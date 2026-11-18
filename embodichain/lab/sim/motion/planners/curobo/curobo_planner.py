@@ -48,12 +48,7 @@ from embodichain.compute.trajectory import differentiate_positions
 import yaml
 
 from embodichain.utils import configclass, logger
-from embodichain.utils.math import (
-    axis_angle_from_quat,
-    pose_inv,
-    quat_from_matrix,
-    quat_xyzw_to_wxyz,
-)
+from embodichain.utils.math import pose_inv, quat_from_matrix, quat_xyzw_to_wxyz
 
 from embodichain.lab.sim.motion.planners.base_planner import (
     BasePlanner,
@@ -63,6 +58,7 @@ from embodichain.lab.sim.motion.planners.base_planner import (
     validate_plan_options,
 )
 from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import (
+    _TCP_LINK,
     _curobo_joint_limits,
     _named_rigid_objects,
 )
@@ -119,13 +115,13 @@ class _CuroboProfile:
     """Simulator -> cuRobo joint-name mapping (identity for the auto-gen YAML)."""
 
     tool_frame_name: str | None = None
-    """cuRobo tool frame (a URDF link name) used as the planning target."""
+    """cuRobo tool frame (an original or generated fixed TCP link)."""
 
     tool_frame_to_tcp: list[list[float]] | None = None
     """Fixed transform from the cuRobo tool frame to the simulator TCP frame.
 
-    ``None`` means the tool frame is already the TCP (the common auto-derived
-    case, where the solver's ``end_link_name`` is the TCP).
+    ``None`` means the native tool frame is already the TCP. Generated profiles
+    embed calibration in a fixed TCP link and leave this field unset.
     """
 
     base_link_name: str | None = None
@@ -579,17 +575,21 @@ class CuroboPoseConstraintCfg:
     """Data-only path fields adapted from cuRobo's ``ToolPoseCriteria``.
 
     Projectors select components of target-relative TCP displacement and the
-    shortest rotation vector. A zero projector disables that path component;
-    identity constrains all three components. Terminal goals remain owned by
+    canonical error quaternion's vector part. A zero projector disables that
+    component; identity constrains all three components. Terminal goals remain owned by
     the target waypoints. Native tensors are created lazily by the planner.
 
     Args:
         path_position_projector: Symmetric, idempotent 3x3 position projector.
         path_rotation_projector: Symmetric, idempotent 3x3 rotation projector.
-        position_scale: Positive uniform native position residual scale.
-        rotation_scale: Positive uniform native rotation residual scale.
+        position_scale: Positive uniform native position residual scale;
+            preserves the physical acceptance bound.
+        rotation_scale: Positive uniform native rotation residual scale;
+            preserves the physical acceptance bound.
         position_tolerance: Unscaled projected TCP distance bound in meters.
-        orientation_tolerance: Unscaled projected rotation-vector bound in radians.
+        orientation_tolerance: Projected angular bound in radians, measured as
+            ``2 * asin(norm(P @ vec(q_error)))`` for a unit error quaternion.
+            Identity projection gives the full shortest rotation angle.
         frame: ``goal`` uses the target TCP axes; ``base`` uses the native
             planning-base axes, independently in each environment.
     """
@@ -650,7 +650,8 @@ class CuroboPoseConstraintCfg:
             direction: Line direction; magnitude and sign do not change the line.
             rotation_axis: Optional axis of free rotation. Omission holds the
                 complete target orientation, matching the native factory.
-            non_terminal_scale: Uniform scale for both native path residuals.
+            non_terminal_scale: Uniform scale for both native path residuals;
+                does not change the physical acceptance bounds.
             position_tolerance: Unscaled perpendicular TCP bound in meters.
             orientation_tolerance: Unscaled projected rotation bound in radians.
             frame: Shared reference frame for both projectors.
@@ -1600,8 +1601,14 @@ class CuroboPlanner(BasePlanner):
         self._validate_query_backend(control_part, batch_size)
         multi_env = bool(self.cfg.world.multi_env)
         key = (control_part, int(batch_size), multi_env, planning_mode)
+        solver = (getattr(self.robot, "_solvers", None) or {}).get(control_part)
+        tcp = getattr(solver, "tcp_xpos", None)
         limits_key = self._robot_yaml_cache_key(
-            self.robot.cfg.fpath, control_part, None, self.cfg.auto_gen
+            self.robot.cfg.fpath,
+            control_part,
+            None,
+            self.cfg.auto_gen,
+            None if tcp is None else tcp.tolist(),
         )
         cached = self._backend_cache.get(key)
         if cached is not None:
@@ -2260,7 +2267,9 @@ class CuroboPlanner(BasePlanner):
         Reads the tool frame, TCP offset, and base link from the control part's
         IK solver, builds the identity simulator->cuRobo joint mapping (the
         auto-generated robot YAML reuses the URDF joint names), and generates
-        the cuRobo robot YAML from the URDF. Nothing robot-specific is hardcoded.
+        the cuRobo robot YAML from the URDF. The solver's TCP calibration is
+        embedded as a fixed native tool frame, including its positional lever
+        arm. Nothing robot-specific is hardcoded.
         """
         robot = self.robot
         assert (
@@ -2286,7 +2295,7 @@ class CuroboPlanner(BasePlanner):
                 )
             tool_frame = part_links[-1]
 
-        # TCP offset: only when the solver's tool frame is not itself the TCP.
+        # Read the solver calibration for the generated fixed TCP tool frame.
         tool_frame_to_tcp = None
         if solver is not None:
             tcp_xpos = getattr(solver, "tcp_xpos", None)
@@ -2310,15 +2319,16 @@ class CuroboPlanner(BasePlanner):
         sim_joints = self._resolve_sim_joint_names(control_part)
         sim_to_curobo = {j: j for j in sim_joints}
 
-        robot_config_path = self._auto_generate_robot_yaml(control_part, tool_frame)
+        robot_config_path = self._auto_generate_robot_yaml(
+            control_part, tool_frame, tool_frame_to_tcp
+        )
         base_link = self._read_curobo_base_link(robot_config_path) or solver_base_link
         sim_base_link = base_link
 
         return _CuroboProfile(
             robot_config_path=robot_config_path,
             sim_to_curobo_joint_names=sim_to_curobo,
-            tool_frame_name=tool_frame,
-            tool_frame_to_tcp=tool_frame_to_tcp,
+            tool_frame_name=_TCP_LINK if tool_frame_to_tcp is not None else tool_frame,
             base_link_name=base_link,
             sim_base_link_name=sim_base_link,
             sim_base_to_curobo_base=self.cfg.sim_base_to_curobo_base,
@@ -2350,7 +2360,10 @@ class CuroboPlanner(BasePlanner):
             return None
 
     def _auto_generate_robot_yaml(
-        self, control_part: str, tool_frame: str | None
+        self,
+        control_part: str,
+        tool_frame: str | None,
+        tool_frame_to_tcp: list[list[float]] | None = None,
     ) -> str:
         """Return a cached cuRobo robot YAML path, generating it from the URDF if needed."""
         from .curobo_yaml import generate_curobo_robot_yaml
@@ -2374,7 +2387,7 @@ class CuroboPlanner(BasePlanner):
             "embodichain_curobo",
         )
         cache_key = self._robot_yaml_cache_key(
-            urdf_path, control_part, tool_frame, auto
+            urdf_path, control_part, tool_frame, auto, tool_frame_to_tcp
         )
         cache_path = os.path.join(cache_dir, f"{cache_key}.yml")
         motion_urdf_path = os.path.splitext(cache_path)[0] + ".motion.urdf"
@@ -2393,6 +2406,7 @@ class CuroboPlanner(BasePlanner):
             control_part,
             cache_path,
             tool_frame=tool_frame,
+            tool_frame_to_tcp=tool_frame_to_tcp,
             urdf_path=urdf_path,
             num_spheres=auto.num_spheres,
             sphere_density=auto.sphere_density,
@@ -2410,10 +2424,11 @@ class CuroboPlanner(BasePlanner):
         control_part: str,
         tool_frame: str | None,
         auto: CuroboAutoGenCfg,
+        tool_frame_to_tcp: list[list[float]] | None = None,
     ) -> str:
-        """Hash the URDF path/content and fit parameters into a stable cache key."""
+        """Hash URDF, limits, fit settings and fixed TCP calibration for the cache."""
         hasher = hashlib.md5()
-        hasher.update(b"absolute-motion-limits-v2")
+        hasher.update(b"tcp-tool-frame-v3")
         hasher.update(urdf_path.encode("utf-8"))
         try:
             with open(urdf_path, "rb") as urdf_file:
@@ -2422,6 +2437,7 @@ class CuroboPlanner(BasePlanner):
             pass
         hasher.update(control_part.encode("utf-8"))
         hasher.update((tool_frame or "").encode("utf-8"))
+        hasher.update(repr(tool_frame_to_tcp).encode("utf-8"))
         hasher.update(str(auto.num_spheres).encode("utf-8"))
         hasher.update(str(auto.sphere_density).encode("utf-8"))
         hasher.update(str(auto.surface_radius).encode("utf-8"))
@@ -2687,14 +2703,18 @@ class CuroboPlanner(BasePlanner):
             basis = position.new_tensor(tool_to_tcp)[:3, :3]
             native_position = basis @ position @ basis.T
             native_rotation = basis @ rotation @ basis.T
+        # Native feasibility compares scaled residuals, including the chordal
+        # quaternion rotation distance. Preserve the public meter/radian bounds.
         criteria = self._bindings.ToolPoseCriteria(
             path_position_projector=native_position,
             path_rotation_projector=native_rotation,
             path_position_axis_scale=[constraint.position_scale] * 3,
             path_rotation_axis_scale=[constraint.rotation_scale] * 3,
             path_tolerance=[
-                constraint.position_tolerance,
-                constraint.orientation_tolerance,
+                constraint.position_tolerance * constraint.position_scale,
+                2.0
+                * math.sin(constraint.orientation_tolerance / 2.0)
+                * constraint.rotation_scale,
             ],
             enforce_path_tolerance=True,
             project_distance_to_goal=constraint.frame == "goal",
@@ -2734,6 +2754,7 @@ class CuroboPlanner(BasePlanner):
         check_rotation = any(
             x != 0 for row in constraint.path_rotation_projector for x in row
         )
+        rotation_bound = math.sin(constraint.orientation_tolerance / 2.0)
         validity = []
         # Bound native FK storage independently of the trajectory batch/horizon.
         chunk_size = 1024
@@ -2771,12 +2792,12 @@ class CuroboPlanner(BasePlanner):
                 quaternion = quaternion / torch.linalg.vector_norm(
                     quaternion, dim=-1, keepdim=True
                 ).clamp_min(1e-12)
-                projected = (
-                    axis_angle_from_quat(quaternion) @ compiled.rotation_projector.T
-                )
+                projected = quaternion[:, :3] @ compiled.rotation_projector.T
+                # Equivalent to 2*asin(norm(P @ vec(q))) <= angular tolerance.
+                # Comparing sine avoids a per-sample inverse trig operation.
                 valid &= (
-                    torch.linalg.vector_norm(projected, dim=-1)
-                    <= constraint.orientation_tolerance
+                    torch.linalg.vector_norm(projected, dim=-1).clamp_max(1.0)
+                    <= rotation_bound
                 )
             validity.append(valid)
         return torch.cat(validity).reshape(batch, horizon).all(dim=-1)

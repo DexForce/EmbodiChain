@@ -464,6 +464,13 @@ def test_pose_path_constraint_rejects_invalid_projectors_and_bounds(values):
         CuroboPoseConstraintCfg(**values)
 
 
+def test_pose_path_constraint_rejects_oblique_idempotent_projector():
+    with pytest.raises(ValueError, match="symmetric"):
+        CuroboPoseConstraintCfg(
+            path_rotation_projector=((1, 1, 0), (0, 0, 0), (0, 0, 0))
+        )
+
+
 def test_pose_constraint_factory_returns_serializable_projectors():
     cfg = CuroboPoseConstraintCfg.linear_motion(
         direction=(2, 0, 0), rotation_axis=(0, 0, 3)
@@ -483,6 +490,57 @@ def test_pose_constraint_factory_returns_serializable_projectors():
 
     restored = CuroboPoseConstraintCfg(**json.loads(json.dumps(cfg.to_dict())))
     assert restored.to_dict() == cfg.to_dict()
+
+
+def test_robot_profile_embeds_tcp_once_and_keys_calibration(tmp_path, monkeypatch):
+    """Different TCP calibrations cannot reuse one generated native tool frame."""
+    source = tmp_path / "robot.urdf"
+    source.write_text(_NO_MIMIC_URDF)
+    offset = torch.eye(4)
+    offset[2, 3] = 0.2
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(robot_uid="robot")
+    planner.cfg.auto_gen.cache_dir = str(tmp_path / "cache")
+    planner._curobo_device = torch.device("cpu")
+    planner.robot = SimpleNamespace(
+        cfg=SimpleNamespace(fpath=str(source)),
+        _solvers={
+            "arm": SimpleNamespace(
+                end_link_name="link1", root_link_name="base", tcp_xpos=offset
+            )
+        },
+    )
+    monkeypatch.setattr(planner, "_resolve_sim_joint_names", lambda _: ["joint1"])
+    monkeypatch.setattr(
+        "embodichain.lab.sim.motion.planners.curobo.curobo_planner._curobo_joint_limits",
+        lambda *args, **kwargs: {"max_velocity": [1.0], "max_acceleration": [15.0]},
+    )
+
+    def generate(robot, control_part, output_path, **kwargs):
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            yaml.safe_dump({"robot_cfg": {"kinematics": {"base_link": "base"}}})
+        )
+        path.with_suffix(".motion.urdf").write_text(_NO_MIMIC_URDF)
+        return output_path
+
+    exporter = Mock(side_effect=generate)
+    monkeypatch.setattr(curobo_yaml, "generate_curobo_robot_yaml", exporter)
+    first = planner._materialize_profile("arm")
+    repeated = planner._materialize_profile("arm")
+    assert exporter.call_count == 1
+    assert first.robot_config_path == repeated.robot_config_path
+    assert first.tool_frame_name == "embodichain_tcp"
+    assert first.tool_frame_to_tcp is None
+    assert exporter.call_args.kwargs["tool_frame_to_tcp"] == offset.tolist()
+    backend = SimpleNamespace(profile=first, tool_to_frame_matrix=None)
+    goal = torch.eye(4)[None]
+    torch.testing.assert_close(planner._tcp_to_tool_pose(goal, backend), goal)
+    offset[2, 3] = 0.3
+    changed = planner._materialize_profile("arm")
+    assert exporter.call_count == 2
+    assert changed.robot_config_path != first.robot_config_path
 
 
 def test_pose_path_constraints_require_matching_full_pose_native_segments():
@@ -553,7 +611,9 @@ def test_pose_path_cost_is_scoped_and_transforms_both_tcp_projectors(raise_insid
     with planner._pose_constraint_scope(backend, constraint):
         assert active["tool"].values["path_position_axis_scale"] == [2.0] * 3
         assert active["tool"].values["path_rotation_axis_scale"] == [3.0] * 3
-        assert active["tool"].values["path_tolerance"][0] == 0.01
+        assert active["tool"].values["path_tolerance"] == pytest.approx(
+            [0.01 * 2.0, 2.0 * math.sin(0.05 / 2.0) * 3.0]
+        )
 
 
 @pytest.mark.parametrize(
@@ -566,6 +626,7 @@ def test_pose_path_cost_is_scoped_and_transforms_both_tcp_projectors(raise_insid
         ("orientation_only", 0.2, 0.05),
         ("free_yaw", 0.6, 0.05),
         ("free_yaw", math.pi, 0.05),
+        ("distinct_goals", 0.6, 0.05),
     ],
 )
 def test_pose_path_validation_checks_selected_tcp_components(
@@ -609,14 +670,24 @@ def test_pose_path_validation_checks_selected_tcp_components(
         cfg = CuroboPoseConstraintCfg.linear_motion(
             direction=(1, 0, 0), rotation_axis=(0, 0, 1)
         )
-        tcp[0, 1, :3, :3] = yaw  # Allowed rotation about Z.
-        tcp[1, 1, :3, :3] = torch.tensor(
-            [
-                [1.0, 0.0, 0.0],
-                [0.0, math.cos(angle), -math.sin(angle)],
-                [0.0, math.sin(angle), math.cos(angle)],
-            ]
-        )
+        # Small tilt combined with arbitrary free yaw must retain the same
+        # acceptance bound, including near pi where the SO(3) log mixes them.
+        for row, tilt in enumerate((0.9 * tolerance, 1.1 * tolerance)):
+            roll = torch.tensor(
+                [
+                    [1.0, 0.0, 0.0],
+                    [0.0, math.cos(tilt), -math.sin(tilt)],
+                    [0.0, math.sin(tilt), math.cos(tilt)],
+                ]
+            )
+            tcp[row, 1, :3, :3] = yaw @ roll
+    elif mode == "distinct_goals":
+        other_frame = torch.eye(4)
+        other_frame[:3, :3] = yaw
+        other_frame[:3, 3] = torch.tensor([0.2, 0.4, 0.1])
+        tcp[1] = other_frame @ tcp[1]
+        goal[1] = other_frame @ goal[1]
+        expected = [True, True]
     else:
         tcp[1, 1, :3, :3] = yaw
     tools = tcp @ torch.linalg.inv(tool_to_tcp)
@@ -639,6 +710,80 @@ def test_pose_path_validation_checks_selected_tcp_components(
     )
     valid = planner._pose_path_validity(torch.zeros(2, 3, 7), goal, backend, cfg, None)
     assert valid.tolist() == expected
+
+
+def test_pose_path_postcheck_rejects_native_success_per_environment(monkeypatch):
+    """A successful native solve still fails rows whose calibrated TCP drifts."""
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(robot_uid="robot", preserve_plan_samples=True)
+    planner.device = planner._curobo_device = torch.device("cpu")
+    planner._bindings = _pose_test_bindings()
+    planner._bindings.Runtime = SimpleNamespace(cuda_graphs=False)
+    monkeypatch.setattr(torch.cuda, "device", lambda *_: nullcontext())
+    monkeypatch.setattr(planner, "_to_curobo_joint_state", lambda joints, _: joints)
+    monkeypatch.setattr(planner, "_to_curobo_pose_goal", lambda *args: object())
+    monkeypatch.setattr(
+        planner, "_sim_world_to_curobo_base_pose", lambda pose, *_: pose
+    )
+    start = torch.zeros(2, 7)
+    start[1] = 0.2
+    positions = start[:, None, :].repeat(1, 3, 1)
+    positions[:, :, 0] += torch.tensor([0.0, 0.1, 0.2])
+    native_success = torch.ones(2, dtype=torch.bool)
+    monkeypatch.setattr(
+        planner,
+        "_extract_segment",
+        lambda *_: (
+            native_success.clone(),
+            positions.clone(),
+            torch.full((2, 3), 0.1),
+            None,
+            None,
+        ),
+    )
+    offset = torch.eye(4)
+    offset[2, 3] = 0.2
+    goal = torch.eye(4).repeat(2, 1, 1)
+    goal[:, 2, 3] = 0.2
+    tools = torch.eye(4).repeat(2, 3, 1, 1)
+    # The native tool origin stays exactly on the line for both rows. Only
+    # row one's tilted long TCP leaves the tube, despite native success.
+    tilt = 0.045
+    tools[1, 1, :3, :3] = torch.tensor(
+        [
+            [math.cos(tilt), 0.0, math.sin(tilt)],
+            [0.0, 1.0, 0.0],
+            [-math.sin(tilt), 0.0, math.cos(tilt)],
+        ]
+    )
+    backend = SimpleNamespace(
+        tool_frame="tool",
+        profile=SimpleNamespace(tool_frame_to_tcp=offset.tolist()),
+        use_cuda_graph=False,
+        planner=SimpleNamespace(
+            plan_pose=lambda *args, **kwargs: object(),
+            update_tool_pose_criteria=lambda values: None,
+            compute_kinematics=lambda _: SimpleNamespace(
+                tool_poses=SimpleNamespace(
+                    get_link_pose=lambda _: SimpleNamespace(
+                        get_matrix=lambda: tools.reshape(-1, 4, 4)
+                    )
+                )
+            ),
+        ),
+    )
+    result = planner._plan_segments(
+        [PlanState.from_xpos(goal)],
+        start,
+        {MoveType.EEF_MOVE: backend},
+        CuroboPlanOptions(path_constraints=[CuroboPoseConstraintCfg.linear_motion()]),
+    )
+    assert native_success.tolist() == [True, True]
+    assert result.success.tolist() == [True, False]
+    torch.testing.assert_close(result.positions[0], positions[0])
+    torch.testing.assert_close(
+        result.positions[1], start[1].expand_as(result.positions[1])
+    )
 
 
 @pytest.mark.parametrize("component", ["position", "rotation"])
@@ -1157,21 +1302,29 @@ def test_warmup_covers_rrt_seed_lanes_and_graph_seed_fitting(
     assert native.ik_solver.config.exit_early is True
 
 
-def test_changing_gravity_rebuilds_a_cached_backend():
+@pytest.mark.parametrize("change", ["gravity", "tcp"])
+def test_changing_frame_inputs_rebuilds_a_cached_backend(change):
     planner = object.__new__(CuroboPlanner)
     planner.cfg = CuroboPlannerCfg(robot_uid="robot")
-    planner.robot = SimpleNamespace(cfg=SimpleNamespace(fpath="robot.urdf"))
-    planner._robot_yaml_cache_key = Mock(return_value="same geometry and limits")
+    offset = torch.eye(4)
+    planner.robot = SimpleNamespace(
+        cfg=SimpleNamespace(fpath="robot.urdf"),
+        _solvers={"arm": SimpleNamespace(tcp_xpos=offset)},
+    )
+    planner._robot_yaml_cache_key = Mock(side_effect=lambda *args: repr(args[-1]))
     planner._timeopt_gravity = Mock(return_value=(0.0, 0.0, 0.0))
     cached = SimpleNamespace(
         planner=Mock(),
-        motion_limits_key="same geometry and limits",
+        motion_limits_key=repr(offset.tolist()),
         gravity=(0.0, 0.0, 0.0),
     )
     key = ("arm", 1, False, MoveType.EEF_MOVE)
     planner._backend_cache = {key: cached}
     assert planner._get_backend("arm", 1) is cached
-    planner._timeopt_gravity.return_value = (0.0, 0.0, -9.81)
+    if change == "gravity":
+        planner._timeopt_gravity.return_value = (0.0, 0.0, -9.81)
+    else:
+        offset[2, 3] = 0.2
     planner._materialize_profile = Mock(side_effect=RuntimeError("rebuild"))
     with pytest.raises(RuntimeError, match="rebuild"):
         planner._get_backend("arm", 1)

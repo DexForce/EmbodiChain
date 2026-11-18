@@ -103,12 +103,14 @@ semantics remain waypoint-owned; no duplicate terminal or device fields are
 exposed. Whole segments, including starts, are checked; activation windows and
 monotonic progress are not implied.
 
-One compiler builds native criteria and cached TCP projector tensors, rotating
-both through fixed tool calibration. Uniform component scales keep this
-conversion well-defined. Scoped native updates restore baseline criteria even
-on exceptions. Bounded device FK validates actual TCP displacement and shortest
-rotation-vector projections with unscaled physical tolerances, rejecting rows
-through the usual start hold. Preserved native samples are required; consumers
+Generated profiles add a massless fixed TCP tool frame from solver calibration,
+so native costs and postvalidation act at the same point, including translated
+offsets. Calibration participates in YAML and backend cache identity. One compiler scales
+native tolerance thresholds with the uniform residual scales; angular bounds
+use the equivalent quaternion-vector threshold. Scoped native updates restore
+baseline criteria even on exceptions. Bounded device FK validates TCP displacement
+and projected quaternion angular error with physical meter/radian bounds,
+rejecting rows through the usual start hold. Preserved native samples are required; consumers
 must revalidate resampled paths. Adding another pose restriction uses projector
 data rather than another geometry-specific lifecycle or configuration subclass.
 

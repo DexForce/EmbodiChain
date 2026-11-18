@@ -222,12 +222,12 @@ configuration, and it can round-trip through `to_dict()` and JSON.
 | Configuration field | Meaning | Default |
 | --- | --- | --- |
 | `path_position_projector` | Select target-relative TCP displacement components. | Zero 3x3 matrix |
-| `path_rotation_projector` | Select shortest rotation-vector components. | Zero 3x3 matrix |
-| `position_scale` | Uniform native position residual scale. | `1.0` |
-| `rotation_scale` | Uniform native rotation residual scale. | `1.0` |
+| `path_rotation_projector` | Select error-quaternion vector components. | Zero 3x3 matrix |
+| `position_scale` | Uniform native position cost scale; preserves the physical bound. | `1.0` |
+| `rotation_scale` | Uniform native rotation cost scale; preserves the physical bound. | `1.0` |
 | `frame` | Shared projector frame: target TCP (`goal`) or native planning base (`base`). | `"goal"` |
 | `position_tolerance` | Unscaled projected TCP distance bound, in meters. | `0.005` |
-| `orientation_tolerance` | Unscaled projected rotation-vector bound, in radians. | `0.05`, approximately 2.86 degrees |
+| `orientation_tolerance` | Projected quaternion angular bound, in radians; full shortest angle for identity projection. | `0.05`, approximately 2.86 degrees |
 
 `linear_motion()` is a convenience factory returning the same configuration
 class. It derives the position projector from `direction`, holds all target
@@ -292,20 +292,26 @@ enforce monotonic progress, a signed approach, or confinement between the two
 endpoints.
 
 The factory's default rotation projector is identity, holding the complete
-target orientation. More generally the adapter computes a shortest rotation
-vector and checks only its projected components:
+target orientation. More generally, let `q_error` be the normalized,
+canonical error quaternion for the target-relative rotation. The adapter uses
+the same projected vector residual as cuRobo and converts its magnitude to an
+angular error:
 
 :::{math}
-\rho = \operatorname{Log}(R_g^{\mathsf T}R(q))^\vee,
-\qquad \|P_R\rho\|\leq\varepsilon_R.
+q_e=\operatorname{quat}(R_g^{\mathsf T}R(q)),\qquad
+\theta_P=2\arcsin\left(\min\{1,\|P_R\operatorname{vec}(q_e)\|\}\right),
+\qquad \theta_P\leq\varepsilon_R.
 :::
 
 This expression uses target TCP axes (`frame="goal"`). For planning-base axes,
 the relative rotation is `R(q) @ R_g.T` instead. A zero `P_R` disables the
-path-orientation bound. The implementation converts the relative matrix to a
-normalized quaternion and then uses the shared shortest axis-angle conversion,
-retaining small-angle resolution and handling rotations near pi. It skips
-rotation-vector work entirely when the rotation projector is zero.
+path-orientation bound. With identity projection, `theta_P` is exactly the
+shortest rotation angle. A free-axis projector removes twist about that axis
+without amplifying a simultaneous small tilt when the twist approaches pi.
+For example, a 0.045 rad tilt remains within a 0.05 rad bound even with a
+near-pi free yaw. The implementation compares quaternion-vector norms with
+`sin(orientation_tolerance / 2)`, avoiding inverse trigonometry per sample,
+and skips this work entirely when the rotation projector is zero.
 
 ### Native optimization costs and tolerance checks
 
@@ -332,8 +338,8 @@ adapter's `position_scale` and `rotation_scale`. The native rotation residual
 is twice the vector part of a
 normalized, shortest-arc error quaternion: `r_R = 2 * vec(q_error)`. Its norm
 is `2 * sin(theta / 2)`, which approximates the rotation angle near zero.
-EmbodiChain's final check projects the exact shortest rotation vector;
-identity projection gives the rotation angle itself.
+EmbodiChain's final check uses the corresponding projected quaternion angular
+error defined above, including when only some rotation axes are constrained.
 
 The position cost propagates through the robot's position Jacobian:
 
@@ -346,14 +352,19 @@ The optimizer can therefore adjust joint trajectories and redundant joint
 postures while discouraging TCP displacement away from the line. This does
 not turn the optimization into an exact Cartesian interpolation algorithm.
 
-The adapter also sets `path_tolerance` and `enforce_path_tolerance=True` in the
-native criteria. In cuRobo 0.9, residual scaling participates in both quadratic
-costs and native reported error distances, so changing a scale can also change
-native feasibility decisions. At scale `2`, the corresponding quadratic
-contribution is approximately four times larger outside deadbands. Start with
-unit scales when matching native checks to physical tolerances; increasing it does not guarantee
-that a feasible path will be found. The final TCP checks always use unscaled
-meters and radians.
+The adapter also sets `enforce_path_tolerance=True`. cuRobo compares scaled
+residual distances against its native tolerances, so the compiler converts
+the public physical bounds to
+
+:::{math}
+\tau_p=w_p\varepsilon_p,\qquad
+\tau_R=2w_R\sin(\varepsilon_R/2).
+:::
+
+Thus changing a scale preserves the same physical acceptance bounds in both
+native feasibility and final TCP checks. At scale `2`, the quadratic cost
+contribution is four times larger outside the same tolerance deadband.
+Increasing a cost scale does not guarantee that a feasible path will be found.
 
 See the upstream [criteria factory](https://github.com/NVlabs/curobo/blob/v0.9.0/curobo/_src/cost/tool_pose_criteria.py)
 and [projected pose metrics](https://github.com/NVlabs/curobo/blob/v0.9.0/curobo/_src/cost/wp_pose_metric.py)
@@ -369,27 +380,27 @@ With `frame="base"`, the supplied direction is already in the native planning
 base. The adapter's normal simulator-world-to-base conversion still applies
 to target poses; `base` does not mean the simulator world frame.
 
-The native model's tool frame `F` may differ from the configured TCP `T` by a
-fixed transform. Using `B` for the planning base, the adapter converts the
-target and reconstructs the actual TCP with
+The solver's URDF end-link frame `F` may differ from the configured TCP `T`
+by a fixed transform. The generated cuRobo profile adds a massless fixed
+`embodichain_tcp` link with that calibration and selects it as the native tool
+frame. Using `B` for the planning base, its FK is
 
 :::{math}
-{}^B T_{F,g}={}^B T_{T,g}\left({}^F T_T\right)^{-1},
-\qquad
 {}^B T_T(q)={}^B T_F(q)\,{}^F T_T.
 :::
 
-For goal-frame constraints, both projectors rotate into the native tool goal
-axes as `P_F = R_FT @ P_T @ R_FT.T`. A translated TCP offset makes the final
-reconstruction important: even a small tool-orientation change can move the
-TCP sideways while the tool origin stays close to its line. The returned
-trajectory is checked at the TCP, including this fixed offset.
+Native goals, position/rotation costs, and returned-sample validation all use
+this TCP directly. The TCP offset is applied once in model FK; it is not
+applied again to goals or FK output. This includes the positional lever-arm
+effect of orientation changes, so the optimizer can correct transverse TCP
+drift with long grippers. Calibration participates in the generated-profile
+cache key. The source URDF and physical collision spheres are unchanged.
 
 ### Returned samples, batches, and scoped state
 
 After native planning, the adapter maps every returned joint sample back
-through native FK, reconstructs the TCP, and checks finite transforms,
-projected position error, and projected shortest rotation-vector error. Acceptance requires **every
+through native TCP FK and checks finite transforms, projected position error,
+and projected quaternion angular error. Acceptance requires **every
 sample**, including the start and endpoint, to pass the unscaled tolerances.
 An optimizer success flag alone does not bypass this check.
 
@@ -439,12 +450,12 @@ produced the following snapshot:
 
 | Metric | Unconstrained approach | Constrained approach |
 | --- | --- | --- |
-| Maximum perpendicular TCP error | 5.82 mm | 4.51 mm |
-| Maximum target-orientation error | 0.21 degrees | 0.37 degrees |
-| Median planning latency | 13.20 ms | 19.55 ms |
+| Maximum perpendicular TCP error | 5.82 mm | 4.68 mm |
+| Maximum target-orientation error | 0.21 degrees | 0.44 degrees |
+| Median planning latency | 11.85 ms | 19.94 ms |
 | Attempts meeting 5 mm / 3 degree tolerances | 0 / 5 | 5 / 5 |
 
-The transverse error fell by about 23%, while planning latency and orientation
+The transverse error fell by about 20%, while planning latency and orientation
 error increased. Both orientation errors remain within the configured bound.
 Optimization balances several objectives and need only satisfy the accepted
 tube; it does not promise zero deviation or improvement in every metric.
@@ -520,9 +531,9 @@ offsets and a moved robot base are handled. If the simulator and cuRobo base
 frames use different fixed conventions, set
 `CuroboPlannerCfg.sim_base_to_curobo_base` to the transform from the simulator
 base to the cuRobo base. Collision-world poses are authored in the cuRobo
-base/world frame. `tool_frame_to_tcp` (read from `solver.tcp_xpos`) converts an
-EmbodiChain TCP goal into the chosen cuRobo tool frame when the solver's end link
-is not itself the TCP. By convention, the adapter uses
+base/world frame. The fixed transform read from `solver.tcp_xpos` is embedded
+as the generated cuRobo TCP tool frame when the solver's end link is not itself
+the TCP. By convention, the adapter uses
 `T_curobo,X = T_curobo,sim_base @ inv(T_world,sim_base) @ T_world,X`. It obtains
 the simulator base from the control part's IK solver root.
 
@@ -769,10 +780,13 @@ overhead comparison video plus `summary.json` and joint trajectories under
 the line-constrained path; the green guide has a 5 mm radius. The fixture opening
 permits both plans, so the difference demonstrates approach geometry rather
 than a collision-checking failure. Playback is kinematic, at six times slow
-motion. Use `--plan-only` for planning checks or `--probe` for still frames.
+motion. The planner uses a 4 mm position bound to reserve 1 mm for display
+interpolation inside the 5 mm guide; the example independently rechecks both
+the native samples and the interpolated display path. Use `--plan-only` for
+planning checks or `--probe` for still frames.
 
-In this fixed case, the sampled maximum perpendicular TCP error is 71.5 mm
-without the path constraint and 4.3 mm with it; both paths pass the native
+In this fixed case, the sampled maximum perpendicular TCP error is 71.2 mm
+without the path constraint and 3.98 mm with it; both paths pass the native
 sampled world-collision check. This is a geometric planning comparison, not a
 physical insertion-success measurement. Rendered media are generated locally
 by the example and are not included in the repository.

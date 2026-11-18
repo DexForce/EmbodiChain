@@ -52,6 +52,7 @@ GOAL_POSITION = (0.45, 0.25, 0.45)
 GOAL_ROTATION = ((1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, -1.0, 0.0))
 COLORS = {"before": (0.10, 0.45, 1.0, 1.0), "after": (1.0, 0.40, 0.04, 1.0)}
 WIDTH, HEIGHT, FPS = 960, 540, 30
+PLAN_POSITION_TOLERANCE_M = 0.004
 
 __all__ = ["main"]
 
@@ -169,7 +170,9 @@ def _plan(robot: Any, fixture: list[Any], output: Path) -> tuple[Any, dict, dict
             path_constraints=(
                 [
                     CuroboPoseConstraintCfg.linear_motion(
-                        position_tolerance=0.005,
+                        # Reserve 1 mm for display interpolation inside the
+                        # independently checked 5 mm guide tube.
+                        position_tolerance=PLAN_POSITION_TOLERANCE_M,
                         orientation_tolerance=math.radians(3),
                     )
                 ]
@@ -238,6 +241,7 @@ def _plan(robot: Any, fixture: list[Any], output: Path) -> tuple[Any, dict, dict
         "approach_distance_m": 0.45,
         "seed": 0,
         "position_tolerance_m": 0.005,
+        "planner_position_tolerance_m": PLAN_POSITION_TOLERANCE_M,
         "orientation_tolerance_deg": 3,
         "metrics": metrics,
         "scope": "planned geometry and kinematic rendering; self-collision disabled by the existing adapter",

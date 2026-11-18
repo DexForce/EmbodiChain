@@ -109,6 +109,7 @@ def _make_sim_robot(
         (1, "goal", False, "cpu", "line"),
         (1, "goal", False, "cuda", "plane"),
         (1, "base", False, "cuda", "orientation"),
+        (1, "goal", True, "cuda", "offset_tcp"),
     ],
 )
 def test_curobo_pose_path_checks_geometry_and_restores_cached_planner(
@@ -118,6 +119,12 @@ def test_curobo_pose_path_checks_geometry_and_restores_cached_planner(
     sim, robot, block = _make_sim_robot(num_envs=num_envs, sim_device=sim_device)
     mg = None
     try:
+        if kind == "offset_tcp":
+            offset = torch.eye(4)
+            c = math.sqrt(0.5)
+            offset[:3, :3] = torch.tensor([[c, 0.0, c], [0.0, 1.0, 0.0], [-c, 0.0, c]])
+            offset[2, 3] = 0.2
+            robot._solvers[CONTROL_PART].set_tcp(offset.numpy())
         mg = MotionGenerator(
             MotionGenCfg(
                 planner_cfg=CuroboPlannerCfg(
@@ -142,6 +149,9 @@ def test_curobo_pose_path_checks_geometry_and_restores_cached_planner(
             position_tolerance=0.005,
             orientation_tolerance=0.05,
         )
+        if kind == "offset_tcp":
+            constraint.position_scale = 2.0
+            constraint.rotation_scale = 3.0
         if kind == "plane":
             constraint = CuroboPoseConstraintCfg(
                 path_position_projector=(
@@ -172,8 +182,23 @@ def test_curobo_pose_path_checks_geometry_and_restores_cached_planner(
         tcp = robot.compute_batch_fk(
             qpos=result.positions, name=CONTROL_PART, to_matrix=True
         )
+        if kind == "offset_tcp":
+            backend = next(iter(mg.planner._backend_cache.values()))
+            assert backend.tool_frame == "embodichain_tcp"
+            assert backend.profile.tool_frame_to_tcp is None
+            state = mg.planner._to_curobo_joint_state(
+                result.positions.reshape(-1, result.positions.shape[-1]), backend
+            )
+            native_tcp = (
+                backend.planner.compute_kinematics(state)
+                .tool_poses.get_link_pose(backend.tool_frame)
+                .get_matrix()
+            )
+            torch.testing.assert_close(
+                native_tcp.reshape_as(tcp), tcp, atol=3e-5, rtol=1e-4
+            )
         delta = tcp[:, :, :3, 3] - target[:, None, :3, 3]
-        if kind == "line":
+        if kind in ("line", "offset_tcp"):
             lateral = delta - (delta * direction).sum(-1, keepdim=True) * direction
             assert (
                 float(torch.linalg.vector_norm(lateral, dim=-1).max())
