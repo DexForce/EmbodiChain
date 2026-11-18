@@ -153,7 +153,11 @@ separate from the open gripper before retracting. `binding.park_idle_arms: true`
 hand-over leaves free when another arm acts next, so the idle arm does not stay
 in the workspace; the embodiment must define a `park` posture for that arm. A
 plan that contains `simulation.park` gets the park lowerer without further
-configuration.
+configuration. `binding.collision_world: true` (off by default) declares the
+table and every scene object the plan does not use as static planner obstacles,
+so a collision-aware planner such as cuRobo avoids them. Objects that a call
+grasps or places against stay out of the planner world, because they move or
+are touched during that call.
 
 Further optional run fields: `task` reuses a published task-plan directory instead
 of planning, after verifying its artifacts and that it planned the same instruction

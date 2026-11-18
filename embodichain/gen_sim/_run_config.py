@@ -71,6 +71,7 @@ class _RunCfg:
         if type(self.recording) is not bool:
             raise TypeError("recording must be a boolean")
         if type(self.binding) is not dict or set(self.binding) - {
+            "collision_world",
             "park_idle_arms",
             "profile",
             "release_clearance",
@@ -80,11 +81,13 @@ class _RunCfg:
             "segments",
         }:
             raise ValueError(
-                "binding supports park_idle_arms, profile, release_clearance, "
-                "resource_anchors, runtime_services, scene_binding and segments"
+                "binding supports collision_world, park_idle_arms, profile, "
+                "release_clearance, resource_anchors, runtime_services, "
+                "scene_binding and segments"
             )
-        if type(self.binding.get("park_idle_arms", False)) is not bool:
-            raise TypeError("park_idle_arms must be a boolean")
+        for name in ("collision_world", "park_idle_arms"):
+            if type(self.binding.get(name, False)) is not bool:
+                raise TypeError(f"{name} must be a boolean")
         clearance = self.binding.get("release_clearance", 0.0)
         if (
             isinstance(clearance, bool)

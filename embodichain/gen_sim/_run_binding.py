@@ -1012,6 +1012,31 @@ def _bind_deployment(
             )
             semantic_scene["rigid_objects"].append(declaration)
             rigid[logical] = declaration
+    if cfg.binding.get("collision_world", False):
+        # Planner obstacles: the table, and every object the plan does not
+        # use. An object that a call grasps or places against moves or is
+        # touched during that call, so it cannot be a fixed obstacle.
+        used = set(bindings["objects"].values())
+        for declaration in semantic_scene["rigid_objects"]:
+            if declaration["simulation_uid"] == "table":
+                declaration["collision_role"] = "static"
+        for native, entry in entries.items():
+            if native in used or native in articulation_uids:
+                continue
+            if native in bindings["objects"]:
+                raise ValueError(
+                    f"Unused scene object {native!r} shares a planned entity ID"
+                )
+            semantic_scene["rigid_objects"].append(
+                {
+                    "entity_id": native,
+                    "simulation_uid": native,
+                    "dynamics": entry.get("body_type", "static"),
+                    "semantic_type": entry.get("category", "object"),
+                    "affordances": [],
+                    "collision_role": "static",
+                }
+            )
     additions = deepcopy(cfg.binding.get("scene_binding", {}))
     for category, values in additions.items():
         if category not in {

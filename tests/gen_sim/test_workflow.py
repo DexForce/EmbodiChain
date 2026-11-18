@@ -2214,3 +2214,54 @@ def test_idle_arm_parking_is_bound_only_on_request(
     assert park["call_id"] == "simulation.park"
     assert park["resources"] == {"primary": "right"}
     assert {"kind": "park"} in lowerers
+
+
+@pytest.mark.parametrize("collision_world", [False, True])
+def test_collision_world_declares_the_table_and_unused_objects_on_request(
+    run_cfg, monkeypatch, collision_world
+):
+    from embodichain.gen_sim.scene_engine.pipeline import generate
+    from embodichain.gen_sim import _run_execution
+
+    def scene_with_a_bystander(image, output, **kwargs):
+        _write_scene(output)
+        export = output / "scene_export"
+        trimesh.creation.box([0.04, 0.04, 0.04]).export(export / "bystander.glb")
+        path = export / "scene_config.json"
+        data = json.loads(path.read_text())
+        bystander = dict(data["rigid_object"][0], uid="bystander", name="bystander")
+        bystander["shape"] = {"shape_type": "Mesh", "fpath": "bystander.glb"}
+        bystander["init_pos"] = [0.55, 0.15, 0.34]
+        data["rigid_object"].append(bystander)
+        path.write_text(json.dumps(data))
+
+    monkeypatch.setattr(generate, "generate_scene_from_image", scene_with_a_bystander)
+    monkeypatch.setattr(
+        _run_execution,
+        "_execute_deployment",
+        lambda path, **kwargs: {
+            "status": "succeeded",
+            "completed": True,
+            "all_success": True,
+            "effect_assurance": "verified",
+        },
+    )
+    run_cfg.binding = {"collision_world": True} if collision_world else {}
+    with _services() as services:
+        _run(run_cfg, services=services)
+    integration = yaml.safe_load(
+        (run_cfg.output / "deployment" / "integration.yaml").read_text()
+    )
+    roles = {
+        item["simulation_uid"]: item.get("collision_role", "none")
+        for item in integration["scene_binding"]["rigid_objects"]
+    }
+    if collision_world:
+        # The grasped cube stays out of the planner world; the rest are obstacles.
+        assert roles == {
+            "cube_native": "none",
+            "table": "static",
+            "bystander": "static",
+        }
+    else:
+        assert roles == {"cube_native": "none", "table": "none"}
