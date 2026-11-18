@@ -104,13 +104,6 @@ category. It resolves a pinned official URDF and individual STL/reference files,
 verifies every SHA256, and repairs dependencies under the shared dataset lock.
 Keep its source revision and complete file checksums together when updating it.
 
-The repaired AgiBot observed-replay URDF is distributed separately from the
-original `AgibotG1` USD preset. `examples/real2sim/resources.lock.json` pins the
-standalone robot archive and complete prepared-input archive, with SHA256 values,
-source provenance and native evidence identities. Users load the published URDF
-or prepared sample directly; the model-owned repair command is the reproduction
-path. See the [download instructions](../../../examples/real2sim/README.md#download-ready-to-use-packages).
-
 ZIP bundles must include directory entries before nested files for Open3D
 extraction. Validate new bundles through `get_data_path()` with an empty cache.
 

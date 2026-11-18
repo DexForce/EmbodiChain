@@ -42,8 +42,7 @@ the prepared kinematics and calibration, checks local-frame agreement and emits
 separate provenance-bearing resources. This does not change the USD preset or
 implicitly convert visual-only robots during replay. See the
 [Real2Sim example](../../../examples/real2sim/README.md#agibot-prepared-input-collision-repair-1212)
-for direct downloads, optional reproduction and native-model qualification;
-[asset distribution](../data-assets/data-assets.md) owns the pinned archive references.
+for package preparation and native-model qualification.
 
 Preset `_build_defaults()` assembles model defaults; base `RobotCfg.from_dict()`
 and `merge_robot_cfg` apply overrides. Do not route the base decoder back into
