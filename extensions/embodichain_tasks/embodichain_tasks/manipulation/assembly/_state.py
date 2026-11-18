@@ -18,7 +18,9 @@
 
 from __future__ import annotations
 from typing import Any
+import numpy as np
 import torch
+from shapely.geometry import Polygon
 from embodichain.utils.math import trans_matrix_to_xyz_quat
 from .functors import (
     _assembly_kinematic_chain,
@@ -312,10 +314,13 @@ class AssemblyState:
                     raise ValueError(
                         "Peg task manifests require the generated mating_outline for dependency-free labeling."
                     )
-                # Manifests store the generator-space outline. Match the
-                # physical collision vertices without changing saved manifests.
-                self._hole_polygon = peg_scale * torch.tensor(
-                    outline, dtype=torch.float32, device=self.env.device
+                # Apply mjfit's area-centroid translation to the authored
+                # outline, including when loading an existing manifest.
+                polygon = np.asarray(outline, dtype=float)
+                if asset_config.get("center", True):
+                    polygon = polygon - np.asarray(Polygon(polygon).centroid.coords[0])
+                self._hole_polygon = torch.as_tensor(
+                    peg_scale * polygon, dtype=torch.float32, device=self.env.device
                 )
             # Supervision uses configured samples; success checks every actual
             # convex bottom vertex, so corners between samples cannot escape.

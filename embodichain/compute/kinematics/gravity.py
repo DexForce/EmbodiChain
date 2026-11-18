@@ -41,6 +41,7 @@ class URDFGravityCompensation:
         dtype: Floating dtype used by the model and its input coordinates.
     """
 
+    @torch.inference_mode(False)
     def __init__(
         self,
         urdf_xml: str | bytes,
@@ -53,7 +54,9 @@ class URDFGravityCompensation:
         self.joint_names: tuple[str, ...] = tuple(
             self._chain.get_joint_parameter_names()
         )
-        self._gravity = torch.as_tensor(gravity, dtype=dtype, device=device)
+        self._gravity = (
+            torch.as_tensor(gravity, dtype=dtype, device=device).detach().clone()
+        )
         if self._gravity.shape != (3,):
             raise ValueError("Gravity must contain three root-frame components.")
         self._links: list[tuple[str, float, torch.Tensor]] = []
@@ -99,8 +102,13 @@ class URDFGravityCompensation:
             )
         if not self._links or qpos.numel() == 0:
             return torch.zeros_like(qpos)
-        with torch.enable_grad():
-            q = qpos.detach().requires_grad_(True)
+        # Differentiate a local potential even when the caller is doing
+        # inference. Backward can only save ordinary tensors.
+        with torch.inference_mode(False), torch.enable_grad():
+            q = qpos.detach()
+            if q.is_inference():
+                q = q.clone()
+            q.requires_grad_(True)
             transforms = self._chain.forward_kinematics(q)
             potential = torch.zeros(q.shape[0], dtype=q.dtype, device=q.device)
             for name, mass, com in self._links:

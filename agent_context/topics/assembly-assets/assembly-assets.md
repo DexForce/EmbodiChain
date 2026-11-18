@@ -94,8 +94,9 @@ remain stable for frozen current-schema runs. Reset events leave selected
 measurements pending until the host finishes `episode_prepare`, so first
 observations and labels reflect the final prepared scene. Robot-base Euler
 rotations follow the simulator's intrinsic `XYZ` convention. Peg measurement
-converts the manifest's nominal opening, plate thickness and clearance to the
-generated collision geometry's physical scale. Nut advancement uses scaled
+applies the generator's area-centroid translation when centering is enabled,
+then converts the manifest's nominal opening, plate thickness and clearance to
+the generated collision geometry's physical scale. Nut advancement uses scaled
 pitch for thresholds and scaled pitch times thread starts for lead.
 No import-owned task registration aliases or environment-method replacements are used.
 

@@ -45,7 +45,7 @@ assert hashlib.sha256(archive.read_bytes()).hexdigest() == info["sha256"]
 PYCODE
 unzip configured-peg.zip
 export RUN="$PWD/configured-peg"
-embodichain eval-policy "$RUN" --checkpoint best --episodes 8192 --num-envs 1024 --seed 20000 --episode-allocation balanced --renderer no-render
+embodichain eval-policy "$RUN" --checkpoint best --episodes 8192 --num-envs 1024 --seed 20000 --episode-allocation balanced --renderer no-render --device cuda:0
 ```
 
 Replay needs the installed current code and declared SDK dependencies. It loads
@@ -113,6 +113,10 @@ The current-code RGB preview completes all seeds 30000–30002 with 3/3 successe
 1280×720 at 25 fps; it is visual evidence, not a success-rate estimate.
 
 ## Fresh training, export and RGB preview
+
+Before starting a fresh run, set `trainer.device` in the training YAML to a
+visible CUDA device. With one GPU visible, use `cuda:0`, including when
+`CUDA_VISIBLE_DEVICES` selects a physical GPU with a different index.
 
 ```bash
 embodichain train-rl --config "$RUN/configs/train.yaml"

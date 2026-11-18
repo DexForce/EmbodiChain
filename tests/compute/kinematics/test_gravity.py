@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 import pytest
 import torch
 
@@ -31,16 +33,24 @@ _URDF = """<robot name="pendulum"><link name="base"/><link name="load">
 
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize(
+    "mode",
+    [nullcontext, torch.no_grad, torch.inference_mode],
+    ids=["grad", "no_grad", "inference"],
+)
 def test_gravity_torques_match_pendulum_potential_derivative(
     dtype: torch.dtype,
+    mode,
 ) -> None:
-    model = URDFGravityCompensation(_URDF, gravity=[0, -9.81, 0], dtype=dtype)
-    q = torch.tensor(
-        [[0.0], [torch.pi / 2], [torch.pi]], dtype=dtype, requires_grad=True
-    )
+    with mode():
+        gravity = torch.tensor([0, -9.81, 0], dtype=dtype)
+        model = URDFGravityCompensation(_URDF, gravity=gravity, dtype=dtype)
+        q = torch.tensor(
+            [[0.0], [torch.pi / 2], [torch.pi]], dtype=dtype, requires_grad=True
+        )
+        actual = model.torques(q)
     # U = m*g*l*sin(q), so holding torque is dU/dq = m*g*l*cos(q).
     expected = 2 * 9.81 * 0.4 * torch.cos(q)
-    actual = model.torques(q)
     assert model.joint_names == ("axis",)
     assert not actual.requires_grad and q.grad is None
     torch.testing.assert_close(actual, expected.detach())

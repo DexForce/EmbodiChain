@@ -687,13 +687,30 @@ def test_peg_seating_checks_each_bottom_vertex_height() -> None:
     assert not success.item()
 
 
-@pytest.mark.parametrize("scale", [0.75, 1.5])
-def test_scaled_peg_seats_on_the_generated_fixture_floor(scale: float) -> None:
+@pytest.mark.parametrize(
+    "scale,center",
+    [(0.75, None), (1.5, None), (1.0, True), (1.0, False)],
+    ids=["scaled-down", "scaled-up", "offset-centered", "offset-as-authored"],
+)
+def test_peg_seats_on_the_generated_fixture_floor(
+    scale: float, center: bool | None
+) -> None:
     pytest.importorskip("mjfit")
     from embodichain_tasks.manipulation.assembly.assets import build_task_assembly
     from embodichain_tasks.manipulation.assembly.preparation import _body_vertices
 
-    asset = build_task_assembly("peg", {"scale": scale})
+    parameters = {"scale": scale}
+    if center is not None:
+        parameters.update(
+            center=center,
+            hole={
+                "type": "rect",
+                "width": 0.052,
+                "height": 0.032,
+                "center": [0.020, 0],
+            },
+        )
+    asset = build_task_assembly("peg", parameters)
     bodies = {body.name: body for body in asset.bodies}
     plate = bodies["plate"]
     floor = next(geom for geom in plate.geometries if geom.name == "bottom")
