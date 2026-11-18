@@ -60,6 +60,9 @@ def main(
     parser.add_argument(
         "--scene", type=Path, help="Reuse a scene workspace instead of generating it."
     )
+    parser.add_argument(
+        "--task", type=Path, help="Reuse a published task plan instead of planning it."
+    )
     parser.add_argument("--task-id", "--task_id", help="Override the task identity.")
     parser.add_argument("--device", help="Execution device, for example cpu or cuda:0.")
     parser.add_argument(
@@ -87,35 +90,45 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
     )
     from ._run_binding import _bind_deployment, _load_runtime
     from ._run_execution import _execute_deployment
+    from ._run_image import _find_previous_cleanup, _prepare_image
 
     # Decode the trusted robot/policy inputs before incurring generation costs.
     runtime, policy, profile = _load_runtime(cfg)
     with Image.open(cfg.image) as image:
         image.verify()
+        size = image.size
+    raw_sha256 = hashlib.sha256(cfg.image.read_bytes()).hexdigest()
+    camera = cfg.input_camera
+    if camera is not None and (camera["sha256"] != raw_sha256 or size != (640, 480)):
+        raise ValueError("input_camera must match the exact 640 × 480 raw head frame")
+    previous_cleanup = None
+    reused_plan = None
     if cfg.task is not None:
         from .workflow import load_task_plan
 
-        # Binding reads the reused graph; it must plan this run's request.
-        plan = load_task_plan(cfg.task)
-        if (
-            plan.get("instruction") != cfg.instruction
-            or plan.get("image_sha256")
-            != hashlib.sha256(cfg.image.read_bytes()).hexdigest()
+        reused_plan = load_task_plan(cfg.task)
+        if reused_plan["instruction"] != cfg.instruction.strip() or (
+            camera is None and reused_plan["image_sha256"] != raw_sha256
         ):
             raise ValueError(
                 "task was planned for a different instruction or image than this run"
             )
+        if camera is not None:
+            previous_cleanup = _find_previous_cleanup(cfg.task, reused_plan, camera)
     output = validate_run_output_directory(cfg.output)
     output.mkdir(parents=True, exist_ok=False)
     source = output / ("source_image" + cfg.image.suffix.lower())
     shutil.copyfile(cfg.image, source)
+    if hashlib.sha256(source.read_bytes()).hexdigest() != raw_sha256:
+        raise ValueError("Input image changed while copying it into the run")
     manifest: dict[str, Any] = {
         "schema_version": "embodichain.gensim-run/v1",
         "task_id": cfg.task_id,
         "policy_sha256": hashlib.sha256(cfg.execution_policy.read_bytes()).hexdigest(),
         "instruction": cfg.instruction,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "image_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        "source_image_sha256": raw_sha256,
+        "image_sha256": raw_sha256,
         "status": "running",
         "run_id": uuid.uuid4().hex,
         "stages": {},
@@ -123,7 +136,7 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
         "runtime_evidence_status": "not_run",
         "task_spec_verdict": "not_evaluated",
     }
-    stage = "task_plan"
+    stage = "image_preprocessing" if camera is not None else "task_plan"
 
     def update(status: str) -> None:
         manifest["stage"] = stage
@@ -133,6 +146,32 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
     run = None
     try:
         with service_scope(services) as run:
+            if camera is not None:
+                update("running")
+                prepared = output / "image_preprocessing"
+                source = _prepare_image(
+                    source,
+                    prepared,
+                    run,
+                    previous_cleanup=previous_cleanup,
+                    expected_sha256=(
+                        reused_plan["image_sha256"] if reused_plan is not None else None
+                    ),
+                )
+                manifest["image_sha256"] = hashlib.sha256(
+                    source.read_bytes()
+                ).hexdigest()
+                manifest["image_preprocessing"] = {
+                    "view": camera["view"],
+                    "input_image": str(source),
+                    "report": str(prepared / "preparation.json"),
+                }
+                if previous_cleanup is not None:
+                    manifest["image_preprocessing"]["reused_from"] = str(
+                        previous_cleanup
+                    )
+                update("reused" if previous_cleanup is not None else "succeeded")
+                stage = "task_plan"
             from .workflow import (
                 load_generated_scene,
                 load_task_plan,
@@ -165,6 +204,10 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
                 )
                 update("succeeded")
             plan = load_task_plan(task)
+            if plan["image_sha256"] != manifest["image_sha256"]:
+                raise ValueError(
+                    "Task plan and effective run image have different hashes"
+                )
             manifest["task_id"] = plan["task_id"]
             manifest["instruction"] = plan["instruction"]
             manifest["spec_digest"] = plan.get("spec_digest")

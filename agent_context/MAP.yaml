@@ -556,6 +556,7 @@ topics:
   source_of_truth:
   - embodichain/cli/gensim.py
   - embodichain/gen_sim/_workflow.py
+  - embodichain/gen_sim/_run_image.py
   - embodichain/gen_sim/_run_config.py
   - embodichain/gen_sim/_run_binding.py
   - embodichain/gen_sim/_run_execution.py
