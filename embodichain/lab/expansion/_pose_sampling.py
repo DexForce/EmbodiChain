@@ -109,6 +109,9 @@ class _PoseBudget(FeasibilityBudget):
 
     def charge(self, kind: str, amount: int = 1) -> None:
         self.check()
+        self._reserve(kind, amount)
+
+    def _reserve(self, kind: str, amount: int = 1) -> None:
         if type(amount) is not int or amount < 1:
             raise ValueError("Budget charges must be positive integers")
         limits = {
@@ -121,6 +124,28 @@ class _PoseBudget(FeasibilityBudget):
             self._blocked = (self.validation, kind + "_budget_exhausted")
             raise FeasibilityBudgetExhausted(self._blocked[1])
         self.counts[kind] += amount
+
+
+class _AdmittedPoseBudget:
+    """Retain shared call limits/cancellation after the admission deadline.
+
+    Already admitted trajectories still have the host's original max_steps and
+    bridge safe-stop rules. The source's raw budget alone admits new work.
+    """
+
+    def __init__(self, budget: _PoseBudget) -> None:
+        self.budget = budget
+
+    def check(self) -> None:
+        budget = self.budget
+        if budget._blocked is not None and budget._blocked[0] == budget.validation:
+            raise FeasibilityBudgetExhausted(budget._blocked[1])
+        if budget.cancelled is not None and budget.cancelled.is_set():
+            raise FeasibilityBudgetExhausted("cancelled")
+
+    def charge(self, kind: str, amount: int = 1) -> None:
+        self.check()
+        self.budget._reserve(kind, amount)
 
 
 class _AdaptivePoseSource(_BoundedPoseSource):
@@ -183,6 +208,7 @@ class _AdaptivePoseSource(_BoundedPoseSource):
         self.budget.validation = (
             True  # Use the full host allocation, not search/held-out splitting.
         )
+        self.planning_budget = _AdmittedPoseBudget(self.budget)
         self._candidates = {}
         self._checks = {}
         self._predicted = {}

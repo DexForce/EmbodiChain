@@ -127,7 +127,11 @@ class _GymWorkloadSource:
 
     def planning_budget(self, assignment):
         feedback = self.groups[assignment.workload_id]["host"]._context.feedback
-        return None if feedback is None else feedback.budget
+        return (
+            None
+            if feedback is None
+            else getattr(feedback, "planning_budget", feedback.budget)
+        )
 
     def can_admit(self, name):
         feedback = self.groups[name]["host"]._context.feedback

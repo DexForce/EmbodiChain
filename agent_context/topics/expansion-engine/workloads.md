@@ -195,6 +195,10 @@ candidate streams and proposal streams still use the expansion seed/ordinal;
 the reference manifest records both seeds. This prevents a sampler comparison
 from silently changing the nominal scene's reset randomization and moving its
 declared local domain. Rolling resets use the same explicit nominal reset seed.
+The raw pose budget enforces the original admission deadline. An admitted
+trajectory's planning view retains shared IK/planning call limits and explicit
+cancellation without treating that deadline as a new mid-trajectory hard stop.
+The original max_steps, physical checks and safe-stop handshake still apply.
 `_pose_sampling.py` owns bounded candidate snapshots, source feedback and budgets;
 `task_pose_coverage.TaskPoseCoverage` implements the session coverage protocol.
 Measured rigid initial/terminal poses contribute only after native sink receipts.

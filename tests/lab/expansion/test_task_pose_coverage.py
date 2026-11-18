@@ -34,6 +34,37 @@ from embodichain.lab.expansion._pose_sampling_cfg import validate_sampling
 from embodichain.lab.sim.scene.feasibility import FeasibilityBudgetExhausted
 
 
+def test_admitted_planning_retains_count_and_cancel_limits_after_admission_time():
+    from threading import Event
+    import time
+    from embodichain.lab.expansion._pose_sampling import (
+        _PoseBudget,
+        _AdmittedPoseBudget,
+    )
+    from embodichain.lab.sim.scene.feasibility import SceneRobotFeasibilityCfg
+
+    cancellation = Event()
+    budget = _PoseBudget(
+        SceneRobotFeasibilityCfg(max_wall_time_s=0.01, max_ik_calls=2),
+        cancelled=cancellation,
+    )
+    budget.validation = True
+    admitted = _AdmittedPoseBudget(budget)
+    time.sleep(0.03)
+    with pytest.raises(FeasibilityBudgetExhausted, match="wall_time"):
+        budget.charge("candidates")
+    admitted.check()
+    admitted.charge("ik")
+    assert budget.counts["ik"] == 1 and budget.counts["candidates"] == 0
+    cancellation.set()
+    with pytest.raises(FeasibilityBudgetExhausted, match="cancelled"):
+        admitted.check()
+    cancellation.clear()
+    with pytest.raises(FeasibilityBudgetExhausted, match="ik_budget"):
+        admitted.charge("ik", 2)
+    assert budget.counts["ik"] == 1
+
+
 def grids():
     return {
         phase: {
