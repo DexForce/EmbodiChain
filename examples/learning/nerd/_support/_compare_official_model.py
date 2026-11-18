@@ -52,8 +52,8 @@ def main() -> None:
     import numpy as np
     import torch
     import warp as wp
-    from embodichain_models.dynamics.nerd.codec import NeRDStateCodec
-    from embodichain_models.dynamics.nerd import load_model
+    from embodichain.extensions.models.dynamics.nerd.codec import NeRDStateCodec
+    from embodichain.extensions.models.dynamics.nerd import load_model
     from examples.learning.nerd._support._reference import (
         reference_identity,
         import_legacy_datasets,
@@ -63,7 +63,7 @@ def main() -> None:
         _cpu_stream_compatibility,
     )
     from examples.learning.nerd._support._trainer import encode_batch
-    from embodichain_models.dynamics.nerd.data import DynamicsWindowDataset
+    from embodichain.extensions.models.dynamics.nerd.data import DynamicsWindowDataset
 
     source = reference_identity(args.source)
     if (

@@ -21,7 +21,10 @@ import argparse
 import json
 
 from embodichain.toolkits.assembly import AssemblyAsset, build_assembly
-from embodichain_benchmarks.assembly.precision import PrecisionRunCfg, run_passive_probe
+from embodichain.extensions.benchmarks.assembly.precision import (
+    PrecisionRunCfg,
+    run_passive_probe,
+)
 
 
 def run(config: str) -> None:

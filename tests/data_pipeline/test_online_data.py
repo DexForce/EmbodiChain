@@ -1224,7 +1224,7 @@ class TestOnlineDataEngine:
         def discover_task_packages() -> list[str]:
             nonlocal task_packages_registered
             task_packages_registered = True
-            return ["embodichain_tasks"]
+            return ["official_tasks"]
 
         env = MagicMock()
         env_cfg = SimpleNamespace(

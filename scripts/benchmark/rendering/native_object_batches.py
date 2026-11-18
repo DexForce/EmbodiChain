@@ -457,11 +457,16 @@ def run_all_benchmarks() -> None:
             "--order",
             args.order,
         ]
-        source_paths = [source, source / "extensions"] + sorted(
-            path
-            for path in (source / "extensions").iterdir()
-            if (path / path.name / "__init__.py").is_file()
-        )
+        source_paths = [source]
+        # Baseline revisions can predate the move into the main package.
+        extension_container = source / "extensions"
+        if extension_container.is_dir():
+            source_paths.append(extension_container)
+            source_paths.extend(
+                path
+                for path in sorted(extension_container.iterdir())
+                if (path / path.name / "__init__.py").is_file()
+            )
         with log.open("w") as stream:
             completed = subprocess.run(
                 command,

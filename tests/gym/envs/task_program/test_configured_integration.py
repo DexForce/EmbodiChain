@@ -118,7 +118,7 @@ from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
     TrapezoidalPlanOptions,
 )
 from embodichain.lab.sim.sensors import CameraCfg
-from embodichain_robots import TianjiMarvinCfg
+from embodichain.extensions.robots import TianjiMarvinCfg
 from embodichain.lab.task_program.semantics import (
     HeldObjectRelation,
     RegisteredSemanticCall,
@@ -136,7 +136,7 @@ from embodichain.toolkits.graspkit.pg_grasp import (
 
 _REPOSITORY_ROOT = Path(__file__).parents[4]
 _CONFIG_DIRECTORY = (
-    _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs/tasks/manipulation"
+    _REPOSITORY_ROOT / "embodichain/extensions/tasks/configs/tasks/manipulation"
 )
 _TABLEWARE_CONFIG_DIRECTORY = _CONFIG_DIRECTORY / "tableware"
 _TASKS = {
@@ -2043,7 +2043,8 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
 ) -> None:
     """Both Marvin hands use source joint commands and toolkit policy defaults."""
     monkeypatch.setattr(
-        "embodichain_robots.tianji.marvin.cfg.get_data_path", lambda value: value
+        "embodichain.extensions.robots.tianji.marvin.cfg.get_data_path",
+        lambda value: value,
     )
     path = _config_path("hand_over")
     config = _gym_config("hand_over")
@@ -2614,7 +2615,7 @@ def test_examples_have_no_importable_task_environment_modules() -> None:
     deployments remain configuration-defined.
     """
     for task_name in ("open_drawer", "hand_over"):
-        module_name = f"embodichain_tasks.manipulation.{task_name}"
+        module_name = f"embodichain.extensions.tasks.manipulation.{task_name}"
         assert importlib.util.find_spec(module_name) is None
 
 

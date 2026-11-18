@@ -46,7 +46,7 @@ deployment as the EmbodiChain CLI:
 - The deployment's observation and action spaces remain the source of truth;
   the RLinf policy dimensions and mapping must match them.
 
-See the [task package registration contract](https://github.com/DexForce/EmbodiChain/blob/main/extensions/embodichain_tasks/README.md#how-registration-works)
+See the [task package registration contract](https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/tasks/README.md#how-registration-works)
 for discovery and initialization details. See the
 {doc}`configuration guide </guides/configuration>` for inline and componentized
 Gym deployment paths.
@@ -55,7 +55,7 @@ The official RLinf recipe may move at a different pace from EmbodiChain. Older
 versions of that recipe use the retired
 `configs/agents/rl/basic/<task>/gym_config.json` layout. Current EmbodiChain
 deployments live under
-`extensions/embodichain_tasks/configs/tasks/<category>/<task>/env.json` or a corresponding
+`embodichain/extensions/tasks/configs/tasks/<category>/<task>/env.json` or a corresponding
 task deployment selected by the project configuration conventions.
 
 ## Current compatibility boundary

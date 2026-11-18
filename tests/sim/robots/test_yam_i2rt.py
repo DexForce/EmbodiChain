@@ -25,8 +25,8 @@ import numpy as np
 import pytest
 import torch
 
-from embodichain_robots import YamI2rtCfg
-from embodichain_robots.i2rt.yam import cfg as yam_i2rt
+from embodichain.extensions.robots import YamI2rtCfg
+from embodichain.extensions.robots.i2rt.yam import cfg as yam_i2rt
 
 pytestmark = pytest.mark.no_sim
 

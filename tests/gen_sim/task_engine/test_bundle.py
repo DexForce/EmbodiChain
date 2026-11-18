@@ -175,7 +175,7 @@ def _configured_files():
 
     root = (
         Path(__file__).parents[3]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/rubiks_cube_pick_place"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/rubiks_cube_pick_place"
     )
     original = yaml.safe_load((root / "task.ur5.yaml").read_text())
     scene = yaml.safe_load((root / original["environment"]["component"]).read_text())

@@ -23,7 +23,7 @@ import numpy as np
 import pytest
 
 from embodichain.toolkits.assembly import import_mjcf
-from embodichain_benchmarks.assembly.probes import (
+from embodichain.extensions.benchmarks.assembly.probes import (
     AnalyticPegGeometry,
     ConstrainedProbeCfg,
     prepare_probe,
@@ -129,7 +129,9 @@ def test_constrained_probe_integrates_without_pose_drives_and_retains_joint_expo
     ],
 )
 def test_quasistatic_acceptance_rejects_oscillation_or_drift_with_zero_median(errors):
-    from embodichain_benchmarks.assembly.probes import _settled_error_statistics
+    from embodichain.extensions.benchmarks.assembly.probes import (
+        _settled_error_statistics,
+    )
 
     statistics = _settled_error_statistics(errors, 5e-6)
     assert statistics["wall_error_m"] == pytest.approx(0.0)
@@ -142,7 +144,9 @@ def test_quasistatic_acceptance_rejects_oscillation_or_drift_with_zero_median(er
 
 
 def test_initial_overlap_only_counts_penetrating_plate_peg_contacts():
-    from embodichain_benchmarks.assembly.probes import _contact_overlap_worlds
+    from embodichain.extensions.benchmarks.assembly.probes import (
+        _contact_overlap_worlds,
+    )
 
     # World0 has a separated plate/peg pair and an unrelated overlap;
     # world1 has one real plate/peg overlap; world2 starts with no contacts.
@@ -189,7 +193,7 @@ def test_mjfit_nested_default_contact_profile_is_retained_on_analytic_probe_peg(
 
 def test_native_constrained_probe_rejects_newton_selection_on_default_before_preparation():
     from embodichain.toolkits.assembly import AssemblyAsset
-    from embodichain_benchmarks.assembly.probes import run_native_probe
+    from embodichain.extensions.benchmarks.assembly.probes import run_native_probe
 
     with pytest.raises(ValueError, match="requires backend='newton'"):
         run_native_probe(
@@ -220,7 +224,7 @@ def test_native_solver_family_retains_colliders_and_seats_a_peg(tmp_path, family
 import json, sys
 from pathlib import Path
 from embodichain.toolkits.assembly import AssemblyAsset
-from embodichain_benchmarks.assembly.precision import PrecisionRunCfg, run_passive_probe
+from embodichain.extensions.benchmarks.assembly.precision import PrecisionRunCfg, run_passive_probe
 asset = AssemblyAsset.load(sys.argv[1])
 result = run_passive_probe(asset, PrecisionRunCfg(
     backend='newton', newton_solver=sys.argv[3], duration=.2, work_dir=sys.argv[4]))
@@ -296,7 +300,7 @@ def test_s2_circle_retains_ten_micrometre_budget_at_every_integration_step(
 import json,sys
 from pathlib import Path
 from embodichain.toolkits.assembly import import_mjcf
-from embodichain_benchmarks.assembly.probes import ConstrainedProbeCfg,run_native_probe
+from embodichain.extensions.benchmarks.assembly.probes import ConstrainedProbeCfg,run_native_probe
 asset = import_mjcf(Path(sys.argv[1]).read_text(), config={
     'kind':'peg','hole':{'type':'circle','radius':.008,'n':32},
     'clearance':.0001,'plate_thickness':.01,'peg_length':.03})

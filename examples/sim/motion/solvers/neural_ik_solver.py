@@ -28,7 +28,7 @@ from embodichain.data.assets.solver_assets import download_neural_ik_checkpoint
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import MarkerCfg
 from embodichain.lab.sim.objects import Robot
-from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+from embodichain.extensions.benchmarks.motion_generation._atomic_fixtures import (
     _create_franka_native_hand_cfg,
 )
 from embodichain.lab.sim.motion.solvers import NeuralIKSolverCfg

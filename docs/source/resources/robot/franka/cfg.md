@@ -22,7 +22,7 @@ The original Panda variant is selected separately through `arm_model` below.
 ## Construction and preview
 
 ```python
-from embodichain_robots import FrankaCfg
+from embodichain.extensions.robots import FrankaCfg
 
 arm = FrankaCfg.from_dict({})  # FR3 by default
 panda_arm = FrankaCfg.from_dict({"arm_model": "panda"})
@@ -78,7 +78,7 @@ original asset directory so relative mesh paths remain valid.
 The Robotiq assembly retains its qualified asset, component order and assembly
 name. The separate `Robotiq2F85` archive is a different model identity and is
 not substituted. Opening conversion remains available from
-`embodichain_robots.robotiq.two_finger.robotiq85_joint_positions`.
+`embodichain.extensions.robots.robotiq.two_finger.robotiq85_joint_positions`.
 
 ## Migration
 

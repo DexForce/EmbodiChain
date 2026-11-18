@@ -21,7 +21,7 @@ camera, lighting and joint settings are recorded in the
 :::
 
 ```python
-from embodichain_robots import AlohaMiniCfg
+from embodichain.extensions.robots import AlohaMiniCfg
 
 cfg = AlohaMiniCfg.from_dict({"uid": "aloha_mini"})
 robot = sim.add_robot(cfg=cfg)
@@ -53,7 +53,7 @@ arm chains describe the grasp TCPs.
 Run a headless construction smoke check with:
 
 ```bash
-python -m embodichain_robots.alohamini.aloha_mini.cfg --headless --device cpu
+python -m embodichain.extensions.robots.alohamini.aloha_mini.cfg --headless --device cpu
 ```
 
 Omit `--headless` for the interactive simulation window. Select the physics

@@ -2,7 +2,7 @@ AgiBot
 ======
 
 Official AgiBot robot configurations live in the
-``embodichain_robots.agibot`` manufacturer namespace.
+``embodichain.extensions.robots.agibot`` manufacturer namespace.
 
 .. list-table::
    :class: robot-catalog

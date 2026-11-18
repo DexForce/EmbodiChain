@@ -96,7 +96,7 @@ from embodichain.lab.sim.motion.planners import (
     ToppraPlanOptions,
     TrajectorySampleMethod,
 )
-from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+from embodichain.extensions.benchmarks.motion_generation._atomic_fixtures import (
     _create_franka_native_hand_cfg,
 )
 from embodichain.lab.visualization import visualization_cfg_from_args

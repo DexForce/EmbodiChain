@@ -31,7 +31,7 @@ __all__ = ["HERE", "SCENES", "prepare", "digest", "write_json"]
 
 HERE = Path(__file__).resolve().parent
 TASK_CONFIG_ROOT = (
-    "extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place"
+    "embodichain/extensions/tasks/configs/tasks/manipulation/gaussian_pick_place"
 )
 SCENES = {
     "discoverse": {"title": "DISCOVERSE lab3"},

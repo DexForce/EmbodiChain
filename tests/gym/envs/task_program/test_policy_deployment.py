@@ -33,7 +33,7 @@ from embodichain.lab.task_program.integrations.progress import (
 
 _TASK = (
     Path(__file__).resolve().parents[4]
-    / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.policy.cobotmagic.yaml"
+    / "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.policy.cobotmagic.yaml"
 )
 
 

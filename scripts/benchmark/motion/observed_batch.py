@@ -42,7 +42,7 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg
 from embodichain.lab.sim.objects import RigidObjectCfg
 from embodichain.lab.sim.shapes import CubeCfg
-from embodichain_robots import FrankaPandaCfg
+from embodichain.extensions.robots import FrankaPandaCfg
 from embodichain.lab.sim.motion.motion_generator import MotionGenOptions
 from embodichain.lab.sim.motion.planners.utils import PlanState
 from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (

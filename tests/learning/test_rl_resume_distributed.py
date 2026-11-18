@@ -37,7 +37,7 @@ from embodichain.learning.rl.policy_evaluation.manifest import (
 from embodichain.learning.rl.utils.trainer import Trainer
 from embodichain.learning.rl.train import _configure_checkpoints, _save_final_checkpoint
 from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
-from embodichain_tasks.classic_control.point_mass import PointMassEnv
+from embodichain.extensions.tasks.classic_control.point_mass import PointMassEnv
 
 
 def _components(rank: int, directory: Path, mode: str) -> Trainer:

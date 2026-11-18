@@ -51,7 +51,7 @@ from embodichain.lab.sim.motion.planners._cartesian_profiles import (
     plan_cartesian_path,
     compute_eef_trajectory,
 )
-from embodichain_robots import CobotMagicCfg
+from embodichain.extensions.robots import CobotMagicCfg
 from embodichain.lab.sim.cfg import MarkerCfg, physics_cfg_for_backend
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.utils.math import euler_xyz_from_quat

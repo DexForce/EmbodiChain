@@ -12,7 +12,7 @@ Locomotion environments use the same task registration, configuration loader, ac
 | `locomotion/velocity/microduck_flat` | `MicroDuckFlatRL-v1` | 14 / 53 / 68 |
 | `classic_control/humanoid` | `HumanoidRun-v1` | 17 / 63 / 63 |
 
-Paths in this table are relative to `embodichain_tasks/configs/tasks/`.
+Paths in this table are relative to `embodichain/extensions/tasks/configs/tasks/`.
 Each directory contains `env.yaml` and `agents/ppo.yaml` for the default backend, plus `env.newton.yaml` and `agents/ppo.newton.yaml` for Newton. Capability registration is `RL`.
 
 The six velocity task deployments declare the generic
@@ -51,7 +51,7 @@ Humanoid uses clipped effort actions (`[-0.4, 0.4]`) multiplied by per-joint mot
 For example, the prepared Go2 training entry is:
 
 ```bash
-embodichain train-rl --config embodichain_tasks/configs/tasks/locomotion/velocity/go2_flat/agents/ppo.yaml
+embodichain train-rl --config embodichain/extensions/tasks/configs/tasks/locomotion/velocity/go2_flat/agents/ppo.yaml
 ```
 
 Local smoke checks cover environment construction, stepping, finite tensors, selective reset and policy forward execution, with zero training updates.

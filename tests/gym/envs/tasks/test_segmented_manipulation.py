@@ -37,7 +37,7 @@ from embodichain.utils.utility import load_config
 
 _CONFIG_ROOT = (
     Path(__file__).resolve().parents[4]
-    / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware"
+    / "embodichain/extensions/tasks/configs/tasks/manipulation/tableware"
 )
 
 

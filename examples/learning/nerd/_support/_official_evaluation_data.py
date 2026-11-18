@@ -50,10 +50,10 @@ def _hash(path: Path) -> str:
 
 def _default_transport_root() -> Path:
     """Find installed or source codec files without importing the model SDK."""
-    relative = Path("embodichain_models/dynamics/nerd")
+    relative = Path("embodichain/extensions/models/dynamics/nerd")
     candidates = [
         Path(__file__).resolve().parents[4]
-        / "extensions/embodichain_models"
+        / "embodichain/extensions/models"
         / relative,
         *(Path(entry) / relative for entry in sys.path),
     ]
@@ -97,7 +97,7 @@ def _transport(directory: Path) -> tuple[Any, Any]:
             # Bind the moved task-math import to the isolated codec rather than
             # importing the SDK into a historical reference interpreter.
             source = path.read_text().replace(
-                "from embodichain_models.dynamics.nerd.codec import",
+                "from embodichain.extensions.models.dynamics.nerd.codec import",
                 "from .codec import",
             )
             exec(compile(source, str(path), "exec"), module.__dict__)

@@ -50,7 +50,7 @@ from embodichain.lab.task_program.semantics.asset_requirements import (
 )
 
 ROOT = Path(__file__).resolve().parents[4]
-CONFIGS = ROOT / "extensions/embodichain_tasks/configs"
+CONFIGS = ROOT / "embodichain/extensions/tasks/configs"
 TASK = CONFIGS / "tasks/manipulation/repeated_pick_place"
 
 

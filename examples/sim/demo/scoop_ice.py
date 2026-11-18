@@ -66,7 +66,7 @@ from embodichain.lab.sim.material import VisualMaterialCfg
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
-from embodichain_robots import URRobotCfg
+from embodichain.extensions.robots import URRobotCfg
 
 
 def initialize_simulation(args):

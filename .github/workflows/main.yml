@@ -66,7 +66,6 @@ jobs:
             docs:
               - 'docs/**'
               - 'embodichain/**'
-              - 'extensions/**'
               - 'examples/**'
               - 'README.md'
               - 'pyproject.toml'
@@ -617,15 +616,18 @@ jobs:
           required = {
               "embodichain/VERSION",
               "embodichain/gen_sim/asset_engine/configs/gen_config.json",
-              "embodichain_tasks/__init__.py",
-              "embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml",
-              "embodichain_robots/__init__.py",
-              "embodichain_robots/_catalog.py",
-              "embodichain_models/__init__.py",
-              "embodichain_robots/_asset_catalog.py",
+              "embodichain/extensions/__init__.py",
+              "embodichain/extensions/benchmarks/__init__.py",
+              "embodichain/extensions/solvers/__init__.py",
+              "embodichain/extensions/tasks/__init__.py",
+              "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml",
+              "embodichain/extensions/robots/__init__.py",
+              "embodichain/extensions/robots/_catalog.py",
+              "embodichain/extensions/models/__init__.py",
+              "embodichain/extensions/robots/_asset_catalog.py",
               "embodichain/data/_asset_registry.py",
-              "embodichain_robots/franka/assets.py",
-              "embodichain_robots/dexforce/w1/assets.py",
+              "embodichain/extensions/robots/franka/assets.py",
+              "embodichain/extensions/robots/dexforce/w1/assets.py",
           }
           with ZipFile(wheels[0]) as wheel:
               members = set(wheel.namelist())
@@ -641,14 +643,14 @@ jobs:
                   )
 
           source_task_configs = {
-              path.relative_to("extensions").as_posix()
-              for path in Path("extensions/embodichain_tasks/configs").rglob("*")
+              path.as_posix()
+              for path in Path("embodichain/extensions/tasks/configs").rglob("*")
               if path.suffix in {".json", ".yaml", ".yml"}
           }
           wheel_task_configs = {
               member
               for member in members
-              if member.startswith("embodichain_tasks/configs/")
+              if member.startswith("embodichain/extensions/tasks/configs/")
               and member.endswith((".json", ".yaml", ".yml"))
           }
           unexpected = sorted(
@@ -657,10 +659,6 @@ jobs:
               if not member.startswith(
                   (
                       "embodichain/",
-                      "embodichain_tasks/",
-                      "embodichain_robots/",
-                      "embodichain_benchmarks/",
-                      "embodichain_models/",
                       f"embodichain-{version}.data/data/share/embodichain/examples/",
                       dist_info,
                   )
@@ -670,7 +668,7 @@ jobs:
           )
           missing = sorted(required - members)
           retired_robot_modules = {
-              f"embodichain_robots/{name}.py"
+              f"embodichain/extensions/robots/{name}.py"
               for name in (
                   "arx5", "aloha_mini", "cobotmagic", "franka_panda",
                   "flexiv_rizon4s", "tianji_marvin", "ur_robot", "so101",
@@ -679,24 +677,26 @@ jobs:
           stale_robot_modules = sorted(
               member for member in members
               if member in retired_robot_modules
-              or member.startswith("embodichain_robots/dexforce_w1/")
+              or member.startswith("embodichain/extensions/robots/dexforce_w1/")
           )
           missing_task_configs = sorted(source_task_configs - wheel_task_configs)
           unexpected_task_configs = sorted(wheel_task_configs - source_task_configs)
-          task_entry_point = "embodichain_tasks = embodichain_tasks"
+          task_entry_point = entry_point_config.get(
+              "embodichain.tasks", "official_tasks", fallback=None
+          ) == "embodichain.extensions.tasks"
           robot_entry_point = entry_point_config.get(
               "embodichain.robots", "official", fallback=None
-          ) == "embodichain_robots._catalog:ROBOT_CONFIGS"
+          ) == "embodichain.extensions.robots._catalog:ROBOT_CONFIGS"
           asset_entry_point = entry_point_config.get(
               "embodichain.assets", "official_robots", fallback=None
-          ) == "embodichain_robots._asset_catalog:ROBOT_ASSETS"
+          ) == "embodichain.extensions.robots._asset_catalog:ROBOT_ASSETS"
           if (
               unexpected
               or missing
               or stale_robot_modules
               or missing_task_configs
               or unexpected_task_configs
-              or task_entry_point not in entry_points
+              or not task_entry_point
               or not robot_entry_point
               or not asset_entry_point
           ):
@@ -706,7 +706,7 @@ jobs:
                   f"stale_robot_modules={stale_robot_modules}, "
                   f"missing_task_configs={missing_task_configs}, "
                   f"unexpected_task_configs={unexpected_task_configs}, "
-                  f"task_entry_point={task_entry_point in entry_points}, "
+                  f"task_entry_point={task_entry_point}, "
                   f"robot_entry_point={robot_entry_point}, "
                   f"asset_entry_point={asset_entry_point}"
               )

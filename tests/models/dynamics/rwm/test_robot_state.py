@@ -22,7 +22,7 @@ import math
 
 import torch
 
-from embodichain_models.dynamics.rwm.robot_state import (
+from embodichain.extensions.models.dynamics.rwm.robot_state import (
     integrate_robot_state,
     robot_state_error,
     robot_state_features,

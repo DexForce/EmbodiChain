@@ -9,7 +9,7 @@ Native preparation is an explicit opt-in through `embodichain.toolkits.assembly.
 |---|---|
 | Pinned mjfit provider, manifests, sampling and USD format export | `embodichain/toolkits/assembly/` |
 | Native compound configs and actual hinge articulations | `embodichain/toolkits/assembly/native.py` |
-| Reference execution, analytic probes and measurement | `extensions/embodichain_benchmarks/assembly/` |
+| Reference execution, analytic probes and measurement | `embodichain/extensions/benchmarks/assembly/` |
 
 `build_assembly` produces source body-local geometry, independent visual parts,
 mass/COM/inertia, world attachments and source contact metadata. Loading a
@@ -53,7 +53,7 @@ Rigid preview preparation validates every body name and OBJ/MTL destination
 before writing the batch. Cache symlinks cannot redirect output outside its
 preparation root; bodies with no visible surfaces retain empty appearance.
 
-`embodichain_benchmarks.assembly.precision` checks geometry/USD ownership and runs passive source/native
+`embodichain.extensions.benchmarks.assembly.precision` checks geometry/USD ownership and runs passive source/native
 comparisons. MuJoCo Warp references declare their constants protocol through
 `PrecisionRunCfg.warp_reference_initialization`: `cpu_compiled` preserves the
 imported reference baseline; `warp_recomputed` explicitly calls public
@@ -82,7 +82,7 @@ contact/algorithm profile. Report grouping uses requested family/CPU identity,
 including unsuccessful cells; actual dispatch is shown independently. Every
 matrix cell owns its preparation directory.
 
-`embodichain_benchmarks.assembly.probes` owns independent constrained circle/square clearance oracles.
+`embodichain.extensions.benchmarks.assembly.probes` owns independent constrained circle/square clearance oracles.
 Many-pegs endpoint seating and gear ratios do not replace those independent
 measurements. Constrained `integration_substeps` defaults to four, resolving
 stiff float32 contacts with a finer interval on every reference/native route.

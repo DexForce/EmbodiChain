@@ -58,14 +58,14 @@ from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.utils import logger
 
-from embodichain_benchmarks.motion_generation.scenarios._placement_geometry import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios._placement_geometry import (
     TABLE_TOP_Z,
     build_flat_object_grasp_pose,
     build_pan_handle_grasp_pose,
     build_support_object_target_pose,
     build_placing_object_target_pose,
 )
-from embodichain_benchmarks.motion_generation.scenarios._placement_qualification import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios._placement_qualification import (
     _placement_input_geometry,
 )
 from examples.sim.atomic_skill.scenario import (

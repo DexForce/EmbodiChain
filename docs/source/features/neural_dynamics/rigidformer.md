@@ -7,7 +7,7 @@ rigid objects from observed geometry and physical properties. Use it when your
 observations are aligned material points on rigid bodies and you want a free
 rollout after several warmup frames. The current adapter has no action input.
 
-`embodichain_models.dynamics.rigidformer` integrates the native author
+`embodichain.extensions.models.dynamics.rigidformer` integrates the native author
 architecture, official weights and a shared-SL training recipe for MOVi-Sphere,
 MOVi-A and MOVi-B. The example provides resource preparation, an engine
 comparison, fixed-checkpoint evaluation and independent reference checks.
@@ -169,7 +169,7 @@ from pathlib import Path
 
 import torch
 
-from embodichain_models.dynamics.rigidformer import (
+from embodichain.extensions.models.dynamics.rigidformer import (
     MOViSequenceSource,
     load_rigidformer_checkpoint,
 )
@@ -307,7 +307,7 @@ Matusik. **RigidFormer: Learning Rigid Dynamics using Transformers.** 2026.
   independent author comparison and exact recovery commands.
 - [Acceptance protocol](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/rigidformer/research/acceptance.md):
   frozen sources, numerical checks, evaluation and retraining requirements.
-- [Public model package](https://github.com/DexForce/EmbodiChain/tree/main/extensions/embodichain_models/embodichain_models/dynamics/rigidformer):
+- [Public model package](https://github.com/DexForce/EmbodiChain/tree/main/embodichain/extensions/models/dynamics/rigidformer):
   model/config, checkpoint, source, objective and trainer APIs.
 - [All neural dynamics models](../neural_dynamics.md).
 

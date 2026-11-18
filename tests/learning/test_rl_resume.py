@@ -39,7 +39,7 @@ from embodichain.learning.rl.train import (
     train_from_config,
 )
 from embodichain.learning.rl.utils.trainer import Trainer
-from embodichain_tasks.classic_control.point_mass import PointMassEnv
+from embodichain.extensions.tasks.classic_control.point_mass import PointMassEnv
 
 
 def _export_prepared_policy_resource(env, config, config_dir):
@@ -1017,7 +1017,7 @@ def test_saved_policy_task_program_reloads_from_unrelated_directory(
 
     source = (
         Path(__file__).resolve().parents[2]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.policy.cobotmagic.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.policy.cobotmagic.yaml"
     )
     raw = yaml.safe_load(source.read_text())
     if export_resources:

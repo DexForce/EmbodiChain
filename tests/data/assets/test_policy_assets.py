@@ -41,7 +41,7 @@ def hub(tmp_path, monkeypatch):
                 "models": {
                     MODEL: {
                         "format": "embodichain-rl-run-v1",
-                        "task_package": "embodichain_tasks",
+                        "task_package": "embodichain.extensions.tasks",
                     }
                 },
             }
@@ -196,7 +196,7 @@ def test_invalid_index_does_not_download_weights(value, message, hub):
 def test_missing_task_package_is_reported_before_weights(hub, monkeypatch):
     _, calls = hub
     monkeypatch.setattr(policy_assets.importlib.util, "find_spec", lambda name: None)
-    with pytest.raises(ImportError, match="embodichain_tasks"):
+    with pytest.raises(ImportError, match="embodichain.extensions.tasks"):
         policy_assets.download_pretrained_policy(MODEL)
     assert [name for name, _ in calls] == ["index.json"]
 

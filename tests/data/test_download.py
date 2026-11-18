@@ -50,7 +50,7 @@ def asset_catalogs(monkeypatch):
 
 
 def test_migrated_robot_assets_keep_legacy_class_identity() -> None:
-    from embodichain_robots._asset_catalog import ROBOT_ASSETS
+    from embodichain.extensions.robots._asset_catalog import ROBOT_ASSETS
     import embodichain.data.assets as assets
 
     registry = download.get_registry()
@@ -146,15 +146,15 @@ def test_asset_resolution_preserves_explicit_extra_modules(monkeypatch) -> None:
 @pytest.mark.parametrize(
     "first_module",
     [
-        "embodichain_robots.arx.arx5.assets",
-        "embodichain_robots.brainco.revo1.assets",
-        "embodichain_robots.agilex.pika.assets",
-        "embodichain_robots.agibot.g1.assets",
-        "embodichain_robots.franka.assets",
-        "embodichain_robots.the_robot_studio.so101.assets",
-        "embodichain_robots.unitree.go2.assets",
-        "embodichain_robots.anybotics.anymal_c.assets",
-        "embodichain_robots.pollen_robotics.microduck.assets",
+        "embodichain.extensions.robots.arx.arx5.assets",
+        "embodichain.extensions.robots.brainco.revo1.assets",
+        "embodichain.extensions.robots.agilex.pika.assets",
+        "embodichain.extensions.robots.agibot.g1.assets",
+        "embodichain.extensions.robots.franka.assets",
+        "embodichain.extensions.robots.the_robot_studio.so101.assets",
+        "embodichain.extensions.robots.unitree.go2.assets",
+        "embodichain.extensions.robots.anybotics.anymal_c.assets",
+        "embodichain.extensions.robots.pollen_robotics.microduck.assets",
     ],
 )
 def test_asset_imports_do_not_load_robot_configuration(first_module: str) -> None:
@@ -163,10 +163,10 @@ import importlib.abc
 import sys
 class RejectConfigs(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.startswith('embodichain_robots.') and (fullname.endswith('.cfg') or fullname in ('embodichain_robots.franka.panda', 'embodichain_robots.universal_robots.ur_robot')):
+        if fullname.startswith('embodichain.extensions.robots.') and (fullname.endswith('.cfg') or fullname in ('embodichain.extensions.robots.franka.panda', 'embodichain.extensions.robots.universal_robots.ur_robot')):
             raise AssertionError('Asset discovery imported robot config: ' + fullname)
 sys.meta_path.insert(0, RejectConfigs())
-from embodichain_robots._asset_catalog import ROBOT_ASSETS
+from embodichain.extensions.robots._asset_catalog import ROBOT_ASSETS
 assert 'open3d' not in sys.modules
 import importlib
 importlib.import_module(sys.argv[1])
@@ -356,10 +356,10 @@ def test_eef_catalog_preserves_ids_without_legacy_exports(monkeypatch, capsys) -
     assert len(entries) == len(expected_ids)
     for name, cls in entries:
         assert cls is get_data_class(name)
-        assert cls.__module__.startswith("embodichain_robots.")
+        assert cls.__module__.startswith("embodichain.extensions.robots.")
         assert not hasattr(assets, name)
     assert get_data_class("PikaGripper").__module__ == (
-        "embodichain_robots.agilex.pika.assets"
+        "embodichain.extensions.robots.agilex.pika.assets"
     )
     download.cmd_list(Namespace(category="eef"))
     output = capsys.readouterr().out

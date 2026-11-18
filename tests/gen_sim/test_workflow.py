@@ -234,7 +234,7 @@ def run_cfg(tmp_path: Path) -> _RunCfg:
                 "embodiment": {
                     "component": str(
                         _ROOT
-                        / "extensions/embodichain_tasks/configs/components/embodiments/franka_panda.yaml"
+                        / "embodichain/extensions/tasks/configs/components/embodiments/franka_panda.yaml"
                     )
                 },
                 "max_episode_steps": 1000,
@@ -244,7 +244,7 @@ def run_cfg(tmp_path: Path) -> _RunCfg:
     policy = yaml.safe_load(
         (
             _ROOT
-            / "extensions/embodichain_tasks/configs/components/execution_policies/motion_gen_verified.yaml"
+            / "embodichain/extensions/tasks/configs/components/execution_policies/motion_gen_verified.yaml"
         ).read_text()
     )
     policy["requires"]["embodiment_contract"] = "single_arm_parallel_gripper"
@@ -1887,7 +1887,7 @@ def _dual_runtime(run_cfg):
     runtime["embodiment"] = {
         "component": str(
             _ROOT
-            / "extensions/embodichain_tasks/configs/components/embodiments/dual_franka_robotiq_arg2f_140_handover.yaml"
+            / "embodichain/extensions/tasks/configs/components/embodiments/dual_franka_robotiq_arg2f_140_handover.yaml"
         )
     }
     run_cfg.runtime.write_text(yaml.safe_dump(runtime))

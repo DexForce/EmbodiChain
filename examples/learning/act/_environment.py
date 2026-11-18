@@ -25,20 +25,18 @@ from typing import Any
 from embodichain.utils.config_paths import resolve_config_path
 
 TASK = resolve_config_path(
-    "extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/task.franka.visual.yaml",
+    "embodichain/extensions/tasks/configs/tasks/manipulation/push_cube/task.franka.visual.yaml",
     base_dir=Path(__file__).parent,
 ).resolve()
 CONFIG_ROOT = TASK.parents[3]
-TASK_PACKAGE = CONFIG_ROOT.parent / "embodichain_tasks"
-if not TASK_PACKAGE.is_dir():
-    TASK_PACKAGE = CONFIG_ROOT.parent
+TASK_PACKAGE = CONFIG_ROOT.parent
 IDENTITY_FILES = {
-    "extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/task.franka.visual.yaml": TASK,
-    "extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/env.visual.yaml": TASK.parent
+    "embodichain/extensions/tasks/configs/tasks/manipulation/push_cube/task.franka.visual.yaml": TASK,
+    "embodichain/extensions/tasks/configs/tasks/manipulation/push_cube/env.visual.yaml": TASK.parent
     / "env.visual.yaml",
-    "extensions/embodichain_tasks/configs/components/embodiments/franka_panda_rgb_224.yaml": CONFIG_ROOT
+    "embodichain/extensions/tasks/configs/components/embodiments/franka_panda_rgb_224.yaml": CONFIG_ROOT
     / "components/embodiments/franka_panda_rgb_224.yaml",
-    "extensions/embodichain_tasks/embodichain_tasks/manipulation/push_cube.py": TASK_PACKAGE
+    "embodichain/extensions/tasks/manipulation/push_cube.py": TASK_PACKAGE
     / "manipulation/push_cube.py",
 }
 

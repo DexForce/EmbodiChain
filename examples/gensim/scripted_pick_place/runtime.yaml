@@ -8,7 +8,7 @@ render_cfg:
 env:
   sim_steps_per_control: 4
 embodiment:
-  component: extensions/embodichain_tasks/configs/components/embodiments/dual_ur5_dh_pgi_140_80.yaml
+  component: embodichain/extensions/tasks/configs/components/embodiments/dual_ur5_dh_pgi_140_80.yaml
   overrides:
     init_pos: [1.45, 0.0, 0.25]
     init_rot: [0.0, 0.0, -90.0]

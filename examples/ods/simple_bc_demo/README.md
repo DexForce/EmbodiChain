@@ -51,7 +51,7 @@ DexSim runtime from the repository root before running native checks:
 
 ```bash
 conda activate py311
-export PYTHONPATH="$PWD:$PWD/extensions:$PWD/extensions/embodichain_tasks:/tmp/ods-dexsim-runtime"
+export PYTHONPATH="$PWD:/tmp/ods-dexsim-runtime"
 export CUDA_VISIBLE_DEVICES=3
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 ```

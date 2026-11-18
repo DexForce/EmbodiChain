@@ -28,15 +28,17 @@ import yaml
 
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.learning.sl import SupervisedBatch, SupervisedLearner
-from embodichain_models.dynamics.rwm import (
+from embodichain.extensions.models.dynamics.rwm import (
     KinematicWorldModel,
     KinematicWorldModelCfg,
     TransitionReplay,
     RobotWorldModelObjective,
     replay_supervised_batch,
 )
-from embodichain_models.dynamics.rwm.robot_state import pack_robot_state
-from embodichain_tasks.locomotion.tracking.g1_motion import UnitreeG1MotionEnv
+from embodichain.extensions.models.dynamics.rwm.robot_state import pack_robot_state
+from embodichain.extensions.tasks.locomotion.tracking.g1_motion import (
+    UnitreeG1MotionEnv,
+)
 
 
 def sample_batch(

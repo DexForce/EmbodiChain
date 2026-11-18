@@ -31,7 +31,7 @@ import yaml
 
 from embodichain.data.assets.robot_assets import FlexivRizon4S
 from embodichain.lab.sim.cfg import RobotCfg
-from embodichain_robots import FlexivRizon4SCfg
+from embodichain.extensions.robots import FlexivRizon4SCfg
 
 
 @pytest.mark.no_sim

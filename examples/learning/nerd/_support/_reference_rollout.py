@@ -64,7 +64,10 @@ def _cpu_stream_compatibility(wp: Any, device: str):
 
 def _canonical_states(states: Any, codec: Any, rotation: Any) -> tuple[Any, Any]:
     import torch
-    from embodichain_models.dynamics.nerd.codec import quat_rotate, quat_multiply
+    from embodichain.extensions.models.dynamics.nerd.codec import (
+        quat_rotate,
+        quat_multiply,
+    )
 
     q = states[..., : codec.q_dim]
     qd = codec.legacy_to_native(q, states[..., codec.q_dim :])
@@ -260,14 +263,14 @@ def evaluate_reference_rollouts(
         JOINT_ACT_SCALE,
     )
     from utils.python_utils import set_random_seed
-    from embodichain_models.dynamics.nerd.codec import NeRDStateCodec
+    from embodichain.extensions.models.dynamics.nerd.codec import NeRDStateCodec
     from ._task_values import reference_task_values
     from examples.learning.nerd._support._evaluation import (
         _error_values,
         _safe_number,
         _teacher_row_sha256,
     )
-    from embodichain_models.dynamics.nerd import load_model
+    from embodichain.extensions.models.dynamics.nerd import load_model
     from ._reference import _restore_official_model
 
     device = str(spec.get("device", "cpu"))

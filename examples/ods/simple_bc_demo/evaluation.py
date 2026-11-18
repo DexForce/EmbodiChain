@@ -33,11 +33,7 @@ import torch
 
 if __package__ in {None, ""}:
     repository = Path(__file__).resolve().parents[3]
-    sys.path[:0] = [
-        str(repository),
-        str(repository / "extensions"),
-        str(repository / "extensions/embodichain_tasks"),
-    ]
+    sys.path.insert(0, str(repository))
 
 from examples.ods.simple_bc_demo.checkpoint import load_policy
 from examples.ods.simple_bc_demo.config import load_task_config

@@ -88,7 +88,7 @@ def main() -> None:
             raise ValueError("Training and validation scene seeds overlap")
         if not args.smoke and validation.get("smoke", False):
             raise ValueError("Full training requires a qualified validation corpus")
-    from embodichain_models.policy.act import (
+    from embodichain.extensions.models.policy.act import (
         build_act_train_config,
         dataset_fingerprint,
         load_act_policy,

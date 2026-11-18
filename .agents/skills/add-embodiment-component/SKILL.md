@@ -13,7 +13,7 @@ configuration serve many tasks.
 An embodiment component belongs at:
 
 ```text
-extensions/embodichain_tasks/configs/components/embodiments/<embodiment_id>.yaml
+embodichain/extensions/tasks/configs/components/embodiments/<embodiment_id>.yaml
 ```
 
 It owns exactly:
@@ -37,7 +37,7 @@ Read `agent_context/MAP.yaml`, then resolve:
 - `task-programs` when a `skill_profile` is requested.
 
 Inspect the closest current component under
-`extensions/embodichain_tasks/configs/components/embodiments/` and the intended runnable
+`embodichain/extensions/tasks/configs/components/embodiments/` and the intended runnable
 task deployment.
 
 ## Reuse or add the robot

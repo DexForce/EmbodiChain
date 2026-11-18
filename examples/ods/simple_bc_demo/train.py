@@ -29,8 +29,6 @@ if __package__ in {None, ""}:
     # the sanitized path when multiprocessing copies it into child processes.
     sys.path[:] = [
         str(repository),
-        str(repository / "extensions"),
-        str(repository / "extensions/embodichain_tasks"),
         *(entry for entry in sys.path if Path(entry).resolve() != example_directory),
     ]
 

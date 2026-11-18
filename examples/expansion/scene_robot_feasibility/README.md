@@ -93,7 +93,7 @@ uniform exploration, and every proposed layout still runs fresh IK/path/physical
 checks. The report records prior identity and guided/fallback counts.
 
 `search.dual_ur5.yaml` reuses the existing
-[`hand_over` task](../../../extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/README.md)
+[`hand_over` task](../../../embodichain/extensions/tasks/configs/tasks/manipulation/hand_over/README.md)
 for rigid-bar grasp, handover and placement. The example-local `hand_over/`
 directory contains an inline physical deployment, scene binding and a
 specialization of `hand_over/task_program/program.bar.yaml` for this table's target poses and

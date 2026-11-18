@@ -56,14 +56,11 @@ def _sha(path: Path) -> str:
 
 def _source_modules(source: Path) -> dict[str, str]:
     """Select only the requested checkout's original or extension module layout."""
-    if (
-        source
-        / "extensions/embodichain_models/embodichain_models/dynamics/nerd/model.py"
-    ).is_file():
+    if (source / "embodichain/extensions/models/dynamics/nerd/model.py").is_file():
         return {
-            "codec": "embodichain_models.dynamics.nerd.codec",
-            "data": "embodichain_models.dynamics.nerd.data",
-            "model": "embodichain_models.dynamics.nerd",
+            "codec": "embodichain.extensions.models.dynamics.nerd.codec",
+            "data": "embodichain.extensions.models.dynamics.nerd.data",
+            "model": "embodichain.extensions.models.dynamics.nerd",
             "trainer": "examples.learning.nerd._support._trainer",
             "qualification": "examples.learning.nerd._support._qualification",
         }
@@ -79,8 +76,11 @@ def _source_modules(source: Path) -> dict[str, str]:
 def _source_paths(source: Path) -> list[str]:
     """Keep each independent worker's imports bound to its requested source."""
     paths = [str(source)]
-    if _source_modules(source)["model"] == "embodichain_models.dynamics.nerd":
-        paths.insert(0, str(source / "extensions/embodichain_models"))
+    if (
+        _source_modules(source)["model"]
+        == "embodichain.extensions.models.dynamics.nerd"
+    ):
+        paths.insert(0, str(source / "embodichain/extensions/models"))
     return paths
 
 
@@ -88,11 +88,14 @@ def _source_identity(source: Path) -> dict[str, Any]:
     def git(*args: str) -> bytes:
         return subprocess.check_output(["git", "-C", str(source), *args])
 
-    if _source_modules(source)["model"] == "embodichain_models.dynamics.nerd":
+    if (
+        _source_modules(source)["model"]
+        == "embodichain.extensions.models.dynamics.nerd"
+    ):
         modules = (
             "examples/learning/nerd/_support/_trainer.py",
             *(
-                "extensions/embodichain_models/embodichain_models/dynamics/nerd/" + name
+                "embodichain/extensions/models/dynamics/nerd/" + name
                 for name in (
                     "model.py",
                     "checkpoint.py",

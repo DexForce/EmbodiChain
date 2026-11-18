@@ -1,6 +1,6 @@
 # Pick/Place in three 3DGS scenes with Franka and two cameras
 
-Record the official Task Program deployments from `embodichain_tasks` against
+Record the official Task Program deployments from `embodichain.extensions.tasks` against
 the registered, standardized Gaussian scene packages. The example retains the
 FR3/parallel-hand model and initial pose,
 executes physical Pick/Place, and records a fixed third-person camera plus a
@@ -26,16 +26,16 @@ through `embodichain data download --name <asset-name>`.
 
 | Scene | Runnable config | Registered background |
 | --- | --- | --- |
-| RoboSplatter office | [task.office.yaml](../../../extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/task.office.yaml) | `RoboSplatterOfficeGS/asset.usda` |
-| DISCOVERSE lab3 | [task.discoverse.yaml](../../../extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/task.discoverse.yaml) | `DiscoverseLab3GS/asset.usda` |
-| RoboSimGS tabletop | [task.robosimgs.yaml](../../../extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/task.robosimgs.yaml) | `RoboSimGSTabletopGS/asset.usda` |
+| RoboSplatter office | [task.office.yaml](../../../embodichain/extensions/tasks/configs/tasks/manipulation/gaussian_pick_place/task.office.yaml) | `RoboSplatterOfficeGS/asset.usda` |
+| DISCOVERSE lab3 | [task.discoverse.yaml](../../../embodichain/extensions/tasks/configs/tasks/manipulation/gaussian_pick_place/task.discoverse.yaml) | `DiscoverseLab3GS/asset.usda` |
+| RoboSimGS tabletop | [task.robosimgs.yaml](../../../embodichain/extensions/tasks/configs/tasks/manipulation/gaussian_pick_place/task.robosimgs.yaml) | `RoboSimGSTabletopGS/asset.usda` |
 
 Task discovery and ordinary trajectory collection work without this recorder:
 
 ```bash
 embodichain show-task gaussian_pick_place
 embodichain run-task \
-  --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/task.office.yaml \
+  --gym-config embodichain/extensions/tasks/configs/tasks/manipulation/gaussian_pick_place/task.office.yaml \
   --headless --seed 42 --max_episodes 2 --record_trajectory \
   --trajectory_save_dir outputs/gaussian_pick_place/office
 ```

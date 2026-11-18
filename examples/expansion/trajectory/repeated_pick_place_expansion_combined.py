@@ -48,7 +48,7 @@ from embodichain.utils.config_paths import resolve_config_path
 from embodichain.utils.utility import load_config
 
 _DEFAULT_TASK_CONFIG = resolve_config_path(
-    "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml",
+    "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml",
     base_dir=Path(__file__).parent,
 )
 _DEFAULT_OUTPUT_DIR = Path("output/repeated_pick_place_expansion_combined")

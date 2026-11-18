@@ -141,7 +141,7 @@ CPU-only; general algebraic models
 require an explicitly built artifact and matching manifest before initialization.
 Its build/load boundary lives in `solvers/_ssik_reference.py`; Warp imports do not
 load that dependency. Explicit prepared ARX5/Rizon4S reference artifacts live in
-`embodichain_robots/_ssik_artifacts/`; the former contains actual-model RR
+`embodichain/extensions/robots/_ssik_artifacts/`; the former contains actual-model RR
 coefficients, while the latter certifies the pinned prebuilt joint prefix and
 bakes its terminal-frame correction. The offline builder's `--prebuilt-model`
 option verifies joint order, normalized axes and pre-terminal offsets before

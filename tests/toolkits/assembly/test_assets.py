@@ -49,7 +49,7 @@ def test_portable_formats_do_not_require_simulation_or_generation(
             def find_spec(self, fullname, path=None, target=None):
                 blocked = (
                     "embodichain.gen_sim", "embodichain.lab",
-                    "embodichain_tasks", "embodichain_benchmarks",
+                    "embodichain.extensions.tasks", "embodichain.extensions.benchmarks",
                     "mjfit", "mujoco", "dexsim",
                 )
                 if any(fullname == name or fullname.startswith(name + ".") for name in blocked):
@@ -150,7 +150,9 @@ def test_usd_preserves_body_ownership_vertices_and_mass(tmp_path) -> None:
     pytest.importorskip("pxr")
     # The native comparison must register schemas before the first stage.
     pytest.importorskip("dexsim.kit.usd")
-    from embodichain_benchmarks.assembly.precision import compare_usd_geometry
+    from embodichain.extensions.benchmarks.assembly.precision import (
+        compare_usd_geometry,
+    )
 
     asset = import_mjcf(SOURCE)
     path = asset.write_usd(tmp_path / "part.usda")

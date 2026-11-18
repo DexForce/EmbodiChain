@@ -157,7 +157,7 @@ demo or RL capabilities:
 ```bash
 embodichain list-task
 embodichain list-task --category manipulation
-embodichain show-task embodichain_tasks:repeated_pick_place
+embodichain show-task embodichain.extensions.tasks:repeated_pick_place
 ```
 
 `show-task` displays a logical task's named deployments, launch commands and
@@ -218,7 +218,7 @@ between dataset/video/trajectory recording, and all three replay modes, see
 Task environments are **auto-discovered**: any installed package that declares
 an ``embodichain.tasks`` entry point is imported at startup, registering its
 environments via ``@register_env``. The main ``embodichain`` distribution
-already includes and registers the official ``embodichain_tasks`` import
+already includes and registers the official ``embodichain.extensions.tasks`` import
 package, so no separate task installation is needed. Repository-style task
 config paths resolve from the source checkout or installed wheel. The task to
 launch is selected by the ``"id"`` field of the gym config. Pass a runnable
@@ -512,21 +512,21 @@ Launch reinforcement learning training from a JSON or YAML config file.
 
 ```bash
 # Train with a config file (JSON or YAML)
-embodichain train-rl --config embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml
+embodichain train-rl --config embodichain/extensions/tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml
 
 # JSON configs remain supported
-embodichain train-rl --config embodichain_tasks/configs/tasks/manipulation/push_cube/agents/ppo.json
+embodichain train-rl --config embodichain/extensions/tasks/configs/tasks/manipulation/push_cube/agents/ppo.json
 
 # Multi-GPU distributed training
 torchrun --nproc_per_node=2 -m embodichain train-rl \
-    --config embodichain_tasks/configs/tasks/manipulation/push_cube/agents/ppo.json \
+    --config embodichain/extensions/tasks/configs/tasks/manipulation/push_cube/agents/ppo.json \
     --distributed
 ```
 
 The module entry point remains available for compatibility:
 
 ```bash
-python -m embodichain.learning.rl.train --config embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml
+python -m embodichain.learning.rl.train --config embodichain/extensions/tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml
 ```
 
 ### Arguments

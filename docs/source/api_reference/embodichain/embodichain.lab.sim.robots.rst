@@ -8,7 +8,7 @@ Overview
 
 Generic dual-arm composition built from compatible single-arm configurations.
 :func:`build_dual_arm_cfg` assembles two single-arm configs into a synchronized
-dual-arm robot. Concrete presets are imported from ``embodichain_robots``;
+dual-arm robot. Concrete presets are imported from ``embodichain.extensions.robots``;
 see :doc:`/api_reference/robot_catalogs` for those configuration classes and
 :doc:`/guides/robot_catalog` for discovery and variant selection.
 

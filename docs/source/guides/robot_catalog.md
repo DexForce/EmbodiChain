@@ -3,7 +3,7 @@
 
 Use the robot catalog to discover installed configurations before choosing a
 robot for a Gym task, workspace analysis, or dual-arm composition. The main
-`embodichain` distribution includes the official `embodichain_robots` package.
+`embodichain` distribution includes the official `embodichain.extensions.robots` package.
 
 ```bash
 embodichain list-robot
@@ -196,11 +196,11 @@ the configuration implementation checklist.
 
 ## Import and Selector Migration
 
-Import concrete presets from `embodichain_robots`. Generic dual-arm APIs remain
+Import concrete presets from `embodichain.extensions.robots`. Generic dual-arm APIs remain
 in the core:
 
 ```python
-from embodichain_robots import FrankaPandaCfg, URRobotCfg
+from embodichain.extensions.robots import FrankaPandaCfg, URRobotCfg
 from embodichain.lab.sim.robots import DualArmRobotCfg, build_dual_arm_cfg
 from embodichain.lab.sim.robots.dual_arm import resolve_mounts
 ```

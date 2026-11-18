@@ -199,10 +199,10 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
     CuroboWorldCfg,
 )
 import numpy as np
-from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+from embodichain.extensions.benchmarks.motion_generation._atomic_fixtures import (
     _create_franka_native_hand_cfg,
 )
-from embodichain_robots import URRobotCfg, DexforceW1Cfg
+from embodichain.extensions.robots import URRobotCfg, DexforceW1Cfg
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 
 __all__ = ["main"]

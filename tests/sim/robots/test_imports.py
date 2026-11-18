@@ -87,30 +87,30 @@ def test_core_does_not_reexport_concrete_robot_classes(class_name: str) -> None:
 @pytest.mark.parametrize("class_name", _CONFIG_CLASSES)
 def test_concrete_robot_class_uses_canonical_package(class_name: str) -> None:
     """Every official preset is accessible from the new public import package."""
-    canonical = import_module("embodichain_robots")
+    canonical = import_module("embodichain.extensions.robots")
     cfg_cls = getattr(canonical, class_name)
-    assert cfg_cls.__module__.startswith("embodichain_robots.")
+    assert cfg_cls.__module__.startswith("embodichain.extensions.robots.")
 
 
 @pytest.mark.parametrize(
     "first_module",
     (
-        "embodichain_robots._catalog",
-        "embodichain_robots.locomotion_profiles",
-        "embodichain_robots.unitree.go1",
-        "embodichain_robots.unitree.go2",
-        "embodichain_robots.unitree.g1",
-        "embodichain_robots.unitree.h1_2",
-        "embodichain_robots.anybotics.anymal_c",
-        "embodichain_robots.pollen_robotics.microduck",
-        "embodichain_robots.brainco.revo1",
-        "embodichain_robots.sharpa.wave",
-        "embodichain_robots.wuji.hand",
-        "embodichain_robots.dh_robotics.pgc_140_50",
-        "embodichain_robots.agilex.pika",
-        "embodichain_robots.agibot.g2",
+        "embodichain.extensions.robots._catalog",
+        "embodichain.extensions.robots.locomotion_profiles",
+        "embodichain.extensions.robots.unitree.go1",
+        "embodichain.extensions.robots.unitree.go2",
+        "embodichain.extensions.robots.unitree.g1",
+        "embodichain.extensions.robots.unitree.h1_2",
+        "embodichain.extensions.robots.anybotics.anymal_c",
+        "embodichain.extensions.robots.pollen_robotics.microduck",
+        "embodichain.extensions.robots.brainco.revo1",
+        "embodichain.extensions.robots.sharpa.wave",
+        "embodichain.extensions.robots.wuji.hand",
+        "embodichain.extensions.robots.dh_robotics.pgc_140_50",
+        "embodichain.extensions.robots.agilex.pika",
+        "embodichain.extensions.robots.agibot.g2",
         "embodichain.robot_registry",
-        "embodichain_robots.dexforce.w1.types",
+        "embodichain.extensions.robots.dexforce.w1.types",
         "embodichain.lab.sim.robots",
         "embodichain.lab.sim.robots.dual_arm",
     ),
@@ -138,14 +138,14 @@ for name in (
     "sharpa.wave.cfg",
     "wuji.hand.cfg",
 ):
-    assert "embodichain_robots." + name not in sys.modules, name
-if module.startswith("embodichain_robots") or module == "embodichain.robot_registry":
+    assert "embodichain.extensions.robots." + name not in sys.modules, name
+if module.startswith("embodichain.extensions.robots") or module == "embodichain.robot_registry":
     assert "embodichain.lab.sim" not in sys.modules
     assert "torch" not in sys.modules
 """
     root = Path(__file__).resolve().parents[3]
     env = os.environ.copy()
-    env["PYTHONPATH"] = os.pathsep.join((str(root), str(root / "extensions")))
+    env["PYTHONPATH"] = str(root)
     result = subprocess.run(
         [sys.executable, "-c", script, first_module],
         cwd=root,
@@ -179,14 +179,14 @@ if module.startswith("embodichain_robots") or module == "embodichain.robot_regis
 )
 def test_flat_robot_modules_are_retired(module_name: str) -> None:
     with pytest.raises(ModuleNotFoundError) as error:
-        import_module("embodichain_robots." + module_name)
-    assert error.value.name == "embodichain_robots." + module_name
+        import_module("embodichain.extensions.robots." + module_name)
+    assert error.value.name == "embodichain.extensions.robots." + module_name
 
 
 def test_pgi_is_not_a_public_preset() -> None:
-    import embodichain_robots
+    import embodichain.extensions.robots
     from embodichain.robot_registry import resolve_robot_cfg
 
-    assert not hasattr(embodichain_robots, "FrankaPandaPgiCfg")
+    assert not hasattr(embodichain.extensions.robots, "FrankaPandaPgiCfg")
     with pytest.raises(ValueError, match="Unknown robot.*FrankaPandaPgi"):
         resolve_robot_cfg("FrankaPandaPgi")

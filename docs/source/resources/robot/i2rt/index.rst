@@ -2,7 +2,7 @@ I2RT Robotics
 =============
 
 Official I2RT robot configurations live in the
-``embodichain_robots.i2rt`` manufacturer namespace.
+``embodichain.extensions.robots.i2rt`` manufacturer namespace.
 
 .. list-table::
    :class: robot-catalog

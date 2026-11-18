@@ -1,4 +1,4 @@
-factory: embodichain_models.dynamics.rigidformer.sl_recipe:build_rigidformer_trainer
+factory: embodichain.extensions.models.dynamics.rigidformer.sl_recipe:build_rigidformer_trainer
 model:
   preset: movi_a
   attention_backend: sdpa

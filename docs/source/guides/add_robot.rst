@@ -6,7 +6,7 @@ Adding a New Robot
 This guide provides a practical checklist and reference for adding a new robot
 to EmbodiChain.
 
-Official concrete presets live in ``embodichain_robots``; generic robot runtime
+Official concrete presets live in ``embodichain.extensions.robots``; generic robot runtime
 and dual-arm composition remain in the core. Use :doc:`robot_catalog` for
 catalog registration, display metadata, and canonical import paths.
 
@@ -50,8 +50,8 @@ Checklist
 6. **Implement** ``build_pk_serial_chain`` reading from ``_pk_urdf_path``.
 7. **Keep** ``from_dict`` as the 3-line template — do not reimplement.
 8. **Register** the official preset's lazy export in
-   ``embodichain_robots/__init__.py`` and its ID, class import path, defaults,
-   and control metadata in ``embodichain_robots/_catalog.py``. External packages
+   ``embodichain/extensions/robots/__init__.py`` and its ID, class import path, defaults,
+   and control metadata in ``embodichain/extensions/robots/_catalog.py``. External packages
    advertise a catalog through an ``embodichain.robots`` entry point.
 9. **Add documentation** — create
    ``docs/source/resources/robot/<vendor>/<model>.md`` and include it in the
@@ -75,7 +75,7 @@ Approaches
   Keep ``cfg.py``, ``assets.py``, optional specification/type helpers, and a lazy
   ``__init__.py`` together. Asset imports must not load configuration modules.
 
-Asset classes register through ``embodichain_robots/_asset_catalog.py`` and the
+Asset classes register through ``embodichain/extensions/robots/_asset_catalog.py`` and the
 ``embodichain.assets`` entry point. Each asset ID declares a ``class_path`` and
 ``category``. Keep source versions, checksums and cache prefixes with the asset;
 the core owns reusable download, locking and extraction machinery.

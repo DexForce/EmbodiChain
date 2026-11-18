@@ -30,7 +30,7 @@ from embodichain.lab.gym.utils.registration import get_env_spec
 from embodichain.utils.utility import load_config
 
 _CONFIG_ROOT = (
-    Path(__file__).resolve().parents[4] / "extensions/embodichain_tasks/configs"
+    Path(__file__).resolve().parents[4] / "embodichain/extensions/tasks/configs"
 )
 _VARIANTS = ("dual_ur5_dh_pgi_140_80", "tianji_marvin")
 _BASELINES = (
@@ -63,7 +63,7 @@ def test_dual_arm_deployment_decodes_and_registers(task: str, variant: str) -> N
     payload = load_config(path)
     if task.split("/")[-1] in _BASELINES:
         importlib.import_module(
-            f"embodichain_tasks.manipulation.{task.replace('/', '.')}"
+            f"embodichain.extensions.tasks.manipulation.{task.replace('/', '.')}"
         )
     cfg = config_to_cfg(payload, source_path=path)
     cfg.robot.validate()

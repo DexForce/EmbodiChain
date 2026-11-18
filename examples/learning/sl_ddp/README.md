@@ -88,7 +88,7 @@ CUDA_VISIBLE_DEVICES=0,1 OMP_NUM_THREADS=1 \
   --config examples/learning/nerd/configs/cartpole/sl.train.yaml
 ```
 
-Its factory is `embodichain_models.dynamics.nerd.sl_recipe:build_supervised_trainer`.
+Its factory is `embodichain.extensions.models.dynamics.nerd.sl_recipe:build_supervised_trainer`.
 The existing precision, causal attention, normalization and loss-mask settings
 remain recipe-owned. Each rank loads the dataset and keeps its own resident
 cache, so budget memory per worker. Validation runs on rank 0 with its unwrapped

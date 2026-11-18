@@ -48,10 +48,10 @@ def test_installed_wheel_cli_reads_external_profiles_without_package_edits(tmp_p
     for name in (
         "embodichain",
         "examples",
-        "extensions/embodichain_robots",
-        "extensions/embodichain_tasks",
-        "extensions/embodichain_benchmarks",
-        "extensions/embodichain_models",
+        "embodichain/extensions/robots",
+        "embodichain/extensions/tasks",
+        "embodichain/extensions/benchmarks",
+        "embodichain/extensions/models",
     ):
         shutil.copytree(
             repo / name,
@@ -118,14 +118,11 @@ def test_installed_wheel_cli_reads_external_profiles_without_package_edits(tmp_p
         "\n".join(dict.fromkeys(runtime_sites)) + "\n"
     )
     # Remove source imports without excluding dependencies installed inside the checkout.
-    source_paths = [repo.resolve()] + [
-        path.resolve() for path in (repo / "extensions").iterdir() if path.is_dir()
-    ]
     (site / "sitecustomize.py").write_text(
         "import sys\nfrom pathlib import Path\n"
-        f"source_paths={list(map(str, source_paths))!r}\n"
+        f"source_path={str(repo.resolve())!r}\n"
         "sys.meta_path=[x for x in sys.meta_path if '__editable__' not in str(x)]\n"
-        "sys.path=[x for x in sys.path if x and str(Path(x).resolve()) not in source_paths]\n"
+        "sys.path=[x for x in sys.path if x and str(Path(x).resolve()) != source_path]\n"
     )
     package = site / "embodichain/gen_sim"
     bundled = package / "asset_engine/configs/gen_config.json"

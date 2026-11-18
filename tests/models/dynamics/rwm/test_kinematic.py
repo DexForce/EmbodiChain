@@ -23,15 +23,15 @@ import math
 import pytest
 import torch
 
-from embodichain_models.dynamics.rwm.kinematic import (
+from embodichain.extensions.models.dynamics.rwm.kinematic import (
     KinematicWorldModel,
     KinematicWorldModelCfg,
     heading_state_increment,
     integrate_heading_state,
 )
-from embodichain_models.dynamics.rwm.model import frozen_world_model
-from embodichain_models.dynamics.rwm.robot_state import rotation_exp
-from embodichain_models.dynamics.rwm.supervised import (
+from embodichain.extensions.models.dynamics.rwm.model import frozen_world_model
+from embodichain.extensions.models.dynamics.rwm.robot_state import rotation_exp
+from embodichain.extensions.models.dynamics.rwm.supervised import (
     RobotWorldModelObjective,
     replay_supervised_batch,
 )

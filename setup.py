@@ -27,7 +27,6 @@ from setuptools import Command, find_namespace_packages, setup
 __all__ = [
     "get_example_data_files",
     "get_package_data",
-    "get_package_dir",
     "get_packages",
     "get_version",
 ]
@@ -36,8 +35,7 @@ logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 logger = logging.getLogger()
 
 THIS_DIR = Path(__file__).resolve().parent
-CORE_PACKAGE_PATTERNS = ["embodichain", "embodichain.*"]
-EXTENSIONS_DIR = THIS_DIR / "extensions"
+PACKAGE_PATTERNS = ["embodichain", "embodichain.*"]
 EXAMPLES_DIR = THIS_DIR / "examples"
 
 
@@ -56,7 +54,6 @@ class CleanCommand(Command):
             "build",
             "dist",
             "embodichain.egg-info",
-            "extensions/embodichain_tasks/embodichain_tasks.egg-info",
         ]:
             rm_path = THIS_DIR / d
             if not rm_path.exists():
@@ -80,77 +77,19 @@ class CleanCommand(Command):
                     logger.info(f"removed '{rm_path}'")
 
 
-def _extension_package_dirs() -> dict[str, Path]:
-    """Discover bundled extension roots in flat or nested layouts."""
-    packages = {}
-    for project in sorted(EXTENSIONS_DIR.glob("embodichain_*")):
-        if not project.is_dir():
-            continue
-        name = project.name
-        if not name.isidentifier():
-            raise ValueError(f"Invalid extension package name: {name}")
-        nested = project / name
-        flat_package = (project / "__init__.py").is_file()
-        nested_package = (nested / "__init__.py").is_file()
-        if flat_package == nested_package:
-            raise ValueError(f"Expected exactly one package layout for {project}")
-        packages[name] = project if flat_package else nested
-    return packages
-
-
 def get_packages() -> list[str]:
     """Return core and bundled extension packages shipped in the main wheel."""
-    core_packages = find_namespace_packages(
-        where=str(THIS_DIR), include=CORE_PACKAGE_PATTERNS
-    )
-    extension_packages = []
-    for name, package_dir in _extension_package_dirs().items():
-        extension_packages.extend(
-            find_namespace_packages(
-                where=str(package_dir.parent), include=[name, f"{name}.*"]
-            )
-        )
     return sorted(
-        set(
-            [
-                *core_packages,
-                *extension_packages,
-                "embodichain_tasks.configs",
-            ]
-        )
+        find_namespace_packages(where=str(THIS_DIR), include=PACKAGE_PATTERNS)
     )
-
-
-def get_package_dir() -> dict[str, str]:
-    """Map bundled extension sources to their stable Python package names."""
-    return {
-        **{
-            name: path.relative_to(THIS_DIR).as_posix()
-            for name, path in _extension_package_dirs().items()
-        },
-        "embodichain_tasks.configs": "extensions/embodichain_tasks/configs",
-    }
 
 
 def get_package_data() -> dict[str, list[str]]:
-    """Collect core resources and shared rules for discovered extension roots.
+    """Collect resource patterns for core and bundled extensions.
 
     Returns:
-        Resource patterns keyed by installed package name. Extension resources
-        use the same rules for flat and nested layouts; task configurations
-        retain their separate source-directory mapping.
+        Resource patterns keyed by installed package name.
     """
-    extension_patterns = [
-        "**/*.json",
-        "**/*.yaml",
-        "**/*.yml",
-        "**/*.urdf",
-        "**/README.md",
-        "**/LICENSE",
-        "**/LICENSE.*",
-        "**/THIRD_PARTY_LICENSES",
-        "**/preview.png",
-    ]
     return {
         "embodichain": ["VERSION"],
         "embodichain.data": ["default_materials.json"],
@@ -169,13 +108,17 @@ def get_package_data() -> dict[str, list[str]]:
             "_graph_react.LICENSE.txt",
             "_graph_assets/*",
         ],
-        **{name: list(extension_patterns) for name in _extension_package_dirs()},
-        "embodichain_tasks.configs": [
-            "tasks/manipulation/cloth_fold/task_program/trajectory.npz",
+        "embodichain.extensions": [
+            "tasks/configs/tasks/manipulation/cloth_fold/task_program/trajectory.npz",
             "**/*.json",
             "**/*.yaml",
             "**/*.yml",
+            "**/*.urdf",
             "**/README.md",
+            "**/LICENSE",
+            "**/LICENSE.*",
+            "**/THIRD_PARTY_LICENSES",
+            "**/preview.png",
         ],
     }
 
@@ -228,7 +171,6 @@ def main() -> None:
         author="EmbodiChain Developers",
         description="An end-to-end, GPU-accelerated, and modular platform for building generalized Embodied Intelligence.",
         packages=get_packages(),
-        package_dir=get_package_dir(),
         package_data=get_package_data(),
         data_files=get_example_data_files(),
         cmdclass={"clean": CleanCommand},

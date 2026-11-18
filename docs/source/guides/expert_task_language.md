@@ -34,7 +34,7 @@ not a source of task language.
 ## Configure a Task Program
 
 The following is the complete program used by the three-cycle cube example at
-`embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task_program/program.yaml`:
+`embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task_program/program.yaml`:
 
 ```yaml
 program_id: repeated_cube_pick_place
@@ -89,7 +89,7 @@ Run the shipped example from the repository root:
 
 ```bash
 embodichain run-task \
-    --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
+    --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
     --headless \
     --max_episodes 1
 ```

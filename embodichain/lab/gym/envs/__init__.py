@@ -27,6 +27,6 @@ from .settling import *
 from .types import *
 from .wrapper import *
 
-# Official task environments live in the bundled ``embodichain_tasks`` package
+# Official task environments live in the bundled ``embodichain.extensions.tasks`` package
 # and register through the same ``embodichain.tasks`` entry-point mechanism as
 # third-party task packages.

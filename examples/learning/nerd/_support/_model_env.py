@@ -26,8 +26,11 @@ import gymnasium as gym
 import numpy as np
 import torch
 
-from embodichain_models.dynamics.nerd.codec import reset_history
-from embodichain_models.dynamics.nerd.transition import NeRDState, NeRDTransition
+from embodichain.extensions.models.dynamics.nerd.codec import reset_history
+from embodichain.extensions.models.dynamics.nerd.transition import (
+    NeRDState,
+    NeRDTransition,
+)
 
 from ._task_reset import sample_task_reset
 from ._task_values import reference_task_values

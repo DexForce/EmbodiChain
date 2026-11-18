@@ -175,7 +175,7 @@ scene at one seed, not a multi-seed stability qualification.
 ## Task-extension migration qualification — 2026-11-16
 
 The three deployments now belong to the official `gaussian_pick_place` task
-under `embodichain_tasks`; embodiment and execution-policy components belong to
+under `embodichain.extensions.tasks`; embodiment and execution-policy components belong to
 the shared component directories. No task Python subclass was introduced.
 Examples retain capture, portable snapshot preparation, video export and
 offline/negative acceptance. All 14 pre-migration resolved YAML declarations

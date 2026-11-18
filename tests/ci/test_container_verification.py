@@ -61,7 +61,11 @@ def test_qualification_requires_installed_code_and_resources(
     metadata.mkdir()
     (metadata / "METADATA").write_text("Name: embodichain\nVersion: 0.0.0\n")
     repo = tmp_path / "checkout"
-    for name in ("embodichain", "embodichain_tasks", "embodichain_robots"):
+    for name in (
+        "embodichain",
+        "embodichain.extensions.tasks",
+        "embodichain.extensions.robots",
+    ):
         for base in (site, repo):
             package = base / name
             package.mkdir(parents=True)
@@ -75,7 +79,11 @@ def test_qualification_requires_installed_code_and_resources(
     if installation == "wheel":
         (site / "embodichain/payload.txt").write_text("shipped")
     if installation == "editable":
-        for name in ("embodichain", "embodichain_tasks", "embodichain_robots"):
+        for name in (
+            "embodichain",
+            "embodichain.extensions.tasks",
+            "embodichain.extensions.robots",
+        ):
             shutil.rmtree(site / name)
         (site / "editable.pth").write_text(str(repo) + "\n")
 
@@ -103,7 +111,11 @@ def test_qualification_requires_installed_code_and_resources(
             "cases": 1,
             "imports": {
                 name: str(site / name)
-                for name in ("embodichain", "embodichain_tasks", "embodichain_robots")
+                for name in (
+                    "embodichain",
+                    "embodichain.extensions.tasks",
+                    "embodichain.extensions.robots",
+                )
             },
         }
     else:

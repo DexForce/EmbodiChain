@@ -15,7 +15,7 @@ belong to the main control, locomotion, or manipulation families.
    * - Franka Reach APG
      - ``FrankaReachApg-v0``
      - Python registration in
-       ``embodichain_tasks.special.franka_reach_apg``; no standard Gym config
+       ``embodichain.extensions.tasks.special.franka_reach_apg``; no standard Gym config
      - Differentiable RL / APG
 
 The simple UR10 end-effector motion example is a Task Program tutorial rather
