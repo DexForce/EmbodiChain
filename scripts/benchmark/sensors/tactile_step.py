@@ -119,7 +119,17 @@ def _benchmark_variant(
                             x_response=(0.2, -0.1, 0.0),
                             y_response=(0.1, 0.0, -0.2),
                         )
-                        if variant == "both-rgb"
+                        if variant in ("both-rgb", "both-rgb-shear")
+                        else None
+                    ),
+                    shear=(
+                        TactileIndentationCfg.ShearCfg(
+                            normal_stiffness=100.0,
+                            shear_stiffness=50.0,
+                            friction=0.5,
+                            marker_indices=tuple(range(0, resolution**2, 16)),
+                        )
+                        if variant in ("both-shear", "both-rgb-shear")
                         else None
                     ),
                 )
@@ -186,6 +196,12 @@ def _benchmark_variant(
                     active and resolution >= 4 and not observed["optical_contact_rows"]
                 ):
                     raise RuntimeError("The optical fixture did not observe contact.")
+            if "normal_force" in rows:
+                observed["modeled_force_rows"] = int(
+                    (rows["normal_force"] > 0).flatten(1).any(dim=-1).sum()
+                )
+                if observed["modeled_force_rows"] != active:
+                    raise RuntimeError("The shear fixture found a wrong load row.")
         return (
             {
                 "environments": envs,
@@ -216,7 +232,7 @@ def main() -> None:
     parser.add_argument(
         "--variants",
         nargs="+",
-        choices=(*_BASE_VARIANTS, "both-rgb"),
+        choices=(*_BASE_VARIANTS, "both-rgb", "both-shear", "both-rgb-shear"),
         default=_BASE_VARIANTS,
     )
     parser.add_argument("--warmup", type=int, default=10)

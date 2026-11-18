@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Literal
 import torch
 
 from embodichain.compute.geometry._indentation import _IndentationQuery
+from embodichain.compute.geometry._tactile_shear import _TactileShear
 from embodichain.compute.image._tactile_rgb import _TactileRGB
 from embodichain.utils import configclass
 
@@ -66,6 +67,19 @@ class TactileIndentationCfg(SensorCfg):
         )
         """Normalized no-contact RGB, either uniform or one triple per row-major cell."""
 
+    @configclass
+    class ShearCfg:
+        """Per-cell penalty contact and shear with a Coulomb slip limit."""
+
+        normal_stiffness: float = MISSING
+        """Compressive stiffness per probe, in N/m."""
+        shear_stiffness: float = MISSING
+        """Tangential elastic stiffness per probe, in N/m."""
+        friction: float = MISSING
+        """Nonnegative Coulomb coefficient."""
+        marker_indices: tuple[int, ...] = ()
+        """Optional ordered, row-major probe indices for sparse marker readout."""
+
     sensor_type: str = "TactileIndentation"
     sample_phase: Literal["physics"] = "physics"
     mount: SensorCfg.OffsetCfg = SensorCfg.OffsetCfg()
@@ -83,11 +97,18 @@ class TactileIndentationCfg(SensorCfg):
     rgb: RGBCfg | None = None
     """Enable calibrated optical output on the same probe grid."""
 
+    shear: ShearCfg | None = None
+    """Enable modeled contact loads and elastic displacement."""
+
     def get_data_types(self) -> list[str]:
         """Return published layout-aligned fields."""
         fields = ["depth", "hit", "shape_id"]
         if self.rgb is not None:
             fields.append("rgb")
+        if self.shear is not None:
+            fields.extend(("normal_force", "shear_force", "shear_displacement"))
+            if self.shear.marker_indices:
+                fields.append("marker_displacement")
         return fields
 
 
@@ -119,6 +140,8 @@ class TactileIndentation(_ReadOnlySensor):
             )
         if not math.isfinite(config.max_depth) or config.max_depth <= 0:
             raise ValueError("max_depth must be finite and positive.")
+        self._shear: _TactileShear | None = None
+        self._markers: torch.Tensor | None = None
         self._rgb: _TactileRGB | None = None
         self._rgb_background: torch.Tensor | None = None
         self._scene: RayScene | None = None
@@ -199,6 +222,8 @@ class TactileIndentation(_ReadOnlySensor):
         query.bind(tuple(mesh for mesh, _ in scene._meshes))
         if self.cfg.rgb is not None:
             self._bind_rgb(self.cfg.rgb, points)
+        if self.cfg.shear is not None:
+            self._bind_shear(self.cfg.shear, points, normals, len(scene._meshes))
         self._scene = scene
         self._query = query
 
@@ -237,7 +262,59 @@ class TactileIndentation(_ReadOnlySensor):
         )
         self._rgb_background = background
 
+    def _bind_shear(
+        self,
+        cfg: TactileIndentationCfg.ShearCfg,
+        points: torch.Tensor,
+        normals: torch.Tensor,
+        num_meshes: int,
+    ) -> None:
+        cfg.validate()
+        if (
+            any(
+                not math.isfinite(value) or value <= 0
+                for value in (cfg.normal_stiffness, cfg.shear_stiffness)
+            )
+            or not math.isfinite(cfg.friction)
+            or cfg.friction < 0
+        ):
+            raise ValueError(
+                "Shear stiffnesses must be finite and positive, and friction nonnegative."
+            )
+        marker_indices = cfg.marker_indices
+        if any(
+            type(index) is not int or not 0 <= index < len(points)
+            for index in marker_indices
+        ) or len(set(marker_indices)) != len(marker_indices):
+            raise ValueError("Marker indices must be unique cells of the probe grid.")
+
+        data = self._data_buffer
+        depth = data["depth"]
+        data["normal_force"] = torch.zeros_like(depth)
+        data["shear_force"] = depth.new_zeros((*depth.shape, 2))
+        data["shear_displacement"] = torch.zeros_like(data["shear_force"])
+        if marker_indices:
+            self._markers = torch.as_tensor(marker_indices, device=self.device)
+            data["marker_displacement"] = depth.new_zeros(
+                (self.num_instances, len(marker_indices), 2)
+            )
+        self._shear = _TactileShear(
+            points,
+            normals,
+            depth,
+            data["shape_id"],
+            data["normal_force"],
+            data["shear_force"],
+            data["shear_displacement"],
+            num_meshes=num_meshes,
+            normal_stiffness=cfg.normal_stiffness,
+            shear_stiffness=cfg.shear_stiffness,
+            friction=cfg.friction,
+        )
+
     def on_unbind(self) -> None:
+        self._shear = None
+        self._markers = None
         self._rgb = None
         self._rgb_background = None
         self._scene = None
@@ -252,22 +329,47 @@ class TactileIndentation(_ReadOnlySensor):
             else torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
         )
         self._data_buffer["shape_id"][rows] = -1
+        if self._shear is not None:
+            self._shear.reset(rows)
         if self._rgb_background is not None:
             self._data_buffer["rgb"][rows] = self._rgb_background
 
     def update(self, **kwargs: object) -> None:
-        """Publish the bounded outward depth and validity for each probe."""
+        """Refresh stateless depth and RGB, or retain the completed shear sample.
+
+        With shear enabled, the scheduler updates all fields and advances the
+        relative-pose history together at the configured sample boundary.
+        """
+        if self._shear is None:
+            self._acquire_frame()
+
+    def _acquire_sample(self, *, sample_dt: float, fetch_only: bool) -> None:
+        self._acquire_frame()
+
+    def _acquire_frame(self) -> None:
         if self._scene is None or self._query is None:
             raise RuntimeError("TactileIndentation must be bound before sampling.")
         meshes = self._scene._posed_meshes()
-        self._query.cast(
-            self.get_mount_pose(),
-            [pose for _, pose in meshes],
-            use_candidates=self.cfg.use_candidates,
-        )
+        mount = self.get_mount_pose()
+        if self._shear is not None:
+            # Share the Warp-compatible layout between indentation and shear.
+            mount = mount.contiguous()
+            poses = [pose.contiguous() for _, pose in meshes]
+        else:
+            poses = [pose for _, pose in meshes]
+        self._query.cast(mount, poses, use_candidates=self.cfg.use_candidates)
         torch.ge(self._data_buffer["shape_id"], 0, out=self._data_buffer["hit"])
         if self._rgb is not None:
             self._rgb.render()
+        if self._shear is not None:
+            self._shear.sample(mount, poses)
+            if self._markers is not None:
+                torch.index_select(
+                    self._data_buffer["shear_displacement"].flatten(1, 2),
+                    1,
+                    self._markers,
+                    out=self._data_buffer["marker_displacement"],
+                )
 
     def get_data_descriptors(self) -> dict[str, dict[str, object]]:
         """Describe depth units, local direction and geometry provenance."""
@@ -279,4 +381,14 @@ class TactileIndentation(_ReadOnlySensor):
             fields["rgb"].update(
                 unit="normalized", frame="probe_grid", source="calibrated_depth_slope"
             )
+        for name, unit, frame in (
+            ("normal_force", "N", "surface_normal"),
+            ("shear_force", "N", "surface_tangent"),
+            ("shear_displacement", "m", "surface_tangent"),
+            ("marker_displacement", "m", "surface_tangent"),
+        ):
+            if name in fields:
+                fields[name].update(
+                    unit=unit, frame=frame, source="indentation_penalty"
+                )
         return fields
