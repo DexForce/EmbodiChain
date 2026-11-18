@@ -104,6 +104,16 @@ category. It resolves a pinned official URDF and individual STL/reference files,
 verifies every SHA256, and repairs dependencies under the shared dataset lock.
 Keep its source revision and complete file checksums together when updating it.
 
+`AgibotG1ObservedReplay` is a separate model-owned asset registered under
+`robot`, with the versioned `AgibotG1ObservedReplayV1` cache. Its pinned archive
+in `DexForceAI/embodichain_data/robot_assets/` contains the repaired observed
+URDF and exact native-qualification inputs; it does not replace the official
+`AgibotG1` USD. The asset class verifies the archive and extracted file hashes.
+The complete five-case derived input package lives in the same data repository
+under `demo/real2sim_inputs/`; `examples/real2sim/resources.lock.json` owns its
+pinned distribution references and original source identity. See the
+[download instructions](../../../examples/real2sim/README.md#download-prepared-physical-inputs).
+
 ZIP bundles must include directory entries before nested files for Open3D
 extraction. Validate new bundles through `get_data_path()` with an empty cache.
 

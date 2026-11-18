@@ -22,6 +22,53 @@ Reusable input, geometry, numerical correction, and evidence helpers live in
 simulation execution live in `embodichain/gen_sim/real2sim/`. The example modules
 only parse arguments and call those packages.
 
+## Download prepared physical inputs
+
+The repaired assets are distributed through the project's Hugging Face dataset
+`DexForceAI/embodichain_data`. [resources.lock.json](resources.lock.json) pins the
+robot and complete-input revisions, archive hashes, internal checksum manifests,
+original source package and native qualification evidence.
+
+For the complete five-case input package (about 166 MB):
+
+```bash
+curl -L --fail \
+  'https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/b537d5468d8326ec69ced54a61c2dd637bdb7e30/demo/real2sim_inputs/real2sim_inputs_5_agibot_physical_v1.zip' \
+  -o real2sim_inputs_5_agibot_physical_v1.zip
+echo '59cdde731d49771d407624255f3e28d3b22f11478f5e4400b15ea5a49379b504  real2sim_inputs_5_agibot_physical_v1.zip' | sha256sum -c -
+unzip real2sim_inputs_5_agibot_physical_v1.zip
+python Real2SimInputs5AgiBotPhysicalV1/verify_inputs.py --load
+export REAL2SIM_SOURCE="$PWD/Real2SimInputs5AgiBotPhysicalV1/samples/03_agibot_toy"
+```
+
+The AgiBot sample already selects `robot_physical/robot.urdf`; no repair command
+is required. The other samples, original robot directories, videos, depth,
+calibration and prepared trajectories are preserved. The original upstream
+archive remains available at its pinned source revision.
+
+For the standalone robot (about 7.4 MB), use the asset registry:
+
+```bash
+embodichain data download --name AgibotG1ObservedReplay
+```
+
+```python
+from embodichain.data import get_data_path
+
+urdf = get_data_path("AgibotG1ObservedReplay/robot_physical/robot.urdf")
+```
+
+This resolves the versioned `AgibotG1ObservedReplayV1` cache and verifies the
+pinned archive and extracted-file hashes. A [direct ZIP download](https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/6d30720ec29ebe7596ce511ee407bf5cca4b6f50/robot_assets/AgibotG1ObservedReplayV1.zip)
+is also available; extract it into a new directory and check its `SHA256SUMS`.
+The standalone asset includes recorded joint/TCP/gripper metadata and native
+qualification inputs, but no videos or complete camera input. Use the full
+package above as `REAL2SIM_SOURCE`.
+
+The observed-replay asset preserves CC-BY-NC-SA-4.0 attribution and remains
+separate from the official `AgibotG1` USD preset. The complete input bundle
+retains its original per-sample licenses and model-resource disclosures.
+
 ## AgiBot prepared-input collision repair (#1212)
 
 The `03_agibot_toy` URDF in the
