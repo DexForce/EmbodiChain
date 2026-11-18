@@ -2302,10 +2302,14 @@ class EmbodiedEnv(BaseEnv):
                 self.num_envs, self._new_demo_episode_metadata(0)
             )
             self._demo_metadata_initialized = True
-        if episode_metadata is not None and getattr(
-            self, "_demo_metadata_initialized", True
-        ):
-            if isinstance(episode_metadata, _EpisodeMetadataRows):
+        if episode_metadata is not None:
+            if not getattr(self, "_demo_metadata_initialized", True):
+                # Unrecorded RL episodes still seal terminal reports. Discard
+                # only the reset rows so the next episode cannot reuse them,
+                # without materializing recording provenance or UUIDs.
+                for env_id in metadata_ids:
+                    episode_metadata[env_id] = {}
+            elif isinstance(episode_metadata, _EpisodeMetadataRows):
                 if metadata_ids:
                     episode_metadata.reset_rows(
                         metadata_ids, self._new_demo_episode_metadata(metadata_ids[0])

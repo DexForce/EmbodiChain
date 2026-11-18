@@ -3,8 +3,8 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "87d8d9454cd18f19d24434380bcd26bcd0dd376e",
-  "source_ref": "87d8d9454cd18f19d24434380bcd26bcd0dd376e",
+  "revision": "5d4561aca503f7897af8cfcd3246f9d7e3f701d4",
+  "source_ref": "HEAD",
   "package_version": "0.3.2",
   "topic_index": "agent_context/MAP.yaml",
   "limitations": [
@@ -31,8 +31,8 @@
         {
           "path": "embodichain/learning/rl/policies/actor_critic.py",
           "symbol": "ActorCritic",
-          "start_line": 33,
-          "end_line": 33,
+          "start_line": 36,
+          "end_line": 36,
           "excerpt": "class ActorCritic(Policy):"
         }
       ],
@@ -2097,8 +2097,8 @@
         {
           "path": "embodichain/learning/rl/algo/ppo.py",
           "symbol": "PPO",
-          "start_line": 52,
-          "end_line": 52,
+          "start_line": 53,
+          "end_line": 53,
           "excerpt": "class PPO(BaseAlgorithm[TensorDict]):"
         }
       ],
@@ -2519,8 +2519,8 @@
         {
           "path": "embodichain/learning/rl/buffer/standard_buffer.py",
           "symbol": "RolloutBuffer",
-          "start_line": 27,
-          "end_line": 27,
+          "start_line": 29,
+          "end_line": 29,
           "excerpt": "class RolloutBuffer:"
         }
       ],
@@ -3785,8 +3785,8 @@
         {
           "path": "embodichain/learning/rl/policies/actor_critic.py",
           "symbol": "ActorCritic",
-          "start_line": 33,
-          "end_line": 33,
+          "start_line": 36,
+          "end_line": 36,
           "excerpt": "class ActorCritic(Policy):"
         }
       ]
@@ -4697,8 +4697,8 @@
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv.create_task_program_bridge",
-          "start_line": 4307,
-          "end_line": 4307,
+          "start_line": 4311,
+          "end_line": 4311,
           "excerpt": "        bridge = self._checked_task_program_adapter().create_bridge("
         }
       ]
@@ -4715,8 +4715,8 @@
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv.compile_task_program",
-          "start_line": 4242,
-          "end_line": 4242,
+          "start_line": 4246,
+          "end_line": 4246,
           "excerpt": "        return self._checked_task_program_adapter().compile(program)"
         }
       ]
@@ -4733,8 +4733,8 @@
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv._declare_robot",
-          "start_line": 3966,
-          "end_line": 3966,
+          "start_line": 3970,
+          "end_line": 3970,
           "excerpt": "        return self.sim.add_robot(robot_cfg)"
         }
       ]
@@ -5323,8 +5323,8 @@
         {
           "path": "embodichain/learning/rl/utils/trainer.py",
           "symbol": "Trainer.__init__",
-          "start_line": 140,
-          "end_line": 140,
+          "start_line": 141,
+          "end_line": 141,
           "excerpt": "        self.collector = SyncCollector("
         }
       ]

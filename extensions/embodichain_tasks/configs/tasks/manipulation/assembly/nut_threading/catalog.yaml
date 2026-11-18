@@ -1,0 +1,19 @@
+task_key: nut_threading
+title: Blind Nut Threading
+summary: Native proprioceptive assembly development task with explicitly approximate
+  jaw carriages; formal reproduction profiles remain gated.
+tags:
+- manipulation
+- assembly
+- proprioception
+- reinforcement_learning
+default_deployment: study_nominal
+deployments:
+  study_nominal:
+    config: task.study.nominal.yaml
+  fullrange_nominal:
+    config: task.fullrange.nominal.yaml
+  study_reference:
+    config: task.study.yaml
+  fullrange_reference:
+    config: task.fullrange.yaml

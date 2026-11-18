@@ -227,6 +227,25 @@ def test_pending_scheduler_restart_survives_checkpoint_round_trip(
     _assert_state_equal(direct.policy.state_dict(), again.policy.state_dict())
 
 
+def test_schema_v2_ppo_without_optional_auxiliary_coefficient_restores(
+    tmp_path,
+) -> None:
+    trainer = _trainer(tmp_path / "first")
+    trainer.train(16)
+    payload = torch.load(trainer.save_checkpoint(), weights_only=True)
+    assert payload["schema_version"] == 2
+    payload["metadata"]["algorithm_config"].pop("auxiliary_coef")
+    path = tmp_path / "without-coefficient.pt"
+    torch.save(payload, path)
+    restored = _trainer(tmp_path / "restored")
+    restored.load_checkpoint(path)
+    _assert_state_equal(trainer.policy.state_dict(), restored.policy.state_dict())
+    _assert_state_equal(trainer.algorithm.state_dict(), restored.algorithm.state_dict())
+    assert restored.global_step == trainer.global_step == 16
+    restored.train(32)
+    assert restored.global_step == 32
+
+
 def test_checkpoint_without_pending_restart_field_restores(tmp_path):
     trainer = _trainer(
         tmp_path / "first", scheduler=dict(name="linear", kwargs=dict(total_iters=4))
@@ -249,6 +268,10 @@ def test_checkpoint_without_pending_restart_field_restores(tmp_path):
         (lambda c: c.update(schema_version=999), "schema version"),
         (lambda c: c.pop("rng_by_rank"), "required fields"),
         (lambda c: c["metadata"].update(environment="different"), "environment"),
+        (
+            lambda c: c["metadata"]["algorithm_config"].update(auxiliary_coef=0.5),
+            "auxiliary_coef",
+        ),
         (lambda c: c.update(world_size=2), "world_size"),
         (lambda c: c.update(restart_schedule="false"), "restart_schedule"),
         (
@@ -273,29 +296,19 @@ def test_invalid_checkpoint_fails_before_policy_changes(tmp_path, mutation, matc
     _assert_state_equal(initial, restored.policy.state_dict())
 
 
-def test_legacy_ppo_loads_available_state_and_grpo_requires_reference(tmp_path):
+@pytest.mark.parametrize("version", [None, 1])
+def test_old_checkpoint_schemas_are_rejected_before_mutation(tmp_path, version):
     trainer = _trainer(tmp_path / "ppo")
     trainer.train(16)
     checkpoint = torch.load(trainer.save_checkpoint(), weights_only=True)
-    for field in (
-        "schema_version",
-        "metadata",
-        "rng_by_rank",
-        "normalizer_by_rank",
-        "world_size",
-        "best_checkpoint",
-    ):
-        checkpoint.pop(field)
-    path = tmp_path / "legacy.pt"
+    checkpoint["schema_version"] = version
+    path = tmp_path / "unsupported.pt"
     torch.save(checkpoint, path)
     restored = _trainer(tmp_path / "restored")
-    with pytest.warns(UserWarning, match="Legacy checkpoint"):
+    before = deepcopy(restored.policy.state_dict())
+    with pytest.raises(ValueError, match="Unsupported checkpoint schema"):
         restored.load_checkpoint(path)
-    restored.train(32)
-    assert restored.num_updates == 2
-    grpo = _trainer(tmp_path / "grpo", "grpo")
-    with pytest.raises(ValueError, match="ref_policy"):
-        grpo.load_checkpoint(path)
+    _assert_state_equal(before, restored.policy.state_dict())
 
 
 def _config(name: str) -> dict:
@@ -694,30 +707,6 @@ def test_atomic_write_preserves_previous_contents_on_error(tmp_path):
 def test_cli_rejects_invalid_resume_arguments(args):
     with pytest.raises(SystemExit):
         parse_args(["--config", "train.yaml", *args])
-
-
-def test_legacy_manifest_rejects_changed_algorithm_config(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    config = _config("ppo")
-    config_path = tmp_path / "train.json"
-    config_path.write_text(json.dumps(config))
-    first = train_from_config(str(config_path))
-    path = Path(first["latest_checkpoint_path"])
-    payload = torch.load(path, weights_only=True)
-    for field in (
-        "schema_version",
-        "metadata",
-        "rng_by_rank",
-        "normalizer_by_rank",
-        "world_size",
-        "best_checkpoint",
-    ):
-        payload.pop(field)
-    torch.save(payload, path)
-    config["algorithm"]["cfg"]["gamma"] = 0.5
-    config_path.write_text(json.dumps(config))
-    with pytest.raises(ValueError, match="legacy checkpoint configuration"):
-        train_from_config(str(config_path), resume=path)
 
 
 def test_scheduler_validation_does_not_mutate_policy(tmp_path):

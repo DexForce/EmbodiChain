@@ -264,11 +264,51 @@ def test_newton_initial_hold_targets_for_multiple_articulations(tmp_path: Path) 
         SimulationManager.flush_cleanup_queue()
 
 
+def _write_root_pose_with_pending_gpu_selection(
+    art: Articulation,
+    pose: torch.Tensor,
+    env_ids: list[int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exercise both root writes and standalone refresh after an async selection."""
+    view = art.body_data.articulation_view
+    batch_type = type(view.batch)
+    select = batch_type.select
+    compute = batch_type.compute_kinematics
+    stream = torch.cuda.Stream(device=pose.device)
+    stream.wait_stream(torch.cuda.current_stream(pose.device))
+    ready = torch.cuda.Event()
+
+    def delay_selection(batch, rows):
+        # Finish the row-to-host conversion before queuing a delay on the
+        # producer stream. Native indices are gathered asynchronously after it.
+        host_rows = rows.tolist() if isinstance(rows, torch.Tensor) else rows
+        torch.cuda._sleep(300_000_000)
+        selected = select(batch, host_rows)
+        ready.record(stream)
+        return selected
+
+    def compute_when_ready(batch):
+        assert ready.query(), "Native kinematics received unfinished CUDA indices"
+        return compute(batch)
+
+    with monkeypatch.context() as patch, torch.cuda.stream(stream):
+        patch.setattr(batch_type, "select", delay_selection)
+        patch.setattr(batch_type, "compute_kinematics", compute_when_ready)
+        art.set_local_pose(pose, env_ids=env_ids)
+        view.compute_kinematics(env_ids)
+    torch.cuda.current_stream(pose.device).wait_stream(stream)
+
+
 @pytest.mark.parametrize("device", ["cpu", "cuda:0"])
 @pytest.mark.parametrize("env_ids", [None, [0]], ids=["all", "selected"])
 @pytest.mark.parametrize("operation", ["reset", "root_pose", "qpos"])
 def test_reset_root_and_joint_pose_writes_preserve_physics_state(
-    tmp_path: Path, device: str, env_ids: list[int] | None, operation: str
+    tmp_path: Path,
+    device: str,
+    env_ids: list[int] | None,
+    operation: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """State restoration publishes link poses without advancing any body."""
     # An off-axis COM makes even a hidden 1 ms step generate joint velocity.
@@ -345,7 +385,12 @@ def test_reset_root_and_joint_pose_writes_preserve_physics_state(
             root_pose[selected_rows, :3] = torch.tensor(
                 [0.25, -0.125, 1.5], device=sim.device
             )
-            art.set_local_pose(root_pose[selected_rows], env_ids=env_ids)
+            if device == "cuda:0" and env_ids is not None:
+                _write_root_pose_with_pending_gpu_selection(
+                    art, root_pose[selected_rows], env_ids, monkeypatch
+                )
+            else:
+                art.set_local_pose(root_pose[selected_rows], env_ids=env_ids)
 
         torch.testing.assert_close(art.get_local_pose(), root_pose, rtol=0, atol=1e-7)
         torch.testing.assert_close(art.get_qpos(), expected_qpos, rtol=0, atol=1e-7)

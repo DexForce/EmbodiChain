@@ -74,6 +74,10 @@ solver state with only some of its articulations; excluding a subset is rejected
 before any facade state changes.
 Other resource exclusions and environment selections remain honored.
 
+Default root-pose writes reuse their Scene batch to publish descendant poses.
+With DexSim 0.6.0rc2, a standalone selected CUDA kinematics update waits on the
+Torch stream that produced its indices before calling the native API.
+
 The backend may handle physical reset atomically before the per-object path.
 Newton scenes containing cables use a complete `Scene.reset_arenas()` boundary;
 the manager retains visual-object, light and sensor reset ownership, including

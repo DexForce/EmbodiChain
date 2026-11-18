@@ -148,7 +148,8 @@ def test_manifest_roundtrip_does_not_import_generator_and_detects_tampering(
 def test_usd_preserves_body_ownership_vertices_and_mass(tmp_path) -> None:
     pytest.importorskip("mujoco")
     pytest.importorskip("pxr")
-    # The native comparison must register schemas before the first stage.
+    # This comparison consumes the native parser. Register its schemas before
+    # the portable exporter creates the first stage in an isolated test run.
     pytest.importorskip("dexsim.kit.usd")
     from embodichain_benchmarks.assembly.precision import compare_usd_geometry
 
