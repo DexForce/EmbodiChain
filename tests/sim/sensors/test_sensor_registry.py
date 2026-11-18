@@ -34,6 +34,7 @@ import torch
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.sensors import (
     BaseSensor,
+    Camera,
     CameraCfg,
     ContactSensorCfg,
     SensorCfg,
@@ -949,3 +950,116 @@ def test_managed_sensor_mount_rebind_and_failed_binding(
     ]
     with pytest.raises(RuntimeError, match="no live mount"):
         sensor.get_mount_pose()
+
+
+def test_scheduled_samples_are_cached_and_reset_rows_are_invalid() -> None:
+    acquired = []
+    fail = False
+
+    class ScheduledProbe(_Probe):
+        def update(self, **kwargs: object) -> None:
+            acquired.append(kwargs["sample_dt"])
+            self._data_buffer["reading"].fill_(len(acquired))
+            if fail:
+                raise RuntimeError("acquisition failed after writing")
+
+    register_sensor(SensorRegistration("TestProbe", _ProbeCfg, ScheduledProbe))
+    manager = _manager()
+    sensor = manager.add_sensor(
+        _ProbeCfg(
+            uid="probe", asset_uid="robot", sample_phase="physics", sample_period=0.1
+        )
+    )
+    manager._sample_managed_sensors("physics", 12, 0.04)
+    manager._sample_managed_sensors("physics", 12, 0.04)
+    manager._visualization_sim_time = 0.33
+    manager._visualization_sim_step = 14
+    manager._sample_managed_sensors("physics", 14, 0.04)
+    assert acquired == [0.04]
+    assert sensor.get_sample_metadata()["sample_id"].tolist() == [1, 1]
+    sensor._invalidate_samples([0])
+    assert sensor.get_sample_metadata()["valid"].tolist() == [False, True]
+    manager._visualization_sim_time = 0.37
+    manager._visualization_sim_step = 15
+    manager._sample_managed_sensors("physics", 15, 0.04)
+    assert acquired == pytest.approx([0.04, 0.12])
+    assert sensor.get_sample_metadata()["physics_step"].tolist() == [15, 15]
+    assert sensor.get_sample_metadata()["valid"].tolist() == [True, True]
+    last_sample = sensor.get_sample_metadata().clone()
+    fail = True
+    manager._visualization_sim_time = 0.50
+    manager._visualization_sim_step = 16
+    with pytest.raises(RuntimeError, match="acquisition failed after writing"):
+        manager._sample_managed_sensors("physics", 16, 0.04)
+    assert sensor.get_data()["reading"].eq(3).all()
+    assert not sensor.get_sample_metadata()["valid"].any()
+    for key in ("sample_id", "physics_step", "time"):
+        torch.testing.assert_close(sensor.get_sample_metadata()[key], last_sample[key])
+
+    fail = False
+    manager._sample_managed_sensors("physics", 16, 0.04)
+    assert acquired[-2:] == pytest.approx([0.13, 0.13])
+    assert sensor.get_sample_metadata()["sample_id"].tolist() == [3, 3]
+    assert sensor.get_sample_metadata()["physics_step"].tolist() == [16, 16]
+    assert sensor.get_sample_metadata()["valid"].all()
+
+
+def test_render_sampling_advances_only_cameras_with_rendered_groups() -> None:
+    frames = {3: 0, 5: 0}
+
+    @configclass
+    class RenderProbeCfg(CameraCfg):
+        sensor_type: str = "RenderProbe"
+        render_group: int = MISSING
+
+    class RenderProbe(Camera):
+        def __init__(self, cfg: RenderProbeCfg, *, context: SensorContext) -> None:
+            BaseSensor.__init__(self, cfg, context=context)
+
+        @property
+        def group_ids(self) -> tuple[int, ...]:
+            return (self.cfg.render_group,)
+
+        def _build_sensor_from_config(
+            self, config: RenderProbeCfg, device: torch.device
+        ) -> None:
+            self._data_buffer["frame"] = torch.zeros(self.num_instances, device=device)
+
+        def _snapshot_render_metadata(self) -> None:
+            pass
+
+        def update(self, **kwargs: object) -> None:
+            assert kwargs["fetch_only"] is True
+            self._data_buffer["frame"].fill_(frames[self.cfg.render_group])
+
+    def render(groups: list[int]) -> None:
+        for group in groups:
+            frames[group] += 1
+
+    register_sensor(SensorRegistration("RenderProbe", RenderProbeCfg, RenderProbe))
+    manager = _manager()
+    manager._require_native_renderer = lambda operation: None
+    manager._ensure_render_state = lambda: None
+    manager._log_scene_summary = lambda: None
+    manager._world = SimpleNamespace(render_camera_group=render)
+    left = manager.add_sensor(
+        RenderProbeCfg(uid="left", render_group=3, sample_phase="render")
+    )
+    right = manager.add_sensor(
+        RenderProbeCfg(uid="right", render_group=5, sample_phase="render")
+    )
+
+    manager.render_camera_group([3])
+    assert left.get_sample_metadata()["valid"].all()
+    assert left.get_data()["frame"].eq(1).all()
+    assert not right.get_sample_metadata()["valid"].any()
+    assert right.get_sample_metadata()["sample_id"].eq(0).all()
+
+    first_left = left.get_sample_metadata().clone()
+    manager._visualization_sim_time += 0.1
+    manager.render_camera_group([5])
+    assert right.get_sample_metadata()["valid"].all()
+    assert right.get_sample_metadata()["sample_id"].eq(1).all()
+    assert right.get_data()["frame"].eq(1).all()
+    for key, value in first_left.items():
+        torch.testing.assert_close(left.get_sample_metadata()[key], value)

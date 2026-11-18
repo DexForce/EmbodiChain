@@ -86,6 +86,13 @@ arena-relative transform through `BaseSensor.get_mount_pose()`. Allocate
 topology-scoped resources in `on_bind()` and release them in `on_unbind()`.
 The manager calls these around scene changes and removal.
 
+Context-backed sensors can opt into completed physics or camera-group render
+sampling with `sample_phase` and `sample_period`. Read the most recent sample
+and per-row validity from `get_sample_metadata()`. Reading does not advance
+sampling. A camera advances only after its own groups render. A failed
+acquisition invalidates the current output and leaves the boundary retryable.
+Legacy Gym-driven camera and contact acquisition keeps its existing ordering.
+
 The independently installable example and usage instructions
 live in
 [external joint encoder](../../../examples/sim/sensors/external_joint_encoder/README.md).
