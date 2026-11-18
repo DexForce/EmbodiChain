@@ -92,6 +92,8 @@ class WorkloadExecutionCfg:
         max_steps: Maximum ordinary controller commands per candidate.
         settling_steps: Minimum physical substeps before a row becomes active.
         seed: Base seed; each candidate owns a stream keyed by local ordinal.
+        nominal_seed: Optional independent reset seed for the authored nominal
+            scene. Omission preserves the historical coupling to ``seed``.
         batch_planning: Cooperatively merge compatible native motion/solver calls.
         reuse_idle_rows: Let unfinished groups borrow otherwise idle rows. A
             rejected attempt permits one additional competing candidate, bounded
@@ -106,6 +108,7 @@ class WorkloadExecutionCfg:
     seed: int = 0
     batch_planning: bool = True
     reuse_idle_rows: bool = False
+    nominal_seed: int | None = None
 
     def __post_init__(self) -> None:
         for name in ("workload_count", "batch_size", "max_steps"):
@@ -118,6 +121,15 @@ class WorkloadExecutionCfg:
             raise TypeError("batch_planning must be a bool")
         if type(self.reuse_idle_rows) is not bool:
             raise TypeError("reuse_idle_rows must be a bool")
+        if self.nominal_seed is not None and (
+            type(self.nominal_seed) is not int or self.nominal_seed < 0
+        ):
+            raise ValueError("nominal_seed must be a nonnegative integer or None")
+
+    @property
+    def reset_seed(self) -> int:
+        """Return the declared nominal scene seed, with legacy coupling by default."""
+        return self.seed if self.nominal_seed is None else self.nominal_seed
 
     @property
     def num_envs(self) -> int:
@@ -400,7 +412,7 @@ class WorkloadProgramExecutor:
         assignments = tuple(added)
         before = self.env.sim.physics_step_index
         result = self.env.reset(
-            seed=self.cfg.seed,
+            seed=self.cfg.reset_seed,
             options={
                 "save_data": False,
                 "reset_ids": [a.env_id for a in added],

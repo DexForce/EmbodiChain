@@ -361,6 +361,7 @@ def _run_operators(
         settling_steps=settings["settling_steps"],
         seed=seed,
         reuse_idle_rows=settings.get("reuse_idle_rows", False),
+        nominal_seed=settings.get("nominal_seed"),
     )
     chunks = settings["grasp_nms_chunk_size"] if torch.cuda.is_available() else 2048
     with pose_nms_scope(chunk_size=chunks):

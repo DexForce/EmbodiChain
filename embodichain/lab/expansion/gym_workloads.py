@@ -759,7 +759,15 @@ def run_gym_expansion_workloads(
     writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="expansion-export")
     try:
         cfg = ExpansionRunCfg(
-            **{**workloads[0].cfg.to_dict(), "batch_size": execution.num_envs}
+            **{
+                **workloads[0].cfg.to_dict(),
+                "batch_size": execution.num_envs,
+                "seed": (
+                    workloads[0].cfg.seed
+                    if execution.nominal_seed is None
+                    else execution.nominal_seed
+                ),
+            }
         )
         owner = GymExpansionHost(
             cfg,
@@ -786,7 +794,9 @@ def run_gym_expansion_workloads(
                     # No trajectories are live during this one nominal reset.
                     event.params["allow_partial_envs"] = True
                     events.set_functor_cfg(name, event)
-        env.reset(seed=execution.seed, options={"save_data": False, "reset_ids": [0]})
+        env.reset(
+            seed=execution.reset_seed, options={"save_data": False, "reset_ids": [0]}
+        )
         # The reference now owns all reset-time scene randomization/settling.
         # Re-running those functors during row refill could advance live peers
         # outside the executor and lose measured control boundaries.
@@ -810,7 +820,11 @@ def run_gym_expansion_workloads(
         }
         _atomic_json(
             root / "reference-scene.json",
-            {"seed": execution.seed, "poses_xyzw": nominal},
+            {
+                "seed": execution.reset_seed,
+                "sampling_seed": execution.seed,
+                "poses_xyzw": nominal,
+            },
         )
         for workload, (raw, environment_cfg) in zip(workloads, configs, strict=True):
             path = Path(workload.cfg.output_dir)
