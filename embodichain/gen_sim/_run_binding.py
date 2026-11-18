@@ -989,6 +989,7 @@ def _bind_deployment(
     if set(anchors) - declared_resources:
         raise ValueError("resource_anchors must name declared profile resources")
     holders: dict[str, str] = {}
+    handover_resources: set[str] = set()
     # Placements may release above their resting pose. The place gate requires a
     # released object to separate from the still-open gripper before retracting,
     # which an object already resting on its support cannot do.
@@ -1074,6 +1075,7 @@ def _bind_deployment(
             options, monitors, call, cid, "pick" if skill == "pick_up" else skill, skill
         )
         if cid == "hand_over":
+            handover_resources.update(call["resources"].values())
             options[key].setdefault("release_at_target", False)
             options[key].setdefault("arm_selection", "bound")
             if (
@@ -1381,6 +1383,27 @@ def _bind_deployment(
             del mapping[name]
     if set(cfg.binding.get("segments", {})) - {node["id"] for node in graph["nodes"]}:
         raise ValueError("Segment bindings must select existing graph nodes")
+    if (
+        handover_resources
+        and "handover_pose" in cfg.binding
+        and "hand_over" not in additions.get("grounding_providers", {})
+        and not configured_services.get("handover_pose_providers")
+        and not profile.get("runtime_services", {}).get("handover_pose_providers")
+    ):
+        # Opt-in default for an embodiment and run that configure no hand-over
+        # pose: the planned exchange never happens below the arm roots.
+        from ._handover_pose import _arm_root_midpoint_provider
+
+        configured_services["handover_pose_providers"] = [
+            _arm_root_midpoint_provider(
+                runtime["embodiment"]["simulation"],
+                profile,
+                sorted(handover_resources),
+            )
+        ]
+        additions.setdefault("grounding_providers", {})[
+            "hand_over"
+        ] = "simulation.configured_handover_pose"
     program = build_program_declaration(graph, scene_id, bindings=segment_bindings)
     program["instruction"] = plan["instruction"]
     integration = {

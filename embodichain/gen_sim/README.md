@@ -148,7 +148,13 @@ uses the arm already holding its object, or the arm anchored nearest to it, and
 a placement on a support prefers its robot-side region. `binding.release_clearance`
 (metres, default 0) releases placements above their resting pose while validators
 keep the resting target; the place gate otherwise expects a released object to
-separate from the open gripper before retracting.
+separate from the open gripper before retracting. `binding.handover_pose:
+arm_root_midpoint` (off by default) covers a planned hand-over when neither the
+embodiment nor the run declares a hand-over pose provider: GenSim then declares one
+at the midpoint of the two arms' root links, located through fixed joints in the
+robot's initial pose. A GenSim hand-over leaves the receiver holding the object, so
+HandOver takes only a minimum exchange height from this pose and places the
+exchange between the arm roots itself.
 
 Further optional run fields: `task` reuses a published task-plan directory instead
 of planning, after verifying its artifacts and that it planned the same instruction

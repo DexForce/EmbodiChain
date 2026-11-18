@@ -85,6 +85,7 @@ class _RunCfg:
                 "lowercase SHA-256 of its raw head frame"
             )
         if type(self.binding) is not dict or set(self.binding) - {
+            "handover_pose",
             "profile",
             "release_clearance",
             "resource_anchors",
@@ -93,9 +94,13 @@ class _RunCfg:
             "segments",
         }:
             raise ValueError(
-                "binding supports profile, release_clearance, resource_anchors, "
-                "runtime_services, scene_binding and segments"
+                "binding supports handover_pose, profile, release_clearance, "
+                "resource_anchors, runtime_services, scene_binding and segments"
             )
+        if self.binding.get("handover_pose", "arm_root_midpoint") != (
+            "arm_root_midpoint"
+        ):
+            raise ValueError("handover_pose must be exactly 'arm_root_midpoint'")
         clearance = self.binding.get("release_clearance", 0.0)
         if (
             isinstance(clearance, bool)
