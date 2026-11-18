@@ -63,6 +63,10 @@ symbolic/call-effect outcomes are rejected by preflight.
 
 ## Composed skill rewards
 
+Read the [system architecture and reward contract](../../../docs/architecture/task-program-reward-composition.md)
+for the component diagram, default skill formulas, configuration resolution,
+runtime ordering and reuse with future learned skills.
+
 The existing RewardManager remains the execution and weighting entry point.
 `joint_task.yaml` is a standalone MoveJoints objective; `program_task.yaml` uses
 `program_rewards.yaml` to share PickUp/Place templates with a policy-owned Task
