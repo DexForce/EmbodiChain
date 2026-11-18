@@ -66,6 +66,9 @@ class ReplayWrapper(gym.Wrapper):
     Expert recordings carry the canonical schema so qpos/qvel targets can be
     reconstructed before stepping. Schema metadata alone cannot identify
     controller actions: older position-only raw policy recordings carry it too.
+    External recordings may declare ``meta.state_joint_names`` to align their
+    complete state and explicit expert commands with the native robot's order.
+    Joint sets must match exactly; raw policy commands are not reinterpreted.
 
     Physical-objective dynamic replay currently supports one environment and
     full resets only. Stepping past exhaustion raises instead of extending
@@ -104,6 +107,7 @@ class ReplayWrapper(gym.Wrapper):
             )
         self._mode = mode
         self._trajectory = load_trajectory(trajectory)
+        self._align_named_joint_layout()
         meta = self._trajectory["meta"]
         self._cable_replay = "cables" in self._trajectory["states"].keys()
         self._cable_source_origins: torch.Tensor | None = None
@@ -201,6 +205,97 @@ class ReplayWrapper(gym.Wrapper):
         self._replay_cursor = _ReplayCursor(self._lengths)
         self._replay_steps = self._replay_cursor.steps
         self._commands = _ReplayCommands.from_recording(self._trajectory)
+
+    def _align_named_joint_layout(self) -> None:
+        """Align explicitly named external recordings to native state/action order.
+
+        Legacy recordings without ``state_joint_names`` retain their strict
+        numeric layout. Named recordings must describe the exact robot and
+        active joint sets; names cannot authorize a missing or extra actuator.
+        """
+        data = self._trajectory
+        meta = data["meta"]
+        if "state_joint_names" not in meta:
+            return
+        names = meta["state_joint_names"]
+        native = list(self.env.robot.joint_names)
+        if (
+            not isinstance(names, (list, tuple))
+            or any(not isinstance(n, str) for n in names)
+            or len(set(names)) != len(names)
+            or set(names) != set(native)
+            or len(names) != self.env.robot.dof
+            or meta.get("robot_dof") != len(names)
+        ):
+            raise ValueError(
+                "Trajectory state_joint_names must match the complete robot joint set."
+            )
+        ids = meta.get("active_joint_ids", [])
+        if (
+            not isinstance(ids, (list, tuple))
+            or any(type(i) is not int or not 0 <= i < len(names) for i in ids)
+            or len(set(ids)) != len(ids)
+        ):
+            raise ValueError(
+                "Trajectory active_joint_ids must be unique state-column indices."
+            )
+        source_active = [names[i] for i in ids]
+        target_active = [native[i] for i in self.env.active_joint_ids]
+        if set(source_active) != set(target_active) or len(source_active) != len(
+            target_active
+        ):
+            raise ValueError(
+                "Trajectory active joint names differ from the replay environment."
+            )
+        state_order = [names.index(n) for n in native]
+        states = data["states"].clone()
+        if "robot" not in states.keys() or "qpos" not in states["robot"].keys():
+            raise ValueError("Named trajectory requires complete robot qpos states.")
+        for key in ("qpos", "qvel", "qf"):
+            if key in states["robot"].keys():
+                value = states["robot"][key]
+                if value.shape != (*states.batch_size, len(names)):
+                    raise ValueError(
+                        f"Named trajectory robot {key} does not match its state layout."
+                    )
+                states["robot"][key] = value[..., state_order]
+        actions = data["actions"]
+        metadata = dict(meta)
+        if meta.get("action_kind") in {"expert", "expert_controller"}:
+            spec = build_expert_action_spec(
+                joint_names=source_active,
+                joint_command_mode=meta.get("joint_command_mode"),
+            )
+            expected = spec.metadata(step_dt=meta.get("step_dt", 0))
+            if (
+                any(
+                    meta.get(k) != expected[k]
+                    for k in ("joint_names", "qpos_slice", "qvel_slice")
+                )
+                or actions.ndim != 3
+                or actions.shape[-1] != spec.width
+            ):
+                raise ValueError(
+                    "Named expert trajectory action schema does not match its source joint order."
+                )
+            order = [source_active.index(n) for n in target_active]
+            if spec.qvel_slice is not None:
+                order += [i + len(source_active) for i in order]
+            actions = actions[..., order]
+            metadata["joint_names"] = target_active
+        elif self._mode == "dynamic" and source_active != target_active:
+            raise ValueError(
+                "Raw policy actions cannot be reordered by joint names; use explicit expert targets."
+            )
+        metadata.update(
+            state_joint_names=native, active_joint_ids=list(self.env.active_joint_ids)
+        )
+        self._trajectory = {
+            **data,
+            "states": states,
+            "actions": actions,
+            "meta": metadata,
+        }
 
     def _validate_action_schema(self, meta: dict) -> None:
         """Validate explicit controller recordings before any simulation step."""

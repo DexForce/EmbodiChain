@@ -325,11 +325,29 @@ class MotionGenerator:
     }
 
     def __init__(
-        self, cfg: MotionGenCfg, *, env_ids: tuple[int, ...] | None = None
+        self,
+        cfg: MotionGenCfg,
+        *,
+        env_ids: tuple[int, ...] | None = None,
+        planner: BasePlanner | None = None,
     ) -> None:
+        """Create a generator with an optional already-bound planner.
 
+        Args:
+            cfg: Backend configuration used when no planner is supplied.
+            env_ids: Optional physical row selection.
+            planner: Borrowed planner, including a planner bound to an offline
+                kinematics port. It must use the configured backend type.
+        """
         # Create planner based on planner_type
-        self.planner: BasePlanner = self._create_planner(cfg.planner_cfg)
+        if (
+            planner is not None
+            and planner.cfg.planner_type != cfg.planner_cfg.planner_type
+        ):
+            raise ValueError("Explicit planner must use the configured backend type.")
+        self.planner: BasePlanner = (
+            self._create_planner(cfg.planner_cfg) if planner is None else planner
+        )
 
         self.robot = self.planner.robot
         self.device = self.robot.device

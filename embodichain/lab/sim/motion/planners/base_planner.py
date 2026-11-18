@@ -22,13 +22,16 @@ import functools
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import MISSING, dataclass
-from typing import Literal
+from typing import Literal, TYPE_CHECKING
 
 from embodichain.utils import logger
 from embodichain.utils import configclass
 from embodichain.lab.sim.sim_manager import SimulationManager
 from .utils import MoveType, PlanState, PlanResult
 from ._joint_limits import _resolve_joint_constraints
+
+if TYPE_CHECKING:
+    from embodichain.lab.sim.objects import Robot
 
 __all__ = [
     "BasePlannerCfg",
@@ -208,14 +211,25 @@ class BasePlanner(ABC):
         cfg: Configuration object for the planner.
     """
 
-    def __init__(self, cfg: BasePlannerCfg):
+    def __init__(self, cfg: BasePlannerCfg, *, robot: Robot | None = None):
+        """Bind a simulator robot or an explicit offline kinematics adapter.
+
+        Args:
+            cfg: Planner configuration.
+            robot: Borrowed robot-compatible kinematics port. When supplied,
+                construction does not look up a SimulationManager.
+        """
         self.cfg: BasePlannerCfg = cfg
 
         if cfg.robot_uid is MISSING:
             logger.log_error("robot_uid is required in planner config", ValueError)
 
-        self.robot = SimulationManager.get_instance(cfg.sim_instance_id).get_robot(
-            cfg.robot_uid
+        self.robot = (
+            robot
+            if robot is not None
+            else SimulationManager.get_instance(cfg.sim_instance_id).get_robot(
+                cfg.robot_uid
+            )
         )
         if self.robot is None:
             logger.log_error(f"Robot {cfg.robot_uid} not found", ValueError)

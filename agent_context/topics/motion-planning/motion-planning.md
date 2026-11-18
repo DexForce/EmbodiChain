@@ -86,6 +86,14 @@ unchanged physics substeps; Gym experts use their environment's command period. 
 prepared actions without retiming again. See
 [retiming and playback](planner-details.md#retiming-and-playback).
 
+Motion-only atomic reconstruction uses `compute.trajectory.phase_alignment` for
+bounded monotone native-path clock fitting and `splicing` for fixed-clock joint
+replacement. Callers qualify required anchors, TCP constraints and derivatives;
+discrete boundary continuity is not collision evidence. An explicitly injected
+planner/robot port bypasses simulator lookup; ordinary construction keeps the
+simulator-owned robot. Scene-grounded fitting retains its outer clock and native
+contact core; see [fitting ownership](../atomic-actions/trajectory-fitting.md).
+
 GraspKit owns sampled/native geometric qualification from explicit hand inputs;
 Scene captures geometry and Robot adapters provide FK/calibration. GraspKit
 performs no hardware lookup. Sampling uses the contact frame and maps to runtime
@@ -101,6 +109,10 @@ Its algorithms remain host-independent. [Expansion Engine](../expansion-engine/e
 owns cross-domain collection; [scene expansion](../scene-expansion/scene-expansion.md)
 owns layout proposals and host integration. [Real2Sim](../data-pipeline/real2sim.md)
 owns protected source mapping and retiming.
+
+Combined Expansion Profiles select `source.kind=task_program` or
+`skill_sequence`. The native sequence host owns supported factors and unchanged
+DemoSkill spans; see [fitting execution](../atomic-actions/trajectory-fitting.md).
 
 The installed benchmark host is `embodichain_benchmarks.motion_generation`.
 It owns scene lifetime, frozen cases, evaluation and artifacts; adapters return

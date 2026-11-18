@@ -31,7 +31,7 @@ from .coordinated_placement import (
     CoordinatedPlacementGoal,
     CoordinatedPlacementOptions,
 )
-from .hand_over import HandOver, HandOverGoal, HandOverOptions
+from .hand_over import HandOver, HandOverGoal, HandOverMotionGoal, HandOverOptions
 from .move_end_effector import (
     EndEffectorPoseGoal,
     MoveEndEffector,
@@ -44,7 +44,7 @@ from .move_held_object import (
 )
 from .move_joints import JointPositionGoal, MoveJoints, MoveJointsOptions
 from .open_door import OpenDoor, OpenDoorGoal, OpenDoorOptions
-from .pick_up import GraspGoal, PickUp, PickUpOptions
+from .pick_up import GraspGoal, PickUpMotionGoal, PickUp, PickUpOptions
 from .place import AssembleGoal, Place, PlaceGoal, PlaceOptions
 from .press import (
     Press,
@@ -63,10 +63,11 @@ from .pour import Pour, PourGoal, PourOptions, PourTarget
 from .slide import (
     Slide,
     SlideGoal,
+    SlideMotionGoal,
     SlideJointTarget,
     SlideOptions,
 )
-from .twist import Twist, TwistGoal, TwistOptions
+from .twist import Twist, TwistGoal, TwistMotionGoal, TwistOptions
 
 BUILTIN_SKILL_TYPES: tuple[type[AtomicSkill], ...] = (
     ExecuteDemoSkill,
@@ -104,8 +105,10 @@ __all__ = [
     "CoordinatedPlacementOptions",
     "EndEffectorPoseGoal",
     "GraspGoal",
+    "PickUpMotionGoal",
     "HandOver",
     "HandOverGoal",
+    "HandOverMotionGoal",
     "HandOverOptions",
     "HeldObjectPoseGoal",
     "JointPositionGoal",
@@ -138,9 +141,11 @@ __all__ = [
     "PushObjectToolCalibration",
     "Slide",
     "SlideGoal",
+    "SlideMotionGoal",
     "SlideJointTarget",
     "SlideOptions",
     "Twist",
     "TwistGoal",
+    "TwistMotionGoal",
     "TwistOptions",
 ]
