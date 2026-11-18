@@ -733,6 +733,7 @@ def _with_automatic_lowerers(
     relative_routes: list[dict[str, Any]],
     aligned_objects: list[str],
     held_routes: list[dict[str, Any]] | None = None,
+    park: bool = False,
 ) -> dict[str, Any]:
     """Add measured lowerers for kinds the run configuration does not supply."""
     services = deepcopy(configured)
@@ -746,9 +747,65 @@ def _with_automatic_lowerers(
         )
     if held_routes and "move_held_object" not in supplied:
         lowerers.append({"kind": "move_held_object", "routes": held_routes})
+    if park and "park" not in supplied:
+        lowerers.append({"kind": "park"})
     if lowerers:
         services["registered_semantic_lowerers"] = lowerers
     return services
+
+
+def _insert_idle_arm_parks(
+    graph: dict[str, Any], catalog: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Park an arm that a call leaves free before another arm acts next.
+
+    Each arm is planned on its own, so a freed arm that stays above its last
+    placement can block the next call of the other arm. The inserted park joins
+    the freeing call's task group and precedes the next call. An arm that still
+    holds an object, or that acts again next, is left where it is.
+
+    Args:
+        graph: Semantic task graph with bound resources; modified in place.
+        catalog: Semantic planning call catalog.
+
+    Returns:
+        The inserted park nodes, in graph order.
+    """
+    freed_slot = {"release": "primary", "transfer": "source"}
+    nodes = graph["nodes"]
+    parks = []
+    index = 0
+    while index < len(nodes) - 1:
+        node, following = nodes[index], nodes[index + 1]
+        call = node["call"]
+        cid = call["call_id"] if call["kind"] == "registered" else call["kind"]
+        arm = call.get("resources", {}).get(freed_slot.get(catalog[cid]["effect"]))
+        next_arms = set(following["call"].get("resources", {}).values())
+        if arm is None or not next_arms or arm in next_arms:
+            index += 1
+            continue
+        park = {
+            "id": f"{node['id']}__park",
+            "call": {
+                "kind": "registered",
+                "call_id": "simulation.park",
+                "arguments": {},
+                "resources": {"primary": arm},
+            },
+            "depends_on": [node["id"]],
+            "task_instance_id": node.get("task_instance_id"),
+            "task_type": node.get("task_type"),
+            "role": "cleanup",
+        }
+        nodes.insert(index + 1, park)
+        following["depends_on"] = [*following.get("depends_on", []), park["id"]]
+        for group in graph.get("task_groups", []):
+            if node["id"] in group.get("node_ids", []):
+                ids = group["node_ids"]
+                ids.insert(ids.index(node["id"]) + 1, park["id"])
+        parks.append(park)
+        index += 2
+    return parks
 
 
 def _room_entries(name: str, assets: Path) -> dict[str, dict[str, Any]]:
@@ -1373,6 +1430,18 @@ def _bind_deployment(
                 validators=tuple(selected.get("validators", validators)),
             )
         )
+    parks = (
+        _insert_idle_arm_parks(graph, catalog)
+        if cfg.binding.get("park_idle_arms", False)
+        else []
+    )
+    if parks:
+        # Parking preserves symbolic state, so it declares no effect monitor.
+        options.setdefault(
+            "simulation.park", {"kind": catalog["simulation.park"]["skill"]}
+        )
+    for park in parks:
+        segment_bindings.append(ProgramSegmentBinding(park["id"]))
     # Skill-named templates (e.g. ``axis_align``) only seed registered call IDs;
     # the policy preset accepts semantic call IDs alone.
     skills = {value["skill"] for value in catalog.values()}
@@ -1397,6 +1466,10 @@ def _bind_deployment(
             relative_routes,
             aligned_objects,
             held_routes,
+            park=any(
+                node["call"].get("call_id") == "simulation.park"
+                for node in graph["nodes"]
+            ),
         ),
     }
     embodiment = runtime["embodiment"]
