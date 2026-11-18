@@ -599,6 +599,11 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
 ) -> None:
     """Backend-owned views are released before Spawn and World resources."""
     events: list[str] = []
+
+    class CyclicView:
+        def __init__(self) -> None:
+            self.retained_view = self
+
     sim = object.__new__(SimulationManager)
     spawn_scene = MagicMock()
     spawn_scene.close.side_effect = lambda: events.append("spawn_close")
@@ -607,11 +612,6 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
     )
     sim._gizmos = {}
     sim._markers = {}
-
-    class CyclicView:
-        def __init__(self):
-            self.retained_view = self
-
     view = CyclicView()
     released = weakref.finalize(view, events.append, "view_released")
     sim._rigid_objects = {
@@ -653,7 +653,7 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
     monkeypatch.setattr(SimulationManager, "reset", reset)
     collect = gc.collect
 
-    def collect_views():
+    def collect_views() -> int:
         events.append("gc_collect")
         return collect()
 
@@ -3139,6 +3139,10 @@ def test_context_camera_uses_manager_attachment_at_the_current_revision(
     camera.cfg = cfg
     camera._is_attached = False
     camera.destroy = MagicMock()
+    camera._bound_topology = None
+    camera._sample_metadata = None
+    camera.on_bind = MagicMock()
+    camera.on_unbind = MagicMock()
     camera.attach_to_parent_nodes = MagicMock(
         side_effect=(
             RuntimeError("attachment failed")

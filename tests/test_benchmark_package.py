@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import os
+from email.parser import Parser
 from pathlib import Path
 import shutil
 import subprocess
@@ -26,6 +27,7 @@ import sys
 import zipfile
 
 import pytest
+from packaging.requirements import Requirement
 
 pytestmark = pytest.mark.no_sim
 
@@ -75,9 +77,26 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
     wheel = next((workspace / "dist").glob("*.whl"))
     with zipfile.ZipFile(wheel) as archive:
         entries = archive.namelist()
+        metadata_path = next(
+            name for name in entries if name.endswith(".dist-info/METADATA")
+        )
+        metadata = Parser().parsestr(archive.read(metadata_path).decode())
+        assert "assembly" not in metadata.get_all("Provides-Extra", [])
+        assert not any(
+            Requirement(value).name.lower() == "mujoco"
+            for value in metadata.get_all("Requires-Dist", [])
+        )
         assert "embodichain_benchmarks/__init__.py" in entries
         assert "embodichain_benchmarks/motion_generation/api.py" in entries
         assert "embodichain/cli/benchmark.py" in entries
+        assert "embodichain/toolkits/assembly/native.py" in entries
+        assert not any(
+            name.startswith("embodichain/lab/sim/assembly/") for name in entries
+        )
+        assert not any(
+            "share/embodichain/assembly_patches/" in name for name in entries
+        )
+
         for name in ("LICENSE.worldparticle", "LICENSE.tome", "PROVENANCE.json"):
             assert f"embodichain_models/dynamics/worldparticle/{name}" in entries
         suites = {
@@ -184,6 +203,13 @@ import embodichain_benchmarks.motion_generation as benchmark
 from embodichain_benchmarks.motion_generation import load_suite, run_benchmark
 assert Path(benchmark.__file__).is_relative_to(target)
 assert "embodichain.lab.sim" not in sys.modules
+from embodichain.toolkits.assembly import native
+assert Path(native.__file__).is_relative_to(target)
+assert callable(native.prepare_native_configs)
+from embodichain_benchmarks.assembly.precision import PrecisionRunCfg
+profile = PrecisionRunCfg(backend="newton", newton_solver="dexuni", solver="cg")
+assert profile.to_dict()["newton_solver"] == "dexuni"
+assert "embodichain.lab.sim" not in sys.modules
 for source in Path(benchmark.__file__).parent.rglob("*.py"):
     for node in ast.walk(ast.parse(source.read_text())):
         names = ([node.module] if isinstance(node, ast.ImportFrom) else
@@ -242,6 +268,24 @@ print("installed benchmark suites and CLI passed")
     )
     assert cli.returncode == 0, cli.stdout + cli.stderr
     assert "--suite" in cli.stdout
+
+    for example in ("drop_peg", "visual_demo"):
+        help_result = subprocess.run(
+            [
+                str(target / "bin/embodichain"),
+                "run-example",
+                f"sim/assembly/{example}",
+                "--help",
+            ],
+            cwd=tmp_path,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert help_result.returncode == 0, help_result.stdout + help_result.stderr
+        assert "--newton-solver" in help_result.stdout
+        assert "dexuni" in help_result.stdout
 
 
 def test_installed_solver_entry_point_and_core_dependency_boundary(

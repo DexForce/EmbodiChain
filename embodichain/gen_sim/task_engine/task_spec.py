@@ -543,6 +543,7 @@ def _semantic_step_arguments(step: Mapping[str, Any]) -> dict[str, Any]:
         "layout": "none",
         "axis": "none",
         "direction": "none",
+        "lift_height_m": None,
         "terminal_behavior": "none",
     }
     for name, default in defaults.items():

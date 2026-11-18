@@ -356,10 +356,17 @@ class _ObservedService:
 
     def __getattr__(self, name: str) -> Any:
         if name != self._method and not (
-            self._role == "articulation_jobs"
-            and name in {"status", "cancel", "download"}
+            (
+                self._role == "articulation_jobs"
+                and name in {"status", "cancel", "download"}
+            )
+            or (self._role == "image_generation" and name == "generate_image_by_image")
         ):
             return getattr(self._service, name)
+
+        action = getattr(self._service, name)
+        if not callable(action):
+            return action
 
         def invoke(*args: Any, **kwargs: Any) -> Any:
             request = args[0] if args else None
@@ -381,7 +388,9 @@ class _ObservedService:
                 "artifacts": [],
             }
             try:
-                result = getattr(self._service, name)(*args, **kwargs)
+                result = action(*args, **kwargs)
+                if isinstance(result, Path):
+                    record["artifacts"] = [str(result)]
                 if hasattr(result, "path"):
                     record["artifacts"] = [str(result.path)]
                 if hasattr(result, "objects"):

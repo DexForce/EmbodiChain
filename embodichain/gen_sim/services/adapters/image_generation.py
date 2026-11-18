@@ -46,6 +46,7 @@ class ImageGenerationClient:
         max_attempts: int,
         health_path: str,
         generate_image_by_prompt_path: str,
+        generate_image_by_image_path: str = "/generate_image_by_image",
         session: requests.Session | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
@@ -53,6 +54,7 @@ class ImageGenerationClient:
         self._max_attempts = max_attempts
         self._health_path = health_path
         self._generate_image_by_prompt_path = generate_image_by_prompt_path
+        self._generate_image_by_image_path = generate_image_by_image_path
         self._session = session or requests.Session()
         self._call_lock = RLock()
 
@@ -102,16 +104,53 @@ class ImageGenerationClient:
         prompt = prompt.strip()
         if not prompt:
             raise ValueError("Image generation prompt must not be empty.")
+        return self._request_png(
+            self._generate_image_by_prompt_path, output_path, json={"prompt": prompt}
+        )
 
+    def generate_image_by_image(
+        self,
+        *,
+        image_path: Path,
+        prompt: str,
+        output_path: Path,
+        size: tuple[int, int],
+        seed: int,
+    ) -> Path:
+        """Edit a PNG using the deployed image-to-image endpoint.
+
+        Args:
+            image_path: Source PNG sent as a multipart attachment.
+            prompt: Description of the requested edit.
+            output_path: Destination for the returned PNG.
+            size: Requested width and height in pixels.
+            seed: Image editor seed.
+
+        Returns:
+            Path to the provider's PNG response.
+        """
+        prompt = prompt.strip()
+        if not prompt:
+            raise ValueError("Image editing prompt must not be empty.")
+        width, height = size
+        with image_path.open("rb") as image_file:
+            return self._request_png(
+                self._generate_image_by_image_path,
+                output_path,
+                files={"image": (image_path.name, image_file, "image/png")},
+                data={"prompt": prompt, "width": width, "height": height, "seed": seed},
+            )
+
+    def _request_png(self, path: str, output_path: str | Path, **kwargs: Any) -> Path:
         resolved_output_path = Path(output_path).expanduser().resolve()
         resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
             record_attempt()
             response = self._session.post(
-                self._url(self._generate_image_by_prompt_path),
-                json={"prompt": prompt},
+                self._url(path),
                 timeout=self._timeout_s,
+                **kwargs,
             )
             response.raise_for_status()
             content_type = response.headers.get("content-type", "").split(";")[0]
