@@ -44,15 +44,21 @@ def _probe(output: Path, strategy: str) -> None:
     )
     cfg = yaml.safe_load((fixture / "expansion.yaml").read_text())
     cfg["engine"].update(
-        workload_count=1, batch_size=8, episodes_per_operator=8, max_attempts=32
+        workload_count=1,
+        batch_size=8,
+        episodes_per_operator=8,
+        max_attempts=32,
+        nominal_seed=7,
     )
     cfg["scene_sampling"].update(strategy=strategy, max_rollouts=32)
     path = output / "expansion.yaml"
     path.write_text(yaml.safe_dump(cfg))
     result = run_task_program_expansion(
-        fixture / "task.yaml", path, output / "collection", seed=7
+        fixture / "task.yaml", path, output / "collection", seed=11
     )
     execution = json.loads((output / "collection/workload-execution.json").read_text())
+    reference = json.loads((output / "collection/reference-scene.json").read_text())
+    assert (reference["seed"], reference["sampling_seed"]) == (7, 11)
     assert execution["num_envs"] == 8 and execution["world"]["world_count"] == 1
     group = result["operators"]["object_pose"]
     receipts = ArtifactEpisodeSink(group["directory"]).inspect()

@@ -42,6 +42,15 @@ def test_task_program_declarations_are_pure_and_protect_contact_phases(tmp_path)
     value = json.loads(process.stdout)
     assert (value["engine"]["workload_count"], value["engine"]["batch_size"]) == (2, 1)
     assert value["trajectory"]["operators"] == ["object_pose", "joint_residual"]
+    value["engine"]["nominal_seed"] = 7
+    nominal = tmp_path / "nominal.yaml"
+    nominal.write_text(yaml.safe_dump(value))
+    assert load_task_program_expansion(nominal)["engine"]["nominal_seed"] == 7
+    value["engine"]["nominal_seed"] = True
+    nominal.write_text(yaml.safe_dump(value))
+    with pytest.raises(ValueError, match="nominal_seed"):
+        load_task_program_expansion(nominal)
+    value["engine"]["nominal_seed"] = 7
     value["trajectory"]["free_phases"]["pick_up"] = ["approach", "lift"]
     invalid = tmp_path / "protected.yaml"
     invalid.write_text(yaml.safe_dump(value))

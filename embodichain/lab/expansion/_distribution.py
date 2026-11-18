@@ -44,6 +44,23 @@ def _cell(pose: list[float], cell_size: float) -> str:
     return ",".join(str(int(x)) for x in np.floor(np.asarray(pose[:2]) / cell_size))
 
 
+def _installation_pose(pose: list[float]) -> list[float]:
+    """Group installation readout jitter only; never alter recorded/FK evidence."""
+    value = np.array(pose, dtype=float, copy=True)
+    if value.shape != (7,) or not np.isfinite(value).all():
+        raise ValueError("Installation requires a finite XYZ/xyzw pose")
+    norm = np.linalg.norm(value[3:])
+    if norm < 1e-12:
+        raise ValueError("Installation quaternion must be nonzero")
+    value[3:] /= norm
+    value = np.round(value, 6)
+    first = next(v for v in value[[6, 3, 4, 5]] if v != 0)
+    if first < 0:
+        value[3:] *= -1
+    value[value == 0] = 0.0
+    return value.tolist()
+
+
 def _motion(points: np.ndarray, times: np.ndarray) -> dict:
     if points.ndim != 2 or points.shape[0] != len(times) or len(times) < 2:
         raise ValueError("Motion requires aligned T+1 points and timestamps")
@@ -161,7 +178,11 @@ def _read(paths: list[Path], entity: str) -> tuple[list[dict], list[str]]:
                 )
             # Fixed topology, installation and task identity; sampled object poses are features.
             robot = [
-                dict(uid=s["uid"], joints=list(s["joint_names"]), pose=list(s["pose"]))
+                dict(
+                    uid=s["uid"],
+                    joints=list(s["joint_names"]),
+                    pose=_installation_pose(s["pose"]),
+                )
                 for s in meta.get("initial_state", ())
                 if s["kind"] == "robot"
             ]
@@ -284,6 +305,7 @@ def _run(
         "TCP is recorded-URDF FK from measured qpos/root plus explicit gripper TCP calibration.",
         "Orientation bins: canonical SO(3) rotation vectors, 30-degree Cartesian bins, not equal-volume; no symmetry folding.",
         "Raw terminal pose bins include tracking variation; receipt-confirmed fixed task categories are a separate coverage metric.",
+        "Installation grouping rounds measured XYZ and canonical normalized xyzw to 1e-6; declared calibration is exact and raw states/FK remain unrounded.",
         "Joint path length mixes joint coordinates; compare only matching domains.",
         "Geometry buckets reuse existing 1e-3 descriptor quantization, not clustering.",
     ]

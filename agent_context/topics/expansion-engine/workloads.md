@@ -189,6 +189,12 @@ switch devices.
 Task-facing expansion configs select `scene_sampling.strategy` (`bounded_pose`
 or `workspace_joint`) independently of `scheduling.policy` (`fifo` or
 `task_pose_coverage`). Absent settings preserve the legacy bounded sampler.
+`engine.nominal_seed` optionally fixes the authored scene reset independently of
+the expansion seed. Without it, both retain the historical shared seed. Runtime
+candidate streams and proposal streams still use the expansion seed/ordinal;
+the reference manifest records both seeds. This prevents a sampler comparison
+from silently changing the nominal scene's reset randomization and moving its
+declared local domain. Rolling resets use the same explicit nominal reset seed.
 `_pose_sampling.py` owns bounded candidate snapshots, source feedback and budgets;
 `task_pose_coverage.TaskPoseCoverage` implements the session coverage protocol.
 Measured rigid initial/terminal poses contribute only after native sink receipts.

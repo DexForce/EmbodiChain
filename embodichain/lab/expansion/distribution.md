@@ -24,6 +24,11 @@ The recorded scene-case task ID identifies the task across seeds and source
 recordings. Older artifacts can use their recorded source UUID when the task ID
 is absent. Artifacts without either identity cannot be compared.
 
+For installation identity only, measured XYZ and sign-canonical normalized xyzw
+components are rounded to 1e-6 to avoid splitting one fixed base by readout noise.
+Declared robot calibration remains exact in the domain fingerprint. Raw episode
+poses, TCP FK and every physical acceptance threshold remain unchanged.
+
 Open `report.html`. Select a spatial region or joint-distribution cell to inspect
 recorded object paths. The evidence panel identifies the full artifact and the
 existing native preview command (which retains its original preload limit).
