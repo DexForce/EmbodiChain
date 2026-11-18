@@ -111,6 +111,7 @@ def test_package_discovery_includes_only_runtime_trees() -> None:
         "embodichain_benchmarks",
         "embodichain_models",
         "embodichain_solvers",
+        "embodichain_sensors",
     }
     assert runtime_roots | {
         "embodichain_tasks.configs",
@@ -128,6 +129,7 @@ def test_package_discovery_includes_only_runtime_trees() -> None:
         "embodichain_benchmarks": "extensions/embodichain_benchmarks",
         "embodichain_models": "extensions/embodichain_models/embodichain_models",
         "embodichain_solvers": "extensions/embodichain_solvers/embodichain_solvers",
+        "embodichain_sensors": "extensions/embodichain_sensors",
     }
 
 
