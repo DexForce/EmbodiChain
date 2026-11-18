@@ -285,6 +285,9 @@ tracks:
       support_pick_hand_interp_steps: 32
       placing_grasp_z_clearance_m: 0.0
       support_grasp_z_clearance_m: 0.0
+      # The support hand takes the free end of the handle, away from the
+      # placing hand.
+      support_grasp_handle_root_offset_m: -0.035
       pre_action_settle_steps: 100
       cases:
       - name: bread_onto_pan

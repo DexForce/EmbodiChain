@@ -342,6 +342,11 @@ Measured replay calibrates the Robotiq grasp and its cuRobo timing:
 - PickUp and AxisAlign plan their approach through five intermediate poses
   on the straight pre-grasp line (`pick_approach_waypoints`). A free-space approach
   can leave a diagonal line and sweep the target before closing.
+- The dual-arm suites also reach each pre-grasp through five poses on the
+  straight line from the start pose (`pick_reach_waypoints`,
+  `hand_over_approach_waypoints`). In cuRobo's empty collision world the
+  HandOver pickup hand otherwise swung 0.65 m out at table height, and the
+  CoordinatedPlacement hands dipped 16 cm into the objects.
 - PickUp and AxisAlign lift through four poses on the straight vertical line
   above the grasp (`pick_lift_waypoints`); a free-space lift dragged the held
   cube about 6 cm across the table before rising.

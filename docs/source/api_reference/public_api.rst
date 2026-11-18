@@ -3331,6 +3331,7 @@ embodichain.lab.sim.atomic_skills.trajectory_ops
    build_pose_plan_states
    interpolate_hand_qpos
    interpolate_joint_trajectory
+   pose_line_keyframes
    resolve_joint_target
    resolve_pose_target
    split_three_segments
