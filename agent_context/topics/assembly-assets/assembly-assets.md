@@ -85,14 +85,18 @@ defaults live in `configs/tasks/manipulation/assembly/defaults.yaml` inside the
 official task package; deployment declarations override those data-owned values.
 The task's `resources.py` serializes assembly manifests/fidelity and delegates
 prepared robot-tree copying to `embodichain.data.resources.snapshot_urdf_resources`.
+It keeps independently configured solver URDFs and their resource trees in the
+run so relocated configurations reproduce the live robot's kinematics.
 Pure polygon distances belong to `embodichain.compute.geometry`; URDF gravity
 feedforward belongs to `embodichain.compute.kinematics`. Robot joint-order and
 root-frame adaptation remains task-owned. Preparation/resource-export entry paths
 remain stable for frozen current-schema runs. Reset events leave selected
 measurements pending until the host finishes `episode_prepare`, so first
 observations and labels reflect the final prepared scene. Robot-base Euler
-rotations follow the simulator's intrinsic `XYZ` convention. Nut advancement uses
-scaled pitch for thresholds and scaled pitch times thread starts for lead.
+rotations follow the simulator's intrinsic `XYZ` convention. Peg measurement
+converts the manifest's nominal opening, plate thickness and clearance to the
+generated collision geometry's physical scale. Nut advancement uses scaled
+pitch for thresholds and scaled pitch times thread starts for lead.
 No import-owned task registration aliases or environment-method replacements are used.
 
 `embodichain_benchmarks.assembly.robot_reference` prepares the historical public Rizon/Robotiq approximation

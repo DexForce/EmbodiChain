@@ -274,7 +274,12 @@ class AssemblyState:
             0,
         ).amax(dim=1)
         grasped = select(self._contact_grasp())
-        clearance = float(self.scene.assembly_asset.config.get("clearance", 0.0005))
+        asset_config = self.scene.assembly_asset.config
+        clearance = float(asset_config.get("clearance", 0.0005))
+        peg_scale = 1.0
+        if self.scene.assembly_kind == "peg":
+            peg_scale = float(asset_config.get("scale", 1.0))
+            clearance *= peg_scale
         penetration_ok = penetration <= max(
             self.cfg.penetration_tolerance,
             clearance * self.cfg.penetration_clearance_fraction,
@@ -302,12 +307,14 @@ class AssemblyState:
         success = torch.zeros_like(grasped)
         if self.scene.assembly_kind == "peg":
             if not hasattr(self, "_hole_polygon"):
-                outline = self.scene.assembly_asset.config.get("mating_outline")
+                outline = asset_config.get("mating_outline")
                 if outline is None:
                     raise ValueError(
                         "Peg task manifests require the generated mating_outline for dependency-free labeling."
                     )
-                self._hole_polygon = torch.tensor(
+                # Manifests store the generator-space outline. Match the
+                # physical collision vertices without changing saved manifests.
+                self._hole_polygon = peg_scale * torch.tensor(
                     outline, dtype=torch.float32, device=self.env.device
                 )
             # Supervision uses configured samples; success checks every actual
@@ -335,9 +342,8 @@ class AssemblyState:
             contact = near_surface & ((edge_distance > band) | near_edge)
             labels = torch.where(contact, 1, torch.where(inside, 2, 0)).long()
             capture = all_inside & (depth > 0)
-            target_bottom_z = self.scene._fixture_zmax - float(
-                self.scene.assembly_asset.config["plate_thickness"]
-            )
+            plate_thickness = peg_scale * float(asset_config["plate_thickness"])
+            target_bottom_z = self.scene._fixture_zmax - plate_thickness
             # The public task accepts every bottom point within 1 mm of the
             # seated plane. Grasp, penetration and the three-step hold below
             # remain additional project guards, separate from that geometry.

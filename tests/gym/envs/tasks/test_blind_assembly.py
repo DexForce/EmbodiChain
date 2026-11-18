@@ -687,6 +687,37 @@ def test_peg_seating_checks_each_bottom_vertex_height() -> None:
     assert not success.item()
 
 
+@pytest.mark.parametrize("scale", [0.75, 1.5])
+def test_scaled_peg_seats_on_the_generated_fixture_floor(scale: float) -> None:
+    pytest.importorskip("mjfit")
+    from embodichain_tasks.manipulation.assembly.assets import build_task_assembly
+    from embodichain_tasks.manipulation.assembly.preparation import _body_vertices
+
+    asset = build_task_assembly("peg", {"scale": scale})
+    bodies = {body.name: body for body in asset.bodies}
+    plate = bodies["plate"]
+    floor = next(geom for geom in plate.geometries if geom.name == "bottom")
+    floor_vertices = (
+        np.asarray(floor.vertices) @ Rotation.from_quat(floor.quaternion).as_matrix().T
+        + floor.position
+    )
+    vertices = _body_vertices(bodies["peg"], cylinder_samples=64)
+    peg_bottom = vertices[:, 2].min()
+    bottom = vertices[np.isclose(vertices[:, 2], peg_bottom, atol=1e-7)]
+    env, part = _analytic_mating_state()
+    env.scene.assembly_asset = asset
+    env.scene._fixture_zmax = float(_body_vertices(plate, 64)[:, 2].max())
+    env._assembly_bottom_vertices = torch.as_tensor(bottom, dtype=torch.float32)
+    env._assembly_edge_points = env._assembly_bottom_vertices.clone()
+    part[:, 2, 3] = float(floor_vertices[:, 2].max() - peg_bottom)
+    for revision in range(3):
+        env._assembly_revision = env._assembly_physics_revision = revision
+        success, _, metrics = _task_state(env)
+    assert metrics["captured"].item()
+    assert metrics["depth"].item() == pytest.approx(0.018 * scale, abs=1e-7)
+    assert success.item()
+
+
 @pytest.mark.parametrize("n_starts,scale", [(1, 1.0), (2, 1.0), (1, 2.0)])
 def test_nut_rotation_at_fixed_capture_depth_is_not_threading(
     n_starts: int, scale: float
@@ -819,13 +850,15 @@ def test_manager_history_selective_reset_does_not_repeat_other_rows(
     assert before.reshape(2, 31, 33)[0, 0, 0].item() == 3.0
 
 
+@pytest.mark.parametrize("independent_solver", [False, True])
 def test_checkpoint_task_resources_relocate_without_generator(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, independent_solver: bool
 ) -> None:
     from embodichain.toolkits.assembly import AssemblyAsset
     import shutil
     import json
     import sys
+    from embodichain_robots.flexiv.rizon4s.cfg import FlexivRizon4SCfg
 
     source = tmp_path / "source" / "prepared_v4_parallel_jaw"
     source.mkdir(parents=True)
@@ -838,8 +871,31 @@ def test_checkpoint_task_resources_relocate_without_generator(
         (source.parent / model).mkdir()
         (source.parent / model / "LICENSE").write_text("fixture license " + model)
     (source.parent / "source_manifest.json").write_text('{"revision":"fixture"}')
+    robot_config = {"fpath": str(urdf)}
+    if independent_solver:
+        calibrated = source.parent / "calibrated" / "robot.urdf"
+        calibrated.parent.mkdir()
+        (calibrated.parent / "meshes").mkdir()
+        (calibrated.parent / "meshes" / "tool.obj").write_text("v 0 0 0\n")
+        calibrated.write_text(
+            '<robot name="calibrated"><link name="base"/>'
+            '<link name="calibrated_tip"><visual><geometry>'
+            '<mesh filename="meshes/tool.obj"/></geometry></visual></link>'
+            '<joint name="joint1" type="revolute">'
+            '<parent link="base"/><child link="calibrated_tip"/>'
+            '<origin xyz="0 0 0.4"/><axis xyz="0 0 1"/>'
+            '<limit lower="-2" upper="2" effort="1" velocity="1"/></joint></robot>'
+        )
+        robot_config["solver_cfg"] = {
+            "arm": {
+                "urdf_path": str(calibrated),
+                "root_link_name": "base",
+                "end_link_name": "calibrated_tip",
+            }
+        }
+    robot = FlexivRizon4SCfg.from_dict(robot_config)
     env = _state_fixture()
-    env.env.cfg = SimpleNamespace(robot=SimpleNamespace(_pk_urdf_path=str(urdf)))
+    env.env.cfg = SimpleNamespace(robot=robot)
     env.scene.assembly_asset = AssemblyAsset(config={"kind": "peg"})
     env.scene.assembly_fidelity = {"source_gripper_dynamics_preserved": False}
     directory = tmp_path / "run" / "configs"
@@ -851,6 +907,7 @@ def test_checkpoint_task_resources_relocate_without_generator(
             "physics": "newton",
             "robot": {
                 "class_type": "FlexivRizon4S",
+                **robot_config,
             },
             "env": {"extensions": {"assembly": _assembly_options()}},
         },
@@ -858,6 +915,7 @@ def test_checkpoint_task_resources_relocate_without_generator(
     )
     target = tmp_path / "relocated" / "configs"
     shutil.copytree(directory, target)
+    shutil.rmtree(directory)
     shutil.rmtree(source.parent)
     monkeypatch.setitem(sys.modules, "mjfit", None)
     path = target / "gym.yaml"
@@ -866,6 +924,16 @@ def test_checkpoint_task_resources_relocate_without_generator(
     path.write_text(yaml.safe_dump(frozen))
     cfg = config_to_cfg(load_config(str(path)), source_path=path)
     assert cfg.robot.fpath == str(target / "resources" / "robot" / "robot.urdf")
+    solver_urdf = Path(cfg.robot.solver_cfg["arm"].urdf_path)
+    if independent_solver:
+        assert solver_urdf.is_relative_to(target)
+        assert solver_urdf != Path(cfg.robot.fpath)
+        assert (solver_urdf.parent / "meshes" / "tool.obj").is_file()
+        chain = cfg.robot.build_pk_serial_chain()["arm"]
+        tcp = chain.forward_kinematics(torch.zeros(1, 1)).get_matrix()
+        torch.testing.assert_close(tcp[0, :3, 3], torch.tensor([0.0, 0.0, 0.4]))
+    else:
+        assert solver_urdf == Path(cfg.robot.fpath)
     asset = AssemblyAsset.load(cfg.extensions["assembly"]["assembly_manifest"])
     assert asset.content_hash == env.scene.assembly_asset.content_hash
     assert (

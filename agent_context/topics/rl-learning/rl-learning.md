@@ -145,8 +145,9 @@ Within schema v2, an omitted optional PPO auxiliary coefficient means zero; an
 explicitly different coefficient remains incompatible.
 
 Named training fields travel with the observation that produced each action.
-Collectors preserve declared feature axes, including scalar fields, after
-combining their configured observation groups. Logical actor/critic parameter
+Collectors preserve declared feature axes after combining configured observation
+groups. Scalar leaves contribute one feature per environment, including within
+nested groups. Logical actor/critic parameter
 groups retain overlap so APG can reject shared trunks; PPO deduplicates shared
 parameters at gradient clipping.
 PPO's optional auxiliary decoder loss recomputes the latent in each minibatch

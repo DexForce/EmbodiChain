@@ -170,7 +170,7 @@ class FlexivRizon4SCfg(RobotCfg):
 
         solver = self.solver_cfg["arm"]
         chain = create_pk_serial_chain(
-            urdf_path=solver.urdf_path,
+            urdf_path=solver.urdf_path or self._pk_urdf_path,
             device=device,
             root_link_name=solver.root_link_name,
             end_link_name=solver.end_link_name,

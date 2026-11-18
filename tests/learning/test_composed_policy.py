@@ -292,9 +292,23 @@ class _LabelEnv:
         )
 
 
-def test_labels_are_pre_action_aligned_across_rollouts_and_ppo_updates() -> None:
+@pytest.mark.parametrize("grouped_scalars", [False, True])
+def test_labels_are_pre_action_aligned_across_rollouts_and_ppo_updates(
+    grouped_scalars: bool,
+) -> None:
+    class GroupedLabelEnv(_LabelEnv):
+        def _observation(self):
+            observation = super()._observation()
+            self.labels[:, 1] = 1 - self.labels[:, 0]
+            observation["contact_labels"] = {
+                "second": self.labels[:, 1],
+                "first": self.labels[:, 0],
+            }
+            return observation
+
     policy = _policy()
-    env = _LabelEnv(policy.obs_dim)
+    env_type = GroupedLabelEnv if grouped_scalars else _LabelEnv
+    env = env_type(policy.obs_dim)
     collector = SyncCollector(env, policy, env.device)
     buffer = RolloutBuffer(
         2,
@@ -317,6 +331,9 @@ def test_labels_are_pre_action_aligned_across_rollouts_and_ppo_updates() -> None
     assert flat["contact_labels"].shape == (6, 2)
     expected = torch.tensor([0, 1, 0, 0, 1, 0])
     torch.testing.assert_close(flat["contact_labels"][:, 0], expected)
+    torch.testing.assert_close(
+        flat["contact_labels"][:, 1], 1 - expected if grouped_scalars else expected
+    )
     before = next(policy.contact_decoder.parameters()).detach().clone()
     algorithm = PPO(
         PPOCfg(

@@ -170,7 +170,10 @@ def test_downloaded_asset_preserves_official_parameters() -> None:
 
 
 @pytest.mark.no_sim
-def test_roundtrip_and_custom_asset_keep_kinematic_source(tmp_path: Path) -> None:
+@pytest.mark.parametrize("explicit_null", [False, True])
+def test_roundtrip_and_custom_asset_keep_kinematic_source(
+    tmp_path: Path, explicit_null: bool
+) -> None:
     """A custom URDF changes both simulation and PK, and overrides round-trip."""
     original = FlexivRizon4SCfg.from_dict({})
     source = ET.parse(original.fpath)
@@ -181,6 +184,9 @@ def test_roundtrip_and_custom_asset_keep_kinematic_source(tmp_path: Path) -> Non
     origin.set("xyz", " ".join(str(x) for x in translation))
     custom = tmp_path / "custom.urdf"
     source.write(custom)
+    solver = {"num_samples": 4}
+    if explicit_null:
+        solver["urdf_path"] = None
     cfg = FlexivRizon4SCfg.from_dict(
         {
             "fpath": str(custom),
@@ -194,13 +200,12 @@ def test_roundtrip_and_custom_asset_keep_kinematic_source(tmp_path: Path) -> Non
                 ]
             },
             "joint_drive_props": {"stiffness": {"joint[1-2]": 2500.0}},
-            "solver_cfg": {"arm": {"num_samples": 4}},
+            "solver_cfg": {"arm": solver},
         }
     )
     cfg.validate()
-    assert (
-        cfg._pk_urdf_path == cfg.fpath == cfg.solver_cfg["arm"].urdf_path == str(custom)
-    )
+    assert cfg._pk_urdf_path == cfg.fpath == str(custom)
+    assert cfg.solver_cfg["arm"].urdf_path == (None if explicit_null else str(custom))
     assert cfg.joint_drive_props.stiffness["joint[1-2]"] == 2500.0
     assert cfg.solver_cfg["arm"].num_samples == 4
     assert cfg.urdf_cfg.components["arm"]["params"] == {"color": "#e0e0e0"}

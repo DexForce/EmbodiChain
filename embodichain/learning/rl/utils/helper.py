@@ -29,6 +29,10 @@ __all__ = [
 ]
 
 
+def _flatten_observation_leaf(value: torch.Tensor) -> torch.Tensor:
+    return value.unsqueeze(-1) if value.ndim == 1 else value.flatten(start_dim=1)
+
+
 def flatten_dict_observation(obs: TensorDict) -> torch.Tensor:
     """Flatten a hierarchical observation TensorDict into a 2D tensor.
 
@@ -46,7 +50,7 @@ def flatten_dict_observation(obs: TensorDict) -> torch.Tensor:
             if isinstance(value, TensorDict):
                 _collect_tensors(value)
             elif isinstance(value, torch.Tensor):
-                obs_list.append(value.flatten(start_dim=1))
+                obs_list.append(_flatten_observation_leaf(value))
 
     _collect_tensors(obs)
 
@@ -96,9 +100,7 @@ def flatten_observation_groups(
         if isinstance(value, TensorDict):
             flattened.append(flatten_dict_observation(value))
         elif isinstance(value, torch.Tensor):
-            flattened.append(
-                value.flatten(start_dim=1) if value.ndim > 1 else value[:, None]
-            )
+            flattened.append(_flatten_observation_leaf(value))
         else:
             raise TypeError(
                 f"Observation group '{group}' must contain tensors, got "

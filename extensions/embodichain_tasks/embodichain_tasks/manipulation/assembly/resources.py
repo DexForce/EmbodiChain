@@ -59,10 +59,11 @@ def export_assembly_resources(
     (assembly_directory / "fidelity.json").write_text(
         json.dumps(state.scene.assembly_fidelity, indent=2) + "\n"
     )
-    source = Path(state.env.cfg.robot._pk_urdf_path).resolve()
+    robot = env.cfg.robot
+    source = Path(robot._pk_urdf_path).resolve()
     robot_directory = resources / "robot"
     provenance = source.parent.parent
-    snapshot_urdf_resources(
+    prepared = snapshot_urdf_resources(
         source,
         robot_directory,
         provenance_root=(
@@ -80,20 +81,36 @@ def export_assembly_resources(
     # explicit joint_stiffness/joint_damping fields still own its native
     # impedance override at the normal initialization boundary.
     for name in ("joint_drive_props", "root_props", "attrs"):
-        value = getattr(state.env.cfg.robot, name, None)
+        value = getattr(robot, name, None)
         if value is not None:
             frozen["robot"][name] = value.to_dict()
     frozen["robot"]["link_attrs"] = {
         name: value.to_dict()
-        for name, value in (
-            getattr(state.env.cfg.robot, "link_attrs", None) or {}
-        ).items()
+        for name, value in (getattr(robot, "link_attrs", None) or {}).items()
     }
-    prepared = f"./resources/robot/{source.name}"
-    frozen["robot"]["fpath"] = prepared
+    config_root = Path(config_dir).resolve()
+    frozen["robot"]["fpath"] = f"./{prepared.relative_to(config_root).as_posix()}"
     frozen["robot"].pop("urdf_cfg", None)
-    for solver in frozen["robot"].get("solver_cfg", {}).values():
-        solver["urdf_path"] = prepared
+    declared_solvers = frozen["robot"].get("solver_cfg") or {}
+    # Keep same-directory dependencies together and prevent models from
+    # different source trees with the same basename from overwriting each other.
+    model_trees = {source.parent: prepared.parent}
+    for part, solver in (robot.solver_cfg or {}).items():
+        model = Path(solver.urdf_path).resolve() if solver.urdf_path else source
+        if part not in declared_solvers:
+            if model == source:
+                continue
+            declared_solvers[part] = solver.to_dict()
+        if model.parent not in model_trees:
+            model_trees[model.parent] = snapshot_urdf_resources(
+                model, resources / "solver_models" / str(len(model_trees))
+            ).parent
+        bundled = model_trees[model.parent] / model.name
+        declared_solvers[part][
+            "urdf_path"
+        ] = f"./{bundled.relative_to(config_root).as_posix()}"
+    if declared_solvers:
+        frozen["robot"]["solver_cfg"] = declared_solvers
     frozen.setdefault("env", {}).setdefault("extensions", {})["assembly"][
         "assembly_manifest"
     ] = f"./resources/assembly/{manifest_name}"
