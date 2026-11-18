@@ -1124,6 +1124,12 @@ class _BatchedSupportWitness:
         self.object_pose = torch.zeros(count, 4, 4, device=device)
         self.reference_pose = torch.zeros_like(self.object_pose)
 
+    def copy_from(self, other: _BatchedSupportWitness) -> None:
+        """Copy a bounded witness proposal without fabricating contact samples."""
+        self.known.copy_(other.known)
+        self.object_pose.copy_(other.object_pose)
+        self.reference_pose.copy_(other.reference_pose)
+
     def evaluate(
         self,
         positive: torch.Tensor,

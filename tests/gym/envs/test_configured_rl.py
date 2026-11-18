@@ -668,3 +668,19 @@ def test_duplicate_program_reward_declarations_cannot_charge_an_occurrence_twice
     )
     with pytest.raises(ValueError, match="Duplicate skill shaping|Overlapping"):
         config_to_cfg(raw, source_path=path, _register_env=False)
+
+
+@pytest.mark.parametrize("declaration", ["omitted", "null"])
+def test_standalone_skill_cannot_be_silently_ignored_without_reward_composition(
+    declaration,
+):
+    raw = yaml.safe_load(_CONFIG.read_text())
+    raw["rl_task"]["skill"] = {
+        "skill_id": "move_joints",
+        "binding": {"robot": "robot", "motion_part": "arm"},
+        "goal": {"positions": [0.0] * 7},
+    }
+    if declaration == "null":
+        raw["rl_task"]["reward_composition"] = None
+    with pytest.raises(ValueError, match="skill.*reward_composition"):
+        config_to_cfg(raw, source_path=_CONFIG, _register_env=False)

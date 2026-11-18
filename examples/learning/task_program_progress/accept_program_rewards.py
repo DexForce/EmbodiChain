@@ -275,6 +275,8 @@ def _replay(args, root):
     env._demo_no_auto_reset = True
     recorder = None
     trace = []
+    captured_steps = []
+    video_capture = None
     checks = []
     previous_paid = [False, False]
     start = time.perf_counter()
@@ -426,6 +428,7 @@ def _replay(args, root):
                 step % 2 == 1 or bool(terminated[0]) or bool(truncated[0])
             ):
                 recorder(env, env_ids=[0], name=f"program_rewards_{args.case}")
+                captured_steps.append(step)
             if bool(terminated[0]) or (args.case == "truncated" and bool(truncated[0])):
                 break
         stage_sums = [
@@ -516,7 +519,23 @@ def _replay(args, root):
             {"name": "discounted_shaping_identity", "passed": telescope_error <= 2e-6}
         )
         if recorder:
+            episode = env.episode_context.episode_ids[0]
             recorder.save_and_clear([0], purpose="diagnostic")
+            path = (
+                args.output
+                / "videos"
+                / "diagnostics"
+                / "env_000"
+                / f"episode_{episode:06d}_program_rewards_{args.case}.mp4"
+            )
+            video_capture = {
+                "path": str(path.relative_to(args.output)),
+                "sha256": _hash(path),
+                "step_indices": captured_steps,
+                "trace_sha256": hashlib.sha256(
+                    json.dumps(trace, sort_keys=True, allow_nan=False).encode()
+                ).hexdigest(),
+            }
         post_reset = None
         if args.case == "success":
             peer_phi = previous_phi[1]
@@ -581,6 +600,7 @@ def _replay(args, root):
             "effective_contract_sha256": contract_sha256,
             "effective_contract": effective_contract,
             "post_reset": post_reset,
+            "video_capture": video_capture,
             "program_identity": env.task_program_progress.program_identity,
             "evaluation_identity": env.task_program_progress.compiled.identity,
             "execution_mode": cfg.task_program_execution,
@@ -724,14 +744,34 @@ def _report(args, root):
         "oracle": "Independent scalar reward-composition arithmetic using canonical measured skill potentials; not an independent geometry/skill-formula oracle",
     }
     preview = None
-    raw_videos = list((args.output / "videos").rglob("*_program_rewards_success.mp4"))
-    if raw_videos:
+    capture = success.get("video_capture")
+    if capture is not None:
+        raw_video = (args.output / capture["path"]).resolve()
+        if (
+            not raw_video.is_relative_to(args.output)
+            or _hash(raw_video) != capture["sha256"]
+        ):
+            raise ValueError(
+                "Recorded preview video content does not match this acceptance run"
+            )
+        trace_hash = hashlib.sha256(
+            json.dumps(success["trace"], sort_keys=True, allow_nan=False).encode()
+        ).hexdigest()
+        if trace_hash != capture["trace_sha256"]:
+            raise ValueError(
+                "Recorded preview video is bound to a different reward trace"
+            )
         dt = 2 * success["control_dt"]
         captured = [
             row
             for row in success["trace"]
             if row["step"] % 2 == 1 or row["terminated"][0] or row["truncated"][0]
         ]
+
+        if [row["step"] for row in captured] != capture["step_indices"]:
+            raise ValueError(
+                "Recorded preview frame indices do not match the reward trace"
+            )
 
         def stamp(seconds):
             total = int(round(seconds * 100))
@@ -783,7 +823,7 @@ def _report(args, root):
                 "error",
                 "-y",
                 "-i",
-                str(sorted(raw_videos)[-1]),
+                str(raw_video),
                 "-vf",
                 f"tpad=stop_mode=clone:stop_duration=1,drawbox=x=0:y=0:w=iw:h=90:color=black@0.65:t=fill,subtitles={ass}",
                 "-c:v",
@@ -798,6 +838,11 @@ def _report(args, root):
             check=True,
         )
         metrics["preview_sha256"] = _hash(preview)
+        metrics["preview_source"] = {
+            "video_sha256": capture["sha256"],
+            "trace_sha256": capture["trace_sha256"],
+            "frame_count": len(capture["step_indices"]),
+        }
     (args.output / "SUMMARY.json").write_text(json.dumps(metrics, indent=2) + "\n")
     lines = [
         "# Task Program reward 验收",

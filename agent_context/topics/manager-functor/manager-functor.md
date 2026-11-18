@@ -100,13 +100,21 @@ state orders. Physical joint IDs are not observation-column indices.
 and standalone `skill` goals into standard `RewardCfg` terms. Program-authored
 reward defaults are declared in `TaskProgramCfg.rewards`; the deployment may
 explicitly override them. `RewardManager` remains the sole weighting/reset owner.
+Standalone `skill` declarations require an explicit composition and discount;
+omitting it rejects configuration rather than dropping the objective. Automatic
+milestones respect explicit terms selected by any equivalent stage/call alias.
+Metric targets, as well as scales, must be finite before binding.
 Stateful potential shaping consumes one `RewardTransitionContext` from the
 canonical post-step observation after measured termination. Reset acquisition
 initializes baselines without paying rewards; repeated transition reads are cached.
 Unavailable required measurements terminate affected rows and cannot erase a
 negative shaping boundary. True task termination and time truncation remain distinct.
 
-`SkillObjectiveObservation` owns bounded, occurrence-local physical windows;
+`SkillObjectiveObservation` owns bounded, occurrence-local physical windows.
+Its contact sampling observer measures each physics substep; only canonical
+control-boundary acquisition commits the proposed duration. A first valid
+sample establishes the boundary, and interrupted evidence restarts the window.
+Missing substeps or pose writes after sampling invalidate the affected evidence;
 read-only queries do not commit history. Its contact sensor joins the public
 sensor suite. Capture identities include the objective, avoiding aliasing across
 multiple goals on one robot. Physical success remains independent of reward weights. Positive support witnesses

@@ -44,13 +44,52 @@ def _setup():
         "is_valid": torch.ones(2, 1, dtype=torch.bool),
         "impulse_valid": torch.ones(2, 1, dtype=torch.bool),
     }
-    sensor = SimpleNamespace(
-        contact_capabilities=SimpleNamespace(impulse=True),
-        uid="test_sensor",
-        get_data=lambda: data,
-        update=lambda: None,
-        dropped_contacts_mask=torch.zeros(2, dtype=torch.bool),
-    )
+
+    class SampledSensor:
+        """Replay completed fake physics samples, including sensor observer hooks."""
+
+        contact_capabilities = SimpleNamespace(impulse=True)
+        uid = "test_sensor"
+
+        def __init__(self):
+            self.observers = {}
+            self.dropped_contacts_mask = torch.zeros(2, dtype=torch.bool)
+            self.last_step = 0
+
+        @property
+        def requires_substep_update(self):
+            return bool(self.observers)
+
+        def add_sampling_observer(self, name, observer):
+            self.observers[name] = observer
+
+        def get_data(self):
+            return data
+
+        def begin_control_step(self):
+            for observer in self.observers.values():
+                observer.begin_control_step()
+
+        def update_physics_step(self, dt):
+            for observer in self.observers.values():
+                observer.after_sample(dt, observer.before_sample())
+            self.last_step = sim.physics_step_index
+
+        def update(self):
+            # Most unit cases directly advance a fake clock. Publish those
+            # completed samples once; repeated queries cannot resample them.
+            end = sim.physics_step_index
+            if end != self.last_step:
+                sim.physics_step_index = self.last_step
+                self.begin_control_step()
+                for step in range(self.last_step + 1, end + 1):
+                    sim.physics_step_index = step
+                    self.update_physics_step(
+                        env.step_dt / env.cfg.sim_steps_per_control
+                    )
+                sim.physics_step_index = end
+
+    sensor = SampledSensor()
     sensor.get_actor_ids = lambda uid, links=None: (
         torch.tensor([[2, 3], [2, 3]])
         if links
@@ -183,7 +222,7 @@ def test_each_repeated_occurrence_requires_a_new_stability_window():
     env.sim.physics_step_index = 5
     assert not term(env, {}).values[:, 1].bool().any()
     term.advance_observation()
-    torch.testing.assert_close(term._stable_time, torch.full((2,), 0.05))
+    torch.testing.assert_close(term._stable_time, torch.zeros(2))
 
 
 def test_pick_cannot_succeed_without_measured_lift_even_with_bilateral_contact():
@@ -289,4 +328,125 @@ def test_sleeping_support_witness_requires_unchanged_physical_geometry():
     pose[0, 2, 3] += 0.005
     env.sim.physics_step_index = 5
     sample = term(env, {})
+    assert sample.values[:, 1].bool().tolist() == [False, True]
+
+
+@pytest.mark.parametrize("skill", ["place", "move_held_object"])
+def test_transient_final_substep_contact_cannot_satisfy_a_physical_window(skill):
+    from embodichain.lab.gym.envs.base_env import BaseEnv
+    from embodichain.lab.sim.atomic_skills.reward_profiles import (
+        default_skill_reward_profile,
+    )
+
+    env, term, data, _ = _setup()
+    term.profile = default_skill_reward_profile(skill)
+    if skill == "move_held_object":
+        data.update(
+            user_ids=torch.tensor([[[1, 2], [1, 3]]] * 2),
+            normal=torch.tensor([[[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]]] * 2),
+            impulse=torch.ones(2, 2),
+            is_valid=torch.zeros(2, 2, dtype=torch.bool),
+            impulse_valid=torch.ones(2, 2, dtype=torch.bool),
+        )
+    else:
+        data["is_valid"].zero_()
+    env.cfg.sim_steps_per_control = 4
+    env.physics_dt = env.step_dt / 4
+    steady = [False]
+
+    def update(dt, steps, *, after_substep=None, **kwargs):
+        for index in range(steps):
+            env.sim.physics_step_index += 1
+            supported = steady[0] or index == steps - 1
+            data["is_valid"].fill_(supported)
+            term.object.body_data.lin_vel[:, 0] = 0.0 if supported else 0.5
+            if after_substep:
+                after_substep(dt)
+
+    env.sim.update = update
+    term(env, {})
+    term.initialize_observation(None, [0, 1])
+    for _ in range(4):
+        BaseEnv._advance_physics(env)
+        sample = term(env, {})
+        assert not sample.values[:, 1].bool().any()
+        term.advance_observation()
+    duration = term._stable_time if skill == "place" else term._held_time
+    torch.testing.assert_close(duration, torch.zeros(2))
+    # A subsequent complete interval sequence really proves the minimum dwell.
+    steady[0] = True
+    for _ in range(4):
+        BaseEnv._advance_physics(env)
+        sample = term(env, {})
+        term.advance_observation()
+    assert sample.values[:, 1].bool().all()
+
+
+def test_unobserved_physics_substep_invalidates_window_evidence():
+    env, term, _, _ = _setup()
+    term(env, {})
+    term.initialize_observation(None, [0, 1])
+    env.cfg.sim_steps_per_control = 4
+    term.sensor.begin_control_step()
+    for step in (1, 3, 4):
+        env.sim.physics_step_index = step
+        term.sensor.update_physics_step(env.step_dt / 4)
+    sample = term(env, {})
+    assert not sample.valid.any()
+    assert not sample.values[:, 1].bool().any()
+
+
+def test_post_physics_pose_write_cannot_reuse_contact_window():
+    env, term, _, pose = _setup()
+    term(env, {})
+    term.initialize_observation(None, [0, 1])
+    for step in range(1, 5):
+        env.sim.physics_step_index = step
+        term(env, {})
+        term.advance_observation()
+    env.sim.physics_step_index = 5
+    term.sensor.update()  # Fully sampled native boundary, before interval events.
+    pose[0, 2, 3] += 0.005
+    sample = term(env, {})
+    assert sample.valid.tolist() == [False, True]
+    assert sample.values[:, 1].bool().tolist() == [False, True]
+
+
+def test_post_physics_gripper_write_cannot_reuse_bilateral_contact_window():
+    from embodichain.lab.sim.atomic_skills.reward_profiles import (
+        default_skill_reward_profile,
+    )
+
+    env, term, data, _ = _setup()
+    term.profile = default_skill_reward_profile("move_held_object")
+    hand_pose = term.robot.get_link_pose("pad_a").clone()
+    term.robot.get_link_pose = lambda *args, **kwargs: hand_pose
+    data.update(
+        user_ids=torch.tensor([[[1, 2], [1, 3]]] * 2),
+        normal=torch.tensor([[[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]]] * 2),
+        impulse=torch.ones(2, 2),
+        is_valid=torch.ones(2, 2, dtype=torch.bool),
+        impulse_valid=torch.ones(2, 2, dtype=torch.bool),
+    )
+    term(env, {})
+    term.initialize_observation(None, [0, 1])
+    for step in range(1, 4):
+        env.sim.physics_step_index = step
+        term(env, {})
+        term.advance_observation()
+    env.sim.physics_step_index = 4
+    term.sensor.update()
+    # An interval event moves only the gripper; arm FK and the cargo stay fixed.
+    hand_pose[0, 0, 3] += 1.0
+    sample = term(env, {})
+    assert sample.valid.tolist() == [False, True]
+    assert sample.values[:, 1].bool().tolist() == [False, True]
+    term.advance_observation()
+    assert term._held_time[0] == 0
+    # Diagnostic hosts may continue without auto-reset: reacquisition must start
+    # a new window rather than restoring the invalidated hold.
+    hand_pose[0, 0, 3] -= 1.0
+    env.sim.physics_step_index = 5
+    sample = term(env, {})
+    assert sample.valid.all()
     assert sample.values[:, 1].bool().tolist() == [False, True]

@@ -387,5 +387,7 @@ ordinary RewardManager terms. Measured skill objectives conjoin the existing
 stage conditions and protect the final physical gate. Multi-call segments need
 an explicit objective for every compiled `call_index`; progress expands these
 into ordered occurrence-local criteria while retaining authored segment aliases.
+Explicit milestone terms selected by stage name, occurrence or `call:N` suppress
+the equivalent automatic bonus for that event.
 The [manager-owned reward contract](../manager-functor/manager-functor.md#composed-skill-rewards)
 owns configuration, observation, weighting, reset and invalid-evidence behavior.

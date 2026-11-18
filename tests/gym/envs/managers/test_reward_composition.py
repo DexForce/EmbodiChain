@@ -220,3 +220,26 @@ def test_named_templates_are_shared_and_saved_revisions_are_enforced(monkeypatch
     )
     with pytest.raises(ValueError, match="saved reward contract"):
         compose_reward_terms(declaration, program=False)
+
+
+@pytest.mark.parametrize("target", [[float("inf")], [float("nan")]])
+def test_nonfinite_metric_targets_reject_before_reward_binding(target):
+    with pytest.raises(ValueError, match="target.*finite"):
+        compose_reward_terms(
+            {
+                "discount": 0.99,
+                "skills": [
+                    {
+                        "skill_id": "move_joints",
+                        "metrics": {
+                            "joints": {
+                                "field": "joint_position",
+                                "target": target,
+                                "scale": 0.1,
+                            }
+                        },
+                    }
+                ],
+            },
+            program=False,
+        )

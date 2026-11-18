@@ -56,7 +56,11 @@ def main() -> None:
     metrics = evaluation["result"]["metrics"]
     test_log = (output / "final_tests.log").read_text()
     passed = re.findall(r"(\d+) passed", test_log)
-    if not passed:
+    if not passed or re.search(
+        r"\b[1-9]\d* (?:failed|errors?|xpassed)\b|\b(?:FAILURES|ERRORS|INTERRUPTED)\b",
+        test_log,
+        flags=re.IGNORECASE,
+    ):
         raise ValueError("No successful final test summary found")
     root = Path(__file__).resolve().parents[3]
     changed = subprocess.check_output(
@@ -135,10 +139,11 @@ def main() -> None:
         ]
     summary["optimization"] = optimization
     summary["finite_optimization_metrics"] = all(
-        math.isfinite(row["value"])
+        bool(values) and all(math.isfinite(row["value"]) for row in values)
         for values in optimization.values()
-        for row in values
     )
+    if not summary["finite_optimization_metrics"]:
+        raise ValueError("Required optimizer metrics must be nonempty and finite")
     (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
 
     def link(path):

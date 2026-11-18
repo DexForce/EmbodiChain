@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
+from dataclasses import dataclass, replace
 import math
 import hashlib
 import json
@@ -222,6 +223,140 @@ def _world_bounds(corners: torch.Tensor, pose: torch.Tensor) -> torch.Tensor:
     return torch.stack((points.amin(1), points.amax(1)), dim=1)
 
 
+@dataclass(frozen=True)
+class _ObjectiveProposal:
+    sample: ObservationSample
+    held_time: torch.Tensor
+    stable_time: torch.Tensor
+    relative: torch.Tensor
+    step: int
+    index: torch.Tensor
+    height: torch.Tensor
+    baseline: torch.Tensor
+    rotation: torch.Tensor
+    support: tuple | None
+    held_now: torch.Tensor
+    stable_now: torch.Tensor
+    motion: torch.Tensor | None
+    pose: torch.Tensor | None
+    reference_pose: torch.Tensor | None
+    hand_poses: torch.Tensor | None
+
+
+class _ObjectiveInterval:
+    """Bounded physical-substep evidence; canonical observations commit windows."""
+
+    def __init__(self, objective):
+        from embodichain.lab.sim.sensors.support_observation import (
+            _BatchedSupportWitness,
+        )
+
+        self.objective = objective
+        self.witness = _BatchedSupportWitness(objective.num_envs, objective.device)
+        self.valid = torch.zeros(
+            objective.num_envs, dtype=torch.bool, device=objective.device
+        )
+        self.held_time = torch.zeros(objective.num_envs, device=objective.device)
+        self.stable_time = torch.zeros_like(self.held_time)
+        self.held_previous = torch.zeros_like(self.valid)
+        self.stable_previous = torch.zeros_like(self.valid)
+        self.count = 0
+        self.elapsed = 0.0
+        self.last_step = -1
+        self.last = None
+        self.entry = None
+
+    def begin_control_step(self):
+        owner = self.objective
+        self.valid.fill_(True)
+        progress = getattr(owner._env, "task_program_progress", None)
+        index = (
+            torch.zeros_like(owner._invocation_index)
+            if progress is None
+            else progress.ordered_progress()[0].clamp_max(
+                progress.ordered_progress()[1] - 1
+            )
+        )
+        restart = (index != owner._invocation_index) | (
+            owner._last_step != owner._env.sim.physics_step_index
+        )
+        self.held_time.copy_(torch.where(restart, 0.0, owner._held_time))
+        self.stable_time.copy_(torch.where(restart, 0.0, owner._stable_time))
+        self.held_previous.copy_(owner._held_boundary & ~restart)
+        self.stable_previous.copy_(owner._stable_boundary & ~restart)
+        self.count = 0
+        self.elapsed = 0.0
+        self.last_step = owner._env.sim.physics_step_index
+        self.last = None
+        self.relative = owner._previous_relative.clone()
+        self.witness.copy_from(owner.support_witness)
+        pose = owner.object.get_local_pose(to_matrix=True)
+        self.entry = (pose[:, 2, 3].clone(), pose[:, :3, :3].clone())
+
+    def before_sample(self):
+        return self.objective._env.sim.physics_step_index
+
+    def after_sample(self, dt, token):
+        if not math.isfinite(dt) or dt <= 0:
+            raise ValueError("Objective physics sampling duration must be positive")
+        owner = self.objective
+        if token != self.last_step + 1:
+            self.valid.zero_()
+        proposal = owner._observe(
+            owner._env,
+            refresh_contacts=False,
+            measurement_dt=dt,
+            previous_relative=self.relative,
+            sampling=True,
+            witness=self.witness,
+            entry=self.entry,
+        )
+        self.valid &= proposal.sample.valid
+        self.held_time.copy_(
+            torch.where(
+                proposal.held_now & proposal.sample.valid & self.held_previous,
+                self.held_time + dt,
+                0.0,
+            )
+        )
+        self.stable_time.copy_(
+            torch.where(
+                proposal.stable_now & proposal.sample.valid & self.stable_previous,
+                self.stable_time + dt,
+                0.0,
+            )
+        )
+        self.held_previous.copy_(proposal.held_now & proposal.sample.valid)
+        self.stable_previous.copy_(proposal.stable_now & proposal.sample.valid)
+        self.relative = proposal.relative
+        self.witness.advance(*proposal.support)
+        self.last_step = token
+        self.count += 1
+        self.elapsed += dt
+        self.last = proposal
+
+    def coverage(self):
+        owner = self.objective
+        complete = (
+            self.count == owner._env.cfg.sim_steps_per_control
+            and math.isclose(
+                self.elapsed, owner._env.step_dt, rel_tol=0.0, abs_tol=1e-9
+            )
+            and self.last_step == owner._env.sim.physics_step_index
+        )
+        return self.valid & complete
+
+    def reset(self, env_ids=None):
+        ids = slice(None) if env_ids is None else env_ids
+        self.valid[ids] = False
+        self.held_time[ids] = 0
+        self.stable_time[ids] = 0
+        self.held_previous[ids] = False
+        self.stable_previous[ids] = False
+        self.entry = None
+        self.witness.reset(env_ids)
+
+
 class SkillObjectiveObservation(Functor):
     """Observe one skill goal; temporal state advances only at host boundaries.
 
@@ -246,6 +381,8 @@ class SkillObjectiveObservation(Functor):
         self.a = self.objective["acceptance"]
         self._held_time = torch.zeros(env.num_envs, device=env.device)
         self._stable_time = torch.zeros_like(self._held_time)
+        self._held_boundary = torch.zeros_like(self._held_time, dtype=torch.bool)
+        self._stable_boundary = torch.zeros_like(self._held_boundary)
         self._initialized = torch.zeros_like(self._held_time, dtype=torch.bool)
         self._last_step = torch.full_like(self._held_time, -1, dtype=torch.long)
         self._previous_relative = torch.zeros(env.num_envs, 3, device=env.device)
@@ -257,6 +394,7 @@ class SkillObjectiveObservation(Functor):
         )
         self._invocation_index = torch.full_like(self._last_step, -1)
         self.sensor = None
+        self._interval = None
         self.object = None
         self.reference = None
         reference = self.objective["goal"].get("reference")
@@ -328,6 +466,8 @@ class SkillObjectiveObservation(Functor):
                 )
                 for link in self.binding["hand_links"]
             }
+            self._interval = _ObjectiveInterval(self)
+            self.sensor.add_sampling_observer("skill_objective", self._interval)
         if self.profile.skill_id == "move_joints":
             positions = self.robot.get_qpos(self.part)
             if len(self.objective["goal"]["positions"]) != positions.shape[1]:
@@ -341,12 +481,15 @@ class SkillObjectiveObservation(Functor):
         self._initialized[ids] = False
         self._held_time[ids] = 0
         self._stable_time[ids] = 0
+        self._held_boundary[ids] = False
+        self._stable_boundary[ids] = False
         self._last_step[ids] = -1
         self._invocation_index[ids] = -1
         self._last_sample = None
         self._candidate = None
         if self.sensor is not None:
             self.support_witness.reset(env_ids)
+            self._interval.reset(env_ids)
 
     def initialize_observation(
         self, frame: ObservationFrame, env_ids: Sequence[int] | torch.Tensor
@@ -355,34 +498,49 @@ class SkillObjectiveObservation(Functor):
         self._initialized[env_ids] = True
         self._last_step[env_ids] = self._env.sim.physics_step_index
         if self._candidate is not None:
-            self._previous_relative[env_ids] = self._candidate[2][env_ids]
+            proposal = self._candidate
+            self._previous_relative[env_ids] = proposal.relative[env_ids]
+            self._held_boundary[env_ids] = (proposal.held_now & proposal.sample.valid)[
+                env_ids
+            ]
+            self._stable_boundary[env_ids] = (
+                proposal.stable_now & proposal.sample.valid
+            )[env_ids]
             if self.object is not None:
-                self._initial_height[env_ids] = self._candidate_height[env_ids]
-                self._initial_rotation[env_ids] = self._candidate_rotation[env_ids]
-            self._invocation_index[env_ids] = self._candidate_index[env_ids]
+                self._initial_height[env_ids] = proposal.height[env_ids]
+                self._initial_rotation[env_ids] = proposal.rotation[env_ids]
+            self._invocation_index[env_ids] = proposal.index[env_ids]
 
     def advance_observation(self) -> None:
-        """Commit the proposal produced by the canonical control-step capture."""
-        if self._candidate is None:
+        """Commit only the canonical control-boundary proposal."""
+        proposal = self._candidate
+        if proposal is None:
             return
-        held, stable, relative, steps = self._candidate
-        self._held_time.copy_(held)
-        self._stable_time.copy_(stable)
-        self._previous_relative.copy_(relative)
-        self._last_step.copy_(steps)
-        if self.sensor is not None:
-            self.support_witness.advance(*self._candidate_support)
-        self._invocation_index.copy_(self._candidate_index)
+        self._held_time.copy_(
+            torch.where(proposal.sample.valid, proposal.held_time, 0.0)
+        )
+        self._stable_time.copy_(
+            torch.where(proposal.sample.valid, proposal.stable_time, 0.0)
+        )
+        self._held_boundary.copy_(proposal.held_now & proposal.sample.valid)
+        self._stable_boundary.copy_(proposal.stable_now & proposal.sample.valid)
+        self._previous_relative.copy_(proposal.relative)
+        self._last_step.fill_(proposal.step)
+        self._invocation_index.copy_(proposal.index)
         if self.object is not None:
-            self._initial_height.copy_(self._candidate_baseline)
-            self._initial_rotation.copy_(self._candidate_rotation)
+            if self._interval.last is not None:
+                self.support_witness.copy_from(self._interval.witness)
+            self.support_witness.advance(*proposal.support)
+            self.support_witness.known &= proposal.sample.valid
+            self._initial_height.copy_(proposal.baseline)
+            self._initial_rotation.copy_(proposal.rotation)
 
-    def _pose_goal(self, current):
+    def _pose_goal(self, current, preserved_rotation=None):
         goal = self.objective["goal"]
         position = current.new_tensor(goal["position"]).expand(self.num_envs, 3)
         rotation = None
         if goal.get("preserve_orientation", False):
-            rotation = self._candidate_rotation
+            rotation = preserved_rotation
         if "quaternion_xyzw" in goal:
             rotation = matrix_from_quat(
                 current.new_tensor(goal["quaternion_xyzw"]).expand(self.num_envs, 4)
@@ -419,8 +577,18 @@ class SkillObjectiveObservation(Functor):
             & (angle <= self.a["orientation_tolerance"]),
         )
 
-    def __call__(self, env: EmbodiedEnv, obs: Any, **kwargs: Any) -> ObservationSample:
-        """Propose this boundary's measured potential and success without advancing history."""
+    def _observe(
+        self,
+        env,
+        *,
+        refresh_contacts=True,
+        measurement_dt=None,
+        previous_relative=None,
+        sampling=False,
+        witness=None,
+        entry=None,
+    ):
+        """Evaluate physical facts without changing committed observation history."""
         skill = self.profile.skill_id
         motion = None
         valid = torch.ones(self.num_envs, device=self.device, dtype=torch.bool)
@@ -447,7 +615,18 @@ class SkillObjectiveObservation(Functor):
             )
         )
         entering = active & (invocation_index != self._invocation_index)
-        self._candidate_index = invocation_index.clone()
+        candidate_index = invocation_index.clone()
+        candidate_height = self._initial_height
+        candidate_baseline = self._initial_height
+        candidate_rotation = self._initial_rotation
+        candidate_support = None
+        held_now = torch.zeros_like(active)
+        stable_now = torch.zeros_like(active)
+        pose = reference_pose = hand_poses = None
+        dt = env.step_dt if measurement_dt is None else measurement_dt
+        previous_relative = (
+            self._previous_relative if previous_relative is None else previous_relative
+        )
         relative = self._previous_relative
         held_time, stable_time = self._held_time, self._stable_time
         if skill == "move_joints":
@@ -468,24 +647,33 @@ class SkillObjectiveObservation(Functor):
             scores = {"position": position, "orientation": orientation}
         else:
             pose = self.object.get_local_pose(to_matrix=True)
-            self._candidate_height = pose[:, 2, 3].clone()
-            self._candidate_baseline = torch.where(
-                entering, pose[:, 2, 3], self._initial_height
+            hand_poses = torch.stack(
+                [
+                    self.robot.get_link_pose(link, to_matrix=True)
+                    for link in self.binding["hand_links"]
+                ],
+                dim=1,
             )
-            self._candidate_rotation = torch.where(
-                entering[:, None, None], pose[:, :3, :3], self._initial_rotation
+            valid &= torch.isfinite(hand_poses).all(dim=(1, 2, 3))
+            candidate_height = pose[:, 2, 3].clone()
+            entry_height, entry_rotation = (
+                (pose[:, 2, 3], pose[:, :3, :3]) if entry is None else entry
             )
-            base_held = torch.where(entering, 0.0, self._held_time)
-            base_stable = torch.where(entering, 0.0, self._stable_time)
+            candidate_baseline = torch.where(
+                entering, entry_height, self._initial_height
+            )
+            candidate_rotation = torch.where(
+                entering[:, None, None], entry_rotation, self._initial_rotation
+            )
             relative = (
                 motion[:, :3, :3].transpose(-1, -2)
                 @ (pose[:, :3, 3] - motion[:, :3, 3])[..., None]
             ).squeeze(-1)
             relative_speed = (
-                torch.linalg.vector_norm(relative - self._previous_relative, dim=-1)
-                / env.step_dt
+                torch.linalg.vector_norm(relative - previous_relative, dim=-1) / dt
             )
-            self.sensor.update()
+            if refresh_contacts:
+                self.sensor.update()
             data = self.sensor.get_data()
             grip, hand_contact, supported, contact_valid = manipulation_contacts(
                 data["user_ids"],
@@ -509,33 +697,37 @@ class SkillObjectiveObservation(Functor):
             ).any(-1)
             contact_valid &= ~self.sensor.dropped_contacts_mask
             reference_pose = self.support.get_local_pose(to_matrix=True)
-            self._candidate_support = (
+            candidate_support = (
                 supported.clone(),
                 contact_valid.clone(),
                 pose.clone(),
                 reference_pose.clone(),
             )
-            supported = self.support_witness.evaluate(
+            supported = (self.support_witness if witness is None else witness).evaluate(
                 supported, contact_valid, pose, reference_pose
             )
             valid &= torch.isfinite(pose).all(dim=(1, 2)) & (
                 ~self._initialized | contact_valid
             )
-            consecutive = step - self._last_step == env.cfg.sim_steps_per_control
             held_now = (
                 grip
                 & (relative_speed <= self.a["relative_speed"])
                 & contact_valid
                 & active
-                & consecutive
             )
+            coverage = torch.ones_like(valid) if sampling else self._interval.coverage()
+            valid &= ~self._initialized | coverage
             held_time = torch.where(
                 fresh,
-                torch.where(held_now, base_held + env.step_dt, 0.0),
+                (
+                    torch.zeros_like(self._held_time)
+                    if sampling
+                    else torch.where(coverage, self._interval.held_time, 0.0)
+                ),
                 self._held_time,
             )
             held = ((held_time >= self.a["hold_duration"] - 1e-7) & held_now).float()
-            pos, rot, near = self._pose_goal(pose)
+            pos, rot, near = self._pose_goal(pose, candidate_rotation)
             pose_score = (pos + rot) / 2
             if skill == "pick_up":
                 reach_distance = torch.linalg.vector_norm(
@@ -547,7 +739,7 @@ class SkillObjectiveObservation(Functor):
                     "lifted": torch.zeros_like(pos),
                 }
                 lifted = (
-                    (pose[:, 2, 3] - self._candidate_baseline) / self.a["lift_height"]
+                    (pose[:, 2, 3] - candidate_baseline) / self.a["lift_height"]
                 ).clamp(0, 1)
                 scores["lifted"] = lifted
                 success = near & held.bool() & (lifted >= 1 - 1e-6)
@@ -557,8 +749,8 @@ class SkillObjectiveObservation(Functor):
             else:
                 object_bounds = _world_bounds(self.object_corners, pose)
                 separation = torch.ones_like(valid)
-                for link, corners in self.hand_corners.items():
-                    link_pose = self.robot.get_link_pose(link, to_matrix=True)
+                for i, corners in enumerate(self.hand_corners.values()):
+                    link_pose = hand_poses[:, i]
                     bounds = _world_bounds(corners, link_pose)
                     gap = torch.maximum(
                         bounds[:, 0] - object_bounds[:, 1],
@@ -575,8 +767,7 @@ class SkillObjectiveObservation(Functor):
                     -1
                 )
                 stable_now = (
-                    consecutive
-                    & released
+                    released
                     & supported
                     & near
                     & (
@@ -592,7 +783,11 @@ class SkillObjectiveObservation(Functor):
                 )
                 stable_time = torch.where(
                     fresh,
-                    torch.where(stable_now, base_stable + env.step_dt, 0.0),
+                    (
+                        torch.zeros_like(self._stable_time)
+                        if sampling
+                        else torch.where(coverage, self._interval.stable_time, 0.0)
+                    ),
                     self._stable_time,
                 )
                 stable = torch.where(
@@ -626,15 +821,58 @@ class SkillObjectiveObservation(Functor):
             (2,),
             values.dtype,
         )
-        self._candidate = (
-            held_time.clone(),
-            stable_time.clone(),
-            relative.clone(),
-            torch.full_like(self._last_step, step),
+        sample = ObservationSample(descriptor, values, valid, (None,) * self.num_envs)
+        return _ObjectiveProposal(
+            sample,
+            held_time,
+            stable_time,
+            relative,
+            step,
+            candidate_index,
+            candidate_height,
+            candidate_baseline,
+            candidate_rotation,
+            candidate_support,
+            held_now,
+            stable_now,
+            None if motion is None else motion.clone(),
+            None if pose is None else pose.clone(),
+            None if reference_pose is None else reference_pose.clone(),
+            None if hand_poses is None else hand_poses.clone(),
         )
-        self._last_sample = ObservationSample(
-            descriptor, values, valid, (None,) * self.num_envs
+
+    def __call__(self, env: EmbodiedEnv, obs: Any, **kwargs: Any) -> ObservationSample:
+        """Propose the canonical result using a complete physical sampling interval."""
+        if self.sensor is not None:
+            self.sensor.update()
+        interval = self._interval
+        proposal = self._observe(
+            env,
+            refresh_contacts=False,
+            witness=None if interval is None else interval.witness,
+            entry=None if interval is None else interval.entry,
         )
+        if interval is not None and interval.last is not None:
+            matching = torch.ones_like(proposal.sample.valid)
+            for name in ("motion", "pose", "reference_pose", "hand_poses"):
+                matching &= (
+                    torch.isclose(
+                        getattr(proposal, name),
+                        getattr(interval.last, name),
+                        atol=1e-6,
+                        rtol=0.0,
+                    )
+                    .flatten(start_dim=1)
+                    .all(-1)
+                )
+            valid = proposal.sample.valid & (~self._initialized | matching)
+            values = proposal.sample.values.clone()
+            values[:, 1] *= valid
+            proposal = replace(
+                proposal, sample=replace(proposal.sample, values=values, valid=valid)
+            )
+        self._candidate = proposal
+        self._last_sample = proposal.sample
         return self._last_sample
 
 

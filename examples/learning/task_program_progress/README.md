@@ -95,15 +95,23 @@ windows. Object, control resource and semantic placement targets must agree with
 the compiled calls. Parallel programs and expert post-policies remain outside
 policy progress support. An omitted skills list selects generic program progress.
 
+Held and stable windows sample every physics substep, so a brief contact at the
+end of a control step does not earn the full control interval. The first valid
+sample establishes a boundary; interrupted evidence restarts the window. Missing
+samples and pose changes after sampling invalidate the affected evidence.
+
 The composition generates additive potential, outcome and milestone RewardCfg
 terms. Existing explicit success/first-achievement terms suppress their matching
 automatic bonuses. `success`, `failure`, `milestone_budget`, `time_cost` and overall
 shaping `weight` may be specified in `reward_composition`; defaults are 10, -10,
 1, 0 and 1. Disabling shaping weight does not disable the physical goal. Every
 skill target and sampling/acceptance parameter is explicit in the effective config.
+Equivalent stage names, occurrence IDs and `call:N` selectors suppress the same
+automatic milestone. Standalone `rl_task.skill` requires `reward_composition`
+with an explicit discount.
 
-Dense formulas accept scalar role scores or error channels with explicit `target`
-and positive `scale`; vector errors reduce by Euclidean norm. Named templates can
+Dense formulas accept scalar role scores or error channels with finite `target`
+and finite positive `scale`; vector errors reduce by Euclidean norm. Named templates can
 be registered by trusted code with `register_skill_reward_profile` and selected
 with `profile`. Extensions can subclass `SkillRewardProfile.potential`; templates
 receive measured tensors and never step simulation. Unknown names and mismatched
@@ -185,7 +193,10 @@ Reports under `outputs/task_program_reward_acceptance` bind the exact controller
 JSON hash, planning configuration hashes, replay evaluation declaration and
 effective reward/objective contracts. Inputs changing after collection reject
 replay. The annotated MP4 displays rewards from that same rollout and freezes
-the last frame for one second to make terminal rewards readable. The focused
+the last frame for one second to make terminal rewards readable. Video hashes,
+captured step indices and the reward-trace hash bind footage to its replay;
+rerunning without `--video` produces no preview, even if old footage is present.
+The focused
 production regression is in `tests/lab/task_program/test_policy_progress.py`.
 
 

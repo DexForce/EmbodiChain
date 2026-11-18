@@ -1442,6 +1442,10 @@ def config_to_cfg(
                 raise ValueError(
                     "Standalone skill and Task Program targets are mutually exclusive"
                 )
+            if env_cfg.rl_task.reward_composition is None:
+                raise ValueError(
+                    "Standalone skill requires reward_composition with an explicit discount"
+                )
         program_rewards = getattr(env_cfg.task_program, "rewards", None)
         if program_rewards is not None:
             combined = deepcopy(program_rewards)

@@ -305,6 +305,15 @@ def compose_reward_terms(
                 type(metric["index"]) is not int or metric["index"] < 0
             ):
                 raise ValueError("Metric index must be a nonnegative integer")
+            if "target" in metric:
+                try:
+                    target = torch.as_tensor(metric["target"], dtype=torch.float64)
+                except (TypeError, ValueError) as error:
+                    raise ValueError(
+                        "Metric target must contain finite real numbers"
+                    ) from error
+                if not bool(torch.isfinite(target).all()):
+                    raise ValueError("Metric target must contain finite real numbers")
             if "scale" in metric:
                 scale = metric["scale"]
                 if (
@@ -418,6 +427,7 @@ class _OutcomeReward(Functor):
 
 def _add_common_rewards(cfg, generated, stages):
     from .rewards import success_reward, program_stage_reward
+    from embodichain.lab.task_program.integrations.progress import _matches_stage
 
     declaration = cfg.rl_task.reward_composition
     explicit = [
@@ -440,7 +450,7 @@ def _add_common_rewards(cfg, generated, stages):
             if any(
                 t.func is program_stage_reward
                 and t.params.get("mode") == "first_achievement"
-                and t.params.get("stage") in (stage.name, stage.segment_id)
+                and _matches_stage(stage, t.params.get("stage"))
                 for t in explicit
             ):
                 continue
