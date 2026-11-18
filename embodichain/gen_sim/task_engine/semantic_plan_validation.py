@@ -752,8 +752,19 @@ def _validate_interpreted_plan(
                     )
                     for n in applicable
                 ):
+                    # Name the nodes and fields so a repair can annotate them.
+                    producers = ", ".join(n["id"] for n in applicable) or (
+                        "none: add the producing call for this object"
+                    )
+                    relation = (
+                        ""
+                        if step["relation"] == "none"
+                        else f" and semantic.relation {step['relation']!r}"
+                    )
                     raise ValueError(
-                        f"Requested target/relation missing on the semantic producer for {step_id}.{obj}"
+                        f"Requested target/relation missing on the semantic producer for {step_id}.{obj}: "
+                        f"set semantic.reference to one of {sorted(target)}{relation} "
+                        f"on its producing node ({producers})"
                     )
         for key in (
             "relation",
@@ -807,7 +818,12 @@ def _validate_interpreted_plan(
         if step.get("terminal_behavior") == "hold":
             allowed_held.update(grounding["bindings"].get(f"{step['id']}.object", []))
     if set(held) - allowed_held:
-        raise ValueError("Task ends holding objects that must be released")
+        # Name the objects so a repair adds the missing release.
+        raise ValueError(
+            "Task ends holding objects that must be released: add a place for "
+            f"{sorted(set(held) - allowed_held)} after its last use, by the arm "
+            "that holds it"
+        )
     referenced = {uid for values in grounding["bindings"].values() for uid in values}
     referenced.update(
         a[key]

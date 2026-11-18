@@ -114,6 +114,8 @@ class SemanticCallContract:
 
 
 _RELATIONS = ["on", "above", "behind", "front_of", "left_of", "right_of"]
+# Built-in calls are named by their kind; every other call is registered.
+_CALL_KINDS = ("pick", "place", "hand_over", "move_held_object", "registered")
 
 
 def semantic_planning_catalog(
@@ -327,6 +329,28 @@ def semantic_planning_catalog(
     return {"schema_version": "semantic_planning_catalog/v1", "calls": deepcopy(calls)}
 
 
+def _envelope_hint(
+    call: Mapping[str, Any], cid: str, spec: Mapping[str, Any], args: object
+) -> str:
+    """Name a nested or misplaced call envelope and show the expected shape."""
+    keys = ", ".join(f'"{key}": ...' for key in spec["required"])
+    if call.get("kind") == "registered":
+        shape = f'{{"kind": "registered", "call_id": "{cid}", "arguments": {{{keys}}}}}'
+        if type(args) is dict and set(args) & {"kind", "call_id", "arguments"}:
+            return (
+                '. The envelope is nested: "arguments" must hold the argument '
+                f"keys themselves. Write {shape}"
+            )
+        return f". Write {shape}"
+    shape = f'{{"kind": "{cid}", {keys}}}'
+    if type(args) is dict and set(args) & {"call_id", "arguments"}:
+        return (
+            f". A built-in {cid} call takes its arguments at the top level, "
+            f'without "call_id" or "arguments". Write {shape}'
+        )
+    return f". Write {shape}"
+
+
 def validate_semantic_call_payload(
     call: dict[str, Any],
     *,
@@ -341,10 +365,29 @@ def validate_semantic_call_payload(
     Raises:
         ValueError: Unknown calls, extra/missing arguments or invalid types.
     """
-    cid = call.get("call_id") if call.get("kind") == "registered" else call.get("kind")
-    spec = semantic_planning_catalog(contracts)["calls"].get(cid)
+    kind = call.get("kind")
+    cid = call.get("call_id") if kind == "registered" else kind
+    catalog = semantic_planning_catalog(contracts)["calls"]
+    registered = sorted(k for k in catalog if k not in _CALL_KINDS)
+    if kind not in _CALL_KINDS:
+        # Name the registered call so that a repair can rewrite the envelope.
+        named = kind if kind in registered else call.get("call_id")
+        hint = (
+            f'; write {{"kind": "registered", "call_id": "{named}", '
+            '"arguments": {...}}'
+            if named in registered
+            else ""
+        )
+        raise ValueError(
+            f"Unknown semantic call kind {kind!r}: use one of "
+            f"{', '.join(_CALL_KINDS)}{hint}"
+        )
+    spec = catalog.get(cid)
     if spec is None:
-        raise ValueError(f"Unknown semantic call: {cid}")
+        raise ValueError(
+            f"Unknown semantic call: {cid}. Registered call_id must be one of "
+            f"{registered}"
+        )
     if call.get("kind") == "registered":
         if set(call) - {"kind", "call_id", "arguments", "resources"}:
             raise ValueError(f"{cid}: unexpected envelope fields")
@@ -358,6 +401,7 @@ def validate_semantic_call_payload(
     ):
         raise ValueError(
             f"{cid} arguments must contain only {', '.join(repr(k) for k in spec['required'])}; optional keys {list(spec['optional'])}. Received keys: {list(args) if type(args) is dict else type(args).__name__}"
+            + _envelope_hint(call, cid, spec, args)
         )
     for key, value in args.items():
         if (
@@ -384,7 +428,13 @@ def validate_semantic_call_payload(
         else:
             valid = type(value) is str and bool(value) and value == value.strip()
         if not valid:
-            raise ValueError(f"{cid}.{key}: invalid argument {value!r}")
+            if rule == "target_ref":
+                expected = '; write {"kind": "target_ref", "target": "<target id>"}'
+            elif isinstance(rule, list):
+                expected = f"; use one of {rule}"
+            else:
+                expected = "; write a non-empty string ID"
+            raise ValueError(f"{cid}.{key}: invalid argument {value!r}{expected}")
     if (
         cid == "place"
         and sum(args.get(key) is not None for key in ("on", "inside", "at")) != 1

@@ -1287,7 +1287,11 @@ def _instruction_repair_guidance(error: Exception) -> str:
         "in 'place it to the left of the striped pedestal', object is the earlier "
         "step_result for 'it', while target selects the striped pedestal; target "
         "must not use kind=none. Use target kind=step_result only when the "
-        "reference object itself is exactly the result of a prior step.\n"
+        "reference object itself is exactly the result of a prior step. "
+        "When the object is picked up, reoriented and kept in the gripper, and "
+        "the instruction names where it is held, for example 'hold it upright "
+        "above the table', target selects that named object (the table) with "
+        "terminal_behavior=hold.\n"
     )
 
 
