@@ -1751,7 +1751,7 @@ complete HTML/JSON/JSONL bundle without opening a physics World. Comparisons
 require matching task, robot installation and configured scene domains.
 
 embodichain.lab.expansion.distribution
--------------------------------------
+--------------------------------------
 
 .. currentmodule:: embodichain.lab.expansion.distribution
 
