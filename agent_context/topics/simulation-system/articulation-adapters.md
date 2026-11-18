@@ -52,6 +52,10 @@ Newton joint descriptor before configured overlays. Passive damping is
 independent of the velocity target gain `joint_drive_props.damping`;
 none/effort modes clear PD gains without removing source dissipation. Explicit
 descriptor values, including zero, retain ownership over source defaults.
+On Default, a partial overlay `joint_drive_props` completes omitted drive fields
+from the native instance. A passive URDF joint can therefore keep a zero
+`max_effort`, and its `<dynamics friction>`, authored in N or N·m, becomes the
+joint friction coefficient. Declare these fields when a task depends on them.
 URDF collision geometry remains owned by the native source: resolved
 `LinkDesc.collisions` may contain only attribute overlays and is not a count
 of physical colliders.
