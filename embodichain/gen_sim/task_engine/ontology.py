@@ -146,7 +146,9 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
         "E1": _contract(
             "E1",
             "Pick, move, and place one object at a symbolic relation; "
-            "terminal_behavior=hold keeps it held at that relation instead.",
+            "terminal_behavior=hold keeps it held at that relation. An explicit "
+            "vertical lift above the initial pose uses direction=up, lift_height_m, "
+            "terminal_behavior=hold, and no target or relation.",
             frozenset(
                 {
                     "target",
@@ -155,6 +157,8 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
                     "orientation_goal",
                     "layout",
                     "axis",
+                    "direction",
+                    "lift_height_m",
                     "terminal_behavior",
                 }
             ),

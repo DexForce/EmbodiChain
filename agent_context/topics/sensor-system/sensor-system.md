@@ -74,15 +74,19 @@ Builtin camera/contact constructors retain their owner adapters. Existing
 use the registry. Context factories returning Camera instances also use manager
 parent binding and cleanup on attachment failure. StereoCamera subclasses and
 aliases remain unsupported for Gaussian capture, regardless of creation order.
-USD-mounted cameras using context or callable factories remain queued until
-explicit `prepare()`, allowing multiple USD declarations before finalization.
-Pending names are reserved; factory failures retain declarations for retry and
-removal cancels them. Query constructed sensor handles after preparation.
-Robot removal cancels only pending cameras whose qualified parent belongs to
-that robot; a canceled sensor UID may be reused by a different owner.
-Generalized non-camera mounting, sampling periods and output
-descriptors are separate runtime-contract work, not guarantees of this initial
-extension path. The independently installable example and usage instructions
+USD-mounted context-backed sensors and cameras using callable factories remain
+queued until explicit `prepare()`, allowing multiple USD declarations before
+finalization. Pending names are reserved; factory failures retain declarations
+for retry and removal cancels them. Query constructed sensor handles after
+preparation. Robot removal cancels pending sensors whose qualified parent
+belongs to that robot. A canceled sensor UID may be reused by a different owner.
+
+Context-backed sensors can declare a physical `mount` and read the current
+arena-relative transform through `BaseSensor.get_mount_pose()`. Allocate
+topology-scoped resources in `on_bind()` and release them in `on_unbind()`.
+The manager calls these around scene changes and removal.
+
+The independently installable example and usage instructions
 live in
 [external joint encoder](../../../examples/sim/sensors/external_joint_encoder/README.md).
 
@@ -101,13 +105,14 @@ their per-instance native paths. Shared image targets already batch their view
 buffers; ordered publication keeps preceding parameter writes visible to the
 next photograph. Stereo calibration and logical center poses remain sensor-owned.
 
-Robot-mounted cameras are declared in `RobotCfg.sensors` with robot-local
-parent links. `SimulationManager.add_robot()` initializes them only when the
+Robot-mounted sensors are declared in `RobotCfg.sensors` with robot-local
+parent links. Cameras use their existing extrinsics; context-backed nonvisual
+sensors use `mount`. `SimulationManager.add_robot()` initializes them only when the
 robot's sensor switch is enabled, qualifies parents using the final robot UID,
 and registers them through `add_sensor()`. Sensor UIDs remain scene-wide;
 multiple robots need distinct sensor UIDs. Camera creation and rebuilds retain
 the same manager-owned lifecycle. Removing a robot destroys its automatically
-initialized cameras before rebuilding the physical scene.
+initialized mounted sensors before rebuilding the physical scene.
 
 For a configured Gym deployment, the manager plans Scene-owned groups before
 creating robot-mounted and independent cameras. Cameras with matching

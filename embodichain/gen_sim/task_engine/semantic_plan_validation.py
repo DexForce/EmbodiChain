@@ -675,6 +675,20 @@ def _validate_interpreted_plan(
                     f"{step_id} requires exactly one semantic producer per declared subject, got {len(producers)} for {subject}"
                 )
             producer = producers[0]
+            if "lift_height_m" in step:
+                lift_annotation = annotations[producer["id"]]
+                height = lift_annotation["intent"].get("lift_height_m")
+                if (
+                    lift_annotation["reference"] is not None
+                    or lift_annotation["relation"] not in (None, "none")
+                    or lift_annotation["intent"].get("direction") != "up"
+                    or type(height) not in {int, float}
+                    or height != step["lift_height_m"]
+                ):
+                    raise ValueError(
+                        f"{step_id} requires a targetless upward held transport "
+                        f"with semantic.intent.lift_height_m={step['lift_height_m']}."
+                    )
             if (
                 held_goal != "none"
                 and annotations[producer["id"]]["intent"].get("orientation_goal")

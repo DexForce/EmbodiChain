@@ -1174,14 +1174,25 @@ def test_relative_placement_validators_follow_the_selected_lowerer(
         assert lowerer["routes"][0]["world_displacement"] == validator["displacement"]
 
 
-def test_held_upright_without_reference_validates_its_terminal_pose(
-    run_cfg: _RunCfg, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("lift_height_m", [None, 0.10])
+def test_held_without_reference_validates_its_terminal_pose(
+    run_cfg: _RunCfg, monkeypatch: pytest.MonkeyPatch, lift_height_m: float | None
 ) -> None:
+    intent = {"orientation_goal": "upright", "terminal_behavior": "hold"}
     instruction = "Hold the cube upright"
+    if lift_height_m is not None:
+        instruction = (
+            "Lift the cube vertically by more than 10 centimetres and keep it held"
+        )
+        intent = {
+            "direction": "up",
+            "lift_height_m": lift_height_m,
+            "terminal_behavior": "hold",
+        }
     semantic = dict(
         reference=None,
         relation="none",
-        intent={"orientation_goal": "upright", "terminal_behavior": "hold"},
+        intent=intent,
     )
     hold = dict(
         kind="registered",
@@ -1215,11 +1226,10 @@ def test_held_upright_without_reference_validates_its_terminal_pose(
         "bindings": {"step_01.object": ["source"]},
     }
     step = _step(
-        task_type="E2",
+        task_type="E2" if lift_height_m is None else "E1",
         target=_selector(),
         relation="none",
-        orientation_goal="upright",
-        terminal_behavior="hold",
+        **intent,
     )
     run_cfg = _RunCfg(**{**run_cfg.to_dict(), "instruction": instruction})
 
@@ -1229,8 +1239,11 @@ def test_held_upright_without_reference_validates_its_terminal_pose(
 
     # A lift validator would measure from the transport start, after Pick has
     # already lifted the object; the held pose itself is the terminal goal.
-    near, upright = program["program"]["items"][1]["validators"]
-    assert (near["kind"], upright["kind"]) == ("object_near_target", "object_upright")
+    near, *other = program["program"]["items"][1]["validators"]
+    assert near["kind"] == "object_near_target"
+    assert [item["kind"] for item in other] == (
+        ["object_upright"] if lift_height_m is None else []
+    )
     (lowerer,) = integration["runtime_services"]["registered_semantic_lowerers"]
     pose = lowerer["routes"][0]["pose"]
     assert program["targets"][near["target"]] == {
@@ -1238,6 +1251,11 @@ def test_held_upright_without_reference_validates_its_terminal_pose(
         "position": pose["position"],
         "quaternion_xyzw": pose["quaternion_xyzw"],
     }
+    if lift_height_m is not None:
+        # Match the initial object origin of the synthetic scene.
+        x, y, z = pose["position"]
+        assert [x, y] == pytest.approx([0.40, -0.12])
+        assert z - near["position_tolerance"] > 0.34 + lift_height_m
 
 
 def test_run_config_rejects_output_inside_the_reused_task(run_cfg: _RunCfg) -> None:
