@@ -49,6 +49,7 @@ from embodichain.lab.sim.atomic_skills import (
     ObjectSemantics,
     PickUp,
     PickUpOptions,
+    Place as PlaceSkill,
     PlaceGoal,
     PlaceOptions,
     PlanningContext,
@@ -142,6 +143,7 @@ _MOTION_CAPABILITIES = frozenset(
     }
 )
 _PICK_TARGET = PickUp.descriptor()
+_PLACE_TARGET = PlaceSkill.descriptor()
 
 
 def _skill_option_templates(*, registered: bool = False) -> dict[str, SkillOptions]:
@@ -330,6 +332,40 @@ class _ReleasingInspectLowerer(_InspectLowerer):
                             if self.phase_checks
                             else {}
                         ),
+                    ),
+                ),
+            ),
+        )
+
+
+class _PlacingInspectLowerer(RegisteredSemanticLowerer):
+    """Registered test call that sets the held cube down through ``Place``."""
+
+    call_id: ClassVar[str] = "vendor.inspect"
+    target_descriptor: ClassVar[SkillDescriptor] = _PLACE_TARGET
+    effect_contract_kind: ClassVar[SemanticEffectKind] = SemanticEffectKind.RELEASE
+
+    def lower(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        context: PlanningContext,
+        bound: object,
+        option_template: SkillOptions,
+    ) -> SemanticLowering:
+        del call, context, bound, option_template
+        return SemanticLowering(
+            goal=PlaceGoal(xpos=SceneEntityPose("table")),
+            registered_effect=RegisteredSemanticEffect(
+                effect_kind=SemanticEffectKind.RELEASE,
+                held_objects=(
+                    RegisteredHeldObjectEffect(
+                        expectation_id="primary",
+                        relation=HeldObjectRelation.DETACHED,
+                        object_id="cube",
+                        slot_id="primary",
+                        release_before_segment="retract",
+                        retain_during_segments=("approach",),
                     ),
                 ),
             ),
@@ -653,18 +689,19 @@ def _integration(
     registry: SceneRegistry,
     *,
     registered: bool = False,
+    registered_target: SkillDescriptor = _PICK_TARGET,
     profile: RobotSkillProfile | None = None,
     supports_dynamic_collision_world: bool = False,
 ) -> tuple[SemanticIntegrationManifest, AtomicSkillEngine]:
     selected_profile = _profile(registered=registered) if profile is None else profile
     catalog = builtin_semantic_call_catalog()
     if registered:
-        assert _PICK_TARGET.binding_contract is not None
+        assert registered_target.binding_contract is not None
         catalog = catalog.with_descriptor(
             SemanticCallDescriptor(
                 call_id="vendor.inspect",
                 spec_type=RegisteredSemanticCall,
-                target_descriptor=_PICK_TARGET,
+                target_descriptor=registered_target,
             )
         )
     manifest = SemanticIntegrationManifest(
@@ -682,6 +719,7 @@ def _compiler(
     registry: SceneRegistry,
     *,
     registered: bool = False,
+    registered_target: SkillDescriptor = _PICK_TARGET,
     relation_grounders: tuple[RelationTargetGrounder, ...] = (
         _FrameRelationGrounder(),
     ),
@@ -694,6 +732,7 @@ def _compiler(
     manifest, engine = _integration(
         registry,
         registered=registered,
+        registered_target=registered_target,
         profile=profile,
         supports_dynamic_collision_world=supports_dynamic_collision_world,
     )
@@ -1890,6 +1929,63 @@ def test_registered_release_requires_object_held_in_every_eligible_row(
         )
     else:
         assert grounded.effect_gates == grounded.effect_guards == ()
+
+
+def test_registered_place_release_gate_checks_only_gripper_opening() -> None:
+    """A call lowered to Place may retreat once the hand has opened.
+
+    The object still sits between the open fingers at the landing pose, so the
+    gate before ``retract`` cannot require the object to have moved away from
+    the hand. Separation is verified by the terminal effect.
+    """
+    registry, _ = _scene_registry()
+    templates = _skill_option_templates(registered=True)
+    templates["vendor.inspect"] = PlaceOptions()
+    profile = _profile(
+        preset=_preset(
+            "safe",
+            registered=True,
+            skill_option_templates=templates,
+            effect_monitors={
+                "vendor.inspect": EffectMonitorRef(
+                    COMPOSITE_EFFECT_MONITOR_ID,
+                    COMPOSITE_EFFECT_MONITOR_REVISION,
+                )
+            },
+        )
+    )
+    compiler, _ = _compiler(
+        registry,
+        registered=True,
+        registered_target=_PLACE_TARGET,
+        registered_lowerers=(_PlacingInspectLowerer(),),
+        profile=profile,
+    )
+    pick_compiler, _ = _compiler(registry)
+    pick_workflow = pick_compiler.analyze((Pick(object=SceneObjectRef("cube")),))
+    semantics = pick_compiler.ground(
+        pick_workflow,
+        0,
+        _context(registry),
+    ).invocation.goal.semantics
+    context = _held_context(registry, semantics, torch.eye(4).repeat(2, 1, 1))
+    workflow = compiler.analyze((RegisteredSemanticCall(call_id="vendor.inspect"),))
+
+    grounded = compiler.ground(workflow, 0, context)
+
+    assert grounded.effect_spec is not None
+    assert grounded.effect_spec.skill_id == "place"
+    assert any(
+        isinstance(clause, PoseRelationClause)
+        and clause.expectation is PoseRelationExpectation.SEPARATED
+        for clause in grounded.effect_spec.clauses
+    )
+    (gate,) = grounded.effect_gates
+    assert gate.gate_id == "primary_released"
+    assert gate.segment_name == "retract"
+    (gate_constraint,) = gate.effect_spec.clauses
+    assert isinstance(gate_constraint, BinaryEffectClause)
+    assert gate_constraint.expected is False
 
 
 def test_ground_wraps_effect_monitor_factory_contract_failure_with_path() -> None:
