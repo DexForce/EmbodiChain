@@ -2281,14 +2281,23 @@ class SimulationManager:
         *,
         rendered_camera_uids: set[str] | None = None,
     ) -> None:
-        for sensor in getattr(self, "_sampling_sensors", {}).get(phase, {}).values():
-            if (
-                rendered_camera_uids is not None
-                and isinstance(sensor, Camera)
-                and sensor.uid not in rendered_camera_uids
+        previous_reads = getattr(self, "_hydroelastic_surface_reads", None)
+        self._hydroelastic_surface_reads = {}
+        try:
+            for sensor in (
+                getattr(self, "_sampling_sensors", {}).get(phase, {}).values()
             ):
-                continue
-            sensor._sample(boundary, self.simulation_time, self.physics_step_index, dt)
+                if (
+                    rendered_camera_uids is not None
+                    and isinstance(sensor, Camera)
+                    and sensor.uid not in rendered_camera_uids
+                ):
+                    continue
+                sensor._sample(
+                    boundary, self.simulation_time, self.physics_step_index, dt
+                )
+        finally:
+            self._hydroelastic_surface_reads = previous_reads
 
     def _plan_camera_groups(self, configs: Sequence[SensorCfg]) -> None:
         """Reserve startup camera slots before the first sensor is created."""
