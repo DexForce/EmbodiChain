@@ -35,6 +35,102 @@ from embodichain.extensions.robots import FlexivRizon4SCfg
 
 
 @pytest.mark.no_sim
+def test_rizon_preserves_explicit_usd_source(tmp_path: Path, monkeypatch) -> None:
+    from embodichain.lab.sim.cfg.source import _asset_file_path
+    from embodichain.extensions.robots.flexiv.rizon4s import cfg as module
+
+    arm = tmp_path / "arm.urdf"
+    arm.write_text('<robot name="arm"><link name="base_link"/></robot>')
+    usd = tmp_path / "robot.usda"
+    usd.write_text("#usda 1.0\n")
+    monkeypatch.setattr(module, "get_data_path", lambda name: str(arm))
+    robot = FlexivRizon4SCfg.from_dict(
+        {"fpath": None, "source": {"file_path": str(usd)}, "solver_cfg": {}}
+    )
+    assert robot.fpath is None
+    assert _asset_file_path(robot) == str(usd)
+
+
+@pytest.mark.no_sim
+def test_rizon_composition_keeps_sensor_and_component_prefix(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from embodichain.extensions.robots.flexiv.rizon4s import cfg as module
+
+    arm = tmp_path / "arm.urdf"
+    arm.write_text(
+        '<robot name="arm"><link name="base_link"/><link name="tip"/>'
+        '<joint name="fixed" type="fixed"><parent link="base_link"/>'
+        '<child link="tip"/></joint></robot>'
+    )
+    sensor = tmp_path / "camera.urdf"
+    sensor.write_text('<robot name="camera"><link name="sensor_link"/></robot>')
+    monkeypatch.setattr(module, "get_data_path", lambda name: str(arm))
+    robot = FlexivRizon4SCfg.from_dict(
+        {
+            "fpath": str(arm),
+            "urdf_cfg": {
+                "fpath_prefix": str(tmp_path / "assembled"),
+                "component_prefix": [["arm", "custom_"]],
+                "sensors": [
+                    {
+                        "sensor_name": "camera",
+                        "sensor_source": str(sensor),
+                        "parent_component": "arm",
+                        "parent_link": "tip",
+                    }
+                ],
+            },
+        }
+    )
+    assert dict(robot.urdf_cfg.component_prefix)["arm"] == "custom_"
+    assert robot.urdf_cfg.sensors[0]["sensor_name"] == "camera"
+    assert robot.solver_cfg["arm"].urdf_path == robot.fpath
+    assert any(
+        "sensor_link" in link.get("name", "")
+        for link in ET.parse(robot.fpath).findall("link")
+    )
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("typed", [False, True])
+def test_rizon_preserves_explicit_calibrated_solver_urdf(
+    tmp_path: Path, monkeypatch, typed: bool
+) -> None:
+    from embodichain.extensions.robots.flexiv.rizon4s import cfg as module
+    from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
+
+    arm = tmp_path / "simulation.urdf"
+    arm.write_text('<robot name="arm"><link name="base_link"/></robot>')
+    calibrated = tmp_path / "calibrated.urdf"
+    calibrated.write_text(
+        '<robot name="calibrated"><link name="calibrated_base"/>'
+        '<link name="calibrated_tip"/><joint name="joint1" type="revolute">'
+        '<parent link="calibrated_base"/><child link="calibrated_tip"/>'
+        '<origin xyz="0 0 0.4"/><axis xyz="0 0 1"/>'
+        '<limit lower="-2" upper="2" effort="1" velocity="1"/></joint></robot>'
+    )
+    monkeypatch.setattr(module, "get_data_path", lambda name: str(arm))
+    options = dict(
+        urdf_path=str(calibrated),
+        root_link_name="calibrated_base",
+        end_link_name="calibrated_tip",
+    )
+    solver = SSIKSolverCfg(**options) if typed else options
+    robot = FlexivRizon4SCfg.from_dict({"solver_cfg": {"arm": solver}})
+    assert robot.solver_cfg["arm"].urdf_path == str(calibrated)
+    assert robot.fpath == str(arm)
+    chain = robot.build_pk_serial_chain()["arm"]
+    pose = chain.forward_kinematics(torch.zeros(1, 1)).get_matrix()
+    torch.testing.assert_close(pose[0, :3, 3], torch.tensor([0.0, 0.0, 0.4]))
+    assert FlexivRizon4SCfg.from_dict(robot.to_dict()).solver_cfg[
+        "arm"
+    ].urdf_path == str(calibrated)
+    if typed:
+        assert solver.urdf_path == str(calibrated)
+
+
+@pytest.mark.no_sim
 def test_downloaded_asset_preserves_official_parameters() -> None:
     """The cached download contains complete meshes and source inertials."""
     root = Path(FlexivRizon4S().extract_dir)
@@ -74,7 +170,10 @@ def test_downloaded_asset_preserves_official_parameters() -> None:
 
 
 @pytest.mark.no_sim
-def test_roundtrip_and_custom_asset_keep_kinematic_source(tmp_path: Path) -> None:
+@pytest.mark.parametrize("explicit_null", [False, True])
+def test_roundtrip_and_custom_asset_keep_kinematic_source(
+    tmp_path: Path, explicit_null: bool
+) -> None:
     """A custom URDF changes both simulation and PK, and overrides round-trip."""
     original = FlexivRizon4SCfg.from_dict({})
     source = ET.parse(original.fpath)
@@ -85,19 +184,31 @@ def test_roundtrip_and_custom_asset_keep_kinematic_source(tmp_path: Path) -> Non
     origin.set("xyz", " ".join(str(x) for x in translation))
     custom = tmp_path / "custom.urdf"
     source.write(custom)
+    solver = {"num_samples": 4}
+    if explicit_null:
+        solver["urdf_path"] = None
     cfg = FlexivRizon4SCfg.from_dict(
         {
             "fpath": str(custom),
+            "urdf_cfg": {
+                "components": [
+                    {
+                        "component_type": "arm",
+                        "urdf_path": str(custom),
+                        "params": {"color": "#e0e0e0"},
+                    }
+                ]
+            },
             "joint_drive_props": {"stiffness": {"joint[1-2]": 2500.0}},
-            "solver_cfg": {"arm": {"num_samples": 4}},
+            "solver_cfg": {"arm": solver},
         }
     )
     cfg.validate()
-    assert (
-        cfg._pk_urdf_path == cfg.fpath == cfg.solver_cfg["arm"].urdf_path == str(custom)
-    )
+    assert cfg._pk_urdf_path == cfg.fpath == str(custom)
+    assert cfg.solver_cfg["arm"].urdf_path == (None if explicit_null else str(custom))
     assert cfg.joint_drive_props.stiffness["joint[1-2]"] == 2500.0
     assert cfg.solver_cfg["arm"].num_samples == 4
+    assert cfg.urdf_cfg.components["arm"]["params"] == {"color": "#e0e0e0"}
     assert original.joint_drive_props.stiffness["joint[1-2]"] == 4000.0
     snapshot = cfg.to_dict()
     assert FlexivRizon4SCfg.from_dict(snapshot).to_dict() == snapshot

@@ -2263,7 +2263,32 @@ class SimulationManager:
                 self._world.render_camera_group(group_ids)
                 for sensor in cameras:
                     sensor._snapshot_render_metadata()
+            if getattr(self, "_sampling_sensors", {}).get("render"):
+                self._sensor_frame_index = getattr(self, "_sensor_frame_index", 0) + 1
+                self._sample_managed_sensors(
+                    "render",
+                    self._sensor_frame_index,
+                    0.0,
+                    rendered_camera_uids={camera.uid for camera in cameras},
+                )
         self._log_scene_summary()
+
+    def _sample_managed_sensors(
+        self,
+        phase: str,
+        boundary: int,
+        dt: float,
+        *,
+        rendered_camera_uids: set[str] | None = None,
+    ) -> None:
+        for sensor in getattr(self, "_sampling_sensors", {}).get(phase, {}).values():
+            if (
+                rendered_camera_uids is not None
+                and isinstance(sensor, Camera)
+                and sensor.uid not in rendered_camera_uids
+            ):
+                continue
+            sensor._sample(boundary, self.simulation_time, self.physics_step_index, dt)
 
     def _plan_camera_groups(self, configs: Sequence[SensorCfg]) -> None:
         """Reserve startup camera slots before the first sensor is created."""
@@ -2388,6 +2413,10 @@ class SimulationManager:
                     self._visualization_sim_step += 1
                     self._visualization_sim_time += physics_dt
                     self._pending_record_dt += physics_dt
+                    if getattr(self, "_sampling_sensors", {}).get("physics"):
+                        self._sample_managed_sensors(
+                            "physics", self.physics_step_index, physics_dt
+                        )
                     if after_substep is not None:
                         with self.profiler.section("after_substep"):
                             after_substep(physics_dt)
@@ -4922,9 +4951,12 @@ class SimulationManager:
                 f"ContactSensor is not supported by the {self.physics.name} "
                 "physics backend."
             )
-        if legacy_factory and getattr(sensor_cfg, "mount", None) is not None:
+        if legacy_factory and (
+            getattr(sensor_cfg, "mount", None) is not None
+            or getattr(sensor_cfg, "sample_phase", None) is not None
+        ):
             raise TypeError(
-                "Physical mounts require a context-backed sensor registration."
+                "Physical mounts and scheduled sampling require a context-backed sensor registration."
             )
         if not legacy_factory:
             if not isinstance(sensor_cfg, registration.config_cls):
@@ -4932,6 +4964,8 @@ class SimulationManager:
                     f"Sensor {sensor_type!r} requires {registration.config_cls.__name__}."
                 )
             sensor_cfg.validate()
+            if sensor_cfg.sample_phase == "render":
+                self._require_native_renderer("Render-sampled sensors")
             self.prepare()
             if (
                 isinstance(sensor_cfg, CameraCfg)
@@ -5029,6 +5063,10 @@ class SimulationManager:
                 self._release_sensor(sensor)
                 raise
             self.__dict__.setdefault("_managed_sensors", {})[uid] = sensor
+            if sensor.cfg.sample_phase is not None:
+                self.__dict__.setdefault("_sampling_sensors", {}).setdefault(
+                    sensor.cfg.sample_phase, {}
+                )[uid] = sensor
         self._sensors[uid] = sensor
         self.notify_visualization_topology_changed()
         return sensor
@@ -5151,6 +5189,8 @@ class SimulationManager:
         if uid in self._sensors:
             sensor = self._sensors.pop(uid)
             getattr(self, "_managed_sensors", {}).pop(uid, None)
+            for sensors in getattr(self, "_sampling_sensors", {}).values():
+                sensors.pop(uid, None)
             self._release_sensor(sensor)
             self.notify_visualization_topology_changed()
             return True
@@ -6531,6 +6571,8 @@ class SimulationManager:
                 for uid, sensor in self._sensors.items():
                     if uid not in excluded_uids and uid not in excluded_sensor_uids:
                         sensor.reset(reset_ids)
+                        if isinstance(sensor, BaseSensor):
+                            sensor._invalidate_samples(reset_ids)
             return
         articulation_uids = tuple(self._robots) + tuple(self._articulations)
         reset_articulation_uids = tuple(
@@ -6595,6 +6637,8 @@ class SimulationManager:
         for uid, sensor in self._sensors.items():
             if uid not in excluded_uids and uid not in excluded_sensor_uids:
                 sensor.reset(env_ids)
+                if isinstance(sensor, BaseSensor):
+                    sensor._invalidate_samples(env_ids)
         if use_coordinated_newton_clear:
             self._clear_newton_articulation_dynamics(newton_articulation_batch)
 

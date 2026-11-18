@@ -31,8 +31,9 @@ from embodichain.lab.task_program.integrations.progress import (
     _validate_policy_action_coverage,
 )
 
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 _TASK = (
-    Path(__file__).resolve().parents[4]
+    _REPO_ROOT
     / "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.policy.cobotmagic.yaml"
 )
 
@@ -173,8 +174,7 @@ def test_strict_inspector_checks_policy_authority_without_registering(tmp_path):
 
     inspect = runpy.run_path(
         str(
-            _TASK.parents[7]
-            / ".agents/skills/add-task-program/scripts/inspect_deployment.py"
+            _REPO_ROOT / ".agents/skills/add-task-program/scripts/inspect_deployment.py"
         )
     )["inspect_deployment"]
     before = (set(REGISTERED_ENVS), set(gymnasium.envs.registry))

@@ -24,6 +24,8 @@ from __future__ import annotations
 from .base_sensor import BaseSensor, SensorCfg
 from .context import SensorClock, SensorStateProvider, SensorContext
 from .camera import Camera, CameraCfg
+from .state import JointEncoder, JointEncoderCfg, FrameTransform, FrameTransformCfg
+from .inertial import PVA, PVACfg, IMU, IMUCfg
 from .stereo import StereoCamera, StereoCameraCfg
 from .contact import (
     ContactSensor,
@@ -40,6 +42,14 @@ from .registry import (
 
 __all__ = [
     "BaseSensor",
+    "PVA",
+    "PVACfg",
+    "IMU",
+    "IMUCfg",
+    "JointEncoder",
+    "JointEncoderCfg",
+    "FrameTransform",
+    "FrameTransformCfg",
     "SensorCfg",
     "SensorClock",
     "SensorStateProvider",
@@ -68,3 +78,9 @@ for _name, _config, _factory in (
 ):
     register_sensor(SensorRegistration(_name, _config, _factory, legacy_factory=True))
     _builtin_sensor_factories[_name] = _factory
+
+register_sensor(SensorRegistration("JointEncoder", JointEncoderCfg, JointEncoder))
+register_sensor(SensorRegistration("FrameTransform", FrameTransformCfg, FrameTransform))
+
+register_sensor(SensorRegistration("PVA", PVACfg, PVA))
+register_sensor(SensorRegistration("IMU", IMUCfg, IMU))

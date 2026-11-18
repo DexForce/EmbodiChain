@@ -84,8 +84,21 @@ def hub(tmp_path, monkeypatch):
     return index, calls
 
 
-def test_download_materializes_one_model_and_reuses_its_revision(tmp_path, hub):
-    _, calls = hub
+@pytest.mark.parametrize(
+    "declared_package", ["embodichain.extensions.tasks", "embodichain_tasks"]
+)
+def test_download_materializes_one_model_and_reuses_its_revision(
+    tmp_path, hub, monkeypatch, declared_package
+):
+    index, calls = hub
+    data = json.loads(index.read_text())
+    data["models"][MODEL]["task_package"] = declared_package
+    index.write_text(json.dumps(data))
+    monkeypatch.setattr(
+        policy_assets.importlib.util,
+        "find_spec",
+        lambda name: object() if name == "embodichain.extensions.tasks" else None,
+    )
     root, source = policy_assets.download_pretrained_policy(MODEL, cache_dir=tmp_path)
     manifest = RunManifest.load(root)
     checkpoint = manifest.select_checkpoint()[1]
@@ -183,6 +196,18 @@ def test_invalid_model_id_is_rejected_before_network(model_id, hub):
             },
             "task package",
         ),
+        (
+            {
+                "schema_version": 1,
+                "models": {
+                    MODEL: {
+                        "format": "embodichain-rl-run-v1",
+                        "task_package": "embodichain..tasks",
+                    }
+                },
+            },
+            "task package",
+        ),
     ],
 )
 def test_invalid_index_does_not_download_weights(value, message, hub):
@@ -193,9 +218,18 @@ def test_invalid_index_does_not_download_weights(value, message, hub):
     assert [name for name, _ in calls] == ["index.json"]
 
 
-def test_missing_task_package_is_reported_before_weights(hub, monkeypatch):
+@pytest.mark.parametrize("missing_parent", [False, True])
+def test_missing_task_package_is_reported_before_weights(
+    hub, monkeypatch, missing_parent
+):
     _, calls = hub
-    monkeypatch.setattr(policy_assets.importlib.util, "find_spec", lambda name: None)
+
+    def find_spec(name):
+        if missing_parent:
+            raise ModuleNotFoundError(name="embodichain.extensions")
+        return None
+
+    monkeypatch.setattr(policy_assets.importlib.util, "find_spec", find_spec)
     with pytest.raises(ImportError, match="embodichain.extensions.tasks"):
         policy_assets.download_pretrained_policy(MODEL)
     assert [name for name, _ in calls] == ["index.json"]

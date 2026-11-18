@@ -33,6 +33,16 @@ Offline job preflight, run, resume and verified inspection commands.
 
    main
 
+embodichain.compute.geometry
+----------------------------
+
+Chunked planar distances preserve tensor batch axes, dtype and device.
+
+.. currentmodule:: embodichain.compute.geometry
+
+.. autofunction:: signed_distance_to_polygon
+
+
 embodichain.compute.geometry.particles
 --------------------------------------
 
@@ -43,6 +53,16 @@ Deterministic lattice sampling for primitive, revolved and closed mesh fill volu
    embodichain.compute.geometry.particles.sample_volume_particles
 
 .. autofunction:: embodichain.compute.geometry.particles.sample_volume_particles
+
+embodichain.compute.geometry.polygon
+------------------------------------
+
+Signed distances support concave planar outlines and bounded point-edge intermediates.
+
+.. currentmodule:: embodichain.compute.geometry.polygon
+
+.. autofunction:: signed_distance_to_polygon
+
 
 embodichain.compute.geometry.shading
 ------------------------------------
@@ -59,6 +79,28 @@ simulator, and does not establish collision or manifold validity.
    has_inconsistent_shading_normals
 
 .. autofunction:: has_inconsistent_shading_normals
+
+embodichain.compute.kinematics
+------------------------------
+
+URDF gravity feedforward evaluates encoder coordinates in an explicit root frame.
+
+.. currentmodule:: embodichain.compute.kinematics
+
+.. autoclass:: URDFGravityCompensation
+   :members: torques
+
+
+embodichain.compute.kinematics.gravity
+--------------------------------------
+
+Cached URDF kinematics and mass/COM data provide simulator-independent holding torques.
+
+.. currentmodule:: embodichain.compute.kinematics.gravity
+
+.. autoclass:: URDFGravityCompensation
+   :members: torques
+
 
 embodichain.compute.kinematics.ik_path
 --------------------------------------
@@ -113,6 +155,13 @@ asset definitions can import the dataset base without circular initialization.
    get_data_path
    list_default_materials
    get_default_material_info
+
+Prepared robot snapshots preserve resource trees and source notices for relocatable runs.
+
+.. currentmodule:: embodichain.data
+
+.. autofunction:: snapshot_urdf_resources
+
 
 embodichain.data.assets.demo_assets
 -----------------------------------
@@ -320,6 +369,16 @@ not change geometry or UVs.
 
 .. autofunction:: get_default_material_info
    :no-index:
+
+embodichain.data.resources
+--------------------------
+
+Filesystem resource snapshots retain relative mesh, material and texture references without simulator imports.
+
+.. currentmodule:: embodichain.data.resources
+
+.. autofunction:: snapshot_urdf_resources
+
 
 embodichain.data_pipeline
 -------------------------
@@ -5301,6 +5360,45 @@ existing locomotion configuration name while implementations move into a package
 .. autofunction:: velocity_locomotion_observation
 
 
+   assembly_robot_reference
+embodichain.extensions.tasks.manipulation.assembly.assets
+---------------------------------------------------------
+
+Public-generator composition of held pegs, perforated gears and nuts with physically mating fixtures. Task topology changes are recorded in asset provenance.
+
+.. currentmodule:: embodichain.extensions.tasks.manipulation.assembly.assets
+
+.. autosummary::
+
+   build_task_assembly
+
+
+
+Shared observation functors
+---------------------------
+
+The observation manager resolves general, assembly and locomotion functors
+through one package. Assembly contact labels and privileged state are intended
+for training; policy configuration controls which observations reach the actor.
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.observations
+
+.. autosummary::
+
+   velocity_locomotion_observation
+
+.. autofunction:: velocity_locomotion_observation
+
+
+Assembly task component callables
+--------------------------------
+
+.. toctree::
+   :maxdepth: 1
+
+   assembly_components
+
+
 Stability execution ownership
 ----------------------------
 
@@ -6209,3 +6307,47 @@ contracts. The package-level imports above are the convenient extension API.
    discover_sensor_plugins
    get_sensor_registration
    list_sensor_types
+
+
+Reference state sensors
+-----------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   JointEncoder
+   JointEncoderCfg
+   FrameTransform
+   FrameTransformCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.state
+
+.. autosummary::
+
+   JointEncoder
+   JointEncoderCfg
+   FrameTransform
+   FrameTransformCfg
+
+
+Finite-difference inertial sensors
+----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   PVA
+   PVACfg
+   IMU
+   IMUCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.inertial
+
+.. autosummary::
+
+   PVA
+   PVACfg
+   IMU
+   IMUCfg

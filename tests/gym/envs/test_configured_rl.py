@@ -515,6 +515,61 @@ def test_unconfigured_host_preserves_info_failure_and_time_limit_flags(
     assert truncated.tolist() == [False, True]
 
 
+def test_unrecorded_partial_reset_discards_only_completed_row_outcomes() -> None:
+    env = _env()
+    env.cfg.seed = 7
+    env.cfg.events = env.cfg.observations = env.cfg.rewards = env.cfg.dataset = None
+    env.dataset_manager = None
+    env.action_manager = None
+    env._demo_reset_provenance = {"seed": 7}
+    env._demo_metadata_initialized = False
+    env._demo_episode_metadata = [{}, {}]
+    env._new_demo_episode_metadata = Mock(
+        side_effect=AssertionError("Unrecorded resets must retain lazy metadata.")
+    )
+    env.episode_context._begin_episode([0, 1])
+    env.episode_context._finish_initialization([0, 1])
+    env.pose[1, 2, 3] = -0.2
+    env._elapsed_steps[:] = torch.tensor([1, 2])
+    env.termination_manager.compute()
+    first_info = env.get_info()
+    env._seal_step_outcomes(
+        torch.tensor([0, 1]),
+        env.termination_manager.terminated,
+        env.termination_manager.truncated,
+        first_info,
+    )
+    first = deepcopy(first_info["terminal_outcomes"][0])
+    peer = deepcopy(env._demo_episode_metadata[1])
+    assert first["acceptance"]["accepted"] is True
+
+    env._initialize_episode(torch.tensor([0]))
+    assert env._demo_episode_metadata[0] == {}
+    assert env._demo_episode_metadata[1] == peer
+    assert env._demo_metadata_initialized is False
+    env._new_demo_episode_metadata.assert_not_called()
+
+    env.episode_context._begin_episode([0])
+    env.episode_context._finish_initialization([0])
+    env.termination_manager.reset([0])
+    env.pose[0, 2, 3] = -0.2
+    env._elapsed_steps[0] = 7
+    env.termination_manager.compute()
+    second_info = env.get_info()
+    env._seal_step_outcomes(
+        torch.tensor([0]),
+        env.termination_manager.terminated,
+        env.termination_manager.truncated,
+        second_info,
+    )
+    second = second_info["terminal_outcomes"][0]
+    assert second["acceptance"]["accepted"] is False
+    assert second["execution"]["length"] == 7
+    assert second["identity"]["episode"] == first["identity"]["episode"] + 1
+    assert first_info["terminal_outcomes"][0] == first
+    assert env._demo_episode_metadata[1] == peer
+
+
 def test_explicit_export_does_not_inherit_previous_episode_success():
     env = _env()
     env.initialize_task_outcome()

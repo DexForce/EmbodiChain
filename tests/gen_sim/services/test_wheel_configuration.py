@@ -45,14 +45,7 @@ def test_installed_wheel_cli_reads_external_profiles_without_package_edits(tmp_p
         "MANIFEST.in",
     ):
         shutil.copy2(repo / name, source / name)
-    for name in (
-        "embodichain",
-        "examples",
-        "embodichain/extensions/robots",
-        "embodichain/extensions/tasks",
-        "embodichain/extensions/benchmarks",
-        "embodichain/extensions/models",
-    ):
+    for name in ("embodichain", "examples"):
         shutil.copytree(
             repo / name,
             source / name,

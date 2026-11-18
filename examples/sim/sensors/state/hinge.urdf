@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<robot name="sensor_hinge">
+  <link name="base">
+    <inertial><mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
+    </inertial>
+  </link>
+  <link name="arm">
+    <inertial><origin xyz="0.12 0 0"/><mass value="0.2"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+    <visual><origin xyz="0.12 0 0"/><geometry><box size="0.24 0.025 0.025"/></geometry></visual>
+    <collision><origin xyz="0.12 0 0"/><geometry><box size="0.24 0.025 0.025"/></geometry></collision>
+  </link>
+  <joint name="hinge" type="revolute">
+    <parent link="base"/><child link="arm"/><axis xyz="0 0 1"/>
+    <limit lower="-1.7" upper="1.7" effort="20" velocity="20"/>
+  </joint>
+</robot>

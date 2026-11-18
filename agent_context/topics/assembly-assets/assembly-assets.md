@@ -9,6 +9,7 @@ Native preparation is an explicit opt-in through `embodichain.toolkits.assembly.
 |---|---|
 | Pinned mjfit provider, manifests, sampling and USD format export | `embodichain/toolkits/assembly/` |
 | Native compound configs and actual hinge articulations | `embodichain/toolkits/assembly/native.py` |
+| Robot-held mating geometry recipes | `embodichain/extensions/tasks/manipulation/assembly/assets.py` |
 | Reference execution, analytic probes and measurement | `embodichain/extensions/benchmarks/assembly/` |
 
 `build_assembly` produces source body-local geometry, independent visual parts,
@@ -52,6 +53,60 @@ cannot reuse a stale imported mesh.
 Rigid preview preparation validates every body name and OBJ/MTL destination
 before writing the batch. Cache symlinks cannot redirect output outside its
 preparation root; bodies with no visible surfaces retain empty appearance.
+
+The application-owned `assets.py:build_task_assembly` composes robot-held task geometry using public generators,
+including perforated gear cores and bosses. It records the changed topology
+separately from the passive generator output. Peg tasks request a local support
+floor through public `bottom_thickness`; passive/raw generator defaults remain
+unchanged. Existing manifests pin their geometry, including an open bottom,
+and do not acquire later task defaults. Task registration, manager
+semantics and training deployment belong to the environment/RL owners. Assembly
+deployments declare `rl_task` and register the common `EmbodiedEnv` through the
+configuration loader, with distinct IDs for distinct deployments. Physical
+components explicitly select scene preparation, resource export, action, startup,
+interval, reset, observation and reward functors. `preparation.py` expands the
+configured manifest into native entities and contact sensors before World creation;
+it does not replace actions or inject events/conditions. Native preparation uses
+`prepare_native_configs` with configured file-backed appearance, keeping collision
+pieces and authored mass/contact data independent of a small number of visual
+material groups. MuJoCo-Warp startup impedance writes use the physics-owned
+batched gain view once, with the configured arm names and unchanged gain values. `_config.py` validates
+`extensions.assembly`, including entity/control-part bindings, sampling counts
+and measurement thresholds. Standard profiles explicitly size mating and grasp
+sampling buffers for the solver's 4096-contact budget; smaller development
+profiles retain their measured overrides. Buffer overflow fails immediately
+instead of accepting truncated grasp evidence. The configured interval event advances shared state
+once after each control transition, independently of selected termination terms.
+Observation, reward and condition functors read that snapshot; reset updates only
+selected rows. Task-owned `functors.py` owns observations, reset, rewards and conditions;
+`_state.py` owns the shared measurement snapshot. Encoder dimensions follow the
+selected arm and orientation representation. Task parameter and geometry
+defaults live in `configs/tasks/manipulation/assembly/defaults.yaml` inside the
+official task package; deployment declarations override those data-owned values.
+The task's `resources.py` serializes assembly manifests/fidelity and delegates
+prepared robot-tree copying to `embodichain.data.resources.snapshot_urdf_resources`.
+It keeps independently configured solver URDFs and their resource trees in the
+run so relocated configurations reproduce the live robot's kinematics.
+Pure polygon distances belong to `embodichain.compute.geometry`; URDF gravity
+feedforward belongs to `embodichain.compute.kinematics`. Robot joint-order and
+root-frame adaptation remains task-owned. Preparation/resource-export entry paths
+remain stable for frozen current-schema runs. Reset events leave selected
+measurements pending until the host finishes `episode_prepare`, so first
+observations and labels reflect the final prepared scene. Robot-base Euler
+rotations follow the simulator's intrinsic `XYZ` convention. Peg measurement
+applies the generator's area-centroid translation when centering is enabled,
+then converts the manifest's nominal opening, plate thickness and clearance to
+the generated collision geometry's physical scale. Nut advancement uses scaled
+pitch for thresholds and scaled pitch times thread starts for lead.
+No import-owned task registration aliases or environment-method replacements are used.
+
+`embodichain.extensions.benchmarks.assembly.robot_reference` prepares the historical public Rizon/Robotiq approximation
+from pinned source assets, with explicit gripper approximation and fidelity
+metadata. Preparation is optional and runs before config loading; replay uses
+frozen resources. Prepared models and their manifest/licenses live under the
+data root's `generated/assembly/` tree, outside source-cache `extract/` repair.
+Source validation never renames a prepared model seen by concurrent readers. Default arm/tool assembly belongs to task embodiment YAML,
+not this converter or a combined robot preset.
 
 `embodichain.extensions.benchmarks.assembly.precision` checks geometry/USD ownership and runs passive source/native
 comparisons. MuJoCo Warp references declare their constants protocol through
@@ -100,14 +155,14 @@ The matrix host initializes installed SDK schemas before authoring USD and
 records geometry/ownership failures separately from independent source/direct
 cells. Each invocation owns a fresh run directory. Worker exit status, asset
 identity and configuration must match before its result is accepted.
-Nominal robot preparation belongs to the later
-robot deployment layer that provides its source asset registration.
+Nominal robot preparation is shipped by the robot deployment
+layer together with its source asset registration, frame regression and API.
 
 User-facing installation, functional entry points, native RGB examples and the
 upstream research citation live in the [Precision Assembly guide](../../../docs/source/features/toolkits/precision_assembly.md).
 
 Focused coverage lives under `tests/toolkits/assembly/`, `tests/sim/assembly/`,
-`tests/benchmark/assembly/`.
+`tests/benchmark/assembly/` and `tests/gym/envs/tasks/test_blind_assembly.py`.
 Portable-format tests explicitly block simulator, task, benchmark and generator
 imports. Existing manifest schemas and content identities are independent of
 Python module locations.

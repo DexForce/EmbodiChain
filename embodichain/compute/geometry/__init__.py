@@ -34,6 +34,7 @@ __all__ = [
     "aabb_sphere_cover",
     "convex_projection_distance_to_origin",
     "axis_contact_pose",
+    "signed_distance_to_polygon",
 ]
 
 _EXPORT_MODULES = {
@@ -49,6 +50,7 @@ _EXPORT_MODULES = {
     "aabb_sphere_cover": "mesh_bounds",
     "convex_projection_distance_to_origin": "convex_projection",
     "axis_contact_pose": "rigid",
+    "signed_distance_to_polygon": "polygon",
 }
 
 

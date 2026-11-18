@@ -68,6 +68,32 @@ class SensorStateProvider(Protocol):
         """
         ...
 
+    def get_joint_names(self, asset_uid: str) -> tuple[str, ...]:
+        """Return joint names in the same order as get_joint_state()."""
+        ...
+
+    def get_frame_state(
+        self, asset_uid: str, link_name: str | None = None
+    ) -> TensorDict:
+        """Read owned arena-relative pose and velocities for an asset or link.
+
+        Args:
+            asset_uid: Physical asset identity.
+            link_name: Articulation link, or None for a rigid body/root.
+
+        Returns:
+            Pose in metres and xyzw, linear velocity in m/s and angular
+            velocity in rad/s, with one row per environment. The optional
+            ``linear_velocity_offset`` gives the body-local reference point
+            of the reported linear velocity in metres. Its default is the
+            frame origin.
+        """
+        ...
+
+    def get_gravity(self) -> torch.Tensor:
+        """Return arena-frame gravitational acceleration in m/s²."""
+        ...
+
 
 @dataclass(frozen=True)
 class SensorContext:
@@ -121,18 +147,78 @@ class _ManagerSensorServices:
         return self._manager().physics_step_index
 
     def get_joint_state(self, asset_uid: str) -> TensorDict:
-        manager = self._manager()
-        # Physical assets and sensors may deliberately share a UID. Generic
-        # get_asset() prefers sensor/light namespaces and cannot resolve state.
-        asset = manager._robots.get(asset_uid)
-        if asset is None:
-            asset = manager._articulations.get(asset_uid)
-        if asset is None or not all(
-            callable(getattr(asset, name, None)) for name in ("get_qpos", "get_qvel")
-        ):
-            raise ValueError(f"Asset {asset_uid!r} does not provide joint state.")
+        asset = self._physical_asset(asset_uid, require_joints=True)
         return TensorDict(
             {"qpos": asset.get_qpos().clone(), "qvel": asset.get_qvel().clone()},
+            batch_size=[self._manager().num_envs],
+            device=self._manager().device,
+        )
+
+    def get_joint_names(self, asset_uid: str) -> tuple[str, ...]:
+        return tuple(self._physical_asset(asset_uid, require_joints=True).joint_names)
+
+    def _physical_asset(self, uid: str, *, require_joints: bool = False):
+        manager = self._manager()
+        asset = manager._robots.get(uid)
+        if asset is None:
+            asset = manager._articulations.get(uid)
+        if asset is None and not require_joints:
+            asset = getattr(manager, "_rigid_objects", {}).get(uid)
+        if asset is None or (
+            require_joints and not callable(getattr(asset, "get_qpos", None))
+        ):
+            raise ValueError(
+                f"Asset {uid!r} does not provide {'joint' if require_joints else 'frame'} state."
+            )
+        return asset
+
+    def get_frame_state(
+        self, asset_uid: str, link_name: str | None = None
+    ) -> TensorDict:
+        manager = self._manager()
+        asset = self._physical_asset(asset_uid)
+        backend = getattr(getattr(manager, "physics", None), "name", None)
+        com_velocity = backend in ("default", "newton")
+        link_index = None
+        if link_name is not None:
+            if link_name not in getattr(asset, "link_names", ()):
+                raise ValueError(f"Unknown link {link_name!r} on {asset_uid!r}.")
+            link_index = asset.link_names.index(link_name)
+            state = asset.body_state[:, link_index]
+        elif getattr(type(asset), "root_state", None) is not None:
+            state = asset.root_state
+            if com_velocity and getattr(asset, "body_data", None) is not None:
+                link_index = asset.link_names.index(asset.root_link_name)
+        else:
+            state = asset.body_state
+
+        fields = {
+            "pose": state[:, :7],
+            "linear_velocity": state[:, 7:10],
+            "angular_velocity": state[:, 10:13],
+        }
+        if com_velocity and not getattr(asset, "is_static", False):
+            # Default and Newton pair the body pose with a COM linear velocity.
+            body_data = getattr(asset, "body_data", None)
+            if body_data is not None:
+                fields["linear_velocity_offset"] = (
+                    body_data.com_pose[:, :3]
+                    if link_index is None
+                    else body_data._read_link_com_position(link_index)
+                )
+        return TensorDict(
+            {
+                key: value.expand(manager.num_envs, -1).clone()
+                for key, value in fields.items()
+            },
             batch_size=[manager.num_envs],
             device=manager.device,
         )
+
+    def get_gravity(self) -> torch.Tensor:
+        manager = self._manager()
+        return torch.as_tensor(
+            manager.sim_config.physics_cfg.gravity,
+            dtype=torch.float32,
+            device=manager.device,
+        ).clone()

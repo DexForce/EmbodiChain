@@ -81,6 +81,13 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
         assert "embodichain/extensions/benchmarks/__init__.py" in entries
         assert "embodichain/extensions/benchmarks/motion_generation/api.py" in entries
         assert "embodichain/cli/benchmark.py" in entries
+        assert (
+            "embodichain/extensions/benchmarks/assembly/robot_reference.py" in entries
+        )
+        assert (
+            "embodichain/extensions/robots/flexiv/rizon4s/rizon4s_sources.json"
+            in entries
+        )
         assert "embodichain/toolkits/assembly/native.py" in entries
         assert not any(
             name.startswith("embodichain/lab/sim/assembly/") for name in entries
@@ -228,6 +235,11 @@ import torch
 assert build_support_object_target_pose(torch.eye(4), torch.device("cpu")).shape == (4, 4)
 from embodichain.extensions.benchmarks.motion_generation.artifacts import environment_metadata
 assert environment_metadata()["git_commit"] is None
+from embodichain.data import get_data_class
+from embodichain.extensions.benchmarks.assembly import robot_reference
+assert Path(robot_reference.__file__).is_relative_to(target)
+assert get_data_class("FlexivRizon4SMenagerie").__module__ == "embodichain.extensions.robots.flexiv.rizon4s._menagerie_assets"
+assert files("embodichain.extensions.robots.flexiv.rizon4s").joinpath("rizon4s_sources.json").is_file()
 from embodichain.cli.main import main
 try:
     main(["benchmark", "motion-generation", "--help"])
@@ -267,6 +279,22 @@ print("installed benchmark suites and CLI passed")
     )
     assert cli.returncode == 0, cli.stdout + cli.stderr
     assert "--suite" in cli.stdout
+    robot_cli = subprocess.run(
+        [
+            str(target / "bin/python"),
+            "-I",
+            "-m",
+            "embodichain.extensions.benchmarks.assembly.robot_reference",
+            "--help",
+        ],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert robot_cli.returncode == 0, robot_cli.stdout + robot_cli.stderr
+    assert "--gripper-model" in robot_cli.stdout
 
     for example in ("drop_peg", "visual_demo"):
         help_result = subprocess.run(
@@ -331,6 +359,92 @@ assert 'open3d.ml.torch' not in sys.modules
 assert 'flash_attn' not in sys.modules
 import dexsim
 assert dexsim.get_world_num() == 0
+"""
+    result = subprocess.run(
+        [str(target / "bin/python"), "-I", "-c", script],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_installed_policy_components_work_without_source_or_simulator(
+    installed_benchmark: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """The wheel supplies the composed learning API without importing native code."""
+    target, _ = installed_benchmark
+    repository = Path(__file__).resolve().parents[1]
+    script = r"""
+import importlib.abc
+import inspect
+from pathlib import Path
+import sys
+
+target, repository = map(Path, sys.argv[1:3])
+sys.meta_path = [finder for finder in sys.meta_path if "__editable__" not in str(finder)]
+sys.path = [entry for entry in sys.path if entry and not Path(entry).is_relative_to(repository)]
+class NoSimulation(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == 'dexsim' or fullname.startswith(('dexsim.', 'embodichain.lab')):
+            raise AssertionError('Offline policy imported simulation: ' + fullname)
+sys.meta_path.insert(0, NoSimulation())
+import torch
+from tensordict import TensorDict
+from embodichain.learning.rl.policies import ActorCritic, ContactPrediction, TemporalActor, build_policy
+from embodichain.compute.geometry import signed_distance_to_polygon
+from embodichain.compute.kinematics import URDFGravityCompensation
+from embodichain.data.resources import snapshot_urdf_resources
+for cls in (ActorCritic, ContactPrediction, TemporalActor, signed_distance_to_polygon, URDFGravityCompensation, snapshot_urdf_resources):
+    assert Path(inspect.getfile(cls)).is_relative_to(target)
+policy = build_policy({
+    'name': 'actor_critic',
+    'obs_groups': {'actor': ['proprioception'], 'critic': ['privileged']},
+    'actor': {'type': 'temporal', 'network_cfg': {'frame_dim': 3, 'history_length': 30, 'hidden_sizes': [8]}},
+    'critic': {'type': 'mlp', 'network_cfg': {'hidden_sizes': [8]}},
+    'auxiliary_tasks': {'contact': {'type': 'contact_prediction', 'contact_points': 2, 'hidden_sizes': [8]}},
+}, 93, 2, torch.device('cpu'), critic_obs_space=4)
+td = TensorDict({'obs': torch.zeros(2, 93), 'critic_obs': torch.ones(2, 4),
+                 'contact_labels': torch.tensor([[0, 1], [1, 0]])}, batch_size=[2])
+policy.get_action(td, deterministic=True)
+evaluated = policy.evaluate_actions(td)
+loss = policy.auxiliary_loss(td, evaluated)
+assert torch.isfinite(loss) and loss > 0
+loss.backward()
+torch.testing.assert_close(policy.export_actor()(td['obs']), td['action'])
+assert not any(name.startswith(('dexsim', 'embodichain.lab')) for name in sys.modules)
+"""
+    result = subprocess.run(
+        [str(target / "bin/python"), "-I", "-c", script, str(target), str(repository)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_installed_assembly_functors_and_defaults_have_task_ownership(
+    installed_benchmark: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """Installed task components resolve their packaged defaults without a checkout."""
+    target, _ = installed_benchmark
+    script = r"""
+from pathlib import Path
+from types import SimpleNamespace
+import inspect,sys
+sys.meta_path=[finder for finder in sys.meta_path if "__editable__" not in str(finder)]
+import torch
+from embodichain.extensions.tasks.manipulation.assembly.functors import AssemblyProprioception,assembly_milestone_reward
+from embodichain.lab.gym.envs.managers import observations
+from embodichain.lab.gym.utils.gym_utils import get_manager_modules
+assert Path(inspect.getfile(AssemblyProprioception)).is_relative_to(sys.prefix)
+assert not hasattr(observations,"AssemblyProprioception")
+assert "embodichain.extensions.tasks.manipulation.assembly.functors" in get_manager_modules()
+state=SimpleNamespace(refresh_assembly_state=lambda:None,_assembly_new_milestones=torch.tensor([[True,False,True,False],[False,False,False,False]]))
+env=SimpleNamespace(assembly_state=state,device=torch.device("cpu"))
+torch.testing.assert_close(assembly_milestone_reward(env,None,None,{},[1.,0.,2.,0.]),torch.tensor([3.,0.]))
 """
     result = subprocess.run(
         [str(target / "bin/python"), "-I", "-c", script],

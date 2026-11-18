@@ -1469,6 +1469,8 @@ class EmbodiedEnv(BaseEnv):
             return True
         if self.cfg.enable_sensor:
             for sensor_cfg in self._sensor_configs():
+                if getattr(sensor_cfg, "sample_phase", None) == "render":
+                    return True
                 _, sensor_factory, _ = _resolve_sensor_factory(
                     sensor_cfg.sensor_type, SimulationManager.SUPPORTED_SENSOR_TYPES
                 )
@@ -2300,10 +2302,14 @@ class EmbodiedEnv(BaseEnv):
                 self.num_envs, self._new_demo_episode_metadata(0)
             )
             self._demo_metadata_initialized = True
-        if episode_metadata is not None and getattr(
-            self, "_demo_metadata_initialized", True
-        ):
-            if isinstance(episode_metadata, _EpisodeMetadataRows):
+        if episode_metadata is not None:
+            if not getattr(self, "_demo_metadata_initialized", True):
+                # Unrecorded RL episodes still seal terminal reports. Discard
+                # only the reset rows so the next episode cannot reuse them,
+                # without materializing recording provenance or UUIDs.
+                for env_id in metadata_ids:
+                    episode_metadata[env_id] = {}
+            elif isinstance(episode_metadata, _EpisodeMetadataRows):
                 if metadata_ids:
                     episode_metadata.reset_rows(
                         metadata_ids, self._new_demo_episode_metadata(metadata_ids[0])
@@ -3509,7 +3515,10 @@ class EmbodiedEnv(BaseEnv):
             return super()._advance_physics()
 
         sensors = [
-            sensor for sensor in self.sensors.values() if sensor.requires_substep_update
+            sensor
+            for sensor in self.sensors.values()
+            if sensor.requires_substep_update
+            and getattr(getattr(sensor, "cfg", None), "sample_phase", None) is None
         ]
         for sensor in sensors:
             sensor.begin_control_step()

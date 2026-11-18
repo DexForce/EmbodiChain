@@ -171,6 +171,7 @@ if module.startswith("embodichain.extensions.robots") or module == "embodichain.
         "cobotmagic",
         "franka_panda",
         "flexiv_rizon4s",
+        "_menagerie",
         "tianji_marvin",
         "ur_robot",
         "so101",

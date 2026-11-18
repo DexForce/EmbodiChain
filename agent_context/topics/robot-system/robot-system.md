@@ -8,6 +8,7 @@ identity and calibrated defaults belong to `embodichain.extensions.robots`.
 | Change or question | Start here |
 |---|---|
 | Runtime control parts, FK/IK adaptation, joint ordering | `embodichain/lab/sim/objects/robot.py` → `Robot` |
+| Encoder-only URDF gravity feedforward | `embodichain/compute/kinematics/gravity.py` → `URDFGravityCompensation` |
 | Pure parallel-jaw defaults, mounted/existing bindings and standalone hand configs | `embodichain/robot_registry.py` → `resolve_gripper_defaults`; `embodichain/lab/gym/utils/_gripper_composition.py`; `embodichain/lab/sim/cfg/gripper.py` |
 | Explicit hand geometry capture and lazy paired grasp ownership | `embodichain/lab/sim/utility/grasp_geometry.py` |
 | Config decoding, construction hooks, backend alternatives | `embodichain/lab/sim/cfg/robot.py` → `RobotCfg`, `RobotPresetCfg` |
@@ -41,7 +42,9 @@ Preset `_build_defaults()` assembles model defaults; base `RobotCfg.from_dict()`
 and `merge_robot_cfg` apply overrides. Do not route the base decoder back into
 the subclass build/merge sequence. Configuration construction may leave MISSING
 fields; validate the completed config. Model URDFs and PK chains must agree in
-joint order and selected control parts.
+joint order and selected control parts. Rizon composition updates inherited solver
+paths to the assembled robot; explicit calibrated solver URDFs remain authoritative
+for both IK and the configured serial chain.
 
 Serialization must preserve components and avoid applying derived transforms
 twice. W1 serializes raw offsets and restores revision-owned transforms on
@@ -53,6 +56,13 @@ Dual-arm composition maps base `mimic_compliance` entries to each side's
 assembled master-joint names, including explicitly bound hands.
 
 ## Joint and solver boundaries
+
+The pure gravity model accepts URDF XML, root-frame gravity and batched encoder
+coordinates in its declared joint order. It owns cached kinematics/mass/COM
+values and returns detached holding torques without reading simulator state.
+Runtime adapters resolve robot/control-part order and rotate gravity into the
+configured root frame; they do not belong in compute.
+
 
 Control-part keys are explicit configuration, not inferred hand capabilities.
 Official conventions live in AGENTS; custom keys and asset-defined link/joint
@@ -128,3 +138,13 @@ first access or attach explicitly on the Robot device; see
 
 Diagnose drive/mimic failures at descriptor lowering and binding before adding
 model-specific post-bind fixes. A hand control part need not have an IK solver.
+
+`FlexivRizon4SCfg` remains the bare seven-joint arm. Application embodiments
+attach tools with `urdf_cfg.components` and own the mount, solver TCP, EEF
+control parts, hand drives and contact overrides. The preset assembles those
+ordinary component overrides into the same source for simulation and FK; it
+contains no hand selection or assembly-task metadata. The canonical example is
+`configs/components/embodiments/flexiv_rizon4s_robotiq2f85.yaml` under the tasks
+extension. Assembly grasp assumptions and exact-dynamics qualification gates
+belong to the physical task environment. Historical reference conversion is
+owned by [assembly asset preparation](../assembly-assets/assembly-assets.md), not a robot type.

@@ -10,6 +10,7 @@ Online sampling and demonstration persistence belong to
 
 | Request | Owner |
 |---|---|
+| Prepared URDF resource snapshots | `embodichain/data/resources.py`: `snapshot_urdf_resources()` |
 | Asset path lookup | `embodichain/data/dataset.py`: `get_data_path()`, `get_data_class()` |
 | Cache roots / mirror prefix | `embodichain/data/constants.py` |
 | Locked download and ZIP integrity | `embodichain/data/dataset.py`: `EmbodiChainDataset`, `_dataset_download_lock()` |
@@ -42,6 +43,14 @@ base URL for asset archives (default: the hf-mirror.com copy of
 Lookup does not verify the final nested file. Check the shared index and installed
 entry points for missing IDs. Explicit loaded modules remain available through
 `extra_modules` after registered IDs; package re-exports do not register assets.
+
+Prepared robot snapshots copy an existing URDF parent tree into a caller-owned
+standalone directory, retaining relative OBJ/MTL/texture references. An explicit
+provenance root contributes its manifest and model license/notice files without
+robot-name rules. Self-snapshots are idempotent; nested source destinations are
+rejected before copying. Task adapters own configuration path rewriting and
+assembly-specific fidelity; the shared filesystem helper does not import Gym,
+simulation or task packages.
 
 ## Download and registry boundaries
 
@@ -199,8 +208,10 @@ rejects paths resolving outside its RUN, including default HF blob symlinks.
 The CLI records repository provenance and writes reports outside the model
 cache. Robot references still use `get_data_path()` and its existing asset cache.
 Task packages must already be installed; downloading weights does not register
-new environment implementations. Test the Hub boundary with fake downloads and
-validate a real selected-model download separately.
+new environment implementations. The index's `task_package` accepts a qualified
+module name. Published official policy indexes declaring `embodichain_tasks`
+resolve their requirement to `embodichain.extensions.tasks`. Test the Hub
+boundary with fake downloads and validate a real selected-model download separately.
 
 ## Qualified cloth replay inputs
 
@@ -237,3 +248,12 @@ changes, exercise absolute, existing-relative and class-prefixed paths plus
 missing/bare prefixes and a custom data root. For CLI changes, cover category
 visibility and failure exit behavior. Use fake download backends for these
 contracts; separately validate actual network downloads when asset content changes.
+
+`FlexivRizon4SMenagerie` is a source-file bundle rather than an archive:
+`embodichain/extensions/robots/flexiv/rizon4s/rizon4s_sources.json` pins individual Git blob identities and
+licenses. The owning asset class verifies each downloaded file before publishing
+the source cache, preserving prepared model directories during automatic repair
+under the same lock used by preparation. Historical URDF preparation and
+model-fidelity metadata are owned by
+`embodichain.extensions.benchmarks.assembly.robot_reference`, not the dataset resolver or a
+combined arm/gripper catalog preset.
