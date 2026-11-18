@@ -3,7 +3,7 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "15ef0041fb9e811df6f0adad91b25694ff7ebe09",
+  "revision": "f1a22b6b998a35cc5db6a3a75d08ce3bd3be9f83",
   "source_ref": "HEAD",
   "package_version": "0.3.2",
   "topic_index": "agent_context/MAP.yaml",
@@ -31,8 +31,8 @@
         {
           "path": "embodichain/learning/rl/policies/actor_critic.py",
           "symbol": "ActorCritic",
-          "start_line": 33,
-          "end_line": 33,
+          "start_line": 36,
+          "end_line": 36,
           "excerpt": "class ActorCritic(Policy):"
         }
       ],
@@ -145,8 +145,8 @@
         {
           "path": "embodichain/lab/sim/objects/articulation.py",
           "symbol": "Articulation",
-          "start_line": 724,
-          "end_line": 724,
+          "start_line": 739,
+          "end_line": 739,
           "excerpt": "class Articulation(BatchEntity):"
         }
       ],
@@ -2097,8 +2097,8 @@
         {
           "path": "embodichain/learning/rl/algo/ppo.py",
           "symbol": "PPO",
-          "start_line": 52,
-          "end_line": 52,
+          "start_line": 53,
+          "end_line": 53,
           "excerpt": "class PPO(BaseAlgorithm[TensorDict]):"
         }
       ],
@@ -2519,8 +2519,8 @@
         {
           "path": "embodichain/learning/rl/buffer/standard_buffer.py",
           "symbol": "RolloutBuffer",
-          "start_line": 27,
-          "end_line": 27,
+          "start_line": 29,
+          "end_line": 29,
           "excerpt": "class RolloutBuffer:"
         }
       ],
@@ -3785,8 +3785,8 @@
         {
           "path": "embodichain/learning/rl/policies/actor_critic.py",
           "symbol": "ActorCritic",
-          "start_line": 33,
-          "end_line": 33,
+          "start_line": 36,
+          "end_line": 36,
           "excerpt": "class ActorCritic(Policy):"
         }
       ]
@@ -3947,8 +3947,8 @@
         {
           "path": "embodichain/lab/sim/objects/articulation.py",
           "symbol": "Articulation",
-          "start_line": 724,
-          "end_line": 724,
+          "start_line": 739,
+          "end_line": 739,
           "excerpt": "class Articulation(BatchEntity):"
         }
       ]
@@ -4690,8 +4690,8 @@
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv.create_task_program_bridge",
-          "start_line": 4307,
-          "end_line": 4307,
+          "start_line": 4316,
+          "end_line": 4316,
           "excerpt": "        bridge = self._checked_task_program_adapter().create_bridge("
         }
       ]
@@ -4708,8 +4708,8 @@
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv.compile_task_program",
-          "start_line": 4242,
-          "end_line": 4242,
+          "start_line": 4251,
+          "end_line": 4251,
           "excerpt": "        return self._checked_task_program_adapter().compile(program)"
         }
       ]
@@ -4726,8 +4726,8 @@
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv._declare_robot",
-          "start_line": 3966,
-          "end_line": 3966,
+          "start_line": 3975,
+          "end_line": 3975,
           "excerpt": "        return self.sim.add_robot(robot_cfg)"
         }
       ]
@@ -5316,8 +5316,8 @@
         {
           "path": "embodichain/learning/rl/utils/trainer.py",
           "symbol": "Trainer.__init__",
-          "start_line": 140,
-          "end_line": 140,
+          "start_line": 141,
+          "end_line": 141,
           "excerpt": "        self.collector = SyncCollector("
         }
       ]
@@ -5812,15 +5812,15 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_robot",
-          "start_line": 4389,
-          "end_line": 4390,
+          "start_line": 4418,
+          "end_line": 4419,
           "excerpt": "        robot = self._declare_spawn_articulation(cfg, Robot)\n        self._robots[uid] = robot"
         },
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager._declare_spawn_articulation",
-          "start_line": 4429,
-          "end_line": 4432,
+          "start_line": 4458,
+          "end_line": 4461,
           "excerpt": "        facade = facade_type(\n            cfg=cfg,\n            device=self.device,\n        )"
         }
       ]
@@ -5855,8 +5855,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_robot",
-          "start_line": 4390,
-          "end_line": 4395,
+          "start_line": 4419,
+          "end_line": 4424,
           "excerpt": "        self._robots[uid] = robot\n        if was_materialized:\n            self.prepare()\n        for sensor_cfg in mounted_sensors:\n            self.add_sensor(sensor_cfg)\n        return robot"
         }
       ]
@@ -5873,8 +5873,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.enable_gizmo",
-          "start_line": 4585,
-          "end_line": 4585,
+          "start_line": 4614,
+          "end_line": 4614,
           "excerpt": "            gizmo = Gizmo(target, gizmo_cfg, control_part)"
         }
       ]
@@ -5891,8 +5891,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.create_rigid_constraint",
-          "start_line": 4051,
-          "end_line": 4051,
+          "start_line": 4080,
+          "end_line": 4080,
           "excerpt": "        constraint = RigidConstraint("
         }
       ]
@@ -5909,8 +5909,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_rigid_object_group",
-          "start_line": 4192,
-          "end_line": 4192,
+          "start_line": 4221,
+          "end_line": 4221,
           "excerpt": "        group = RigidObjectGroup("
         }
       ]
@@ -5927,8 +5927,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager._declare_rigid_objects",
-          "start_line": 3472,
-          "end_line": 3472,
+          "start_line": 3501,
+          "end_line": 3501,
           "excerpt": "            rigid_obj = RigidObject(cfg=cfg, device=self.device)"
         }
       ]
@@ -5945,8 +5945,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_articulation",
-          "start_line": 4293,
-          "end_line": 4293,
+          "start_line": 4322,
+          "end_line": 4322,
           "excerpt": "        self._articulations[uid] = articulation"
         }
       ]
@@ -5963,8 +5963,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_deformable_object",
-          "start_line": 3851,
-          "end_line": 3851,
+          "start_line": 3880,
+          "end_line": 3880,
           "excerpt": "        self._deformable_objects[uid] = deformable"
         }
       ]
@@ -5981,8 +5981,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_light",
-          "start_line": 2983,
-          "end_line": 2983,
+          "start_line": 3012,
+          "end_line": 3012,
           "excerpt": "        self._lights[uid] = batch_lights"
         }
       ]
