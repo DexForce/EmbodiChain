@@ -35,7 +35,12 @@ from embodichain_benchmarks.motion_generation import (
     run_benchmark,
 )
 from embodichain_benchmarks.motion_generation import runner as runner_module
-from embodichain_benchmarks.motion_generation.config import TrackCfg, suite_to_dict
+from embodichain_benchmarks.motion_generation.config import (
+    RobotSpecCfg,
+    TrackCfg,
+    stable_hash,
+    suite_to_dict,
+)
 from embodichain_benchmarks.motion_generation.metrics.trajectory import (
     make_failure_outcomes,
 )
@@ -494,11 +499,20 @@ def test_frozen_manifest_replays_without_generating_new_inputs(
         run_benchmark(suite, case_manifest=path, **kwargs)
 
 
-@pytest.mark.parametrize("change", ["robot_config", "binding_hash", "missing_binding"])
+@pytest.mark.parametrize(
+    "change",
+    ["robot_config", "binding_hash", "missing_binding", "implicit_franka_hand"],
+)
 def test_frozen_manifest_rejects_changed_embodiment_before_simulation(
     fake_runtime, tmp_path: Path, change: str
 ) -> None:
     suite = load_suite()
+    if change == "implicit_franka_hand":
+        suite.robot = RobotSpecCfg(
+            id="custom_dual_franka",
+            provider="dual_arm",
+            config={"robot_type": "franka"},
+        )
     suite.protocol.warmup_trials = 0
     suite.protocol.measured_trials = 1
     kwargs = dict(
@@ -516,6 +530,13 @@ def test_frozen_manifest_rejects_changed_embodiment_before_simulation(
         payload = json.loads(path.read_text())
         if change == "binding_hash":
             payload["resolved_embodiment"]["config_hash"] = "different-geometry"
+        elif change == "implicit_franka_hand":
+            # Legacy PGI manifests hashed only raw inputs and stored 18 joints.
+            payload["resolved_embodiment"]["config_hash"] = stable_hash(
+                suite.robot.config
+            )
+            payload["cases"][0]["full_start_qpos"] = [[0.0] * 18]
+            payload["cases_sha256"] = stable_hash(payload["cases"])
         else:
             payload.pop("resolved_embodiment")
         path.write_text(json.dumps(payload))
