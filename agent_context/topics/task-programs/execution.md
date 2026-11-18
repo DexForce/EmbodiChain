@@ -57,6 +57,8 @@ observer hook. The semantic adapter translates clauses to the physical
 `atomic_skills.grip_evidence.GripContactObserver`; sensors own acquisition/history
 and compute owns bilateral contact arithmetic. It retains provider IDs and physical algorithm revisions; revision
 2's open-hand interpretation requires explicit driver calibration and opt-in.
+Configured embodiments select it with `control_part_evidence.kind:
+pad_contact_constraint`; see [configuration](configuration.md).
 No task labels or control-part suffixes select a policy. Sampling/timeline lifecycle
 and per-row availability belong to the [contact boundary](../sensor-system/contact-history.md).
 Raw traces are observations, while report serialization and TaskSpec verdicts

@@ -1169,3 +1169,102 @@ def test_joint_contact_duration_limit_preserves_owned_prefix_and_stops_acquisiti
     observer.begin_window("new")
     assert observer.generation != generation and observer.snapshot() == ()
     assert len(retained) == 1 and retained[0].frame.timestamp == 0.0
+
+
+def test_configured_pad_contact_evidence_holds_at_any_opening_and_binds_scene_uids():
+    """Configured pad contact reports a hold that barely closes the fingers."""
+    from embodichain.lab.sim.atomic_skills import AntipodalAffordance
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_runtime_services,
+    )
+    from embodichain.lab.task_program.semantics import (
+        GRASP_AFFORDANCE_CAPABILITY,
+        SceneAffordanceRef,
+    )
+
+    declaration = {
+        "kind": "pad_contact_constraint",
+        "pad_links": {"hand": ["pad_a", "pad_b"]},
+        "open_qpos": [0.044, 0.044],
+        "open_tolerance": 0.004,
+    }
+    factory = _decode_runtime_services(
+        {"control_part_evidence": declaration}
+    ).control_part_evidence
+    with pytest.raises(ValueError, match="set together"):
+        _decode_runtime_services(
+            {
+                "control_part_evidence": {
+                    key: value
+                    for key, value in declaration.items()
+                    if key != "open_tolerance"
+                }
+            }
+        )
+
+    source = ContactSource()
+    scope = {}
+
+    def add_sensor(cfg):
+        scope["objects"] = list(cfg.rigid_uid_list)
+        scope["links"] = [
+            (item.articulation_uid, tuple(item.link_name_list))
+            for item in cfg.articulation_cfg_list
+        ]
+        source.cfg = cfg
+        return source
+
+    simulation = SimpleNamespace(
+        get_rigid_object_uid_list=lambda: ["cube_001", "table"],
+        get_sensor=lambda uid: None,
+        add_sensor=add_sensor,
+        spawn_result=SimpleNamespace(topology_revision=1),
+    )
+    # Fingers 0.5 mm short of fully open, as when they close on a wide object.
+    qpos = torch.tensor([[0.0435, 0.0435]])
+    robot = SimpleNamespace(
+        uid="robot",
+        joint_names=["finger_a", "finger_b"],
+        get_joint_ids=lambda name: [0, 1],
+        get_qpos=lambda **kwargs: qpos,
+        get_qvel=lambda **kwargs: torch.zeros(1, 2),
+        compute_fk=lambda **kwargs: torch.eye(4).unsqueeze(0),
+    )
+    state_provider = SimpleNamespace(observe=lambda **kwargs: None)
+    cube = SceneObjectRef("subject")
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                cube, state_provider=state_provider, aliases=("cube_001",)
+            ),
+            SceneEntityRegistration(SceneObjectRef("table"), state_provider),
+            SceneEntityRegistration(
+                ref=SceneAffordanceRef("subject_grasp"),
+                parent=cube,
+                native_name="subject_grasp",
+                affordance=AntipodalAffordance(),
+                affordance_capabilities=frozenset({GRASP_AFFORDANCE_CAPABILITY}),
+                affordance_revision="1",
+                relative_pose=torch.eye(4),
+            ),
+        )
+    )
+    provider = factory.create(
+        simulation=simulation,
+        robot=robot,
+        scene_registry=registry,
+        engine=SimpleNamespace(robot=robot),
+        scene_provider=None,
+    )
+    assert scope == {"objects": ["cube_001"], "links": [("robot", ("pad_a", "pad_b"))]}
+
+    held = provider.collect((query(),), context())["constraint"]
+    assert (held.values.tolist(), held.valid.tolist()) == ([True], [True])
+
+    # After opening, the object still rests against one pad of the open hand.
+    source.data["is_valid"][0, 1] = False
+    released = provider.collect(
+        (query(expected=False, relation=HeldObjectRelation.DETACHED),),
+        context(revision=2),
+    )["constraint"]
+    assert (released.values.tolist(), released.valid.tolist()) == ([False], [True])

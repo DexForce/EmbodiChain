@@ -1926,6 +1926,48 @@ class _JointPositionConstraintObserver:
         )
 
 
+def _graspable_object_ids(
+    object_ids: tuple[str, ...] | None,
+    scene_registry: SceneRegistry,
+    *,
+    evidence: str,
+) -> tuple[str, ...]:
+    """Resolve an optional allowlist against graspable scene objects."""
+    if type(scene_registry) is not SceneRegistry:
+        raise TypeError("scene_registry must be exactly SceneRegistry.")
+    if object_ids is None:
+        object_ids = tuple(
+            ref.entity_id
+            for ref in scene_registry.entity_refs
+            if type(ref) is SceneObjectRef
+            and scene_registry.affordances(
+                ref,
+                capability=GRASP_AFFORDANCE_CAPABILITY,
+            )
+        )
+    if not object_ids:
+        raise ValueError(f"{evidence} requires at least one graspable scene object.")
+    resolved_object_ids: list[str] = []
+    for object_id in object_ids:
+        object_ref = scene_registry.resolve(
+            object_id,
+            expected_type=SceneObjectRef,
+        )
+        if not scene_registry.affordances(
+            object_ref,
+            capability=GRASP_AFFORDANCE_CAPABILITY,
+        ):
+            raise ValueError(
+                f"{evidence} object {object_id!r} must expose a grasp affordance."
+            )
+        resolved_object_ids.append(object_ref.entity_id)
+    if len(set(resolved_object_ids)) != len(resolved_object_ids):
+        raise ValueError(
+            f"{evidence} object_ids must resolve to distinct scene objects."
+        )
+    return tuple(resolved_object_ids)
+
+
 @dataclass(frozen=True, slots=True)
 class _JointPositionConstraintEvidenceProviderFactory(
     ControlPartEvidenceProviderFactory
@@ -1966,45 +2008,11 @@ class _JointPositionConstraintEvidenceProviderFactory(
 
     def _resolve_object_ids(self, scene_registry: SceneRegistry) -> tuple[str, ...]:
         """Resolve an optional allowlist against graspable scene objects."""
-        if type(scene_registry) is not SceneRegistry:
-            raise TypeError("scene_registry must be exactly SceneRegistry.")
-        object_ids = self.object_ids
-        if object_ids is None:
-            object_ids = tuple(
-                ref.entity_id
-                for ref in scene_registry.entity_refs
-                if type(ref) is SceneObjectRef
-                and scene_registry.affordances(
-                    ref,
-                    capability=GRASP_AFFORDANCE_CAPABILITY,
-                )
-            )
-        if not object_ids:
-            raise ValueError(
-                "Joint-position constraint evidence requires at least one "
-                "graspable scene object."
-            )
-        resolved_object_ids: list[str] = []
-        for object_id in object_ids:
-            object_ref = scene_registry.resolve(
-                object_id,
-                expected_type=SceneObjectRef,
-            )
-            if not scene_registry.affordances(
-                object_ref,
-                capability=GRASP_AFFORDANCE_CAPABILITY,
-            ):
-                raise ValueError(
-                    "Joint-position constraint evidence object "
-                    f"{object_id!r} must expose a grasp affordance."
-                )
-            resolved_object_ids.append(object_ref.entity_id)
-        if len(set(resolved_object_ids)) != len(resolved_object_ids):
-            raise ValueError(
-                "Joint-position constraint evidence object_ids must resolve to "
-                "distinct scene objects."
-            )
-        return tuple(resolved_object_ids)
+        return _graspable_object_ids(
+            self.object_ids,
+            scene_registry,
+            evidence="Joint-position constraint evidence",
+        )
 
     def create(
         self,
@@ -2034,4 +2042,127 @@ class _JointPositionConstraintEvidenceProviderFactory(
                 open_qpos=self.open_qpos,
                 minimum_displacement=self.minimum_displacement,
             ),
+        )
+
+
+_PAD_CONTACT_SENSOR_UID = "control_part_pad_contact"
+"""Contact sensor owned by configured pad-contact constraint evidence."""
+
+
+@dataclass(frozen=True, slots=True)
+class _PadContactConstraintEvidenceProviderFactory(ControlPartEvidenceProviderFactory):
+    """Create bilateral pad-contact evidence scoped to graspable scene objects.
+
+    A gripper holds an object while both declared pad links press on it from
+    opposing sides, so the result does not depend on how far the fingers
+    closed. ``open_qpos`` and ``open_tolerance`` additionally accept a release
+    in which the object still rests against one pad of a measured open hand.
+    """
+
+    provider_id: ClassVar[str] = CONTROL_PART_EVIDENCE_PROVIDER_ID
+    revision: ClassVar[str] = CONTROL_PART_EVIDENCE_PROVIDER_REVISION
+
+    pad_links: tuple[tuple[str, tuple[str, str]], ...]
+    object_ids: tuple[str, ...] | None
+    open_qpos: tuple[float, ...] | None
+    open_tolerance: float | None
+
+    def __post_init__(self) -> None:
+        if type(self.pad_links) is not tuple or not self.pad_links:
+            raise ValueError("pad_links must be a non-empty exact tuple.")
+        for entry in self.pad_links:
+            if type(entry) is not tuple or len(entry) != 2:
+                raise ValueError("pad_links entries must be control-part/link pairs.")
+            control_part, links = entry
+            _identifier(control_part, field_name="pad_links")
+            if type(links) is not tuple or len(links) != 2 or links[0] == links[1]:
+                raise ValueError(
+                    f"pad_links for {control_part!r} must name two distinct links."
+                )
+            for link in links:
+                _identifier(link, field_name="pad_links")
+        control_parts = [control_part for control_part, _ in self.pad_links]
+        if len(set(control_parts)) != len(control_parts):
+            raise ValueError("pad_links must not repeat a control part.")
+        if self.object_ids is not None:
+            if type(self.object_ids) is not tuple or not self.object_ids:
+                raise ValueError("object_ids must be a non-empty exact tuple or None.")
+            for object_id in self.object_ids:
+                _identifier(object_id, field_name="object_ids")
+            if len(set(self.object_ids)) != len(self.object_ids):
+                raise ValueError("object_ids must not contain duplicates.")
+        if (self.open_qpos is None) != (self.open_tolerance is None):
+            raise ValueError("open_qpos and open_tolerance must be set together.")
+        if self.open_qpos is not None:
+            if type(self.open_qpos) is not tuple or not self.open_qpos:
+                raise ValueError("open_qpos must be a non-empty exact tuple.")
+            if not all(math.isfinite(value) for value in self.open_qpos):
+                raise ValueError("open_qpos must contain only finite values.")
+            if not math.isfinite(self.open_tolerance) or self.open_tolerance <= 0.0:
+                raise ValueError("open_tolerance must be finite and positive.")
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicSkillEngine,
+        scene_provider: SceneProvider,
+    ) -> EffectEvidenceProvider:
+        """Bind a fresh contact-evidence provider to the assembled runtime."""
+        from embodichain.lab.sim.atomic_skills.grip_evidence import (
+            DriverOpeningBinding,
+        )
+        from .simulation.grip_evidence import (
+            NativeGripEvidenceCfg,
+            NativeGripEvidenceFactory,
+        )
+
+        object_ids = _graspable_object_ids(
+            self.object_ids,
+            scene_registry,
+            evidence="Pad-contact constraint evidence",
+        )
+        rigid_uids = set(simulation.get_rigid_object_uid_list())
+        object_bindings: list[tuple[str, str]] = []
+        for object_id in object_ids:
+            # The registry records a differing simulation UID as an alias.
+            names = (*scene_registry.lookup(object_id).aliases, object_id)
+            uid = next((name for name in names if name in rigid_uids), None)
+            if uid is None:
+                raise ValueError(
+                    f"Pad-contact constraint evidence object {object_id!r} must be "
+                    "a simulation rigid object."
+                )
+            object_bindings.append((object_id, uid))
+        opening_bindings: tuple[DriverOpeningBinding, ...] = ()
+        if self.open_qpos is not None:
+            opening_bindings = tuple(
+                DriverOpeningBinding(
+                    control_part=control_part,
+                    joint_names=tuple(
+                        robot.joint_names[int(index)]
+                        for index in robot.get_joint_ids(name=control_part)
+                    ),
+                    driver_indices=tuple(range(len(self.open_qpos))),
+                    open_qpos=self.open_qpos,
+                    tolerance=self.open_tolerance,
+                )
+                for control_part, _ in self.pad_links
+            )
+        return NativeGripEvidenceFactory(
+            NativeGripEvidenceCfg(
+                sensor_uid=_PAD_CONTACT_SENSOR_UID,
+                object_bindings=tuple(object_bindings),
+                pad_bindings=self.pad_links,
+                algorithm_revision=2 if opening_bindings else 1,
+                opening_bindings=opening_bindings,
+            )
+        ).create(
+            simulation=simulation,
+            robot=robot,
+            scene_registry=scene_registry,
+            engine=engine,
+            scene_provider=scene_provider,
         )

@@ -367,10 +367,18 @@ for supported topology, geometry and cache lifetime.
 The reference embodiment `skill_profile.contract_id` and `profile_id` values
 are unversioned. Versioned Gym, task-integration, or scene-registry IDs are
 separate identity domains and do not imply a skill-profile version.
-For `joint_position_constraint` evidence, `object_ids` is an optional explicit
-narrowing. When omitted, runtime assembly scopes the embodiment service to the
-selected scene's graspable rigid objects, so reusable embodiments do not name
-task-local objects.
+`control_part_evidence.kind` selects how a hand's grasp constraint is measured.
+`joint_position_constraint` reports a hold once any hand joint is at least
+`minimum_displacement` from `open_qpos`, so a grasp that closes the fingers by
+less than that reads as open. `pad_contact_constraint` instead reuses native
+grip evidence: `pad_links` names the two pad links of each control part, and a
+hold is opposed positive-impulse contact of both pads with the object,
+independent of grasp width. Its optional `open_qpos` and `open_tolerance`, set
+together in the control part's joint order, also accept a release where the
+object rests against one pad of a measured open hand. For both kinds,
+`object_ids` is an optional explicit narrowing. When omitted, runtime assembly
+scopes the embodiment service to the selected scene's graspable rigid objects,
+so reusable embodiments do not name task-local objects.
 
 Deployment embodiment robot installation overrides are restricted to `uid`,
 `init_pos`, `init_rot`, and `init_qpos`, plus bounded task calibration.

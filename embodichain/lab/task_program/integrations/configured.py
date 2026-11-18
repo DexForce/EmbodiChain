@@ -54,6 +54,7 @@ from ._configured_services import (
     _JointPositionConstraintEvidenceProviderFactory,
     _MoveHeldObjectLowererFactory,
     _MoveEndEffectorLowererFactory,
+    _PadContactConstraintEvidenceProviderFactory,
     _ParkLowererFactory,
     _PourLowererFactory,
     _PourTargetBinding,
@@ -3073,8 +3074,34 @@ def _decode_control_part_evidence(
     value: object,
     *,
     path: str,
-) -> _JointPositionConstraintEvidenceProviderFactory:
+) -> (
+    _JointPositionConstraintEvidenceProviderFactory
+    | _PadContactConstraintEvidenceProviderFactory
+):
     """Decode one allowlisted control-part evidence provider factory."""
+    common = _mapping(
+        value,
+        path=path,
+        required=frozenset({"kind"}),
+        optional=frozenset(
+            {
+                "control_parts",
+                "object_ids",
+                "open_qpos",
+                "minimum_displacement",
+                "pad_links",
+                "open_tolerance",
+            }
+        ),
+    )
+    kind = _identifier(common["kind"], path=f"{path}.kind")
+    if kind == "pad_contact_constraint":
+        return _decode_pad_contact_constraint_evidence(value, path=path)
+    if kind != "joint_position_constraint":
+        raise ValueError(
+            f"Unsupported {path}.kind {kind!r}; supported kinds are "
+            "['joint_position_constraint', 'pad_contact_constraint']."
+        )
     config = _mapping(
         value,
         path=path,
@@ -3088,12 +3115,6 @@ def _decode_control_part_evidence(
         ),
         optional=frozenset({"object_ids"}),
     )
-    kind = _identifier(config["kind"], path=f"{path}.kind")
-    if kind != "joint_position_constraint":
-        raise ValueError(
-            f"Unsupported {path}.kind {kind!r}; supported kinds are "
-            "['joint_position_constraint']."
-        )
     return _JointPositionConstraintEvidenceProviderFactory(
         control_parts=_identifier_tuple(
             config["control_parts"],
@@ -3113,6 +3134,60 @@ def _decode_control_part_evidence(
             path=f"{path}.minimum_displacement",
             minimum=0.0,
             strict_minimum=True,
+        ),
+    )
+
+
+def _decode_pad_contact_constraint_evidence(
+    value: object,
+    *,
+    path: str,
+) -> _PadContactConstraintEvidenceProviderFactory:
+    """Decode bilateral pad-contact evidence for each declared hand."""
+    config = _mapping(
+        value,
+        path=path,
+        required=frozenset({"kind", "pad_links"}),
+        optional=frozenset({"object_ids", "open_qpos", "open_tolerance"}),
+    )
+    pad_links = config["pad_links"]
+    if not isinstance(pad_links, Mapping) or not pad_links:
+        raise ValueError(f"{path}.pad_links must be a non-empty mapping.")
+    if ("open_qpos" in config) != ("open_tolerance" in config):
+        raise ValueError(
+            f"{path}.open_qpos and {path}.open_tolerance must be set together."
+        )
+    pads: list[tuple[str, tuple[str, str]]] = []
+    for control_part, links in pad_links.items():
+        links_path = f"{path}.pad_links.{control_part}"
+        names = _identifier_tuple(links, path=links_path)
+        if len(names) != 2:
+            raise ValueError(f"{links_path} must name exactly two pad links.")
+        pads.append((_identifier(control_part, path=links_path), (names[0], names[1])))
+    return _PadContactConstraintEvidenceProviderFactory(
+        pad_links=tuple(pads),
+        object_ids=(
+            None
+            if "object_ids" not in config
+            else _identifier_tuple(
+                config["object_ids"],
+                path=f"{path}.object_ids",
+            )
+        ),
+        open_qpos=(
+            None
+            if "open_qpos" not in config
+            else _finite_tuple(config["open_qpos"], path=f"{path}.open_qpos")
+        ),
+        open_tolerance=(
+            None
+            if "open_tolerance" not in config
+            else _real(
+                config["open_tolerance"],
+                path=f"{path}.open_tolerance",
+                minimum=0.0,
+                strict_minimum=True,
+            )
         ),
     )
 
@@ -3140,7 +3215,11 @@ class _DecodedRuntimeServices:
         | _KinematicReplayFactory,
         ...,
     ] = ()
-    control_part_evidence: _JointPositionConstraintEvidenceProviderFactory | None = None
+    control_part_evidence: (
+        _JointPositionConstraintEvidenceProviderFactory
+        | _PadContactConstraintEvidenceProviderFactory
+        | None
+    ) = None
     nominal_motion_sources: tuple[_ConfiguredPrototypeSource, ...] = ()
     settle_presets: (
         tuple[
