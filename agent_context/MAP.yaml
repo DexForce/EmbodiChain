@@ -303,6 +303,7 @@ topics:
     SimulationSceneExpansionHost, SimulationSceneInitialState, episode_prepare]
   paths: [topics/scene-expansion/scene-expansion.md]
   source_of_truth:
+  - embodichain/lab/_scene_config/
   - embodichain/lab/sim/scene/feasibility/
   - embodichain/lab/sim/scene/expansion/
   - embodichain/lab/task_program/integrations/feasibility.py

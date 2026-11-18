@@ -311,16 +311,7 @@ class _AdaptivePoseSource(_BoundedPoseSource):
             for uid, opts in self.configuration.items():
                 if "follow" in opts:
                     parent = opts["follow"]
-                    poses[uid][:3, 3] = (
-                        self.poses[uid][:3, 3]
-                        + poses[parent][:3, 3]
-                        - self.poses[parent][:3, 3]
-                    )
-                    poses[uid][:3, :3] = (
-                        poses[parent][:3, :3]
-                        @ self.poses[parent][:3, :3].T
-                        @ self.poses[uid][:3, :3]
-                    )
+                    poses[uid] = self._follower_pose(uid, parent, poses[parent])
         changes = tuple(
             ScenePoseChange(uid, tuple(map(tuple, pose))) for uid, pose in poses.items()
         )
@@ -378,6 +369,16 @@ class _AdaptivePoseSource(_BoundedPoseSource):
             ):
                 return False, "full_pose_fk_residual"
         return True, "passed"
+
+    def _follower_pose(
+        self, uid: str, parent: str, parent_pose: np.ndarray
+    ) -> np.ndarray:
+        """Apply the parent's arena displacement and rotation to the nominal follower."""
+        nominal_parent = self.poses[parent]
+        pose = self.poses[uid].astype(parent_pose.dtype, copy=True)
+        pose[:3, 3] = pose[:3, 3] + parent_pose[:3, 3] - nominal_parent[:3, 3]
+        pose[:3, :3] = parent_pose[:3, :3] @ nominal_parent[:3, :3].T @ pose[:3, :3]
+        return pose
 
     def _offer(self, candidate, rng, raw):
         if self.cfg["strategy"] == "workspace_joint":

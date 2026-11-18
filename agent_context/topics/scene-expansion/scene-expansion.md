@@ -57,6 +57,7 @@ and does not certify continuous reachable volume.
 
 | Request | Owner |
 |---|---|
+| Simulator-free layout policy and feasibility declarations | `embodichain/lab/_scene_config/` |
 | Shared proposal contracts and fixed source | `embodichain/lab/sim/scene/expansion/` |
 | Candidate limits and movable entity permissions | `cfg.py` in that package |
 | Arena poses and proposal identity | `contracts.py` in that package |

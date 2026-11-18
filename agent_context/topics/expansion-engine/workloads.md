@@ -88,11 +88,11 @@ After at least the declared physical settling substeps, `activate` captures the
 initial measured boundary, performs the source's required preparation checks,
 registers a native candidate and uses `ExpansionEngine.admit_row`. It returns a
 fresh bridge bound exactly to that row and the environment's control cadence.
-Rejected preparation returns None and never earns quota. A warming row whose
-admission time budget expires is retired without proposal or receipt; its group
-can finish incomplete while already-admitted peers continue and export normally.
-The native source also handles expiry during initial-state validation before
-atomic session proposal.
+Rejected preparation returns None and never earns quota. The native source retires
+warming rows when the admission time or independent rollout budget is exhausted.
+It records the stop reason before proposal, including exhaustion detected during
+initial-state validation. The group can finish incomplete while already-admitted
+peers continue and export normally.
 
 Settling rows remain controller-active so Gym consumes their explicit reset
 hold targets. They are not live trajectories: only cursor rows receive source
@@ -227,6 +227,10 @@ same layout/task-mode screens for a controlled comparison without changing
 ordinary simple-sampling defaults. Screening budgets are bounded and separate
 from fixed physical quality thresholds. Prepared candidates stay immutable by
 ordinal; failed screening cannot turn into an accepted simple fallback.
+Static policy and task-mode decoding use shared simulator-free declarations.
+Authored anchors must satisfy the prepared layout domain. An out-of-domain
+bounded draw rejects only that proposal. Followers outside the support tree
+inherit the final parent's displacement before task screening.
 
 `robot_first` anchors one movable support-tree root per proposal from the
 workspace of a declared `robot_anchors` phase/part target. It uses the target's

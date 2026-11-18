@@ -37,6 +37,7 @@ def setup_source(
     member_yaw=False,
     workspace=None,
     bounded_fixed_root=False,
+    configure=None,
 ):
     import embodichain.lab.expansion._scene_first_sampling as module
 
@@ -187,6 +188,8 @@ def setup_source(
         opts["scene_sampling"]["layout"]["policy"]["intra_group"] = {
             "targets": {"mug": {"yaw_delta_range_deg": [30, 30]}}
         }
+    if configure is not None:
+        configure(opts, objects)
     validate_sampling(opts)
     return (
         _LayoutPoseSource(env, opts, seed=7, revision="test-source"),
@@ -386,6 +389,50 @@ def test_fixed_layout_geometry_cannot_be_moved_by_a_bounded_draw(monkeypatch):
     source.candidate(0)
     assert not source.validate(0).accepted and not checked
     assert source._events[0]["reason"] == "layout_moves_fixed_entity"
+
+
+def test_external_follower_uses_final_layout_parent_pose(monkeypatch):
+    def configure(opts, objects):
+        opts["scene"]["reference"] = {"follow": "tray"}
+        objects["reference"] = SimpleNamespace(
+            cfg=SimpleNamespace(to_dict=lambda: {"uid": "reference"}),
+            get_local_pose=lambda to_matrix=True: torch.eye(4)[None],
+        )
+        opts["scene_sampling"]["layout"]["conditions"]["tray"][0][3] += 0.05
+
+    source, checked, _ = setup_source(monkeypatch, configure=configure)
+    candidate = source.candidate(0)
+    assert source.validate(0).accepted
+    poses = {
+        c.entity_uid: np.asarray(c.arena_pose) for c in candidate.scene.pose_changes
+    }
+    np.testing.assert_allclose(poses["reference"][:3, 3], [0.05, 0, 0], atol=1e-9)
+    np.testing.assert_allclose(checked[0]["reference"], poses["reference"])
+
+
+@pytest.mark.parametrize("authored", [False, True])
+def test_outside_layout_bounds_rejects_sample_but_invalidates_authored_anchor(
+    monkeypatch, authored
+):
+    def configure(opts, objects):
+        opts["scene"]["tray"]["translation_m"][0] = [0.075, 0.075]
+        layout = opts["scene_sampling"]["layout"]
+        layout["policy"]["group_xy_offset_bounds_m"]["tray"][1][0] = 0.06
+        if authored:
+            layout["conditions"]["tray"][0][3] += 0.075
+        else:
+            layout["conditions"] = {}
+
+    if authored:
+        with pytest.raises(ValueError, match="outside declared root XY bounds"):
+            setup_source(monkeypatch, strategy="bounded_pose", configure=configure)
+    else:
+        source, checked, _ = setup_source(
+            monkeypatch, strategy="bounded_pose", configure=configure
+        )
+        source.candidate(0)
+        assert not source.validate(0).accepted and not checked
+        assert source._events[0]["reason"] == "layout_outside_sampled_domain"
 
 
 def test_member_layout_yaw_cannot_expand_the_task_domain(monkeypatch):

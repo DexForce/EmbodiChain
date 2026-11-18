@@ -17,13 +17,80 @@
 """Strict optional scene sampling and pose coverage declarations."""
 
 from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
 import math
+from typing import TYPE_CHECKING
+
 import numpy as np
+
+if TYPE_CHECKING:
+    from embodichain.lab._scene_config.feasibility import PhaseTarget, TaskOperationMode
 
 __all__: list[str] = []
 
 _ROBOT_LAYOUT_STRATEGIES = ("robot_first", "bidirectional")
 _LAYOUT_STRATEGIES = ("scene_first", *_ROBOT_LAYOUT_STRATEGIES)
+
+
+@dataclass(frozen=True)
+class _AnchorTarget:
+    phase_id: str
+    target: PhaseTarget
+    root_uid: str
+
+
+def _anchor_targets(
+    mode: TaskOperationMode, layout: Mapping, policy: Mapping, selections: object
+) -> tuple[_AnchorTarget, ...]:
+    """Resolve each named target to a rigid frame in the initial support tree."""
+    if not isinstance(selections, list) or not selections:
+        raise ValueError(
+            "robot_anchors requires a nonempty list of phase/part selectors"
+        )
+    targets = {}
+    moved = set()
+    support, parents = layout["support_uid"], layout["parent_by_uid"]
+    variable_members = policy["intra_group"]["targets"]
+    for phase in mode.phases:
+        for target in phase.targets:
+            targets[phase.phase_id, target.control_part] = (target, moved.copy())
+        moved.update(held.entity_uid for held in phase.held_objects)
+        moved.update(change.entity_uid for change in phase.resulting_poses)
+    result, seen = [], set()
+    for sel in selections:
+        if (
+            not isinstance(sel, Mapping)
+            or set(sel) != {"phase_id", "control_part"}
+            or any(type(value) is not str for value in sel.values())
+        ):
+            raise ValueError("robot_anchors selects explicit phase_id and control_part")
+        key = (sel["phase_id"], sel["control_part"])
+        if key not in targets or key in seen:
+            raise ValueError("robot_anchors must select unique declared phase targets")
+        seen.add(key)
+        target, earlier_moves = targets[key]
+        root = target.frame_uid
+        if root not in parents:
+            raise ValueError("A robot anchor target needs a frame in the support tree")
+        while True:
+            if root in variable_members or root in earlier_moves:
+                raise ValueError(
+                    "A robot anchor needs an initial frame rigidly attached to its layout root"
+                )
+            if parents[root] == support:
+                break
+            root = parents[root]
+        groups = policy["group_targets"]
+        if not policy["randomize_groups"] or (
+            groups is not None and root not in groups
+        ):
+            raise ValueError("A robot anchor requires a movable layout root")
+        if root in layout.get("conditions", {}):
+            raise ValueError("A robot anchor cannot replace an authored root condition")
+        result.append(_AnchorTarget(key[0], target, root))
+    return tuple(result)
 
 
 def validate_sampling(value: dict) -> None:
@@ -210,8 +277,8 @@ def validate_sampling(value: dict) -> None:
             or not 0 < screening["planning_timeout_s"] <= 60
         ):
             raise ValueError("Screening timeout must be positive and bounded")
-        from embodichain.lab.sim.scene.expansion.layout import _policy_data
-        from embodichain.lab.sim.scene.feasibility import request_from_mapping
+        from embodichain.lab._scene_config.feasibility import request_from_mapping
+        from embodichain.lab._scene_config.policy import _policy_data
 
         normalized_policy = _policy_data(layout["policy"])
         if any(
@@ -270,8 +337,6 @@ def validate_sampling(value: dict) -> None:
             "robot_anchors" in sampling
             or sampling["strategy"] in _ROBOT_LAYOUT_STRATEGIES
         ):
-            from ._robot_first_sampling import _anchor_targets
-
             anchors = _anchor_targets(
                 request.modes[0],
                 layout,

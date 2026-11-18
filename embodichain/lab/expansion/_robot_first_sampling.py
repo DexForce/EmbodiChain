@@ -27,75 +27,14 @@ import numpy as np
 from embodichain.lab.sim.scene.expansion import SceneLayoutCondition
 from embodichain.lab.sim.scene.feasibility.proposals import _workspace_fk_samples
 
+from ._pose_sampling_cfg import _AnchorTarget
+
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.scene.expansion import PreparedSceneRandomization
-    from embodichain.lab.sim.scene.feasibility import (
-        FeasibilityBudget,
-        PhaseTarget,
-        TaskOperationMode,
-    )
+    from embodichain.lab.sim.scene.feasibility import FeasibilityBudget
 
 __all__: list[str] = []
-
-
-@dataclass(frozen=True)
-class _AnchorTarget:
-    phase_id: str
-    target: PhaseTarget
-    root_uid: str
-
-
-def _anchor_targets(
-    mode: TaskOperationMode, layout: Mapping, policy: Mapping, selections: object
-) -> tuple[_AnchorTarget, ...]:
-    """Resolve each named target to a rigid frame in the initial support tree."""
-    if not isinstance(selections, list) or not selections:
-        raise ValueError(
-            "robot_anchors requires a nonempty list of phase/part selectors"
-        )
-    targets = {}
-    moved = set()
-    support, parents = layout["support_uid"], layout["parent_by_uid"]
-    variable_members = policy["intra_group"]["targets"]
-    for phase in mode.phases:
-        for target in phase.targets:
-            targets[phase.phase_id, target.control_part] = (target, moved.copy())
-        moved.update(held.entity_uid for held in phase.held_objects)
-        moved.update(change.entity_uid for change in phase.resulting_poses)
-    result, seen = [], set()
-    for sel in selections:
-        if (
-            not isinstance(sel, Mapping)
-            or set(sel) != {"phase_id", "control_part"}
-            or any(type(value) is not str for value in sel.values())
-        ):
-            raise ValueError("robot_anchors selects explicit phase_id and control_part")
-        key = (sel["phase_id"], sel["control_part"])
-        if key not in targets or key in seen:
-            raise ValueError("robot_anchors must select unique declared phase targets")
-        seen.add(key)
-        target, earlier_moves = targets[key]
-        root = target.frame_uid
-        if root not in parents:
-            raise ValueError("A robot anchor target needs a frame in the support tree")
-        while True:
-            if root in variable_members or root in earlier_moves:
-                raise ValueError(
-                    "A robot anchor needs an initial frame rigidly attached to its layout root"
-                )
-            if parents[root] == support:
-                break
-            root = parents[root]
-        groups = policy["group_targets"]
-        if not policy["randomize_groups"] or (
-            groups is not None and root not in groups
-        ):
-            raise ValueError("A robot anchor requires a movable layout root")
-        if root in layout.get("conditions", {}):
-            raise ValueError("A robot anchor cannot replace an authored root condition")
-        result.append(_AnchorTarget(key[0], target, root))
-    return tuple(result)
 
 
 @dataclass(frozen=True)
