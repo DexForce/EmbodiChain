@@ -362,7 +362,8 @@ class AntipodalGraspAffordanceBinding:
     ``internal_axis`` upgrades the payload to :class:`AxisAlignAffordance` while
     preserving the same antipodal grasp capability.  The axis is expressed in
     the rigid object's local frame and can be reused by held-object skills such
-    as ``Pour``.
+    as ``Pour``. ``max_closing_face_angle`` restricts a box-like object to
+    grasps that close squarely onto a pair of its faces.
     """
 
     entity_id: str
@@ -373,6 +374,10 @@ class AntipodalGraspAffordanceBinding:
     relative_pose: tuple[float, ...] = _IDENTITY_POSE
     mesh_env_id: int = 0
     internal_axis: tuple[float, float, float] | None = None
+    # Unset leaves the identity of existing deployments unchanged.
+    max_closing_face_angle: float | None = field(
+        default=None, metadata={"omit_none_from_provenance": True}
+    )
 
     def __post_init__(self) -> None:
         for field_name in ("entity_id", "object_id", "native_name", "revision"):
@@ -403,6 +408,13 @@ class AntipodalGraspAffordanceBinding:
             if math.sqrt(sum(value * value for value in axis)) <= 1.0e-6:
                 raise ValueError("internal_axis must be non-zero.")
             object.__setattr__(self, "internal_axis", axis)
+        if self.max_closing_face_angle is not None:
+            angle = _finite(
+                self.max_closing_face_angle, field_name="max_closing_face_angle"
+            )
+            if not 0.0 < angle < math.pi / 4:
+                raise ValueError("max_closing_face_angle must be in (0, pi/4) rad.")
+            object.__setattr__(self, "max_closing_face_angle", angle)
 
 
 @dataclass(frozen=True, slots=True)
@@ -757,6 +769,7 @@ def _antipodal_affordance(
     kwargs = {
         "mesh_vertices": vertices,
         "mesh_triangles": triangles,
+        "max_closing_face_angle": binding.max_closing_face_angle,
     }
     if binding.internal_axis is None:
         return AntipodalAffordance(**kwargs)

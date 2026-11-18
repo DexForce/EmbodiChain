@@ -578,6 +578,7 @@ def _decode_antipodal_grasp(
                 "relative_pose",
                 "mesh_env_id",
                 "internal_axis",
+                "max_closing_face_angle",
             }
         ),
     )
@@ -632,6 +633,14 @@ def _decode_antipodal_grasp(
                 expected_length=3,
             )
             if "internal_axis" in config
+            else None
+        ),
+        max_closing_face_angle=(
+            _real(
+                config["max_closing_face_angle"],
+                path=f"{path}.max_closing_face_angle",
+            )
+            if "max_closing_face_angle" in config
             else None
         ),
     )
@@ -794,6 +803,7 @@ def _decode_entity_affordance(
                 "relative_pose",
                 "mesh_env_id",
                 "internal_axis",
+                "max_closing_face_angle",
                 "grasp_link",
                 "object_target_pose",
                 "object_target_frame",

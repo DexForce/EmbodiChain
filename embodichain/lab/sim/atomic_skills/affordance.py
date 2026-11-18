@@ -24,6 +24,8 @@ from typing import Any, ClassVar, Literal, TYPE_CHECKING
 
 import torch
 
+from embodichain.compute.geometry.mesh import box_face_axes
+
 from .affordance_sampling import (
     AffordancePoseCandidates,
     AffordanceSample,
@@ -141,6 +143,14 @@ class AntipodalAffordance(Affordance):
     mesh_scope: Literal["object", "link"] = "object"
     """Whether the mesh describes the whole object or one selected link."""
 
+    max_closing_face_angle: float | None = None
+    """Largest angle [rad] between a grasp's closing axis and a box face normal.
+
+    Meant for box-like objects. When set, only candidates that close squarely
+    onto a pair of faces are kept, which removes grasps that span a diagonal
+    and touch the object on its edges. ``None`` keeps every candidate.
+    """
+
     MAX_SURFACE_POINT_COUNT: ClassVar[int] = 1000
     """Maximum point-cloud size used for geometry-distribution analysis."""
 
@@ -151,6 +161,15 @@ class AntipodalAffordance(Affordance):
             "link",
         ):
             raise ValueError("mesh_scope must be 'object' or 'link'.")
+        if self.max_closing_face_angle is not None:
+            if (
+                isinstance(self.max_closing_face_angle, bool)
+                or not isinstance(self.max_closing_face_angle, Real)
+                or not 0.0 < self.max_closing_face_angle < math.pi / 4
+            ):
+                raise ValueError("max_closing_face_angle must be in (0, pi/4) rad.")
+            if self.mesh_vertices is None:
+                raise ValueError("max_closing_face_angle requires the target mesh.")
         if self.mesh_vertices is None and self.mesh_triangles is None:
             return
         if self.mesh_vertices is None or self.mesh_triangles is None:
@@ -224,7 +243,28 @@ class AntipodalAffordance(Affordance):
             raise ValueError(
                 "grasp generator must return one candidate row per object pose."
             )
+        if self.max_closing_face_angle is not None:
+            rows = self._face_aligned_rows(rows, object_poses)
         return AffordancePoseCandidates.from_rows(rows, device=object_poses.device)
+
+    def _face_aligned_rows(
+        self,
+        rows: list[tuple[torch.Tensor, torch.Tensor]],
+        object_poses: torch.Tensor,
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        """Keep candidates whose closing axis is normal to a box face."""
+        axes = box_face_axes(
+            self.mesh_vertices.to(dtype=torch.float32), self.mesh_triangles
+        )
+        minimum = math.cos(self.max_closing_face_angle)
+        aligned = []
+        for (poses, costs), object_pose in zip(rows, object_poses):
+            rotation = object_pose[:3, :3].to(poses)
+            # The grasp frame's x-axis is the closing axis; express it locally.
+            closing = poses[:, :3, 0] @ rotation
+            keep = (closing @ axes.to(poses).T).abs().amax(dim=1) >= minimum
+            aligned.append((poses[keep], costs[keep.to(costs.device)]))
+        return aligned
 
     def sample_surface_points(self, max_points: int = 1000) -> torch.Tensor:
         """Deterministically sample target-local mesh-surface points.

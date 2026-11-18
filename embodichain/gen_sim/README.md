@@ -149,6 +149,9 @@ a placement on a support prefers its robot-side region. `binding.release_clearan
 (metres, default 0) releases placements above their resting pose while validators
 keep the resting target; the place gate otherwise expects a released object to
 separate from the open gripper before retracting.
+`binding.box_grasp_categories` lists scene object categories, such as `cube`, whose
+grasps must close squarely onto a pair of box faces (within 15 degrees); grasps that
+span a diagonal and hold the object by its edges are then discarded.
 
 Further optional run fields: `task` reuses a published task-plan directory instead
 of planning, after verifying its artifacts and that it planned the same instruction

@@ -22,6 +22,7 @@ import argparse
 from collections import deque
 import hashlib
 import json
+import math
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -274,12 +275,17 @@ def test_workflow_generates_binds_and_preserves_actual_execution_verdict(
         run_cfg.instruction += " \n"
         run_cfg.task_id = " gensim_task "
 
-    # Releasing above the resting pose is opt-in; cover both settings.
+    # Releasing above the resting pose and face-aligned box grasps are opt-in;
+    # cover both settings.
     clearance = 0.03 if success else 0.0
     run_cfg = _RunCfg(
         **{
             **run_cfg.to_dict(),
-            "binding": {**run_cfg.binding, "release_clearance": clearance},
+            "binding": {
+                **run_cfg.binding,
+                "release_clearance": clearance,
+                "box_grasp_categories": ["cube"] if success else [],
+            },
         }
     )
 
@@ -305,6 +311,16 @@ def test_workflow_generates_binds_and_preserves_actual_execution_verdict(
         assert (
             deployment.scene_binding["rigid_objects"][0]["simulation_uid"]
             == "cube_native"
+        )
+        grasp = next(
+            affordance
+            for affordance in deployment.scene_binding["rigid_objects"][0][
+                "affordances"
+            ]
+            if affordance["kind"] == "antipodal_grasp"
+        )
+        assert grasp.get("max_closing_face_angle") == (
+            pytest.approx(math.pi / 12, abs=1e-6) if success else None
         )
         executed.append(path)
         return {
@@ -1674,6 +1690,8 @@ def test_resource_anchors_select_the_nearest_arm(run_cfg: _RunCfg) -> None:
         _RunCfg(**{**run_cfg.to_dict(), "binding": {"resource_anchors": {"left": [0]}}})
     with pytest.raises(ValueError, match="release_clearance"):
         _RunCfg(**{**run_cfg.to_dict(), "binding": {"release_clearance": -0.01}})
+    with pytest.raises(ValueError, match="box_grasp_categories"):
+        _RunCfg(**{**run_cfg.to_dict(), "binding": {"box_grasp_categories": "cube"}})
 
 
 def test_registered_calls_get_templates_keyed_by_call_id() -> None:

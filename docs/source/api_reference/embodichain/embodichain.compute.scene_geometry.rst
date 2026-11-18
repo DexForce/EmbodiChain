@@ -64,6 +64,9 @@ Operations and invalid values
    * - ``triangle_geometry``
      - Normals ``(..., 3)``, areas ``(...)``, validity ``(...)``
      - Degenerate, nonfinite or unrepresentable triangles return zero measurements and false validity.
+   * - ``box_face_axes``
+     - Three orthogonal unit face directions as rows, ``(3, 3)``
+     - Raises when the mesh has no valid triangle or no face perpendicular to its dominant one.
 
 AABB overlap is positive volume only when all axis depths are positive;
 touching faces produce zero on the touching axis. Affine transforms support
@@ -100,6 +103,7 @@ Public kernel namespace
    group_height_offset
    transform_aabbs
    triangle_geometry
+   box_face_axes
    nearest_half_turn_pose
    rotate_rigid_grasp
    transform_vertex_bounds
@@ -183,6 +187,7 @@ Triangle measurements
    :nosignatures:
 
    triangle_geometry
+   box_face_axes
 
 .. automodule:: embodichain.compute.geometry.mesh
    :members:
