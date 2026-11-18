@@ -107,6 +107,8 @@ def test_generated_scene_is_rescaled_onto_the_calibrated_tabletop(
     # is authored in the Y-up axes (x, height, depth).
     assert table["body_scale"] == pytest.approx([0.6, 0.5, 0.4375])
     assert table["init_pos"] == pytest.approx([0.0, 0.0, 0.715])
+    # One hull keeps the collision surface on the calibrated tabletop height.
+    assert table["max_convex_hull_num"] == 1
     assert data["rigid_object"][0]["init_pos"] == [0.5, 0.5, 0.5]
     # Deployments are written as YAML; numpy scalars must not leak into them.
     yaml.safe_dump(result)

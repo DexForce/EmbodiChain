@@ -291,6 +291,10 @@ def calibrate_scene(
         float(surface_z - high[2]),
     ]
     table["init_rot"] = oriented(table)
+    # A convex decomposition raises the collision surface of a table-sized mesh
+    # about a centimetre above its mesh. The calibrated table is box-like, so
+    # its convex hull keeps the collision surface at ``surface_z``.
+    table["max_convex_hull_num"] = 1
     for entry in result.get("rigid_object", []):
         mask = masks / f"{entry['uid']}_mask.png"
         if not mask.is_file():
