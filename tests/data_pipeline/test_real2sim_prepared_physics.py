@@ -154,6 +154,43 @@ def test_physical_package_preserves_recording_and_updates_identity(
     assert not updated["task_success_verified"]
 
 
+def test_physical_package_counts_selected_robot_resources(
+    package: Path, tmp_path: Path
+) -> None:
+    audit_path = package / "input_validation.json"
+    audit = json.loads(audit_path.read_text())
+    audit["cases"][0]["asset_count"] = 0
+    audit_path.write_text(json.dumps(audit))
+    seal_prepared_checksums(package)
+
+    def prepare_mesh_robot(source: Path, output: Path) -> tuple[Path, dict]:
+        target, provenance = _physical_robot(source, output)
+        (output / "pad.obj").write_text("v 0 0 0\nv 0.01 0 0\nv 0 0.01 0\nf 1 2 3\n")
+        (output / "texture.png").write_bytes(b"fixture texture resource")
+        tree = ET.parse(target)
+        link = tree.getroot().find("link")
+        geometry = link.find("collision/geometry")
+        geometry.clear()
+        ET.SubElement(geometry, "mesh", filename="pad.obj")
+        visual = ET.SubElement(link, "visual")
+        ET.SubElement(ET.SubElement(visual, "geometry"), "mesh", filename="./pad.obj")
+        ET.SubElement(
+            ET.SubElement(visual, "material"), "texture", filename="texture.png"
+        )
+        tree.write(target)
+        return target, provenance
+
+    output = tmp_path / "physical"
+    prepare_physical_inputs(
+        package, output, sample_id="example", prepare_robot=prepare_mesh_robot
+    )
+    updated = json.loads((output / "input_validation.json").read_text())
+    # The shared visual/collision mesh and its texture are two distinct resources.
+    assert updated["cases"][0]["asset_count"] == 2
+    assert json.loads(audit_path.read_text())["cases"][0]["asset_count"] == 0
+    verify_prepared_checksums(output)
+
+
 def test_corrupt_source_rejected_before_preparation(
     package: Path, tmp_path: Path
 ) -> None:

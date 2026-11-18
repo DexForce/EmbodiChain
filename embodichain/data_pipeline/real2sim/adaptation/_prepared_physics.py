@@ -145,6 +145,14 @@ def prepare_physical_inputs(
             Path(path).relative_to(root).as_posix(): checksum
             for path, checksum in validation["collision_mesh_sha256"].items()
         }
+        robot_tree = ET.parse(urdf)
+        asset_count = len(
+            {
+                (urdf.parent / node.attrib["filename"]).resolve()
+                for node in robot_tree.findall(".//mesh")
+                + robot_tree.findall(".//texture")
+            }
+        )
         metadata["physical_robot_provenance"] = (
             "robot_physical/collision_provenance.json"
         )
@@ -193,6 +201,7 @@ def prepare_physical_inputs(
                     physical_execution="not_run; native qualification is a separate check",
                     physical_robot_preflight="passed",
                     source_observations_unchanged=True,
+                    asset_count=asset_count,
                     robot_geometry_sha256=validation["robot_geometry_sha256"],
                     source_robot_geometry_sha256=old_geometry,
                 )

@@ -11,7 +11,8 @@ both are implemented by this Real2Sim feature.
 
 | Stage | Example entry point | Implementation |
 | --- | --- | --- |
-| Repair the pinned AgiBot physical input | `python -m examples.real2sim.prepare_agibot` | Model-owned authored collision recipe and prepared-package validation |
+| Download ready-to-use AgiBot inputs | [Published packages](#download-ready-to-use-packages) | Qualified robot asset and complete five-case input package |
+| Reproduce the AgiBot asset repair | `python -m examples.real2sim.prepare_agibot` | Model-owned authored collision recipe and prepared-package validation |
 | Video to native Scene Engine export | `python -m examples.real2sim` | `gen_sim.real2sim.scene.reconstruct_video()` |
 | Export to calibrated, registered scene | Python snippet below | `gen_sim.real2sim.scene.register_scene_export()` |
 | Annotation, bounded correction, physical replay | `python -m examples.real2sim.agent` | `gen_sim.real2sim.execution.run_prepared_real2sim()` |
@@ -24,15 +25,86 @@ only parse arguments and call those packages.
 
 ## AgiBot prepared-input collision repair (#1212)
 
-The `03_agibot_toy` URDF in the
-[pinned prepared-input package](https://huggingface.co/datasets/DestoFaygo/embodichain-real2sim-inputs/tree/1b34442c9e3d3e6a3139d3df95d5cb0e61a93e1f)
-contains 41 visuals and no collisions. Loading, FK and file checksums do not
-establish physical replay eligibility. Physical execution now checks the URDF,
-mesh resources and declared gripper contact links before starting inference or
-native simulation; visual-only models remain available for nonphysical input
-loading. Replay never synthesizes collision geometry automatically.
+### Download ready-to-use packages
 
-In an installed development environment, explicitly prepare a **new** package:
+[AgiBot observed-replay asset release v1](https://github.com/DexForce/EmbodiChain/releases/tag/assets-agibot-g1-observed-replay-v1)
+contains two self-contained downloads. Both include the repaired physical URDF
+with **41 visuals and 36 collisions**, provenance, licenses, internal checksums,
+and native qualification evidence. Users do not need to regenerate the asset.
+
+| Package | Use |
+| --- | --- |
+| [Complete five-case input package](https://github.com/DexForce/EmbodiChain/releases/download/assets-agibot-g1-observed-replay-v1/real2sim_inputs_5_agibot_physical_v1.zip) (166 MB) | Direct input to the Real2Sim examples; AgiBot metadata already selects the repaired URDF |
+| [Standalone AgiBot robot](https://github.com/DexForce/EmbodiChain/releases/download/assets-agibot-g1-observed-replay-v1/agibot_g1_observed_replay_v1.zip) (7.4 MB) | Load the URDF directly; includes recorded joint/TCP/gripper metadata and the qualification input trajectory, without videos |
+
+For the complete prepared inputs, run from the repository root:
+
+```bash
+curl -L --fail \
+  'https://github.com/DexForce/EmbodiChain/releases/download/assets-agibot-g1-observed-replay-v1/real2sim_inputs_5_agibot_physical_v1.zip' \
+  -o real2sim_inputs_5_agibot_physical_v1.zip
+echo '41dfe262dd83aae4c2b24f1b5eb0d7025a45e2f62732d56db9168624e580d7c8  real2sim_inputs_5_agibot_physical_v1.zip' | sha256sum -c -
+unzip real2sim_inputs_5_agibot_physical_v1.zip
+export REAL2SIM_DATA="$PWD/Real2SimInputs5AgiBotPhysicalV1"
+(cd "$REAL2SIM_DATA" && sha256sum -c SHA256SUMS)
+python "$REAL2SIM_DATA/verify_inputs.py" --load
+export REAL2SIM_SOURCE="$REAL2SIM_DATA/samples/03_agibot_toy"
+```
+
+Continue with registration and replay below using `REAL2SIM_SOURCE`. All five
+recordings are included, with original observations, trajectories, timestamps,
+calibration and original robot directories preserved. The prepared loader remains
+compatible with PR #1173 at `8560e0a`. Scene reconstruction and service configuration
+remain separate from these inputs.
+
+For the standalone robot:
+
+```bash
+curl -L --fail \
+  'https://github.com/DexForce/EmbodiChain/releases/download/assets-agibot-g1-observed-replay-v1/agibot_g1_observed_replay_v1.zip' \
+  -o agibot_g1_observed_replay_v1.zip
+echo '3d2c715fbfca0f96e9390933cfe72b296b53ff39ed2126f628280df961ee1e3f  agibot_g1_observed_replay_v1.zip' | sha256sum -c -
+unzip agibot_g1_observed_replay_v1.zip
+(cd AgibotG1ObservedReplayV1 && sha256sum -c SHA256SUMS)
+```
+
+```python
+from pathlib import Path
+from embodichain.lab.sim.cfg import RobotCfg, ArticulationRootPropertiesCfg
+
+asset = Path("AgibotG1ObservedReplayV1").resolve()
+robot_cfg = RobotCfg(
+    uid="agibot",
+    fpath=str(asset / "robot_physical/robot.urdf"),
+    build_pk_chain=False,
+    root_props=ArticulationRootPropertiesCfg(fixed_base=True),
+)
+```
+
+Use this explicit URDF path for the observed-replay model. `AgibotG1Cfg` continues
+to select the original GenieSim USD preset. The standalone package retains exact
+`robot.json`, trajectory and resource bytes bound by its native report; its
+`asset_manifest.json` records entry points and provenance.
+
+[resources.lock.json](resources.lock.json) pins both download URLs, archive sizes,
+SHA-256 values, internal checksum manifests, source revision and physical geometry.
+The release also supplies `release.json` and `SHA256SUMS`. The full input package's
+`distribution.json` and `manifest.json` point to the same standalone asset, while
+`input_validation.json` records 63 selected AgiBot mesh resources and successful
+relocation checks for all five cases. Keep each package's license notices: the
+AgiBot model and recording use CC-BY-NC-SA-4.0; the full collection retains its
+upstream per-sample licenses and model-resource disclosures.
+
+### Reproduce the repair from the original inputs
+
+The `03_agibot_toy` URDF in the
+[original pinned input package](https://huggingface.co/datasets/DestoFaygo/embodichain-real2sim-inputs/tree/1b34442c9e3d3e6a3139d3df95d5cb0e61a93e1f)
+contains 41 visuals and no collisions. That historical source is retained for
+reproduction. Physical execution checks authored collisions, mesh resources and
+declared gripper contact links before inference or native simulation; replay never
+synthesizes collision geometry automatically.
+
+In an installed development environment, optionally recreate a **new** package:
 
 ```bash
 curl -L --fail \
@@ -74,8 +146,7 @@ import, finite stepping, calibrated opening/closing, sustained bilateral pad
 contact and release. Attaching a report verifies its complete input hashes,
 including calibration, initial trajectory and URDF inertials, before updating
 qualification status and package checksums. The command checks all 36 native
-collision-bearing links
-and every calibrated pad. These checks do not establish grasp stability,
+collision-bearing links and every calibrated pad. These checks do not establish grasp stability,
 hardware validity, or successful execution of the toy-placement task. They also
 do not add Task Program/DemoSkill deployment integration.
 
