@@ -68,7 +68,7 @@ def test_observed_replay_descriptor_pins_revision_and_respects_mirrors(
     with pytest.raises(Intercepted):
         assets.AgibotG1ObservedReplay(str(tmp_path))
     revision = assets.AgibotG1ObservedReplay._revision
-    filename = "robot_assets/AgibotG1ObservedReplayV1.zip"
+    filename = "robot_assets/AgibotG1ObservedReplayV2.zip"
     origin = (
         "https://huggingface.co/datasets/DexForceAI/embodichain_data/"
         f"resolve/{revision}/{filename}"
@@ -76,26 +76,26 @@ def test_observed_replay_descriptor_pins_revision_and_respects_mirrors(
     selected = prefix.replace("/resolve/main/", f"/resolve/{revision}/") + filename
     assert captured["descriptor"].urls == list(dict.fromkeys([selected, origin]))
     assert captured["descriptor"].md5 == assets.AgibotG1ObservedReplay._archive_md5
-    assert captured["cache_prefix"] == "AgibotG1ObservedReplayV1"
+    assert captured["cache_prefix"] == "AgibotG1ObservedReplayV2"
     assert captured["root"] == str(tmp_path)
 
 
 @pytest.fixture
 def observed_archive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     source = tmp_path / "source"
-    archive = source / "robot_assets/AgibotG1ObservedReplayV1.zip"
+    archive = source / "robot_assets/AgibotG1ObservedReplayV2.zip"
     archive.parent.mkdir(parents=True)
     contents = {
-        "robot_physical/robot.urdf": b'<robot name="fixture"><link name="base"/></robot>',
-        "robot_physical/pad.obj": b"fixture collision resource",
-        "robot_physical/LICENSE.agibot": b"fixture retained license",
+        "robot.urdf": b'<robot name="fixture"><link name="base"/></robot>',
+        "collisions/pad.obj": b"fixture collision resource",
+        "LICENSE.agibot": b"fixture retained license",
     }
     checksums = "".join(
         f"{hashlib.sha256(content).hexdigest()}  {name}\n"
         for name, content in contents.items()
     ).encode()
     with ZipFile(archive, "w") as output:
-        output.writestr("robot_physical/", b"")
+        output.writestr("collisions/", b"")
         for name, content in contents.items():
             output.writestr(name, content)
         output.writestr("SHA256SUMS", checksums)
@@ -111,27 +111,30 @@ def observed_archive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return archive
 
 
-def test_observed_replay_resolves_flat_archive_from_empty_cache(
+def test_observed_replay_resolves_model_only_v2_without_reusing_v1(
     observed_archive: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = str(tmp_path / "cache")
+    old_urdf = Path(root) / "extract/AgibotG1ObservedReplayV1/robot_physical/robot.urdf"
+    old_archive = (
+        Path(root) / "download/AgibotG1ObservedReplayV1/AgibotG1ObservedReplayV1.zip"
+    )
+    old_urdf.parent.mkdir(parents=True)
+    old_urdf.write_bytes(b"previous V1 model layout")
+    old_archive.parent.mkdir(parents=True)
+    old_archive.write_bytes(b"previous V1 archive")
     monkeypatch.setattr(constants, "EMBODICHAIN_DEFAULT_DATA_ROOT", root)
     monkeypatch.setattr(assets, "EMBODICHAIN_DEFAULT_DATA_ROOT", root)
-    path = Path(
-        dataset.get_data_path("AgibotG1ObservedReplay/robot_physical/robot.urdf")
-    )
-    assert (
-        path
-        == Path(root) / "extract/AgibotG1ObservedReplayV1/robot_physical/robot.urdf"
-    )
+    path = Path(dataset.get_data_path("AgibotG1ObservedReplay/robot.urdf"))
+    assert path == Path(root) / "extract/AgibotG1ObservedReplayV2/robot.urdf"
     assert path.read_bytes() == b'<robot name="fixture"><link name="base"/></robot>'
+    assert old_urdf.read_bytes() == b"previous V1 model layout"
+    assert old_archive.read_bytes() == b"previous V1 archive"
     observed_archive.unlink()
-    assert dataset.get_data_path(
-        "AgibotG1ObservedReplay/robot_physical/robot.urdf"
-    ) == str(path)
+    assert dataset.get_data_path("AgibotG1ObservedReplay/robot.urdf") == str(path)
 
 
-@pytest.mark.parametrize("relative", ["SHA256SUMS", "robot_physical/pad.obj"])
+@pytest.mark.parametrize("relative", ["SHA256SUMS", "collisions/pad.obj"])
 def test_observed_replay_rejects_changed_cached_resources(
     observed_archive: Path, tmp_path: Path, relative: str
 ) -> None:

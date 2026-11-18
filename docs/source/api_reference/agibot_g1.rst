@@ -29,8 +29,8 @@ Observed-replay URDF asset
 --------------------------
 
 The separate ``AgibotG1ObservedReplay`` data asset downloads a pinned physical
-URDF, its local mesh resources, recording calibration and qualification evidence.
-Resolve ``AgibotG1ObservedReplay/robot_physical/robot.urdf`` with
+URDF, its local mesh resources, collision provenance and license.
+Resolve ``AgibotG1ObservedReplay/robot.urdf`` with
 :func:`embodichain.data.get_data_path`. Its versioned cache and verified content
 are independent of the original ``AgibotG1`` USD asset and robot preset.
 

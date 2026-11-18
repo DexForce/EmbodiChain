@@ -21,20 +21,19 @@ embodichain data download --name AgibotG1ObservedReplay
 ```python
 from embodichain.data import get_data_path
 
-urdf = get_data_path("AgibotG1ObservedReplay/robot_physical/robot.urdf")
+urdf = get_data_path("AgibotG1ObservedReplay/robot.urdf")
 ```
 
-The asset uses the `AgibotG1ObservedReplayV1` cache, a pinned distribution
-revision, archive MD5/SHA-256 and a trusted file-checksum manifest. It retains
-the recorded model's joints, inertials, visuals and calibration, adding 14
-official arm cylinders and 22 authored hand collision meshes. The archive
-includes the source attribution, CC-BY-NC-SA-4.0 license, exact qualification
-inputs, native report and trace. Its native checks establish collision/contact
-behavior; they do not establish recorded-task success or hardware accuracy.
+The asset uses the `AgibotG1ObservedReplayV2` cache, a pinned distribution
+revision, archive MD5/SHA-256 and a trusted file-checksum manifest. The archive
+contains the root-level `robot.urdf`, its visual and collision meshes, the
+CC-BY-NC-SA-4.0 license, model conversion provenance, and a README. Its 14 arm
+cylinders and 22 hand collision meshes preserve the observed model's original
+joints, inertials and visuals.
 
 The original `AgibotG1` asset and `AgibotG1Cfg` continue to select the official
-USD. The observed-replay asset is not a new robot preset; use its bundled
-`robot.json` when configuring the recorded joint/TCP/gripper layout. The
+USD. Recording-specific `robot.json`, calibration, trajectories, and native
+validation reports/traces belong to the complete Real2Sim input package. The
 [Real2Sim example](../../../../examples/real2sim/README.md#download-prepared-physical-inputs)
 contains the pinned complete-input download and reproduction instructions.
 

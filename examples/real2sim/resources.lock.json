@@ -1,5 +1,5 @@
 {
-  "schema": "embodichain-agibot-asset-distribution/v1",
+  "schema": "embodichain-agibot-asset-distribution/v2",
   "generation_commit": "2f30259f3eae3a4758b9d54f229d2a2e6b1462f1",
   "source_package": {
     "repository": "DestoFaygo/embodichain-real2sim-inputs",
@@ -9,36 +9,44 @@
     "checksums_sha256": "f94951f0704bdf1095c581b4ca5637586f7c95c25a66a6c1759078dd86fbeca2"
   },
   "standalone_robot": {
-    "file": "AgibotG1ObservedReplayV1.zip",
-    "sha256": "bfedc336c02c61f4998da67b5f6df6e954725d2a023f8f104cc649451f3cf9f6",
-    "md5": "7aa86d274e394309c5f9955f5b1857ef",
-    "size": 7387156,
+    "file": "AgibotG1ObservedReplayV2.zip",
+    "sha256": "a289e751006be59e830119be1629a6a55a07338176d2ab4171e22463fc4e9c9c",
+    "md5": "b8dbea604576e68c1371cfc9eb55b337",
+    "size": 6997189,
     "archive_root": "",
-    "checksums_sha256": "e109121caa4ff8a211c472b7dadcae3d2516f18ca76b37e1a9863fd82cdc1185",
+    "checksums_sha256": "4308a768e868127079934ca07ca0ceb541d80f2270c37f7269725a9b6e54fd80",
     "asset_id": "AgibotG1ObservedReplay",
+    "cache_prefix": "AgibotG1ObservedReplayV2",
     "repository": "DexForceAI/embodichain_data",
-    "path": "robot_assets/AgibotG1ObservedReplayV1.zip",
-    "urdf": "robot_physical/robot.urdf",
+    "path": "robot_assets/AgibotG1ObservedReplayV2.zip",
+    "urdf": "robot.urdf",
     "license": "CC-BY-NC-SA-4.0",
-    "revision": "6d30720ec29ebe7596ce511ee407bf5cca4b6f50",
-    "url": "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/6d30720ec29ebe7596ce511ee407bf5cca4b6f50/robot_assets/AgibotG1ObservedReplayV1.zip",
-    "registry_reference": "AgibotG1ObservedReplay/robot_physical/robot.urdf"
+    "model_only": true,
+    "revision": "e002d649bb292d3e18c3a97d5b5c22c8ddcc81a3",
+    "url": "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/e002d649bb292d3e18c3a97d5b5c22c8ddcc81a3/robot_assets/AgibotG1ObservedReplayV2.zip",
+    "registry_reference": "AgibotG1ObservedReplay/robot.urdf",
+    "companion_metadata": {
+      "file": "artifact.json",
+      "url": "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/e002d649bb292d3e18c3a97d5b5c22c8ddcc81a3/robot_assets/AgibotG1ObservedReplayV2/artifact.json",
+      "sha256": "73ab953824d80f7113ae421976c33872a9865300db5d6f5d8627cd4561320f54"
+    }
   },
   "prepared_inputs": {
-    "file": "real2sim_inputs_5_agibot_physical_v1.zip",
-    "sha256": "59cdde731d49771d407624255f3e28d3b22f11478f5e4400b15ea5a49379b504",
-    "md5": "af56e6cfe86003b9f8684fc1fb0d2f7e",
-    "size": 166019816,
-    "archive_root": "Real2SimInputs5AgiBotPhysicalV1",
-    "checksums_sha256": "d60eaaa33748117e574f2b45fc539fc3de5db240aafce92835dbd5f6bea12547",
+    "file": "real2sim_inputs_5_agibot_physical_v2.zip",
+    "sha256": "593d6aec77b22577e7076a92afd150e9a1ff2b52857fe02dddd3cdd66bd90d6b",
+    "md5": "52a370042aa2e2dd77fabf36c4581d74",
+    "size": 166020028,
+    "archive_root": "Real2SimInputs5AgiBotPhysicalV2",
+    "checksums_sha256": "45c0dc02af7042d0ba2da18328a86d6e26aa4afdfa8115b6f744157ae518d304",
     "repository": "DexForceAI/embodichain_data",
-    "path": "demo/real2sim_inputs/real2sim_inputs_5_agibot_physical_v1.zip",
-    "prepared_source": "Real2SimInputs5AgiBotPhysicalV1/samples/03_agibot_toy",
+    "path": "demo/real2sim_inputs/real2sim_inputs_5_agibot_physical_v2.zip",
+    "prepared_source": "Real2SimInputs5AgiBotPhysicalV2/samples/03_agibot_toy",
     "licenses": "Per-sample; see LICENSES.md and licenses/",
-    "revision": "b537d5468d8326ec69ced54a61c2dd637bdb7e30",
-    "url": "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/b537d5468d8326ec69ced54a61c2dd637bdb7e30/demo/real2sim_inputs/real2sim_inputs_5_agibot_physical_v1.zip"
+    "revision": "9ff78edea77dedbdc5d5cce9e0b6ef4792cb11d5",
+    "url": "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/9ff78edea77dedbdc5d5cce9e0b6ef4792cb11d5/demo/real2sim_inputs/real2sim_inputs_5_agibot_physical_v2.zip"
   },
   "robot_geometry_sha256": "eb2df06b27924cb8c037992e44ec1b71cf6cd39f97fa1b2d84326d294f7fefec",
+  "urdf_sha256": "b3f145954404327cd1b8b0f4d33cfce9279100545b8fd87b51d369661cb9d3ac",
   "native_qualification": {
     "status": "passed",
     "checks_passed": 11,
@@ -46,8 +54,12 @@
     "report_sha256": "329d1662e1da30cf6a39b743135774f5a76d8b7af1d80a5ddf6db07c6f452791",
     "code_sha256": "2173888a3238ac4037087027c77a989854bae4eba1d112059fea3f0981459d3e",
     "trace_sha256": "ca3b6e5bf9cadae9929cdca9fcb688068a30fdf0a73d182179cbbcb24a81e2b6",
-    "task_success_verified": false
+    "task_success_verified": false,
+    "scope": "prepared_inputs_only",
+    "report_path": "samples/03_agibot_toy/physical_validation/native/report.json",
+    "trace_path": "samples/03_agibot_toy/physical_validation/native/trace.npz"
   },
+  "native_evidence_location": "prepared_inputs_only",
   "relocation": {
     "files": 347,
     "resource_references": 273,
@@ -114,12 +126,11 @@
       }
     ],
     "status": "passed",
-    "method": "Extract Hugging Face distribution ZIP into an unrelated directory; verify hashes/resources and all five prepared loaders/FK checks."
+    "method": "Extract V2 ZIP into an unrelated directory; verify hashes/resources and all five prepared loaders/FK checks."
   },
   "source_original_files_preserved": 270,
-  "urdf_sha256": "b3f145954404327cd1b8b0f4d33cfce9279100545b8fd87b51d369661cb9d3ac",
   "distribution_manifest": {
-    "url": "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/b537d5468d8326ec69ced54a61c2dd637bdb7e30/demo/real2sim_inputs/resources.lock.json",
-    "sha256": "99245e89a5e38f6fded9046ee93b1e1e25923a5515ef224fb29eeb6f6808852e"
+    "url": "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/9ff78edea77dedbdc5d5cce9e0b6ef4792cb11d5/demo/real2sim_inputs/resources.lock.json",
+    "sha256": "2b61f4194b410562e0a5cedc70d3b49ef561f286760f5575fc8dec672e479ec7"
   }
 }

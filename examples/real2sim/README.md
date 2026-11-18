@@ -27,26 +27,27 @@ only parse arguments and call those packages.
 The repaired assets are distributed through the project's Hugging Face dataset
 `DexForceAI/embodichain_data`. [resources.lock.json](resources.lock.json) pins the
 robot and complete-input revisions, archive hashes, internal checksum manifests,
-original source package and native qualification evidence.
+original source package and the complete input package's qualification evidence.
 
 For the complete five-case input package (about 166 MB):
 
 ```bash
 curl -L --fail \
-  'https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/b537d5468d8326ec69ced54a61c2dd637bdb7e30/demo/real2sim_inputs/real2sim_inputs_5_agibot_physical_v1.zip' \
-  -o real2sim_inputs_5_agibot_physical_v1.zip
-echo '59cdde731d49771d407624255f3e28d3b22f11478f5e4400b15ea5a49379b504  real2sim_inputs_5_agibot_physical_v1.zip' | sha256sum -c -
-unzip real2sim_inputs_5_agibot_physical_v1.zip
-python Real2SimInputs5AgiBotPhysicalV1/verify_inputs.py --load
-export REAL2SIM_SOURCE="$PWD/Real2SimInputs5AgiBotPhysicalV1/samples/03_agibot_toy"
+  'https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/9ff78edea77dedbdc5d5cce9e0b6ef4792cb11d5/demo/real2sim_inputs/real2sim_inputs_5_agibot_physical_v2.zip' \
+  -o real2sim_inputs_5_agibot_physical_v2.zip
+echo '593d6aec77b22577e7076a92afd150e9a1ff2b52857fe02dddd3cdd66bd90d6b  real2sim_inputs_5_agibot_physical_v2.zip' | sha256sum -c -
+unzip real2sim_inputs_5_agibot_physical_v2.zip
+python Real2SimInputs5AgiBotPhysicalV2/verify_inputs.py --load
+export REAL2SIM_SOURCE="$PWD/Real2SimInputs5AgiBotPhysicalV2/samples/03_agibot_toy"
 ```
 
 The AgiBot sample already selects `robot_physical/robot.urdf`; no repair command
-is required. The other samples, original robot directories, videos, depth,
-calibration and prepared trajectories are preserved. The original upstream
-archive remains available at its pinned source revision.
+is required. The complete package owns recording-specific `robot.json`,
+calibration, trajectories, and `physical_validation/native/report.json` and
+`trace.npz`. Original videos, depth and robot resources are preserved. The
+upstream input archive remains available at its pinned source revision.
 
-For the standalone robot (about 7.4 MB), use the asset registry:
+For the standalone robot model (about 7.0 MB), use the asset registry:
 
 ```bash
 embodichain data download --name AgibotG1ObservedReplay
@@ -55,19 +56,21 @@ embodichain data download --name AgibotG1ObservedReplay
 ```python
 from embodichain.data import get_data_path
 
-urdf = get_data_path("AgibotG1ObservedReplay/robot_physical/robot.urdf")
+urdf = get_data_path("AgibotG1ObservedReplay/robot.urdf")
 ```
 
-This resolves the versioned `AgibotG1ObservedReplayV1` cache and verifies the
-pinned archive and extracted-file hashes. A [direct ZIP download](https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/6d30720ec29ebe7596ce511ee407bf5cca4b6f50/robot_assets/AgibotG1ObservedReplayV1.zip)
+This resolves the versioned `AgibotG1ObservedReplayV2` cache and verifies the
+pinned archive and extracted-file hashes. A [direct ZIP download](https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/e002d649bb292d3e18c3a97d5b5c22c8ddcc81a3/robot_assets/AgibotG1ObservedReplayV2.zip)
 is also available; extract it into a new directory and check its `SHA256SUMS`.
-The standalone asset includes recorded joint/TCP/gripper metadata and native
-qualification inputs, but no videos or complete camera input. Use the full
-package above as `REAL2SIM_SOURCE`.
+The archive contains root-level `robot.urdf`, its visual/collision meshes,
+license, model provenance, README and checksums. Recording metadata, trajectory
+arrays and native validation reports/traces are only in the complete package.
+The model's URDF and all 63 mesh resources match the complete package's
+`robot_physical/` directory.
 
-The observed-replay asset preserves CC-BY-NC-SA-4.0 attribution and remains
-separate from the official `AgibotG1` USD preset. The complete input bundle
-retains its original per-sample licenses and model-resource disclosures.
+The model retains CC-BY-NC-SA-4.0 attribution and remains separate from the
+original `AgibotG1` USD preset. The complete input bundle retains its original
+per-sample licenses and model-resource disclosures.
 
 ## AgiBot prepared-input collision repair (#1212)
 

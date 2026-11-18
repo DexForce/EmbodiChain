@@ -109,10 +109,9 @@ class AgibotG1(EmbodiChainDataset):
 class AgibotG1ObservedReplay(EmbodiChainDataset):
     """Download the pinned, collision-bearing observed-replay G1 URDF.
 
-    This separate asset preserves the prepared recording's kinematics and
-    gripper calibration. It includes the authored collision repair, attribution,
-    CC-BY-NC-SA-4.0 license, and native qualification evidence. It does not replace
-    the original :class:`AgibotG1` USD model or attest physical task success.
+    The model bundle contains ``robot.urdf``, local visual and collision meshes,
+    collision provenance, attribution and the CC-BY-NC-SA-4.0 license. It uses
+    a separate versioned cache from the original :class:`AgibotG1` USD model.
 
     Args:
         data_root: Optional asset cache root; defaults to the configured
@@ -123,18 +122,18 @@ class AgibotG1ObservedReplay(EmbodiChainDataset):
 
     Example:
         >>> from embodichain.data import get_data_path
-        >>> path = get_data_path("AgibotG1ObservedReplay/robot_physical/robot.urdf")
+        >>> path = get_data_path("AgibotG1ObservedReplay/robot.urdf")
     """
 
-    cache_prefix: ClassVar[str] = "AgibotG1ObservedReplayV1"
-    _archive_name: ClassVar[str] = "AgibotG1ObservedReplayV1.zip"
-    _revision: ClassVar[str] = "6d30720ec29ebe7596ce511ee407bf5cca4b6f50"
-    _archive_md5: ClassVar[str] = "7aa86d274e394309c5f9955f5b1857ef"
+    cache_prefix: ClassVar[str] = "AgibotG1ObservedReplayV2"
+    _archive_name: ClassVar[str] = "AgibotG1ObservedReplayV2.zip"
+    _revision: ClassVar[str] = "e002d649bb292d3e18c3a97d5b5c22c8ddcc81a3"
+    _archive_md5: ClassVar[str] = "b8dbea604576e68c1371cfc9eb55b337"
     _archive_sha256: ClassVar[str] = (
-        "bfedc336c02c61f4998da67b5f6df6e954725d2a023f8f104cc649451f3cf9f6"
+        "a289e751006be59e830119be1629a6a55a07338176d2ab4171e22463fc4e9c9c"
     )
     _checksums_sha256: ClassVar[str] = (
-        "e109121caa4ff8a211c472b7dadcae3d2516f18ca76b37e1a9863fd82cdc1185"
+        "4308a768e868127079934ca07ca0ceb541d80f2270c37f7269725a9b6e54fd80"
     )
 
     def __init__(self, data_root: str | None = None) -> None:
