@@ -153,7 +153,7 @@ def get_package_data() -> dict[str, list[str]]:
     ]
     return {
         "embodichain": ["VERSION"],
-        "embodichain.lab.expansion": ["_preview.html"],
+        "embodichain.lab.expansion": ["_preview.html", "_distribution.html"],
         "embodichain.data": ["default_materials.json"],
         "embodichain.compute.kinematics._warp": [
             "ssik_LICENSE.txt",
