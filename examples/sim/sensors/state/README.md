@@ -23,3 +23,17 @@ red, green and blue denoting X, Y and Z. A vertical cursor shows which simulated
 sample supplies the displayed frames.
 
 The command writes `preview.png` and `preview.mp4` to the selected directory.
+
+## PVA and IMU
+
+```bash
+python -m examples.sim.sensors.state.inertial --output /tmp/sensor-inertial
+```
+
+This uses Default CPU and finite differences. Three cubes are measured at rest,
+in free fall, and spinning around Z with a sensor 0.18 m off the rotation axis.
+PVA shows arena-frame vertical acceleration and IMU shows local angular
+velocity and specific force. Specific force is near zero in free fall and near
+9.81 m/s² along Z at rest. The spinning sensor measures centripetal specific
+force along negative local X. Dots in the validity panel identify samples
+where acceleration is unavailable, including startup and the mid-run reset.

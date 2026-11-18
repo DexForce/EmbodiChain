@@ -1063,7 +1063,6 @@ def test_render_sampling_advances_only_cameras_with_rendered_groups() -> None:
 
 
 def test_state_reference_sensors_reorder_joints_and_compose_frames() -> None:
-    from tensordict import TensorDict
     from embodichain.lab.sim.sensors import (
         FrameTransformCfg,
         JointEncoderCfg,
@@ -1106,4 +1105,121 @@ def test_state_reference_sensors_reorder_joints_and_compose_frames() -> None:
     torch.testing.assert_close(
         transform.get_data()["transform"][:, :3, 3],
         torch.tensor([[1.0, 4.0, 0.0]]).expand(2, -1),
+    )
+
+
+def test_imu_distinguishes_freefall_from_rest_and_partial_reset() -> None:
+    from embodichain.lab.sim.sensors import IMUCfg
+
+    manager = _manager()
+    manager.sim_config.physics_cfg = SimpleNamespace(gravity=(0.0, 0.0, -9.81))
+    body_state = torch.tensor([[[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, *([0.0] * 6)]]] * 2)
+    manager._robots["arm"] = SimpleNamespace(link_names=["tip"], body_state=body_state)
+    sensor = manager.add_sensor(IMUCfg(uid="imu", asset_uid="arm", link_name="tip"))
+    manager._sample_managed_sensors("physics", 12, 0.1)
+    assert not sensor.get_data()["acceleration_valid"].any()
+    body_state[1, 0, 9] = -0.981
+    manager._visualization_sim_time += 0.1
+    manager._sample_managed_sensors("physics", 13, 0.1)
+    torch.testing.assert_close(
+        sensor.get_data()["specific_force"],
+        torch.tensor([[0.0, 0.0, 9.81], [0.0, 0.0, 0.0]]),
+    )
+    sensor.reset([0])
+    body_state[1, 0, 9] = -1.962
+    manager._visualization_sim_time += 0.1
+    manager._sample_managed_sensors("physics", 14, 0.1)
+    assert sensor.get_data()["acceleration_valid"].tolist() == [False, True]
+
+
+@pytest.mark.parametrize("backend", ["default", "newton"])
+@pytest.mark.parametrize("frame", ["link", "root", "rigid"])
+def test_inertial_difference_uses_velocity_at_sensor_point(
+    frame: str, backend: str
+) -> None:
+    from embodichain.lab.sim.sensors import IMUCfg, PVACfg
+
+    manager = _manager()
+    manager.physics = SimpleNamespace(name=backend)
+    manager.sim_config.physics_cfg = SimpleNamespace(gravity=(0.0, 0.0, 0.0))
+    omega = torch.pi / 2
+    body_state = torch.zeros((2, 13))
+    body_state[:, 0] = -1.0
+    body_state[:, 6] = 1.0
+    body_state[:, 12] = omega
+    com_pose = torch.tensor([[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]]).expand(2, -1)
+    link_name = None
+    if frame == "rigid":
+        manager._rigid_objects = {
+            "body": SimpleNamespace(
+                body_state=body_state, body_data=SimpleNamespace(com_pose=com_pose)
+            )
+        }
+    else:
+
+        class Robot:
+            link_names = ("other", "tip")
+            root_link_name = "tip"
+
+            @property
+            def root_state(self) -> torch.Tensor:
+                return self.body_state[:, 1]
+
+        robot = Robot()
+        robot.body_state = torch.stack(
+            (torch.zeros_like(body_state), body_state), dim=1
+        )
+        link_com_poses = torch.stack((torch.zeros_like(com_pose), com_pose), dim=1)
+        if backend == "newton":
+            from embodichain.lab.sim.objects.articulation import ArticulationData
+
+            def fetch_link_physical_properties(mass, inertia, poses):
+                poses.copy_(link_com_poses)
+
+            data = object.__new__(ArticulationData)
+            data.articulation_view = SimpleNamespace(
+                is_newton_backend=True,
+                fetch_link_physical_properties=fetch_link_physical_properties,
+            )
+            data._mass = torch.zeros((2, 2))
+            data._inertia = torch.zeros((2, 2, 3))
+            data._com_pose = torch.empty_like(link_com_poses)
+            robot.body_data = data
+        else:
+            robot.body_data = SimpleNamespace(
+                _read_link_com_position=lambda index: link_com_poses[:, index, :3]
+            )
+        manager._robots["body"] = robot
+        body_state = robot.body_state[:, 1]
+        if frame == "link":
+            link_name = "tip"
+
+    pva = manager.add_sensor(PVACfg(uid="pva", asset_uid="body", link_name=link_name))
+    imu = manager.add_sensor(IMUCfg(uid="imu", asset_uid="body", link_name=link_name))
+    manager._sample_managed_sensors("physics", 12, 1.0)
+    torch.testing.assert_close(
+        pva.get_data()["linear_velocity"],
+        torch.tensor([[0.0, -omega, 0.0]]).expand(2, -1),
+    )
+    assert not imu.get_data()["acceleration_valid"].any()
+
+    # The body turns about a stationary COM, so the body origin travels in an arc.
+    body_state[:, :3] = torch.tensor([0.0, -1.0, 0.0])
+    body_state[:, 5:7] = 2**-0.5
+    manager._visualization_sim_time += 1.0
+    manager._visualization_sim_step = 13
+    manager._sample_managed_sensors("physics", 13, 1.0)
+    assert pva.get_data()["acceleration_valid"].all()
+    assert imu.get_data()["acceleration_valid"].all()
+    torch.testing.assert_close(
+        pva.get_data()["linear_velocity"],
+        torch.tensor([[omega, 0.0, 0.0]]).expand(2, -1),
+    )
+    torch.testing.assert_close(
+        pva.get_data()["linear_acceleration"],
+        torch.tensor([[omega, omega, 0.0]]).expand(2, -1),
+    )
+    torch.testing.assert_close(
+        imu.get_data()["specific_force"],
+        torch.tensor([[omega, -omega, 0.0]]).expand(2, -1),
     )

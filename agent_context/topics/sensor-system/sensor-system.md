@@ -9,6 +9,7 @@
 | Explicit clock and joint-state service | `embodichain/lab/sim/sensors/context.py` → `SensorContext` |
 | Exported sensor/config names | `embodichain/lab/sim/sensors/__init__.py` |
 | Joint encoder and relative frame transforms | `embodichain/lab/sim/sensors/state.py` |
+| Finite-difference PVA and IMU | `embodichain/lab/sim/sensors/inertial.py` |
 | Image configuration, data flags, extrinsics | `embodichain/lab/sim/sensors/camera.py` → `CameraCfg`, `Camera` |
 | UID-scoped deployment calibration | `embodichain/lab/gym/utils/_component_composition.py`; [configuration ownership](../env-framework/configuration.md#reusable-gym-deployment-components) |
 | Two-eye transforms and attachment | `embodichain/lab/sim/sensors/stereo.py` → `StereoCameraCfg`, `StereoCamera` |
@@ -93,6 +94,11 @@ and per-row validity from `get_sample_metadata()`. Reading does not advance
 sampling. A camera advances only after its own groups render. A failed
 acquisition invalidates the current output and leaves the boundary retryable.
 Legacy Gym-driven camera and contact acquisition keeps its existing ordering.
+
+Default and Newton frame state includes the current body-local center-of-mass
+offset as `linear_velocity_offset` for moving rigid bodies and articulation
+links. PVA and IMU transport the reported linear velocity to the configured
+sensor point before taking finite differences.
 
 The independently installable example and usage instructions
 live in
