@@ -1619,6 +1619,8 @@ def test_room_adds_visual_shell_and_authored_floor_collider(
     assert room["floor"]["shape"] == {"shape_type": "Cube", "size": [5.6, 5.2, 0.06]}
     assert room["floor"]["init_pos"] == [0.7, 0.0, -0.03]
     assert room["floor"]["body_type"] == "static"
+    # Only the room mesh draws the floor; the collider stays invisible.
+    assert room["floor"]["render_enabled"] is False
     mesh = trimesh.load(room["visual"]["shape"]["fpath"], force="mesh")
     assert mesh.bounds[0] == pytest.approx([-2.0, -1.5, 0.0], abs=1e-6)
     assert mesh.bounds[1] == pytest.approx([2.0, 1.5, 2.0], abs=1e-6)

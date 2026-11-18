@@ -158,7 +158,7 @@ which rescales and places each rigid object so its projection matches its image
 mask (scenes with articulations, or whose table does not stay world-axis aligned
 under the calibrated yaw, are rejected);
 `room` adds a scene asset room (for example `WoodLab`) as a visual shell with its
-authored floor collider; `recording` streams every camera frame and per-step state
+authored floor collider, which is not drawn so that the room's own floor shows; `recording` streams every camera frame and per-step state
 to `recording/` during execution. Missing native parts, hidden or ambiguous
 references, unsupported geometry and incompatible capabilities reject rather
 than selecting a substitute or claiming execution readiness. Model grounding

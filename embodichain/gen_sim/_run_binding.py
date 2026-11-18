@@ -801,6 +801,9 @@ def _room_entries(name: str, assets: Path) -> dict[str, dict[str, Any]]:
             "init_pos": vector("translate"),
             "init_rot": [0.0, 0.0, 0.0],
             "body_type": "static",
+            # The box's top face coincides with the room's own floor, so
+            # drawing both makes the visible floor depend on the renderer.
+            "render_enabled": False,
         },
     }
 
