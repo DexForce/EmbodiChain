@@ -20,6 +20,21 @@ import pytest
 from embodichain.lab.expansion._distribution import _motion, _summarize
 
 
+def test_installation_noise_does_not_split_domain_or_modify_raw_poses():
+    from embodichain.lab.expansion._distribution import _installation_pose
+
+    measured = [2.3283064365386963e-10, -3.725290298461914e-9, 0, 0, 0, 0, -1]
+    raw = list(measured)
+    assert _installation_pose(measured) == _installation_pose([0, 0, 0, 0, 0, 0, 1])
+    assert measured == raw
+    assert _installation_pose([0.01, 0, 0, 0, 0, 0, 1]) != _installation_pose(measured)
+    assert _installation_pose([0, 0, 0, 0, 0, -1, -1e-10]) == _installation_pose(
+        [0, 0, 0, 0, 0, 1, 1e-10]
+    )
+    with pytest.raises(ValueError, match="nonzero"):
+        _installation_pose([0] * 7)
+
+
 def test_motion_density_and_time_are_separate():
     a = _motion(np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]), np.array([0.0, 2.0]))
     b = _motion(
