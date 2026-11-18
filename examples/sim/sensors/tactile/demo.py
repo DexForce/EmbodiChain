@@ -54,6 +54,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pad", choices=("planar", "curved"), default="curved")
     parser.add_argument("--device", default="cpu")
+    parser.add_argument(
+        "--rgb", action="store_true", help="Show the optical pad model."
+    )
+    parser.add_argument("--background", nargs=3, type=float, default=(0.27, 0.35, 0.48))
+    parser.add_argument(
+        "--x-response", nargs=3, type=float, default=(0.60, -0.12, -0.15)
+    )
+    parser.add_argument(
+        "--y-response", nargs=3, type=float, default=(0.07, 0.43, -0.28)
+    )
     parser.add_argument("--frames", type=int, default=24)
     parser.add_argument("--fps", type=int, default=10)
     parser.add_argument("--video", action="store_true", help="Also export H.264 MP4.")
@@ -117,6 +127,13 @@ def create_scene(
             init_pos=(0.0, 0.0, PAD_HEIGHT - TOOL_RADIUS - 0.006),
         )
     )
+    optical = None
+    if args.rgb:
+        optical = {
+            "background": args.background,
+            "x_response": args.x_response,
+            "y_response": args.y_response,
+        }
     sensor = sim.add_sensor(
         SensorCfg.from_dict(
             {
@@ -128,6 +145,7 @@ def create_scene(
                 "resolution": RESOLUTION,
                 "curvature_radius": CURVATURE_RADIUS if args.pad == "curved" else None,
                 "max_depth": MAX_DEPTH,
+                "rgb": optical,
             }
         )
     )
@@ -201,6 +219,17 @@ def draw_depth(figure: Figure, axis: Axes, sample: Sample) -> None:
     figure.colorbar(image, ax=axis, label="Depth (m)", shrink=0.75)
 
 
+def draw_rgb(axis: Axes, sample: Sample) -> None:
+    """Display the normalized optical output from the same pad sample."""
+    axis.imshow(
+        sample["rgb"],
+        origin="lower",
+        extent=(-PAD_SIZE[0] / 2, PAD_SIZE[0] / 2, -PAD_SIZE[1] / 2, PAD_SIZE[1] / 2),
+        interpolation="nearest",
+    )
+    axis.set(title="Tactile RGB", xlabel="Pad X (m)", ylabel="Pad Y (m)")
+
+
 def draw_sample(
     figure: Figure, samples: list[Sample], index: int, args: argparse.Namespace
 ) -> None:
@@ -208,9 +237,11 @@ def draw_sample(
     sample = samples[index]
     figure.clear()
     figure.set_layout_engine("constrained")
-    scene, depth = figure.subplots(1, 2)
-    show_scene(scene, sample["camera_rgb"])
-    draw_depth(figure, depth, sample)
+    axes = figure.subplots(1, 3 if args.rgb else 2)
+    show_scene(axes[0], sample["camera_rgb"])
+    draw_depth(figure, axes[1], sample)
+    if args.rgb:
+        draw_rgb(axes[2], sample)
     figure.supxlabel(
         f"Sample {sample['sample_id']}   ·   t = {sample['time']:.3f} s", fontsize=9
     )
@@ -223,7 +254,7 @@ def export(samples: list[Sample], args: argparse.Namespace) -> None:
         args.output_dir / "samples.npz",
         **{key: np.stack([sample[key] for sample in samples]) for key in samples[0]},
     )
-    figure = plt.figure(figsize=(7.6, 3.8), dpi=120)
+    figure = plt.figure(figsize=(10.8 if args.rgb else 7.6, 3.8), dpi=120)
     preview = int(np.argmax([sample["depth"].max() for sample in samples]))
     draw_sample(figure, samples, preview, args)
     figure.savefig(args.output_dir / "preview.png")

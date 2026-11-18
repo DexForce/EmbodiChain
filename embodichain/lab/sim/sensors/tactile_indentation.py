@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Literal
 import torch
 
 from embodichain.compute.geometry._indentation import _IndentationQuery
+from embodichain.compute.image._tactile_rgb import _TactileRGB
 from embodichain.utils import configclass
 
 from .base_sensor import SensorCfg
@@ -48,6 +49,23 @@ class TactileIndentationCfg(SensorCfg):
     together to use an explicitly calibrated curved layout.
     """
 
+    @configclass
+    class RGBCfg:
+        """First-order optical response for a regular or calibrated pad grid."""
+
+        x_response: tuple[float, float, float] = MISSING
+        """RGB gain per unit depth slope toward increasing columns."""
+        y_response: tuple[float, float, float] = MISSING
+        """RGB gain per unit depth slope toward increasing rows."""
+        background: (
+            tuple[float, float, float] | tuple[tuple[float, float, float], ...]
+        ) = (
+            0.5,
+            0.5,
+            0.5,
+        )
+        """Normalized no-contact RGB, either uniform or one triple per row-major cell."""
+
     sensor_type: str = "TactileIndentation"
     sample_phase: Literal["physics"] = "physics"
     mount: SensorCfg.OffsetCfg = SensorCfg.OffsetCfg()
@@ -62,9 +80,15 @@ class TactileIndentationCfg(SensorCfg):
     use_candidates: bool = False
     """Enable conservative geometric culling for workloads that benefit from it."""
 
+    rgb: RGBCfg | None = None
+    """Enable calibrated optical output on the same probe grid."""
+
     def get_data_types(self) -> list[str]:
         """Return published layout-aligned fields."""
-        return ["depth", "hit", "shape_id"]
+        fields = ["depth", "hit", "shape_id"]
+        if self.rgb is not None:
+            fields.append("rgb")
+        return fields
 
 
 class TactileIndentation(_ReadOnlySensor):
@@ -95,6 +119,8 @@ class TactileIndentation(_ReadOnlySensor):
             )
         if not math.isfinite(config.max_depth) or config.max_depth <= 0:
             raise ValueError("max_depth must be finite and positive.")
+        self._rgb: _TactileRGB | None = None
+        self._rgb_background: torch.Tensor | None = None
         self._scene: RayScene | None = None
         self._query: _IndentationQuery | None = None
         super().__init__(config, context=context)
@@ -171,10 +197,49 @@ class TactileIndentation(_ReadOnlySensor):
             self.cfg.max_depth,
         )
         query.bind(tuple(mesh for mesh, _ in scene._meshes))
+        if self.cfg.rgb is not None:
+            self._bind_rgb(self.cfg.rgb, points)
         self._scene = scene
         self._query = query
 
+    def _bind_rgb(
+        self, cfg: TactileIndentationCfg.RGBCfg, points: torch.Tensor
+    ) -> None:
+        cfg.validate()
+        if any(
+            len(gain) != 3 or not all(math.isfinite(value) for value in gain)
+            for gain in (cfg.x_response, cfg.y_response)
+        ):
+            raise ValueError("RGB gains must contain three finite values.")
+        data = self._data_buffer
+        _, height, width = data["depth"].shape
+        background = torch.as_tensor(
+            cfg.background, dtype=torch.float32, device=self.device
+        )
+        if background.shape == (3,):
+            background = background.expand(height, width, 3).contiguous()
+        elif background.shape == (height * width, 3):
+            background = background.reshape(height, width, 3)
+        else:
+            raise ValueError("RGB background needs one color or one per probe.")
+        if not bool(((background >= 0.0) & (background <= 1.0)).all()):
+            raise ValueError("RGB background must be in [0, 1].")
+        rgb = background.expand(self.num_instances, -1, -1, -1).clone()
+        data["rgb"] = rgb
+        self._rgb = _TactileRGB(
+            data["depth"],
+            data["hit"],
+            rgb,
+            background,
+            points,
+            cfg.x_response,
+            cfg.y_response,
+        )
+        self._rgb_background = background
+
     def on_unbind(self) -> None:
+        self._rgb = None
+        self._rgb_background = None
         self._scene = None
         self._query = None
 
@@ -187,6 +252,8 @@ class TactileIndentation(_ReadOnlySensor):
             else torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
         )
         self._data_buffer["shape_id"][rows] = -1
+        if self._rgb_background is not None:
+            self._data_buffer["rgb"][rows] = self._rgb_background
 
     def update(self, **kwargs: object) -> None:
         """Publish the bounded outward depth and validity for each probe."""
@@ -199,6 +266,8 @@ class TactileIndentation(_ReadOnlySensor):
             use_candidates=self.cfg.use_candidates,
         )
         torch.ge(self._data_buffer["shape_id"], 0, out=self._data_buffer["hit"])
+        if self._rgb is not None:
+            self._rgb.render()
 
     def get_data_descriptors(self) -> dict[str, dict[str, object]]:
         """Describe depth units, local direction and geometry provenance."""
@@ -206,4 +275,8 @@ class TactileIndentation(_ReadOnlySensor):
         fields["depth"].update(
             unit="m", frame="surface_normal", source=self.cfg.geometry_source
         )
+        if "rgb" in fields:
+            fields["rgb"].update(
+                unit="normalized", frame="probe_grid", source="calibrated_depth_slope"
+            )
         return fields

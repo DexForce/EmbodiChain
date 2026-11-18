@@ -248,6 +248,16 @@ and target and no truncated queue. Probe normals, distances and shape IDs
 describe geometric overlap. Profile the full sensing step before choosing
 candidate screening for workloads with all rows active.
 
+Set `TactileIndentationCfg.rgb` to publish normalized RGB on the depth grid.
+Calibrate the background and the two slope-to-RGB gains for the device. The
+gains follow increasing probe columns and rows. Planar, spherical-cap, and
+explicit row-major grids use the physical distance between neighboring
+probes for each directional slope. A no-contact pixel and a reset row return their calibrated
+background. RGB shares the depth sample and consumes no native render pass.
+Gym's `preview_sensor_data(name, data_type="rgb")` reads the latest valid
+scheduled sample for the chosen environment. Legacy camera preview still
+refreshes explicitly.
+
 Ray queries default to cooked collision shapes. Select `geometry_source: visual`
 for authored procedural or array-backed render geometry of rigid and visual
 objects. Visual queries use authored surfaces with no renderer or shading
