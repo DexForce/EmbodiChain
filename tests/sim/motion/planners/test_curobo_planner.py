@@ -775,6 +775,141 @@ def test_backend_forwards_fast_settings_and_disables_self_collision(
     }
 
 
+def _self_collision_planner(monkeypatch, create_kwargs, cost_manager):
+    """Planner whose fake cuRobo records factory arguments."""
+    rollout = SimpleNamespace(get_cost_manager_configs=lambda: [cost_manager])
+
+    class FakeMotionPlannerCfg:
+        @staticmethod
+        def create(**kwargs):
+            create_kwargs.update(kwargs)
+            return SimpleNamespace(
+                trajopt_solver_config=SimpleNamespace(num_seeds=8),
+                rrt_graph_planner_config=SimpleNamespace(
+                    resources_config=SimpleNamespace(rollout_config=rollout),
+                    planner_config=SimpleNamespace(max_batched_lanes=128),
+                ),
+            )
+
+    class FakeMotionPlanner:
+        joint_names = ["joint"]
+
+        def __init__(self, cfg):
+            self.cfg = cfg
+
+    planner = CuroboPlanner.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(
+        robot_uid="robot", self_collision=True, enable_timeopt=False
+    )
+    planner._curobo_device = torch.device("cuda:0")
+    planner._bindings = SimpleNamespace(
+        Runtime=SimpleNamespace(cuda_graphs=True),
+        MotionPlannerCfg=FakeMotionPlannerCfg,
+        DeviceCfg=lambda device: device,
+        MotionPlanner=FakeMotionPlanner,
+        BatchMotionPlanner=FakeMotionPlanner,
+    )
+    planner._validate_profile_joint_names = lambda *args: None
+    planner._validate_base_link_name = lambda *args: None
+    planner._resolve_tool_frame = lambda *args: "tool"
+    planner._load_runtime_robot_config = lambda path: {
+        "robot_cfg": {
+            "kinematics": {
+                "lock_joints": {"other": 0.0},
+                "self_collision_buffer": {},
+                "self_collision_ignore": {},
+            }
+        }
+    }
+    planner._self_collision_ignore = lambda path: {"link_a": ["link_b"]}
+    monkeypatch.setattr(torch.cuda, "device", lambda device: nullcontext())
+    return planner
+
+
+def test_self_collision_checks_with_passive_joints_locked_where_observed(monkeypatch):
+    create_kwargs = {}
+    cost_manager = SimpleNamespace(disable_self_collision=Mock())
+    planner = _self_collision_planner(monkeypatch, create_kwargs, cost_manager)
+    planner.robot = SimpleNamespace(
+        joint_names=["joint", "other"],
+        get_qpos=lambda: torch.tensor([[0.1, 0.7]]),
+    )
+
+    backend = planner._build_backend(
+        control_part="arm",
+        batch_size=1,
+        profile=_CuroboProfile(
+            robot_config_path="robot.yml",
+            sim_to_curobo_joint_names={"joint": "joint"},
+        ),
+        sim_joint_names=["joint"],
+        scene_model=None,
+        use_cuda_graph=False,
+        planning_mode=MoveType.EEF_MOVE,
+        passive_locks=planner._observed_passive_locks(),
+    )
+
+    assert create_kwargs["self_collision_check"] is True
+    cost_manager.disable_self_collision.assert_not_called()
+    kinematics = create_kwargs["robot"]["robot_cfg"]["kinematics"]
+    # The other arm is locked where it is observed, not at its initial value.
+    assert kinematics["lock_joints"] == {"other": pytest.approx(0.7)}
+    assert kinematics["self_collision_ignore"] == {"link_a": ["link_b"]}
+    assert backend.passive_locks == {"other": pytest.approx(0.7)}
+    # Finger-sized motion keeps the backend; a moved arm joint rebuilds it.
+    assert planner._passive_locks_match(
+        backend.passive_locks, {"joint": 3.0, "other": 0.72}
+    )
+    assert not planner._passive_locks_match(
+        backend.passive_locks, {"joint": 0.1, "other": 0.8}
+    )
+
+
+def test_self_collision_rejects_rows_with_different_passive_joints(monkeypatch):
+    planner = _self_collision_planner(monkeypatch, {}, SimpleNamespace())
+    planner.robot = SimpleNamespace(
+        joint_names=["joint", "other"],
+        get_qpos=lambda: torch.tensor([[0.1, 0.7], [0.1, 0.9]]),
+    )
+
+    with pytest.raises(ValueError, match="self_collision_lock_tolerance"):
+        planner._observed_passive_locks()
+
+
+def test_self_collision_ignore_keeps_sampled_pairs_checked(monkeypatch):
+    from embodichain.lab.sim.motion.planners.curobo import curobo_planner
+
+    calls = []
+
+    class FakeBuilder:
+        @classmethod
+        def from_config(cls, path, device_cfg):
+            calls.append(("from_config", path))
+            return cls()
+
+        def compute_collision_matrix(self, prune_collisions):
+            calls.append(("prune", prune_collisions))
+            return {"link_b": ["link_c", "link_a"]}
+
+    monkeypatch.setattr(
+        curobo_planner.importlib,
+        "import_module",
+        lambda name: SimpleNamespace(RobotBuilder=FakeBuilder),
+    )
+    monkeypatch.setattr(torch.cuda, "device", lambda device: nullcontext())
+    planner = CuroboPlanner.__new__(CuroboPlanner)
+    planner._curobo_device = torch.device("cuda:0")
+    planner._bindings = SimpleNamespace(DeviceCfg=lambda device: device)
+
+    first = planner._self_collision_ignore("robot.yml")
+    first["link_b"].append("mutated")
+    second = planner._self_collision_ignore("robot.yml")
+
+    # Computed once per robot YAML, without pruning never-colliding pairs.
+    assert calls == [("from_config", "robot.yml"), ("prune", False)]
+    assert second == {"link_b": ["link_a", "link_c"]}
+
+
 def test_multi_env_scene_model_clones_scene_dictionaries_independently():
     planner = object.__new__(CuroboPlanner)
     scene_model = {
