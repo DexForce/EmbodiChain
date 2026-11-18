@@ -100,7 +100,7 @@ def export_assembly_resources(
         if part not in declared_solvers:
             if model == source:
                 continue
-            declared_solvers[part] = solver.to_dict()
+            declared_solvers[part] = robot.to_dict()["solver_cfg"][part]
         if model.parent not in model_trees:
             model_trees[model.parent] = snapshot_urdf_resources(
                 model, resources / "solver_models" / str(len(model_trees))

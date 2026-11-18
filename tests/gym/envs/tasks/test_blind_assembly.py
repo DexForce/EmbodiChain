@@ -850,15 +850,16 @@ def test_manager_history_selective_reset_does_not_repeat_other_rows(
     assert before.reshape(2, 31, 33)[0, 0, 0].item() == 3.0
 
 
-@pytest.mark.parametrize("independent_solver", [False, True])
+@pytest.mark.parametrize("solver_source", ["shared", "explicit", "catalog"])
 def test_checkpoint_task_resources_relocate_without_generator(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, independent_solver: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, solver_source: str
 ) -> None:
     from embodichain.toolkits.assembly import AssemblyAsset
     import shutil
     import json
     import sys
-    from embodichain_robots.flexiv.rizon4s.cfg import FlexivRizon4SCfg
+    import yaml
+    from embodichain import robot_registry
 
     source = tmp_path / "source" / "prepared_v4_parallel_jaw"
     source.mkdir(parents=True)
@@ -871,7 +872,8 @@ def test_checkpoint_task_resources_relocate_without_generator(
         (source.parent / model).mkdir()
         (source.parent / model / "LICENSE").write_text("fixture license " + model)
     (source.parent / "source_manifest.json").write_text('{"revision":"fixture"}')
-    robot_config = {"fpath": str(urdf)}
+    robot_config = {"class_type": "FlexivRizon4S", "fpath": str(urdf)}
+    independent_solver = solver_source != "shared"
     if independent_solver:
         calibrated = source.parent / "calibrated" / "robot.urdf"
         calibrated.parent.mkdir()
@@ -893,36 +895,40 @@ def test_checkpoint_task_resources_relocate_without_generator(
                 "end_link_name": "calibrated_tip",
             }
         }
-    robot = FlexivRizon4SCfg.from_dict(robot_config)
+    if solver_source == "catalog":
+        catalog = robot_registry._robot_specs()
+        robot_id = "CalibratedRizonFixture"
+        defaults = {
+            key: value for key, value in robot_config.items() if key != "class_type"
+        }
+        entry = {**catalog["FlexivRizon4S"], "defaults": defaults}
+        monkeypatch.setattr(
+            robot_registry, "_robot_specs", lambda: {**catalog, robot_id: entry}
+        )
+        robot_config = {"class_type": robot_id}
+    deployment = {
+        "id": "BlindPegInsertionRL-v1",
+        "physics": "newton",
+        "robot": robot_config,
+        "env": {"extensions": {"assembly": _assembly_options()}},
+    }
+    robot = config_to_cfg(deployment, _register_env=False).robot
     env = _state_fixture()
     env.env.cfg = SimpleNamespace(robot=robot)
     env.scene.assembly_asset = AssemblyAsset(config={"kind": "peg"})
     env.scene.assembly_fidelity = {"source_gripper_dynamics_preserved": False}
     directory = tmp_path / "run" / "configs"
     env.env.assembly_state = env
-    frozen = export_assembly_resources(
-        env.env,
-        {
-            "id": "BlindPegInsertionRL-v1",
-            "physics": "newton",
-            "robot": {
-                "class_type": "FlexivRizon4S",
-                **robot_config,
-            },
-            "env": {"extensions": {"assembly": _assembly_options()}},
-        },
-        directory,
-    )
+    frozen = export_assembly_resources(env.env, deployment, directory)
+    # Serialize before relocation, as checkpoint creation does.
+    (directory / "gym.yaml").write_text(yaml.safe_dump(frozen))
     target = tmp_path / "relocated" / "configs"
     shutil.copytree(directory, target)
     shutil.rmtree(directory)
     shutil.rmtree(source.parent)
     monkeypatch.setitem(sys.modules, "mjfit", None)
     path = target / "gym.yaml"
-    import yaml
-
-    path.write_text(yaml.safe_dump(frozen))
-    cfg = config_to_cfg(load_config(str(path)), source_path=path)
+    cfg = config_to_cfg(load_config(str(path)), source_path=path, _register_env=False)
     assert cfg.robot.fpath == str(target / "resources" / "robot" / "robot.urdf")
     solver_urdf = Path(cfg.robot.solver_cfg["arm"].urdf_path)
     if independent_solver:
@@ -932,6 +938,7 @@ def test_checkpoint_task_resources_relocate_without_generator(
         chain = cfg.robot.build_pk_serial_chain()["arm"]
         tcp = chain.forward_kinematics(torch.zeros(1, 1)).get_matrix()
         torch.testing.assert_close(tcp[0, :3, 3], torch.tensor([0.0, 0.0, 0.4]))
+        np.testing.assert_array_equal(cfg.robot.solver_cfg["arm"].tcp, np.eye(4))
     else:
         assert solver_urdf == Path(cfg.robot.fpath)
     asset = AssemblyAsset.load(cfg.extensions["assembly"]["assembly_manifest"])
