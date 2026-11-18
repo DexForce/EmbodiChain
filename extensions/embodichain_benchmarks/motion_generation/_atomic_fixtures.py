@@ -814,7 +814,7 @@ def create_dual_tutorial_robot_cfg(
     right_arm_home: Sequence[float] | None = None,
     hand_stiffness: float = 1e3,
     hand_damping: float = 1e2,
-    hand_max_effort: float | None = None,
+    hand_max_effort: float = 1e4,
 ) -> RobotCfg:
     """Build a dual tutorial robot from the selected arm and hand.
 
@@ -850,8 +850,7 @@ def create_dual_tutorial_robot_cfg(
         right_arm_home: Optional right-arm initial configuration.
         hand_stiffness: Hand joint drive stiffness.
         hand_damping: Hand joint drive damping.
-        hand_max_effort: Hand joint maximum effort. ``None`` selects the
-            Franka Robotiq closing torque, or 1e4 for other hands.
+        hand_max_effort: Hand joint maximum effort.
 
     Returns:
         A dual-arm robot configuration with two matching grippers.
@@ -927,12 +926,6 @@ def create_dual_tutorial_robot_cfg(
     hand_joint_patterns = (
         ["fr3_finger_joint[1-2]"] if native_panda else base_cfg.control_parts["eef"]
     )
-    if hand_max_effort is None:
-        hand_max_effort = (
-            _ROBOTIQ_MAX_EFFORT
-            if gripper == "robotiq_2f_140" and robot_type == "franka"
-            else 1e4
-        )
     for property_name, value in (
         ("stiffness", hand_stiffness),
         ("damping", hand_damping),

@@ -55,23 +55,14 @@ class DualArmProvider(RobotProvider):
 
     control_part = "left_arm"
 
-    def identity_config(self) -> dict[str, object]:
-        """Bind an omitted Franka hand selector to the mounted Robotiq.
-
-        Returns:
-            Copied configuration with the effective Franka hand selection.
-        """
-        config = super().identity_config()
-        if str(config.get("robot_type", "ur5")) == "franka":
-            config.setdefault("gripper_type", "robotiq_2f_140")
-        return config
-
     def build_cfg(self) -> RobotCfg:
         """Build the configured dual-arm robot."""
-        config = self.identity_config()
+        config = dict(self.spec.config)
         robot_type = str(config.get("robot_type", "ur5"))
         solver = str(config.get("solver", "ur"))
-        gripper = config.get("gripper_type")
+        gripper = config.get(
+            "gripper_type", "robotiq_2f_140" if robot_type == "franka" else None
+        )
         if solver not in {"ur", "pytorch"}:
             raise ValueError("robot.config.solver must be 'ur' or 'pytorch'.")
         return create_dual_tutorial_robot_cfg(
@@ -99,11 +90,7 @@ class DualArmProvider(RobotProvider):
             ),
             hand_stiffness=float(config.get("hand_stiffness", 1.0e3)),
             hand_damping=float(config.get("hand_damping", 1.0e2)),
-            hand_max_effort=(
-                None
-                if config.get("hand_max_effort") is None
-                else float(config["hand_max_effort"])
-            ),
+            hand_max_effort=float(config.get("hand_max_effort", 1.0e4)),
         )
 
 

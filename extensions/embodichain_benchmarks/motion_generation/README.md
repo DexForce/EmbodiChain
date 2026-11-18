@@ -759,11 +759,6 @@ before simulation even when the public name and DOF match. Declared performance
 subsets and batch sizes retain that identity without regenerating tasks; keep
 timing replicas separate from quality denominators.
 
-Provider-backed identities also include provider-declared effective defaults.
-In particular, an omitted dual-Franka hand selector resolves to Robotiq before
-hashing, so custom suites cannot reuse former implicit-PGI manifests with the
-same raw configuration. Regenerate those manifests after the migration.
-
 Omitting `sampling_method` retains the legacy `joint_templates` population.
 Its L/S/wrist templates describe joint displacements; those labels do not certify
 Cartesian geometry or measured singularity. Keep its results under their original
