@@ -47,6 +47,7 @@ __all__ = [
     "PlasticTray",
     "WaterBasin",
     "Drawer",
+    "BedsideCabinet",
     "Cow",
     "BakeTextureObj",
     "DrawerUSD",
@@ -335,6 +336,24 @@ class Drawer(EmbodiChainDataset):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "Drawer.zip"),
             "3981636db1f4188146fce25d54084612",
+        )
+        prefix = type(self).__name__
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
+
+
+class BedsideCabinet(EmbodiChainDataset):
+    """get_data_path("BedsideCabinet/bedside_cabinet.urdf")
+
+    The complete :class:`Drawer` cabinet with a uniform 0.8 scale baked into its
+    geometry, joint origins, prismatic limits and inertias.
+    """
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "BedsideCabinet.zip"),
+            "d7df002ca1545cb5664db6793952abca",
         )
         prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
