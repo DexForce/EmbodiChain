@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 from ._preview_data import PreviewData, PreviewState
+from ._preview_heatmap import object_heatmaps
 
 __all__: list[str] = []
 
@@ -41,7 +42,13 @@ class PreviewTransport:
         self.status: dict[str, Any] = {}
         self.jpeg = b""
         self.snapshot = b"{}"
+        self.deviations = b"{}"
         html = Path(__file__).with_name("_preview.html").read_bytes()
+        charts_js = Path(__file__).with_name("_preview_charts.js").read_bytes()
+        heatmap_js = Path(__file__).with_name("_preview_heatmap.js").read_bytes()
+        heatmaps = json.dumps(
+            object_heatmaps(state.data), allow_nan=False, separators=(",", ":")
+        ).encode()
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -64,6 +71,12 @@ class PreviewTransport:
                 with owner.lock:
                     if route == "/":
                         data, kind = html, "text/html; charset=utf-8"
+                    elif route == "/preview-charts.js":
+                        data, kind = charts_js, "text/javascript; charset=utf-8"
+                    elif route == "/preview-heatmap.js":
+                        data, kind = heatmap_js, "text/javascript; charset=utf-8"
+                    elif route == "/object-heatmaps":
+                        data, kind = heatmaps, "application/json"
                     elif route == "/state":
                         data, kind = (
                             json.dumps(owner.status, allow_nan=False).encode(),
@@ -71,6 +84,8 @@ class PreviewTransport:
                         )
                     elif route == "/snapshot":
                         data, kind = owner.snapshot, "application/json"
+                    elif route == "/deviations":
+                        data, kind = owner.deviations, "application/json"
                     elif route == "/frame.jpg":
                         data, kind = owner.jpeg, "image/jpeg"
                     else:
@@ -140,6 +155,7 @@ def serve_preview(
     open_browser: bool = False,
     duration: float = 0,
 ) -> None:
+    from ._preview_deviations import deviation_curves
     from ._preview_render import native_renderer
 
     state = PreviewState(data)
@@ -147,6 +163,11 @@ def serve_preview(
     thread = None
     try:
         with native_renderer(data, gpu) as renderer:
+            transport.deviations = json.dumps(
+                deviation_curves(data, renderer.link_names),
+                allow_nan=False,
+                separators=(",", ":"),
+            ).encode()
             frame = 0
 
             def publish() -> None:

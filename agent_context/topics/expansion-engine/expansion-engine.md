@@ -105,9 +105,19 @@ then replays full measured states using `_preview_render.py` and a loopback-only
 physics stepping occurs. It accepts one URDF robot and recorded rigid visual
 objects (including file Mesh/USD via native visual loading), with fixed layouts;
 unsupported geometry is rejected. Constant static backgrounds remain single
-instances. Space filters group
-input directories; missing motion annotations remain explicit. HTTP publishes a
-single immutable image/state snapshot; WebRTC is follow-up work. FK and episode
+instances. The solid robot and objects always follow the explicit reference,
+or the first input recording when a reference is absent. The play button and
+Space key toggle playback. Candidate buttons toggle individual ghosts. See the
+[UR5 layout and grasp tutorial](../../../scripts/tutorials/expansion/ur5_pick_place/README.md)
+for collection and replay. Filters preserve each toggle and playback of the solid
+trajectory. Space filters group input directories and missing motion annotations
+remain explicit. `_preview_deviations.py` reuses recorded world FK and gripper
+calibration for TCP errors. At each reference time it reports the minimum, mean
+and maximum across recordings still in range for TCP translation distance,
+TCP rotation angle and each episode's worst joint deviation. `_preview_heatmap.py`
+counts distinct recordings per rigid object's measured XY cell, including the solid
+reference, for the full recording and its first and last frame. The HTTP service
+publishes both chart datasets independently of the live image/state snapshots. FK and episode
 budgets bound preload, controls are queued for the render owner, and native
 resources/ports close on exit. See the example's `ghost-preview.md` for usage.
 

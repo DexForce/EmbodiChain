@@ -1,33 +1,144 @@
 <!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EmbodiChain · 扩增结果回放</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#10151b;color:#e8edf3;font:14px system-ui,sans-serif}header{padding:22px 28px;border-bottom:1px solid #303944;display:flex;align-items:center;justify-content:space-between}h1{font-size:20px;margin:0 0 6px}p{color:#9eacba;margin:0;line-height:1.6}.badge{color:#77dbb2;border:1px solid #376455;border-radius:20px;padding:7px 12px}main{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:18px;padding:20px;max-width:1700px;margin:auto}.stage{background:#1b222b;border:1px solid #303944;border-radius:12px;overflow:hidden}.toolbar{display:flex;gap:10px;padding:12px;align-items:center;flex-wrap:wrap}button,select{background:#27323f;color:#e8edf3;border:1px solid #465363;border-radius:6px;padding:9px;cursor:pointer}button:hover{background:#34475a}button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid #63b7ff}select{max-width:100%}.viewport{position:relative;background:#222;aspect-ratio:1100/760}.viewport img{width:100%;height:100%;object-fit:contain;touch-action:none;cursor:grab}.overlay{position:absolute;left:16px;top:14px;background:#10151bdc;padding:9px 12px;border-radius:7px;pointer-events:none;font-size:12px}.timeline{padding:16px}input[type=range]{width:100%;accent-color:#6bb7ff}.timeinfo{display:flex;justify-content:space-between;gap:10px;color:#a8bacb;font-size:12px;margin-top:9px}.side{display:flex;flex-direction:column;gap:14px}.panel{padding:17px;background:#1b222b;border:1px solid #303944;border-radius:12px}.panel h2{font-size:14px;margin:0 0 15px}.field{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:11px 0}.field select{width:160px}label{color:#c9d4df}input[type=checkbox]{accent-color:#6bb7ff}.count{font-size:30px;color:#80bfff}.candidates{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:12px}.candidates button{text-align:left;font-size:12px}.candidates button small{display:block;color:#a5b5c6;margin-top:4px}.candidates button.active{border-color:#7cbcff;background:#253e58}.legend{font-size:12px;color:#a7b6c4;line-height:1.9}.detail{font-size:12px;line-height:1.9;overflow-wrap:anywhere}.error{color:#ffba9b}footer{padding:0 22px 20px;color:#8393a3;font-size:12px}@media(max-width:850px){main{grid-template-columns:1fr;padding:10px}.side{display:grid;grid-template-columns:1fr 1fr}header{padding:15px}.badge{display:none}}@media(max-width:550px){.side{grid-template-columns:1fr}.toolbar{gap:5px}h1{font-size:17px}}
+.deviations{grid-column:1/-1;min-width:0}.deviations h2{font-size:18px;margin:0 0 6px}.chart-heading{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;align-items:end;margin:6px 0 14px}.chart-heading output,.curve output{font-variant-numeric:tabular-nums}.chart-heading output{color:#cad9e6}.chart-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.chart-grid h3{font-size:15px;margin:0 0 14px}.curve{margin:12px 0 0}.curve figcaption{display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:13px}.curve figcaption span{border-left:3px solid var(--line);padding-left:7px}.curve output{color:var(--line)}.curve-plot{position:relative}.curve canvas{display:block;width:100%;height:120px}.curve-plot i{position:absolute;top:8px;bottom:24px;width:0;border-left:1px dashed #e2eaf3;pointer-events:none}.chart-grid section:has(.curve:only-of-type) canvas{height:250px}
+.chart-grid[hidden]{display:none}
+.curve figcaption{flex-wrap:wrap;row-gap:4px}
+.controls-help{font-size:12px;color:#a8bacb}.controls-help kbd{font:inherit;border:1px solid #465363;border-radius:4px;padding:1px 4px}
+@media(max-width:850px){.chart-grid{grid-template-columns:1fr}.chart-grid section:has(.curve:only-of-type) canvas{height:150px}}
+.heatmap{grid-column:1/-1;min-width:0}.heatmap h2{font-size:18px;margin:0 0 6px}.heatmap-panel{margin-top:14px;display:grid;grid-template-columns:minmax(0,470px) minmax(200px,340px);gap:clamp(20px,6vw,90px);justify-content:center;align-items:center}.heatmap-panel[hidden]{display:none}
+.heatmap canvas{display:block;width:100%;aspect-ratio:1;cursor:crosshair}.heatmap-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.heatmap-controls label{display:grid;gap:6px}.heatmap-controls select{width:100%}
+.heatmap dl{margin:18px 0;border-block:1px solid #384451}.heatmap dl div{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:6px 0}.heatmap dt,.heatmap-legend{color:#a7b6c4}.heatmap dd{margin:0;font-variant-numeric:tabular-nums}
+.heatmap-scale{display:flex;height:12px;overflow:hidden;border-radius:3px;border:1px solid #465363;margin:7px 0 3px}.heatmap-scale i{flex:1}.heatmap-ticks{display:flex;justify-content:space-between;font-size:12px}.heatmap-readout{display:block;min-height:3.3em;margin-top:18px;color:#c9d4df;font-size:13px;line-height:1.6;font-variant-numeric:tabular-nums}
+@media(max-width:650px){.heatmap-panel{display:flex;flex-direction:column;align-items:stretch;gap:12px}.heatmap-controls{margin-top:2px}.heatmap canvas{align-self:center;max-width:450px}.heatmap-readout{min-height:3.2em}}
 </style>
 <header><div><h1>EmbodiChain · 扩增结果回放</h1><p>完整模型虚影 · 已确认的真实扩增结果</p></div><span class="badge" id="connection">正在连接原生渲染器</span></header>
-<main><section class="stage"><div class="toolbar"><button id="play">播放</button><button id="reset">回到起点</button><select id="align" aria-label="对齐方式"><option value="phase">按动作阶段对齐</option><option value="time">按真实时间对齐</option></select><select id="camera" aria-label="观察视角"><option value="custom">自由视角</option><option value="orbit">斜视</option><option value="top">俯视</option><option value="front">侧视</option><option value="close">抓取区域近景</option></select><span style="font-size:12px;color:#9eacba">拖动画面旋转 · 滚轮缩放</span></div><div class="viewport"><img id="frame" alt="EmbodiChain 原生场景渲染画面" draggable="false"><div class="overlay" id="caption">正在加载完整机器人模型…</div></div><div class="timeline"><input id="progress" aria-label="回放进度" type="range" min="0" max="1000" value="400"><div class="timeinfo"><span id="clock">—</span><span id="phase">—</span></div></div></section>
+<main><section class="stage"><div class="toolbar"><button id="play" aria-keyshortcuts="Space">播放</button><button id="reset">回到起点</button><select id="align" aria-label="对齐方式"><option value="phase">按动作阶段对齐</option><option value="time">按真实时间对齐</option></select><select id="camera" aria-label="观察视角"><option value="custom">自由视角</option><option value="orbit">斜视</option><option value="top">俯视</option><option value="front">侧视</option><option value="close">抓取区域近景</option></select><span class="controls-help"><kbd>空格</kbd> 播放 / 暂停 · 拖动画面旋转 · 滚轮缩放</span></div><div class="viewport"><img id="frame" alt="EmbodiChain 原生场景渲染画面" draggable="false"><div class="overlay" id="caption">正在加载完整机器人模型…</div></div><div class="timeline"><input id="progress" aria-label="回放进度" type="range" min="0" max="1000" value="400"><div class="timeinfo"><span id="clock">—</span><span id="phase">—</span></div></div></section>
 <aside class="side"><section class="panel" id="coverage-panel" hidden><h2>采样覆盖 · 包含未通过点</h2><p id="coverage-summary"></p><details><summary>边界与样本明细</summary><div class="detail" id="coverage-details"></div></details></section><section class="panel"><h2>分布筛选 · 三维联动</h2><div class="field"><label for="space">参数组</label><select id="space"><option value="all">全部空间组</option></select></div><div class="field"><label for="aff">Affordance</label><select id="aff"><option value="all">全部抓取分支</option></select></div><div class="field"><label for="variant">轨迹</label><select id="variant"><option value="all">全部变体</option></select></div><div><strong class="count" id="count">—</strong><span id="total"> 条符合筛选</span></div><div class="candidates" id="candidates"></div></section>
-<section class="panel"><h2>场景图层</h2><div class="field"><label for="ghosts">其他候选虚影</label><input id="ghosts" type="checkbox" checked></div><div class="field"><label for="reference">参考轨迹虚影</label><input id="reference" type="checkbox" checked></div><div class="field"><label for="paths">末端轨迹线</label><input id="paths" type="checkbox" checked></div><div class="field"><label for="targets">抓取目标坐标轴</label><input id="targets" type="checkbox" checked></div><div class="field"><label for="positions">初始空间位置</label><input id="positions" type="checkbox" checked></div><div class="legend">实色：选中轨迹的原始模型<br>候选按轨迹变体着色 · 灰色：参考<br>抓取目标使用初始物体坐标变换；不代表接触测量。</div></section>
-<section class="panel"><h2>真实执行记录</h2><div class="detail" id="detail">等待渲染结果…</div></section></aside></main>
+<section class="panel"><h2>场景图层</h2>
+<div class="field"><label for="ghosts">显示全部匹配虚影</label><input id="ghosts" type="checkbox"></div>
+<div class="field"><label for="paths">末端轨迹线</label><input id="paths" type="checkbox" checked></div>
+<div class="field"><label for="targets">抓取目标坐标轴</label><input id="targets" type="checkbox" checked></div>
+<div class="field"><label for="positions">初始空间位置</label><input id="positions" type="checkbox" checked></div>
+<div class="legend">实色模型始终播放固定对照。点击轨迹按钮可分别显示或隐藏对应的虚影。</div></section>
+<section class="panel"><h2>真实执行记录</h2><div class="detail" id="detail">等待渲染结果…</div></section></aside>
+<section class="deviations" aria-labelledby="deviation-title">
+  <div class="chart-heading">
+    <div><h2 id="deviation-title">扩增轨迹偏差</h2><p id="deviation-description">正在读取统计曲线…</p></div>
+    <output id="deviation-time"></output>
+  </div>
+  <div class="chart-grid" id="deviation-panels" hidden>
+    <section class="panel" id="tcp-deviations"><h3>TCP 位姿偏差</h3></section>
+    <section class="panel" id="joint-deviations">
+      <h3>机械臂最大关节偏差</h3>
+    </section>
+  </div>
+</section>
+<section class="heatmap" aria-labelledby="heatmap-title">
+  <h2 id="heatmap-title">物体位置分布热力图</h2>
+  <p id="heatmap-description">正在读取物体位置…</p>
+  <div class="heatmap-panel panel" id="heatmap-panel" hidden>
+    <canvas id="heatmap-plot" role="img" aria-label="物体位置的 XY 俯视热力图"></canvas>
+    <div>
+      <div class="heatmap-controls">
+        <label>物体<select id="heatmap-object"></select></label>
+        <label>取样时段<select id="heatmap-phase"><option value="all">全程</option><option value="start">起点</option><option value="end">终点</option></select></label>
+      </div>
+      <dl>
+        <div><dt>实测 X 范围</dt><dd id="heatmap-x"></dd></div>
+        <div><dt>实测 Y 范围</dt><dd id="heatmap-y"></dd></div>
+        <div><dt>网格边长</dt><dd id="heatmap-step"></dd></div>
+        <div><dt>单格最高覆盖</dt><dd id="heatmap-peak"></dd></div>
+      </dl>
+      <div class="heatmap-legend">每格覆盖的轨迹数
+        <div class="heatmap-scale" id="heatmap-scale" aria-hidden="true"></div>
+        <div class="heatmap-ticks"><span>0</span><span id="heatmap-scale-max"></span></div>
+      </div>
+      <output id="heatmap-cell" class="heatmap-readout"></output>
+    </div>
+  </div>
+</section></main>
 <footer>EmbodiChain SimulationManager / RobotMarkers / VisualizationMarkers → DexSim Hybrid 原生渲染。仅回放，物理推进 0 步。机器人与物体使用逐帧记录；轨迹线每 4 帧取点并连接。视角、灯光与透明材质仅用于验收展示。</footer>
+<script src="/preview-charts.js"></script>
+<script src="/preview-heatmap.js"></script>
 <script>
-let status=null,busy=false,dragging=false,filterKey='',initialized=false,pending={},sending=false;
+let status=null,busy=false,dragging=false,filterKey=null,initialized=false,sending=false;
+const pending=[];
 const $=id=>document.getElementById(id);
-async function control(update){Object.assign(pending,update);if(sending)return;sending=true;try{while(Object.keys(pending).length){const body=pending;pending={};const r=await fetch('/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw Error('控制未成功应用')}}catch(e){$('connection').textContent=e.message}finally{sending=false}}
+function isDiscrete(update){return 'toggle_playback' in update || 'toggle_ghost' in update || 'ghosts' in update}
+async function control(update){
+  const last=pending.at(-1);
+  // Coalesce continuous controls, but preserve every individual click and its filters.
+  if(last && !isDiscrete(last) && !isDiscrete(update))Object.assign(last,update);
+  else pending.push(update);
+  if(sending)return;
+  sending=true;
+  try{
+    while(pending.length){
+      const body=pending.shift();
+      const r=await fetch('/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      if(!r.ok)throw Error('控制未成功应用');
+    }
+  }catch(e){$('connection').textContent=e.message}finally{sending=false}
+}
 for(const k of ['space','aff','variant','align'])$(k).onchange=()=>control({[k]:$(k).value});
-for(const k of ['ghosts','reference','paths','targets','positions'])$(k).onchange=()=>control({[k]:$(k).checked});
-$('play').onclick=()=>control({playing:!status?.playing,...(status?.progress>=1?{progress:0}:{})});$('reset').onclick=()=>control({progress:0,playing:false});
+for(const k of ['ghosts','paths','targets','positions'])$(k).onchange=()=>control({[k]:$(k).checked});
+$('play').onclick=()=>control({toggle_playback:true});
+$('reset').onclick=()=>control({progress:0,playing:false});
+document.addEventListener('keydown',event=>{
+  if((event.code!=='Space' && event.key!==' ') || event.defaultPrevented || event.isComposing ||
+     event.altKey || event.ctrlKey || event.metaKey || event.shiftKey)return;
+  if(event.target.isContentEditable || event.target.closest?.('select, textarea, input:not([type="range"]), summary'))return;
+  event.preventDefault();
+  if(!event.repeat)$('play').click();
+});
 $('progress').onpointerdown=()=>dragging=true;$('progress').oninput=()=>control({progress:+$('progress').value/1000,playing:false});window.addEventListener('pointerup',()=>dragging=false);
 const cameras={orbit:{yaw:-2.15,elevation:.55,distance:1.65},top:{yaw:-1.57,elevation:1.48,distance:1.5},front:{yaw:-1.57,elevation:.2,distance:1.5},close:{yaw:-2.15,elevation:.7,distance:.85}};
 $('camera').onchange=()=>{if(cameras[$('camera').value])control(cameras[$('camera').value])};
 let pointer=null;$('frame').onpointerdown=e=>{if(!status)return;pointer={x:e.clientX,y:e.clientY,yaw:status.yaw,e:status.elevation};$('frame').setPointerCapture(e.pointerId)};$('frame').onpointermove=e=>{if(pointer)control({yaw:Math.max(-20,Math.min(20,pointer.yaw-(e.clientX-pointer.x)*.008)),elevation:Math.max(.1,Math.min(1.5,pointer.e+(e.clientY-pointer.y)*.006))})};$('frame').onpointerup=$('frame').onpointercancel=()=>pointer=null;
 $('frame').addEventListener('wheel',e=>{e.preventDefault();if(status)control({distance:Math.max(.2,Math.min(20,status.distance+e.deltaY*.001))})},{passive:false});
+function updateCandidates(s){
+  const list=$('candidates');
+  const key=s.visible.join(',');
+  if(key!==filterKey){
+    filterKey=key;
+    const buttons=s.clips.filter(c=>s.visible.includes(c.index)).map(c=>{
+      const button=document.createElement('button');
+      button.type='button';
+      button.dataset.index=c.index;
+      button.textContent=c.label;
+      const details=document.createElement('small');
+      details.textContent=`${c.space} · A:${c.aff} · V:${c.variant}`;
+      button.append(details);
+      button.onclick=()=>control({toggle_ghost:c.index});
+      return button;
+    });
+    list.replaceChildren(...buttons);
+  }
+  const shown=new Set(s.visible_ghosts);
+  for(const button of list.children){
+    const pressed=shown.has(Number(button.dataset.index));
+    button.classList.toggle('active',pressed);
+    button.setAttribute('aria-pressed',String(pressed));
+  }
+  const all=$('ghosts');
+  all.disabled=s.count===0;
+  all.checked=s.count>0 && shown.size===s.count;
+  all.indeterminate=shown.size>0 && !all.checked;
+}
 async function poll(){if(busy||document.hidden)return;busy=true;try{const r=await fetch('/snapshot');if(!r.ok)throw Error('连接失败');const s=await r.json();if(s.frame===undefined)return;status=s;
 if(s.coverage){$('coverage-panel').hidden=false;const c=s.coverage;$('coverage-summary').textContent=`计划 ${c.planned_attempts} · 已尝试 ${c.records.reduce((n,r)=>n+r.attempts,0)} · 已确认 ${c.records.reduce((n,r)=>n+r.confirmed,0)}。${c.coverage_complete?'全部计划样本已确认':'包含未通过、回退或未执行点'}`;$('coverage-details').style.whiteSpace='pre-line';$('coverage-details').textContent='有限参数采样，不代表连续空间或全部边界组合穷举。\n'+c.axes.map(a=>`${a.name}: [${a.lower}, ${a.upper}]`).join('\n')+'\n\n'+c.records.map(r=>`#${r.index} ${r.role} · ${r.status} · ${r.confirmed}/${r.planned ?? c.recipes_per_point} 确认\n${Object.entries(r.values).map(([k,v])=>k+'='+Number(v).toPrecision(4)).join(', ')}`).join('\n\n')}
-if(!initialized){for(const key of ['space','aff','variant'])for(const value of s.options[key]){const o=document.createElement('option');o.value=value;o.textContent=value==='unrecorded'?'未记录':value;$(key).append(o)}if(!s.options.align.includes('phase'))$('align').querySelector('[value="phase"]').remove();$('reference').disabled=!s.has_reference;initialized=true}
-if(!sending){for(const k of ['space','aff','variant','align'])if(document.activeElement!==$(k))$(k).value=s[k];for(const k of ['ghosts','reference','paths','targets','positions'])$(k).checked=s[k];if(document.activeElement!==$('camera'))$('camera').value=Object.keys(cameras).find(k=>Object.keys(cameras[k]).every(p=>Math.abs(s[p]-cameras[k][p])<.001))||'custom'}
-$('connection').textContent='● 原生渲染 · HTTP JPEG';$('connection').classList.remove('error');$('count').textContent=s.count;$('total').textContent=` / ${s.total} 条符合筛选`;$('play').disabled=!s.count;$('play').textContent=s.playing?'暂停':'播放';if(!dragging)$('progress').value=Math.round(s.progress*1000);
-$('clock').textContent=s.count?`${s.time.toFixed(2)} s · 记录帧 ${s.source_frame} / ${s.source_frames-1}`:'当前筛选无结果';$('phase').textContent=s.phase;$('caption').textContent=`${s.label} · ${s.count} 条候选 · 完整模型 / 原生渲染`;
-$('detail').textContent=s.count?`${s.label} · 原有校验通过\n抓取候选 ${s.candidate} · 物理推进 ${s.physics_steps} 步\n${s.episode}`:'当前筛选无结果；可调整空间、抓取分支或轨迹。';$('detail').style.whiteSpace='pre-line';
-const key=JSON.stringify([s.visible,s.selected]);if(key!==filterKey){filterKey=key;$('candidates').replaceChildren(...s.clips.filter(c=>s.visible.includes(c.index)).map(c=>{const b=document.createElement('button');b.textContent=c.label;const small=document.createElement('small');small.textContent=`${c.space} · A:${c.aff} · V:${c.variant}`;b.append(small);b.className=c.index===s.selected?'active':'';b.setAttribute('aria-pressed',c.index===s.selected);b.onclick=()=>control({selected:c.index});return b}))}
+if(!initialized){for(const key of ['space','aff','variant'])for(const value of s.options[key]){const o=document.createElement('option');o.value=value;o.textContent=value==='unrecorded'?'未记录':value;$(key).append(o)}if(!s.options.align.includes('phase'))$('align').querySelector('[value="phase"]').remove();initialized=true}
+if(!sending){for(const k of ['space','aff','variant','align'])if(document.activeElement!==$(k))$(k).value=s[k];for(const k of ['paths','targets','positions'])$(k).checked=s[k];if(document.activeElement!==$('camera'))$('camera').value=Object.keys(cameras).find(k=>Object.keys(cameras[k]).every(p=>Math.abs(s[p]-cameras[k][p])<.001))||'custom'}
+$('connection').textContent='● 原生渲染 · HTTP JPEG';$('connection').classList.remove('error');$('count').textContent=s.count;$('total').textContent=` / ${s.total} 条符合筛选`;$('play').textContent=s.playing?'暂停':'播放';if(!dragging)$('progress').value=Math.round(s.progress*1000);
+const solidLabel=s.has_reference?'原始轨迹':`首条记录 ${s.label}（固定对照）`;
+$('clock').textContent=`${s.time.toFixed(2)} s · 记录帧 ${s.source_frame} / ${s.source_frames-1}`;
+$('phase').textContent=s.phase;
+$('caption').textContent=`${solidLabel} · ${s.visible_ghosts.length} 条扩增虚影`;
+$('detail').textContent=`${solidLabel} · 已通过验收\n抓取候选 ${s.candidate} · 物理推进 ${s.physics_steps} 步\n${s.episode}`;
+$('detail').style.whiteSpace='pre-line';
+updateCandidates(s);
+deviationCharts.setFrame(s.source_frame);
 // Image and recorded-frame information come from one immutable server publication.
 $('frame').src=s.image;
 }catch(e){$('connection').textContent='渲染服务未连接';$('connection').classList.add('error')}finally{busy=false}}

@@ -94,6 +94,7 @@ class NativeRenderer:
         )
 
         self.data, self.sim, self.publisher, self.center = data, sim, publisher, center
+        self.link_names = names
         scene = sim.spawn_result
         self.step = sim.physics_step_index
         self.previous = None
@@ -106,7 +107,7 @@ class NativeRenderer:
             and all(
                 np.allclose(
                     c.measured.object_poses[uid],
-                    data.clips[0].measured.object_poses[uid][0],
+                    data.solid_clip.measured.object_poses[uid][0],
                     rtol=0,
                     atol=1e-7,
                 )
@@ -114,18 +115,16 @@ class NativeRenderer:
             )
         }
         self.moving_objects = [uid for uid in data.boxes if uid not in self.backgrounds]
-        for uid in self.backgrounds:
-            self.models[uid].set_local_pose(
-                data.clips[0].measured.object_poses[uid][0:1]
-            )
-            self.models[uid].set_visible(True)
+        for uid, model in self.models.items():
+            model.set_local_pose(data.solid_clip.measured.object_poses[uid][0:1])
+            model.set_visible(True)
         palette = [
             (0.18, 0.58, 1),
             (0.15, 0.9, 0.5),
             (0.9, 0.55, 0.2),
             (0.7, 0.4, 0.95),
         ]
-        variants = sorted({c.variant for c in data.clips})
+        variants = sorted({data.clips[i].variant for i in data.ghost_indices})
         self.colors = {v: palette[i % len(palette)] for i, v in enumerate(variants)}
         for name, pos, intensity in [
             ("preview_key", [-1, -2, 3], 35),
@@ -138,20 +137,16 @@ class NativeRenderer:
                     name=name, light_type="POINT", pose=pose, intensity=intensity
                 )
             )
-        self.robots = []
-        self.objects = []
+        self.ghosts = {}
 
         def markers(name: str, shapes: dict) -> Any:
             return VisualizationMarkers(
                 VisualizationMarkersCfg(prim_path=name, markers=shapes), publisher
             )
 
-        for i, c in enumerate(data.all_clips):
-            color = (
-                self.colors.get(c.variant, (0.65, 0.7, 0.75))
-                if i < len(data.clips)
-                else (0.65, 0.7, 0.75)
-            )
+        for i in data.ghost_indices:
+            c = data.clips[i]
+            color = self.colors[c.variant]
             robot = RobotMarkers(
                 RobotMarkersCfg(
                     name=f"preview_robot_{i}",
@@ -160,7 +155,7 @@ class NativeRenderer:
                 ),
                 publisher,
             )
-            self.robots.append((robot, [names.index(n) for n in robot.link_names]))
+            link_order = [names.index(n) for n in robot.link_names]
             objects = (
                 markers(
                     f"preview_objects_{i}",
@@ -172,10 +167,8 @@ class NativeRenderer:
                 if self.moving_objects
                 else None
             )
-            self.objects.append(objects)
-            robot.visualize_link_poses(
-                c.links[0, [names.index(n) for n in robot.link_names]][None]
-            )
+            self.ghosts[i] = (robot, link_order, objects)
+            robot.visualize_link_poses(c.links[0, link_order][None])
             robot.set_visibility(False)
             if objects:
                 p = np.array(
@@ -183,21 +176,21 @@ class NativeRenderer:
                 )
                 objects.visualize(p[:, :3], p[:, 3:], marker_indices=np.arange(len(p)))
                 objects.set_visibility(False)
-        self.selected = RobotMarkers(
+        self.solid_robot = RobotMarkers(
             RobotMarkersCfg(
-                name="selected_model",
+                name="solid_model",
                 asset_path=str(data.asset),
                 appearance=RobotMarkersAppearanceCfg(mode="asset", opacity=1),
             ),
             publisher,
         )
-        self.selected_order = [names.index(n) for n in self.selected.link_names]
-        self.selected.visualize_link_poses(
-            data.clips[0].links[0, self.selected_order][None]
+        self.solid_order = [names.index(n) for n in self.solid_robot.link_names]
+        self.solid_robot.visualize_link_poses(
+            data.solid_clip.links[0, self.solid_order][None]
         )
-        self.selected_objects = (
+        self.solid_objects = (
             markers(
-                "selected_objects",
+                "solid_objects",
                 {
                     uid: self._object_prototype(
                         uid, color=(0.9, 0.58, 0.2, 1), scene_lighting=True, unlit=False
@@ -208,16 +201,15 @@ class NativeRenderer:
             if self.moving_objects and not self.models
             else None
         )
-        self.paths = markers(
-            "measured_paths",
-            {
-                str(i): MarkerPrototypeCfg(
-                    shape="cylinder", color=(*self.colors[v], 0.8)
-                )
-                for i, v in enumerate(variants)
-            },
-        )
-        self.variant_ids = {v: i for i, v in enumerate(variants)}
+        path_shapes = {
+            "solid": MarkerPrototypeCfg(shape="cylinder", color=(1, 0.9, 0.7, 1))
+        }
+        self.variant_ids = {v: i for i, v in enumerate(variants, start=1)}
+        for variant, index in self.variant_ids.items():
+            path_shapes[str(index)] = MarkerPrototypeCfg(
+                shape="cylinder", color=(*self.colors[variant], 0.8)
+            )
+        self.paths = markers("measured_paths", path_shapes)
         self.targets = markers(
             "recorded_grasp_targets",
             {"target": MarkerPrototypeCfg(shape="frame", scale=(0.065, 0.065, 0.065))},
@@ -274,14 +266,16 @@ class NativeRenderer:
 
     def draw(self, state: PreviewState) -> bytes:
         v = state.values
-        visible = state.visible()
+        solid = self.data.solid_clip
+        visible = state.visible_ghosts()
         if tuple(visible) != self.previous:
+            displayed = [solid, *(self.data.clips[i] for i in visible)]
             positions = []
             rotations = []
             scales = []
             types = []
-            for i in visible:
-                c = self.data.clips[i]
+            for c in displayed:
+                path_type = 0 if c is solid else self.variant_ids[c.variant]
                 points = c.tips[
                     np.unique(np.r_[np.arange(0, len(c.tips), 4), len(c.tips) - 1])
                 ]
@@ -303,18 +297,14 @@ class NativeRenderer:
                     positions.append((a + b) / 2)
                     rotations.append(rotation.as_quat())
                     scales.append([0.002, 0.002, length])
-                    types.append(self.variant_ids[c.variant])
+                    types.append(path_type)
             self.paths.visualize(
                 np.array(positions).reshape(-1, 3),
                 np.array(rotations).reshape(-1, 4),
                 np.array(scales).reshape(-1, 3),
                 np.asarray(types, dtype=int),
             )
-            targets = (
-                np.concatenate([self.data.clips[i].targets for i in visible])
-                if visible
-                else np.empty((0, 4, 4))
-            )
+            targets = np.concatenate([c.targets for c in displayed])
             self.targets.visualize(
                 targets[:, :3, 3],
                 (
@@ -325,48 +315,33 @@ class NativeRenderer:
             )
             initial = [
                 p[0, :3]
-                for i in visible
-                for uid, p in self.data.clips[i].measured.object_poses.items()
+                for c in displayed
+                for uid, p in c.measured.object_poses.items()
                 if uid not in self.backgrounds
             ]
             self.positions.visualize(np.asarray(initial).reshape(-1, 3))
             self.previous = tuple(visible)
-        self.selected.set_visibility(bool(visible))
-        if self.selected_objects:
-            self.selected_objects.set_visibility(bool(visible))
-        for uid, obj in self.models.items():
-            if uid not in self.backgrounds:
-                obj.set_visible(bool(visible))
-        if visible:
-            c = self.data.clips[v["selected"]]
-            f = state.frame_at(c)
-            self.selected.visualize_link_poses(c.links[f, self.selected_order][None])
-            for uid in self.moving_objects:
-                if uid in self.models:
-                    self.models[uid].set_local_pose(
-                        c.measured.object_poses[uid][f : f + 1]
-                    )
-            if self.selected_objects:
-                p = np.array(
-                    [c.measured.object_poses[uid][f] for uid in self.moving_objects]
+        f = state.frame_at(solid)
+        self.solid_robot.visualize_link_poses(solid.links[f, self.solid_order][None])
+        for uid in self.moving_objects:
+            if uid in self.models:
+                self.models[uid].set_local_pose(
+                    solid.measured.object_poses[uid][f : f + 1]
                 )
-                self.selected_objects.visualize(
-                    p[:, :3], p[:, 3:], marker_indices=np.arange(len(p))
-                )
-        ghost_count = 0
-        for i, (c, (robot, order), objects) in enumerate(
-            zip(self.data.all_clips, self.robots, self.objects)
-        ):
-            show = (
-                v["reference"]
-                if i == len(self.data.clips)
-                else v["ghosts"] and i in visible and i != v["selected"]
+        if self.solid_objects:
+            p = np.array(
+                [solid.measured.object_poses[uid][f] for uid in self.moving_objects]
             )
+            self.solid_objects.visualize(
+                p[:, :3], p[:, 3:], marker_indices=np.arange(len(p))
+            )
+        for i, (robot, order, objects) in self.ghosts.items():
+            show = i in visible
             robot.set_visibility(show)
             if objects:
                 objects.set_visibility(show)
             if show:
-                ghost_count += 1
+                c = self.data.clips[i]
                 f = state.frame_at(c)
                 robot.visualize_link_poses(c.links[f, order][None])
                 if objects:
@@ -400,7 +375,7 @@ class NativeRenderer:
         image.save(buffer, format="JPEG", quality=88)
         self.stats = {
             "physics_steps": self.sim.physics_step_index - self.step,
-            "ghost_count": ghost_count,
+            "ghost_count": len(visible),
             "path_segments": self.paths.count if v["paths"] else 0,
             "grasp_targets": self.targets.count if v["targets"] else 0,
             "scene_objects": len(self.data.boxes),

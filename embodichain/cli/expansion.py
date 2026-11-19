@@ -82,7 +82,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     command.add_argument(
         "--reference",
-        help="Optional result directory containing exactly one reference episode",
+        help=(
+            "Job directory containing one confirmed original trajectory for solid "
+            "playback. Defaults to the first loaded input recording as a comparison."
+        ),
     )
     command.add_argument(
         "--robot-asset", help="Matching URDF override if recorded asset paths moved"

@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 import json
@@ -28,6 +28,7 @@ from scipy.spatial.transform import Rotation
 
 from .comparison import MeasuredTrajectory
 from .persistence import ArtifactEpisodeSink, load_expansion_episode
+from ._preview_deviations import recorded_coordinates
 
 __all__: list[str] = []
 
@@ -52,6 +53,7 @@ class PreviewClip:
     label: str = ""
     links: np.ndarray | None = None
     tips: np.ndarray | None = None
+    tcp_frame: tuple[str, np.ndarray] | None = None
 
 
 def annotations(metadata: Any, measured: MeasuredTrajectory) -> dict[str, Any]:
@@ -275,6 +277,16 @@ class PreviewData:
     ground_visible: bool = True
     coverage: dict[str, Any] | None = None
     object_specs: dict[str, dict[str, Any]] | None = None
+    arm_joint_groups: dict[str, list[str]] = field(default_factory=dict)
+
+    @property
+    def solid_clip(self) -> PreviewClip:
+        """Pin the supplied reference, or the first input recording for comparison."""
+        return self.reference if self.reference is not None else self.clips[0]
+
+    @property
+    def ghost_indices(self) -> range:
+        return range(0 if self.reference is not None else 1, len(self.clips))
 
     @property
     def all_clips(self) -> list[PreviewClip]:
@@ -327,6 +339,7 @@ def load_preview(
     boxes = None
     robot_spec = None
     object_specs = None
+    arm_joint_groups = None
     end = None
     ground = True
     seen = set()
@@ -360,8 +373,9 @@ def load_preview(
         # URDF assembly comments may differ; compare the actual XML model.
         import xml.etree.ElementTree as ET
 
+        model = ET.parse(resolved_asset).getroot()
         if asset is not None and ET.tostring(ET.parse(asset).getroot()) != ET.tostring(
-            ET.parse(resolved_asset).getroot()
+            model
         ):
             raise ValueError("Output directories reference different robot models")
         asset = resolved_asset
@@ -376,6 +390,11 @@ def load_preview(
                 "Specify --eef-link when the recorded solver endpoint is ambiguous"
             )
         end = inferred
+        groups, tcp_frame = recorded_coordinates(robot, end, model)
+        if arm_joint_groups is None:
+            arm_joint_groups = groups
+        elif groups != arm_joint_groups:
+            arm_joint_groups = {}
         if group == 0:
             ground = job["resolved_deployment"].get("ground_plane_visible") is not False
         elif ground != (
@@ -425,6 +444,7 @@ def load_preview(
             clip = PreviewClip(
                 measured=measured,
                 space=f"S{group+1} · {path.name}",
+                tcp_frame=tcp_frame,
                 **annotations(episode.metadata, measured),
             )
             if is_reference:
@@ -434,22 +454,28 @@ def load_preview(
                 clips.append(clip)
                 clip.label = f"C-{len(clips):03d}"
     return PreviewData(
-        clips, reference_clip, asset, end, boxes, ground, coverage, object_specs
+        clips,
+        reference_clip,
+        asset,
+        end,
+        boxes,
+        ground,
+        coverage,
+        object_specs,
+        arm_joint_groups=arm_joint_groups or {},
     )
 
 
 class PreviewState:
     def __init__(self, data: PreviewData) -> None:
         self.data = data
+        self.enabled_ghosts: set[int] = set()
         self.values = dict(
             space="all",
             aff="all",
             variant="all",
-            selected=0,
             progress=0.0,
             playing=False,
-            reference=data.reference is not None,
-            ghosts=True,
             paths=True,
             targets=True,
             positions=True,
@@ -458,10 +484,11 @@ class PreviewState:
             elevation=0.55,
             distance=1.65,
         )
+        candidates = [data.clips[i] for i in data.ghost_indices]
         self.options = {
-            "space": sorted({c.space for c in data.clips}),
-            "aff": sorted({c.affordance for c in data.clips}),
-            "variant": sorted({c.variant for c in data.clips}),
+            "space": sorted({c.space for c in candidates}),
+            "aff": sorted({c.affordance for c in candidates}),
+            "variant": sorted({c.variant for c in candidates}),
             "align": ["time"] + (["phase"] if data.phase_alignment else []),
         }
 
@@ -469,18 +496,21 @@ class PreviewState:
         if (
             not isinstance(update, dict)
             or not update
-            or set(update) - self.values.keys()
+            or set(update)
+            - (self.values.keys() | {"toggle_playback", "toggle_ghost", "ghosts"})
         ):
             raise ValueError("Invalid preview controls")
         bounds = {
-            "selected": (0, len(self.data.clips) - 1),
             "progress": (0, 1),
             "yaw": (-20, 20),
             "elevation": (0.1, 1.5),
             "distance": (0.2, 20),
         }
         for key, value in update.items():
-            if key in self.options:
+            if key == "toggle_ghost":
+                if type(value) is not int or value not in self.data.ghost_indices:
+                    raise ValueError(key)
+            elif key in self.options:
                 if value not in self.options[key] + ([] if key == "align" else ["all"]):
                     raise ValueError(key)
             elif key in bounds:
@@ -488,7 +518,6 @@ class PreviewState:
                     type(value) not in (float, int)
                     or not math.isfinite(value)
                     or not bounds[key][0] <= value <= bounds[key][1]
-                    or (key == "selected" and type(value) is not int)
                 ):
                     raise ValueError(key)
             elif type(value) is not bool:
@@ -496,27 +525,34 @@ class PreviewState:
         return dict(update)
 
     def apply(self, update: dict[str, Any]) -> None:
-        self.values.update(self.validate(update))
-        visible = self.visible()
-        if visible and self.values["selected"] not in visible:
-            self.values["selected"] = visible[0]
-        if not visible:
-            self.values["playing"] = False
+        controls = self.validate(update)
+        toggle = controls.pop("toggle_ghost", None)
+        show_matching = controls.pop("ghosts", None)
+        toggle_playback = controls.pop("toggle_playback", False)
+        self.values.update(controls)
+        if toggle_playback:
+            self.values["playing"] = not self.values["playing"]
+            if self.values["playing"] and self.values["progress"] >= 1:
+                self.values["progress"] = 0.0
+        if show_matching is True:
+            self.enabled_ghosts.update(self.matching())
+        elif show_matching is False:
+            self.enabled_ghosts.difference_update(self.matching())
+        if toggle is not None:
+            self.enabled_ghosts.symmetric_difference_update((toggle,))
 
-    def visible(self) -> list[int]:
+    def matching(self) -> list[int]:
         v = self.values
         return [
             i
-            for i, c in enumerate(self.data.clips)
-            if all(
-                v[k] == "all" or v[k] == actual
-                for k, actual in [
-                    ("space", c.space),
-                    ("aff", c.affordance),
-                    ("variant", c.variant),
-                ]
-            )
+            for i in self.data.ghost_indices
+            if v["space"] in ("all", self.data.clips[i].space)
+            and v["aff"] in ("all", self.data.clips[i].affordance)
+            and v["variant"] in ("all", self.data.clips[i].variant)
         ]
+
+    def visible_ghosts(self) -> list[int]:
+        return [i for i in self.matching() if i in self.enabled_ghosts]
 
     def frame_at(self, clip: PreviewClip) -> int:
         p = self.values["progress"]
@@ -533,34 +569,31 @@ class PreviewState:
         return max(float(c.measured.timestamps[-1]) for c in self.data.all_clips)
 
     def snapshot(self) -> dict[str, Any]:
-        visible = self.visible()
-        c = self.data.clips[self.values["selected"]]
+        matching = self.matching()
+        c = self.data.solid_clip
         f = self.frame_at(c)
         return {
             **self.values,
-            "visible": visible,
-            "count": len(visible),
-            "total": len(self.data.clips),
+            "visible": matching,
+            "visible_ghosts": [i for i in matching if i in self.enabled_ghosts],
+            "count": len(matching),
+            "total": len(self.data.ghost_indices),
             "options": self.options,
             "has_reference": self.data.reference is not None,
             "coverage": self.data.coverage,
-            "label": c.label if visible else "No matches",
-            "source_frame": f if visible else None,
-            "source_frames": len(c.measured.timestamps) if visible else 0,
-            "time": float(c.measured.timestamps[f]) if visible else None,
-            "episode": c.measured.name if visible else "",
+            "label": c.label,
+            "source_frame": f,
+            "source_frames": len(c.measured.timestamps),
+            "time": float(c.measured.timestamps[f]),
+            "episode": c.measured.name,
             "candidate": ", ".join(c.candidate_ids) or "unrecorded",
-            "phase": (
-                next(
-                    (
-                        name
-                        for name, t in reversed(list(zip(c.phase_names, c.anchors)))
-                        if t <= c.measured.timestamps[f]
-                    ),
-                    "unrecorded",
-                )
-                if visible
-                else ""
+            "phase": next(
+                (
+                    name
+                    for name, t in reversed(list(zip(c.phase_names, c.anchors)))
+                    if t <= c.measured.timestamps[f]
+                ),
+                "unrecorded",
             ),
             "clips": [
                 dict(
@@ -571,5 +604,6 @@ class PreviewState:
                     variant=c.variant,
                 )
                 for i, c in enumerate(self.data.clips)
+                if i in self.data.ghost_indices
             ],
         }
