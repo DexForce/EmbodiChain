@@ -233,3 +233,10 @@ validators. The Atomic terminal gate owns additional real command frames; these
 consume ordinary rollout budgets and T+1 evidence. See
 [invocation handoff](../atomic-actions/execution.md#tolerance-bounded-invocation-handoff)
 and [boundary diagnostics](../../../examples/expansion/engine/skill-boundaries.md).
+
+Native joint-residual generation retains its original random proposal budget and
+full-amplitude preference. On exhaustion, the adapter may deterministically
+shrink one closest motion rejection under unchanged minimum-delta, joint, motion,
+FK and physical checks. It preserves the time grid and protected samples; metadata
+records the raw proposal count, refinement scale and both validation results.
+See [boundary and residual qualification](../../../examples/expansion/engine/skill-boundaries.md).

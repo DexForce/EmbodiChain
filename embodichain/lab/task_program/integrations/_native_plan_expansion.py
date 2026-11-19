@@ -26,6 +26,36 @@ from typing import Any
 __all__: list[str] = []
 
 
+def _fit_joint_residual(
+    reference, candidate, *, active, joint_limits, minimum_delta, checks
+):
+    """Bound a sampled residual without changing time, endpoints or validators.
+
+    Try the original draw first, then at most eight halvings. No new random
+    draws or smaller-than-declared variants are admitted. Each materialized
+    candidate is checked in its actual storage dtype before it can leave here.
+    """
+    delta = candidate.positions - reference.positions
+    for refinement in range(9):
+        scale = 0.5**refinement
+        fitted = (
+            replace(candidate)
+            if refinement == 0
+            else replace(candidate, positions=reference.positions + scale * delta)
+        )
+        magnitude = float((fitted.positions - reference.positions).abs().max())
+        if magnitude < minimum_delta:
+            break
+        values = fitted.positions[:, active]
+        bounds = joint_limits[active]
+        if bool(((values < bounds[:, 0]) | (values > bounds[:, 1])).any()):
+            continue
+        result = checks(fitted)
+        if all(check.accepted for check in result):
+            return fitted, result, scale
+    return None
+
+
 @dataclass(frozen=True)
 class TaskProgramNativeExpansionRecord:
     """Owned measured-plan expansion provenance and hashed numeric attachment."""
@@ -285,35 +315,71 @@ class _NativePlanExpansion:
                 f"{reference_checks}"
             )
         reason = "no distinct candidate"
-        for attempt in range(self.options["max_proposals"]):
-            arguments = dict(
-                joint_limits=limits,
-                normalized_scale=self.options["joint_offset_scale"],
-                generator=generator,
-            )
-            try:
-                if self.operator == "joint_residual":
-                    candidate = joint_residual(template, **arguments)
-                elif self.operator == "via_points":
-                    candidate = via_points(
-                        template, via_count=self.options["via_count"], **arguments
-                    )
-                elif self.operator == "nullspace_residual":
-                    candidate = nullspace_residual(
-                        template, task_jacobians=jacobians, **arguments
-                    )
-                else:
-                    raise ValueError(f"Unsupported operator: {self.operator}")
-            except ProposalRejected as exc:
-                reason = str(exc)
-                continue
-            delta = float((candidate.positions - template.positions).abs().max())
-            if delta < self.options["minimum_joint_delta"]:
-                continue
-            checks = motion_checks(candidate)
-            if any(not check.accepted for check in checks):
-                reason = f"edited-phase motion limits: {checks}"
-                continue
+        best_rejected = None
+        budget = self.options["max_proposals"]
+        for iteration in range(budget + 1):
+            residual_scale = 1.0
+            if iteration == budget:
+                # Preserve the existing random draws and full-amplitude preference.
+                # Only budget exhaustion activates this bounded deterministic fallback.
+                if self.operator != "joint_residual" or best_rejected is None:
+                    break
+                _, attempt, sampled, raw_checks = best_rejected
+                fitted = _fit_joint_residual(
+                    template,
+                    sampled,
+                    active=active,
+                    joint_limits=limits,
+                    minimum_delta=self.options["minimum_joint_delta"],
+                    checks=motion_checks,
+                )
+                if fitted is None:
+                    reason = f"best motion rejection at proposal {attempt}: {raw_checks}; bounded refinement cannot meet unchanged limits and minimum delta"
+                    break
+                candidate, checks, residual_scale = fitted
+                sampled_positions = sampled.positions
+                delta = float((candidate.positions - template.positions).abs().max())
+            else:
+                attempt = iteration
+                arguments = dict(
+                    joint_limits=limits,
+                    normalized_scale=self.options["joint_offset_scale"],
+                    generator=generator,
+                )
+                try:
+                    if self.operator == "joint_residual":
+                        candidate = joint_residual(template, **arguments)
+                    elif self.operator == "via_points":
+                        candidate = via_points(
+                            template, via_count=self.options["via_count"], **arguments
+                        )
+                    elif self.operator == "nullspace_residual":
+                        candidate = nullspace_residual(
+                            template, task_jacobians=jacobians, **arguments
+                        )
+                    else:
+                        raise ValueError(f"Unsupported operator: {self.operator}")
+                except ProposalRejected as exc:
+                    reason = str(exc)
+                    continue
+                delta = float((candidate.positions - template.positions).abs().max())
+                if delta < self.options["minimum_joint_delta"]:
+                    continue
+                sampled_positions = candidate.positions
+                checks = motion_checks(candidate)
+                raw_checks = checks
+                if any(not check.accepted for check in checks):
+                    reason = f"edited-phase motion limits: {checks}"
+                    if self.operator == "joint_residual":
+                        score = max(
+                            value
+                            for report in checks
+                            for check in report.checks
+                            for value in check.metrics.values()
+                        )
+                        if best_rejected is None or score < best_rejected[0]:
+                            best_rejected = (score, attempt, candidate, checks)
+                    continue
             fk = self._check_fk(template, candidate, kinematics)
             if self.operator == "nullspace_residual" and (
                 fk["max_translation_m"]
@@ -340,6 +406,11 @@ class _NativePlanExpansion:
                 "task_rows": self.options["nullspace_task_rows"],
                 "max_joint_delta": delta,
                 "proposal": attempt,
+                "residual_scale": residual_scale,
+                "raw_proposal_count": min(iteration + 1, budget),
+                "raw_motion_checks": [
+                    dict(c.metrics) for r in raw_checks for c in r.checks
+                ],
                 "same_time_grid": True,
                 "motion_validation_scope": "edited_phases_and_boundary_stencils",
                 "motion": {
@@ -370,6 +441,11 @@ class _NativePlanExpansion:
                         candidate=candidate.positions.numpy(),
                         dt=template.dt.numpy(),
                         editable=editable.numpy(),
+                        **(
+                            {"raw_candidate": sampled_positions.numpy()}
+                            if residual_scale < 1
+                            else {}
+                        ),
                     )
                 evidence["plan_artifact"] = {
                     "path": str(path),

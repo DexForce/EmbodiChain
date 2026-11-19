@@ -35,10 +35,10 @@ import numpy as np
 __all__: list[str] = []
 
 
-def _episodes(directory: Path) -> list[dict]:
+def _episodes(directory: Path, operator: str = "object_pose") -> list[dict]:
     result = []
     for path in sorted(
-        (directory / "collection/dataset/object_pose/episodes").glob("*/episode.npz")
+        (directory / f"collection/dataset/{operator}/episodes").glob("*/episode.npz")
     ):
         with np.load(path, allow_pickle=False) as arrays:
             m = json.loads(arrays["manifest"].tobytes())
@@ -200,7 +200,9 @@ def _plot(before: dict, after: dict, output: Path) -> None:
     plt.close(fig)
 
 
-def _collect(root: Path, baseline: Path, revision: Path) -> None:
+def _collect(
+    root: Path, baseline: Path, revision: Path, operator: str = "object_pose"
+) -> None:
     if root.exists():
         raise FileExistsError("Collection requires a fresh output directory")
     root.mkdir(parents=True)
@@ -227,6 +229,8 @@ def _collect(root: Path, baseline: Path, revision: Path) -> None:
                     "--worker",
                     "--group",
                     group,
+                    "--operator",
+                    operator,
                     "--scene",
                     "open",
                     "--rows",
@@ -255,6 +259,7 @@ def _collect(root: Path, baseline: Path, revision: Path) -> None:
                     "embodichain/lab/sim/atomic_skills/tracking.py",
                     "embodichain/lab/expansion/task_program_jobs.py",
                     "embodichain/lab/task_program/integrations/configured.py",
+                    "embodichain/lab/task_program/integrations/_native_plan_expansion.py",
                 )
                 runs.append(
                     {
@@ -293,6 +298,9 @@ def _main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--collect", action="store_true")
+    parser.add_argument(
+        "--operator", choices=("object_pose", "joint_residual"), default="object_pose"
+    )
     parser.add_argument("--baseline", type=Path)
     parser.add_argument(
         "--revision", type=Path, default=Path(__file__).resolve().parents[3]
@@ -302,12 +310,12 @@ def _main() -> None:
     if args.collect:
         if args.baseline is None:
             parser.error("--collect requires --baseline")
-        _collect(root, args.baseline.resolve(), args.revision.resolve())
+        _collect(root, args.baseline.resolve(), args.revision.resolve(), args.operator)
     runs = json.loads((root / "runs.json").read_text())
     rows = []
     by_case = {}
     for run in runs:
-        data = _episodes(root / run["case"])
+        data = _episodes(root / run["case"], args.operator)
         if len({row["episode"] for row in data}) != run["metrics"]["committed"]:
             raise ValueError(
                 f"Boundary records do not match confirmed episode count: {run['case']}"
@@ -403,6 +411,7 @@ def _main() -> None:
         }
     report = {
         "schema_version": 1,
+        "operator": args.operator,
         "summary": summaries,
         "plot_pair": plot,
         "rows": rows,

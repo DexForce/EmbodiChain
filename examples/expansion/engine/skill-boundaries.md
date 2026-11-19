@@ -185,10 +185,10 @@ Window maxima are 0.459 and 0.400 rad/s² after takeover, below the unchanged
 seed, not a general performance guarantee. Existing D quota shortfalls and
 stop-gate rejection remain; no gate was loosened to recover success.
 
-An additional joint-residual smoke is 4/4 before and 3/4 after: the original
+An initial joint-residual smoke was 4/4 before and 3/4 after: the original
 edited-phase acceleration validator rejects one generated Place variant
-(acceleration ratio 1.425). This failure is retained and the feature remains
-subject to broader operator qualification. Main matrix results are object-pose
+(acceleration ratio 1.425). This failure is retained as evidence; the bounded repair below addresses this
+budget-exhaustion case. Broader operator qualification remains separate. Main matrix results are object-pose
 operator results, not a claim that all trajectory operators preserve yield.
 
 ![Reference-conditioned six-joint handoff](assets/reference-handoff.png)
@@ -199,3 +199,67 @@ dashed lines measurements. Velocities are unsmoothed control-grid differences;
 they are not native instantaneous velocity readings. The numerical matrix has
 per-run source manifests; later fail-closed rebuild/retiming and interface guards
 have focused tests plus a separate B=4 native smoke.
+
+## Joint-residual rejection recovery
+
+The earlier 3/4 probe exposed a near-limit rejection-sampling weakness, not a
+failure of the reference prefix. The failure occurs in Place/retract candidate
+checks, before plan restoration/rebuilding. The nominal phase already consumes
+about 99% of the acceleration bound. Residual amplitude is sampled from joint
+range, independently of the phase's remaining dynamic margin. A fixed random
+budget can therefore miss a feasible amplitude; preserving endpoints alone does
+not constrain discrete acceleration. The old error reports the last rejection,
+not the closest one.
+
+The native adapter now preserves the original random sequence and preference
+for unscaled candidates. Only after raw `max_proposals` is exhausted does it
+retain the closest motion rejection and try at most eight deterministic
+halvings. Every materialized result must pass the unchanged joint/motion checks
+and original minimum delta, followed by unchanged FK, reconstruction, collision
+and physical/task validation. It does not retime, alter protected samples or
+accept nominal repeats. Memory remains O(TD), retaining one candidate rather
+than the entire proposal pool. This is bounded local repair, not a complete
+feasibility solver.
+
+Provenance includes `proposal` (raw source index), `raw_proposal_count`,
+`residual_scale`, raw checks and the accepted checks. Refined plan archives also
+include `raw_candidate`; original passing draws retain their amplitude.
+
+### Same-configuration qualification
+
+Baseline `6cd7da36b`; Default CPU, group A, joint_residual, seed 7, B=4,
+4-rollout/128-scene-candidate budgets, 64 raw motion proposals, 240 seconds.
+Velocity/acceleration limits remain 0.5; minimum joint delta remains 0.002 rad.
+Both before/after and after/before were run serially with the same CPU affinity
+and visible GPU. Earlier exploratory baseline runs also achieved 4/4: the
+failure is sensitive to the small dynamic margin, not a guaranteed failure on
+every run of the current baseline.
+
+| Metric | Before | After |
+| --- | --- | --- |
+| Confirmed/executed, two orders | 6/8 (3/4 each) | 8/8 (4/4 each) |
+| Mean wall seconds, setup through export | 21.776 | 21.208 |
+| Qualified episodes/minute | 8.27 | 11.32 |
+| Pick→Place command jump, maximum | 0 rad | 0 rad |
+| Handoff-window command acceleration, maximum | 0.415 rad/s² | 0.411 rad/s² |
+
+The restored ordinal 2 exhausts all 64 raw draws. Its closest draw (index 4)
+has acceleration ratio 1.000464, above the unchanged 1+1e-6 acceptance threshold.
+A residual scale of 0.5 yields ratio 0.993311 (0.993013 on the second repeat)
+and actual max delta 0.009999 rad, above the original 0.002 minimum. All endpoints,
+hand columns and noneditable samples match the reference exactly. The original
+reference itself still must pass validation; repair cannot bypass that gate.
+
+![Unchanged successful handoff behavior](assets/residual-repair-handoff.png)
+
+The handoff plot compares shared successful ordinal 1. The failed ordinal 2 had
+no executed Place path before repair; its raw rejected plan is shown separately:
+
+![Rejected and refined planned residual](assets/residual-refinement.png)
+
+The 2.6% wall-time difference is descriptive for this small sample, not a general
+speedup claim. Effective throughput improves mainly by recovering the fourth
+qualified episode. The rejected candidate is not labeled as measured execution.
+Analysis supports `--operator joint_residual`; per-run source manifests and raw
+artifacts retain the comparison evidence. Final changes to archive size and
+private ownership were followed by a separate native smoke.
