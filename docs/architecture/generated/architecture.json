@@ -3,7 +3,7 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "b3bad38b5effeee6848d9733703aefbbd114d6e8",
+  "revision": "a79dd9bc3fa1d938b50eaf2d3198326cffac480e",
   "source_ref": "HEAD",
   "package_version": "0.3.2",
   "topic_index": "agent_context/MAP.yaml",
@@ -5812,15 +5812,15 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_robot",
-          "start_line": 4638,
-          "end_line": 4639,
+          "start_line": 4663,
+          "end_line": 4664,
           "excerpt": "        robot = self._declare_spawn_articulation(cfg, Robot)\n        self._robots[uid] = robot"
         },
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager._declare_spawn_articulation",
-          "start_line": 4678,
-          "end_line": 4681,
+          "start_line": 4703,
+          "end_line": 4706,
           "excerpt": "        facade = facade_type(\n            cfg=cfg,\n            device=self.device,\n        )"
         }
       ]
@@ -5837,8 +5837,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.start_visualization",
-          "start_line": 1245,
-          "end_line": 1250,
+          "start_line": 1246,
+          "end_line": 1251,
           "excerpt": "        runtime = VisualizationRuntime(\n            SceneExporter(self, visualization_cfg),\n            visualization_cfg,\n        )\n        self._visualization_runtime = runtime\n        runtime.start()"
         }
       ]
@@ -5855,8 +5855,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_robot",
-          "start_line": 4639,
-          "end_line": 4644,
+          "start_line": 4664,
+          "end_line": 4669,
           "excerpt": "        self._robots[uid] = robot\n        if was_materialized:\n            self.prepare()\n        for sensor_cfg in mounted_sensors:\n            self.add_sensor(sensor_cfg)\n        return robot"
         }
       ]
@@ -5873,8 +5873,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.enable_gizmo",
-          "start_line": 4834,
-          "end_line": 4834,
+          "start_line": 4859,
+          "end_line": 4859,
           "excerpt": "            gizmo = Gizmo(target, gizmo_cfg, control_part)"
         }
       ]
@@ -5891,8 +5891,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.create_rigid_constraint",
-          "start_line": 4300,
-          "end_line": 4300,
+          "start_line": 4325,
+          "end_line": 4325,
           "excerpt": "        constraint = RigidConstraint("
         }
       ]
@@ -5909,8 +5909,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_rigid_object_group",
-          "start_line": 4441,
-          "end_line": 4441,
+          "start_line": 4466,
+          "end_line": 4466,
           "excerpt": "        group = RigidObjectGroup("
         }
       ]
@@ -5927,8 +5927,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager._declare_rigid_objects",
-          "start_line": 3721,
-          "end_line": 3721,
+          "start_line": 3746,
+          "end_line": 3746,
           "excerpt": "            rigid_obj = RigidObject(cfg=cfg, device=self.device)"
         }
       ]
@@ -5945,8 +5945,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_articulation",
-          "start_line": 4542,
-          "end_line": 4542,
+          "start_line": 4567,
+          "end_line": 4567,
           "excerpt": "        self._articulations[uid] = articulation"
         }
       ]
@@ -5963,8 +5963,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_deformable_object",
-          "start_line": 4100,
-          "end_line": 4100,
+          "start_line": 4125,
+          "end_line": 4125,
           "excerpt": "        self._deformable_objects[uid] = deformable"
         }
       ]
@@ -5981,8 +5981,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_light",
-          "start_line": 3227,
-          "end_line": 3227,
+          "start_line": 3252,
+          "end_line": 3252,
           "excerpt": "        self._lights[uid] = batch_lights"
         }
       ]
