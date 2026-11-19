@@ -156,7 +156,8 @@ and image; `planning_repairs` (default 1) bounds diagnostic re-planning;
 `source_calibration` names a JSON camera/tabletop calibration of the input image,
 which rescales and places each rigid object so its projection matches its image
 mask (scenes with articulations, or whose table does not stay world-axis aligned
-under the calibrated yaw, are rejected);
+under the calibrated yaw, are rejected). The calibrated table is decomposed
+with V-HACD, so objects rest at the calibrated surface height;
 `room` adds a scene asset room (for example `WoodLab`) as a visual shell with its
 authored floor collider; `recording` streams every camera frame and per-step state
 to `recording/` during execution. Missing native parts, hidden or ambiguous
