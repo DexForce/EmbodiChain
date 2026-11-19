@@ -11,7 +11,7 @@ in-episode state writes.
 
 ## Requirements and entry point
 
-Use CUDA and the pinned DexSim `0.6.0rc2` wheel. The packaged
+Use CUDA and the pinned DexSim `0.6.0` wheel. The packaged
 [`cable.usda`](cable.usda) defines the original 51 centerline points, the 7 mm
 diameter and the initial pose. The `usd_scene.asset_cfgs` entry in
 [`env.yaml`](env.yaml) binds the curve as `cable` and supplies the fixed first
