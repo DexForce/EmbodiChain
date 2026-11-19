@@ -187,7 +187,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("scene", "task"), default="scene")
     parser.add_argument(
-        "--view", choices=("viser", "window", "offscreen", "none"), default="viser"
+        "--view",
+        choices=("viser", "window", "web", "offscreen", "none"),
+        default="viser",
     )
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--candidates", type=int, default=3)

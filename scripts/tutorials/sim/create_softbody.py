@@ -135,8 +135,8 @@ def main(args: argparse.Namespace | None = None) -> None:
     sim.prepare()
 
     # Open window when the scene has been set up
-    if not args.headless:
-        sim.open_window()
+    if not args.headless or getattr(args, "web", False):
+        sim.open_viewer()
 
     print(f"[INFO]: Running simulation with {args.num_envs} environment(s)")
     print("[INFO]: Press Ctrl+C to stop the simulation")

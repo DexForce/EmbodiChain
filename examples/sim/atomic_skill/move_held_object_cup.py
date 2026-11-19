@@ -243,7 +243,7 @@ def main() -> None:
         return
 
     if wait_for_user:
-        input("Press Enter to replay the MoveHeldObject demo...")
+        sim.wait_for_input("Press Enter to replay the MoveHeldObject demo...")
     clear_after_step = compiled.segment(1, "lift").start
     replay_trajectory(
         sim,
@@ -255,7 +255,7 @@ def main() -> None:
         on_trajectory_step=make_clear_dynamics_callback(obj, clear_after_step),
     )
     if wait_for_user:
-        input("Press Enter to exit the simulation...")
+        sim.wait_for_input("Press Enter to exit the simulation...")
 
 
 if __name__ == "__main__":

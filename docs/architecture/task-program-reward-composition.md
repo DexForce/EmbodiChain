@@ -174,7 +174,7 @@ when a consuming algorithm is supplied.
 
 The terminal shaping contribution can be negative while task success is
 correctly rewarded. In the recorded two-stage fixture, the last step is
-`10 + 0.5 - 0.945506 ≈ 9.554495`: success, milestone and absorbing-potential
+`10 + 0.5 - 0.944451 ≈ 9.555549`: success, milestone and absorbing-potential
 correction are separate ledger entries.
 
 ## Configuration and generated manager terms
@@ -318,7 +318,7 @@ The [native acceptance reference](../../examples/learning/task_program_progress/
 records four passing CPU cases: success, hold, truncation and failure, totaling
 1,559 `env.step` calls and 3,118 environment reward samples, including a
 post-reset transition. The maximum scalar composition error is
-`4.7683716e-7`; repeated-read error is zero. The arithmetic oracle consumes
+`8.9406967e-8`; repeated-read error is zero. The arithmetic oracle consumes
 canonical measured skill potentials and is not an independent geometry or
 skill-formula oracle. Focused production tests cover those underlying contracts.
 

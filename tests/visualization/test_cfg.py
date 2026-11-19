@@ -18,7 +18,35 @@ from __future__ import annotations
 
 import pytest
 
-from embodichain.lab.visualization import VisualizationCfg, ViserServerCfg
+from embodichain.lab.visualization import DexSimWebCfg, VisualizationCfg, ViserServerCfg
+
+
+def test_visualization_cfg_preserves_positional_constructor() -> None:
+    cfg = VisualizationCfg(
+        "viser",
+        12.0,
+        [1],
+        2,
+        1_000,
+        3.0,
+        5.0,
+        True,
+        ViserServerCfg(port=9000),
+        web=DexSimWebCfg(port=9765),
+    )
+
+    assert (
+        cfg.backend,
+        cfg.scene_fps,
+        cfg.env_ids,
+        cfg.max_visible_envs,
+        cfg.point_cloud_max_points,
+        cfg.sensor_image_fps,
+        cfg.soft_body_fps,
+        cfg.allow_commands,
+        cfg.viser_server.port,
+    ) == ("viser", 12.0, [1], 2, 1_000, 3.0, 5.0, True, 9000)
+    assert cfg.web.port == 9765
 
 
 def test_visualization_cfg_copies_environment_selection() -> None:
@@ -57,10 +85,13 @@ def test_visualization_cfg_rejects_non_positive_image_fps() -> None:
         VisualizationCfg(backend="viser", sensor_image_fps=0.0)
 
 
-def test_visualization_cfg_accepts_explicit_viser_commands() -> None:
-    cfg = VisualizationCfg(backend="viser", allow_commands=True)
+@pytest.mark.parametrize("backend,expected", [("viser", True), ("dexsim-web", False)])
+def test_visualization_cfg_limits_application_commands_to_viser(
+    backend, expected
+) -> None:
+    cfg = VisualizationCfg(backend=backend, allow_commands=True)
 
-    assert cfg.allow_commands
+    assert cfg.allow_commands is expected
 
 
 def test_visualization_cfg_rejects_commands_without_viser() -> None:
