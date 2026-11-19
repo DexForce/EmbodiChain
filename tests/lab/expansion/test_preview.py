@@ -14,18 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Result-only preview: provenance, row selection, controls and HTTP lifecycle."""
+"""Result-only preview: provenance, row selection and WebRTC controls."""
 
 from __future__ import annotations
 
-import base64
 from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
-import threading
-import urllib.error
-import urllib.request
 import numpy as np
 import pytest
 import torch
@@ -38,8 +34,13 @@ from embodichain.lab.expansion.contracts import (
 )
 from embodichain.lab.expansion.persistence import ArtifactEpisodeSink
 from embodichain.lab.expansion._preview_data import load_preview, PreviewState
+from embodichain.lab.expansion._preview_deviations import (
+    deviation_curves,
+    recorded_coordinates,
+)
+from embodichain.lab.expansion._preview_heatmap import object_heatmaps
 from embodichain.lab.expansion._preview_render import prepare_geometry
-from embodichain.lab.expansion._preview_server import PreviewTransport
+from embodichain.lab.expansion._preview_server import _WebPreviewTransport
 
 
 @pytest.fixture
@@ -164,6 +165,12 @@ def test_result_loading_binds_grasp_row_and_fk_without_writing_results(recorded_
     }
     data = load_preview([path])
     clip = data.clips[0]
+    state = PreviewState(data)
+    assert data.solid_clip is clip and state.snapshot()["total"] == 0
+    state.apply({"playing": True, "progress": 1})
+    assert state.snapshot()["source_frame"] == 2 and state.values["playing"]
+    with pytest.raises(ValueError, match="toggle_ghost"):
+        state.apply({"toggle_ghost": 0})
     assert (
         clip.affordance == "1" and clip.candidate_ids == ("31",) and clip.variant == "1"
     )
@@ -197,6 +204,207 @@ def test_result_loader_rejects_incomplete_scene_and_budget(recorded_job, tmp_pat
         load_preview([path])
 
 
+def test_curves_use_calibrated_tcp_and_per_episode_joint_maxima(recorded_job):
+    from scipy.spatial.transform import Rotation
+    from xml.etree import ElementTree as ET
+
+    path, _, _ = recorded_job
+    data = load_preview([path])
+    sample = data.clips[0]
+    offset = np.eye(4)
+    offset[0, 3] = 1
+    robot = {
+        "solver_cfg": {"wrist": {"end_link_name": "tool"}},
+        "control_parts": {"wrist": ["a|b"]},
+        "gripper_bindings": {
+            "other": {
+                "declaration": {"motion_part": "other_arm"},
+                "root_link": "other_tool",
+            },
+            "hand": {
+                "declaration": {"motion_part": "wrist"},
+                "root_link": "hand_root",
+                "defaults": {"default_root_from_tcp": offset.tolist()},
+            },
+        },
+    }
+    model = ET.fromstring(
+        '<robot><joint name="a" type="continuous"/><joint name="b" type="revolute"/><joint name="finger" type="prismatic"/></robot>'
+    )
+    data.arm_joint_groups, tcp_frame = recorded_coordinates(robot, "tool", model)
+    assert data.arm_joint_groups == {"deg": ["a", "b"]}
+
+    def clip(times, yaw_deg, joint_names, qpos_deg):
+        transforms = np.tile(np.eye(4), (len(times), 1, 1))
+        transforms[:, :3, :3] = Rotation.from_euler(
+            "z", np.asarray(yaw_deg)[:, None], degrees=True
+        ).as_matrix()
+        measured = replace(
+            sample.measured,
+            timestamps=np.array(times),
+            joint_names=joint_names,
+            qpos=np.deg2rad(qpos_deg),
+            root_poses=np.tile([0, 0, 0, 0, 0, 0, 1], (len(times), 1)),
+            object_poses={},
+        )
+        return replace(
+            sample, measured=measured, links=transforms[:, None], tcp_frame=tcp_frame
+        )
+
+    data.reference = clip(
+        [0, 1, 2, 3], [170] * 4, ("a", "b", "finger"), np.zeros((4, 3))
+    )
+    data.clips = [
+        clip([0, 2], [170, -100], ("finger", "b", "a"), [[180, 0, 0], [180, 0, 60]]),
+        clip([0, 1], [170, 80], ("a", "finger", "b"), [[0, 180, 0], [0, 180, -60]]),
+        clip([0, 1], [170, -160], ("a", "b", "finger"), [[0, 0, 180], [-36, 0, 180]]),
+    ]
+    report = deviation_curves(data, ["hand_root"])
+    assert report["time_s"] == [0, 1, 2, 3] and report["count"] == [3, 3, 1, 0]
+    means = report["mean"]
+    # At 1 s the three rotations are 45, 90 and 30 degrees. The first
+    # position is interpolated halfway along the 90-degree TCP chord.
+    chord_mm = 1000 * np.sqrt(2)
+    short_chord_mm = 2000 * np.sin(np.deg2rad(15))
+    mean_mm = (0.5 * chord_mm + chord_mm + short_chord_mm) / 3
+    expected = {
+        "translation_mm": (
+            [0, short_chord_mm, chord_mm],
+            [0, mean_mm, chord_mm],
+            [0, chord_mm, chord_mm],
+        ),
+        "rotation_deg": ([0, 30, 90], [0, 55, 90], [0, 90, 90]),
+        # Per-episode worst joint deviations at 1 s are 30, 60 and 36 degrees.
+        "qpos_deg": ([0, 30, 60], [0, 42, 60], [0, 60, 60]),
+    }
+    for key, (low, mean, high) in expected.items():
+        band = report["range"][key]
+        np.testing.assert_allclose(band["min"][:3], low, atol=1e-9)
+        np.testing.assert_allclose(means[key][:3], mean, atol=1e-9)
+        np.testing.assert_allclose(band["max"][:3], high, atol=1e-9)
+        assert (
+            band["min"][-1] is None
+            and means[key][-1] is None
+            and band["max"][-1] is None
+        )
+    fallback = replace(data, clips=[data.reference, *data.clips], reference=None)
+    implicit = deviation_curves(fallback, ["hand_root"])
+    assert implicit["mean"] == means and implicit["range"] == report["range"]
+    # Older jobs may lack TCP calibration while retaining valid arm measurements.
+    data.clips[0].tcp_frame = None
+    no_tcp = deviation_curves(data, ["hand_root"])
+    assert no_tcp["mean"] == {"qpos_deg": means["qpos_deg"]}
+    assert no_tcp["range"] == {"qpos_deg": report["range"]["qpos_deg"]}
+
+
+def test_heatmap_bins_each_object_pose_target_once_at_its_measured_start(recorded_job):
+    path, _, _ = recorded_job
+    data = load_preview([path])
+    sample = data.solid_clip
+    anchor = sample.measured.object_poses["box"]
+
+    def clip(start, targets):
+        poses = anchor.copy()
+        poses[0, :2] = start
+        poses[1:, :2] = [50, -60]
+        measured = replace(
+            sample.measured,
+            object_poses={"box": poses, "goal": anchor, "table": anchor},
+        )
+        return replace(sample, measured=measured, object_pose_uids=targets)
+
+    a, b = (-0.25, 0.5 + 2**-20), (0.125, 0.5)
+    data.reference = clip((20, 30), ("box", "goal"))
+    data.clips = [
+        clip(a, ("box", "goal")),
+        clip(a, ("box",)),
+        clip(b, ("box",)),
+        clip((6, 7), ()),
+    ]
+    report = object_heatmaps(data)
+    assert report["episodes"] == 3
+    box, goal = report["objects"]
+    assert [box["uid"], goal["uid"]] == ["box", "goal"]
+    assert set(box["views"]) == {"start"}
+    view = box["views"]["start"]
+    np.testing.assert_array_equal(view["bounds_m"], [[a[0], b[1]], [b[0], a[1]]])
+    edges = np.array([box["x_edges_m"], box["y_edges_m"]])
+    centers = (edges[:, :-1] + edges[:, 1:]) / 2
+    np.testing.assert_allclose(
+        centers[:, [0, -1]].T, view["bounds_m"], rtol=0, atol=1e-12
+    )
+    expected = np.zeros_like(view["counts"])
+    expected[-1, 0] = 2
+    expected[0, -1] = 1
+    np.testing.assert_array_equal(view["counts"], expected)
+    assert box["episodes"] == 3
+    assert goal["episodes"] == np.sum(goal["views"]["start"]["counts"]) == 1
+    goal_edges = np.array([goal["x_edges_m"], goal["y_edges_m"]])
+    np.testing.assert_allclose(
+        goal_edges[:, [0, -1]],
+        anchor[0, :2, None] + [-0.0005, 0.0005],
+        rtol=0,
+        atol=1e-12,
+    )
+
+    # A genuine input augmentation still contributes when it doubles as the solid replay.
+    implicit = object_heatmaps(replace(data, reference=None))
+    assert implicit["objects"] == report["objects"] and implicit["episodes"] == 3
+
+
+def test_heatmap_reads_selected_operator_and_rigid_targets_from_saved_recipe(
+    recorded_job,
+):
+    path, job, episode = recorded_job
+    job["operator"] = "object_pose"
+    (path / "job.json").write_text(json.dumps(job))
+    sink = ArtifactEpisodeSink(path)
+    for ordinal, selected in enumerate(("object_pose", "affordance", None), start=1):
+        motion = {"options": {"operators": ["object_pose", "affordance"]}}
+        if selected:
+            motion["operator"] = selected
+        operations = [
+            {"name": "motion", "payload_json": json.dumps(motion)},
+            {
+                "name": "joint_scene",
+                "payload_json": json.dumps(
+                    {
+                        "pose_changes": {
+                            "box": np.eye(4).tolist(),
+                            "robot": np.eye(4).tolist(),
+                        }
+                    }
+                ),
+            },
+        ]
+        sink.submit(
+            replace(
+                episode,
+                episode_id=f"episode{ordinal}",
+                commit_id=f"commit{ordinal}",
+                metadata={
+                    **episode.metadata,
+                    "recipe_spec": {"operations": operations},
+                },
+            ),
+            submission_id=ordinal,
+        )
+
+    data = load_preview([path])
+    targets = {c.measured.name: c.object_pose_uids for c in data.clips}
+    assert targets == {
+        "episode": (),
+        "episode1": ("box",),
+        "episode2": (),
+        "episode3": ("box",),
+    }
+    report = object_heatmaps(data)
+    assert report["episodes"] == 2
+    box = report["objects"][0]
+    assert box["views"]["start"]["bounds_m"] == [[10, 20], [10, 20]]
+    assert np.sum(box["views"]["start"]["counts"]) == 2
+
+
 def test_result_loader_keeps_real_mesh_spec_and_native_operator_labels(
     recorded_job, tmp_path
 ):
@@ -226,21 +434,35 @@ def test_result_loader_keeps_real_mesh_spec_and_native_operator_labels(
     assert result["affordance"] == "unrecorded"
 
 
-def test_filter_empty_intersection_and_phase_alignment(recorded_job):
+def test_independent_ghosts_keep_reference_playing_across_filters(recorded_job):
     path, _, _ = recorded_job
     data = load_preview([path])
     first = data.clips[0]
+    data.reference = replace(first, measured=replace(first.measured, name="original"))
     data.clips = [
         replace(first, space="A", affordance="0", variant="0"),
         replace(first, space="B", affordance="1", variant="1"),
     ]
     state = PreviewState(data)
+    assert state.snapshot()["visible_ghosts"] == []
+    state.apply({"toggle_ghost": 0})
+    state.apply({"toggle_ghost": 1})
+    assert state.visible_ghosts() == [0, 1]
+    state.apply({"toggle_ghost": 1})
+    assert state.visible_ghosts() == [0]
     state.apply({"space": "B"})
-    assert state.visible() == [1] and state.values["selected"] == 1
+    assert state.matching() == [1] and state.visible_ghosts() == []
+    state.apply({"ghosts": True})
+    assert state.visible_ghosts() == [1]
     state.apply({"aff": "0", "playing": True})
-    assert state.visible() == [] and not state.values["playing"]
-    assert state.snapshot()["source_frame"] is None
+    assert state.matching() == [] and state.values["playing"]
+    assert state.snapshot()["episode"] == "original"
+    assert state.snapshot()["source_frame"] == 0
     state.apply({"space": "all", "aff": "all", "progress": 0.5})
+    assert state.visible_ghosts() == [0, 1]
+    state.apply({"space": "B", "ghosts": False})
+    state.apply({"space": "all"})
+    assert state.visible_ghosts() == [0]
     assert state.frame_at(first) == 0  # phase boundary .4 s -> recorded frame at 0 s
     state.apply({"align": "time"})
     assert state.frame_at(first) == 1  # exactly .5 s
@@ -248,7 +470,8 @@ def test_filter_empty_intersection_and_phase_alignment(recorded_job):
     assert state.frame_at(first) == 2
     for update in (
         {"progress": float("nan")},
-        {"selected": True},
+        {"toggle_ghost": True},
+        {"toggle_ghost": 2},
         {"playing": "true"},
         {"unknown": 0},
         {"aff": "missing"},
@@ -259,41 +482,53 @@ def test_filter_empty_intersection_and_phase_alignment(recorded_job):
         assert state.values == before
 
 
-def test_http_snapshot_control_and_shutdown(recorded_job):
+def test_playback_toggles_in_order_and_restarts_from_the_end(recorded_job):
     path, _, _ = recorded_job
     state = PreviewState(load_preview([path]))
-    transport = PreviewTransport(state, 0)
-    transport.publish({"frame": 7, "source_frame": 2}, b"jpeg-frame-7")
-    thread = threading.Thread(target=transport.server.serve_forever)
-    thread.start()
-    try:
-        snapshot = json.load(urllib.request.urlopen(transport.url + "snapshot"))
-        assert snapshot["frame"] == 7 and snapshot["source_frame"] == 2
-        assert base64.b64decode(snapshot["image"].split(",")[1]) == b"jpeg-frame-7"
-        req = urllib.request.Request(
-            transport.url + "control",
-            data=b'{"progress":0.5}',
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        assert urllib.request.urlopen(req).status == 204
-        assert (
-            state.values["progress"] == 0
-        )  # only the render owner applies queued commands
-        state.apply(transport.commands.get_nowait())
-        assert state.values["progress"] == 0.5
-        req.add_header("Origin", "https://untrusted.example")
-        with pytest.raises(urllib.error.HTTPError) as error:
-            urllib.request.urlopen(req)
-        assert error.value.code == 403
-    finally:
-        transport.server.shutdown()
-        thread.join(timeout=5)
-        transport.server.server_close()
-    assert not thread.is_alive()
+    state.apply({"progress": 0.5})
+    toggle = {"toggle_playback": True}
+    state.apply(toggle)
+    assert state.values["playing"] and state.values["progress"] == 0.5
+    state.apply(toggle)
+    assert not state.values["playing"] and state.values["progress"] == 0.5
+    state.apply({"progress": 1})
+    state.apply(toggle)
+    assert state.values["playing"] and state.values["progress"] == 0
 
 
-def test_preview_cli_dispatch_does_not_collect(monkeypatch, recorded_job):
+def test_native_preview_publishes_metadata_and_queues_valid_replay_controls(
+    recorded_job,
+):
+    from types import SimpleNamespace
+
+    path, _, _ = recorded_job
+    state = PreviewState(load_preview([path]))
+    application = {}
+
+    def install(assets, request):
+        application.update(assets=assets, request=request)
+
+    viewer = SimpleNamespace(
+        endpoint="http://127.0.0.1:8769/", _replace_application=install
+    )
+    transport = _WebPreviewTransport(state, viewer, b'{"episodes":0}')
+    transport.publish({"frame": 7, "source_frame": 2})
+    request = application["request"]
+    code, body = request("/api/state", "{}")
+    assert code == 200
+    assert json.loads(body) == {"frame": 7, "source_frame": 2}
+    assert b'<script src="/browser.js"></script>' in application["assets"]["/"][1]
+    assert request("/api/command", '{"progress":0.5}')[0] == 200
+    assert state.values["progress"] == 0
+    state.apply(transport.commands.popleft())
+    assert state.values["progress"] == 0.5
+    assert request("/api/command", '{"playing":"yes"}')[0] == 400
+    assert not transport.commands
+
+
+def test_preview_cli_dispatches_confirmed_records_without_collecting(
+    monkeypatch, recorded_job
+):
     from embodichain.cli.expansion import main
     import embodichain.lab.expansion._preview_server as server
     from embodichain.lab.expansion import ExpansionEngine
@@ -314,20 +549,22 @@ def test_preview_cli_dispatch_does_not_collect(monkeypatch, recorded_job):
     )
 
 
-def test_viewer_html_is_in_package_data(tmp_path):
+def test_expansion_frontend_assets_are_in_package_data(tmp_path):
     from setup import get_package_data
     from setuptools import Distribution
     from setuptools.command.build_py import build_py
-    import shutil
 
-    package = "embodichain.lab.expansion"
-    source = tmp_path / "source"
-    source.mkdir()
-    original = (
-        Path(__file__).resolve().parents[3] / "embodichain/lab/expansion/_preview.html"
+    package = "embodichain.lab.expansion._frontend"
+    source = Path(__file__).resolve().parents[3] / "embodichain/lab/expansion/_frontend"
+    assets = (
+        "distribution.html",
+        "preview.html",
+        "preview.css",
+        "preview-text.js",
+        "preview-controls.js",
+        "preview-charts.js",
+        "preview-heatmap.js",
     )
-    shutil.copyfile(original, source / "_preview.html")
-    (source / "__init__.py").write_text("")
     distribution = Distribution(
         {
             "packages": [package],
@@ -341,8 +578,9 @@ def test_viewer_html_is_in_package_data(tmp_path):
     command.build_lib = str(tmp_path / "build")
     command.ensure_finalized()
     command.run()
-    packaged = Path(command.build_lib) / "embodichain/lab/expansion/_preview.html"
-    assert packaged.read_bytes() == original.read_bytes()
+    packaged = Path(command.build_lib) / "embodichain/lab/expansion/_frontend"
+    for name in assets:
+        assert (packaged / name).read_bytes() == (source / name).read_bytes()
 
 
 def test_manifest_keeps_rejected_points_visible_in_coverage(recorded_job):
@@ -456,3 +694,12 @@ def test_aggregate_input_keeps_explicit_reference_separate(recorded_job, second_
     assert len(data.clips) == 1 + second_count
     assert data.reference.space.endswith("reference")
     assert all(not clip.space.endswith("reference") for clip in data.clips)
+    # Without a separate original, the first input stays solid across group changes.
+    fallback = PreviewState(replace(data, reference=None))
+    fallback.apply({"space": data.clips[-1].space, "ghosts": True})
+    snapshot = fallback.snapshot()
+    assert snapshot["episode"] == "first-0"
+    assert snapshot["total"] == second_count
+    assert {data.clips[i].measured.name for i in snapshot["visible_ghosts"]} == {
+        f"second-{index}" for index in range(second_count)
+    }

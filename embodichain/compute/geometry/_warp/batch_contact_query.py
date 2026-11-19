@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import warp as wp
 
+from .contact_query import _pair_slot
+
 __all__: list[str] = []
 
 
@@ -36,6 +38,7 @@ def contact_summary(
     margin1: wp.array(dtype=float),
     shape_body: wp.array(dtype=wp.int32),
     poses: wp.array(dtype=wp.transform),
+    pair_keys: wp.array(dtype=wp.int64),
     active: wp.array(dtype=wp.int32),
     width: int,
     batches: int,
@@ -74,7 +77,10 @@ def contact_summary(
         else:
             row = a // width
             x, y = a % width, b % width
-            if active[x * width + y] != 0:
+            slot = _pair_slot(pair_keys, width, x, y)
+            if slot < 0:
+                wp.atomic_min(output, row, 2, 0.0)
+            elif active[slot] != 0:
                 p0 = wp.transform_point(poses[shape_body[a]], point0[index])
                 p1 = wp.transform_point(poses[shape_body[b]], point1[index])
                 distance = (
@@ -85,6 +91,4 @@ def contact_summary(
                 else:
                     wp.atomic_min(output, row, 0, distance)
                     if distance <= required + tolerance[row]:
-                        wp.atomic_min(
-                            output, row, 1, float(wp.min(x, y) * width + wp.max(x, y))
-                        )
+                        wp.atomic_min(output, row, 1, float(slot))

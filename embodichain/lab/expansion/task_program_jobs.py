@@ -68,18 +68,17 @@ def _task_expansion_extensions(*, options, operator, seed, report):
         nonlocal pose_source
         from ._scene_first_sampling import _LayoutPoseSource
 
-        source_type = (
-            _LayoutPoseSource
-            if "layout" in options.get("scene_sampling", {})
-            else _AdaptivePoseSource
-        )
-        pose_source = (
-            source_type(env, options, seed=seed, revision=report["semantic_id"])
-            if "scene_sampling" in options
-            else _BoundedPoseSource(
-                env, options["scene"], seed=seed, revision=report["semantic_id"]
+        revision = report["semantic_id"]
+        if "layout" in options.get("scene_sampling", {}):
+            pose_source = _LayoutPoseSource(env, options, seed=seed, revision=revision)
+        elif "scene_sampling" in options:
+            pose_source = _AdaptivePoseSource(
+                env, options, seed=seed, revision=revision
             )
-        )
+        else:
+            pose_source = _BoundedPoseSource(
+                env, options["scene"], seed=seed, revision=revision
+            )
         return pose_source
 
     def feedback(env, source, path):

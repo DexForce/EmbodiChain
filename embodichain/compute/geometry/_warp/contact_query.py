@@ -23,6 +23,16 @@ import warp as wp
 __all__ = []
 
 
+@wp.func
+def _pair_slot(keys: wp.array(dtype=wp.int64), width: int, a: int, b: int):
+    key = wp.int64(wp.min(a, b)) * wp.int64(width) + wp.int64(wp.max(a, b))
+    slot = wp.lower_bound(keys, key)
+    if slot < keys.shape[0]:
+        if keys[slot] == key:
+            return slot
+    return int(-1)
+
+
 @wp.kernel(enable_backward=False)
 def _contact_summary(
     count: wp.array(dtype=wp.int32),
@@ -35,6 +45,7 @@ def _contact_summary(
     margin1: wp.array(dtype=float),
     shape_body: wp.array(dtype=wp.int32),
     poses: wp.array(dtype=wp.transform),
+    pair_keys: wp.array(dtype=wp.int64),
     active: wp.array(dtype=wp.int32),
     shapes: int,
     required: float,
@@ -65,7 +76,11 @@ def _contact_summary(
         a, b = first[index], second[index]
         if a < 0 or b < 0 or a >= shapes or b >= shapes:
             wp.atomic_min(output, 3, 0.0)
-        elif active[a * shapes + b] != 0:
+            return
+        slot = _pair_slot(pair_keys, shapes, a, b)
+        if slot < 0:
+            wp.atomic_min(output, 3, 0.0)
+        elif active[slot] != 0:
             p0 = wp.vec3(point0[index][0], point0[index][1], point0[index][2])
             p1 = wp.vec3(point1[index][0], point1[index][1], point1[index][2])
             owner0, owner1 = shape_body[a], shape_body[b]
@@ -79,6 +94,4 @@ def _contact_summary(
             else:
                 wp.atomic_min(output, 0, distance)
                 if distance <= required + tolerance[0]:
-                    wp.atomic_min(
-                        output, 1, float(wp.min(a, b) * shapes + wp.max(a, b))
-                    )
+                    wp.atomic_min(output, 1, float(slot))
