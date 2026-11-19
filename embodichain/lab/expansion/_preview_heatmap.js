@@ -18,7 +18,7 @@
   const element = name => document.getElementById('heatmap-' + name);
   const canvas = element('plot');
   const ctx = canvas.getContext('2d');
-  const objectSelect = element('object'), phaseSelect = element('phase');
+  const objectSelect = element('object');
   const number = new Intl.NumberFormat('zh-CN', {maximumFractionDigits: 4});
   const meters = (a, b) => `${number.format(a)} ～ ${number.format(b)} m`;
   const peak = counts => Math.max(...counts.map(row => Math.max(...row)));
@@ -96,20 +96,20 @@
     }
     const {row, col} = cell;
     const x = object.x_edges_m, y = object.y_edges_m;
-    output.textContent = `覆盖 ${view.counts[row][col]} / ${data.episodes} 条轨迹 · X ${meters(x[col], x[col + 1])} · Y ${meters(y[row], y[row + 1])}`;
+    output.textContent = `起点 ${view.counts[row][col]} / ${object.episodes} 条轨迹 · X ${meters(x[col], x[col + 1])} · Y ${meters(y[row], y[row + 1])}`;
   }
 
-  function selectView() {
+  function selectObject() {
     object = data.objects[objectSelect.selectedIndex];
-    view = object.views[phaseSelect.value];
+    view = object.views.start;
     cell = null;
+    element('description').textContent = `${object.episodes} 条 object_pose 扩增轨迹记录了 ${object.uid} 的起点。每条轨迹按首帧实测 XY 坐标计入一个网格。`;
     const [low, high] = view.bounds_m;
     element('x').textContent = meters(low[0], high[0]);
     element('y').textContent = meters(low[1], high[1]);
     element('step').textContent = number.format(object.x_edges_m[1] - object.x_edges_m[0]) + ' m';
-    element('peak').textContent = `${peak(view.counts)} / ${data.episodes} 条`;
-    // Use the same colors and axes for all three views of an object.
-    const max = peak(object.views.all.counts);
+    const max = peak(view.counts);
+    element('peak').textContent = `${max} / ${object.episodes} 条`;
     colors = colorScale(max);
     element('scale-max').textContent = max;
     element('scale').replaceChildren(...colors.map(color => {
@@ -117,7 +117,7 @@
       swatch.style.backgroundColor = color;
       return swatch;
     }));
-    canvas.setAttribute('aria-label', `${object.uid} · ${phaseSelect.selectedOptions[0].text} · X ${meters(low[0], high[0])} · Y ${meters(low[1], high[1])} · 单格最多 ${peak(view.counts)} 条轨迹`);
+    canvas.setAttribute('aria-label', `${object.uid} 扩增起点 · X ${meters(low[0], high[0])} · Y ${meters(low[1], high[1])} · 单格最多 ${max} 条轨迹`);
     reportCell();
     draw();
   }
@@ -134,8 +134,7 @@
     draw();
   }
 
-  objectSelect.addEventListener('change', selectView);
-  phaseSelect.addEventListener('change', selectView);
+  objectSelect.addEventListener('change', selectObject);
   canvas.addEventListener('pointermove', inspect);
   canvas.addEventListener('pointerdown', inspect);
   canvas.addEventListener('pointerleave', event => {
@@ -153,16 +152,14 @@
       if (!response.ok) throw Error('heatmaps');
       data = await response.json();
       if (!data.objects.length) {
-        description.textContent = `已加载 ${data.episodes} 条轨迹，其中没有刚体物体的位置记录。`;
+        description.textContent = '当前输入中没有记录 object_pose 扩增物体的起点。';
         return;
       }
-      const cohort = data.explicit_reference ? `（原始 1 条，扩增 ${data.episodes - 1} 条）` : '';
-      description.textContent = `场景 XY 俯视 · 全部 ${data.episodes} 条轨迹${cohort}。每格统计在此记录过物体原点的轨迹条数，每条轨迹只计一次。`;
       for (const item of data.objects) objectSelect.add(new Option(item.uid, item.uid));
       element('panel').hidden = false;
-      selectView();
+      selectObject();
     } catch {
-      description.textContent = '物体位置分布加载失败，请刷新页面重试。';
+      description.textContent = '扩增起点加载失败，请刷新页面重试。';
     }
   }
   load();

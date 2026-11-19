@@ -115,8 +115,10 @@ remain explicit. `_preview_deviations.py` reuses recorded world FK and gripper
 calibration for TCP errors. At each reference time it reports the minimum, mean
 and maximum across recordings still in range for TCP translation distance,
 TCP rotation angle and each episode's worst joint deviation. `_preview_heatmap.py`
-counts distinct recordings per rigid object's measured XY cell, including the solid
-reference, for the full recording and its first and last frame. The HTTP service
+bins the measured first-frame XY of each rigid target in an `object_pose` input
+episode's `joint_scene.pose_changes`. The recipe's selected motion operator takes
+precedence over the job-level operator. The explicit reference belongs to replay.
+The HTTP service
 publishes both chart datasets independently of the live image/state snapshots. FK and episode
 budgets bound preload, controls are queued for the render owner, and native
 resources/ports close on exit. See the example's `ghost-preview.md` for usage.

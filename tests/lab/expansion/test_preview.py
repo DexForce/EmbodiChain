@@ -301,53 +301,103 @@ def test_curves_use_calibrated_tcp_and_per_episode_joint_maxima(recorded_job):
     assert no_tcp["range"] == {"qpos_deg": report["range"]["qpos_deg"]}
 
 
-def test_heatmaps_count_each_recording_once_per_object_cell_and_phase(recorded_job):
+def test_heatmap_bins_each_object_pose_target_once_at_its_measured_start(recorded_job):
     path, _, _ = recorded_job
     data = load_preview([path])
     sample = data.solid_clip
     anchor = sample.measured.object_poses["box"]
 
-    def clip(positions):
+    def clip(start, targets):
         poses = anchor.copy()
-        poses[:, :2] = positions
+        poses[0, :2] = start
+        poses[1:, :2] = [50, -60]
         measured = replace(
-            sample.measured, object_poses={"box": poses, "anchor": anchor}
+            sample.measured,
+            object_poses={"box": poses, "goal": anchor, "table": anchor},
         )
-        return replace(sample, measured=measured)
+        return replace(sample, measured=measured, object_pose_uids=targets)
 
-    a, b, c, detour = (-0.25, 0.5), (0.125, -0.375), (0.75, 0.25), (0.375, 0.875)
-    data.reference = clip([b, detour, a])
-    data.clips = [clip([a, a, c]), clip([a, b, b])]
-    data.object_specs = {"anchor": {"body_type": "static"}}
+    a, b = (-0.25, 0.5), (0.125, -0.375)
+    data.reference = clip((20, 30), ("box", "goal"))
+    data.clips = [
+        clip(a, ("box", "goal")),
+        clip(a, ("box",)),
+        clip(b, ("box",)),
+        clip((6, 7), ()),
+    ]
     report = object_heatmaps(data)
-    assert report["episodes"] == 3 and report["explicit_reference"]
-    box, still = report["objects"]
-    assert [box["uid"], still["uid"]] == ["box", "anchor"]
+    assert report["episodes"] == 3
+    box, goal = report["objects"]
+    assert [box["uid"], goal["uid"]] == ["box", "goal"]
+    assert set(box["views"]) == {"start"}
+    view = box["views"]["start"]
+    np.testing.assert_allclose(view["bounds_m"], [[a[0], b[1]], [b[0], a[1]]])
+    assert box["x_edges_m"][-1] < 1 and box["y_edges_m"][0] > -1
+    expected = np.zeros_like(view["counts"])
+    for (x, y), count in [(a, 2), (b, 1)]:
+        row = np.searchsorted(box["y_edges_m"], y, side="right") - 1
+        col = np.searchsorted(box["x_edges_m"], x, side="right") - 1
+        expected[row, col] = count
+    np.testing.assert_array_equal(view["counts"], expected)
+    assert box["episodes"] == 3
+    assert goal["episodes"] == np.sum(goal["views"]["start"]["counts"]) == 1
 
-    for phase, hits in {
-        "all": {a: 3, b: 2, c: 1, detour: 1},
-        "start": {a: 2, b: 1},
-        "end": {a: 1, b: 1, c: 1},
-    }.items():
-        view = box["views"][phase]
-        expected = np.zeros_like(view["counts"])
-        for (x, y), count in hits.items():
-            row = np.searchsorted(box["y_edges_m"], y, side="right") - 1
-            col = np.searchsorted(box["x_edges_m"], x, side="right") - 1
-            expected[row, col] = count
-        np.testing.assert_array_equal(view["counts"], expected)
-        points = np.array(list(hits))
-        np.testing.assert_allclose(
-            view["bounds_m"], [points.min(axis=0), points.max(axis=0)]
+    # A genuine input augmentation still contributes when it doubles as the solid replay.
+    implicit = object_heatmaps(replace(data, reference=None))
+    assert implicit["objects"] == report["objects"] and implicit["episodes"] == 3
+
+
+def test_heatmap_reads_selected_operator_and_rigid_targets_from_saved_recipe(
+    recorded_job,
+):
+    path, job, episode = recorded_job
+    job["operator"] = "object_pose"
+    (path / "job.json").write_text(json.dumps(job))
+    sink = ArtifactEpisodeSink(path)
+    for ordinal, selected in enumerate(("object_pose", "affordance", None), start=1):
+        motion = {"options": {"operators": ["object_pose", "affordance"]}}
+        if selected:
+            motion["operator"] = selected
+        operations = [
+            {"name": "motion", "payload_json": json.dumps(motion)},
+            {
+                "name": "joint_scene",
+                "payload_json": json.dumps(
+                    {
+                        "pose_changes": {
+                            "box": np.eye(4).tolist(),
+                            "robot": np.eye(4).tolist(),
+                        }
+                    }
+                ),
+            },
+        ]
+        sink.submit(
+            replace(
+                episode,
+                episode_id=f"episode{ordinal}",
+                commit_id=f"commit{ordinal}",
+                metadata={
+                    **episode.metadata,
+                    "recipe_spec": {"operations": operations},
+                },
+            ),
+            submission_id=ordinal,
         )
-        # The fixed body's single cell includes all three recordings.
-        fixed_counts = np.array(still["views"][phase]["counts"])
-        assert fixed_counts.max() == 3 and fixed_counts.sum() == 3
 
-    implicit = object_heatmaps(
-        replace(data, clips=[data.reference, *data.clips], reference=None)
-    )
-    assert implicit == {**report, "explicit_reference": False}
+    data = load_preview([path])
+    targets = {c.measured.name: c.object_pose_uids for c in data.clips}
+    assert targets == {
+        "episode": (),
+        "episode1": ("box",),
+        "episode2": (),
+        "episode3": ("box",),
+    }
+    report = object_heatmaps(data)
+    assert report["episodes"] == 2
+    box = report["objects"][0]
+    assert box["views"]["start"]["bounds_m"] == [[10, 20], [10, 20]]
+    assert np.sum(box["views"]["start"]["counts"]) == 2
 
 
 def test_result_loader_keeps_real_mesh_spec_and_native_operator_labels(
@@ -450,12 +500,7 @@ def test_http_snapshot_control_and_shutdown(recorded_job):
     thread.start()
     try:
         heatmaps = json.load(urllib.request.urlopen(transport.url + "object-heatmaps"))
-        assert heatmaps["episodes"] == 1
-        assert heatmaps["objects"][0]["views"]["all"]["bounds_m"] == [
-            [10, 20],
-            [10, 20],
-        ]
-        assert np.sum(heatmaps["objects"][0]["views"]["all"]["counts"]) == 1
+        assert heatmaps["episodes"] == 0 and heatmaps["objects"] == []
         snapshot = json.load(urllib.request.urlopen(transport.url + "snapshot"))
         assert snapshot["frame"] == 7 and snapshot["source_frame"] == 2
         assert base64.b64decode(snapshot["image"].split(",")[1]) == b"jpeg-frame-7"

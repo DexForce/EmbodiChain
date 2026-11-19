@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Measured object-position coverage for the expansion replay."""
+"""Measured starting positions of object_pose layout targets in the expansion replay."""
 
 from __future__ import annotations
 
@@ -41,11 +41,18 @@ def _grid_edges(bounds: np.ndarray) -> np.ndarray:
 
 
 def object_heatmaps(data: PreviewData) -> dict[str, Any]:
-    """Count the distinct recordings with a measured object origin in each XY cell."""
-    clips = data.all_clips
+    """Bin one measured start per targeted rigid object and object_pose input episode."""
+    starts: dict[str, list[np.ndarray]] = {}
+    episodes = 0
+    for clip in data.clips:
+        if clip.object_pose_uids:
+            episodes += 1
+        for uid in clip.object_pose_uids:
+            starts.setdefault(uid, []).append(clip.measured.object_poses[uid][0, :2])
+
     specs = data.object_specs or {}
     uids = sorted(
-        data.solid_clip.measured.object_poses,
+        starts,
         key=lambda uid: (
             specs.get(uid, {}).get("body_type") in {"static", "kinematic"},
             uid,
@@ -53,43 +60,27 @@ def object_heatmaps(data: PreviewData) -> dict[str, Any]:
     )
     objects = []
     for uid in uids:
-        paths = [clip.measured.object_poses[uid][:, :2] for clip in clips]
-        bounds = {
-            "all": np.array(
-                [
-                    np.min([p.min(axis=0) for p in paths], axis=0),
-                    np.max([p.max(axis=0) for p in paths], axis=0),
-                ],
-                dtype=float,
-            )
-        }
-        for phase, index in (("start", 0), ("end", -1)):
-            xy = np.stack([p[index] for p in paths])
-            bounds[phase] = np.stack([xy.min(axis=0), xy.max(axis=0)])
-
-        x_edges, y_edges = _grid_edges(bounds["all"])
-        counts = {phase: np.zeros((_BINS, _BINS), dtype=np.int32) for phase in bounds}
-        for xy in paths:
-            column = x_edges.searchsorted(xy[:, 0], side="right") - 1
-            row = y_edges.searchsorted(xy[:, 1], side="right") - 1
-            cells = np.ravel_multi_index((row, column), (_BINS, _BINS))
-            visited = np.bincount(cells, minlength=_BINS**2) > 0
-            counts["all"] += visited.reshape(_BINS, _BINS)
-            counts["start"].flat[cells[0]] += 1
-            counts["end"].flat[cells[-1]] += 1
+        xy = np.asarray(starts[uid], dtype=float)
+        bounds = np.stack([xy.min(axis=0), xy.max(axis=0)])
+        x_edges, y_edges = _grid_edges(bounds)
+        # Canvas rows are Y and columns are X.
+        counts, _, _ = np.histogram2d(xy[:, 1], xy[:, 0], bins=(y_edges, x_edges))
         objects.append(
             {
                 "uid": uid,
+                "episodes": len(xy),
                 "x_edges_m": x_edges.tolist(),
                 "y_edges_m": y_edges.tolist(),
                 "views": {
-                    phase: {"counts": grid.tolist(), "bounds_m": bounds[phase].tolist()}
-                    for phase, grid in counts.items()
+                    "start": {
+                        "counts": counts.astype(int).tolist(),
+                        "bounds_m": bounds.tolist(),
+                    }
                 },
             }
         )
     return {
-        "episodes": len(clips),
+        "episodes": episodes,
         "explicit_reference": data.reference is not None,
         "objects": objects,
     }

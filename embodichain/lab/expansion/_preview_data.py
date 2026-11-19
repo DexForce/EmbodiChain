@@ -54,6 +54,25 @@ class PreviewClip:
     links: np.ndarray | None = None
     tips: np.ndarray | None = None
     tcp_frame: tuple[str, np.ndarray] | None = None
+    object_pose_uids: tuple[str, ...] = ()
+
+
+def _object_pose_uids(
+    metadata: Any, job_operator: str | None, measured: MeasuredTrajectory
+) -> tuple[str, ...]:
+    """Read the selected operator and its rigid layout targets from the saved recipe."""
+    operator = job_operator
+    changes = {}
+    for operation in metadata.get("recipe_spec", {}).get("operations", ()):
+        if operation["name"] == "joint_scene":
+            changes = json.loads(operation["payload_json"]).get("pose_changes", {})
+        elif operation["name"] == "motion":
+            operator = json.loads(operation["payload_json"]).get(
+                "operator", job_operator
+            )
+    if operator != "object_pose":
+        return ()
+    return tuple(uid for uid in changes if uid in measured.object_poses)
 
 
 def annotations(metadata: Any, measured: MeasuredTrajectory) -> dict[str, Any]:
@@ -445,6 +464,9 @@ def load_preview(
                 measured=measured,
                 space=f"S{group+1} · {path.name}",
                 tcp_frame=tcp_frame,
+                object_pose_uids=_object_pose_uids(
+                    episode.metadata, job.get("operator"), measured
+                ),
                 **annotations(episode.metadata, measured),
             )
             if is_reference:

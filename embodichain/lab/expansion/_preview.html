@@ -7,7 +7,7 @@
 .controls-help{font-size:12px;color:#a8bacb}.controls-help kbd{font:inherit;border:1px solid #465363;border-radius:4px;padding:1px 4px}
 @media(max-width:850px){.chart-grid{grid-template-columns:1fr}.chart-grid section:has(.curve:only-of-type) canvas{height:150px}}
 .heatmap{grid-column:1/-1;min-width:0}.heatmap h2{font-size:18px;margin:0 0 6px}.heatmap-panel{margin-top:14px;display:grid;grid-template-columns:minmax(0,470px) minmax(200px,340px);gap:clamp(20px,6vw,90px);justify-content:center;align-items:center}.heatmap-panel[hidden]{display:none}
-.heatmap canvas{display:block;width:100%;aspect-ratio:1;cursor:crosshair}.heatmap-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.heatmap-controls label{display:grid;gap:6px}.heatmap-controls select{width:100%}
+.heatmap canvas{display:block;width:100%;aspect-ratio:1;cursor:crosshair}.heatmap-controls{display:grid;gap:6px}.heatmap-controls select{width:100%}
 .heatmap dl{margin:18px 0;border-block:1px solid #384451}.heatmap dl div{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:6px 0}.heatmap dt,.heatmap-legend{color:#a7b6c4}.heatmap dd{margin:0;font-variant-numeric:tabular-nums}
 .heatmap-scale{display:flex;height:12px;overflow:hidden;border-radius:3px;border:1px solid #465363;margin:7px 0 3px}.heatmap-scale i{flex:1}.heatmap-ticks{display:flex;justify-content:space-between;font-size:12px}.heatmap-readout{display:block;min-height:3.3em;margin-top:18px;color:#c9d4df;font-size:13px;line-height:1.6;font-variant-numeric:tabular-nums}
 @media(max-width:650px){.heatmap-panel{display:flex;flex-direction:column;align-items:stretch;gap:12px}.heatmap-controls{margin-top:2px}.heatmap canvas{align-self:center;max-width:450px}.heatmap-readout{min-height:3.2em}}
@@ -35,22 +35,19 @@
   </div>
 </section>
 <section class="heatmap" aria-labelledby="heatmap-title">
-  <h2 id="heatmap-title">物体位置分布热力图</h2>
-  <p id="heatmap-description">正在读取物体位置…</p>
+  <h2 id="heatmap-title">object_pose 物体起点分布</h2>
+  <p id="heatmap-description">正在读取扩增起点…</p>
   <div class="heatmap-panel panel" id="heatmap-panel" hidden>
-    <canvas id="heatmap-plot" role="img" aria-label="物体位置的 XY 俯视热力图"></canvas>
+    <canvas id="heatmap-plot" role="img" aria-label="物体扩增起点的 XY 俯视热力图"></canvas>
     <div>
-      <div class="heatmap-controls">
-        <label>物体<select id="heatmap-object"></select></label>
-        <label>取样时段<select id="heatmap-phase"><option value="all">全程</option><option value="start">起点</option><option value="end">终点</option></select></label>
-      </div>
+      <label class="heatmap-controls">扩增物体<select id="heatmap-object"></select></label>
       <dl>
         <div><dt>实测 X 范围</dt><dd id="heatmap-x"></dd></div>
         <div><dt>实测 Y 范围</dt><dd id="heatmap-y"></dd></div>
         <div><dt>网格边长</dt><dd id="heatmap-step"></dd></div>
-        <div><dt>单格最高覆盖</dt><dd id="heatmap-peak"></dd></div>
+        <div><dt>单格最多轨迹</dt><dd id="heatmap-peak"></dd></div>
       </dl>
-      <div class="heatmap-legend">每格覆盖的轨迹数
+      <div class="heatmap-legend">起点落入该格的轨迹数
         <div class="heatmap-scale" id="heatmap-scale" aria-hidden="true"></div>
         <div class="heatmap-ticks"><span>0</span><span id="heatmap-scale-max"></span></div>
       </div>
