@@ -755,7 +755,7 @@ if __name__ == "__main__":
     )
     robot = sim.add_robot(cfg=cfg)
     sim.prepare()
-    sim.open_window()
+    sim.open_viewer()
 
     # Round-trip check: from_dict(to_dict()) reproduces the cfg.
     cfg2 = DualArmRobotCfg.from_dict(cfg.to_dict())

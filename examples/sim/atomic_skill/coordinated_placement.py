@@ -604,7 +604,7 @@ def run_coordinated_placement_demo(
         robot.set_qpos(state.last_qpos, joint_ids=full_joint_ids)
     else:
         if wait_for_user:
-            input("Press Enter to execute both pick-up trajectories...")
+            sim.wait_for_input("Press Enter to execute both pick-up trajectories...")
 
         def log_trajectory_execution(step_idx: int, total_steps: int) -> None:
             if args.debug_state and (
@@ -782,7 +782,7 @@ def run_coordinated_placement_demo(
             num_envs=num_envs,
         )
     if wait_for_user:
-        input("Press Enter to execute coordinated placement...")
+        sim.wait_for_input("Press Enter to execute coordinated placement...")
 
     replay_trajectory(
         sim,
@@ -836,7 +836,7 @@ def run_coordinated_placement_demo(
         f"mesh_evidence={placement['rows']}"
     )
     if wait_for_user:
-        input("Press Enter to exit the simulation...")
+        sim.wait_for_input("Press Enter to exit the simulation...")
 
 
 def main() -> None:

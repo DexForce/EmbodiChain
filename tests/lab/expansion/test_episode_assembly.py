@@ -44,6 +44,7 @@ def test_source_rejection_preserves_successful_peer(tmp_path, failed_row):
     assert episodes[failed_row] is None
     peer = episodes[1 - failed_row]
     assert peer is not None and peer.validation.accepted
+    assert peer.metadata["source_env_id"] == 1 - failed_row
     assert len(peer.actions) == 1 and len(peer.timestamps) == 2
     record = json.loads((tmp_path / str(failed_row) / "attempt.json").read_text())
     assert (

@@ -260,6 +260,10 @@ batched behavior in `test_neural_planner.py` and `test_neural_batched.py` under
 
 ### cuRobo backend and import isolation
 
+Collision-model inspection uses the owning manager's `wait_for_input()` callback
+so temporary native actors remain visible in Web presentation while paused.
+The low-level YAML visualization helper accepts the callback explicitly.
+
 `curobo_planner.py::_require_curobo()` lazily imports the optional backend and
 restores the caller's Torch matmul precision and CUDA/cuDNN TF32 flags on success
 or failure. Backend import side effects must not change numerical policy for

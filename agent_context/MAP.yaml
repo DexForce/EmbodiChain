@@ -184,8 +184,8 @@ topics:
   status: active
 - id: sim-visualization
   title: Simulation Visualization
-  aliases: [browser visualization, viser, sim visualization, marker visualization, USD scene preview, 场景预览, 标志物可视化, 仿真可视化]
-  keywords: [preview-scene, preview_scene, VisualizationCfg, ViserServerCfg, SceneManifest, visualization, EntityGizmoManipulator, robot_ik_gizmo,
+  aliases: [browser visualization, viser, sim visualization, WebRTC, --web, 网页渲染, marker visualization, USD scene preview, 场景预览, 标志物可视化, 仿真可视化]
+  keywords: [preview-scene, preview_scene, VisualizationCfg, ViserServerCfg, DexSimWebCfg, dexsim-web, SimulationManagerCfg.web, open_viewer, poll_viewer, wait_for_input, SceneManifest, visualization, EntityGizmoManipulator, robot_ik_gizmo,
     GizmoCfg, MarkerGroup, MarkerPrototypeCfg, RobotMarkers, VisualizationMarkers, robot markers, ghost robot, 机器人可视化, backpressure, capture_visualization, Newton deformable, particle set,
     render topology, quaternion, xyzw, cable visualization, cable capsule]
   paths: [topics/sim-visualization/sim-visualization.md]
@@ -208,7 +208,7 @@ topics:
 - id: expansion-engine
   title: Expansion Engine
   aliases: [Expansion Engine, offline expansion, 扩增引擎, 批量专家采集]
-  keywords: [ExpansionEngine, ExpansionRunCfg, ExpansionJobCfg, ExpansionSession, ExpansionSessionCfg, ExpansionCoverage, EpisodeCoverage, GymExpansionHost, ArtifactEpisodeSink, MediaSpool, render_observation_variants]
+  keywords: [ExpansionEngine, ExpansionRunCfg, ExpansionJobCfg, ExpansionSession, ExpansionSessionCfg, ExpansionCoverage, EpisodeCoverage, GymExpansionHost, ArtifactEpisodeSink, MediaSpool, render_observation_variants, WorkloadProgramExecutor, WorkloadExecutionCfg, workload_count, GymExpansionHostExtensions, MeasuredExpansionValidator, MeasuredTrajectory, preview_expansion_comparison, 扩增虚影]
   paths: [topics/expansion-engine/expansion-engine.md]
   source_of_truth:
   - embodichain/lab/expansion/
@@ -305,6 +305,7 @@ topics:
     SimulationSceneExpansionHost, SimulationSceneInitialState, episode_prepare]
   paths: [topics/scene-expansion/scene-expansion.md]
   source_of_truth:
+  - embodichain/lab/_scene_config/
   - embodichain/lab/sim/scene/feasibility/
   - embodichain/lab/sim/scene/expansion/
   - embodichain/lab/task_program/integrations/feasibility.py

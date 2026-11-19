@@ -212,6 +212,7 @@ def _sample_hierarchy(
     support_gap: float,
     movable_roots: tuple[int, ...] | None = None,
     root_offset_bounds: dict[int, torch.Tensor] | None = None,
+    anchored_roots: tuple[int, ...] = (),
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """One proposal per ordinal, with no per-member retry loops."""
     local = [matrix.expand(count, 4, 4).clone() for matrix in relative]
@@ -299,7 +300,7 @@ def _sample_hierarchy(
         world.append(
             local[node] if parent < 0 else _matrix_product(world[parent], local[node])
         )
-    root_boxes, deltas = [], []
+    root_boxes, deltas = [], {}
     fixed_boxes = {}
     if randomize_groups and movable_roots is not None:
         for root in root_keys:
@@ -327,7 +328,15 @@ def _sample_hierarchy(
                 )
             fixed_boxes[root] = box
             root_boxes.append(box)
-    for root, key in root_keys.items():
+    # Place exact anchors before variable groups, so their space is already
+    # reserved when choosing the free region of an unanchored sibling.
+    roots = (
+        sorted(root_keys, key=lambda root: root not in anchored_roots)
+        if anchored_roots
+        else root_keys
+    )
+    for root in roots:
+        key = root_keys[root]
         points = (
             _rotate_points(
                 _subtree_points(root, local, corners, parents), world[root][:, :3, :3]
@@ -336,8 +345,8 @@ def _sample_hierarchy(
         )
         box = torch.stack((points[:, :, :2].amin(1), points[:, :, :2].amax(1)), dim=1)
         if root in fixed_boxes:
-            deltas.append(
-                torch.zeros((count, 2), dtype=relative.dtype, device=relative.device)
+            deltas[root] = torch.zeros(
+                (count, 2), dtype=relative.dtype, device=relative.device
             )
             continue
         if randomize_groups:
@@ -392,9 +401,9 @@ def _sample_hierarchy(
                 >= group_margin - 1e-10
             )
         root_boxes.append(box)
-        deltas.append(delta)
+        deltas[root] = delta
     return (
-        torch.stack(deltas, dim=1),
+        torch.stack([deltas[root] for root in root_keys], dim=1),
         (
             torch.stack([sampled[node] for node in sorted(targets)], dim=1)
             if targets

@@ -216,7 +216,7 @@ def main() -> None:
     )
     measured.finish(sim, target)
     if wait:
-        input("Press Enter to finish...")
+        sim.wait_for_input("Press Enter to finish...")
     serve_tutorial_scene(sim, args)
 
 

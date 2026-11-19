@@ -83,7 +83,8 @@ def preview_scene(
     Producer-specific identity and joint-state metadata are opaque. The native
     import owner resolves authored units, physical types and initial state.
     Default preview publishes that state without advancing physics. Browser
-    controls and native Space/N/Home/Escape commands run on the simulation thread.
+    controls belong to Viser; native Space/N/Home/Escape commands run on the
+    simulation thread. Web displays the scene without browser editing controls.
 
     Args:
         usd_file: USD, USDA, USDC or relocatable USDZ entry file.
@@ -167,13 +168,16 @@ def preview_scene(
         if cfg.render_cfg.renderer == "auto":
             cfg.render_cfg.renderer = "hybrid"
         is_viser = cfg.visualization.backend == "viser"
-        interactive = is_viser or not cfg.headless
+        is_web = getattr(cfg, "web", False) or cfg.visualization.backend == "dexsim-web"
+        interactive = is_viser or is_web or not cfg.headless
         if not interactive and simulate and steps is None:
             raise ValueError("Headless simulation requires a finite steps limit.")
         initial_digest = source_digest(source)
         result["source_sha256"] = initial_digest
         result["frontend"] = (
-            "viser" if is_viser else "window" if interactive else "headless"
+            "viser"
+            if is_viser
+            else "web" if is_web else "window" if interactive else "headless"
         )
         result["simulate"] = simulate
         result["enable_ground_plane"] = False
@@ -216,13 +220,21 @@ def preview_scene(
                 if runtime is not None:
                     runtime.publish_preview_camera(eye=tuple(eye), target=tuple(target))
                 if interactive and not is_viser:
-                    if not sim.open_window():
+                    if not sim.open_viewer():
                         raise RuntimeError(
-                            "Could not open the native scene-preview window."
+                            "Could not open the selected scene-preview viewport."
                         )
-                    sim.get_world().get_windows().set_look_at(eye, target, [0, 0, 1])
-                    handler = install_native_controls(sim, controls)
-                    print("Space: play/pause; N: step; Home: reload source; Esc: stop.")
+                    sim.viewer.set_look_at(eye, target, [0, 0, 1])
+                    if is_web:
+                        result["endpoint"] = sim.viewer.endpoint
+                        print(
+                            f"Scene preview: {sim.viewer.endpoint}; close with Ctrl-C."
+                        )
+                    else:
+                        handler = install_native_controls(sim, controls)
+                        print(
+                            "Space: play/pause; N: step; Home: reload source; Esc: stop."
+                        )
 
                 def before_frame(owner: SimulationManager) -> bool:
                     changed = bool(on_frame(owner)) if on_frame is not None else False
@@ -313,7 +325,7 @@ def main(
     parser.add_argument(
         "--steps",
         type=int,
-        help="Finite physics steps; requires --simulate and is mandatory for headless simulation.",
+        help="Finite physics steps; requires --simulate and is mandatory without a window or browser viewport.",
     )
     parser.add_argument(
         "--report",

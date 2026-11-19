@@ -564,6 +564,12 @@ class ExpansionSession:
             for attempt in self._attempts.values()
         )
 
+    def _write_reserved(self) -> int:
+        return sum(
+            attempt.state in {"pending_write", "committed"}
+            for attempt in self._attempts.values()
+        )
+
     def take_ready(
         self,
         case_id: str,
@@ -571,6 +577,7 @@ class ExpansionSession:
         *,
         episode_byte_budget: int | None = None,
         candidate_id: str | None = None,
+        speculative: bool = False,
     ) -> CandidateTrajectoryBatch | EpisodeCandidate | None:
         """Reserve a row, rollout attempt, and pending payload capacity before execution.
 
@@ -586,12 +593,17 @@ class ExpansionSession:
             episode_byte_budget: Maximum episode payload bytes to reserve for this row.
             candidate_id: Optional exact ready candidate to reserve. Omission
                 preserves deterministic FIFO selection within the case.
+            speculative: Permit competing rollouts for unfilled quota. Payload,
+                attempt and write reservations still bound execution; only one
+                passed episode can reserve each remaining persistence slot.
 
         Returns:
             One assigned candidate row, or ``None`` when no matching row or capacity
             is available or the session has stopped.
         """
         self._cases[(case_id, initial_state_id)]
+        if type(speculative) is not bool:
+            raise TypeError("speculative must be a bool")
         if candidate_id is not None and (
             type(candidate_id) is not str or not candidate_id.strip()
         ):
@@ -608,7 +620,8 @@ class ExpansionSession:
         )
         if (
             self.stop_reason
-            or self._reserved() >= self._cfg.collection.target_committed_episodes
+            or (self._write_reserved() if speculative else self._reserved())
+            >= self._cfg.collection.target_committed_episodes
             or self._counts["rollout_attempted"] + assigned
             >= self._cfg.collection.max_rollout_attempts
             or pending_count >= self._cfg.persistence.pending_episode_limit
@@ -761,6 +774,9 @@ class ExpansionSession:
         if self._episode_bytes(episode) > attempt.episode_byte_budget:
             self.release(episode.identity, reason="episode_byte_budget_exceeded")
             raise BufferError("Payload exceeds its reserved episode byte budget.")
+        if self._write_reserved() >= self._cfg.collection.target_committed_episodes:
+            self.release(episode.identity, reason="quota_reserved_by_peer")
+            return False
         owned = replace(episode)
         if not self._reserve_coverage(owned):
             self.release(episode.identity, reason="coverage_rejected")

@@ -65,6 +65,10 @@ position search reuses its pool; approach search draws one pool per direction.
 Each successful row freezes independently. Per-row resets or filtering before
 ranking/NMS change populations. Freeze grasp, direction and position before
 comparing planners and review population fingerprints after selection changes.
+`utils.nms.pose_nms_scope` supplies a nested, task-local pairwise tile budget;
+explicit call arguments override it. It preserves threshold arithmetic and
+selection order without changing an imported backend function. Copied planning
+contexts inherit the budget while independent threads keep their own default.
 Explicit goal-conditioned endpoint searches also change the population and
 retain rejected goals; they establish neither paths nor physical success.
 
@@ -89,3 +93,13 @@ separate from path, dynamic and task validation.
 
 Use `tests/sim/motion/expansion/` for algorithm/contracts coverage and host tests
 for stepping, acceptance and persistence. Examples are not production test APIs.
+
+## Explicit boundary draws
+
+Spatial profiles optionally carry `joint_samples` (named controlled-joint signed
+fractions) and `knot_samples` (via-point magnitudes), each finite in [-1,1].
+The combined Task Program adapter forwards them to the ordinary operators;
+absence retains local-RNG sampling. Explicit draws never bypass phase permissions,
+endpoint protection, deduplication, joint limits or measured acceptance. One named
+joint draw is reused across permitted phases. The Expansion Engine preview owns
+parameter-domain sampling and coverage accounting, not the motion operators.

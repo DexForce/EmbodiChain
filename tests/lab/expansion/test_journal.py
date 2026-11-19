@@ -91,6 +91,21 @@ def test_interrupted_recipe_retries_with_new_attempt_after_capacity_change(tmp_p
     next_run.checkpoint(force=True, state="closed")
 
 
+def test_rolling_allocation_preserves_live_peers_and_ordinal_identity(tmp_path):
+    ledger = ExpansionJournal(tmp_path)
+    ledger.open_run(
+        {"job_id": "a", "semantic_id": "a", "execution_id": "r"}, {}, resume=False
+    )
+    first = ledger.allocate_recipe(recipe(0))
+    ledger.update(first, status="running")
+    second = ledger.allocate_recipe(recipe(1))
+    assert [r["status"] for r in ledger.attempts()] == ["running", "proposed"]
+    assert (second.sequence, second.recipe.context.ordinal) == (1, 1)
+    with pytest.raises(ValueError, match="ordinals"):
+        ledger.allocate_recipe(recipe(1))
+    ledger.checkpoint(force=True, state="finished")
+
+
 def test_changed_semantics_cannot_reuse_job(tmp_path):
     ledger = ExpansionJournal(tmp_path)
     ledger.open_run(

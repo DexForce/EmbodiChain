@@ -37,6 +37,83 @@ if TYPE_CHECKING:
 __all__ = ["RobotWorkspaceProposalSource"]
 
 
+def _workspace_fk_samples(
+    robot: Robot,
+    budget: FeasibilityBudget,
+    *,
+    control_part: str,
+    source: str,
+    sample_count: int,
+    seed: int,
+) -> np.ndarray:
+    """Return owned current-arena FK poses from a bounded workspace population."""
+    generator = torch.Generator(device=robot.device).manual_seed(seed)
+    budget.check()
+    if source == "cache":
+        workspace = robot.get_workspace(control_part)
+        settings = robot.cfg.workspace_cfg[control_part]
+        indices = workspace.sample_indices(
+            sample_count,
+            strategy=settings.strategy,
+            min_score=settings.min_score,
+            generator=generator,
+        )
+        if (
+            indices.shape != (sample_count,)
+            or indices.dtype != torch.int64
+            or bool(((indices < 0) | (indices >= workspace.num_samples)).any())
+        ):
+            raise ValueError("workspace sampler returned invalid cache indices")
+        qpos = workspace.qpos[indices].to(device=robot.device)
+    else:
+        limits = robot.get_qpos_limits(name=control_part)[0]
+        if (
+            not bool(torch.isfinite(limits).all())
+            or bool((limits[:, 1] < limits[:, 0]).any())
+            or bool((limits.abs() > 1e6).any())
+        ):
+            raise UnsupportedFeasibilityError(
+                "Joint-uniform workspace preparation requires explicit finite joint bounds"
+            )
+        qpos = limits[:, 0] + torch.rand(
+            (sample_count, len(limits)), device=robot.device, generator=generator
+        ) * (limits[:, 1] - limits[:, 0])
+    if (
+        qpos.ndim != 2
+        or len(qpos) != sample_count
+        or not bool(torch.isfinite(qpos).all())
+    ):
+        raise ValueError(
+            "workspace proposals require finite selected joint configurations"
+        )
+    poses = np.empty((sample_count, 4, 4), dtype=np.float64)
+    for start in range(0, sample_count, budget.cfg.batch_size):
+        budget.check()
+        stop = min(start + budget.cfg.batch_size, sample_count)
+        batch = robot.compute_batch_fk(
+            qpos=qpos[None, start:stop],
+            name=control_part,
+            env_ids=[0],
+            to_matrix=True,
+        )
+        if batch.shape != (1, stop - start, 4, 4):
+            raise ValueError("workspace FK proposals must match the requested batch")
+        poses[start:stop] = batch[0].detach().cpu().numpy()
+    if not np.isfinite(poses).all():
+        raise ValueError("workspace FK proposals must be finite rigid matrices")
+    rotations = poses[:, :3, :3]
+    if (
+        not np.allclose(poses[:, 3, :], [0.0, 0.0, 0.0, 1.0], atol=1e-5, rtol=0)
+        or not np.allclose(
+            rotations.transpose(0, 2, 1) @ rotations, np.eye(3), atol=1e-5, rtol=0
+        )
+        or not np.allclose(np.linalg.det(rotations), 1.0, atol=1e-5, rtol=0)
+    ):
+        raise ValueError("workspace FK proposals must be proper rigid transforms")
+    budget.check()
+    return poses
+
+
 class RobotWorkspaceProposalSource:
     """Copy current-model FK samples into an independent numerical proposal prior.
 
@@ -112,76 +189,16 @@ class RobotWorkspaceProposalSource:
                 np.linalg.inv(np.array(target.pose)),
                 np.linalg.inv(np.array(variable.members[target.frame_uid])),
             )
-        generator = torch.Generator(device=robot.device).manual_seed(budget.cfg.seed)
-        budget.check()
-        if control_part in (robot.cfg.workspace_cfg or {}):
-            workspace = robot.get_workspace(control_part)
-            settings = robot.cfg.workspace_cfg[control_part]
-            indices = workspace.sample_indices(
-                sample_count,
-                strategy=settings.strategy,
-                min_score=settings.min_score,
-                generator=generator,
-            )
-            if (
-                indices.shape != (sample_count,)
-                or indices.dtype != torch.int64
-                or bool(((indices < 0) | (indices >= workspace.num_samples)).any())
-            ):
-                raise ValueError("workspace sampler returned invalid cache indices")
-            qpos = workspace.qpos[indices].to(device=robot.device)
-            origin = "configured_qpos_cache"
-        else:
-            limits = robot.get_qpos_limits(name=control_part)[0]
-            if (
-                not bool(torch.isfinite(limits).all())
-                or bool((limits[:, 1] < limits[:, 0]).any())
-                or bool((limits.abs() > 1e6).any())
-            ):
-                raise UnsupportedFeasibilityError(
-                    "Joint-uniform workspace preparation requires explicit finite joint bounds"
-                )
-            qpos = limits[:, 0] + torch.rand(
-                (sample_count, len(limits)), device=robot.device, generator=generator
-            ) * (limits[:, 1] - limits[:, 0])
-            origin = "joint_uniform_fk"
-        if (
-            qpos.ndim != 2
-            or len(qpos) != sample_count
-            or not bool(torch.isfinite(qpos).all())
-        ):
-            raise ValueError(
-                "workspace proposals require finite selected joint configurations"
-            )
-        batches = []
-        for start in range(0, sample_count, budget.cfg.batch_size):
-            budget.check()
-            batch = (
-                robot.compute_batch_fk(
-                    qpos=qpos[None, start : start + budget.cfg.batch_size],
-                    name=control_part,
-                    env_ids=[0],
-                    to_matrix=True,
-                )[0]
-                .detach()
-                .cpu()
-                .double()
-                .numpy()
-                .copy()
-            )
-            batches.append(batch)
-        poses = np.concatenate(batches)
-        if poses.ndim != 3 or poses.shape[1:] != (4, 4) or not np.isfinite(poses).all():
-            raise ValueError("workspace FK proposals must be finite rigid matrices")
-        rotations = poses[:, :3, :3]
-        if (
-            not np.allclose(poses[:, 3, :], [0.0, 0.0, 0.0, 1.0], atol=1e-5, rtol=0)
-            or not np.allclose(
-                rotations.transpose(0, 2, 1) @ rotations, np.eye(3), atol=1e-5, rtol=0
-            )
-            or not np.allclose(np.linalg.det(rotations), 1.0, atol=1e-5, rtol=0)
-        ):
-            raise ValueError("workspace FK proposals must be proper rigid transforms")
+        has_cache = control_part in (robot.cfg.workspace_cfg or {})
+        poses = _workspace_fk_samples(
+            robot,
+            budget,
+            control_part=control_part,
+            source="cache" if has_cache else "joint_uniform_fk",
+            sample_count=sample_count,
+            seed=budget.cfg.seed,
+        )
+        origin = "configured_qpos_cache" if has_cache else "joint_uniform_fk"
         self._local = np.linalg.inv(self._root)[None] @ poses
         self._uniform_fraction = uniform_fraction
         self._rng = np.random.default_rng(budget.cfg.seed)

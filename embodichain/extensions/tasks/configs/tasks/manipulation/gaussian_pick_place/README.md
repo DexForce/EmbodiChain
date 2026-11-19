@@ -17,7 +17,7 @@ embodichain show-task gaussian_pick_place
 embodichain list-task --category manipulation
 embodichain run-task \
   --gym-config embodichain/extensions/tasks/configs/tasks/manipulation/gaussian_pick_place/task.office.yaml \
-  --headless --seed 42 --max_episodes 2 --record_trajectory \
+  --headless --seed 42 --num_envs 4 --max_episodes 4 --record_trajectory \
   --trajectory_save_dir outputs/gaussian_pick_place/office
 ```
 
@@ -35,6 +35,15 @@ existing third-person intrinsics/extrinsics through
 timed tracking and verified effects. Program targets and acceptance remain
 scene-specific; the common integration binds only the cube and support.
 
+Backgrounds use the registered packages' `asset.usda` visual subtrees. A qualified
+DexSim build clones their native Gaussian companions across arenas, sharing one
+immutable resource with independent instance poses and visibility. Source placement
+is preserved, including Office's authored X-axis rotation of 90 degrees; do not
+repeat that rotation in the environment. `num_envs` defaults to one and can be
+increased with the launcher override. Multi-arena USD rendering requires a build
+with `SpawnedRigidBody.get_gaussian_resource_ids()` and native companion cloning;
+older SDKs receive a capability error before scene declaration.
+
 The source Gaussian packages are visual-only and supply no scanned collision
 geometry. Task acceptance requires lift >=4 cm, final position error <=2 cm,
 tilt <=15 degrees, measured release and stable placement. These deployments
@@ -48,3 +57,5 @@ loads these authoritative definitions, writes portable configuration snapshots,
 and records complete paired RGB, native trajectories and capture metadata.
 Media spooling, video export and offline/negative acceptance remain example
 workflows. Their task IDs, camera UIDs and native trajectory layout are retained.
+The example's `verify_parallel` command checks all rows of a batched execution,
+both cameras at every control boundary, and cross-arena background isolation.

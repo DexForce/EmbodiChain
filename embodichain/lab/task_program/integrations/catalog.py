@@ -236,8 +236,12 @@ def _canonical_value(value: object) -> object:
             and not value.supports_segment_motion_recovery
         ):
             metadata.pop("supports_segment_motion_recovery")
-        if type(value) is MotionPolicy and value.final_velocity_rejection == "hold":
-            metadata.pop("final_velocity_rejection")
+        if type(value) is MotionPolicy:
+            if value.final_velocity_rejection == "hold":
+                metadata.pop("final_velocity_rejection")
+            # An inactive phase-path extension preserves existing registration seals.
+            if not value.phase_paths:
+                metadata.pop("phase_paths")
         if type(value) is RecoveryPolicy and value.retry_all_failed_plans is True:
             metadata.pop("retry_all_failed_plans")
         if isinstance(value, PickUpOptions) and value.initial_lift_height == 0.0:
@@ -248,6 +252,8 @@ def _canonical_value(value: object) -> object:
             metadata.pop("grasp_retract_distance")
         if isinstance(value, PlaceOptions) and value.cartesian_approach is False:
             metadata.pop("cartesian_approach")
+        if isinstance(value, PlaceOptions) and value.release_settle_duration == 0.0:
+            metadata.pop("release_settle_duration")
         if isinstance(value, SlideOptions) and value.push_approach_offset is None:
             metadata.pop("push_approach_offset")
         return {"type": _qualified_name(value), "fields": metadata}

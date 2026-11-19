@@ -278,12 +278,12 @@ def main(args: argparse.Namespace | None = None) -> None:
         register_press_trajectory(sim, trajectory)
 
         sim.prepare()
-        if not args.headless:
-            sim.open_window()
+        if not args.headless or getattr(args, "web", False):
+            sim.open_viewer()
 
         sim.update(step=SETTLE_STEPS)
-        if not args.headless:
-            input("Press Enter to press the soft body...")
+        if not args.headless or getattr(args, "web", False):
+            sim.wait_for_input("Press Enter to press the soft body...")
         sim.update(step=trajectory.shape[1] - 1)
 
         logger.log_info("\nPress Ctrl+C to exit the simulation loop.")

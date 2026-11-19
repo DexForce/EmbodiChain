@@ -279,8 +279,8 @@ def main(args: argparse.Namespace | None = None) -> None:
 
     logger.log_info("Scene exported successfully.")
 
-    if not args.headless:
-        sim.open_window()
+    if not args.headless or getattr(args, "web", False):
+        sim.open_viewer()
         logger.log_info("Press Ctrl+C to exit.")
         try:
             while True:

@@ -1,0 +1,555 @@
+schema_version: 1
+engine:
+  episodes_per_operator: 4
+  max_attempts: 64
+  max_steps: 3200
+  max_wall_time_s: 600.0
+  settling_steps: 30
+  capture_media: false
+  collision_backend: newton
+  collision_device: cpu
+scene:
+  block_1:
+    translation_m:
+    - - -0.025
+      - 0.025
+    - - -0.03
+      - 0.03
+    - - 0
+      - 0
+    yaw_rad:
+    - 0
+    - 0
+  block_3:
+    translation_m:
+    - - -0.025
+      - 0.025
+    - - -0.03
+      - 0.03
+    - - 0
+      - 0
+    yaw_rad:
+    - 0
+    - 0
+trajectory:
+  operators:
+  - object_pose
+  joint_offset_scale: 0.005
+  via_count: 1
+  max_proposals: 64
+  minimum_joint_delta: 0.002
+  velocity_limit: 0.5
+  acceleration_limit: 0.5
+  nullspace_task_rows:
+  - 0
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  nullspace_translation_tolerance_m: 0.001
+  nullspace_rotation_tolerance_rad: 0.01
+  free_phases:
+    place:
+    - retract
+validation:
+  initial_checks:
+  - kind: support_bounds
+    entity: block_1
+    lower:
+    - 0.2
+    - -0.5
+    - 0.82
+    upper:
+    - 1.2
+    - 0.5
+    - 0.95
+  - kind: support_bounds
+    entity: block_2
+    lower:
+    - 0.2
+    - -0.5
+    - 0.82
+    upper:
+    - 1.2
+    - 0.5
+    - 0.95
+  - kind: support_bounds
+    entity: block_3
+    lower:
+    - 0.2
+    - -0.5
+    - 0.82
+    upper:
+    - 1.2
+    - 0.5
+    - 0.95
+  final_checks: &id001
+  - kind: axis_relation
+    entity: block_1
+    other: block_2
+    axis: 0
+    lower: -0.115
+    upper: -0.045
+  - kind: axis_relation
+    entity: block_1
+    other: block_2
+    axis: 1
+    lower: -0.03
+    upper: 0.03
+  - kind: axis_relation
+    entity: block_1
+    other: block_2
+    axis: 2
+    lower: -0.012
+    upper: 0.012
+  - kind: speed_below
+    entity: block_1
+    linear_m_s: 0.03
+    angular_rad_s: 0.2
+  - kind: axis_relation
+    entity: block_3
+    other: block_2
+    axis: 0
+    lower: 0.045
+    upper: 0.115
+  - kind: axis_relation
+    entity: block_3
+    other: block_2
+    axis: 1
+    lower: -0.03
+    upper: 0.03
+  - kind: axis_relation
+    entity: block_3
+    other: block_2
+    axis: 2
+    lower: -0.012
+    upper: 0.012
+  - kind: speed_below
+    entity: block_3
+    linear_m_s: 0.03
+    angular_rad_s: 0.2
+  - kind: joint_range
+    joint: left_gripper_finger1_joint_1
+    lower: -0.001
+    upper: 0.005
+  - kind: joint_range
+    joint: right_gripper_finger1_joint_1
+    lower: -0.001
+    upper: 0.005
+  - kind: pose_near
+    entity: block_2
+    position:
+    - 0.675
+    - 0.0
+    - 0.86
+    tolerance_m: 0.005
+  - kind: speed_below
+    entity: block_2
+    linear_m_s: 0.03
+    angular_rad_s: 0.2
+  events:
+  - event_id: block_1_lifted
+    conditions:
+    - kind: lifted
+      entity: block_1
+      height_m: 0.05
+  - event_id: block_3_lifted
+    conditions:
+    - kind: lifted
+      entity: block_3
+      height_m: 0.05
+  - event_id: both_sorted_released_stable
+    conditions: *id001
+    consecutive_steps: 3
+  allowed_contacts: &id002
+  - - block_1
+    - support_surface
+  - - block_1
+    - default_plane
+  - - block_2
+    - support_surface
+  - - block_2
+    - default_plane
+  - - block_3
+    - support_surface
+  - - block_3
+    - default_plane
+  - - block_1
+    - DualUR5/right_gripper_finger1_link_1
+  - - block_1
+    - DualUR5/right_gripper_finger2_link_1
+  - - block_3
+    - DualUR5/left_gripper_finger1_link_1
+  - - block_3
+    - DualUR5/left_gripper_finger2_link_1
+  mounting_contacts:
+  - - '@root'
+    - default_plane
+  - - '@root'
+    - support_surface
+scene_sampling:
+  strategy: scene_first
+  workspace_source: joint_uniform_fk
+  control_part: right_arm
+  sample_count: 16384
+  robot_anchors:
+  - phase_id: block_1_grasp
+    control_part: right_arm
+  - phase_id: block_3_grasp
+    control_part: left_arm
+  uniform_fraction: 0.25
+  max_candidates: 256
+  max_rollouts: 4
+  max_ik_calls: 16384
+  max_planning_calls: 2048
+  targets: {}
+  layout:
+    support_uid: support_surface
+    parent_by_uid:
+      block_1: support_surface
+      block_2: support_surface
+      block_3: support_surface
+    policy:
+      group_targets:
+      - block_1
+      - block_3
+      batch_size: 1
+      collision_margin_m: 0.002
+      group_xy_offset_bounds_m:
+        block_1:
+        - - -0.025
+          - -0.03
+        - - 0.025
+          - 0.03
+        block_3:
+        - - -0.025
+          - -0.03
+        - - 0.025
+          - 0.03
+  task_mode:
+    mode_id: sort_with_both_arms
+    phases:
+    - phase_id: block_1_approach
+      dependencies: []
+      targets:
+      - control_part: right_arm
+        frame_uid: block_1
+        pose:
+        - - 1.0
+          - 0.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - -1.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - -1.0
+          - 0.11
+        - - 0.0
+          - 0.0
+          - 0.0
+          - 1.0
+      allowed_contacts: *id002
+    - phase_id: block_1_grasp
+      dependencies:
+      - block_1_approach
+      targets:
+      - control_part: right_arm
+        frame_uid: block_1
+        pose:
+        - - 1.0
+          - 0.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - -1.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - -1.0
+          - -0.01
+        - - 0.0
+          - 0.0
+          - 0.0
+          - 1.0
+      allowed_contacts: *id002
+    - phase_id: block_1_lift
+      dependencies:
+      - block_1_grasp
+      targets:
+      - control_part: right_arm
+        frame_uid: block_1
+        pose:
+        - - 1.0
+          - 0.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - -1.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - -1.0
+          - 0.14
+        - - 0.0
+          - 0.0
+          - 0.0
+          - 1.0
+      allowed_contacts: *id002
+      held_objects:
+      - entity_uid: block_1
+        control_part: right_arm
+        tcp_from_object:
+        - - 1.0
+          - 0.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - -1.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - -1.0
+          - -0.01
+        - - 0.0
+          - 0.0
+          - 0.0
+          - 1.0
+    - phase_id: block_1_place
+      dependencies:
+      - block_1_lift
+      targets:
+      - control_part: right_arm
+        frame_uid: block_2
+        pose:
+        - - 1.0
+          - 0.0
+          - 0.0
+          - -0.08
+        - - 0.0
+          - -1.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - -1.0
+          - 0.07
+        - - 0.0
+          - 0.0
+          - 0.0
+          - 1.0
+      allowed_contacts: *id002
+      held_objects:
+      - entity_uid: block_1
+        control_part: right_arm
+        tcp_from_object:
+        - - 1.0
+          - 0.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - -1.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - -1.0
+          - -0.01
+        - - 0.0
+          - 0.0
+          - 0.0
+          - 1.0
+    - phase_id: block_1_retreat
+      dependencies:
+      - block_1_place
+      targets:
+      - control_part: right_arm
+        frame_uid: block_2
+        pose:
+        - - 1.0
+          - 0.0
+          - 0.0
+          - -0.08
+        - - 0.0
+          - -1.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - -1.0
+          - 0.22
+        - - 0.0
+          - 0.0
+          - 0.0
+          - 1.0
+      allowed_contacts: *id002
+    - phase_id: block_3_approach
+      dependencies:
+      - block_1_retreat
+      targets:
+      - control_part: left_arm
+        frame_uid: block_3
+        pose:
+        - - 1.0
+          - 0.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - -1.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - -1.0
+          - 0.11
+        - - 0.0
+          - 0.0
+          - 0.0
+          - 1.0
+      allowed_contacts: *id002
+    - phase_id: block_3_grasp
+      dependencies:
+      - block_3_approach
+      targets:
+      - control_part: left_arm
+        frame_uid: block_3
+        pose:
+        - - 1.0
+          - 0.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - -1.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - -1.0
+          - -0.01
+        - - 0.0
+          - 0.0
+          - 0.0
+          - 1.0
+      allowed_contacts: *id002
+    - phase_id: block_3_lift
+      dependencies:
+      - block_3_grasp
+      targets:
+      - control_part: left_arm
+        frame_uid: block_3
+        pose:
+        - - 1.0
+          - 0.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - -1.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - -1.0
+          - 0.14
+        - - 0.0
+          - 0.0
+          - 0.0
+          - 1.0
+      allowed_contacts: *id002
+      held_objects:
+      - entity_uid: block_3
+        control_part: left_arm
+        tcp_from_object:
+        - - 1.0
+          - 0.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - -1.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - -1.0
+          - -0.01
+        - - 0.0
+          - 0.0
+          - 0.0
+          - 1.0
+    - phase_id: block_3_place
+      dependencies:
+      - block_3_lift
+      targets:
+      - control_part: left_arm
+        frame_uid: block_2
+        pose:
+        - - 1.0
+          - 0.0
+          - 0.0
+          - 0.08
+        - - 0.0
+          - -1.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - -1.0
+          - 0.07
+        - - 0.0
+          - 0.0
+          - 0.0
+          - 1.0
+      allowed_contacts: *id002
+      held_objects:
+      - entity_uid: block_3
+        control_part: left_arm
+        tcp_from_object:
+        - - 1.0
+          - 0.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - -1.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - -1.0
+          - -0.01
+        - - 0.0
+          - 0.0
+          - 0.0
+          - 1.0
+    - phase_id: block_3_retreat
+      dependencies:
+      - block_3_place
+      targets:
+      - control_part: left_arm
+        frame_uid: block_2
+        pose:
+        - - 1.0
+          - 0.0
+          - 0.0
+          - 0.08
+        - - 0.0
+          - -1.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - -1.0
+          - 0.22
+        - - 0.0
+          - 0.0
+          - 0.0
+          - 1.0
+      allowed_contacts: *id002
+scheduling:
+  policy: fifo
+  pool_size: 8
+  exploration_fraction: 0.25
