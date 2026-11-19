@@ -316,13 +316,14 @@ class _NativePlanExpansion:
             )
         reason = "no distinct candidate"
         best_rejected = None
+        can_scale_residual = self.operator in ("joint_residual", "via_points")
         budget = self.options["max_proposals"]
         for iteration in range(budget + 1):
             residual_scale = 1.0
             if iteration == budget:
                 # Preserve the existing random draws and full-amplitude preference.
                 # Only budget exhaustion activates this bounded deterministic fallback.
-                if self.operator != "joint_residual" or best_rejected is None:
+                if not can_scale_residual or best_rejected is None:
                     break
                 _, attempt, sampled, raw_checks = best_rejected
                 fitted = _fit_joint_residual(
@@ -370,7 +371,7 @@ class _NativePlanExpansion:
                 raw_checks = checks
                 if any(not check.accepted for check in checks):
                     reason = f"edited-phase motion limits: {checks}"
-                    if self.operator == "joint_residual":
+                    if can_scale_residual:
                         score = max(
                             value
                             for report in checks

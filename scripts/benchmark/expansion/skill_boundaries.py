@@ -299,7 +299,9 @@ def _main() -> None:
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--collect", action="store_true")
     parser.add_argument(
-        "--operator", choices=("object_pose", "joint_residual"), default="object_pose"
+        "--operator",
+        choices=("object_pose", "joint_residual", "via_points"),
+        default="object_pose",
     )
     parser.add_argument("--baseline", type=Path)
     parser.add_argument(

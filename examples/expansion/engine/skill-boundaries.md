@@ -263,3 +263,51 @@ qualified episode. The rejected candidate is not labeled as measured execution.
 Analysis supports `--operator joint_residual`; per-run source manifests and raw
 artifacts retain the comparison evidence. Final changes to archive size and
 private ownership were followed by a separate native smoke.
+
+## Via-point rejection recovery
+
+The native `via_points` adapter uses the same bounded fallback after exhausting
+the original full-amplitude proposal budget. It ranks the rejected motion
+candidates by their worst limit ratio, then tries at most eight halvings on
+one candidate. Each candidate must retain the original minimum perturbation
+and pass the original joint, speed and acceleration checks. Shape scalings use
+the same control grid and preserve the two protected samples at each editable
+phase edge. Accepted candidates follow the ordinary FK, reconstruction and
+measured collision and task acceptance. Provenance retains the raw checks and
+final scale for every accepted proposal, with a separate raw path for a refinement.
+
+On the original UR5 open pick-place configuration (Default CPU, B=4, four
+rollouts, 128 scene candidates, 64 motion proposals per eligible call), the
+five-seed baseline scan confirmed 18/20. Seed 27 had one Pick plan failure and
+one Place stop-gate timeout. A fixed-knot regression with one raw proposal
+reproduces motion-limit rejection at 2.898 times the acceleration cap. A
+quarter-scale refinement passes the same cap, preserves release and retract
+edge frames, and retains the original time grid and stationary joint commands.
+The one-proposal fixture exercises the fallback independently of the native
+benchmark's unchanged 64-proposal budget.
+
+| Same-configuration comparison | Confirmed / executed | End-to-end wall time | Pick-to-Place command jump |
+| --- | --- | --- | --- |
+| Seed 7, three serial pairs including reversed order | 12/12 → 12/12 | Median 22.93 → 23.09 s | 0 → 0 rad |
+| Seed 27, one serial pair | 2/4 → 2/4 | 23.13 → 23.31 s | 0 → 0 rad |
+
+Every accepted native via-point draw used scale 1. Both versions retain the two
+seed-27 rejections and all confirmed episodes pass `path_collision`, `lift` and
+`placed_and_released`. Seed 7 wall times were 22.92, 22.93, 23.57 s before and
+22.17, 37.17, 23.09 s after. The 37.17 s run spent 14.78 s between environment
+initialization and the solver limit message, versus 4.53–4.76 s in the other
+first four runs. Keep this run in the results and interpret the timing as a
+shared-host sample. All pairs use CPU affinity 24–31, visible GPU 3, and one
+numerical thread. The run configuration and original 0.5 rad/s, 0.5 rad/s²,
+and 2 mrad bounds agree across versions.
+
+![Recorded via-point handoff before and after the fallback change](assets/via-points-handoff.png)
+
+The figure compares command and measured joint motion around the first Place
+command at seed 7, ordinal 2, on the same initial layout. Both curves retain
+the planned reference takeover. Seed 7's peak command acceleration within the
+handoff window is 0.411 → 0.412 rad/s², below the original 0.5 cap.
+
+Use the existing worker with `--operator via_points --seed 7 --rows 4
+--rollouts 4 --candidates 128 --seconds 240` for this workload. The boundary
+reporter accepts `--operator via_points` for the resulting episode archives.

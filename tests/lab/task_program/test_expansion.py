@@ -1106,3 +1106,79 @@ def test_custom_registered_skill_retains_complete_explicit_phase_permissions() -
         == factory.records[0].trajectory_selected
         == 1
     )
+
+
+def test_native_via_point_refines_after_the_raw_proposal_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.lab.sim.motion.expansion import operators
+    from embodichain.lab.task_program.integrations._native_plan_expansion import (
+        _NativePlanExpansion,
+    )
+
+    def plan_place(action, request, context):
+        positions = torch.zeros((1, 26, 3))
+        positions[:, 4:, 2] = 0.02
+        positions[:, 6:, 0] = torch.linspace(0, 0.19, 20)
+        trajectory = TimedTrajectory.from_uniform_step(
+            positions, env_ids=context.env_ids, step_dt=CONTROL_DT
+        )
+        return action.build_plan(
+            request,
+            context,
+            success=True,
+            trajectory=trajectory,
+            segment_lengths={"approach": 3, "release": 3, "retract": 20},
+        )
+
+    monkeypatch.setattr(_ThreePhasePlaceAction, "_plan", plan_place)
+    engine, invocation, resolved, context, plan = _planned_place()
+    engine.robot.get_qpos_limits.return_value = torch.tensor([[-2.0, 2.0]] * 3)
+    engine.robot.get_qvel_limits.return_value = torch.full((3,), 0.5)
+    monkeypatch.setattr(_NativePlanExpansion, "_kinematics", lambda *_: (None, ()))
+    sample_via_points = operators.via_points
+    raw_proposals = []
+
+    def fixed_knot(template, **kwargs):
+        candidate = sample_via_points(
+            template, joint_samples={"j0": 1.0}, knot_samples=(1.0,), **kwargs
+        )
+        raw_proposals.append(candidate)
+        return candidate
+
+    monkeypatch.setattr(operators, "via_points", fixed_knot)
+    factory = TaskProgramSameGridExpansionFactory.from_native_plan(
+        "via_points",
+        {
+            "free_phases": {"place": ["retract"]},
+            "velocity_limit": 0.5,
+            "acceleration_limit": 0.5,
+            "max_proposals": 1,
+            "minimum_joint_delta": 0.002,
+            "joint_offset_scale": 0.05,
+            "via_count": 1,
+            "nullspace_task_rows": [0],
+        },
+        seed=7,
+        scene_case=SceneCase(
+            "case", "state", "scene", "repeated_cube_pick_place", "robot"
+        ),
+        revision="reference",
+    )
+
+    transform = factory.create_plan_transform(_plan_request(invocation), engine=engine)
+    rebuilt = transform(resolved, context, plan)
+    evidence = rebuilt.diagnostics.metadata["expansion"]
+    assert len(raw_proposals) == evidence["raw_proposal_count"] == 1
+    assert evidence["raw_motion_checks"][0]["acceleration_ratio"] > 1
+    assert evidence["motion"]["candidate"][0]["acceleration_ratio"] <= 1
+    assert evidence["residual_scale"] == 0.25
+    assert evidence["max_joint_delta"] >= 0.002
+    assert rebuilt.diagnostics.metadata["collision_evidence"] == "unverified"
+    assert rebuilt.segments == plan.segments
+    assert torch.equal(rebuilt.joint_trajectory.dt, plan.joint_trajectory.dt)
+    original = plan.joint_trajectory.positions
+    positions = rebuilt.joint_trajectory.positions
+    assert torch.equal(positions[:, :8], original[:, :8])
+    assert torch.equal(positions[:, -2:], original[:, -2:])
+    assert torch.equal(positions[:, :, 1:], original[:, :, 1:])
