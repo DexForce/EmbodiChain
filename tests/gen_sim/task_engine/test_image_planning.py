@@ -1547,7 +1547,7 @@ def test_hybrid_cli_compiles_pick_place_and_rejects_hinge(
                 for r in ("block_2", "block_1_top")
             }
             if kw["role"] == "task_image_grounding"
-            else {"issues": []}
+            else {"issues": [], "source_operations": [op]}
         ),
     )
     out = tmp_path / "hybrid"

@@ -27,54 +27,98 @@ from embodichain.gen_sim.task_spec.publication import decode_task_document
 
 
 @pytest.mark.parametrize(
-    "text,operations,error",
+    "text,proposed,reviewed",
     [
         (
-            "完成一次倾倒动作",
-            [{"template": "E3", "quote": "倾倒动作", "mode": "fluid"}],
-            "pour_mode_mismatch",
+            "Tilt the cup toward the bowl without transferring its contents.",
+            dict(template="E3", reference="bowl", mode="fluid"),
+            dict(template="E3", reference="bowl", mode="motion"),
         ),
         (
-            "把水倒进碗里",
-            [{"template": "E3", "quote": "水倒进碗里", "mode": "motion"}],
-            "pour_mode_mismatch",
+            "Empty the water from the cup into the bowl.",
+            dict(template="E3", reference="bowl", mode="motion"),
+            dict(template="E3", reference="bowl", mode="fluid"),
         ),
         (
-            "朝碗倾倒一次",
-            [{"template": "E3", "quote": "倾倒一次", "mode": "fluid"}],
-            "ambiguous_pour",
+            "Lower the cup into the recess in the holder.",
+            dict(template="E1", reference="holder", relation="on"),
+            dict(template="E1", reference="holder", relation="inside"),
         ),
         (
-            "扶正杯子再移入托盘",
-            [{"template": "E1", "relation": "inside", "quote": "移入托盘"}],
-            "source_omission",
-        ),
-        (
-            "把杯子移入托盘",
-            [{"template": "E1", "relation": "on", "quote": "把杯子移入托盘"}],
-            "source_omission",
-        ),
-        (
-            "把餐碗放在垫上",
-            [{"template": "E5", "relation": "on"}],
-            "unsupported_addition",
+            "Mimic pouring into the bowl, then leave the cup in the gripper.",
+            dict(template="E3", reference="bowl", mode="motion"),
+            dict(
+                template="E3",
+                reference="bowl",
+                mode="motion",
+                terminal_behavior="hold",
+                terminal_quote="leave the cup in the gripper",
+            ),
         ),
     ],
 )
-def test_source_gate_rejects_wrong_meaning_before_freeze(text, operations, error):
-    from embodichain.gen_sim.task_engine.hybrid import _check_source_intent
-
-    with pytest.raises(ValueError, match=error):
-        _check_source_intent(text, operations)
-
-
-def test_negated_transfer_does_not_require_liquid_evidence():
-    from embodichain.gen_sim.task_engine.hybrid import _check_source_intent
-
-    _check_source_intent(
-        "演示倒水姿势，不需要倒出液体",
-        [{"template": "E3", "quote": "倒水姿势", "mode": "motion"}],
+def test_structured_source_audit_rejects_changed_meaning(text, proposed, reviewed):
+    from embodichain.gen_sim.task_engine.hybrid import (
+        _operation_rows,
+        _validate_source_audit,
     )
+
+    operations = _operation_rows([dict(object="cup", quote=text, **proposed)], text)
+    audit = {
+        "issues": [],
+        "source_operations": [dict(object="cup", quote=text, **reviewed)],
+    }
+    with pytest.raises(ValueError, match="source_audit.*operation 1"):
+        _validate_source_audit(text, operations, audit)
+
+
+def test_source_audit_requires_an_independent_operation_for_each_input():
+    from embodichain.gen_sim.task_engine.hybrid import (
+        _operation_rows,
+        _validate_source_audit,
+    )
+
+    instruction = "Put the cup inside the box."
+    operations = _operation_rows(
+        [
+            dict(
+                template="E1",
+                object="cup",
+                reference="box",
+                relation="inside",
+                quote=instruction,
+            )
+        ],
+        instruction,
+    )
+    with pytest.raises(ValueError, match="source_operations"):
+        _validate_source_audit(instruction, operations, {"issues": []})
+
+
+@pytest.mark.parametrize(
+    "fields,error",
+    [
+        ({"mode": "solid"}, "Unsupported or ambiguous pour mode"),
+        ({"terminal_behavior": "hold"}, "Missing verbatim terminal behavior source"),
+        (
+            {"terminal_behavior": "hold", "terminal_quote": "not in the instruction"},
+            "Missing verbatim terminal behavior source",
+        ),
+    ],
+)
+def test_operation_rows_rejects_unsupported_or_unquoted_intent(fields, error):
+    from embodichain.gen_sim.task_engine.hybrid import _operation_rows
+
+    instruction = "Mimic pouring from the cup toward the bowl."
+    operation = dict(
+        template="E3",
+        object="cup",
+        reference="bowl",
+        mode="motion",
+        quote=instruction,
+    )
+    with pytest.raises(ValueError, match=error):
+        _operation_rows([{**operation, **fields}], instruction)
 
 
 def test_failed_source_audit_prevents_publication(tmp_path, monkeypatch):
@@ -116,13 +160,62 @@ def test_failed_source_audit_prevents_publication(tmp_path, monkeypatch):
     assert not (tmp_path / "plan").exists()
 
 
+def test_hybrid_reaudits_a_repair_before_selecting_it(tmp_path, monkeypatch):
+    from PIL import Image
+    from embodichain.gen_sim.services import GenSimServices, GenSimServicesCfg, compat
+    from embodichain.gen_sim.task_engine.hybrid import publish_hybrid
+
+    text = "Empty the water from the cup into the bowl."
+    source = [
+        dict(template="E3", object="cup", reference="bowl", mode="fluid", quote=text)
+    ]
+    audited = []
+    monkeypatch.setattr(
+        compat.VisionFacade,
+        "complete",
+        lambda *a, **kw: json.dumps({"operations": source}),
+    )
+
+    def respond(**kwargs):
+        prompt = json.loads(kwargs["prompt"])
+        if kwargs["role"] == "task_semantic_planning":
+            return {
+                "calls": [
+                    *prompt["previous"],
+                    dict(kind="place", object="cup", on="bowl", resources={}),
+                ]
+            }
+        audited.append([call["kind"] for call in prompt["ordered_calls"]])
+        if "place" in audited[-1]:
+            return {"issues": [dict(quote=text, reason="unsupported placement")]}
+        return {"issues": [], "source_operations": source}
+
+    monkeypatch.setattr(compat, "structured_call", respond)
+    image = tmp_path / "scene.png"
+    Image.new("RGB", (20, 20)).save(image)
+    with GenSimServices(GenSimServicesCfg()) as services:
+        result = publish_hybrid(text, "pour", image, tmp_path / "plan", services)
+    assert result["coverage"]["status"] == "uncovered"
+    assert result["planning_history"][-1]["coverage"]["status"] == "source_rejected"
+    assert len(audited) == 2 and "place" in audited[1]
+    assert all(
+        node["call"]["kind"] != "place"
+        for node in result["semantic_task_graph"]["nodes"]
+    )
+
+
 @pytest.mark.parametrize(
     "family,params,expected",
     [
         ("E2", {"orientation": "upright"}, "covered"),
         (
             "E3",
-            {"reference": "cup", "mode": "motion", "restore_required": True},
+            {
+                "reference": "cup",
+                "mode": "motion",
+                "terminal_behavior": "return_and_release",
+                "terminal_quote": "request",
+            },
             "covered",
         ),
         ("E3", {"reference": "cup", "mode": "fluid"}, "uncovered"),
@@ -350,10 +443,7 @@ def test_handover_requires_preceding_acquisition_and_correct_direction():
 
 
 def test_hybrid_compound_drawer_clause_accepts_bare_array():
-    from embodichain.gen_sim.task_engine.hybrid import (
-        _check_source_intent,
-        _operation_rows,
-    )
+    from embodichain.gen_sim.task_engine.hybrid import _operation_rows
 
     ops = [
         dict(
@@ -364,9 +454,10 @@ def test_hybrid_compound_drawer_clause_accepts_bare_array():
             relation="inside",
         )
     ]
-    _check_source_intent("把魔方放进抽屉后把抽屉关好。", _operation_rows(ops))
+    text = "把魔方放进抽屉后把抽屉关好。"
+    assert _operation_rows(ops, text)[0]["reference"] == "drawer"
     with pytest.raises(ValueError, match=r"operations\[0\]"):
-        _operation_rows({"operations": [ops]})
+        _operation_rows({"operations": [ops]}, text)
 
 
 def test_hybrid_held_vessel_pours_without_reacquisition():
@@ -383,14 +474,15 @@ def test_hybrid_held_vessel_pours_without_reacquisition():
             object="bottle",
             primary="left",
             quote="扶正瓶子",
-            continue_held=True,
+            orientation="upright",
         ),
         dict(
             template="E3",
             object="bottle",
             reference="cup",
             mode="motion",
-            restore_required=True,
+            terminal_behavior="return_and_release",
+            terminal_quote="再放回原位",
             quote="演示倾倒动作，再放回原位",
         ),
     ]
@@ -411,6 +503,159 @@ def test_hybrid_held_vessel_pours_without_reacquisition():
     ops[-1]["primary"] = "right"
     with pytest.raises(ValueError, match="occupied"):
         _supported_program(ops, text)
+
+
+@pytest.mark.parametrize(
+    "family,terminal,clause,terminal_quote,expected_calls",
+    [
+        (
+            "E3",
+            "hold",
+            "Tilt the cup toward the bowl without emptying it, then keep the cup in your grip.",
+            "keep the cup in your grip",
+            ("pick", "simulation.move_held_object", "simulation.pour"),
+        ),
+        (
+            "E3",
+            "return_and_release",
+            "Tilt the cup toward the bowl without emptying it, then put the cup back where it began.",
+            "put the cup back where it began",
+            (
+                "pick",
+                "simulation.move_held_object",
+                "simulation.pour",
+                "simulation.move_held_object",
+                "place",
+            ),
+        ),
+        (
+            "E3",
+            "none",
+            "Tilt the cup toward the bowl without emptying it, then bring it upright again.",
+            None,
+            ("pick", "simulation.move_held_object", "simulation.pour"),
+        ),
+        (
+            "E2",
+            "hold",
+            "Stand the cup upright and keep holding it.",
+            "keep holding it",
+            ("simulation.axis_align",),
+        ),
+        (
+            "E2",
+            "return_and_release",
+            "Stand the cup upright and put it back where it began.",
+            "put it back where it began",
+            ("simulation.axis_align", "simulation.move_held_object", "place"),
+        ),
+        (
+            "E4",
+            "hold",
+            "Hand the cup from the right to the left arm and keep it in the left gripper.",
+            "keep it in the left gripper",
+            ("pick", "hand_over"),
+        ),
+        (
+            "E4",
+            "none",
+            "Hand the cup from the right to the left arm.",
+            None,
+            ("pick", "hand_over"),
+        ),
+    ],
+    ids=[
+        "pour-hold",
+        "pour-return",
+        "pour-upright-only",
+        "align-hold",
+        "align-return",
+        "handover-hold",
+        "handover-unspecified",
+    ],
+)
+def test_hybrid_terminal_follows_instruction(
+    tmp_path, monkeypatch, family, terminal, clause, terminal_quote, expected_calls
+):
+    from PIL import Image
+    from embodichain.gen_sim.services import GenSimServices, GenSimServicesCfg, compat
+    from embodichain.gen_sim.task_engine.hybrid import publish_hybrid, verify_witness
+    from embodichain.gen_sim.task_spec import TaskSpec
+    from embodichain.gen_sim.workflow import load_task_plan
+
+    fields = {
+        "E2": {"orientation": "upright", "primary": "right"},
+        "E3": {"reference": "bowl", "mode": "motion", "primary": "right"},
+        "E4": {"source": "right", "destination": "left"},
+    }[family]
+    operation = dict(template=family, object="cup", quote=clause, **fields)
+    operation["terminal_behavior"] = terminal
+    if terminal_quote is not None:
+        operation["terminal_quote"] = terminal_quote
+    monkeypatch.setattr(
+        compat.VisionFacade,
+        "complete",
+        lambda *a, **kw: json.dumps({"operations": [operation]}),
+    )
+
+    def review(**kwargs):
+        assert kwargs["role"] == "task_interpretation"
+        return {"issues": [], "source_operations": [operation]}
+
+    monkeypatch.setattr(compat, "structured_call", review)
+    image = tmp_path / "scene.png"
+    Image.new("RGB", (20, 20)).save(image)
+    output = tmp_path / "plan"
+    with GenSimServices(GenSimServicesCfg()) as services:
+        result = publish_hybrid(clause, "terminal", image, output, services)
+
+    calls = [node["call"] for node in result["semantic_task_graph"]["nodes"]]
+    assert tuple(call.get("call_id", call["kind"]) for call in calls) == expected_calls
+    assert result["coverage"]["status"] == "covered"
+    document = load_task_plan(output)
+    assert document["stage"] == "authoring_only"
+    objectives = document["task_document"]["objectives"]
+    holds = [goal for goal in objectives["goal"] if goal["predicate"] == "held"]
+    if terminal == "hold":
+        assert len(holds) == 1
+        assert holds[0]["subject"] == "cup"
+        assert holds[0]["arguments"]["required_arm"] == (
+            "left" if family == "E4" else "right"
+        )
+    else:
+        assert not holds
+    if terminal == "return_and_release":
+        assert calls[-2]["arguments"]["target"] == "original_support_cup"
+        assert calls[-1]["on"] == "original_support_cup"
+        assert any(
+            p.get("arguments", {}).get("operation") == "return_and_release"
+            for m in objectives["milestones"]
+            for p in m["achieve"]
+        )
+    elif family == "E3" and terminal == "hold":
+        mutated = deepcopy(result["semantic_task_graph"])
+        last = mutated["nodes"][-1]
+        mutated["nodes"].append(
+            {
+                **last,
+                "id": "extra_place",
+                "depends_on": [last["id"]],
+                "call": dict(
+                    kind="place",
+                    object="cup",
+                    on="bowl",
+                    resources={"primary": "right"},
+                ),
+            }
+        )
+        mutated["task_groups"][0]["node_ids"].append("extra_place")
+        verdict = verify_witness(
+            TaskSpec.from_dict(result["task_spec"]),
+            mutated,
+            support_targets={},
+            bindings=result["pending_operation_bindings"],
+        )
+        assert "final_cup_held" in verdict["uncovered"]
 
 
 @pytest.mark.parametrize(
@@ -452,7 +697,7 @@ def test_nonaffirmative_pour_reaches_publication_and_review(
 
     def respond(**kw):
         if kw["role"] == "task_interpretation":
-            return {"issues": []}
+            return {"issues": [], "source_operations": ops}
         return {
             r: dict(description=r, bbox=[10, 10, 200, 200])
             for r in kw["schema"]["required"]
@@ -550,7 +795,7 @@ def test_hybrid_two_mats_project_each_occurrence(tmp_path, monkeypatch, family):
         compat,
         "structured_call",
         lambda **kw: (
-            {"issues": []}
+            {"issues": [], "source_operations": ops}
             if kw["role"] == "task_interpretation"
             else {
                 r: dict(description=r, bbox=[10, 10, 200, 200])
@@ -569,3 +814,162 @@ def test_hybrid_two_mats_project_each_occurrence(tmp_path, monkeypatch, family):
         annotations["call_4" if family == "E1" else "call_2"]["reference"]
         == "second_mat"
     )
+
+
+@pytest.mark.parametrize(
+    "tray,description,box",
+    [
+        ("labeled_tray", "blue tray with a white label", [50, 400, 400, 800]),
+        ("plain_tray", "blue tray without a label", [600, 400, 950, 800]),
+        ("tray", None, [50, 400, 400, 800]),
+    ],
+)
+def test_hybrid_scene_context_selects_and_preserves_destination(
+    tmp_path, monkeypatch, tray, description, box
+):
+    from PIL import Image
+    from embodichain.gen_sim.services import GenSimServices, GenSimServicesCfg, compat
+    from embodichain.gen_sim.task_engine.cli import main
+    from embodichain.gen_sim.workflow import load_task_plan
+
+    instruction = "Put the cup inside the tray."
+    image = tmp_path / "scene.png"
+    Image.new("RGB", (20, 20)).save(image)
+    output = tmp_path / "plan"
+    argv = [
+        "--image",
+        str(image),
+        "--instruction",
+        instruction,
+        "--output",
+        str(output),
+    ]
+    context = None
+    if description:
+        context = {
+            "schema_version": "embodichain.task-scene-context/v1",
+            "description": "There are two blue trays in the scene.",
+            "objects": [dict(id=tray, description=description, asset_kind="rigid")],
+        }
+        source = tmp_path / "context.json"
+        source.write_text(json.dumps(context), encoding="utf-8")
+        argv.extend(["--scene-context", str(source)])
+
+    def interpret(self, **kwargs):
+        prompt = json.loads(kwargs["user_prompt"])
+        assert prompt["instruction"] == instruction
+        assert prompt.get("scene_context") == context
+        target = prompt["scene_context"]["objects"][0]["id"] if context else "tray"
+        return json.dumps(
+            dict(
+                operations=[
+                    dict(
+                        template="E1",
+                        object="cup",
+                        reference=target,
+                        relation="inside",
+                        quote=instruction,
+                    )
+                ]
+            )
+        )
+
+    def respond(**kwargs):
+        prompt = json.loads(kwargs["prompt"])
+        assert prompt["instruction"] == instruction
+        if kwargs["role"] == "task_interpretation":
+            assert prompt.get("scene_context") == context
+            return {
+                "issues": [],
+                "source_operations": [
+                    dict(
+                        template="E1",
+                        object="cup",
+                        reference=tray,
+                        relation="inside",
+                        quote=instruction,
+                    )
+                ],
+            }
+        assert prompt.get("scene_context") == context
+        return {
+            role: dict(description=f"observed {role}", bbox=coords)
+            for role, coords in {"cup": [450, 100, 550, 250], tray: box}.items()
+        }
+
+    monkeypatch.setattr(compat.VisionFacade, "complete", interpret)
+    monkeypatch.setattr(compat, "structured_call", respond)
+    with GenSimServices(GenSimServicesCfg()) as services:
+        main(argv, services=services)
+
+    graph = json.loads((output / "semantic_task_graph.json").read_text())
+    assert [node["call"] for node in graph["nodes"]] == [
+        dict(kind="pick", object="cup", resources={}),
+        dict(kind="place", object="cup", inside=tray, resources={}),
+    ]
+    assert graph["nodes"][1]["depends_on"] == [graph["nodes"][0]["id"]]
+    grounding = json.loads((output / "image_grounding.json").read_text())
+    assert grounding["bindings"][tray] == [tray]
+    assert {item["id"]: item["bbox"] for item in grounding["objects"]}[tray] == [
+        coord / 1000 for coord in box
+    ]
+    plan = load_task_plan(output)
+    assert plan["task_document"]["configuration"]["descriptions"][tray] == (
+        description or tray
+    )
+    snapshot = output / "scene_context.json"
+    if context is None:
+        assert not snapshot.exists()
+    else:
+        assert snapshot.name in plan["artifacts"]
+        assert json.loads(snapshot.read_text()) == context
+
+
+@pytest.mark.parametrize(
+    "object_id,asset_kind,error",
+    [
+        ("drawer", "rigid", "drawer.*rigid.*articulation"),
+        ("top_drawer", "articulated", "top_drawer.*task role"),
+        ("drawer", "container", "asset_kind"),
+    ],
+)
+def test_hybrid_scene_context_rejects_conflicting_input(
+    tmp_path, monkeypatch, object_id, asset_kind, error
+):
+    from PIL import Image
+    from embodichain.gen_sim.services import GenSimServices, GenSimServicesCfg, compat
+    from embodichain.gen_sim.task_engine.hybrid import publish_hybrid
+
+    instruction = "Open the drawer."
+    image = tmp_path / "scene.png"
+    Image.new("RGB", (20, 20)).save(image)
+    source = tmp_path / "context.json"
+    source.write_text(
+        json.dumps(
+            {
+                "schema_version": "embodichain.task-scene-context/v1",
+                "objects": [
+                    dict(id=object_id, description="top drawer", asset_kind=asset_kind)
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def interpret(self, **kwargs):
+        assert asset_kind != "container", "Invalid context must fail before model calls"
+        return json.dumps(
+            [dict(template="E6", object="drawer", state="open", quote=instruction)]
+        )
+
+    monkeypatch.setattr(compat.VisionFacade, "complete", interpret)
+    monkeypatch.setattr(
+        compat, "structured_call", lambda **kw: pytest.fail("Unexpected model call")
+    )
+    output = tmp_path / "plan"
+    with GenSimServices(GenSimServicesCfg()) as services:
+        with pytest.raises(ValueError, match=error):
+            publish_hybrid(
+                instruction, "example", image, output, services, scene_context=source
+            )
+    assert not output.exists()

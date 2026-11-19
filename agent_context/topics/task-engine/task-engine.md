@@ -17,11 +17,23 @@ and twist mode can require occurrence-bound deployment parameters. The hybrid
 validator checks symbolic declaration coverage, including acquisition versus
 release in coordinated transport. Physical evidence and calibrated installation
 remain separate; motion-only pouring never establishes liquid transfer.
-Before freezing the hybrid objective, source checks distinguish explicit pour
-motion, requested liquid transfer and ambiguous outcomes. A separately prompted
-source audit checks omissions and invented actions against both the declarations and their expanded calls and occurrence bindings. During expansion, a following placement or pour can reuse the same held object; explicit incompatible arms remain errors. Diagnostics feed a bounded
-reinterpretation; a failed audit prevents plan publication.
-For rigid pick/place, named handovers and coordinated tray release, hybrid automatically grounds frozen roles in the original image, or verifies a supplied `--scene-grounding FILE`. A null box retains a pending role. Plans outside this deployment scope publish an authoring-only manifest. Qualification and deployment preparation then use the same
+Before freezing the hybrid objective, the independent source audit must agree
+on the ordered, quoted operations and check their expanded calls. This
+distinguishes mode, destination, laterality and terminal intent without
+vocabulary-based dispatch. Revised calls must pass the audit again before
+selection; a failed source interpretation cannot publish a plan.
+Align, pour and handover expand a final hold or return-and-release only from
+an explicit, quoted terminal declaration. When unspecified, no cleanup call
+or terminal hold goal is added. A following operation may reuse the still-held
+object; an incompatible explicit arm remains an error. Pouring restores
+orientation without returning to the original position.
+Hybrid accepts optional `--scene-context FILE` for scene facts, not extra task
+actions. The `embodichain.task-scene-context/v1` JSON has optional `description`
+and `objects` entries (`id`, `description`, optional `asset_kind` of `rigid` or
+`articulated`). Object IDs assert task roles; unrelated scene notes belong in
+`description`. Context guides interpretation and grounding, does not establish
+visibility, and is retained in the plan artifact inventory.
+For rigid pick/place, named handovers ending in placement and coordinated tray release, hybrid automatically grounds frozen roles in the original image, or verifies a supplied `--scene-grounding FILE`. A null box retains a pending role. Plans outside this deployment scope publish an authoring-only manifest. Qualification and deployment preparation then use the same
 role, geometry, resource and configuration checks as template plans. The same tray identity is retained across fruit landings and the final transport;
 qualification selects non-overlapping landing poses and the terminal segment
 rechecks retained payloads. A handover requires a trusted exchange pose. Ungrounded

@@ -52,7 +52,9 @@ def run(root, image, execute):
         GenSimServicesCfg(),
         injected=dict(
             task_image_grounding=Reply(dict(operations=f["operations"])),
-            task_interpretation=Reply(dict(issues=[])),
+            task_interpretation=Reply(
+                dict(issues=[], source_operations=f["operations"])
+            ),
         ),
     ) as svc:
         result = publish_hybrid(
