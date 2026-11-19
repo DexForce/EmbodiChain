@@ -53,17 +53,31 @@ _TASK = (
 
 
 def _declaration():
-    return yaml.safe_load((_TASK / "task_program/integration.yaml").read_text())[
+    value = yaml.safe_load((_TASK / "task_program/integration.yaml").read_text())[
         "runtime_services"
     ]["cable_material"]
+    value.pop("operations", None)
+    return value
 
 
-def _deployment(*, compact=False):
-    path = _TASK / ("task.yam.compact.yaml" if compact else "task.yam.yaml")
+def _deployment(*, legacy_checks=False):
+    path = _TASK / "task.yam.yaml"
     raw = yaml.safe_load(path.read_text())
     physical = resolve_gym_components(raw, base_dir=path.parent)
+    selection = deepcopy(physical.config["task_program"])
+    if legacy_checks:
+        declaration = yaml.safe_load(
+            (_TASK / "task_program/integration.yaml").read_text()
+        )
+        declaration["profile"]["skill_options"].update(
+            {
+                call_id: {"kind": "move_joints", "preserve_samples": True}
+                for call_id in ("simulation.cable_joint", "simulation.cable_check")
+            }
+        )
+        selection["integration"] = {"inline": declaration}
     deployment = load_configured_task_program_deployment(
-        task_program=physical.config["task_program"],
+        task_program=selection,
         skill_profile=physical.embodiment_skill_profile,
         evaluation=physical.evaluation,
         base_dir=path.parent,
@@ -72,25 +86,8 @@ def _deployment(*, compact=False):
     return deployment
 
 
-def test_cable_deployment_preflights_all_calls_and_measured_final_acceptance():
+def test_cable_preflight_has_eight_calls_and_retains_physical_checks():
     deployment = _deployment()
-    registration = deployment.integration.registration
-    compiled = registration.catalog.preflight(deployment.load_program())
-    assert compiled.segment_count == 57
-    assert registration.evaluation_final_refs == ("route_success",)
-    assert registration.scene_binding.declare().entries == ()
-    factories = registration.registered_semantic_lowerer_factories
-    assert {factory.target_descriptor.skill_id for factory in factories} == {
-        "pick_up",
-        "move_end_effector",
-        "move_joints",
-    }
-    for factory in factories:
-        assert factory.argument_contract.required["target"]
-
-
-def test_compact_cable_preflight_has_eight_calls_and_retains_physical_checks():
-    deployment = _deployment(compact=True)
     registration = deployment.integration.registration
     compiled = registration.catalog.preflight(deployment.load_program())
     assert compiled.segment_count == 8
@@ -99,27 +96,16 @@ def test_compact_cable_preflight_has_eight_calls_and_retains_physical_checks():
         for factory in registration.registered_semantic_lowerer_factories
         if factory.call_id == "simulation.cable_pickup"
     )
-    original = _decode_cable_service(_declaration())
-    assert (cfg.geometry, cfg.motion_parts, cfg.slip_limit) == (
-        original.geometry,
-        original.motion_parts,
-        original.slip_limit,
+    geometry = dict(cfg.geometry)
+    assert geometry["strict_region"] == (
+        (0.5845, 0.064, 0.753),
+        (0.5875, 0.0896, 0.759),
     )
-    # Timing changes must preserve every geometric target and physical gate.
+    assert cfg.slip_limit == 0.012
     targets = {target.target_id: target for target in cfg.targets}
-    assert set(targets) == {target.target_id for target in original.targets} | {
-        "settle_contact"
-    }
-    for target in original.targets:
-        assert (
-            replace(
-                targets[target.target_id],
-                speed=target.speed,
-                angular_speed=target.angular_speed,
-                samples=target.samples,
-            )
-            == target
-        )
+    assert targets["align_tip_3_1"].maximum_correction == 0.005
+    assert targets["align_tip_3_1"].minimum_z == 0.7655
+    assert targets["lay_down_free_end_0"].minimum_z == 0.7625
     operations = cfg.operations
     assert len(operations) == 8
     phases = [phase for operation in operations for phase in operation.phases]
@@ -158,13 +144,11 @@ def test_compact_cable_preflight_has_eight_calls_and_retains_physical_checks():
 def test_contact_catalog_accepts_a_single_declared_operation_kind(
     operation_name, call_id
 ):
-    path = _TASK / "task.yam.compact.yaml"
+    path = _TASK / "task.yam.yaml"
     physical = resolve_gym_components(
         yaml.safe_load(path.read_text()), base_dir=path.parent
     )
-    declaration = yaml.safe_load(
-        (_TASK / "task_program/integration.compact.yaml").read_text()
-    )
+    declaration = yaml.safe_load((_TASK / "task_program/integration.yaml").read_text())
     operations = declaration["runtime_services"]["cable_material"]["operations"]
     declaration["runtime_services"]["cable_material"]["operations"] = {
         operation_name: operations[operation_name]
@@ -321,6 +305,70 @@ def test_material_observation_maps_selected_rows_and_arena_origins_once():
         atol=4e-6,
         rtol=0,
     )
+
+
+@pytest.mark.parametrize("kind", ["material", "material_lift", "ray_align"])
+def test_geometry_failure_is_row_local_and_cannot_lengthen_a_healthy_path(kind):
+    service, state, measured = _runtime()
+    value = _declaration()
+    spec = {"kind": kind, "material_distance": 0.162}
+    if kind in {"material", "material_lift"}:
+        spec["position"] = [None, None, 0.78]
+    value["targets"] = {"mixed": spec}
+    service.cfg = _decode_cable_service(value)
+    if kind == "material":
+
+        def ik(pose, *, joint_seed, env_ids, **kwargs):
+            return env_ids == 3, joint_seed.clone()
+
+        service.robot.compute_ik = ik
+    elif kind == "material_lift":
+        state[1, 13, 3:7] = torch.tensor([0.0, 0.0, 0.0, 1.0])
+    else:
+        state[3, -1, 1] = 0.1
+    first = _lower_pitch(service, "mixed")
+    assert set(first.failed_preconditions) == {1}
+    assert torch.isfinite(first.goal.xpos).all()
+    # Only the failed physical row changes; healthy env 3 keeps the same path/grid.
+    measured[1] = torch.tensor([100.0, 20.0, 30.0])
+    second = _lower_pitch(service, "mixed")
+    assert set(second.failed_preconditions) == {1}
+    torch.testing.assert_close(first.goal.xpos[0], second.goal.xpos[0])
+
+
+def test_contact_source_preserves_reachable_peer_when_one_wrist_has_no_ik():
+    from embodichain.lab.task_program.integrations.simulation._cable_contact import (
+        CableContactSource,
+    )
+    from embodichain.lab.sim.atomic_skills.primitives.contact import ContactPhase
+
+    service, _, measured = _runtime()
+    service.robot.compute_ik = lambda pose, *, joint_seed, env_ids, **kwargs: (
+        env_ids == 3,
+        joint_seed.clone(),
+    )
+    source = CableContactSource(service)
+    target = SimpleNamespace(control_part="right_arm", joint_ids=(0, 1, 2))
+    request = SimpleNamespace(
+        goal=None,
+        invocation_id="mixed-ik",
+        binding=SimpleNamespace(endpoint=lambda *args: SimpleNamespace(target=target)),
+    )
+    context = SimpleNamespace(
+        batch_size=2,
+        env_ids=service.env_ids,
+        robot=SimpleNamespace(qpos=measured[service.env_ids]),
+        require_control_dt=lambda: 1 / 60,
+    )
+    resolved = source.resolve(
+        ContactPhase("pose", "right_approach_0.162"),
+        request,
+        context,
+        torch.tensor([True, True]),
+    )
+    assert resolved.valid.tolist() == [True, False]
+    assert torch.isfinite(resolved.values).all()
+    assert service.last_targets == {}
 
 
 @pytest.mark.parametrize("retract_distance", [0.0, 0.008])
@@ -705,7 +753,7 @@ def _pitch_runtime(tool_pitch, ray_pitch):
     return service, state
 
 
-def _lower_pitch(service, target="pitch"):
+def _lower_pitch(service, target="pitch", *, active_mask=None):
     lowerer = _CableMoveLowerer(service.cfg)
     lowerer.runtime = service
     endpoint = SimpleNamespace(runtime_target=SimpleNamespace(control_part="left_arm"))
@@ -719,10 +767,28 @@ def _lower_pitch(service, target="pitch"):
             call_id="simulation.cable_move", arguments={"target": target}
         ),
         context=SimpleNamespace(
-            env_ids=service.env_ids, require_control_dt=lambda: 1 / 60
+            env_ids=service.env_ids,
+            require_control_dt=lambda: 1 / 60,
+            planning_mask=active_mask,
         ),
         bound=bound,
         option_template=MoveEndEffectorOptions(),
+    )
+
+
+def test_inactive_legacy_move_row_cannot_lengthen_healthy_trajectory():
+    service, _, measured = _runtime()
+    value = _declaration()
+    value["targets"] = {"home": {"kind": "home"}}
+    service.cfg = _decode_cable_service(value)
+    active = torch.tensor([False, True])
+    first = _lower_pitch(service, "home", active_mask=active).goal.xpos
+    measured[3, 0] = 0.5
+    second = _lower_pitch(service, "home", active_mask=active).goal.xpos
+    assert first.shape[1] == second.shape[1] == 2
+    torch.testing.assert_close(first[1], second[1])
+    torch.testing.assert_close(
+        second[0], service.tool("left_arm")[0].expand_as(second[0])
     )
 
 
@@ -1133,10 +1199,25 @@ def test_cable_check_allows_surviving_row_to_execute_next_segment(prior_slip):
 
     # Run the deployed YAM check and two short holds through the actual semantic
     # executor, command sink and Gym bridge, with selected physical rows 3, 1.
-    deployment = _deployment()
+    deployment = _deployment(legacy_checks=True)
     full = deployment.load_program()
     first = full.program.items[0]
-    _, hold, check = first.steps.items
+    hold = replace(
+        first.steps,
+        call=replace(
+            first.steps.call,
+            call_id="simulation.cable_joint",
+            arguments={"target": "settle_motion"},
+        ),
+    )
+    check = replace(
+        first.steps,
+        call=replace(
+            first.steps.call,
+            call_id="simulation.cable_check",
+            arguments={"target": "right_approach_0.162_tracking"},
+        ),
+    )
     segments = tuple(
         replace(first, name=name, steps=node)
         for name, node in (("before", hold), ("check", check), ("after", hold))

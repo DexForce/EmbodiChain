@@ -62,6 +62,8 @@ from .policies import (
 )
 from .requirements import GRASP_CAPABILITY, SkillBindingContract
 from .runtime_commands import (
+    _sequence_from_fresh_frames,
+    _frame_from_fresh_commands,
     EndpointCommand,
     JointPositionPayload,
     RuntimeCommandFrame,
@@ -1359,8 +1361,8 @@ class AtomicSkill(Generic[GoalT, OptionsT], ABC):
                     EndpointCommand(target=target, payload=command.payload)
                 )
             frames.append(
-                RuntimeCommandFrame(
-                    commands=tuple(endpoint_commands),
+                _frame_from_fresh_commands(
+                    endpoint_commands,
                     active_mask=(
                         frame.active_mask
                         if active_mask is None
@@ -1370,7 +1372,7 @@ class AtomicSkill(Generic[GoalT, OptionsT], ABC):
                     hold_duration=frame.hold_duration,
                 )
             )
-        return TimedCommandSequence(frames=tuple(frames), env_ids=commands.env_ids)
+        return _sequence_from_fresh_frames(frames, commands.env_ids)
 
     def _joint_command_sequence(
         self,
@@ -1421,14 +1423,14 @@ class AtomicSkill(Generic[GoalT, OptionsT], ABC):
             # dispatching it, wait for the next arrival interval; the terminal
             # frame reuses its own interval as the action's settling window.
             frames.append(
-                RuntimeCommandFrame(
-                    commands=tuple(endpoint_commands),
+                _frame_from_fresh_commands(
+                    endpoint_commands,
                     active_mask=active_mask,
                     env_ids=trajectory.env_ids,
                     hold_duration=trajectory.dt[:, next_waypoint_index],
                 )
             )
-        return TimedCommandSequence(frames=tuple(frames), env_ids=trajectory.env_ids)
+        return _sequence_from_fresh_frames(frames, trajectory.env_ids)
 
     @staticmethod
     def _build_segments(

@@ -677,8 +677,9 @@ def _dual_motion_generator() -> MotionGenerator:
         env_ids: list[int] | None = None,
         to_matrix: bool = True,
     ) -> torch.Tensor:
-        del env_ids, to_matrix
-        pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+        del to_matrix
+        count = NUM_ENVS if env_ids is None else len(env_ids)
+        pose = torch.eye(4).repeat(count, 1, 1)
         pose[:, 0, 3] = -1.0 if link_name == "left_root" else 1.0
         return pose
 
@@ -745,8 +746,15 @@ def _dual_motion_generator() -> MotionGenerator:
         qpos: torch.Tensor | None = None,
         name: str | None = None,
         to_matrix: bool = True,
+        env_ids: list[int] | torch.Tensor | None = None,
     ) -> torch.Tensor:
-        count = NUM_ENVS if qpos is None else qpos.shape[0]
+        count = (
+            (NUM_ENVS if env_ids is None else len(env_ids))
+            if qpos is None
+            else qpos.shape[0]
+        )
+        if env_ids is not None:
+            assert len(env_ids) == count
         return torch.eye(4).repeat(count, 1, 1)
 
     robot.get_qpos.side_effect = get_qpos
@@ -2343,6 +2351,58 @@ def test_pick_cartesian_lift_keeps_pose_path_and_failure_mask(
             hand[:, lift.start : lift.stop]
         ),
     )
+
+
+@pytest.mark.parametrize("cartesian_lift", [False, True])
+def test_pick_phase_paths_and_cartesian_lift_require_explicit_choice(
+    cartesian_lift, tmp_path
+):
+    generator = _motion_generator()
+    # Fixed-grid planning retains the real authored-velocity-limit check.
+    urdf = tmp_path / "arm.urdf"
+    urdf.write_text(
+        '<robot name="limits">'
+        + "".join(f'<link name="link_{i}"/>' for i in range(ROBOT_DOF + 1))
+        + "".join(
+            f'<joint name="joint_{i}" type="revolute">'
+            f'<parent link="link_{i}"/><child link="link_{i + 1}"/>'
+            '<axis xyz="0 0 1"/><limit lower="-3" upper="3" velocity="1" effort="1"/></joint>'
+            for i in range(ROBOT_DOF)
+        )
+        + "</robot>"
+    )
+    generator.robot.cfg.fpath = str(urdf)
+    generator.generate = Mock(wraps=generator.generate)
+    action = _bind_action(generator, PickUp())
+    pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    invocation = SkillInvocation(
+        skill_id="pick_up",
+        goal=GraspGoal(semantics=_semantics(entity_id="target"), grasp_xpos=pose),
+        binding=_binding(action),
+        motion_policy=MotionPolicy(
+            strategy="ik_interp",
+            sample_count=20,
+            interpolation_mode="fixed_grid",
+            ik_seed_mode="sequential",
+            acceleration_limit=None,
+            phase_paths={"pre_grasp": "cartesian"},
+        ),
+        skill_options=PickUpOptions(cartesian_lift=cartesian_lift, lift_height=0.1),
+    )
+    context = _context(scene=_target_scene(pose, timestamp=0.0, version=0))
+    if cartesian_lift:
+        with pytest.raises(ValueError, match="cartesian_lift and phase_paths"):
+            _plan_action(action, invocation, context)
+        generator.generate.assert_not_called()
+    else:
+        _plan_action(action, invocation, context)
+        assert generator.generate.call_args_list[0].kwargs[
+            "options"
+        ].waypoint_modes == (
+            "cartesian",
+            "joint",
+            "joint",
+        )
 
 
 def test_pick_holds_fully_closed_before_lifting_when_configured() -> None:

@@ -1789,6 +1789,64 @@ and durable episode-boundary recovery. See the offline expansion example.
    ExpansionCoverage
    EpisodeCoverage
 
+.. autosummary::
+
+   ExpansionWorkloadCfg
+   WorkloadExecutionCfg
+   WorkloadAssignment
+   WorkloadRowResult
+   WorkloadSource
+   WorkloadProgramExecutor
+   GymExpansionWorkload
+   run_gym_expansion_workloads
+   load_task_program_expansion
+   load_expansion_viewer
+   run_task_program_expansion
+   derive_grasp_expansion_deployment
+   launch_expansion_preview
+   stop_expansion_preview
+   preview_expansion_results
+   export_expansion_episodes
+
+.. autosummary::
+
+   GymExpansionHostExtensions
+   ExpansionRowContext
+   ExpansionValidator
+   MeasuredExpansionValidator
+   MeasuredTrajectory
+   record_reference_trajectory
+   preview_expansion_comparison
+   report_expansion_distribution
+
+Offline distribution reporting validates confirmed native receipts and emits a
+complete HTML/JSON/JSONL bundle without opening a physics World. Comparisons
+require matching task, robot installation and configured scene domains.
+
+embodichain.lab.expansion.distribution
+--------------------------------------
+
+.. currentmodule:: embodichain.lab.expansion.distribution
+
+.. autofunction:: report_expansion_distribution
+
+embodichain.lab.expansion.acceptance
+------------------------------------
+
+Measured task and physical acceptance share a host port. Geometry uses independent
+Newton queries; native contacts inspect every physical sample and optionally
+require sustained finger contact and bounded object drift. Tasks declare all
+permissions and thresholds; missing or dropped evidence rejects the trajectory.
+
+.. currentmodule:: embodichain.lab.expansion.acceptance
+
+.. autosummary::
+
+   MeasuredExpansionValidator
+
+.. autoclass:: MeasuredExpansionValidator
+   :members:
+
 embodichain.lab.expansion.artifacts
 -----------------------------------
 
@@ -1801,6 +1859,29 @@ Typed content-addressed numeric, media and source references. Paths remain conta
    ArtifactReference
    EpisodeArtifactManifest
    resolve_artifact_path
+
+embodichain.lab.expansion.comparison
+------------------------------------
+
+Reference and accepted expansion recordings share a measured timeline. The
+native viewer retains robot/object ghost resources, supports pause and selection,
+and publishes render states with physics disabled. Collection is an optional
+caller-owned callback, and the environment factory retains task/asset ownership.
+
+.. currentmodule:: embodichain.lab.expansion.comparison
+
+.. autosummary::
+
+   MeasuredTrajectory
+   record_reference_trajectory
+   preview_expansion_comparison
+
+.. autoclass:: MeasuredTrajectory
+   :members:
+
+.. autofunction:: record_reference_trajectory
+
+.. autofunction:: preview_expansion_comparison
 
 embodichain.lab.expansion.configured
 ------------------------------------
@@ -1893,6 +1974,21 @@ attempts at episode boundaries. Native failures invalidate the active host.
    ExpansionRecipeSource
    PreparingExpansionHost
 
+embodichain.lab.expansion.episode_export
+----------------------------------------
+
+.. currentmodule:: embodichain.lab.expansion.episode_export
+
+Export each confirmed qualified trajectory to an independently readable LeRobot
+dataset, retaining its portable T+1 evidence, source hashes and recording journal.
+Export uses frozen evidence and opens no simulation World.
+
+.. autosummary::
+
+   export_expansion_episodes
+
+.. autofunction:: export_expansion_episodes
+
 embodichain.lab.expansion.export
 --------------------------------
 
@@ -1904,6 +2000,26 @@ Stream confirmed numeric episodes and observation children through the existing 
 
    export_expansion_lerobot
 
+embodichain.lab.expansion.gym_workloads
+--------------------------------------
+
+The native workload facade owns one World containing W times B environments.
+Task packages supply pinned source declarations and row-local scene/plan ports;
+the facade retains native session admission, measured T+1 evidence, physical
+acceptance, confirmed receipts and one bounded artifact export thread.
+Integration policies may differ while physical topology and cadence must agree.
+
+.. currentmodule:: embodichain.lab.expansion.gym_workloads
+
+.. autosummary::
+
+   GymExpansionWorkload
+   run_gym_expansion_workloads
+
+.. autoclass:: GymExpansionWorkload
+
+.. autofunction:: run_gym_expansion_workloads
+
 embodichain.lab.expansion.host
 ------------------------------
 
@@ -1914,6 +2030,30 @@ The native Gym adapter owns World preparation, parameter readback and Task Progr
 .. autosummary::
 
    GymExpansionHost
+
+embodichain.lab.expansion.host_extensions
+-----------------------------------------
+
+Runtime extension callbacks select collection rendering, a scene source, measured
+acceptance, immutable recipe transforms and per-row Task Program plan factories.
+The native host continues to own preparation, clocks, state capture and receipts.
+
+.. currentmodule:: embodichain.lab.expansion.host_extensions
+
+.. autosummary::
+
+   ExpansionValidator
+   ExpansionRowContext
+   GymExpansionHostExtensions
+
+.. autoclass:: ExpansionValidator
+   :members:
+
+.. autoclass:: ExpansionRowContext
+   :members:
+
+.. autoclass:: GymExpansionHostExtensions
+   :members:
 
 embodichain.lab.expansion.journal
 ---------------------------------
@@ -1942,6 +2082,28 @@ Stage immutable numeric evidence and archived source attachments before publishi
 .. autosummary::
 
    load_expansion_episode
+
+embodichain.lab.expansion.preview
+--------------------------------
+
+Launch, wait for or stop a bounded native result-preview service. Status and logs
+remain separate from saved episodes; PID ownership is checked before signalling.
+Inputs may be native jobs, aggregate scene/motion results or preview plans.
+Recorded motion supplies an endpoint when several robot solvers are present.
+
+.. currentmodule:: embodichain.lab.expansion.preview
+
+.. autosummary::
+
+   launch_expansion_preview
+   preview_expansion_results
+   stop_expansion_preview
+
+.. autofunction:: launch_expansion_preview
+
+.. autofunction:: preview_expansion_results
+
+.. autofunction:: stop_expansion_preview
 
 embodichain.lab.expansion.program
 ---------------------------------
@@ -2034,6 +2196,32 @@ Source-independent session limits. These settings are separate from deployment-o
    ExpansionCollectionCfg
    ExpansionPersistenceCfg
 
+embodichain.lab.expansion.task_program_jobs
+------------------------------------------
+
+Load closed scene/motion declarations without simulator imports, derive local
+grasp policy snapshots and collect through the existing single-World workload
+engine. Caller-owned source hashes and runtime versions remain in confirmed
+episode evidence. Physical thresholds and protected phase boundaries are retained;
+the facade owns configuration binding, preparation, export and optional preview.
+
+.. currentmodule:: embodichain.lab.expansion.task_program_jobs
+
+.. autosummary::
+
+   load_task_program_expansion
+   load_expansion_viewer
+   run_task_program_expansion
+   derive_grasp_expansion_deployment
+
+.. autofunction:: load_task_program_expansion
+
+.. autofunction:: load_expansion_viewer
+
+.. autofunction:: run_task_program_expansion
+
+.. autofunction:: derive_grasp_expansion_deployment
+
 embodichain.lab.expansion.visual
 --------------------------------
 
@@ -2046,6 +2234,32 @@ Apply one native visual profile per compatible World cohort. Render complete rec
    load_visual_profiles
    render_observation_variants
    inspect_observation_variants
+
+embodichain.lab.expansion.workloads
+-----------------------------------
+
+.. currentmodule:: embodichain.lab.expansion.workloads
+
+Rolling Task Program execution in one caller-owned World with capacity
+``workload_count * batch_size``. Sources retain task-owned scene proposals and
+required physical qualification; native session and sink receipts remain the
+authority for admission and committed quotas. Preparing rows settle through
+ordinary World steps while live trajectories retain every control boundary.
+
+.. autosummary::
+
+   ExpansionWorkloadCfg
+   WorkloadExecutionCfg
+   WorkloadAssignment
+   WorkloadRowResult
+   WorkloadSource
+   WorkloadProgramExecutor
+
+.. autoclass:: WorkloadProgramExecutor
+   :members:
+
+.. autoclass:: WorkloadSource
+   :members:
 
 embodichain.lab.expansion.workflow
 ----------------------------------
@@ -3813,6 +4027,32 @@ embodichain.lab.sim.sensors.camera
    Camera
    CameraCfg
 
+embodichain.lab.sim.sensors.contact
+-----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact
+
+.. autosummary::
+
+   ContactPermissionChecker
+
+embodichain.lab.sim.sensors.contact.permissions
+-----------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact.permissions
+
+Check complete native contact buffers against explicit actor/frame permissions.
+The host chooses the original physical sampling rate; unavailable impulse,
+unknown actors and dropped evidence cannot pass. Results are owned device-side
+row summaries, suitable for every-substep observers without Python contact lists.
+
+.. autosummary::
+
+   ContactPermissionChecker
+
+.. autoclass:: ContactPermissionChecker
+   :members:
+
 embodichain.lab.sim.sensors.contact.sensor
 ------------------------------------------
 
@@ -4452,6 +4692,8 @@ native simulation windows and browser visualization.
    MarkerPrototypeCfg
    MarkerGroup
 
+   MarkerFramePublisher
+
 embodichain.lab.visualization.markers.cfg
 ----------------------------------------
 
@@ -4461,6 +4703,22 @@ embodichain.lab.visualization.markers.cfg
 
    MarkerPrototypeCfg
    MarkerGroupCfg
+
+embodichain.lab.visualization.markers.frame
+-------------------------------------------
+
+The frame publisher stages multiple marker groups and submits one native visual
+batch. Hidden instances retain their resources and actual visibility; later
+frames transform only visible instances. Publishing never advances physics.
+
+.. currentmodule:: embodichain.lab.visualization.markers.frame
+
+.. autosummary::
+
+   MarkerFramePublisher
+
+.. autoclass:: MarkerFramePublisher
+   :members:
 
 embodichain.lab.visualization.markers.group
 ------------------------------------------
@@ -6032,6 +6290,278 @@ native listener binds all IPv4 interfaces and lives until World teardown.
    :no-index:
 
 
+embodichain.data.assets.rl_assets
+---------------------------------
+
+Robot, reset-state and frozen-terrain archives use the standard asset cache.
+
+.. currentmodule:: embodichain.data.assets.rl_assets
+
+.. autosummary::
+
+   UnitreeG1Rough
+   G1RoughTerrains
+   ShadowHandPen
+   LeapHandCubeFaceTurn
+   LeapHandCube
+
+.. autoclass:: UnitreeG1Rough
+   :members:
+
+.. autoclass:: G1RoughTerrains
+   :members:
+
+.. autoclass:: ShadowHandPen
+   :members:
+
+.. autoclass:: LeapHandCubeFaceTurn
+   :members:
+
+.. autoclass:: LeapHandCube
+   :members:
+
+
+embodichain_tasks.locomotion.velocity.g1_rough
+----------------------------------------------
+
+The G1 Rough environment registers the 37-action rough-terrain locomotion task with terrain height observations.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.g1_rough
+
+.. autosummary::
+
+   UnitreeG1RoughEnv
+
+.. autoclass:: UnitreeG1RoughEnv
+   :members:
+
+
+embodichain_tasks.locomotion.velocity.rough
+-------------------------------------------
+
+Load rough-terrain velocity task configurations from a supplied scene bundle. The loader validates robot joint order, shared initial states and terrain inputs.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.rough
+
+.. autosummary::
+
+   load_rough_env_cfg
+
+.. autofunction:: load_rough_env_cfg
+
+
+embodichain_tasks.locomotion.velocity.rough.config
+--------------------------------------------------
+
+Packaged task definitions retain policy joint order, observation dimensions and fixed physics/control periods.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.config
+
+.. autosummary::
+
+   RoughVelocityConfig
+   load_config
+
+.. autoclass:: RoughVelocityConfig
+   :members:
+
+.. autofunction:: load_config
+
+
+embodichain_tasks.locomotion.velocity.rough.curriculum
+------------------------------------------------------
+
+Terrain assignment and selected-row curriculum updates use terminal positions and commands before resetting each episode.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.curriculum
+
+.. autosummary::
+
+   TerrainCurriculum
+
+.. autoclass:: TerrainCurriculum
+   :members:
+
+
+embodichain_tasks.locomotion.velocity.rough.environment
+-------------------------------------------------------
+
+Resolve the rough-terrain deployment against exported robot and terrain assets, with optional training randomization and contact generation selection.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.environment
+
+.. autosummary::
+
+   load_rough_env_cfg
+
+.. autofunction:: load_rough_env_cfg
+
+
+embodichain_tasks.locomotion.velocity.rough.mdp
+-----------------------------------------------
+
+Pure Torch state, action, observation, reward and termination functions share the rough-terrain task definitions. Device constants cache fixed values and reward joint selectors.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.mdp
+
+.. autosummary::
+
+   RoughVelocityState
+   RoughVelocityReward
+   RoughVelocityConstants
+   action_target
+   observation_terms
+   build_observation
+   compute_rewards
+   compute_termination
+   dc_motor_effort
+   update_contact_times
+
+.. autoclass:: RoughVelocityState
+   :members:
+
+.. autoclass:: RoughVelocityReward
+   :members:
+
+.. autoclass:: RoughVelocityConstants
+   :members:
+
+.. autofunction:: action_target
+
+.. autofunction:: observation_terms
+
+.. autofunction:: build_observation
+
+.. autofunction:: compute_rewards
+
+.. autofunction:: compute_termination
+
+.. autofunction:: dc_motor_effort
+
+.. autofunction:: update_contact_times
+
+
+embodichain_tasks.locomotion.velocity.rough.runtime
+---------------------------------------------------
+
+The runtime adapts the shared task definitions to EmbodiChain managers, state and sensors. Explicit motors retain the configured outer physics cadence; implicit torque telemetry is sampled before the final physical step.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.runtime
+
+.. autosummary::
+
+   RoughVelocityEnv
+
+.. autoclass:: RoughVelocityEnv
+   :members:
+
+
+embodichain_tasks.locomotion.velocity.rough.terrain
+---------------------------------------------------
+
+The scanner evaluates 187 torso-relative terrain rays and replays a fixed-buffer CUDA graph when the geometry and buffers remain unchanged.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.terrain
+
+.. autosummary::
+
+   HeightScanner
+
+.. autoclass:: HeightScanner
+   :members:
+
+
+embodichain_tasks.manipulation.dexterous
+----------------------------------------
+
+USD-native Shadow Hand and LEAP Hand dexterous manipulation RL environments built on ``EmbodiedEnv``.
+
+.. currentmodule:: embodichain_tasks.manipulation.dexterous
+
+.. autosummary::
+
+   LeapCubeFaceTurnEnv
+   LeapCubeReorientEnv
+   LeapCubeRotateZAxisEnv
+   ShadowPenContinuousEnv
+   ShadowPenFixedEnv
+
+
+embodichain_tasks.manipulation.dexterous.leap_cube_face_turn
+------------------------------------------------------------
+
+LEAP Hand top-layer articulated cube face-turning environment (``LeapCubeFaceTurnRL-v1``).
+
+.. currentmodule:: embodichain_tasks.manipulation.dexterous.leap_cube_face_turn
+
+.. autosummary::
+
+   LeapCubeFaceTurnEnv
+
+.. autoclass:: LeapCubeFaceTurnEnv
+   :members:
+
+
+embodichain_tasks.manipulation.dexterous.leap_cube_reorient
+-----------------------------------------------------------
+
+LEAP Hand in-hand cube 3D orientation tracking environment (``LeapCubeReorientRL-v1``).
+
+.. currentmodule:: embodichain_tasks.manipulation.dexterous.leap_cube_reorient
+
+.. autosummary::
+
+   LeapCubeReorientEnv
+
+.. autoclass:: LeapCubeReorientEnv
+   :members:
+
+
+embodichain_tasks.manipulation.dexterous.leap_cube_rotate_z
+-----------------------------------------------------------
+
+LEAP Hand continuous cube Z-axis rotation environment (``LeapCubeRotateZAxisRL-v1``).
+
+.. currentmodule:: embodichain_tasks.manipulation.dexterous.leap_cube_rotate_z
+
+.. autosummary::
+
+   LeapCubeRotateZAxisEnv
+
+.. autoclass:: LeapCubeRotateZAxisEnv
+   :members:
+
+
+embodichain_tasks.manipulation.dexterous.shadow_pen_continuous
+--------------------------------------------------------------
+
+Shadow Hand continuous multi-pose pen-spinning environment (``ShadowPenContinuousRL-v1``).
+
+.. currentmodule:: embodichain_tasks.manipulation.dexterous.shadow_pen_continuous
+
+.. autosummary::
+
+   ShadowPenContinuousEnv
+
+.. autoclass:: ShadowPenContinuousEnv
+   :members:
+
+
+embodichain_tasks.manipulation.dexterous.shadow_pen_fixed
+---------------------------------------------------------
+
+Shadow Hand fixed-grasp pen-spinning environment (``ShadowPenFixedRL-v1``).
+
+.. currentmodule:: embodichain_tasks.manipulation.dexterous.shadow_pen_fixed
+
+.. autosummary::
+
+   ShadowPenFixedEnv
+
+.. autoclass:: ShadowPenFixedEnv
+   :members:
+
+
 Parallel-jaw hand configuration and composition
 ----------------------------------------------
 
@@ -6363,6 +6893,21 @@ contracts. The package-level imports above are the convenient extension API.
    discover_sensor_plugins
    get_sensor_registration
    list_sensor_types
+
+Task pose coverage
+------------------
+
+The task pose coverage adapter counts measured pick/place XY-yaw cells across
+scene cases in one explicitly declared experiment domain. Reservations remain
+pending until the ordinary ExpansionSession persistence receipt confirms them;
+planned candidate poses never contribute to confirmed coverage.
+
+.. autosummary::
+
+   embodichain.lab.expansion.task_pose_coverage.TaskPoseCoverage
+
+.. autoclass:: embodichain.lab.expansion.task_pose_coverage.TaskPoseCoverage
+   :members:
 
 
 Reference state sensors

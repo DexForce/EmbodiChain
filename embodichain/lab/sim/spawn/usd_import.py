@@ -203,7 +203,7 @@ def _compile_usd_import(
         if native_gaussians:
             for item in source.mesh_objects:
                 if _has_native_gaussian_renders(item):
-                    item.per_env = False
+                    item.per_env = manager.num_envs > 1
     unsupported_particles = [
         type(item).__name__
         for item in source.particle_sets
@@ -566,10 +566,14 @@ def _compile_usd_import(
         if root_pose is not None:
             descriptor.pose = root_pose @ descriptor.pose
         _set_resolved_usd_pose(cfg, descriptor.pose)
-        if native_gaussians and _has_native_gaussian_renders(descriptor):
-            # Per-asset configuration resolves physics but must not re-enable
-            # unsupported native USD Gaussian Arena replication.
-            descriptor.per_env = False
+        if (
+            native_gaussians
+            and manager is not None
+            and _has_native_gaussian_renders(descriptor)
+        ):
+            # Preserve singleton placement while allowing qualified native
+            # companion replication in multi-Arena imports.
+            descriptor.per_env = manager.num_envs > 1
         source.materials.update(materials)
         if isinstance(cfg, RobotCfg) and cfg.enable_sensor:
             if manager is None and cfg.sensors:

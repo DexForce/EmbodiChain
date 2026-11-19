@@ -255,7 +255,10 @@ class PickUpOptions(SkillOptions):
     """
 
     cartesian_lift: bool = False
-    """Preserve a straight world-Z lift with IK interpolation and native limits."""
+    """Preserve a straight world-Z lift with IK interpolation and native limits.
+
+    Mutually exclusive with explicit ``MotionPolicy.phase_paths``.
+    """
 
     initial_lift_height: float = field(default=0.0, kw_only=True)
     """Initial world-Z clearance (m) from the current TCP pose before approach."""
@@ -442,12 +445,18 @@ class PickUp(
         env_ids: torch.Tensor | None = None,
         active_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, int]]:
+        if options.cartesian_lift and motion_policy.phase_paths:
+            raise ValueError("cartesian_lift and phase_paths are mutually exclusive.")
         if options.approach_along_grasp_axis:
             approach_direction = grasp_xpos[:, :3, 2]
         pre_grasp_xpos = translate_pose_world(
             grasp_xpos, -approach_direction * options.pre_grasp_distance
         )
 
+        if contact_grasp and motion_policy.phase_paths:
+            raise ValueError(
+                "Contact pickup uses its fixed Cartesian grid, without phase_paths."
+            )
         if contact_grasp and motion_policy.strategy == "ik_interp":
 
             def sampled_move(
@@ -587,6 +596,7 @@ class PickUp(
                 # planner options were supplied.
                 motion_options.sample_count = None
             waypoints = [pre_grasp_xpos, grasp_xpos, lift_xpos]
+            phase_names = ["pre_grasp", "grasp", "lift"]
             if options.initial_lift_height > 0.0:
                 start_xpos = self.robot.compute_fk(
                     qpos=start_arm_qpos,
@@ -603,6 +613,12 @@ class PickUp(
                     start_xpos.new_tensor([0.0, 0.0, options.initial_lift_height]),
                 )
                 waypoints.insert(0, initial_lift)
+                phase_names.insert(0, "initial_lift")
+
+            if any(name in motion_policy.phase_paths for name in phase_names):
+                motion_options.waypoint_modes = tuple(
+                    motion_policy.phase_paths.get(name, "joint") for name in phase_names
+                )
 
             if options.cartesian_lift:
                 if motion_policy.strategy != "ik_interp":

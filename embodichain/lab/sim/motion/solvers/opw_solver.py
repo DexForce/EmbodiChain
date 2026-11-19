@@ -186,7 +186,8 @@ class OPWSolver(BaseSolver):
             qpos_batch = qpos
         n_sample = qpos_batch.shape[0]
         # Retimed trajectories retain float64; the OPW kernel consumes float32.
-        qpos_wp = wp.from_torch(qpos_batch.to(dtype=torch.float32).reshape(-1))
+        qpos_batch = qpos_batch.to(device=self.device, dtype=torch.float32).contiguous()
+        qpos_wp = wp.from_torch(qpos_batch.reshape(-1))
         xpos_wp = wp.zeros(
             n_sample * 16, dtype=float, device=standardize_device_string(self.device)
         )

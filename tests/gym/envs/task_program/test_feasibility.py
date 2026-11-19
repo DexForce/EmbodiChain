@@ -99,6 +99,44 @@ def test_monitor_requires_measured_lift_then_stable_terminal_and_rejects_reverse
     assert not monitor.validation(env).accepted
 
 
+@pytest.mark.parametrize("drop", [False, True])
+def test_event_only_transport_guard_uses_earlier_measured_boundaries(drop):
+    env, cube = environment()
+    goal = Cube()
+    goal.position[0, 0] = 0.5
+    objects = {"cube": cube, "goal": goal}
+    env.sim.get_rigid_object_uid_list = lambda: tuple(objects)
+    env.sim.get_rigid_object = objects.get
+    arrived = {
+        "kind": "pose_near",
+        "entity": "cube",
+        "position": [0.5, 0.0, 0.025],
+        "tolerance_m": 0.01,
+    }
+    transport = {
+        "kind": "transport_guard",
+        "entity": "cube",
+        "other": "goal",
+        "lift_height_m": 0.05,
+        "minimum_transit_height_m": 0.025,
+        "goal_tolerance_m": 0.03,
+    }
+    monitor = MeasuredTaskMonitor(
+        (arrived,),
+        ({"event_id": "transported", "conditions": [arrived, transport]},),
+    )
+    monitor.reset(env)
+    cube.position[0, 2] = 0.1
+    monitor.observe(env, None)
+    assert not monitor.receipts
+    if drop:
+        cube.position[0, 2] = 0.025
+        monitor.observe(env, None)
+    cube.position[:] = goal.position
+    monitor.observe(env, None)
+    assert monitor.validation(env).accepted is not drop
+
+
 def test_monitor_reads_physical_velocity_and_closed_schema():
     env, cube = environment()
     monitor = MeasuredTaskMonitor(

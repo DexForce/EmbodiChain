@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Resolve the original GenieSim G1_120s USD bundle."""
+"""Resolve the GenieSim G1_120s USD bundle with verified collision geometry."""
 
 from __future__ import annotations
 
@@ -26,7 +26,10 @@ from urllib.request import urlopen
 
 import open3d as o3d
 
-from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
+from embodichain.data.constants import (
+    EMBODICHAIN_DEFAULT_DATA_ROOT,
+    EMBODICHAIN_DOWNLOAD_PREFIX,
+)
 from embodichain.data.dataset import EmbodiChainDataset, _dataset_download_lock
 
 __all__ = ["AgibotG1"]
@@ -37,7 +40,11 @@ _SOURCE = (
 )
 _MODEL_SOURCE = f"{_SOURCE}/robot/G1_120s"
 _ROBOT_USD = "robot.usda"
-_ROBOT_USD_MD5 = "05fad1a0d51b3e2a1782757f66d06986"
+_REPAIR_REVISION = "23370abf1c98b597ac13e40279dbb10cd775ccfb"
+_REPAIR_ENTRY = f"robot_assets/AgibotG1V4/{_ROBOT_USD}"
+_REPAIR_MD5 = "d0e9bffb1f7516f44056cba494085760"
+_REPAIR_SHA256 = "7ac0c031c0845d018dcca22ab845cfeb1c443e77dfdc2c413b40202273464913"
+# The upstream inventory also records the source entry before the repair.
 _FILES = {
     "LICENSE": "e66c269d4819aaab34b49ef5220c4ddab6756f21bb5180761a4eb8561f2b7bbd",
     "config.yaml": "8c4dd46f3de94e2710a99a5ef5d2bf68292f83918e756572b411b279ffdf0e29",
@@ -65,7 +72,7 @@ def _ensure_file(url: str, destination: Path, expected: str) -> None:
             with urlopen(url, timeout=60) as source:
                 copyfileobj(source, output)
         if _sha256(temporary) != expected:
-            raise ValueError(f"AgiBot G1 source SHA256 mismatch: {destination.name}")
+            raise ValueError(f"AgiBot G1 asset SHA256 mismatch: {destination.name}")
         temporary.replace(destination)
     finally:
         if temporary is not None:
@@ -73,29 +80,39 @@ def _ensure_file(url: str, destination: Path, expected: str) -> None:
 
 
 class AgibotG1(EmbodiChainDataset):
-    """Download and verify the original G1 USD layers and their license.
+    """Download the G1 USD and verify its entry and referenced layers.
 
     The model is provided by AgiBot's GenieSimAssets under CC BY-NC-SA 4.0.
-    The cache retains the original files, attribution and relative layer paths.
+    The entry defines the 120s gripper colliders on their meshes, enables the
+    authored arm and wrist camera mount colliders, and adds body and shoulder
+    colliders from the official G1 OmniPicker variant. The referenced layers
+    come from G1_120s.
 
     Args:
         data_root: Optional asset cache root.
     """
 
-    cache_prefix = f"AgibotG1_{_REVISION[:12]}"
+    cache_prefix = f"AgibotG1_{_REVISION[:12]}_v4"
 
     def __init__(self, data_root: str | None = None) -> None:
         root = str(
             Path(data_root or EMBODICHAIN_DEFAULT_DATA_ROOT).expanduser().resolve()
         )
-        descriptor = o3d.data.DataDescriptor(
-            f"{_MODEL_SOURCE}/{_ROBOT_USD}", _ROBOT_USD_MD5
+        origin = (
+            "https://huggingface.co/datasets/DexForceAI/embodichain_data/"
+            f"resolve/{_REPAIR_REVISION}/{_REPAIR_ENTRY}"
         )
+        prefix = EMBODICHAIN_DOWNLOAD_PREFIX.replace(
+            "/resolve/main/", f"/resolve/{_REPAIR_REVISION}/", 1
+        )
+        urls = list(dict.fromkeys([prefix + _REPAIR_ENTRY, origin]))
+        descriptor = o3d.data.DataDescriptor(urls, _REPAIR_MD5)
         super().__init__(self.cache_prefix, descriptor, root)
         with _dataset_download_lock(root, self.cache_prefix):
             for relative, expected in _FILES.items():
                 if relative == _ROBOT_USD:
                     url = (Path(self.download_dir) / _ROBOT_USD).as_uri()
+                    expected = _REPAIR_SHA256
                 else:
                     source = _SOURCE if relative == "LICENSE" else _MODEL_SOURCE
                     url = f"{source}/{relative}"

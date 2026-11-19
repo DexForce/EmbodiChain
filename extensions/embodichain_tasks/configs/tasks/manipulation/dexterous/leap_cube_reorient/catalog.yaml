@@ -1,0 +1,12 @@
+task_key: leap_cube_reorient
+title: LEAP Hand Cube Reorientation
+summary: Reorient a rigid cube in-hand to consecutive 3D target orientations with
+  the 16-DOF LEAP Hand.
+tags:
+- manipulation
+- dexterous
+- reinforcement_learning
+default_deployment: default
+deployments:
+  default:
+    config: env.yaml

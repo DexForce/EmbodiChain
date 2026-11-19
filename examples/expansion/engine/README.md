@@ -24,6 +24,29 @@ for measured 3D/RGB-D comparisons, per-capability checks, recovery diagnostics a
 portable dataset verification. `--mode quick` samples a smaller subset; unrun
 capabilities remain explicit. `--reuse` rebuilds the offline page without a World.
 
+## Native ghost preview
+
+Compute Task Program expansion at both parameter bounds and stratified interior
+points, validate the real results, then automatically open the native viewer:
+
+```bash
+embodichain expansion preview --job examples/expansion/engine/job.preview.yaml
+```
+
+Preview existing results without any collection:
+
+```bash
+embodichain expansion preview --input /path/to/job-output --gpu 0 --open
+```
+
+Repeat `--input` for groups, or point it at a generated preview-plan directory.
+`--inpu` is an alias for `--input`. In job mode `--output` selects a **new** output
+folder; it is no longer the existing-result input flag. `--plan-only` freezes and
+validates samples without executing, and `--no-open` suppresses automatic opening.
+The [preview guide](ghost-preview.md) explains budgets, failed-boundary evidence,
+scene-atlas domains, finite-sampling limitations and the WebRTC TODO. Rendering is
+native; the browser receives H.264 video over WebRTC.
+
 ## Run a configured job
 
 From the repository root, with the simulation dependencies installed:

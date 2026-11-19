@@ -95,7 +95,7 @@ interior endpoint target. They do not run an unbounded Python loop.
 
 ## Stages and reusable boundaries
 
-The program contains 57 segments and 148 Semantic Call invocations.
+The program contains 8 segments and 8 Atomic Skill invocations: four `PickUp` / `Place` pairs with 55 observed phase plans and 48 physical checkpoints.
 
 The deployment starts with both grippers open, 180 mm above the bench.
 In the arena frame, the right TCP starts at approximately `(0.45, -0.26, 0.93)` m
@@ -106,9 +106,8 @@ The right arm places capsule centres at material distances 0.162, 0.282 and
 0.438 m; these are the nearest capsule centres to the upstream nominal grasp
 locations. The left arm grasps at 0.57 m, leaving a 30 mm free span. All four
 pinches use a 0.7605 m TCP height. `PickUp` closes and settles with
-`lift_height: 0`; a separate `material_lift` target lowers to `MoveEndEffector`
-and raises the held material while retracting opposite its observed tangent
-projected onto XY. This supplies upstream slack as the cable lifts from the
+`lift_height: 0`; its observed `material_lift` phase then raises the held
+material while retracting opposite its measured tangent projected onto XY. This supplies upstream slack as the cable lifts from the
 bench. The lift preserves the measured tool orientation and keeps the original
 post-closure slip reference.
 
@@ -277,36 +276,21 @@ spool:
 python -m pytest tests/gym/envs/tasks/test_route_the_cable_cuda.py --run-gpu -m gpu -q
 ```
 
-Before the terminal insertion and retreat changes described above, the standard
-headless collector completed one episode with the original point
-list and one with the packaged USD on DexSim `0.6.0rc2` (build `dbaca660`),
-using the same RTX 5090 D v2 and seed 73. Both passed all 51 segments and final
-physical acceptance after two seconds of settling. The original and USD runs
-took 5,981 and 5,994 control steps, respectively. The final tip positions differed
-by 1.184 mm, both inside the strict channel. Maximum grasp slip was 0.316 mm
-and 0.307 mm, respectively, and both runs reported zero final sampled cable
-penetration against the bench, spools and port.
+The optimized eight-call implementation was qualified at seed 73 on DexSim
+`0.6.0rc2` build `dbaca660471d5aaa7e750093e7fe1c207465c4af` and an RTX 5090.
+Fresh 2-environment, 16-environment and repeated 16-environment batches passed
+2/2, 16/16 and 16/16 tasks. Their physical task times were 44.22, 45.07 and
+45.15 seconds, including the final two-second settling interval. All released
+endpoints stayed within the unchanged strict channel through retreat, home,
+final settling and five additional seconds of live physics. Maximum observed
+grip slip was 1.741 mm against the original 12 mm limit. Final sampled cable
+penetration against the bench, spools and port was zero.
 
-The 57-segment insertion/release trajectory was qualified on 2026-11-17 with
-DexSim `0.6.0rc2` build `dbaca660471d5aaa7e750093e7fe1c207465c4af`,
-Newton 1.7.0, seed 73, 20 VBD iterations and an RTX 5090 D v2. Four fresh
-2-environment batches passed 8/8 tasks, and three fresh 16-environment batches
-passed 48/48. All batches used the same source and initial state for each batch
-size. The unchanged full-route and third-carry CUDA cases also passed in
-separate fresh processes. The complete-route regression checks raw robot/bench,
-robot/spool and robot/port contacts after every control step; the repeated
-batches retain the original observable first-release and third-carry milestones.
-Final endpoint Z across the 56 multi-environment tasks was 753.595–757.615 mm,
-within the unchanged 753–759 mm range. The original displacement, penetration,
-spool seating, clearance, speed and two-second settling requirements remain active.
-
-The deployment inspector reports 57 segments / 148 calls. The 104 focused CPU
-cases comprise 70 cable runtime/material tests, two packaged-resource tests and
-32 VisualObject tests. They cover bounded pivot motion, both wrist branches,
-floor limits, per-environment failures and grip adjustment preserving the
-original slip reference. Validation jobs ran sequentially on a shared GPU with
-read-only state observers. These fixed-seed runs do not establish deterministic
-physics, multi-seed success rates or repeated-reset reliability.
+These fixed-seed batches qualify the tested setup, not a population success
+rate. CPU coverage checks the bounded pivot, original grasp reference, exact
+row scope, strictly decoded pacing and contact dwells. GPU acceptance covers
+raw robot/fixture contacts, the original spool/lift milestones and released-tip
+persistence. Each qualification uses a fresh process.
 
 Recordings contain full robot commands and
 `states.cables.cable.segment_state_w`, shaped `(environments, time, 50, 13)` in
@@ -327,65 +311,39 @@ not prove repeatable frictional routing. Use a fresh process for each trial unti
 that reset path is qualified. Raw trajectory recordings may include failed
 attempts; select training data using the segment and final outcomes.
 
-## Task Program migration qualification
+## Eight-call task and contact-aware pacing
 
-The migration preserves the Newton/DexUni two-way cable solver, scene and robot
-contact coefficients. The shared execution policy applies its joint acceleration
-budget to all Cartesian moves, so stage durations may be longer than the former
-handwritten direct-motion path. The episode budget is 12,000 control steps.
+`task.yam.yaml` is the single supported deployment and registers
+`RouteTheCable-YAM-v1`. The previous 57-segment / 148-call program and temporary
+compact deployment files have been removed. The canonical program contains
+three right-arm `PickUp`/`Place` pairs and one left-arm `PickUp`/`Place` pair.
+The ordinary task entry point therefore runs the optimized task directly.
 
-Static composition/catalog preflight and intermediate physical qualification do
-not certify a complete cable task. Full acceptance remains strict after release,
-retreat and settling. Failed samples retain their measured stopping stage;
-changing orchestration does not by itself establish physical insertion success.
+The skills plan 55 observed phases within 8 execution sessions, with no nested
+Atomic Skill invocation. The original 48 physical checks run at acknowledged
+command boundaries, while the 45 explicit hold targets are internal command
+ranges. Home belongs to the corresponding placement retreat. Every
+feedback-dependent target is resolved from current observations before planning.
 
+The profile scales translational rates by 2.2 and uses 1.1 rad/s for ordinary
+angular pacing. Each target can declare positive `angular_speed` in rad/s;
+omission keeps 0.5 rad/s. The two wrist lay-down phases retain 0.5 rad/s and
+15-control contact holds. All four 21-control post-close dwells, the 30-control
+soft-grasp and post-release holds, and the final 120-control acceptance hold
+are retained. Ordinary process holds and hand transitions are shortened with
+minimum sample constraints. The motion acceleration budget is 2.42; robot
+joint-speed limits remain unchanged.
 
-## Compact program with contact-aware pacing
-
-`task.yam.compact.yaml` selects `RouteTheCableCompact-YAM-v1`, an opt-in variant
-with **8 Semantic Calls / 8 Atomic Skill invocations**: three right-arm
-`PickUp`/`Place` pairs, then one left-arm `PickUp`/`Place` pair. The ordinary
-`task.yam.yaml` remains the default 57-segment / 148-call deployment.
-
-```bash
-python -m embodichain run-task \
-  --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/cable/route_the_cable/task.yam.compact.yaml \
-  --max_episodes 1 --seed 73 --headless
-```
-
-The compact integration declares 55 observed phases. `PickUp`/`Place` plan them
-directly inside one execution session; they do not start nested Atomic Skills.
-The 48 original `cable_check` calls become acknowledged physical checkpoints,
-and 45 hold targets become command ranges. Home motion is part of the
-corresponding placement retreat. Every feedback-dependent target is resolved
-again from fresh observations before its phase is planned.
-
-The fast profile combines compact orchestration with faster motion pacing.
-Translational target speeds are scaled by 2.2 and ordinary angular pacing uses
-1.1 rad/s. Each motion target may explicitly declare positive `angular_speed`
-in rad/s; omitted values retain the legacy 0.5 rad/s. The two wrist lay-down
-phases keep 0.5 rad/s and their original 15-control settling holds through the
-separate `settle_contact` target. The profile also preserves all four original
-21-control post-close dwells, the 30-control soft-grasp and post-release holds,
-and the final 120-control acceptance hold. Ordinary process holds and gripper
-transitions are shortened with minimum sample constraints. The motion-policy
-acceleration budget follows squared time scaling; authored robot joint-speed
-limits remain enforced. This targets a physical task cycle near 44 seconds,
-including the final two-second acceptance hold.
-
-The observation source supplies geometry and evidence; the existing Atomic
-engine owns IK, joint commands, timing and row-local execution. Failed rows are
-removed before geometry/timing reductions and IK. Physical grasp references are
-captured after the acknowledged close/settle command and released per row; no
-rigid cable/tool relation is projected. Newton/DexUni, physics/control timesteps,
-scene, robot, cable coefficients, native contact handling and strict task
-acceptance are unchanged. The previous normal-pacing compact implementation
-is available at commit `47c741133` for comparison.
+Newton/DexUni coupling, physics/control timesteps, rod and robot parameters,
+scene, native contact handling and physical success criteria are preserved.
+The source supplies geometry and evidence; the engine owns IK, command timing
+and row-local execution. Failed rows are removed before duration reductions
+and IK. References are acquired after acknowledged closing/settling and released
+per row, without projecting a rigid cable/tool attachment.
 
 Observed continuation is bounded and shares one invocation timeout. Offline
-`compile()`, external nominal trajectories/expansion, replay recovery and
-mid-operation invocation revisions are explicitly unsupported. Cancellation and
-failed-row holds use the ordinary runner. `PLAN_CONTINUED` events expose every
-installed phase plan. Extended accepted goal types intentionally change related
-registration/integration fingerprints; saved registrations must be regenerated.
-Fewer invocations and shorter physical duration are separately measured results.
+`compile()`, external nominal/expanded trajectories, per-phase path overrides,
+replay recovery and mid-operation invocation revisions are unsupported. The
+runner owns cancellation and failed-row holds; `PLAN_CONTINUED` records every
+installed continuation. Saved integration registrations must be regenerated
+when their supported goal descriptors or pacing declarations change.

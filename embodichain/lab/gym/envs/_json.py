@@ -27,6 +27,10 @@ __all__: list[str] = []
 
 def json_safe_copy(value: Any, *, field_name: str) -> Any:
     """Return an owned JSON value without implicit type coercion."""
+    from embodichain.utils._owned_json import _FrozenMap
+
+    if type(value) is _FrozenMap and value._strict:
+        return value.mutable_copy()
     if value is None or type(value) in {bool, int, str}:
         return value
     if type(value) is float:

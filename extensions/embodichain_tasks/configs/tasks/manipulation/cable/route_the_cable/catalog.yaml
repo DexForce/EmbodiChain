@@ -1,7 +1,6 @@
 task_key: route_the_cable
 title: Route the Cable
-summary: Task Program with material-coordinate pinches, measured slip and bounded
-  routing feedback.
+summary: Eight-call contact routing with fast pacing and preserved critical settling.
 tags:
 - cable
 - deformable
@@ -11,5 +10,3 @@ default_deployment: yam
 deployments:
   yam:
     config: task.yam.yaml
-  yam_compact:
-    config: task.yam.compact.yaml

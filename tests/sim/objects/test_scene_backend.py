@@ -1400,3 +1400,105 @@ def test_spawn_static_friction_uses_live_batch_and_selected_rows(monkeypatch):
     rigid.get_friction([0])
     assert factory.call_count == 2
     assert factory.call_args.args[0] is rebuilt
+
+
+def test_numeric_boundary_owns_samples_and_invalidates_writes_and_revisions() -> None:
+    from contextvars import copy_context
+    from embodichain.lab.sim.objects.backends._numeric_observations import (
+        numeric_observation_scope,
+        shared_pose,
+    )
+    from embodichain.lab.sim.objects.backends.scene import _checked_batch_call
+
+    class Batch:
+        def __init__(self):
+            self.value = torch.ones(2, 3)
+            self.reads = 0
+
+        def fetch_joint_position(self, out):
+            self.reads += 1
+            out.copy_(self.value)
+            return 2
+
+        def apply_joint_position(self, value):
+            self.value.copy_(value)
+            return 2
+
+        def apply_failed(self):
+            self.value.fill_(9)
+            raise RuntimeError("partial native write")
+
+    batch = Batch()
+    sim = SimpleNamespace(
+        physics_backend="default",
+        device=torch.device("cpu"),
+        physics_step_index=0,
+        _spawn_scene=SimpleNamespace(topology_revision=0),
+        get_rigid_object_uid_list=lambda: (),
+    )
+    robot = SimpleNamespace(
+        _data=SimpleNamespace(
+            articulation_view=SimpleNamespace(batch=batch, scene=sim._spawn_scene)
+        )
+    )
+
+    def read():
+        out = torch.empty(2, 3)
+        assert _checked_batch_call(batch, "fetch_joint_position", out) == 2
+        return out
+
+    with numeric_observation_scope(sim, robot):
+        escaped = copy_context()
+        first = read()
+        first.fill_(77)
+        torch.testing.assert_close(copy_context().run(read), torch.ones(2, 3))
+        assert batch.reads == 1
+        derived_calls = []
+
+        def derive():
+            derived_calls.append(True)
+            return batch.value @ torch.eye(3) + 10
+
+        derived = shared_pose(batch, True, derive)
+        derived.fill_(88)
+        torch.testing.assert_close(
+            shared_pose(batch, True, derive), torch.full((2, 3), 11.0)
+        )
+        assert len(derived_calls) == 1
+        torch.testing.assert_close(
+            shared_pose(batch, False, lambda: batch.value.clone()), torch.ones(2, 3)
+        )
+        _checked_batch_call(batch, "apply_joint_position", torch.full((2, 3), 2.0))
+        torch.testing.assert_close(read(), torch.full((2, 3), 2.0))
+        assert batch.reads == 2
+        torch.testing.assert_close(
+            shared_pose(batch, True, derive), torch.full((2, 3), 12.0)
+        )
+        assert len(derived_calls) == 2
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            torch.testing.assert_close(
+                shared_pose(batch, True, derive),
+                torch.full((2, 3), 12.0, dtype=torch.bfloat16),
+            )
+        assert len(derived_calls) == 3
+        sim.physics_step_index += 1
+        batch.value.fill_(3)
+        assert read()[0, 0] == 3 and batch.reads == 3
+        sim._spawn_scene.topology_revision += 1
+        batch.value.fill_(4)
+        assert read()[0, 0] == 4 and batch.reads == 4
+        with pytest.raises(RuntimeError, match="partial native"):
+            _checked_batch_call(batch, "apply_failed")
+        assert read()[0, 0] == 9 and batch.reads == 5
+        with numeric_observation_scope(sim, robot):
+            _checked_batch_call(batch, "apply_joint_position", torch.full((2, 3), 6.0))
+            assert read()[0, 0] == 6
+        assert read()[0, 0] == 6 and batch.reads == 7
+    # Same physics tick, new boundary: reset/prepare writes are never reused.
+    batch.value.fill_(8)
+    with numeric_observation_scope(sim, robot):
+        assert read()[0, 0] == 8 and batch.reads == 8
+    batch.value.fill_(10)
+    assert escaped.run(read)[0, 0] == 10 and batch.reads == 9
+    batch.value.fill_(11)
+    assert escaped.run(read)[0, 0] == 11 and batch.reads == 10

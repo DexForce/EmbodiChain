@@ -236,8 +236,16 @@ class _SpatialCfg:
     joint_offset_scale: float = 0.05
     dedup_tolerance: float | None = None
     via_count: int = 1
+    joint_samples: dict[str, float] = {}
+    knot_samples: tuple[float, ...] = ()
 
     def __post_init__(self) -> None:
+        from ._samples import validate_samples
+
+        self.joint_samples, self.knot_samples = validate_samples(
+            self.joint_samples, self.knot_samples, self.via_count
+        )
+
         self.operators = _strings(self.operators, "trajectory.spatial.operators")
         if any(item not in ("joint_residual", "via_points") for item in self.operators):
             raise ValueError(
@@ -520,6 +528,8 @@ class CombinedExpansionProfile:
                 "enabled",
                 "operators",
                 "joint_offset_scale",
+                "joint_samples",
+                "knot_samples",
                 "dedup_tolerance",
                 "via_count",
             },

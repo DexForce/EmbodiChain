@@ -1,4 +1,4 @@
-integration_id: route_the_cable_v1
+integration_id: route_the_cable_compact_fast_v1
 program_id: route_the_cable
 requires:
   scene_contract: cable_board_v1
@@ -13,26 +13,18 @@ profile:
   defaults:
     pick_up:
       primary: right_manipulator
-    move_end_effector:
-      primary: right_manipulator
-    move_joints:
+    place:
       primary: right_manipulator
   skill_options:
-    simulation.cable_pick:
+    simulation.cable_pickup:
       kind: pick_up
-      hand_interp_steps: 48
+      hand_interp_steps: 22
       grasp_settle_steps: 21
       lift_height: 0.0
       pre_grasp_distance: 0.0
-    simulation.cable_move:
-      kind: move_end_effector
-      preserve_cartesian_samples: true
-    simulation.cable_joint:
-      kind: move_joints
-      preserve_samples: true
-    simulation.cable_check:
-      kind: move_joints
-      preserve_samples: true
+    simulation.cable_place:
+      kind: place
+      release_settle_steps: 0
   effect_monitors: {}
 runtime_services:
   cable_material:
@@ -133,11 +125,12 @@ runtime_services:
         - null
         - null
         - 0.81
-        speed: 0.12
+        speed: 0.264
         port_screen: false
+        angular_speed: 1.1
       settle_motion:
         kind: hold
-        samples: 15
+        samples: 7
       right_approach_0.162_tracking:
         kind: check
         condition: pose
@@ -164,6 +157,8 @@ runtime_services:
         - 0.774
         material_distance: 0.162
         retract_distance: 0.0015
+        speed: 0.11000000000000001
+        angular_speed: 1.1
       raise_0_tracking:
         kind: check
         condition: pose
@@ -176,6 +171,8 @@ runtime_services:
         - 0.5
         - -0.255
         - null
+        speed: 0.11000000000000001
+        angular_speed: 1.1
       carry_0_tracking:
         kind: check
         condition: pose
@@ -188,6 +185,8 @@ runtime_services:
         - null
         - null
         - 0.7645
+        speed: 0.11000000000000001
+        angular_speed: 1.1
       lower_0_tracking:
         kind: check
         condition: pose
@@ -196,7 +195,7 @@ runtime_services:
         stop_when_seated: false
       release_0:
         kind: open
-        samples: 36
+        samples: 17
         finger_position: 0.008
         release_part: right_arm
       retreat_0:
@@ -205,7 +204,8 @@ runtime_services:
         - null
         - null
         - 0.82
-        speed: 0.08
+        speed: 0.17600000000000002
+        angular_speed: 1.1
       retreat_0_tracking:
         kind: check
         condition: pose
@@ -214,7 +214,7 @@ runtime_services:
         stop_when_seated: false
       open_clear_of_spool_0:
         kind: open
-        samples: 36
+        samples: 17
         release_part: right_arm
       right_approach_0.282:
         kind: material
@@ -223,8 +223,9 @@ runtime_services:
         - null
         - null
         - 0.81
-        speed: 0.12
+        speed: 0.264
         port_screen: false
+        angular_speed: 1.1
       right_approach_0.282_tracking:
         kind: check
         condition: pose
@@ -251,6 +252,8 @@ runtime_services:
         - 0.78
         material_distance: 0.282
         retract_distance: 0.003
+        speed: 0.11000000000000001
+        angular_speed: 1.1
       raise_1_tracking:
         kind: check
         condition: pose
@@ -263,6 +266,8 @@ runtime_services:
         - 0.528
         - -0.14
         - null
+        speed: 0.11000000000000001
+        angular_speed: 1.1
       carry_1_tracking:
         kind: check
         condition: pose
@@ -275,6 +280,8 @@ runtime_services:
         - null
         - null
         - 0.7645
+        speed: 0.11000000000000001
+        angular_speed: 1.1
       lower_1_tracking:
         kind: check
         condition: pose
@@ -283,7 +290,7 @@ runtime_services:
         stop_when_seated: false
       release_1:
         kind: open
-        samples: 36
+        samples: 17
         finger_position: 0.008
         release_part: right_arm
       retreat_1:
@@ -292,7 +299,8 @@ runtime_services:
         - null
         - null
         - 0.82
-        speed: 0.08
+        speed: 0.17600000000000002
+        angular_speed: 1.1
       retreat_1_tracking:
         kind: check
         condition: pose
@@ -301,7 +309,7 @@ runtime_services:
         stop_when_seated: false
       open_clear_of_spool_1:
         kind: open
-        samples: 36
+        samples: 17
         release_part: right_arm
       right_approach_0.438:
         kind: material
@@ -310,8 +318,9 @@ runtime_services:
         - null
         - null
         - 0.81
-        speed: 0.12
+        speed: 0.264
         port_screen: false
+        angular_speed: 1.1
       right_approach_0.438_tracking:
         kind: check
         condition: pose
@@ -338,6 +347,8 @@ runtime_services:
         - 0.8
         material_distance: 0.438
         retract_distance: 0.008
+        speed: 0.11000000000000001
+        angular_speed: 1.1
       raise_2_tracking:
         kind: check
         condition: pose
@@ -350,6 +361,8 @@ runtime_services:
         - 0.555
         - -0.01
         - null
+        speed: 0.11000000000000001
+        angular_speed: 1.1
       carry_2_tracking:
         kind: check
         condition: pose
@@ -362,6 +375,8 @@ runtime_services:
         - null
         - null
         - 0.7645
+        speed: 0.11000000000000001
+        angular_speed: 1.1
       lower_2_tracking:
         kind: check
         condition: pose
@@ -370,7 +385,7 @@ runtime_services:
         stop_when_seated: false
       release_2:
         kind: open
-        samples: 36
+        samples: 17
         finger_position: 0.008
         release_part: right_arm
       retreat_2:
@@ -379,7 +394,8 @@ runtime_services:
         - null
         - null
         - 0.82
-        speed: 0.08
+        speed: 0.17600000000000002
+        angular_speed: 1.1
       retreat_2_tracking:
         kind: check
         condition: pose
@@ -388,11 +404,12 @@ runtime_services:
         stop_when_seated: false
       open_clear_of_spool_2:
         kind: open
-        samples: 36
+        samples: 17
         release_part: right_arm
       home_right:
         kind: home
-        speed: 0.15
+        speed: 0.33
+        angular_speed: 1.1
       home_right_tracking:
         kind: check
         condition: pose
@@ -406,8 +423,9 @@ runtime_services:
         - null
         - null
         - 0.81
-        speed: 0.12
+        speed: 0.264
         port_screen: true
+        angular_speed: 1.1
       left_approach_0.57_tracking:
         kind: check
         condition: pose
@@ -432,6 +450,8 @@ runtime_services:
         - 0.586
         - 0.055
         - 0.795
+        speed: 0.11000000000000001
+        angular_speed: 1.1
       stage_free_end_tracking:
         kind: check
         condition: pose
@@ -444,9 +464,10 @@ runtime_services:
         - null
         - null
         - 0.795
-        speed: 0.025
+        speed: 0.05500000000000001
         tolerance: 0.006
         stop_when_seated: true
+        angular_speed: 1.1
       lower_channel_0_tracking:
         kind: check
         condition: pose
@@ -461,10 +482,11 @@ runtime_services:
         - null
         maximum_correction: 0.005
         maximum_y: 0.05
-        speed: 0.02
+        speed: 0.044000000000000004
         tolerance: 0.006
         stop_when_seated: true
         maximum_z_correction: 0.003
+        angular_speed: 1.1
       align_tip_0_0_tracking:
         kind: check
         condition: pose
@@ -479,10 +501,11 @@ runtime_services:
         - null
         maximum_correction: 0.005
         maximum_y: 0.05
-        speed: 0.02
+        speed: 0.044000000000000004
         tolerance: 0.006
         stop_when_seated: true
         maximum_z_correction: 0.003
+        angular_speed: 1.1
       align_tip_0_1_tracking:
         kind: check
         condition: pose
@@ -495,9 +518,10 @@ runtime_services:
         - null
         - null
         - 0.7875
-        speed: 0.025
+        speed: 0.05500000000000001
         tolerance: 0.006
         stop_when_seated: true
+        angular_speed: 1.1
       lower_channel_1_tracking:
         kind: check
         condition: pose
@@ -512,10 +536,11 @@ runtime_services:
         - null
         maximum_correction: 0.005
         maximum_y: 0.05
-        speed: 0.02
+        speed: 0.044000000000000004
         tolerance: 0.006
         stop_when_seated: true
         maximum_z_correction: 0.003
+        angular_speed: 1.1
       align_tip_1_0_tracking:
         kind: check
         condition: pose
@@ -530,10 +555,11 @@ runtime_services:
         - null
         maximum_correction: 0.005
         maximum_y: 0.05
-        speed: 0.02
+        speed: 0.044000000000000004
         tolerance: 0.006
         stop_when_seated: true
         maximum_z_correction: 0.003
+        angular_speed: 1.1
       align_tip_1_1_tracking:
         kind: check
         condition: pose
@@ -546,9 +572,10 @@ runtime_services:
         - null
         - null
         - 0.78
-        speed: 0.025
+        speed: 0.05500000000000001
         tolerance: 0.006
         stop_when_seated: true
+        angular_speed: 1.1
       lower_channel_2_tracking:
         kind: check
         condition: pose
@@ -563,10 +590,11 @@ runtime_services:
         - null
         maximum_correction: 0.005
         maximum_y: 0.05
-        speed: 0.02
+        speed: 0.044000000000000004
         tolerance: 0.006
         stop_when_seated: true
         maximum_z_correction: 0.003
+        angular_speed: 1.1
       align_tip_2_0_tracking:
         kind: check
         condition: pose
@@ -581,10 +609,11 @@ runtime_services:
         - null
         maximum_correction: 0.005
         maximum_y: 0.05
-        speed: 0.02
+        speed: 0.044000000000000004
         tolerance: 0.006
         stop_when_seated: true
         maximum_z_correction: 0.003
+        angular_speed: 1.1
       align_tip_2_1_tracking:
         kind: check
         condition: pose
@@ -599,6 +628,8 @@ runtime_services:
         minimum_tool_pitch: -0.3490658503988659
         tolerance: 0.006
         stop_when_seated: true
+        speed: 0.11000000000000001
+        angular_speed: 1.1
       pitch_free_end_0_tracking:
         kind: check
         condition: pose
@@ -613,6 +644,8 @@ runtime_services:
         minimum_tool_pitch: -0.3490658503988659
         tolerance: 0.006
         stop_when_seated: true
+        speed: 0.11000000000000001
+        angular_speed: 1.1
       pitch_free_end_1_tracking:
         kind: check
         condition: pose
@@ -625,9 +658,10 @@ runtime_services:
         - null
         - null
         - 0.7685
-        speed: 0.025
+        speed: 0.05500000000000001
         tolerance: 0.006
         stop_when_seated: true
+        angular_speed: 1.1
       lower_channel_3_tracking:
         kind: check
         condition: pose
@@ -636,7 +670,7 @@ runtime_services:
         stop_when_seated: true
       soften_free_end:
         kind: grip_adjust
-        samples: 60
+        samples: 28
         finger_position: 0.004
       settle_soft_grasp:
         kind: hold
@@ -656,10 +690,11 @@ runtime_services:
         maximum_correction: 0.005
         maximum_y: 0.05
         minimum_z: 0.7655
-        speed: 0.02
+        speed: 0.044000000000000004
         tolerance: 0.006
         stop_when_seated: false
         maximum_z_correction: 0.003
+        angular_speed: 1.1
       align_tip_3_0_tracking:
         kind: check
         condition: pose
@@ -675,10 +710,11 @@ runtime_services:
         maximum_correction: 0.005
         maximum_y: 0.05
         minimum_z: 0.7655
-        speed: 0.02
+        speed: 0.044000000000000004
         tolerance: 0.006
         stop_when_seated: false
         maximum_z_correction: 0.003
+        angular_speed: 1.1
       align_tip_3_1_tracking:
         kind: check
         condition: pose
@@ -689,8 +725,9 @@ runtime_services:
         kind: lay_down
         maximum_rotation: 0.17453292519943295
         minimum_z: 0.7625
-        speed: 0.015
+        speed: 0.033
         tolerance: 0.006
+        angular_speed: 0.5
       lay_down_free_end_0_tracking:
         kind: check
         condition: pose
@@ -701,8 +738,9 @@ runtime_services:
         kind: lay_down
         maximum_rotation: 0.17453292519943295
         minimum_z: 0.7625
-        speed: 0.015
+        speed: 0.033
         tolerance: 0.006
+        angular_speed: 0.5
       lay_down_free_end_1_tracking:
         kind: check
         condition: pose
@@ -714,7 +752,7 @@ runtime_services:
         condition: seated
       release_free_end:
         kind: open
-        samples: 60
+        samples: 28
         release_part: left_arm
         finger_position: 0.008
       settle_released_end:
@@ -725,8 +763,9 @@ runtime_services:
         position:
         - null
         - null
-        - 0.80
-        speed: 0.025
+        - 0.8
+        speed: 0.05500000000000001
+        angular_speed: 1.1
       retreat_free_end_tracking:
         kind: check
         condition: pose
@@ -739,7 +778,8 @@ runtime_services:
         - null
         - 0.015
         - 0.82
-        speed: 0.08
+        speed: 0.17600000000000002
+        angular_speed: 1.1
       raise_clear_of_port_tracking:
         kind: check
         condition: pose
@@ -747,7 +787,8 @@ runtime_services:
         orientation_tolerance: 0.25
       home_left:
         kind: home
-        speed: 0.15
+        speed: 0.33
+        angular_speed: 1.1
       home_left_tracking:
         kind: check
         condition: pose
@@ -765,9 +806,10 @@ runtime_services:
         - null
         maximum_correction: 0.005
         maximum_y: 0.05
-        speed: 0.02
+        speed: 0.044000000000000004
         tolerance: 0.006
         stop_when_seated: true
+        angular_speed: 1.1
       align_over_port_0_tracking:
         kind: check
         condition: pose
@@ -782,9 +824,10 @@ runtime_services:
         - null
         maximum_correction: 0.005
         maximum_y: 0.05
-        speed: 0.02
+        speed: 0.044000000000000004
         tolerance: 0.006
         stop_when_seated: true
+        angular_speed: 1.1
       align_over_port_1_tracking:
         kind: check
         condition: pose
@@ -799,9 +842,10 @@ runtime_services:
         - null
         maximum_correction: 0.005
         maximum_y: 0.05
-        speed: 0.02
+        speed: 0.044000000000000004
         tolerance: 0.006
         stop_when_seated: true
+        angular_speed: 1.1
       align_over_port_2_tracking:
         kind: check
         condition: pose
@@ -816,9 +860,10 @@ runtime_services:
         - null
         maximum_correction: 0.005
         maximum_y: 0.05
-        speed: 0.02
+        speed: 0.044000000000000004
         tolerance: 0.006
         stop_when_seated: true
+        angular_speed: 1.1
       align_over_port_3_tracking:
         kind: check
         condition: pose
@@ -833,6 +878,8 @@ runtime_services:
         - null
         - null
         - 0.78
+        speed: 0.11000000000000001
+        angular_speed: 1.1
       raise_free_end_tracking:
         kind: check
         condition: pose
@@ -841,5 +888,373 @@ runtime_services:
         stop_when_seated: false
       open_clear_of_port:
         kind: open
-        samples: 36
+        samples: 17
         release_part: left_arm
+      settle_contact:
+        kind: hold
+        samples: 15
+    operations:
+      right_pick_0:
+        kind: pick_up
+        phases:
+        - kind: pose
+          target: right_approach_0.162
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: right_approach_0.162_tracking
+        - kind: grasp
+          target: right_grasp_0.162
+        - kind: pose
+          target: raise_0
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: raise_0_tracking
+          - kind: check
+            target: right_lifted_0.162
+      right_place_0:
+        kind: place
+        phases:
+        - kind: pose
+          target: carry_0
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: carry_0_tracking
+        - kind: pose
+          target: lower_0
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: lower_0_tracking
+        - kind: joint
+          target: release_0
+        - kind: pose
+          target: retreat_0
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: retreat_0_tracking
+        - kind: joint
+          target: open_clear_of_spool_0
+      right_pick_1:
+        kind: pick_up
+        phases:
+        - kind: pose
+          target: right_approach_0.282
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: right_approach_0.282_tracking
+        - kind: grasp
+          target: right_grasp_0.282
+        - kind: pose
+          target: raise_1
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: raise_1_tracking
+          - kind: check
+            target: right_lifted_0.282
+      right_place_1:
+        kind: place
+        phases:
+        - kind: pose
+          target: carry_1
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: carry_1_tracking
+        - kind: pose
+          target: lower_1
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: lower_1_tracking
+        - kind: joint
+          target: release_1
+        - kind: pose
+          target: retreat_1
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: retreat_1_tracking
+        - kind: joint
+          target: open_clear_of_spool_1
+      right_pick_2:
+        kind: pick_up
+        phases:
+        - kind: pose
+          target: right_approach_0.438
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: right_approach_0.438_tracking
+        - kind: grasp
+          target: right_grasp_0.438
+        - kind: pose
+          target: raise_2
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: raise_2_tracking
+          - kind: check
+            target: right_lifted_0.438
+      right_place_2:
+        kind: place
+        phases:
+        - kind: pose
+          target: carry_2
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: carry_2_tracking
+        - kind: pose
+          target: lower_2
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: lower_2_tracking
+        - kind: joint
+          target: release_2
+        - kind: pose
+          target: retreat_2
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: retreat_2_tracking
+        - kind: joint
+          target: open_clear_of_spool_2
+        - kind: pose
+          target: home_right
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: home_right_tracking
+      left_pick:
+        kind: pick_up
+        phases:
+        - kind: pose
+          target: left_approach_0.57
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: left_approach_0.57_tracking
+        - kind: grasp
+          target: left_grasp_0.57
+        - kind: pose
+          target: raise_free_end
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: raise_free_end_tracking
+          - kind: check
+            target: left_lifted_0.57
+      left_place:
+        kind: place
+        phases:
+        - kind: pose
+          target: stage_free_end
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: stage_free_end_tracking
+        - kind: pose
+          target: align_over_port_0
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: align_over_port_0_tracking
+        - kind: pose
+          target: align_over_port_1
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: align_over_port_1_tracking
+        - kind: pose
+          target: align_over_port_2
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: align_over_port_2_tracking
+        - kind: pose
+          target: align_over_port_3
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: align_over_port_3_tracking
+        - kind: pose
+          target: lower_channel_0
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: lower_channel_0_tracking
+        - kind: pose
+          target: align_tip_0_0
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: align_tip_0_0_tracking
+        - kind: pose
+          target: align_tip_0_1
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: align_tip_0_1_tracking
+        - kind: pose
+          target: lower_channel_1
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: lower_channel_1_tracking
+        - kind: pose
+          target: align_tip_1_0
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: align_tip_1_0_tracking
+        - kind: pose
+          target: align_tip_1_1
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: align_tip_1_1_tracking
+        - kind: pose
+          target: lower_channel_2
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: lower_channel_2_tracking
+        - kind: pose
+          target: align_tip_2_0
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: align_tip_2_0_tracking
+        - kind: pose
+          target: align_tip_2_1
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: align_tip_2_1_tracking
+        - kind: pose
+          target: pitch_free_end_0
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: pitch_free_end_0_tracking
+        - kind: pose
+          target: pitch_free_end_1
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: pitch_free_end_1_tracking
+        - kind: pose
+          target: lower_channel_3
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: lower_channel_3_tracking
+        - kind: joint
+          target: soften_free_end
+          after:
+          - kind: hold
+            target: settle_soft_grasp
+          - kind: check
+            target: soften_free_end_tracking
+        - kind: pose
+          target: align_tip_3_0
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: align_tip_3_0_tracking
+        - kind: pose
+          target: align_tip_3_1
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: align_tip_3_1_tracking
+        - kind: pose
+          target: lay_down_free_end_0
+          after:
+          - kind: hold
+            target: settle_contact
+          - kind: check
+            target: lay_down_free_end_0_tracking
+        - kind: pose
+          target: lay_down_free_end_1
+          after:
+          - kind: hold
+            target: settle_contact
+          - kind: check
+            target: lay_down_free_end_1_tracking
+          - kind: check
+            target: release_alignment
+        - kind: joint
+          target: release_free_end
+          after:
+          - kind: hold
+            target: settle_released_end
+        - kind: pose
+          target: retreat_free_end
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: retreat_free_end_tracking
+        - kind: pose
+          target: raise_clear_of_port
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: raise_clear_of_port_tracking
+        - kind: joint
+          target: open_clear_of_port
+        - kind: pose
+          target: home_left
+          after:
+          - kind: hold
+            target: settle_motion
+          - kind: check
+            target: home_left_tracking
+          - kind: hold
+            target: settle_and_validate

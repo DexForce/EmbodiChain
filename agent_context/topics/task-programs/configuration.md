@@ -280,9 +280,13 @@ retains the original internal-axis pouring behavior.
 `scene_binding.cables` declares material-state native identities without rigid
 object semantics or root-pose providers. The allowlisted
 `runtime_services.cable_material` binds those identities to measured material
-coordinates and closed target declarations. Its calls lower to existing
-`PickUp(ContactGraspGoal)`, `MoveEndEffector`, and `MoveJoints` skills; the program
-owns stage ordering. The bridge captures contact references only after an
+coordinates and closed target declarations. Declared contact operations lower
+to `PickUp(ContactPickUpGoal)` and `Place(ContactPlaceGoal)`; bounded observed
+continuations keep feedback phases inside the same invocation. The program
+owns operation ordering. Compatibility move/joint/check adapters retain their
+explicit configured call contracts. Registered grounding receives eligible rows
+through `PlanningContext.planning_mask`, before shared duration reductions.
+The bridge captures contact references only after an
 acknowledged close frame and checks material slip after every consumed action.
 Measured cable conditions reject individual eligible rows. Healthy rows continue
 to the next stage.

@@ -257,6 +257,21 @@ def test_contact_path_rejects_replay_recovery_of_partially_executed_operation():
         engine.plan(invocation, context)
 
 
+def test_contact_path_rejects_phase_path_overrides_before_observing_geometry():
+    source = _Source()
+    engine, invocation, context = _setup(source)
+    policy = replace(
+        invocation.motion_policy,
+        interpolation_mode="fixed_grid",
+        acceleration_limit=None,
+        ik_seed_mode="sequential",
+        phase_paths={"approach": "cartesian"},
+    )
+    with pytest.raises(ValueError, match="fixed sampling policy"):
+        engine.plan(replace(invocation, motion_policy=policy), context)
+    assert source.masks == []
+
+
 def test_contact_path_timeout_covers_the_whole_invocation():
     source = _Source()
     engine, invocation, context = _setup(source)

@@ -313,6 +313,7 @@ def _plan_contact_phase(
         request.motion_policy.sample_count_retries
         or request.motion_policy.segment_sample_count_retries
         or request.motion_policy.segment_continuous_ik_recovery
+        or request.motion_policy.phase_paths
     ):
         raise ValueError("Observed contact paths require a fixed sampling policy.")
     if (

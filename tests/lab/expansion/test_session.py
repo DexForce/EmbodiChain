@@ -59,6 +59,95 @@ def test_old_and_new_session_paths_export_the_identical_class():
     assert ExpansionSession.__module__ == "embodichain.lab.expansion.session"
 
 
+def test_competing_rollouts_keep_one_pending_write_and_confirmed_quota():
+    session = ExpansionSession(
+        ExpansionSessionCfg.from_mapping(
+            {
+                "collection": {
+                    "target_committed_episodes": 1,
+                    "max_proposals": 3,
+                    "max_rollout_attempts": 3,
+                },
+                "execution": {"ready_high_watermark": 3, "ready_low_watermark": 0},
+                "persistence": {"pending_episode_limit": 2, "pending_max_bytes": 4096},
+            }
+        )
+    )
+    session.register_case(
+        SceneCase("case", "initial", "scene", "task", "robot"),
+        torch.tensor([[-1.0, 1.0]]),
+        joint_names=("joint",),
+    )
+    passed = ValidationResult(
+        (
+            ValidationCheck("path_collision", "passed"),
+            ValidationCheck("task_success", "passed"),
+        )
+    )
+    episodes = []
+    for index in range(2):
+        identity, _ = session.propose(
+            "case",
+            "initial",
+            source_id="source",
+            source_revision="v1",
+            template_id=f"recipe{index}",
+            operator_id="episode",
+        )
+        session.add_prepared_episode(EpisodeCandidate(identity, "{}"), passed)
+        if index:
+            assert (
+                session.take_ready(
+                    "case",
+                    "initial",
+                    episode_byte_budget=2048,
+                    candidate_id=identity.candidate_id,
+                )
+                is None
+            )
+        assert (
+            session.take_ready(
+                "case",
+                "initial",
+                episode_byte_budget=2048,
+                candidate_id=identity.candidate_id,
+                speculative=True,
+            )
+            is not None
+        )
+        session.mark_rollout_started(identity)
+        episode_id, commit_id = session.episode_ids(identity)
+        episodes.append(
+            ExpertEpisode(
+                identity,
+                {"joint_positions": torch.tensor([[0.0], [0.1]])},
+                torch.tensor([[0.1]]),
+                torch.tensor([0.0, 0.1]),
+                "qpos",
+                passed,
+                episode_id,
+                commit_id,
+            )
+        )
+    assert session.accept_episode(episodes[0])
+    # Even before the writer confirms its receipt, the second qualified row
+    # cannot reserve or write the only quota slot.
+    assert not session.accept_episode(episodes[1])
+    assert session.snapshot()["counts"]["validated_accepted"] == 1
+    episode = episodes[0]
+    receipt = CommitReceipt(
+        episode.episode_id,
+        episode.identity.candidate_id,
+        episode.identity.attempt_id,
+        "stored",
+        episode.commit_id,
+        "case",
+    )
+    assert session.apply_receipt(receipt)
+    assert not session.apply_receipt(receipt)
+    assert session.snapshot()["counts"]["committed"] == 1
+
+
 @pytest.mark.parametrize("legacy", [False, True])
 def test_explicit_policy_keeps_legacy_trajectory_dedup_and_generic_episode_credit(
     legacy,

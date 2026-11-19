@@ -1,0 +1,201 @@
+schema_version: 1
+engine:
+  episodes_per_operator: 128
+  max_attempts: 4096
+  max_steps: 1200
+  max_wall_time_s: 1800.0
+  settling_steps: 30
+  capture_media: false
+  collision_backend: newton
+  collision_device: cpu
+scene:
+  cube:
+    translation_m:
+    - - -0.48
+      - 0.12
+    - - -0.22
+      - 0.18
+    - - 0
+      - 0
+    yaw_rad:
+    - -1.5707963267948966
+    - 1.5707963267948966
+  goal:
+    translation_m:
+    - - -0.2
+      - 0.1
+    - - -0.18
+      - 0.12
+    - - 0
+      - 0
+    yaw_rad:
+    - -1.5707963267948966
+    - 1.5707963267948966
+trajectory:
+  operators:
+  - object_pose
+  joint_offset_scale: 0.005
+  via_count: 1
+  max_proposals: 64
+  minimum_joint_delta: 0.002
+  velocity_limit: 0.5
+  acceleration_limit: 0.5
+  nullspace_task_rows:
+  - 0
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  nullspace_translation_tolerance_m: 0.001
+  nullspace_rotation_tolerance_rad: 0.01
+  free_phases:
+    place:
+    - retract
+validation:
+  initial_checks:
+  - kind: support_bounds
+    entity: cube
+    lower:
+    - -1
+    - -0.4
+    - -0.003
+    upper:
+    - -0.2
+    - 0.7
+    - 0.05
+  final_checks:
+  - &id001
+    kind: pose_relative
+    entity: cube
+    other: goal
+    position_tolerance:
+    - 0.02
+    - 0.02
+    - 0.01
+    yaw_tolerance_rad: 0.17453292519943295
+    yaw_period_rad: 3.141592653589793
+    tilt_tolerance_rad: 0.17453292519943295
+    position_offset:
+    - 0
+    - 0
+    - 0.12
+  - &id002
+    kind: joint_range
+    joint: gripper_finger1_joint_1
+    lower: -0.001
+    upper: 0.005
+  - &id003
+    kind: speed_below
+    entity: cube
+    linear_m_s: 0.03
+    angular_rad_s: 0.2
+  - kind: transport_guard
+    entity: cube
+    other: goal
+    lift_height_m: 0.05
+    minimum_transit_height_m: 0.025
+    goal_tolerance_m: 0.03
+  events:
+  - event_id: lift
+    conditions:
+    - kind: lifted
+      entity: cube
+      height_m: 0.05
+  - event_id: placed_and_released
+    conditions:
+    - *id001
+    - *id002
+    - *id003
+    consecutive_steps: 3
+  allowed_contacts:
+  - - cube
+    - UR5/gripper_finger1_link_1
+  - - cube
+    - UR5/gripper_finger2_link_1
+  - - cube
+    - default_plane
+  mounting_contacts:
+  - - '@root'
+    - default_plane
+scene_sampling:
+  strategy: bounded_pose
+  workspace_source: joint_uniform_fk
+  control_part: arm
+  sample_count: 4096
+  uniform_fraction: 0.25
+  max_candidates: 4096
+  max_rollouts: 128
+  max_ik_calls: 32768
+  max_planning_calls: 4096
+  targets:
+    cube:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - -1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - -1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    goal:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - -1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - -1.0
+      - 0.12
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+scheduling:
+  policy: fifo
+  pool_size: 64
+  exploration_fraction: 0.25
+pose_coverage:
+  entity: cube
+  place_reference: goal
+  grids:
+    pick:
+      lower:
+      - -0.9
+      - -0.3
+      - -1.5707963267948966
+      upper:
+      - -0.3
+      - 0.1
+      - 1.5707963267948966
+      cell_size:
+      - 0.1
+      - 0.1
+      - 0.5235987755982988
+      yaw_period: 3.141592653589793
+    place:
+      lower:
+      - -0.6
+      - 0.3
+      - -1.5707963267948966
+      upper:
+      - -0.3
+      - 0.6
+      - 1.5707963267948966
+      cell_size:
+      - 0.1
+      - 0.1
+      - 0.5235987755982988
+      yaw_period: 3.141592653589793

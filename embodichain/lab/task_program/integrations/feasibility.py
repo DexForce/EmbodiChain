@@ -23,6 +23,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+import math
+import json
 import numpy as np
 from scipy.spatial.transform import Rotation
 
@@ -91,6 +93,14 @@ class MeasuredTaskMonitor:
             self.events.append((data["event_id"], conditions, steps))
         if len({e[0] for e in self.events}) != len(self.events):
             raise ValueError("event IDs must be unique")
+        event_conditions = (
+            condition for _, conditions, _ in self.events for condition in conditions
+        )
+        self._transport_guards = {
+            json.dumps(condition, sort_keys=True): condition
+            for condition in (*self.final_checks, *event_conditions)
+            if condition["kind"] == "transport_guard"
+        }
         self.initial_heights = {}
         self._index = 0
         self._steps = 0
@@ -98,12 +108,28 @@ class MeasuredTaskMonitor:
         self._previous = []
         self._order_ok = True
         self.receipts = []
+        self._transport = {}
 
     @staticmethod
     def _validate(value: Mapping[str, object]) -> dict:
         kinds = {
             "pose_near": {"entity", "position", "tolerance_m"},
+            "pose_relative": {
+                "entity",
+                "other",
+                "position_tolerance",
+                "yaw_tolerance_rad",
+                "yaw_period_rad",
+                "tilt_tolerance_rad",
+            },
             "lifted": {"entity", "height_m"},
+            "transport_guard": {
+                "entity",
+                "other",
+                "lift_height_m",
+                "minimum_transit_height_m",
+                "goal_tolerance_m",
+            },
             "joint_range": {"joint", "lower", "upper"},
             "speed_below": {"entity", "linear_m_s", "angular_rad_s"},
             "axis_relation": {"entity", "other", "axis", "lower", "upper"},
@@ -114,7 +140,13 @@ class MeasuredTaskMonitor:
                 "Unsupported measured rigid-task predicate"
             )
         kind = value["kind"]
-        data = _closed(value, kinds[kind] | {"kind", "negate"}, "predicate")
+        data = _closed(
+            value,
+            kinds[kind]
+            | {"kind", "negate"}
+            | ({"position_offset"} if kind == "pose_relative" else set()),
+            "predicate",
+        )
         if (
             not kinds[kind] <= data.keys()
             or type(data.get("negate", False)) is not bool
@@ -153,6 +185,51 @@ class MeasuredTaskMonitor:
             raise ValueError(
                 "Axis relation requires an arena axis and finite ordered bounds"
             )
+        if kind == "pose_relative":
+            offset = np.asarray(data.get("position_offset", (0, 0, 0)), dtype=float)
+            if offset.shape != (3,) or not np.isfinite(offset).all():
+                raise ValueError("position_offset must have three finite values")
+            tolerance = np.asarray(data["position_tolerance"], dtype=float)
+            if (
+                tolerance.shape != (3,)
+                or not np.isfinite(tolerance).all()
+                or np.any(tolerance <= 0)
+            ):
+                raise ValueError(
+                    "position_tolerance must contain three positive finite values"
+                )
+            for key in ("yaw_tolerance_rad", "yaw_period_rad", "tilt_tolerance_rad"):
+                if (
+                    type(data[key]) not in (int, float)
+                    or not math.isfinite(data[key])
+                    or data[key] <= 0
+                ):
+                    raise ValueError(f"{key} must be finite and positive")
+            if data["yaw_tolerance_rad"] > data[
+                "yaw_period_rad"
+            ] / 2 or not math.isclose(
+                2 * math.pi / data["yaw_period_rad"],
+                round(2 * math.pi / data["yaw_period_rad"]),
+            ):
+                raise ValueError(
+                    "Yaw symmetry must divide a full turn and tolerance cannot exceed half a period"
+                )
+        if kind == "transport_guard":
+            for key in (
+                "lift_height_m",
+                "minimum_transit_height_m",
+                "goal_tolerance_m",
+            ):
+                if (
+                    type(data[key]) not in (int, float)
+                    or not math.isfinite(data[key])
+                    or data[key] <= 0
+                ):
+                    raise ValueError(f"{key} must be finite and positive")
+            if data["minimum_transit_height_m"] >= data["lift_height_m"]:
+                raise ValueError(
+                    "Transit threshold must be below the verified lift height"
+                )
         return data
 
     def reset(self, env: Any) -> None:
@@ -166,6 +243,7 @@ class MeasuredTaskMonitor:
         self._previous = [False] * len(self.events)
         self._order_ok = True
         self.receipts = []
+        self._transport = {}
 
     def predicate(self, env: Any, condition: Mapping[str, object]) -> bool:
         """Read one explicitly declared condition from current physical state.
@@ -176,7 +254,20 @@ class MeasuredTaskMonitor:
         Returns:
             Physical truth value; unknown entities/joints are configuration errors.
         """
+        cached = getattr(self, "_batch_predicates", None)
+        if cached is not None:
+            from ._measured_batch import _MeasuredChecks
+
+            key = _MeasuredChecks.key(condition)
+            if key in cached:
+                return bool(cached[key][self.env_id])
         kind = condition["kind"]
+        if kind == "transport_guard":
+            lifted, dropped = self._transport.get(
+                json.dumps(dict(condition), sort_keys=True), (False, False)
+            )
+            passed = lifted and not dropped
+            return bool(not passed if condition.get("negate", False) else passed)
         if kind == "joint_range":
             index = env.robot.joint_names.index(condition["joint"])
             value = float(env.robot.get_qpos()[self.env_id, index])
@@ -188,7 +279,40 @@ class MeasuredTaskMonitor:
             position = (
                 obj.get_local_pose()[self.env_id, :3].detach().cpu().double().numpy()
             )
-            if kind == "pose_near":
+            if kind == "pose_relative":
+                other = env.sim.get_rigid_object(condition["other"])
+                if other is None:
+                    raise ValueError("Relative target entity is absent")
+                actual = (
+                    obj.get_local_pose(to_matrix=True)[self.env_id]
+                    .detach()
+                    .cpu()
+                    .double()
+                    .numpy()
+                )
+                target = (
+                    other.get_local_pose(to_matrix=True)[self.env_id]
+                    .detach()
+                    .cpu()
+                    .double()
+                    .numpy()
+                )
+                delta = actual[:3, 3] - (
+                    target[:3, 3]
+                    + target[:3, :3]
+                    @ np.asarray(condition.get("position_offset", (0, 0, 0)))
+                )
+                relative = target[:3, :3].T @ actual[:3, :3]
+                yaw = math.atan2(relative[1, 0], relative[0, 0])
+                period = condition["yaw_period_rad"]
+                yaw_error = abs((yaw + period / 2) % period - period / 2)
+                tilt = math.acos(float(np.clip(relative[2, 2], -1, 1)))
+                passed = (
+                    bool(np.all(np.abs(delta) <= condition["position_tolerance"]))
+                    and yaw_error <= condition["yaw_tolerance_rad"]
+                    and tilt <= condition["tilt_tolerance_rad"]
+                )
+            elif kind == "pose_near":
                 passed = (
                     np.linalg.norm(position - condition["position"])
                     <= condition["tolerance_m"]
@@ -274,9 +398,72 @@ class MeasuredTaskMonitor:
                 )
         return bool(not passed if condition.get("negate", False) else passed)
 
+    @staticmethod
+    def batch_scope(
+        env: Any,
+        monitors: Sequence[MeasuredTaskMonitor],
+        *,
+        extra_conditions: Sequence[Mapping[str, object]] = (),
+    ) -> object:
+        """Share one measured numeric boundary across independent event monitors.
+
+        Args:
+            env: Live environment or complete measured-state facade.
+            monitors: Distinct physical-row monitors, already reset for this episode.
+            extra_conditions: Additional validated initial checks to read in this scope.
+
+        Returns:
+            Context manager. Inside it, predicate arithmetic uses one packed
+            readback; ordered events, counters and reports still belong to each
+            native monitor. Unsupported fast paths keep the scalar predicate.
+            No cached physical values survive the scope.
+        """
+        from ._measured_batch import _MeasuredChecks
+
+        selected = {monitor.env_id: monitor for monitor in monitors}
+        if not selected or len(selected) != len(monitors):
+            raise ValueError(
+                "batch_scope requires unique nonempty physical-row monitors"
+            )
+        if any(not 0 <= row < env.num_envs for row in selected):
+            raise ValueError("monitor row is outside the measured environment")
+        first = next(iter(selected.values()))
+        conditions = [first._validate(c) for c in extra_conditions]
+        final, events = [], []
+        for monitor in selected.values():
+            final.extend(monitor.final_checks)
+            events.extend({"conditions": values} for _, values, _ in monitor.events)
+        return _MeasuredChecks(
+            env,
+            {"initial_checks": conditions, "final_checks": final, "events": events},
+            selected,
+        ).boundary()
+
     def observe(self, env: Any, action: Any) -> None:
         """Record consecutive event predicates at actual control boundaries."""
         self._steps += 1
+        for key, condition in self._transport_guards.items():
+            lifted, dropped = self._transport.get(key, (False, False))
+            pose = env.sim.get_rigid_object(condition["entity"]).get_local_pose()[
+                self.env_id, :3
+            ]
+            goal = env.sim.get_rigid_object(condition["other"]).get_local_pose()[
+                self.env_id, :3
+            ]
+            if (
+                not np.isfinite(pose.detach().cpu().numpy()).all()
+                or not np.isfinite(goal.detach().cpu().numpy()).all()
+            ):
+                self._transport[key] = (lifted, True)
+                continue
+            height = float(pose[2]) - self.initial_heights[condition["entity"]]
+            lifted = lifted or height >= condition["lift_height_m"]
+            dropped = dropped or (
+                lifted
+                and height < condition["minimum_transit_height_m"]
+                and float((pose[:2] - goal[:2]).norm()) > condition["goal_tolerance_m"]
+            )
+            self._transport[key] = (lifted, dropped)
         expected = self._index
         for i, (name, conditions, required) in enumerate(self.events):
             current = all(self.predicate(env, c) for c in conditions)
@@ -447,7 +634,7 @@ def build_feasibility_host(
         + digest(
             (
                 adapter,
-                "newton-convex-query/v1",
+                NewtonCollisionChecker.query_contract,
                 version("newton"),
                 cfg.collision_device,
                 cfg.collision_use_cuda_graph,

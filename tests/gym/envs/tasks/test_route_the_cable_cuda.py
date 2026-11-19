@@ -27,6 +27,7 @@ import torch
 import yaml
 
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+from embodichain.lab.gym.envs.demo import execute_demo_episode
 from embodichain.lab.sim import SimulationManager
 import gymnasium as gym
 import embodichain_tasks
@@ -95,6 +96,7 @@ class _SpoolReleaseCUDAScenario:
         worst_distance = 0.0
         worst_segment = ""
         env.reset()
+        released = False
         for segment in env.create_demo_segments():
             for action in segment.actions:
                 env.step(action)
@@ -110,12 +112,14 @@ class _SpoolReleaseCUDAScenario:
                     if distance < worst_distance:
                         worst_distance, worst_segment = distance, segment.name
             assert bool(segment.validator().all()), segment.name
-            if segment.name == "open_clear_of_spool_0":
+            if segment.name == "right_place_0":
+                released = True
                 break
 
         # Finite cable states and seated cable alone previously accepted a jaw
         # sweep through the rim with about 16 mm reported penetration.
         # Include the bench when qualifying the deeper initial pinch.
+        assert released, "The expert did not complete the first release"
         record_property("first_spool_robot_obstacle_distance_m", worst_distance)
         assert worst_distance >= -0.001, (worst_segment, worst_distance)
         max_slip = float(_material_runtime(env).max_slip.max())
@@ -148,14 +152,7 @@ class _SpoolReleaseCUDAScenario:
             [actor.actor_id for actor in query.actors if "/spool_" in actor.path],
             device=env.device,
         )
-        third_segments = {
-            "raise_2",
-            "carry_2",
-            "lower_2",
-            "release_2",
-            "retreat_2",
-            "open_clear_of_spool_2",
-        }
+        third_segments = {"right_pick_2", "right_place_2"}
         worst_distance = 0.0
         max_slip = 0.0
         raised = False
@@ -178,7 +175,7 @@ class _SpoolReleaseCUDAScenario:
                     if distances.numel():
                         worst_distance = min(worst_distance, float(distances.min()))
             assert bool(segment.validator().all()), segment.name
-            if segment.name == "raise_2":
+            if segment.name == "right_pick_2":
                 raised = True
                 assert _material_runtime(env).grasps["right_arm"][0] == 0.438
                 # The gripped centre must clear the 23.5 mm rim plus cable radius.
@@ -190,7 +187,7 @@ class _SpoolReleaseCUDAScenario:
                         _material_runtime(env).point(0.438)[0][:, 2] > clearance_height
                     ).all()
                 )
-            if segment.name == "open_clear_of_spool_2":
+            if segment.name == "right_place_2":
                 assert raised
                 record_property("third_carry_slip_m", max_slip)
                 record_property("third_carry_robot_spool_distance_m", worst_distance)
@@ -235,14 +232,57 @@ class _SpoolReleaseCUDAScenario:
         assert robot_ids.numel() and obstacle_ids.numel()
         worst_distance = 0.0
         worst_segment = ""
-        required_boundaries = {
-            "release_free_end",
-            "retreat_free_end",
-            "settle_and_validate",
-        }
+        required_boundaries = {"release_free_end", "retreat_free_end", "home_left"}
         completed_boundaries: set[str] = set()
-        settling_steps = 0
-        last_segment = None
+        stage_metadata = []
+        release_started = False
+        wrapped = False
+        lower = torch.tensor((0.5845, 0.064, 0.753), device=env.device)
+        upper = torch.tensor((0.5875, 0.0896, 0.759), device=env.device)
+
+        def assert_endpoint() -> None:
+            endpoint = _material_runtime(env).metrics()["end_position"]
+            assert bool(((endpoint >= lower) & (endpoint <= upper)).all()), endpoint
+
+        def observe(active, action, observation) -> None:
+            nonlocal worst_distance, worst_segment, release_started, wrapped
+            service = _material_runtime(env)
+            source = service._contact_source
+            assert source is not None
+            if not wrapped:
+                original_finish = source.finish
+
+                def finish(cursor, context, mask):
+                    result = original_finish(cursor, context, mask)
+                    if cursor.phase_name in required_boundaries:
+                        assert_endpoint()
+                        completed_boundaries.add(cursor.phase_name)
+                        for axis, value in zip(
+                            "xyz", service.metrics()["end_position"][0], strict=True
+                        ):
+                            record_property(
+                                f"{cursor.phase_name}_endpoint_{axis}_m", float(value)
+                            )
+                    return result
+
+                source.finish = finish
+                wrapped = True
+            if source.current.phase_name == "release_free_end":
+                release_started = True
+            if release_started:
+                assert_endpoint()
+            contacts = query.fetch_solver_report()
+            assert contacts.dropped_count == 0
+            pairs = contacts.actor_ids[: contacts.count]
+            selected = torch.isin(pairs, robot_ids).any(-1) & torch.isin(
+                pairs, obstacle_ids
+            ).any(-1)
+            distances = contacts.distance[: contacts.count][selected]
+            if distances.numel() and float(distances.min()) < worst_distance:
+                worst_distance = float(distances.min())
+                worst_segment = source.current.phase_name
+            assert worst_distance >= -0.001, (worst_segment, worst_distance)
+
         env.reset()
         qpos = env.robot.get_qpos()
         for side, ready_y in (("right", -0.26), ("left", 0.26)):
@@ -253,82 +293,59 @@ class _SpoolReleaseCUDAScenario:
             torch.testing.assert_close(
                 tcp[:3, 3], tcp.new_tensor([0.45, ready_y, 0.93]), atol=0.01, rtol=0
             )
-            assert tcp[2, 2] < -0.85  # Tool +Z points down toward the work surface.
+            assert tcp[2, 2] < -0.85
             assert bool((qpos[:, env.robot.get_joint_ids(f"{side}_eef")] > 0.045).all())
-        for segment in env.create_demo_segments():
-            last_segment = segment.name
-            segment_distance = 0.0
-            for action in segment.actions:
-                env.step(action)
-                # The material goal cannot detect a finger penetrating the
-                # bench or port during the left-hand pinch and insertion.
-                contacts = query.fetch_solver_report()
-                assert contacts.dropped_count == 0, (
-                    segment.name,
-                    contacts.dropped_count,
-                )
-                pairs = contacts.actor_ids[: contacts.count]
-                robot_obstacle = torch.isin(pairs, robot_ids).any(-1) & torch.isin(
-                    pairs, obstacle_ids
-                ).any(-1)
-                distances = contacts.distance[: contacts.count][robot_obstacle]
-                if distances.numel():
-                    segment_distance = min(segment_distance, float(distances.min()))
-                    if segment_distance < worst_distance:
-                        worst_distance, worst_segment = segment_distance, segment.name
-                    record_property(
-                        f"robot_obstacle_{segment.name}_distance_m", segment_distance
-                    )
-                    record_property(
-                        "full_route_robot_obstacle_distance_m", worst_distance
-                    )
-                    assert worst_distance >= -0.001, (worst_segment, worst_distance)
-                if segment.name == "settle_and_validate":
-                    settling_steps += 1
-            measurements = _material_runtime(env).metrics()
-            endpoint = measurements["end_position"][0]
-            # Keep the most recent endpoint even when an earlier stage fails.
-            # Named boundaries distinguish release-induced escape from drift
-            # during retreat or the final settling interval.
-            for axis, value in zip("xyz", endpoint, strict=True):
-                record_property(f"last_endpoint_{axis}_m", float(value))
-                if segment.name in required_boundaries:
-                    record_property(f"{segment.name}_endpoint_{axis}_m", float(value))
-            record_property(
-                "max_grasp_slip_m", float(measurements["max_grasp_slip"].max())
-            )
-            assert bool(segment.validator().all()), (
-                segment.name,
-                {
-                    key: value.detach().cpu().tolist()
-                    for key, value in measurements.items()
-                },
-            )
-            if segment.name in required_boundaries:
-                completed_boundaries.add(segment.name)
 
+        result = execute_demo_episode(
+            env,
+            step_observer=observe,
+            on_segment_completed=lambda stage: stage_metadata.append(
+                stage.to_metadata()
+            ),
+        )
+        assert result.completed and all(result.success), result.to_metadata()
+        assert len(stage_metadata) == 8
+        assert stage_metadata[-1]["name"] == "left_place"
         assert completed_boundaries == required_boundaries
-        assert last_segment == "settle_and_validate"
-        record_property("full_route_robot_obstacle_distance_m", worst_distance)
-        # The deployment's 120 control frames at 60 Hz must include a real
-        # two-second physical settling interval after release and retreat.
-        settling_seconds = settling_steps * env.step_dt
+        events = [
+            event
+            for stage in stage_metadata
+            for event in stage["metadata"]["runtime"]["events"]
+        ]
+        assert sum(event["kind"] == "skill_planned" for event in events) == 8
+        starts = [
+            event
+            for event in events
+            if event["kind"] == "trajectory_segment_entered"
+            and (event.get("segment_name") or "").startswith(
+                "hold:settle_and_validate:"
+            )
+        ]
+        assert len(starts) == 1
+        ends = [
+            event["timestamp"]
+            for event in events
+            if event["kind"] == "trajectory_completed"
+            and event["invocation_id"] == starts[0]["invocation_id"]
+            and event["timestamp"] >= starts[0]["timestamp"]
+        ]
+        settling_seconds = min(ends) - starts[0]["timestamp"]
         record_property("settling_seconds", settling_seconds)
         assert settling_seconds >= 2.0 - 1e-9
-
+        record_property("full_route_robot_obstacle_distance_m", worst_distance)
+        record_property("task_seconds", float(env.sim.simulation_time))
+        assert 42 <= env.sim.simulation_time <= 46
+        # Continue real physics after completion; all additional samples must stay seated.
+        for _ in range(round(5.0 / env.step_dt)):
+            env.sim.update(
+                physics_dt=env.physics_dt,
+                step=env.cfg.sim_steps_per_control,
+                after_substep=lambda dt: assert_endpoint(),
+                render_final_step=False,
+            )
         measurements = _material_runtime(env).metrics()
-        endpoint = measurements["end_position"]
-        # Independent physical channel bounds from the task acceptance
-        # contract: loosening the configured evaluator must not pass this case.
-        lower = endpoint.new_tensor((0.5845, 0.064, 0.753))
-        upper = endpoint.new_tensor((0.5875, 0.0896, 0.759))
-        assert bool(((endpoint >= lower) & (endpoint <= upper)).all()), endpoint
         assert bool((measurements["max_grasp_slip"] <= 0.012).all())
-        for metric in (
-            "bench_penetration",
-            "spool_penetration",
-            "port_penetration",
-        ):
+        for metric in ("bench_penetration", "spool_penetration", "port_penetration"):
             record_property(metric + "_m", float(measurements[metric].max()))
             assert bool((measurements[metric] <= 0.001).all()), (
                 metric,

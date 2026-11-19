@@ -271,7 +271,9 @@ class CableContactSource:
             data["last_target"] = view.last_targets[motion.control_part]
         elif phase.kind == "grasp":
             # Resolve only target geometry; reference state is installed when execution accepts the plan.
-            local = view.pose(target, motion.control_part)
+            local_valid = torch.ones(len(rows), dtype=torch.bool, device=held.device)
+            local = view.pose(target, motion.control_part, valid_mask=local_valid)
+            valid[rows] &= local_valid
             values = torch.eye(4, device=held.device).expand(B, 4, 4).clone()
             values[rows] = local
             close = request.binding.endpoint("primary", "grasp").joint_positions(

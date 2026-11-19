@@ -1109,6 +1109,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 "object_motion_keyframes",
                 "grasp_settle_steps",
                 "release_settle_steps",
+                "release_settle_duration",
                 "pick_object_part",
                 "lift_height",
                 "pre_grasp_distance",
@@ -1309,6 +1310,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 {
                     "hand_interp_steps",
                     "release_settle_steps",
+                    "release_settle_duration",
                     "lift_height",
                     "max_approach_retract_z",
                     "cartesian_waypoint_count",
@@ -1333,6 +1335,12 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 config["release_settle_steps"],
                 path=f"{path}.release_settle_steps",
                 minimum=0,
+            )
+        if "release_settle_duration" in config:
+            kwargs["release_settle_duration"] = _real(
+                config["release_settle_duration"],
+                path=f"{path}.release_settle_duration",
+                minimum=0.0,
             )
         if "lift_height" in config:
             kwargs["lift_height"] = _real(
@@ -1826,6 +1834,7 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
                 "interpolation_mode",
                 "interpolate_position_step",
                 "ik_seed_mode",
+                "phase_paths",
                 "sample_count_retries",
                 "segment_sample_count_retries",
                 "segment_continuous_ik_recovery",
@@ -1838,6 +1847,7 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
         config["sample_count"], path=f"{path}.sample_count", minimum=2
     )
     kwargs: dict[str, object] = {
+        "phase_paths": dict(config.get("phase_paths", {})),
         "strategy": _identifier(
             config.get("strategy", "ik_interp"),
             path=f"{path}.strategy",
@@ -3581,6 +3591,8 @@ class _ConfiguredTaskProgramAdapterFactory:
     def create_adapter(
         self,
         environment: object,
+        *,
+        grasp_contact_frames: Mapping[str, object] | None = None,
     ) -> TaskProgramEnvironmentAdapter:
         """Create a live adapter for an initialized environment."""
         from .demo_skill import _ConfiguredDemoSkillSource
@@ -3591,7 +3603,9 @@ class _ConfiguredTaskProgramAdapterFactory:
         ):
             if getattr(environment, "num_envs", None) != 1:
                 raise ValueError("configured Demo Skills require num_envs == 1")
-        adapter = self.delegate.create_adapter(environment)
+        adapter = self.delegate.create_adapter(
+            environment, grasp_contact_frames=grasp_contact_frames
+        )
         adapter._set_configured_nominal_sources(self.nominal_motion_sources)
         return adapter
 

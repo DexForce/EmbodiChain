@@ -350,7 +350,9 @@ class _CableRuntime:
                 rejected |= source.rejected
         return rejected, "cable_material_state_or_slip_guard_failed"
 
-    def _material_pose(self, target: _CableTarget, part: str) -> torch.Tensor:
+    def _material_pose(
+        self, target: _CableTarget, part: str, *, valid_mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
         assert target.material_distance is not None
         point, tangent, _ = self.point(target.material_distance)
         yaw = torch.atan2(tangent[:, 1], tangent[:, 0])
@@ -369,6 +371,7 @@ class _CableRuntime:
             success, qpos = self.robot.compute_ik(
                 pose, joint_seed=seed, name=part, env_ids=self.env_ids
             )
+            success = success.reshape(-1).bool()
             if target.port_screen:
                 stage = pose.clone()
                 port_angle = math.pi / 2 if branch == 0 else -math.pi / 2
@@ -380,7 +383,10 @@ class _CableRuntime:
                 )
                 stage[:, :3, 3] = point.new_tensor(self.geometry["port_stage"])
                 later, _ = self.robot.compute_ik(
-                    stage, joint_seed=qpos, name=part, env_ids=self.env_ids
+                    stage,
+                    joint_seed=torch.where(success[:, None], qpos, seed),
+                    name=part,
+                    env_ids=self.env_ids,
                 )
                 success = success.reshape(-1).bool() & later.reshape(-1).bool()
             candidates.append((success.reshape(-1).bool(), qpos, pose))
@@ -389,11 +395,19 @@ class _CableRuntime:
             ~first[0]
             | ((second[1] - seed).square().sum(-1) < (first[1] - seed).square().sum(-1))
         )
-        if not bool((first[0] | second[0]).all()):
+        reachable = first[0] | second[0]
+        if valid_mask is not None:
+            reachable &= valid_mask
+            valid_mask &= reachable
+        elif not bool(reachable.all()):
             raise ValueError("No reachable wrist branch for the cable material target.")
         if target.port_screen:
-            self.port_yaw[part] = torch.where(choose, -math.pi / 2, math.pi / 2)
-        return torch.where(choose[:, None, None], second[2], first[2])
+            yaw = torch.where(choose, -math.pi / 2, math.pi / 2)
+            self.port_yaw[part] = torch.where(
+                reachable, yaw, self.port_yaw.get(part, torch.zeros_like(yaw))
+            )
+        chosen = torch.where(choose[:, None, None], second[2], first[2])
+        return torch.where(reachable[:, None, None], chosen, self.tool(part))
 
     def _pitch_delta(
         self, target: _CableTarget, part: str, pose: torch.Tensor
@@ -465,9 +479,11 @@ class _CableRuntime:
             return self._lay_down_delta(target, part, pose)
         return self._pitch_delta(target, part, pose)
 
-    def pose(self, target: _CableTarget, part: str) -> torch.Tensor:
+    def pose(
+        self, target: _CableTarget, part: str, *, valid_mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
         if target.kind == "material":
-            return self._material_pose(target, part)
+            return self._material_pose(target, part, valid_mask=valid_mask)
         if target.kind == "home":
             return self.home[part].clone()
         pose = self.tool(part, commanded=target.kind in {"command", "tip_align"})
@@ -510,26 +526,45 @@ class _CableRuntime:
                 rotation[:, 1, 0], rotation[:, 1, 1] = s, c
                 pose[:, :3, :3] = rotation @ pose[:, :3, :3]
             else:
-                if not bool((direction[:, 1] > 1e-6).all()):
+                valid = torch.isfinite(direction).all(-1) & (direction[:, 1] > 1e-6)
+                if valid_mask is not None:
+                    valid_mask &= valid
+                elif not bool(valid.all()):
                     raise ValueError(
                         "The distal cable span points away from the channel."
                     )
                 mouth_x, mouth_y = self.geometry["port_mouth"]
-                meets = point[:, 0] + direction[:, 0] / direction[:, 1] * (
+                denominator = torch.where(
+                    valid, direction[:, 1], torch.ones_like(direction[:, 1])
+                )
+                meets = point[:, 0] + direction[:, 0] / denominator * (
                     mouth_y - point[:, 1]
                 )
-                pose[:, 0, 3] += mouth_x - meets
+                pose[:, 0, 3] += torch.where(
+                    valid, mouth_x - meets, torch.zeros_like(meets)
+                )
         elif target.kind == "material_lift":
             assert target.material_distance is not None
             assert target.position[2] is not None
             tangent = self.point(target.material_distance)[1][:, :2]
             horizontal_norm = tangent.norm(dim=-1, keepdim=True)
-            if not bool((horizontal_norm > 1e-6).all()):
+            valid = torch.isfinite(tangent).all(-1) & (horizontal_norm[:, 0] > 1e-6)
+            if valid_mask is not None:
+                valid_mask &= valid
+            elif not bool(valid.all()):
                 raise ValueError(
                     "Material lift requires a cable tangent with a horizontal direction."
                 )
-            pose[:, :2, 3] -= target.retract_distance * tangent / horizontal_norm
-            pose[:, 2, 3] = target.position[2]
+            safe_tangent = torch.where(
+                valid[:, None], tangent, torch.zeros_like(tangent)
+            )
+            denominator = torch.where(
+                valid[:, None], horizontal_norm, torch.ones_like(horizontal_norm)
+            )
+            pose[:, :2, 3] -= target.retract_distance * safe_tangent / denominator
+            pose[:, 2, 3] = torch.where(
+                valid, pose.new_tensor(target.position[2]), pose[:, 2, 3]
+            )
         elif target.kind == "tip_align":
             end = cable_endpoints(self.state(), self.lengths)[1][:, -1] - self.origins
             for axis, value in enumerate(target.position):
@@ -605,7 +640,10 @@ class _CablePickLowerer(_CableLowerer):
         if target.kind != "material":
             raise ValueError("Cable pickup requires a material target.")
         part = self._part(bound)
+        valid = torch.ones_like(service.max_slip, dtype=torch.bool)
+        pose = service.pose(target, part, valid_mask=valid)
         service.pending_pick = (part, target)
+        service.pending_pick_rows = valid
         service.hand_to_motion[self._part(bound, "grasp")] = part
         assert target.material_distance is not None
         service.pick_initial[part] = (
@@ -628,16 +666,31 @@ class _CablePickLowerer(_CableLowerer):
                 }
             )
         return SemanticLowering(
-            goal=ContactGraspGoal(service.pose(target, part)),
+            goal=ContactGraspGoal(pose),
             control_overrides=overrides,
+            failed_preconditions={
+                int(context.env_ids[row]): "Unreachable cable grasp target."
+                for row in (~valid).nonzero().flatten().tolist()
+            },
         )
 
 
 def _ground_cable_move(
-    service: _CableRuntime, target: _CableTarget, part: str, control_dt: float
+    service: _CableRuntime,
+    target: _CableTarget,
+    part: str,
+    control_dt: float,
+    active_mask: torch.Tensor | None = None,
 ) -> SemanticLowering:
     env_ids = service.env_ids
-    start, end = service.tool(part), service.pose(target, part)
+    active = (
+        torch.ones(len(env_ids), dtype=torch.bool, device=env_ids.device)
+        if active_mask is None
+        else active_mask
+    )
+    geometry_valid = active.clone()
+    start = service.tool(part)
+    end = service.pose(target, part, valid_mask=geometry_valid)
     pivot_geometry = (
         service._pivot_delta(target, part, start)
         if target.kind in {"pitch_align", "lay_down"}
@@ -652,13 +705,13 @@ def _ground_cable_move(
         holding = pivot_geometry[2] & (pivot_geometry[1] == 0)
         start = torch.where(holding[:, None, None], end, start)
     path_start, path_end = start, end
-    if pivot_geometry is not None:
-        valid = pivot_geometry[2][:, None, None]
-        identity = torch.eye(4, dtype=start.dtype, device=start.device)
-        # Invalid rows are rejected independently, including nonfinite
-        # observations; they must not poison the shared sample count.
-        path_start = torch.where(valid, start, identity)
-        path_end = torch.where(valid, end, identity)
+    path_valid = (
+        geometry_valid if pivot_geometry is None else geometry_valid & pivot_geometry[2]
+    )
+    identity = torch.eye(4, dtype=start.dtype, device=start.device)
+    # Invalid rows must not influence shared duration or contribute nonfinite paths.
+    path_start = torch.where(path_valid[:, None, None], start, identity)
+    path_end = torch.where(path_valid[:, None, None], end, identity)
     distance = (path_start[:, :3, 3] - path_end[:, :3, 3]).norm(dim=-1).max().item()
     trace = (
         (path_start[:, :3, :3].transpose(1, 2) @ path_end[:, :3, :3])
@@ -673,9 +726,15 @@ def _ground_cable_move(
         )
         + 1,
     )
-    service.last_targets[part] = end.clone()
+    previous_target = service.last_targets.get(part, service.tool(part, commanded=True))
+    service.last_targets[part] = torch.where(
+        geometry_valid[:, None, None], end, previous_target
+    ).clone()
     path = interpolate_xpos_batched(path_start, path_end, count)[:, 1:]
-    failures = {}
+    failures = {
+        int(env_ids[row]): "Unreachable or invalid cable target geometry."
+        for row in (active & ~geometry_valid).nonzero().flatten().tolist()
+    }
     if pivot_geometry is not None:
         point, _, valid = pivot_geometry
         local_point = start[:, :3, :3].transpose(1, 2) @ (
@@ -699,9 +758,13 @@ def _ground_cable_move(
             if target.kind == "lay_down"
             else "The distal cable span or tool points away from the channel."
         )
-        failures = {
-            int(env_ids[row]): reason for row in (~valid).nonzero().flatten().tolist()
-        }
+        failures.update(
+            {
+                int(env_ids[row]): reason
+                for row in (active & ~valid).nonzero().flatten().tolist()
+            }
+        )
+    path = torch.where(geometry_valid[:, None, None, None], path, start[:, None])
     return SemanticLowering(
         goal=EndEffectorPoseGoal(path), failed_preconditions=failures
     )
@@ -721,7 +784,13 @@ class _CableMoveLowerer(_CableLowerer):
     ) -> SemanticLowering:
         service, target = self._target(call)
         part = self._part(bound)
-        return _ground_cable_move(service, target, part, context.require_control_dt())
+        return _ground_cable_move(
+            service,
+            target,
+            part,
+            context.require_control_dt(),
+            active_mask=getattr(context, "planning_mask", None),
+        )
 
 
 def _ground_cable_joint(
