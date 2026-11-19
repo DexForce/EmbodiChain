@@ -209,10 +209,13 @@ def test_native_viser_preview_processes_step_and_stop_without_pose_holding(
     assert result["frontend"] == "viser"
 
 
-def test_native_window_displays_initial_state_without_physics(tmp_path: Path):
+@pytest.mark.parametrize(
+    "frontend", ["window", pytest.param("web", marks=pytest.mark.gpu)]
+)
+def test_native_window_displays_initial_state_without_physics(tmp_path: Path, frontend):
     import os
 
-    if not os.getenv("DISPLAY"):
+    if frontend == "window" and not os.getenv("DISPLAY"):
         pytest.skip("Native window qualification needs an available display.")
     source = tmp_path / "scene.usda"
     _source(source)
@@ -221,17 +224,35 @@ def test_native_window_displays_initial_state_without_physics(tmp_path: Path):
     def stop(sim):
         assert sim._default_plane is None
         assert sim.simulation_time == 0
-        assert sim.is_window_opened
+        assert sim.is_viewer_open
+        if frontend == "web":
+            assert not sim.is_window_opened
+            assert sim.visualization_runtime is None
         frames[0] += 1
         if frames[0] == 2:
             raise KeyboardInterrupt()
         return False
 
-    result = preview_scene(
-        source, sim_cfg=SimulationManagerCfg(headless=False), on_frame=stop
-    )
+    if frontend == "web":
+        import socket
+        from embodichain.lab.visualization import DexSimWebCfg, VisualizationCfg
+
+        with socket.socket() as candidate:
+            candidate.bind(("127.0.0.1", 0))
+            port = candidate.getsockname()[1]
+        cfg = SimulationManagerCfg(
+            web=True,
+            visualization=VisualizationCfg(
+                web=DexSimWebCfg(port=port, width=64, height=64)
+            ),
+        )
+    else:
+        cfg = SimulationManagerCfg(headless=False)
+    result = preview_scene(source, sim_cfg=cfg, on_frame=stop)
     assert result["physics_steps"] == 0
     assert frames[0] == 2
+    assert result["frontend"] == frontend
+    assert any(row["kind"] == "articulation" for row in result["entities"])
 
 
 def test_native_scene_reset_reimports_without_advancing_physics(tmp_path: Path):

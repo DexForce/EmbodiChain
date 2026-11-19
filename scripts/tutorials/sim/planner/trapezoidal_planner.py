@@ -647,8 +647,8 @@ def main() -> None:
         robot = sim.add_robot(CobotMagicCfg.from_dict({"uid": "CobotMagic"}))
         if sim.is_use_gpu_physics:
             sim.init_gpu_physics()
-        if not args.headless:
-            sim.open_window()
+        if not args.headless or getattr(args, "web", False):
+            sim.open_viewer()
 
         control_part = "left_arm"
         joint_waypoints = build_demo_waypoints(robot, control_part)

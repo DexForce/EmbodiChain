@@ -435,6 +435,32 @@ def test_actor_and_critic_gradients_are_clipped_separately() -> None:
     assert float(critic_norm) == pytest.approx(1.0, rel=1e-5)
 
 
+def test_shared_actor_critic_parameters_are_clipped_once(monkeypatch) -> None:
+    shared = nn.Linear(2, 3)
+    policy = ActorCritic(
+        2,
+        1,
+        torch.device("cpu"),
+        nn.Sequential(shared, nn.Linear(3, 1)),
+        nn.Sequential(shared, nn.Linear(3, 1)),
+    )
+    algorithm = _algorithm(policy, max_grad_norm=1.0)
+    for parameter in policy.parameters():
+        parameter.grad = torch.ones_like(parameter)
+    clipped = []
+    original = torch.nn.utils.clip_grad_norm_
+
+    def observed(parameters, *args, **kwargs):
+        parameters = tuple(parameters)
+        clipped.extend(map(id, parameters))
+        return original(parameters, *args, **kwargs)
+
+    monkeypatch.setattr(torch.nn.utils, "clip_grad_norm_", observed)
+    algorithm._clip_gradients()
+    assert len(clipped) == len(set(clipped))
+    assert set(clipped) == {id(parameter) for parameter in policy.parameters()}
+
+
 def test_log_action_standard_deviation_uses_configured_range() -> None:
     policy = ActorCritic(
         obs_dim=2,
@@ -816,3 +842,29 @@ def test_base_env_preserves_terminal_rows_before_reused_reset_storage(
     torch.testing.assert_close(
         info["terminal_observation_mask"], torch.tensor([False, True, False])
     )
+
+
+def test_custom_policy_keeps_its_default_config_when_omitted(monkeypatch) -> None:
+    from embodichain.learning.rl.policies import Policy
+    from embodichain.learning.rl.policies import registry
+
+    class DefaultConfig:
+        gain = 3
+
+    class CustomPolicy(Policy):
+        def __init__(self, obs_dim, action_dim, device, cfg=DefaultConfig()):
+            super().__init__()
+            self.gain = cfg.gain
+
+        def forward(self, tensordict, deterministic=False):
+            return tensordict
+
+        def get_value(self, tensordict):
+            return tensordict
+
+        def evaluate_actions(self, tensordict):
+            return tensordict
+
+    monkeypatch.setitem(registry._POLICY_REGISTRY, "custom_default", CustomPolicy)
+    policy = build_policy({"name": "custom_default"}, 3, 1, torch.device("cpu"))
+    assert policy.gain == 3

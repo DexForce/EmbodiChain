@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import importlib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 import weakref
 
@@ -34,6 +34,8 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.sim_manager import SimulationManagerCfg
     from embodichain.lab.sim.objects.fluid import FluidObject
     from embodichain.lab.sim._runtime_controls import _SceneInitialJointStates
+    from embodichain.lab.sim.sensors.base_sensor import SensorCfg
+    from ._joint_wrench import _JointWrenchSource
 
 __all__ = ["NewtonPhysicsBackend"]
 
@@ -63,6 +65,9 @@ class NewtonPhysicsBackend(PhysicsBackend):
         self._differentiable_runtime = None
         self._runtime_device: str | None = None
         self._configured_solver_type: str | None = None
+        self._rne_available = False
+        self._joint_wrenches_enabled = False
+        self._joint_wrenches: _JointWrenchSource | None = None
         self._fluid_render_clip_key: tuple[object, ...] | None = None
         self._fluid_render_clip_z: torch.Tensor | None = None
         self._fluid_render_dirty = False
@@ -101,7 +106,35 @@ class NewtonPhysicsBackend(PhysicsBackend):
         )
         self._configured_solver_type = str(newton_cfg.solver_cfg.solver_type)
         self._runtime_device = str(newton_cfg.device)
+        self._rne_available = (
+            self._configured_solver_type == "mujoco_warp"
+            and self._runtime_device.startswith("cuda")
+            and not newton_cfg.requires_grad
+            and not getattr(newton_cfg.solver_cfg, "use_mujoco_cpu", True)
+            and getattr(newton_cfg.solver_cfg, "rne_mode", "disabled") != "disabled"
+        )
+        self._joint_wrenches_enabled = newton_physics_cfg.enable_joint_wrenches
+        if self._joint_wrenches_enabled and not self._rne_available:
+            raise NotImplementedError(
+                "Joint wrench acquisition requires CUDA Newton MuJoCo Warp with RNE enabled."
+            )
         world_config.newton_cfg = newton_cfg
+
+    def _create_body_acceleration_reader(
+        self, asset_uid: str, link_name: str | None
+    ) -> Callable[[], tuple[torch.Tensor, torch.Tensor, torch.Tensor]] | None:
+        if not self._rne_available or link_name is not None:
+            return None
+        asset = self._manager._rigid_objects.get(asset_uid)
+        if asset is None or asset.is_non_dynamic or asset.body_data is None:
+            return None
+
+        data = asset.body_data
+
+        def read() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+            return data.lin_acc, data.ang_acc, data.com_pose[:, :3]
+
+        return read
 
     def activate(self, sim_config: "SimulationManagerCfg") -> None:
         del sim_config
@@ -109,9 +142,42 @@ class NewtonPhysicsBackend(PhysicsBackend):
         # SceneBuilder.finalize() completes its model; no second manager-level
         # activation or rebuild domain participates.
 
-    def _prepare_scene_build(self) -> None:
-        """Preflight cable anchors and prepare defaults for the current declarations."""
+    def _create_joint_wrench_reader(
+        self,
+        asset_uid: str,
+        joint_name: str,
+        offset: SensorCfg.OffsetCfg,
+        force: torch.Tensor,
+        torque: torch.Tensor,
+        valid: torch.Tensor,
+    ) -> Callable[[], None]:
+        if self._joint_wrenches is None:
+            raise NotImplementedError(
+                "JointWrench requires NewtonPhysicsCfg.enable_joint_wrenches=True."
+            )
         manager = self._manager
+        if asset_uid not in manager._articulations and asset_uid not in manager._robots:
+            raise ValueError(
+                f"Asset {asset_uid!r} does not provide articulation joints."
+            )
+        handles = manager._spawn_scene.handles(asset_uid)
+        if len(handles) != manager.num_envs:
+            raise NotImplementedError(
+                "JointWrench requires an articulation in every arena."
+            )
+        return self._joint_wrenches.create_reader(
+            handles, joint_name, offset, force, torque, valid
+        )
+
+    def _prepare_scene_build(self) -> None:
+        """Register requested observers and preflight cable declarations."""
+        manager = self._manager
+        if self._joint_wrenches_enabled and self._joint_wrenches is None:
+            from ._joint_wrench import _JointWrenchSource
+
+            source = _JointWrenchSource()
+            manager.add_runtime_control(source)
+            self._joint_wrenches = source
         cables = getattr(manager, "_cable_objects", {})
         if not cables:
             return

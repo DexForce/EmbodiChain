@@ -1,0 +1,109 @@
+# Defaults shared by supported robot-held assembly declarations.
+# Deployment fields and assembly_config override these values.
+parameters:
+  hinge_entity_cfg: null
+  mating_sensor: assembly_contacts
+  grasp_sensor: grasp_contacts
+  contact_points_per_ring: 64
+  assembly_profile: study
+  assembly_manifest: null
+  assembly_seed: null
+  assembly_config: {}
+  preserve_source_contacts: true
+  file_visuals: true
+  require_heterogeneous_assets: false
+  require_exact_robot_dynamics: false
+  assembly_contact_capacity: 4096
+  grasp_contact_capacity: 4096
+  grasp_warmup_steps: 10
+  initial_position_range: 0.0125
+  grasp_position_range: 0.0025
+  joint_stiffness: 40.0
+  joint_damping: 20.0
+  proprioceptive_joint_limits: null
+  proprioceptive_velocity_scale: null
+  grasp_force_threshold: 0.05
+  grasp_max_air_time: 0.005
+  penetration_tolerance: 0.0001
+  penetration_clearance_fraction: 0.5
+  success_hold_steps: 3
+  failure_distance: 0.25
+  grasp_failure_after_steps: 25
+  contact_band: 0.001
+  gear_tilt_tolerance: 0.05
+  nut_radial_tolerance: 0.001
+  nut_tilt_tolerance: 0.15
+  nut_capture_pitch_fraction: 0.29
+  nut_min_turn: 1.5707963267948966
+  nut_min_advance_fraction: 0.2
+  nut_advance_tolerance_fraction: 0.1
+  milestone_depth: 0.001
+  cylinder_boundary_samples: 64
+  grip_section_fraction: 0.2
+  grasp_aperture_clearance: 0.0005
+  parallel_grasp_target_upper: 0.0425
+  parallel_grasp_closure: 0.0035
+  four_bar_grasp_closure: 0.08
+  grip_depth: 0.012
+  gear_grip_offsets:
+  - 0.0085
+  - 0.01875
+  observation_history_length: 30
+assets:
+  peg:
+    generator:
+      kind: peg
+      hole:
+        type: stadium
+        width: 0.052
+        height: 0.032
+        n: 32
+      clearance: 0.00125
+      plate_size: 0.14
+      plate_thickness: 0.018
+      bottom_thickness: 0.002
+      peg_length: 0.09
+      peg_mass: 0.5
+  gear:
+    generator:
+      kind: gear
+      teeth:
+      - 20
+      - 20
+      module: 0.00275
+      face_width: 0.0115
+      pressure_angle: 22.5
+      tooth_width: 0.46
+      motor: false
+      axles: false
+    recipe:
+      shaft_radius: 0.005
+      bore_clearance: 0.000875
+      shaft_tip: 0.0065
+      boss_radius: 0.009
+      boss_height: 0.018
+      boss_outline_samples: 48
+      shaft_outline_samples: 64
+      plate_density: 7800.0
+      ring_friction: 0.5
+      ring_condim: 3
+      shaft_friction:
+      - 1.0
+      - 0.005
+      - 0.0001
+      shaft_condim: 3
+      collar_radius_scale: 1.5
+      collar_half_height: 0.0025
+  nut:
+    generator:
+      kind: thread
+      major_diameter: 0.036
+      pitch: 0.004
+      thread_length: 0.05
+      clearance: 0.00015
+      nut_shape: hex
+      nut_size: 0.055
+      nut_height: 0.029
+      bolt_shank_length: 0.0
+      friction: 0.29
+      condim: 3

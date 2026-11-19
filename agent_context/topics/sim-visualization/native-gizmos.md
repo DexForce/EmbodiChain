@@ -16,17 +16,21 @@ opts out; Gym deployments accept the same top-level JSON/YAML field through
 the first window. These explicit calls take precedence over the startup default.
 Query through `sim.get_world().get_entity_gizmo()`. DexSim owns window
 detach/reopen and controller state; reopening never reapplies the default or
-overwrites an explicit native disable. Pure headless and Viser runs do not
-automatically create a native entity controller.
+overwrites an explicit native disable. Pure headless, Viser and Web information-page runs do not
+automatically create a native entity controller. The Web page has no scene
+editing input or application command handling. Native window and Viser
+interaction retain their own control paths.
 
 `SimulationManagerCfg.robot_ik_gizmo` defaults to `GizmoCfg()`. During normal
 updates the manager registers robot control parts with complete solver chain/TCP
-metadata in single-environment interactive runs. Pure headless, read-only Viser, and
+metadata in single-environment interactive runs. Pure headless, Web information-page, read-only Viser, and
 multi-environment runs do not register automatic controls. The first native I
 press creates DexSim's `IKGizmoController` by default;
 `GizmoCfg(ik_start_enabled=True)` opts into activation on the first update with
 an open window. The startup attempt is consumed once, including on failure;
 later key presses can retry. Viser constructs IK on its first drag.
+`create_robot_ik_gizmo_controller()` remains the explicit native-window factory.
+
 Registration never writes drive targets. `Gizmo` owns managed native input and
 target-node cleanup, detaches input on window close, and reattaches the same
 controller on reopen. Robot removal releases all its managed controls.

@@ -42,6 +42,7 @@ from embodichain.lab.visualization import (
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    add_viser_args_to_parser(parser)
     parser.add_argument("--renderer", choices=("fast-rt", "hybrid"), default="fast-rt")
     parser.add_argument(
         "--output", type=Path, default=Path("outputs/camera_ground_visibility")

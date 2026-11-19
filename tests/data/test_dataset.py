@@ -36,6 +36,62 @@ PROCESS_JOIN_TIMEOUT_SECONDS = 5.0
 PROCESS_START_TIMEOUT_SECONDS = 60.0
 
 
+@pytest.mark.parametrize("healthy", [True, False])
+def test_source_cache_validation_keeps_prepared_models_readable(
+    tmp_path: Path, monkeypatch, healthy: bool
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from embodichain_robots.flexiv.rizon4s._menagerie_assets import (
+        FlexivRizon4SMenagerie,
+    )
+    from embodichain_benchmarks.assembly.robot_reference import prepare_rizon4s_urdf
+
+    root = tmp_path / "cache"
+    prefix = "FlexivRizon4SMenagerie"
+    extracted = root / "extract" / prefix
+    extracted.mkdir(parents=True)
+    (extracted / "LICENSE").write_text("source seed")
+    download = root / "download" / prefix
+    download.mkdir(parents=True)
+    (download / "LICENSE").write_text("downloaded seed")
+    output = root / "generated" / "assembly" / prefix / "prepared_v4_parallel_jaw"
+    output.mkdir(parents=True)
+    urdf = output / "rizon4s_robotiq2f85.urdf"
+    urdf.write_text('<robot name="prepared"><link name="root"/></robot>')
+    (output / "fidelity.json").write_text("{}")
+    prepared = Path(prepare_rizon4s_urdf(extracted, gripper_model="parallel_jaw"))
+    assert not prepared.is_relative_to(extracted)
+    from embodichain.utils.utility import load_config
+
+    declaration = load_config(
+        str(
+            Path(__file__).resolve().parents[2]
+            / "extensions/embodichain_tasks/configs/components/embodiments/"
+            "flexiv_rizon4s_robotiq2f85.nominal.yaml"
+        )
+    )
+    monkeypatch.setattr(constants, "EMBODICHAIN_DEFAULT_DATA_ROOT", str(root))
+    assert dataset_module.get_data_path(declaration["simulation"]["fpath"]) == str(
+        prepared
+    )
+    with ThreadPoolExecutor(max_workers=1) as readers:
+
+        def check_during_validation(path):
+            assert (
+                readers.submit(prepared.read_text).result(timeout=3) == urdf.read_text()
+            )
+            return "valid" if healthy else "invalid"
+
+        FlexivRizon4SMenagerie.check_zip(
+            SimpleNamespace(calculate_md5=check_during_validation),
+            prefix,
+            SimpleNamespace(urls=["https://example.invalid/LICENSE"], md5="valid"),
+            str(root),
+        )
+    assert prepared.read_text().startswith('<robot name="prepared">')
+    assert extracted.exists() is healthy
+
+
 @pytest.mark.no_sim
 @pytest.mark.parametrize(
     "urls, expected",

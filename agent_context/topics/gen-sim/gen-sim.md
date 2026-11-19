@@ -71,6 +71,11 @@ clearance/Place timing declarations keep their ownership. Opening, terminal
 separation, resting-position and stability evidence are unchanged; clearance
 and actuation time are planning behavior, not weaker acceptance thresholds.
 
+`_run_image.py` owns the optional head-frame preprocessing handoff. A verified
+`input_camera` declaration pins the raw head frame by hash. Task Engine and
+scene generation consume a single effective image. Task Plan reuse copies the
+previous run's effective image and checks its input provenance and pixel audit.
+
 Articulated USDC admission allows absent `gen_sim:closedPosition` metadata;
 present declarations must identify a finite joint-limit endpoint. Missing
 endpoint semantics remain unknown. Operation-specific target qualification

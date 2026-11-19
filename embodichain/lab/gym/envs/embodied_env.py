@@ -1469,6 +1469,8 @@ class EmbodiedEnv(BaseEnv):
             return True
         if self.cfg.enable_sensor:
             for sensor_cfg in self._sensor_configs():
+                if getattr(sensor_cfg, "sample_phase", None) == "render":
+                    return True
                 _, sensor_factory, _ = _resolve_sensor_factory(
                     sensor_cfg.sensor_type, SimulationManager.SUPPORTED_SENSOR_TYPES
                 )
@@ -2300,10 +2302,14 @@ class EmbodiedEnv(BaseEnv):
                 self.num_envs, self._new_demo_episode_metadata(0)
             )
             self._demo_metadata_initialized = True
-        if episode_metadata is not None and getattr(
-            self, "_demo_metadata_initialized", True
-        ):
-            if isinstance(episode_metadata, _EpisodeMetadataRows):
+        if episode_metadata is not None:
+            if not getattr(self, "_demo_metadata_initialized", True):
+                # Unrecorded RL episodes still seal terminal reports. Discard
+                # only the reset rows so the next episode cannot reuse them,
+                # without materializing recording provenance or UUIDs.
+                for env_id in metadata_ids:
+                    episode_metadata[env_id] = {}
+            elif isinstance(episode_metadata, _EpisodeMetadataRows):
                 if metadata_ids:
                     episode_metadata.reset_rows(
                         metadata_ids, self._new_demo_episode_metadata(metadata_ids[0])
@@ -3509,7 +3515,10 @@ class EmbodiedEnv(BaseEnv):
             return super()._advance_physics()
 
         sensors = [
-            sensor for sensor in self.sensors.values() if sensor.requires_substep_update
+            sensor
+            for sensor in self.sensors.values()
+            if sensor.requires_substep_update
+            and getattr(getattr(sensor, "cfg", None), "sample_phase", None) is None
         ]
         for sensor in sensors:
             sensor.begin_control_step()
@@ -4117,53 +4126,53 @@ class EmbodiedEnv(BaseEnv):
         method: str = "cv2",
         save: bool = False,
     ) -> None:
-        """Preview the sensor data by matplotlib
+        """Display or save an enabled sensor image.
 
-        Note:
-            Currently only support RGB image preview.
+        Scheduled sensors use their latest valid sample. Legacy sensors refresh
+        before previewing. Stereo pairs are shown side by side.
 
         Args:
-            name (str): name of the sensor to preview.
-            data_type (str): type of the sensor data to preview.
-            env_ids (int): index of the arena to preview. Defaults to 0.
-            method (str): method to preview the sensor data. Currently support "plt" and "cv2". Defaults to "cv2".
-            save (bool): whether to save the preview image. Defaults to False.
+            name: Name of the sensor to preview.
+            data_type: Key of the image in the sensor's data buffer.
+            env_ids: Index of the environment to preview.
+            method: Image backend, either "plt" or "cv2".
+            save: Save the image instead of opening a preview window.
         """
-        # TODO: this function need to be improved to support more sensor types and data types.
-
         sensor = self.get_sensor(name=name)
-
-        if data_type not in sensor.SUPPORTED_DATA_TYPES:
-            logger.log_error(
-                f"Data type '{data_type}' not supported by sensor '{name}'. Supported types: {sensor.SUPPORTED_DATA_TYPES}"
-            )
-
-        sensor.update()
+        metadata = sensor.get_sample_metadata()
+        if metadata is None:
+            sensor.update()
 
         data = sensor.get_data()
+        if data_type not in data:
+            logger.log_error(
+                f"Data type '{data_type}' not enabled for sensor '{name}'. "
+                f"Available types: {list(data.keys())}"
+            )
+        if metadata is not None and not bool(metadata["valid"][env_ids]):
+            logger.log_error(
+                f"Sensor '{name}' has no valid scheduled sample for environment {env_ids}."
+            )
 
-        # TODO: maybe put the preview (visualization) method to the sensor class.
-        if sensor.cfg.sensor_type == "StereoCamera":
-            view = data[data_type][env_ids].cpu().numpy()
-            view_right = data[f"{data_type}_right"][env_ids].cpu().numpy()
-            view = np.concatenate((view, view_right), axis=1)
-        else:
-            view = data[data_type][env_ids].cpu().numpy()
+        view = data[data_type][env_ids].cpu().numpy()
+        if sensor.cfg.sensor_type == "StereoCamera" and f"{data_type}_right" in data:
+            right = data[f"{data_type}_right"][env_ids].cpu().numpy()
+            view = np.concatenate((view, right), axis=1)
 
         if method == "cv2":
             import cv2
 
+            if data_type == "rgb" and np.issubdtype(view.dtype, np.floating):
+                view = np.rint(np.clip(view, 0.0, 1.0) * 255).astype(np.uint8)
+            bgr = cv2.cvtColor(view, cv2.COLOR_RGB2BGR)
             if save:
-                cv2.imwrite(
-                    f"sensor_data_{data_type}.png",
-                    cv2.cvtColor(view, cv2.COLOR_RGB2BGR),
-                )
+                cv2.imwrite(f"sensor_data_{data_type}.png", bgr)
             else:
                 window_name = f"sensor_data_{data_type}"
                 height, width = view.shape[:2]
                 cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
                 cv2.resizeWindow(window_name, width, height)
-                cv2.imshow(window_name, cv2.cvtColor(view, cv2.COLOR_RGB2BGR))
+                cv2.imshow(window_name, bgr)
                 cv2.waitKey(0)
                 cv2.destroyWindow(window_name)
 
