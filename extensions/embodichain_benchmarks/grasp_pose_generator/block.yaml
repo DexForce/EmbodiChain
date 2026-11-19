@@ -1,0 +1,20 @@
+gripper: FrankaPandaHand
+object: block
+rigid:
+  attrs:
+    mass_props:
+      mass: 0.015
+    material_props:
+      dynamic_friction: 0.97
+      static_friction: 0.99
+  body_type: dynamic
+  init_pos:
+  - 0
+  - 0
+  - 0.061
+  shape:
+    shape_type: Cube
+    size:
+    - 0.065
+    - 0.065
+    - 0.12

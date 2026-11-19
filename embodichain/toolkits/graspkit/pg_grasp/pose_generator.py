@@ -268,7 +268,12 @@ class GraspAnnotationCfg:
     force_refresh: bool = False
     """Whether the service recomputes annotations when first seeing a mesh."""
 
+    disk_cache: bool = True
+    """Read and write persistent annotations. Disable for isolated seeded trials."""
+
     def __post_init__(self) -> None:
+        if type(self.disk_cache) is not bool:
+            raise TypeError("disk_cache must be a bool.")
         if self.selection_mode not in ("whole_mesh", "interactive"):
             raise ValueError(
                 "selection_mode must be exactly 'whole_mesh' or 'interactive'."
@@ -486,6 +491,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             filter_ground_collision=collision.filter_ground_collision,
             check_collision=not proposals_only,
             prepared=prepared,
+            **({} if annotation.disk_cache else {"disk_cache": False}),
             **(
                 {
                     "closing_geometry": self._closing_geometry,

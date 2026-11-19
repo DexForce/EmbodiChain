@@ -94,6 +94,7 @@ class _AntipodalMeshBackend:
         filter_ground_collision: bool,
         approach_alignment_angle: float | None = None,
         check_collision: bool = True,
+        disk_cache: bool = True,
         prepared: _AntipodalMeshBackend | None = None,
         closing_geometry: SampledHandGeometry | None = None,
         closing_ground_height_m: float | None = None,
@@ -155,6 +156,7 @@ class _AntipodalMeshBackend:
                 cfg=collision_cfg,
                 collision_geometry=collision_geometry,
             )
+        self._disk_cache = disk_cache
         self._sampler_cfg = sampler_cfg
         self._center_mode = sampler_cfg.center_mode
         self._max_deviation_angle = max_deviation_angle
@@ -171,7 +173,7 @@ class _AntipodalMeshBackend:
         )
 
         # Load cached antipodal pairs for the whole mesh if available.
-        if prepared is None:
+        if prepared is None and disk_cache:
             cache_path = self._get_cache_dir(self.vertices, self.triangles)
             if os.path.exists(cache_path):
                 logger.log_info(
@@ -366,6 +368,8 @@ class _AntipodalMeshBackend:
 
     def _cache_hit_point_pairs(self, hit_point_pairs: torch.Tensor):
         self._hit_point_pairs = hit_point_pairs
+        if not self._disk_cache:
+            return
         cache_path = self._get_cache_dir(self.vertices, self.triangles)
         self._save_cache(cache_path, hit_point_pairs)
 
