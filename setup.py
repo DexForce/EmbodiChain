@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 
 from setuptools import Command, find_namespace_packages, setup
+from setuptools.command.build_py import build_py
 
 __all__ = [
     "get_example_data_files",
@@ -37,6 +38,26 @@ logger = logging.getLogger()
 THIS_DIR = Path(__file__).resolve().parent
 PACKAGE_PATTERNS = ["embodichain", "embodichain.*"]
 EXAMPLES_DIR = THIS_DIR / "examples"
+
+
+class BuildPy(build_py):
+    """Remove retired extension packages from reused build staging."""
+
+    def run(self) -> None:
+        for extension in (
+            "benchmarks",
+            "models",
+            "robots",
+            "sensors",
+            "solvers",
+            "tasks",
+        ):
+            stale_package = Path(self.build_lib) / f"embodichain_{extension}"
+            if stale_package.is_symlink():
+                stale_package.unlink(missing_ok=True)
+            elif stale_package.is_dir():
+                shutil.rmtree(stale_package)
+        super().run()
 
 
 class CleanCommand(Command):
@@ -179,7 +200,7 @@ def main() -> None:
         packages=get_packages(),
         package_data=get_package_data(),
         data_files=get_example_data_files(),
-        cmdclass={"clean": CleanCommand},
+        cmdclass={"build_py": BuildPy, "clean": CleanCommand},
         include_package_data=False,
     )
 

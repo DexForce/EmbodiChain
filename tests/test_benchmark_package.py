@@ -51,6 +51,10 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
     ignore = shutil.ignore_patterns("__pycache__", "*.pyc", "*.egg-info")
     for name in ("embodichain", "examples"):
         shutil.copytree(root / name, source / name, ignore=ignore)
+    # Reuse staging from the retired top-level layout.
+    stale = source / "build" / "lib" / "embodichain_tasks"
+    stale.mkdir(parents=True)
+    (stale / "__init__.py").touch()
     built = subprocess.run(
         [
             sys.executable,
@@ -334,7 +338,8 @@ for name in ('torch', 'newton', 'dexsim', 'embodichain.extensions.models'):
 
 class ConcreteImportsForbidden(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split('.')[0] in {'embodichain.extensions.models', 'embodichain.extensions.solvers'}:
+        packages = ('embodichain.extensions.models', 'embodichain.extensions.solvers')
+        if any(fullname == package or fullname.startswith(package + '.') for package in packages):
             raise AssertionError('Core imported a concrete implementation: ' + fullname)
 
 blocker = ConcreteImportsForbidden()

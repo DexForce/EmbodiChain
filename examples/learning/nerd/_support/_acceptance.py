@@ -40,6 +40,18 @@ import sys
 import time
 from typing import Any
 
+_PREVIOUS_MODELS_ROOT = Path("extensions/embodichain_models")
+_EXTENSION_LAYOUTS = (
+    (
+        Path("embodichain/extensions/models/dynamics/nerd"),
+        "embodichain.extensions.models.dynamics.nerd",
+    ),
+    (
+        _PREVIOUS_MODELS_ROOT / "embodichain_models/dynamics/nerd",
+        "embodichain_models.dynamics.nerd",
+    ),
+)
+
 
 def _write(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -54,13 +66,22 @@ def _sha(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _extension_layout(source: Path) -> tuple[Path, str] | None:
+    for directory, package in _EXTENSION_LAYOUTS:
+        if (source / directory / "model.py").is_file():
+            return directory, package
+    return None
+
+
 def _source_modules(source: Path) -> dict[str, str]:
     """Select only the requested checkout's original or extension module layout."""
-    if (source / "embodichain/extensions/models/dynamics/nerd/model.py").is_file():
+    layout = _extension_layout(source)
+    if layout is not None:
+        _, package = layout
         return {
-            "codec": "embodichain.extensions.models.dynamics.nerd.codec",
-            "data": "embodichain.extensions.models.dynamics.nerd.data",
-            "model": "embodichain.extensions.models.dynamics.nerd",
+            "codec": f"{package}.codec",
+            "data": f"{package}.data",
+            "model": package,
             "trainer": "examples.learning.nerd._support._trainer",
             "qualification": "examples.learning.nerd._support._qualification",
         }
@@ -76,11 +97,9 @@ def _source_modules(source: Path) -> dict[str, str]:
 def _source_paths(source: Path) -> list[str]:
     """Keep each independent worker's imports bound to its requested source."""
     paths = [str(source)]
-    if (
-        _source_modules(source)["model"]
-        == "embodichain.extensions.models.dynamics.nerd"
-    ):
-        paths.insert(0, str(source / "embodichain/extensions/models"))
+    layout = _extension_layout(source)
+    if layout is not None and layout[0].is_relative_to(_PREVIOUS_MODELS_ROOT):
+        paths.insert(0, str(source / _PREVIOUS_MODELS_ROOT))
     return paths
 
 
@@ -88,14 +107,13 @@ def _source_identity(source: Path) -> dict[str, Any]:
     def git(*args: str) -> bytes:
         return subprocess.check_output(["git", "-C", str(source), *args])
 
-    if (
-        _source_modules(source)["model"]
-        == "embodichain.extensions.models.dynamics.nerd"
-    ):
+    layout = _extension_layout(source)
+    if layout is not None:
+        directory, _ = layout
         modules = (
             "examples/learning/nerd/_support/_trainer.py",
             *(
-                "embodichain/extensions/models/dynamics/nerd/" + name
+                (directory / name).as_posix()
                 for name in (
                     "model.py",
                     "checkpoint.py",

@@ -209,7 +209,7 @@ The CLI records repository provenance and writes reports outside the model
 cache. Robot references still use `get_data_path()` and its existing asset cache.
 Task packages must already be installed; downloading weights does not register
 new environment implementations. The index's `task_package` accepts a qualified
-module name. Published official policy indexes declaring `embodichain.extensions.tasks`
+module name. Published official policy indexes declaring `embodichain_tasks`
 resolve their requirement to `embodichain.extensions.tasks`. Test the Hub
 boundary with fake downloads and validate a real selected-model download separately.
 

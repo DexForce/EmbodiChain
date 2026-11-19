@@ -30,13 +30,14 @@ TASK = resolve_config_path(
 ).resolve()
 CONFIG_ROOT = TASK.parents[3]
 TASK_PACKAGE = CONFIG_ROOT.parent
+# These keys identify task content in saved ACT datasets and checkpoints.
 IDENTITY_FILES = {
-    "embodichain/extensions/tasks/configs/tasks/manipulation/push_cube/task.franka.visual.yaml": TASK,
-    "embodichain/extensions/tasks/configs/tasks/manipulation/push_cube/env.visual.yaml": TASK.parent
+    "extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/task.franka.visual.yaml": TASK,
+    "extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/env.visual.yaml": TASK.parent
     / "env.visual.yaml",
-    "embodichain/extensions/tasks/configs/components/embodiments/franka_panda_rgb_224.yaml": CONFIG_ROOT
+    "extensions/embodichain_tasks/configs/components/embodiments/franka_panda_rgb_224.yaml": CONFIG_ROOT
     / "components/embodiments/franka_panda_rgb_224.yaml",
-    "embodichain/extensions/tasks/manipulation/push_cube.py": TASK_PACKAGE
+    "extensions/embodichain_tasks/embodichain_tasks/manipulation/push_cube.py": TASK_PACKAGE
     / "manipulation/push_cube.py",
 }
 
