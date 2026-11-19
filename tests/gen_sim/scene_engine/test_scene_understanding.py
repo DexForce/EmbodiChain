@@ -134,6 +134,36 @@ def test_image_analysis_promotes_bell_before_generation(tmp_path: Path) -> None:
     assert scene.assets[0].is_articulated is True
 
 
+def test_image_analysis_keeps_assets_rigid_when_articulation_is_not_allowed(
+    tmp_path: Path,
+) -> None:
+    payload = json.loads(_response())
+    payload["assets"][0].update(category="bell", name="silver service bell")
+    payload["assets"].append(
+        {
+            "category": "pot",
+            "name": "grey pot",
+            "description": "A grey pot with a lid.",
+            "is_articulated": True,
+        }
+    )
+
+    class VLM:
+        def complete(self, **_: object) -> str:
+            return json.dumps(payload)
+
+    image = tmp_path / "scene.png"
+    Image.new("RGB", (8, 8)).save(image)
+    scene = Scene()
+    scene_understanding._analyze_image_objects(
+        scene=scene,
+        image_path=image,
+        vlm_client=VLM(),  # type: ignore[arg-type]
+        allow_articulated_assets=False,
+    )
+    assert [asset.is_articulated for asset in scene.assets] == [False, False]
+
+
 def test_image_object_analysis_accepts_name_with_spatial_words() -> None:
     scene = scene_understanding._parse_image_object_analysis_response(
         _response(asset_name="left cup")
@@ -179,9 +209,17 @@ def test_image_object_analysis_retries_then_updates_scene(tmp_path: Path) -> Non
 class _PromptedSegmentation:
     """Return one rectangular mask only for the prompts it recognizes."""
 
-    def __init__(self, image_size: tuple[int, int], known: set[str]) -> None:
+    def __init__(
+        self,
+        image_size: tuple[int, int],
+        known: set[str],
+        box: tuple[int, int, int, int] = (8, 8, 24, 20),
+        hole: tuple[int, int, int, int] | None = None,
+    ) -> None:
         mask = Image.new("L", image_size, 0)
-        ImageDraw.Draw(mask).rectangle((8, 8, 24, 20), fill=255)
+        ImageDraw.Draw(mask).rectangle(box, fill=255)
+        if hole is not None:
+            ImageDraw.Draw(mask).rectangle(hole, fill=0)
         self.mask = image_segmentation_utils._encode_binary_mask_rle(mask)
         self.known = known
         self.prompts: list[str] = []
@@ -224,6 +262,65 @@ def test_seamless_tabletop_falls_back_to_a_surface_prompt(tmp_path: Path) -> Non
 
     assert segmentation.prompts[-1] == "surface"
     assert scene.table is not None and scene.table.mask_path is not None
+
+
+@pytest.mark.parametrize(
+    ("table_box", "accepted"),
+    [
+        ((0, 0, 47, 31), True),  # fills the frame around the asset
+        ((0, 0, 47, 20), False),  # large, but the asset does not rest on it
+        ((10, 8, 38, 31), False),  # under the asset, but not frame-filling
+    ],
+)
+def test_declined_seamless_tabletop_is_settled_by_mask_geometry(
+    tmp_path: Path, table_box: tuple[int, int, int, int], accepted: bool
+) -> None:
+    image_path = tmp_path / "scene.png"
+    Image.new("RGB", (48, 32), "white").save(image_path)
+    scene = Scene(
+        objects=[
+            SceneObject(
+                id="table",
+                kind="table",
+                category="table",
+                name="white table",
+                description="A white tabletop filling the frame.",
+            )
+        ]
+    )
+    # A striped asset mask: real masks have holes, and the table mask excludes
+    # the whole object.
+    asset_box = (14, 12, 34, 24)
+    asset_mask = Image.new("L", (48, 32), 0)
+    for row in range(asset_box[1], asset_box[3] + 1, 3):
+        ImageDraw.Draw(asset_mask).line((14, row, 34, row), fill=255)
+    segmentation = _PromptedSegmentation(
+        (48, 32), {"surface"}, box=table_box, hole=asset_box
+    )
+
+    class VLM:
+        def complete(self, **_: object) -> str:
+            return json.dumps({"selected_mask_index": None})
+
+    def segment() -> None:
+        scene_understanding._segment_table(
+            image_path,
+            image_path,
+            asset_mask,
+            tmp_path,
+            tmp_path,
+            scene,
+            vlm_client=VLM(),  # type: ignore[arg-type]
+            image_segmentation_client=segmentation,  # type: ignore[arg-type]
+        )
+
+    assert scene.table is not None
+    if accepted:
+        segment()
+        assert scene.table.mask_path is not None
+    else:
+        with pytest.raises(ValueError, match="VLM-validated"):
+            segment()
 
 
 def test_unsegmented_asset_retries_with_vlm_appearance_prompts(

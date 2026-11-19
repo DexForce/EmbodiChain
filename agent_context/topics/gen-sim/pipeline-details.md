@@ -13,6 +13,10 @@
    Configuration and adapter ownership live under `services/`, not the pipelines.
 3. Scene understanding produces the table/object model and scene graph; geometry and optional
    articulation stages materialize assets; refinement updates placement.
+   `allow_articulated_assets=False` keeps every asset rigid; the legacy scene
+   provider passes it unless the task requirements name an `articulation` or
+   `button` role. Table masks need VLM validation, except a lone candidate that
+   fills the frame under the segmented assets (a seamless tabletop).
    `SceneExporter.export()` is the durable generation boundary.
    The staged API in `scene_engine/pipeline/api.py` also persists versioned
    blueprints before materialization. Articulated generation delegates to

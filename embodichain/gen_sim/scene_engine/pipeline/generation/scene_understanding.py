@@ -25,6 +25,7 @@ import re
 import shutil
 from typing import Any
 
+import numpy as np
 from PIL import Image
 
 from embodichain.gen_sim.services.compat import SegmentationClient
@@ -36,9 +37,11 @@ from embodichain.gen_sim.scene_engine.core.scene_graph import (
 )
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.gen_sim.services.compat import VisionClient
+from embodichain.utils.logger import log_warning
 from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils import (
     MaskCandidate,
     build_mask_candidates,
+    decode_rle_mask,
     render_asset_mask_id_overlay,
     render_image_without_masks,
     render_numbered_mask_candidates,
@@ -170,6 +173,13 @@ assets array when no objects are visible. Every field must be a non-empty
 string. is_articulated must be a boolean."""
 
 _USER_PROMPT = "Analyze the provided image and return only the required JSON object."
+# A lone table candidate that the validator declines is still the table when it
+# covers this fraction of the image ...
+_SEAMLESS_TABLE_MIN_FRACTION = 0.5
+# ... and this fraction of the band just below the segmented assets.
+_SEAMLESS_TABLE_MIN_SUPPORT = 0.3
+# Height of that band, as a fraction of the image height (at least 2 px).
+_SEAMLESS_TABLE_BAND_FRACTION = 0.03
 
 _TABLE_VALIDATION_SYSTEM_PROMPT = """You select the best table mask candidate.
 The image contains table-mask candidates overlaid semi-transparently on the
@@ -265,7 +275,13 @@ def understand_scene(
     vlm_client: VisionClient,
     image_segmentation_client: SegmentationClient,
     json_max_attempts: int = 3,
+    allow_articulated_assets: bool = True,
 ) -> tuple[Scene, SceneGraph]:
+    """Segment the image and build its initial scene graph.
+
+    With ``allow_articulated_assets=False`` every asset stays rigid, also one
+    that the image analysis or its category would mark as articulated.
+    """
 
     resolved_image_path = _validate_image_path(image_path)
     # The output in this stage will keep a JSON which contains
@@ -280,6 +296,7 @@ def understand_scene(
         image_path=resolved_image_path,
         vlm_client=vlm_client,
         json_max_attempts=json_max_attempts,
+        allow_articulated_assets=allow_articulated_assets,
     )
 
     # Receive the validated whole-scene mask, for VLM output the scene graph.
@@ -466,6 +483,7 @@ def _analyze_image_objects(
     image_path: str | Path,
     vlm_client: VisionClient,
     json_max_attempts: int = 3,
+    allow_articulated_assets: bool = True,
 ) -> None:
     """Analyze one image and update ``scene`` with validated semantic objects."""
     if json_max_attempts < 1:
@@ -481,7 +499,11 @@ def _analyze_image_objects(
         )
         try:
             analyzed_scene = _parse_image_object_analysis_response(response_text)
-            _force_known_movable_objects_articulated(analyzed_scene)
+            if allow_articulated_assets:
+                _force_known_movable_objects_articulated(analyzed_scene)
+            else:
+                for scene_object in analyzed_scene.assets:
+                    scene_object.is_articulated = False
             validate_scene_understanding(analyzed_scene)
         except ValueError as exc:
             last_validation_error = exc
@@ -740,6 +762,9 @@ def _segment_table(
         raise ValueError("Cannot segment a scene without a table.")
 
     table = scene.table
+    selected: MaskCandidate | None = None
+    # A lone frame-filling candidate that the validator declined.
+    unconfirmed: MaskCandidate | None = None
     # Build the segmentation prompts for table.
     for prompt_label, prompt in (
         ("name", table.name),
@@ -782,21 +807,60 @@ def _segment_table(
             candidates_image_path=candidates_image_path,
             vlm_client=vlm_client,
         )
-        if selected_mask_index is None:
-            continue
+        if selected_mask_index is not None:
+            selected = _candidate_by_index(candidates, selected_mask_index)
+            break
+        if (
+            unconfirmed is None
+            and len(candidates) == 1
+            and _fills_frame_under_assets(candidates[0], label_avoid_mask)
+        ):
+            unconfirmed = candidates[0]
 
-        # Save result.
-        candidate = _candidate_by_index(candidates, selected_mask_index)
-        table.mask_path = str(
-            save_binary_mask(
-                candidate,
-                image_size=_image_size(image_path),
-                output_path=Path(masks_output_root) / "table_mask.png",
+    # A seamless tabletop that fills the frame shows no edge or leg, and the
+    # validator declines its mask on some attempts. The mask geometry settles
+    # that case when no prompt produced a validated candidate.
+    if selected is None:
+        if unconfirmed is None:
+            raise ValueError(
+                "Unable to find a VLM-validated segmentation mask for the table."
             )
+        log_warning(
+            "Table mask accepted without VLM validation: it fills the frame "
+            "under the segmented assets."
         )
-        return
+        selected = unconfirmed
+    table.mask_path = str(
+        save_binary_mask(
+            selected,
+            image_size=_image_size(image_path),
+            output_path=Path(masks_output_root) / "table_mask.png",
+        )
+    )
 
-    raise ValueError("Unable to find a VLM-validated segmentation mask for the table.")
+
+def _fills_frame_under_assets(
+    candidate: MaskCandidate, asset_union_mask: Image.Image
+) -> bool:
+    """Return whether a candidate fills the frame and carries the assets.
+
+    An object resting on the table meets it along its lower image contour, so
+    the band of pixels just below the lowest asset pixel of each image column
+    belongs to the tabletop. A large mask that misses this band, such as a
+    floor around a small table, is not the table. Holes inside an asset mask
+    do not count: only the lowest contour is used.
+    """
+    table = np.asarray(decode_rle_mask(candidate.mask_rle)).astype(bool)
+    assets = np.asarray(asset_union_mask).astype(bool)
+    if assets.shape != table.shape or table.mean() < _SEAMLESS_TABLE_MIN_FRACTION:
+        return False
+    height = table.shape[0]
+    depth = max(2, round(_SEAMLESS_TABLE_BAND_FRACTION * height))
+    occupied = assets.any(axis=0)
+    lowest = height - 1 - np.argmax(assets[::-1], axis=0)
+    rows = np.arange(height)[:, None]
+    band = occupied & (rows > lowest) & (rows <= lowest + depth)
+    return bool(band.any()) and table[band].mean() >= _SEAMLESS_TABLE_MIN_SUPPORT
 
 
 def _validate_table_candidates_with_vlm(
