@@ -57,6 +57,8 @@ observer hook. The semantic adapter translates clauses to the physical
 `atomic_skills.grip_evidence.GripContactObserver`; sensors own acquisition/history
 and compute owns bilateral contact arithmetic. It retains provider IDs and physical algorithm revisions; revision
 2's open-hand interpretation requires explicit driver calibration and opt-in.
+Configured embodiments select it with `control_part_evidence.kind:
+pad_contact_constraint`; see [configuration](configuration.md).
 No task labels or control-part suffixes select a policy. Sampling/timeline lifecycle
 and per-row availability belong to the [contact boundary](../sensor-system/contact-history.md).
 Raw traces are observations, while report serialization and TaskSpec verdicts
@@ -209,7 +211,7 @@ gate. Routed held-object transport uses this contract and its named Atomic goal
 requests terminal retained-attachment verification.
 A registered release may retain
 its incoming verified hold through declared approach phases and require measured
-detachment before retracting. Ordinary Place checks loss of the grasp constraint/contact before retreat, then checks both loss of grip and physical pose separation at the terminal boundary. Registered release gates retain their declared contract. Runtime validates every guard phase against each successful final plan,
+detachment before retracting. Place, and every registered call lowered to the Place skill such as relative placement, checks loss of the grasp constraint/contact before retreat, then checks both loss of grip and physical pose separation at the terminal boundary. Registered release gates on other skills retain their declared contract. Runtime validates every guard phase against each successful final plan,
 after optional transforms and before dispatch, including retries. Failed plans
 retain their original planning diagnostics. A lowerer may explicitly preserve
 symbolic state only when it declares no effect contract. Declaring a held

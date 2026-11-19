@@ -243,6 +243,62 @@ class TestAntipodalAffordance:
         with pytest.raises(ValueError, match="whole-object geometry"):
             affordance.get_object_longest_axis(torch.eye(4).unsqueeze(0))
 
+    def test_face_angle_limit_drops_grasps_closing_across_a_box_diagonal(self):
+        import numpy as np
+        import trimesh
+
+        def yaw(degrees: float) -> torch.Tensor:
+            angle = torch.deg2rad(torch.tensor(degrees))
+            cos, sin = torch.cos(angle), torch.sin(angle)
+            return torch.tensor([[cos, -sin, 0.0], [sin, cos, 0.0], [0.0, 0.0, 1.0]])
+
+        # A 56 mm cube with 1 mm chamfers, modelled 30 degrees off its own frame.
+        half, chamfer = 0.028, 0.001
+        corners = [
+            np.roll([sign * half, a * (half - chamfer), b * (half - chamfer)], axis)
+            for axis in range(3)
+            for sign in (-1, 1)
+            for a in (-1, 1)
+            for b in (-1, 1)
+        ]
+        hull = trimesh.convex.convex_hull(np.array(corners))
+        box_in_mesh = yaw(30.0)
+        vertices = torch.tensor(hull.vertices, dtype=torch.float32) @ box_in_mesh.T
+        triangles = torch.tensor(hull.faces)
+        object_pose = torch.eye(4)
+        object_pose[:3, :3] = yaw(50.0)
+        object_pose[:3, 3] = torch.tensor([0.3, -0.2, 0.77])
+
+        def grasp(box_yaw_degrees: float) -> torch.Tensor:
+            pose = torch.eye(4)
+            closing = object_pose[:3, :3] @ box_in_mesh @ yaw(box_yaw_degrees)[:, 0]
+            approach = torch.tensor([0.0, 0.0, -1.0])
+            pose[:3, 0] = closing
+            pose[:3, 1] = torch.linalg.cross(approach, closing)
+            pose[:3, 2] = approach
+            return pose
+
+        # Square on a face, 10 degrees off it, across the diagonal, on the
+        # perpendicular face pair.
+        poses = torch.stack([grasp(0.0), grasp(10.0), grasp(45.0), grasp(90.0)])
+        generator = Mock()
+        generator.get_valid_grasp_poses.return_value = [(poses, torch.arange(4.0))]
+
+        def kept_costs(limit: float | None) -> list[float]:
+            candidates = AntipodalAffordance(
+                mesh_vertices=vertices,
+                mesh_triangles=triangles,
+                max_closing_face_angle=limit,
+            ).get_grasp_candidates(
+                generator, object_pose[None], torch.tensor([0.0, 0.0, -1.0])
+            )
+            return candidates.costs[candidates.valid].tolist()
+
+        assert kept_costs(None) == [0.0, 1.0, 2.0, 3.0]
+        assert kept_costs(0.26) == [0.0, 1.0, 3.0]
+        with pytest.raises(ValueError, match="max_closing_face_angle"):
+            AntipodalAffordance(max_closing_face_angle=0.26)
+
 
 class TestAxisAlignAffordance:
     def test_extends_antipodal_affordance_with_owned_internal_axis(self):

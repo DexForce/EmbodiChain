@@ -24,6 +24,7 @@ import pytest
 import torch
 
 from embodichain.compute.geometry import (
+    box_face_axes,
     aabb_containment_violation,
     aabb_overlap_depth,
     aabb_separation,
@@ -308,6 +309,49 @@ def test_triangle_geometry_handles_winding_degeneracy_and_invalid_padding(
     )
     assert normals.dtype == dtype and normals.device == device
     assert areas.dtype == dtype and areas.device == device
+
+
+def test_box_face_axes_follow_face_area_not_the_mesh_frame_or_chamfers(device, dtype):
+    import numpy as np
+    import trimesh
+
+    # A 40 x 56 x 80 mm box with 1 mm chamfers, modelled off its own frame.
+    half = np.array([0.020, 0.028, 0.040])
+    corners = []
+    for axis in range(3):
+        inset = half - 0.001
+        inset[axis] = half[axis]
+        corners += [inset * signs for signs in product((-1, 1), repeat=3)]
+    hull = trimesh.convex.convex_hull(np.array(corners))
+    rotation = torch.tensor(
+        trimesh.transformations.euler_matrix(0.4, -0.3, 0.9)[:3, :3],
+        device=device,
+        dtype=dtype,
+    )
+    vertices = torch.tensor(hull.vertices, device=device, dtype=dtype) @ rotation.T
+    triangles = torch.tensor(hull.faces, device=device)
+
+    axes = box_face_axes(vertices, triangles)
+
+    assert axes.dtype == dtype and axes.device == device
+    torch.testing.assert_close(
+        axes @ axes.T, torch.eye(3, device=device, dtype=dtype), atol=1e-5, rtol=0
+    )
+    # Each estimated axis is one of the box's own axes, up to sign.
+    alignment = (axes @ rotation).abs()
+    torch.testing.assert_close(
+        alignment.amax(dim=1),
+        torch.ones(3, device=device, dtype=dtype),
+        atol=1e-4,
+        rtol=0,
+    )
+    assert sorted(alignment.argmax(dim=1).tolist()) == [0, 1, 2]
+
+    flat = torch.tensor(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], device=device, dtype=dtype
+    )
+    with pytest.raises(ValueError, match="perpendicular"):
+        box_face_axes(flat, torch.tensor([[0, 1, 2]], device=device))
 
 
 def test_triangle_geometry_handles_empty_batches(device, dtype):

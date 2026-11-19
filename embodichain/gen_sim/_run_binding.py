@@ -35,6 +35,8 @@ __all__: list[str] = []
 # Scene exports and ObjectBaseCfg read ``init_rot`` as extrinsic x-y-z degrees.
 _EULER = "xyz"
 _LIFT_POSITION_TOLERANCE_M = 0.01
+# A box-like object is gripped squarely on a pair of faces, within 15 degrees.
+_BOX_GRASP_FACE_ANGLE_RAD = round(math.pi / 12, 6)
 
 
 def _load_runtime(
@@ -993,6 +995,7 @@ def _bind_deployment(
     # released object to separate from the still-open gripper before retracting,
     # which an object already resting on its support cannot do.
     release_clearance = float(cfg.binding.get("release_clearance", 0.0))
+    box_grasp_categories = set(cfg.binding.get("box_grasp_categories", []))
     configured_services = runtime_services
     # Measured legacy geometry binds only the registered calls whose lowerer the
     # run configuration does not supply. A configured lowerer owns its targets,
@@ -1151,6 +1154,11 @@ def _bind_deployment(
             if affordance is None:
                 affordance = {"entity_id": grasp, "kind": "antipodal_grasp"}
                 value["affordances"].append(affordance)
+            if value["semantic_type"] in box_grasp_categories:
+                # Without this a grasp may span the diagonal and hold the edges.
+                affordance.setdefault(
+                    "max_closing_face_angle", _BOX_GRASP_FACE_ANGLE_RAD
+                )
             if cid == "simulation.axis_align":
                 # The aligned body frame's +Z is the object's length axis.
                 affordance["internal_axis"] = [0.0, 0.0, 1.0]

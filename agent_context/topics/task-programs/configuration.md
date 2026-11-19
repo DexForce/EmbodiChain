@@ -367,10 +367,18 @@ for supported topology, geometry and cache lifetime.
 The reference embodiment `skill_profile.contract_id` and `profile_id` values
 are unversioned. Versioned Gym, task-integration, or scene-registry IDs are
 separate identity domains and do not imply a skill-profile version.
-For `joint_position_constraint` evidence, `object_ids` is an optional explicit
-narrowing. When omitted, runtime assembly scopes the embodiment service to the
-selected scene's graspable rigid objects, so reusable embodiments do not name
-task-local objects.
+`control_part_evidence.kind` selects how a hand's grasp constraint is measured.
+`joint_position_constraint` reports a hold once any hand joint is at least
+`minimum_displacement` from `open_qpos`, so a grasp that closes the fingers by
+less than that reads as open. `pad_contact_constraint` instead reuses native
+grip evidence: `pad_links` names the two pad links of each control part, and a
+hold is opposed positive-impulse contact of both pads with the object,
+independent of grasp width. Its optional `open_qpos` and `open_tolerance`, set
+together in the control part's joint order, also accept a release where the
+object rests against one pad of a measured open hand. For both kinds,
+`object_ids` is an optional explicit narrowing. When omitted, runtime assembly
+scopes the embodiment service to the selected scene's graspable rigid objects,
+so reusable embodiments do not name task-local objects.
 
 Deployment embodiment robot installation overrides are restricted to `uid`,
 `init_pos`, `init_rot`, and `init_qpos`, plus bounded task calibration.
@@ -418,9 +426,13 @@ globally unique `entity_id` and a closed `kind` discriminator
 ownership with `object_id` or `parent_id`. `rigidized_articulations` owns a
 required `locked_qpos` mapping and binds a physical `simulation.articulation`
 UID as a `SceneObjectRef`. Its `antipodal_grasp` child owns a required
-`grasp_link`; ordinary rigid-object antipodal fields (`mesh_env_id` and
-`internal_axis`) remain unchanged and are not accepted on that link-backed
-child. Configured rigidized articulations accept only `collision_role: none`:
+`grasp_link`; ordinary rigid-object antipodal fields (`mesh_env_id`,
+`internal_axis` and `max_closing_face_angle`) remain unchanged and are not
+accepted on that link-backed child. `max_closing_face_angle` (radians, default
+unset) is for box-like objects: only grasps whose closing axis is within that
+angle of a box face normal are kept, so a grasp spanning a diagonal and holding
+the edges is discarded. The face directions come from the mesh's surface area
+rather than its frame. Configured rigidized articulations accept only `collision_role: none`:
 their link-local grasp mesh does not provide planner collision geometry.
 Joint-position and cross-arena transform tolerances may only tighten the safe
 maxima of `1e-3` and `1e-5`; native joint-limit coincidence is proven with a

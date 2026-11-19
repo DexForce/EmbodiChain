@@ -1042,6 +1042,9 @@ class _TypedMoveHeldObjectLowerer(RegisteredSemanticLowerer):
 _HOLD_ENDPOINT_IDS = ("motion", "grasp")
 """Resource endpoints that carry or address a held-object relation."""
 
+_PLACE_SKILL_ID = "place"
+"""Atomic Skill that opens the hand at a landing pose before it retreats."""
+
 
 class SemanticCallCompiler:
     """Analyze semantic workflows and JIT-lower exactly one call at a time."""
@@ -2547,9 +2550,14 @@ class SemanticCallCompiler:
                 expectation_id=expectation_id,
                 relation=relation,
             )
-            if type(call) is Place and gate_id == "source_released":
+            if (
+                relation is HeldObjectRelation.DETACHED
+                and effect_spec.skill_id == _PLACE_SKILL_ID
+            ):
                 # At the landing pose an open gripper can still surround the object.
                 # Verify opening before retreat; verify separation at the terminal.
+                # This holds for every call lowered to Place, including
+                # registered ones such as relative placement.
 
                 gate_spec = replace(
                     gate_spec,

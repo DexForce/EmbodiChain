@@ -18,11 +18,13 @@
 
 from __future__ import annotations
 
+import math
+
 import torch
 
 from .aabb import _float_tensor
 
-__all__ = ["triangle_geometry"]
+__all__ = ["triangle_geometry", "box_face_axes"]
 
 
 def triangle_geometry(
@@ -88,3 +90,75 @@ def triangle_geometry(
     normals = torch.where(valid[..., None], cross / safe_length[..., None], 0.0)
     areas = torch.where(valid, length * 0.5, 0.0)
     return normals, areas, valid
+
+
+def box_face_axes(
+    vertices: torch.Tensor,
+    triangles: torch.Tensor,
+    *,
+    cone_angle: float = math.pi / 18,
+    max_candidates: int = 256,
+) -> torch.Tensor:
+    """Estimate the three orthogonal face directions of a box-like mesh.
+
+    The first axis is the triangle normal with the most surface area facing
+    along it in either sense; the second is chosen the same way among normals
+    perpendicular to the first. Each is refined to the area-weighted mean of
+    its supporting normals. Small features such as chamfers hold little area
+    and do not move the result. The estimate does not use the mesh frame, so
+    a box modelled at an angle to its own axes is handled.
+
+    Args:
+        vertices: Mesh vertices, shaped ``(N, 3)``, float32 or float64.
+        triangles: Vertex indices, shaped ``(M, 3)``.
+        cone_angle: Half-angle in radians within which a normal supports, or
+            is perpendicular to, an axis.
+        max_candidates: Number of largest triangles tried as axis directions.
+
+    Returns:
+        Unit axes as rows, shaped ``(3, 3)``, right-handed and orthogonal, in
+        the frame, dtype and device of ``vertices``.
+
+    Raises:
+        ValueError: The mesh has no valid triangle, or no face perpendicular
+            to its dominant face direction.
+    """
+    _float_tensor(vertices, "vertices")
+    if vertices.ndim != 2 or vertices.shape[1] != 3:
+        raise ValueError("vertices must have shape (N, 3)")
+    if triangles.ndim != 2 or triangles.shape[1] != 3:
+        raise ValueError("triangles must have shape (M, 3)")
+    if not 0.0 < cone_angle < math.pi / 4:
+        raise ValueError("cone_angle must be in (0, pi/4)")
+    if type(max_candidates) is not int or max_candidates < 1:
+        raise ValueError("max_candidates must be a positive integer")
+    normals, areas, valid = triangle_geometry(
+        vertices[triangles.to(device=vertices.device, dtype=torch.long)]
+    )
+    normals, areas = normals[valid], areas[valid]
+    if normals.shape[0] == 0:
+        raise ValueError("Mesh has no valid triangle")
+    candidates = normals[torch.topk(areas, min(max_candidates, areas.shape[0])).indices]
+    supports = math.cos(cone_angle)
+
+    def strongest(allowed: torch.Tensor) -> torch.Tensor:
+        directions = candidates[allowed]
+        if directions.shape[0] == 0:
+            raise ValueError(
+                "Mesh has no face perpendicular to its dominant face direction"
+            )
+        # Normals facing either way along a direction belong to the same axis.
+        alignment = directions @ normals.T
+        support = ((alignment.abs() >= supports) * areas).sum(dim=1)
+        signed = alignment[torch.argmax(support)]
+        members = signed.abs() >= supports
+        mean = (
+            normals[members] * (torch.sign(signed[members]) * areas[members])[:, None]
+        ).sum(dim=0)
+        return mean / torch.linalg.vector_norm(mean)
+
+    first = strongest(torch.ones_like(candidates[:, 0], dtype=torch.bool))
+    second = strongest((candidates @ first).abs() <= math.sin(cone_angle))
+    second = second - (second @ first) * first
+    second = second / torch.linalg.vector_norm(second)
+    return torch.stack((first, second, torch.linalg.cross(first, second)))
