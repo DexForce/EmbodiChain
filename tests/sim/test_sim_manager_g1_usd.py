@@ -163,6 +163,9 @@ def _check_g1(path: str, entry_point: str) -> None:
                 if name.startswith("gripper_") and count
             }
             assert gripper_colliders == GRIPPER_COLLISION_LINKS
+            for side in ("l", "r"):
+                # One gripper base collider and four camera mount meshes.
+                assert collision_shape_counts[f"gripper_{side}_base_link"] == 5
             body_and_arm_colliders = {
                 name: count
                 for name, count in collision_shape_counts.items()

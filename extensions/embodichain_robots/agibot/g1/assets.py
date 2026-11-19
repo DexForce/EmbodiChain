@@ -40,10 +40,10 @@ _SOURCE = (
 )
 _MODEL_SOURCE = f"{_SOURCE}/robot/G1_120s"
 _ROBOT_USD = "robot.usda"
-_REPAIR_REVISION = "703a381d751132b61a16b0e482bd54480af57f8b"
-_REPAIR_ENTRY = f"robot_assets/AgibotG1V3/{_ROBOT_USD}"
-_REPAIR_MD5 = "bd84fca08a0c4fa65d92965887ce9b09"
-_REPAIR_SHA256 = "4b0c06eb5392f5052b57a2d4650e6e892c0a197a7f3039fc121f9fcdda1c2628"
+_REPAIR_REVISION = "23370abf1c98b597ac13e40279dbb10cd775ccfb"
+_REPAIR_ENTRY = f"robot_assets/AgibotG1V4/{_ROBOT_USD}"
+_REPAIR_MD5 = "d0e9bffb1f7516f44056cba494085760"
+_REPAIR_SHA256 = "7ac0c031c0845d018dcca22ab845cfeb1c443e77dfdc2c413b40202273464913"
 # The upstream inventory also records the source entry before the repair.
 _FILES = {
     "LICENSE": "e66c269d4819aaab34b49ef5220c4ddab6756f21bb5180761a4eb8561f2b7bbd",
@@ -84,14 +84,15 @@ class AgibotG1(EmbodiChainDataset):
 
     The model is provided by AgiBot's GenieSimAssets under CC BY-NC-SA 4.0.
     The entry defines the 120s gripper colliders on their meshes, enables the
-    authored arm cylinders, and adds body and shoulder colliders from the
-    official G1 OmniPicker variant. The referenced layers come from G1_120s.
+    authored arm and wrist camera mount colliders, and adds body and shoulder
+    colliders from the official G1 OmniPicker variant. The referenced layers
+    come from G1_120s.
 
     Args:
         data_root: Optional asset cache root.
     """
 
-    cache_prefix = f"AgibotG1_{_REVISION[:12]}_v3"
+    cache_prefix = f"AgibotG1_{_REVISION[:12]}_v4"
 
     def __init__(self, data_root: str | None = None) -> None:
         root = str(
