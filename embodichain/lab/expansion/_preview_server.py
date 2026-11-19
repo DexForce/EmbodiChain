@@ -23,8 +23,8 @@ import json
 import socket
 import time
 import webbrowser
-from pathlib import Path
 from typing import TYPE_CHECKING
+from ._frontend import _preview_assets
 from ._preview_data import PreviewData, PreviewState
 from ._preview_heatmap import object_heatmaps
 
@@ -38,37 +38,6 @@ def _json(value: object) -> str:
     return json.dumps(value, allow_nan=False, separators=(",", ":"))
 
 
-def _assets(data: PreviewData) -> dict[str, tuple[str, bytes]]:
-    static = {
-        route: (mime, Path(__file__).with_name(filename).read_bytes())
-        for route, filename, mime in (
-            ("/", "_preview.html", "text/html; charset=utf-8"),
-            ("/preview.css", "_preview.css", "text/css; charset=utf-8"),
-            ("/preview-text.js", "_preview_text.js", "text/javascript; charset=utf-8"),
-            (
-                "/preview-controls.js",
-                "_preview_controls.js",
-                "text/javascript; charset=utf-8",
-            ),
-            (
-                "/preview-charts.js",
-                "_preview_charts.js",
-                "text/javascript; charset=utf-8",
-            ),
-            (
-                "/preview-heatmap.js",
-                "_preview_heatmap.js",
-                "text/javascript; charset=utf-8",
-            ),
-        )
-    }
-    static["/object-heatmaps"] = (
-        "application/json",
-        _json(object_heatmaps(data)).encode(),
-    )
-    return static
-
-
 class _WebPreviewTransport:
     """Serve replay controls and statistics over the native video listener."""
 
@@ -79,7 +48,11 @@ class _WebPreviewTransport:
         self.commands: deque[dict[str, object]] = deque()
         self.url = viewer.endpoint
         self.status = "{}"
-        assets = _assets(state.data)
+        assets = _preview_assets()
+        assets["/object-heatmaps"] = (
+            "application/json",
+            _json(object_heatmaps(state.data)).encode(),
+        )
         assets["/deviations"] = ("application/json", deviations)
         viewer._replace_application(assets, self._request)
 

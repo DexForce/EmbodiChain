@@ -55,4 +55,4 @@ python -m embodichain expansion preview \
 
 两种策略共用一份配置。默认布局允许立方体和放置目标在 X、Y 方向各偏移 ±6 cm。`trajectory.affordance.call_indices: [0]` 将抓取扩增应用到第一次调用 `pick`。`fixed_object_to_eef: null` 在 affordance 组启用夹爪的对向接触候选生成器。`branches: 3` 让采集器轮流请求分支 1 和 2，再按实际抓取、搬运、释放和放置结果验收。可以在同一处调整分支数、布局范围和每组轨迹数。[扩增配置](expansion.yaml) · [任务与机器人配置](../../../../extensions/embodichain_tasks/configs/tasks/manipulation/workspace_pose_pick_place/acceptance/scene_first/task.yaml)
 
-播放键、筛选器和时间轴在回放页面中实现，偏差曲线和物体热力图各有独立的绘图脚本。改完重新运行「网页回放」命令即可用同一批轨迹查看效果。[回放页面](../../../../embodichain/lab/expansion/_preview.html) · [偏差曲线脚本](../../../../embodichain/lab/expansion/_preview_charts.js) · [热力图脚本](../../../../embodichain/lab/expansion/_preview_heatmap.js)
+播放键、筛选器和时间轴在回放页面中实现，偏差曲线和物体热力图各有独立的绘图脚本。改完重新运行「网页回放」命令即可用同一批轨迹查看效果。[回放页面](../../../../embodichain/lab/expansion/_frontend/preview.html) · [偏差曲线脚本](../../../../embodichain/lab/expansion/_frontend/preview-charts.js) · [热力图脚本](../../../../embodichain/lab/expansion/_frontend/preview-heatmap.js)

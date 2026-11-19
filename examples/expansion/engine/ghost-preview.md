@@ -251,7 +251,7 @@ CLI 不触发采集和安装包页面资源由生产模块的聚焦测试覆盖�
 
 上述文件是原型的历史实验产物；仓库入口不再依赖它们。结果读取与控制语义由
 `embodichain/lab/expansion/_preview_data.py` 负责，原生渲染与资源释放由
-`_preview_render.py` 负责，HTTP 服务与页面由 `_preview_server.py`、`_preview.html`
+`_preview_render.py` 负责，HTTP 服务与页面由 `_preview_server.py`、`_frontend/preview.html`
 负责，CLI 由 `embodichain/cli/expansion.py` 分发。
 
 当前渲染支持单 URDF 机器人、单位机器人缩放，以及有完整实测位姿的刚体场景。

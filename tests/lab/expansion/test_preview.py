@@ -549,27 +549,22 @@ def test_preview_cli_dispatches_confirmed_records_without_collecting(
     )
 
 
-def test_viewer_assets_are_in_package_data(tmp_path):
+def test_expansion_frontend_assets_are_in_package_data(tmp_path):
     from setup import get_package_data
     from setuptools import Distribution
     from setuptools.command.build_py import build_py
-    import shutil
 
-    package = "embodichain.lab.expansion"
-    source = tmp_path / "source"
-    source.mkdir()
-    originals = Path(__file__).resolve().parents[3] / "embodichain/lab/expansion"
+    package = "embodichain.lab.expansion._frontend"
+    source = Path(__file__).resolve().parents[3] / "embodichain/lab/expansion/_frontend"
     assets = (
-        "_preview.html",
-        "_preview.css",
-        "_preview_text.js",
-        "_preview_controls.js",
-        "_preview_charts.js",
-        "_preview_heatmap.js",
+        "distribution.html",
+        "preview.html",
+        "preview.css",
+        "preview-text.js",
+        "preview-controls.js",
+        "preview-charts.js",
+        "preview-heatmap.js",
     )
-    for name in assets:
-        shutil.copyfile(originals / name, source / name)
-    (source / "__init__.py").write_text("")
     distribution = Distribution(
         {
             "packages": [package],
@@ -583,9 +578,9 @@ def test_viewer_assets_are_in_package_data(tmp_path):
     command.build_lib = str(tmp_path / "build")
     command.ensure_finalized()
     command.run()
-    packaged = Path(command.build_lib) / "embodichain/lab/expansion"
+    packaged = Path(command.build_lib) / "embodichain/lab/expansion/_frontend"
     for name in assets:
-        assert (packaged / name).read_bytes() == (originals / name).read_bytes()
+        assert (packaged / name).read_bytes() == (source / name).read_bytes()
 
 
 def test_manifest_keeps_rejected_points_visible_in_coverage(recorded_job):

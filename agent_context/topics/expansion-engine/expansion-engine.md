@@ -102,7 +102,8 @@ process orchestration remain outside the replay core.
 `embodichain expansion preview --input` reads confirmed job outputs through `_preview_data.py`,
 then replays full measured states using `_preview_render.py` and
 `_preview_server.py`. Browser replay defaults to the DexSim WebRTC observer
-and its owner-thread application.
+and its owner-thread application. `_frontend/` owns the packaged preview
+HTML, CSS and JavaScript and the offline distribution report template.
 Video is separate from the HTTP replay state; authenticated commands queue only
 validated replay controls. Inputs retain their original evidence; no collection or
 physics stepping occurs. It accepts one URDF robot and recorded rigid visual

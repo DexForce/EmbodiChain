@@ -153,15 +153,7 @@ def get_package_data() -> dict[str, list[str]]:
     ]
     return {
         "embodichain": ["VERSION"],
-        "embodichain.lab.expansion": [
-            "_preview.html",
-            "_preview.css",
-            "_preview_text.js",
-            "_preview_controls.js",
-            "_preview_charts.js",
-            "_preview_heatmap.js",
-            "_distribution.html",
-        ],
+        "embodichain.lab.expansion._frontend": ["*.html", "*.css", "*.js"],
         "embodichain.lab.visualization": [
             "web_assets/*.html",
             "web_assets/*.js",
