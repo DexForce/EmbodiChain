@@ -24,6 +24,8 @@ from typing import Any, ClassVar, Literal, TYPE_CHECKING
 
 import torch
 
+from embodichain.utils.math import axis_angle_to_rotation_matrix
+
 from .affordance_sampling import (
     AffordancePoseCandidates,
     AffordanceSample,
@@ -390,6 +392,16 @@ class TwistAffordance(Affordance):
     grasp_roll_range: tuple[float, float] | None = field(default=None, kw_only=True)
     """Allowed absolute grasp rolls containing :attr:`grasp_roll`."""
 
+    grasp_tilt: float = field(default=0.0, kw_only=True)
+    """Approach rotation about :attr:`grasp_tilt_axis` through the grasp point, in
+    radians. It is applied after the roll, so it leaves the hand's own symmetry
+    intact and lets the approach clear geometry beside the target."""
+
+    grasp_tilt_axis: tuple[float, float, float] | None = field(
+        default=None, kw_only=True
+    )
+    """Target-local axis of :attr:`grasp_tilt`; required when the tilt is non-zero."""
+
     twist_axis: torch.Tensor = field(
         default_factory=lambda: torch.tensor([0.0, 1.0, 0.0])
     )
@@ -418,6 +430,22 @@ class TwistAffordance(Affordance):
                     "grasp_roll_range must contain the nominal grasp_roll."
                 )
             self.grasp_roll_range = (lower, upper)
+        if (
+            isinstance(self.grasp_tilt, bool)
+            or not isinstance(self.grasp_tilt, Real)
+            or not math.isfinite(self.grasp_tilt)
+        ):
+            raise ValueError("grasp_tilt must be a finite real scalar.")
+        self.grasp_tilt = float(self.grasp_tilt)
+        if self.grasp_tilt_axis is not None:
+            axis = _validate_local_point(
+                self.grasp_tilt_axis, "TwistAffordance.grasp_tilt_axis"
+            )
+            if math.hypot(*axis) <= 1.0e-6:
+                raise ValueError("TwistAffordance.grasp_tilt_axis must be non-zero.")
+            self.grasp_tilt_axis = axis
+        elif self.grasp_tilt != 0.0:
+            raise ValueError("A non-zero grasp_tilt requires grasp_tilt_axis.")
         if (
             not isinstance(self.twist_axis, torch.Tensor)
             or self.twist_axis.shape != (3,)
@@ -476,6 +504,8 @@ class TwistAffordance(Affordance):
 
         The pose z-axis follows :attr:`twist_axis`. The remaining axes are
         formed with an adaptive reference so the result is always in SO(3).
+        :attr:`grasp_tilt` then rotates the rolled pose about its target-local
+        axis through the grasp point.
 
         Returns:
             Batched world-frame grasp poses with shape ``(B, 4, 4)``.
@@ -483,6 +513,10 @@ class TwistAffordance(Affordance):
         Raises:
             ValueError: If ``target_pose`` is not a batched pose tensor.
         """
+        return self._tilt_grasp_poses(self._rolled_grasp_pose(target_pose), target_pose)
+
+    def _rolled_grasp_pose(self, target_pose: torch.Tensor) -> torch.Tensor:
+        """Return the nominal rolled grasp pose before :attr:`grasp_tilt`."""
         if target_pose.dim() != 3 or target_pose.shape[1:] != (4, 4):
             raise ValueError("Target pose must have shape (B, 4, 4).")
         target_pose = target_pose.to(dtype=torch.float32)
@@ -514,6 +548,21 @@ class TwistAffordance(Affordance):
         )
         return _roll_poses(grasp_pose, nominal_roll)
 
+    def _tilt_grasp_poses(
+        self, poses: torch.Tensor, target_pose: torch.Tensor
+    ) -> torch.Tensor:
+        """Rotate grasp poses by :attr:`grasp_tilt` about their grasp points."""
+        if self.grasp_tilt == 0.0:
+            return poses
+        axis = torch.tensor(
+            self.grasp_tilt_axis, dtype=poses.dtype, device=poses.device
+        )
+        axis = torch.matmul(target_pose[:, :3, :3].to(poses), axis / axis.norm())
+        tilt = axis_angle_to_rotation_matrix(axis * self.grasp_tilt)
+        tilted = poses.clone()
+        tilted[:, :3, :3] = torch.matmul(tilt, poses[:, :3, :3])
+        return tilted
+
     def sample_grasp_pose(
         self,
         target_pose: torch.Tensor,
@@ -533,7 +582,7 @@ class TwistAffordance(Affordance):
         Returns:
             Sampled grasp poses and roll metadata.
         """
-        nominal = self.get_grasp_pose(target_pose)
+        nominal = self._rolled_grasp_pose(target_pose)
         rolls = torch.full(
             (len(nominal),),
             self.grasp_roll,
@@ -547,7 +596,10 @@ class TwistAffordance(Affordance):
                 env_ids=env_ids,
                 key=key,
             ).to(nominal)
-        poses = _roll_poses(nominal, rolls - self.grasp_roll)
+        poses = self._tilt_grasp_poses(
+            _roll_poses(nominal, rolls - self.grasp_roll),
+            target_pose.to(dtype=torch.float32),
+        )
         success = torch.ones(len(poses), dtype=torch.bool, device=poses.device)
         return AffordanceSample(
             success=success,

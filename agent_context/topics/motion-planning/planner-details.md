@@ -88,7 +88,11 @@ their 0.5 default. Its YAML and backend caches include resolved speed and
 acceleration vectors; changing either a request or robot limits closes and
 rebuilds the affected backend. Neural policy rollout retains its configured timing. The
 `ik_interp` path resolves robot speed caps and generic motion limits in the
-facade independently of the selected planner backend.
+facade independently of the selected planner backend. Its limited Cartesian
+retiming shares one control interval across the batch, but rows that failed
+IK, or alone need more than the 10,000-interval budget, stop setting it and are
+no longer solved: they fail and hold their start while the remaining rows are
+timed. A batch in which every row plans is retimed exactly as before.
 
 ## Backend-specific boundaries
 

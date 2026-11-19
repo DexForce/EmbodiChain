@@ -81,7 +81,10 @@ exports. Cartesian profile geometry and joint derivatives stay in their
 existing planner/compute owners, not tutorials.
 
 `retime_to_control_grid()` rounds duration up to the command grid without
-shortening it and recomputes velocity references. Standalone playback advances
+shortening it and recomputes velocity references. Linear retiming keeps a
+saturated acceleration only when the command period is an integer multiple of
+the source sample period (0.025 s onto 0.04 s reads about 9% high), so sample
+planners at a divisor of the compiled clock and keep their native samples. Standalone playback advances
 unchanged physics substeps; Gym experts use their environment's command period. Writers encode
 prepared actions without retiming again. See
 [retiming and playback](planner-details.md#retiming-and-playback).
@@ -108,7 +111,9 @@ It owns scene lifetime, frozen cases, evaluation and artifacts; adapters return
 preflight and runtime capability declarations remain separate. Frozen inputs do
 not guarantee identical stochastic outcomes across schedules. Parallel quality
 work uses spawned processes; performance replay stays serial and excludes
-contended timing. Population, masked-constraint, contact-scoring and uncertainty
+contended timing. A later simulator in the same process can diverge physically
+from the first, so `isolate_tracks=True` replays every track in its own
+single-use process. Population, masked-constraint, contact-scoring and uncertainty
 rules live in the [benchmark README](../../../extensions/embodichain_benchmarks/motion_generation/README.md)
 and [design contract](../../../extensions/embodichain_benchmarks/motion_generation/BENCHMARK_DESIGN.md).
 

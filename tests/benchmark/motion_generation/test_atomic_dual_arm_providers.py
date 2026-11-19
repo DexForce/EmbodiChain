@@ -1376,6 +1376,7 @@ class _CountingSampler(ParallelJawGraspPoseGenerator):
         *,
         gripper_data: dict[str, object] | None = None,
         root_from_tcp: list[list[float]] | None = None,
+        ray_deviation_angle: float | None = None,
     ) -> None:
         super().__init__(
             **{

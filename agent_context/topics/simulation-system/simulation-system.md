@@ -189,6 +189,15 @@ For missing metadata, verify readiness at the current topology; for empty Newton
 viewers, check that startup did not finalize an undeclared scene. Compute device
 and render GPU are distinct. Reset leakage points to selections/snapshots; native
 teardown failures point to ownership/unwind order. Motion namespaces stay lazy.
+Soft articulation contacts or fingers closing through a handle point to solver
+iterations: GPU physics solves the scene at its largest per-actor
+`min_position_iters`/`min_velocity_iters`, articulations default to the native
+4/1, so an articulation-only scene needs explicit counts. Articulation joints
+that never move under contact point to joint friction: a partial drive keeps
+the asset's omitted fields, and PhysX applies URDF friction as a coefficient
+on constraint force, so declare it explicitly. Configured gains that have no
+effect point to the drive type: an asset may import its joints undriven
+(`NONE`), and a partial drive keeps that mode unless `drive_type` is declared.
 
 Select focused tests from the owning detail page. Lifecycle coverage starts in
 `tests/sim/test_sim_manager.py` and `tests/sim/spawn/test_scene.py`; source,

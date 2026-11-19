@@ -35,6 +35,7 @@ from embodichain.compute.geometry import nearest_half_turn_pose, rotate_rigid_gr
 from embodichain.compute.kinematics import pose_error
 
 from embodichain.lab.sim.atomic_skills import (
+    GRASP_COMMAND,
     SkillInvocation,
     Affordance,
     AxisAlignAffordance,
@@ -66,10 +67,13 @@ from .atomic_case_utils import (
     _pre_pick_pose,
     TOP_DOWN_ROTATION,
     atomic_case_id,
+    case_hand_qpos,
     case_name,
     case_pose,
     difficulty,
     float_vector,
+    folded_object_yaw,
+    hand_command_override,
     randomization_parameters,
     randomized_vector_batch,
     snapshot_case_qpos,
@@ -742,6 +746,7 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
             door_waypoint_count=int(config.get("door_waypoint_count", 20)),
             approach_distance=float(config.get("approach_distance_m", 0.1)),
             retract_distance=float(config.get("retract_distance_m", 0.1)),
+            approach_ik_seeds=config.get("approach_ik_seeds", 0),
         )
         link_pose = handle.link_pose(target_link).to(device=start_qpos.device)
         mesh_vertices = affordance.mesh_vertices.to(
@@ -809,6 +814,7 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
                 "door_waypoint_count": options.door_waypoint_count,
                 "approach_distance_m": options.approach_distance,
                 "retract_distance_m": options.retract_distance,
+                "approach_ik_seeds": options.approach_ik_seeds,
                 "open_angle_rad": open_angle,
                 "open_fraction": open_fraction,
                 "target_joint_position": target_position,
@@ -869,6 +875,7 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
                 door_waypoint_count=int(case.case_parameters["door_waypoint_count"]),
                 approach_distance=float(case.case_parameters["approach_distance_m"]),
                 retract_distance=float(case.case_parameters["retract_distance_m"]),
+                approach_ik_seeds=case.case_parameters.get("approach_ik_seeds", 0),
             ),
         )
 
@@ -975,6 +982,34 @@ def _pour_poses(
     return torch.stack((pre_grasp, grasp_pose, lift, poured, lift), dim=1)
 
 
+def _yaw_following_approach(
+    approach: torch.Tensor, object_pose: torch.Tensor
+) -> torch.Tensor:
+    """Rotate a world approach by each object's yaw, folded onto its nearest face.
+
+    A box repeats every quarter turn about world Z, so the yaw offset is folded
+    into [-45, 45) degrees before rotating the configured direction. Parallel
+    flat pads then close along a face normal for every sampled yaw.
+
+    Args:
+        approach: Configured world approach direction with shape ``(3,)``.
+        object_pose: Settled object poses with shape ``(B, 4, 4)``.
+
+    Returns:
+        Per-row world approach directions with shape ``(B, 3)``.
+    """
+    folded = folded_object_yaw(object_pose)
+    cos, sin = torch.cos(folded), torch.sin(folded)
+    return torch.stack(
+        (
+            cos * approach[0] - sin * approach[1],
+            sin * approach[0] + cos * approach[1],
+            approach[2].expand_as(cos),
+        ),
+        dim=1,
+    )
+
+
 def _pour_approach_candidates(
     config: Mapping[str, object],
 ) -> tuple[tuple[float, int], ...] | None:
@@ -1029,9 +1064,11 @@ def _select_pour_approach_grasp(
 ) -> tuple[torch.Tensor, torch.Tensor, dict[str, object]]:
     """Choose an independent oblique azimuth before any evaluated planning.
 
-    Rotation about world Z retains the configured elevation. Each row visits
-    choices in order and freezes its first complete reference chain. Allocation
-    sums are bounded by the original per-row candidate budget.
+    Rotation about world Z retains the configured elevation. ``base_approach``
+    is one world direction ``(3,)`` or one per row ``(B, 3)``, as produced by
+    yaw-following approaches; each row rotates its own direction. Each row
+    visits choices in order and freezes its first complete reference chain.
+    Allocation sums are bounded by the original per-row candidate budget.
     """
     batch = len(object_pose)
     selected = torch.eye(4, device=object_pose.device, dtype=object_pose.dtype).repeat(
@@ -1046,10 +1083,12 @@ def _select_pour_approach_grasp(
     for angle, allocation in candidates:
         c, s = math.cos(angle), math.sin(angle)
         rotation = object_pose.new_tensor([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
-        candidate_direction = rotation @ base_approach
-        candidate_direction = candidate_direction / candidate_direction.norm()
+        candidate_direction = base_approach @ rotation.T
+        candidate_direction = candidate_direction / candidate_direction.norm(
+            dim=-1, keepdim=True
+        )
         directions = torch.where(
-            found[:, None], selected_directions, candidate_direction[None]
+            found[:, None], selected_directions, candidate_direction.expand(batch, -1)
         )
         pools = scenario._ranked_antipodal_grasp_pools(
             handle,
@@ -1161,6 +1200,11 @@ class _PourCases(AtomicSkillCaseProvider):
             dtype=torch.float32,
             device=device,
         )
+        follow_yaw = config.get("approach_follows_object_yaw", False)
+        if type(follow_yaw) is not bool:
+            raise TypeError("approach_follows_object_yaw must be a bool.")
+        if follow_yaw:
+            approach = _yaw_following_approach(approach, object_pose)
         internal_axis = torch.tensor(
             _unit_vector(
                 config.get("internal_axis"),
@@ -1429,6 +1473,42 @@ def _axis_alignment_parameters(
     return source, target, axis, angle
 
 
+def _upright_grasp_pre_rotation(
+    source: torch.Tensor, target: torch.Tensor, rotation_axis: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Mirror AxisAlign's upright rows and their world-frame grasp pre-rotation.
+
+    Args:
+        source: World object axes with shape ``(B, 3)``.
+        target: World target axes with shape ``(B, 3)``.
+        rotation_axis: Shortest-arc alignment axes with shape ``(B, 3)``.
+
+    Returns:
+        The upright row mask ``(B,)`` and the 45-degree rotation opposite each
+        row's alignment axis ``(B, 3, 3)``. Callers apply it to the TCP
+        orientation, about the TCP origin, on upright rows only.
+    """
+    upright = (source[:, 2].abs() <= _UPRIGHT_HORIZONTAL_MAX_ABS_Z) & (
+        target[:, 2] >= _UPRIGHT_TARGET_MIN_Z
+    )
+    rotation = axis_angle_to_rotation_matrix(
+        -rotation_axis * _UPRIGHT_GRASP_PRE_ROTATION
+    )
+    return upright, rotation
+
+
+def _upright_grasp_closure_rotation(
+    source: torch.Tensor, target: torch.Tensor, rotation_axis: torch.Tensor
+) -> torch.Tensor:
+    """Return the TCP rotation each row's executed grasp closes with.
+
+    Upright rows close at the pre-rotated grasp; other rows receive identity.
+    """
+    upright, rotation = _upright_grasp_pre_rotation(source, target, rotation_axis)
+    identity = torch.eye(3, dtype=rotation.dtype, device=rotation.device)
+    return torch.where(upright[:, None, None], rotation, identity.expand_as(rotation))
+
+
 def _axis_align_poses(
     object_pose: torch.Tensor,
     grasp_pose: torch.Tensor,
@@ -1445,14 +1525,9 @@ def _axis_align_poses(
     source, target, rotation_axis, angle = _axis_alignment_parameters(
         object_pose, internal_axis, target_axis
     )
-    upright = (source[:, 2].abs() <= _UPRIGHT_HORIZONTAL_MAX_ABS_Z) & (
-        target[:, 2] >= _UPRIGHT_TARGET_MIN_Z
-    )
+    upright, pre_rotation = _upright_grasp_pre_rotation(source, target, rotation_axis)
     pre_rotated = grasp_pose.clone()
-    pre_rotated[:, :3, :3] = torch.matmul(
-        axis_angle_to_rotation_matrix(-rotation_axis * _UPRIGHT_GRASP_PRE_ROTATION),
-        grasp_pose[:, :3, :3],
-    )
+    pre_rotated[:, :3, :3] = torch.matmul(pre_rotation, grasp_pose[:, :3, :3])
     grasp = torch.where(upright[:, None, None], pre_rotated, grasp_pose)
     pre_grasp = _translate(grasp, -approach * pre_grasp_distance)
     lift = grasp.clone()
@@ -1576,6 +1651,7 @@ def _select_axis_grasp(
     grasp_parameters: Mapping[str, object],
     build_poses: Callable[..., torch.Tensor],
     seed: int,
+    closure_tcp_rotation: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, dict[str, object]]:
     """Freeze the first independently reachable position/grasp for every row.
 
@@ -1583,6 +1659,8 @@ def _select_axis_grasp(
     search reuses the same declared geometry pool and original environment;
     only ordinary exhausted-pool results allow the next offset. No evaluated
     planner or physical policy outcome participates in this preparation rule.
+    ``closure_tcp_rotation`` ``(B, 3, 3)`` is the world TCP rotation each row
+    closes with; the pool's closure support check evaluates candidates there.
     """
     if distances is not None:
         base = scenario.robot.get_control_part_base_pose(
@@ -1622,6 +1700,7 @@ def _select_axis_grasp(
         row_rank=lambda row, candidates, costs: _axis_align_grasp_order(
             rotation_axis[row], candidates, costs
         ),
+        closure_tcp_rotation=closure_tcp_rotation,
     )
     selected = torch.stack([pool[0] for pool in pools])
     found = torch.zeros(len(object_pose), device=object_pose.device, dtype=torch.bool)
@@ -1786,7 +1865,7 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
                 ),
             )
 
-        _, _, rotation_axis, _ = _axis_alignment_parameters(
+        source_axis, world_target_axis, rotation_axis, _ = _axis_alignment_parameters(
             object_pose, internal_axis, target_axis
         )
 
@@ -1817,6 +1896,10 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
                 grasp_parameters=grasp,
                 build_poses=poses,
                 seed=seed,
+                # Upright rows close at the pre-rotated grasp, not the sample.
+                closure_tcp_rotation=_upright_grasp_closure_rotation(
+                    source_axis, world_target_axis, rotation_axis
+                ),
             )
         elif grasp["grasp_source"] == "antipodal":
             sampled = scenario.screen_antipodal_grasp(
@@ -2119,18 +2202,13 @@ class _PushObjectEvaluator:
         return evaluate_skill_stage_batch("push_object", evidence)
 
 
-def _push_poses(
+def _push_contact_frame(
     object_pose: torch.Tensor,
     target_pose: torch.Tensor,
     *,
-    contact_distance: float,
-    approach_height: float,
-    retract_height: float,
-    push_overshoot: float,
-    contact_frame_to_eef: torch.Tensor,
-    object_contact_offset: torch.Tensor,
-) -> torch.Tensor:
-    """Mirror PushObject: approach, contact, pushed and retract TCP poses."""
+    contact_along_target_face: bool,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Return support normal, push direction and distance, frame, and contact axis."""
     normal = torch.nn.functional.normalize(target_pose[:, :3, 2], dim=1)
     displacement = target_pose[:, :3, 3] - object_pose[:, :3, 3]
     planar = displacement - (displacement * normal).sum(dim=1, keepdim=True) * normal
@@ -2146,11 +2224,81 @@ def _push_poses(
     x_axis = x_axis - (x_axis * normal).sum(dim=1, keepdim=True) * normal
     frame[:, :3, 0] = torch.nn.functional.normalize(x_axis, dim=1)
     frame[:, :3, 1] = torch.linalg.cross(frame[:, :3, 2], frame[:, :3, 0], dim=1)
+    contact_axis = direction
+    if contact_along_target_face:
+        axes = torch.stack(
+            (frame[:, :3, 0], -frame[:, :3, 0], frame[:, :3, 1], -frame[:, :3, 1]),
+            dim=1,
+        )
+        nearest = (axes * direction[:, None]).sum(dim=-1).argmax(dim=1)
+        contact_axis = axes[torch.arange(axes.shape[0], device=axes.device), nearest]
+    return normal, direction, distance, frame, contact_axis
+
+
+def _push_contact_distance_from_face(
+    vertices: torch.Tensor,
+    object_pose: torch.Tensor,
+    target_pose: torch.Tensor,
+    *,
+    face_distance: float,
+    object_contact_offset: torch.Tensor,
+    contact_along_target_face: bool,
+) -> float:
+    """Return the centre contact distance that keeps ``face_distance`` behind the face.
+
+    Args:
+        vertices: Object-local vertices, shape ``(B, V, 3)`` or ``(V, 3)``.
+        object_pose: Settled object poses, shape ``(B, 4, 4)``.
+        target_pose: Target object poses, shape ``(B, 4, 4)``.
+        face_distance: TCP distance behind the object's rear face along the
+            contact axis, in metres.
+        object_contact_offset: Object-local contact-centre offset.
+        contact_along_target_face: Whether the contact axis follows the
+            nearest target face, as in :func:`_push_poses`.
+
+    Returns:
+        The distance from the contact centre shared by every environment.
+    """
+    *_, contact_axis = _push_contact_frame(
+        object_pose, target_pose, contact_along_target_face=contact_along_target_face
+    )
+    if vertices.dim() == 2:
+        vertices = vertices.expand(object_pose.shape[0], -1, -1)
+    rotation = object_pose[:, :3, :3].to(dtype=torch.float32)
+    local_back = torch.matmul(rotation.transpose(1, 2), -contact_axis[:, :, None])
+    offset = object_contact_offset.to(device=vertices.device, dtype=torch.float32)
+    extent = torch.matmul(vertices.to(torch.float32) - offset, local_back).amax(
+        dim=(1, 2)
+    )
+    if float(extent.max() - extent.min()) > 1.0e-4:
+        raise ValueError(
+            "contact_distance_from_face_m needs the same rear-face extent in every "
+            f"environment; got {extent.detach().cpu().tolist()}."
+        )
+    return float(extent.mean()) + face_distance
+
+
+def _push_poses(
+    object_pose: torch.Tensor,
+    target_pose: torch.Tensor,
+    *,
+    contact_distance: float,
+    approach_height: float,
+    retract_height: float,
+    push_overshoot: float,
+    contact_frame_to_eef: torch.Tensor,
+    object_contact_offset: torch.Tensor,
+    contact_along_target_face: bool = False,
+) -> torch.Tensor:
+    """Mirror PushObject: approach, contact, pushed and retract TCP poses."""
+    normal, direction, distance, frame, contact_axis = _push_contact_frame(
+        object_pose, target_pose, contact_along_target_face=contact_along_target_face
+    )
     contact_center = object_pose[:, :3, 3] + torch.matmul(
         object_pose[:, :3, :3],
         object_contact_offset.to(device=object_pose.device, dtype=torch.float32),
     )
-    frame[:, :3, 3] = contact_center - direction * contact_distance
+    frame[:, :3, 3] = contact_center - contact_axis * contact_distance
     contact = torch.matmul(frame, contact_frame_to_eef.to(device=frame.device))
     approach = _translate(contact, normal * approach_height)
     pushed = _translate(contact, direction * (distance + push_overshoot))
@@ -2219,14 +2367,34 @@ class _PushObjectCases(AtomicSkillCaseProvider):
             dtype=torch.float32,
             device=object_pose.device,
         )
+        contact_along_target_face = bool(config.get("contact_along_target_face", False))
+        face_distance = config.get("contact_distance_from_face_m")
+        if face_distance is None:
+            contact_distance = float(config.get("contact_distance_m", 0.03))
+        elif "contact_distance_m" in config:
+            raise ValueError(
+                "PushObject cases set contact_distance_m or "
+                "contact_distance_from_face_m, not both."
+            )
+        else:
+            # Sized variants keep the clearance behind the face actually pushed.
+            contact_distance = _push_contact_distance_from_face(
+                handle.entity.get_vertices(scale=True),
+                object_pose,
+                target_pose,
+                face_distance=float(face_distance),
+                object_contact_offset=contact_offset,
+                contact_along_target_face=contact_along_target_face,
+            )
         options = PushObjectOptions(
             hand_interp_steps=int(config.get("hand_interp_steps", 12)),
             approach_height=float(config.get("approach_height_m", 0.1)),
             retract_height=float(config.get("retract_height_m", 0.1)),
-            contact_distance=float(config.get("contact_distance_m", 0.03)),
+            contact_distance=contact_distance,
             push_overshoot=float(config.get("push_overshoot_m", 0.0)),
             object_contact_offset=contact_offset,
             contact_frame_to_eef=calibration,
+            contact_along_target_face=contact_along_target_face,
         )
         targets = _push_poses(
             object_pose,
@@ -2237,6 +2405,7 @@ class _PushObjectCases(AtomicSkillCaseProvider):
             push_overshoot=options.push_overshoot,
             contact_frame_to_eef=calibration,
             object_contact_offset=contact_offset,
+            contact_along_target_face=options.contact_along_target_face,
         )
         references = scenario.solve_reference_qpos(start_qpos, targets)
         return BenchmarkCase(
@@ -2266,9 +2435,14 @@ class _PushObjectCases(AtomicSkillCaseProvider):
                 "approach_height_m": options.approach_height,
                 "retract_height_m": options.retract_height,
                 "contact_distance_m": options.contact_distance,
+                "contact_distance_from_face_m": (
+                    None if face_distance is None else float(face_distance)
+                ),
                 "push_overshoot_m": options.push_overshoot,
                 "contact_frame_to_eef": calibration.detach().cpu().tolist(),
                 "object_contact_offset_m": contact_offset.detach().cpu().tolist(),
+                "contact_along_target_face": options.contact_along_target_face,
+                "hand_grasp_qpos": case_hand_qpos(config, "hand_grasp_qpos"),
                 "pre_action_settle_steps": settle_steps,
                 "object_initial_pose": object_pose.detach().cpu().tolist(),
                 "target_object_pose": target_pose.detach().cpu().tolist(),
@@ -2320,6 +2494,14 @@ class _PushObjectCases(AtomicSkillCaseProvider):
                     dtype=torch.float32,
                     device=device,
                 ),
+                contact_along_target_face=bool(
+                    parameters.get("contact_along_target_face", False)
+                ),
+            ),
+            control_overrides=hand_command_override(
+                GRASP_COMMAND,
+                parameters.get("hand_grasp_qpos"),
+                device=device,
             ),
         )
 

@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -331,6 +332,116 @@ def test_shipped_suites_share_explicit_timed_planning_budgets(path: Path) -> Non
             assert "velocity" not in spec.config and "acceleration" not in spec.config
         if spec.adapter == "curobo":
             CuroboAutoGenCfg(**spec.config.get("auto_gen", {}))
+
+
+def _saturated_rest_to_rest(
+    intervals: int, sample_dt: float, acceleration: float, velocity: float
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Sample a rest-to-rest trapezoid at its acceleration and speed limits."""
+    duration = intervals * sample_dt
+    ramp = min(0.5 * duration, velocity / acceleration)
+    times = torch.arange(intervals + 1, dtype=torch.float64) * sample_dt
+    rising = 0.5 * acceleration * times.clamp(max=ramp) ** 2
+    cruise = acceleration * ramp * (times - ramp).clamp(min=0.0)
+    positions = rising + cruise
+    distance = acceleration * ramp * (duration - ramp)
+    positions = torch.where(
+        times <= 0.5 * duration, positions, distance - positions.flip(0)
+    )
+    dt = torch.full_like(times, sample_dt)
+    dt[0] = 0.0
+    return positions.view(1, -1, 1), dt.view(1, -1)
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted(
+        Path("extensions/embodichain_benchmarks/motion_generation/suites").glob(
+            "atomic_*.yaml"
+        )
+    ),
+    ids=lambda path: path.stem,
+)
+def test_curobo_samples_retime_onto_compiled_clock_within_limits(path: Path) -> None:
+    """A limit-saturated cuRobo path stays valid on the compiled command clock.
+
+    Linear retiming onto a period that is not a multiple of the planner sample
+    period aliases saturated acceleration upward. Resampling a long plan to a
+    fixed count first, then upsampling it onto the command clock, concentrates
+    each coarse velocity change into one command step. Either reports a dynamic
+    violation for a path that meets its limit.
+    """
+    from embodichain.compute.trajectory.timing import (
+        resample_in_time,
+        retime_to_control_grid,
+    )
+    from embodichain.lab.sim import SimulationManagerCfg
+    from embodichain_benchmarks.motion_generation.metrics.trajectory import (
+        _trajectory_derivatives,
+    )
+
+    suite = load_suite(path)
+    acceleration = suite.protocol.joint_acceleration_limit_rad_s2
+    curobo = [
+        spec for spec in suite.planners if spec.adapter == "curobo" and spec.enabled
+    ]
+    tracks = [
+        track
+        for track in suite.enabled_tracks()
+        if track.scenario == "atomic_skill"
+        and track.config.get("physics", {}).get("clock") == "compiled"
+    ]
+    if not curobo or not tracks or acceleration is None:
+        pytest.skip("No compiled Atomic replay of a cuRobo plan.")
+    sample_dt = float(curobo[0].config.get("interpolation_dt", 0.025))
+    # Mirrors the CuroboAdapter default for suites that omit the key.
+    preserved = bool(curobo[0].config.get("preserve_plan_samples", True))
+    speed_limits = suite.protocol.joint_velocity_limit_rad_s
+    # A null budget defers to asset caps; an unbounded cruise stays saturated.
+    velocity = (
+        math.inf
+        if speed_limits is None
+        else float(
+            min(speed_limits) if isinstance(speed_limits, list) else speed_limits
+        )
+    )
+    physics_dt = SimulationManagerCfg().physics_dt
+    for track in tracks:
+        steps = int(track.config["physics"].get("steps_per_waypoint", 4))
+        control_dt = physics_dt * steps
+        # MotionGenerator resamples unpreserved plans to each skill's count.
+        counts = sorted(
+            {
+                int(skill[key])
+                for skill in track.config.get("skills", [])
+                for key in ("sample_count", "pick_sample_count")
+                if key in skill
+            }
+            or {80}
+        )
+        peak = 0.0
+        for intervals in [*range(8, 160), *range(160, 1600, 37)]:
+            positions, dt = _saturated_rest_to_rest(
+                intervals, sample_dt, acceleration, velocity
+            )
+            source = _trajectory_derivatives(positions[0], dt[0])[1]
+            assert source.abs().max() <= acceleration * (1.0 + 1.0e-9)
+            for sample_count in [None] if preserved else counts:
+                path_q, path_dt = (
+                    (positions, dt)
+                    if sample_count is None
+                    else resample_in_time(positions, dt, sample_count)
+                )
+                command, _, command_dt, valid = retime_to_control_grid(
+                    path_q, path_dt, control_dt
+                )
+                count = int(valid[0])
+                retimed = _trajectory_derivatives(
+                    command[0, :count], command_dt[0, :count]
+                )[1]
+                if retimed.numel():
+                    peak = max(peak, float(retimed.abs().max()) / acceleration)
+        assert peak <= 1.0 + suite.protocol.dynamic_limit_tolerance, (track.id, peak)
 
 
 def test_atomic_migration_preserves_existing_toppra_budgets() -> None:

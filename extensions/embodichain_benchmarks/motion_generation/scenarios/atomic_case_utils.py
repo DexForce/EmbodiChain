@@ -27,7 +27,9 @@ import torch
 from embodichain.lab.sim.atomic_skills import (
     Affordance,
     HeldObjectState,
+    JointPositionCommand,
     ObjectSemantics,
+    SkillControlOverrides,
 )
 from embodichain.compute.geometry import rotate_rigid_grasp
 
@@ -69,6 +71,11 @@ __all__ = [
     "case_pose",
     "held_object_state",
     "twist_arc_poses",
+    "folded_object_yaw",
+    "yaw_following_grasp_rotation",
+    "grasp_follows_object_yaw",
+    "case_hand_qpos",
+    "hand_command_override",
 ]
 
 
@@ -319,6 +326,13 @@ def randomization_parameters(
         ),
         "ranges": ranges,
     }
+    scales = {
+        str(key): value
+        for key, value in config.items()
+        if str(key).endswith("_jitter_scale")
+    }
+    if scales:
+        parameters["range_scales"] = scales
     if pose_batch_enabled:
         from dataclasses import asdict
 
@@ -345,6 +359,73 @@ def randomization_parameters(
                 }
             )
     return parameters
+
+
+def folded_object_yaw(object_pose: torch.Tensor) -> torch.Tensor:
+    """Return each object's yaw folded onto its nearest box face.
+
+    A box repeats every quarter turn about world Z, so the world yaw of the
+    object's x axis is folded into [-45, 45) degrees.
+
+    Args:
+        object_pose: Object poses with shape ``(B, 4, 4)``.
+
+    Returns:
+        Folded yaw angles in radians with shape ``(B,)``.
+    """
+    x_axis = object_pose[:, :3, 0]
+    yaw = torch.atan2(x_axis[:, 1], x_axis[:, 0])
+    quarter = math.pi / 2.0
+    return torch.remainder(yaw + quarter / 2.0, quarter) - quarter / 2.0
+
+
+def yaw_following_grasp_rotation(
+    rotation: torch.Tensor, object_pose: torch.Tensor
+) -> torch.Tensor:
+    """Turn a world grasp rotation about world Z by each object's folded yaw.
+
+    Parallel flat pads that close along a face normal of the unrotated box then
+    close along the corresponding face normal for every sampled yaw.
+
+    Args:
+        rotation: World grasp rotation with shape ``(3, 3)``.
+        object_pose: Object poses with shape ``(B, 4, 4)``.
+
+    Returns:
+        Per-row world grasp rotations ``Rz(folded yaw) @ rotation`` with shape
+        ``(B, 3, 3)``.
+    """
+    folded = folded_object_yaw(object_pose)
+    cos, sin = torch.cos(folded), torch.sin(folded)
+    zero, one = torch.zeros_like(folded), torch.ones_like(folded)
+    about_z = torch.stack(
+        (cos, -sin, zero, sin, cos, zero, zero, zero, one), dim=-1
+    ).reshape(-1, 3, 3)
+    return torch.matmul(about_z, rotation)
+
+
+def grasp_follows_object_yaw(
+    config: Mapping[str, object], *, grasp_source: str
+) -> bool:
+    """Validate the opt-in that turns a fixed grasp with the object's yaw.
+
+    Args:
+        config: Skill case configuration.
+        grasp_source: The case's resolved grasp source.
+
+    Returns:
+        The configured ``grasp_follows_object_yaw`` value, ``False`` when absent.
+
+    Raises:
+        TypeError: If the value is not a bool.
+        ValueError: If it is enabled for a grasp source other than ``fixed``.
+    """
+    value = config.get("grasp_follows_object_yaw", False)
+    if type(value) is not bool:
+        raise TypeError("grasp_follows_object_yaw must be a bool.")
+    if value and grasp_source != "fixed":
+        raise ValueError("grasp_follows_object_yaw requires fixed grasps.")
+    return value
 
 
 def case_pose(case: BenchmarkCase, name: str, *, device: torch.device) -> torch.Tensor:
@@ -390,3 +471,49 @@ def twist_arc_poses(
     return rotate_rigid_grasp(target_pose, grasp_pose, twist_axis, axis_origin, angles)[
         1
     ]
+
+
+def case_hand_qpos(config: Mapping[str, object], key: str) -> list[float] | None:
+    """Read an optional gripper joint-position vector from a case config.
+
+    Args:
+        config: Merged skill and case configuration.
+        key: Configuration key, such as ``hand_open_qpos``.
+
+    Returns:
+        The finite joint positions, or ``None`` when the key is absent.
+
+    Raises:
+        ValueError: If the value is not a non-empty list of finite numbers.
+    """
+    value = config.get(key)
+    if value is None:
+        return None
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise ValueError(f"{key} must be a list of joint positions.")
+    qpos = [float(item) for item in value]
+    if not qpos or not all(math.isfinite(item) for item in qpos):
+        raise ValueError(f"{key} must contain finite joint positions.")
+    return qpos
+
+
+def hand_command_override(
+    command: str, qpos: Sequence[float] | None, *, device: torch.device
+) -> SkillControlOverrides | None:
+    """Replace one grasp-endpoint semantic command for a single invocation.
+
+    Args:
+        command: Semantic command name, such as ``open`` or ``grasp``.
+        qpos: Joint positions of the gripper control part, or ``None``.
+        device: Device of the robot.
+
+    Returns:
+        Endpoint overrides for the ``primary`` slot's ``grasp`` endpoint, or
+        ``None`` to keep the embodiment's command profile.
+    """
+    if qpos is None:
+        return None
+    positions = JointPositionCommand(
+        torch.tensor(list(qpos), dtype=torch.float32, device=device)
+    )
+    return SkillControlOverrides(endpoints={"primary": {"grasp": {command: positions}}})

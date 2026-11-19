@@ -21,7 +21,13 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Literal
 
-from embodichain.lab.sim.atomic_skills import SkillInvocation, MotionPolicy
+from embodichain.lab.sim.atomic_skills import (
+    AxisAlignOptions,
+    MotionPolicy,
+    PickUpOptions,
+    PourOptions,
+    SkillInvocation,
+)
 
 from ..config import ProtocolCfg
 
@@ -30,6 +36,10 @@ __all__ = [
     "benchmark_motion_policy",
     "benchmark_motion_attribution",
     "policy_motion_budget",
+    "with_axis_align_rotation_waypoints",
+    "with_pick_approach_waypoints",
+    "with_pick_lift_waypoints",
+    "with_pour_rotation_waypoints",
     "with_motion_budget",
     "with_plan_options",
 ]
@@ -143,4 +153,66 @@ def with_plan_options(
     )
     return replace(
         invocation, motion_policy=replace(policy, plan_opts=plan_opts, **limits)
+    )
+
+
+def with_pick_approach_waypoints(
+    invocation: SkillInvocation, waypoints: int
+) -> SkillInvocation:
+    """Plan PickUp approaches through straight-line intermediate poses.
+
+    The invocation's own policy still plans reach, approach and lift in one
+    call. Other skills are returned unchanged.
+    """
+    options = invocation.skill_options
+    if not isinstance(options, PickUpOptions) or waypoints == 0:
+        return invocation
+    return replace(
+        invocation, skill_options=replace(options, approach_waypoints=waypoints)
+    )
+
+
+def with_pick_lift_waypoints(
+    invocation: SkillInvocation, waypoints: int
+) -> SkillInvocation:
+    """Plan PickUp lifts through straight vertical intermediate poses.
+
+    The invocation's own policy still plans the lift in its existing call,
+    including AxisAlign's held-object phase. Other skills are returned unchanged.
+    """
+    options = invocation.skill_options
+    if not isinstance(options, PickUpOptions) or waypoints == 0:
+        return invocation
+    return replace(invocation, skill_options=replace(options, lift_waypoints=waypoints))
+
+
+def with_axis_align_rotation_waypoints(
+    invocation: SkillInvocation, waypoints: int
+) -> SkillInvocation:
+    """Plan AxisAlign reorientation through intermediate held-object poses.
+
+    The invocation's own policy still plans lift and alignment in one call.
+    Other skills are returned unchanged.
+    """
+    options = invocation.skill_options
+    if not isinstance(options, AxisAlignOptions) or waypoints == 0:
+        return invocation
+    return replace(
+        invocation, skill_options=replace(options, alignment_waypoints=waypoints)
+    )
+
+
+def with_pour_rotation_waypoints(
+    invocation: SkillInvocation, waypoints: int
+) -> SkillInvocation:
+    """Plan Pour rotation and return through intermediate held-object poses.
+
+    The invocation's own policy still plans both legs in one call. Other
+    skills are returned unchanged.
+    """
+    options = invocation.skill_options
+    if not isinstance(options, PourOptions) or waypoints == 0:
+        return invocation
+    return replace(
+        invocation, skill_options=replace(options, rotation_waypoints=waypoints)
     )

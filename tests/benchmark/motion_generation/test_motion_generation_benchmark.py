@@ -1791,6 +1791,8 @@ def test_atomic_skill_antipodal_grasp_uses_standalone_generator(
         max_candidates=8,
         gripper_data=None,
         root_from_tcp=tcp,
+        closure_sweep=False,
+        ray_deviation_angle=None,
     )
     call = generator.get_valid_grasp_poses.call_args.kwargs
     assert torch.equal(call["mesh_vertices"], vertices)
@@ -2315,6 +2317,20 @@ def test_atomic_skill_twist_invocation_uses_tutorial_options():
         ("primary", "motion"),
         ("primary", "grasp"),
     }
+    assert invocation.control_overrides.is_empty
+
+    case.case_parameters["hand_open_qpos"] = [0.3]
+    invocation = create_atomic_skill_provider("twist").build_invocation(
+        scenario,
+        case,
+        Mock(),
+    )
+    (command,) = invocation.control_overrides.endpoints["primary"]["grasp"].values()
+    assert set(invocation.control_overrides.endpoints["primary"]["grasp"]) == {"open"}
+    torch.testing.assert_close(
+        command.resolve(num_envs=1, control_dof=1, device="cpu"),
+        torch.tensor([[0.3]]),
+    )
 
 
 def test_atomic_skill_move_held_object_uses_current_options_contract():

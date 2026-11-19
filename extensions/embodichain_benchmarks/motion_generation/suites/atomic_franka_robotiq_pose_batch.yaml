@@ -1,12 +1,17 @@
 schema_version: 1
 name: atomic_franka_robotiq_pose_batch
-suite_version: atomic_franka_robotiq_pose_batch_v7
+suite_version: atomic_franka_robotiq_pose_batch_v14
 profile: coverage
 
 robot:
   id: franka_robotiq
   provider: franka_robotiq
   config:
+    # Cartesian contact paths: hold each FEP sample within 0.1 rad of the
+    # previous one; independent q7 searches alternate near the shoulder singularity.
+    solver_cfg:
+      arm:
+        continuous_path_joint_step: 0.1
     attrs:
       material_props:
         static_friction: 1.0
@@ -46,12 +51,15 @@ planners:
     config:
       max_attempts: 5
       max_planning_time: null
-      interpolation_dt: 0.025
+      # Divides the compiled control period, so retiming keeps solved acceleration;
+      # coarser samples keep long slow plans within cuRobo's interpolation buffer.
+      interpolation_dt: 0.04
       collision_activation_distance: 0.01
       use_cuda_graph: true
       cuda_graph_fallback: true
       warmup_iterations: 1
-      preserve_plan_samples: false
+      # Native samples avoid resampling the solved timing before compilation.
+      preserve_plan_samples: true
       world:
         obstacle_representation: sphere
         multi_env: false
@@ -81,6 +89,10 @@ tracks:
       # One simulator environment row represents one sampled pose.  All eight
       # poses below are therefore planned in one batched Atomic Skill call.
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
       batch_sizes: [8]
       seeds: [11]
       randomization:
@@ -112,6 +124,12 @@ tracks:
             stiffness: 0.001
             damping: 100.0
             max_effort: 0.01
+            # Omitted drive fields keep the asset values since #1168. PhysX scales
+            # the asset's joint friction (1.0 on the drawer slide) by constraint
+            # force, which held the joints still, and the asset imports these joints
+            # undriven, which ignored their stiffness and damping.
+            friction: 0.0
+            drive_type: force
           fix_base: true
           settle_steps: 10
         - id: drawer
@@ -121,6 +139,10 @@ tracks:
           init_qpos: [0.0]
           drive:
             drive_type: none
+            # PhysX scales joint friction by constraint force, and the asset values
+            # (1.0 on the drawer slide) held the joints still. Zero was in effect
+            # until omitted drive fields began keeping the asset values (#1168).
+            friction: 0.0
           attrs:
             material_props:
               static_friction: 1.0
@@ -205,6 +227,9 @@ tracks:
           # The physical button has 6 mm of travel. Keep a small 2 mm
           # over-travel for reliable actuation without driving the arm 24 mm
           # into the hard joint stop in every randomized environment.
+          # Closed pads first touch the button 25.2 mm ahead of the solver TCP;
+          # stop 1 mm short, then press through the 6 mm stroke plus 1 mm.
+          press_tcp_offset_m: -0.0262
           press_distance_m: 0.008
           articulation: microwave
           target_link: button_link
@@ -226,6 +251,9 @@ tracks:
           grasp_sample_count: 10000
           grasp_max_candidates: 128
           grasp_alignment_max_angle_deg: 10.0
+          # Seat the 32 mm bar mid-pad: on the solver TCP it sat 22 mm from the
+          # fingertips of the vertically closing pads and slid out in fast pulls.
+          grasp_depth_offset_m: 0.011
           hand_interp_steps: 12
           approach_distance_m: 0.10
           translation_distance_m: 0.18
@@ -251,6 +279,14 @@ tracks:
           twist_waypoint_count: 8
           pre_grasp_distance_m: 0.12
           twist_angle_rad: -0.7853981634
+          # Open only to ~82 mm around the 52 mm knob: fully open fingers spread
+          # 140 mm and one strikes the door handle 64 mm beside the knob.
+          hand_open_qpos: [0.28, -0.28, 0.28, -0.28, -0.28, 0.28]
+          # Even 82 mm apart, a straight-in side grasp puts the finger links on the
+          # handle 45 mm in front of the knob; they were pried open or shut. Reach
+          # in 22 degrees from the far side, about the knob's vertical axis.
+          grasp_tilt_rad: 0.3839724354
+          grasp_tilt_axis: [0.0, 0.0, 1.0]
           articulation: microwave
           target_link: knob_link
           target_joint: knob_joint

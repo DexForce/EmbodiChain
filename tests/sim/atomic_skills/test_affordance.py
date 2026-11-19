@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import math
 from unittest.mock import Mock
 
 import pytest
@@ -909,6 +910,47 @@ class TestTwistAffordance:
             atol=1.0e-6,
         )
         assert torch.allclose(torch.linalg.det(rotation), torch.ones(2), atol=1.0e-6)
+
+    def test_grasp_tilt_rotates_about_a_target_local_axis_through_the_grasp(self):
+        link_pose = torch.eye(4).repeat(2, 1, 1)
+        link_pose[1, :3, :3] = torch.tensor(
+            [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+        )
+        link_pose[:, :3, 3] = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        geometry = dict(
+            grasp_position=(0.1, -0.01, 0.0),
+            axis_origin=(0.0, 0.0, 0.0),
+            twist_axis=torch.tensor([0.0, 1.0, 0.0]),
+        )
+        nominal = TwistAffordance(**geometry).get_grasp_pose(link_pose)
+        tilted = TwistAffordance(
+            **geometry, grasp_tilt=math.radians(20.0), grasp_tilt_axis=(0.0, 0.0, 2.0)
+        ).get_grasp_pose(link_pose)
+
+        torch.testing.assert_close(tilted[:, :3, 3], nominal[:, :3, 3])
+        # The approach turns about the link's own z-axis, rotated in each row.
+        cos, sin = math.cos(math.radians(20.0)), math.sin(math.radians(20.0))
+        expected_z = torch.matmul(link_pose[:, :3, :3], torch.tensor([-sin, cos, 0.0]))
+        torch.testing.assert_close(tilted[:, :3, 2], expected_z)
+        torch.testing.assert_close(
+            torch.sum(tilted[:, :3, 1] * nominal[:, :3, 1], dim=1), torch.ones(2)
+        )
+
+    @pytest.mark.parametrize(
+        ("kwargs", "match"),
+        (
+            ({"grasp_tilt": 0.2}, "requires grasp_tilt_axis"),
+            ({"grasp_tilt": 0.2, "grasp_tilt_axis": (0.0, 0.0, 0.0)}, "non-zero"),
+            (
+                {"grasp_tilt": float("nan"), "grasp_tilt_axis": (0.0, 0.0, 1.0)},
+                "finite",
+            ),
+            ({"grasp_tilt": True, "grasp_tilt_axis": (0.0, 0.0, 1.0)}, "finite"),
+        ),
+    )
+    def test_rejects_invalid_grasp_tilt(self, kwargs, match):
+        with pytest.raises(ValueError, match=match):
+            TwistAffordance(grasp_position=(0.0, 0.0, 0.0), **kwargs)
 
 
 class TestSlideAffordance:

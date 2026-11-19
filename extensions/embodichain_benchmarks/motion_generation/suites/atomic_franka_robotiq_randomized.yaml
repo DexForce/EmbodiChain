@@ -1,12 +1,17 @@
 schema_version: 1
 name: atomic_franka_robotiq_randomized
-suite_version: atomic_franka_robotiq_randomized_v4
+suite_version: atomic_franka_robotiq_randomized_v10
 profile: coverage
 
 robot:
   id: franka_robotiq
   provider: franka_robotiq
-  config: {}
+  config:
+    # Cartesian contact paths: hold each FEP sample within 0.1 rad of the
+    # previous one; independent q7 searches alternate near the shoulder singularity.
+    solver_cfg:
+      arm:
+        continuous_path_joint_step: 0.1
 
 planners:
   - id: nmg
@@ -41,12 +46,15 @@ planners:
     config:
       max_attempts: 5
       max_planning_time: null
-      interpolation_dt: 0.025
+      # Divides the compiled control period, so retiming keeps solved acceleration;
+      # coarser samples keep long slow plans within cuRobo's interpolation buffer.
+      interpolation_dt: 0.04
       collision_activation_distance: 0.01
       use_cuda_graph: true
       cuda_graph_fallback: true
       warmup_iterations: 1
-      preserve_plan_samples: false
+      # Native samples avoid resampling the solved timing before compilation.
+      preserve_plan_samples: true
       world:
         obstacle_representation: sphere
         multi_env: false
@@ -74,6 +82,10 @@ tracks:
     enabled: true
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
       batch_sizes: [1]
       seeds: [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116]
       physics:
@@ -97,6 +109,12 @@ tracks:
             stiffness: 0.001
             damping: 100.0
             max_effort: 0.01
+            # Omitted drive fields keep the asset values since #1168. PhysX scales
+            # the asset's joint friction (1.0 on the drawer slide) by constraint
+            # force, which held the joints still, and the asset imports these joints
+            # undriven, which ignored their stiffness and damping.
+            friction: 0.0
+            drive_type: force
           fix_base: true
           settle_steps: 10
       objects:
@@ -165,7 +183,10 @@ tracks:
           sample_count: 256
           hand_interp_steps: 12
           approach_distance_m: 0.12
-          press_distance_m: 0.03
+          # Closed pads first touch the button 25.2 mm ahead of the solver TCP;
+          # stop 1 mm short, then press through the 6 mm stroke plus 1 mm.
+          press_tcp_offset_m: -0.0262
+          press_distance_m: 0.008
           articulation: microwave
           target_link: button_link
           target_joint: button_joint

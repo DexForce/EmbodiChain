@@ -734,6 +734,11 @@ def test_w1_v030_reference_pose_redundancy_search(side: str) -> None:
         ({"reference_qpos": [0.0] * 6 + [float("nan")]}, "reference_qpos"),
         ({"axis_alignment_tolerance": 0.0}, "axis_alignment_tolerance"),
         ({"axis_alignment_tolerance": float("inf")}, "axis_alignment_tolerance"),
+        ({"continuous_path_joint_step": 0.1}, "requires redundancy_search"),
+        (
+            {"continuous_path_joint_step": 0.0, "redundancy_search": True},
+            "continuous_path_joint_step",
+        ),
     ],
 )
 def test_fep_calibration_rejects_invalid_parameters(fields: dict, match: str) -> None:
@@ -1506,3 +1511,83 @@ def test_cached_geometry_across_cuda_streams(search: bool) -> None:
         assert bool(valid.all()) and bool(valid2.all())
         _assert_pose_accuracy(target2, solver.get_fk(result2))
         torch.testing.assert_close(result, saved, atol=0, rtol=0)
+
+
+def _cartesian_line(
+    solver: FEPSolver, start: torch.Tensor, offset: list[float], count: int
+) -> torch.Tensor:
+    path = solver.get_fk(start).repeat(count, 1, 1)
+    progress = torch.linspace(0, 1, count, device=solver.device)[:, None]
+    path[:, :3, 3] += progress * torch.tensor(offset, device=solver.device)
+    return path
+
+
+def test_continuous_path_ik_is_opt_in(solver: FEPSolver) -> None:
+    assert not solver.supports_continuous_batch_ik
+    assert not solver.continuous_ik_whole_path
+    solver.cfg.redundancy_search = True
+    assert not solver.supports_continuous_batch_ik
+    with pytest.raises(ValueError, match="continuous_path_joint_step"):
+        solver._get_continuous_ik_path(
+            solver.get_fk(solver.get_default_qpos_seed()[None])[None],
+            solver.get_default_qpos_seed()[None],
+        )
+
+
+def test_continuous_path_bounds_steps_near_shoulder_singularity(
+    solver: FEPSolver,
+) -> None:
+    # q2 near zero aligns joints 1 and 3; independent q7 searches seeded by
+    # the previous answer then swap between distant joint-1/joint-3 pairs.
+    start = torch.tensor(
+        [[0.093, -0.077, 0.282, -2.598, 0.452, 4.136, -0.236]], device=solver.device
+    )
+    path = _cartesian_line(solver, start, [0.0, 0.0, -0.1], 120)
+    solver.cfg.redundancy_search = True
+    previous, point_steps = start, []
+    for target in path:
+        valid, joints = solver.get_ik(target[None], previous)
+        assert bool(valid.all())
+        point_steps.append(float((joints - previous).abs().max()))
+        previous = joints
+    bound = 0.1
+    assert max(point_steps) > 2 * bound
+
+    solver.cfg.continuous_path_joint_step = bound
+    assert solver.supports_continuous_batch_ik
+    assert solver.continuous_ik_whole_path
+    valid, joints = solver._get_continuous_ik_path(path[None], start)
+    assert bool(valid.all())
+    _assert_pose_accuracy(path, solver.get_fk(joints[0]))
+    _assert_limits(solver, joints[0])
+    path_joints = torch.cat((start, joints[0]))
+    assert float(path_joints.diff(dim=0).abs().max()) <= bound + 1e-5
+    # A constant q7 flips joints 1 and 3 here; q7 instead ramps monotonically,
+    # starting and ending at rest.
+    q7 = path_joints[:, 6]
+    q7_steps = q7.diff() * torch.sign(q7[-1] - q7[0])
+    assert float((q7[-1] - q7[0]).abs()) > 0.01
+    assert bool((q7_steps >= -1e-6).all())
+    assert float(q7_steps[[0, -1]].max()) < 0.1 * float(q7_steps.max())
+    assert float(path_joints.diff(dim=0).diff(dim=0).abs().max()) < 0.05
+
+
+def test_continuous_path_solves_distant_first_sample_without_bound(
+    solver: FEPSolver,
+) -> None:
+    seed = solver.get_default_qpos_seed()[None]
+    seed[:, 1] = 0.5
+    goal = seed.clone()
+    goal[:, 0] += 0.8
+    goal[:, 3] -= 0.4
+    path = _cartesian_line(solver, goal, [0.0, 0.04, 0.0], 8)
+    solver.cfg.redundancy_search = True
+    solver.cfg.continuous_path_joint_step = 0.05
+    valid, joints = solver._get_continuous_ik_path(path[None], seed)
+    assert bool(valid.all())
+    _assert_pose_accuracy(path, solver.get_fk(joints[0]))
+    assert float((joints[0, 0] - seed[0]).abs().max()) > 0.05
+    assert float(joints[0].diff(dim=0).abs().max()) <= 0.05 + 1e-5
+    valid, joints = solver._get_continuous_ik_path(path[None, :1], seed)
+    assert bool(valid.all())
+    _assert_pose_accuracy(path[:1], solver.get_fk(joints[0]))

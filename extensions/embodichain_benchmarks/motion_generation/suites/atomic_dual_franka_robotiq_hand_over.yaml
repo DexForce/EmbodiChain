@@ -2,7 +2,7 @@
 # Hand asset: Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf
 schema_version: 1
 name: atomic_dual_franka_robotiq_hand_over
-suite_version: atomic_dual_franka_robotiq_hand_over_v6
+suite_version: atomic_dual_franka_robotiq_hand_over_v8
 profile: smoke
 robot:
   id: dual_franka_robotiq_hand_over

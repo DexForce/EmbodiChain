@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_robotiq_spatial_generalization
-suite_version: atomic_franka_robotiq_spatial_generalization_v11
+suite_version: atomic_franka_robotiq_spatial_generalization_v22
 profile: coverage
 
 # Reusable strict-spatial domain definitions. Every track below selects only
@@ -26,7 +26,7 @@ x-domain-object-xy: &domain_object_xy
     object_yaw_jitter_rad: 0.0
     target_translation_jitter_m: [0.0, 0.0, 0.0]
     samples_per_seed: 8
-  overrides:
+  overrides: &overrides_object_xy
     batch_sizes: [8]
     randomization:
       enabled: true
@@ -48,7 +48,7 @@ x-domain-object-yaw: &domain_object_yaw
     object_yaw_jitter_rad: 0.523599
     target_translation_jitter_m: [0.0, 0.0, 0.0]
     samples_per_seed: 8
-  overrides:
+  overrides: &overrides_object_yaw
     batch_sizes: [8]
     randomization:
       enabled: true
@@ -70,7 +70,7 @@ x-domain-object-z: &domain_object_z
     object_yaw_jitter_rad: 0.0
     object_roll_pitch_jitter_rad: [0.0, 0.0]
     samples_per_seed: 8
-  overrides:
+  overrides: &overrides_object_z
     batch_sizes: [8]
     randomization:
       enabled: true
@@ -90,7 +90,7 @@ x-domain-object-roll-pitch: &domain_object_roll_pitch
     object_yaw_jitter_rad: 0.0
     object_roll_pitch_jitter_rad: [0.174533, 0.174533]
     samples_per_seed: 8
-  overrides:
+  overrides: &overrides_object_roll_pitch
     batch_sizes: [8]
     randomization:
       enabled: true
@@ -195,7 +195,7 @@ x-domain-task-frame-planar: &domain_task_frame_planar
     task_frame_translation_jitter_m: [0.03, 0.03, 0.0]
     task_frame_yaw_jitter_rad: 0.174533
     samples_per_seed: 8
-  overrides:
+  overrides: &overrides_task_frame_planar
     batch_sizes: [8]
     randomization:
       enabled: true
@@ -313,7 +313,7 @@ x-domain-articulation-spatial-pose: &domain_articulation_spatial_pose
     object_yaw_jitter_rad: 0.523599
     object_roll_pitch_jitter_rad: [0.174533, 0.174533]
     samples_per_seed: 8
-  overrides:
+  overrides: &overrides_articulation_spatial_pose
     batch_sizes: [8]
     randomization:
       enabled: true
@@ -375,7 +375,7 @@ x-domain-articulation-workspace-shell: &domain_articulation_workspace_shell
     object_translation_jitter_m: [0.05, 0.05, 0.02]
     workspace_buckets: [near, mid, far]
     samples_per_seed: 8
-  overrides:
+  overrides: &overrides_articulation_workspace_shell
     batch_sizes: [8]
     randomization:
       enabled: true
@@ -575,10 +575,34 @@ x-microwave-controls: &microwave_controls
   position: [-1.0, -0.30, 0.4]
   rotation_deg: [0.0, 0.0, 90.0]
   init_qpos: [0.0, 0.0, 0.0, 0.0]
+  # The button returns on a 300 N/m spring (1.8 N at its 6 mm stroke). With
+  # only the weak shared drive, a 10-degree roll or pitch let the 25 g button
+  # creep inwards under gravity during replay, so a downward-facing press
+  # started with up to its whole stroke already spent.
   drive:
-    stiffness: 0.001
+    stiffness:
+      door_hinge: 0.001
+      turntable_joint: 0.001
+      knob_joint: 0.001
+      button_joint: 300.0
     damping: 100.0
-    max_effort: 0.01
+    max_effort:
+      door_hinge: 0.01
+      turntable_joint: 0.01
+      knob_joint: 0.01
+      button_joint: 5.0
+    # Omitted drive fields keep the asset values since #1168. PhysX scales
+    # the asset's joint friction (1.0 on the drawer slide) by constraint
+    # force, which held the joints still, and the asset imports these joints
+    # undriven, which ignored their stiffness and damping.
+    friction: 0.0
+    drive_type: force
+  # Articulation-only tracks need explicit solver iterations: GPU physics
+  # solves the whole scene with its largest per-actor count, the native
+  # articulation default is 4/1, and without a 32/8 rigid object in the scene
+  # finger contacts never converged and the fingers closed through handles.
+  min_position_iters: 32
+  min_velocity_iters: 8
   fix_base: true
   settle_steps: 10
 
@@ -590,10 +614,17 @@ x-drawer: &drawer
   init_qpos: [0.0]
   drive:
     drive_type: none
+    # PhysX scales joint friction by constraint force, and the asset values
+    # (1.0 on the drawer slide) held the joints still. Zero was in effect
+    # until omitted drive fields began keeping the asset values (#1168).
+    friction: 0.0
   attrs:
     material_props:
       static_friction: 1.0
       dynamic_friction: 1.0
+  # See microwave_controls: 32/8 iterations for the articulation-only track.
+  min_position_iters: 32
+  min_velocity_iters: 8
   fix_base: true
   settle_steps: 10
   reset_settle_steps: 0
@@ -606,10 +637,17 @@ x-microwave-door: &microwave_door
   init_qpos: [0.0, 0.0, 0.0, 0.0]
   drive:
     drive_type: none
+    # PhysX scales joint friction by constraint force, and the asset values
+    # (1.0 on the drawer slide) held the joints still. Zero was in effect
+    # until omitted drive fields began keeping the asset values (#1168).
+    friction: 0.0
   attrs:
     material_props:
       static_friction: 1.0
       dynamic_friction: 1.0
+  # See microwave_controls: 32/8 iterations for the articulation-only track.
+  min_position_iters: 32
+  min_velocity_iters: 8
   fix_base: true
   settle_steps: 10
 
@@ -617,6 +655,9 @@ x-skill-pick-up: &skill_pick_up
   id: pick_up
   sample_count: 120
   grasp_source: fixed
+  # Flat Robotiq pads close along a face normal only if the fixed grasp turns
+  # with the cube's yaw; a world-fixed grasp drops yawed cubes on lift.
+  grasp_follows_object_yaw: true
   hand_interp_steps: 12
   pre_grasp_distance_m: 0.15
   lift_height_m: 0.16
@@ -634,6 +675,9 @@ x-skill-move-held-object: &skill_move_held_object
   sample_count: 120
   pick_sample_count: 120
   grasp_source: fixed
+  # Flat Robotiq pads close along a face normal only if the fixed grasp turns
+  # with the cube's yaw; a world-fixed grasp drops yawed cubes on lift.
+  grasp_follows_object_yaw: true
   target_object_offset_m: [0.08, 0.08, 0.04]
   approach_direction: [0.0, 0.0, -1.0]
   pre_grasp_distance_m: 0.15
@@ -650,6 +694,9 @@ x-skill-place: &skill_place
   sample_count: 120
   pick_sample_count: 120
   grasp_source: fixed
+  # Flat Robotiq pads close along a face normal only if the fixed grasp turns
+  # with the cube's yaw; a world-fixed grasp drops yawed cubes on lift.
+  grasp_follows_object_yaw: true
   target_object_offset_m: [0.10, 0.10, 0.0]
   retract_height_m: 0.10
   approach_direction: [0.0, 0.0, -1.0]
@@ -667,6 +714,9 @@ x-skill-press: &skill_press
   sample_count: 256
   hand_interp_steps: 12
   approach_distance_m: 0.12
+  # Closed pads first touch the button 25.2 mm ahead of the solver TCP;
+  # stop 1 mm short, then press through the 6 mm stroke plus 1 mm.
+  press_tcp_offset_m: -0.0262
   press_distance_m: 0.008
   articulation: microwave
   target_link: button_link
@@ -684,6 +734,9 @@ x-skill-slide: &skill_slide
   grasp_sample_count: 10000
   grasp_max_candidates: 128
   grasp_alignment_max_angle_deg: 10.0
+  # Seat the 32 mm bar mid-pad: on the solver TCP it sat 22 mm from the
+  # fingertips of the vertically closing pads and slid out in fast pulls.
+  grasp_depth_offset_m: 0.011
   hand_interp_steps: 12
   approach_distance_m: 0.10
   translation_distance_m: 0.18
@@ -704,6 +757,14 @@ x-skill-twist: &skill_twist
   twist_waypoint_count: 8
   pre_grasp_distance_m: 0.12
   twist_angle_rad: -0.7853981634
+  # Open only to ~82 mm around the 52 mm knob: fully open fingers spread
+  # 140 mm and one strikes the door handle 64 mm beside the knob.
+  hand_open_qpos: [0.28, -0.28, 0.28, -0.28, -0.28, 0.28]
+  # Even 82 mm apart, a straight-in side grasp puts the finger links on the
+  # handle 45 mm in front of the knob; they were pried open or shut. Reach
+  # in 22 degrees from the far side, about the knob's vertical axis.
+  grasp_tilt_rad: 0.3839724354
+  grasp_tilt_axis: [0.0, 0.0, 1.0]
   articulation: microwave
   target_link: knob_link
   target_joint: knob_joint
@@ -718,6 +779,9 @@ x-skill-open-door: &skill_open_door
   sample_count: 240
   hand_interp_steps: 12
   door_waypoint_count: 20
+  # The approach posture fixes the branch the hinge arc must follow; near a
+  # singular posture the arc otherwise jumps branches and cannot be timed.
+  approach_ik_seeds: 8
   approach_distance_m: 0.10
   retract_distance_m: 0.10
   articulation: microwave
@@ -734,9 +798,19 @@ x-skill-open-door: &skill_open_door
     - name: spatial_microwave_door_60deg
       task_difficulty: medium
       open_angle_rad: 1.0472
+      # The full articulation-pose ranges left about 3 in 10 rows without a
+      # reachable handle grasp; at 0.75 resampling qualifies every batch.
+      articulation_jitter_scale: 0.75
     - name: spatial_microwave_door_90deg
       task_difficulty: hard
       open_angle_rad: 1.5708
+      # Preserve the full opening arc; the longer hand needs a shorter release retreat.
+      retract_distance_m: 0.05
+      # With the full ranges a third to a half of the 90-degree arcs in the yaw
+      # and articulation-pose domains had no IK solution at their end, against
+      # none at the nominal pose. Halving them qualifies the roll/pitch and
+      # shell batches; yaw beyond a few degrees still leaves rows unsolved.
+      articulation_jitter_scale: 0.5
 
 x-skill-pour: &skill_pour
   id: pour
@@ -745,12 +819,25 @@ x-skill-pour: &skill_pour
   hand_interp_steps: 12
   pre_grasp_distance_m: 0.15
   lift_height_m: 0.16
-  approach_direction: [-0.7071, 0.0, -0.7071]
+  # The pads close along the pour axis, so pouring turns the cube about the
+  # pad normal; closing across that axis let it slip in hand at 90 degrees.
+  approach_direction: [0.0, -0.7071, -0.7071]
+  # Flat Robotiq pads close along a face normal only if the approach turns
+  # with the cube's yaw; a fixed world approach leaves yawed rows no grasp.
+  approach_follows_object_yaw: true
   internal_axis: [1.0, 0.0, 0.0]
   grasp_source: antipodal
   grasp_sample_count: 10000
   grasp_max_candidates: 128
   grasp_alignment_max_angle_deg: 10.0
+  grasp_filter_before_ranking: true
+  # Near the workspace edge the nominal oblique approach can leave a row with
+  # no reachable pour chain; the same face-normal approach a quarter turn
+  # around the cube can. The three choices share the original 128 budget.
+  grasp_approach_candidates:
+    - {yaw_offset_rad: 0.0, max_candidates: 64}
+    - {yaw_offset_rad: 1.5707963267948966, max_candidates: 32}
+    - {yaw_offset_rad: -1.5707963267948966, max_candidates: 32}
   cases:
     - name: spatial_cube_pour_30deg
       object: cube_50mm
@@ -767,6 +854,8 @@ x-skill-pour: &skill_pour
 
 x-skill-axis-align: &skill_axis_align
   id: axis_align
+  # Keep the original centre when reachable; otherwise try bounded inward goals.
+  alignment_inward_candidates_m: [0.0, 0.025, 0.05, 0.075, 0.10]
   sample_count: 180
   hand_interp_steps: 12
   pre_grasp_distance_m: 0.15
@@ -795,23 +884,45 @@ x-skill-push-object: &skill_push_object
   approach_height_m: 0.10
   retract_height_m: 0.10
   push_overshoot_m: 0.0
-  object_contact_offset_m: [0.0, 0.0, -0.01]
+  # Push with the pads 75% closed, about 34 mm apart: two contacts straddle
+  # the cube face. The closed fingers form a 15 mm pusher about which the cube
+  # turned and drifted sideways; nominal and object-xy rows failed 25 of 54.
+  hand_grasp_qpos: [0.525, -0.525, 0.525, -0.525, -0.525, 0.525]
+  # Keep the contact behind the cube face nearest the push, so yawed cubes
+  # keep the 2 mm approach clearance instead of starting inside the hand.
+  contact_along_target_face: true
+  object_contact_offset_m: [0.0, 0.0, 0.005]
+  # Measure the start from the face pushed: 13.5 mm pad half-width plus 2 mm.
+  # A 40.5 mm centre distance left 40 mm cubes 7 mm short, and started inside
+  # 60 mm cubes and the 70 mm side of elongated ones, which then tipped.
+  contact_distance_from_face_m: 0.0155
   cases:
     - name: spatial_cube_push_lateral_10cm
       object: cube_50mm
       task_difficulty: simple
-      contact_distance_m: 0.042
       target_object_offset_m: [0.0, 0.10, 0.0]
     - name: spatial_cube_push_toward_base_8cm
       object: cube_50mm
       task_difficulty: simple
-      contact_distance_m: 0.052
+      # Turn the hand 90 degrees so a closed finger face, spanning the cube's
+      # height, pushes; facing this way the knuckles struck the top edge and
+      # tipped the cube. Same 2 mm clearance as the lateral push.
+      contact_frame_to_eef:
+        - [0.0, -1.0, 0.0, 0.0]
+        - [1.0, 0.0, 0.0, 0.0]
+        - [0.0, 0.0, 1.0, 0.0]
+        - [0.0, 0.0, 0.0, 1.0]
       target_object_offset_m: [0.08, 0.0, 0.0]
 
 robot:
   id: franka_robotiq
   provider: franka_robotiq
   config:
+    # Cartesian contact paths: hold each FEP sample within 0.1 rad of the
+    # previous one; independent q7 searches alternate near the shoulder singularity.
+    solver_cfg:
+      arm:
+        continuous_path_joint_step: 0.1
     attrs:
       material_props:
         static_friction: 1.0
@@ -825,12 +936,15 @@ planners:
     config:
       max_attempts: 5
       max_planning_time: null
-      interpolation_dt: 0.025
+      # Divides the compiled control period, so retiming keeps solved acceleration;
+      # coarser samples keep long slow plans within cuRobo's interpolation buffer.
+      interpolation_dt: 0.04
       collision_activation_distance: 0.01
       use_cuda_graph: true
       cuda_graph_fallback: true
       warmup_iterations: 1
-      preserve_plan_samples: false
+      # Native samples avoid resampling the solved timing before compilation.
+      preserve_plan_samples: true
       world:
         obstacle_representation: sphere
         multi_env: false
@@ -881,6 +995,13 @@ tracks:
         scene_layout: franka_robotiq_cube_table_v1
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
+      # Empty cuRobo world: ~10-degree keyframes keep held reorientation off the support.
+      axis_align_rotation_waypoints: 8
+      pour_rotation_waypoints: 8
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -924,6 +1045,10 @@ tracks:
         scene_layout: franka_robotiq_cube_table_v1
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -961,6 +1086,10 @@ tracks:
         scene_layout: franka_robotiq_cube_table_v1
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -995,6 +1124,10 @@ tracks:
         scene_layout: franka_robotiq_cube_table_v1
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1028,6 +1161,13 @@ tracks:
         scene_layout: franka_robotiq_cube_table_v1
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
+      # Empty cuRobo world: ~10-degree keyframes keep held reorientation off the support.
+      axis_align_rotation_waypoints: 8
+      pour_rotation_waypoints: 8
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1059,6 +1199,10 @@ tracks:
         scene_layout: franka_robotiq_cube_table_v1
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1090,6 +1234,10 @@ tracks:
         scene_layout: franka_robotiq_cube_table_v1
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1121,6 +1269,10 @@ tracks:
         scene_layout: franka_robotiq_cube_table_v1
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1158,6 +1310,10 @@ tracks:
         scene_layout: franka_robotiq_microwave_controls_v1
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1195,6 +1351,10 @@ tracks:
         scene_layout: franka_robotiq_drawer_v1
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1205,6 +1365,9 @@ tracks:
   - id: spatial-door
     scenario: atomic_skill
     enabled: true
+    # A door arc that leaves the arm's reach in any row is an unqualified input
+    # (main's whole-batch qualification): robustness domains draw another
+    # batch, keep the rejected proposals as evidence, and fail after 16.
     domains:
       - <<: *domain_nominal
         applicability: [open_door]
@@ -1212,26 +1375,51 @@ tracks:
       - <<: *domain_object_xy
         applicability: [open_door]
         scene_layout: franka_robotiq_microwave_door_v1
+        overrides:
+          <<: *overrides_object_xy
+          case_generation_attempts: 16
       - <<: *domain_object_yaw
         applicability: [open_door]
         scene_layout: franka_robotiq_microwave_door_v1
+        overrides:
+          <<: *overrides_object_yaw
+          case_generation_attempts: 16
       - <<: *domain_object_z
         applicability: [open_door]
         scene_layout: franka_robotiq_microwave_door_v1
+        overrides:
+          <<: *overrides_object_z
+          case_generation_attempts: 16
       - <<: *domain_object_roll_pitch
         applicability: [open_door]
         scene_layout: franka_robotiq_microwave_door_v1
+        overrides:
+          <<: *overrides_object_roll_pitch
+          case_generation_attempts: 16
       - <<: *domain_task_frame_planar
         applicability: [open_door]
         scene_layout: franka_robotiq_microwave_door_v1
+        overrides:
+          <<: *overrides_task_frame_planar
+          case_generation_attempts: 16
       - <<: *domain_articulation_spatial_pose
         applicability: [open_door]
         scene_layout: franka_robotiq_microwave_door_v1
+        overrides:
+          <<: *overrides_articulation_spatial_pose
+          case_generation_attempts: 16
       - <<: *domain_articulation_workspace_shell
         applicability: [open_door]
         scene_layout: franka_robotiq_microwave_door_v1
+        overrides:
+          <<: *overrides_articulation_workspace_shell
+          case_generation_attempts: 16
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics

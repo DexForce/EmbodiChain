@@ -121,6 +121,17 @@ backend `plan_opts`; `motion_gen` always invokes the backend. Segments requestin
 `ik_interp`. PushObject, Slide, Press, OpenDoor and Twist fail closed under
 `motion_gen`: endpoint-only backend planning cannot certify their straight-line
 or articulated contact paths, and the action must not silently fall back to IK.
+PushObject places its contact `contact_distance` behind the object along the
+push; opt-in `contact_along_target_face` offsets it along the target frame's
+planar axis nearest the push, so a box aligned with the target keeps that
+clearance when the push is oblique to its faces. Invocation-level
+`SkillControlOverrides` can replace an endpoint's `open` or `grasp` command,
+for example a partial opening, without changing the embodiment profile.
+OpenDoor's opt-in `approach_ik_seeds` also solves the approach pose with the
+last arm joint held at evenly spaced values, scores each posture by the largest
+joint step of the continuous reach, hinge arc and retreat, and plans the
+approach in joint space to each row's best posture; zero keeps the posture
+solved from the start state.
 Each phase retains its native time profile while retiming to the control grid;
 requested phase counts are minima, so long phases expand rather than speeding
 up. Composite phases use terminal holds to align lengths; they do not

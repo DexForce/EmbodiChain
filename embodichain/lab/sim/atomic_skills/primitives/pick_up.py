@@ -79,6 +79,7 @@ from embodichain.lab.sim.atomic_skills.requirements import (
 )
 from embodichain.lab.sim.atomic_skills.state import HeldObjectState, PlanningContext
 from embodichain.lab.sim.atomic_skills.trajectory_ops import (
+    axis_translation_keyframes,
     build_pose_plan_states,
     axis_translation_keyframes,
     interpolate_hand_qpos,
@@ -215,6 +216,26 @@ class PickUpOptions(SkillOptions):
     grasps and ``fixed_object_to_eef`` bypass this sampled-grasp selection.
     """
 
+    approach_waypoints: int = 0
+    """Intermediate poses on the straight pre-grasp to grasp line.
+
+    The motion policy plans through them in the same call, which keeps an
+    open hand near that line instead of letting the approach sweep the target.
+    ``0`` plans only the pre-grasp and grasp poses before closing. AxisAlign
+    inherits the same approach.
+    """
+
+    lift_waypoints: int = 0
+    """Intermediate poses on the straight world +Z line from grasp to lift.
+
+    The poses keep the grasp orientation and are planned in the same call as
+    the lift, which keeps the closed hand rising vertically instead of letting
+    a free-space lift drag the held object across the support. ``0`` plans only
+    the grasp and lift poses. AxisAlign inherits the same lift. Grasp-candidate
+    IK screening still checks only the endpoints, and an external nominal
+    motion keeps its own path. ``cartesian_lift`` keyframes its own lift, so
+    the two cannot be combined.
+    """
     approach_along_grasp_axis: bool = False
     """Use the realized calibrated TCP +Z for native pre-grasp translation.
 
@@ -287,6 +308,12 @@ class PickUpOptions(SkillOptions):
             raise TypeError("cartesian_lift must be boolean.")
         if type(self.approach_along_grasp_axis) is not bool:
             raise TypeError("approach_along_grasp_axis must be boolean.")
+        if type(self.approach_waypoints) is not int or self.approach_waypoints < 0:
+            raise ValueError("approach_waypoints must be a non-negative integer.")
+        if type(self.lift_waypoints) is not int or self.lift_waypoints < 0:
+            raise ValueError("lift_waypoints must be a non-negative integer.")
+        if self.cartesian_lift and self.lift_waypoints:
+            raise ValueError("cartesian_lift already keyframes its own lift.")
         if self.approach_along_grasp_axis and self.fixed_object_to_eef is None:
             raise ValueError("Grasp-axis approach requires fixed_object_to_eef.")
         if self.fixed_object_to_eef is not None:
@@ -410,7 +437,7 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
             # motion generator resolves backend defaults when no explicit
             # planner options were supplied.
             motion_options.sample_count = None
-        waypoints = [pre_grasp_xpos, grasp_xpos, lift_xpos]
+        approach_poses = [pre_grasp_xpos[:, None]]
         if options.initial_lift_height > 0.0:
             start_xpos = self.robot.compute_fk(
                 qpos=start_arm_qpos,
@@ -426,18 +453,28 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
                 start_xpos,
                 start_xpos.new_tensor([0.0, 0.0, options.initial_lift_height]),
             )
-            waypoints.insert(0, initial_lift)
+            approach_poses.insert(0, initial_lift[:, None])
+        if options.approach_waypoints:
+            approach_poses.append(
+                axis_translation_keyframes(
+                    pre_grasp_xpos,
+                    grasp_xpos,
+                    approach_direction.to(grasp_xpos),
+                    n_waypoints=options.approach_waypoints + 1,
+                )[:, :-1]
+            )
+        approach_targets = torch.cat([*approach_poses, grasp_xpos[:, None]], dim=1)
 
         if options.cartesian_lift:
             if motion_policy.strategy != "ik_interp":
                 raise ValueError("cartesian_lift requires strategy='ik_interp'.")
             if motion_policy.interpolation_mode == "adaptive":
-                n_approach = max(n_approach, len(waypoints))
+                n_approach = max(n_approach, approach_targets.shape[1] + 1)
             approach_success, approach_arm = plan_named_arm_trajectory(
                 self.motion_generator,
                 manipulator.control_part,
                 start_arm_qpos,
-                torch.stack(waypoints[:-1], dim=1),
+                approach_targets,
                 n_approach,
                 motion_policy,
                 interpolation_dt,
@@ -467,8 +504,23 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
                 lift_success = approach_success.clone()
             is_success = approach_success & lift_success
         else:
+            # Optional vertical lift keyframes follow the grasp target, so the
+            # grasp split index below depends only on the approach keyframes.
+            lift_poses = [lift_xpos[:, None]]
+            if options.lift_waypoints:
+                lift_poses.insert(
+                    0,
+                    axis_translation_keyframes(
+                        grasp_xpos,
+                        lift_xpos,
+                        lift_xpos.new_tensor([0.0, 0.0, 1.0]),
+                        n_waypoints=options.lift_waypoints + 1,
+                    )[:, :-1],
+                )
             motion_result = self.motion_generator.generate(
-                build_pose_plan_states(torch.stack(waypoints, dim=1)),
+                build_pose_plan_states(
+                    torch.cat([approach_targets, *lift_poses], dim=1)
+                ),
                 options=motion_options,
             )
             assert isinstance(motion_result.success, torch.Tensor)
@@ -484,7 +536,7 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
                 dt=motion_result.dt,
                 control_dt=interpolation_dt,
                 arrival_indices=motion_result.waypoint_indices,
-                split_target_index=len(waypoints) - 2,
+                split_target_index=approach_targets.shape[1] - 1,
                 success=motion_result.success,
                 env_ids=self.planning_services.env_ids,
             )

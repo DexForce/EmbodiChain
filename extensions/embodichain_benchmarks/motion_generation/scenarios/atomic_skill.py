@@ -98,8 +98,12 @@ from .atomic_policy import (
     benchmark_motion_attribution,
     benchmark_motion_policy_strategy,
     policy_motion_budget,
+    with_axis_align_rotation_waypoints,
+    with_pick_approach_waypoints,
+    with_pick_lift_waypoints,
     with_motion_budget,
     with_plan_options,
+    with_pour_rotation_waypoints,
 )
 from .atomic_evaluation import executed_final_pose_errors, motion_valid_mask
 
@@ -225,6 +229,66 @@ class AtomicSkillScenario(ScenarioProvider):
         if not isinstance(model_id, str) or not model_id:
             raise ValueError("track.config.grasp_model must be a non-empty model id.")
         return resolve_gripper_defaults(model_id)
+
+    def grasp_closure_sweep(self) -> bool:
+        """Whether the mounted hand qualifies closure against the support plane.
+
+        Only the migrated six-joint Robotiq hand opts in. The PGI fixture keeps
+        its legacy open-hand qualification so existing baselines are unchanged.
+        """
+        model = self.grasp_model()
+        return bool(model is not None and model.get("model_id") == "robotiq_arg2f_140")
+
+    def grasp_ray_deviation_angle(self) -> float | None:
+        """Maximum antipodal ray deviation for the mounted hand, in radians.
+
+        Robotiq's flat pads rotate an object onto a contact face when the
+        closing axis leaves that face's normal, so its candidates stay within
+        two degrees. The PGI fixture keeps the generator default.
+        """
+        model = self.grasp_model()
+        if model is None or model.get("model_id") != "robotiq_arg2f_140":
+            return None
+        return math.radians(2.0)
+
+    def pick_approach_waypoints(self) -> int:
+        """Straight-line PickUp approach poses requested by the track.
+
+        Tracks opt in with ``pick_approach_waypoints``; the default ``0`` plans
+        only the pre-grasp, grasp and lift poses.
+        """
+        return self._track_waypoint_count("pick_approach_waypoints")
+
+    def pick_lift_waypoints(self) -> int:
+        """Straight vertical PickUp lift poses requested by the track.
+
+        Tracks opt in with ``pick_lift_waypoints``; the default ``0`` plans
+        only the grasp and lift poses.
+        """
+        return self._track_waypoint_count("pick_lift_waypoints")
+
+    def axis_align_rotation_waypoints(self) -> int:
+        """Intermediate AxisAlign reorientation poses requested by the track.
+
+        Tracks opt in with ``axis_align_rotation_waypoints``; the default ``0``
+        plans only the lift and aligned poses.
+        """
+        return self._track_waypoint_count("axis_align_rotation_waypoints")
+
+    def pour_rotation_waypoints(self) -> int:
+        """Intermediate poses on each Pour rotation leg requested by the track.
+
+        Tracks opt in with ``pour_rotation_waypoints``; the default ``0`` plans
+        only the poured and returned poses.
+        """
+        return self._track_waypoint_count("pour_rotation_waypoints")
+
+    def _track_waypoint_count(self, key: str) -> int:
+        """Read one optional non-negative waypoint count from the track config."""
+        value = 0 if self.track is None else self.track.config.get(key, 0)
+        if type(value) is not int or value < 0:
+            raise ValueError(f"track.config.{key} must be a non-negative int.")
+        return value
 
     def grasp_root_from_tcp(self) -> list[list[float]] | None:
         """Bind flange-mounted hand geometry to this fixture's solver TCP.
@@ -694,6 +758,7 @@ class AtomicSkillScenario(ScenarioProvider):
                         count,
                         gripper_data=self.grasp_model(),
                         root_from_tcp=self.grasp_root_from_tcp(),
+                        ray_deviation_angle=self.grasp_ray_deviation_angle(),
                     )
                     for count in sorted(sampling_counts)
                 },
@@ -968,6 +1033,24 @@ class AtomicSkillScenario(ScenarioProvider):
         if self.suite is not None:
             invocations = tuple(
                 with_motion_budget(item, self.suite.protocol) for item in invocations
+            )
+            invocations = tuple(
+                with_pick_approach_waypoints(item, self.pick_approach_waypoints())
+                for item in invocations
+            )
+            invocations = tuple(
+                with_pick_lift_waypoints(item, self.pick_lift_waypoints())
+                for item in invocations
+            )
+            invocations = tuple(
+                with_axis_align_rotation_waypoints(
+                    item, self.axis_align_rotation_waypoints()
+                )
+                for item in invocations
+            )
+            invocations = tuple(
+                with_pour_rotation_waypoints(item, self.pour_rotation_waypoints())
+                for item in invocations
             )
         physics = (
             {} if self.track is None else dict(self.track.config.get("physics", {}))
@@ -1639,7 +1722,9 @@ class AtomicSkillScenario(ScenarioProvider):
             The selected grasp batch with shape ``(B, 4, 4)``.
 
         Raises:
-            RuntimeError: No candidate variant reaches every skill pose.
+            _AntipodalGraspSearchError: No candidate variant reaches every
+                skill pose. This input qualification failure lets a track that
+                opts into ``case_generation_attempts`` propose another batch.
         """
         if self.robot is None:
             raise RuntimeError("Atomic Skill runtime is not configured.")
@@ -1712,8 +1797,15 @@ class AtomicSkillScenario(ScenarioProvider):
         row_rank: (
             Callable[[int, torch.Tensor, torch.Tensor], torch.Tensor] | None
         ) = None,
+        closure_tcp_rotation: torch.Tensor | None = None,
     ) -> list[torch.Tensor]:
-        """Sample/rank one frozen pool per row for reuse across goal variants."""
+        """Sample/rank one frozen pool per row for reuse across goal variants.
+
+        ``closure_tcp_rotation`` is an optional ``(B, 3, 3)`` world rotation
+        that a skill applies to each row's TCP orientation before closing. Only
+        the generator's closure support check sees it; ``None`` keeps the
+        original sampling call.
+        """
         assert self.robot is not None
         from .._atomic_fixtures import (
             create_antipodal_semantics,
@@ -1738,6 +1830,8 @@ class AtomicSkillScenario(ScenarioProvider):
                 max_candidates=max_candidates,
                 gripper_data=self.grasp_model(),
                 root_from_tcp=self.grasp_root_from_tcp(),
+                closure_sweep=self.grasp_closure_sweep(),
+                ray_deviation_angle=self.grasp_ray_deviation_angle(),
                 **self._closing_grasp_options(),
                 **(
                     {"approach_alignment_angle": math.radians(alignment_max_angle_deg)}
@@ -1750,6 +1844,11 @@ class AtomicSkillScenario(ScenarioProvider):
                 mesh_triangles=affordance.mesh_triangles,
                 obj_poses=object_pose,
                 approach_direction=approach_direction,
+                **(
+                    {}
+                    if closure_tcp_rotation is None
+                    else {"closure_tcp_rotation": closure_tcp_rotation}
+                ),
             )
         batch_size = object_pose.shape[0]
         if len(candidate_pools) != batch_size:
@@ -1939,6 +2038,7 @@ class AtomicSkillScenario(ScenarioProvider):
         n_sample: int,
         max_candidates: int,
         alignment_max_angle_deg: float,
+        grasp_depth_offset_m: float = 0.0,
     ) -> torch.Tensor:
         """Freeze a mounted-hand grasp that can complete a Slide path."""
         translation_sign = -1.0 if direction == "pull" else 1.0
@@ -1966,6 +2066,7 @@ class AtomicSkillScenario(ScenarioProvider):
             max_candidates=max_candidates,
             alignment_max_angle_deg=alignment_max_angle_deg,
             waypoint_poses=slide_poses,
+            grasp_depth_offset_m=grasp_depth_offset_m,
         )
 
     def screen_articulation_grasp(
@@ -1981,6 +2082,7 @@ class AtomicSkillScenario(ScenarioProvider):
         max_candidates: int,
         alignment_max_angle_deg: float,
         waypoint_poses: Callable[[torch.Tensor], Sequence[torch.Tensor]],
+        grasp_depth_offset_m: float = 0.0,
     ) -> torch.Tensor:
         """Freeze the first sampled link grasp whose skill poses are reachable.
 
@@ -2001,12 +2103,16 @@ class AtomicSkillScenario(ScenarioProvider):
                 approach axis in every row.
             waypoint_poses: Skill poses that a batched grasp variant must reach,
                 in order.
+            grasp_depth_offset_m: Contact-centre shift toward the hand, applied
+                to the hand surfaces before candidate qualification.
 
         Returns:
             The selected grasp batch with shape ``(B, 4, 4)``.
 
         Raises:
-            RuntimeError: No candidate variant reaches every skill pose.
+            _AntipodalGraspSearchError: No candidate variant reaches every
+                skill pose. This input qualification failure lets a track that
+                opts into ``case_generation_attempts`` propose another batch.
         """
         if self.robot is None:
             raise RuntimeError("Atomic Skill runtime is not configured.")
@@ -2045,6 +2151,12 @@ class AtomicSkillScenario(ScenarioProvider):
                 max_candidates=max_candidates,
                 gripper_data=self.grasp_model(),
                 root_from_tcp=self.grasp_root_from_tcp(),
+                # A mounted link rests on no support: the closure sweep would
+                # infer one at the link's lowest point and reject every grasp
+                # whose lower finger closes beneath a handle or knob.
+                closure_sweep=False,
+                ray_deviation_angle=self.grasp_ray_deviation_angle(),
+                grasp_depth_offset_m=grasp_depth_offset_m,
             )
             candidates, costs = generator.get_valid_grasp_poses(
                 mesh_vertices=mesh_vertices,
@@ -2080,9 +2192,13 @@ class AtomicSkillScenario(ScenarioProvider):
                     continue
                 if self._ik_chain_feasible(start_qpos, waypoint_poses(variant)):
                     return variant
-        raise RuntimeError(
+        raise _AntipodalGraspSearchError(
             "No independently reachable antipodal articulation grasp remained after "
-            f"screening {len(ranked)} candidates."
+            f"screening {len(ranked)} candidates.",
+            evidence={
+                "kind": "articulation_grasp_reference",
+                "candidates": len(ranked),
+            },
         )
 
     def restore_base_robot(self) -> None:

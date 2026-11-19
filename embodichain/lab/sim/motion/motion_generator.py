@@ -1134,6 +1134,9 @@ class MotionGenerator:
         chunk_size = max(
             1, min(_MAX_IK_BATCH_WAYPOINTS, _MAX_IK_BATCH_TARGETS // batch_size)
         )
+        if continuous and getattr(solver, "continuous_ik_whole_path", False) is True:
+            # The solver resolves redundancy along the path and needs all of it.
+            chunk_size = poses.shape[1]
         success = torch.ones(batch_size, dtype=torch.bool, device=device)
         qpos_seed = start_qpos
         solved_waypoints: list[torch.Tensor] = []
@@ -1412,6 +1415,7 @@ class MotionGenerator:
                     torch.stack(poses, dim=1),
                     keyframes,
                     options,
+                    row_success=success,
                 )
                 success &= limited_success
         else:
@@ -1433,8 +1437,16 @@ class MotionGenerator:
         target_poses: torch.Tensor,
         solved_keyframes: torch.Tensor,
         options: MotionGenOptions,
+        *,
+        row_success: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Retain a sampled Cartesian path while enforcing joint motion limits."""
+        """Retain a sampled Cartesian path while enforcing joint motion limits.
+
+        All rows share one control interval. A row that already failed, or alone
+        needs more than the 10,000-interval budget, stops setting that interval
+        and is no longer solved: it fails and holds its start while the rest of
+        the batch is timed. A batch in which every row plans is unchanged.
+        """
         assert options.control_part is not None
         assert options.sample_count is not None
         assert options.interpolation_dt is not None
@@ -1464,14 +1476,34 @@ class MotionGenerator:
                 dim=1
             ),
         )
+        success = (
+            torch.ones(
+                solved_keyframes.shape[0],
+                dtype=torch.bool,
+                device=solved_keyframes.device,
+            )
+            if row_success is None
+            else row_success.to(
+                device=solved_keyframes.device, dtype=torch.bool
+            ).clone()
+        )
+
+        def drop_over_budget(row_intervals: torch.Tensor) -> None:
+            # One unreachable row must not fail its batch: leave the shared
+            # interval to the rows that fit, unless no row does.
+            exceeded = success & (row_intervals > 10_000)
+            if bool(exceeded.any()) and bool((success & ~exceeded).any()):
+                logger.log_warning(
+                    f"Cartesian timing dropped {int(exceeded.sum())} row(s) beyond "
+                    "its 10000-control-interval budget."
+                )
+                success.logical_and_(~exceeded)
+
+        drop_over_budget(torch.ceil(duration / options.interpolation_dt))
+        timed = duration[success] if bool(success.any()) else duration
         interval_count = max(
             options.sample_count - 1,
-            int(torch.ceil(duration.max() / options.interpolation_dt).item()),
-        )
-        success = torch.ones(
-            solved_keyframes.shape[0],
-            dtype=torch.bool,
-            device=solved_keyframes.device,
+            int(torch.ceil(timed.max() / options.interpolation_dt).item()),
         )
         positions = solved_keyframes
         for _ in range(6):
@@ -1492,11 +1524,25 @@ class MotionGenerator:
                 options.control_part,
                 path_sampler=options.cartesian_path_sampler,
             )
-            iteration_success, solved = self._solve_waypoints_for_options(
-                sampled_poses[:, 1:],
-                solved_keyframes[:, 0],
-                options,
-            )
+            if bool(success.all()):
+                iteration_success, solved = self._solve_waypoints_for_options(
+                    sampled_poses[:, 1:],
+                    solved_keyframes[:, 0],
+                    options,
+                )
+            else:
+                rows = torch.nonzero(success).flatten()
+                iteration_success = torch.zeros_like(success)
+                solved = solved_keyframes[:, :1].repeat(1, interval_count, 1)
+                if rows.numel():
+                    row_success, row_solved = self._solve_waypoint_rows(
+                        rows,
+                        sampled_poses[rows, 1:],
+                        solved_keyframes[rows, 0],
+                        options,
+                    )
+                    iteration_success[rows] = row_success
+                    solved[rows] = row_solved
             success &= iteration_success
             positions = torch.cat([solved_keyframes[:, :1], solved], dim=1)
             interval_velocity = positions.diff(dim=1) / options.interpolation_dt
@@ -1511,19 +1557,24 @@ class MotionGenerator:
                 )
                 / options.interpolation_dt
             )
-            velocity_ratio = float(
-                (interval_velocity.abs() / safe_velocity_limits.view(1, 1, -1))
-                .amax()
-                .item()
+            row_scale = torch.maximum(
+                (interval_velocity.abs() / safe_velocity_limits.view(1, 1, -1)).amax(
+                    dim=(1, 2)
+                ),
+                torch.sqrt(
+                    (
+                        boundary_acceleration.abs() / acceleration_limits.view(1, 1, -1)
+                    ).amax(dim=(1, 2))
+                ),
             )
-            acceleration_ratio = float(
-                (boundary_acceleration.abs() / acceleration_limits.view(1, 1, -1))
-                .amax()
-                .item()
-            )
-            scale = max(velocity_ratio, math.sqrt(acceleration_ratio))
+            drop_over_budget(torch.ceil(interval_count * row_scale * 1.02))
+            if bool(success.any()):
+                row_scale = row_scale.masked_fill(~success, 0.0)
+            scale = float(row_scale.max().item())
             if scale <= 1.0 + 1.0e-5:
-                return success, positions
+                return success, self._hold_failed_rows(
+                    positions, solved_keyframes, success
+                )
             interval_count = math.ceil(interval_count * scale * 1.02)
 
         interval_velocity = positions.diff(dim=1) / options.interpolation_dt
@@ -1544,7 +1595,36 @@ class MotionGenerator:
         success &= (
             boundary_acceleration.abs() <= acceleration_limits.view(1, 1, -1) + 1.0e-5
         ).all(dim=(1, 2))
-        return success, positions
+        return success, self._hold_failed_rows(positions, solved_keyframes, success)
+
+    def _solve_waypoint_rows(
+        self,
+        rows: torch.Tensor,
+        poses: torch.Tensor,
+        start_qpos: torch.Tensor,
+        options: MotionGenOptions,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Solve Cartesian waypoints for a subset of this generator's rows."""
+        selection = getattr(self, "_env_ids", None)
+        env_ids = (
+            tuple(range(self.robot.num_instances)) if selection is None else selection
+        )
+        self._env_ids = tuple(env_ids[index] for index in rows.tolist())
+        try:
+            return self._solve_waypoints_for_options(poses, start_qpos, options)
+        finally:
+            self._env_ids = selection
+
+    @staticmethod
+    def _hold_failed_rows(
+        positions: torch.Tensor,
+        solved_keyframes: torch.Tensor,
+        success: torch.Tensor,
+    ) -> torch.Tensor:
+        """Hold failed rows at their start so no unchecked IK path is executed."""
+        if bool(success.all()):
+            return positions
+        return torch.where(success[:, None, None], positions, solved_keyframes[:, :1])
 
     def _sample_cartesian_path(
         self,

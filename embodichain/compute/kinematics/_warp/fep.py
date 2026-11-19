@@ -730,3 +730,59 @@ def select(
             if success:
                 value = candidates[row, best, i]
             joints[row, slot, i] = value
+
+
+@wp.kernel
+def select_path(
+    branches: wp.array4d(dtype=wp.float32),
+    branch_valid: wp.array3d(dtype=wp.bool),
+    seeds: wp.array2d(dtype=wp.float32),
+    weights: wp.array(dtype=wp.float32),
+    path: wp.array3d(dtype=wp.float32),
+    path_valid: wp.array2d(dtype=wp.bool),
+    largest_step: wp.array(dtype=wp.float32),
+    path_length: wp.array(dtype=wp.float32),
+):
+    """Follow each row's path, taking the branch nearest the preceding pose.
+
+    ``branches`` is ``(R, N, K, 7)``. A sample without a valid finite branch
+    repeats the preceding pose and is invalid. Each row also reports its
+    largest absolute joint step and weighted path length from the seed.
+    """
+    row = wp.tid()
+    largest = wp.float32(0.0)
+    length = wp.float64(0.0)
+    for sample in range(branches.shape[1]):
+        best = int(-1)
+        best_cost = wp.float64(wp.inf)
+        for branch in range(branches.shape[2]):
+            if not branch_valid[row, sample, branch]:
+                continue
+            cost = wp.float64(0.0)
+            finite = bool(True)
+            for i in range(7):
+                value = branches[row, sample, branch, i]
+                if not wp.isfinite(value):
+                    finite = False
+                previous = seeds[row, i]
+                if sample > 0:
+                    previous = path[row, sample - 1, i]
+                delta = wp.float64(value) - wp.float64(previous)
+                cost += delta * delta * wp.float64(weights[i])
+            if finite and cost < best_cost:
+                best = branch
+                best_cost = cost
+        path_valid[row, sample] = best >= 0
+        for i in range(7):
+            previous = seeds[row, i]
+            if sample > 0:
+                previous = path[row, sample - 1, i]
+            value = previous
+            if best >= 0:
+                value = branches[row, sample, best, i]
+            largest = wp.max(largest, wp.abs(value - previous))
+            path[row, sample, i] = value
+        if best >= 0:
+            length += wp.sqrt(best_cost)
+    largest_step[row] = largest
+    path_length[row] = wp.float32(length)

@@ -79,6 +79,7 @@ from embodichain_benchmarks.motion_generation.scenarios.atomic_replay import (
 )
 from embodichain_benchmarks.motion_generation.contracts import ExecutionObservation
 from embodichain_benchmarks.motion_generation.scenarios.atomic_case_utils import (
+    TOP_DOWN_ROTATION,
     atomic_case_id,
     canonical_case_qpos,
     case_generation_seed,
@@ -915,7 +916,7 @@ def _fake_articulation_geometry(*, joint_type: str) -> dict[str, torch.Tensor]:
 def test_atomic_suite_is_franka_robotiq_and_curobo_only():
     suite = load_suite("atomic_franka_robotiq_smoke")
 
-    assert suite.suite_version == "atomic_franka_robotiq_smoke_v6"
+    assert suite.suite_version == "atomic_franka_robotiq_smoke_v13"
     assert suite.robot.id == "franka_robotiq"
     assert suite.robot.provider == "franka_robotiq"
     assert [spec.id for spec in suite.planners if spec.enabled] == ["curobo"]
@@ -946,7 +947,7 @@ def test_atomic_suite_is_franka_robotiq_and_curobo_only():
         "sample_count": 256,
         "hand_interp_steps": 12,
         "approach_distance_m": 0.12,
-        "press_distance_m": 0.03,
+        "press_distance_m": 0.008,
     }
     assert {
         key: skills_by_id["slide"][key]
@@ -1001,6 +1002,8 @@ def test_atomic_suite_is_franka_robotiq_and_curobo_only():
             "stiffness": 0.001,
             "damping": 100.0,
             "max_effort": 0.01,
+            "friction": 0.0,
+            "drive_type": "force",
         },
         "fix_base": True,
         "settle_steps": 10,
@@ -1011,7 +1014,7 @@ def test_atomic_suite_is_franka_robotiq_and_curobo_only():
         "position": [-1.1, 0.0, 0.0],
         "rotation_deg": [0.0, 0.0, 90.0],
         "init_qpos": [0.0],
-        "drive": {"drive_type": "none"},
+        "drive": {"drive_type": "none", "friction": 0.0},
         "attrs": {"material_props": {"static_friction": 1.0, "dynamic_friction": 1.0}},
         "fix_base": True,
         "settle_steps": 10,
@@ -1047,7 +1050,7 @@ def test_randomized_atomic_suite_covers_four_interaction_skills_with_fixed_seed_
     suite = load_suite("atomic_franka_robotiq_randomized")
     track = suite.enabled_tracks()[0]
 
-    assert suite.suite_version == "atomic_franka_robotiq_randomized_v4"
+    assert suite.suite_version == "atomic_franka_robotiq_randomized_v10"
     assert track.id == "atomic-skill-randomized"
     assert track.config["seeds"] == list(range(101, 117))
     assert [item["id"] for item in track.config["skills"]] == [
@@ -1424,6 +1427,22 @@ def test_atomic_cube_uses_current_rigid_object_physics_api():
             4,
         ),
         (
+            "press",
+            {
+                "name": "calibrated_microwave_start_button",
+                "sample_count": 256,
+                "hand_interp_steps": 12,
+                "approach_distance_m": 0.12,
+                "press_distance_m": 0.006,
+                "press_tcp_offset_m": -0.02316,
+                "articulation": "microwave",
+                "target_link": "button_link",
+                "target_joint": "button_joint",
+            },
+            "prismatic",
+            4,
+        ),
+        (
             "slide",
             {
                 "name": "drawer_pull",
@@ -1475,6 +1494,11 @@ def test_new_atomic_skill_cases_freeze_reference_waypoints(
     entity.get_qpos_limits.return_value = torch.tensor([[[0.0, 0.006]]])
     articulation_dof = 4 if config["articulation"] == "microwave" else 1
     articulation_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    if config.get("press_tcp_offset_m") is not None:
+        rotations = torch.zeros(batch_size, 3)
+        rotations[:, 0] = torch.linspace(-0.4, 0.4, batch_size)
+        articulation_pose[:, :3, :3] = axis_angle_to_rotation_matrix(rotations)
+        articulation_pose[:, :3, 3] = torch.linspace(-0.03, 0.03, batch_size)[:, None]
     articulation_qpos = torch.zeros(batch_size, articulation_dof)
     entity.get_qpos.return_value = articulation_qpos
     handle = Mock(
@@ -1531,6 +1555,29 @@ def test_new_atomic_skill_cases_freeze_reference_waypoints(
     assert torch.isfinite(case.target_waypoints).all()
     assert case.case_parameters["sample_count"] == config["sample_count"]
     assert case.case_parameters["hand_interp_steps"] == config["hand_interp_steps"]
+    if skill_id == "press":
+        # The fake button's outward surface is z=-.01; its press axis is +Z.
+        expected_position = [0.0, 0.0, -0.01 + config.get("press_tcp_offset_m", 0.0)]
+        assert case.case_parameters["press_position"] == pytest.approx(
+            expected_position
+        )
+        assert case.case_parameters["press_surface_position"] == pytest.approx(
+            [0.0, 0.0, -0.01]
+        )
+        torch.testing.assert_close(
+            case.target_waypoints[:, 1, :3, 3],
+            (articulation_pose[:, :3, :3] @ torch.tensor(expected_position))
+            + articulation_pose[:, :3, 3],
+        )
+        torch.testing.assert_close(
+            case.target_waypoints[:, 2, :3, 3] - case.target_waypoints[:, 1, :3, 3],
+            articulation_pose[:, :3, 2] * config["press_distance_m"],
+        )
+        create_atomic_skill_provider(skill_id).build_invocation(scenario, case, Mock())
+        goal = scenario.require_engine.return_value.make_invocation.call_args.args[1]
+        assert goal.semantics.affordance.press_position == pytest.approx(
+            expected_position
+        )
     assert case.object_id == config["articulation"]
     assert case.case_parameters["target_link"] == config["target_link"]
     assert case.case_parameters["target_joint"] == config["target_joint"]
@@ -1618,6 +1665,136 @@ def test_fixed_held_object_case_keeps_pickup_and_transport_at_table_pose() -> No
     torch.testing.assert_close(grasp_pose[:, 2, 3], table_pose[:, 2, 3])
     torch.testing.assert_close(target_object[:, 2, 3], table_pose[:, 2, 3] + 0.16)
     assert case.target_waypoints.shape == (batch_size, 1, 4, 4)
+
+
+def _about_z(angles_deg: list[float]) -> torch.Tensor:
+    """Return world-Z rotations ``(B, 3, 3)`` for angles in degrees."""
+    angles = torch.deg2rad(torch.tensor(angles_deg, dtype=torch.float32))
+    axis_angles = torch.zeros(len(angles_deg), 3)
+    axis_angles[:, 2] = angles
+    return axis_angle_to_rotation_matrix(axis_angles)
+
+
+def _fixed_grasp_case(skill_id: str, object_pose: torch.Tensor, **config_values):
+    """Generate one fixed-grasp case over mocked kinematics and a settled cube."""
+    batch_size = object_pose.shape[0]
+    robot = Mock(device=torch.device("cpu"))
+    robot.get_qpos.side_effect = lambda name=None: torch.zeros(batch_size, 7)
+    robot.get_joint_ids.return_value = list(range(7))
+    robot.compute_fk.return_value = torch.eye(4).repeat(batch_size, 1, 1)
+    robot.compute_ik.side_effect = lambda pose, joint_seed, name: (
+        torch.ones(batch_size, dtype=torch.bool),
+        joint_seed.clone(),
+    )
+    handle = Mock(object_id="cube", entity=Mock(), config={"id": "cube"})
+    scenario = Mock(robot=robot, control_part="arm", simulation=None)
+    scenario.activate_object.return_value = handle
+    scenario.randomize_object_pose.return_value = object_pose.clone()
+    scenario.solve_reference_qpos.side_effect = lambda start, targets: torch.zeros(
+        targets.shape[0], targets.shape[1], start.shape[-1]
+    )
+    config = {
+        "name": "fixed_cube",
+        "object": "cube",
+        "grasp_source": "fixed",
+        "pre_action_settle_steps": 0,
+        **config_values,
+    }
+    case = create_atomic_skill_provider(skill_id).generate_case(
+        scenario,
+        Mock(
+            suite_version="test_v1",
+            robot=Mock(id="franka_robotiq"),
+            protocol=Mock(rotation_threshold_rad=0.1),
+        ),
+        Mock(id="atomic-skill"),
+        config,
+        seed=11,
+        batch_size=batch_size,
+    )
+    return case
+
+
+def _yawed_cubes(yaws_deg: list[float]) -> torch.Tensor:
+    """Return settled cube poses ``(B, 4, 4)`` yawed about world Z."""
+    poses = torch.eye(4).repeat(len(yaws_deg), 1, 1)
+    poses[:, :3, :3] = _about_z(yaws_deg)
+    poses[:, :3, 3] = torch.tensor([-0.42, -0.08, 0.025]) + torch.tensor(
+        [[0.0, 0.0, 0.0], [0.02, -0.01, 0.0], [-0.01, 0.03, 0.0]]
+    )
+    return poses
+
+
+@pytest.mark.parametrize("skill_id", ["pick_up", "move_held_object", "place"])
+def test_fixed_grasp_follows_object_yaw_folded_onto_nearest_face(skill_id) -> None:
+    """Opted-in fixed grasps turn about world Z by each cube's folded yaw."""
+    object_pose = _yawed_cubes([12.4, -40.0, 50.0])
+    case = _fixed_grasp_case(skill_id, object_pose, grasp_follows_object_yaw=True)
+
+    grasp = torch.tensor(case.case_parameters["grasp_pose"])
+    # A quarter turn repeats the box, so 50 degrees folds onto -40 degrees.
+    expected = _about_z([12.4, -40.0, -40.0]) @ torch.tensor(TOP_DOWN_ROTATION)
+    torch.testing.assert_close(grasp[:, :3, :3], expected)
+    torch.testing.assert_close(grasp[:, :3, 3], object_pose[:, :3, 3])
+    if skill_id == "pick_up":
+        torch.testing.assert_close(case.target_waypoints[:, 1], grasp)
+    else:
+        torch.testing.assert_close(
+            torch.tensor(case.case_parameters["object_to_eef"]),
+            torch.linalg.inv(object_pose) @ grasp,
+        )
+
+
+@pytest.mark.parametrize("skill_id", ["pick_up", "move_held_object", "place"])
+def test_fixed_grasp_without_yaw_opt_in_keeps_world_rotation(skill_id) -> None:
+    """Without the opt-in every yawed row keeps the configured world rotation."""
+    case = _fixed_grasp_case(skill_id, _yawed_cubes([12.4, -40.0, 50.0]))
+
+    grasp = torch.tensor(case.case_parameters["grasp_pose"])
+    assert torch.equal(
+        grasp[:, :3, :3], torch.tensor(TOP_DOWN_ROTATION).expand(3, -1, -1)
+    )
+
+
+@pytest.mark.parametrize("skill_id", ["pick_up", "move_held_object", "place"])
+@pytest.mark.parametrize(
+    ("config_values", "error"),
+    [
+        ({"grasp_follows_object_yaw": "true"}, TypeError),
+        ({"grasp_follows_object_yaw": 1}, TypeError),
+        (
+            {"grasp_follows_object_yaw": True, "grasp_source": "antipodal"},
+            ValueError,
+        ),
+    ],
+)
+def test_fixed_grasp_yaw_opt_in_is_validated_before_scene_work(
+    skill_id, config_values, error
+) -> None:
+    """A malformed or ineffective opt-in fails before any object is activated."""
+    scenario = Mock()
+
+    with pytest.raises(error, match="grasp_follows_object_yaw"):
+        create_atomic_skill_provider(skill_id).generate_case(
+            scenario,
+            Mock(suite_version="test_v1"),
+            Mock(id="atomic-skill"),
+            {
+                "name": "fixed_cube",
+                "object": "cube",
+                "grasp_source": "fixed",
+                **config_values,
+            },
+            seed=11,
+            batch_size=1,
+        )
+    scenario.activate_object.assert_not_called()
+
+
+def test_held_object_composites_clear_dynamics_at_pickup_lift() -> None:
+    """Composite transport/place reuses the PickUp lift boundary."""
+    compiled = Mock()
+    compiled.segment.return_value = Mock(start=17)
 
 
 def test_physical_replay_preserves_object_momentum_across_lift() -> None:
@@ -3583,6 +3760,108 @@ def test_franka_panda_pgi_kinematic_chain_matches_the_assembled_solver() -> None
     torch.testing.assert_close(
         solver.get_fk(qpos), chain.forward_kinematics(qpos).get_matrix() @ tcp
     )
+
+
+def test_grasp_closure_sweep_is_limited_to_the_migrated_robotiq_hand() -> None:
+    """Only the Robotiq fixture opts into closure support qualification."""
+    scenario = AtomicSkillScenario()
+    scenario.track = Mock(config={"grasp_model": "RobotiqArg2F140"})
+    assert scenario.grasp_closure_sweep()
+    scenario.track = Mock(config={"grasp_model": "DHPGI14080"})
+    assert not scenario.grasp_closure_sweep()
+    scenario.track = Mock(config={})
+    assert not scenario.grasp_closure_sweep()
+
+
+def test_robotiq_grasp_pool_requires_face_normal_closing_axes() -> None:
+    """Robotiq's flat pads narrow antipodal ray deviation; PGI keeps defaults."""
+    from embodichain.toolkits.graspkit.pg_grasp import (
+        AntipodalGraspPoseGeneratorCfg,
+    )
+    from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+        create_parallel_jaw_grasp_pose_generator,
+    )
+
+    scenario = AtomicSkillScenario()
+    scenario.track = Mock(config={"grasp_model": "RobotiqArg2F140"})
+    angle = scenario.grasp_ray_deviation_angle()
+    assert angle == pytest.approx(math.radians(2.0))
+    scenario.track = Mock(config={"grasp_model": "DHPGI14080"})
+    assert scenario.grasp_ray_deviation_angle() is None
+
+    narrow = create_parallel_jaw_grasp_pose_generator(
+        n_sample=64, force_refresh=False, ray_deviation_angle=angle
+    )
+    default = create_parallel_jaw_grasp_pose_generator(n_sample=64, force_refresh=False)
+    assert narrow.algorithm_cfg.ray_deviation_angle == pytest.approx(angle)
+    assert (
+        default.algorithm_cfg.ray_deviation_angle
+        == AntipodalGraspPoseGeneratorCfg().ray_deviation_angle
+    )
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "pick_approach_waypoints",
+        "pick_lift_waypoints",
+        "axis_align_rotation_waypoints",
+        "pour_rotation_waypoints",
+    ],
+)
+def test_track_waypoint_counts_are_opt_in(key: str) -> None:
+    scenario = AtomicSkillScenario()
+    count = getattr(scenario, key)
+    scenario.track = Mock(config={})
+    assert count() == 0
+    scenario.track = Mock(config={key: 5})
+    assert count() == 5
+    for invalid in (True, -1, 2.0):
+        scenario.track = Mock(config={key: invalid})
+        with pytest.raises(ValueError, match=key):
+            count()
+
+
+def test_track_waypoints_thread_only_into_their_skill_options() -> None:
+    from embodichain.lab.sim.atomic_skills import (
+        AxisAlignOptions,
+        PickUpOptions,
+        PourOptions,
+    )
+    from embodichain_benchmarks.motion_generation.scenarios.atomic_policy import (
+        with_axis_align_rotation_waypoints,
+        with_pick_lift_waypoints,
+        with_pour_rotation_waypoints,
+    )
+
+    def invocation(skill_id: str, options: object) -> SkillInvocation:
+        return SkillInvocation(
+            skill_id=skill_id,
+            goal=None,
+            binding=SkillBinding(owner_id="test", endpoints={}),
+            skill_options=options,
+        )
+
+    axis_align = invocation("axis_align", AxisAlignOptions(approach_waypoints=5))
+    pour = invocation("pour", PourOptions(rotate_angle=1.0))
+    pick = invocation("pick_up", PickUpOptions())
+    aligned = with_axis_align_rotation_waypoints(axis_align, 8).skill_options
+    assert (aligned.alignment_waypoints, aligned.approach_waypoints) == (8, 5)
+    poured = with_pour_rotation_waypoints(pour, 8).skill_options
+    assert (poured.rotation_waypoints, poured.rotate_angle) == (8, 1.0)
+    for item in (axis_align, pour, pick):
+        assert with_axis_align_rotation_waypoints(item, 0) is item
+        assert with_pour_rotation_waypoints(item, 0) is item
+    assert with_axis_align_rotation_waypoints(pour, 8) is pour
+    assert with_axis_align_rotation_waypoints(pick, 8) is pick
+    assert with_pour_rotation_waypoints(axis_align, 8) is axis_align
+    assert with_pour_rotation_waypoints(pick, 8) is pick
+    # Lift keyframes reach every PickUpOptions, including AxisAlign's.
+    assert with_pick_lift_waypoints(pick, 4).skill_options.lift_waypoints == 4
+    lifted = with_pick_lift_waypoints(axis_align, 4).skill_options
+    assert (lifted.lift_waypoints, lifted.approach_waypoints) == (4, 5)
+    assert with_pick_lift_waypoints(pour, 4) is pour
+    assert with_pick_lift_waypoints(pick, 0) is pick
 
 
 def test_atomic_preparation_resumes_cases_without_renumbering_random_streams(

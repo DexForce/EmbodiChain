@@ -34,7 +34,11 @@ from embodichain.compute.geometry import nearest_half_turn_pose
 
 from ..bindings import EndpointBinding
 from ..state import PlanningContext
-from ..trajectory_ops import _execution_samples, build_pose_plan_states
+from ..trajectory_ops import (
+    _execution_samples,
+    build_joint_plan_states,
+    build_pose_plan_states,
+)
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -348,6 +352,41 @@ def plan_named_arm_trajectory(
             interpolation_dt=interpolation_dt,
             cartesian_linear=cartesian_linear,
             cartesian_path_sampler=cartesian_path_sampler,
+        ),
+    )
+    return _named_arm_result(result, n_waypoints, interpolation_dt, control_part)
+
+
+def plan_named_arm_joint_trajectory(
+    motion_generator: MotionGenerator,
+    control_part: str,
+    start_qpos: torch.Tensor,
+    target_qpos: torch.Tensor,
+    n_waypoints: int,
+    motion_policy: MotionPolicy,
+    interpolation_dt: float | None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Plan one manipulator to joint targets on the shared execution grid.
+
+    Args:
+        motion_generator: Planner facade of the manipulator.
+        control_part: Arm control part.
+        start_qpos: Arm start states shaped ``(B, D)``.
+        target_qpos: Joint targets shaped ``(B, D)`` or ``(B, N, D)``.
+        n_waypoints: Minimum execution sample count.
+        motion_policy: Strategy and timing of the plan.
+        interpolation_dt: Execution control period.
+
+    Returns:
+        Per-row success and arm positions on the execution grid.
+    """
+    result = motion_generator.generate(
+        build_joint_plan_states(target_qpos),
+        options=motion_policy.to_motion_gen_options(
+            start_qpos=start_qpos,
+            control_part=control_part,
+            sample_count=n_waypoints,
+            interpolation_dt=interpolation_dt,
         ),
     )
     return _named_arm_result(result, n_waypoints, interpolation_dt, control_part)
@@ -670,6 +709,7 @@ __all__ = [
     "arm_qpos_from_state",
     "assemble_full_robot_trajectory",
     "pad_trajectory_to_length",
+    "plan_named_arm_joint_trajectory",
     "plan_named_arm_trajectory",
     "plan_named_arm_trajectories",
     "resample_planned_trajectory",

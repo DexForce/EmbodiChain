@@ -47,7 +47,7 @@ from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
     GripperCollisionChecker,
     GripperCollisionCfg,
 )
-from embodichain.utils.math import get_pc_center_box
+from embodichain.utils.math import get_pc_center_box, pose_inv
 from .fixed_geometry import FixedGripperCollisionGeometry
 
 GRASP_ANNOTATOR_CACHE_DIR = (
@@ -92,6 +92,7 @@ class _AntipodalMeshBackend:
         viser_port: int,
         use_largest_connected_component: bool,
         filter_ground_collision: bool,
+        filter_closure_support: bool = False,
         approach_alignment_angle: float | None = None,
         check_collision: bool = True,
         prepared: _AntipodalMeshBackend | None = None,
@@ -119,6 +120,8 @@ class _AntipodalMeshBackend:
             use_largest_connected_component: Whether to retain only the largest
                 component of an interactive selection.
             filter_ground_collision: Whether to reject ground collisions.
+            filter_closure_support: Whether to reject candidates whose closing
+                pad surfaces intersect the inferred support plane.
             approach_alignment_angle: Optional hard TCP-Z angle in radians,
                 applied before deduplication, collision checks and ranking.
         """
@@ -165,6 +168,12 @@ class _AntipodalMeshBackend:
         self._viser_port = viser_port
         self._use_largest_connected_component = use_largest_connected_component
         self._filter_ground_collision = filter_ground_collision
+        self._filter_closure_support = filter_closure_support
+        self._grasp_from_tcp = torch.as_tensor(
+            collision_geometry.provenance["grasp_from_tcp"],
+            dtype=torch.float32,
+            device=self.device,
+        )
         self._antipodal_sampler = AntipodalSampler(cfg=sampler_cfg)
         self._hit_point_pairs: torch.Tensor | None = (
             prepared._hit_point_pairs if prepared is not None else None
@@ -551,6 +560,7 @@ class _AntipodalMeshBackend:
         visualize_collision: bool = False,
         *,
         axis_region_selector: GraspRegionSelector | None = None,
+        closure_tcp_rotation: torch.Tensor | None = None,
     ):
         """Filter valid grasps, optionally to one projected half of the object.
 
@@ -565,10 +575,20 @@ class _AntipodalMeshBackend:
             axis_region_selector: Optional selection from collision-qualified
                 fallback geometry before ranking. Existing viable regions and
                 unpartitioned calls retain their original behavior.
+            closure_tcp_rotation: Optional world rotation ``(3, 3)`` applied
+                to each candidate's runtime TCP orientation about the TCP
+                origin for the closure support check only. ``None``, or a
+                backend without closure support filtering, keeps the original
+                qualification. Returned poses are never rotated.
 
         Returns:
             Success, grasp poses, opening lengths, and grasp costs.
         """
+        closure_options = (
+            {}
+            if closure_tcp_rotation is None
+            else {"closure_tcp_rotation": closure_tcp_rotation}
+        )
         if axis_region_selector is not None and not callable(axis_region_selector):
             raise TypeError("axis_region_selector must be callable or None.")
         if self._hit_point_pairs is None:
@@ -659,6 +679,7 @@ class _AntipodalMeshBackend:
                     is_positive_part,
                     visualize_collision,
                     axis_region_selector,
+                    **closure_options,
                 )
         return self._filter_valid_grasp_poses(
             origin_points_=origin_points_masked,
@@ -667,6 +688,7 @@ class _AntipodalMeshBackend:
             approach_direction=approach_direction,
             mesh_center=mesh_part_center,
             visualize_collision=visualize_collision,
+            **closure_options,
         )
 
     def get_dual_arm_valid_grasp_poses(
@@ -767,6 +789,8 @@ class _AntipodalMeshBackend:
         mesh_center: torch.Tensor,
         object_pose: torch.Tensor,
         visualize_collision: bool = False,
+        *,
+        closure_tcp_rotation: torch.Tensor | None = None,
     ):
         geometry = self._qualified_geometry(
             origin_points_,
@@ -774,6 +798,7 @@ class _AntipodalMeshBackend:
             approach_direction,
             object_pose,
             visualize_collision=visualize_collision,
+            closure_tcp_rotation=closure_tcp_rotation,
         )
         if not len(geometry.poses):
             return self._empty_grasp_result()
@@ -787,6 +812,25 @@ class _AntipodalMeshBackend:
             torch.zeros(1, device=self.device),
         )
 
+    def _closure_support_enabled(self) -> bool:
+        """Return whether closure support filtering is configured for this mesh."""
+        return bool(getattr(self, "_filter_closure_support", False))
+
+    def _closure_query_poses(
+        self, poses: torch.Tensor, closure_tcp_rotation: torch.Tensor
+    ) -> torch.Tensor:
+        """Return canonical poses whose runtime TCP turns about its origin.
+
+        ``tcp = poses @ grasp_from_tcp`` keeps its origin while its orientation
+        is pre-multiplied by the world rotation; the result maps back through
+        ``inverse(grasp_from_tcp)`` into the checker's canonical frame.
+        """
+        grasp_from_tcp = self._grasp_from_tcp.to(poses)
+        tcp = poses @ grasp_from_tcp
+        rotated = tcp.clone()
+        rotated[:, :3, :3] = closure_tcp_rotation.to(poses) @ tcp[:, :3, :3]
+        return rotated @ pose_inv(grasp_from_tcp)
+
     def _qualified_geometry(
         self,
         origin_points_: torch.Tensor,
@@ -798,8 +842,13 @@ class _AntipodalMeshBackend:
         directions: tuple[torch.Tensor, ...] = (),
         visualize_collision: bool = False,
         materialize: bool = True,
+        closure_tcp_rotation: torch.Tensor | None = None,
     ) -> _GraspGeometry:
-        """Reuse original direction draws, optionally skipping pose materialization."""
+        """Reuse original direction draws, optionally skipping pose materialization.
+
+        ``closure_tcp_rotation`` changes only the closure support check, which
+        then evaluates each candidate at its TCP-rotated pose.
+        """
         if pair_ids is None:
             pair_ids = torch.arange(len(origin_points_), device=origin_points_.device)
 
@@ -877,12 +926,24 @@ class _AntipodalMeshBackend:
         valid_pair_ids = valid_pair_ids[nms_indices]
 
         if self._collision_checker is not None:
+            closure_options = (
+                {}
+                if closure_tcp_rotation is None or not self._closure_support_enabled()
+                else {
+                    "closure_grasp_poses": self._closure_query_poses(
+                        valid_grasp_poses, closure_tcp_rotation
+                    )
+                }
+            )
             is_colliding, max_penetration = self._collision_checker.query(
                 object_pose,
                 valid_grasp_poses,
                 is_filter_ground_collision=self._filter_ground_collision,
+                filter_closure_support=self._closure_support_enabled(),
                 is_visual=visualize_collision,
                 collision_threshold=0.0,
+                apertures=valid_open_lengths,
+                **closure_options,
             )
             if is_colliding.logical_not().sum() == 0:
                 logger.log_warning(
@@ -983,6 +1044,8 @@ class _AntipodalMeshBackend:
         positive: bool,
         visualize_collision: bool,
         selector: GraspRegionSelector,
+        *,
+        closure_tcp_rotation: torch.Tensor | None = None,
     ) -> tuple[bool, torch.Tensor, torch.Tensor | float, torch.Tensor]:
         """Offer only qualified geometry to a call-owned region selector."""
         pair_ids = torch.arange(len(origins), device=origins.device)
@@ -993,6 +1056,7 @@ class _AntipodalMeshBackend:
             object_pose,
             pair_ids=pair_ids[original_mask],
             visualize_collision=visualize_collision,
+            closure_tcp_rotation=closure_tcp_rotation,
         )
         if len(original.poses):
             return self._rank_geometry(original, approach, original_center)
@@ -1004,6 +1068,7 @@ class _AntipodalMeshBackend:
             pair_ids=pair_ids,
             directions=original.directions,
             visualize_collision=visualize_collision,
+            closure_tcp_rotation=closure_tcp_rotation,
         )
         if not len(support.poses):
             return self._empty_grasp_result()

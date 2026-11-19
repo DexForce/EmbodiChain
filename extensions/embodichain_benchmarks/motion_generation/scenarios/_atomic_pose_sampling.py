@@ -411,6 +411,17 @@ def apply_task_frame_randomization(
     pose[:, :3, :3] = rotation @ pose[:, :3, :3]
 
 
+def _scaled_amplitude(value: object, scale: float) -> object:
+    """Scale a scalar or per-axis range; other values are validated later."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value * scale
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return [
+            item * scale if isinstance(item, (int, float)) else item for item in value
+        ]
+    return value
+
+
 def randomized_scene_pose(
     initial_pose: torch.Tensor,
     config: Mapping[str, object],
@@ -419,8 +430,22 @@ def randomized_scene_pose(
     seed: int,
     stream: int,
 ) -> torch.Tensor:
-    """Perturb one scene pose without owning reset, physics or observation."""
+    """Perturb one scene pose without owning reset, physics or observation.
+
+    An optional ``{kind}_jitter_scale`` in ``[0, 1]`` scales the resolved
+    position, yaw and roll/pitch ranges of every domain alike, so one case can
+    narrow its perturbations without changing which components a domain
+    perturbs. Task-frame randomization is not scaled.
+    """
     settings = _pose_settings(config)
+    scale_name = f"{kind}_jitter_scale"
+    scale = config.get(scale_name, 1.0)
+    if (
+        isinstance(scale, bool)
+        or not isinstance(scale, (int, float))
+        or not 0.0 <= scale <= 1.0
+    ):
+        raise ValueError(f"{scale_name} must be a number in [0, 1].")
     position_name = f"{kind}_position_jitter_m"
     amplitude = float_vector(
         config.get(position_name, settings.object_translation_jitter_m),
@@ -430,6 +455,8 @@ def randomized_scene_pose(
     )
     if any(value < 0.0 for value in amplitude):
         raise ValueError(f"{position_name} values must be non-negative.")
+    if scale != 1.0:
+        amplitude = tuple(value * scale for value in amplitude)
     pose = initial_pose.clone()
     pose[:, :3, 3] += seeded_jitter(
         amplitude,
@@ -445,12 +472,17 @@ def randomized_scene_pose(
     roll_pitch_name = f"{kind}_roll_pitch_jitter_rad"
     yaw = config.get(yaw_name)
     roll_pitch = config.get(roll_pitch_name)
+    yaw_amplitude = settings.object_yaw_jitter_rad if yaw is None else yaw
+    roll_pitch_amplitude = (
+        settings.object_roll_pitch_jitter_rad if roll_pitch is None else roll_pitch
+    )
+    if scale != 1.0:
+        yaw_amplitude = _scaled_amplitude(yaw_amplitude, scale)
+        roll_pitch_amplitude = _scaled_amplitude(roll_pitch_amplitude, scale)
     apply_seeded_spatial_rotation(
         pose,
-        roll_pitch_amplitude=(
-            settings.object_roll_pitch_jitter_rad if roll_pitch is None else roll_pitch
-        ),
-        yaw_amplitude=settings.object_yaw_jitter_rad if yaw is None else yaw,
+        roll_pitch_amplitude=roll_pitch_amplitude,
+        yaw_amplitude=yaw_amplitude,
         roll_pitch_name=roll_pitch_name,
         yaw_name=yaw_name,
         seed=seed,

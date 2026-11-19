@@ -66,6 +66,7 @@ from embodichain.lab.sim.atomic_skills.primitives._binding_contracts import (
 from embodichain.lab.sim.atomic_skills.primitives._helpers import (
     arm_qpos_from_state,
     hold_inactive_cartesian_rows,
+    plan_named_arm_joint_trajectory,
     plan_named_arm_trajectory,
 )
 from embodichain.lab.sim.atomic_skills.requirements import (
@@ -83,6 +84,11 @@ from embodichain.lab.sim.atomic_skills.trajectory_ops import (
     translate_pose_world,
 )
 from embodichain.compute.geometry import rotate_rigid_grasp
+
+# Approach postures are scored on a path sampled this many times more densely
+# than planned: a branch jump keeps its size there while a smooth path's
+# largest step shrinks.
+_POSTURE_SCORE_REFINEMENT = 4
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -134,9 +140,26 @@ class OpenDoorOptions(SkillOptions):
     joint_position_tolerance: float = 1.0e-4
     """Tolerance for legal-limit and already-open comparisons in radians."""
 
+    approach_ik_seeds: int = 0
+    """Extra approach postures tried, spread over the last arm joint's range.
+
+    The approach posture fixes the IK branch that the straight reach, the hinge
+    arc and the retreat must then follow continuously; near a singular posture
+    that path can jump between branches however densely it is sampled. ``0``
+    keeps the posture solved from the start state. Otherwise that posture and
+    one per seed, each solved with the last arm joint held at an evenly spaced
+    value within its limits, are scored by the largest joint step of the
+    continuous path through those three phases at four times the planned
+    sample density. Each environment keeps the posture with the smallest step,
+    the start-state posture on ties, and plans its approach to it in joint
+    space. A posture whose path fails IK is never selected.
+    """
+
     def __post_init__(self) -> None:
         if self.hand_interp_steps < 1:
             raise ValueError("hand_interp_steps must be at least 1.")
+        if type(self.approach_ik_seeds) is not int or self.approach_ik_seeds < 0:
+            raise ValueError("approach_ik_seeds must be a non-negative integer.")
         if self.door_waypoint_count < 1:
             raise ValueError("door_waypoint_count must be at least 1.")
         if not math.isfinite(self.approach_distance):
@@ -327,14 +350,47 @@ class OpenDoor(AtomicSkill[OpenDoorGoal, OpenDoorOptions]):
             -rotated_approach_direction * options.retract_distance,
         )
 
-        approach_success, approach_arm = self._plan_pose_segment(
-            approach_xpos,
-            start_arm_qpos,
-            control_part,
-            request,
-            n_approach,
-            interpolation_dt=interpolation_dt,
-        )
+        if options.approach_ik_seeds:
+            approach_qpos, approach_found = self._select_approach_posture(
+                approach_xpos,
+                start_arm_qpos,
+                control_part,
+                self._contact_path_poses(
+                    approach_xpos,
+                    grasp_xpos,
+                    approach_direction_world,
+                    link_pose,
+                    affordance,
+                    hinge_rotation,
+                    retract_xpos,
+                    rotated_approach_direction,
+                    counts=(
+                        _POSTURE_SCORE_REFINEMENT * n_reach,
+                        _POSTURE_SCORE_REFINEMENT * n_open,
+                        _POSTURE_SCORE_REFINEMENT * n_retract,
+                    ),
+                ),
+                options.approach_ik_seeds,
+            )
+            approach_success, approach_arm = plan_named_arm_joint_trajectory(
+                self.motion_generator,
+                control_part,
+                start_arm_qpos,
+                approach_qpos,
+                n_approach,
+                request.motion_policy,
+                interpolation_dt,
+            )
+            approach_success = approach_success & approach_found
+        else:
+            approach_success, approach_arm = self._plan_pose_segment(
+                approach_xpos,
+                start_arm_qpos,
+                control_part,
+                request,
+                n_approach,
+                interpolation_dt=interpolation_dt,
+            )
         # Reach and retract remain explicit straight-line Cartesian samples.
         linear_contact = True
         reach_keyframes = (
@@ -783,6 +839,117 @@ class OpenDoor(AtomicSkill[OpenDoorGoal, OpenDoorOptions]):
             cartesian_linear=cartesian_linear,
             cartesian_path_sampler=cartesian_path_sampler,
         )
+
+    def _contact_path_poses(
+        self,
+        approach_xpos: torch.Tensor,
+        grasp_xpos: torch.Tensor,
+        approach_direction: torch.Tensor,
+        link_pose: torch.Tensor,
+        affordance: OpenDoorAffordance,
+        hinge_rotation: torch.Tensor,
+        retract_xpos: torch.Tensor,
+        retract_direction: torch.Tensor,
+        *,
+        counts: tuple[int, int, int],
+    ) -> torch.Tensor:
+        """Sample the reach line, hinge arc and retreat line after the approach.
+
+        Args:
+            approach_xpos: Approach poses shaped ``(B, 4, 4)``.
+            grasp_xpos: Handle grasp poses shaped ``(B, 4, 4)``.
+            approach_direction: World approach axes shaped ``(B, 3)``.
+            link_pose: Handle-link poses shaped ``(B, 4, 4)``.
+            affordance: Hinge semantics of the handle.
+            hinge_rotation: Signed hinge rotations shaped ``(B,)``.
+            retract_xpos: Retreat poses shaped ``(B, 4, 4)``.
+            retract_direction: World retreat axes shaped ``(B, 3)``.
+            counts: Reach, arc and retreat sample counts.
+
+        Returns:
+            End-effector poses shaped ``(B, N, 4, 4)``, from the first reach
+            sample after the approach pose to the retreat pose.
+        """
+        n_reach, n_open, n_retract = counts
+        reach = axis_translation_keyframes(
+            approach_xpos, grasp_xpos, approach_direction, n_waypoints=n_reach - 1
+        )
+        arc = self._opened_link_and_eef_poses_at_fractions(
+            link_pose,
+            grasp_xpos,
+            affordance.rotation_axis,
+            affordance.axis_origin,
+            hinge_rotation,
+            torch.linspace(0.0, 1.0, n_open, device=self.device)[1:],
+        )[1]
+        retract = axis_translation_keyframes(
+            arc[:, -1], retract_xpos, retract_direction, n_waypoints=n_retract - 1
+        )
+        return torch.cat((reach, arc.to(reach), retract), dim=1)
+
+    def _select_approach_posture(
+        self,
+        approach_xpos: torch.Tensor,
+        start_qpos: torch.Tensor,
+        control_part: str,
+        path_poses: torch.Tensor,
+        seed_count: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Choose each row's approach posture by its continuous contact path.
+
+        Args:
+            approach_xpos: Approach poses shaped ``(B, 4, 4)``.
+            start_qpos: Arm start states shaped ``(B, D)``.
+            control_part: Arm control part.
+            path_poses: Contact path after the approach, ``(B, N, 4, 4)``.
+            seed_count: Number of postures tried besides the start-state one.
+
+        Returns:
+            Selected arm postures shaped ``(B, D)`` and their IK success shaped
+            ``(B,)``. A row whose every path fails IK at this density keeps the
+            start-state posture, and the planned phases decide its success.
+        """
+        env_ids = self.planning_services.env_ids
+        ik_kwargs = {} if env_ids is None else {"env_ids": env_ids}
+        limits = self.robot.get_qpos_limits(name=control_part, **ik_kwargs)
+        limits = limits.to(device=start_qpos.device, dtype=start_qpos.dtype)
+        held = torch.linspace(0.0, 1.0, seed_count + 2, device=start_qpos.device)[1:-1]
+        seeds = [start_qpos]
+        for fraction in held:
+            seed = start_qpos.clone()
+            seed[:, -1] = torch.lerp(limits[:, -1, 0], limits[:, -1, 1], fraction)
+            seeds.append(seed)
+        postures, solved, scores = [], [], []
+        for seed in seeds:
+            # A single pose keeps the seed's last joint, as the planner does.
+            found, posture = self.robot.compute_batch_ik(
+                pose=approach_xpos[:, None],
+                joint_seed=seed,
+                name=control_part,
+                continuous=True,
+                **ik_kwargs,
+            )
+            posture = posture[:, 0].to(start_qpos)
+            reached, path = self.robot.compute_batch_ik(
+                pose=path_poses,
+                joint_seed=posture,
+                name=control_part,
+                continuous=True,
+                **ik_kwargs,
+            )
+            steps = torch.cat((posture[:, None], path.to(posture)), dim=1).diff(dim=1)
+            score = steps.abs().amax(dim=(1, 2))
+            valid = found[:, 0] & reached.all(dim=1) & torch.isfinite(score)
+            postures.append(posture)
+            solved.append(found[:, 0])
+            scores.append(torch.where(valid, score, torch.full_like(score, math.inf)))
+        scores = torch.stack(scores, dim=1)
+        # argmin keeps the first, start-state posture on ties, including rows
+        # where no path is valid.
+        best = scores.argmin(dim=1)
+        rows = torch.arange(start_qpos.shape[0], device=start_qpos.device)
+        selected = torch.stack(postures, dim=1)[rows, best]
+        return selected, torch.stack(solved, dim=1)[rows, best]
 
     def _opened_link_and_eef_poses(
         self,

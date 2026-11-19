@@ -24,6 +24,12 @@ Hosts acquire versioned measurements; verification is the boundary that commits
 or invalidates observed effects. Preserve required stop/hold boundaries on the
 executed control grid instead of relying only on native planner timing.
 
+PickUp `approach_waypoints` and `lift_waypoints`, AxisAlign
+`alignment_waypoints` and Pour `rotation_waypoints` add evenly spaced
+straight-line or in-place rotation poses to the same motion-policy call, so a
+free-space backend cannot sweep the target or the support; zero keeps the
+endpoint plans.
+
 ## Package map
 
 | Concern | Source of truth |

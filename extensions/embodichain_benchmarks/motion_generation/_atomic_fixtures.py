@@ -28,6 +28,7 @@ from pathlib import Path
 
 from embodichain.robot_registry import resolve_gripper_defaults
 from embodichain.lab.sim.utility.gripper_geometry import (
+    attach_closure_samples,
     build_gripper_collision_geometry,
 )
 
@@ -44,6 +45,7 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
     JointDrivePropertiesCfg,
     LinkPhysicsOverrideCfg,
+    MimicComplianceCfg,
     NewtonCollisionPropertiesCfg,
     NewtonRigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
@@ -104,6 +106,10 @@ _ROBOTIQ_HAND_JOINTS = (
     "right_inner_knuckle_joint",
     "right_inner_finger_joint",
 )
+
+# Robotiq closing torque. A rigid mimic transmits linkage constraint loads to
+# the hand root in proportion to grip force; 40 N*m deflected the wrist.
+_ROBOTIQ_MAX_EFFORT = 5.0
 
 
 _UR_TUTORIAL_QPOS_LIMITS: tuple[tuple[float, float], ...] = tuple(
@@ -167,6 +173,8 @@ def create_parallel_jaw_grasp_pose_generator(
     gripper_data: dict[str, object] | None = None,
     root_from_tcp: Sequence[Sequence[float]] | None = None,
     grasp_depth_offset_m: float = 0.0,
+    closure_sweep: bool = False,
+    ray_deviation_angle: float | None = None,
     closing_geometry: SampledHandGeometry | None = None,
     closing_ground_height_m: float | None = None,
     closing_ground_clearance_m: float = 0.0,
@@ -185,6 +193,10 @@ def create_parallel_jaw_grasp_pose_generator(
         grasp_depth_offset_m: Move the physical contact centre toward the hand
             by this distance along canonical approach Z. Collision surfaces and
             output poses are rebuilt in that contact frame before sampling.
+        closure_sweep: Also sample closing pad surfaces and reject candidates
+            whose blocked closure intersects the inferred support plane.
+        ray_deviation_angle: Maximum antipodal ray deviation from the sampled
+            surface normal in radians; ``None`` keeps the generator default.
         closing_geometry: Optional model stroke in the canonical contact frame.
         closing_ground_height_m: Explicit world ground plane for that stroke.
         closing_ground_clearance_m: Minimum floor clearance through each
@@ -205,10 +217,12 @@ def create_parallel_jaw_grasp_pose_generator(
     if (closing_geometry is None) != (closing_ground_height_m is None):
         raise ValueError("Closing floor qualification needs geometry and a plane.")
     model = TUTORIAL_PARALLEL_JAW_MODEL if gripper_data is None else gripper_data
+    defaults = resolve_gripper_defaults(model["catalog_id"])
     geometry = build_gripper_collision_geometry(
-        resolve_gripper_defaults(model["catalog_id"]),
+        defaults,
         point_spacing=0.012,
         root_from_tcp=None if root_from_tcp is None else np.asarray(root_from_tcp),
+        closure_sweep=closure_sweep,
     )
     if grasp_depth_offset_m != 0.0:
         # A TCP calibration alone preserves physical contact geometry. Rebase
@@ -242,6 +256,8 @@ def create_parallel_jaw_grasp_pose_generator(
                 "grasp_depth_offset_m": grasp_depth_offset_m,
             },
         )
+        if closure_sweep:
+            geometry = attach_closure_samples(geometry, defaults)
         if closing_geometry is not None:
             from embodichain.toolkits.graspkit.pg_grasp.contact_fit import (
                 SampledHandGeometry,
@@ -269,8 +285,16 @@ def create_parallel_jaw_grasp_pose_generator(
             sample_count=n_sample,
             max_candidates=max_candidates,
             approach_alignment_angle=approach_alignment_angle,
+            **(
+                {}
+                if ray_deviation_angle is None
+                else {"ray_deviation_angle": ray_deviation_angle}
+            ),
         ),
-        collision_cfg=ParallelJawGraspCollisionCfg(filter_ground_collision=False),
+        collision_cfg=ParallelJawGraspCollisionCfg(
+            filter_ground_collision=False,
+            filter_closure_support=closure_sweep,
+        ),
         annotation_cfg=GraspAnnotationCfg(
             selection_mode="whole_mesh",
             viser_port=11801,
@@ -576,10 +600,23 @@ def _create_franka_robotiq_cfg(overrides: dict[str, Any]) -> RobotCfg:
     cfg.control_parts["eef"] = list(_ROBOTIQ_HAND_JOINTS)
     cfg.init_qpos = list(cfg.init_qpos[:7]) + [0.0] * 6
     cfg.solver_cfg["arm"].tcp = sample_tool_tcp("franka", gripper="robotiq_2f_140")
+    # Native stiffness and damping with the reduced closing torque.
     hand_drives = resolve_gripper_defaults("RobotiqArg2F140")["joint_drive_props"]
-    for field in ("stiffness", "damping", "max_effort"):
+    for field in ("stiffness", "damping"):
         for joint in _ROBOTIQ_HAND_JOINTS:
             getattr(cfg.joint_drive_props, field)[joint] = hand_drives[field]
+    for joint in _ROBOTIQ_HAND_JOINTS:
+        cfg.joint_drive_props.max_effort[joint] = _ROBOTIQ_MAX_EFFORT
+    # The native compliant mimic lets the linkage fold under a held load, so the
+    # pads lose parallel contact and the object slips. Couple it rigidly.
+    cfg.mimic_compliance = {"finger_joint": MimicComplianceCfg(0.0, 0.0)}
+    # Position-only replay lags a 1e4 servo by tens of mrad at the end of a
+    # move; this stiffness matches the Panda arm preset.
+    cfg.joint_drive_props.stiffness["fr3_joint[1-7]"] = 1e5
+    # Omitted drive fields keep the URDF values since #1168, which gave the
+    # arm 0.2 joint friction, scaled by constraint force in PhysX. The
+    # calibration ran with the former zero, and pushes lost rows without it.
+    cfg.joint_drive_props.friction = {"fr3_joint[1-7]": 0.0}
     cfg.link_attrs = {
         **(cfg.link_attrs or {}),
         "newton_gripper_contacts": _newton_gripper_contacts(

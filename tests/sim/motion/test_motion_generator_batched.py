@@ -1433,6 +1433,62 @@ class TestMotionStrategy:
         assert torch.all(result.positions[:, 1:, 0] >= result.positions[:, :-1, 0])
         generator.planner.plan.assert_not_called()
 
+    def test_limited_cartesian_motion_fails_only_the_row_beyond_its_budget(self):
+        generator = _mock_generator()
+        generator.robot.compute_fk.return_value = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+
+        def encode_position(
+            pose: torch.Tensor,
+            name: str,
+            joint_seed: torch.Tensor,
+            continuous: bool = False,
+            env_ids: tuple[int, ...] | None = None,
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            qpos = joint_seed.clone()
+            qpos[..., 0] = pose[..., 0, 3]
+            # Environment 1 sweeps a joint 2000 times further than environment 0.
+            envs = range(pose.shape[0]) if env_ids is None else env_ids
+            for row, env in enumerate(envs):
+                if env == 1:
+                    qpos[row, ..., 0] *= 2000.0
+            return torch.ones(pose.shape[:2], dtype=torch.bool), qpos
+
+        generator.robot.compute_batch_ik.side_effect = encode_position
+        targets = []
+        for weight in torch.linspace(0.25, 1.0, 4):
+            pose = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+            pose[:, 0, 3] = weight
+            targets.append(PlanState.from_xpos(pose))
+
+        result = generator.generate(
+            targets,
+            MotionGenOptions(
+                strategy="ik_interp",
+                sample_count=5,
+                start_qpos=torch.zeros(BATCH_SIZE, CONTROLLED_DOF),
+                control_part="arm",
+                is_linear=True,
+                interpolation_dt=0.05,
+                preserve_cartesian_samples=True,
+                velocity_limit=1.0,
+                acceleration_limit=2.0,
+            ),
+        )
+
+        # The far row alone needs over 10,000 intervals; the near row is still
+        # timed within limits instead of failing with it.
+        assert result.success.tolist() == [True, False]
+        assert result.positions is not None
+        torch.testing.assert_close(result.positions[0, -1, 0], torch.tensor(1.0))
+        assert (result.positions[0].diff(dim=0).abs() / 0.05).max() <= 1.0 + 1.0e-5
+        torch.testing.assert_close(
+            result.positions[1], torch.zeros_like(result.positions[1])
+        )
+        # Once dropped, the far row is no longer solved at the denser timing.
+        calls = generator.robot.compute_batch_ik.call_args_list
+        first = next(i for i, call in enumerate(calls) if "env_ids" in call.kwargs)
+        assert all(call.kwargs.get("env_ids") == (0,) for call in calls[first:])
+
     def test_limited_cartesian_motion_resamples_external_rotation_exactly(self):
         generator = _mock_generator()
         start_pose = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
@@ -1891,6 +1947,29 @@ def test_continuous_batch_ik_uses_capability_and_path_seed_across_chunks() -> No
     assert all(call.kwargs["joint_seed"].shape == (2, 1) for call in calls)
     torch.testing.assert_close(calls[1].kwargs["joint_seed"], poses[:, 3, 0, 3:4])
     torch.testing.assert_close(calls[2].kwargs["joint_seed"], poses[:, 7, 0, 3:4])
+
+
+def test_whole_path_continuous_solver_receives_the_path_in_one_call() -> None:
+    generator = _mock_generator(controlled_dof=1)
+    solver = generator.robot.get_solver.return_value
+    solver.supports_continuous_batch_ik = True
+    solver.continuous_ik_whole_path = True
+    poses = torch.eye(4).repeat(2, 9, 1, 1)
+    poses[..., 0, 3] = torch.arange(1, 10)
+    generator.robot.compute_batch_ik.side_effect = lambda *, pose, **kwargs: (
+        torch.ones(pose.shape[:2], dtype=torch.bool),
+        pose[..., 0, 3:4].clone(),
+    )
+    with patch("embodichain.lab.sim.motion.motion_generator._MAX_IK_BATCH_TARGETS", 8):
+        success, positions = generator._solve_cartesian_waypoints(
+            poses, torch.zeros(2, 1), "arm"
+        )
+
+    assert success.all()
+    torch.testing.assert_close(positions, poses[..., 0, 3:4])
+    (call,) = generator.robot.compute_batch_ik.call_args_list
+    assert call.kwargs["pose"].shape[1] == 9
+    assert call.kwargs["continuous"] is True
 
 
 @pytest.mark.parametrize("continuous", [False, True])

@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_robotiq_door_pour_align_push
-suite_version: atomic_franka_robotiq_door_pour_align_push_v4
+suite_version: atomic_franka_robotiq_door_pour_align_push_v12
 profile: smoke
 
 # OpenDoor, Pour, AxisAlign and PushObject on the Franka + Robotiq 2F-140 embodiment.
@@ -11,6 +11,11 @@ robot:
   id: franka_robotiq
   provider: franka_robotiq
   config:
+    # Cartesian contact paths: hold each FEP sample within 0.1 rad of the
+    # previous one; independent q7 searches alternate near the shoulder singularity.
+    solver_cfg:
+      arm:
+        continuous_path_joint_step: 0.1
     attrs:
       material_props:
         static_friction: 1.0
@@ -24,12 +29,15 @@ planners:
     config:
       max_attempts: 5
       max_planning_time: null
-      interpolation_dt: 0.025
+      # Divides the compiled control period, so retiming keeps solved acceleration;
+      # coarser samples keep long slow plans within cuRobo's interpolation buffer.
+      interpolation_dt: 0.04
       collision_activation_distance: 0.01
       use_cuda_graph: true
       cuda_graph_fallback: true
       warmup_iterations: 1
-      preserve_plan_samples: false
+      # Native samples avoid resampling the solved timing before compilation.
+      preserve_plan_samples: true
       world:
         obstacle_representation: sphere
         multi_env: false
@@ -61,6 +69,13 @@ tracks:
     enabled: true
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
+      # Empty cuRobo world: ~10-degree keyframes keep held reorientation off the support.
+      axis_align_rotation_waypoints: 8
+      pour_rotation_waypoints: 8
       batch_sizes: [1]
       seeds: [11]
       physics:
@@ -84,6 +99,10 @@ tracks:
           init_qpos: [0.0, 0.0, 0.0, 0.0]
           drive:
             drive_type: none
+            # PhysX scales joint friction by constraint force, and the asset values
+            # (1.0 on the drawer slide) held the joints still. Zero was in effect
+            # until omitted drive fields began keeping the asset values (#1168).
+            friction: 0.0
           attrs:
             material_props:
               static_friction: 1.0
@@ -126,13 +145,16 @@ tracks:
             - name: microwave_door_90deg
               task_difficulty: hard
               open_angle_rad: 1.5708
+              # Preserve the full opening arc; the longer hand needs a shorter release retreat.
+              retract_distance_m: 0.05
         - id: pour
           sample_count: 80
           pick_sample_count: 120
           hand_interp_steps: 12
           pre_grasp_distance_m: 0.15
           lift_height_m: 0.16
-          approach_direction: [-0.7071, 0.0, -0.7071]
+          # The pads close along the pour axis; closing across it slipped at 90 degrees.
+          approach_direction: [0.0, -0.7071, -0.7071]
           internal_axis: [1.0, 0.0, 0.0]
           grasp_source: antipodal
           grasp_sample_count: 10000
@@ -152,6 +174,8 @@ tracks:
               task_difficulty: medium
               rotate_angle_rad: 1.5708
         - id: axis_align
+          # Keep the original centre when reachable; otherwise try bounded inward goals.
+          alignment_inward_candidates_m: [0.0, 0.025, 0.05, 0.075, 0.10]
           sample_count: 180
           hand_interp_steps: 12
           pre_grasp_distance_m: 0.15
@@ -178,18 +202,34 @@ tracks:
           approach_height_m: 0.10
           retract_height_m: 0.10
           push_overshoot_m: 0.0
-          # Push 1 cm below the cube centre so the closed fingers do not tip it.
-          object_contact_offset_m: [0.0, 0.0, -0.01]
-          # Existing task contact parameters are retained for this gripper swap.
-          # Robotiq-specific push calibration is separate follow-up work.
+          # Push with the pads 75% closed, about 34 mm apart: two contacts straddle
+          # the cube face. The closed fingers form a 15 mm pusher about which the cube
+          # turned and drifted sideways; nominal and object-xy rows failed 25 of 54.
+          hand_grasp_qpos: [0.525, -0.525, 0.525, -0.525, -0.525, 0.525]
+          # Keep the contact behind the cube face nearest the push, so yawed cubes
+          # keep the 2 mm approach clearance instead of starting inside the hand.
+          contact_along_target_face: true
+          # Closed Robotiq pads need clearance above the support plane.
+          # A 5 mm upward offset clears the 40 mm cube support by >1.8 mm,
+          # even without extra clearance from native rest offsets.
+          object_contact_offset_m: [0.0, 0.0, 0.005]
+          # Nominal 50 mm cube: closed-hand face extent plus 2 mm approach clearance.
           cases:
             - name: cube_push_lateral_10cm
               object: cube_50mm
               task_difficulty: simple
-              contact_distance_m: 0.042
+              contact_distance_m: 0.0405
               target_object_offset_m: [0.0, 0.10, 0.0]
             - name: cube_push_toward_base_8cm
               object: cube_50mm
               task_difficulty: simple
-              contact_distance_m: 0.052
+              # Turn the hand 90 degrees so a closed finger face, spanning the cube's
+              # height, pushes; facing this way the knuckles struck the top edge and
+              # tipped the cube. Same 2 mm clearance as the lateral push.
+              contact_distance_m: 0.0405
+              contact_frame_to_eef:
+                - [0.0, -1.0, 0.0, 0.0]
+                - [1.0, 0.0, 0.0, 0.0]
+                - [0.0, 0.0, 1.0, 0.0]
+                - [0.0, 0.0, 0.0, 1.0]
               target_object_offset_m: [0.08, 0.0, 0.0]
