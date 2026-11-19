@@ -3,7 +3,7 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "318da3e17a674401c372984973cc974efeddb361",
+  "revision": "dabd052127eafabe4b724b258f6550a0b4c97235",
   "source_ref": "HEAD",
   "package_version": "0.3.2",
   "topic_index": "agent_context/MAP.yaml",
@@ -1591,8 +1591,8 @@
         {
           "path": "embodichain/lab/task_program/integrations/catalog.py",
           "symbol": "TaskProgramIntegrationCatalog",
-          "start_line": 618,
-          "end_line": 618,
+          "start_line": 635,
+          "end_line": 635,
           "excerpt": "class TaskProgramIntegrationCatalog:"
         }
       ],
@@ -2947,8 +2947,8 @@
         {
           "path": "embodichain/lab/task_program/compiler/lowering.py",
           "symbol": "SemanticCallCompiler",
-          "start_line": 1046,
-          "end_line": 1046,
+          "start_line": 1066,
+          "end_line": 1066,
           "excerpt": "class SemanticCallCompiler:"
         }
       ],
@@ -4087,8 +4087,8 @@
         {
           "path": "embodichain/lab/gym/envs/task_program/bridge.py",
           "symbol": "TaskProgramDemoBridge._segment_actions",
-          "start_line": 2023,
-          "end_line": 2023,
+          "start_line": 2036,
+          "end_line": 2036,
           "excerpt": "                        self._sink.pop(),"
         }
       ]
@@ -4787,8 +4787,8 @@
         {
           "path": "embodichain/lab/task_program/runtime/executor.py",
           "symbol": "SemanticCallExecutor._prepare_grounded_call",
-          "start_line": 1240,
-          "end_line": 1246,
+          "start_line": 1276,
+          "end_line": 1282,
           "excerpt": "        session = self._engine.start(\n            (invocation,),\n            context,\n            eligible_mask=active_mask,\n            plan_transform=plan_transform,\n            nominal_source=nominal_source,\n        )"
         }
       ]
@@ -4805,8 +4805,8 @@
         {
           "path": "embodichain/lab/task_program/runtime/executor.py",
           "symbol": "SemanticCallExecutor._prepare_grounded_call",
-          "start_line": 1248,
-          "end_line": 1254,
+          "start_line": 1284,
+          "end_line": 1290,
           "excerpt": "        runner = ExecutionRunner(\n            session,\n            primed,\n            self._command_sink,\n            clock=self._clock,\n            cfg=runner_cfg,\n        )"
         }
       ]
@@ -4866,8 +4866,8 @@
         {
           "path": "embodichain/lab/task_program/integrations/simulation/environment.py",
           "symbol": "SimulationTaskProgramFactory.create_atomic_skill_engine",
-          "start_line": 1164,
-          "end_line": 1165,
+          "start_line": 1198,
+          "end_line": 1199,
           "excerpt": "        engine = AtomicSkillEngine(\n            motion_generator,"
         }
       ]
@@ -4884,8 +4884,8 @@
         {
           "path": "embodichain/lab/task_program/integrations/simulation/environment.py",
           "symbol": "SimulationTaskProgramFactory._create_motion_generator",
-          "start_line": 1358,
-          "end_line": 1359,
+          "start_line": 1399,
+          "end_line": 1400,
           "excerpt": "            generator = MotionGenerator(\n                MotionGenCfg(planner_cfg=planner_cfg), **selection_kwargs"
         }
       ]
@@ -5812,15 +5812,15 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_robot",
-          "start_line": 4663,
-          "end_line": 4664,
+          "start_line": 4675,
+          "end_line": 4676,
           "excerpt": "        robot = self._declare_spawn_articulation(cfg, Robot)\n        self._robots[uid] = robot"
         },
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager._declare_spawn_articulation",
-          "start_line": 4703,
-          "end_line": 4706,
+          "start_line": 4715,
+          "end_line": 4718,
           "excerpt": "        facade = facade_type(\n            cfg=cfg,\n            device=self.device,\n        )"
         }
       ]
@@ -5855,8 +5855,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_robot",
-          "start_line": 4664,
-          "end_line": 4669,
+          "start_line": 4676,
+          "end_line": 4681,
           "excerpt": "        self._robots[uid] = robot\n        if was_materialized:\n            self.prepare()\n        for sensor_cfg in mounted_sensors:\n            self.add_sensor(sensor_cfg)\n        return robot"
         }
       ]
@@ -5873,8 +5873,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.enable_gizmo",
-          "start_line": 4859,
-          "end_line": 4859,
+          "start_line": 4871,
+          "end_line": 4871,
           "excerpt": "            gizmo = Gizmo(target, gizmo_cfg, control_part)"
         }
       ]
@@ -5891,8 +5891,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.create_rigid_constraint",
-          "start_line": 4325,
-          "end_line": 4325,
+          "start_line": 4337,
+          "end_line": 4337,
           "excerpt": "        constraint = RigidConstraint("
         }
       ]
@@ -5909,8 +5909,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_rigid_object_group",
-          "start_line": 4466,
-          "end_line": 4466,
+          "start_line": 4478,
+          "end_line": 4478,
           "excerpt": "        group = RigidObjectGroup("
         }
       ]
@@ -5927,8 +5927,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager._declare_rigid_objects",
-          "start_line": 3746,
-          "end_line": 3746,
+          "start_line": 3754,
+          "end_line": 3754,
           "excerpt": "            rigid_obj = RigidObject(cfg=cfg, device=self.device)"
         }
       ]
@@ -5945,8 +5945,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_articulation",
-          "start_line": 4567,
-          "end_line": 4567,
+          "start_line": 4579,
+          "end_line": 4579,
           "excerpt": "        self._articulations[uid] = articulation"
         }
       ]
@@ -5963,8 +5963,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_deformable_object",
-          "start_line": 4125,
-          "end_line": 4125,
+          "start_line": 4137,
+          "end_line": 4137,
           "excerpt": "        self._deformable_objects[uid] = deformable"
         }
       ]
