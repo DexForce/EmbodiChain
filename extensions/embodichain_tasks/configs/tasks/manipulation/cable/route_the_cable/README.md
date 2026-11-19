@@ -139,7 +139,7 @@ aim the observed distal span 15° downward. Each can turn downward by at most
 span is never rotated upward. The complete interpolated motion pivots around
 the observed grasped material point, and a seated row retains its loaded command.
 After the last nominal descent, `soften_free_end` adjusts each finger toward a
-4 mm joint target over 60 control samples, then holds for 30 samples before the
+4 mm joint target over 28 control samples, then holds for 30 samples before the
 last two endpoint corrections. This reduces the commanded pinch load while
 retaining the original grasp reference and accumulated slip measurements.
 The adjustment neither releases the grasp reference nor resets the 12 mm slip
@@ -176,7 +176,7 @@ penetration no greater than 1 mm. These release and final acceptance bounds are
 unchanged. Ordinary measured TCP tracking remains required until the endpoint
 is seated inside the strict channel.
 
-The left hand releases toward an 8 mm joint target per finger over 60 control
+The left hand releases toward an 8 mm joint target per finger over 28 control
 samples, then holds the arm stationary for 30 samples. It withdraws vertically
 to TCP `[same X, same Y, 0.80]` m before a separate retreat moves the TCP to
 `[same X, 0.015, 0.82]` m. `open_clear_of_port` opens the hand fully after
@@ -276,7 +276,7 @@ spool:
 python -m pytest tests/gym/envs/tasks/test_route_the_cable_cuda.py --run-gpu -m gpu -q
 ```
 
-The optimized eight-call implementation was qualified at seed 73 on DexSim
+The initial optimized eight-call implementation (`d9eff2f47`) was qualified at seed 73 on DexSim
 `0.6.0rc2` build `dbaca660471d5aaa7e750093e7fe1c207465c4af` and an RTX 5090.
 Fresh 2-environment, 16-environment and repeated 16-environment batches passed
 2/2, 16/16 and 16/16 tasks. Their physical task times were 44.22, 45.07 and
@@ -285,6 +285,13 @@ endpoints stayed within the unchanged strict channel through retreat, home,
 final settling and five additional seconds of live physics. Maximum observed
 grip slip was 1.741 mm against the original 12 mm limit. Final sampled cable
 penetration against the bench, spools and port was zero.
+
+A later main-integrated batch correctly rejected one row during the second
+lay-down's transient endpoint rise. The current profile retains a full second
+of settling there before the unchanged release gate; a fresh 2-row and 16-row
+qualification passed at 44.60 and 45.77 physical seconds, respectively, with
+five additional seconds of released-endpoint persistence. The earlier failed
+batch remains recorded in the PR.
 
 These fixed-seed batches qualify the tested setup, not a population success
 rate. CPU coverage checks the bounded pivot, original grasp reference, exact
