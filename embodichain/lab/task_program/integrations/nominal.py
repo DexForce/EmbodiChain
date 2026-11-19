@@ -154,6 +154,7 @@ class _ConfiguredTaskProgramNominalSources:
         ],
         *,
         host_collision_guard: object | None = None,
+        decorate_demo_source=None,
     ) -> None:
         if host_collision_guard is not None:
             from .simulation.real2sim_collision import TabletopCollisionGuardFactory
@@ -166,6 +167,9 @@ class _ConfiguredTaskProgramNominalSources:
         self._fingerprint = _fingerprint(program)
         self._declarations = declarations
         self._host_collision_guard = host_collision_guard
+        if decorate_demo_source is not None and not callable(decorate_demo_source):
+            raise TypeError("decorate_demo_source must be callable.")
+        self._decorate_demo_source = decorate_demo_source
         self._sources = {item.call_index: item for item in declarations}
         if len(self._sources) != len(declarations):
             raise ValueError("configured nominal source call indices must be unique")
@@ -247,7 +251,14 @@ class _ConfiguredTaskProgramNominalSources:
         if isinstance(declaration, _ConfiguredDemoSkillSource):
             from .simulation.demo_skill import _create_demo_skill_source
 
-            return _create_demo_skill_source(declaration, request, engine)
+            source = _create_demo_skill_source(declaration, request, engine)
+            if self._decorate_demo_source is not None:
+                source = self._decorate_demo_source(source)
+                if not isinstance(source, NominalMotionSource):
+                    raise TypeError(
+                        "A DemoSkill decorator must return a nominal source."
+                    )
+            return source
         prototype = load_prototype(declaration.prototype_manifest)
         return PrototypeMotionProvider(
             prototype,

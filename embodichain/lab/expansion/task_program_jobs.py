@@ -17,7 +17,7 @@
 """Declarative scene/motion jobs composed through the native workload engine."""
 
 from __future__ import annotations
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -34,6 +34,13 @@ from ._task_program_config import load_task_program_expansion, load_expansion_vi
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.scene.feasibility import JointSceneCandidate
+    from embodichain.lab.task_program.runtime.expansion import (
+        TaskProgramNominalSourceFactory,
+    )
+    from embodichain.lab.task_program.integrations.invocation_policy import (
+        InvocationPolicyBinding,
+    )
+    from .host_extensions import ExpansionRowContext, ExpansionValidator
 
 __all__ = [
     "load_task_program_expansion",
@@ -58,7 +65,15 @@ def _load_deployment(path: Path) -> None:
 from ._pose_sampling import _BoundedPoseSource, _AdaptivePoseSource
 
 
-def _task_expansion_extensions(*, options, operator, seed, report):
+def _task_expansion_extensions(
+    *,
+    options,
+    operator,
+    seed,
+    report,
+    nominal_source_factory=None,
+    invocation_policy_bindings=(),
+):
     """Declare task proposals; upstream owns collection and persistence."""
     from .host_extensions import GymExpansionHostExtensions
 
@@ -121,7 +136,9 @@ def _task_expansion_extensions(*, options, operator, seed, report):
         scene_source_factory=source,
         feedback_factory=feedback if "scene_sampling" in options else None,
         recipe_transform=recipe_transform,
-        plan_transform_factory=plans,
+        plan_transform_factory=plans if operator != "object_pose" else None,
+        nominal_source_factory=nominal_source_factory,
+        invocation_policy_bindings=invocation_policy_bindings,
         require_plan_transform=operator != "object_pose",
     )
 
@@ -256,7 +273,18 @@ def derive_grasp_expansion_deployment(
 
 
 def _run_operators(
-    deployment, output, options, selected, *, seed, sources, viewer, runtime_versions
+    deployment,
+    output,
+    options,
+    selected,
+    *,
+    seed,
+    sources,
+    viewer,
+    runtime_versions,
+    validator_factory=None,
+    nominal_source_factory=None,
+    invocation_policy_bindings=(),
 ):
     """Call the public upstream collector without operator processes."""
     from embodichain.lab.expansion import (
@@ -333,7 +361,12 @@ def _run_operators(
                 report,
                 artifacts,
                 _task_expansion_extensions(
-                    options=options, operator=name, seed=seed, report=report
+                    options=options,
+                    operator=name,
+                    seed=seed,
+                    report=report,
+                    nominal_source_factory=nominal_source_factory,
+                    invocation_policy_bindings=invocation_policy_bindings,
                 ),
             )
         )
@@ -342,16 +375,19 @@ def _run_operators(
         renderer = viewer["renderer"] if settings["capture_media"] else None
     common = GymExpansionHostExtensions(
         collection_renderer=renderer,
-        validator_factory=lambda env, path: MeasuredExpansionValidator(
-            env,
-            options["validation"],
-            path,
-            backend=(
-                "native_contacts"
-                if settings["collision_backend"] == "native_contacts"
-                else "geometry"
-            ),
-            device=settings["collision_device"],
+        validator_factory=validator_factory
+        or (
+            lambda env, path: MeasuredExpansionValidator(
+                env,
+                options["validation"],
+                path,
+                backend=(
+                    "native_contacts"
+                    if settings["collision_backend"] == "native_contacts"
+                    else "geometry"
+                ),
+                device=settings["collision_device"],
+            )
         ),
     )
     execution = WorkloadExecutionCfg(
@@ -383,6 +419,11 @@ def run_task_program_expansion(
     runtime_versions: Mapping[str, object] | None = None,
     viewer: Mapping[str, object] | None = None,
     preview_output: str | Path | None = None,
+    validator_factory: Callable[[Any, Path], ExpansionValidator] | None = None,
+    nominal_source_factory: (
+        Callable[[Any, ExpansionRowContext], TaskProgramNominalSourceFactory] | None
+    ) = None,
+    invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
 ) -> Mapping[str, object]:
     """Collect declared scene/motion operators through the single-World engine.
 
@@ -397,6 +438,9 @@ def run_task_program_expansion(
         viewer: Headless/renderer declarations. A non-headless job opens the native
             read-only preview after collection, qualification and export.
         preview_output: Optional service status/log directory outside saved data.
+        validator_factory: Optional task-owned measured validation port.
+        nominal_source_factory: Optional independent factory for each attempted row.
+        invocation_policy_bindings: Named presets bound to the exact program calls.
 
     Returns:
         Owned operator quotas, confirmed readback, native dataset paths and preview
@@ -445,6 +489,25 @@ def run_task_program_expansion(
     inputs = output / "inputs"
     inputs.mkdir(exist_ok=True)
     sources = dict(source_artifacts or {})
+    if (deployment.parent / "invocation_bindings.json").is_file():
+        from embodichain.toolkits.skill_fitting.task_program import (
+            load_invocation_bindings,
+        )
+
+        sealed = load_invocation_bindings(deployment)
+        if invocation_policy_bindings and invocation_policy_bindings != sealed:
+            raise ValueError(
+                "Explicit invocation policies differ from the sealed deployment."
+            )
+        invocation_policy_bindings = sealed
+        for name in (
+            "manifest.json",
+            "compile_report.json",
+            "source_map.json",
+            "invocation_bindings.json",
+        ):
+            path = deployment.parent / name
+            sources[f"fitted_{name}"] = {"path": str(path), "sha256": file_digest(path)}
     derived = _prepare_deployment(deployment, inputs)
     atomic_json(inputs / "expansion.json", options)
     for path in (derived, inputs / "environment.yaml", inputs / "expansion.json"):
@@ -461,6 +524,9 @@ def run_task_program_expansion(
         sources=sources,
         viewer=view,
         runtime_versions=runtime_versions,
+        validator_factory=validator_factory,
+        nominal_source_factory=nominal_source_factory,
+        invocation_policy_bindings=invocation_policy_bindings,
     )
     result = {
         "complete": all(value.get("complete", False) for value in groups.values()),

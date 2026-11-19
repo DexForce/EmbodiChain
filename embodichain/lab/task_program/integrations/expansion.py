@@ -227,6 +227,7 @@ class TaskProgramSameGridExpansionFactory:
         from ._native_plan_expansion import _NativePlanExpansion
 
         instance = object.__new__(cls)
+        instance.reject_nominal_source_overlap = True
         instance._native_delegate = _NativePlanExpansion(
             operator,
             options,

@@ -155,6 +155,12 @@ def get_package_data() -> dict[str, list[str]]:
         "embodichain": ["VERSION"],
         "embodichain.lab.expansion": ["_preview.html", "_distribution.html"],
         "embodichain.data": ["default_materials.json"],
+        "embodichain.toolkits.trajectory_annotator": [
+            "README.md",
+            "web/*.html",
+            "web/*.js",
+            "web/*.css",
+        ],
         "embodichain.compute.kinematics._warp": [
             "ssik_LICENSE.txt",
             "data/*.npz",

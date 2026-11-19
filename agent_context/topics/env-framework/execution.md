@@ -355,6 +355,23 @@ not orchestrate multiple experiments or qualify kinematic playback.
   and control replay restore complete particle states at each recorded boundary;
   dynamic replay restores only the initial particle state and recomputes later
   fluid motion from recorded actions.
+  External expert recordings may declare `meta.state_joint_names` for the full
+  state columns. Replay verifies the exact robot and active joint sets, then
+  maps state qpos/qvel and explicit expert commands into native order. Missing,
+  duplicate or mismatched joints reject before stepping. Legacy files without
+  this field retain numeric-layout checks; raw policy actions cannot be remapped
+  as joint commands. Legacy fitted replay packages remain readable through this path.
+- **Native fitted sequences**: `run-task --skill-sequence skills.yaml` is a separate
+  direct AtomicSkillEngine host in `toolkits/skill_fitting/_execution.py`. It uses
+  the plain physical Gym deployment, replans native goals from live state and
+  submits ControllerAction through `env.step`; only source DemoSkill gaps use PT.
+  It cannot combine with replay or Task Program ownership. A matching
+  `--expansion-profile` delegates fixed-scene B=1 spatial variants to
+  `toolkits/skill_fitting/_sequence_expansion.py`; DemoSkill paths stay unchanged.
+  Execution
+  completion/observed heights are recorded separately from physical success.
+  The portable input/output contract is owned by
+  [Atomic Skills](../atomic-actions/atomic-actions.md).
 - **Policy projection**: `rollout_buffer` retains actual policy observations,
   including sampled noise, and its existing obs/action/reward alignment for
   LeRobot/RL. It shares the acquisition boundary with raw history, rather than
@@ -381,6 +398,12 @@ not orchestrate multiple experiments or qualify kinematic playback.
   policy action space; a controller/expert trajectory uses the private
   `ExpertActionSpec` layout. One trajectory cannot mix these schemas.
 - **CLI**: `run-task --replay --replay_trajectory <path> --replay_mode {kinematic,dynamic,control}`.
+  Automatic `kinematic` / `dynamic` replay runs without wall-clock pacing and
+  closes the viewer on completion. For persistent inspection use `control`:
+  `--headless --viser` exposes a frame slider, and `--no-headless` without
+  `--viser` opens the native window even when the file sets `headless: true`.
+  Control replay starts paused; terminal `a` plays at the control interval,
+  `n` / `p` step, a number plus Enter seeks, `r` resets, and `q` exits.
 
 ---
 

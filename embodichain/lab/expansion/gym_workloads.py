@@ -335,26 +335,43 @@ class _GymWorkloadSource:
         if native is None:
             ctx.journal.update(request, status="initial_rejected")
             return None
+        row_context = ExpansionRowContext(
+            row,
+            identity,
+            assignment.ordinal,
+            request.attempt_id,
+            request.directory,
+            case,
+            request.recipe,
+        )
         factory = None
         if ctx.extensions.plan_transform_factory is not None:
-            factory = ctx.extensions.plan_transform_factory(
-                self.env,
-                ExpansionRowContext(
-                    row,
-                    identity,
-                    assignment.ordinal,
-                    request.attempt_id,
-                    request.directory,
-                    case,
-                    request.recipe,
-                ),
-            )
+            factory = ctx.extensions.plan_transform_factory(self.env, row_context)
             if factory is None:
                 raise ValueError("plan_transform_factory returned no factory")
-        adapter = group["adapter"].for_env_ids((row,))
-        bridge = adapter.create_bridge(
-            ctx.program, plan_transform_factory=factory, isolate_policy_sessions=True
+            if group["adapter"].configured_nominal_sources and not getattr(
+                factory, "reject_nominal_source_overlap", False
+            ):
+                raise ValueError(
+                    "A workload transform must declare call-local nominal-source exclusion."
+                )
+        nominal = (
+            None
+            if ctx.extensions.nominal_source_factory is None
+            else ctx.extensions.nominal_source_factory(self.env, row_context)
         )
+        adapter = group["adapter"].for_env_ids((row,))
+        bridge_options = {
+            "plan_transform_factory": factory,
+            "isolate_policy_sessions": True,
+        }
+        if nominal is not None:
+            bridge_options["nominal_source_factory"] = nominal
+        if ctx.extensions.invocation_policy_bindings:
+            bridge_options["invocation_policy_bindings"] = (
+                ctx.extensions.invocation_policy_bindings
+            )
+        bridge = adapter.create_bridge(ctx.program, **bridge_options)
         # The frame owner is shared and observes all active rows once per step.
         self.owner._context.initial, self.owner._context.initial_obs = (
             initial,
@@ -629,6 +646,8 @@ def run_gym_expansion_workloads(
         or common.feedback_factory
         or common.recipe_transform
         or common.plan_transform_factory
+        or common.nominal_source_factory
+        or common.invocation_policy_bindings
     ):
         raise ValueError(
             "common extensions may only select rendering and measured validation"
@@ -895,17 +914,18 @@ def run_gym_expansion_workloads(
                 )
                 adapters[id(factory)] = adapter
             ctx.program = adapter.compile(environment_cfg.task_program)
+            if workload.extensions.invocation_policy_bindings:
+                from embodichain.lab.task_program.integrations.invocation_policy import (
+                    BoundInvocationPolicies,
+                )
+
+                BoundInvocationPolicies(
+                    ctx.program, workload.extensions.invocation_policy_bindings
+                )
             if ctx.feedback is not None:
                 bind = getattr(ctx.feedback, "bind_program", None)
                 if bind is not None:
                     bind(adapter, ctx.program)
-            if (
-                workload.extensions.plan_transform_factory is not None
-                and adapter.configured_nominal_sources
-            ):
-                raise ValueError(
-                    "a workload transform cannot replace configured nominal sources"
-                )
             if (
                 groups
                 and ctx.program.program_id

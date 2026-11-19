@@ -1203,6 +1203,16 @@ class SemanticCallExecutor:
                 nominal_source = self._nominal_source_factory.create_nominal_source(
                     plan_request, engine=self._engine
                 )
+            if (
+                nominal_source is not None
+                and plan_transform is not None
+                and getattr(
+                    self._plan_transform_factory, "reject_nominal_source_overlap", False
+                )
+            ):
+                raise ValueError(
+                    "A native expansion and a declared nominal source select the same call."
+                )
         if effect_guards:
             external_plan_transform = plan_transform
 
