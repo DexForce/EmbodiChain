@@ -82,7 +82,12 @@ def test_generated_scene_is_rescaled_onto_the_calibrated_tabletop(
     data = {
         "format": "embodichain.scene-export/v1",
         "background": [
-            {"uid": "table", "shape": {"fpath": "table.glb"}, "init_rot": [0, 0, 180]}
+            {
+                "uid": "table",
+                "shape": {"fpath": "table.glb"},
+                "init_rot": [0, 0, 180],
+                "max_convex_hull_num": 16,
+            }
         ],
         "rigid_object": [
             {
@@ -107,6 +112,11 @@ def test_generated_scene_is_rescaled_onto_the_calibrated_tabletop(
     # is authored in the Y-up axes (x, height, depth).
     assert table["body_scale"] == pytest.approx([0.6, 0.5, 0.4375])
     assert table["init_pos"] == pytest.approx([0.0, 0.0, 0.715])
+    # V-HACD keeps the collision surface on the calibrated tabletop height and
+    # leaves the table its own hull budget.
+    collision = table["shape"]["collision"]
+    assert collision["approximation"] == "convex_decomposition"
+    assert (collision["max_hulls"], collision["acd_method"]) == (16, "vhacd")
     assert data["rigid_object"][0]["init_pos"] == [0.5, 0.5, 0.5]
     # Deployments are written as YAML; numpy scalars must not leak into them.
     yaml.safe_dump(result)

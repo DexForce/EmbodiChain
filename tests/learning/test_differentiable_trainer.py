@@ -136,8 +136,7 @@ class _ActorWithExtraState(nn.Linear):
         self.calibration = state["calibration"]
 
 
-@pytest.mark.parametrize("legacy", [False, True])
-def test_resume_preserves_module_extra_state(tmp_path: Path, legacy: bool) -> None:
+def test_resume_preserves_module_extra_state(tmp_path: Path) -> None:
     env = _QuadraticActionEnv()
     actor = _ActorWithExtraState()
     policy = ActorOnly(1, 1, env.device, actor=actor)
@@ -148,18 +147,8 @@ def test_resume_preserves_module_extra_state(tmp_path: Path, legacy: bool) -> No
     trainer.train(total_updates=1)
     actor.calibration = "calibrated"
     path = trainer.save_checkpoint(tmp_path / "extra-state.pt")
-    if legacy:
-        payload = torch.load(path, weights_only=True)
-        for field in ("metadata", "rng_by_rank", "normalizer_by_rank", "world_size"):
-            payload.pop(field)
-        payload["schema_version"] = 1
-        torch.save(payload, path)
     actor.calibration = "changed"
-    if legacy:
-        with pytest.warns(UserWarning, match="Legacy checkpoint"):
-            trainer.load_checkpoint(path)
-    else:
-        trainer.load_checkpoint(path)
+    trainer.load_checkpoint(path)
     assert actor.calibration == "calibrated"
     trainer.train(total_updates=2)
     assert trainer.num_updates == 2
@@ -261,7 +250,7 @@ def test_complete_resume_rejects_changed_gradient_accumulation(tmp_path: Path) -
         restored.load_checkpoint(path)
 
 
-def test_resume_accepts_older_v2_without_apg_configuration(tmp_path: Path) -> None:
+def test_resume_rejects_missing_apg_configuration(tmp_path: Path) -> None:
     env, policy, algorithm = _make_components()
     trainer = DifferentiableTrainer(
         DifferentiableTrainerCfg(segment_length=2), env, policy, algorithm
@@ -271,7 +260,7 @@ def test_resume_accepts_older_v2_without_apg_configuration(tmp_path: Path) -> No
     payload = torch.load(path, weights_only=True)
     payload["metadata"].pop("trainer_config")
     torch.save(payload, path)
-    with pytest.warns(UserWarning, match="APG trainer configuration"):
+    with pytest.raises(ValueError, match="trainer_config"):
         trainer.load_checkpoint(path)
     trainer.train(total_updates=2)
     assert trainer.num_updates == 2
@@ -565,9 +554,10 @@ def test_checkpoint_load_falls_back_for_older_torch(
 
     monkeypatch.setattr(torch, "load", compatible_load)
 
-    trainer.load_checkpoint(checkpoint_path)
+    with pytest.raises(TypeError, match="weights_only"):
+        trainer.load_checkpoint(checkpoint_path)
 
-    assert calls == [True, False]
+    assert calls == [True]
 
 
 @pytest.mark.parametrize("rollout_mode", ["segmented", "complete"])
@@ -654,32 +644,18 @@ def test_checkpoint_continues_apg_updates_and_rollout_schedule(
         assert restored.env.prepared_indices[0] == saved_index
 
 
-def test_load_existing_apg_schema_v1_and_continue(tmp_path: Path) -> None:
+def test_old_apg_checkpoint_schema_is_rejected(tmp_path: Path) -> None:
     env, policy, algorithm = _make_components()
     trainer = DifferentiableTrainer(
-        DifferentiableTrainerCfg(segment_length=2),
-        env,
-        policy,
-        algorithm,
+        DifferentiableTrainerCfg(segment_length=2), env, policy, algorithm
     )
-    trainer.train(total_updates=1)
-    path = trainer.save_checkpoint(tmp_path / "v1.pt")
-    checkpoint = torch.load(path, weights_only=True)
-    for key in (
-        "metadata",
-        "rng_by_rank",
-        "normalizer_by_rank",
-        "world_size",
-        "best_checkpoint",
-    ):
-        checkpoint.pop(key)
-    checkpoint["schema_version"] = 1
-    torch.save(checkpoint, path)
-    with pytest.warns(UserWarning, match="Legacy checkpoint"):
+    path = trainer.save_checkpoint(tmp_path / "unsupported.pt")
+    payload = torch.load(path, weights_only=True)
+    payload["schema_version"] = 1
+    torch.save(payload, path)
+    with pytest.raises(ValueError, match="Unsupported checkpoint schema"):
         trainer.load_checkpoint(path)
-    trainer.train(total_updates=2)
-    assert trainer.num_updates == 2
-    assert trainer.global_step == 8
+    assert trainer.num_updates == 0
 
 
 def test_variable_horizon_requires_update_budget_for_implicit_lr_curve() -> None:

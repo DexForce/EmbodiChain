@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import MISSING, field
 from pathlib import Path
+import re
 from typing import Any
 
 from embodichain.utils import configclass
@@ -44,6 +45,7 @@ class _RunCfg:
     headless: bool = True
     planning_repairs: int = 1
     source_calibration: Path | None = None
+    input_camera: dict[str, str] | None = None
     room: str | None = None
     recording: bool = False
     binding: dict[str, Any] = field(default_factory=dict)
@@ -70,6 +72,18 @@ class _RunCfg:
             raise ValueError("room must name a scene asset class such as WoodLab")
         if type(self.recording) is not bool:
             raise TypeError("recording must be a boolean")
+        camera = self.input_camera
+        if camera is not None and (
+            type(camera) is not dict
+            or set(camera) != {"view", "sha256"}
+            or camera["view"] != "robodojo_dual_arm_head"
+            or type(camera["sha256"]) is not str
+            or re.fullmatch("[0-9a-f]{64}", camera["sha256"]) is None
+        ):
+            raise ValueError(
+                "input_camera requires view: robodojo_dual_arm_head and the "
+                "lowercase SHA-256 of its raw head frame"
+            )
         if type(self.binding) is not dict or set(self.binding) - {
             "profile",
             "release_clearance",

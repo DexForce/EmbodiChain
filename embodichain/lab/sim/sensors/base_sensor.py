@@ -16,14 +16,16 @@
 
 from __future__ import annotations
 
+import math
 import sys
 import torch
 
 from abc import abstractmethod
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import (
     Dict,
     List,
+    Literal,
     Any,
     Sequence,
     Tuple,
@@ -121,6 +123,15 @@ class SensorCfg(ObjectBaseCfg):
         return []
 
     sensor_type: str = "BaseSensor"
+
+    mount: OffsetCfg | None = None
+    """Physical attachment for context-backed sensors. Cameras use extrinsics."""
+
+    sample_phase: Literal["physics", "render"] | None = None
+    """Opt in to manager-owned sampling at the selected completed boundary."""
+
+    sample_period: float = 0.0
+    """Minimum simulation-time interval in seconds. Zero samples every boundary."""
 
     @classmethod
     def from_dict(cls, init_dict: Dict[str, Any]) -> "SensorCfg":
@@ -322,9 +333,151 @@ class BaseSensor(BatchEntity):
         )
 
         self._entities = [None for _ in range(num_envs)]
+        self._mount_pose = None
+        self._bound_topology = None
+        self._sample_number = 0
+        self._sample_boundary = None
+        self._sample_time = -math.inf
+        if config.sample_phase not in (None, "physics", "render"):
+            raise ValueError("sample_phase must be physics, render, or None.")
+        if not math.isfinite(config.sample_period) or config.sample_period < 0:
+            raise ValueError("sample_period must be a finite nonnegative duration.")
+        if config.sample_phase is not None and context is None:
+            raise ValueError("Scheduled sensors require a SensorContext.")
+        self._sample_metadata = None
+        if config.sample_phase is not None:
+            self._sample_metadata = TensorDict(
+                {
+                    "sample_id": torch.zeros(
+                        num_envs, dtype=torch.int64, device=device
+                    ),
+                    "time": torch.full(
+                        (num_envs,), float("nan"), device=device, dtype=torch.float64
+                    ),
+                    "physics_step": torch.full(
+                        (num_envs,), -1, device=device, dtype=torch.int64
+                    ),
+                    "valid": torch.zeros(num_envs, dtype=torch.bool, device=device),
+                },
+                batch_size=[num_envs],
+                device=device,
+            )
         self._build_sensor_from_config(config, device=device)
-
         super().__init__(config, self._entities, device)
+
+    def on_bind(self) -> None:
+        """Prepare resources for the current topology after the scene is bound."""
+
+    def on_unbind(self) -> None:
+        """Release topology-scoped resources, including after a failed bind.
+
+        Implementations should tolerate partially initialized resources.
+        """
+
+    def get_mount_pose(self) -> torch.Tensor:
+        """Read the physical mount pose on the sensor device.
+
+        Returns:
+            Arena-relative homogeneous transforms with shape (environments, 4, 4).
+
+        Raises:
+            RuntimeError: The sensor has no live mount binding.
+        """
+        if self._mount_pose is None:
+            raise RuntimeError(f"Sensor {self.uid!r} has no live mount binding.")
+        return self._mount_pose()
+
+    def _bind(
+        self, topology: int, mount_pose: Callable[[], torch.Tensor] | None
+    ) -> None:
+        if self._bound_topology == topology:
+            return
+        self._unbind()
+        self._bound_topology = topology
+        self._mount_pose = mount_pose
+        try:
+            self.on_bind()
+        except BaseException:
+            self._unbind()
+            raise
+
+    def _unbind(self) -> None:
+        if self._bound_topology is None:
+            return
+        self._bound_topology = None
+        self._invalidate_samples()
+        self._sample_time = -math.inf
+        self._sample_boundary = None
+        try:
+            self.on_unbind()
+        finally:
+            self._mount_pose = None
+
+    def get_sample_metadata(self) -> TensorDict | None:
+        """Read borrowed per-environment metadata for the latest scheduled sample.
+
+        Returns:
+            Sample IDs, simulation times, completed physics-step indices and
+            validity. Legacy sensors without a sampling phase return None.
+        """
+        return self._sample_metadata
+
+    def get_data_descriptors(self) -> dict[str, dict[str, object]]:
+        """Describe tensor fields for batched observation and storage.
+
+        Returns:
+            A mapping of field name to shape excluding the environment axis,
+            dtype, units and frame. Subclasses can extend field semantics.
+        """
+        return {
+            name: {
+                "shape": tuple(value.shape[1:]),
+                "dtype": value.dtype,
+                "unit": None,
+                "frame": None,
+            }
+            for name, value in self._data_buffer.items()
+        }
+
+    def _invalidate_samples(
+        self, env_ids: Sequence[int] | torch.Tensor | None = None
+    ) -> None:
+        if self._sample_metadata is None:
+            return
+        rows = (
+            slice(None)
+            if env_ids is None
+            else torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
+        )
+        self._sample_metadata["valid"][rows] = False
+
+    def _sample(self, boundary: int, time: float, physics_step: int, dt: float) -> None:
+        metadata = self._sample_metadata
+        if metadata is None or self._sample_boundary == boundary:
+            return
+        period = self.cfg.sample_period
+        if time - self._sample_time + 1e-12 < period:
+            return
+        elapsed = time - self._sample_time if self._sample_boundary is not None else dt
+        try:
+            self._acquire_sample(
+                sample_dt=elapsed, fetch_only=self.cfg.sample_phase == "render"
+            )
+        except BaseException:
+            # Acquisition may have already overwritten the borrowed output buffers.
+            metadata["valid"].fill_(False)
+            raise
+        self._sample_boundary = boundary
+        self._sample_time = time
+        self._sample_number += 1
+        metadata["sample_id"].fill_(self._sample_number)
+        metadata["time"].fill_(time)
+        metadata["physics_step"].fill_(physics_step)
+        metadata["valid"].fill_(True)
+
+    def _acquire_sample(self, *, sample_dt: float, fetch_only: bool) -> None:
+        """Acquire data at a scheduled boundary before publishing metadata."""
+        self.update(sample_dt=sample_dt, fetch_only=fetch_only)
 
     @cached_property
     def num_instances(self) -> int:

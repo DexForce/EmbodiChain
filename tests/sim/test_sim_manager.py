@@ -598,6 +598,14 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
 ) -> None:
     """Backend-owned views are released before Spawn and World resources."""
     events: list[str] = []
+
+    class CyclicView:
+        def __init__(self) -> None:
+            self.cycle = self
+
+        def __del__(self) -> None:
+            events.append("view_release")
+
     sim = object.__new__(SimulationManager)
     spawn_scene = MagicMock()
     spawn_scene.close.side_effect = lambda: events.append("spawn_close")
@@ -606,7 +614,9 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
     )
     sim._gizmos = {}
     sim._markers = {}
-    sim._rigid_objects = {}
+    sim._rigid_objects = {
+        "body": SimpleNamespace(_data=CyclicView(), _entities=[], _spawn_result=None)
+    }
     sim._constraints = {}
     sim._rigid_object_groups = {}
     sim._fluid_objects = {}
@@ -638,11 +648,19 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
         instances.pop(instance_id)
 
     monkeypatch.setattr(SimulationManager, "reset", reset)
-    monkeypatch.setattr(gc, "collect", lambda: events.append("gc_collect"))
+    collect = gc.collect
+
+    def collect_views() -> int:
+        events.append("gc_collect")
+        return collect()
+
+    monkeypatch.setattr(gc, "collect", collect_views)
 
     sim._deferred_destroy()
 
     assert events.index("backend_prepare") < events.index("gc_collect")
+    assert "view_release" in events
+    assert events.index("view_release") < events.index("spawn_close")
     assert events.index("backend_prepare") < events.index("spawn_close")
     assert events.index("backend_prepare") < events.index("world_quit")
     assert instances == ({} if owns_registry_entry else {0: replacement})
@@ -3115,6 +3133,10 @@ def test_context_camera_uses_manager_attachment_at_the_current_revision(
     camera.cfg = cfg
     camera._is_attached = False
     camera.destroy = MagicMock()
+    camera._bound_topology = None
+    camera._sample_metadata = None
+    camera.on_bind = MagicMock()
+    camera.on_unbind = MagicMock()
     camera.attach_to_parent_nodes = MagicMock(
         side_effect=(
             RuntimeError("attachment failed")

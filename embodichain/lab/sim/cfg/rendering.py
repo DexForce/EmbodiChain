@@ -48,6 +48,11 @@ _DENOISING_MODES: dict[DenoisingMode, RTRenderMode] = {
     "nrd": RTRenderMode.NRD_RELAX,
 }
 
+_TONE_MAPPING_TYPES: dict[str, ToneMappingType] = {
+    "modified-reinhard": ToneMappingType.MODIFIED_REINHARD,
+    "aces": ToneMappingType.ACES,
+}
+
 
 @configclass
 class DenoisingCfg:
@@ -320,6 +325,24 @@ class DLSSCfg:
     tiled_enabled: bool = True
     """Evaluate compatible multi-camera targets through one tiled DLSS atlas."""
 
+    tiled_gutter_pixels: int = 16
+    """Copied per-side atlas guard band when real RR overscan is disabled."""
+
+    tiled_overscan_pixels: int | None = None
+    """Private per-side offscreen RR output border, cropped from public images.
+
+    None preserves the installed SDK's default. Active overscan replaces the
+    copied gutter without changing public intrinsics or geometry outputs.
+    Zero also works with SDKs predating overscan; nonzero values require a
+    supporting SDK.
+    """
+
+    frame_time_delta_ms: float = 0.0
+    """Fixed DLSS render interval in milliseconds; zero measures wall time.
+
+    This is the rendering cadence, independent of physics and control steps.
+    """
+
     exposure_compensation: float = 1.0
     """Positive, finite exposure multiplier used by the RR bridge."""
 
@@ -334,10 +357,27 @@ class DLSSCfg:
             "render_height",
             "target_width",
             "target_height",
+            "tiled_gutter_pixels",
         ):
             value = getattr(self, name)
             if type(value) is not int or value < 0:
                 raise ValueError(f"DLSSCfg.{name} must be a non-negative integer.")
+        if self.tiled_overscan_pixels is not None and (
+            type(self.tiled_overscan_pixels) is not int
+            or self.tiled_overscan_pixels < 0
+        ):
+            raise ValueError(
+                "DLSSCfg.tiled_overscan_pixels must be None or a non-negative integer."
+            )
+        if (
+            isinstance(self.frame_time_delta_ms, bool)
+            or not isinstance(self.frame_time_delta_ms, Real)
+            or not math.isfinite(self.frame_time_delta_ms)
+            or self.frame_time_delta_ms < 0.0
+        ):
+            raise ValueError(
+                "DLSSCfg.frame_time_delta_ms must be a non-negative, finite number."
+            )
         if self.upsample_ratio is not None and (
             isinstance(self.upsample_ratio, bool)
             or not isinstance(self.upsample_ratio, Real)
@@ -370,6 +410,7 @@ class DLSSCfg:
 
         Raises:
             ValueError: If the configuration contains invalid values.
+            NotImplementedError: If nonzero overscan requires a newer SDK.
         """
         self.__post_init__()
         dlss = dexsim.DLSSConfig()
@@ -384,6 +425,16 @@ class DLSSCfg:
         dlss.target_width = self.target_width
         dlss.target_height = self.target_height
         dlss.tiled_enabled = self.tiled_enabled
+        dlss.tiled_gutter_pixels = self.tiled_gutter_pixels
+        dlss.frame_time_delta_ms = self.frame_time_delta_ms
+        if self.tiled_overscan_pixels is not None:
+            if hasattr(dlss, "tiled_overscan_pixels"):
+                dlss.tiled_overscan_pixels = self.tiled_overscan_pixels
+            elif self.tiled_overscan_pixels != 0:
+                raise NotImplementedError(
+                    "Nonzero DLSSCfg.tiled_overscan_pixels requires a DexSim SDK "
+                    "with offscreen RR overscan support."
+                )
         dlss.exposure_compensation = self.exposure_compensation
         return dlss
 
@@ -432,7 +483,10 @@ class RenderCfg:
     """NRD settings shared by targets using standalone NRD."""
 
     tone_mapping_enabled: bool = False
-    """Whether to map HDR RGB output with the modified Reinhard curve."""
+    """Whether to apply the selected tone-mapping curve to HDR RGB output."""
+
+    tone_mapping_type: Literal["modified-reinhard", "aces"] = "modified-reinhard"
+    """Final RGB tone mapper; the existing modified Reinhard default is retained."""
 
     tone_mapping_exposure: float = 1.0
     """Fixed linear exposure multiplier applied before tone mapping."""
@@ -526,6 +580,13 @@ class RenderCfg:
 
     def __post_init__(self) -> None:
         """Validate rendering parameters."""
+        if (
+            type(self.tone_mapping_type) is not str
+            or self.tone_mapping_type not in _TONE_MAPPING_TYPES
+        ):
+            raise ValueError(
+                "RenderCfg.tone_mapping_type must be 'modified-reinhard' or 'aces'."
+            )
         if self.spp < 1:
             logger.log_error("RenderCfg.spp must be at least 1.", ValueError)
         if self.tone_mapping_exposure < 0.0:
@@ -600,9 +661,9 @@ class RenderCfg:
         world_config.raytrace_config.min_bounces = self.min_bounces
         world_config.raytrace_config.max_bounces = self.max_bounces
         world_config.postprocess_config.tone_mapping_enabled = self.tone_mapping_enabled
-        world_config.postprocess_config.tone_mapping_type = (
-            ToneMappingType.MODIFIED_REINHARD
-        )
+        world_config.postprocess_config.tone_mapping_type = _TONE_MAPPING_TYPES[
+            self.tone_mapping_type
+        ]
         world_config.postprocess_config.tone_mapping_exposure = (
             self.tone_mapping_exposure
         )

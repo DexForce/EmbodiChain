@@ -103,7 +103,11 @@ from embodichain.lab.sim.sensors import (
     SensorContext,
 )
 from embodichain.lab.sim.sensors import _builtin_sensor_factories
-from embodichain.lab.sim.sensors.attachment import resolve_parent_nodes
+from embodichain.lab.sim.sensors.attachment import (
+    _qualify_robot_mount,
+    _resolve_link,
+    resolve_parent_nodes,
+)
 from embodichain.lab.sim.sensors._camera_group_pool import _CameraGroupPool
 from embodichain.lab.sim.sensors.registry import _resolve_sensor_factory
 from embodichain.lab.sim.cfg import (
@@ -1938,6 +1942,7 @@ class SimulationManager:
     def prepare(self) -> None:
         """Materialize declarations, bind state, and restore camera parents."""
         self._ready_spawn_topology_revision = -1
+        managed_sensors = getattr(self, "_managed_sensors", {})
         scene = self._spawn_scene
         result = scene.builder.result
         if (
@@ -1947,6 +1952,8 @@ class SimulationManager:
             or scene.builder.has_pending_changes
         ):
             if result is not None:
+                for sensor in managed_sensors.values():
+                    sensor._unbind()
                 # Clear configured parent paths before rebuilding native links;
                 # semantic parent resolution is retried after facade binding.
                 for sensor in self._sensors.values():
@@ -1991,6 +1998,9 @@ class SimulationManager:
         ):
             self._attach_parented_cameras()
             self._camera_attachment_topology_revision = topology_revision
+        for sensor in managed_sensors.values():
+            if sensor._bound_topology != topology_revision:
+                self._bind_sensor(sensor, topology_revision)
         self._ready_spawn_topology_revision = topology_revision
         self._refresh_marker_attachments()
         self._prepare_mounted_sensors()
@@ -2253,7 +2263,41 @@ class SimulationManager:
                 self._world.render_camera_group(group_ids)
                 for sensor in cameras:
                     sensor._snapshot_render_metadata()
+            if getattr(self, "_sampling_sensors", {}).get("render"):
+                self._sensor_frame_index = getattr(self, "_sensor_frame_index", 0) + 1
+                self._sample_managed_sensors(
+                    "render",
+                    self._sensor_frame_index,
+                    0.0,
+                    rendered_camera_uids={camera.uid for camera in cameras},
+                )
         self._log_scene_summary()
+
+    def _sample_managed_sensors(
+        self,
+        phase: str,
+        boundary: int,
+        dt: float,
+        *,
+        rendered_camera_uids: set[str] | None = None,
+    ) -> None:
+        previous_reads = getattr(self, "_hydroelastic_surface_reads", None)
+        self._hydroelastic_surface_reads = {}
+        try:
+            for sensor in (
+                getattr(self, "_sampling_sensors", {}).get(phase, {}).values()
+            ):
+                if (
+                    rendered_camera_uids is not None
+                    and isinstance(sensor, Camera)
+                    and sensor.uid not in rendered_camera_uids
+                ):
+                    continue
+                sensor._sample(
+                    boundary, self.simulation_time, self.physics_step_index, dt
+                )
+        finally:
+            self._hydroelastic_surface_reads = previous_reads
 
     def _plan_camera_groups(self, configs: Sequence[SensorCfg]) -> None:
         """Reserve startup camera slots before the first sensor is created."""
@@ -2378,6 +2422,10 @@ class SimulationManager:
                     self._visualization_sim_step += 1
                     self._visualization_sim_time += physics_dt
                     self._pending_record_dt += physics_dt
+                    if getattr(self, "_sampling_sensors", {}).get("physics"):
+                        self._sample_managed_sensors(
+                            "physics", self.physics_step_index, physics_dt
+                        )
                     if after_substep is not None:
                         with self.profiler.section("after_substep"):
                             after_substep(physics_dt)
@@ -4376,25 +4424,9 @@ class SimulationManager:
             sensor_uids = set(self._sensors)
             sensor_uids.update(getattr(self, "_pending_mounted_sensors", {}))
             for sensor_cfg in cfg.sensors:
-                if not isinstance(sensor_cfg, CameraCfg):
-                    raise TypeError("RobotCfg.sensors supports mounted cameras only.")
-                if not isinstance(sensor_cfg.uid, str) or not sensor_cfg.uid.strip():
-                    raise ValueError("Mounted sensors require a non-empty uid.")
-                if sensor_cfg.uid in sensor_uids:
-                    raise ValueError(f"Sensor {sensor_cfg.uid!r} already exists.")
-                sensor_uids.add(sensor_cfg.uid)
-                parent = sensor_cfg.extrinsics.parent
-                if not isinstance(parent, str) or not parent.strip():
-                    raise ValueError("Mounted sensors require a parent link.")
-                link_name = parent.removeprefix(f"{uid}/")
-                if not link_name or "/" in link_name:
-                    raise ValueError(
-                        f"Mounted sensor {sensor_cfg.uid!r} must refer to a "
-                        f"local link on robot {uid!r}."
-                    )
-                bound_cfg = deepcopy(sensor_cfg)
-                bound_cfg.extrinsics.parent = f"{uid}/{link_name}"
-                mounted_sensors.append(bound_cfg)
+                mounted_sensors.append(
+                    _qualify_robot_mount(sensor_cfg, uid, sensor_uids)
+                )
 
         was_materialized = self.spawn_result is not None
         robot = self._declare_spawn_articulation(cfg, Robot)
@@ -4933,12 +4965,21 @@ class SimulationManager:
                 f"ContactSensor is not supported by the {self.physics.name} "
                 "physics backend."
             )
+        if legacy_factory and (
+            getattr(sensor_cfg, "mount", None) is not None
+            or getattr(sensor_cfg, "sample_phase", None) is not None
+        ):
+            raise TypeError(
+                "Physical mounts and scheduled sampling require a context-backed sensor registration."
+            )
         if not legacy_factory:
             if not isinstance(sensor_cfg, registration.config_cls):
                 raise TypeError(
                     f"Sensor {sensor_type!r} requires {registration.config_cls.__name__}."
                 )
             sensor_cfg.validate()
+            if sensor_cfg.sample_phase == "render":
+                self._require_native_renderer("Render-sampled sensors")
             self.prepare()
             if (
                 isinstance(sensor_cfg, CameraCfg)
@@ -4953,12 +4994,6 @@ class SimulationManager:
                 raise TypeError(
                     f"Sensor factory {sensor_type!r} must return BaseSensor."
                 )
-            if isinstance(sensor, Camera):
-                try:
-                    self._attach_camera_parent(sensor)
-                except Exception:
-                    sensor.destroy()
-                    raise
         elif isinstance(sensor_factory, type) and issubclass(sensor_factory, Camera):
             if len(self._arenas) != self.num_envs:
                 raise RuntimeError(
@@ -5031,9 +5066,67 @@ class SimulationManager:
             except Exception:
                 sensor.destroy()
                 raise
+        if not legacy_factory:
+            try:
+                result = self.spawn_result
+                revision = int(result.topology_revision) if result is not None else 0
+                self._bind_sensor(sensor, revision)
+                if isinstance(sensor, Camera):
+                    self._attach_camera_parent(sensor)
+            except BaseException:
+                self._release_sensor(sensor)
+                raise
+            self.__dict__.setdefault("_managed_sensors", {})[uid] = sensor
+            if sensor.cfg.sample_phase is not None:
+                self.__dict__.setdefault("_sampling_sensors", {}).setdefault(
+                    sensor.cfg.sample_phase, {}
+                )[uid] = sensor
         self._sensors[uid] = sensor
         self.notify_visualization_topology_changed()
         return sensor
+
+    def _bind_sensor(self, sensor: BaseSensor, topology: int) -> None:
+        offset = sensor.cfg.mount
+        mount_pose = None
+        parent_uid = None
+        if offset is not None:
+            transform = offset.transformation.to(device=self.device)
+            if offset.parent is None:
+                mount_pose = lambda: transform.expand(self.num_envs, -1, -1).clone()
+            elif offset.parent in self._rigid_objects:
+                parent_uid = offset.parent
+                asset = self._rigid_objects[parent_uid]
+                if asset.num_instances not in (1, self.num_envs):
+                    raise RuntimeError(
+                        f"Invalid instance count for sensor parent {offset.parent!r}."
+                    )
+                mount_pose = (
+                    lambda: asset.get_local_pose(to_matrix=True).expand(
+                        self.num_envs, -1, -1
+                    )
+                    @ transform
+                )
+            else:
+                parent_uid, asset, link = _resolve_link(
+                    offset.parent,
+                    {**self._articulations, **self._robots},
+                    self.num_envs,
+                )
+                mount_pose = (
+                    lambda: asset.get_link_pose(link, to_matrix=True) @ transform
+                )
+        sensor._bind(topology, mount_pose)
+        sensor._mount_parent_uid = parent_uid
+
+    @staticmethod
+    def _release_sensor(sensor: BaseSensor) -> None:
+        try:
+            if isinstance(sensor, BaseSensor):
+                sensor._unbind()
+        finally:
+            destroy = getattr(sensor, "destroy", None)
+            if callable(destroy):
+                destroy()
 
     def _attach_camera_parent(self, sensor: Camera) -> None:
         """Resolve and attach one camera to its configured parent nodes."""
@@ -5109,9 +5202,10 @@ class SimulationManager:
             return True
         if uid in self._sensors:
             sensor = self._sensors.pop(uid)
-            destroy = getattr(sensor, "destroy", None)
-            if callable(destroy):
-                destroy()
+            getattr(self, "_managed_sensors", {}).pop(uid, None)
+            for sensors in getattr(self, "_sampling_sensors", {}).values():
+                sensors.pop(uid, None)
+            self._release_sensor(sensor)
             self.notify_visualization_topology_changed()
             return True
 
@@ -5132,19 +5226,39 @@ class SimulationManager:
         if robot is not None and robot.cfg.enable_sensor:
             for sensor_cfg in robot.cfg.sensors:
                 queued = pending.get(sensor_cfg.uid)
-                if (
-                    queued is not None
-                    and queued.extrinsics.parent is not None
-                    and queued.extrinsics.parent.startswith(f"{uid}/")
-                ):
-                    pending.pop(sensor_cfg.uid)
+                if queued is not None:
+                    offset = (
+                        queued.extrinsics
+                        if isinstance(queued, CameraCfg)
+                        else queued.mount
+                    )
+                    if offset is not None and (offset.parent or "").startswith(
+                        f"{uid}/"
+                    ):
+                        pending.pop(sensor_cfg.uid)
                 sensor = self._sensors.get(sensor_cfg.uid)
                 if (
-                    isinstance(sensor, Camera)
-                    and sensor.cfg.extrinsics.parent is not None
-                    and sensor.cfg.extrinsics.parent.startswith(f"{uid}/")
+                    sensor is not None
+                    and (
+                        sensor.cfg.extrinsics
+                        if isinstance(sensor, Camera)
+                        else sensor.cfg.mount
+                    )
+                    is not None
+                    and (
+                        (
+                            sensor.cfg.extrinsics
+                            if isinstance(sensor, Camera)
+                            else sensor.cfg.mount
+                        ).parent
+                        or ""
+                    ).startswith(f"{uid}/")
                 ):
                     self.remove_asset(sensor_cfg.uid)
+
+        for sensor_uid, sensor in tuple(getattr(self, "_managed_sensors", {}).items()):
+            if sensor._mount_parent_uid == uid:
+                self.remove_asset(sensor_uid)
 
         for group in tuple(getattr(self, "_marker_groups", {}).values()):
             group._detach_parent(uid)
@@ -6471,6 +6585,8 @@ class SimulationManager:
                 for uid, sensor in self._sensors.items():
                     if uid not in excluded_uids and uid not in excluded_sensor_uids:
                         sensor.reset(reset_ids)
+                        if isinstance(sensor, BaseSensor):
+                            sensor._invalidate_samples(reset_ids)
             return
         articulation_uids = tuple(self._robots) + tuple(self._articulations)
         reset_articulation_uids = tuple(
@@ -6535,6 +6651,8 @@ class SimulationManager:
         for uid, sensor in self._sensors.items():
             if uid not in excluded_uids and uid not in excluded_sensor_uids:
                 sensor.reset(env_ids)
+                if isinstance(sensor, BaseSensor):
+                    sensor._invalidate_samples(env_ids)
         if use_coordinated_newton_clear:
             self._clear_newton_articulation_dynamics(newton_articulation_batch)
 
@@ -6695,9 +6813,6 @@ class SimulationManager:
         # Release backend-owned views before Scene closes the native
         # resources that back them. Newton also synchronizes its device here.
         self.physics.prepare_for_teardown()
-        # Run wrapper destructors while their World is still alive. The later
-        # collections continue to break cycles left by the native teardown.
-        gc.collect()
 
         # Render-only cameras may be attached to Spawn articulation link
         # nodes. Remove their Arena views before closing Scene, which
@@ -6705,7 +6820,7 @@ class SimulationManager:
         # CameraGroups.
         for sensor in list(getattr(self, "_sensors", {}).values()):
             try:
-                sensor.destroy()
+                self._release_sensor(sensor)
             except Exception as error:
                 logger.log_warning(
                     f"Failed to destroy sensor {getattr(sensor, 'uid', None)!r}: "
@@ -6745,6 +6860,13 @@ class SimulationManager:
                         asset._spawn_result = None
                     if hasattr(asset, "_entities"):
                         asset._entities = []
+
+        # Drop facade-owned references before collecting their wrapper cycles.
+        # Otherwise those cycles can survive until a later GC, after Scene
+        # has destroyed the native resources backing the views.
+        gc.collect()
+
+        if self._spawn_scene is not None:
             try:
                 self._spawn_scene.close()
             finally:

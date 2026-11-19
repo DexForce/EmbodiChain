@@ -27,6 +27,9 @@ simulation:
       asset_physics_mode: overlay
       joint_drive_props:
         drive_type: none
+        # The asset's URDF friction of 1 N is read as a joint friction
+        # coefficient of 1.0, which stalls the rail; declare a light one.
+        friction: 0.1
       attrs:
         material_props:
           static_friction: 1.0

@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from collections import deque
+from contextlib import nullcontext
 import json
 import math
 from pathlib import Path
@@ -103,34 +104,45 @@ class _MixedDeviceEnv:
         self.action_manager = _DeviceCheckingActionManager(self.device)
 
 
+@pytest.mark.parametrize("default_device_context", [False, True])
 def test_trainer_metric_means_transfer_only_one_scalar_batch(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, default_device_context: bool
 ) -> None:
     """Logging preserves mixed metric means without per-value host copies."""
     original_cpu = torch.Tensor.cpu
     transferred_shapes = []
+    cpu_call_depth = 0
 
     def counted_cpu(value: torch.Tensor, *args, **kwargs):
-        transferred_shapes.append(tuple(value.shape))
-        return original_cpu(value, *args, **kwargs)
+        nonlocal cpu_call_depth
+        # DeviceContext redispatches through this Python wrapper. Count the
+        # outer request once; two sequential .cpu() calls must still count twice.
+        if cpu_call_depth == 0:
+            transferred_shapes.append(tuple(value.shape))
+        cpu_call_depth += 1
+        try:
+            return original_cpu(value, *args, **kwargs)
+        finally:
+            cpu_call_depth -= 1
 
     monkeypatch.setattr(torch.Tensor, "cpu", counted_cpu)
     trainer = Trainer.__new__(Trainer)
-    values = trainer._pack_log_dicts(
-        {
-            "rewards": {
-                "progress": torch.tensor([1.0, 3.0], requires_grad=True),
-                "other": [1, 5],
-            },
-            "metrics": {
-                "grasped": torch.tensor([True, False]),
-                "length": torch.tensor([1, 3], dtype=torch.int64),
-                "noncontiguous": torch.arange(8.0).reshape(2, 4)[:, ::2],
-                "empty": torch.empty(0),
-                "unsupported": "not a numeric metric",
-            },
-        }
-    )
+    with torch.device("cpu") if default_device_context else nullcontext():
+        values = trainer._pack_log_dicts(
+            {
+                "rewards": {
+                    "progress": torch.tensor([1.0, 3.0], requires_grad=True),
+                    "other": [1, 5],
+                },
+                "metrics": {
+                    "grasped": torch.tensor([True, False]),
+                    "length": torch.tensor([1, 3], dtype=torch.int64),
+                    "noncontiguous": torch.arange(8.0).reshape(2, 4)[:, ::2],
+                    "empty": torch.empty(0),
+                    "unsupported": "not a numeric metric",
+                },
+            }
+        )
     assert list(values) == [
         "rewards/progress",
         "rewards/other",
@@ -142,6 +154,13 @@ def test_trainer_metric_means_transfer_only_one_scalar_batch(
     assert list(values.values())[:-1] == [2.0, 3.0, 0.5, 2.0, 3.0]
     assert math.isnan(values["metrics/empty"])
     assert transferred_shapes == [(5,)]
+    # A subsequent real batch remains a separate request: redispatch handling
+    # must not hide another transfer or retain its reentrancy state.
+    with torch.device("cpu") if default_device_context else nullcontext():
+        assert trainer._pack_log_dicts({"metrics": {"next": torch.ones(2)}}) == {
+            "metrics/next": 1.0
+        }
+    assert transferred_shapes == [(5,), (1,)]
 
 
 @pytest.mark.parametrize("logging_enabled", [True, False])

@@ -8,12 +8,20 @@
 | Registration, package discovery and construction contracts | `embodichain/lab/sim/sensors/registry.py` |
 | Explicit clock and joint-state service | `embodichain/lab/sim/sensors/context.py` → `SensorContext` |
 | Exported sensor/config names | `embodichain/lab/sim/sensors/__init__.py` |
+| Joint encoder and relative frame transforms | `embodichain/lab/sim/sensors/state.py` |
+| PVA and IMU, including opt-in native acceleration | `embodichain/lab/sim/sensors/inertial.py` |
+| Six-axis parent reaction at a child link | `embodichain/lab/sim/sensors/joint_wrench.py` |
+| Collision/visual ray provider, terrain scan, geometric LiDAR and ray depth | `embodichain/lab/sim/sensors/ray.py` |
+| Curved pad geometry and indentation depth | `embodichain/lab/sim/sensors/tactile_indentation.py` |
+| Official VLP-16 preset | `extensions/embodichain_sensors/vlp16.py` and the `embodichain.sensors` entry point |
 | Image configuration, data flags, extrinsics | `embodichain/lab/sim/sensors/camera.py` → `CameraCfg`, `Camera` |
 | UID-scoped deployment calibration | `embodichain/lab/gym/utils/_component_composition.py`; [configuration ownership](../env-framework/configuration.md#reusable-gym-deployment-components) |
 | Two-eye transforms and attachment | `embodichain/lab/sim/sensors/stereo.py` → `StereoCameraCfg`, `StereoCamera` |
 | Parent-name resolution | `embodichain/lab/sim/sensors/attachment.py` → `resolve_parent_nodes` |
 | Creation, preparation and attachment coordination | `embodichain/lab/sim/sim_manager.py` → `add_sensor`, `prepare` |
 | Contact query adaptation and actor metadata | `embodichain/lab/sim/sensors/contact/sensor.py` |
+| Planar contact array and measurement validity | `embodichain/lab/sim/sensors/contact_grid.py` |
+| Contact resultant reference sensor | `embodichain/lab/sim/sensors/contact_resultant.py` |
 | Joint and contact acquisition windows | `embodichain/lab/sim/sensors/contact/observation.py` |
 | Native support observations and pair ownership | `embodichain/lab/sim/sensors/support_observation.py` |
 | Fixed contact-buffer scatter | `embodichain/lab/sim/sensors/contact/_warp/scatter.py` |
@@ -74,15 +82,31 @@ Builtin camera/contact constructors retain their owner adapters. Existing
 use the registry. Context factories returning Camera instances also use manager
 parent binding and cleanup on attachment failure. StereoCamera subclasses and
 aliases remain unsupported for Gaussian capture, regardless of creation order.
-USD-mounted cameras using context or callable factories remain queued until
-explicit `prepare()`, allowing multiple USD declarations before finalization.
-Pending names are reserved; factory failures retain declarations for retry and
-removal cancels them. Query constructed sensor handles after preparation.
-Robot removal cancels only pending cameras whose qualified parent belongs to
-that robot; a canceled sensor UID may be reused by a different owner.
-Generalized non-camera mounting, sampling periods and output
-descriptors are separate runtime-contract work, not guarantees of this initial
-extension path. The independently installable example and usage instructions
+USD-mounted context-backed sensors and cameras using callable factories remain
+queued until explicit `prepare()`, allowing multiple USD declarations before
+finalization. Pending names are reserved; factory failures retain declarations
+for retry and removal cancels them. Query constructed sensor handles after
+preparation. Robot removal cancels pending sensors whose qualified parent
+belongs to that robot. A canceled sensor UID may be reused by a different owner.
+
+Context-backed sensors can declare a physical `mount` and read the current
+arena-relative transform through `BaseSensor.get_mount_pose()`. Allocate
+topology-scoped resources in `on_bind()` and release them in `on_unbind()`.
+The manager calls these around scene changes and removal.
+
+Context-backed sensors can opt into completed physics or camera-group render
+sampling with `sample_phase` and `sample_period`. Read the most recent sample
+and per-row validity from `get_sample_metadata()`. Reading does not advance
+sampling. A camera advances only after its own groups render. A failed
+acquisition invalidates the current output and leaves the boundary retryable.
+Legacy Gym-driven camera and contact acquisition keeps its existing ordering.
+
+Default and Newton frame state includes the current body-local center-of-mass
+offset as `linear_velocity_offset` for moving rigid bodies and articulation
+links. PVA and IMU transport the reported linear velocity to the configured
+sensor point before taking finite differences.
+
+The independently installable example and usage instructions
 live in
 [external joint encoder](../../../examples/sim/sensors/external_joint_encoder/README.md).
 
@@ -101,13 +125,14 @@ their per-instance native paths. Shared image targets already batch their view
 buffers; ordered publication keeps preceding parameter writes visible to the
 next photograph. Stereo calibration and logical center poses remain sensor-owned.
 
-Robot-mounted cameras are declared in `RobotCfg.sensors` with robot-local
-parent links. `SimulationManager.add_robot()` initializes them only when the
+Robot-mounted sensors are declared in `RobotCfg.sensors` with robot-local
+parent links. Cameras use their existing extrinsics; context-backed nonvisual
+sensors use `mount`. `SimulationManager.add_robot()` initializes them only when the
 robot's sensor switch is enabled, qualifies parents using the final robot UID,
 and registers them through `add_sensor()`. Sensor UIDs remain scene-wide;
 multiple robots need distinct sensor UIDs. Camera creation and rebuilds retain
 the same manager-owned lifecycle. Removing a robot destroys its automatically
-initialized cameras before rebuilding the physical scene.
+initialized mounted sensors before rebuilding the physical scene.
 
 For a configured Gym deployment, the manager plans Scene-owned groups before
 creating robot-mounted and independent cameras. Cameras with matching
@@ -208,7 +233,74 @@ quota are integration contracts. Generic image tiling belongs to
 `embodichain/compute/image/_warp/tiling.py`; compatibility exports under
 `utils.warp.kernels` do not change those owners.
 
+ContactGrid bins native contact rows on the mount-local XY plane. Its count
+and impulse vectors are per cell. Read component validity, report completeness
+and the native impulse duration before consuming or normalizing a sample.
+The contact query owns topology and loss semantics. The fixed grid scatter
+kernel is private to the sensor adapter.
+
 ## Focused validation
+
+TactileIndentation uses the ray provider's topology and owner poses, with
+two outward-facing exit tests on each closed, consistently wound target. Its optional
+conservative pad-sphere/local-AABB gate has one candidate flag per environment
+and target and no truncated queue. Probe normals, distances and shape IDs
+describe geometric overlap. Profile the full sensing step before choosing
+candidate screening for workloads with all rows active.
+
+Set `TactileIndentationCfg.rgb` to publish normalized RGB on the depth grid.
+Calibrate the background and the two slope-to-RGB gains for the device. The
+gains follow increasing probe columns and rows. Planar, spherical-cap, and
+explicit row-major grids use the physical distance between neighboring
+probes for each directional slope. A no-contact pixel and a reset row return their calibrated
+background. RGB shares the depth sample and consumes no native render pass.
+Gym's `preview_sensor_data(name, data_type="rgb")` reads the latest valid
+scheduled sample for the chosen environment. Legacy camera preview still
+refreshes explicitly.
+
+Set `TactileIndentationCfg.shear` to estimate per-cell compressive and shear
+forces in newtons and elastic displacement in meters. It drives the elastic
+state from completed-sample relative probe motion against the winning collider,
+caps shear at the Coulomb limit, and clears state on a miss, collider change,
+or reset. Carry stored deformation into the current tangent axes before applying
+relative probe travel. With shear enabled, the scheduler updates all fields and the shear
+history at the same sample boundary. Direct `update()` retains the completed
+sample. The first sample of a contact supplies normal force and starts with
+zero shear. The tangent axes are mount +X projected onto the probe plane
+(+Y when close to the normal) and the cross product of the normal and that
+tangent. Ordered `marker_indices` expose a sparse subset of the same relative
+gel displacement. These estimates share the clipped geometric depth and
+are independent from the native impulse reported by ContactGrid.
+
+Set `TactileIndentationCfg.surface` to project the last external Newton
+hydroelastic collision pass onto the same probes. It requires a DexSim build
+with `Scene.get_hydroelastic_contact_capabilities()` and surface output enabled in
+the solver's collision pipeline. Mount on a physical pad body or articulation
+link in every arena. `target_uids` identify the opposing collision actors.
+The provider binds shape IDs for the current topology and uses the
+collision-input pad pose from the owned snapshot. Regular layouts bin face
+centroids in pad XY and check normal clearance. Explicit layouts select the
+nearest probe within `surface.max_distance`.
+
+The surface grid reports face count and minimum signed, margin-relative
+separation per cell. `surface_complete` distinguishes recorded empty cells
+from a missing or capacity-truncated snapshot. `surface_generation` and
+`surface_substep` identify the solver collision pass. Model rebuilds clear the
+output and rebind shapes before the next completed sample. Geometric depth,
+RGB, and the elastic load model keep their existing sampling contracts.
+Pads sampled together share one full-capacity Scene copy per completed step.
+
+Ray queries default to cooked collision shapes. Select `geometry_source: visual`
+for authored procedural or array-backed render geometry of rigid and visual
+objects. Visual queries use authored surfaces with no renderer or shading
+dependency. Meshes and static poses are cached per scene topology revision.
+Use kinematic targets for movable geometry. Target mesh topology, vertex data
+and scale must be shared across replicas. VLP16 adds the nominal firing-order
+elevation table through the bundled entry point. Replace an asset to change cached
+geometry. Each dynamic instance supplies its current arena-frame pose.
+On CUDA, dynamic rigid ray targets convert packed position and quaternion
+poses to matrices in one launch on the caller's stream. Collision offsets and
+topology checks stay in the ray provider.
 
 | Changed boundary | Existing coverage |
 |---|---|

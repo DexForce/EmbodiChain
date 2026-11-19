@@ -33,6 +33,16 @@ Offline job preflight, run, resume and verified inspection commands.
 
    main
 
+embodichain.compute.geometry
+----------------------------
+
+Chunked planar distances preserve tensor batch axes, dtype and device.
+
+.. currentmodule:: embodichain.compute.geometry
+
+.. autofunction:: signed_distance_to_polygon
+
+
 embodichain.compute.geometry.particles
 --------------------------------------
 
@@ -43,6 +53,16 @@ Deterministic lattice sampling for primitive, revolved and closed mesh fill volu
    embodichain.compute.geometry.particles.sample_volume_particles
 
 .. autofunction:: embodichain.compute.geometry.particles.sample_volume_particles
+
+embodichain.compute.geometry.polygon
+------------------------------------
+
+Signed distances support concave planar outlines and bounded point-edge intermediates.
+
+.. currentmodule:: embodichain.compute.geometry.polygon
+
+.. autofunction:: signed_distance_to_polygon
+
 
 embodichain.compute.geometry.shading
 ------------------------------------
@@ -59,6 +79,28 @@ simulator, and does not establish collision or manifold validity.
    has_inconsistent_shading_normals
 
 .. autofunction:: has_inconsistent_shading_normals
+
+embodichain.compute.kinematics
+------------------------------
+
+URDF gravity feedforward evaluates encoder coordinates in an explicit root frame.
+
+.. currentmodule:: embodichain.compute.kinematics
+
+.. autoclass:: URDFGravityCompensation
+   :members: torques
+
+
+embodichain.compute.kinematics.gravity
+--------------------------------------
+
+Cached URDF kinematics and mass/COM data provide simulator-independent holding torques.
+
+.. currentmodule:: embodichain.compute.kinematics.gravity
+
+.. autoclass:: URDFGravityCompensation
+   :members: torques
+
 
 embodichain.compute.kinematics.ik_path
 --------------------------------------
@@ -113,6 +155,13 @@ asset definitions can import the dataset base without circular initialization.
    get_data_path
    list_default_materials
    get_default_material_info
+
+Prepared robot snapshots preserve resource trees and source notices for relocatable runs.
+
+.. currentmodule:: embodichain.data
+
+.. autofunction:: snapshot_urdf_resources
+
 
 embodichain.data.assets.demo_assets
 -----------------------------------
@@ -320,6 +369,16 @@ not change geometry or UVs.
 
 .. autofunction:: get_default_material_info
    :no-index:
+
+embodichain.data.resources
+--------------------------
+
+Filesystem resource snapshots retain relative mesh, material and texture references without simulator imports.
+
+.. currentmodule:: embodichain.data.resources
+
+.. autofunction:: snapshot_urdf_resources
+
 
 embodichain.data_pipeline
 -------------------------
@@ -5156,6 +5215,140 @@ qualified DriverOpeningBinding type must be rebuilt with its Atomic owner.
 .. autoclass:: DriverOpeningBinding
    :members:
 
+embodichain.toolkits.assembly
+-----------------------------
+
+Public assembly generation and portable manifests preserve one physical body with multiple convex collision pieces. Generator dependencies are optional at manifest load time. GenSim and simulation integrations consume this toolkit; its data model does not import either runtime.
+
+See :doc:`Precision Assembly <../features/toolkits/precision_assembly>` for
+functional entry points, installation, native demo recordings and research attribution.
+
+.. currentmodule:: embodichain.toolkits.assembly
+
+.. autosummary::
+
+   AssemblyAsset
+   AssemblyBody
+   AssemblyGeometry
+   AssemblyJoint
+   MJFIT_REVISION
+   build_assembly
+   build_many_pegs
+   import_mjcf
+   sample_assemblies
+   load_mjfit
+
+
+
+
+embodichain.toolkits.assembly.native
+------------------------------------
+
+Prepare native rigid and hinge configurations from portable assembly assets.
+File-backed appearance is optional and preserves source collision ownership.
+
+.. currentmodule:: embodichain.toolkits.assembly.native
+
+.. autosummary::
+
+   to_rigid_config
+   to_rigid_configs
+   to_articulation_configs
+   prepare_native_configs
+
+.. autofunction:: to_rigid_config
+.. autofunction:: to_rigid_configs
+.. autofunction:: to_articulation_configs
+.. autofunction:: prepare_native_configs
+
+embodichain.toolkits.assembly.adapter
+-------------------------------------
+
+Pinned public mjfit generation, deterministic sampling and bounded MuJoCo conversion. Source mesh frames and mass tensors are converted at this boundary.
+
+.. currentmodule:: embodichain.toolkits.assembly.adapter
+
+.. autosummary::
+
+   MJFIT_REVISION
+   build_assembly
+   import_mjcf
+   sample_assemblies
+   load_mjfit
+
+
+
+
+embodichain.toolkits.assembly.many
+----------------------------------
+
+The official many-pegs grid preserves the public sampler's indexed seed,
+per-cell configuration and prefixed body ownership in one portable scene.
+Optional curved-outline precision settings record both the original sample
+and the actual public generator configuration. The grid does not represent
+independent simulation arenas.
+
+.. currentmodule:: embodichain.toolkits.assembly.many
+
+.. autosummary::
+
+   build_many_pegs
+
+
+
+
+embodichain.toolkits.assembly.model
+-----------------------------------
+
+Self-contained body-local geometry, joint attachment and mass-property records with content-addressed, checksummed serialization. Native configuration conversion is owned by ``embodichain.toolkits.assembly.native``.
+
+.. currentmodule:: embodichain.toolkits.assembly.model
+
+.. autosummary::
+
+   AssemblyGeometry
+   AssemblyJoint
+   AssemblyBody
+   AssemblyAsset
+
+
+
+
+embodichain_benchmarks.assembly.precision
+-----------------------------------------
+
+Independent USD geometry/mass acceptance and passive source/native simulation measurements. Missing overflow accounting remains unverified rather than a precision certification. ``PrecisionRunCfg.newton_solver`` explicitly selects MuJoCo Warp or DexUni; ``solver`` retains the MuJoCo algorithm. Native results retain the prepared family and actual SDK dispatch.
+
+.. currentmodule:: embodichain_benchmarks.assembly.precision
+
+.. autosummary::
+
+   PrecisionRunCfg
+   compare_usd_geometry
+   run_passive_probe
+
+
+
+
+embodichain_benchmarks.assembly.probes
+--------------------------------------
+
+Circle/square analytic clearance oracles, state-controlled S0 contact scans and
+real slide/hinge S2-S4 equilibrium probes. Native and source runners preserve
+the same force/torque and geometry; unmeasured health limits qualification.
+
+.. currentmodule:: embodichain_benchmarks.assembly.probes
+
+.. autosummary::
+
+   AnalyticPegGeometry
+   ConstrainedProbeCfg
+   ConstrainedProbeDefinition
+   prepare_probe
+   run_reference_probe
+   run_native_probe
+   run_warp_probe
+
 Shared locomotion observation functor
 ------------------------------------
 
@@ -5165,6 +5358,45 @@ existing locomotion configuration name while implementations move into a package
 .. currentmodule:: embodichain.lab.gym.envs.managers.observations
 
 .. autofunction:: velocity_locomotion_observation
+
+
+   assembly_robot_reference
+embodichain_tasks.manipulation.assembly.assets
+----------------------------------------------
+
+Public-generator composition of held pegs, perforated gears and nuts with physically mating fixtures. Task topology changes are recorded in asset provenance.
+
+.. currentmodule:: embodichain_tasks.manipulation.assembly.assets
+
+.. autosummary::
+
+   build_task_assembly
+
+
+
+Shared observation functors
+---------------------------
+
+The observation manager resolves general, assembly and locomotion functors
+through one package. Assembly contact labels and privileged state are intended
+for training; policy configuration controls which observations reach the actor.
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.observations
+
+.. autosummary::
+
+   velocity_locomotion_observation
+
+.. autofunction:: velocity_locomotion_observation
+
+
+Assembly task component callables
+--------------------------------
+
+.. toctree::
+   :maxdepth: 1
+
+   assembly_components
 
 
 Stability execution ownership
@@ -6075,3 +6307,199 @@ contracts. The package-level imports above are the convenient extension API.
    discover_sensor_plugins
    get_sensor_registration
    list_sensor_types
+
+
+Reference state sensors
+-----------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   JointEncoder
+   JointEncoderCfg
+   FrameTransform
+   FrameTransformCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.state
+
+.. autosummary::
+
+   JointEncoder
+   JointEncoderCfg
+   FrameTransform
+   FrameTransformCfg
+
+
+Inertial sensors
+----------------
+
+PVA and IMU use finite differences by default. Set
+``acceleration_source="native"`` for dynamic rigid bodies on CUDA Newton
+MuJoCo Warp with RNE enabled. ``"auto"`` selects native acquisition when the
+configured target supports it and finite differences otherwise. Native
+acceleration is the final solver substep result, transported from the
+center of mass to the sensor point. After a reset it becomes valid on the next
+sampled physics step. The ``acceleration_valid`` descriptor reports the bound source.
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   PVA
+   PVACfg
+   IMU
+   IMUCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.inertial
+
+.. autosummary::
+
+   PVA
+   PVACfg
+   IMU
+   IMUCfg
+
+
+Joint reaction wrench
+---------------------
+
+Enable ``NewtonPhysicsCfg.enable_joint_wrenches`` before preparing a CUDA
+Newton MuJoCo Warp scene with RNE enabled. A ``JointWrench`` selects a native
+parent/child articulation joint. It reads the final solver substep's reaction
+exerted by the parent on the child, expressed at the configured sensor
+offset from the child link origin. Force is in newtons and torque in
+newton-metres. Both vectors use sensor axes. Check ``wrench_valid`` after
+initialization and reset.
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   JointWrench
+   JointWrenchCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.joint_wrench
+
+.. autosummary::
+
+   JointWrench
+   JointWrenchCfg
+
+
+Planar contact grid
+-------------------
+
+Contact grids bin the latest solver contact report into a mounted metric
+surface. Use the per-quantity validity fields and the native impulse duration
+when consuming the outputs.
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   ContactGrid
+   ContactGridCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact_grid
+
+.. autosummary::
+
+   ContactGrid
+   ContactGridCfg
+
+
+Contact-resultant sensor
+------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   ContactResultant
+   ContactResultantCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact_resultant
+
+.. autosummary::
+
+   ContactResultant
+   ContactResultantCfg
+
+
+Batched triangle ray queries
+----------------------------
+
+.. currentmodule:: embodichain.compute.geometry.raycast
+
+.. autosummary::
+
+   TriangleRayMesh
+   cast_rays
+
+
+Tactile indentation
+-------------------
+
+Tactile indentation measures geometric overlap along calibrated probes on
+planar or curved surfaces. The geometry source and clipped depth are published
+independently from contact force or optical images.
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   TactileIndentation
+   TactileIndentationCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.tactile_indentation
+
+.. autosummary::
+
+   TactileIndentation
+   TactileIndentationCfg
+
+
+Terrain scan
+------------
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   RayScene
+   TerrainScan
+   TerrainScanCfg
+   RayLidar
+   RayLidarCfg
+   RayDepthCamera
+   RayDepthCameraCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.ray
+
+.. autosummary::
+
+   RayScene
+   TerrainScan
+   TerrainScanCfg
+   RayLidar
+   RayLidarCfg
+   RayDepthCamera
+   RayDepthCameraCfg
+
+
+Official sensor presets
+-----------------------
+
+.. currentmodule:: embodichain_sensors
+
+.. autosummary::
+
+   VLP16Cfg
+
+.. currentmodule:: embodichain_sensors.vlp16
+
+.. autosummary::
+
+   VLP16Cfg
+   VLP16_REGISTRATION

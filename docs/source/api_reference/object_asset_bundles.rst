@@ -39,6 +39,7 @@ against its registered MD5 by the shared dataset loader.
    PlasticTray
    WaterBasin
    Drawer
+   BedsideCabinet
    Cow
    BakeTextureObj
    DrawerUSD

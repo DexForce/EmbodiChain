@@ -37,6 +37,7 @@ pytestmark = pytest.mark.no_sim
         ["gensim"],
         ["gensim", "services"],
         ["gensim", "asset"],
+        ["gensim", "image", "clean-robot"],
         ["gensim", "scene"],
         ["gensim", "task"],
         ["gensim", "asset", "ingest"],
