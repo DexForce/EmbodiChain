@@ -261,3 +261,23 @@ def test_whole_body_metric_requires_pose_and_joint_acceptance() -> None:
     assert torch.allclose(
         evaluation.component_errors["joint_max_abs"], torch.tensor([0.01, 0.2])
     )
+
+
+def test_boundary_policy_snapshot_preserves_independent_terminal_contract():
+    from dataclasses import replace
+
+    original = replace(
+        TrackingPolicy.timed(settle_duration=0.4),
+        boundary_stop=True,
+        boundary_position_tolerance=0.002,
+        boundary_velocity_tolerance=0.01,
+        boundary_timeout=2.0,
+    )
+    owned = original.snapshot()
+    assert owned == original and owned is not original
+    assert owned.terminal is not original.terminal
+    assert owned.terminal.settle_duration == 0.4
+    with pytest.raises(TypeError):
+        replace(original, boundary_stop=1)
+    with pytest.raises(ValueError):
+        replace(original, boundary_timeout=float("nan"))

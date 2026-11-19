@@ -160,6 +160,20 @@ def _prepare_deployment(deployment: Path, output: Path) -> Path:
             {owner: snapshot[owner]}, base_dir=deployment.parent
         ).config
     (output / "environment.yaml").write_text(yaml.safe_dump(physical, sort_keys=False))
+    policy_path = snapshot.get("task_program", {}).get("execution_policy")
+    if policy_path is not None:
+        from embodichain.lab.task_program.integrations._configured_composition import (
+            _resolve_execution_policy,
+        )
+
+        _, policy = _resolve_execution_policy(policy_path, base_dir=deployment.parent)
+        policy = deepcopy(policy)
+        policy.setdefault("tracking", {"kind": "timed"}).setdefault(
+            "boundary_stop", True
+        )
+        boundary_policy = output / "execution_policy.yaml"
+        boundary_policy.write_text(yaml.safe_dump(policy, sort_keys=False))
+        snapshot["task_program"]["execution_policy"] = str(boundary_policy.resolve())
     snapshot["id"] += "-Expansion-v1"
     path = output / "deployment.json"
     atomic_json(path, snapshot)

@@ -76,6 +76,7 @@ class ExecutionEventKind(str, Enum):
     REPLANNED = "replanned"
     TRACKING_DIVERGED = "tracking_diverged"
     TRACKING_FEEDBACK_FAILED = "tracking_feedback_failed"
+    BOUNDARY_DIAGNOSTIC = "boundary_diagnostic"
     TERMINAL_ACCEPTANCE_PENDING = "terminal_acceptance_pending"
     TERMINAL_ACCEPTANCE_FAILED = "terminal_acceptance_failed"
     DYNAMIC_GOAL_CHANGED = "dynamic_goal_changed"
@@ -422,6 +423,10 @@ class ExecutionSession:
         )
         self._terminal_started_at: float | None = None
         self._terminal_pending_reported = False
+        self._boundary_samples = 0
+        self._boundary_stable = None
+        self._boundary_observed_at = None
+        self._boundary_position = None
         self._eligible = (
             torch.ones_like(self._last_command_mask)
             if eligible_mask is None
@@ -1212,6 +1217,115 @@ class ExecutionSession:
                 f"Unsupported terminal acceptance {type(terminal).__name__}."
             )
 
+        # A normal task handoff may retain a tracking residual even though its
+        # nominal endpoint velocity is zero. Keep the exact validated terminal
+        # command (including grasp targets) until the selected motion joints settle.
+        boundary = plan.tracking_policy
+        ids = (
+            [
+                i
+                for endpoint in self._requests[self._invocation_index].binding.endpoints
+                if endpoint.endpoint_id == "motion"
+                for i in endpoint.joint_ids
+            ]
+            if boundary.boundary_stop
+            else []
+        )
+        ids = list(dict.fromkeys(ids))
+        # Non-motion commands retain their existing terminal/effect semantics.
+        if ids and plan.joint_trajectory is not None:
+            import json
+
+            target = plan.joint_trajectory.positions[:, -1, ids]
+            measured = self._context.robot.qpos[:, ids]
+            velocity = self._context.robot.qvel[:, ids]
+            error = (target - measured).abs().amax(dim=1)
+            native_speed = velocity.abs().amax(dim=1)
+            speed = native_speed
+            timestamp = self._context.robot.timestamp
+            if (
+                self._boundary_position is not None
+                and timestamp > self._boundary_observed_at
+            ):
+                speed = (
+                    (
+                        (measured - self._boundary_position)
+                        / (timestamp - self._boundary_observed_at)
+                    )
+                    .abs()
+                    .amax(dim=1)
+                )
+            elif self._boundary_position is None:
+                speed = torch.full_like(native_speed, float("inf"))
+            finite = torch.isfinite(error) & torch.isfinite(native_speed)
+            ready = (
+                finite
+                & (error <= boundary.boundary_position_tolerance)
+                & (speed <= boundary.boundary_velocity_tolerance)
+            )
+            if self._boundary_stable is None:
+                self._boundary_stable = torch.zeros_like(error, dtype=torch.long)
+            if self._boundary_observed_at != self._context.robot.timestamp:
+                self._boundary_stable = torch.where(
+                    ready & execution_mask, self._boundary_stable + 1, 0
+                )
+                self._boundary_observed_at = self._context.robot.timestamp
+                self._boundary_position = measured.clone()
+            pending = execution_mask & (self._boundary_stable < 2)
+            timed_out = pending & (elapsed_terminal >= boundary.boundary_timeout)
+            invalid = execution_mask & ~finite
+            if (
+                self._boundary_samples == 0
+                or not pending.any()
+                or timed_out.any()
+                or invalid.any()
+            ):
+                events.append(
+                    self._event(
+                        ExecutionEventKind.BOUNDARY_DIAGNOSTIC,
+                        execution_mask,
+                        json.dumps(
+                            {
+                                "joint_ids": ids,
+                                "elapsed_s": elapsed_terminal,
+                                "samples": self._boundary_samples,
+                                "position_error": [
+                                    v if math.isfinite(v) else None
+                                    for v in error.detach().cpu().tolist()
+                                ],
+                                "measured_speed": [
+                                    v if math.isfinite(v) else None
+                                    for v in speed.detach().cpu().tolist()
+                                ],
+                                "native_speed": [
+                                    v if math.isfinite(v) else None
+                                    for v in native_speed.detach().cpu().tolist()
+                                ],
+                                "velocity_source": "control_boundary_position_difference",
+                                "position_tolerance": boundary.boundary_position_tolerance,
+                                "velocity_tolerance": boundary.boundary_velocity_tolerance,
+                                "ready": ready.detach().cpu().tolist(),
+                                "timeout": timed_out.detach().cpu().tolist(),
+                            },
+                            allow_nan=False,
+                        ),
+                    )
+                )
+            self._boundary_samples += 1
+            if (timed_out | invalid).any():
+                events.extend(
+                    self._fail_tracking_feedback(
+                        timed_out | invalid,
+                        "Boundary takeover did not settle within its bounded timeout.",
+                    )
+                )
+                if self._status is not ExecutionStatus.RUNNING:
+                    return self._tick_result(command=None, events=events)
+                execution_mask = self._pending & plan.plan_success
+                pending &= execution_mask
+                terminal_pending &= execution_mask
+            terminal_pending |= pending
+
         if terminal_pending.any():
             if not self._terminal_pending_reported:
                 events.append(
@@ -1358,6 +1472,10 @@ class ExecutionSession:
         self._last_tracking_frame = None
         self._last_command_mask.zero_()
         self._tracking_violation_counts.zero_()
+        self._boundary_samples = 0
+        self._boundary_stable = None
+        self._boundary_observed_at = None
+        self._boundary_position = None
         self._terminal_acceptance_counts.zero_()
         self._terminal_started_at = None
         self._terminal_pending_reported = False

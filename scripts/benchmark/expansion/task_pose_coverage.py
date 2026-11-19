@@ -115,6 +115,8 @@ def _worker(args) -> None:
         if path.startswith(
             (
                 "embodichain/lab/expansion/",
+                "embodichain/lab/sim/atomic_skills/",
+                "embodichain/lab/gym/envs/task_program/",
                 "embodichain/lab/task_program/",
                 "extensions/embodichain_tasks/configs/tasks/manipulation/workspace_pose_pick_place/",
                 "scripts/benchmark/expansion/task_pose_coverage.py",

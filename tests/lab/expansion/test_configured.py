@@ -179,3 +179,54 @@ def test_deployment_snapshot_preserves_component_relative_assets(tmp_path, owner
     resolved = resolve_gym_components(snapshot, base_dir=derived.parent).config
     assert resolved["rigid_object"][0]["shape"]["fpath"] == str(mesh)
     assert {p.name: p.read_bytes() for p in source.iterdir()} == before
+
+
+@pytest.mark.parametrize("selector", ["path", "component", "inline"])
+def test_expansion_boundary_policy_preserves_selector_and_original_file(
+    tmp_path, selector
+):
+    import json
+    from pathlib import Path
+    import yaml
+    from embodichain.lab.expansion.task_program_jobs import _prepare_deployment
+
+    root = Path(__file__).resolve().parents[3]
+    source = (
+        root
+        / "extensions/embodichain_tasks/configs/components/execution_policies/trajectory_open_loop.yaml"
+    )
+    policy = yaml.safe_load(source.read_text())
+    owned = tmp_path / "policy.yaml"
+    owned.write_text(yaml.safe_dump(policy))
+    before = owned.read_bytes()
+    selection = str(owned)
+    if selector == "component":
+        selection = {
+            "component": str(owned),
+            "overrides": {"motion": {"sample_count": 23}},
+        }
+    if selector == "inline":
+        selection = {"inline": policy}
+    env = tmp_path / "env.yaml"
+    env.write_text("physics: default\n")
+    deployment = tmp_path / "task.yaml"
+    deployment.write_text(
+        yaml.safe_dump(
+            {
+                "id": "test",
+                "environment": {"component": str(env)},
+                "task_program": {"execution_policy": selection},
+            }
+        )
+    )
+    output = tmp_path / "out"
+    output.mkdir()
+    prepared = json.loads(_prepare_deployment(deployment, output).read_text())
+    result = yaml.safe_load(
+        Path(prepared["task_program"]["execution_policy"]).read_text()
+    )
+    assert result["tracking"]["boundary_stop"] is True
+    assert result["motion"]["sample_count"] == (
+        23 if selector == "component" else policy["motion"]["sample_count"]
+    )
+    assert owned.read_bytes() == before

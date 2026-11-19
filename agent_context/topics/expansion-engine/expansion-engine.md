@@ -222,3 +222,11 @@ The report distinguishes cumulative additions from independent cohorts; observed
 bins are not a feasible-volume certificate. The reader uses existing artifact
 validation dependencies but creates no World. See
 [distribution usage](../../../embodichain/lab/expansion/distribution.md).
+
+Native configured jobs snapshot execution policies through the canonical selector
+resolver and default `tracking.boundary_stop` on, preserving explicit opt-out and
+component overrides. They do not mutate authored policy files or replace physical
+validators. The Atomic terminal gate owns additional real command frames; these
+consume ordinary rollout budgets and T+1 evidence. See
+[invocation handoff](../atomic-actions/execution.md#tolerance-bounded-invocation-handoff)
+and [boundary diagnostics](../../../examples/expansion/engine/skill-boundaries.md).

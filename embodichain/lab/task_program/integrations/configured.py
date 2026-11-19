@@ -1923,6 +1923,26 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
 
 
 def _decode_tracking_policy(value: object, *, path: str) -> TrackingPolicy:
+    from dataclasses import replace
+
+    if not isinstance(value, Mapping):
+        return _decode_tracking_policy_base(value, path=path)
+    config = dict(value)
+    boundary = {
+        name: config.pop(name)
+        for name in tuple(config)
+        if name
+        in {
+            "boundary_stop",
+            "boundary_position_tolerance",
+            "boundary_velocity_tolerance",
+            "boundary_timeout",
+        }
+    }
+    return replace(_decode_tracking_policy_base(config, path=path), **boundary)
+
+
+def _decode_tracking_policy_base(value: object, *, path: str) -> TrackingPolicy:
     """Decode one allowlisted tracking policy."""
     common = _mapping(
         value,

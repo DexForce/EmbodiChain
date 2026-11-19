@@ -3528,3 +3528,73 @@ def test_failed_effect_plan_retries_without_requesting_effect_verification() -> 
     assert any(
         event.kind is ExecutionEventKind.RECOVERY_EXHAUSTED for event in failed.events
     )
+
+
+def test_boundary_stop_keeps_terminal_target_until_distinct_stable_observations():
+    engine, _ = _engine()
+    invocation = replace(
+        _invocation(engine),
+        tracking_policy=replace(TrackingPolicy.timed(), boundary_stop=True),
+    )
+    session = engine.start((invocation,), _context(0.0, 0.0, 0.2, 0))
+    session.tick(_context(0.0, 0.0, 0.2, 0))
+    session.tick(_context(0.1, 0.0, 0.2, 0))
+    waiting = session.tick(_context(0.2, 0.19, 0.2, 0))
+    assert torch.allclose(_joint_positions(waiting.command), torch.full((1, 2), 0.2))
+    ready = _context(0.3, 0.2, 0.2, 0)
+    assert session.tick(ready).status is ExecutionStatus.RUNNING
+    assert session.tick(ready).status is ExecutionStatus.RUNNING
+    assert session.tick(_context(0.4, 0.2, 0.2, 0)).status is ExecutionStatus.RUNNING
+    assert session.tick(_context(0.5, 0.2, 0.2, 0)).status is ExecutionStatus.COMPLETED
+
+
+def test_boundary_timeout_does_not_keep_failed_rows_in_timed_hold():
+    engine, _ = _engine(batch_size=2)
+    invocation = replace(
+        _invocation(engine),
+        tracking_policy=replace(
+            TrackingPolicy.timed(settle_duration=2),
+            boundary_stop=True,
+            boundary_timeout=0.3,
+        ),
+    )
+    session = engine.start((invocation,), _context(0.0, (0.0, 0.0), (0.2, 0.2), 0))
+    session.tick(_context(0.0, (0.0, 0.0), (0.2, 0.2), 0))
+    session.tick(_context(0.1, (0.0, 0.0), (0.2, 0.2), 0))
+    session.tick(_context(0.2, (0.0, 0.2), (0.2, 0.2), 0))
+    session.tick(_context(0.3, (0.0, 0.2), (0.2, 0.2), 0))
+    result = session.tick(_context(0.5, (0.0, 0.2), (0.2, 0.2), 0))
+    assert result.eligible_mask.tolist() == [False, True]
+    assert result.command.active_mask.tolist() == [False, True]
+
+
+def test_nonfinite_boundary_speed_rejects_only_affected_row():
+    engine, _ = _engine(batch_size=2)
+    invocation = replace(
+        _invocation(engine),
+        tracking_policy=replace(TrackingPolicy.timed(), boundary_stop=True),
+    )
+    session = engine.start((invocation,), _context(0.0, (0.0, 0.0), (0.2, 0.2), 0))
+    session.tick(_context(0.0, (0.0, 0.0), (0.2, 0.2), 0))
+    session.tick(_context(0.1, (0.0, 0.0), (0.2, 0.2), 0))
+    context = _context(0.2, (0.2, 0.2), (0.2, 0.2), 0)
+    context = replace(
+        context,
+        robot=replace(
+            context.robot, qvel=torch.tensor([[float("nan"), 0.0], [0.0, 0.0]])
+        ),
+    )
+    result = session.tick(context)
+    assert result.eligible_mask.tolist() == [False, True]
+    assert result.command.active_mask.tolist() == [False, True]
+
+
+def test_boundary_stop_leaves_non_motion_command_contract_unchanged():
+    engine, _ = _destination_engine(destinations=("first",))
+    invocation = replace(
+        _destination_invocation(engine),
+        tracking_policy=replace(TrackingPolicy.timed(), boundary_stop=True),
+    )
+    session = engine.start((invocation,), _context(0.0, 0.0, 0.2, 0))
+    assert session.tick(_context(0.0, 0.0, 0.2, 0)).command is not None
+    assert session.tick(_context(0.1, 0.0, 0.2, 0)).status is ExecutionStatus.COMPLETED
