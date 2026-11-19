@@ -83,10 +83,11 @@ topics:
   - embodichain/lab/gym/utils/trajectory_state.py
   - embodichain/lab/gym/envs/managers/observation_types.py
   - embodichain/lab/gym/envs/demo.py
+  - embodichain/lab/gym/envs/wrapper/replay.py
   - embodichain/lab/gym/utils/profiler.py
   - extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/
   watch_paths: [embodichain/lab/gym/utils/, embodichain/lab/gym/envs/task_program/, embodichain/cli/, extensions/embodichain_tasks/,
-    tests/gym/envs/, embodichain/lab/evaluation/, tests/lab/evaluation/, tests/lab/scripts/test_evaluate_task_objective.py]
+    tests/gym/envs/, embodichain/lab/gym/envs/wrapper/replay.py, embodichain/lab/evaluation/, tests/lab/evaluation/, tests/lab/scripts/test_evaluate_task_objective.py]
   related_topics: [simulation-system, manager-functor, sim-visualization, task-programs, data-pipeline]
   status: active
 - id: manager-functor
@@ -440,13 +441,17 @@ topics:
 - id: atomic-actions
   title: Atomic Skills
   aliases: [atomic skill, atomic skills, atomic action, 原子技能, 原子动作]
-  keywords: [PlanningBudget, PlanningRecovery, ExecutionPlanLifecycle, AtomicSkillEngine, run-atomic-skill, PlanningContext, ExecutionSession, ExecutionRunner, SkillInvocation,
+  keywords: [annotate-trajectory, trajectory_annotator, 轨迹切分, 轨迹标注, fit-trajectory, --skill-sequence, scene-skill-fitting-inputs, SkillFitCfg, PickUpMotionGoal, SlideMotionGoal, TwistMotionGoal, HandOverMotionGoal, 视频关节轨迹拟合, 轨迹回填, PlanningBudget, PlanningRecovery, ExecutionPlanLifecycle, AtomicSkillEngine, run-atomic-skill, PlanningContext, ExecutionSession, ExecutionRunner, SkillInvocation,
     hand_geometry_cfgs, GraspOpeningTarget, prepare_grasp_query, scoped grasp preparation,
     RecoveryPolicy, HeldObjectGuardRequest, PhaseEffectGateRequest, articulation_geometry, control-grid retiming,
     AffordanceSamplingContext, AffordancePoseCandidates, AffordanceSample, affordance sampling]
   paths: [topics/atomic-actions/atomic-actions.md]
   source_of_truth:
   - embodichain/lab/sim/atomic_skills/engine.py
+  - embodichain/lab/sim/atomic_skills/fitting.py
+  - embodichain/toolkits/skill_fitting/
+  - embodichain/toolkits/trajectory_annotator/
+  - embodichain/data_pipeline/skill_fitting.py
   - embodichain/lab/sim/atomic_skills/core.py
   - embodichain/lab/sim/atomic_skills/goals.py
   - embodichain/lab/sim/atomic_skills/execution.py
@@ -459,7 +464,8 @@ topics:
   - embodichain/cli/run_example.py
   - examples/sim/atomic_skill/
   watch_paths: [embodichain/lab/sim/atomic_skills/, embodichain/lab/sim/atomic_actions/, tests/sim/atomic_skills/,
-    scripts/tutorials/atomic_skill/, tests/examples/atomic_skill/]
+    scripts/tutorials/atomic_skill/, examples/toolkits/trajectory_annotation/,
+    tests/toolkits/trajectory_annotator/, tests/examples/atomic_skill/]
   related_topics: [simulation-system, motion-planning, robot-system, ik-solvers, task-programs]
   status: active
 - id: task-programs

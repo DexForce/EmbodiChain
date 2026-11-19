@@ -27,6 +27,36 @@ from setup import get_example_data_files, get_package_dir, get_packages
 pytestmark = pytest.mark.no_sim
 
 
+def test_distribution_includes_trajectory_annotation_web_resources(
+    tmp_path: Path,
+) -> None:
+    """Installed annotation pages need their HTML, scripts and styles together."""
+    package = "embodichain.toolkits.trajectory_annotator"
+    source = package_setup.THIS_DIR / "embodichain/toolkits/trajectory_annotator"
+    distribution = Distribution(
+        {
+            "packages": [package],
+            "package_dir": {package: str(source)},
+            "package_data": package_setup.get_package_data(),
+            "include_package_data": False,
+            "script_name": str(package_setup.THIS_DIR / "setup.py"),
+        }
+    )
+    command = distribution.get_command_obj("build_py")
+    command.build_lib = str(tmp_path / "lib")
+    command.ensure_finalized()
+    command.run()
+    installed = Path(command.build_lib) / "embodichain/toolkits/trajectory_annotator"
+    for relative in (
+        "README.md",
+        "web/index.html",
+        "web/app.js",
+        "web/fitting.js",
+        "web/styles.css",
+    ):
+        assert (installed / relative).read_bytes() == (source / relative).read_bytes()
+
+
 def test_distribution_preserves_the_ordinary_examples_tree(tmp_path: Path) -> None:
     distribution = Distribution(
         {"data_files": get_example_data_files(), "script_name": "setup.py"}

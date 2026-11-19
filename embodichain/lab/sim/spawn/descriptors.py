@@ -427,7 +427,31 @@ def rigid_desc_from_cfg(
         collision.render_source_index = (
             None if cfg.visuals is not None or not renders else index
         )
-        collisions.append(collision)
+        mesh_collision = (
+            part_shape.collision if isinstance(part_shape, MeshCfg) else None
+        )
+        if (
+            mesh_collision is not None
+            and mesh_collision.decomposition_fpath is not None
+        ):
+            from ._convex_parts import load_convex_parts
+
+            convex_parts = load_convex_parts(mesh_collision.decomposition_fpath)
+            if len(convex_parts) > max_hulls:
+                raise ValueError("Precomputed decomposition exceeds max_hulls.")
+            collisions.extend(
+                replace(
+                    collision,
+                    file_path=None,
+                    vertices=vertices,
+                    triangles=triangles,
+                    approximation=CollisionApproximation.CONVEX_HULL,
+                    render_source_index=None,
+                )
+                for vertices, triangles in convex_parts
+            )
+        else:
+            collisions.append(collision)
 
     if cfg.particle_collision_shape is not None:
         boundary_shape = cfg.particle_collision_shape
