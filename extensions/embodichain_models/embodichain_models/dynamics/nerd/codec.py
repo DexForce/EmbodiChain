@@ -526,7 +526,25 @@ def append_history(
 def reset_history(
     history: Mapping[str, Tensor], lengths: Tensor, mask: Tensor
 ) -> tuple[dict[str, Tensor], Tensor]:
-    """Functionally clear selected rows while retaining other rows' gradients."""
+    """Clear selected histories, retaining only unselected trajectory graphs.
+
+    A complete graph-tracked reset allocates fresh constants: a masked zero
+    derivative alone would still reference a graph consumed by prior backward.
+    Inference-only resets avoid the full-mask device synchronization.
+
+    Args:
+        history: Named immutable history tensors with leading environment rows.
+        lengths: Per-environment valid prefix lengths.
+        mask: Boolean environment rows selected for episode reset.
+
+    Returns:
+        Replacement histories and lengths. Unselected rows retain their graphs;
+        a complete reset is independent of the previous episode's graph.
+    """
+    if any(value.requires_grad for value in history.values()) and bool(mask.all()):
+        return {
+            key: torch.zeros_like(value) for key, value in history.items()
+        }, torch.zeros_like(lengths)
     return {
         k: torch.where(mask[:, None, None], torch.zeros_like(v), v)
         for k, v in history.items()

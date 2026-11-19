@@ -762,13 +762,19 @@ class _GeneratorFailureEnv:
 
 def test_action_generator_failure_safe_stops_before_propagating() -> None:
     env = _GeneratorFailureEnv()
+    observations = []
+
+    def observe(active, action, observation):
+        observations.append((active, action, observation))
 
     with pytest.raises(RuntimeError, match="action generation") as error:
-        execute_demo_episode(env)
+        execute_demo_episode(env, step_observer=observe)
 
     assert isinstance(error.value.__cause__, ValueError)
     assert env.actions == [1, 0]
     assert env.abort_calls == [("action_generation_failed", True)]
+    # Both the acknowledged command and the safe hold are real boundaries.
+    assert observations == [((True,), 1, None), ((True,), 0, None)]
 
 
 class _TerminatingEnv(_SegmentedEnv):

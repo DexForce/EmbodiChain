@@ -67,3 +67,38 @@ The primitive Cube baseline remains a separate, direct-configuration example.
 Its primitive shapes do not require asset catalogs.
 
 - [DemoSkill](demo_skill/README.md): task-specific real-demonstration assets, mixed/whole Task Program calls and qualified offline expansion.
+
+## Scene construction, layout solving and augmentation
+
+The [scene-layout example](scene_layout.py) incrementally constructs a table,
+two containers, a red keep-out marker and six colored parts from `SceneFragment`
+and namespaced `compose` calls. Its authored input deliberately has overlapping
+parts, keep-out intrusions and an out-of-bounds part.
+
+```bash
+embodichain run-example expansion/scene_layout --output /tmp/scene-layout
+```
+
+Use an empty output directory and a compatible Default/Hybrid environment with
+Pillow and imageio/ffmpeg. A headless machine uses SDL's dummy video driver.
+There are no model-service calls, robot motions or task-environment requirements.
+
+The example calls the shared `solve_layout` to repair the authored layout,
+then calls `generate(recipe, seed=..., ordinal=...)` with one seed and three logical
+ordinals to produce distinct variants under the same assets and constraints.
+`apply_changes` and `apply_scene_variants` publish the actual poses without
+advancing physics. Finally, the entire World settles under gravity and every
+layout is checked again from measured poses/AABBs using `check_layout`.
+
+Constraints use fixed-orientation XY/AABB proxies, a 40 mm clearance, a 0.1 mm
+geometry tolerance, complete footprint bounds, the keep-out rectangle and explicit
+relations (A left of B, B left of C, D behind E). Fixed table/container/marker poses are checked
+separately. Convergence and support-height checks qualify the native settled state.
+These checks do not establish robot reachability, exact mesh collision freedom,
+or task success.
+
+Open `index.html` for the native before/after comparison, the four-layout gallery
+and `preview.mp4`. The video includes actual incremental construction, instantaneous
+layout applications and real gravity settling; inspection holds do not advance
+physics. `report.json` retains measured constraint counts and coordinates;
+`plans.json` retains the solver inputs/results and candidate identities.

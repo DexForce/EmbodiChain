@@ -969,6 +969,50 @@ def test_stereo_sensor_and_record_camera_primary_rgb_are_exported() -> None:
     assert simulation.cameras["record_camera"].update_count == 1
 
 
+def test_group_variants_export_ragged_meshes_one_environment_at_a_time() -> None:
+    simulation = _CompleteSimulation()
+    group = simulation.rigid_group
+    group.cfg.rigid_objects["left"] = SimpleNamespace(env_variants={1: object()})
+    original_vertices = group.get_object_vertices
+    original_triangles = group.get_object_triangles
+    quad = np.array(
+        [[0, 0, 0], [0.1, 0, 0], [0, 0.1, 0], [0.1, 0.1, 0]], dtype=np.float32
+    )
+
+    def vertices(object_id, env_ids, scale):
+        if object_id == 0:
+            assert len(env_ids) == 1
+            return (
+                np.array([quad])
+                if env_ids[0] == 1
+                else original_vertices(object_id, env_ids, scale)
+            )
+        return original_vertices(object_id, env_ids, scale)
+
+    def triangles(object_id, env_ids):
+        if object_id == 0:
+            assert len(env_ids) == 1
+            if env_ids[0] == 1:
+                return np.array([[[0, 1, 2], [1, 3, 2]]], dtype=np.int32)
+        return original_triangles(object_id, env_ids)
+
+    group.get_object_vertices = vertices
+    group.get_object_triangles = triangles
+    exporter = SceneExporter(
+        simulation, VisualizationCfg(backend="viser", env_ids=[0, 1]), run_id="ragged"
+    )
+    manifest = exporter.build_manifest()
+    geometry = {item.geometry_id: item for item in manifest.geometries}
+    nodes = [
+        node
+        for node in manifest.nodes
+        if node.kind == "rigid_group_object" and node.node_id.endswith("object:left")
+    ]
+    assert [len(geometry[node.geometry_id].vertices) for node in nodes] == [3, 4]
+    assert [len(geometry[node.geometry_id].faces) for node in nodes] == [1, 2]
+    assert exporter.capture(sim_step=1, sim_time=0.01).frame is not None
+
+
 def test_rigid_groups_and_deformable_meshes_are_exported() -> None:
     exporter = SceneExporter(
         _CompleteSimulation(),

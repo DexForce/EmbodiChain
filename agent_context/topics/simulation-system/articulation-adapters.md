@@ -47,6 +47,19 @@ damping, separately from the drive's velocity gain. It retains the same
 exact-name/regex/control-part matching and remains active for passive or effort
 target modes. Applied Newton-only settings are rejected on Default.
 
+`spawn/source.py` retains authored URDF passive damping and friction in the
+Newton joint descriptor before configured overlays. Passive damping is
+independent of the velocity target gain `joint_drive_props.damping`;
+none/effort modes clear PD gains without removing source dissipation. Explicit
+descriptor values, including zero, retain ownership over source defaults.
+On Default, a partial overlay `joint_drive_props` completes omitted drive fields
+from the native instance. A passive URDF joint can therefore keep a zero
+`max_effort`, and its `<dynamics friction>`, authored in N or N·m, becomes the
+joint friction coefficient. Declare these fields when a task depends on them.
+URDF collision geometry remains owned by the native source: resolved
+`LinkDesc.collisions` may contain only attribute overlays and is not a count
+of physical colliders.
+
 ## State order and batched writes
 
 Public `joint_names` follows finalized Scene qpos/qvel order, which may differ
@@ -69,11 +82,13 @@ are borrowed buffers, not snapshots; clone values that must survive later
 reads. Fetch after reset or direct writes rather than caching across them.
 
 `Articulation.set_state()` writes selected root, joint and drive fields in one
-backend operation. Current joint positions are clipped to joint limits.
-Position targets are also clipped by default; `clamp_target_qpos=False` retains
-raw PD targets while physical joint limits remain enabled. `set_qpos()` exposes
-the same target-only option. Keep this distinction when a task records motor
-commands for learned dynamics.
+backend operation. Current joint positions and position targets are clipped to
+joint limits by default. `clamp_target_qpos=False` retains raw PD targets;
+`clamp_qpos=False` lets cached physical replay restore exact states, including
+compliant limit excursions. Physical joint limits remain enabled in both cases.
+`set_qpos()` exposes only the target option. Keep this distinction when a task
+records motor commands for learned dynamics. The focused contract lives in
+`tests/sim/objects/test_articulation_state.py`.
 
 `Articulation.set_root_velocity()` writes selected world-frame linear and
 angular velocities as `(N, 6)` rows. The Scene adapter validates the complete
@@ -119,9 +134,14 @@ Use zero for both parameters for hard coupling. Newton rejects these settings.
 
 MuJoCo-Warp mimic joints retain native equality constraints and contact-force
 coupling. `_configure_newton_mimic_compliance()` adjusts only the selected
-articulation's equality rows, respecting the solver's time-constant safety
-floor; a weak follower drive stabilizes updates. Command targets propagate the
-authored leader relation. Never copy measured follower state or disable the
+articulation's equality rows. Optional root fields
+`newton_mimic_solref` and `newton_mimic_solimp` select a per-articulation
+MuJoCo profile independently of `newton_mimic_stabilizer`. Explicit profiles
+retain follower drives and unspecified equality parameters. The opt-in
+stabilizer additionally configures weak follower drives, propagates commanded
+leader targets and supplies a Default-inspired reference when none is authored;
+solver timestep safety remains native-owned. Contact impedance remains separate.
+Never copy measured follower state or disable the
 native equality, which would turn the follower into an independent servo.
 Keep private Newton runtime access in the backend helper, with generic
 Articulation owning name mappings, resets and target propagation.

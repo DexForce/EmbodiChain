@@ -26,6 +26,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from itertools import groupby
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -39,6 +40,7 @@ __all__ = ["build_commands", "main", "run_plan"]
 _LANE_ORDER = ("docs", "fast", "distributed", "gpu", "sim")
 _SLOW_LANE_PREFIX = "slow-"
 _DISTRIBUTED_TEST = "tests/learning/test_rl_distributed.py"
+_GPU_NODES_PER_PROCESS = 150
 _PLAN_MODES = {"partial", "docs-only", "full-pr", "full"}
 _CPU_THREAD_ENVIRONMENTS = (
     "OMP_NUM_THREADS",
@@ -298,6 +300,21 @@ def _resource_command_for_nodes(command: list[str], nodes: list[str]) -> list[st
     return [*command[:4], *nodes, *command[marker_index:]]
 
 
+def _resource_chunks(nodes: list[str], max_nodes: int) -> list[list[str]]:
+    """Bound native process lifetime without splitting a test module."""
+    chunks: list[list[str]] = []
+    current: list[str] = []
+    for _, group in groupby(nodes, key=lambda node: node.split("::", 1)[0]):
+        module_nodes = list(group)
+        if current and len(current) + len(module_nodes) > max_nodes:
+            chunks.append(current)
+            current = []
+        current.extend(module_nodes)
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 def _run_resource_lane(
     lane: str,
     command: list[str],
@@ -306,7 +323,7 @@ def _run_resource_lane(
     no_finalize_resource_lanes: bool = False,
     freeze_native_imports: bool = False,
 ) -> int:
-    """Discover selected nodes, then run the same ordered collection freshly."""
+    """Discover ordered nodes, then run bounded native process segments."""
     with tempfile.TemporaryDirectory(prefix="embodichain-test-selection-") as directory:
         manifest = Path(directory) / "selection.json"
         discovery = [
@@ -328,28 +345,58 @@ def _run_resource_lane(
             raise RuntimeError(
                 "nonempty resource collection returned pytest exit code 5"
             )
-        narrowed = _resource_command_for_nodes(command, nodes)
-        # Native failures can leave the device unusable for subsequent scenes.
-        # Report the first failure before another test can hang, and expose the
-        # active node and Python stack if a native call stops making progress.
-        narrowed.extend(
-            (
-                "--exitfirst",
-                "--verbose",
-                "--tb=short",
-                "-o",
-                "faulthandler_timeout=120",
-            )
+        chunks = (
+            _resource_chunks(nodes, _GPU_NODES_PER_PROCESS)
+            if lane == "gpu" and no_finalize_resource_lanes
+            else [nodes]
         )
-        narrowed.append(f"--ci-expected-collection={manifest}")
-        if no_finalize_resource_lanes:
-            narrowed[2] = "scripts.ci.pytest_no_finalize"
-            if freeze_native_imports:
-                narrowed.insert(3, "--freeze-native-imports")
-        print(f"[CI] {lane}: selected nodes: {shlex.join(narrowed)}", flush=True)
-        return subprocess.run(
-            narrowed, cwd=repository_root, check=False, env=None
-        ).returncode
+        original = json.loads(manifest.read_text(encoding="utf-8"))
+        for index, selected in enumerate(chunks):
+            expected = manifest
+            if len(chunks) > 1:
+                expected = manifest.with_name(f"selection-{index}.json")
+                expected.write_text(
+                    json.dumps(
+                        {
+                            "version": 1,
+                            "files": list(
+                                dict.fromkeys(
+                                    node.split("::", 1)[0] for node in selected
+                                )
+                            ),
+                            "nodeids": selected,
+                            "markers": {
+                                node: original["markers"][node] for node in selected
+                            },
+                        },
+                        indent=2,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+            narrowed = _resource_command_for_nodes(command, selected)
+            # Keep the same failure and collection checks for every native process.
+            narrowed.extend(
+                (
+                    "--exitfirst",
+                    "--verbose",
+                    "--tb=short",
+                    "-o",
+                    "faulthandler_timeout=120",
+                )
+            )
+            narrowed.append(f"--ci-expected-collection={expected}")
+            if no_finalize_resource_lanes:
+                narrowed[2] = "scripts.ci.pytest_no_finalize"
+                if freeze_native_imports:
+                    narrowed.insert(3, "--freeze-native-imports")
+            print(f"[CI] {lane}: selected nodes: {shlex.join(narrowed)}", flush=True)
+            result = subprocess.run(
+                narrowed, cwd=repository_root, check=False, env=None
+            )
+            if result.returncode:
+                return result.returncode
+        return 0
 
 
 def run_plan(

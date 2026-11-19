@@ -152,6 +152,8 @@ class BaseEnv(gym.Env):
     def __init__(
         self,
         cfg: EnvCfg,
+        *,
+        _initialization_seed: int | None = None,
         **kwargs,
     ):
         # Renderer resolution and manager filtering belong to this instance.
@@ -176,7 +178,14 @@ class BaseEnv(gym.Env):
             self.sim_cfg.profiler = self.cfg.profiler
 
         if self.cfg.seed is not None:
-            effective_seed = self._set_seed(self.cfg.seed)
+            # Preparation may have already seeded process RNGs. Preserve that
+            # stream and its resolved -1 seed through the remaining setup.
+            effective_seed = (
+                self._set_seed(self.cfg.seed)
+                if _initialization_seed is None
+                else _initialization_seed
+            )
+            self.cfg.seed = effective_seed
             super().reset(seed=effective_seed)
         else:
             logger.log_info(f"No seed is set for the environment.")
@@ -215,11 +224,14 @@ class BaseEnv(gym.Env):
                 )
 
             self.sensors = self._setup_sensors(**kwargs)
-            self._camera_group_ids = [
-                sensor.group_id
-                for sensor in self.sensors.values()
-                if isinstance(sensor, Camera)
-            ]
+            self._camera_group_ids = list(
+                dict.fromkeys(
+                    group_id
+                    for sensor in self.sensors.values()
+                    if isinstance(sensor, Camera)
+                    for group_id in sensor.group_ids
+                )
+            )
 
             if not self.sim_cfg.headless or self.sim_cfg.web:
                 self.sim.open_viewer()
@@ -504,7 +516,8 @@ class BaseEnv(gym.Env):
         """
         if not hasattr(self, "_camera_group_ids"):
             self._camera_group_ids: List[int] = []
-        self._camera_group_ids.append(group_id)
+        if group_id not in self._camera_group_ids:
+            self._camera_group_ids.append(group_id)
 
     def _requires_native_renderer(self) -> bool:
         """Predict native render consumers before constructing the World.
@@ -600,7 +613,10 @@ class BaseEnv(gym.Env):
     def _advance_physics(self) -> None:
         """Advance physics and sample opted-in sensors after each substep."""
         sensors = [
-            sensor for sensor in self.sensors.values() if sensor.requires_substep_update
+            sensor
+            for sensor in self.sensors.values()
+            if sensor.requires_substep_update
+            and getattr(getattr(sensor, "cfg", None), "sample_phase", None) is None
         ]
         if not sensors:
             self.sim.update(
@@ -709,7 +725,11 @@ class BaseEnv(gym.Env):
         with self._profiler.section("sensor_fetch"):
             for sensor_name, sensor in self.sensors.items():
                 with self._profiler.section(f"sensor_update.{sensor_name}"):
-                    if not sensor.requires_substep_update:
+                    if (
+                        not sensor.requires_substep_update
+                        and getattr(getattr(sensor, "cfg", None), "sample_phase", None)
+                        is None
+                    ):
                         sensor.update(fetch_only=fetch_only)
                 with self._profiler.section(f"sensor_get_data.{sensor_name}"):
                     obs[sensor_name] = sensor.get_data()
@@ -1042,6 +1062,8 @@ class BaseEnv(gym.Env):
                     )
                 for sensor in self.sensors.values():
                     sensor.reset(env_ids=reset_ids)
+                    if isinstance(sensor, BaseSensor):
+                        sensor._invalidate_samples(reset_ids)
                 with self._profiler.section("initialize_episode"):
                     self._initialize_episode(reset_ids, **options)
                 if prepare is not None:
@@ -1120,8 +1142,9 @@ class BaseEnv(gym.Env):
             self._component_generators[name] = generator
         return self._component_generators[name]
 
-    def _set_seed(self, seed: int) -> int:
-        """Set the effective environment seed and rewind seeded managers."""
+    @staticmethod
+    def _apply_process_seed(seed: int) -> int:
+        """Seed process RNGs without changing the caller's kernel policy."""
         cudnn_benchmark = torch.backends.cudnn.benchmark
         cudnn_deterministic = torch.backends.cudnn.deterministic
         try:
@@ -1131,6 +1154,11 @@ class BaseEnv(gym.Env):
             # caller's deterministic-kernel policy.
             torch.backends.cudnn.benchmark = cudnn_benchmark
             torch.backends.cudnn.deterministic = cudnn_deterministic
+        return effective_seed
+
+    def _set_seed(self, seed: int) -> int:
+        """Set the effective environment seed and rewind seeded managers."""
+        effective_seed = self._apply_process_seed(seed)
         self.cfg.seed = effective_seed
         for name, generator in getattr(self, "_component_generators", {}).items():
             generator.manual_seed(self._component_seed(name, effective_seed))
@@ -1157,9 +1185,11 @@ class BaseEnv(gym.Env):
                 rollout or segment boundaries.
 
         Returns:
-            The observation, reward, termination and truncation flags, and
-            info. Hosts that publish terminal reports include completed rows
-            under `terminal_outcomes`.
+            Observation, reward, terminated, truncated, and an info mapping.
+            Completed rows may carry environment-owned ``terminal_outcomes``.
+            Auto-reset also preserves owned ``terminal_observation`` rows,
+            ``terminal_env_ids`` and a full ``terminal_observation_mask`` for
+            time-limit bootstrapping; live observations contain reset states.
         """
 
         if recording_active_mask is not None:
@@ -1232,10 +1262,23 @@ class BaseEnv(gym.Env):
             if not replay and getattr(self, "_demo_instruction_snapshot", None) is None:
                 reset_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
                 if len(reset_env_ids) > 0:
+                    if isinstance(info, TensorDict):
+                        info = info.to_dict()
                     self._seal_step_outcomes(
                         reset_env_ids, terminateds, truncateds, info
                     )
                     if not no_auto_reset:
+                        # Snapshot completed rows before reset reuses buffers.
+                        info["terminal_env_ids"] = reset_env_ids.clone()
+                        info["terminal_observation_mask"] = (
+                            truncateds & ~terminateds
+                        ).clone()
+                        if isinstance(obs, TensorDict):
+                            info["terminal_observation"] = obs[reset_env_ids]
+                        else:
+                            info["terminal_observation"] = torch.utils._pytree.tree_map(
+                                lambda value: value[reset_env_ids], obs
+                            )
                         with self._profiler.section("auto_reset"):
                             obs, reset_info = self.reset(
                                 options={"reset_ids": reset_env_ids}

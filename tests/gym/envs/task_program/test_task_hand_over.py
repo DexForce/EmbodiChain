@@ -138,7 +138,7 @@ def test_hand_over_registers_plain_embodied_env_from_config() -> None:
     assert __all__ == []
     assert importlib.util.find_spec("embodichain_tasks.manipulation.hand_over") is None
     assert spec.cls is EmbodiedEnv
-    assert spec.max_episode_steps == 1200
+    assert spec.max_episode_steps == 3600
     assert spec.task_program_registration is not None
     assert spec.task_program_adapter_factory is not None
     assert spec.task_program_adapter_factory.registration is (
@@ -157,7 +157,7 @@ def test_hand_over_gym_config_selects_packaged_program_without_contact_sensor() 
         "program": "task_program/program.yaml",
         "integration": "task_program/integration.yaml",
         "execution_policy": (
-            "../../../components/execution_policies/motion_gen_verified.yaml"
+            "../../../components/execution_policies/sequential_ik_verified.yaml"
         ),
     }
     assert payload["environment"] == {"component": "env.yaml"}
@@ -428,8 +428,8 @@ def test_hand_over_profile_binds_unified_left_to_right_transfer() -> None:
     }
     preset = binding.presets[0]
     assert preset.preset_id == "safe"
-    assert preset.motion_policy.strategy == "motion_gen"
-    assert preset.motion_policy.sample_count == 140
+    assert preset.motion_policy.strategy == "ik_interp"
+    assert preset.motion_policy.sample_count == 220
     assert preset.tracking_policy.in_flight is not None
     assert preset.tracking_policy.in_flight.metrics[0].tolerance == pytest.approx(1.0)
     assert preset.tracking_policy.terminal.metrics[0].tolerance == pytest.approx(1.0)
@@ -444,7 +444,7 @@ def test_hand_over_profile_binds_unified_left_to_right_transfer() -> None:
     assert type(hand_over_options) is HandOverOptions
     assert hand_over_options.pre_grasp_distance == pytest.approx(0.08)
     assert hand_over_options.lift_height == pytest.approx(0.08)
-    assert hand_over_options.hand_interp_steps == 10
+    assert hand_over_options.hand_interp_steps == 40
     assert dict(binding.grounding_providers) == {
         "hand_over": ConfiguredHandOverPoseProvider.provider_id,
     }

@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import MISSING, field
 from pathlib import Path
+import re
 from typing import Any
 
 from embodichain.utils import configclass
@@ -39,8 +40,14 @@ class _RunCfg:
     execution_policy: Path = MISSING
     task_id: str = "gensim_task"
     scene: Path | None = None
+    task: Path | None = None
     device: str | None = None
     headless: bool = True
+    planning_repairs: int = 1
+    source_calibration: Path | None = None
+    input_camera: dict[str, str] | None = None
+    room: str | None = None
+    recording: bool = False
     binding: dict[str, Any] = field(default_factory=dict)
     scene_provider: dict[str, Any] = field(
         default_factory=lambda: {"id": "legacy_scene_engine", "profile": {}}
@@ -57,15 +64,53 @@ class _RunCfg:
             raise ValueError("device must be a nonempty string or null")
         if type(self.headless) is not bool:
             raise TypeError("headless must be a boolean")
+        if type(self.planning_repairs) is not int or self.planning_repairs < 0:
+            raise ValueError("planning_repairs must be a nonnegative integer")
+        if self.room is not None and (
+            type(self.room) is not str or not self.room.isidentifier()
+        ):
+            raise ValueError("room must name a scene asset class such as WoodLab")
+        if type(self.recording) is not bool:
+            raise TypeError("recording must be a boolean")
+        camera = self.input_camera
+        if camera is not None and (
+            type(camera) is not dict
+            or set(camera) != {"view", "sha256"}
+            or camera["view"] != "robodojo_dual_arm_head"
+            or type(camera["sha256"]) is not str
+            or re.fullmatch("[0-9a-f]{64}", camera["sha256"]) is None
+        ):
+            raise ValueError(
+                "input_camera requires view: robodojo_dual_arm_head and the "
+                "lowercase SHA-256 of its raw head frame"
+            )
         if type(self.binding) is not dict or set(self.binding) - {
             "profile",
+            "release_clearance",
+            "resource_anchors",
             "runtime_services",
             "scene_binding",
             "segments",
         }:
             raise ValueError(
-                "binding supports profile, runtime_services, scene_binding and segments"
+                "binding supports profile, release_clearance, resource_anchors, "
+                "runtime_services, scene_binding and segments"
             )
+        clearance = self.binding.get("release_clearance", 0.0)
+        if (
+            isinstance(clearance, bool)
+            or not isinstance(clearance, (int, float))
+            or not 0.0 <= clearance < 0.2
+        ):
+            raise ValueError("release_clearance must be a height in [0, 0.2) m")
+        anchors = self.binding.get("resource_anchors", {})
+        if type(anchors) is not dict or any(
+            type(value) is not list
+            or len(value) != 2
+            or not all(isinstance(x, (int, float)) for x in value)
+            for value in anchors.values()
+        ):
+            raise ValueError("resource_anchors maps resources to planar [x, y] anchors")
         if (
             type(self.scene_provider) is not dict
             or set(self.scene_provider) != {"id", "profile"}
@@ -89,14 +134,22 @@ def _load_run_config(args: argparse.Namespace) -> _RunCfg:
         raise ValueError(
             f"Unsupported GenSim run fields: {sorted(set(value) - allowed)}"
         )
-    path_fields = {"image", "output", "runtime", "execution_policy", "scene"}
+    path_fields = {
+        "image",
+        "output",
+        "runtime",
+        "execution_policy",
+        "scene",
+        "task",
+        "source_calibration",
+    }
     for name in allowed:
         override = getattr(args, name, None)
         if override is not None:
             value[name] = override
         if name in path_fields and name in value:
             raw = value[name]
-            if raw is None and name == "scene":
+            if raw is None and name in {"scene", "task", "source_calibration"}:
                 continue
             if not isinstance(raw, (str, Path)) or not str(raw).strip():
                 raise ValueError(f"{name} must be a nonempty path")
@@ -108,20 +161,27 @@ def _load_run_config(args: argparse.Namespace) -> _RunCfg:
         raise ValueError(f"Missing GenSim run fields: {sorted(missing)}")
     cfg = _RunCfg(**value)
     cfg.validate()
-    for path in (cfg.image, cfg.runtime, cfg.execution_policy):
+    inputs = (cfg.image, cfg.runtime, cfg.execution_policy, cfg.source_calibration)
+    for path in (path for path in inputs if path is not None):
         if not path.is_file():
             raise FileNotFoundError(path)
         if cfg.output == path or cfg.output in path.parents:
             raise ValueError("GenSim output must not contain an input file")
-    if cfg.scene is not None:
-        if not (cfg.scene / "scene_export/scene_config.json").is_file():
-            raise ValueError(
-                "scene must name a workspace containing scene_export/scene_config.json"
-            )
-        if (
-            cfg.scene == cfg.output
-            or cfg.scene in cfg.output.parents
-            or cfg.output in cfg.scene.parents
+    if cfg.task is not None and not (cfg.task / "task_plan_manifest.json").is_file():
+        raise ValueError("task must name a published task plan directory")
+    if (
+        cfg.scene is not None
+        and not (cfg.scene / "scene_export/scene_config.json").is_file()
+    ):
+        raise ValueError(
+            "scene must name a workspace containing scene_export/scene_config.json"
+        )
+    # Reused inputs are copied or read while the output grows.
+    for name, path in (("task", cfg.task), ("scene", cfg.scene)):
+        if path is not None and (
+            path == cfg.output
+            or path in cfg.output.parents
+            or cfg.output in path.parents
         ):
-            raise ValueError("GenSim output and source scene must not overlap")
+            raise ValueError(f"GenSim output and source {name} must not overlap")
     return cfg

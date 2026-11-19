@@ -258,6 +258,8 @@ def derive_scene_request(draft: Mapping[str, Any]) -> dict[str, Any]:
             if role == "object":
                 structure = contract.source_structure
                 affordances = sorted(contract.scene_affordances)
+                if "lift_height_m" in step:
+                    affordances.remove("placeable")
                 # Upright is a step goal; earlier actions may change the object's pose.
                 initial_state = {}
                 attributes: dict[str, Any] = {}

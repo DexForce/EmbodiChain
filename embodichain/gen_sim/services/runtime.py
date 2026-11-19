@@ -238,10 +238,9 @@ def _http_adapter(role: str, profile: Mapping[str, Any]) -> Any:
     kwargs.update(options)
     api_key = profile.get("api_key")
     if api_key:
-        import requests
+        from .adapters._http import _OriginBoundSession
 
-        session = requests.Session()
-        session.headers["Authorization"] = f"Bearer {api_key}"
+        session = _OriginBoundSession(profile["base_url"], api_key)
         kwargs["session"] = session
     try:
         return cls(**kwargs)
@@ -357,10 +356,17 @@ class _ObservedService:
 
     def __getattr__(self, name: str) -> Any:
         if name != self._method and not (
-            self._role == "articulation_jobs"
-            and name in {"status", "cancel", "download"}
+            (
+                self._role == "articulation_jobs"
+                and name in {"status", "cancel", "download"}
+            )
+            or (self._role == "image_generation" and name == "generate_image_by_image")
         ):
             return getattr(self._service, name)
+
+        action = getattr(self._service, name)
+        if not callable(action):
+            return action
 
         def invoke(*args: Any, **kwargs: Any) -> Any:
             request = args[0] if args else None
@@ -382,7 +388,9 @@ class _ObservedService:
                 "artifacts": [],
             }
             try:
-                result = getattr(self._service, name)(*args, **kwargs)
+                result = action(*args, **kwargs)
+                if isinstance(result, Path):
+                    record["artifacts"] = [str(result)]
                 if hasattr(result, "path"):
                     record["artifacts"] = [str(result.path)]
                 if hasattr(result, "objects"):

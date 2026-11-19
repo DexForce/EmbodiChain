@@ -1,0 +1,55 @@
+program_id: franka_gs_pick_place
+instruction: Grasp the cube, lift it clear of the table, move it to the target, release
+  it, and wait for stable placement.
+targets:
+  rest_pose:
+    kind: pose
+    position:
+    - 0.30000000000000004
+    - -0.22
+    - 0.785
+    quaternion_xyzw:
+    - 0
+    - 0
+    - 0
+    - 1
+  drop_pose:
+    kind: pose
+    position:
+    - 0.30000000000000004
+    - -0.22
+    - 0.8150000000000001
+    quaternion_xyzw:
+    - 0
+    - 0
+    - 0
+    - 1
+program:
+  kind: sequence
+  items:
+  - segment: pick_cube
+    instruction: Close the fingers on the cube and lift it.
+    steps:
+      pick:
+        object: cube
+    validators:
+    - kind: object_lifted
+      object: cube
+      minimum_lift: 0.04
+  - segment: place_cube
+    instruction: Transport, open the fingers, withdraw, and wait for stable placement.
+    steps:
+      place:
+        object: cube
+        at: drop_pose
+    post:
+    - kind: wait_stable
+      entity: cube
+    validators:
+    - kind: object_near_target
+      object: cube
+      target: rest_pose
+      position_tolerance: 0.02
+    - kind: object_upright
+      object: cube
+      maximum_tilt_degrees: 15.0

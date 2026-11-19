@@ -19,11 +19,112 @@
 ``Camera``, ``StereoCamera``, and ``ContactSensor`` all derive from ``BaseSensor`` and expose batched ``TensorDict`` data buffers.
 """
 
+from __future__ import annotations
+
 from .base_sensor import BaseSensor, SensorCfg
+from .context import SensorClock, SensorStateProvider, SensorContext
 from .camera import Camera, CameraCfg
+from .state import JointEncoder, JointEncoderCfg, FrameTransform, FrameTransformCfg
+from .inertial import PVA, PVACfg, IMU, IMUCfg
+from .joint_wrench import JointWrench, JointWrenchCfg
 from .stereo import StereoCamera, StereoCameraCfg
 from .contact import (
     ContactSensor,
     ContactSensorCfg,
     ArticulationContactFilterCfg,
+)
+from .contact_grid import ContactGrid, ContactGridCfg
+from .contact_resultant import ContactResultant, ContactResultantCfg
+from .ray import (
+    RayScene,
+    TerrainScan,
+    TerrainScanCfg,
+    RayLidar,
+    RayLidarCfg,
+    RayDepthCamera,
+    RayDepthCameraCfg,
+)
+from .tactile_indentation import TactileIndentation, TactileIndentationCfg
+from .registry import (
+    SensorRegistration,
+    register_sensor,
+    discover_sensor_plugins,
+    get_sensor_registration,
+    list_sensor_types,
+)
+
+__all__ = [
+    "BaseSensor",
+    "TactileIndentation",
+    "TactileIndentationCfg",
+    "RayLidar",
+    "RayLidarCfg",
+    "RayDepthCamera",
+    "RayDepthCameraCfg",
+    "RayScene",
+    "TerrainScan",
+    "TerrainScanCfg",
+    "ContactGrid",
+    "ContactGridCfg",
+    "ContactResultant",
+    "ContactResultantCfg",
+    "PVA",
+    "PVACfg",
+    "IMU",
+    "IMUCfg",
+    "JointWrench",
+    "JointWrenchCfg",
+    "JointEncoder",
+    "JointEncoderCfg",
+    "FrameTransform",
+    "FrameTransformCfg",
+    "SensorCfg",
+    "SensorClock",
+    "SensorStateProvider",
+    "SensorContext",
+    "SensorRegistration",
+    "register_sensor",
+    "discover_sensor_plugins",
+    "get_sensor_registration",
+    "list_sensor_types",
+    "Camera",
+    "CameraCfg",
+    "StereoCamera",
+    "StereoCameraCfg",
+    "ContactSensor",
+    "ContactSensorCfg",
+    "ArticulationContactFilterCfg",
+]
+
+# Built-ins use the same registry as plugins. Their direct constructors and
+# manager-owned render/contact lifecycle remain compatible.
+_builtin_sensor_factories = {}
+for _name, _config, _factory in (
+    ("Camera", CameraCfg, Camera),
+    ("StereoCamera", StereoCameraCfg, StereoCamera),
+    ("ContactSensor", ContactSensorCfg, ContactSensor),
+):
+    register_sensor(SensorRegistration(_name, _config, _factory, legacy_factory=True))
+    _builtin_sensor_factories[_name] = _factory
+
+register_sensor(SensorRegistration("JointEncoder", JointEncoderCfg, JointEncoder))
+register_sensor(SensorRegistration("FrameTransform", FrameTransformCfg, FrameTransform))
+
+register_sensor(SensorRegistration("PVA", PVACfg, PVA))
+register_sensor(SensorRegistration("IMU", IMUCfg, IMU))
+register_sensor(SensorRegistration("JointWrench", JointWrenchCfg, JointWrench))
+
+register_sensor(SensorRegistration("ContactGrid", ContactGridCfg, ContactGrid))
+
+register_sensor(
+    SensorRegistration("ContactResultant", ContactResultantCfg, ContactResultant)
+)
+
+register_sensor(SensorRegistration("TerrainScan", TerrainScanCfg, TerrainScan))
+
+register_sensor(SensorRegistration("RayLidar", RayLidarCfg, RayLidar))
+register_sensor(SensorRegistration("RayDepthCamera", RayDepthCameraCfg, RayDepthCamera))
+
+register_sensor(
+    SensorRegistration("TactileIndentation", TactileIndentationCfg, TactileIndentation)
 )

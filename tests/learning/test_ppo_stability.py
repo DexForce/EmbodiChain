@@ -333,6 +333,57 @@ def test_clipped_value_loss_uses_larger_error() -> None:
     assert float(loss) == pytest.approx(0.64)
 
 
+@pytest.mark.parametrize("clip", [-0.2, 0.0, 0.2, 1.0, 2.0])
+def test_clipped_actor_loss_matches_ratio_objective_and_gradients(clip: float) -> None:
+    algorithm = _algorithm(_policy(), clip_coef=clip)
+    generator = torch.Generator().manual_seed(20261026)
+    log_ratio = (torch.randn(4096, generator=generator) * 2).requires_grad_()
+    reference_log_ratio = log_ratio.detach().clone().requires_grad_()
+    advantages = torch.randn(4096, generator=generator)
+    # Independent reference is the original probability-ratio definition.
+    # Include the existing zero/wide clip settings and negative-clip behavior.
+    ratio = reference_log_ratio.exp()
+    reference = -torch.minimum(
+        ratio * advantages, ratio.clamp(1 - clip, 1 + clip) * advantages
+    ).mean()
+    actual = algorithm._actor_loss(log_ratio, advantages)
+    actual.backward()
+    reference.backward()
+    torch.testing.assert_close(actual, reference, atol=1e-5, rtol=1e-4)
+    torch.testing.assert_close(
+        log_ratio.grad, reference_log_ratio.grad, atol=1e-5, rtol=1e-4
+    )
+
+
+@pytest.mark.parametrize("advantage,expected", [(1.0, -1.2), (0.0, 0.0)])
+def test_clipped_actor_loss_does_not_backpropagate_inactive_exp_overflow(
+    advantage: float, expected: float
+) -> None:
+    algorithm = _algorithm(_policy(), clip_coef=0.2)
+    # exp(100) overflows FP32, although a positive advantage already clips
+    # this branch to ratio 1.2. Computing exp first produced a NaN gradient.
+    log_ratio = torch.tensor([100.0], requires_grad=True)
+    loss = algorithm._actor_loss(log_ratio, torch.tensor([advantage]))
+    loss.backward()
+    assert float(loss) == pytest.approx(expected)
+    torch.testing.assert_close(log_ratio.grad, torch.zeros_like(log_ratio))
+
+
+def test_unbounded_negative_advantage_still_fails_nonfinite_gradient_guard() -> None:
+    policy = _policy()
+    algorithm = _algorithm(policy, clip_coef=0.2)
+    parameter = next(policy.actor.parameters())
+    with torch.no_grad():
+        parameter.fill_(100.0 / parameter.numel())
+    loss = algorithm._actor_loss(parameter.sum().reshape(1), torch.tensor([-1.0]))
+    # Negative advantages retain the genuinely unbounded upper-ratio branch;
+    # a global log-ratio clamp would incorrectly make this objective finite.
+    assert torch.isinf(loss)
+    loss.backward()
+    with pytest.raises(FloatingPointError, match="optimizer step skipped"):
+        algorithm._clip_gradients()
+
+
 def test_action_bound_loss_penalizes_policy_means_outside_unit_range() -> None:
     action_mean = torch.tensor([[-2.0], [-0.5], [0.5], [2.0]])
 
@@ -384,6 +435,32 @@ def test_actor_and_critic_gradients_are_clipped_separately() -> None:
     assert float(critic_norm) == pytest.approx(1.0, rel=1e-5)
 
 
+def test_shared_actor_critic_parameters_are_clipped_once(monkeypatch) -> None:
+    shared = nn.Linear(2, 3)
+    policy = ActorCritic(
+        2,
+        1,
+        torch.device("cpu"),
+        nn.Sequential(shared, nn.Linear(3, 1)),
+        nn.Sequential(shared, nn.Linear(3, 1)),
+    )
+    algorithm = _algorithm(policy, max_grad_norm=1.0)
+    for parameter in policy.parameters():
+        parameter.grad = torch.ones_like(parameter)
+    clipped = []
+    original = torch.nn.utils.clip_grad_norm_
+
+    def observed(parameters, *args, **kwargs):
+        parameters = tuple(parameters)
+        clipped.extend(map(id, parameters))
+        return original(parameters, *args, **kwargs)
+
+    monkeypatch.setattr(torch.nn.utils, "clip_grad_norm_", observed)
+    algorithm._clip_gradients()
+    assert len(clipped) == len(set(clipped))
+    assert set(clipped) == {id(parameter) for parameter in policy.parameters()}
+
+
 def test_log_action_standard_deviation_uses_configured_range() -> None:
     policy = ActorCritic(
         obs_dim=2,
@@ -424,3 +501,370 @@ def test_gae_handles_episode_boundaries(
     _, returns = compute_gae(rollout, gamma=0.99, gae_lambda=0.95)
 
     torch.testing.assert_close(returns, torch.tensor([[expected_return]]))
+
+
+def test_timeout_bootstraps_terminal_state_instead_of_current_or_reset_state() -> None:
+    from embodichain.learning.rl.algo import compute_gae
+    from embodichain.learning.rl.buffer import RolloutBuffer
+    from embodichain.learning.rl.collector import SyncCollector
+    from embodichain.learning.rl.policies import ActorCritic
+
+    class TimeoutEnv:
+        num_envs = 1
+        device = torch.device("cpu")
+
+        def reset(self):
+            return {"state": torch.tensor([[2.0]])}, {}
+
+        def step(self, action):
+            return (
+                {"state": torch.tensor([[99.0]])},
+                torch.tensor([1.0]),
+                torch.tensor([False]),
+                torch.tensor([True]),
+                {
+                    "terminal_observation": {"state": torch.tensor([[7.0]])},
+                    "terminal_env_ids": torch.tensor([0]),
+                    "terminal_observation_mask": torch.tensor([True]),
+                },
+            )
+
+    critic = torch.nn.Linear(1, 1, bias=False)
+    with torch.no_grad():
+        critic.weight.fill_(1.0)
+    policy = ActorCritic(1, 1, torch.device("cpu"), torch.nn.Linear(1, 1), critic)
+    env = TimeoutEnv()
+    buffer = RolloutBuffer(1, 1, 1, 1, env.device)
+    rollout = SyncCollector(env, policy, env.device).collect(
+        1, rollout=buffer.start_rollout()
+    )
+    _, returns = compute_gae(rollout, gamma=0.9, gae_lambda=1.0)
+    torch.testing.assert_close(returns, torch.tensor([[7.3]]))
+
+
+@pytest.mark.parametrize("compact", [False, True])
+@pytest.mark.parametrize("ending", ["running", "terminated", "truncated", "both"])
+def test_terminal_values_only_infer_actual_timeout_rows(compact, ending) -> None:
+    """Full and reordered compact terminal batches use transition flags first."""
+
+    class Env:
+        num_envs = 3
+        device = torch.device("cpu")
+
+        def reset(self):
+            return {"state": torch.tensor([[1.0], [2.0], [3.0]])}, {}
+
+        def step(self, action):
+            terminal = torch.tensor([[5.0], [7.0], [11.0]])
+            terminated = torch.tensor([True, ending in {"terminated", "both"}, False])
+            truncated = torch.tensor([True, ending in {"truncated", "both"}, False])
+            info = {"terminal_observation": {"state": terminal}}
+            if compact:
+                ids = (terminated | truncated).nonzero(as_tuple=False).flatten().flip(0)
+                info.update(
+                    terminal_env_ids=ids,
+                    terminal_observation={"state": terminal[ids]},
+                    terminal_observation_mask=truncated & ~terminated,
+                )
+            next_state = terminal.clone()
+            next_state[terminated | truncated] = 99.0
+            return (
+                {"state": next_state},
+                torch.ones(3),
+                terminated,
+                truncated,
+                info,
+            )
+
+    critic = nn.Linear(1, 1, bias=False)
+    with torch.no_grad():
+        critic.weight.fill_(1.0)
+    batches = []
+    critic.register_forward_pre_hook(
+        lambda module, inputs: batches.append(inputs[0].clone())
+    )
+    policy = ActorCritic(1, 1, torch.device("cpu"), nn.Linear(1, 1), critic)
+    buffer = RolloutBuffer(3, 1, 1, 1, torch.device("cpu"))
+    rollout = SyncCollector(Env(), policy, torch.device("cpu")).collect(
+        1, rollout=buffer.start_rollout()
+    )
+    if ending == "truncated":
+        assert [len(batch) for batch in batches] == [3, 3, 3]
+        torch.testing.assert_close(batches[1], torch.tensor([[5.0], [7.0], [11.0]]))
+        assert rollout["timeout_value"][1, 0] == 7.0
+    else:
+        assert [len(batch) for batch in batches] == [3, 3]
+        assert torch.isnan(rollout["timeout_value"]).all()
+    assert torch.isnan(rollout["timeout_value"][[0, 2], 0]).all()
+
+
+@pytest.mark.parametrize("fail_terminal", [False, True])
+def test_single_timeout_critic_inference_restores_mode_and_batchnorm(
+    fail_terminal,
+) -> None:
+    """One timeout uses fixed statistics and restores modes on failure."""
+
+    class Critic(nn.Sequential):
+        def forward(self, value):
+            if not self.training and fail_terminal:
+                raise OSError("terminal critic failed")
+            return super().forward(value)
+
+    critic = Critic(nn.BatchNorm1d(1), nn.Linear(1, 1, bias=False))
+    with torch.no_grad():
+        critic[1].weight.fill_(1.0)
+    terminal_stats = []
+
+    class Env:
+        num_envs = 2
+        device = torch.device("cpu")
+
+        def reset(self):
+            return {"state": torch.tensor([[-1.0], [1.0]])}, {}
+
+        def step(self, action):
+            terminal_stats.append(
+                (critic[0].running_mean.clone(), critic[0].running_var.clone())
+            )
+            return (
+                {"state": torch.tensor([[99.0], [3.0]])},
+                torch.ones(2),
+                torch.tensor([False, False]),
+                torch.tensor([True, False]),
+                {
+                    "terminal_observation": {"state": torch.tensor([[7.0]])},
+                    "terminal_env_ids": torch.tensor([0]),
+                    "terminal_observation_mask": torch.tensor([True, False]),
+                },
+            )
+
+    policy = ActorCritic(1, 1, torch.device("cpu"), nn.Linear(1, 1), critic)
+    collector = SyncCollector(Env(), policy, torch.device("cpu"))
+    rollout = RolloutBuffer(2, 1, 1, 1, torch.device("cpu")).start_rollout()
+    if fail_terminal:
+        with pytest.raises(OSError, match="terminal critic failed"):
+            collector.collect(1, rollout=rollout)
+        assert critic[0].num_batches_tracked == 1
+    else:
+        collector.collect(1, rollout=rollout)
+        mean, variance = terminal_stats[0]
+        expected = (7.0 - mean) / (variance + critic[0].eps).sqrt()
+        torch.testing.assert_close(rollout["timeout_value"][0, 0], expected.squeeze())
+        # Only ordinary full-batch action/final-value calls update statistics.
+        assert critic[0].num_batches_tracked == 2
+    assert all(module.training for module in policy.modules())
+
+
+@pytest.mark.parametrize("compact", [False, True])
+def test_one_timeout_retains_peers_for_batchnorm_without_running_statistics(compact):
+    """Batch statistics include hard-terminal and still-active peer states."""
+    terminal = torch.tensor([[5.0], [7.0], [11.0]])
+
+    class Env:
+        num_envs = 3
+        device = torch.device("cpu")
+
+        def reset(self):
+            return {"state": torch.tensor([[1.0], [2.0], [3.0]])}, {}
+
+        def step(self, action):
+            info = {"terminal_observation": {"state": terminal.clone()}}
+            if compact:
+                ids = torch.tensor([1, 0])
+                info.update(
+                    terminal_env_ids=ids, terminal_observation={"state": terminal[ids]}
+                )
+            return (
+                {"state": torch.tensor([[99.0], [99.0], [11.0]])},
+                torch.ones(3),
+                torch.tensor([True, False, False]),
+                torch.tensor([False, True, False]),
+                info,
+            )
+
+    critic = nn.Sequential(
+        nn.BatchNorm1d(1, track_running_stats=False), nn.Linear(1, 1, bias=False)
+    )
+    with torch.no_grad():
+        critic[1].weight.fill_(1.0)
+    policy = ActorCritic(1, 1, torch.device("cpu"), nn.Linear(1, 1), critic)
+    rollout = SyncCollector(Env(), policy, torch.device("cpu")).collect(
+        1, RolloutBuffer(3, 1, 1, 1, torch.device("cpu")).start_rollout()
+    )
+    expected = (terminal[1, 0] - terminal.mean()) / (
+        terminal.var(unbiased=False) + critic[0].eps
+    ).sqrt()
+    torch.testing.assert_close(rollout["timeout_value"][1, 0], expected)
+    assert torch.isnan(rollout["timeout_value"][[0, 2], 0]).all()
+    torch.testing.assert_close(rollout["obs"][0, 1], torch.tensor([99.0]))
+    assert all(module.training for module in policy.modules())
+
+
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+@pytest.mark.parametrize(
+    "source_dtype,amp_dtype,compact",
+    [
+        (torch.float64, None, True),
+        (torch.float16, None, True),
+        (torch.uint8, None, True),
+        (torch.float64, None, False),
+        (torch.float32, torch.float16, True),
+        (torch.float32, torch.bfloat16, True),
+    ],
+)
+def test_terminal_bootstrap_preserves_rollout_dtypes(
+    device, source_dtype, amp_dtype, compact
+):
+    """Terminal actor/critic inputs and autocast values use their storage dtypes."""
+    if (
+        device == "cuda"
+        and amp_dtype == torch.bfloat16
+        and not torch.cuda.is_bf16_supported()
+    ):
+        pytest.skip("CUDA BF16 is unavailable on this device")
+    target_device = torch.device(device)
+
+    def observation(values):
+        state = torch.tensor(values, dtype=source_dtype, device=target_device).reshape(
+            -1, 1
+        )
+        return {
+            "policy": state,
+            "critic": torch.cat((state, torch.ones_like(state)), dim=-1),
+        }
+
+    class Env:
+        num_envs = 3
+        device = target_device
+
+        def reset(self):
+            return observation([1, 2, 3]), {}
+
+        def step(self, action):
+            terminal = observation([5, 7, 11])
+            info = {"terminal_observation": terminal}
+            if compact:
+                ids = torch.tensor([1], device=target_device)
+                info.update(
+                    terminal_env_ids=ids,
+                    terminal_observation={
+                        key: value[ids] for key, value in terminal.items()
+                    },
+                )
+            return (
+                observation([5, 99, 11]),
+                torch.ones(3, device=target_device),
+                torch.tensor([False, False, False], device=target_device),
+                torch.tensor([False, True, False], device=target_device),
+                info,
+            )
+
+    critic = nn.Linear(2, 1, bias=False)
+    with torch.no_grad():
+        critic.weight.fill_(1.0)
+    policy = ActorCritic(
+        1,
+        1,
+        target_device,
+        nn.Linear(1, 1),
+        critic,
+        critic_obs_dim=2,
+        actor_obs_groups=("policy",),
+        critic_obs_groups=("critic",),
+    )
+    buffer = RolloutBuffer(3, 1, 1, 1, target_device, critic_obs_dim=2)
+    collector = SyncCollector(Env(), policy, target_device)
+    with torch.autocast(
+        device_type=device, dtype=amp_dtype, enabled=amp_dtype is not None
+    ):
+        rollout = collector.collect(1, buffer.start_rollout())
+    assert rollout["timeout_value"].dtype == rollout["value"].dtype == torch.float32
+    torch.testing.assert_close(
+        rollout["timeout_value"][1, 0], torch.tensor(8.0, device=target_device)
+    )
+    assert torch.isnan(rollout["timeout_value"][[0, 2], 0]).all()
+    torch.testing.assert_close(
+        rollout["obs"][1, 1], torch.tensor([99.0], device=target_device)
+    )
+
+
+@pytest.mark.parametrize("tensor_dict_info", [False, True])
+def test_base_env_preserves_terminal_rows_before_reused_reset_storage(
+    tensor_dict_info: bool,
+) -> None:
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    from embodichain.lab.gym.envs import BaseEnv
+
+    state = torch.tensor([[3.0], [7.0], [11.0]])
+    observation = {"state": state}
+    info = {"success": torch.tensor([True, False, False])}
+    if tensor_dict_info:
+        info = TensorDict(info, batch_size=[3])
+
+    def reset(**kwargs):
+        state[kwargs["options"]["reset_ids"]] = 99.0
+        return observation, {}
+
+    env = SimpleNamespace(
+        _profiler=SimpleNamespace(section=lambda *args, **kwargs: nullcontext()),
+        sim=SimpleNamespace(render_frame=lambda: nullcontext()),
+        _preprocess_action=lambda **kwargs: kwargs["action"],
+        _step_action=lambda **kwargs: kwargs["action"],
+        _postprocess_action=lambda **kwargs: kwargs["action"],
+        _advance_physics=lambda: None,
+        _update_sim_state=lambda **kwargs: None,
+        _update_physical_objective=lambda: None,
+        _capture_observation=lambda **kwargs: SimpleNamespace(policy=observation),
+        get_obs=lambda **kwargs: observation,
+        get_info=lambda **kwargs: info,
+        get_reward=lambda **kwargs: torch.ones(3),
+        _extend_reward=lambda **kwargs: kwargs["rewards"],
+        check_truncated=lambda **kwargs: torch.tensor([False, True, False]),
+        _hook_after_sim_step=lambda **kwargs: None,
+        _elapsed_steps=torch.zeros(3, dtype=torch.long),
+        max_episode_steps=10,
+        cfg=SimpleNamespace(ignore_terminations=False),
+        num_envs=3,
+        device=torch.device("cpu"),
+        reset=reset,
+    )
+    env._get_termination_flags = lambda obs, info: BaseEnv._get_termination_flags(
+        env, obs, info
+    )
+    env._seal_step_outcomes = lambda *args: BaseEnv._seal_step_outcomes(env, *args)
+    env._after_observation = lambda *args: BaseEnv._after_observation(env, *args)
+    _, _, _, _, info = BaseEnv.step(env, torch.zeros(3, 1))
+    torch.testing.assert_close(
+        info["terminal_observation"]["state"], torch.tensor([[3.0], [7.0]])
+    )
+    torch.testing.assert_close(state, torch.tensor([[99.0], [99.0], [11.0]]))
+    torch.testing.assert_close(
+        info["terminal_observation_mask"], torch.tensor([False, True, False])
+    )
+
+
+def test_custom_policy_keeps_its_default_config_when_omitted(monkeypatch) -> None:
+    from embodichain.learning.rl.policies import Policy
+    from embodichain.learning.rl.policies import registry
+
+    class DefaultConfig:
+        gain = 3
+
+    class CustomPolicy(Policy):
+        def __init__(self, obs_dim, action_dim, device, cfg=DefaultConfig()):
+            super().__init__()
+            self.gain = cfg.gain
+
+        def forward(self, tensordict, deterministic=False):
+            return tensordict
+
+        def get_value(self, tensordict):
+            return tensordict
+
+        def evaluate_actions(self, tensordict):
+            return tensordict
+
+    monkeypatch.setitem(registry._POLICY_REGISTRY, "custom_default", CustomPolicy)
+    policy = build_policy({"name": "custom_default"}, 3, 1, torch.device("cpu"))
+    assert policy.gain == 3

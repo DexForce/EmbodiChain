@@ -110,12 +110,16 @@ def test_package_discovery_includes_only_runtime_trees() -> None:
         "embodichain_robots",
         "embodichain_benchmarks",
         "embodichain_models",
+        "embodichain_solvers",
+        "embodichain_sensors",
     }
     assert runtime_roots | {
         "embodichain_tasks.configs",
         "embodichain_robots.dexforce.w1",
     } <= set(packages)
     assert "embodichain_tasks.manipulation.tableware" in packages
+    assert "embodichain.lab.gym.envs.managers.observations" in packages
+    assert "embodichain_solvers.physics.nerd" in packages
     assert "embodichain_tasks.tableware" not in packages
     assert all(package.partition(".")[0] in runtime_roots for package in packages)
     assert package_dir == {
@@ -124,6 +128,8 @@ def test_package_discovery_includes_only_runtime_trees() -> None:
         "embodichain_robots": "extensions/embodichain_robots",
         "embodichain_benchmarks": "extensions/embodichain_benchmarks",
         "embodichain_models": "extensions/embodichain_models/embodichain_models",
+        "embodichain_solvers": "extensions/embodichain_solvers/embodichain_solvers",
+        "embodichain_sensors": "extensions/embodichain_sensors",
     }
 
 
@@ -228,7 +234,9 @@ def test_project_metadata_has_no_direct_dependencies() -> None:
     ("version", "supported"),
     [
         ("0.6.0.dev11491", False),
-        ("0.6.0rc1", True),
+        ("0.6.0rc1", False),
+        ("0.6.0rc2", False),
+        ("0.6.0", True),
     ],
 )
 def test_dexsim_dependency_selects_cable_release_wheel(

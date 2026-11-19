@@ -13,6 +13,7 @@ Paths are relative to `embodichain/gen_sim/` unless qualified.
 | External scene-provider lifecycle | `scene_providers.py`: request/job/cancellation contracts and selected entry-point loading |
 | Public staged workflow | `workflow.py`: Task Plan loading, provider job operations, generated-scene validation, qualification and deterministic deployment preparation |
 | Unified command dispatch | `embodichain/cli/gensim.py`: `gensim asset ingest`, `scene generate/edit/expand/preview`, `task plan`, `run`, `ui`; legacy top-level commands remain in `embodichain/cli/main.py` |
+| Remove robot hardware from a dual-arm head-camera frame | `scene_engine/cli/robot_cleanup.py` and `_robot_cleanup.py`: `gensim image clean-robot`, scoped masks, image-to-image edit, RGB audit |
 | Image to native execution | `_workflow.py`, `_run_config.py`, `_run_binding.py`, `_run_execution.py`; [command and run guide](../../../embodichain/gen_sim/README.md) |
 | Generate/edit CLI modes | `scene_engine/cli/start.py` |
 | Image → scene | `scene_engine/pipeline/generate.py`: `generate_scene_from_image()` |
@@ -23,6 +24,7 @@ Paths are relative to `embodichain/gen_sim/` unless qualified.
 | Grouped layouts from an existing export | `scene_engine/cli/randomization.py`, `scene_engine/randomization/generation.py` |
 | Baseline cache, saved runs and pose playback | `scene_engine/randomization/baseline.py`, `persistence.py`, `loading.py` |
 | Whole-scene USD package | `scene_engine/pipeline/utils/scene_usd.py`: `build_scene_usd()`, direct preview loading; `usd_scene.py`: entity index |
+| DexSim AssetRevision delivery | `scene_engine/pipeline/utils/scene_package.py`: SDK-owned scheme-one packaging and dependency closure; [output contract](../../../embodichain/gen_sim/README.md) |
 | General asset ingest | `asset_engine/pipeline/ingest.py`: `ingest_one_asset()` |
 | Asset orientation and scaling orchestration | `asset_engine/utils/_simready_pipeline.py`; `simready_utils.py` and `full_blender.py` retain geometry/render/export adapters and entry points |
 | Articulated asset generation | `asset_engine/pipeline/articulation.py`, `asset_engine/clients/articulated_generation.py` |
@@ -38,20 +40,40 @@ image/edit mode generates first. [Pipeline details](pipeline-details.md) own
 stage, ingest, resume, UI and grouped-randomization contracts.
 
 Full scene providers are separate from model-service roles. The selected
-`embodichain.gensim_scene_providers` adapter owns external job transport and
-materialization; GenSim owns requirements, qualification and deployment validity.
-Task plans, generated scenes, qualification reports and prepared deployments
-use separate immutable manifests. Expected incompatibility returns structured
-qualification; corrupt artifacts and transport failures remain errors. These
-operations expose durable identity/feedback boundaries for a later agent loop.
+`embodichain.gensim_scene_providers` adapter owns its external job transport and
+materialization, while GenSim owns task requirements, qualification and deployment
+validity. Task plans, generated scenes, qualification reports and prepared
+deployments use separate immutable manifests. Expected scene incompatibility is a
+structured qualification result; artifact corruption and transport failure remain
+errors. These operations reserve the durable identity and feedback boundary needed
+by a later bounded agent loop, but do not implement an agent runtime, MCP transport
+or automatic retry loop.
+
+Owned transports close when the run exits; explicit legacy clients and supplied
+service runs remain caller-owned. Chat requests own their stateless transport.
+Edit: import export → validate graph/typed edit plan → generate additions
+→ change layout → overwrite export. Combined image/edit mode generates first.
 
 `gensim run` binds a generated scene to a trusted embodiment/execution policy,
-preflights Task Program and uses ordinary Gym demo execution. Its source graph
-stays unbound; bound graph/deployment have separate run-owned paths. Ambiguous
+preflights Task Program and uses ordinary Gym demo execution. Placement,
+relative placement, axis alignment and held-transport targets bind from measured
+rigid geometry; optional calibration, room, recording and arm-anchor fields are in
+the command guide. Its source graph stays unbound; bound graph/deployment have
+separate run-owned paths. Ambiguous
 references reject and failures retain stage artifacts. Native success and
 normative TaskSpec certification remain distinct. See the
 [command guide](../../../embodichain/gen_sim/README.md) and provider-free
 [scripted reproduction](../../../examples/gensim/scripted_pick_place/README.md).
+
+`_run_image.py` owns the optional head-frame preprocessing handoff. A verified
+`input_camera` declaration pins the raw head frame by hash. Task Engine and
+scene generation consume a single effective image. Task Plan reuse copies the
+previous run's effective image and checks its input provenance and pixel audit.
+
+Articulated USDC admission allows absent `gen_sim:closedPosition` metadata;
+present declarations must identify a finite joint-limit endpoint. Missing
+endpoint semantics remain unknown. Operation-specific target qualification
+belongs to the [source control bindings](../scene-services/scene-services.md).
 
 One `GenSimServices` run lazily resolves selected model capabilities and closes
 owned transports; injected clients/runs remain borrowed. Python configuration
@@ -74,14 +96,31 @@ relations/table regions; directional vocabularies require quarter turns.
 
 - `scene_export/` contains scene/config/graph JSON and mesh/articulation assets;
   imported/exported graph node IDs must equal object IDs.
+- Rigid exports carry conservatively measured uniform GLB color properties and
+  content-bound provenance. Opacity uses authored GLB floating-point alpha and
+  material mode before library color quantization. Material extensions and
+  external buffers withhold GLB-only color proofs, including on replay. Authored
+  base-color texture declarations remain ineligible even if their image is missing. Unsupported
+  geometry, textures and mixed appearance leave the measurement unverified.
+  Role checks verify measured proofs against the mesh the deployment consumes,
+  including the legacy `shape.fpath` selection. Proxy GLB proofs cannot certify
+  the appearance of packaged USD prims; a runtime-material measurement is required.
 - Editable state is Y-up and runtime output Z-up. Preserve `body_scale` separately.
   Native execution bakes scale/axis conversion into run-owned OBJ vertices and
   isolated material sidecars; GLB node transforms alone are insufficient.
 - Every generated scene contains a rigid table. Articulations retain runtime
   USDC plus edit-proxy GLB, with distinct native-root and proxy placement.
-- Optional `scene_usd/` carries schema-v2 entity metadata; `scene.usdz` is its
-  relocatable package. Preview loads the stage directly. Build after preparation,
-  validate UIDs and keep packaged paths inside the output root.
+- Generation, editing and staged materialization produce `scene_usd/` with
+  provenance-bearing `scene.usda`, relocatable `scene.usdz` and `scene_package.zip`.
+  DexSim owns canonical `/Asset` packaging, AssetRevision `2.0-draft` validation,
+  dependency digests and provenance. The private processed-USD exporter is isolated
+  in `scene_package.py`. Packaging grants no capability or certification;
+  unmeasured quality stays unknown. Delivery failures propagate and stale delivery
+  files are invalidated when editable exports are replaced. Build after scene
+  preparation, validate UIDs and keep package paths inside the output root.
+- Lab-owned `preview-scene --usd-file` loads standard USD through
+  `SimulationManager.add_usd` without interpreting producer identity/joint tags.
+  Manifest and native-asset preview adapters are removed.
 - USD texture copies bake image-origin conversion while retaining authored UVs;
   native glTF textures keep original pixels. Use ordinary USD texture nodes.
 - Overwrite validates/writes before stale deletion. Scene Engine's internal
@@ -103,6 +142,13 @@ See [pipeline details](pipeline-details.md#grouped-layouts) for hierarchy,
 canonicalization and pose-only playback boundaries.
 
 ## Runtime and extension boundaries
+
+GenSim can consume precision assembly through the reusable
+`embodichain/toolkits/assembly/` API; see
+[assembly assets and precision](../assembly-assets/assembly-assets.md)
+for pinned mjfit adaptation, portable manifests and native/USD construction.
+It does not use Scene Engine inference or the general SimReady decomposition
+pipeline, because approximate recooking can consume an assembly's clearance.
 
 Live generation/execution share a process and retain `hybrid`: renderer
 selection is process-wide and closing a temporary World does not reset it.
@@ -132,6 +178,7 @@ TaskSpec separately applies normative criteria.
 | Service discovery, parsing and lifetime | `tests/gen_sim/services/`, `tests/gen_sim/test_gen_sim_env.py` |
 | UI roots, auth and process ownership | `tests/gen_sim/gradio_ui/` |
 | CLI and execution handoff | `tests/cli/test_gensim.py`, `tests/test_main.py`, `tests/gen_sim/test_workflow.py` |
+| DexSim package schema, bytes, dependency closure and namespace preservation | `tests/gen_sim/scene_engine/test_scene_package.py` |
 
 Choose provider/simulator tests for the changed boundary; unit checks alone do
 not establish remote model quality or native task success.

@@ -9,8 +9,9 @@ browser renderer, selected with `--viser`.
 embodichain preview-robot --robot ur5 --web
 embodichain preview-asset --asset_path /path/to/model.urdf --web --preview
 embodichain preview-material --material GlassClear --web
+embodichain preview-scene --usd-file /path/to/scene.usdz --web
 embodichain run-task --gym_config /path/to/task.yaml --web
-embodichain run-atomic-action --skill pickup --web
+embodichain run-atomic-skill --skill pickup --web
 ```
 
 Open `http://127.0.0.1:8765/`. `--web-port` and `--web-fps` override the
@@ -113,15 +114,13 @@ trigger recording; the Python host starts and stops it.
 ## DexSim boundaries
 
 - Requires Linux/NVIDIA, loadable WebRTC streaming libraries, and NVENC. The
-  pinned SDK is `dexsim_engine==0.6.0rc1`. Its Python API exposes
+  pinned SDK is `dexsim_engine==0.6.0`. Its Python API exposes
   `WebApplication` and startup `WorldConfig.webrtc_*` settings.
-  **Release qualification is blocked:** the published Linux x86_64 Python 3.12
-  wheel's streaming libraries fail to load with
-  `ELF load command address/offset not page-aligned`. No loadable replacement
-  artifact is currently pinned. The manager checks the selected streaming
-  library before allocating a World and reports the native loading error.
-  Python API availability or tests using repaired binaries do not qualify the
-  unmodified release artifact.
+  The published Linux x86_64 Python 3.12 release artifact passes native library
+  loading and browser media acceptance without binary repairs. The manager
+  still checks the selected streaming library before allocating a World and
+  reports loading failures. Qualification must use the exact selected SDK
+  artifact; Python API availability alone does not qualify its native runtime.
 - The SDK automatically enumerates scene cameras and has no Python video-source
   whitelist. Its video catalog is limited to 16 RGB streams, with even
   dimensions in 32–4096. Stereo/depth-only/large camera catalogs are allowed in
@@ -157,7 +156,8 @@ python -m pytest tests/visualization/test_web_viewer_browser.py --run-gpu -q
 Install Playwright and Chrome and retain the host's display/SDL environment.
 `WEBRTC_TEST_CHROME` selects a Chrome executable outside PATH. SDK-native
 library failures are runtime qualification failures, not successful browser
-validation. After a loadable SDK artifact is published, pin it and rerun browser
-acceptance against that exact unmodified artifact before merging. Listener
+validation. Record the exact unmodified SDK artifact used for acceptance.
+The browser regression submits forged native input and, on the representative
+FastRT path, closes and reopens the host viewer while media is active. Listener
 release is checked inside the live child after manager teardown and cleanup,
 before process exit can release sockets implicitly.

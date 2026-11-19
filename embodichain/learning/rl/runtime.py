@@ -225,7 +225,9 @@ def _build_gym_environment(
         base_dir=config_dir,
     )
     gym_config = load_config(gym_config_path)
-    env_cfg = config_to_cfg(gym_config, manager_modules=get_manager_modules())
+    env_cfg = config_to_cfg(
+        gym_config, manager_modules=get_manager_modules(), source_path=gym_config_path
+    )
     if num_envs is not None:
         env_cfg.num_envs = int(num_envs)
     if seed is not None:
@@ -394,8 +396,6 @@ def _build_gym_policy(
             actor_observation_dim,
             env.action_space,
             device,
-            actor=build_mlp_from_cfg(actor_cfg, actor_observation_dim, action_dim),
-            critic=build_mlp_from_cfg(critic_cfg, critic_observation_dim, 1),
             critic_obs_space=(
                 critic_observation_dim if uses_separate_critic_obs else None
             ),
@@ -416,6 +416,7 @@ def _build_gym_policy(
         env.observation_space,
         env.action_space,
         device,
+        critic_obs_space=(critic_observation_dim if uses_separate_critic_obs else None),
     )
 
 
@@ -449,12 +450,12 @@ def _build_learning_policy(
         device,
         actor=(
             build_mlp_from_cfg(actor_cfg, actor_observation_dim, action_dim)
-            if actor_cfg is not None
+            if actor_cfg is not None and policy_block["name"].lower() != "actor_critic"
             else None
         ),
         critic=(
             build_mlp_from_cfg(critic_cfg, critic_observation_dim, 1)
-            if critic_cfg is not None
+            if critic_cfg is not None and policy_block["name"].lower() != "actor_critic"
             else None
         ),
         critic_obs_space=(critic_observation_dim if uses_separate_critic_obs else None),

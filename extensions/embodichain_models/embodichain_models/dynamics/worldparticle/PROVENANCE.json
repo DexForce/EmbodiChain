@@ -1,0 +1,29 @@
+{
+  "source": "https://github.com/WorldParticle/WorldParticle",
+  "upstream_revision": "b8e37b854f2af3fc9bfd7fc150cfc01cba4a092e",
+  "source_files_sha256": {
+    "models/particle_network_cross_attn_feat.py": "acb65d5a36a26addcf3b1cc7368665d970ec90ae0799988145435f1391035c50",
+    "models/cross_attn_feat.py": "60f1cd9b755c08f64cb2d67ea326b60a3ac8f5a4cb940a7dd2c12ce15840ab85",
+    "models/super_particle_layers.py": "126dfdb567b9da5711f221931b0a8dee0859b47fe562b8803a6fcad272b5a675",
+    "models/continuous_conv.py": "8a4bcccffe06c82a7750be48129c1bbfb686ec0bd66640d389acfc20bf8d1253",
+    "models/layers/attention.py": "feb20a84177a9448c0e8abb24aef806ef3f6de569d74808a9c63b495eebc95c7",
+    "models/layers/merge.py": "e01542cd0fee2c7c6e44ea21ad2beaa9860549acffc6f3a3ff84e6d6e4df20dc",
+    "models/encodings/rope.py": "709e3209e7c427a2e1a44b76eee624b0d361c808b7656f992b37bafbf3d13aed",
+    "models/encodings/rms_norm.py": "6b90031c3fe097270180d26b0741e0e739056e3d575a75f3315c057320027b69"
+  },
+  "adaptations": [
+    "Package-relative imports; removed sys.path mutation",
+    "Task predicates extracted without dataset/Lightning dependencies",
+    "Missing FlashAttention fails explicitly instead of changing the attention backend",
+    "YAPF whitespace formatting; no numerical algorithm changes"
+  ],
+  "third_party": {
+    "ToMe": {
+      "source": "https://github.com/facebookresearch/ToMe",
+      "license": "CC-BY-NC-4.0",
+      "license_file": "LICENSE.tome",
+      "affected_file": "_network/layers/merge.py",
+      "notice": "Upstream WorldParticle retains a Meta/ToMe header here. Its license must be considered separately from the WorldParticle root MIT license."
+    }
+  }
+}

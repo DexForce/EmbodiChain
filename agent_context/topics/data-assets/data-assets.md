@@ -10,6 +10,7 @@ Online sampling and demonstration persistence belong to
 
 | Request | Owner |
 |---|---|
+| Prepared URDF resource snapshots | `embodichain/data/resources.py`: `snapshot_urdf_resources()` |
 | Asset path lookup | `embodichain/data/dataset.py`: `get_data_path()`, `get_data_class()` |
 | Cache roots / mirror prefix | `embodichain/data/constants.py` |
 | Locked download and ZIP integrity | `embodichain/data/dataset.py`: `EmbodiChainDataset`, `_dataset_download_lock()` |
@@ -42,6 +43,14 @@ base URL for asset archives (default: the hf-mirror.com copy of
 Lookup does not verify the final nested file. Check the shared index and installed
 entry points for missing IDs. Explicit loaded modules remain available through
 `extra_modules` after registered IDs; package re-exports do not register assets.
+
+Prepared robot snapshots copy an existing URDF parent tree into a caller-owned
+standalone directory, retaining relative OBJ/MTL/texture references. An explicit
+provenance root contributes its manifest and model license/notice files without
+robot-name rules. Self-snapshots are idempotent; nested source destinations are
+rejected before copying. Task adapters own configuration path rewriting and
+assembly-specific fidelity; the shared filesystem helper does not import Gym,
+simulation or task packages.
 
 ## Download and registry boundaries
 
@@ -106,6 +115,20 @@ Keep its source revision and complete file checksums together when updating it.
 
 ZIP bundles must include directory entries before nested files for Open3D
 extraction. Validate new bundles through `get_data_path()` with an empty cache.
+
+Captured Gaussian backgrounds register as `RoboSplatterOfficeGS`,
+`DiscoverseLab3GS` and `RoboSimGSTabletopGS` in `assets/scene_assets.py`.
+Each resolves `asset.usda` from an immutable Hub snapshot and a versioned cache.
+The metre/Z-up entry references original or separately decoded PLY data; the
+package includes an AssetRevision inventory, source hashes and licensing
+evidence. These are visual-only scenes and supply no enclosing collision box.
+`scripts/tools/prepare_gaussian_scene_assets.py` owns explicit offline packaging;
+normal runtime consumers download the completed archive. Package admission and
+native RGB evidence do not certify metric Gaussian depth or industrial readiness.
+Official Task Program deployments live under
+`extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/`.
+`examples/gym/gaussian_pick_place/` consumes those definitions for RGB recording,
+video export and offline acceptance; it does not own another task configuration.
 
 `Franka` also materializes `Panda/Fr3HandV1.urdf` from the pinned integrated
 hand subtree, retaining source names and relative mesh paths. Bare FR3 arms
@@ -188,6 +211,19 @@ Task packages must already be installed; downloading weights does not register
 new environment implementations. Test the Hub boundary with fake downloads and
 validate a real selected-model download separately.
 
+## Qualified cloth replay inputs
+
+`scripts/tools/prepare_cloth_fold_assets.py` installs the pinned M02 input bundle
+into the normal data root. It uses the shared download lock, verifies archive
+and task-owned URDF/mesh SHA-256 values, includes URDF-relative visual and
+collision dependencies, and rejects conflicting local files. Each input is copied
+to a same-directory temporary file, verified and atomically published without
+overwriting an existing file, so interrupted copies remain retryable. The packaged
+cloth task retains its qualified replay stream and 15 mm final centroid rules.
+The installer also supports an explicit custom root; launch with that same
+`EMBODICHAIN_DATA_ROOT`. It does not change the global root or substitute the
+generic W1 archive for the qualified robot.
+
 ## Failure diagnosis and change sites
 
 | Symptom | Inspect |
@@ -210,3 +246,12 @@ changes, exercise absolute, existing-relative and class-prefixed paths plus
 missing/bare prefixes and a custom data root. For CLI changes, cover category
 visibility and failure exit behavior. Use fake download backends for these
 contracts; separately validate actual network downloads when asset content changes.
+
+`FlexivRizon4SMenagerie` is a source-file bundle rather than an archive:
+`embodichain_robots/flexiv/rizon4s/rizon4s_sources.json` pins individual Git blob identities and
+licenses. The owning asset class verifies each downloaded file before publishing
+the source cache, preserving prepared model directories during automatic repair
+under the same lock used by preparation. Historical URDF preparation and
+model-fidelity metadata are owned by
+`embodichain_benchmarks.assembly.robot_reference`, not the dataset resolver or a
+combined arm/gripper catalog preset.

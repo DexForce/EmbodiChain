@@ -7,7 +7,7 @@
 | Public simulation facade | `embodichain/lab/sim/__init__.py` |
 | World, registries, readiness and stepping | `embodichain/lab/sim/sim_manager.py` → `SimulationManager`, `SimulationManagerCfg` |
 | Declaration, source resolution and binding | `embodichain/lab/sim/spawn/scene.py`, `spawn/source.py`, `spawn/descriptors.py` |
-| USD import recipes, preflight and source-path results | `cfg/usd.py`, `spawn/usd_import.py`, `spawn/usd_result.py` |
+| USD import recipes, preflight and source-path results | `cfg/usd.py`, `spawn/usd_import.py`, `spawn/_usd_scene.py`, `spawn/usd_result.py` |
 | Fresh static USD reads and owned authored link meshes | `embodichain/lab/sim/spawn/source_geometry.py` |
 | Manager-level backend hooks and capabilities | `embodichain/lab/sim/physics/` |
 | Object-level Scene batch adapters | `embodichain/lab/sim/objects/backends/scene.py`, `newton.py` |
@@ -18,6 +18,10 @@
 `cli.sim` supplies standalone arguments without importing runtime dependencies.
 [Environment configuration](../env-framework/configuration.md) owns runnable
 file/CLI composition and physics selection. Concrete defaults stay in configs.
+
+SimulationManagerCfg.enable_ground_plane controls the manager-owned colliding plane
+(default enabled). Whole-scene preview disables it so source physics is not
+augmented; Viser's display grid and source-authored ground are separate.
 
 ## Ownership
 
@@ -30,6 +34,17 @@ Backend differences belong in physics hooks or object adapters; tasks do not
 perform native access. Spawn owns replication/isolation and source overlays.
 Contact sensors use the finalized Scene query boundary. Cameras/lights use the
 same Scene, including its pre-finalization prepared-Arena phase.
+
+The private `_GeometryNetForceSensor` qualifies native MuJoCo-Warp geometry-pair
+net forces for the Sharpa reference experiment. It resolves named source
+colliders after preparation, rejects ambiguous decompositions and topology
+changes, and closes borrowed buffers before manager teardown. Native material
+scaling and batched joint-gain writes are physics-owned private views: tasks
+submit row values, source reset defaults are preserved, and solver graphs are
+invalidated after parameter changes. The private `_shrink_cylinder_variants`
+helper scales only analytic cylinders by ratios in `(0, 1]`, scaling inertia at
+constant mass while keeping the enclosing template broad-phase bounds. It does
+not update render geometry or descriptors and must run once before collection.
 
 `VisualObject` owns appearance, visibility and pure-visual poses without physics
 buffers or collision API. Source selectors are exclusive with ordinary file/
@@ -49,6 +64,16 @@ Default; cross-object/world constraints require `add_usd()`.
 Source, texture and visual-rebuild rules
 are in [articulation adapters](articulation-adapters.md),
 [rendering](rendering.md) and [scene geometry](../scene-services/geometry.md).
+
+Whole-scene imports also admit standard AssetRevision ZIPs through SDK package
+validation. `spawn/_usd_scene.py` resolves their declared USD entrypoint and
+retains the original address/digest in the static environment inventory.
+`SpawnScene` owns the extraction context until native Scene closure; ZIP-imported
+facades address the resolved USD during that lifetime. Singleton USD sources do
+not accept arbitrary ZIPs. The same descriptor compiler supports manager-free
+identity/override/constraint preflight without constructing object facades.
+Configured Gym ownership and semantic binding are described by
+[USD environments](../env-framework/configuration.md#whole-scene-usd-environments).
 
 `spawn.source_geometry` owns fresh authored reads and `LinkMesh`, with optional
 per-assembly snapshots and no global source cache. Captured identity/order and
@@ -82,6 +107,40 @@ including explicit warmup, before `after_substep`. Preparation, render sync,
 reads, topology rebuilds and resets do not advance or rewind these clocks.
 Episode clocks may have an offset; physical evidence must validate the mapping.
 Caches also validate binding/topology identity, not only the step count.
+
+## Compound geometry and prepared variants
+
+Procedural rigid geometry can be a `CompoundShapeCfg` of flat body-local
+`ShapePartCfg` entries. Spawn emits one physical body and multiple independent
+colliders; owner `visuals` cannot become collision geometry. Explicit
+mass/COM/inertia applies once to the parent. `CylinderCfg` retains a native
+cylinder descriptor, but cooking fidelity remains backend-specific.
+Rigid appearance has one canonical `visuals` list. Legacy `visual_shape` and
+compound `visual_parts` migrate into that list with a warning and are cleared;
+competing inputs fail. Procedural arrays and singleton mesh files lower on the
+body for both physics backends. File-containing render batches use separate
+singleton imports with owner pose tracking; see [rendering](rendering.md).
+Gaussian and other companion visuals keep
+their separate binding capabilities. Semantic queries retain the physical
+surface unless the parent config explicitly selects a shared proxy.
+
+Preparation-time `RigidObjectCfg.env_variants` requires Newton and a supporting
+SDK. MuJoCo Warp requires compatible collider topology within a batch; arbitrary
+per-arena piece counts are not qualified. Spawn checks descriptor support for
+variants and raw Newton `solref`/`solimp`/`solmix` before materialization rather
+than silently discarding requested settings. A dependency version alone does
+not qualify every geometry or solver profile.
+Rigid-object groups retain member variants on selected resets. Variant checks
+precede replacement removals and material registration for the complete batch.
+Variants accept procedural shapes, physics, scale, visible mesh appearance and
+initial poses. Per-variant USD sources, semantic proxies, Gaussian resources,
+hidden visual elements and post-load UV generation are rejected; parent
+semantic proxies remain shared across the batch. Default semantic surfaces
+follow each selected row's physical shape. Ragged surfaces require row-wise
+queries rather than an ambiguous dense batch.
+The default ground is separately owned by `SimulationManagerCfg`: disable it
+for constrained probes or author `ground_plane_attrs` to match a reference
+contact profile. Omitting that profile preserves the existing scene defaults.
 
 ## Quaternion and pose convention
 

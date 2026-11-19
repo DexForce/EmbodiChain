@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 import hashlib
 from pathlib import Path
 import shutil
+import uuid
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -59,6 +60,9 @@ def main(
     parser.add_argument(
         "--scene", type=Path, help="Reuse a scene workspace instead of generating it."
     )
+    parser.add_argument(
+        "--task", type=Path, help="Reuse a published task plan instead of planning it."
+    )
     parser.add_argument("--task-id", "--task_id", help="Override the task identity.")
     parser.add_argument("--device", help="Execution device, for example cpu or cuda:0.")
     parser.add_argument(
@@ -86,28 +90,53 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
     )
     from ._run_binding import _bind_deployment, _load_runtime
     from ._run_execution import _execute_deployment
+    from ._run_image import _find_previous_cleanup, _prepare_image
 
     # Decode the trusted robot/policy inputs before incurring generation costs.
     runtime, policy, profile = _load_runtime(cfg)
     with Image.open(cfg.image) as image:
         image.verify()
+        size = image.size
+    raw_sha256 = hashlib.sha256(cfg.image.read_bytes()).hexdigest()
+    camera = cfg.input_camera
+    if camera is not None and (camera["sha256"] != raw_sha256 or size != (640, 480)):
+        raise ValueError("input_camera must match the exact 640 × 480 raw head frame")
+    previous_cleanup = None
+    reused_plan = None
+    if cfg.task is not None:
+        from .workflow import load_task_plan
+
+        reused_plan = load_task_plan(cfg.task)
+        if reused_plan["instruction"] != cfg.instruction.strip() or (
+            camera is None and reused_plan["image_sha256"] != raw_sha256
+        ):
+            raise ValueError(
+                "task was planned for a different instruction or image than this run"
+            )
+        if camera is not None:
+            previous_cleanup = _find_previous_cleanup(cfg.task, reused_plan, camera)
     output = validate_run_output_directory(cfg.output)
     output.mkdir(parents=True, exist_ok=False)
     source = output / ("source_image" + cfg.image.suffix.lower())
     shutil.copyfile(cfg.image, source)
+    if hashlib.sha256(source.read_bytes()).hexdigest() != raw_sha256:
+        raise ValueError("Input image changed while copying it into the run")
     manifest: dict[str, Any] = {
         "schema_version": "embodichain.gensim-run/v1",
         "task_id": cfg.task_id,
+        "policy_sha256": hashlib.sha256(cfg.execution_policy.read_bytes()).hexdigest(),
         "instruction": cfg.instruction,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "image_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        "source_image_sha256": raw_sha256,
+        "image_sha256": raw_sha256,
         "status": "running",
+        "run_id": uuid.uuid4().hex,
         "stages": {},
         "execution_ready": False,
         "runtime_evidence_status": "not_run",
         "task_spec_verdict": "not_evaluated",
     }
-    stage = "task_plan"
+    stage = "image_preprocessing" if camera is not None else "task_plan"
 
     def update(status: str) -> None:
         manifest["stage"] = stage
@@ -117,8 +146,35 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
     run = None
     try:
         with service_scope(services) as run:
+            if camera is not None:
+                update("running")
+                prepared = output / "image_preprocessing"
+                source = _prepare_image(
+                    source,
+                    prepared,
+                    run,
+                    previous_cleanup=previous_cleanup,
+                    expected_sha256=(
+                        reused_plan["image_sha256"] if reused_plan is not None else None
+                    ),
+                )
+                manifest["image_sha256"] = hashlib.sha256(
+                    source.read_bytes()
+                ).hexdigest()
+                manifest["image_preprocessing"] = {
+                    "view": camera["view"],
+                    "input_image": str(source),
+                    "report": str(prepared / "preparation.json"),
+                }
+                if previous_cleanup is not None:
+                    manifest["image_preprocessing"]["reused_from"] = str(
+                        previous_cleanup
+                    )
+                update("reused" if previous_cleanup is not None else "succeeded")
+                stage = "task_plan"
             from .workflow import (
                 load_generated_scene,
+                load_task_plan,
                 materialize_scene_generation,
                 plan_image_task,
                 prepare_task_deployment,
@@ -130,15 +186,34 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
                 load_scene_generation_provider,
             )
 
-            update("running")
-            task = plan_image_task(
-                source,
-                cfg.instruction,
-                output / "task",
-                task_id=cfg.task_id,
-                services=run,
-            )
-            update("succeeded")
+            if cfg.task is not None:
+                # Reuse a published plan read-only, as --scene reuses a scene.
+                task = output / "task"
+                shutil.copytree(cfg.task, task)
+                manifest["task_reused_from"] = str(cfg.task)
+                update("reused")
+            else:
+                update("running")
+                task = plan_image_task(
+                    source,
+                    cfg.instruction,
+                    output / "task",
+                    task_id=cfg.task_id,
+                    services=run,
+                    max_repairs=cfg.planning_repairs,
+                )
+                update("succeeded")
+            plan = load_task_plan(task)
+            if plan["image_sha256"] != manifest["image_sha256"]:
+                raise ValueError(
+                    "Task plan and effective run image have different hashes"
+                )
+            manifest["task_id"] = plan["task_id"]
+            manifest["instruction"] = plan["instruction"]
+            manifest["spec_digest"] = plan.get("spec_digest")
+            manifest["graph_digest"] = plan["semantic_graph_sha256"]
+            manifest["plan_digest"] = plan["plan_digest"]
+
             stage = "scene"
             update("running")
             scene = cfg.scene
@@ -151,7 +226,7 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
                     cfg.scene_provider["id"], provider_profile
                 )
                 request = SceneGenerationRequest(
-                    task_id=cfg.task_id,
+                    task_id=plan["task_id"],
                     image_path=source,
                     image_sha256=manifest["image_sha256"],
                     requirements_path=requirements,
@@ -163,7 +238,9 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
                 )
                 request_key = hashlib.sha256(
                     (
-                        cfg.scene_provider["id"] + request.request_hash + cfg.task_id
+                        cfg.scene_provider["id"]
+                        + request.request_hash
+                        + plan["task_id"]
                     ).encode("utf-8")
                 ).hexdigest()
                 job = submit_scene_generation(
@@ -181,6 +258,11 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
             update("succeeded")
             stage = "binding"
             update("running")
+            if (
+                hashlib.sha256(cfg.execution_policy.read_bytes()).hexdigest()
+                != manifest["policy_sha256"]
+            ):
+                raise ValueError("Execution policy changed after task planning")
             if (scene / "generated_scene.json").is_file():
                 load_generated_scene(scene)
                 qualification = qualify_task_scene(
@@ -208,21 +290,93 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
                     cfg.runtime,
                     cfg.execution_policy,
                     output / "prepared",
+                    expected_revisions={"plan_digest": manifest["plan_digest"]},
                 )
             else:
                 deployment = _bind_deployment(
-                    cfg, scene, task, runtime, policy, profile, services=run
+                    cfg,
+                    scene,
+                    task,
+                    runtime,
+                    policy,
+                    profile,
+                    services=run,
+                    expected_plan_digest=manifest["plan_digest"],
                 )
             manifest["deployment"] = str(deployment)
             update("succeeded")
             stage = "execution"
             manifest["execution_ready"] = True
             manifest["runtime_evidence_status"] = "running"
+            from .task_spec import canonical_hash
+
+            bundle_files = {}
+            for path in deployment.parent.rglob("*"):
+                if path.is_file():
+                    digest = hashlib.sha256()
+                    with path.open("rb") as stream:
+                        while block := stream.read(1024 * 1024):
+                            digest.update(block)
+                    bundle_files[path.relative_to(deployment.parent).as_posix()] = (
+                        digest.hexdigest()
+                    )
+            manifest["attempt_id"] = uuid.uuid4().hex
+            manifest["bundle_digest"] = canonical_hash(bundle_files)
+            manifest["program_digest"] = bundle_files["program.json"]
+            manifest["scene_digest"] = hashlib.sha256(
+                (
+                    (scene / "generated_scene.json")
+                    if (scene / "generated_scene.json").is_file()
+                    else (scene / "scene_export" / "scene_config.json")
+                ).read_bytes()
+            ).hexdigest()
             update("running")
             report = _execute_deployment(
-                deployment, device=cfg.device, headless=cfg.headless
+                deployment,
+                device=cfg.device,
+                headless=cfg.headless,
+                recording=output / "recording" if cfg.recording else None,
             )
             write_run_json(output / "execution_report.json", report)
+            write_run_json(
+                output / "attempt_feedback.json",
+                {
+                    "schema_version": "embodichain.attempt-feedback/v1",
+                    **{
+                        key: manifest[key]
+                        for key in (
+                            "run_id",
+                            "attempt_id",
+                            "spec_digest",
+                            "graph_digest",
+                            "plan_digest",
+                            "bundle_digest",
+                            "scene_digest",
+                            "program_digest",
+                            "policy_sha256",
+                        )
+                    },
+                    "static_validation": "validated",
+                    "planning_feasibility": "see_execution_segments",
+                    "execution": report["status"],
+                    "physical_verdict": "unavailable",
+                    "persistence": "unverified",
+                    "capture_step": report.get("length"),
+                    "execution_report": "execution_report.json",
+                    "execution_report_digest": canonical_hash(report),
+                    "issues": [
+                        {
+                            "node_id": s.get("name"),
+                            "code": s.get("failure_reason"),
+                            "expected": "segment success",
+                            "measured": s.get("success"),
+                        }
+                        for s in report.get("segments", [])
+                        if s.get("success") is False
+                    ],
+                    "missing_evidence": ["independent_task_spec_evaluation"],
+                },
+            )
             manifest["runtime_evidence_status"] = report["status"]
             manifest["status"] = (
                 "succeeded"
@@ -230,6 +384,13 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
                 else "failed"
             )
             update(manifest["status"])
+            from .task_engine._review import write_review
+
+            try:
+                write_review(task, output / "task_review.html", output)
+            except (ValueError, OSError, KeyError, TypeError) as error:
+                manifest["review_error"] = str(error)
+                write_run_json(output / "run_manifest.json", manifest)
     except BaseException as error:
         manifest["status"] = (
             "interrupted" if isinstance(error, KeyboardInterrupt) else "failed"

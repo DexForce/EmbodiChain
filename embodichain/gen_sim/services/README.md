@@ -64,6 +64,9 @@ budget and adapter options. Fields can use `{"env": "NAME"}`; `api_key_env` is
 shorthand for an API-key reference. Only references are resolved: process values
 win over the selected dotenv (`EMBODICHAIN_ENV_FILE` or the default GenSim `.env`).
 Unrelated `OPENAI_*` values never fill missing fields in an explicit profile.
+HTTP profile API keys are sent only to the configured origin (scheme, host and
+port). External mesh URLs and redirects to another origin receive no profile
+Authorization header.
 Unused roles require no credentials, connection or health check. The example's
 optional job-control profile is only needed when using Gradio's remote panel.
 An OpenAI-compatible profile may omit its API key for a trusted local endpoint.
@@ -171,6 +174,10 @@ with local mesh paths, Y-up metre positions, unit xyzw quaternions and separate
 positive scales. A mesh-only adapter must compose a layout estimator; it must not
 invent a zero pose. The service layer does not implement a new estimator.
 Articulation returns a validated USDC and an optional request-evidence sidecar.
+The custom `gen_sim:closedPosition` field is optional at admission. When present,
+it must be a finite, non-boolean joint-limit endpoint; absence preserves unknown
+open/closed semantics and does not prevent scene export. A task's open/closed
+target binding must supply the missing semantics before resolving its targets.
 The existing UI job-control API is a separate optional capability; it preserves
 submit/status/cancel/download behavior without blocking the Gradio event stream.
 

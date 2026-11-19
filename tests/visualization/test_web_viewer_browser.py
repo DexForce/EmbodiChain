@@ -212,6 +212,18 @@ def test_native_browser_view_and_sensor_isolation(
                 assert current["test_cube_pose"] == initial["test_cube_pose"]
                 assert current["frames"] > initial["frames"]
                 page.screenshot(path=str(tmp_path / "viewer.png"))
+                reopened = renderer == "fast-rt"
+                if reopened:
+                    request = result_path.with_suffix(".reopen")
+                    request.touch()
+
+                    def reopen_complete():
+                        assert process.poll() is None, log_path.read_text(
+                            errors="replace"
+                        )
+                        return not request.exists()
+
+                    _wait(reopen_complete)
                 page.reload()
                 _wait(
                     lambda: page.evaluate(
@@ -219,7 +231,15 @@ def test_native_browser_view_and_sensor_isolation(
                     )
                 )
                 current = ready()
-                assert current["run_id"] == initial["run_id"]
+                assert (current["run_id"] != initial["run_id"]) is reopened
+                if reopened:
+                    _wait(
+                        lambda: page.evaluate(
+                            "Boolean(document.querySelector('#main-view video')?.readyState >= 2)"
+                        )
+                    )
+                    assert current["test_camera_pose"] == initial["test_camera_pose"]
+                    assert current["test_cube_pose"] == initial["test_cube_pose"]
                 assert current["test_sensor_pose"] == initial["test_sensor_pose"]
                 assert current["test_sim_step"] == 1
                 assert not errors

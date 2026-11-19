@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "scenes": {
+    "office": {
+      "name": "RoboSplatter Office",
+      "local_source_name": "robosplatter_office.ply",
+      "repository": "HorizonRobotics/RoboSplatter",
+      "repository_type": "dataset",
+      "revision": "5dc6f3b8d689cf3f28b51bb68e1adc469815a930",
+      "source_path": "example_asset/scene/office.ply",
+      "source_url": "https://huggingface.co/datasets/HorizonRobotics/RoboSplatter/resolve/5dc6f3b8d689cf3f28b51bb68e1adc469815a930/example_asset/scene/office.ply",
+      "sha256": "7bee948f8e9c5a60168ed5a780ac7ca13dd20e514794988032da5edb4591bacb",
+      "license": "Apache-2.0",
+      "source_up_axis": "Y",
+      "source_meters_per_unit": 1.0,
+      "rotation_xyz_degrees": [
+        90,
+        0,
+        0
+      ],
+      "compressed_super_splat": false,
+      "slug": "robosplatter_office"
+    },
+    "discoverse": {
+      "name": "DISCOVERSE Lab3",
+      "local_source_name": "discoverse_lab3.ply",
+      "repository": "tatp/DISCOVERSE-models",
+      "repository_type": "model",
+      "revision": "960244d7d9b47edb522e7537619f1597759bff70",
+      "source_path": "3dgs/scene/lab3/point_cloud.ply",
+      "source_url": "https://huggingface.co/tatp/DISCOVERSE-models/resolve/960244d7d9b47edb522e7537619f1597759bff70/3dgs/scene/lab3/point_cloud.ply",
+      "sha256": "522a9c434aa82a7d64e89482cc2b1963d76bd20dce6c3c5e81dfe345385b4ceb",
+      "license": null,
+      "source_up_axis": "Z",
+      "source_meters_per_unit": 1.0,
+      "rotation_xyz_degrees": [
+        0,
+        0,
+        0
+      ],
+      "compressed_super_splat": true,
+      "slug": "discoverse_lab3"
+    },
+    "robosimgs": {
+      "name": "RoboSimGS Tabletop",
+      "local_source_name": "robosimgs_single_view.ply",
+      "repository": "haoyu1234/robosimgs",
+      "repository_type": "dataset",
+      "revision": "dd30168456d2dfc0c979e8bbf42a28d91a633802",
+      "source_path": "single-view-scene/splat-transform.ply",
+      "source_url": "https://huggingface.co/datasets/haoyu1234/robosimgs/resolve/dd30168456d2dfc0c979e8bbf42a28d91a633802/single-view-scene/splat-transform.ply",
+      "sha256": "fab316cfc24998c481792e075aa1430f0c1a324af197bfb891082ebe42d5ef07",
+      "license": "MIT",
+      "source_up_axis": "Z",
+      "source_meters_per_unit": 1.0,
+      "rotation_xyz_degrees": [
+        0,
+        0,
+        0
+      ],
+      "compressed_super_splat": false,
+      "slug": "robosimgs_tabletop"
+    }
+  }
+}

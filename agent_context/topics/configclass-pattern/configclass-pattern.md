@@ -10,6 +10,10 @@
 `@configclass` wraps `dataclass`, infers annotations from ordinary defaults,
 copies mutable/nested defaults per instance, and adds `validate()`, `to_dict()`,
 `replace()` and `copy()`. Public configuration fields should still be annotated.
+The decorator retains each class's original declarations as private metadata
+before flattening inherited annotations. Domain decoders use that ownership to
+resolve postponed type names in the declaring module; the metadata is not a
+configuration field and does not appear in serialization.
 
 ## Required values and validation
 
@@ -43,7 +47,7 @@ domain-contract validator. Domain loaders add their own checks.
 
 | Operation | Contract |
 |---|---|
-| `to_dict()` | Recursively converts configs; tensors remain tensors, callables become strings |
+| `to_dict()` | Recursively converts configs; preserves integer mapping keys, tensors remain tensors, callables become strings |
 | Custom `to_dict()` | A custom method anywhere in the MRO is preserved, including on decorated subclasses |
 | `replace(**kwargs)` / `copy(**kwargs)` | Construct a replacement through the dataclass helper and initialization hooks |
 | Custom `__post_init__` | Runs before configclass's copying hook |

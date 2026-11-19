@@ -137,23 +137,39 @@ def main() -> None:
         pose = sensor.get_local_pose(to_matrix=True).clone()
         intrinsic = sensor.get_intrinsics().clone()
         viewer = sim._web_viewer
-        original_state = viewer.state
 
-        def state() -> dict:
-            return dict(
-                original_state(),
-                test_sim_step=sim._visualization_sim_step,
-                test_arena_offsets=sim.arena_offsets.tolist(),
-                test_sensor_pose=sensor.get_local_pose(to_matrix=True).tolist(),
-                test_cube_pose=cube.get_local_pose(to_matrix=True).tolist(),
-                test_camera_pose=viewer.get_pose_matrix().tolist(),
-            )
+        def install_test_state(adapter) -> None:
+            original_state = adapter.state
 
-        viewer.state = state
+            def state() -> dict:
+                return dict(
+                    original_state(),
+                    test_sim_step=sim._visualization_sim_step,
+                    test_arena_offsets=sim.arena_offsets.tolist(),
+                    test_sensor_pose=sensor.get_local_pose(to_matrix=True).tolist(),
+                    test_cube_pose=cube.get_local_pose(to_matrix=True).tolist(),
+                    test_camera_pose=adapter.get_pose_matrix().tolist(),
+                )
+
+            adapter.state = state
+
+        install_test_state(viewer)
         assert not sim.is_window_opened and not sim.can_open_native_window()
         assert sensor.group_id != viewer.group.get_group_id()
         start = time.monotonic()
         while running and time.monotonic() - start < 120:
+            # Host-only test signal; the browser application remains read-only.
+            reopen_request = result_path.with_suffix(".reopen")
+            if reopen_request.exists():
+                sim.close_viewer()
+                assert sim.open_viewer()
+                viewer = sim._web_viewer
+                viewer.set_look_at(
+                    np.array([2.0, -3.0, 2.0]) + offset,
+                    np.array([0.0, 0.0, 0.4]) + offset,
+                )
+                install_test_state(viewer)
+                reopen_request.unlink()
             sim.capture_visualization(force=False)
             time.sleep(0.005)
         sensor.update(fetch_only=True)

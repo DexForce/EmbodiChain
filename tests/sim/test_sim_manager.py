@@ -19,6 +19,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 import gc
 import queue
+import threading
 
 from pathlib import Path
 
@@ -29,6 +30,7 @@ import dexsim
 import numpy as np
 import pytest
 import torch
+
 
 import embodichain.lab.sim.sim_manager as sim_manager_module
 import embodichain.lab.visualization as visualization_module
@@ -252,6 +254,24 @@ class FakeCamera:
         return np.full((4, 4, 4), 7, dtype=np.uint8)
 
 
+class FakeWindow:
+    """Native-window stub exposing picture and pose readback."""
+
+    def __init__(self, picture: np.ndarray | None) -> None:
+        self.picture = picture
+        self.pose = np.eye(4, dtype=np.float32)
+        self.input_controls: list[object] = []
+
+    def get_picture(self) -> np.ndarray | None:
+        return self.picture
+
+    def get_pose_matrix(self) -> np.ndarray:
+        return self.pose
+
+    def add_input_control(self, control: object) -> None:
+        self.input_controls.append(control)
+
+
 class FakePointCloud:
     """Point-cloud stub that records native rendering calls."""
 
@@ -436,6 +456,7 @@ def _make_sim_manager(
     sim._window_record_save_threads = []
     sim._window_record_hotkey_cfg = None
     sim._window_record_input_control = None
+    sim._window_capture_requests = queue.SimpleQueue()
     sim._window_camera_pose_hotkey_cfg = None
     sim._window_camera_pose_input_control = None
     sim._env = FakeEnv()
@@ -577,6 +598,14 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
 ) -> None:
     """Backend-owned views are released before Spawn and World resources."""
     events: list[str] = []
+
+    class CyclicView:
+        def __init__(self) -> None:
+            self.cycle = self
+
+        def __del__(self) -> None:
+            events.append("view_release")
+
     sim = object.__new__(SimulationManager)
     spawn_scene = MagicMock()
     spawn_scene.close.side_effect = lambda: events.append("spawn_close")
@@ -585,7 +614,9 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
     )
     sim._gizmos = {}
     sim._markers = {}
-    sim._rigid_objects = {}
+    sim._rigid_objects = {
+        "body": SimpleNamespace(_data=CyclicView(), _entities=[], _spawn_result=None)
+    }
     sim._constraints = {}
     sim._rigid_object_groups = {}
     sim._fluid_objects = {}
@@ -617,11 +648,19 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
         instances.pop(instance_id)
 
     monkeypatch.setattr(SimulationManager, "reset", reset)
-    monkeypatch.setattr(gc, "collect", lambda: events.append("gc_collect"))
+    collect = gc.collect
+
+    def collect_views() -> int:
+        events.append("gc_collect")
+        return collect()
+
+    monkeypatch.setattr(gc, "collect", collect_views)
 
     sim._deferred_destroy()
 
     assert events.index("backend_prepare") < events.index("gc_collect")
+    assert "view_release" in events
+    assert events.index("view_release") < events.index("spawn_close")
     assert events.index("backend_prepare") < events.index("spawn_close")
     assert events.index("backend_prepare") < events.index("world_quit")
     assert instances == ({} if owns_registry_entry else {0: replacement})
@@ -1174,6 +1213,20 @@ def test_open_window_is_idempotent() -> None:
     sim._world.open_window.assert_not_called()
 
 
+def test_open_window_registers_capture_hotkey_for_existing_window() -> None:
+    sim = _make_sim_manager(window=FakeWindow(np.ones((2, 2, 3), dtype=np.uint8)))
+    sim._window_capture_hotkey_cfg = {
+        "save_path": None,
+        "image_prefix": "capture",
+        "hotkey": "c",
+    }
+    sim._window_capture_input_control = None
+
+    assert sim.open_window()
+
+    assert len(sim._window.input_controls) == 1
+
+
 def test_entity_gizmo_delegates_to_dexsim_and_excludes_default_plane() -> None:
     sim = _make_sim_manager()
     config = object()
@@ -1489,11 +1542,13 @@ def test_render_camera_group_syncs_state_before_rendering(
     sim._render_state_published = False if in_render_frame else None
     camera = MagicMock(spec=Camera)
     camera.group_id = 3
+    camera.group_ids = (3,)
     camera._capture_metadata = {"capture_sequence": 1}
     camera._pending_capture_metadata = {"capture_sequence": 2}
     camera._snapshot_render_metadata.side_effect = lambda: lifecycle.append("metadata")
     other_camera = MagicMock(spec=Camera)
     other_camera.group_id = 4
+    other_camera.group_ids = (4,)
     other_camera._capture_metadata = {"capture_sequence": 5}
     sim._sensors = {"selected": camera, "other": other_camera}
     sim.sync_render_state = MagicMock(side_effect=lambda: lifecycle.append("sync"))
@@ -2361,6 +2416,7 @@ def test_robot_mounted_camera_backend_lifecycle(
 
 def test_default_plane_authors_repeated_uv_before_spawn() -> None:
     sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg()
     sim._spawn_scene = MagicMock()
     sim._spawn_scene.handles.return_value = []
     sim._spawn_default_plane_material = object()
@@ -2381,6 +2437,43 @@ def test_default_plane_authors_repeated_uv_before_spawn() -> None:
             dtype=np.float32,
         ),
     )
+
+
+def test_ground_plane_can_be_disabled_before_declaration() -> None:
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(enable_ground_plane=False)
+    sim._spawn_scene = MagicMock()
+    sim._declare_spawn_default_plane()
+    sim._spawn_scene.declare.assert_not_called()
+
+
+def test_ground_plane_uses_explicit_portable_contact_material() -> None:
+    from embodichain.lab.sim.cfg import (
+        CollisionPropertiesCfg,
+        RigidBodyMaterialCfg,
+        RigidBodyPhysicsCfg,
+    )
+
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(
+        ground_plane_attrs=RigidBodyPhysicsCfg(
+            collision_props=CollisionPropertiesCfg(contact_offset=0, rest_offset=0),
+            material_props=RigidBodyMaterialCfg(
+                dynamic_friction=0.7, static_friction=0.7
+            ),
+        )
+    )
+    sim.physics = SimpleNamespace(name="default", solver_type=None)
+    sim._spawn_scene = MagicMock()
+    sim._spawn_scene.handles.return_value = []
+    sim._spawn_default_plane_material = None
+    sim._declare_spawn_default_plane()
+    collision = sim._spawn_scene.declare.call_args.args[2].collisions[0]
+    assert collision.dexsim.contact_offset == 0
+    assert collision.dexsim.dynamic_friction == pytest.approx(0.7)
+    assert collision.newton.margin == 0
+    assert collision.newton.gap == 0
+    assert collision.newton.mu == pytest.approx(0.7)
 
 
 @pytest.mark.parametrize("num_envs", [1, 8])
@@ -3002,6 +3095,196 @@ def _make_camera_attachment_manager(num_envs: int = 2) -> SimulationManager:
     return sim
 
 
+def test_prepare_retries_deferred_mounted_sensor_after_factory_failure() -> None:
+    sim = _make_camera_attachment_manager()
+    cfg = CameraCfg(uid="pending")
+    sim._pending_mounted_sensors = {"pending": cfg}
+    sensor = object()
+    sim.add_sensor = MagicMock(side_effect=[RuntimeError("factory failed"), sensor])
+    with pytest.raises(RuntimeError, match="factory failed"):
+        sim.prepare()
+    assert sim._pending_mounted_sensors == {"pending": cfg}
+    sim.prepare()
+    assert not sim._pending_mounted_sensors
+    assert sim.add_sensor.call_count == 2
+
+
+def test_auto_sensor_uid_skips_deferred_mounted_reservations() -> None:
+    sim = _make_camera_attachment_manager()
+    sim._pending_mounted_sensors = {"camera_0": CameraCfg(uid="camera_0")}
+    camera = object.__new__(Camera)
+
+    class Factory(Camera):
+        def __new__(cls, cfg, *args, **kwargs):
+            camera.cfg = cfg
+            return camera
+
+    sim.SUPPORTED_SENSOR_TYPES = {"Camera": Factory}
+    sim.add_sensor(CameraCfg())
+    assert camera.cfg.uid == "camera_1"
+    assert sim.remove_asset("camera_0")
+    assert not sim._pending_mounted_sensors
+
+
+@pytest.mark.parametrize("failure", [None, "parent", "attachment"])
+@pytest.mark.parametrize(
+    "factory_mode", ["context_class", "context_function", "legacy_function"]
+)
+def test_context_camera_uses_manager_attachment_at_the_current_revision(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str | None,
+    factory_mode: str,
+) -> None:
+    from embodichain.lab.sim.sensors import (
+        SensorRegistration,
+        register_sensor,
+        registry,
+    )
+
+    @configclass
+    class ContextCameraCfg(CameraCfg):
+        sensor_type: str = "ContextCamera"
+
+    sim = _make_camera_attachment_manager()
+    asset, nodes = _make_camera_parent_asset()
+    sim._robots["arm"] = asset
+    cfg = ContextCameraCfg(
+        uid="camera",
+        extrinsics=CameraCfg.ExtrinsicsCfg(
+            parent="missing" if failure == "parent" else "arm/wrist"
+        ),
+    )
+    camera = object.__new__(Camera)
+    camera.cfg = cfg
+    camera._is_attached = False
+    camera.destroy = MagicMock()
+    camera._bound_topology = None
+    camera._sample_metadata = None
+    camera.on_bind = MagicMock()
+    camera.on_unbind = MagicMock()
+    camera.attach_to_parent_nodes = MagicMock(
+        side_effect=(
+            RuntimeError("attachment failed")
+            if failure == "attachment"
+            else lambda parents: setattr(camera, "_is_attached", True)
+        )
+    )
+    calls = []
+
+    class ContextCamera(Camera):
+        def __new__(cls, config, *, context):
+            calls.append(context.num_instances)
+            return camera
+
+    def context_factory(config, *, context):
+        return ContextCamera(config, context=context)
+
+    def legacy_factory(config, device):
+        calls.append(sim.num_envs)
+        return camera
+
+    factory = {
+        "context_class": ContextCamera,
+        "context_function": context_factory,
+        "legacy_function": legacy_factory,
+    }[factory_mode]
+    monkeypatch.setattr(registry, "_registrations", registry._registrations.copy())
+    register_sensor(
+        SensorRegistration(
+            "ContextCamera",
+            ContextCameraCfg,
+            factory,
+            legacy_factory=factory_mode == "legacy_function",
+        )
+    )
+    if failure:
+        with pytest.raises(
+            (ValueError, RuntimeError), match="was not found|attachment failed"
+        ):
+            sim.add_sensor(cfg)
+        assert not sim._sensors
+        assert calls == ([] if failure == "parent" else [sim.num_envs])
+        assert camera.destroy.call_count == int(failure == "attachment")
+    else:
+        assert sim.add_sensor(cfg) is camera
+        assert camera.is_attached
+        camera.attach_to_parent_nodes.assert_called_once_with(nodes)
+        revision = sim._camera_attachment_topology_revision
+        sim.prepare()
+        assert sim._camera_attachment_topology_revision == revision
+        camera.attach_to_parent_nodes.assert_called_once_with(nodes)
+
+
+@pytest.mark.parametrize("scene_first", [False, True])
+@pytest.mark.parametrize("typed_stereo", [False, True])
+@pytest.mark.parametrize("callable_factory", [False, True])
+def test_gaussian_capture_rejects_registered_stereo_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+    scene_first: bool,
+    typed_stereo: bool,
+    callable_factory: bool,
+) -> None:
+    from embodichain.lab.sim.sensors import (
+        SensorRegistration,
+        register_sensor,
+        registry,
+    )
+
+    @configclass
+    class AliasStereoCfg(StereoCameraCfg if typed_stereo else CameraCfg):
+        sensor_type: str = "AliasStereo"
+
+    camera = object.__new__(StereoCamera)
+    camera.cfg = AliasStereoCfg(uid="stereo")
+    camera.destroy = MagicMock()
+
+    class AliasStereo(StereoCamera):
+        def __new__(cls, *_args, **_kwargs):
+            return camera
+
+    monkeypatch.setattr(registry, "_registrations", registry._registrations.copy())
+    register_sensor(
+        SensorRegistration(
+            "AliasStereo",
+            AliasStereoCfg,
+            (lambda cfg, device: camera) if callable_factory else AliasStereo,
+            legacy_factory=True,
+        )
+    )
+    sim = _make_camera_attachment_manager()
+    if scene_first:
+        sim._spawn_scene.has_gaussians = True
+        with pytest.raises(NotImplementedError, match="StereoCamera"):
+            sim.add_sensor(camera.cfg)
+        assert sim._sensors == {}
+        assert camera.destroy.call_count == int(callable_factory and not typed_stereo)
+    else:
+        from dexsim.types import Renderer
+        from embodichain.lab.sim.cfg import GaussianRenderCfg
+
+        sim._sensors[camera.uid or "stereo"] = camera
+        sim.sim_config = SimulationManagerCfg(
+            num_envs=1,
+            render_cfg=RenderCfg(
+                renderer="hybrid",
+                gaussian=GaussianRenderCfg(enabled=True),
+                denoising=DenoisingCfg(window="off", offscreen="off"),
+            ),
+        )
+        sim.num_envs = 1
+        sim.physics.name = "default"
+        sim._world = SimpleNamespace(
+            get_renderer_type=lambda: Renderer.HYBRID,
+            get_gaussian_effective_config=lambda: {"normalized": {"enabled": True}},
+        )
+        monkeypatch.setattr(
+            sim_manager_module, "_has_native_gaussian_renders", lambda desc: True
+        )
+        # Exercise the actual preflight used when Gaussian USD assets follow a camera.
+        with pytest.raises(NotImplementedError, match="StereoCamera"):
+            sim._prepare_native_usd_gaussians([object()])
+
+
 @pytest.mark.parametrize("stereo", [False, True])
 @pytest.mark.parametrize("state", ["failed_bind", "pending_changes", "needs_rebuild"])
 def test_add_camera_waits_for_parent_readiness_and_next_prepare(
@@ -3204,6 +3487,135 @@ def test_window_camera_pose_to_look_at_uses_dexsim_world_up() -> None:
     np.testing.assert_allclose(eye, [1.0, 2.0, 3.0])
     np.testing.assert_allclose(look_at, [1.0, 2.0, 2.0])
     np.testing.assert_allclose(up, [0.0, 0.0, 1.0])
+
+
+def test_capture_window_returns_owned_picture_and_writes_png(tmp_path: Path) -> None:
+    source = np.full((3, 4, 3), 11, dtype=np.uint8)
+    sim = _make_sim_manager(window=FakeWindow(source))
+
+    captured = sim.capture_window(save_path=tmp_path / "viewport")
+
+    assert captured is not None
+    assert captured.flags.owndata
+    np.testing.assert_array_equal(captured, source)
+    assert (tmp_path / "viewport.png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    source[...] = 0
+    assert captured[0, 0, 0] == 11
+
+
+def test_capture_window_uses_pose_preserving_camera_fallback() -> None:
+    sim = _make_sim_manager(window=FakeWindow(np.empty((0,), dtype=np.uint8)))
+
+    captured = sim.capture_window()
+
+    assert captured is not None
+    assert captured.shape == (4, 4, 4)
+    assert sim._window_capture_camera is not None
+    assert sim._window_capture_camera.render_count == 1
+    np.testing.assert_array_equal(
+        sim._window_capture_camera.last_pose,
+        np.eye(4, dtype=np.float32),
+    )
+
+
+def test_capture_window_returns_none_without_an_open_window() -> None:
+    sim = _make_sim_manager()
+
+    assert sim.capture_window() is None
+
+
+def test_capture_window_native_failure_does_not_query_retired_camera(
+    tmp_path: Path,
+) -> None:
+    window = FakeWindow(None)
+    window.get_picture = MagicMock(side_effect=RuntimeError("Window is closed"))
+    window.get_pose_matrix = MagicMock()
+    sim = _make_sim_manager(window=window)
+
+    assert sim.capture_window(tmp_path / "closed.png") is None
+    window.get_pose_matrix.assert_not_called()
+    assert not (tmp_path / "closed.png").exists()
+
+
+def test_capture_window_hotkey_saves_one_frame_and_rejects_conflicts(
+    tmp_path: Path,
+) -> None:
+    window = FakeWindow(np.full((2, 2, 3), 3, dtype=np.uint8))
+    sim = _make_sim_manager(window=window)
+
+    assert sim.enable_window_capture_hotkey(save_path=tmp_path / "hotkey")
+    assert len(window.input_controls) == 1
+    sim._publish_render_state = MagicMock()
+    owner_thread = threading.get_ident()
+    get_picture = window.get_picture
+
+    def read_on_owner_thread() -> np.ndarray:
+        assert threading.get_ident() == owner_thread
+        return get_picture()
+
+    window.get_picture = MagicMock(side_effect=read_on_owner_thread)
+    callback = threading.Thread(
+        target=window.input_controls[0].on_key_down,
+        args=(dexsim.types.InputKey.SCANCODE_C.value,),
+    )
+    callback.start()
+    callback.join(timeout=1)
+    assert not callback.is_alive()
+    window.get_picture.assert_not_called()
+    assert not (tmp_path / "hotkey.png").exists()
+
+    with sim.render_frame():
+        pass
+
+    window.get_picture.assert_called_once()
+    assert (tmp_path / "hotkey.png").is_file()
+
+    with pytest.raises(ValueError, match="conflicts"):
+        sim.enable_window_capture_hotkey(hotkey=dexsim.types.InputKey.SCANCODE_R)
+
+
+def test_capture_window_hotkey_discards_requests_from_closed_window(
+    tmp_path: Path,
+) -> None:
+    sim = _make_sim_manager(window=FakeWindow(np.ones((2, 2, 3), dtype=np.uint8)))
+    sim._publish_render_state = MagicMock()
+    sim.capture_window = MagicMock()
+    assert sim.enable_window_capture_hotkey(save_path=tmp_path / "old")
+    old_control = sim._window_capture_input_control
+    old_control.on_key_down(dexsim.types.InputKey.SCANCODE_C.value)
+
+    sim.close_window()
+    sim._world.window = FakeWindow(np.ones((2, 2, 3), dtype=np.uint8))
+    assert sim.open_window()
+    # A late native callback must not capture the replacement window either.
+    old_control.on_key_down(dexsim.types.InputKey.SCANCODE_C.value)
+    with sim.render_frame():
+        pass
+    sim.capture_window.assert_not_called()
+
+    sim._window_capture_input_control.on_key_down(
+        dexsim.types.InputKey.SCANCODE_C.value
+    )
+    with sim.render_frame():
+        pass
+    sim.capture_window.assert_called_once()
+
+
+def test_capture_window_hotkey_applies_updated_key_and_output(tmp_path: Path) -> None:
+    window = FakeWindow(np.ones((2, 2, 3), dtype=np.uint8))
+    sim = _make_sim_manager(window=window)
+    sim._publish_render_state = MagicMock()
+    assert sim.enable_window_capture_hotkey(save_path=tmp_path / "old", hotkey="c")
+    assert sim.enable_window_capture_hotkey(save_path=tmp_path / "new", hotkey="x")
+    assert len(window.input_controls) == 1
+
+    window.input_controls[0].on_key_down(dexsim.types.InputKey.SCANCODE_C.value)
+    window.input_controls[0].on_key_down(dexsim.types.InputKey.SCANCODE_X.value)
+    with sim.render_frame():
+        pass
+
+    assert (tmp_path / "new.png").is_file()
+    assert not (tmp_path / "old.png").exists()
 
 
 def test_start_window_record_rejects_invalid_parameters() -> None:
@@ -3570,6 +3982,56 @@ def test_replace_rigid_object_commits_only_after_new_declaration() -> None:
 
     assert operations == ["remove", "add", "prepare"]
     assert sim._rigid_objects["box"] is replacement
+
+
+@pytest.mark.parametrize("backend,num_envs", [("newton", 1), ("dexsim", 2)])
+def test_replace_invalid_variants_preserves_existing_spawn_object(backend, num_envs):
+    from embodichain.lab.sim.spawn.scene import SpawnScene, _AssetDeclaration
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.shapes import CubeCfg
+    from dexsim.spawn import ObjectDesc
+
+    old = object()
+    original = ObjectDesc(name="box")
+    scene = object.__new__(SpawnScene)
+    scene._num_envs = num_envs
+    scene._assets = {
+        "box": _AssetDeclaration(kind="rigid_object", descriptor=original, facade=old)
+    }
+    objects = [original]
+    scene.builder = SimpleNamespace(
+        backend=backend,
+        is_finalized=False,
+        result=None,
+        mesh_objects=objects,
+        scene_entities=[],
+        cables=[],
+        particle_sets=[],
+        remove_object=MagicMock(side_effect=lambda uid: objects.pop()),
+    )
+    scene._register_material_batches = MagicMock()
+    sim = object.__new__(SimulationManager)
+    sim.device = torch.device("cpu")
+    sim.physics = SimpleNamespace(
+        name="newton" if backend == "newton" else "default", solver_type="mujoco_warp"
+    )
+    sim._rigid_objects = {"box": old}
+    sim._spawn_scene = scene
+    sim._validate_visual_config = lambda cfg: None
+    cfg = RigidObjectCfg(
+        uid="box", shape=CubeCfg(), env_variants={1: RigidObjectCfg(shape=CubeCfg())}
+    )
+
+    with pytest.raises(
+        (ValueError, NotImplementedError), match="env_variants|Newton backend"
+    ):
+        sim.replace_rigid_object(cfg)
+
+    assert sim._rigid_objects["box"] is old
+    assert scene._assets["box"].descriptor is original
+    assert objects == [original]
+    scene.builder.remove_object.assert_not_called()
+    scene._register_material_batches.assert_not_called()
 
 
 def test_replace_missing_rigid_object_does_not_mutate_scene() -> None:
@@ -4510,3 +4972,61 @@ def test_targeted_particle_material_schedule_validates_before_registration() -> 
             {"stiffness": ((0.0, 1000.0),)}, uid="cloth"
         )
     builder.add_runtime_control.assert_not_called()
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_configure_collision_when_ground_is_disabled(enabled):
+    from embodichain.lab.sim.sim_manager import SimulationManager
+
+    manager = SimpleNamespace(
+        spawn_result=None, sim_config=SimpleNamespace(enable_ground_plane=False)
+    )
+    if enabled:
+        with pytest.raises(ValueError, match="ground plane is disabled"):
+            SimulationManager.configure_ground_plane_collision(manager, enabled=True)
+    else:
+        assert (
+            SimulationManager.configure_ground_plane_collision(manager, enabled=False)
+            is None
+        )
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_group_file_batches_reject_before_losing_appearance(explicit):
+    from embodichain.lab.sim.cfg import (
+        RigidObjectCfg,
+        RigidObjectGroupCfg,
+        VisualElementCfg,
+    )
+    from embodichain.lab.sim.shapes import (
+        CompoundShapeCfg,
+        CubeCfg,
+        MeshCfg,
+        MeshCollisionCfg,
+        ShapePartCfg,
+    )
+    from embodichain.lab.sim.sim_manager import SimulationManager
+
+    mesh = MeshCfg(
+        fpath="part.obj", collision=MeshCollisionCfg(approximation="convex_hull")
+    )
+    if explicit:
+        member = RigidObjectCfg(
+            shape=CubeCfg(),
+            visuals=[
+                VisualElementCfg(id="file", representation=mesh),
+                VisualElementCfg(id="box", representation=CubeCfg()),
+            ],
+        )
+    else:
+        member = RigidObjectCfg(
+            shape=CompoundShapeCfg(
+                parts=[
+                    ShapePartCfg(shape=mesh),
+                    ShapePartCfg(shape=CubeCfg()),
+                ]
+            )
+        )
+    cfg = RigidObjectGroupCfg(uid="group", rigid_objects={"piece": member})
+    with pytest.raises(NotImplementedError, match="declare individual RigidObjects"):
+        SimulationManager.add_rigid_object_group(SimpleNamespace(), cfg)

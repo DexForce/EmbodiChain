@@ -29,6 +29,58 @@ from embodichain.compute.trajectory import (
 from .plans import TimedTrajectory, normalize_success_mask
 
 
+def _execution_samples(
+    positions: torch.Tensor,
+    dt: torch.Tensor | None,
+    arrival_indices: torch.Tensor | None,
+    success: torch.Tensor | bool | None,
+    *,
+    start_qpos: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
+    """Exclude rejected candidates from an execution grid without mutating them.
+
+    Planner paths may deliberately retain failed rows for diagnostics. Those
+    rows are never dispatched, so they must not determine a composite phase's
+    duration. Represent them by zero-time start holds before resampling; keep
+    the caller's success mask and original planner result authoritative.
+    """
+    if success is None:
+        return positions, dt, arrival_indices
+    mask = normalize_success_mask(
+        success,
+        num_envs=positions.shape[0],
+        device=positions.device,
+        name="Execution planning success",
+    )
+    if bool(mask.all()):
+        return positions, dt, arrival_indices
+    # Invalid backend output remains an integration error, including failed
+    # rows; masking must not hide malformed timing or nonfinite candidates.
+    if not torch.isfinite(positions).all():
+        raise ValueError("Execution candidates must contain finite positions.")
+    if dt is not None:
+        PlanResult(
+            success=mask,
+            positions=positions,
+            dt=dt,
+            waypoint_indices=arrival_indices,
+        )
+        if bool((dt[:, 0] != 0).any()):
+            raise ValueError("Execution candidates require a zero first arrival.")
+    elif arrival_indices is not None:
+        raise ValueError("Execution arrival indices require explicit timing.")
+    held = positions[:, :1] if start_qpos is None else start_qpos[:, None].to(positions)
+    return (
+        torch.where(mask[:, None, None], positions, held),
+        None if dt is None else torch.where(mask[:, None], dt, 0.0),
+        (
+            None
+            if arrival_indices is None
+            else torch.where(mask[:, None], arrival_indices, -1)
+        ),
+    )
+
+
 def resolve_pose_target(
     target: torch.Tensor,
     *,
@@ -352,18 +404,23 @@ def to_full_robot_trajectory(
         raise ValueError("PlanResult controlled DoF does not match joint_ids.")
     if result.dt is None:
         raise ValueError("PlanResult must include explicit dt.")
-    if result.waypoint_indices is None:
+    positions, source_dt, arrivals = _execution_samples(
+        positions,
+        result.dt,
+        result.waypoint_indices,
+        result.success,
+        start_qpos=base_qpos[:, joint_ids],
+    )
+    if arrivals is None:
         positions, velocities, dt, _ = retime_to_control_grid(
             positions,
-            result.dt,
+            source_dt,
             control_dt,
         )
     else:
         from embodichain.compute.trajectory._arrival_timing import _resample_at_arrivals
 
-        retained = _resample_at_arrivals(
-            positions, result.dt, control_dt, result.waypoint_indices
-        )
+        retained = _resample_at_arrivals(positions, source_dt, control_dt, arrivals)
         positions, velocities, dt = (
             retained[name] for name in ("positions", "velocities", "dt")
         )

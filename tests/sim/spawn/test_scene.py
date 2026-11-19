@@ -94,6 +94,21 @@ def _make_scene(handles: dict[str, object]) -> SpawnScene:
     return scene
 
 
+@pytest.mark.parametrize("backend", ["newton", "dexsim"])
+def test_invalid_prepared_variants_fail_before_declaration(backend: str) -> None:
+    scene = _make_scene({})
+    scene.builder.backend = backend
+    scene.builder.add_object = MagicMock()
+    descriptor = SimpleNamespace(
+        name="variant", per_env=True, env_variants={1: object()}
+    )
+    expected_error = ValueError if backend == "newton" else NotImplementedError
+    with pytest.raises(expected_error):
+        scene.declare("rigid_object", "variant", descriptor)
+    scene.builder.add_object.assert_not_called()
+    assert "variant" not in scene
+
+
 def _material_assignment_scene(kind: str):
     originals = [MagicMock(name=f"original_{i}") for i in range(2)]
     stale = MagicMock(name="stale_descriptor_material")
@@ -265,7 +280,10 @@ def test_bind_retries_only_incomplete_declarations() -> None:
     assert second.bind_attempts == 2
 
 
-def test_declare_initializes_facade_with_spawn_instance_count() -> None:
+@pytest.mark.parametrize("per_env,instances", [(True, 3), (False, 1)])
+def test_declare_initializes_facade_with_spawn_instance_count(
+    per_env, instances
+) -> None:
     scene = object.__new__(SpawnScene)
     scene._num_envs = 3
     scene.builder = SimpleNamespace(
@@ -279,11 +297,11 @@ def test_declare_initializes_facade_with_spawn_instance_count() -> None:
     scene.declare(
         "rigid_object",
         "cube",
-        SimpleNamespace(name="cube", per_env=True),
+        SimpleNamespace(name="cube", per_env=per_env),
         facade=facade,
     )
 
-    assert facade.declared_num_instances == 3
+    assert facade.declared_num_instances == instances
 
 
 @pytest.mark.parametrize("failure", ["duplicate", "partial_add"])

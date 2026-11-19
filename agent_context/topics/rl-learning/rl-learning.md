@@ -50,6 +50,28 @@ scheduled APG supplies the next complete horizon/objective scale. Legacy vector
 environment names remain aliases. This path currently rejects distributed mode
 and environment profiling; see [differentiable environments](../differentiable-env/differentiable-env.md).
 
+The [Sharpa in-hand example](../../../examples/learning/sharpa_inhand/README.md)
+trains cylinder rotation in native EmbodiChain physics. `reference.py` first
+trains the pinned upstream teacher, whose saved training config parameterizes
+the native run. `native_full.py` / `_full_native_task.py` collect eight-scale,
+domain-randomized transitions through `SimulationManager`, physics-owned
+parameter writes and exact raw-cache replay. `_apg_learner.py` keeps the
+upstream HORA teacher, world model and replay while routing actor updates
+through EmbodiChain APG. Native hand self-contact dimensionality and metal
+contact parameters still differ from upstream, so results are not strict
+upstream physics parity or an algorithm comparison.
+`native_full_evaluate.py` checks frozen source receipts before qualifying a
+newly trained checkpoint; reference/implementation transfer modes are
+diagnostics only. Qualify a freshly trained checkpoint with physical traces.
+The sibling [Wuji example](../../../examples/learning/wuji_inhand/README.md)
+adapts the same learner to the 20-DOF Wuji hand in run-owned source snapshots.
+Its native task requires a palm-up root pose (local palmar +X faces world +Z),
+verified initial opposing-pad contacts, authored actuator effort limits and
+fixed physical parameters across eight sizes. Differentiable FK gates rewards
+by pad geometry and forces, while native termination/evaluation checks actual
+opposing-pad participation. Neither route uses the simulator's FK-only
+`DifferentiableEnv` or differentiates contact physics.
+
 ## Rollout and Trainer Routing
 
 | Kind | Trainer / payload | Algorithms |
@@ -105,6 +127,77 @@ Motion Policy Kit profiles do not expose Web configuration and are rejected.
 
 Web camera operations remain on the World creator thread; recording timing belongs to
 [visualization configuration](../sim-visualization/configuration.md).
+
+## Composable actors and auxiliary objectives
+
+`ActorCritic` accepts ordinary actor/critic modules and optional named
+`AuxiliaryTask` objectives. An actor's `forward_with_features` supplies action
+means and graph-connected features in one pass; ordinary actors retain their
+existing forward path. The policy registers objective heads/buffers, aggregates
+training-field declarations, evaluates losses and exports inference-only actors.
+Shared actor/critic observations remain valid. `ContactPrediction` owns contact
+labels, decoder and cross-entropy, including its actor-label isolation check.
+
+Configuration selects `actor.type: temporal` with `TemporalActorCfg` fields in
+`actor.network_cfg`, an ordinary MLP critic, and optional
+`auxiliary_tasks.<name>.type: contact_prediction` declarations. Temporal networks
+and history storage live in `policies/temporal.py`; objectives live in
+`policies/auxiliary.py`. The temporal actor accepts only `official_v1`: current
+followed by chronological history including current, with the matching input
+normalizer. Environment observation producers use that same layout. There is no
+separate proprioceptive policy adapter or historical encoder/history branch.
+Component contracts record semantic settings, including parameterless objectives,
+so equal neural tensor shapes cannot silently change training semantics on resume.
+The checkpoint loader accepts only the current full schema and metadata; older
+schemas and incomplete historical metadata are rejected before model mutation.
+Within schema v2, an omitted optional PPO auxiliary coefficient means zero; an
+explicitly different coefficient remains incompatible.
+
+Named training fields travel with the observation that produced each action.
+Collectors preserve declared feature axes after combining configured observation
+groups. Scalar leaves contribute one feature per environment, including within
+nested groups. Logical actor/critic parameter
+groups retain overlap so APG can reject shared trunks; PPO deduplicates shared
+parameters at gradient clipping.
+PPO's optional auxiliary decoder loss recomputes the latent in each minibatch
+so encoder gradients remain connected. Normalization statistics remain frozen
+through collection and PPO epochs, then update for the next rollout. Actor
+export excludes critic and contact decoder; inference alignment does not
+qualify task learning or simulator throughput.
+
+Blind-assembly producers and manager functors live in the official task
+extension's `manipulation/assembly/functors.py`. The generic observation package
+does not own assembly state or task rules. All three families use current-first
+encoder/FK features; history storage remains a reusable policy component.
+[Assembly ownership](../assembly-assets/assembly-assets.md) identifies shared
+geometry, gravity, resource snapshots and declarative task defaults. Examples
+under `examples/learning/blind_assembly/` own actor export and native preview.
+
+## Episode evaluation and saved resources
+
+Auto-reset preserves completed-row observations and IDs for timeout bootstrap;
+only true timeouts request terminal value inference. Complete pre-reset batches
+preserve batch-dependent critics; inputs and values use their rollout storage
+dtypes, and module training modes are restored afterward. GRPO does not request
+those values. True termination
+suppresses bootstrap. Legacy environments retain their fallback.
+Evaluation defaults to first completion order; `balanced` allocates per-arena
+quotas before stepping. `on_episode` retains owned environment terminal reports;
+`on_scored_episode` emits one scalar record per scored completion after quota
+filtering. The native headless CLI retains both quota selection and terminal
+reports. Evaluation uses an independent environment and restores policy mode.
+
+Training snapshots freeze physical components relative to the declaring
+config before moving them into a run. `EmbodiedEnvCfg.resource_export` packages
+materialized task resources from the unwrapped environment and an owned frozen
+mapping. Explicit local physical-resource paths resolve from the saved config.
+Task Program snapshots retain embodiment skill metadata and bind physical and
+semantic resource references before relocation. Policy Task Programs also run
+their configured resource exporters. Checkpoints bind the original declaration
+to the exact exported snapshot checksum, including manager term order. Saved
+Gym configs can resume without relaxing checks on changed parameters.
+Resource-packaging failures are
+synchronized across ranks before resume or training starts.
 
 ## Invariants and validation
 

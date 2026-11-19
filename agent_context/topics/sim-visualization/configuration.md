@@ -24,6 +24,11 @@ Following a Web observer while recording uses creator-thread simulation-time
 capture. Explicit wall-clock capture requires a fixed or thread-safe custom pose
 source; it cannot read the observer from the render thread.
 
+Whole-scene USD preview is owned by `lab/scripts/preview_scene.py`, including
+GenSim deliveries. Web remains a persistent viewport when the World is headless;
+the preview opens and frames it through `open_viewer()` and `viewer`. Native
+keyboard controls belong only to the window, and joint editing belongs to Viser.
+
 The following snapshot and server settings describe the Viser backend.
 
 `SimulationManagerCfg.visualization` owns a `VisualizationCfg`. Server settings

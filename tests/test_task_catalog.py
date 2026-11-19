@@ -17,7 +17,10 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -25,9 +28,83 @@ from embodichain.cli import _task_catalog as catalog
 from embodichain.cli.main import main
 
 
+def test_runtime_resources_prefer_the_selected_source_checkout(tmp_path: Path) -> None:
+    foreign = tmp_path / "foreign_configs"
+    foreign.mkdir()
+    (foreign / "__init__.py").write_text("ORIGIN = 'another checkout'\n")
+    root = Path(__file__).resolve().parents[1]
+    script = """
+import importlib.abc
+import importlib.machinery
+import importlib.util
+from importlib.resources import files
+from pathlib import Path
+import sys
+
+class StaleEditableFinder(importlib.abc.MetaPathFinder):
+    @classmethod
+    def find_spec(cls, fullname, path=None, target=None):
+        if fullname == 'embodichain_tasks.configs':
+            return importlib.util.spec_from_file_location(fullname, sys.argv[1])
+
+sys.meta_path.insert(sys.meta_path.index(importlib.machinery.PathFinder) + 1, StaleEditableFinder())
+import embodichain_tasks
+assert Path(str(files('embodichain_tasks.configs'))).resolve() == Path(sys.argv[2]).resolve()
+from embodichain_tasks.locomotion.velocity.contracts._config import load_task_data
+assert len(load_task_data('anymal_c_flat')['robot']['joint_names']) == 12
+assert 'embodichain_tasks.embodichain_tasks' not in sys.modules
+"""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            script,
+            str(foreign / "__init__.py"),
+            str(root / "extensions/embodichain_tasks/configs"),
+        ],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        timeout=45,
+        env={
+            **os.environ,
+            "PYTHONPATH": os.pathsep.join(
+                [
+                    str(root),
+                    str(root / "extensions"),
+                    str(root / "extensions/embodichain_tasks"),
+                    os.environ.get("PYTHONPATH", ""),
+                ]
+            ),
+        },
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def write(path: Path, value: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value), encoding="utf-8")
+
+
+def test_gaussian_pick_place_is_one_official_task_with_three_deployments() -> None:
+    root = (
+        Path(__file__).resolve().parents[1]
+        / "extensions/embodichain_tasks/configs/tasks"
+    )
+    tasks = catalog._load_catalog({"embodichain_tasks": root})
+    task = catalog._select_task(tasks, "embodichain_tasks:gaussian_pick_place")
+    assert task.task_path == ("manipulation", "gaussian_pick_place")
+    assert task.default_deployment == "office"
+    assert {deployment.name: deployment.env_id for deployment in task.deployments} == {
+        "office": "FrankaGSPickPlace-Office-v1",
+        "discoverse": "FrankaGSPickPlace-Discoverse-v1",
+        "robosimgs": "FrankaGSPickPlace-Robosimgs-v1",
+    }
+    assert all(
+        deployment.capabilities == {catalog._TASK_PROGRAM}
+        and deployment.physics == "default"
+        for deployment in task.deployments
+    )
 
 
 @pytest.fixture

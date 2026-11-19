@@ -50,7 +50,8 @@ Language instructions express intent; physical acceptance still depends on the
 selected effect authority and validators, not on the presence of a label.
 
 Measured segment validators can check lift from the segment's incoming pose,
-world-axis position relative to another live object, and object uprightness.
+position relative to another live rigid object or articulation link, and object
+uprightness.
 `object_near_relative_target` compares an object's measured position against a
 fresh reference position plus a declared world-axis displacement; it does not
 reuse the reference pose captured for planning.
@@ -141,6 +142,12 @@ selection into the unbound program, and registers the common `EmbodiedEnv`.
 The CLI may override only the program. Components have closed fields and
 intentionally omit compatibility `version` values.
 
+Physical scenes may come from an environment's `simulation.usd_scene`.
+The [environment import owner](../env-framework/configuration.md#whole-scene-usd-environments)
+preflights source paths/types and explicit UIDs; the existing integration still
+owns logical entities, affordances and execution bindings. No GenSim workspace
+or AssetRevision semantic projection is required.
+
 External callers compose the same semantic deployment through
 `integrations.load_configured_task_program_deployment`, implemented in
 `integrations/composition.py`. It consumes the resolved embodiment skill profile
@@ -180,10 +187,60 @@ Ownership is explicit rather than a generic deep merge:
   effect-assurance policy. Planner collision objects are attached from the
   selected live scene and are not serialized in the policy.
 
+`task_program.integration` also accepts a closed `{component, overrides}`
+selector. It loads the referenced integration relative to the deployment and
+applies an owned, allowlisted patch before ordinary contract/catalog validation.
+Overrides may select `integration_id`, `requires.embodiment_contract`, and
+existing `profile.skill_options` entries' grasp/placement tuning fields.
+`skill_options` is the canonical authoring key; the legacy `action_options`
+alias remains readable, and specifying both is rejected.
+Existing `profile.defaults` call/slot bindings may select another explicitly
+named resource; new call defaults and slots are rejected and the selected
+resource must still pass ordinary capability checks.
+Scene bindings, scene contracts, services and skill kinds cannot be overridden.
+New resource defaults and slots cannot be introduced. Arrays replace whole
+values; this is not generic deep merging. Component-owned asset paths remain relative to the integration file.
+The `blocks_ranking_rgb` and `stack_blocks_two` deployments demonstrate sharing
+a semantic scene while retaining explicitly calibrated robot-specific grasp parameters. Selecting a
+contract still requires the embodiment and execution policy to satisfy it.
+
+Integration transform fields also accept `{position, quaternion_xyzw}` or
+`{position, rotation_matrix}` in addition to their legacy flat matrices.
+`configured.py._pose_matrix` normalizes finite nonzero XYZW quaternions and
+retains explicit matrix coefficients without orthogonalization. Compact forms
+require exactly one orientation; coordinate-frame ownership is unchanged.
+Geometry/TCP declarations retain their existing four-row matrix form as well.
+
+Scene-root `simulation_uid` is optional when it equals `entity_id`. Normal
+loading, asset materialization and pouring adaptation share
+`configured.py._resolve_simulation_uid`; explicit different UIDs remain mappings,
+and explicit invalid values are rejected rather than defaulted. Asset changes
+retain logical entity IDs.
+
+The read-only deployment inspector's `--explain` output identifies the concrete
+physical backend and traces composed integration/policy fields to component,
+inline, or deployment-override locations. `--json` includes
+`resolved_configuration` and typed preset defaults. Its service view uses the
+production-composed declarations, including expanded named DemoSkills; normalized
+recovery fields retain their original authored key in source locations.
+Built-in composite monitor
+defaults are resolved through `CompositeEffectMonitorCfg`; other providers'
+defaults are not inferred. Inspection neither constructs simulation nor provides
+physical-effect evidence. See the task package usage for the authoring forms.
+
+Contact-sensitive tasks may explicitly select pickup `cartesian_lift` or
+placement `cartesian_approach` in skill options. They require `ik_interp` and
+reuse Cartesian sampling and joint-limit retiming; ordinary calls retain their
+existing path and inactive-option fingerprints. Existing placement
+`cartesian_waypoint_count` remains a keyframe count. HandOver's optional
+`grasp_retract_distance` backs sampled TCPs away along their approach axis;
+its zero default preserves the published registration identity. None of these
+options changes effect or task-acceptance thresholds.
+
 `task_program.execution_policy` accepts a string path or a closed
 `{component, overrides}` selector. `_resolve_execution_policy()` in
 `integrations/_configured_composition.py` applies allowlisted motion/recovery
-scalar overrides to an owned copy, then validates the resolved values with the
+overrides to an owned copy, then validates the resolved values with the
 normal policy decoders. Contracts, planner selection, tracking and effect
 assurance remain component-owned. Paths in either form resolve from the runnable
 deployment. Reuse the base policy and declare tuning in the selector instead of
@@ -236,21 +293,32 @@ requires the verified held-object transform. Coordinated transport must select
 the real primitive's release mode. Do not install frontend skill replacements.
 `move_held_object` additionally accepts an explicit `routes` declaration instead
 of its legacy single-target fields. Each route binds a canonical object, target
-ID and an inert absolute or scene-relative pose. These declarations live in
-`simulation/targets.py` and `simulation/transport.py`; lowering only constructs
-typed goals, retained-attachment effects and lookahead targets. It does not read
-live poses, select motion policy or replace the shared Atomic Skill. The original
-single-target decoder/factory and effect behavior remain unchanged. Mixed forms
+ID and an inert absolute or scene-relative pose, optionally preceded by
+`waypoints`. `preserve_current_object_orientation` retains the carried object's
+observed rotation while positions follow their declared frames. These
+declarations live in `simulation/targets.py` and `simulation/transport.py`;
+lowering resolves a fresh planning snapshot when waypoints or observed rotation
+are requested, places every resolved pose on the planning device, then
+constructs typed goals, retained-attachment effects and lookahead targets. It does not select motion policy or replace the shared
+Atomic Skill. The original single-target decoder/factory and effect behavior
+remain unchanged. Mixed forms
 and duplicate target IDs are rejected. The optional
 `RegisteredSemanticLowererSceneValidator` contract lets an immutable factory
 preflight its references against `SceneManifest` before runtime assembly; routed
 transport uses it for canonical object/reference checks.
-The routed-2 factory uses named transport goals and verified retention-only
+The routed-3 factory uses named transport goals and verified retention-only
 phases: grounding checks the exact object and every eligible input-hold row,
 then guards `transport` and requests terminal attachment verification. Projected
 presets reject this contract before motion planning or dispatch. The legacy
 single-target factory keeps its existing effectless behavior and identity.
 
+The configured `move_end_effector` lowerer exposes the existing Cartesian
+Atomic Skill through closed named routes of arena-frame SE(3) waypoints. Its
+call accepts only a configured `target` selector. Use it for empty-hand transit
+or deliberate contact motion; held-object transit requires the transport
+contract above. The lowerer declares `requires_unoccupied_slots = ("primary",)`,
+so grounding rejects the call with `unoccupied_resource_required` when the bound
+manipulator holds a verified object in any eligible environment.
 
 Container affordances may declare a local-z release clearance while retaining
 their original semantic target for final acceptance.
@@ -304,9 +372,18 @@ narrowing. When omitted, runtime assembly scopes the embodiment service to the
 selected scene's graspable rigid objects, so reusable embodiments do not name
 task-local objects.
 
-Deployment embodiment overrides affect only the robot simulation fields and
-are restricted to `uid`, `init_pos`, `init_rot`, and `init_qpos`. Sensor lists
-are selected atomically with the embodiment. Task grasp-generator overrides
+Deployment embodiment robot installation overrides are restricted to `uid`,
+`init_pos`, `init_rot`, and `init_qpos`, plus bounded task calibration.
+`joint_drive_props.stiffness` and `damping` may replace finite, nonnegative
+values of entries the component already names, and
+`grippers.<instance>.commands.open` or `grasp` may replace a declared hand's
+command with positions for every native hand joint within the hand limits.
+New drive entries, other drive fields and structural hand changes are
+rejected. Sensor membership remains owned by the embodiment; the separate
+UID-keyed `camera_overrides` permits only explicitly declared ordinary-camera
+calibration, under the
+[physical composition contract](../env-framework/configuration.md#reusable-gym-deployment-components).
+Task grasp-generator overrides
 are similarly allowlisted. This gives one embodiment to many tasks and one
 task to many compatible embodiments without copying either declaration or
 admitting arbitrary merge semantics. `repeated_pick_place` and `open_drawer`
@@ -363,6 +440,11 @@ manifests and live registries retain the same identity.
 so reference rotation does not rotate their offset or per-axis tolerances.
 Select `reference_frame: parent` to measure both in the live reference frame,
 matching a target whose relative pose composes the complete parent transform.
+The reference may be an articulation link; the observer reads its current
+native link pose so acceptance follows a moving drawer floor after closure.
+Static validation sends this reference with role `object`; a validation context
+that declares `supports_link_references = True`, such as the integration
+catalog, receives `object_or_link` instead.
 
 
 ## Named evaluation rules
