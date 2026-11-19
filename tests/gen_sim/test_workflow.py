@@ -338,6 +338,11 @@ def test_workflow_generates_binds_and_preserves_actual_execution_verdict(
     assert manifest["status"] == ("succeeded" if success else "failed")
     assert manifest["runtime_evidence_status"] == manifest["status"]
     assert manifest["task_spec_verdict"] == "not_evaluated"
+    assert "image_preprocessing" not in manifest["stages"]
+    assert (
+        manifest["image_sha256"]
+        == hashlib.sha256(run_cfg.image.read_bytes()).hexdigest()
+    )
     receipt = json.loads((run_cfg.output / "execution_report.json").read_text())
     assert receipt["all_success"] is success
     import re
@@ -1330,6 +1335,122 @@ def test_reused_task_must_plan_the_run_instruction_and_image(
     assert not cfg.output.exists()
 
 
+@pytest.mark.parametrize("corrupted_artifact", [None, "input.png", "robot-mask.png"])
+def test_workflow_reuses_the_grounded_cleaned_image(
+    run_cfg: _RunCfg, monkeypatch: pytest.MonkeyPatch, corrupted_artifact: str | None
+) -> None:
+    from embodichain.gen_sim import _robot_cleanup, _run_execution, workflow
+    from embodichain.gen_sim.scene_engine.pipeline import generate
+
+    Image.new("RGB", (640, 480), "white").save(run_cfg.image)
+    run_cfg.input_camera = {
+        "view": "robodojo_dual_arm_head",
+        "sha256": hashlib.sha256(run_cfg.image.read_bytes()).hexdigest(),
+    }
+    scene_inputs = []
+
+    def cleanup(source: Path, output: Path, **kwargs: object) -> None:
+        output.mkdir()
+        with Image.open(source) as original:
+            original.save(output / "original.png")
+            cleaned = original.copy()
+        cleaned.putpixel((320, 479), (0, 0, 0))
+        cleaned.save(output / "input.png")
+        cleaned.save(output / "editor-response.png")
+        mask = Image.new("L", cleaned.size)
+        mask.putpixel((320, 479), 255)
+        for name in ("robot", "arms", "grippers", "camera-support"):
+            mask.save(output / f"{name}-mask.png")
+        (output / "preparation.json").write_text(
+            json.dumps(
+                {
+                    "outside_mask_pixels_checked": 640 * 480 - 1,
+                    "outside_mask_pixels_changed": 0,
+                    "inside_mask_pixels_changed": 1,
+                }
+            )
+        )
+
+    def generate_scene(image, output, **kwargs):
+        scene_inputs.append(hashlib.sha256(Path(image).read_bytes()).hexdigest())
+        _write_scene(output)
+
+    monkeypatch.setattr(_robot_cleanup, "clean_robot_image", cleanup)
+    monkeypatch.setattr(generate, "generate_scene_from_image", generate_scene)
+    monkeypatch.setattr(
+        _run_execution,
+        "_execute_deployment",
+        lambda *args, **kwargs: {
+            "status": "succeeded",
+            "completed": True,
+            "all_success": True,
+        },
+    )
+    with _services() as services:
+        first = _run(run_cfg, services=services)
+    assert first["stages"]["image_preprocessing"] == "succeeded"
+    assert first["source_image_sha256"] != first["image_sha256"]
+    assert scene_inputs == [first["image_sha256"]]
+    task = run_cfg.output / "task"
+    assert workflow.load_task_plan(task)["image_sha256"] == first["image_sha256"]
+
+    if corrupted_artifact:
+        # Corrupting only the mask preserves the plan image hash but breaks the audit.
+        Image.new("L", (640, 480)).save(
+            run_cfg.output / "image_preprocessing" / corrupted_artifact
+        )
+    reused = run_cfg.replace(task=task, output=run_cfg.output.parent / "reuse")
+
+    def unexpected_call(*args, **kwargs):
+        pytest.fail("Reusing a grounded Task Plan must not clean or plan again")
+
+    monkeypatch.setattr(_robot_cleanup, "clean_robot_image", unexpected_call)
+    monkeypatch.setattr(workflow, "plan_image_task", unexpected_call)
+    with GenSimServices(
+        GenSimServicesCfg(),
+        injected={
+            "task_image_grounding": _ScriptedChat(
+                {
+                    "objects": {"source": "cube_native", "table": "table"},
+                    "resources": {"default_primary": "primary_manipulator"},
+                }
+            ),
+        },
+    ) as services:
+        if corrupted_artifact:
+            with pytest.raises(ValueError, match="image hash|pixel audit"):
+                _run(reused, services=services)
+            assert scene_inputs == [first["image_sha256"]]
+            return
+        second = _run(reused, services=services)
+    assert second["stages"]["image_preprocessing"] == "reused"
+    assert second["stages"]["task_plan"] == "reused"
+    assert second["plan_digest"] == first["plan_digest"]
+    assert scene_inputs == [first["image_sha256"]] * 2
+
+
+def test_declared_camera_cannot_be_used_with_a_different_frame(
+    run_cfg: _RunCfg,
+) -> None:
+    Image.new("RGB", (640, 480), "white").save(run_cfg.image)
+    cfg = run_cfg.replace(
+        input_camera={"view": "robodojo_dual_arm_head", "sha256": "0" * 64}
+    )
+    with pytest.raises(ValueError, match="exact 640"):
+        _run(cfg)
+    assert not cfg.output.exists()
+
+
+def test_run_config_rejects_cleanup_for_a_wrist_view(run_cfg: _RunCfg) -> None:
+    with pytest.raises(ValueError, match="robodojo_dual_arm_head"):
+        run_cfg.replace(
+            input_camera={
+                "view": "robodojo_wrist",
+                "sha256": hashlib.sha256(run_cfg.image.read_bytes()).hexdigest(),
+            }
+        )
+
+
 def test_runtime_mesh_handoff_bakes_axis_and_scale_without_changing_source(
     tmp_path: Path,
 ) -> None:
@@ -1342,8 +1463,18 @@ def test_runtime_mesh_handoff_bakes_axis_and_scale_without_changing_source(
     before = source.read_bytes()
     data = json.loads((export / "scene_config.json").read_text())
     data["background"][0]["body_scale"] = [2.0, 3.0, 4.0]
+    authored = {
+        "approximation": "convex_decomposition",
+        "max_hulls": 8,
+        "acd_method": "vhacd",
+    }
+    data["background"][0]["shape"]["collision"] = authored
     result = _physical_scene(export, data, tmp_path / "runtime-assets")
     table = result["background"][0]
+    # An authored collision policy is kept; other meshes follow their hull budget.
+    assert table["shape"]["collision"] == authored
+    cube = result["rigid_object"][0]["shape"]["collision"]
+    assert cube["approximation"] == "convex_hull"
     mesh = trimesh.load_scene(table["shape"]["fpath"])
     vertices = np.concatenate(
         [geometry.vertices for geometry in mesh.geometry.values()]

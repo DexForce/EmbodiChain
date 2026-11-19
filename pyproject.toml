@@ -14,7 +14,7 @@ dynamic = ["version"]
 
 # Core install dependencies (kept from requirements.txt).
 dependencies = [
-  "dexsim_engine==0.6.0rc2",
+  "dexsim_engine==0.6.0",
   # DexSim and LeRobot require different OpenCV distributions sharing cv2.
   # Keep their bindings on the same release to avoid mixed Python/native APIs.
   "opencv-python==4.12.0.88; python_version < '3.12'",
@@ -103,6 +103,9 @@ embodichain_tasks = "embodichain_tasks"
 
 [project.entry-points."embodichain.robots"]
 official = "embodichain_robots._catalog:ROBOT_CONFIGS"
+
+[project.entry-points."embodichain.sensors"]
+VLP16 = "embodichain_sensors.vlp16:VLP16_REGISTRATION"
 
 [project.entry-points."embodichain.assets"]
 official_robots = "embodichain_robots._asset_catalog:ROBOT_ASSETS"

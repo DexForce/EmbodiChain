@@ -397,8 +397,8 @@ def main(args: argparse.Namespace | None = None) -> None:
             FrankaPandaCfg.from_dict({"uid": "tracking_franka"})
         )
         sim.prepare()
-        if not args.headless:
-            sim.open_window()
+        if not args.headless or getattr(args, "web", False):
+            sim.open_viewer()
         common_initial_qpos = robot.get_qpos().clone()
         trials = {
             "qpos_only_zero_qvel": _run_trial(

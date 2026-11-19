@@ -14,10 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Exercise the original #904 asset through both public USD import paths.
+"""Exercise the shipped G1 model through both public USD import paths.
 
-Set EMBODICHAIN_G1_USD to the original G1_120s/robot.usda, with all referenced
-layers and meshes present. The asset is supplied locally by the test operator.
+Set EMBODICHAIN_G1_USD to the downloaded AgibotG1/robot.usda, with its
+referenced layers present. The test uses a local copy of the shipped asset.
 """
 
 from __future__ import annotations
@@ -39,6 +39,25 @@ CLOSURE_JOINTS = {
     "idx79_gripper_r_inner_joint2",
     "idx89_gripper_r_outer_joint2",
 }
+GRIPPER_COLLISION_LINKS = {
+    f"gripper_{side}_{link}"
+    for side in ("l", "r")
+    for link in (
+        "base_link",
+        *(f"{jaw}_link{index}" for jaw in ("inner", "outer") for index in range(1, 6)),
+    )
+}
+BODY_COLLISION_SHAPES = {
+    "base_link": 2,
+    "body_link1": 2,
+    "body_link2": 2,
+    "head_link2": 1,
+}
+ARM_COLLISION_SHAPES = {
+    f"arm_{side}_{link}": 1
+    for side in ("l", "r")
+    for link in ("base_link", *(f"link{index}" for index in range(1, 7)), "end_link")
+}
 ANCHOR_TOLERANCE_M = 1e-4
 MIN_OPENING_M = 1e-3
 RETURN_TOLERANCE_M = 1e-3
@@ -47,10 +66,10 @@ TARGET_TOLERANCE_RAD = 0.02
 
 @pytest.mark.subprocess_sim
 @pytest.mark.parametrize("entry_point", ["add_usd", "add_robot"])
-def test_import_preserves_original_g1_gripper_loops(entry_point: str) -> None:
+def test_import_preserves_g1_collisions_and_loops(entry_point: str) -> None:
     path = os.environ.get("EMBODICHAIN_G1_USD")
     if not path:
-        pytest.skip("Set EMBODICHAIN_G1_USD to the original G1_120s/robot.usda")
+        pytest.skip("Set EMBODICHAIN_G1_USD to the downloaded AgibotG1/robot.usda")
     # NoRender requires a fresh process because other tests initialize a
     # different process-wide renderer.
     result = subprocess.run(
@@ -62,7 +81,7 @@ def test_import_preserves_original_g1_gripper_loops(entry_point: str) -> None:
         ],
         capture_output=True,
         text=True,
-        timeout=45,
+        timeout=90,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -134,6 +153,27 @@ def _check_g1(path: str, entry_point: str) -> None:
             assert len(closures) == len(CLOSURE_JOINTS)
             assert {handle.get_name() for handle in closures} == expected_names
             assert len(robot.mimic_ids) == 6  # Three source mimic joints per jaw.
+            collision_shape_counts = {
+                name: len(robot.get_link_collision_shapes(name))
+                for name in robot.link_names
+            }
+            gripper_colliders = {
+                name
+                for name, count in collision_shape_counts.items()
+                if name.startswith("gripper_") and count
+            }
+            assert gripper_colliders == GRIPPER_COLLISION_LINKS
+            for side in ("l", "r"):
+                # One gripper base collider and four camera mount meshes.
+                assert collision_shape_counts[f"gripper_{side}_base_link"] == 5
+            body_and_arm_colliders = {
+                name: count
+                for name, count in collision_shape_counts.items()
+                if not name.startswith("gripper_") and count
+            }
+            assert (
+                body_and_arm_colliders == BODY_COLLISION_SHAPES | ARM_COLLISION_SHAPES
+            )
             sim.get_world().enable_physics(True)
 
             if reimport:

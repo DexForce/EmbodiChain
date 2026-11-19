@@ -249,7 +249,7 @@ def run(args: argparse.Namespace) -> None:
 
     for direction in ("pull", "push"):
         if direction == "push" and wait_for_user:
-            input(
+            sim.wait_for_input(
                 "Pull replay finished. Press Enter to read the moved handle "
                 "pose and plan the push..."
             )
@@ -283,7 +283,7 @@ def run(args: argparse.Namespace) -> None:
             return
 
         if wait_for_user:
-            input(f"Press Enter to replay the drawer {direction}...")
+            sim.wait_for_input(f"Press Enter to replay the drawer {direction}...")
         focus_pose = drawer.get_link_pose(HANDLE_LINK_NAME, to_matrix=True)
         focus_position = [focus_pose[0, 0, 3], focus_pose[0, 1, 3], focus_pose[0, 2, 3]]
         camera_position = [
@@ -304,7 +304,7 @@ def run(args: argparse.Namespace) -> None:
         )
 
     if wait_for_user:
-        input("Press Enter to exit the simulation...")
+        sim.wait_for_input("Press Enter to exit the simulation...")
 
 
 def main() -> None:

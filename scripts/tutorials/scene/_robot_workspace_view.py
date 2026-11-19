@@ -63,6 +63,7 @@ class _Display:
     def config(self) -> SimulationManagerCfg:
         return SimulationManagerCfg(
             num_envs=1,
+            web=self.view == "web",
             device="cpu",
             headless=self.view != "window",
             physics_dt=0.01,
@@ -79,7 +80,7 @@ class _Display:
         )
 
     def attach(self, sim: Any) -> None:
-        if self.view in ("window", "offscreen"):
+        if self.view in ("window", "web", "offscreen"):
             sim.add_light(
                 LightCfg(
                     uid="workspace_light",
@@ -105,8 +106,8 @@ class _Display:
         )
 
     def start(self, sim: Any) -> None:
-        if self.view == "window":
-            if not sim.open_window():
+        if self.view in {"window", "web"}:
+            if not sim.open_viewer():
                 raise RuntimeError("Native window could not be opened")
         if self.view == "offscreen":
             import imageio.v2 as imageio
@@ -124,7 +125,7 @@ class _Display:
         with np.load(info["reachability"]["cache"], allow_pickle=False) as cache:
             self.workspace_points = cache["points"].copy()
             self.workspace_colors = cache["colors"].copy()
-        if self.view in ("window", "offscreen"):
+        if self.view in ("window", "web", "offscreen"):
             self.native_cloud = sim.visualize_point_cloud(
                 points=self.workspace_points,
                 colors=self.workspace_colors,
@@ -233,9 +234,12 @@ class _Display:
                                 "keyframe": str(path.relative_to(self.output)),
                             }
                         )
-        if force and self.view in ("viser", "window"):
+        if force and self.view in ("viser", "window", "web"):
             # Hold a frame for inspection without integrating physics.
-            time.sleep(1.0)
+            end = time.monotonic() + 1.0
+            while time.monotonic() < end:
+                sim.poll_viewer()
+                time.sleep(0.02)
 
     def advance(self, sim: Any, count: int) -> None:
         for _ in range(count):
@@ -247,7 +251,7 @@ class _Display:
     def control_step(self, sim: Any) -> None:
         self.steps += 4
         self.frame(sim, "execution")
-        if self.view in ("viser", "window"):
+        if self.view in ("viser", "window", "web"):
             time.sleep(CONTROL_DT)
 
     def close(self) -> None:

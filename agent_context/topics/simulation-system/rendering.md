@@ -86,6 +86,16 @@ loader's axis conversion and owns `renderer: hybrid`. Forcing NoRender is not
 an equivalent qualification of that scene even when cameras are disabled.
 Headless native rendering still requires the host's offscreen display setup.
 
+## WebRTC observation view
+
+`visualization.backend="dexsim-web"` reserves native rendering before World
+construction and forces the local window closed. A dedicated observation camera
+is rendered from `render_frame()` without adding sensor renders. Paused callers
+pump `capture_visualization()` on the World creator thread. WebRTC application
+closure precedes sensor/scene teardown; its listener is released with World
+cleanup. Follow [visualization](../sim-visualization/sim-visualization.md) for
+the shared viewport API, interactions and native video-catalog limitations.
+
 ## Default scene presentation
 
 `SimulationManager.set_default_background()` authors the native ground material
@@ -237,11 +247,13 @@ completion can retry the staged publication before another camera read.
 USD visual Xforms may reference an external Gaussian PLY through DexSim's
 native parser. This produces a Gaussian render on its original USD rigid or
 visual owner, with USD collision and mass left independent. EmbodiChain binds
-that source through `add_usd()` or `UsdSourceCfg` in one Arena with Default
-physics and Hybrid rendering. Native USD Gaussian renders cannot currently be
-replicated across Arenas or replaced by the explicit `visuals` list; reject
-those requests before Spawn mutation. The standalone `GaussianSplatCfg` path
-continues to support multi-Arena companions and per-instance randomization.
+that source through `add_usd()` or `UsdSourceCfg` with Default physics and Hybrid
+rendering. Qualified DexSim builds clone the parent and its Gaussian companions
+across Arenas, share immutable resources and retain independent transforms and
+visibility. EmbodiChain checks the public `get_gaussian_resource_ids()` capability
+before multi-Arena declaration; older SDKs retain singleton support. Native USD
+Gaussian appearance cannot be replaced by an explicit `visuals` list. The
+standalone `GaussianSplatCfg` path retains its per-instance randomization API.
 NoRender omits the USD Gaussian render resource but keeps its authored physics
 and collision descriptions, including replicated bodies. Type queries retain
 the authored visual reference without allocating Gaussian points.

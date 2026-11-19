@@ -31,6 +31,7 @@ from embodichain.compute.kinematics.manipulability import (
     yoshikawa_manipulability,
 )
 
+from .gravity import URDFGravityCompensation
 from .dls import damped_least_squares_step, solve_dls_ik
 from .pose_error import pose_error
 from .serial_chain import SerialChainKinematics
@@ -40,6 +41,7 @@ from .tree import TreeKinematics, LinkKinematics
 from .types import DifferentiableIKCfg, DifferentiableIKResult
 
 __all__ = [
+    "URDFGravityCompensation",
     "matrix_product",
     "matrix_vector_product",
     "heading_rotation",

@@ -329,13 +329,13 @@ def _physical_scene(export: Path, data: dict[str, Any], assets: Path) -> dict[st
                 destination = asset_root / (entry["uid"] + ".obj")
                 mesh.export(destination, include_normals=True)
                 item["body_scale"] = [1.0, 1.0, 1.0]
-                item["shape"] = {
-                    **deepcopy(entry["shape"]),
-                    "fpath": str(destination),
-                    "collision": _mesh_collision_cfg(
+                item["shape"] = {**deepcopy(entry["shape"]), "fpath": str(destination)}
+                # An authored collision policy, such as the calibrated table's,
+                # takes precedence over the legacy hull budget.
+                if item["shape"].get("collision") is None:
+                    item["shape"]["collision"] = _mesh_collision_cfg(
                         entry.get("max_convex_hull_num", 32)
-                    ).to_dict(),
-                }
+                    ).to_dict()
             result[category].append(item)
     return result
 

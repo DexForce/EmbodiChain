@@ -317,7 +317,7 @@ def run_handover_demo(
         return
 
     if wait_for_user:
-        input("Press Enter to execute the handover...")
+        sim.wait_for_input("Press Enter to execute the handover...")
 
     replay_trajectory(
         sim,
@@ -330,7 +330,7 @@ def run_handover_demo(
         compiled=compiled,
     )
     if wait_for_user:
-        input("Press Enter to exit the simulation...")
+        sim.wait_for_input("Press Enter to exit the simulation...")
 
 
 def run(args: argparse.Namespace) -> None:

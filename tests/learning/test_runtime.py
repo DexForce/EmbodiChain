@@ -30,6 +30,7 @@ from embodichain.learning.rl.runtime import (
 )
 from embodichain.lab.sim import SimulationManagerCfg
 from embodichain.lab.sim.cfg import RenderCfg
+from embodichain.lab.visualization import VisualizationCfg
 
 
 def _policy_config() -> dict:
@@ -65,12 +66,19 @@ class GymEnvironment:
         self.closed += 1
 
 
-def test_gym_environment_applies_runtime_overrides(tmp_path, monkeypatch):
+@pytest.mark.parametrize("web", [False, True])
+def test_gym_environment_applies_runtime_overrides(tmp_path, monkeypatch, web):
     gym_config = tmp_path / "gym.yaml"
     gym_config.write_text("id: Example\n", encoding="utf-8")
     env_cfg = SimpleNamespace(
         num_envs=8,
-        sim_cfg=None,
+        sim_cfg=(
+            SimulationManagerCfg(
+                headless=True, render_cfg=RenderCfg(renderer="no-render")
+            )
+            if web
+            else None
+        ),
         profiler=None,
     )
     built = GymEnvironment()
@@ -87,7 +95,8 @@ def test_gym_environment_applies_runtime_overrides(tmp_path, monkeypatch):
         {"trainer": {"gym_config": "gym.yaml"}},
         simulation_device=torch.device("cpu"),
         num_envs=1,
-        headless=True,
+        headless=not web,
+        **({"visualization": VisualizationCfg(backend="dexsim-web")} if web else {}),
         renderer="hybrid",
         gpu_id=0,
         seed=17,
@@ -100,6 +109,7 @@ def test_gym_environment_applies_runtime_overrides(tmp_path, monkeypatch):
     assert runtime.env_cfg.seed == 17
     assert runtime.env_cfg.sim_cfg.sim_device == torch.device("cpu")
     assert runtime.env_cfg.sim_cfg.headless is True
+    assert runtime.env_cfg.sim_cfg.web is web
     assert runtime.env_cfg.sim_cfg.render_cfg.renderer == "hybrid"
 
 

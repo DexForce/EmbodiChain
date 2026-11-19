@@ -119,6 +119,60 @@ orbit/zoom and recorder view. Use
 camera changes; the [evaluation guide](../../../docs/source/guides/policy_evaluation.md)
 owns user controls.
 
+`eval-policy --web` uses the same task adapter with a read-only native WebRTC
+viewport. It requires an explicit finite positive episode, control-step or
+duration budget so completion reaches report writing. Paused termination is
+rejected because Web has no resume input; use auto-reset termination. External
+Motion Policy Kit profiles do not expose Web configuration and are rejected.
+
+Web camera operations remain on the World creator thread; recording timing belongs to
+[visualization configuration](../sim-visualization/configuration.md).
+
+## Composable actors and auxiliary objectives
+
+`ActorCritic` accepts ordinary actor/critic modules and optional named
+`AuxiliaryTask` objectives. An actor's `forward_with_features` supplies action
+means and graph-connected features in one pass; ordinary actors retain their
+existing forward path. The policy registers objective heads/buffers, aggregates
+training-field declarations, evaluates losses and exports inference-only actors.
+Shared actor/critic observations remain valid. `ContactPrediction` owns contact
+labels, decoder and cross-entropy, including its actor-label isolation check.
+
+Configuration selects `actor.type: temporal` with `TemporalActorCfg` fields in
+`actor.network_cfg`, an ordinary MLP critic, and optional
+`auxiliary_tasks.<name>.type: contact_prediction` declarations. Temporal networks
+and history storage live in `policies/temporal.py`; objectives live in
+`policies/auxiliary.py`. The temporal actor accepts only `official_v1`: current
+followed by chronological history including current, with the matching input
+normalizer. Environment observation producers use that same layout. There is no
+separate proprioceptive policy adapter or historical encoder/history branch.
+Component contracts record semantic settings, including parameterless objectives,
+so equal neural tensor shapes cannot silently change training semantics on resume.
+The checkpoint loader accepts only the current full schema and metadata; older
+schemas and incomplete historical metadata are rejected before model mutation.
+Within schema v2, an omitted optional PPO auxiliary coefficient means zero; an
+explicitly different coefficient remains incompatible.
+
+Named training fields travel with the observation that produced each action.
+Collectors preserve declared feature axes after combining configured observation
+groups. Scalar leaves contribute one feature per environment, including within
+nested groups. Logical actor/critic parameter
+groups retain overlap so APG can reject shared trunks; PPO deduplicates shared
+parameters at gradient clipping.
+PPO's optional auxiliary decoder loss recomputes the latent in each minibatch
+so encoder gradients remain connected. Normalization statistics remain frozen
+through collection and PPO epochs, then update for the next rollout. Actor
+export excludes critic and contact decoder; inference alignment does not
+qualify task learning or simulator throughput.
+
+Blind-assembly producers and manager functors live in the official task
+extension's `manipulation/assembly/functors.py`. The generic observation package
+does not own assembly state or task rules. All three families use current-first
+encoder/FK features; history storage remains a reusable policy component.
+[Assembly ownership](../assembly-assets/assembly-assets.md) identifies shared
+geometry, gravity, resource snapshots and declarative task defaults. Examples
+under `examples/learning/blind_assembly/` own actor export and native preview.
+
 ## Episode evaluation and saved resources
 
 Auto-reset preserves completed-row observations and IDs for timeout bootstrap;

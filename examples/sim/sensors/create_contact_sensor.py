@@ -235,8 +235,8 @@ def main(args: argparse.Namespace | None = None) -> None:
     print("[INFO]: Press Ctrl+C to stop the simulation")
 
     # Open window when the scene has been set up
-    if not args.headless:
-        sim.open_window()
+    if not args.headless or getattr(args, "web", False):
+        sim.open_viewer()
 
     robot_grasp_pose(robot, cube2, sim)
     # Run the simulation

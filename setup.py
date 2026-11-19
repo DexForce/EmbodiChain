@@ -159,6 +159,11 @@ def get_package_data() -> dict[str, list[str]]:
             "_preview_heatmap.js",
             "_distribution.html",
         ],
+        "embodichain.lab.visualization": [
+            "web_assets/*.html",
+            "web_assets/*.js",
+            "web_assets/*.css",
+        ],
         "embodichain.data": ["default_materials.json"],
         "embodichain.compute.kinematics._warp": [
             "ssik_LICENSE.txt",

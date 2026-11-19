@@ -1,6 +1,7 @@
 Public API Supplement
 =====================
 
+
 .. This page is maintained by the update-api-docs agent skill.
    docs/scripts/check_api_docs.py reads it but never writes it.
 
@@ -33,6 +34,16 @@ Offline job preflight, run, resume and verified inspection commands.
 
    main
 
+embodichain.compute.geometry
+----------------------------
+
+Chunked planar distances preserve tensor batch axes, dtype and device.
+
+.. currentmodule:: embodichain.compute.geometry
+
+.. autofunction:: signed_distance_to_polygon
+
+
 embodichain.compute.geometry.particles
 --------------------------------------
 
@@ -43,6 +54,16 @@ Deterministic lattice sampling for primitive, revolved and closed mesh fill volu
    embodichain.compute.geometry.particles.sample_volume_particles
 
 .. autofunction:: embodichain.compute.geometry.particles.sample_volume_particles
+
+embodichain.compute.geometry.polygon
+------------------------------------
+
+Signed distances support concave planar outlines and bounded point-edge intermediates.
+
+.. currentmodule:: embodichain.compute.geometry.polygon
+
+.. autofunction:: signed_distance_to_polygon
+
 
 embodichain.compute.geometry.shading
 ------------------------------------
@@ -59,6 +80,28 @@ simulator, and does not establish collision or manifold validity.
    has_inconsistent_shading_normals
 
 .. autofunction:: has_inconsistent_shading_normals
+
+embodichain.compute.kinematics
+------------------------------
+
+URDF gravity feedforward evaluates encoder coordinates in an explicit root frame.
+
+.. currentmodule:: embodichain.compute.kinematics
+
+.. autoclass:: URDFGravityCompensation
+   :members: torques
+
+
+embodichain.compute.kinematics.gravity
+--------------------------------------
+
+Cached URDF kinematics and mass/COM data provide simulator-independent holding torques.
+
+.. currentmodule:: embodichain.compute.kinematics.gravity
+
+.. autoclass:: URDFGravityCompensation
+   :members: torques
+
 
 embodichain.compute.kinematics.ik_path
 --------------------------------------
@@ -113,6 +156,13 @@ asset definitions can import the dataset base without circular initialization.
    get_data_path
    list_default_materials
    get_default_material_info
+
+Prepared robot snapshots preserve resource trees and source notices for relocatable runs.
+
+.. currentmodule:: embodichain.data
+
+.. autofunction:: snapshot_urdf_resources
+
 
 embodichain.data.assets.demo_assets
 -----------------------------------
@@ -320,6 +370,16 @@ not change geometry or UVs.
 
 .. autofunction:: get_default_material_info
    :no-index:
+
+embodichain.data.resources
+--------------------------
+
+Filesystem resource snapshots retain relative mesh, material and texture references without simulator imports.
+
+.. currentmodule:: embodichain.data.resources
+
+.. autofunction:: snapshot_urdf_resources
+
 
 embodichain.data_pipeline
 -------------------------
@@ -5559,6 +5619,45 @@ existing locomotion configuration name while implementations move into a package
 .. autofunction:: velocity_locomotion_observation
 
 
+   assembly_robot_reference
+embodichain_tasks.manipulation.assembly.assets
+----------------------------------------------
+
+Public-generator composition of held pegs, perforated gears and nuts with physically mating fixtures. Task topology changes are recorded in asset provenance.
+
+.. currentmodule:: embodichain_tasks.manipulation.assembly.assets
+
+.. autosummary::
+
+   build_task_assembly
+
+
+
+Shared observation functors
+---------------------------
+
+The observation manager resolves general, assembly and locomotion functors
+through one package. Assembly contact labels and privileged state are intended
+for training; policy configuration controls which observations reach the actor.
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.observations
+
+.. autosummary::
+
+   velocity_locomotion_observation
+
+.. autofunction:: velocity_locomotion_observation
+
+
+Assembly task component callables
+--------------------------------
+
+.. toctree::
+   :maxdepth: 1
+
+   assembly_components
+
+
 Stability execution ownership
 ----------------------------
 
@@ -6135,6 +6234,19 @@ lowering still validates calibrated scene and route bindings.
 
 .. autofunction:: validate_semantic_call_payload
 
+Native WebRTC viewer configuration
+---------------------------------
+
+The experimental WebRTC viewer uses a dedicated observation camera in the
+existing World. It requires a WebRTC-enabled Linux/NVIDIA DexSim build; its
+native listener binds all IPv4 interfaces and lives until World teardown.
+
+.. autoclass:: embodichain.lab.visualization.DexSimWebCfg
+   :members:
+
+.. autoclass:: embodichain.lab.visualization.cfg.DexSimWebCfg
+   :no-index:
+
 
 Parallel-jaw hand configuration and composition
 ----------------------------------------------
@@ -6482,3 +6594,199 @@ planned candidate poses never contribute to confirmed coverage.
 
 .. autoclass:: embodichain.lab.expansion.task_pose_coverage.TaskPoseCoverage
    :members:
+
+
+Reference state sensors
+-----------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   JointEncoder
+   JointEncoderCfg
+   FrameTransform
+   FrameTransformCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.state
+
+.. autosummary::
+
+   JointEncoder
+   JointEncoderCfg
+   FrameTransform
+   FrameTransformCfg
+
+
+Inertial sensors
+----------------
+
+PVA and IMU use finite differences by default. Set
+``acceleration_source="native"`` for dynamic rigid bodies on CUDA Newton
+MuJoCo Warp with RNE enabled. ``"auto"`` selects native acquisition when the
+configured target supports it and finite differences otherwise. Native
+acceleration is the final solver substep result, transported from the
+center of mass to the sensor point. After a reset it becomes valid on the next
+sampled physics step. The ``acceleration_valid`` descriptor reports the bound source.
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   PVA
+   PVACfg
+   IMU
+   IMUCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.inertial
+
+.. autosummary::
+
+   PVA
+   PVACfg
+   IMU
+   IMUCfg
+
+
+Joint reaction wrench
+---------------------
+
+Enable ``NewtonPhysicsCfg.enable_joint_wrenches`` before preparing a CUDA
+Newton MuJoCo Warp scene with RNE enabled. A ``JointWrench`` selects a native
+parent/child articulation joint. It reads the final solver substep's reaction
+exerted by the parent on the child, expressed at the configured sensor
+offset from the child link origin. Force is in newtons and torque in
+newton-metres. Both vectors use sensor axes. Check ``wrench_valid`` after
+initialization and reset.
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   JointWrench
+   JointWrenchCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.joint_wrench
+
+.. autosummary::
+
+   JointWrench
+   JointWrenchCfg
+
+
+Planar contact grid
+-------------------
+
+Contact grids bin the latest solver contact report into a mounted metric
+surface. Use the per-quantity validity fields and the native impulse duration
+when consuming the outputs.
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   ContactGrid
+   ContactGridCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact_grid
+
+.. autosummary::
+
+   ContactGrid
+   ContactGridCfg
+
+
+Contact-resultant sensor
+------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   ContactResultant
+   ContactResultantCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact_resultant
+
+.. autosummary::
+
+   ContactResultant
+   ContactResultantCfg
+
+
+Batched triangle ray queries
+----------------------------
+
+.. currentmodule:: embodichain.compute.geometry.raycast
+
+.. autosummary::
+
+   TriangleRayMesh
+   cast_rays
+
+
+Tactile indentation
+-------------------
+
+Tactile indentation measures geometric overlap along calibrated probes on
+planar or curved surfaces. The geometry source and clipped depth are published
+independently from contact force or optical images.
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   TactileIndentation
+   TactileIndentationCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.tactile_indentation
+
+.. autosummary::
+
+   TactileIndentation
+   TactileIndentationCfg
+
+
+Terrain scan
+------------
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   RayScene
+   TerrainScan
+   TerrainScanCfg
+   RayLidar
+   RayLidarCfg
+   RayDepthCamera
+   RayDepthCameraCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.ray
+
+.. autosummary::
+
+   RayScene
+   TerrainScan
+   TerrainScanCfg
+   RayLidar
+   RayLidarCfg
+   RayDepthCamera
+   RayDepthCameraCfg
+
+
+Official sensor presets
+-----------------------
+
+.. currentmodule:: embodichain_sensors
+
+.. autosummary::
+
+   VLP16Cfg
+
+.. currentmodule:: embodichain_sensors.vlp16
+
+.. autosummary::
+
+   VLP16Cfg
+   VLP16_REGISTRATION

@@ -366,7 +366,7 @@ def configure_window_camera(sim: SimulationManager) -> None:
     Args:
         sim: Prepared simulation manager with an open native window.
     """
-    window = sim.get_world().get_windows()
+    window = sim.viewer
     if window is not None:
         window.set_look_at(
             eye=np.asarray([3.0, 3.0, 4.0], dtype=np.float32),
@@ -423,7 +423,7 @@ def main(args: argparse.Namespace | None = None) -> None:
         cloth = create_cloth(sim)
         sim.prepare()
 
-        if not args.headless and sim.open_window():
+        if (not args.headless or getattr(args, "web", False)) and sim.open_viewer():
             configure_window_camera(sim)
         run_simulation(sim, soft_body, cloth, args.iterations)
     except KeyboardInterrupt:

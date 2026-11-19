@@ -33,6 +33,9 @@ upstream solver does not imply that every asset or operation exposes it here.
 | `ContactSensor` | Supported on CPU and GPU | Solver/device dependent |
 | Differentiable simulation | Unsupported | `semi_implicit` only |
 
+See {doc}`../../sensors/backend_support` for sensor-specific solver, device,
+and SDK requirements.
+
 Use Default for workflows needing its native rigid constraints or established
 Constraint Dynamics behavior. Use Newton for DexUni robot/deformable coupling,
 particle-based cloth or soft bodies, solver-specific experiments, or the
