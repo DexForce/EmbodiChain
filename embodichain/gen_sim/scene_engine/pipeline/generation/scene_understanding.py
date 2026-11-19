@@ -19,6 +19,7 @@ from __future__ import annotations
 
 __all__: list[str] = []
 
+from collections.abc import Sequence
 import json
 from pathlib import Path
 import re
@@ -170,6 +171,24 @@ assets array when no objects are visible. Every field must be a non-empty
 string. is_articulated must be a boolean."""
 
 _USER_PROMPT = "Analyze the provided image and return only the required JSON object."
+_TASK_OBJECTS_PROMPT = """A task will be carried out in this scene. It acts on
+the objects below, as named by a separate observer of the same image. Cover
+every one that you can see: the supporting table by the table entry, any other
+object by its own asset entry, and a named part (such as a lid, a door or a
+hook) by the asset that carries it. List such an object even when it is small,
+thin or cut off by the image border, and use the named object type for its
+category and name instead of a visually similar type. Never add an object that
+you cannot see, and keep every other rule.
+"""
+
+
+def _object_analysis_user_prompt(task_objects: Sequence[str] | None) -> str:
+    """Return the analysis request, naming the task's objects when supplied."""
+    if not task_objects:
+        return _USER_PROMPT
+    lines = "\n".join(f"- {description}" for description in task_objects)
+    return f"{_TASK_OBJECTS_PROMPT}{lines}\n\n{_USER_PROMPT}"
+
 
 _TABLE_VALIDATION_SYSTEM_PROMPT = """You select the best table mask candidate.
 The image contains table-mask candidates overlaid semi-transparently on the
@@ -265,7 +284,13 @@ def understand_scene(
     vlm_client: VisionClient,
     image_segmentation_client: SegmentationClient,
     json_max_attempts: int = 3,
+    task_objects: Sequence[str] | None = None,
 ) -> tuple[Scene, SceneGraph]:
+    """Segment the image and build its initial scene graph.
+
+    ``task_objects`` are short descriptions of the objects a task acts on. The
+    image analysis is asked to list each of them under its named object type.
+    """
 
     resolved_image_path = _validate_image_path(image_path)
     # The output in this stage will keep a JSON which contains
@@ -280,6 +305,7 @@ def understand_scene(
         image_path=resolved_image_path,
         vlm_client=vlm_client,
         json_max_attempts=json_max_attempts,
+        task_objects=task_objects,
     )
 
     # Receive the validated whole-scene mask, for VLM output the scene graph.
@@ -466,6 +492,7 @@ def _analyze_image_objects(
     image_path: str | Path,
     vlm_client: VisionClient,
     json_max_attempts: int = 3,
+    task_objects: Sequence[str] | None = None,
 ) -> None:
     """Analyze one image and update ``scene`` with validated semantic objects."""
     if json_max_attempts < 1:
@@ -477,7 +504,7 @@ def _analyze_image_objects(
         response_text = vlm_client.complete(
             image_path=resolved_image_path,
             system_prompt=_SYSTEM_PROMPT,
-            user_prompt=_USER_PROMPT,
+            user_prompt=_object_analysis_user_prompt(task_objects),
         )
         try:
             analyzed_scene = _parse_image_object_analysis_response(response_text)

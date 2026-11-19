@@ -35,6 +35,19 @@ from .task_engine.orchestration.workflow_artifacts import write_run_json
 __all__: list[str] = []
 
 
+def _task_objects(requirements_path: Path) -> list[str]:
+    """Return the task's description of each object role it acts on."""
+    configuration = json.loads(requirements_path.read_text(encoding="utf-8")).get(
+        "configuration", {}
+    )
+    descriptions = configuration.get("descriptions", {})
+    return [
+        descriptions[role["id"]]
+        for role in configuration.get("roles", ())
+        if descriptions.get(role.get("id"))
+    ]
+
+
 class LegacySceneEngineProvider:
     provider_id = "legacy_scene_engine"
 
@@ -77,6 +90,7 @@ class LegacySceneEngineProvider:
                 root,
                 scene_z_rotation_degrees=180.0,
                 services=self._services,
+                task_objects=_task_objects(request.requirements_path),
             )
             result = {
                 "schema_version": "embodichain.legacy-scene-job/v1",
