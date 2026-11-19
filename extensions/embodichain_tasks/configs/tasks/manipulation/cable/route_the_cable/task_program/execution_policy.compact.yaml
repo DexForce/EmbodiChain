@@ -1,4 +1,4 @@
-policy_id: cable_compact_contact_v1
+policy_id: cable_compact_fast_contact_v1
 preset_id: cable
 requires:
   embodiment_contract: dual_arm_parallel_gripper
@@ -7,9 +7,10 @@ planner:
 motion:
   strategy: ik_interp
   velocity_targets: auto
-  sample_count: 73
-  interpolate_position_step: 0.0008333333333333334
+  sample_count: 34
+  interpolate_position_step: 0.0018333333333333335
   dynamic_collision_mode: 'off'
+  acceleration_limit: 2.42
 tracking:
   kind: timed
 recovery:

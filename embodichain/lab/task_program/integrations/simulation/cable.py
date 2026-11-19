@@ -82,6 +82,7 @@ class _CableTarget:
     retract_distance: float = 0.0
     position: tuple[float | None, float | None, float | None] = (None, None, None)
     speed: float = 0.05
+    angular_speed: float = 0.5
     tolerance: float = 0.02
     orientation_tolerance: float = 0.25
     port_screen: bool = False
@@ -667,7 +668,10 @@ def _ground_cable_move(
     angle = torch.acos(((trace - 1) / 2).clamp(-1, 1)).max().item()
     count = max(
         3,
-        math.ceil(max(distance / target.speed, angle / 0.5) / control_dt) + 1,
+        math.ceil(
+            max(distance / target.speed, angle / target.angular_speed) / control_dt
+        )
+        + 1,
     )
     service.last_targets[part] = end.clone()
     path = interpolate_xpos_batched(path_start, path_end, count)[:, 1:]
@@ -918,7 +922,7 @@ def _decode_cable_service(value: object) -> _CableService:
             item, path=path, required=frozenset({"kind"}), optional=frozenset(fields)
         )
         kind = _identifier(row["kind"], path=path)
-        motion_fields = {"speed", "tolerance", "orientation_tolerance"}
+        motion_fields = {"speed", "angular_speed", "tolerance", "orientation_tolerance"}
         allowed = {
             "material": motion_fields
             | {"material_distance", "position", "port_screen", "firm"},
@@ -1000,6 +1004,7 @@ def _decode_cable_service(value: object) -> _CableService:
         target = _CableTarget(**kwargs)
         if (
             target.speed <= 0
+            or target.angular_speed <= 0
             or target.tolerance <= 0
             or target.orientation_tolerance <= 0
             or target.maximum_correction <= 0

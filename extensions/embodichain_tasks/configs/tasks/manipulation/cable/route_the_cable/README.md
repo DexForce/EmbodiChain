@@ -340,7 +340,7 @@ retreat and settling. Failed samples retain their measured stopping stage;
 changing orchestration does not by itself establish physical insertion success.
 
 
-## Experimental compact program
+## Compact program with contact-aware pacing
 
 `task.yam.compact.yaml` selects `RouteTheCableCompact-YAM-v1`, an opt-in variant
 with **8 Semantic Calls / 8 Atomic Skill invocations**: three right-arm
@@ -356,27 +356,36 @@ python -m embodichain run-task \
 The compact integration declares 55 observed phases. `PickUp`/`Place` plan them
 directly inside one execution session; they do not start nested Atomic Skills.
 The 48 original `cable_check` calls become acknowledged physical checkpoints,
-and 45 hold targets become command ranges. Their original order, thresholds,
-settling samples and initial control frames are retained. Home motion is part
-of the corresponding placement retreat. Every feedback-dependent target is
-resolved again from fresh observations before its phase is planned.
+and 45 hold targets become command ranges. Home motion is part of the
+corresponding placement retreat. Every feedback-dependent target is resolved
+again from fresh observations before its phase is planned.
+
+The fast profile combines compact orchestration with faster motion pacing.
+Translational target speeds are scaled by 2.2 and ordinary angular pacing uses
+1.1 rad/s. Each motion target may explicitly declare positive `angular_speed`
+in rad/s; omitted values retain the legacy 0.5 rad/s. The two wrist lay-down
+phases keep 0.5 rad/s and their original 15-control settling holds through the
+separate `settle_contact` target. The profile also preserves all four original
+21-control post-close dwells, the 30-control soft-grasp and post-release holds,
+and the final 120-control acceptance hold. Ordinary process holds and gripper
+transitions are shortened with minimum sample constraints. The motion-policy
+acceleration budget follows squared time scaling; authored robot joint-speed
+limits remain enforced. This targets a physical task cycle near 44 seconds,
+including the final two-second acceptance hold.
 
 The observation source supplies geometry and evidence; the existing Atomic
 engine owns IK, joint commands, timing and row-local execution. Failed rows are
 removed before geometry/timing reductions and IK. Physical grasp references are
 captured after the acknowledged close/settle command and released per row; no
-rigid cable/tool relation is projected. Newton/DexUni, scene, robot, cable
-coefficients, native contact handling and strict task acceptance are unchanged.
+rigid cable/tool relation is projected. Newton/DexUni, physics/control timesteps,
+scene, robot, cable coefficients, native contact handling and strict task
+acceptance are unchanged. The previous normal-pacing compact implementation
+is available at commit `47c741133` for comparison.
 
-Observed continuation is bounded and shares one invocation timeout. This
-variant sets that timeout to 120 seconds to cover the full left placement;
-it retains the 12,000-control-step episode ceiling. Offline `compile()`, external
-nominal trajectories/expansion, replay recovery and mid-operation invocation
-revisions are explicitly unsupported. Cancellation and failed-row holds use the
-ordinary runner. `PLAN_CONTINUED` events expose every installed phase plan.
-
-The extended accepted goal types intentionally change registration/integration
-fingerprints, including integrations which reference these descriptors. Saved
-registrations must be regenerated; the existing handover program fingerprint is
-unchanged. Fewer invocations are a structural simplification, not a claim of
-proportionally faster physics or of a general deformable-object policy.
+Observed continuation is bounded and shares one invocation timeout. Offline
+`compile()`, external nominal trajectories/expansion, replay recovery and
+mid-operation invocation revisions are explicitly unsupported. Cancellation and
+failed-row holds use the ordinary runner. `PLAN_CONTINUED` events expose every
+installed phase plan. Extended accepted goal types intentionally change related
+registration/integration fingerprints; saved registrations must be regenerated.
+Fewer invocations and shorter physical duration are separately measured results.

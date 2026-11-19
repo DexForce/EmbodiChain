@@ -100,12 +100,26 @@ def test_compact_cable_preflight_has_eight_calls_and_retains_physical_checks():
         if factory.call_id == "simulation.cable_pickup"
     )
     original = _decode_cable_service(_declaration())
-    assert (cfg.targets, cfg.geometry, cfg.motion_parts, cfg.slip_limit) == (
-        original.targets,
+    assert (cfg.geometry, cfg.motion_parts, cfg.slip_limit) == (
         original.geometry,
         original.motion_parts,
         original.slip_limit,
     )
+    # Timing changes must preserve every geometric target and physical gate.
+    targets = {target.target_id: target for target in cfg.targets}
+    assert set(targets) == {target.target_id for target in original.targets} | {
+        "settle_contact"
+    }
+    for target in original.targets:
+        assert (
+            replace(
+                targets[target.target_id],
+                speed=target.speed,
+                angular_speed=target.angular_speed,
+                samples=target.samples,
+            )
+            == target
+        )
     operations = cfg.operations
     assert len(operations) == 8
     phases = [phase for operation in operations for phase in operation.phases]
@@ -113,6 +127,24 @@ def test_compact_cable_preflight_has_eight_calls_and_retains_physical_checks():
     assert sum(phase.kind == "grasp" for phase in phases) == 4
     assert sum(post.kind == "check" for phase in phases for post in phase.after) == 48
     assert sum(post.kind == "hold" for phase in phases for post in phase.after) == 45
+    assert {
+        name: targets[name].samples
+        for name in (
+            "settle_soft_grasp",
+            "settle_contact",
+            "settle_released_end",
+            "settle_and_validate",
+        )
+    } == {
+        "settle_soft_grasp": 30,
+        "settle_contact": 15,
+        "settle_released_end": 30,
+        "settle_and_validate": 120,
+    }
+    for phase in phases:
+        if targets[phase.target].kind == "lay_down":
+            assert targets[phase.target].angular_speed == 0.5
+            assert phase.after[0].target == "settle_contact"
     assert registration.evaluation_final_refs == ("route_success",)
 
 
@@ -692,6 +724,34 @@ def _lower_pitch(service, target="pitch"):
         bound=bound,
         option_template=MoveEndEffectorOptions(),
     )
+
+
+def test_declared_angular_speed_changes_duration_without_changing_pivot_goal():
+    service, _ = _pitch_runtime(0, math.pi / 6)
+    ordinary = _lower_pitch(service).goal.xpos
+    target = service.cfg.target("pitch")
+    assert target.angular_speed == 0.5
+    service.cfg = replace(service.cfg, targets=(replace(target, angular_speed=1.0),))
+    accelerated = _lower_pitch(service).goal.xpos
+    # A ten-degree rotation at 60 Hz takes ceil(20.94) / ceil(10.47) samples.
+    assert ordinary.shape[1] == 21
+    assert accelerated.shape[1] == 11
+    torch.testing.assert_close(ordinary[:, -1], accelerated[:, -1])
+
+
+@pytest.mark.parametrize("rate", [0.0, -0.5])
+def test_cable_angular_speed_requires_a_positive_rate(rate):
+    value = _declaration()
+    value["targets"] = {"home": {"kind": "home", "angular_speed": rate}}
+    with pytest.raises(ValueError, match="positive"):
+        _decode_cable_service(value)
+
+
+def test_cable_hold_cannot_declare_a_motion_angular_speed():
+    value = _declaration()
+    value["targets"] = {"hold": {"kind": "hold", "samples": 15, "angular_speed": 1.0}}
+    with pytest.raises(ValueError, match="Unsupported fields"):
+        _decode_cable_service(value)
 
 
 @pytest.mark.parametrize(
