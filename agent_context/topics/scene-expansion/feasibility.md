@@ -43,8 +43,10 @@ states. The physical extractor preserves native convex shapes, includes the
 global ground, and rejects triangle meshes, SDFs, non-robot articulations and
 unsupported robot asset scales/formats. No collider is silently convexified.
 Halfspaces use analytic physical-shape support. Phase masks do not mutate live
-filters, and the query never advances the simulation clock. Shape/pair/contact
-storage is bounded; saturation and nonfinite results remain unverified.
+filters, and the query never advances the simulation clock. Explicit pair
+lists and phase masks contain only eligible pairs. Batched rows share a
+bounded pair/contact budget and run in chunks when needed. Callers can set a
+separate shape quota. Saturation and nonfinite results remain unverified.
 The host closes the owned query arrays/graphs after every attempt.
 
 Query transforms are rebased before composing local offsets; precision budgets

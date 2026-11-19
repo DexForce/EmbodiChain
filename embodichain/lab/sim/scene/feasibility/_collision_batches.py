@@ -57,6 +57,7 @@ class _CollisionBatches:
             gap=checker.detection_gap_m / 2,
             margin=0.0,
             density=0.0,
+            collision_group=0,  # All query pairs are supplied explicitly.
             collision_filter_parent=False,
         )
         for index in checker._native:
@@ -98,19 +99,8 @@ class _CollisionBatches:
         self.model = batch.finalize(device=checker.device)
         self.state = self.model.state()
         width = len(checker._native)
-        pairs = [
-            (checker._native_lookup[i], checker._native_lookup[j])
-            for i, j in checker._pairs
-            if i in checker._native_lookup and j in checker._native_lookup
-        ]
-        explicit = np.asarray(
-            [
-                (a + row * width, b + row * width)
-                for row in range(count)
-                for a, b in pairs
-            ],
-            dtype=np.int32,
-        )
+        offsets = np.arange(count, dtype=np.int32) * width
+        explicit = (checker._shape_pairs + offsets[:, None, None]).reshape(-1, 2)
         self.explicit = wp.array(explicit, dtype=wp.vec2i, device=checker.device)
         self.capacity = checker._capacity * count
         self.pipeline = newton.CollisionPipeline(
@@ -170,6 +160,7 @@ class _CollisionBatches:
                 contacts.rigid_contact_margin1,
                 self.model.shape_body,
                 self.state.body_q,
+                checker._pair_keys,
                 self.active,
                 len(checker._native),
                 self.count,
@@ -303,8 +294,7 @@ class _CollisionBatches:
                         "Batched Newton query overflowed or returned invalid evidence"
                     )
                 if row not in failures and math.isfinite(summary[row, 1]):
-                    a, b = divmod(int(summary[row, 1]), len(checker._native))
-                    failures[row] = (checker._native[a], checker._native[b])
+                    failures[row] = checker._native_pairs[int(summary[row, 1])]
         self.queries += 1
         result = []
         for row in rows:

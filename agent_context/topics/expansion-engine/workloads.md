@@ -228,6 +228,12 @@ preparation/conditional generation and `RobotFeasibilityBackend`/`plan_task_mode
 it creates no physics World and owns only the isolated collision-query resources.
 `layout` and `task_mode` are explicit, validated task declarations. Root layout
 variables currently use XY only; selected nested members retain declared XY/yaw.
+Placement uses projected object bounds and support geometry. The subsequent
+phase/path screen preserves physical convex hulls. For `scene_first`
+`object_pose` only, each rigid triangle mesh uses a box enclosing its scaled
+vertices in collider-local axes. This can reject placements inside concave
+fixtures. `scene-first-checks.json` records the affected collider IDs in
+`rigid_mesh_box_proxies`. Rollout contacts use the simulator's physical shapes.
 Homogeneous replicas support rolling W times B collection, including eight rows.
 Preparation snapshots the common prototype geometry, installation and nominal
 full-joint planning start before any row executes. The feasibility adapter uses

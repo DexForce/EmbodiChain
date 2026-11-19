@@ -39,6 +39,19 @@ from embodichain.lab.sim.scene.expansion.conditions import _LayoutConditionDomai
 __all__: list[str] = []
 
 
+def _layout_collision_bodies(env, strategy, operator):
+    from embodichain.lab.task_program.integrations.simulation.feasibility_geometry import (
+        _physical_collision_bodies,
+        collision_bodies_from_simulation,
+    )
+
+    if strategy == "scene_first" and operator == "object_pose":
+        mesh_boxes = []
+        bodies = _physical_collision_bodies(env, env_id=0, layout_mesh_boxes=mesh_boxes)
+        return bodies, mesh_boxes
+    return collision_bodies_from_simulation(env), []
+
+
 class _LayoutPoseSource(_AdaptivePoseSource):
     """Generate or certify complete layouts before checking task branches.
 
@@ -47,7 +60,7 @@ class _LayoutPoseSource(_AdaptivePoseSource):
     Runtime execution still replans and independently validates measured outcomes.
     """
 
-    def __init__(self, env, options, *, seed, revision):
+    def __init__(self, env, options, *, seed, revision, operator=None):
         before = self._world_clock(env.sim)
         self._collision = None
         super().__init__(env, options, seed=seed, revision=revision)
@@ -141,18 +154,17 @@ class _LayoutPoseSource(_AdaptivePoseSource):
             )
             self._workspace_seconds = time.perf_counter() - started
 
-        from embodichain.lab.task_program.integrations.simulation.feasibility_geometry import (
-            collision_bodies_from_simulation,
-        )
         from .acceptance import _GeometryRow
         from embodichain.lab.sim.scene.feasibility import NewtonCollisionChecker
 
-        bodies = collision_bodies_from_simulation(env)
+        bodies, self._layout_mesh_boxes = _layout_collision_bodies(
+            env, self.cfg["strategy"], operator
+        )
         known = {b.frame_uid for b in bodies}
         ignored, _ = _GeometryRow.contact_permissions(env, options["validation"], known)
         try:
             self._collision = NewtonCollisionChecker(
-                bodies, ignored_pairs=ignored, device="cpu", max_shapes=512
+                bodies, ignored_pairs=ignored, device="cpu"
             )
             self._check_clock(env.sim, before)
         except BaseException:
@@ -381,6 +393,7 @@ class _LayoutPoseSource(_AdaptivePoseSource):
                 dict(
                     phase_checks=self._task_checks,
                     layout_source=self._prepared_layout.source.fingerprint,
+                    rigid_mesh_box_proxies=self._layout_mesh_boxes,
                     conditions=self._conditions.to_dict(),
                     workspace_prior=[pool.metrics() for pool in self._anchor_pools],
                     workspace_anchor_checks=self._anchor_checks,

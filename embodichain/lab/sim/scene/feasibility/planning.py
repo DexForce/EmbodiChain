@@ -466,6 +466,11 @@ class RobotFeasibilityBackend:
                 mask, q = result
                 q = q.detach().cpu().double().numpy()
                 valid = mask.detach().cpu().numpy()
+                # Analytic Warp solvers encode branch validity as integer 0/1.
+                if np.issubdtype(valid.dtype, np.integer) and np.all(
+                    (valid == 0) | (valid == 1)
+                ):
+                    valid = valid.astype(bool)
                 if (
                     q.ndim not in (2, 3)
                     or q.shape[0] != 1

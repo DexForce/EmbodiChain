@@ -25,9 +25,75 @@ import pytest
 import torch
 
 from scene_layout_support import make_source
-from embodichain.lab.expansion._scene_first_sampling import _LayoutPoseSource
+from embodichain.lab.expansion._scene_first_sampling import (
+    _LayoutPoseSource,
+    _layout_collision_bodies,
+)
 from embodichain.lab.expansion._pose_sampling_cfg import validate_sampling
-from embodichain.lab.sim.scene.feasibility import FeasibilityBudgetExhausted
+from embodichain.lab.sim.scene.feasibility import (
+    FeasibilityBudgetExhausted,
+    UnsupportedFeasibilityError,
+)
+
+
+def test_scene_first_object_pose_bounds_only_native_rigid_triangle_meshes():
+    from embodichain.lab.task_program.integrations.simulation.feasibility_geometry import (
+        collision_bodies_from_simulation,
+    )
+
+    hull = SimpleNamespace(
+        shape_type=SimpleNamespace(name="CONVEX"),
+        local_pose=torch.eye(4),
+        vertices=torch.tensor([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]),
+        triangles=torch.tensor([[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]),
+    )
+    pose = torch.tensor([[0, -1, 0, 10], [1, 0, 0, 0], [0, 0, 1, 1], [0, 0, 0, 1.0]])
+    mesh = SimpleNamespace(
+        shape_type=SimpleNamespace(name="MESH"),
+        local_pose=pose.clone(),
+        vertices=torch.tensor([[1, 2, 0], [5, 2, 0], [1, 4, 0]]),
+        triangles=torch.tensor([[0, 1, 2]]),
+    )
+    robot = SimpleNamespace(
+        uid="robot",
+        cfg=SimpleNamespace(body_scale=(1, 1, 1)),
+        link_names=("arm",),
+        get_link_collision_shapes=lambda link: [hull],
+    )
+    env = SimpleNamespace(
+        robot=robot,
+        sim=SimpleNamespace(
+            get_articulation_uid_list=lambda: (),
+            get_rigid_object_uid_list=lambda: ["shelf"],
+            get_rigid_object=lambda uid: SimpleNamespace(
+                get_collision_shapes=lambda: [mesh]
+            ),
+        ),
+    )
+    (arm, shelf), proxies = _layout_collision_bodies(env, "scene_first", "object_pose")
+    assert arm.kind == "convex" and arm.robot
+    np.testing.assert_array_equal(arm.vertices, hull.vertices)
+    assert proxies == [shelf.collision_id] == ["shelf/0"]
+    assert shelf.kind == "box"
+    np.testing.assert_allclose(shelf.dimensions, [4, 2, 1e-6])
+    np.testing.assert_allclose(np.array(shelf.local_pose)[:3, :3], pose[:3, :3])
+    np.testing.assert_allclose(np.array(shelf.local_pose)[:3, 3], [7, 3, 1])
+    torch.testing.assert_close(mesh.local_pose, pose)
+
+    with pytest.raises(UnsupportedFeasibilityError, match="shelf/0: mesh"):
+        collision_bodies_from_simulation(env)
+    for strategy, operator in [
+        ("scene_first", "affordance"),
+        ("robot_first", "object_pose"),
+    ]:
+        with pytest.raises(UnsupportedFeasibilityError, match="shelf/0: mesh"):
+            _layout_collision_bodies(env, strategy, operator)
+    mesh.triangles = torch.tensor([[0, 1, 3]])
+    with pytest.raises(UnsupportedFeasibilityError, match="triangles for shelf/0"):
+        _layout_collision_bodies(env, "scene_first", "object_pose")
+    robot.get_link_collision_shapes = lambda link: [mesh]
+    with pytest.raises(UnsupportedFeasibilityError, match="robot/arm/0: mesh"):
+        _layout_collision_bodies(env, "scene_first", "object_pose")
 
 
 def setup_source(
