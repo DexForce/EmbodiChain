@@ -228,6 +228,19 @@ class PickUpOptions(SkillOptions):
     initial_lift_height: float = field(default=0.0, kw_only=True)
     """Initial world-Z clearance (m) from the current TCP pose before approach."""
 
+    approach_tilts: tuple[float, ...] = field(default=(), kw_only=True)
+    """Outward tilt angles (rad) of the approach direction to consider as well.
+
+    A short arm cannot reach far objects with a vertical gripper. Each angle
+    rotates the approach direction outward, toward the horizontal direction
+    from the arm base to the object, and repeats grasp sampling and the
+    reachability screen (pre-grasp, grasp, lift and downstream targets). Each
+    row uses the direction that leaves the most reachable grasp candidates;
+    ``approach_direction`` wins ties, then the smaller angle. Explicit goal
+    grasps and ``fixed_object_to_eef`` bypass sampling and therefore this
+    option.
+    """
+
     def __post_init__(self) -> None:
         if (
             isinstance(self.initial_lift_height, bool)
@@ -273,6 +286,13 @@ class PickUpOptions(SkillOptions):
             torch.linalg.vector_norm(self.approach_direction.float(), dim=-1) <= 1.0e-6
         ).any():
             raise ValueError("approach_direction rows must be non-zero.")
+        if not isinstance(self.approach_tilts, tuple) or any(
+            isinstance(angle, bool)
+            or not isinstance(angle, (int, float))
+            or not 0.0 < angle < math.pi / 2
+            for angle in self.approach_tilts
+        ):
+            raise ValueError("approach_tilts must be a tuple of angles in (0, pi / 2).")
         if self.approach_alignment_max_angle is not None and not (
             0.0 <= self.approach_alignment_max_angle <= math.pi / 2
         ):
@@ -627,7 +647,10 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
         affordance_sample: AffordanceSample | None = None
         if target.grasp_xpos is None:
             if options.fixed_object_to_eef is None:
-                affordance_sample = self._resolve_grasp_pose(
+                (
+                    affordance_sample,
+                    approach_direction,
+                ) = self._resolve_grasp_pose_with_tilts(
                     sem,
                     object_pose,
                     start_arm_qpos,
@@ -904,6 +927,106 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
                     )
                 }
             ),
+        )
+
+    def _resolve_grasp_pose_with_tilts(
+        self,
+        semantics: ObjectSemantics,
+        object_pose: torch.Tensor,
+        start_qpos: torch.Tensor,
+        manipulator: JointPositionTarget,
+        grasp_target_id: str,
+        options: PickUpOptions,
+        approach_direction: torch.Tensor,
+        context: PlanningContext,
+        *,
+        sample_key: str,
+    ) -> tuple[AffordanceSample, torch.Tensor]:
+        """Resolve a grasp along the most reachable configured approach.
+
+        Returns:
+            The grasp sample and the approach direction each row uses. Both are
+            those of ``approach_direction`` unless a tilted approach leaves
+            more reachable grasp candidates.
+        """
+
+        def resolve(direction: torch.Tensor) -> tuple[AffordanceSample, torch.Tensor]:
+            sample = self._resolve_grasp_pose(
+                semantics,
+                object_pose,
+                start_qpos,
+                manipulator,
+                grasp_target_id,
+                options,
+                direction,
+                context,
+                sample_key=sample_key,
+            )
+            reachable = sample.metadata.get("valid_candidate_counts")
+            counts = (
+                torch.as_tensor(reachable, device=self.device)
+                if isinstance(reachable, list) and len(reachable) == self.num_envs
+                else sample.success.to(torch.long)
+            )
+            return sample, torch.where(sample.success, counts, 0)
+
+        sample, counts = resolve(approach_direction)
+        if not options.approach_tilts:
+            return sample, approach_direction
+
+        directions = approach_direction.expand(self.num_envs, 3).clone()
+        base_pose = self.robot.get_control_part_base_pose(
+            name=manipulator.control_part,
+            to_matrix=True,
+            **(
+                {"env_ids": self.planning_services.env_ids}
+                if self.planning_services.env_ids is not None
+                else {}
+            ),
+        ).to(device=self.device, dtype=directions.dtype)
+        outward = object_pose[:, :3, 3].to(directions.dtype) - base_pose[:, :3, 3]
+        outward = outward - (outward * directions).sum(-1, keepdim=True) * directions
+        length = torch.linalg.vector_norm(outward, dim=-1, keepdim=True)
+        tiltable = length.squeeze(-1) > 1.0e-6
+        outward = outward / length.clamp_min(1.0e-6)
+
+        configured = directions.clone()
+        success = sample.success.clone()
+        poses = sample.poses.clone()
+        metadata = dict(sample.metadata)
+        tilts = torch.zeros(self.num_envs, device=self.device)
+        for angle in sorted(options.approach_tilts):
+            if not tiltable.any():
+                break
+            tilted = torch.where(
+                tiltable[:, None],
+                math.cos(angle) * configured + math.sin(angle) * outward,
+                configured,
+            )
+            attempt, attempt_counts = resolve(tilted)
+            better = tiltable & (attempt_counts > counts)
+            if not better.any():
+                continue
+            poses[better] = attempt.poses[better]
+            directions[better] = tilted[better]
+            tilts[better] = angle
+            counts[better] = attempt_counts[better]
+            success |= better
+            for key, rows in attempt.metadata.items():
+                current = metadata.get(key)
+                if (
+                    isinstance(rows, list)
+                    and isinstance(current, list)
+                    and len(rows) == len(current) == self.num_envs
+                ):
+                    metadata[key] = [
+                        rows[row] if better[row] else current[row]
+                        for row in range(self.num_envs)
+                    ]
+        metadata["approach_tilts"] = tilts.cpu().tolist()
+        return (
+            AffordanceSample(success=success, poses=poses, metadata=metadata),
+            directions,
         )
 
     def _resolve_grasp_pose(
