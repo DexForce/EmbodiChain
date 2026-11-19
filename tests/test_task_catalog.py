@@ -271,14 +271,27 @@ def test_show_and_filtered_gallery_use_static_records(
     assert "Pick &lt;cube&gt;" not in output.read_text()
 
 
-def test_environment_component_supplies_backend(task_root: Path) -> None:
+@pytest.mark.parametrize(
+    ("component", "backend"),
+    [
+        ("env.yaml", "newton"),
+        (
+            "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/stack_blocks_two/env.yaml",
+            "default",
+        ),
+    ],
+    ids=["relative", "packaged"],
+)
+def test_environment_component_supplies_backend(
+    task_root: Path, component: str, backend: str
+) -> None:
     write(
         task_root / "manipulation/pick/task.a.yaml",
-        {"id": "Pick-A-v1", "environment": {"component": "env.yaml"}},
+        {"id": "Pick-A-v1", "environment": {"component": component}},
     )
     write(task_root / "manipulation/pick/env.yaml", {"physics": "newton"})
     (task,) = catalog._load_catalog({"demo": task_root})
-    assert task.deployments[0].physics == "newton"
+    assert task.deployments[0].physics == backend
 
 
 def test_duplicate_authored_fields_fail(task_root: Path) -> None:

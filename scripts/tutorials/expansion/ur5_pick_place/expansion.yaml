@@ -1,0 +1,122 @@
+schema_version: 1
+engine:
+  episodes_per_operator: 4
+  max_attempts: 32
+  max_steps: 2400
+  max_wall_time_s: 240
+  settling_steps: 30
+  capture_media: false
+  collision_backend: newton
+  collision_device: cpu
+
+scene:
+  cube: &xy_range
+    translation_m: [[-0.06, 0.06], [-0.06, 0.06], [0, 0]]
+    yaw_rad: [0, 0]
+  goal: *xy_range
+
+trajectory:
+  operators: [object_pose, affordance]
+  affordance:
+    branches: 3
+    call_indices: [0]  # Pick the cube; the second call places it.
+    action_options:
+      pick:
+        fixed_object_to_eef: null  # Use the gripper's antipodal candidate generator.
+    grasp_generators:
+      eef:
+        approach_deviation_angle: 0.12  # radians
+        max_candidates: 64
+  joint_offset_scale: 0.005
+  via_count: 1
+  max_proposals: 64
+  minimum_joint_delta: 0.002
+  velocity_limit: 0.5
+  acceleration_limit: 0.5
+  nullspace_task_rows: [0, 1, 2, 3, 4, 5]
+  nullspace_translation_tolerance_m: 0.001
+  nullspace_rotation_tolerance_rad: 0.01
+  free_phases: {place: [retract]}
+
+validation:
+  initial_checks:
+    - {kind: support_bounds, entity: cube, lower: [-1, -0.4, -0.003], upper: [-0.2, 0.7, 0.05]}
+  final_checks:
+    - &placed
+      kind: pose_relative
+      entity: cube
+      other: goal
+      position_tolerance: [0.02, 0.02, 0.01]
+      position_offset: [0, 0, 0.12]
+      yaw_tolerance_rad: 0.17453292519943295
+      yaw_period_rad: 3.141592653589793
+      tilt_tolerance_rad: 0.17453292519943295
+    - &released {kind: joint_range, joint: gripper_finger1_joint_1, lower: -0.001, upper: 0.005}
+    - &stable {kind: speed_below, entity: cube, linear_m_s: 0.03, angular_rad_s: 0.2}
+    - {kind: transport_guard, entity: cube, other: goal, lift_height_m: 0.05, minimum_transit_height_m: 0.025, goal_tolerance_m: 0.03}
+  events:
+    - event_id: lift
+      conditions: [{kind: lifted, entity: cube, height_m: 0.05}]
+    - event_id: placed_and_released
+      conditions: [*placed, *released, *stable]
+      consecutive_steps: 3
+  allowed_contacts: &contacts
+    - [cube, default_plane]
+    - [cube, support_surface]
+    - [cube, UR5/gripper_finger1_link_1]
+    - [cube, UR5/gripper_finger2_link_1]
+  mounting_contacts: [['@root', default_plane], ['@root', support_surface]]
+
+scene_sampling:
+  strategy: scene_first
+  workspace_source: joint_uniform_fk
+  control_part: arm
+  sample_count: 16384
+  robot_anchors: [{phase_id: grasp, control_part: arm}]
+  uniform_fraction: 0.25
+  max_candidates: 32
+  max_rollouts: 12
+  max_ik_calls: 16384
+  max_planning_calls: 2048
+  targets: {}
+  layout:
+    support_uid: support_surface
+    parent_by_uid: {cube: support_surface}
+    policy:
+      group_targets: [cube]
+      batch_size: 1
+      collision_margin_m: 0.02
+      group_xy_offset_bounds_m: {cube: [[-0.06, -0.06], [0.06, 0.06]]}
+  task_mode:
+    mode_id: runtime
+    phases:
+      - phase_id: approach
+        dependencies: []
+        targets:
+          - &above_cube
+            control_part: arm
+            frame_uid: cube
+            pose: [[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0.1], [0, 0, 0, 1]]
+        allowed_contacts: *contacts
+      - phase_id: grasp
+        dependencies: [approach]
+        targets:
+          - control_part: arm
+            frame_uid: cube
+            pose: &grasp_pose [[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]]
+        allowed_contacts: *contacts
+      - phase_id: lift
+        dependencies: [grasp]
+        targets: [*above_cube]
+        allowed_contacts: *contacts
+        held_objects: &held [{entity_uid: cube, control_part: arm, tcp_from_object: *grasp_pose}]
+      - phase_id: place
+        dependencies: [lift]
+        targets:
+          - control_part: arm
+            frame_uid: goal
+            pose: [[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0.12], [0, 0, 0, 1]]
+        allowed_contacts: *contacts
+        held_objects: *held
+
+scheduling: {policy: fifo, pool_size: 1, exploration_fraction: 0.25}

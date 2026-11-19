@@ -82,7 +82,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     command.add_argument(
         "--reference",
-        help="Optional result directory containing exactly one reference episode",
+        help=(
+            "Job directory containing one confirmed original trajectory for solid "
+            "playback. Defaults to the first loaded input recording as a comparison."
+        ),
     )
     command.add_argument(
         "--robot-asset", help="Matching URDF override if recorded asset paths moved"
@@ -93,7 +96,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     command.add_argument("--gpu", type=int, default=0)
     command.add_argument(
-        "--port", type=int, default=8769, help="Loopback port; 0 selects a free port"
+        "--port",
+        type=int,
+        default=8769,
+        help="Browser preview port; 0 selects an available port",
     )
     command.add_argument("--max-episodes", type=int, default=32)
     command.add_argument(

@@ -162,7 +162,7 @@ class _GeometryRow:
         checker = None if checker_pool is None else checker_pool.get(key)
         if checker is None:
             checker = NewtonCollisionChecker(
-                bodies, ignored_pairs=ignored, device=device, max_shapes=512
+                bodies, ignored_pairs=ignored, device=device
             )
             if checker_pool is not None:
                 checker_pool[key] = checker
@@ -733,20 +733,13 @@ class MeasuredExpansionValidator:
                 moving = tuple(uid for uid in check.moving if uid in aliases)
                 groups.setdefault((checker, tuple(allowed), moving), []).append(row)
         for (checker, allowed, moving), rows in groups.items():
-            # Respect the existing aggregate contact-buffer ceiling. Compact
-            # selected rows also prevent inactive/heterogeneous rows consuming it.
-            width = max(1, min(env.num_envs, 1048576 // checker._capacity))
-            for start in range(0, len(rows), width):
-                selected = rows[start : start + width]
-                reports = checker.check_batch(
-                    {uid: values[selected] for uid, values in frames.items()},
-                    allowed_contacts=allowed,
-                    moving_objects=moving,
-                )
-                for row, report, pair in zip(
-                    selected, reports, checker.last_batch_pairs
-                ):
-                    self.rows[row].record_geometry(report, pair, action)
+            reports = checker.check_batch(
+                {uid: values[rows] for uid, values in frames.items()},
+                allowed_contacts=allowed,
+                moving_objects=moving,
+            )
+            for row, report, pair in zip(rows, reports, checker.last_batch_pairs):
+                self.rows[row].record_geometry(report, pair, action)
 
     def close(self) -> None:
         """Detach owned observers before releasing resources; safe on failure."""

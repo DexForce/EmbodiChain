@@ -228,6 +228,16 @@ preparation/conditional generation and `RobotFeasibilityBackend`/`plan_task_mode
 it creates no physics World and owns only the isolated collision-query resources.
 `layout` and `task_mode` are explicit, validated task declarations. Root layout
 variables currently use XY only; selected nested members retain declared XY/yaw.
+Placement checks group bounds on the main support. For a bounded leaf root
+overhanging that rectangle, preparation can verify the projected centroid
+against contact patches at the authored height on the named support. Full
+projected extents still determine clearance to other groups.
+All layout-screened operators use native convex shapes and primitives. Physical
+triangle colliders on rigid objects and robot links are decomposed in their scaled local frame for the isolated
+Newton phase/path query. V-HACD handles volumetric concavities; planar meshes
+retain their footprint and holes. `scene-first-checks.json` records part counts
+by physical collider in `mesh_convex_parts`. Rollout contacts use the
+simulator's original physical shapes.
 Homogeneous replicas support rolling W times B collection, including eight rows.
 Preparation snapshots the common prototype geometry, installation and nominal
 full-joint planning start before any row executes. The feasibility adapter uses

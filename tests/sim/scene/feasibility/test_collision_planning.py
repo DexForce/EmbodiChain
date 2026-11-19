@@ -130,6 +130,94 @@ def test_batched_geometry_matches_scalar_rows_and_rebinds_permissions(device):
         checker.close()
 
 
+@pytest.mark.parametrize(
+    "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
+)
+def test_decomposed_geometry_crosses_512_shapes_with_physical_pair_identity(
+    monkeypatch, device
+):
+    pytest.importorskip("newton")
+    bodies = [CollisionBody("ground", "ground", "halfspace", (0, 0, 1, 0))]
+    for frame, axis, count in (("arm", 0, 257), ("payload", 1, 256)):
+        for i in range(count):
+            local = np.eye(4)
+            local[axis, 3] = i / 8
+            bodies.append(
+                CollisionBody(
+                    f"{frame}/{i}",
+                    frame,
+                    "sphere",
+                    (0.01,),
+                    local,
+                    robot=frame == "arm",
+                    source_collision_id=(
+                        "payload/fixture" if frame == "payload" and i >= 254 else None
+                    ),
+                )
+            )
+    with pytest.raises(UnsupportedFeasibilityError, match="shape budget"):
+        NewtonCollisionChecker(bodies, max_shapes=512)
+    checker = NewtonCollisionChecker(
+        bodies, device=device, ignored_pairs=(("ground", "arm"),), max_contacts=64
+    )
+    try:
+        frames = {
+            name: np.repeat(np.eye(4)[None], 2, axis=0)
+            for name in ("arm", "payload", "ground")
+        }
+        frames["ground"][:, 2, 3] = -1
+        frames["payload"][:, :3, 3] = [256 / 8, -255 / 8, 0]
+        frames["payload"][1, 2, 3] = 1
+        pair = ("arm/256", "payload/fixture")
+        assert checker.metadata["native_pair_count"] == 257 * 256
+        assert len(checker.ignored_pairs) == 257
+        assert frozenset(("ground", "arm/256")) in checker.ignored_pairs
+        assert checker.check({k: v[0] for k, v in frames.items()})[0].status == "failed"
+        assert checker.last_pair == pair
+        assert [r.status for r in checker.check_batch(frames)] == ["failed", "passed"]
+        assert checker.last_batch_pairs == (pair, None)
+        assert (
+            checker.check_batch(frames, allowed_contacts=(pair,))[0].status == "passed"
+        )
+        assert (
+            checker.check_batch(frames, allowed_contacts=(("payload", "arm/256"),))[
+                0
+            ].status
+            == "passed"
+        )
+        assert (
+            checker.check_batch(frames, allowed_contacts=(("payload/254", "arm"),))[
+                0
+            ].status
+            == "failed"
+        )
+        assert (
+            checker.check_batch(frames, allowed_contacts=(("payload/255", "arm"),))[
+                0
+            ].status
+            == "passed"
+        )
+        assert (
+            checker.check(
+                {key: value[0] for key, value in frames.items()},
+                allowed_contacts=(pair,),
+            )[0].status
+            == "passed"
+        )
+        # One row fits the aggregate pair budget. The reversed selection crosses chunks.
+        monkeypatch.setattr(
+            "embodichain.lab.sim.scene.feasibility.collision._MAX_QUERY_PAIRS",
+            257 * 256,
+        )
+        assert [r.status for r in checker.check_batch(frames, env_ids=(1, 0))] == [
+            "passed",
+            "failed",
+        ]
+        assert checker.last_batch_pairs == (None, pair)
+    finally:
+        checker.close()
+
+
 def test_phase_branches_must_connect_and_dual_targets_stay_synchronized():
     identity = np.eye(4).tolist()
     mode = TaskOperationMode(
@@ -296,6 +384,19 @@ def test_robot_adapter_uses_hypothetical_roots_and_checks_joint_tcp_conflicts():
     )
     result = plan_task_mode(simultaneous, backend, {}, FeasibilityBudget(cfg))
     assert result.accepted and result.paths[-1][-1] == pytest.approx((1.0, 0.0))
+
+    # OPW supplies one integer flag per analytic branch on the selected row.
+    validity = torch.tensor([[0, 1]], dtype=torch.int32)
+    backend.robot.compute_ik = lambda pose, **kw: (
+        validity,
+        pose[:, None, 2, 3, None].expand(-1, 2, -1),
+    )
+    assert plan_task_mode(mode, backend, {}, FeasibilityBudget(cfg)).accepted
+    validity[0, 1] = 0
+    assert not plan_task_mode(mode, backend, {}, FeasibilityBudget(cfg)).accepted
+    validity[0, 1] = 2
+    with pytest.raises(ValueError, match="IK result shape/type"):
+        plan_task_mode(mode, backend, {}, FeasibilityBudget(cfg))
 
 
 def test_robot_adapter_projects_mimic_follower_for_collision():
