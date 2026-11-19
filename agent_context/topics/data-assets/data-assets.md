@@ -209,7 +209,7 @@ The CLI records repository provenance and writes reports outside the model
 cache. Robot references still use `get_data_path()` and its existing asset cache.
 Task packages must already be installed; downloading weights does not register
 new environment implementations. The index's `task_package` accepts a qualified
-module name. Published official policy indexes declaring `embodichain_tasks`
+module name. Published official policy indexes declaring `embodichain.extensions.tasks`
 resolve their requirement to `embodichain.extensions.tasks`. Test the Hub
 boundary with fake downloads and validate a real selected-model download separately.
 
@@ -257,3 +257,10 @@ under the same lock used by preparation. Historical URDF preparation and
 model-fidelity metadata are owned by
 `embodichain.extensions.benchmarks.assembly.robot_reference`, not the dataset resolver or a
 combined arm/gripper catalog preset.
+
+The five classes in `assets/rl_assets.py` use the same archive cache. The
+`official_rl` entry point registers four robot entries and the `G1RoughTerrains`
+scene entry through the shared `embodichain.assets` catalog. CLI discovery and
+`get_data_class()` resolve the same class identities. The G1 Rough asset does not replace
+`UnitreeG1Locomotion`; their joint counts and provenance differ. Publication
+status is external to code registration and must be verified before release.
