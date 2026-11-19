@@ -24,6 +24,18 @@ Hosts acquire versioned measurements; verification is the boundary that commits
 or invalidates observed effects. Preserve required stop/hold boundaries on the
 executed control grid instead of relying only on native planner timing.
 
+`PickUp` accepts a rigid `GraspGoal` or an explicit `ContactGraspGoal`.
+The rigid path projects its existing held-object relation. Contact pickup
+requires a free task-state resource, shares the approach/close/lift command
+assembly and declares `EffectVerificationRequirement(kind="contact_grasp")`
+without a rigid held-object update. Hosts supply physical evidence such as
+material-point lift and tool-frame retention before accepting that boundary.
+The routing host samples its material reference at the end of the `close`
+phase, including `grasp_settle_steps`, before lifting. Native contact IK paths
+use `MotionPolicy.interpolate_position_step` for lift sampling on the control
+grid; joint limits can lengthen them. Numerical material-coordinate geometry
+belongs to `compute/geometry/cable.py`.
+
 ## Package map
 
 | Concern | Source of truth |

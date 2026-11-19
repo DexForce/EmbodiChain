@@ -4660,7 +4660,7 @@ def test_invalid_evaluation_deployment_fails_before_registration(
     assert config["id"] not in gym_registry
 
 
-def test_legacy_task_program_identities_keep_pre_evaluation_values():
+def test_unrelated_task_program_identities_keep_pre_cable_program_values():
     from embodichain.lab.task_program.integrations import task_program_fingerprint
 
     path = _config_path("hand_over")
@@ -4686,15 +4686,15 @@ def test_legacy_task_program_identities_keep_pre_evaluation_values():
     integration = deployment.integration
     registration = integration.registration
     assert "evaluation" not in registration.fingerprint_payload()
-    # Independently recomputed on upstream main ac714ec8 after its robot/profile
-    # migrations. The evaluation-free payload and program are unchanged here.
+    # Independently recomputed at 694ddda7d before the cable Task Program
+    # migration. Contact-capable PickUp had already changed the old main golden.
     assert (
         registration.fingerprint
-        == "61cf38ce9128dfcc7063cec3933d900674863facbc6b244f31dec07ea24ca730"
+        == "0b5253d265d1d88dc165138e915f56f3596f52525c9ae620943f68a3ecc1d79f"
     )
     assert (
         integration.integration_fingerprint
-        == "d8d328c33f7149a5ed76b861bead1155977ed7f4ef213c9ceae560b36c20034e"
+        == "400ee8ebb00e416a8c9b783f5a681b7f9566da92cef4cbc55ec966cd5c20b2c4"
     )
     compiled = registration.catalog.preflight(deployment.load_program())
     assert (

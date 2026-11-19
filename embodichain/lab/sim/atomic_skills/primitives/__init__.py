@@ -44,7 +44,7 @@ from .move_held_object import (
 )
 from .move_joints import JointPositionGoal, MoveJoints, MoveJointsOptions
 from .open_door import OpenDoor, OpenDoorGoal, OpenDoorOptions
-from .pick_up import GraspGoal, PickUp, PickUpOptions
+from .pick_up import ContactGraspGoal, GraspGoal, PickUp, PickUpOptions
 from .place import AssembleGoal, Place, PlaceGoal, PlaceOptions
 from .press import (
     Press,
@@ -103,6 +103,7 @@ __all__ = [
     "CoordinatedPlacementGoal",
     "CoordinatedPlacementOptions",
     "EndEffectorPoseGoal",
+    "ContactGraspGoal",
     "GraspGoal",
     "HandOver",
     "HandOverGoal",

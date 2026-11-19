@@ -1,0 +1,24 @@
+policy_id: cable_sampled_contact_v1
+preset_id: cable
+requires:
+  embodiment_contract: dual_arm_parallel_gripper
+planner:
+  type: trapezoidal
+motion:
+  strategy: ik_interp
+  velocity_targets: auto
+  sample_count: 73
+  interpolate_position_step: 0.0008333333333333334
+  dynamic_collision_mode: 'off'
+tracking:
+  kind: timed
+recovery:
+  max_replans: 0
+  max_skill_retries: 0
+workflow_recovery:
+  max_recovery_attempts: 0
+runner:
+  minimum_cycle_time: 0.0
+  hold_on_completion: false
+  hold_during_effect_verification: false
+effect_assurance: projected
