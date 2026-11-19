@@ -118,19 +118,25 @@ def test_cable_preflight_has_eight_calls_and_retains_physical_checks():
         for name in (
             "settle_soft_grasp",
             "settle_contact",
+            "settle_release_alignment",
             "settle_released_end",
             "settle_and_validate",
         )
     } == {
         "settle_soft_grasp": 30,
         "settle_contact": 15,
+        "settle_release_alignment": 60,
         "settle_released_end": 30,
         "settle_and_validate": 120,
     }
     for phase in phases:
         if targets[phase.target].kind == "lay_down":
             assert targets[phase.target].angular_speed == 0.5
-            assert phase.after[0].target == "settle_contact"
+            assert phase.after[0].target == (
+                "settle_contact"
+                if phase.target.endswith("_0")
+                else "settle_release_alignment"
+            )
     assert registration.evaluation_final_refs == ("route_success",)
 
 

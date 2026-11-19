@@ -325,13 +325,14 @@ command boundaries, while the 45 explicit hold targets are internal command
 ranges. Home belongs to the corresponding placement retreat. Every
 feedback-dependent target is resolved from current observations before planning.
 
-The profile scales translational rates by 2.2 and uses 1.1 rad/s for ordinary
+The profile scales translational rates by 2.22 and uses 1.11 rad/s for ordinary
 angular pacing. Each target can declare positive `angular_speed` in rad/s;
 omission keeps 0.5 rad/s. The two wrist lay-down phases retain 0.5 rad/s and
-15-control contact holds. All four 21-control post-close dwells, the 30-control
+15-control and 60-control contact holds, respectively. The longer second hold
+lets the transient endpoint rise settle before the unchanged release gate. All four 21-control post-close dwells, the 30-control
 soft-grasp and post-release holds, and the final 120-control acceptance hold
 are retained. Ordinary process holds and hand transitions are shortened with
-minimum sample constraints. The motion acceleration budget is 2.42; robot
+minimum sample constraints. The motion acceleration budget is 2.4642; robot
 joint-speed limits remain unchanged.
 
 Newton/DexUni coupling, physics/control timesteps, rod and robot parameters,

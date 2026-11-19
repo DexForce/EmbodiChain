@@ -125,9 +125,9 @@ runtime_services:
         - null
         - null
         - 0.81
-        speed: 0.264
+        speed: 0.2664
         port_screen: false
-        angular_speed: 1.1
+        angular_speed: 1.11
       settle_motion:
         kind: hold
         samples: 7
@@ -157,8 +157,8 @@ runtime_services:
         - 0.774
         material_distance: 0.162
         retract_distance: 0.0015
-        speed: 0.11000000000000001
-        angular_speed: 1.1
+        speed: 0.111
+        angular_speed: 1.11
       raise_0_tracking:
         kind: check
         condition: pose
@@ -171,8 +171,8 @@ runtime_services:
         - 0.5
         - -0.255
         - null
-        speed: 0.11000000000000001
-        angular_speed: 1.1
+        speed: 0.111
+        angular_speed: 1.11
       carry_0_tracking:
         kind: check
         condition: pose
@@ -185,8 +185,8 @@ runtime_services:
         - null
         - null
         - 0.7645
-        speed: 0.11000000000000001
-        angular_speed: 1.1
+        speed: 0.111
+        angular_speed: 1.11
       lower_0_tracking:
         kind: check
         condition: pose
@@ -204,8 +204,8 @@ runtime_services:
         - null
         - null
         - 0.82
-        speed: 0.17600000000000002
-        angular_speed: 1.1
+        speed: 0.1776
+        angular_speed: 1.11
       retreat_0_tracking:
         kind: check
         condition: pose
@@ -223,9 +223,9 @@ runtime_services:
         - null
         - null
         - 0.81
-        speed: 0.264
+        speed: 0.2664
         port_screen: false
-        angular_speed: 1.1
+        angular_speed: 1.11
       right_approach_0.282_tracking:
         kind: check
         condition: pose
@@ -252,8 +252,8 @@ runtime_services:
         - 0.78
         material_distance: 0.282
         retract_distance: 0.003
-        speed: 0.11000000000000001
-        angular_speed: 1.1
+        speed: 0.111
+        angular_speed: 1.11
       raise_1_tracking:
         kind: check
         condition: pose
@@ -266,8 +266,8 @@ runtime_services:
         - 0.528
         - -0.14
         - null
-        speed: 0.11000000000000001
-        angular_speed: 1.1
+        speed: 0.111
+        angular_speed: 1.11
       carry_1_tracking:
         kind: check
         condition: pose
@@ -280,8 +280,8 @@ runtime_services:
         - null
         - null
         - 0.7645
-        speed: 0.11000000000000001
-        angular_speed: 1.1
+        speed: 0.111
+        angular_speed: 1.11
       lower_1_tracking:
         kind: check
         condition: pose
@@ -299,8 +299,8 @@ runtime_services:
         - null
         - null
         - 0.82
-        speed: 0.17600000000000002
-        angular_speed: 1.1
+        speed: 0.1776
+        angular_speed: 1.11
       retreat_1_tracking:
         kind: check
         condition: pose
@@ -318,9 +318,9 @@ runtime_services:
         - null
         - null
         - 0.81
-        speed: 0.264
+        speed: 0.2664
         port_screen: false
-        angular_speed: 1.1
+        angular_speed: 1.11
       right_approach_0.438_tracking:
         kind: check
         condition: pose
@@ -347,8 +347,8 @@ runtime_services:
         - 0.8
         material_distance: 0.438
         retract_distance: 0.008
-        speed: 0.11000000000000001
-        angular_speed: 1.1
+        speed: 0.111
+        angular_speed: 1.11
       raise_2_tracking:
         kind: check
         condition: pose
@@ -361,8 +361,8 @@ runtime_services:
         - 0.555
         - -0.01
         - null
-        speed: 0.11000000000000001
-        angular_speed: 1.1
+        speed: 0.111
+        angular_speed: 1.11
       carry_2_tracking:
         kind: check
         condition: pose
@@ -375,8 +375,8 @@ runtime_services:
         - null
         - null
         - 0.7645
-        speed: 0.11000000000000001
-        angular_speed: 1.1
+        speed: 0.111
+        angular_speed: 1.11
       lower_2_tracking:
         kind: check
         condition: pose
@@ -394,8 +394,8 @@ runtime_services:
         - null
         - null
         - 0.82
-        speed: 0.17600000000000002
-        angular_speed: 1.1
+        speed: 0.1776
+        angular_speed: 1.11
       retreat_2_tracking:
         kind: check
         condition: pose
@@ -408,8 +408,8 @@ runtime_services:
         release_part: right_arm
       home_right:
         kind: home
-        speed: 0.33
-        angular_speed: 1.1
+        speed: 0.333
+        angular_speed: 1.11
       home_right_tracking:
         kind: check
         condition: pose
@@ -423,9 +423,9 @@ runtime_services:
         - null
         - null
         - 0.81
-        speed: 0.264
+        speed: 0.2664
         port_screen: true
-        angular_speed: 1.1
+        angular_speed: 1.11
       left_approach_0.57_tracking:
         kind: check
         condition: pose
@@ -450,8 +450,8 @@ runtime_services:
         - 0.586
         - 0.055
         - 0.795
-        speed: 0.11000000000000001
-        angular_speed: 1.1
+        speed: 0.111
+        angular_speed: 1.11
       stage_free_end_tracking:
         kind: check
         condition: pose
@@ -464,10 +464,10 @@ runtime_services:
         - null
         - null
         - 0.795
-        speed: 0.05500000000000001
+        speed: 0.0555
         tolerance: 0.006
         stop_when_seated: true
-        angular_speed: 1.1
+        angular_speed: 1.11
       lower_channel_0_tracking:
         kind: check
         condition: pose
@@ -482,11 +482,11 @@ runtime_services:
         - null
         maximum_correction: 0.005
         maximum_y: 0.05
-        speed: 0.044000000000000004
+        speed: 0.0444
         tolerance: 0.006
         stop_when_seated: true
         maximum_z_correction: 0.003
-        angular_speed: 1.1
+        angular_speed: 1.11
       align_tip_0_0_tracking:
         kind: check
         condition: pose
@@ -501,11 +501,11 @@ runtime_services:
         - null
         maximum_correction: 0.005
         maximum_y: 0.05
-        speed: 0.044000000000000004
+        speed: 0.0444
         tolerance: 0.006
         stop_when_seated: true
         maximum_z_correction: 0.003
-        angular_speed: 1.1
+        angular_speed: 1.11
       align_tip_0_1_tracking:
         kind: check
         condition: pose
@@ -518,10 +518,10 @@ runtime_services:
         - null
         - null
         - 0.7875
-        speed: 0.05500000000000001
+        speed: 0.0555
         tolerance: 0.006
         stop_when_seated: true
-        angular_speed: 1.1
+        angular_speed: 1.11
       lower_channel_1_tracking:
         kind: check
         condition: pose
@@ -536,11 +536,11 @@ runtime_services:
         - null
         maximum_correction: 0.005
         maximum_y: 0.05
-        speed: 0.044000000000000004
+        speed: 0.0444
         tolerance: 0.006
         stop_when_seated: true
         maximum_z_correction: 0.003
-        angular_speed: 1.1
+        angular_speed: 1.11
       align_tip_1_0_tracking:
         kind: check
         condition: pose
@@ -555,11 +555,11 @@ runtime_services:
         - null
         maximum_correction: 0.005
         maximum_y: 0.05
-        speed: 0.044000000000000004
+        speed: 0.0444
         tolerance: 0.006
         stop_when_seated: true
         maximum_z_correction: 0.003
-        angular_speed: 1.1
+        angular_speed: 1.11
       align_tip_1_1_tracking:
         kind: check
         condition: pose
@@ -572,10 +572,10 @@ runtime_services:
         - null
         - null
         - 0.78
-        speed: 0.05500000000000001
+        speed: 0.0555
         tolerance: 0.006
         stop_when_seated: true
-        angular_speed: 1.1
+        angular_speed: 1.11
       lower_channel_2_tracking:
         kind: check
         condition: pose
@@ -590,11 +590,11 @@ runtime_services:
         - null
         maximum_correction: 0.005
         maximum_y: 0.05
-        speed: 0.044000000000000004
+        speed: 0.0444
         tolerance: 0.006
         stop_when_seated: true
         maximum_z_correction: 0.003
-        angular_speed: 1.1
+        angular_speed: 1.11
       align_tip_2_0_tracking:
         kind: check
         condition: pose
@@ -609,11 +609,11 @@ runtime_services:
         - null
         maximum_correction: 0.005
         maximum_y: 0.05
-        speed: 0.044000000000000004
+        speed: 0.0444
         tolerance: 0.006
         stop_when_seated: true
         maximum_z_correction: 0.003
-        angular_speed: 1.1
+        angular_speed: 1.11
       align_tip_2_1_tracking:
         kind: check
         condition: pose
@@ -628,8 +628,8 @@ runtime_services:
         minimum_tool_pitch: -0.3490658503988659
         tolerance: 0.006
         stop_when_seated: true
-        speed: 0.11000000000000001
-        angular_speed: 1.1
+        speed: 0.111
+        angular_speed: 1.11
       pitch_free_end_0_tracking:
         kind: check
         condition: pose
@@ -644,8 +644,8 @@ runtime_services:
         minimum_tool_pitch: -0.3490658503988659
         tolerance: 0.006
         stop_when_seated: true
-        speed: 0.11000000000000001
-        angular_speed: 1.1
+        speed: 0.111
+        angular_speed: 1.11
       pitch_free_end_1_tracking:
         kind: check
         condition: pose
@@ -658,10 +658,10 @@ runtime_services:
         - null
         - null
         - 0.7685
-        speed: 0.05500000000000001
+        speed: 0.0555
         tolerance: 0.006
         stop_when_seated: true
-        angular_speed: 1.1
+        angular_speed: 1.11
       lower_channel_3_tracking:
         kind: check
         condition: pose
@@ -690,11 +690,11 @@ runtime_services:
         maximum_correction: 0.005
         maximum_y: 0.05
         minimum_z: 0.7655
-        speed: 0.044000000000000004
+        speed: 0.0444
         tolerance: 0.006
         stop_when_seated: false
         maximum_z_correction: 0.003
-        angular_speed: 1.1
+        angular_speed: 1.11
       align_tip_3_0_tracking:
         kind: check
         condition: pose
@@ -710,11 +710,11 @@ runtime_services:
         maximum_correction: 0.005
         maximum_y: 0.05
         minimum_z: 0.7655
-        speed: 0.044000000000000004
+        speed: 0.0444
         tolerance: 0.006
         stop_when_seated: false
         maximum_z_correction: 0.003
-        angular_speed: 1.1
+        angular_speed: 1.11
       align_tip_3_1_tracking:
         kind: check
         condition: pose
@@ -725,7 +725,7 @@ runtime_services:
         kind: lay_down
         maximum_rotation: 0.17453292519943295
         minimum_z: 0.7625
-        speed: 0.033
+        speed: 0.0333
         tolerance: 0.006
         angular_speed: 0.5
       lay_down_free_end_0_tracking:
@@ -738,7 +738,7 @@ runtime_services:
         kind: lay_down
         maximum_rotation: 0.17453292519943295
         minimum_z: 0.7625
-        speed: 0.033
+        speed: 0.0333
         tolerance: 0.006
         angular_speed: 0.5
       lay_down_free_end_1_tracking:
@@ -764,8 +764,8 @@ runtime_services:
         - null
         - null
         - 0.8
-        speed: 0.05500000000000001
-        angular_speed: 1.1
+        speed: 0.0555
+        angular_speed: 1.11
       retreat_free_end_tracking:
         kind: check
         condition: pose
@@ -778,8 +778,8 @@ runtime_services:
         - null
         - 0.015
         - 0.82
-        speed: 0.17600000000000002
-        angular_speed: 1.1
+        speed: 0.1776
+        angular_speed: 1.11
       raise_clear_of_port_tracking:
         kind: check
         condition: pose
@@ -787,8 +787,8 @@ runtime_services:
         orientation_tolerance: 0.25
       home_left:
         kind: home
-        speed: 0.33
-        angular_speed: 1.1
+        speed: 0.333
+        angular_speed: 1.11
       home_left_tracking:
         kind: check
         condition: pose
@@ -806,10 +806,10 @@ runtime_services:
         - null
         maximum_correction: 0.005
         maximum_y: 0.05
-        speed: 0.044000000000000004
+        speed: 0.0444
         tolerance: 0.006
         stop_when_seated: true
-        angular_speed: 1.1
+        angular_speed: 1.11
       align_over_port_0_tracking:
         kind: check
         condition: pose
@@ -824,10 +824,10 @@ runtime_services:
         - null
         maximum_correction: 0.005
         maximum_y: 0.05
-        speed: 0.044000000000000004
+        speed: 0.0444
         tolerance: 0.006
         stop_when_seated: true
-        angular_speed: 1.1
+        angular_speed: 1.11
       align_over_port_1_tracking:
         kind: check
         condition: pose
@@ -842,10 +842,10 @@ runtime_services:
         - null
         maximum_correction: 0.005
         maximum_y: 0.05
-        speed: 0.044000000000000004
+        speed: 0.0444
         tolerance: 0.006
         stop_when_seated: true
-        angular_speed: 1.1
+        angular_speed: 1.11
       align_over_port_2_tracking:
         kind: check
         condition: pose
@@ -860,10 +860,10 @@ runtime_services:
         - null
         maximum_correction: 0.005
         maximum_y: 0.05
-        speed: 0.044000000000000004
+        speed: 0.0444
         tolerance: 0.006
         stop_when_seated: true
-        angular_speed: 1.1
+        angular_speed: 1.11
       align_over_port_3_tracking:
         kind: check
         condition: pose
@@ -878,8 +878,8 @@ runtime_services:
         - null
         - null
         - 0.78
-        speed: 0.11000000000000001
-        angular_speed: 1.1
+        speed: 0.111
+        angular_speed: 1.11
       raise_free_end_tracking:
         kind: check
         condition: pose
@@ -893,6 +893,9 @@ runtime_services:
       settle_contact:
         kind: hold
         samples: 15
+      settle_release_alignment:
+        kind: hold
+        samples: 60
     operations:
       right_pick_0:
         kind: pick_up
@@ -1223,7 +1226,7 @@ runtime_services:
           target: lay_down_free_end_1
           after:
           - kind: hold
-            target: settle_contact
+            target: settle_release_alignment
           - kind: check
             target: lay_down_free_end_1_tracking
           - kind: check
