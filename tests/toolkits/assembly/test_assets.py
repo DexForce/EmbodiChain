@@ -162,31 +162,43 @@ def test_usd_preserves_body_ownership_vertices_and_mass(tmp_path) -> None:
     assert measured["inertia_relative_error"] < 1e-6
 
 
-def test_usd_static_compound_has_one_body_not_one_body_per_collider(
-    tmp_path, request
-) -> None:
+def test_usd_static_compound_has_one_body_not_one_body_per_collider(tmp_path) -> None:
+    """Preserve authored ownership and reject known native-parser collider loss."""
     pytest.importorskip("mujoco")
     pytest.importorskip("pxr")
     from dexsim.kit.usd import parse_usd
     from importlib.metadata import version
-
-    if version("dexsim-engine") in {"0.6.0rc1", "0.6.0rc2"}:
-        request.node.add_marker(
-            pytest.mark.xfail(
-                strict=True,
-                raises=AssertionError,
-                reason=(
-                    "DexSim 0.6.0rc1/rc2 drop child colliders on disabled static USD bodies; "
-                    "native import rejects that loss, while direct compounds remain supported."
-                ),
-            )
-        )
+    from pxr import Usd, UsdPhysics
+    from embodichain.toolkits.assembly.native import to_rigid_config
+    from embodichain_benchmarks.assembly.precision import compare_usd_geometry
 
     asset = import_mjcf(SOURCE.replace('<freejoint name="part_joint"/>', ""))
     path = asset.write_usd(tmp_path / "static.usda")
+    stage = Usd.Stage.Open(str(path))
+    owners = [prim for prim in stage.Traverse() if prim.HasAPI(UsdPhysics.RigidBodyAPI)]
+    colliders = [
+        prim for prim in stage.Traverse() if prim.HasAPI(UsdPhysics.CollisionAPI)
+    ]
+    assert len(owners) == 1
+    assert not UsdPhysics.RigidBodyAPI(owners[0]).GetRigidBodyEnabledAttr().Get()
+    assert len(colliders) == 2
+    assert all(prim.GetParent() == owners[0] for prim in colliders)
+    direct = to_rigid_config(asset.bodies[0])
+    assert direct.body_type == "static"
+    assert len(direct.shape.parts) == 2
     parsed = parse_usd(str(path), root_name="test")
     assert len(parsed.mesh_objects) == 1
-    assert len(parsed.mesh_objects[0].collisions) == 2
+    if not parsed.mesh_objects[0].collisions:
+        # These published parsers drop disabled-body child colliders. Verify
+        # the production geometry gate refuses the loss rather than waiving it.
+        assert version("dexsim-engine") in {"0.6.0rc1", "0.6.0rc2", "0.6.0"}
+        with pytest.raises(
+            ValueError, match="USD parser changed body/collider ownership"
+        ):
+            compare_usd_geometry(asset, path)
+    else:
+        assert len(parsed.mesh_objects[0].collisions) == 2
+        assert compare_usd_geometry(asset, path)["passed"]
 
 
 def test_unsupported_equality_constraints_fail_before_conversion() -> None:
