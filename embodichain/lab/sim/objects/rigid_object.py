@@ -36,6 +36,10 @@ from embodichain.lab.sim.objects.backends import (
     is_newton_scene,
 )
 from embodichain.lab.sim.objects.backends.base import RigidBodyViewBase
+from embodichain.lab.sim.objects.backends._numeric_observations import (
+    _ACTIVE as _NUMERIC_READS,
+    shared_pose,
+)
 from embodichain.lab.sim.objects.backends.rigid_physics import (
     _set_default_spawn_friction,
     apply_legacy_physical_attr,
@@ -911,6 +915,21 @@ class RigidObject(BatchEntity):
         if self.is_static:
             return get_local_pose_cpu(self._entities, to_matrix).to(self.device)
 
+        if (
+            type(self) is RigidObject
+            and type(to_matrix) is bool
+            and self._data is not None
+            and _NUMERIC_READS.get() is not None
+        ):
+            return shared_pose(
+                self._data.body_view.batch,
+                to_matrix,
+                lambda: RigidObject._read_dynamic_local_pose(self, to_matrix),
+            )
+        return RigidObject._read_dynamic_local_pose(self, to_matrix)
+
+    def _read_dynamic_local_pose(self, to_matrix: bool) -> torch.Tensor:
+        """Convert the current native pose without sharing caller-owned storage."""
         pose = self.body_data.pose.clone()
         if to_matrix:
             xyz = pose[:, :3]

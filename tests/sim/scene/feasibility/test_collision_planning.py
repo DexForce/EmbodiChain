@@ -69,6 +69,67 @@ def test_newton_self_interarm_payload_and_phase_contacts():
         checker.check({"left": pose(0)})
 
 
+@pytest.mark.parametrize(
+    "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
+)
+def test_batched_geometry_matches_scalar_rows_and_rebinds_permissions(device):
+    bodies = (
+        CollisionBody("arm", "arm", "box", (0.2, 0.2, 0.2), robot=True),
+        CollisionBody("payload", "payload", "sphere", (0.1,)),
+        CollisionBody("obstacle", "obstacle", "box", (0.2, 0.2, 0.2)),
+        CollisionBody("ground", "ground", "halfspace", (0, 0, 1, 0)),
+    )
+    frames = {
+        name: np.repeat(np.eye(4)[None], 3, axis=0)
+        for name in ("arm", "payload", "obstacle", "ground")
+    }
+    for name, x in (("arm", 0.0), ("payload", 1.0), ("obstacle", 2.0)):
+        frames[name][:, 0, 3] = x
+        frames[name][:, 2, 3] = 0.5
+    frames["payload"][1, 0, 3] = 0.1
+    frames["payload"][2, 2, 3] = -0.1
+    checker = NewtonCollisionChecker(bodies, device=device)
+    try:
+        for allowed in ((), (("arm", "payload"),)):
+            expected, pairs = [], []
+            for row in range(3):
+                report, _ = checker.check(
+                    {key: value[row] for key, value in frames.items()},
+                    allowed_contacts=allowed,
+                    moving_objects=("payload",),
+                )
+                expected.append(report.status)
+                pairs.append(checker.last_pair)
+            result = checker.check_batch(
+                frames, allowed_contacts=allowed, moving_objects=("payload",)
+            )
+            assert [report.status for report in result] == expected
+            assert checker.last_batch_pairs == tuple(pairs)
+            selected = checker.check_batch(
+                frames,
+                allowed_contacts=allowed,
+                moving_objects=("payload",),
+                env_ids=(2, 0),
+            )
+            assert [report.status for report in selected] == [expected[2], expected[0]]
+        assert expected == ["passed", "passed", "failed"]
+        # Changing permissions cannot reuse the previous mask, and invalid row
+        # IDs or malformed physical transforms fail before querying geometry.
+        assert (
+            checker.check_batch(frames, moving_objects=("payload",))[1].status
+            == "failed"
+        )
+        with pytest.raises(ValueError, match="unique"):
+            checker.check_batch(frames, env_ids=(1, 1))
+        assert checker.last_batch_pairs == ()
+        malformed = {key: value.copy() for key, value in frames.items()}
+        malformed["arm"][0, 3, 0] = 1
+        with pytest.raises(ValueError, match="rigid"):
+            checker.check_batch(malformed)
+    finally:
+        checker.close()
+
+
 def test_phase_branches_must_connect_and_dual_targets_stay_synchronized():
     identity = np.eye(4).tolist()
     mode = TaskOperationMode(

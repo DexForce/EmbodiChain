@@ -22,6 +22,76 @@ import pytest
 from embodichain.lab.expansion import ExpansionEngine, load_expansion_job
 
 
+def test_task_program_declarations_are_pure_and_protect_contact_phases(tmp_path):
+    import json
+    import os
+    import subprocess
+    import sys
+    import yaml
+    from embodichain.lab.expansion import load_task_program_expansion
+
+    path = Path(__file__).parent / "fixtures/task_program_job.yaml"
+    code = "from embodichain.lab.expansion import load_task_program_expansion; import json,sys; value=load_task_program_expansion(sys.argv[1]); assert not any(k=='dexsim' or k.startswith('dexsim.') for k in sys.modules); print(json.dumps(value))"
+    process = subprocess.run(
+        [sys.executable, "-c", code, str(path)],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ},
+    )
+    value = json.loads(process.stdout)
+    assert (value["engine"]["workload_count"], value["engine"]["batch_size"]) == (2, 1)
+    assert value["trajectory"]["operators"] == ["object_pose", "joint_residual"]
+    value["engine"]["nominal_seed"] = 7
+    nominal = tmp_path / "nominal.yaml"
+    nominal.write_text(yaml.safe_dump(value))
+    assert load_task_program_expansion(nominal)["engine"]["nominal_seed"] == 7
+    value["engine"]["nominal_seed"] = True
+    nominal.write_text(yaml.safe_dump(value))
+    with pytest.raises(ValueError, match="nominal_seed"):
+        load_task_program_expansion(nominal)
+    value["engine"]["nominal_seed"] = 7
+    value["trajectory"]["free_phases"]["pick_up"] = ["approach", "lift"]
+    invalid = tmp_path / "protected.yaml"
+    invalid.write_text(yaml.safe_dump(value))
+    with pytest.raises(ValueError, match="protected free phase"):
+        load_task_program_expansion(invalid)
+
+
+def test_official_layout_jobs_load_without_simulation_imports():
+    import subprocess
+    import sys
+
+    task_root = (
+        Path(__file__).resolve().parents[3]
+        / "extensions/embodichain_tasks/configs/tasks/manipulation"
+    )
+    paths = sorted(task_root.glob("**/acceptance/scene_first/expansion.yaml"))
+    assert paths
+    code = """
+import importlib.abc
+import sys
+
+class NoSimulator(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.startswith(("dexsim", "embodichain.lab.sim", "embodichain.lab.gym")):
+            raise AssertionError(f"configuration loader imported {fullname}")
+
+sys.meta_path.insert(0, NoSimulator())
+from embodichain.lab.expansion import load_task_program_expansion
+for path in sys.argv[1:]:
+    sampling = load_task_program_expansion(path)["scene_sampling"]
+    assert sampling["layout"]["policy"] and sampling["task_mode"]["phases"]
+    assert sampling["robot_anchors"]
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code, *map(str, paths)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize("name", ["default", "newton", "rgbd", "motion"])
 def test_example_preflight_resolves_owned_backend_and_budget(name, tmp_path):
     path = (
@@ -69,3 +139,43 @@ def test_resource_changes_preserve_semantics_but_record_new_execution(tmp_path):
     assert a["execution_id"] != b["execution_id"]
     cfg.mass_scale = {"cube": (2.0, 3.0)}
     assert preflight_expansion_job(cfg)["semantic_id"] != a["semantic_id"]
+
+
+@pytest.mark.parametrize("owner", ["environment", "scene"])
+def test_deployment_snapshot_preserves_component_relative_assets(tmp_path, owner):
+    import json
+    import yaml
+    from embodichain.lab.expansion.task_program_jobs import _prepare_deployment
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+
+    source = tmp_path / "source"
+    source.mkdir()
+    mesh = source / "mesh.obj"
+    mesh.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+    simulation = {
+        "rigid_object": [
+            {"uid": "mesh", "shape": {"shape_type": "Mesh", "fpath": "./mesh.obj"}}
+        ]
+    }
+    component = (
+        {
+            "environment_id": "mesh-test",
+            "physics": "default",
+            "simulation": simulation,
+            "env": {},
+        }
+        if owner == "environment"
+        else {"scene_id": "mesh-test", "simulation": simulation}
+    )
+    (source / "component.yaml").write_text(yaml.safe_dump(component))
+    declaration = {"id": "SnapshotTest-v1", owner: {"component": "component.yaml"}}
+    deployment = source / "deployment.yaml"
+    deployment.write_text(yaml.safe_dump(declaration))
+    before = {p.name: p.read_bytes() for p in source.iterdir()}
+    output = tmp_path / "output"
+    output.mkdir()
+    derived = _prepare_deployment(deployment, output)
+    snapshot = json.loads(derived.read_text())
+    resolved = resolve_gym_components(snapshot, base_dir=derived.parent).config
+    assert resolved["rigid_object"][0]["shape"]["fpath"] == str(mesh)
+    assert {p.name: p.read_bytes() for p in source.iterdir()} == before

@@ -1039,8 +1039,12 @@ def test_public_plan_authorizes_raw_action_plan_destinations() -> None:
         action.plan(request, context)
 
 
-def test_command_target_authorization_rejects_altered_joint_claims() -> None:
+@pytest.mark.parametrize(
+    "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
+)
+def test_command_target_authorization_rejects_altered_joint_claims(device: str) -> None:
     context = _context()
+    env_ids = context.env_ids.to(device)
     request = ResolvedSkillRequest(
         skill_id="dependency_test",
         goal=EndEffectorPoseGoal(SceneEntityPose("tracked")),
@@ -1065,19 +1069,41 @@ def test_command_target_authorization_rejects_altered_joint_claims() -> None:
         commands=(
             EndpointCommand(
                 target=JointPositionTarget("arm", (2, 3)),
-                payload=JointPositionPayload(torch.ones(2, 2)),
+                payload=JointPositionPayload(torch.ones(2, 2, device=device)),
             ),
         ),
-        active_mask=torch.ones(2, dtype=torch.bool),
-        env_ids=context.env_ids,
-        hold_duration=torch.full((2,), 0.1),
+        active_mask=torch.ones(2, dtype=torch.bool, device=device),
+        env_ids=env_ids,
+        hold_duration=torch.full((2,), 0.1, device=device),
     )
 
     with pytest.raises(ValueError, match="bound joint-position target"):
         _DependencyAction._authorize_command_targets(
             request,
-            TimedCommandSequence(frames=(frame,), env_ids=context.env_ids),
+            TimedCommandSequence(frames=(frame,), env_ids=env_ids),
         )
+
+    commands = _command_sequence(env_ids=env_ids, frame_count=2)
+    owned = _DependencyAction._authorize_command_targets(request, commands)
+    commands.frames[0].commands[0].payload.positions.fill_(99)
+    torch.testing.assert_close(
+        owned.frames[0].commands[0].payload.positions, torch.ones(2, 2, device=device)
+    )
+    owned.frames[0].commands[0].payload.positions.fill_(55)
+    torch.testing.assert_close(
+        owned.frames[1].commands[0].payload.positions,
+        torch.full((2, 2), 2.0, device=device),
+    )
+    owned.frames[0].commands[0].payload.positions[0, 0] = float("nan")
+    with pytest.raises(ValueError, match="finite"):
+        owned.snapshot()
+    commands.frames[1].commands[0].payload.positions[0, 0] = float("nan")
+    with pytest.raises(ValueError, match="finite"):
+        _DependencyAction._authorize_command_targets(request, commands)
+    commands.frames[1].commands[0].payload.positions.fill_(2)
+    commands.frames[0].hold_duration.fill_(-1)
+    with pytest.raises(ValueError, match="non-negative"):
+        _DependencyAction._authorize_command_targets(request, commands)
 
 
 def test_command_target_authorization_rejects_custom_claim_conflicts() -> None:

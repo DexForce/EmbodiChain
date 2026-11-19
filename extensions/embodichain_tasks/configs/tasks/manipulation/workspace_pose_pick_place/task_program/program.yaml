@@ -1,0 +1,44 @@
+program_id: workspace_pose_pick_place
+instruction: Pick up the cuboid and place it at the scene-relative goal pose.
+targets:
+  drop_pose:
+    kind: scene_relative
+    entity: goal
+    frame: parent
+    position:
+    - 0
+    - 0
+    - 0.12
+    quaternion_xyzw:
+    - 0
+    - 0
+    - 0
+    - 1
+program:
+  kind: repeat
+  count: 1
+  body:
+    kind: sequence
+    items:
+    - kind: segment
+      name: pick_cube
+      instruction: Grasp and lift the cube.
+      steps:
+        kind: invoke
+        call:
+          kind: pick
+          object: cube
+    - kind: segment
+      name: place_cube
+      instruction: Place the cube at the next target position and release it.
+      steps:
+        kind: invoke
+        call:
+          kind: place
+          object: cube
+          at:
+            kind: target_ref
+            target: drop_pose
+      post:
+      - kind: wait_stable
+        entity: cube

@@ -11,6 +11,12 @@ imported from `embodichain.lab.sim.scene.expansion`.
 movable permissions. `prepare_scene_randomization` prepares geometry;
 `generate_scene_variants` returns addressed CPU/CUDA candidates;
 `apply_scene_variants` preflights selected rigid poses without stepping.
+`SceneLayoutCondition` restricts prepared generation to explicit arena-pose
+anchors, with root XY/member XY-yaw permissions retained. Moving ancestors
+must also be anchored. Anchored roots reserve space before unanchored groups
+are sampled. Invalid domains reject before generation; unsupported
+geometry returns budget exhaustion rather than silently moving the anchors.
+The source/policy remain reusable; empty conditions preserve the old stream.
 `SimulationSceneExpansionHost` prepares/restores ordered rows with independent
 validation. Offline scheduling and confirmed persistence belong to the
 [Expansion Engine](../expansion-engine/expansion-engine.md).
@@ -28,10 +34,30 @@ Joint task-conditioned layout/installation search is owned by
 attempts. Its configured search adapter still evaluates one B=1 deployment per
 attempt through the shared selected-row preparation/restoration contract.
 
+The task-facing rolling collector also exposes selectable bounded versus
+workspace-conditioned pose proposals with optional receipt-confirmed task-pose
+coverage feedback; see [workload feedback](../expansion-engine/workloads.md#optional-task-pose-proposal-feedback).
+The collector's optional scene-first, robot-first and bidirectional strategies
+compose support-tree layout generation with the existing full-state task
+feasibility backend. Robot-first projects a declared target's workspace TCPs to
+root XY conditions before generating the rest of the layout. See the
+[conditional layout source contract](../expansion-engine/workloads.md#conditional-layout-proposals-and-task-screening)
+for selectors and direction scheduling. Explicit
+`layout` and `task_mode` declarations bind support parents, permissions and
+synchronized task stages. Homogeneous replicas can share the prepared layout
+and frozen nominal planning start within one rolling W times B World; the
+feasibility adapter explicitly selects its solver row. A bounded-sampling
+baseline can opt into the same screens. Declared
+workspace caches supply seeds; no cache hit certifies a pose or task. Pure
+layout queries do not advance the owning World; topology changes invalidate
+the prepared geometry. This is distinct from offline atlas region validation
+and does not certify continuous reachable volume.
+
 ## Entry points
 
 | Request | Owner |
 |---|---|
+| Simulator-free layout policy and feasibility declarations | `embodichain/lab/_scene_config/` |
 | Shared proposal contracts and fixed source | `embodichain/lab/sim/scene/expansion/` |
 | Candidate limits and movable entity permissions | `cfg.py` in that package |
 | Arena poses and proposal identity | `contracts.py` in that package |

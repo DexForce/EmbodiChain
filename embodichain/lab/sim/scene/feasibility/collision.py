@@ -296,6 +296,8 @@ class NewtonCollisionChecker:
             raise UnsupportedFeasibilityError("Physical collision pair budget exceeded")
         self._capacity = min(max_contacts, requested_capacity)
         self._mask_cache = OrderedDict()
+        self._batch_queries = OrderedDict()
+        self.last_batch_pairs: tuple[tuple[str, str] | None, ...] = ()
         self._model = self._state = self._pipeline = self._contacts = None
         self._graph = self._active = self._output = self._empty_count = (
             self._explicit
@@ -703,6 +705,86 @@ class NewtonCollisionChecker:
             "Discrete Newton convex/physical-halfspace query; clearance is capped by the detection band",
         ), (0.0 if math.isinf(clearance) else min(self.detection_gap_m, clearance))
 
+    def check_batch(
+        self,
+        frame_poses: Mapping[str, object],
+        *,
+        allowed_contacts: Sequence[tuple[str, str]] = (),
+        moving_objects: Sequence[str] = (),
+        all_pairs: bool = False,
+        env_ids: Sequence[int] | None = None,
+    ) -> tuple[FeasibilityCheck, ...]:
+        """Check independent measured rows with one bounded numerical query.
+
+        Args:
+            frame_poses: Every declared frame with arena poses ``(B, 4, 4)``.
+                Tensor inputs are copied to the query-owned CPU boundary.
+            allowed_contacts: Shared explicit contact exemptions for these rows.
+            moving_objects: Dynamic frames requiring environment checks.
+            all_pairs: Also inspect static layout pairs.
+            env_ids: Ordered selected rows; None selects all B rows.
+
+        Returns:
+            Discrete checks in selected-row order. ``last_batch_pairs`` records
+            each failure's physical IDs. This API does not report a distance or
+            overwrite the scalar check's clearance interval. It never advances
+            or changes the live simulation. Geometry, precision and saturation
+            rejection follow :meth:`check`.
+        """
+        if self._closed:
+            raise RuntimeError("collision checker is closed")
+        from ._collision_batches import _CollisionBatches
+
+        self.last_batch_pairs = ()
+        frames = {}
+        size = None
+        for uid in self._frame_uids:
+            if uid not in frame_poses:
+                raise UnsupportedFeasibilityError(
+                    f"Missing physical collision frame {uid}"
+                )
+            value = frame_poses[uid]
+            if hasattr(value, "detach"):
+                value = value.detach().cpu().numpy()
+            array = np.asarray(value)
+            if array.ndim != 3 or array.shape[1:] != (4, 4) or not array.shape[0]:
+                raise ValueError("batched arena poses must have shape (B, 4, 4), B > 0")
+            if size is not None and size != len(array):
+                raise ValueError("batched collision frames must share their row count")
+            size = len(array)
+            frames[uid] = array
+        rows = tuple(range(size)) if env_ids is None else tuple(env_ids)
+        if (
+            not rows
+            or len(set(rows)) != len(rows)
+            or any(type(row) is not int or not 0 <= row < size for row in rows)
+        ):
+            raise ValueError("env_ids must select unique physical rows")
+        if type(all_pairs) is not bool:
+            raise TypeError("all_pairs must be a bool")
+        # Resolve permissions with the same native validation before caching.
+        allowed = frozenset(self._expand_pairs(allowed_contacts))
+        self._mask(allowed_contacts, moving_objects, all_pairs)
+        key = size, allowed, frozenset(moving_objects), all_pairs
+        query = self._batch_queries.get(key)
+        if query is None:
+            if size * self._capacity > 1048576:
+                raise UnsupportedFeasibilityError(
+                    "Batched collision contact budget exceeded"
+                )
+            query = _CollisionBatches(
+                self, size, allowed_contacts, moving_objects, all_pairs
+            )
+            self._batch_queries[key] = query
+            while len(self._batch_queries) > 2:
+                _, old = self._batch_queries.popitem(last=False)
+                old.close()
+        else:
+            self._batch_queries.move_to_end(key)
+        result = query.check(frames, rows)
+        self.last_batch_pairs = tuple(pair for _, _, pair in result)
+        return tuple(report for _, report, _ in result)
+
     def _failure(self, i: int, j: int) -> FeasibilityCheck:
         self.last_pair = self.bodies[i].collision_id, self.bodies[j].collision_id
         return FeasibilityCheck(
@@ -713,6 +795,29 @@ class NewtonCollisionChecker:
 
     def close(self) -> None:
         """Release owned query arrays/graphs; repeated cleanup is harmless."""
+        stream = next(
+            (
+                query.stream
+                for query in self._batch_queries.values()
+                if getattr(query, "stream", None) is not None
+            ),
+            None,
+        )
+        if stream is not None:
+            import warp as wp
+
+            # A robot solver may have borrowed a temporary Warp stream. Keep
+            # query-owned arrays on a live stream through their final release.
+            with wp.ScopedStream(stream, sync_enter=False):
+                self._close_arrays()
+        else:
+            self._close_arrays()
+
+    def _close_arrays(self) -> None:
+        for query in self._batch_queries.values():
+            query.close()
+        self._batch_queries.clear()
+        self.last_batch_pairs = ()
         self._graph = self._pipeline = self._contacts = self._state = self._model = None
         self._active = self._output = self._empty_count = None
         self._tolerance = None

@@ -2061,7 +2061,7 @@ class SemanticCallCompiler:
         option_template = self._skill_option_template(analyzed, PlaceOptions)
         if call.at is not None:
             object_target = self._broadcast_pose(
-                call.at.to_matrix(),
+                self._ground_object_target(SemanticObjectTarget(pose=call.at), context),
                 context,
                 name="Place.at",
             )

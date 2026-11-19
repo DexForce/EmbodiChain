@@ -1148,6 +1148,39 @@ def test_joint_encoder_emits_full_qpos_and_holds_inactive_rows() -> None:
     assert torch.equal(action[1], qpos[1])
 
 
+@pytest.mark.parametrize("mode", ["position", "position_velocity"])
+def test_joint_encoder_groups_destinations_without_aliasing_source(mode) -> None:
+    """A complete frame preserves independent destinations and inactive rows."""
+    qpos = torch.arange(BATCH_SIZE * ROBOT_DOF, dtype=torch.float32).reshape(
+        BATCH_SIZE, ROBOT_DOF
+    )
+    source = qpos.clone()
+    encoder = RuntimeCommandFrameEncoder(_QposProvider(qpos), joint_command_mode=mode)
+    first = _joint_frame(
+        duration=STEP_DT,
+        active_mask=torch.tensor([True, False]),
+        velocities=torch.tensor([[1.0, 3.0], [11.0, 13.0]]),
+    )
+    extra = EndpointCommand(
+        target=JointPositionTarget(control_part="second", joint_ids=(0,)),
+        payload=JointPositionPayload(
+            positions=torch.tensor([[90.0], [91.0]]),
+            velocities=torch.tensor([[9.0], [9.1]]),
+        ),
+    )
+    frame = replace(first, commands=(*first.commands, extra))
+    action = encoder.encode(frame)
+    positions = action if mode == "position" else action["qpos"]
+    assert torch.equal(positions[0], torch.tensor([90.0, 10.0, 2.0, 30.0, 4.0]))
+    assert torch.equal(positions[1], source[1])
+    if mode == "position_velocity":
+        assert torch.equal(action["qvel"][0], torch.tensor([9.0, 1.0, 0.0, 3.0, 0.0]))
+        assert torch.equal(action["qvel"][1], torch.zeros(ROBOT_DOF))
+    positions.zero_()
+    assert torch.equal(qpos, source)
+    assert torch.equal(extra.payload.positions, torch.tensor([[90.0], [91.0]]))
+
+
 def test_joint_encoder_holds_unaddressed_joints_at_controller_targets() -> None:
     """A scoped command must not chase measured drift on another resource."""
     current = torch.zeros(BATCH_SIZE, ROBOT_DOF)
