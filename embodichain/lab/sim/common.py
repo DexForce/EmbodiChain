@@ -124,7 +124,8 @@ class BatchEntity(ABC):
         """Return owned metadata snapshots for configured or USD source visuals.
 
         Gaussian arrays are not copied. Resource IDs are diagnostics scoped to
-        the current Scene; USD-native visual references do not expose them.
+        the current Scene. Qualified SDK builds also expose IDs for USD-native
+        Gaussian companions, in environment order.
         Configuration element IDs and USD prim paths remain stable.
 
         Returns:
@@ -134,19 +135,43 @@ class BatchEntity(ABC):
         if binding is not None:
             return binding.describe()
         source_elements = getattr(self, "_source_visual_elements", None)
-        if source_elements is not None:
-            from copy import deepcopy
-
-            return deepcopy(source_elements)
-        if getattr(self.cfg, "source", None) is not None and getattr(
-            self, "is_spawn_bound", False
+        if (
+            source_elements is None
+            and getattr(self.cfg, "source", None) is not None
+            and getattr(self, "is_spawn_bound", False)
         ):
             from embodichain.lab.sim.spawn.usd import _source_visual_elements
 
             entities = getattr(self, "_entities", ())
             descriptor = getattr(entities[0], "object_desc", None) if entities else None
             if descriptor is not None:
-                return _source_visual_elements(descriptor)
+                source_elements = _source_visual_elements(descriptor)
+        if source_elements is not None:
+            from copy import deepcopy
+
+            elements = deepcopy(source_elements)
+            entities = getattr(self, "_entities", ())
+            getters = [
+                getattr(entity, "get_gaussian_resource_ids", None)
+                for entity in entities
+            ]
+            if getters and all(callable(getter) for getter in getters):
+                rows = [tuple(getter()) for getter in getters]
+                if any(rows):
+                    count = sum(
+                        element["representation"] == "gaussian_splat"
+                        for element in elements
+                    )
+                    if any(len(row) != count for row in rows):
+                        raise RuntimeError(
+                            "USD Gaussian companion metadata differs across environments"
+                        )
+                    index = 0
+                    for element in elements:
+                        if element["representation"] == "gaussian_splat":
+                            element["resource_ids"] = tuple(row[index] for row in rows)
+                            index += 1
+            return elements
         from embodichain.lab.sim.cfg.visuals import GaussianSplatCfg, _visual_elements
 
         groups = getattr(self.cfg, "link_visuals", {})
