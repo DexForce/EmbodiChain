@@ -60,6 +60,8 @@ class _NativePlanExpansion:
         revision: str,
         output: Path | None = None,
         episode_id: int = 0,
+        affordance_branch: int | None = None,
+        preferred_local_poses: tuple[tuple[str, tuple[float, ...]], ...] = (),
     ):
         if operator not in (
             "object_pose",
@@ -77,6 +79,18 @@ class _NativePlanExpansion:
         self.scene_case, self.revision = scene_case, revision
         self.output = output
         self.episode_id = episode_id
+        if affordance_branch is not None and (
+            operator != "affordance"
+            or type(affordance_branch) is not int
+            or not 1 <= affordance_branch < self.options["affordance"]["branches"]
+        ):
+            raise ValueError(
+                "affordance_branch must select a non-nominal configured branch"
+            )
+        self.affordance_branch = affordance_branch
+        if preferred_local_poses and operator != "affordance":
+            raise ValueError("preferred_local_poses requires the affordance operator")
+        self.preferred_local_poses = preferred_local_poses
         self._records: list[TaskProgramNativeExpansionRecord] = []
 
     @property
@@ -126,7 +140,12 @@ class _NativePlanExpansion:
                 count=settings["branches"],
                 seed=self.seed,
                 episode_id=self.episode_id,
-                branch_override=1 + self.episode_id % (settings["branches"] - 1),
+                preferred_local_poses=self.preferred_local_poses,
+                branch_override=(
+                    self.affordance_branch
+                    if self.affordance_branch is not None
+                    else 1 + self.episode_id % (settings["branches"] - 1)
+                ),
             ),
         )
 

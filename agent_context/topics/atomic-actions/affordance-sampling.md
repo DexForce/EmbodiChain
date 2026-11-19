@@ -17,6 +17,12 @@ never retain it. `AffordancePoseCandidates` retains poses, costs, and an
 explicit validity mask. `AffordanceSample` returns row-local success, poses,
 and owned metadata.
 
+A caller can supply keyed `preferred_local_poses` from a previously verified
+episode. A non-nominal pose selection may match one of the current valid,
+geometrically distinct alternatives in the same reference frame. The ordinary
+rank applies when no equivalent alternative exists. The sample records the
+current candidate ID and whether it matched. The caller owns selection history.
+
 Actions own IK, reachability, complete trajectory feasibility, and diagnostics.
 They intersect `AffordanceSample.success` with their feasibility result and put
 the sampling record under `diagnostics.metadata["affordance_sample"]`.
