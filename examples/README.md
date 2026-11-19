@@ -139,15 +139,14 @@ python scripts/tutorials/sim/create_cable.py
 python scripts/tutorials/sim/create_cable.py --headless --renderer no-render --num-envs 2
 ```
 
-The cable examples use CUDA and DexSim `0.6.0rc2` (engine commit
-`dbaca660471d5aaa7e750093e7fe1c207465c4af`). The DexForce package index
-provides Linux x86_64 wheels for Python 3.11 and 3.12. To install the pinned
-engine in your EmbodiChain environment and check its build, run:
+The cable examples use CUDA and the project-pinned DexSim engine. The DexForce
+package index provides Linux x86_64 wheels for Python 3.11 and 3.12. To install
+the engine and check its build, run:
 
 ```bash
 python -m pip install --index-url https://pypi.org/simple \
   --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site \
-  dexsim-engine==0.6.0rc2
+  dexsim-engine==0.6.0
 python -c "import dexsim; from dexsim.scene import SpawnedCable; print(dexsim.__version__, dexsim.__commit_id__)"
 ```
 

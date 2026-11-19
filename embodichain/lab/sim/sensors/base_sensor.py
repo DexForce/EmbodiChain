@@ -460,7 +460,9 @@ class BaseSensor(BatchEntity):
             return
         elapsed = time - self._sample_time if self._sample_boundary is not None else dt
         try:
-            self.update(sample_dt=elapsed, fetch_only=self.cfg.sample_phase == "render")
+            self._acquire_sample(
+                sample_dt=elapsed, fetch_only=self.cfg.sample_phase == "render"
+            )
         except BaseException:
             # Acquisition may have already overwritten the borrowed output buffers.
             metadata["valid"].fill_(False)
@@ -472,6 +474,10 @@ class BaseSensor(BatchEntity):
         metadata["time"].fill_(time)
         metadata["physics_step"].fill_(physics_step)
         metadata["valid"].fill_(True)
+
+    def _acquire_sample(self, *, sample_dt: float, fetch_only: bool) -> None:
+        """Acquire data at a scheduled boundary before publishing metadata."""
+        self.update(sample_dt=sample_dt, fetch_only=fetch_only)
 
     @cached_property
     def num_instances(self) -> int:

@@ -29,6 +29,7 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     DefaultPhysicsCfg,
     DefaultRigidBodyPropertiesCfg,
+    NewtonPhysicsCfg,
     RigidBodyPhysicsCfg,
     RigidObjectCfg,
 )
@@ -50,13 +51,24 @@ SCENARIOS = (
 )
 
 
-def run_inertial(output: Path, device: str, video: bool) -> None:
+def run_inertial(
+    output: Path, backend: str, device: str, source: str, video: bool
+) -> None:
     """Read the registered sensors at completed physics boundaries."""
+    physics = (
+        DefaultPhysicsCfg(device=device)
+        if backend == "default"
+        else NewtonPhysicsCfg(
+            device=device,
+            num_substeps=3,
+            solver_cfg={"solver_type": "mujoco_warp", "rne_mode": "last_substep"},
+        )
+    )
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
             visualization=VisualizationCfg(backend="none"),
-            physics_cfg=DefaultPhysicsCfg(device=device),
+            physics_cfg=physics,
             physics_dt=DT,
             render_cfg=SCENE_RENDER,
             enable_entity_gizmo=False,
@@ -74,10 +86,14 @@ def run_inertial(output: Path, device: str, video: bool) -> None:
                     uid=uid,
                     shape=CubeCfg(size=(0.10,) * 3),
                     init_pos=position,
-                    attrs=RigidBodyPhysicsCfg(
-                        rigid_props=DefaultRigidBodyPropertiesCfg(
-                            linear_damping=0.0, angular_damping=0.0
+                    attrs=(
+                        RigidBodyPhysicsCfg(
+                            rigid_props=DefaultRigidBodyPropertiesCfg(
+                                linear_damping=0.0, angular_damping=0.0
+                            )
                         )
+                        if backend == "default"
+                        else RigidBodyPhysicsCfg()
                     ),
                 )
             )
@@ -91,6 +107,7 @@ def run_inertial(output: Path, device: str, video: bool) -> None:
                             "sensor_type": kind,
                             "uid": f"{uid}_{kind.lower()}",
                             "asset_uid": uid,
+                            "acceleration_source": source,
                             "offset": {"pos": [OFFSET if uid == "spin" else 0, 0, 0]},
                         }
                     )
@@ -146,6 +163,10 @@ def run_inertial(output: Path, device: str, video: bool) -> None:
                     )
                 )
 
+        selected = sensors["spin"][0].get_data_descriptors()["acceleration_valid"][
+            "source"
+        ]
+        print(f"Requested {source}; selected {selected} on {backend}/{device}.")
         spin = torch.tensor([[0, 0, OMEGA]], device=sim.device)
         bodies["spin"].set_velocity(ang_vel=spin)
         record()
@@ -195,6 +216,30 @@ def run_inertial(output: Path, device: str, video: bool) -> None:
                 s=10,
                 color=color,
             )
+        angular.text(
+            0.02,
+            0.94,
+            f"Source  {selected.replace('_', ' ')}",
+            transform=angular.transAxes,
+            va="top",
+            fontsize=9,
+            color="#475467",
+        )
+        acceleration.axhline(
+            -9.81,
+            linestyle=":",
+            color="#66717b",
+            linewidth=1,
+            label="Free-fall reference",
+        )
+        acceleration.legend(frameon=False, fontsize=8, loc="center right")
+        specific.axhline(
+            -OFFSET * OMEGA**2,
+            linestyle=":",
+            color="#80614d",
+            linewidth=1,
+            label="Spin reference",
+        )
         angular.set_ylabel("Angular velocity Z (rad/s)")
         angular.legend(frameon=False, fontsize=8, loc="center right")
         acceleration.set_ylabel("PVA acceleration Z (m/s²)")
@@ -224,10 +269,18 @@ def main() -> None:
     """Parse the output and simulation device."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--backend", choices=("default", "newton"), default="default")
     parser.add_argument("--device", default="cpu")
+    parser.add_argument(
+        "--source",
+        choices=("finite_difference", "native", "auto"),
+        default="finite_difference",
+    )
     parser.add_argument("--no-video", action="store_true")
     args = parser.parse_args()
-    run_inertial(args.output, args.device, not args.no_video)
+    if args.backend == "newton" and not args.device.startswith("cuda"):
+        parser.error("The Newton MuJoCo Warp example requires --device cuda:0.")
+    run_inertial(args.output, args.backend, args.device, args.source, not args.no_video)
 
 
 if __name__ == "__main__":

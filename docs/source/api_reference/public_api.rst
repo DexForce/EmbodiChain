@@ -6331,8 +6331,16 @@ Reference state sensors
    FrameTransformCfg
 
 
-Finite-difference inertial sensors
-----------------------------------
+Inertial sensors
+----------------
+
+PVA and IMU use finite differences by default. Set
+``acceleration_source="native"`` for dynamic rigid bodies on CUDA Newton
+MuJoCo Warp with RNE enabled. ``"auto"`` selects native acquisition when the
+configured target supports it and finite differences otherwise. Native
+acceleration is the final solver substep result, transported from the
+center of mass to the sensor point. After a reset it becomes valid on the next
+sampled physics step. The ``acceleration_valid`` descriptor reports the bound source.
 
 .. currentmodule:: embodichain.lab.sim.sensors
 
@@ -6351,3 +6359,147 @@ Finite-difference inertial sensors
    PVACfg
    IMU
    IMUCfg
+
+
+Joint reaction wrench
+---------------------
+
+Enable ``NewtonPhysicsCfg.enable_joint_wrenches`` before preparing a CUDA
+Newton MuJoCo Warp scene with RNE enabled. A ``JointWrench`` selects a native
+parent/child articulation joint. It reads the final solver substep's reaction
+exerted by the parent on the child, expressed at the configured sensor
+offset from the child link origin. Force is in newtons and torque in
+newton-metres. Both vectors use sensor axes. Check ``wrench_valid`` after
+initialization and reset.
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   JointWrench
+   JointWrenchCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.joint_wrench
+
+.. autosummary::
+
+   JointWrench
+   JointWrenchCfg
+
+
+Planar contact grid
+-------------------
+
+Contact grids bin the latest solver contact report into a mounted metric
+surface. Use the per-quantity validity fields and the native impulse duration
+when consuming the outputs.
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   ContactGrid
+   ContactGridCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact_grid
+
+.. autosummary::
+
+   ContactGrid
+   ContactGridCfg
+
+
+Contact-resultant sensor
+------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   ContactResultant
+   ContactResultantCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact_resultant
+
+.. autosummary::
+
+   ContactResultant
+   ContactResultantCfg
+
+
+Batched triangle ray queries
+----------------------------
+
+.. currentmodule:: embodichain.compute.geometry.raycast
+
+.. autosummary::
+
+   TriangleRayMesh
+   cast_rays
+
+
+Tactile indentation
+-------------------
+
+Tactile indentation measures geometric overlap along calibrated probes on
+planar or curved surfaces. The geometry source and clipped depth are published
+independently from contact force or optical images.
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   TactileIndentation
+   TactileIndentationCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.tactile_indentation
+
+.. autosummary::
+
+   TactileIndentation
+   TactileIndentationCfg
+
+
+Terrain scan
+------------
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   RayScene
+   TerrainScan
+   TerrainScanCfg
+   RayLidar
+   RayLidarCfg
+   RayDepthCamera
+   RayDepthCameraCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.ray
+
+.. autosummary::
+
+   RayScene
+   TerrainScan
+   TerrainScanCfg
+   RayLidar
+   RayLidarCfg
+   RayDepthCamera
+   RayDepthCameraCfg
+
+
+Official sensor presets
+-----------------------
+
+.. currentmodule:: embodichain.extensions.sensors
+
+.. autosummary::
+
+   VLP16Cfg
+
+.. currentmodule:: embodichain.extensions.sensors.vlp16
+
+.. autosummary::
+
+   VLP16Cfg
+   VLP16_REGISTRATION

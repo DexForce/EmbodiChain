@@ -17,8 +17,8 @@ Canonical skills live under `.agents/skills/`. `.claude/skills/` and
 
 The distribution and primary import package are **`embodichain`**, lowercase
 and one word. The repository directory is `EmbodiChain`. The same wheel bundles
-the official `tasks`, `robots`, `models`, `solvers`, and `benchmarks` packages
-under `embodichain.extensions`. Put their sources and resources in
+the official `tasks`, `robots`, `models`, `solvers`, `sensors`, and
+`benchmarks` packages under `embodichain.extensions`. Put their sources and resources in
 `embodichain/extensions/<name>/` and import them as `embodichain.extensions.<name>`.
 
 | Area | Owner |
@@ -36,6 +36,7 @@ under `embodichain.extensions`. Put their sources and resources in
 | Real-device controllers / standalone tools | `embodichain/lab/devices/`, `embodichain/toolkits/` |
 | Shared config and math utilities | `embodichain/utils/` |
 | Official task entry points / components / deployments | `embodichain/extensions/tasks/` |
+| Official sensor presets | `embodichain/extensions/sensors/` |
 | Concrete robot configurations / model-owned asset definitions / calibrated defaults | `embodichain/extensions/robots/` |
 
 Generic robot runtime/configuration and dual-arm composition remain in

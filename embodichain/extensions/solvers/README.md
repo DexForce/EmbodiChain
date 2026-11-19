@@ -42,9 +42,9 @@ The independent `WorldParticleModel` owns features, topology, frozen network
 and coordinate conversion. The Provider validates native scene, particle count,
 dt, gravity and supported capabilities; callers must preserve authored particle
 order/topology. It delegates read/force/write/reset
-and stream ownership to the SDK's `ParticleInferenceSolver` (SDK 0.6.0rc2).
-Main's SDK 0.6.0rc2 pin provides this facility. Older SDKs missing the facility
-fail before network loading; deployment also needs qualified model operators.
+and stream ownership to the SDK's `ParticleInferenceSolver`, which is available
+in the project-pinned SDK. Older builds without this facility fail before
+network loading. Deployment also needs qualified model operators.
 No core particle inference solver or second model transition is introduced.
 WorldParticle currently supports one CUDA particle world with static model
 boundaries, without functional gradients, dynamic rigid coupling or CUDA Graph

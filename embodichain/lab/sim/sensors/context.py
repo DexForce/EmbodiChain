@@ -19,7 +19,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
+from collections.abc import Callable
 import weakref
 
 import torch
@@ -27,6 +28,10 @@ from tensordict import TensorDict
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.sim_manager import SimulationManager
+    from .base_sensor import SensorCfg
+    from .contact import ContactSensor, ContactSensorCfg
+    from ._hydroelastic_grid import _HydroelasticPadSource
+    from .ray import RayScene
 
 __all__ = ["SensorClock", "SensorStateProvider", "SensorContext"]
 
@@ -107,13 +112,51 @@ class SensorContext:
         device: Device for sensor outputs.
         num_instances: Number of simulation environments.
         clock: Simulation clock and completed-substep identity.
-        state: Public joint-state acquisition service.
+        state: Public physical state acquisition service.
+        contact_factory: Optional factory for a bound, sensor-owned contact reader.
+        ray_factory: Optional factory taking target UIDs and an explicit geometry
+            source ("collision" or "visual").
+        acceleration_factory: Optional asset/link factory returning a completed-step
+            reader or None for unsupported targets. The reader returns world-axis
+            linear acceleration at the center of mass, angular acceleration, and
+            the center-of-mass offset in body-local axes, all batched by environment.
+            Returned buffers may be reused by the provider.
+        joint_wrench_factory: Optional asset/joint and child-mount factory
+            returning a completed-step reader. It fills the supplied per-row
+            force, torque and validity buffers. The wrench is expressed at the
+            sensor origin in sensor axes.
+        hydroelastic_factory: Optional physical-mount and opposing-target factory
+            for topology-scoped completed Newton surface projection.
     """
 
     device: torch.device
     num_instances: int
     clock: SensorClock
     state: SensorStateProvider
+    contact_factory: Callable[[ContactSensorCfg], ContactSensor] | None = None
+    ray_factory: (
+        Callable[[tuple[str, ...], Literal["collision", "visual"]], RayScene] | None
+    ) = None
+
+    acceleration_factory: (
+        Callable[
+            [str, str | None],
+            Callable[[], tuple[torch.Tensor, torch.Tensor, torch.Tensor]] | None,
+        ]
+        | None
+    ) = None
+
+    joint_wrench_factory: (
+        Callable[
+            [str, str, SensorCfg.OffsetCfg, torch.Tensor, torch.Tensor, torch.Tensor],
+            Callable[[], None],
+        ]
+        | None
+    ) = None
+
+    hydroelastic_factory: (
+        Callable[[SensorCfg.OffsetCfg, tuple[str, ...]], _HydroelasticPadSource] | None
+    ) = None
 
     @classmethod
     def from_manager(cls, manager: SimulationManager) -> SensorContext:
@@ -126,7 +169,17 @@ class SensorContext:
             Context without exposing native World or backend objects.
         """
         services = _ManagerSensorServices(manager)
-        return cls(manager.device, manager.num_envs, services, services)
+        return cls(
+            manager.device,
+            manager.num_envs,
+            services,
+            services,
+            services.create_contact_reader,
+            services.create_ray_scene,
+            services.create_acceleration_reader,
+            services.create_joint_wrench_reader,
+            services.create_hydroelastic_reader,
+        )
 
 
 class _ManagerSensorServices:
@@ -141,6 +194,13 @@ class _ManagerSensorServices:
 
     def now(self) -> float:
         return self._manager().simulation_time
+
+    def create_hydroelastic_reader(
+        self, mount: SensorCfg.OffsetCfg, targets: tuple[str, ...]
+    ) -> _HydroelasticPadSource:
+        from ._hydroelastic_grid import _HydroelasticPadSource
+
+        return _HydroelasticPadSource(self._manager(), mount, targets)
 
     @property
     def physics_step_index(self) -> int:
@@ -222,3 +282,65 @@ class _ManagerSensorServices:
             dtype=torch.float32,
             device=manager.device,
         ).clone()
+
+    def create_acceleration_reader(
+        self, asset_uid: str, link_name: str | None
+    ) -> Callable[[], tuple[torch.Tensor, torch.Tensor, torch.Tensor]] | None:
+        factory = getattr(
+            getattr(self._manager(), "physics", None),
+            "_create_body_acceleration_reader",
+            None,
+        )
+        return None if factory is None else factory(asset_uid, link_name)
+
+    def create_joint_wrench_reader(
+        self,
+        asset_uid: str,
+        joint_name: str,
+        offset: SensorCfg.OffsetCfg,
+        force: torch.Tensor,
+        torque: torch.Tensor,
+        valid: torch.Tensor,
+    ) -> Callable[[], None]:
+        factory = getattr(
+            getattr(self._manager(), "physics", None),
+            "_create_joint_wrench_reader",
+            None,
+        )
+        if factory is None:
+            raise NotImplementedError(
+                "JointWrench requires a native joint wrench provider."
+            )
+        return factory(asset_uid, joint_name, offset, force, torque, valid)
+
+    def create_contact_reader(self, cfg: ContactSensorCfg) -> ContactSensor:
+        from .contact import ContactSensor
+
+        manager = self._manager()
+        if not manager.physics.supports_contact_sensor:
+            raise NotImplementedError(
+                f"Contact acquisition unavailable on {manager.physics_backend}/"
+                f"{getattr(manager.physics, 'solver_type', None)} ({manager.device})."
+            )
+        return ContactSensor(cfg, manager.device, owner=manager)
+
+    def create_ray_scene(
+        self,
+        targets: tuple[str, ...],
+        source: Literal["collision", "visual"] = "collision",
+    ) -> RayScene:
+        from .ray import _build_ray_scene
+
+        manager = self._manager()
+        result = manager.spawn_result
+        if result is None:
+            raise RuntimeError("Ray queries require a prepared scene.")
+        revision = int(result.topology_revision)
+        cached_revision, scenes = getattr(manager, "_sensor_ray_scenes", (None, {}))
+        if cached_revision != revision:
+            scenes = {}
+            manager._sensor_ray_scenes = (revision, scenes)
+        key = (targets, source)
+        if key not in scenes:
+            scenes[key] = _build_ray_scene(manager, targets, source)
+        return scenes[key]

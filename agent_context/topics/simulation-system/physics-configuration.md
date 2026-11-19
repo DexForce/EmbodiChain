@@ -176,9 +176,9 @@ finalized solver-array mutations. `has_particle_collision` is
 per-shape participation; Arena isolation remains scene-owned.
 
 Rigid USD import rejects a parsed disabled body with authored child colliders
-but no retained collision pieces. DexSim 0.6.0rc1 has this parser limitation;
-use direct compound construction until the dependency retains static-body
-collider ownership. Do not change a static fixture into a moving body to mask it.
+but no retained collision pieces. The pinned DexSim SDK retains static-body
+collider ownership. Use direct compound construction on 0.6.0rc1 and 0.6.0rc2,
+whose USD parsers drop these colliders.
 
 File-backed Newton collision queries read each prepared shape independently,
 including cooked hulls, local poses and scales. Explicit particle-only boundaries

@@ -26,12 +26,25 @@ from .context import SensorClock, SensorStateProvider, SensorContext
 from .camera import Camera, CameraCfg
 from .state import JointEncoder, JointEncoderCfg, FrameTransform, FrameTransformCfg
 from .inertial import PVA, PVACfg, IMU, IMUCfg
+from .joint_wrench import JointWrench, JointWrenchCfg
 from .stereo import StereoCamera, StereoCameraCfg
 from .contact import (
     ContactSensor,
     ContactSensorCfg,
     ArticulationContactFilterCfg,
 )
+from .contact_grid import ContactGrid, ContactGridCfg
+from .contact_resultant import ContactResultant, ContactResultantCfg
+from .ray import (
+    RayScene,
+    TerrainScan,
+    TerrainScanCfg,
+    RayLidar,
+    RayLidarCfg,
+    RayDepthCamera,
+    RayDepthCameraCfg,
+)
+from .tactile_indentation import TactileIndentation, TactileIndentationCfg
 from .registry import (
     SensorRegistration,
     register_sensor,
@@ -42,10 +55,25 @@ from .registry import (
 
 __all__ = [
     "BaseSensor",
+    "TactileIndentation",
+    "TactileIndentationCfg",
+    "RayLidar",
+    "RayLidarCfg",
+    "RayDepthCamera",
+    "RayDepthCameraCfg",
+    "RayScene",
+    "TerrainScan",
+    "TerrainScanCfg",
+    "ContactGrid",
+    "ContactGridCfg",
+    "ContactResultant",
+    "ContactResultantCfg",
     "PVA",
     "PVACfg",
     "IMU",
     "IMUCfg",
+    "JointWrench",
+    "JointWrenchCfg",
     "JointEncoder",
     "JointEncoderCfg",
     "FrameTransform",
@@ -84,3 +112,19 @@ register_sensor(SensorRegistration("FrameTransform", FrameTransformCfg, FrameTra
 
 register_sensor(SensorRegistration("PVA", PVACfg, PVA))
 register_sensor(SensorRegistration("IMU", IMUCfg, IMU))
+register_sensor(SensorRegistration("JointWrench", JointWrenchCfg, JointWrench))
+
+register_sensor(SensorRegistration("ContactGrid", ContactGridCfg, ContactGrid))
+
+register_sensor(
+    SensorRegistration("ContactResultant", ContactResultantCfg, ContactResultant)
+)
+
+register_sensor(SensorRegistration("TerrainScan", TerrainScanCfg, TerrainScan))
+
+register_sensor(SensorRegistration("RayLidar", RayLidarCfg, RayLidar))
+register_sensor(SensorRegistration("RayDepthCamera", RayDepthCameraCfg, RayDepthCamera))
+
+register_sensor(
+    SensorRegistration("TactileIndentation", TactileIndentationCfg, TactileIndentation)
+)

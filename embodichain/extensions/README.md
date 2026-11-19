@@ -10,6 +10,7 @@ editable installs, and wheel installs.
 | [`embodichain.extensions.robots`](robots/README.md) | Concrete robot presets and the official robot catalog |
 | [`embodichain.extensions.models`](models/README.md) | Bundled model implementations |
 | [`embodichain.extensions.solvers`](solvers/README.md) | Native-physics deployment adapters |
+| [`embodichain.extensions.sensors`](sensors/vlp16.py) | Official sensor presets |
 | [`embodichain.extensions.benchmarks`](benchmarks/motion_generation/README.md) | Evaluation suites, planner adapters, scoring policies, and reports |
 
 Add a bundled extension as `embodichain/extensions/<name>/__init__.py`. The
