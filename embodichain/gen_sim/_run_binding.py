@@ -805,6 +805,14 @@ def _room_entries(name: str, assets: Path) -> dict[str, dict[str, Any]]:
     }
 
 
+# A held object moving slower than this (m/s, rad/s) is at rest; the values of
+# the built-in rigid-object settle preset.
+_SETTLED_HOLD_VELOCITIES = {
+    "settled_linear_velocity_threshold": 0.03,
+    "settled_angular_velocity_threshold": 0.20,
+}
+
+
 def _register_call_options(
     options: dict[str, Any],
     monitors: dict[str, Any],
@@ -812,14 +820,23 @@ def _register_call_options(
     call_id: str,
     builtin_key: str,
     skill: str,
+    *,
+    accept_settled_hold: bool = False,
 ) -> None:
     """Declare the action-option template and monitor a call is looked up by.
 
     Policy presets key templates by semantic call. Builtin calls use their skill
     key; registered calls use their call ID and inherit the same skill's
     templates, so run-level ``place`` options also govern relative placement.
+    With ``accept_settled_hold`` the declared monitor accepts a held object
+    that shifted in the hand and came to rest.
     """
-    monitor = {"monitor_id": "builtin.composite_effect", "revision": "1"}
+    monitor: dict[str, Any] = {
+        "monitor_id": "builtin.composite_effect",
+        "revision": "1",
+    }
+    if accept_settled_hold:
+        monitor["params"] = dict(_SETTLED_HOLD_VELOCITIES)
     options.setdefault(builtin_key, {"kind": skill})
     monitors.setdefault(builtin_key, monitor)
     if call["kind"] == "registered":
@@ -1071,7 +1088,13 @@ def _bind_deployment(
             elif catalog[cid]["effect"] == "release":
                 holders.pop(subject, None)
         _register_call_options(
-            options, monitors, call, cid, "pick" if skill == "pick_up" else skill, skill
+            options,
+            monitors,
+            call,
+            cid,
+            "pick" if skill == "pick_up" else skill,
+            skill,
+            accept_settled_hold=cfg.binding.get("accept_settled_hold", False),
         )
         if cid == "hand_over":
             options[key].setdefault("release_at_target", False)

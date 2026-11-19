@@ -148,7 +148,12 @@ uses the arm already holding its object, or the arm anchored nearest to it, and
 a placement on a support prefers its robot-side region. `binding.release_clearance`
 (metres, default 0) releases placements above their resting pose while validators
 keep the resting target; the place gate otherwise expects a released object to
-separate from the open gripper before retracting.
+separate from the open gripper before retracting. `binding.accept_settled_hold`
+(default false) lets the declared effect monitors accept a held object that
+shifted in the hand and came to rest: its pose error lies between the monitor's
+attached and detached thresholds, it moves slower than 0.03 m/s and 0.2 rad/s,
+and the grasp evidence still reports the hold. Without it such a hold stays
+unresolved until the skill times out.
 
 Further optional run fields: `task` reuses a published task-plan directory instead
 of planning, after verifying its artifacts and that it planned the same instruction

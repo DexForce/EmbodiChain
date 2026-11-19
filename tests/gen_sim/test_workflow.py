@@ -274,12 +274,17 @@ def test_workflow_generates_binds_and_preserves_actual_execution_verdict(
         run_cfg.instruction += " \n"
         run_cfg.task_id = " gensim_task "
 
-    # Releasing above the resting pose is opt-in; cover both settings.
+    # Releasing above the resting pose and accepting a settled hold are opt-in;
+    # cover both settings.
     clearance = 0.03 if success else 0.0
     run_cfg = _RunCfg(
         **{
             **run_cfg.to_dict(),
-            "binding": {**run_cfg.binding, "release_clearance": clearance},
+            "binding": {
+                **run_cfg.binding,
+                "release_clearance": clearance,
+                "accept_settled_hold": success,
+            },
         }
     )
 
@@ -1674,6 +1679,8 @@ def test_resource_anchors_select_the_nearest_arm(run_cfg: _RunCfg) -> None:
         _RunCfg(**{**run_cfg.to_dict(), "binding": {"resource_anchors": {"left": [0]}}})
     with pytest.raises(ValueError, match="release_clearance"):
         _RunCfg(**{**run_cfg.to_dict(), "binding": {"release_clearance": -0.01}})
+    with pytest.raises(ValueError, match="accept_settled_hold"):
+        _RunCfg(**{**run_cfg.to_dict(), "binding": {"accept_settled_hold": 1}})
 
 
 def test_registered_calls_get_templates_keyed_by_call_id() -> None:
@@ -1686,13 +1693,24 @@ def test_registered_calls_get_templates_keyed_by_call_id() -> None:
         options, monitors, call, "simulation.place_relative", "place", "place"
     )
     _register_call_options(
-        options, monitors, {"kind": "pick"}, "pick", "pick", "pick_up"
+        options,
+        monitors,
+        {"kind": "pick"},
+        "pick",
+        "pick",
+        "pick_up",
+        accept_settled_hold=True,
     )
 
     assert options["simulation.place_relative"] == options["place"]
     assert options["simulation.place_relative"] is not options["place"]
     assert options["pick"] == {"kind": "pick_up"}
     assert set(monitors) == {"place", "simulation.place_relative", "pick"}
+    assert "params" not in monitors["place"]
+    assert set(monitors["pick"]["params"]) == {
+        "settled_linear_velocity_threshold",
+        "settled_angular_velocity_threshold",
+    }
 
 
 def test_configured_lowerers_take_precedence_over_automatic_ones() -> None:
