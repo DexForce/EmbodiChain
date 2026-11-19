@@ -228,6 +228,19 @@ class PickUpOptions(SkillOptions):
     initial_lift_height: float = field(default=0.0, kw_only=True)
     """Initial world-Z clearance (m) from the current TCP pose before approach."""
 
+    screen_downstream_approach: bool = field(default=False, kw_only=True)
+    """Also require the pose from which a downstream placement approaches.
+
+    Place reaches its target through a pose ``lift_height`` above it. With this
+    option the semantic compiler adds that raised object pose to
+    ``downstream_object_target_poses``, so a grasp is selected only when the
+    arm can reach both. Without it only the target itself is screened.
+
+    The IK solver converges only from a nearby seed, so with this option a
+    downstream pose that has no solution from the pose before it is also tried
+    from the lift pose and from the pose that follows it.
+    """
+
     def __post_init__(self) -> None:
         if (
             isinstance(self.initial_lift_height, bool)
@@ -285,6 +298,8 @@ class PickUpOptions(SkillOptions):
         _validate_single_se3(self.grasp_frame_to_eef, "grasp_frame_to_eef")
         if type(self.cartesian_lift) is not bool:
             raise TypeError("cartesian_lift must be boolean.")
+        if type(self.screen_downstream_approach) is not bool:
+            raise TypeError("screen_downstream_approach must be boolean.")
         if type(self.approach_along_grasp_axis) is not bool:
             raise TypeError("approach_along_grasp_axis must be boolean.")
         if self.approach_along_grasp_axis and self.fixed_object_to_eef is None:
@@ -1022,6 +1037,8 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
         # MoveHeldObject begins after the lift, so screen its target from the
         # same joint state that the execution stream will use.
         downstream_seed = lift_qpos
+        downstream_poses: list[torch.Tensor] = []
+        downstream_results: list[tuple[torch.Tensor, torch.Tensor]] = []
         for object_target_pose in options.downstream_object_target_poses:
             object_target_pose = object_target_pose.to(
                 device=self.device, dtype=torch.float32
@@ -1042,6 +1059,36 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
             downstream_success, downstream_seed = self._compute_batch_candidate_ik(
                 downstream_eef_variants, downstream_seed, manipulator
             )
+            if options.screen_downstream_approach and not downstream_success.all():
+                # The solver converges from a nearby seed only. A pose it
+                # misses from the previous pose is tried from the lift pose.
+                retried, retried_qpos = self._compute_batch_candidate_ik(
+                    downstream_eef_variants, lift_qpos, manipulator
+                )
+                recovered = retried & ~downstream_success
+                downstream_seed = torch.where(
+                    recovered[..., None], retried_qpos, downstream_seed
+                )
+                downstream_success = downstream_success | retried
+            downstream_poses.append(downstream_eef_variants)
+            downstream_results.append((downstream_success, downstream_seed))
+        if options.screen_downstream_approach:
+            # ... and then from the pose that follows it, so an approach pose
+            # can be reached by continuity from its target as well.
+            for index in range(len(downstream_poses) - 2, -1, -1):
+                success, qpos = downstream_results[index]
+                following_success, following_qpos = downstream_results[index + 1]
+                if not (~success & following_success).any():
+                    continue
+                retried, retried_qpos = self._compute_batch_candidate_ik(
+                    downstream_poses[index], following_qpos, manipulator
+                )
+                recovered = retried & ~success & following_success
+                downstream_results[index] = (
+                    success | recovered,
+                    torch.where(recovered[..., None], retried_qpos, qpos),
+                )
+        for downstream_success, _ in downstream_results:
             pickup_success &= downstream_success
             downstream_success_counts.append(pickup_success.sum(dim=(1, 2)).tolist())
         if not pickup_success.any(dim=(1, 2)).all():

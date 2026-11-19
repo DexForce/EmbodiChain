@@ -153,6 +153,15 @@ class PlaceOptions(SkillOptions):
     preserve_current_object_orientation: bool = False
     """Keep the held object's observed world orientation at the place target."""
 
+    @property
+    def approach_clearance(self) -> float:
+        """World-z distance (m) of the approach pose above the release pose.
+
+        Zero when ``max_approach_retract_z`` caps the approach, because the
+        capped height then depends on the release pose itself.
+        """
+        return 0.0 if self.max_approach_retract_z is not None else self.lift_height
+
     def __post_init__(self) -> None:
         if type(self.cartesian_approach) is not bool:
             raise TypeError("cartesian_approach must be boolean.")

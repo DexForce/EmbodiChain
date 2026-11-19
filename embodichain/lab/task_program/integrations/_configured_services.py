@@ -1009,6 +1009,7 @@ class _RelativePlaceLowerer(RegisteredSemanticLowerer):
                 preserve_current_object_orientation=(
                     options.preserve_current_object_orientation
                 ),
+                approach_clearance=options.approach_clearance,
             ),
         )
 

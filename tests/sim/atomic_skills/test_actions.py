@@ -4318,6 +4318,56 @@ def test_pick_candidate_pregrasp_uses_configured_world_approach_direction(
     assert torch.equal(aligned, expected)
 
 
+@pytest.mark.parametrize("screen", [False, True])
+def test_pick_downstream_screen_retries_from_neighbouring_seeds(screen: bool) -> None:
+    """A pose missed from the previous pose is tried from the lift and the next pose."""
+    generator = _motion_generator()
+    action = _bind_action(generator, PickUp())
+    approach, target = torch.eye(4), torch.eye(4)
+    approach[2, 3] = 0.1
+    shape = (NUM_ENVS, 1, 2)
+    solved = torch.ones(shape, dtype=torch.bool)
+    lift_qpos = torch.full((*shape, ARM_DOF), 0.3)
+    target_qpos = torch.full((*shape, ARM_DOF), 0.7)
+    zeros = torch.zeros(*shape, ARM_DOF)
+    results = [
+        (solved, zeros),  # pre-grasp
+        (solved, zeros),  # grasp
+        (solved, lift_qpos),  # lift
+        (~solved, zeros),  # approach pose from the lift pose
+        *([(~solved, zeros)] if screen else []),  # ... retried from the lift pose
+        (~solved, zeros),  # target from the unsolved approach pose
+        *(
+            [
+                (solved, target_qpos),  # target from the lift pose
+                (solved, zeros),  # approach pose from the target
+            ]
+            if screen
+            else []
+        ),
+    ]
+    action._compute_batch_candidate_ik = Mock(side_effect=results)
+
+    _, ik_success = action._select_feasible_grasp_variants(
+        torch.eye(4).repeat(NUM_ENVS, 1, 1, 1),
+        torch.zeros(NUM_ENVS, ARM_DOF),
+        torch.eye(4).repeat(NUM_ENVS, 1, 1),
+        JointPositionTarget("arm", tuple(range(ARM_DOF))),
+        PickUpOptions(
+            downstream_object_target_poses=(approach, target),
+            screen_downstream_approach=screen,
+        ),
+        torch.tensor((0.0, 0.0, -1.0)),
+    )
+
+    calls = action._compute_batch_candidate_ik.call_args_list
+    assert len(calls) == len(results)
+    assert bool(ik_success.all()) is screen
+    if screen:
+        torch.testing.assert_close(calls[6].args[1], lift_qpos)
+        torch.testing.assert_close(calls[7].args[1], target_qpos)
+
+
 def test_pick_resolves_late_bound_scene_grasp_and_declares_dependency() -> None:
     generator = _motion_generator()
     target_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
