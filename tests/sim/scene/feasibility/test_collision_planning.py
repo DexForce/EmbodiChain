@@ -150,6 +150,9 @@ def test_decomposed_geometry_crosses_512_shapes_with_physical_pair_identity(
                     (0.01,),
                     local,
                     robot=frame == "arm",
+                    source_collision_id=(
+                        "payload/fixture" if frame == "payload" and i >= 254 else None
+                    ),
                 )
             )
     with pytest.raises(UnsupportedFeasibilityError, match="shape budget"):
@@ -165,7 +168,7 @@ def test_decomposed_geometry_crosses_512_shapes_with_physical_pair_identity(
         frames["ground"][:, 2, 3] = -1
         frames["payload"][:, :3, 3] = [256 / 8, -255 / 8, 0]
         frames["payload"][1, 2, 3] = 1
-        pair = ("arm/256", "payload/255")
+        pair = ("arm/256", "payload/fixture")
         assert checker.metadata["native_pair_count"] == 257 * 256
         assert len(checker.ignored_pairs) == 257
         assert frozenset(("ground", "arm/256")) in checker.ignored_pairs
@@ -180,6 +183,25 @@ def test_decomposed_geometry_crosses_512_shapes_with_physical_pair_identity(
             checker.check_batch(frames, allowed_contacts=(("payload", "arm/256"),))[
                 0
             ].status
+            == "passed"
+        )
+        assert (
+            checker.check_batch(frames, allowed_contacts=(("payload/254", "arm"),))[
+                0
+            ].status
+            == "failed"
+        )
+        assert (
+            checker.check_batch(frames, allowed_contacts=(("payload/255", "arm"),))[
+                0
+            ].status
+            == "passed"
+        )
+        assert (
+            checker.check(
+                {key: value[0] for key, value in frames.items()},
+                allowed_contacts=(pair,),
+            )[0].status
             == "passed"
         )
         # One row fits the aggregate pair budget. The reversed selection crosses chunks.

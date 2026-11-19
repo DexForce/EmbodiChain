@@ -39,17 +39,14 @@ from embodichain.lab.sim.scene.expansion.conditions import _LayoutConditionDomai
 __all__: list[str] = []
 
 
-def _layout_collision_bodies(env, strategy, operator):
+def _layout_collision_bodies(env):
     from embodichain.lab.task_program.integrations.simulation.feasibility_geometry import (
         _physical_collision_bodies,
-        collision_bodies_from_simulation,
     )
 
-    if strategy == "scene_first" and operator == "object_pose":
-        mesh_boxes = []
-        bodies = _physical_collision_bodies(env, env_id=0, layout_mesh_boxes=mesh_boxes)
-        return bodies, mesh_boxes
-    return collision_bodies_from_simulation(env), []
+    mesh_parts = {}
+    bodies = _physical_collision_bodies(env, env_id=0, layout_mesh_parts=mesh_parts)
+    return bodies, mesh_parts
 
 
 class _LayoutPoseSource(_AdaptivePoseSource):
@@ -60,7 +57,7 @@ class _LayoutPoseSource(_AdaptivePoseSource):
     Runtime execution still replans and independently validates measured outcomes.
     """
 
-    def __init__(self, env, options, *, seed, revision, operator=None):
+    def __init__(self, env, options, *, seed, revision):
         before = self._world_clock(env.sim)
         self._collision = None
         super().__init__(env, options, seed=seed, revision=revision)
@@ -157,9 +154,7 @@ class _LayoutPoseSource(_AdaptivePoseSource):
         from .acceptance import _GeometryRow
         from embodichain.lab.sim.scene.feasibility import NewtonCollisionChecker
 
-        bodies, self._layout_mesh_boxes = _layout_collision_bodies(
-            env, self.cfg["strategy"], operator
-        )
+        bodies, self._layout_mesh_parts = _layout_collision_bodies(env)
         known = {b.frame_uid for b in bodies}
         ignored, _ = _GeometryRow.contact_permissions(env, options["validation"], known)
         try:
@@ -393,7 +388,8 @@ class _LayoutPoseSource(_AdaptivePoseSource):
                 dict(
                     phase_checks=self._task_checks,
                     layout_source=self._prepared_layout.source.fingerprint,
-                    rigid_mesh_box_proxies=self._layout_mesh_boxes,
+                    mesh_convex_parts=self._layout_mesh_parts,
+                    rigid_mesh_box_proxies=[],  # Retained for existing report readers.
                     conditions=self._conditions.to_dict(),
                     workspace_prior=[pool.metrics() for pool in self._anchor_pools],
                     workspace_anchor_checks=self._anchor_checks,

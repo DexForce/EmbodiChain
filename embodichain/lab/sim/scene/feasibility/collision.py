@@ -78,6 +78,7 @@ class CollisionBody:
         vertices: Mesh-local positions; scale must already be applied.
         triangles: Mesh triangle indices.
         robot: Whether this shape belongs to a robot.
+        source_collision_id: Physical collider shared by its convex parts.
     """
 
     collision_id: str
@@ -93,10 +94,13 @@ class CollisionBody:
     vertices: tuple[tuple[float, float, float], ...] = ()
     triangles: tuple[tuple[int, int, int], ...] = ()
     robot: bool = False
+    source_collision_id: str | None = None
 
     def __post_init__(self) -> None:
         _identifier(self.collision_id, "collision_id")
         _identifier(self.frame_uid, "frame_uid")
+        if self.source_collision_id is not None:
+            _identifier(self.source_collision_id, "source_collision_id")
         object.__setattr__(self, "local_pose", _rigid_pose(self.local_pose))
         size = finite(self.dimensions, "shape dimensions")
         expected = {
@@ -271,8 +275,21 @@ class NewtonCollisionChecker:
         self._use_cuda_graph = use_cuda_graph
         self._aliases = {}
         ids = {b.collision_id for b in self.bodies}
+        sources = {}
         for body in self.bodies:
             self._aliases.setdefault(body.frame_uid, set()).add(body.collision_id)
+            if body.source_collision_id is not None:
+                frame, parts = sources.setdefault(
+                    body.source_collision_id, (body.frame_uid, set())
+                )
+                if frame != body.frame_uid:
+                    raise ValueError("A source collider must belong to a single frame")
+                parts.add(body.collision_id)
+        for source, (_, parts) in sources.items():
+            if self._aliases.setdefault(source, parts) != parts:
+                raise ValueError(
+                    "Source collider and frame aliases must be unambiguous"
+                )
         if any(
             token in ids and targets != {token}
             for token, targets in self._aliases.items()
@@ -300,6 +317,7 @@ class NewtonCollisionChecker:
             if self.bodies[i].frame_uid != self.bodies[j].frame_uid
             and self.bodies[j].frame_uid not in ignored_targets[i]
             and self.bodies[j].collision_id not in ignored_targets[i]
+            and self.bodies[j].source_collision_id not in ignored_targets[i]
         )
         pairs = tuple(islice(eligible, _MAX_QUERY_PAIRS + 1))
         if len(pairs) > _MAX_QUERY_PAIRS:
@@ -500,7 +518,9 @@ class NewtonCollisionChecker:
             targets.setdefault(right, set()).add(left)
         empty = frozenset()
         return tuple(
-            targets.get(body.frame_uid, empty) | targets.get(body.collision_id, empty)
+            targets.get(body.frame_uid, empty)
+            | targets.get(body.collision_id, empty)
+            | targets.get(body.source_collision_id, empty)
             for body in self.bodies
         )
 
@@ -531,6 +551,7 @@ class NewtonCollisionChecker:
             return (
                 b.frame_uid not in allowed_targets[i]
                 and b.collision_id not in allowed_targets[i]
+                and b.source_collision_id not in allowed_targets[i]
                 and (
                     all_pairs
                     or a.robot
@@ -854,8 +875,15 @@ class NewtonCollisionChecker:
         self.last_batch_pairs = tuple(reports[row][1] for row in rows)
         return tuple(reports[row][0] for row in rows)
 
+    def _physical_pair(self, i: int, j: int) -> tuple[str, str]:
+        a, b = self.bodies[i], self.bodies[j]
+        return (
+            a.source_collision_id or a.collision_id,
+            b.source_collision_id or b.collision_id,
+        )
+
     def _failure(self, i: int, j: int) -> FeasibilityCheck:
-        self.last_pair = self.bodies[i].collision_id, self.bodies[j].collision_id
+        self.last_pair = self._physical_pair(i, j)
         return FeasibilityCheck(
             "collision",
             "failed",

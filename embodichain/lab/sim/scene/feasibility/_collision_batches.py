@@ -300,7 +300,7 @@ class _CollisionBatches:
         for row in rows:
             if row in failures:
                 i, j = failures[row]
-                pair = checker.bodies[i].collision_id, checker.bodies[j].collision_id
+                pair = checker._physical_pair(i, j)
                 report = FeasibilityCheck(
                     "collision",
                     "failed",

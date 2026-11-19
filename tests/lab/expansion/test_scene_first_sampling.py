@@ -36,7 +36,10 @@ from embodichain.lab.sim.scene.feasibility import (
 )
 
 
-def test_scene_first_object_pose_bounds_only_native_rigid_triangle_meshes():
+def test_layout_mesh_parts_preserve_the_physical_frame_and_openings():
+    import trimesh
+    from scipy.spatial import ConvexHull
+
     from embodichain.lab.task_program.integrations.simulation.feasibility_geometry import (
         collision_bodies_from_simulation,
     )
@@ -70,30 +73,52 @@ def test_scene_first_object_pose_bounds_only_native_rigid_triangle_meshes():
             ),
         ),
     )
-    (arm, shelf), proxies = _layout_collision_bodies(env, "scene_first", "object_pose")
+    (arm, shelf), counts = _layout_collision_bodies(env)
     assert arm.kind == "convex" and arm.robot
     np.testing.assert_array_equal(arm.vertices, hull.vertices)
-    assert proxies == [shelf.collision_id] == ["shelf/0"]
-    assert shelf.kind == "box"
-    np.testing.assert_allclose(shelf.dimensions, [4, 2, 1e-6])
-    np.testing.assert_allclose(np.array(shelf.local_pose)[:3, :3], pose[:3, :3])
-    np.testing.assert_allclose(np.array(shelf.local_pose)[:3, 3], [7, 3, 1])
+    assert counts == {"shelf/0": 1}
+    assert shelf.source_collision_id == "shelf/0" and shelf.kind == "convex"
+    np.testing.assert_allclose(shelf.local_pose, pose)
+    np.testing.assert_allclose(
+        np.unique(np.round(np.asarray(shelf.vertices)[:, :2], 8), axis=0),
+        [[1, 2], [1, 4], [5, 2]],
+    )
+    np.testing.assert_allclose(np.ptp(np.asarray(shelf.vertices)[:, 2]), 1e-6)
     torch.testing.assert_close(mesh.local_pose, pose)
+
+    ring = trimesh.creation.annulus(r_min=0.5, r_max=1.0, height=0.2, sections=32)
+    mesh.vertices = torch.tensor(ring.vertices)
+    mesh.triangles = torch.tensor(ring.faces)
+    bodies, counts = _layout_collision_bodies(env)
+    parts = bodies[1:]
+    assert counts == {"shelf/0": len(parts)} and len(parts) > 1
+    planes = [ConvexHull(part.vertices).equations for part in parts]
+
+    def contains(point):
+        return any(np.all(eq[:, :3] @ point + eq[:, 3] <= 1e-8) for eq in planes)
+
+    assert not contains([0, 0, 0])
+    assert contains([0.75, 0, 0])
+    assert contains([-0.75, 0, 0])
+    assert all(part.source_collision_id == "shelf/0" for part in parts)
 
     with pytest.raises(UnsupportedFeasibilityError, match="shelf/0: mesh"):
         collision_bodies_from_simulation(env)
-    for strategy, operator in [
-        ("scene_first", "affordance"),
-        ("robot_first", "object_pose"),
-    ]:
-        with pytest.raises(UnsupportedFeasibilityError, match="shelf/0: mesh"):
-            _layout_collision_bodies(env, strategy, operator)
-    mesh.triangles = torch.tensor([[0, 1, 3]])
-    with pytest.raises(UnsupportedFeasibilityError, match="triangles for shelf/0"):
-        _layout_collision_bodies(env, "scene_first", "object_pose")
     robot.get_link_collision_shapes = lambda link: [mesh]
     with pytest.raises(UnsupportedFeasibilityError, match="robot/arm/0: mesh"):
-        _layout_collision_bodies(env, "scene_first", "object_pose")
+        collision_bodies_from_simulation(env)
+    attached, both = _layout_collision_bodies(env)
+    robot_parts = [body for body in attached if body.robot]
+    assert both == {"robot/arm/0": len(parts), "shelf/0": len(parts)}
+    assert len(robot_parts) == len(parts) and all(
+        body.frame_uid == "robot/arm" for body in robot_parts
+    )
+    robot.get_link_collision_shapes = lambda link: [hull]
+    mesh.triangles = torch.tensor([[0, 1, len(mesh.vertices)]])
+    with pytest.raises(
+        UnsupportedFeasibilityError, match="Invalid physical mesh for shelf/0"
+    ):
+        _layout_collision_bodies(env)
 
 
 def setup_source(
@@ -143,10 +168,7 @@ def setup_source(
     checked = []
     closed = []
     monkeypatch.setattr(module, "scene_layout_input_from_sim", lambda *a, **kw: source)
-    monkeypatch.setattr(
-        "embodichain.lab.task_program.integrations.simulation.feasibility_geometry.collision_bodies_from_simulation",
-        lambda env: (),
-    )
+    monkeypatch.setattr(module, "_layout_collision_bodies", lambda env: ((), {}))
     monkeypatch.setattr(
         "embodichain.lab.expansion.acceptance._GeometryRow.contact_permissions",
         lambda *a: ((), ()),

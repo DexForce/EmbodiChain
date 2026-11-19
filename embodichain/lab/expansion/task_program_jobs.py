@@ -70,9 +70,7 @@ def _task_expansion_extensions(*, options, operator, seed, report):
 
         revision = report["semantic_id"]
         if "layout" in options.get("scene_sampling", {}):
-            pose_source = _LayoutPoseSource(
-                env, options, seed=seed, revision=revision, operator=operator
-            )
+            pose_source = _LayoutPoseSource(env, options, seed=seed, revision=revision)
         elif "scene_sampling" in options:
             pose_source = _AdaptivePoseSource(
                 env, options, seed=seed, revision=revision

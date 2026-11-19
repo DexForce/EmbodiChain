@@ -39,9 +39,11 @@ mimic constraints. Hypothetical whole-robot FK supplies solver-root transforms;
 using live roots for projected torso/base states is incorrect. Complete path
 screening uses explicit physical geometry and phase contact permissions.
 `collision.py` lazily builds a Newton `CollisionPipeline` over isolated query
-states. The physical extractor preserves native convex shapes, includes the
-global ground, and rejects triangle meshes, SDFs, non-robot articulations and
-unsupported robot asset scales/formats. No collider is silently convexified.
+states. The standalone adapter uses native convex shapes, primitives and the
+global ground. Triangle meshes, SDFs, non-robot articulations and unsupported
+robot scales require an explicit adapter. The layout-screened collector cooks
+physical triangle colliders on rigid objects and robot links into convex parts.
+Permissions and reported failures retain the original physical collider IDs.
 Halfspaces use analytic physical-shape support. Phase masks do not mutate live
 filters, and the query never advances the simulation clock. Explicit pair
 lists and phase masks contain only eligible pairs. Batched rows share a
