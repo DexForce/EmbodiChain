@@ -21,11 +21,9 @@ from __future__ import annotations
 from contextlib import contextmanager
 from collections.abc import Iterator
 from typing import Any
-import io
 import math
 import numpy as np
 from scipy.spatial.transform import Rotation
-from PIL import Image
 from ._preview_data import PreviewData, PreviewState, pose_matrix
 
 __all__: list[str] = []
@@ -247,11 +245,7 @@ class NativeRenderer:
                 np.asarray(points).reshape(-1, 3),
                 marker_indices=np.asarray(types, dtype=int),
             )
-        self.camera = scene.add_camera(
-            spawn.CameraDesc(name="expansion_preview_camera", resolution=(1100, 760))
-        )
-        self.camera.open_camera()
-        self.camera.set_visual_overlay_enabled(True)
+        self.web_viewer = sim.viewer
         publisher.publish(preload=True)
 
     def _object_prototype(self, uid: str, **appearance: Any) -> Any:
@@ -264,7 +258,7 @@ class NativeRenderer:
             )
         return MarkerPrototypeCfg(shape="box", scale=self.data.boxes[uid], **appearance)
 
-    def draw(self, state: PreviewState) -> bytes:
+    def draw(self, state: PreviewState) -> None:
         v = state.values
         solid = self.data.solid_clip
         visible = state.visible_ghosts()
@@ -362,17 +356,13 @@ class NativeRenderer:
         eye = self.center + d * np.array(
             [math.cos(e) * math.cos(yaw), math.cos(e) * math.sin(yaw), math.sin(e)]
         )
-        self.camera.look_at(eye.tolist(), self.center.tolist(), [0, 0, 1])
-        with self.sim.render_frame(capture_camera_images=False):
-            self.sim.sync_render_state()
-            self.camera.render()
+        self.web_viewer.set_look_at(eye.tolist(), self.center.tolist())
+        if not self.sim.capture_visualization(force=True, capture_camera_images=False):
+            raise RuntimeError(
+                f"WebRTC observer did not render: {self.web_viewer.error}"
+            )
         if self.sim.physics_step_index != self.step:
             raise RuntimeError("Preview unexpectedly advanced physics")
-        image = Image.fromarray(
-            np.ascontiguousarray(self.camera.get_rgb_map()[..., :3], dtype=np.uint8)
-        )
-        buffer = io.BytesIO()
-        image.save(buffer, format="JPEG", quality=88)
         self.stats = {
             "physics_steps": self.sim.physics_step_index - self.step,
             "ghost_count": len(visible),
@@ -381,17 +371,19 @@ class NativeRenderer:
             "scene_objects": len(self.data.boxes),
             "fixed_backgrounds": len(self.backgrounds),
         }
-        return buffer.getvalue()
 
 
 @contextmanager
-def native_renderer(data: PreviewData, gpu: int = 0) -> Iterator[NativeRenderer]:
+def native_renderer(
+    data: PreviewData, gpu: int = 0, *, web_port: int
+) -> Iterator[NativeRenderer]:
     import os
 
     os.environ.setdefault("SDL_VIDEODRIVER", "offscreen")
     import torch
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import RenderCfg, DenoisingCfg
+    from embodichain.lab.visualization import DexSimWebCfg, VisualizationCfg
     from embodichain.lab.visualization.markers import MarkerFramePublisher
 
     torch.set_num_threads(1)
@@ -404,6 +396,10 @@ def native_renderer(data: PreviewData, gpu: int = 0) -> Iterator[NativeRenderer]
             num_envs=1,
             enable_entity_gizmo=False,
             startup_summary="off",
+            web=True,
+            visualization=VisualizationCfg(
+                web=DexSimWebCfg(port=web_port, width=1100, height=760, fps=25)
+            ),
             render_cfg=RenderCfg(
                 renderer="hybrid",
                 spp=4,

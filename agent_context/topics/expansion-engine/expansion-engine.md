@@ -100,8 +100,11 @@ cross-group frame through the public marker layer. Task assets and any collectio
 process orchestration remain outside the replay core.
 
 `embodichain expansion preview --input` reads confirmed job outputs through `_preview_data.py`,
-then replays full measured states using `_preview_render.py` and a loopback-only
-`_preview_server.py`. Inputs retain their original evidence; no collection or
+then replays full measured states using `_preview_render.py` and
+`_preview_server.py`. Browser replay defaults to the DexSim WebRTC observer
+and its owner-thread application.
+Video is separate from the HTTP replay state; authenticated commands queue only
+validated replay controls. Inputs retain their original evidence; no collection or
 physics stepping occurs. It accepts one URDF robot and recorded rigid visual
 objects (including file Mesh/USD via native visual loading), with fixed layouts;
 unsupported geometry is rejected. Constant static backgrounds remain single
@@ -120,8 +123,7 @@ episode's `joint_scene.pose_changes`. Each axis fits the object's measured start
 independently with half a bin of padding at either end, or a 1 mm window for a
 constant coordinate. The recipe's selected motion operator takes
 precedence over the job-level operator. The explicit reference belongs to replay.
-The HTTP service
-publishes both chart datasets independently of the live image/state snapshots. FK and episode
+Static chart payloads and HTTP replay metadata are independent of the encoded video. FK and episode
 budgets bound preload, controls are queued for the render owner, and native
 resources/ports close on exit. See the example's `ghost-preview.md` for usage.
 

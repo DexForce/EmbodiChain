@@ -14,18 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Result-only preview: provenance, row selection, controls and HTTP lifecycle."""
+"""Result-only preview: provenance, row selection and WebRTC controls."""
 
 from __future__ import annotations
 
-import base64
 from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
-import threading
-import urllib.error
-import urllib.request
 import numpy as np
 import pytest
 import torch
@@ -44,7 +40,7 @@ from embodichain.lab.expansion._preview_deviations import (
 )
 from embodichain.lab.expansion._preview_heatmap import object_heatmaps
 from embodichain.lab.expansion._preview_render import prepare_geometry
-from embodichain.lab.expansion._preview_server import PreviewTransport
+from embodichain.lab.expansion._preview_server import _WebPreviewTransport
 
 
 @pytest.fixture
@@ -500,43 +496,39 @@ def test_playback_toggles_in_order_and_restarts_from_the_end(recorded_job):
     assert state.values["playing"] and state.values["progress"] == 0
 
 
-def test_http_snapshot_control_and_shutdown(recorded_job):
+def test_native_preview_publishes_metadata_and_queues_valid_replay_controls(
+    recorded_job,
+):
+    from types import SimpleNamespace
+
     path, _, _ = recorded_job
     state = PreviewState(load_preview([path]))
-    transport = PreviewTransport(state, 0)
-    transport.publish({"frame": 7, "source_frame": 2}, b"jpeg-frame-7")
-    thread = threading.Thread(target=transport.server.serve_forever)
-    thread.start()
-    try:
-        heatmaps = json.load(urllib.request.urlopen(transport.url + "object-heatmaps"))
-        assert heatmaps["episodes"] == 0 and heatmaps["objects"] == []
-        snapshot = json.load(urllib.request.urlopen(transport.url + "snapshot"))
-        assert snapshot["frame"] == 7 and snapshot["source_frame"] == 2
-        assert base64.b64decode(snapshot["image"].split(",")[1]) == b"jpeg-frame-7"
-        req = urllib.request.Request(
-            transport.url + "control",
-            data=b'{"progress":0.5}',
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        assert urllib.request.urlopen(req).status == 204
-        assert (
-            state.values["progress"] == 0
-        )  # only the render owner applies queued commands
-        state.apply(transport.commands.get_nowait())
-        assert state.values["progress"] == 0.5
-        req.add_header("Origin", "https://untrusted.example")
-        with pytest.raises(urllib.error.HTTPError) as error:
-            urllib.request.urlopen(req)
-        assert error.value.code == 403
-    finally:
-        transport.server.shutdown()
-        thread.join(timeout=5)
-        transport.server.server_close()
-    assert not thread.is_alive()
+    application = {}
+
+    def install(assets, request):
+        application.update(assets=assets, request=request)
+
+    viewer = SimpleNamespace(
+        endpoint="http://127.0.0.1:8769/", _replace_application=install
+    )
+    transport = _WebPreviewTransport(state, viewer, b'{"episodes":0}')
+    transport.publish({"frame": 7, "source_frame": 2})
+    request = application["request"]
+    code, body = request("/api/state", "{}")
+    assert code == 200
+    assert json.loads(body) == {"frame": 7, "source_frame": 2}
+    assert b'<script src="/browser.js"></script>' in application["assets"]["/"][1]
+    assert request("/api/command", '{"progress":0.5}')[0] == 200
+    assert state.values["progress"] == 0
+    state.apply(transport.commands.popleft())
+    assert state.values["progress"] == 0.5
+    assert request("/api/command", '{"playing":"yes"}')[0] == 400
+    assert not transport.commands
 
 
-def test_preview_cli_dispatch_does_not_collect(monkeypatch, recorded_job):
+def test_preview_cli_dispatches_confirmed_records_without_collecting(
+    monkeypatch, recorded_job
+):
     from embodichain.cli.expansion import main
     import embodichain.lab.expansion._preview_server as server
     from embodichain.lab.expansion import ExpansionEngine
@@ -567,7 +559,14 @@ def test_viewer_assets_are_in_package_data(tmp_path):
     source = tmp_path / "source"
     source.mkdir()
     originals = Path(__file__).resolve().parents[3] / "embodichain/lab/expansion"
-    assets = ("_preview.html", "_preview_charts.js", "_preview_heatmap.js")
+    assets = (
+        "_preview.html",
+        "_preview.css",
+        "_preview_text.js",
+        "_preview_controls.js",
+        "_preview_charts.js",
+        "_preview_heatmap.js",
+    )
     for name in assets:
         shutil.copyfile(originals / name, source / name)
     (source / "__init__.py").write_text("")

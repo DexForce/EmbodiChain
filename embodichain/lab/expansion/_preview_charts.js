@@ -17,8 +17,8 @@
 const deviationCharts = (() => {
   const left = 48, right = 12, top = 8, bottom = 24;
   const plots = [];
-  let data, playbackFrame = 0, hoverFrame = null;
-  const number = new Intl.NumberFormat('zh-CN', {maximumSignificantDigits: 4});
+  let data, playbackFrame = 0, hoverFrame = null, failed = false;
+  let number, tcpNote, jointNote;
   const description = document.getElementById('deviation-description');
   const readout = document.getElementById('deviation-time');
 
@@ -27,14 +27,22 @@ const deviationCharts = (() => {
     const frame = hoverFrame ?? playbackFrame;
     const time = data.time_s[frame];
     const fraction = time / data.time_s.at(-1);
-    readout.textContent = `${number.format(time)} s · ${data.count[frame]} / ${data.episodes} 条轨迹`;
+    readout.textContent = previewText('deviationTime', {
+      time: number.format(time),
+      count: data.count[frame],
+      total: data.episodes,
+    });
     for (const plot of plots) {
       const value = plot.values[frame];
       const format = v => `${number.format(v)} ${plot.unit}`;
       if (value === null) {
-        plot.value.textContent = '无样本';
+        plot.value.textContent = previewText('deviationNoSample');
       } else if (plot.range) {
-        plot.value.textContent = `最小 ${format(plot.range.min[frame])} · 均值 ${format(value)} · 最大 ${format(plot.range.max[frame])}`;
+        plot.value.textContent = previewText('deviationRange', {
+          min: format(plot.range.min[frame]),
+          mean: format(value),
+          max: format(plot.range.max[frame]),
+        });
       } else {
         plot.value.textContent = format(value);
       }
@@ -129,7 +137,7 @@ const deviationCharts = (() => {
     ctx.stroke();
   }
 
-  function addCurve(panel, key, title, unit, color) {
+  function addCurve(panel, key, titleKey, unit, color) {
     const values = data.mean[key];
     if (!values) return;
     const range = data.range?.[key];
@@ -137,21 +145,18 @@ const deviationCharts = (() => {
     figure.className = 'curve'; figure.style.setProperty('--line', color);
     const caption = document.createElement('figcaption');
     const label = document.createElement('span');
-    label.textContent = `${title}（${unit}）`;
     const value = document.createElement('output');
     caption.append(label, value);
     const area = document.createElement('div');
     area.className = 'curve-plot';
     const canvas = document.createElement('canvas');
     canvas.setAttribute('role', 'img');
-    const summary = range ? '均值曲线及最小值至最大值色带' : '均值曲线';
-    canvas.setAttribute('aria-label', `${title}随实测时间的${summary}，单位 ${unit}`);
     const cursor = document.createElement('i');
     area.append(canvas, cursor); figure.append(caption, area); panel.append(figure);
     const peak = (range?.max ?? values).reduce((max, v) => v === null ? max : Math.max(max, v), 0);
     const step = tickStep(peak || 1);
     const ticks = Math.ceil((peak || 1) / step);
-    const plot = {values, value, range, unit, color, canvas, cursor, step, ticks, max: step * ticks};
+    const plot = {values, value, range, titleKey, label, unit, color, canvas, cursor, step, ticks, max: step * ticks};
     plots.push(plot);
     new ResizeObserver(() => draw(plot)).observe(canvas);
     canvas.addEventListener('pointermove', event => {
@@ -162,36 +167,63 @@ const deviationCharts = (() => {
     canvas.addEventListener('pointerleave', () => { hoverFrame = null; updateReadout(); });
   }
 
+  function renderLanguage() {
+    number = new Intl.NumberFormat(document.documentElement.lang, {maximumSignificantDigits: 4});
+    if (failed || !data?.episodes) {
+      const key = failed ? 'deviationsFailed' : data ? 'deviationsEmpty' : 'deviationsLoading';
+      description.textContent = previewText(key);
+      return;
+    }
+    description.textContent = previewText('deviationsHelp', {
+      reference: previewText(data.explicit_reference ? 'reference' : 'firstReference'),
+      count: data.episodes,
+    });
+    if (Object.keys(data.range ?? {}).length) description.append(' ', previewText('deviationsBand'));
+    if (tcpNote) tcpNote.textContent = previewText('tcpUnavailable');
+    if (jointNote) {
+      const separator = document.documentElement.lang === 'en' ? ', ' : '、';
+      const names = Object.values(data.arm_joint_groups).flat();
+      jointNote.textContent = names.length
+        ? previewText('jointNames', {names: names.join(separator)})
+        : previewText('jointsUnavailable');
+    }
+    for (const plot of plots) {
+      const values = {title: previewText(plot.titleKey), unit: plot.unit};
+      plot.label.textContent = previewText('curveLabel', values);
+      plot.canvas.setAttribute('aria-label', previewText(plot.range ? 'curveWithBand' : 'curveMean', values));
+      draw(plot);
+    }
+    updateReadout();
+  }
+
   async function load() {
     try {
       const response = await fetch('/deviations');
-      if (!response.ok) throw Error('deviations');
+      if (!response.ok) throw Error('Could not read deviations');
       data = await response.json();
-      if (!data.episodes) {
-        description.textContent = '当前只有对照轨迹。加入扩增轨迹即可显示偏差曲线。';
-        return;
+      if (data.episodes) {
+        document.getElementById('deviation-panels').hidden = false;
+        const tcp = document.getElementById('tcp-deviations');
+        addCurve(tcp, 'translation_mm', 'translationDistance', 'mm', '#80c7ff');
+        addCurve(tcp, 'rotation_deg', 'rotationAngle', '°', '#e6af77');
+        if (!data.mean.translation_mm) {
+          tcpNote = document.createElement('p');
+          tcp.append(tcpNote);
+        }
+        const joints = document.getElementById('joint-deviations');
+        addCurve(joints, 'qpos_deg', 'revoluteDeviation', '°', '#85d5b8');
+        addCurve(joints, 'qpos_mm', 'prismaticDeviation', 'mm', '#c9a9f2');
+        jointNote = document.createElement('p');
+        joints.append(jointNote);
       }
-      const reference = data.explicit_reference ? '原始轨迹' : '首条对照记录';
-      description.textContent = `相对${reference}，按实测时间对齐全部 ${data.episodes} 条扩增轨迹。每个时刻只计仍有记录的轨迹。`;
-      if (Object.keys(data.range ?? {}).length) description.append('色带覆盖最小值至最大值，实线表示均值。');
-      document.getElementById('deviation-panels').hidden = false;
-      const tcp = document.getElementById('tcp-deviations');
-      addCurve(tcp, 'translation_mm', '平移距离', 'mm', '#80c7ff');
-      addCurve(tcp, 'rotation_deg', '相对旋转角', '°', '#e6af77');
-      if (!data.mean.translation_mm) tcp.append('记录中缺少所选机械臂的完整 TCP 标定。');
-      const joints = document.getElementById('joint-deviations');
-      addCurve(joints, 'qpos_deg', '转动关节最大绝对偏差', '°', '#85d5b8');
-      addCurve(joints, 'qpos_mm', '移动关节最大绝对偏差', 'mm', '#c9a9f2');
-      const names = Object.values(data.arm_joint_groups).flat();
-      const note = document.createElement('p');
-      note.textContent = names.length ? `统计关节 · ${names.join('、')}` : '记录中缺少可识别的机械臂关节组。';
-      joints.append(note);
-      updateReadout();
     } catch {
-      description.textContent = '偏差曲线加载失败，请刷新页面重试。';
+      failed = true;
     }
+    renderLanguage();
   }
 
+  document.addEventListener('preview-language-change', renderLanguage);
+  renderLanguage();
   load();
   return {setFrame(frame) {
     if (frame !== playbackFrame) { playbackFrame = frame; updateReadout(); }

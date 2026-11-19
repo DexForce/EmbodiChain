@@ -19,17 +19,19 @@
   const canvas = element('plot');
   const ctx = canvas.getContext('2d');
   const objectSelect = element('object');
-  const millimeters = new Intl.NumberFormat('zh-CN', {maximumSignificantDigits: 4});
   const peak = counts => Math.max(...counts.map(row => Math.max(...row)));
-  let data, object, view, xAxis, yAxis, colors, area, cell = null;
+  let data, object, view, xAxis, yAxis, colors, area, cell = null, failed = false;
 
   function axisScale(edges) {
     const bins = edges.length - 1;
     const step = (edges[bins] - edges[0]) / bins;
     const digits = Math.min(20, Math.max(0, 1 - Math.floor(Math.log10(step))));
-    const number = new Intl.NumberFormat('zh-CN', {maximumFractionDigits: digits, useGrouping: false});
+    const number = new Intl.NumberFormat(document.documentElement.lang, {
+      maximumFractionDigits: digits,
+      useGrouping: false,
+    });
     const ticks = [0, 0.25, 0.5, 0.75, 1].map(t => number.format(edges[Math.round(t * bins)]));
-    const meters = (a, b) => `${number.format(a)} ～ ${number.format(b)} m`;
+    const meters = (a, b) => previewText('meters', {low: number.format(a), high: number.format(b)});
     return {step, ticks, meters};
   }
 
@@ -108,27 +110,48 @@
   function reportCell() {
     const output = element('cell');
     if (!cell) {
-      output.textContent = '指向或轻点网格，查看该位置的坐标和轨迹数。';
+      output.textContent = previewText('heatmapInspect');
       return;
     }
     const {row, col} = cell;
     const x = object.x_edges_m, y = object.y_edges_m;
-    output.textContent = `起点 ${view.counts[row][col]} / ${object.episodes} 条轨迹 · X ${xAxis.meters(x[col], x[col + 1])} · Y ${yAxis.meters(y[row], y[row + 1])}`;
+    output.textContent = previewText('heatmapCell', {
+      count: view.counts[row][col],
+      total: object.episodes,
+      x: xAxis.meters(x[col], x[col + 1]),
+      y: yAxis.meters(y[row], y[row + 1]),
+    });
+  }
+
+  function renderLanguage() {
+    const description = element('description');
+    if (failed || !object) {
+      const key = failed ? 'heatmapFailed' : data ? 'heatmapEmpty' : 'heatmapLoading';
+      description.textContent = previewText(key);
+      return;
+    }
+    xAxis = axisScale(object.x_edges_m);
+    yAxis = axisScale(object.y_edges_m);
+    description.textContent = previewText('heatmapHelp', {count: object.episodes, object: object.uid});
+    const [low, high] = view.bounds_m;
+    const x = xAxis.meters(low[0], high[0]);
+    const y = yAxis.meters(low[1], high[1]);
+    const millimeters = new Intl.NumberFormat(document.documentElement.lang, {maximumSignificantDigits: 4});
+    element('x').textContent = x;
+    element('y').textContent = y;
+    element('step').textContent = `${millimeters.format(xAxis.step * 1000)} × ${millimeters.format(yAxis.step * 1000)} mm`;
+    const max = peak(view.counts);
+    element('peak').textContent = previewText('heatmapPeak', {max, total: object.episodes});
+    canvas.setAttribute('aria-label', previewText('heatmapAlt', {object: object.uid, x, y, max}));
+    reportCell();
+    draw();
   }
 
   function selectObject() {
     object = data.objects[objectSelect.selectedIndex];
     view = object.views.start;
-    xAxis = axisScale(object.x_edges_m);
-    yAxis = axisScale(object.y_edges_m);
     cell = null;
-    element('description').textContent = `${object.episodes} 条 object_pose 扩增轨迹记录了 ${object.uid} 的起点。X、Y 轴按各自的首帧实测范围缩放。`;
-    const [low, high] = view.bounds_m;
-    element('x').textContent = xAxis.meters(low[0], high[0]);
-    element('y').textContent = yAxis.meters(low[1], high[1]);
-    element('step').textContent = `${millimeters.format(xAxis.step * 1000)} × ${millimeters.format(yAxis.step * 1000)} mm`;
     const max = peak(view.counts);
-    element('peak').textContent = `${max} / ${object.episodes} 条`;
     colors = colorScale(max);
     element('scale-max').textContent = max;
     element('scale').replaceChildren(...colors.map(color => {
@@ -136,9 +159,7 @@
       swatch.style.backgroundColor = color;
       return swatch;
     }));
-    canvas.setAttribute('aria-label', `${object.uid} 扩增起点 · X ${xAxis.meters(low[0], high[0])} · Y ${yAxis.meters(low[1], high[1])} · 单格最多 ${max} 条轨迹`);
-    reportCell();
-    draw();
+    renderLanguage();
   }
 
   function inspect(event) {
@@ -165,21 +186,23 @@
   new ResizeObserver(draw).observe(canvas);
 
   async function load() {
-    const description = element('description');
     try {
       const response = await fetch('/object-heatmaps');
-      if (!response.ok) throw Error('heatmaps');
+      if (!response.ok) throw Error('Could not read starting positions');
       data = await response.json();
-      if (!data.objects.length) {
-        description.textContent = '当前输入中没有记录 object_pose 扩增物体的起点。';
+      if (data.objects.length) {
+        for (const item of data.objects) objectSelect.add(new Option(item.uid, item.uid));
+        element('panel').hidden = false;
+        selectObject();
         return;
       }
-      for (const item of data.objects) objectSelect.add(new Option(item.uid, item.uid));
-      element('panel').hidden = false;
-      selectObject();
     } catch {
-      description.textContent = '扩增起点加载失败，请刷新页面重试。';
+      failed = true;
     }
+    renderLanguage();
   }
+
+  document.addEventListener('preview-language-change', renderLanguage);
+  renderLanguage();
   load();
 })();

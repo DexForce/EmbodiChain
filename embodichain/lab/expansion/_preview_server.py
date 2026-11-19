@@ -14,137 +14,94 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Loopback-only native preview transport. WebRTC integration remains a TODO."""
+"""Serve recorded expansion playback through the native WebRTC viewport."""
 
 from __future__ import annotations
 
-import base64
+from collections import deque
 import json
-import queue
-import threading
+import socket
 import time
 import webbrowser
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
-from urllib.parse import urlsplit
+from typing import TYPE_CHECKING
 from ._preview_data import PreviewData, PreviewState
 from ._preview_heatmap import object_heatmaps
+
+if TYPE_CHECKING:
+    from embodichain.lab.visualization._web_viewer import _WebViewer
 
 __all__: list[str] = []
 
 
-class PreviewTransport:
-    def __init__(self, state: PreviewState, port: int) -> None:
+def _json(value: object) -> str:
+    return json.dumps(value, allow_nan=False, separators=(",", ":"))
+
+
+def _assets(data: PreviewData) -> dict[str, tuple[str, bytes]]:
+    static = {
+        route: (mime, Path(__file__).with_name(filename).read_bytes())
+        for route, filename, mime in (
+            ("/", "_preview.html", "text/html; charset=utf-8"),
+            ("/preview.css", "_preview.css", "text/css; charset=utf-8"),
+            ("/preview-text.js", "_preview_text.js", "text/javascript; charset=utf-8"),
+            (
+                "/preview-controls.js",
+                "_preview_controls.js",
+                "text/javascript; charset=utf-8",
+            ),
+            (
+                "/preview-charts.js",
+                "_preview_charts.js",
+                "text/javascript; charset=utf-8",
+            ),
+            (
+                "/preview-heatmap.js",
+                "_preview_heatmap.js",
+                "text/javascript; charset=utf-8",
+            ),
+        )
+    }
+    static["/object-heatmaps"] = (
+        "application/json",
+        _json(object_heatmaps(data)).encode(),
+    )
+    return static
+
+
+class _WebPreviewTransport:
+    """Serve replay controls and statistics over the native video listener."""
+
+    def __init__(
+        self, state: PreviewState, viewer: _WebViewer, deviations: bytes
+    ) -> None:
         self.state = state
-        self.commands: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=64)
-        self.lock = threading.Lock()
-        self.status: dict[str, Any] = {}
-        self.jpeg = b""
-        self.snapshot = b"{}"
-        self.deviations = b"{}"
-        html = Path(__file__).with_name("_preview.html").read_bytes()
-        charts_js = Path(__file__).with_name("_preview_charts.js").read_bytes()
-        heatmap_js = Path(__file__).with_name("_preview_heatmap.js").read_bytes()
-        heatmaps = json.dumps(
-            object_heatmaps(state.data), allow_nan=False, separators=(",", ":")
-        ).encode()
-        owner = self
+        self.commands: deque[dict[str, object]] = deque()
+        self.url = viewer.endpoint
+        self.status = "{}"
+        assets = _assets(state.data)
+        assets["/deviations"] = ("application/json", deviations)
+        viewer._replace_application(assets, self._request)
 
-        class Handler(BaseHTTPRequestHandler):
-            def setup(self) -> None:
-                super().setup()
-                self.connection.settimeout(3)
+    def _request(self, path: str, raw: str) -> tuple[int, str]:
+        if path == "/api/state":
+            return 200, self.status
+        if path != "/api/command":
+            return 404, '{"error":"unknown route"}'
+        # DexSim has already checked same-origin and the current viewer token.
+        if len(self.commands) >= 64:
+            return 429, '{"error":"replay control queue is full"}'
+        try:
+            if len(raw) > 4096:
+                raise ValueError("control size")
+            update = self.state.validate(json.loads(raw))
+        except (ValueError, TypeError):
+            return 400, '{"error":"invalid replay control"}'
+        self.commands.append(update)
+        return 200, "{}"
 
-            def log_message(self, *_: object) -> None:
-                pass
-
-            def do_GET(self) -> None:
-                if urlsplit("//" + self.headers.get("Host", "")).hostname not in {
-                    "127.0.0.1",
-                    "localhost",
-                    "::1",
-                }:
-                    self.send_error(403)
-                    return
-                route = self.path.split("?")[0]
-                with owner.lock:
-                    if route == "/":
-                        data, kind = html, "text/html; charset=utf-8"
-                    elif route == "/preview-charts.js":
-                        data, kind = charts_js, "text/javascript; charset=utf-8"
-                    elif route == "/preview-heatmap.js":
-                        data, kind = heatmap_js, "text/javascript; charset=utf-8"
-                    elif route == "/object-heatmaps":
-                        data, kind = heatmaps, "application/json"
-                    elif route == "/state":
-                        data, kind = (
-                            json.dumps(owner.status, allow_nan=False).encode(),
-                            "application/json",
-                        )
-                    elif route == "/snapshot":
-                        data, kind = owner.snapshot, "application/json"
-                    elif route == "/deviations":
-                        data, kind = owner.deviations, "application/json"
-                    elif route == "/frame.jpg":
-                        data, kind = owner.jpeg, "image/jpeg"
-                    else:
-                        self.send_error(404)
-                        return
-                self.send_response(200)
-                self.send_header("Content-Type", kind)
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("X-Content-Type-Options", "nosniff")
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                try:
-                    self.wfile.write(data)
-                except (BrokenPipeError, ConnectionResetError):
-                    pass
-
-            def do_POST(self) -> None:
-                if self.path != "/control":
-                    self.send_error(404)
-                    return
-                origin = self.headers.get("Origin")
-                host = self.headers.get("Host", "")
-                # Same-origin loopback controls also work through a different forwarded port.
-                if (
-                    urlsplit("//" + host).hostname
-                    not in {"127.0.0.1", "localhost", "::1"}
-                    or self.headers.get("Content-Type") != "application/json"
-                    or (origin and origin != "http://" + host)
-                ):
-                    self.send_error(403)
-                    return
-                try:
-                    size = int(self.headers.get("Content-Length", "0"))
-                    if not 0 < size <= 4096:
-                        raise ValueError("control size")
-                    update = owner.state.validate(json.loads(self.rfile.read(size)))
-                    owner.commands.put_nowait(update)
-                except (ValueError, TypeError, queue.Full, TimeoutError):
-                    self.send_error(400)
-                    return
-                self.send_response(204)
-                self.end_headers()
-
-        self.server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-        self.server.daemon_threads = True
-        self.url = f"http://127.0.0.1:{self.server.server_port}/"
-
-    def publish(self, status: dict[str, Any], jpeg: bytes) -> None:
-        snapshot = json.dumps(
-            {
-                **status,
-                "image": "data:image/jpeg;base64," + base64.b64encode(jpeg).decode(),
-            },
-            allow_nan=False,
-        ).encode()
-        with self.lock:
-            self.status = status
-            self.jpeg = jpeg
-            self.snapshot = snapshot
+    def publish(self, status: dict[str, object]) -> None:
+        self.status = _json(status)
 
 
 def serve_preview(
@@ -155,79 +112,77 @@ def serve_preview(
     open_browser: bool = False,
     duration: float = 0,
 ) -> None:
+    """Replay confirmed episodes in a browser using the native observer."""
     from ._preview_deviations import deviation_curves
     from ._preview_render import native_renderer
 
+    if port == 0:
+        # The native World configuration requires a concrete listening port.
+        with socket.socket() as probe:
+            probe.bind(("0.0.0.0", 0))
+            port = probe.getsockname()[1]
+
     state = PreviewState(data)
-    transport = PreviewTransport(state, port)
-    thread = None
-    try:
-        with native_renderer(data, gpu) as renderer:
-            transport.deviations = json.dumps(
-                deviation_curves(data, renderer.link_names),
-                allow_nan=False,
-                separators=(",", ":"),
-            ).encode()
-            frame = 0
+    with native_renderer(data, gpu, web_port=port) as renderer:
+        viewer = renderer.web_viewer
+        deviations = _json(deviation_curves(data, renderer.link_names)).encode()
+        transport = _WebPreviewTransport(state, viewer, deviations)
+        frame_period = 1 / viewer.cfg.fps
+        frame = 0
 
-            def publish() -> None:
-                nonlocal frame
-                jpeg = renderer.draw(state)
-                transport.publish(
-                    {
-                        **state.snapshot(),
-                        **renderer.stats,
-                        "frame": frame,
-                        "renderer": "EmbodiChain / DexSim Hybrid + OptiX",
-                        "transport": "HTTP JPEG",
-                    },
-                    jpeg,
+        def publish() -> None:
+            nonlocal frame
+            renderer.draw(state)
+            transport.publish(
+                {
+                    **state.snapshot(),
+                    **renderer.stats,
+                    "frame": frame,
+                    "transport": "WebRTC",
+                }
+            )
+            frame += 1
+
+        publish()
+        print(
+            json.dumps(
+                {
+                    "state": "ready",
+                    "url": transport.url,
+                    "episodes": len(data.clips),
+                    "physics_steps": 0,
+                    "transport": "WebRTC",
+                }
+            ),
+            flush=True,
+        )
+        if open_browser:
+            webbrowser.open(transport.url)
+
+        start = last = next_frame = time.monotonic()
+        next_idle_frame = start + 0.25
+        dirty = False
+        while not duration or time.monotonic() - start < duration:
+            now = time.monotonic()
+            elapsed = now - last
+            last = now
+            while transport.commands:
+                state.apply(transport.commands.popleft())
+                dirty = True
+            if state.values["playing"]:
+                state.values["progress"] = min(
+                    1.0, state.values["progress"] + elapsed / state.duration
                 )
-                frame += 1
-
-            publish()
-            thread = threading.Thread(
-                target=transport.server.serve_forever, daemon=True
-            )
-            thread.start()
-            print(
-                json.dumps(
-                    {
-                        "state": "ready",
-                        "url": transport.url,
-                        "episodes": len(data.clips),
-                        "physics_steps": 0,
-                        "transport": "HTTP JPEG",
-                    }
-                ),
-                flush=True,
-            )
-            if open_browser:
-                webbrowser.open(transport.url)
-            start = last = time.monotonic()
-            while not duration or time.monotonic() - start < duration:
-                now = time.monotonic()
-                elapsed = now - last
-                last = now
+                if state.values["progress"] >= 1:
+                    state.values["playing"] = False
+                dirty = True
+            if now >= next_frame and (dirty or now >= next_idle_frame):
+                # Capturing the native observer also services its app requests.
+                publish()
                 dirty = False
-                while True:
-                    try:
-                        state.apply(transport.commands.get_nowait())
-                        dirty = True
-                    except queue.Empty:
-                        break
-                if state.values["playing"]:
-                    state.values["progress"] = min(
-                        1.0, state.values["progress"] + elapsed / state.duration
-                    )
-                    if state.values["progress"] >= 1:
-                        state.values["playing"] = False
-                    dirty = True
-                if dirty:
-                    publish()
-                time.sleep(max(0.01, 0.1 - (time.monotonic() - now)))
-    finally:
-        if thread is not None:
-            transport.server.shutdown()
-            thread.join(timeout=5)
-        transport.server.server_close()
+                next_frame = now + frame_period
+                next_idle_frame = now + 0.25
+            else:
+                viewer._process_application_requests()
+            wait = min(0.01, next_frame - time.monotonic()) if dirty else 0.01
+            time.sleep(max(0.001, wait))

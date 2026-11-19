@@ -45,7 +45,7 @@ folder; it is no longer the existing-result input flag. `--plan-only` freezes an
 validates samples without executing, and `--no-open` suppresses automatic opening.
 The [preview guide](ghost-preview.md) explains budgets, failed-boundary evidence,
 scene-atlas domains, finite-sampling limitations and the WebRTC TODO. Rendering is
-native; browser transport remains HTTP JPEG, not WebRTC.
+native; the browser receives H.264 video over WebRTC.
 
 ## Run a configured job
 

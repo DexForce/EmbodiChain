@@ -155,6 +155,9 @@ def get_package_data() -> dict[str, list[str]]:
         "embodichain": ["VERSION"],
         "embodichain.lab.expansion": [
             "_preview.html",
+            "_preview.css",
+            "_preview_text.js",
+            "_preview_controls.js",
             "_preview_charts.js",
             "_preview_heatmap.js",
             "_distribution.html",
