@@ -239,10 +239,14 @@ def load_inputs(
     root = directory.resolve(strict=True)
     manifest = json.loads((root / "fitting.json").read_text())
     required = {"schema", "inputs", "annotations", "frame_clock", "files"}
+    schema = manifest.get("schema")
+    if schema == "scene-skill-fitting-inputs/v2":
+        required.add("execution_context")
     if (
         not required <= manifest.keys()
         or manifest.keys() - (required | {"frame_source"})
-        or manifest["schema"] != "scene-skill-fitting-inputs/v1"
+        or schema
+        not in {"scene-skill-fitting-inputs/v1", "scene-skill-fitting-inputs/v2"}
     ):
         raise ValueError("Unsupported fitting input bundle.")
     for name, digest in manifest["files"].items():
@@ -255,6 +259,11 @@ def load_inputs(
         settings[key] = str(_contained(root, settings[key]))
     inputs = FitInputs(**settings)
     inputs.check()
+    if (
+        schema == "scene-skill-fitting-inputs/v2"
+        and inputs.qpos_semantics != "design_reference"
+    ):
+        raise ValueError("Version 2 fitting requires an explicit design reference.")
     # Robot/scene dependencies are also confined to the sealed file inventory.
     profile = RobotProfile.load(inputs.robot_profile)
     from ._scene import load_scene
@@ -299,6 +308,8 @@ def load_inputs(
     visual = _video_source(root, manifest)
     if visual is not None:
         dependencies.add(str(visual[0]))
+    if schema == "scene-skill-fitting-inputs/v2":
+        dependencies.add(str(_contained(root, manifest["execution_context"])))
     inventory = {str(_contained(root, p)) for p in manifest["files"]}
     if dependencies - inventory:
         raise ValueError("Bundle has unlisted or external robot/scene dependencies.")

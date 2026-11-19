@@ -226,7 +226,21 @@ def _hand_geometry(
             result.append(link)
         return result
 
-    names = profile.control_parts[hand]
+    drivers = profile.control_parts[hand]
+    names = drivers
+    followers = {}
+    if len(drivers) == 1:
+        # Some parallel grippers expose only an aperture driver to the
+        # controller. Use its physical URDF followers for geometry.
+        for name, joint in joints.items():
+            mimic = joint.find("mimic")
+            if mimic is not None and mimic.get("joint") == drivers[0]:
+                followers[name] = (
+                    float(mimic.get("multiplier", "1")),
+                    float(mimic.get("offset", "0")),
+                )
+        if followers:
+            names = list(followers)
     if any(n not in joints or joints[n].attrib["type"] != "prismatic" for n in names):
         raise ValueError(
             "Automatic grasp geometry needs configured parallel prismatic fingers and their collision meshes."
@@ -244,8 +258,15 @@ def _hand_geometry(
     def frames(command: str) -> dict[str, np.ndarray]:
         state = {
             **values,
-            **dict(zip(names, profile.hand_commands[hand][command], strict=True)),
+            **dict(zip(drivers, profile.hand_commands[hand][command], strict=True)),
         }
+        if followers:
+            state.update(
+                {
+                    name: state[drivers[0]] * gain + offset
+                    for name, (gain, offset) in followers.items()
+                }
+            )
         fk = chain.forward_kinematics(
             torch.tensor([[state[n] for n in parameters]], dtype=torch.float64)
         )
@@ -298,7 +319,7 @@ def _hand_geometry(
         tcp_link=solver["end_link_name"],
         collision_links=links,
         joint_positions=dict(
-            zip(names, profile.hand_commands[hand]["open"], strict=True)
+            zip(drivers, profile.hand_commands[hand]["open"], strict=True)
         ),
         link_from_tcp=tcp_offset,
         grasp_from_tcp=np.linalg.inv(canonical) @ root_from_tcp,
@@ -411,6 +432,7 @@ def prepare_scene_grasps(
     phase_hints: list[dict[str, Any]] | None,
     *,
     grasp_world_z_offset_m: float = 0.0,
+    observed_object_to_tcp: list[list[float]] | None = None,
 ) -> tuple[list[GraspGoal], dict[str, Any], dict[str, str]]:
     """Sample one bounded affordance pool, then rank against the observed grasp."""
     from embodichain.lab.sim.atomic_skills import ObjectSemantics
@@ -473,10 +495,6 @@ def prepare_scene_grasps(
             )
 
         target = min(objects, key=distance)
-    geometry, gripper_inputs = _hand_geometry(
-        profile, pair, qpos[0], cfg.grasp_contact_inset_m
-    )
-    files.update(geometry.provenance["files_sha256"])
     affordance = AntipodalAffordance(
         mesh_vertices=torch.as_tensor(
             target.vertices, dtype=torch.float32, device=robot.device
@@ -485,6 +503,52 @@ def prepare_scene_grasps(
             target.triangles, dtype=torch.long, device=robot.device
         ),
     )
+    if observed_object_to_tcp is not None:
+        relation = np.asarray(observed_object_to_tcp, dtype=float)
+        if (
+            relation.shape != (4, 4)
+            or not np.isfinite(relation).all()
+            or not np.allclose(relation[3], (0, 0, 0, 1), atol=1e-7)
+            or not np.allclose(
+                relation[:3, :3].T @ relation[:3, :3], np.eye(3), atol=1e-5
+            )
+            or not np.isclose(np.linalg.det(relation[:3, :3]), 1.0, atol=1e-5)
+            or grasp_world_z_offset_m != 0
+        ):
+            raise ValueError(
+                "The measured grasp must be a rigid object-to-TCP transform."
+            )
+        pose = target.pose @ relation
+        if np.linalg.norm(pose[:3, 3] - reference[:3, 3]) > cfg.max_grasp_distance_m:
+            raise ValueError("The measured grasp is outside the fitted encounter.")
+        object_pose = torch.as_tensor(
+            target.pose, dtype=torch.float32, device=robot.device
+        )
+        goal = GraspGoal(
+            semantics=ObjectSemantics(
+                affordance=affordance, geometry={}, entity_id=target.identifier
+            ),
+            grasp_xpos=object_pose.new_tensor(pose),
+            object_pose=object_pose,
+        )
+        return (
+            [goal],
+            {
+                "object_id": target.identifier,
+                "world_from_object": target.pose.tolist(),
+                "object_to_tcp": relation.tolist(),
+                "scene_path": str(scene_path.resolve()),
+                "mesh_path": str(target.mesh_path),
+                "observed_grasp_xpos": pose.tolist(),
+                "candidate_count": 1,
+                "grasp_validity_scope": "measured_relative_grasp_requires_runtime_validation",
+            },
+            files,
+        )
+    geometry, gripper_inputs = _hand_geometry(
+        profile, pair, qpos[0], cfg.grasp_contact_inset_m
+    )
+    files.update(geometry.provenance["files_sha256"])
     rows, costs, roll_variants = [], [], []
     for half_turn in (False, True):
         # Keep the actual TCP position/approach axis fixed, even for a virtual

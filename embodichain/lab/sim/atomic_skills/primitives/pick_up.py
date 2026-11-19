@@ -240,6 +240,12 @@ class PickUpOptions(SkillOptions):
     observed rotation instead of a shared world vector.
     """
 
+    verified_object_to_eef: torch.Tensor | None = None
+    """Expected measured attachment relation when the command is servo-compensated."""
+
+    grasp_relative_approach: tuple[torch.Tensor, ...] = ()
+    """Optional TCP waypoints relative to the resolved grasp, ordered before close."""
+
     cartesian_lift: bool = False
     """Preserve a straight world-Z lift with IK interpolation and native limits.
 
@@ -303,6 +309,20 @@ class PickUpOptions(SkillOptions):
             or not torch.isfinite(self.obj_upright_direction).all()
         ):
             raise ValueError("obj_upright_direction must be a finite (3,) tensor.")
+        for index, pose in enumerate(self.grasp_relative_approach):
+            _validate_single_se3(pose, f"grasp_relative_approach[{index}]")
+        object.__setattr__(
+            self,
+            "grasp_relative_approach",
+            tuple(pose.clone() for pose in self.grasp_relative_approach),
+        )
+        if self.verified_object_to_eef is not None:
+            _validate_single_se3(self.verified_object_to_eef, "verified_object_to_eef")
+            object.__setattr__(
+                self,
+                "verified_object_to_eef",
+                self.verified_object_to_eef.clone(),
+            )
         _validate_single_se3(self.grasp_frame_to_eef, "grasp_frame_to_eef")
         if type(self.cartesian_lift) is not bool:
             raise TypeError("cartesian_lift must be boolean.")
@@ -437,6 +457,12 @@ class PickUp(AtomicSkill[GraspGoal | PickUpMotionGoal, PickUpOptions]):
             motion_options.sample_count = None
         waypoints = [pre_grasp_xpos, grasp_xpos, lift_xpos]
         phase_names = ["pre_grasp", "grasp", "lift"]
+        if options.grasp_relative_approach:
+            waypoints[:1] = [
+                grasp_xpos @ waypoint.to(grasp_xpos)
+                for waypoint in options.grasp_relative_approach
+            ]
+            phase_names[:1] = ["pre_grasp"] * len(options.grasp_relative_approach)
         if options.initial_lift_height > 0.0:
             start_xpos = self.robot.compute_fk(
                 qpos=start_arm_qpos,
@@ -951,6 +977,9 @@ class PickUp(AtomicSkill[GraspGoal | PickUpMotionGoal, PickUpOptions]):
         sem = target.semantics
         state = context
         object_to_eef = torch.bmm(pose_inv(object_pose), grasp_xpos)
+        if options.verified_object_to_eef is not None:
+            object_to_eef = options.verified_object_to_eef.to(object_pose)
+            object_to_eef = object_to_eef.unsqueeze(0).expand_as(object_pose).clone()
         held = HeldObjectState(
             semantics=sem, object_to_eef=object_to_eef, grasp_xpos=grasp_xpos
         )

@@ -153,6 +153,31 @@ class _DemoSkillLowererFactory:
                             "DemoSkill roles must belong to the registered simulation"
                         )
                     roles[name], uids[name] = ref.entity_id, entity.uid
+                initial_role = getattr(owner, "initial_held_role", None)
+                if initial_role is not None:
+                    primary = bound.binding.resources.get("primary")
+                    motion = (
+                        None if primary is None else primary.endpoints.get("motion")
+                    )
+                    grasp = None if primary is None else primary.endpoints.get("grasp")
+                    if (
+                        motion is None
+                        or grasp is None
+                        or motion.task_state_key != grasp.task_state_key
+                    ):
+                        raise ValueError(
+                            "DemoSkill entry requires a shared motion and grasp state key"
+                        )
+                    held = context.task.get_held_object(motion.task_state_key)
+                    if (
+                        held is None
+                        or held.semantics.entity_id != roles[initial_role]
+                        or held.env_mask is None
+                        or not bool(held.env_mask.all())
+                    ):
+                        raise ValueError(
+                            "DemoSkill entry requires verified held-object evidence"
+                        )
                 semantics = None
                 registered_effect = None
                 if owner.terminal_held_role is not None or owner.release_on_exit:
@@ -167,7 +192,7 @@ class _DemoSkillLowererFactory:
 
                     role = owner.terminal_held_role
                     if role is None:
-                        role = owner.released_role
+                        role = initial_role or owner.released_role
                         if role is None:
                             raise ValueError(
                                 "release_on_exit requires an explicit terminal object role"
@@ -203,7 +228,9 @@ class _DemoSkillLowererFactory:
                                 ),
                                 object_id=roles[role],
                                 slot_id="primary",
-                                allow_missing_detached_baseline=owner.release_on_exit,
+                                allow_missing_detached_baseline=(
+                                    owner.release_on_exit and initial_role is None
+                                ),
                             ),
                         ),
                     )

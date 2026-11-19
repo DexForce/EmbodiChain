@@ -715,19 +715,42 @@ def fit_skill_segment(
     if scene_grasps is not None and skill_id == "pick_up" and phase_hints is None:
         # Only the outer clock/boundaries are fixed for scene reconstruction.
         # A changed grasp may need more time to connect to the recorded end.
-        # Search a bounded set of free-phase allocations while preserving the
-        # observed closing duration; explicit phase hints remain authoritative.
+        # The fitted command may open wider than the observed grasp. Allocate
+        # enough ticks to close at the same velocity and acceleration limits.
+        # Explicit phase hints remain authoritative.
         closing = lift_start - close_start
+        hand = endpoints["primary"]["grasp"]
+        hand_ids = participant_data["primary"][4]
+        hand_profile = engine.control_profiles[hand]
+        travel = (
+            torch.as_tensor(hand_profile.commands[OPEN_COMMAND].positions).cpu().numpy()
+            - torch.as_tensor(hand_profile.commands[GRASP_COMMAND].positions)
+            .cpu()
+            .numpy()
+        )
+        source_dt = float(np.min(np.diff(times)))
+        max_step = np.minimum(
+            velocity[hand_ids] * source_dt,
+            acceleration[hand_ids] * source_dt**2,
+        )
+        closing = max(closing, int(np.ceil(np.max(np.abs(travel) / max_step))) + 1)
         free = len(q) - closing
-        for fraction in (0.5, 0.45, 0.4, 0.55, 0.6):
-            before = int(round(free * fraction))
-            alternative = [
-                dict(name="approach", start=0, stop=before),
-                dict(name="close", start=before, stop=before + closing),
-                dict(name="lift", start=before + closing, stop=len(q)),
-            ]
-            if alternative not in phase_options:
-                phase_options.append(alternative)
+        if free >= 4:
+            native_max_step = np.minimum(
+                velocity[hand_ids] * cfg.control_dt,
+                acceleration[hand_ids] * cfg.control_dt**2,
+            )
+            native_closing = int(np.ceil(np.max(np.abs(travel) / native_max_step))) + 1
+            options = replace(options, hand_interp_steps=max(closing, native_closing))
+            for fraction in (0.5, 0.45, 0.4, 0.55, 0.6):
+                before = int(round(free * fraction))
+                alternative = [
+                    dict(name="approach", start=0, stop=before),
+                    dict(name="close", start=before, stop=before + closing),
+                    dict(name="lift", start=before + closing, stop=len(q)),
+                ]
+                if alternative not in phase_options:
+                    phase_options.append(alternative)
 
     def connect_scene(
         values: np.ndarray, fit_phases: list[dict[str, Any]]

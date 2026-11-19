@@ -34,6 +34,18 @@ Native skill fitting
 .. automodule:: embodichain.lab.sim.atomic_skills.fitting
    :members:
 
+Task Program execution bindings
+-------------------------------
+
+Use ``export_task_program`` to bind an accepted Pickup fit to a supplied
+execution context and its explicitly assigned demonstration spans. The export
+preserves the execution cadence and records how timed source events map to
+compiled invocations. Use ``load_invocation_bindings`` to verify the sealed files
+and validate the invocation policies against a fresh compile before execution.
+
+.. automodule:: embodichain.toolkits.skill_fitting.task_program
+   :members:
+
 Numerical primitives
 --------------------
 

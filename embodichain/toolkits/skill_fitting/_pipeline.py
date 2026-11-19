@@ -49,6 +49,7 @@ class FitInputs:
     env_index: int = 0
     device: str = "cpu"
     phase_hints: list[dict[str, Any]] | None = None
+    observed_object_to_tcp: list[list[float]] | None = None
     fit_config: dict[str, Any] = {}
 
     def check(self) -> None:
@@ -141,6 +142,10 @@ def fit_recording(
 
     if set(inputs.fit_config) - set(SkillFitCfg.__dataclass_fields__):
         raise ValueError("Unknown fit configuration fields.")
+    if inputs.observed_object_to_tcp is not None and (
+        not inputs.scene or not inputs.object_id or skill_id != "pick_up"
+    ):
+        raise ValueError("A measured grasp requires a scene-bound Pickup.")
     cfg = SkillFitCfg(**inputs.fit_config)
     cfg.validate()
     paths = [
@@ -220,6 +225,7 @@ def fit_recording(
             recording.qpos[start:stop],
             cfg,
             inputs.phase_hints,
+            observed_object_to_tcp=inputs.observed_object_to_tcp,
             **options,
         )
         if any(scene_files.get(p) != d for p, d in defaults_files.items()):

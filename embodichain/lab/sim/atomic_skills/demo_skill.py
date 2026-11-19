@@ -322,8 +322,19 @@ class DemoSkillMotionProvider:
             device=context.robot.qpos.device,
             dtype=context.robot.qpos.dtype,
         ).unsqueeze(0)
+        entry_observed = context.robot.qpos
+        if spec.initial_held_role is not None:
+            # A verified squeeze can deflect passive follower joints in contact.
+            # Those joints obey mimic relationships on commanded trajectory samples.
+            robot = self.motion_generator.robot
+            passive = set(getattr(robot, "mimic_ids", ()))
+            independent = [
+                index for index in range(initial.shape[-1]) if index not in passive
+            ]
+            initial = initial[:, independent]
+            entry_observed = entry_observed[:, independent]
         entry_matches = torch.allclose(
-            initial, context.robot.qpos, atol=spec.entry_tolerance, rtol=0
+            initial, entry_observed, atol=spec.entry_tolerance, rtol=0
         )
         if not entry_matches and not spec.allow_entry_connection:
             raise ValueError("DemoSkill entry posture differs from the recorded state")
@@ -466,6 +477,30 @@ class DemoSkillMotionProvider:
             )
             self.monitor.spec = spec
             self.monitor.sample_count = path.shape[1]
+        if entry_matches and spec.initial_held_role is not None:
+            hand = request.binding.endpoint("primary", "grasp").require_target(
+                JointPositionTarget
+            )
+            controlled = set(arm.joint_ids) | set(hand.joint_ids)
+            for child, parent in zip(
+                getattr(generator.robot, "mimic_ids", ()),
+                getattr(generator.robot, "mimic_parents", ()),
+                strict=True,
+            ):
+                if parent in controlled:
+                    controlled.add(child)
+            unowned = sorted(set(range(path.shape[-1])) - controlled)
+            if unowned and torch.allclose(
+                path[:, :, unowned],
+                path[:, :1, unowned].expand(-1, path.shape[1], -1),
+                atol=1e-6,
+                rtol=0,
+            ):
+                path[:, :, unowned] = context.robot.qpos[:, None, unowned]
+            # The held-entry guard first qualified the measured posture. Use that
+            # exact posture for the zero-time arm sample while keeping gripper load.
+            ids = list(arm.joint_ids)
+            path[:, 0, ids] = context.robot.qpos[:, ids]
         self._nominal_spec = spec
         timed = TimedTrajectory.from_uniform_step(
             path, env_ids=context.env_ids, step_dt=context.require_control_dt()

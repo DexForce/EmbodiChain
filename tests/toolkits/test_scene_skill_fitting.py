@@ -38,6 +38,34 @@ from embodichain.toolkits.skill_fitting._scene import (
 )
 
 
+def test_task_program_keeps_annotation_shoulders_and_unmarked_spans():
+    from embodichain.toolkits.skill_fitting.task_program import _execution_timeline
+
+    spans = [
+        {"kind": "demo_skill", "start": 0, "stop": 3},
+        {
+            "kind": "atomic_skill",
+            "start": 3,
+            "stop": 13,
+            "fit_start": 5,
+            "fit_stop": 11,
+            "annotation": {"id": "acquire"},
+        },
+        {"kind": "demo_skill", "start": 13, "stop": 20},
+    ]
+    assert [
+        (s["kind"], s["start"], s["stop"]) for s in _execution_timeline(spans, 20)
+    ] == [
+        ("demo_skill", 0, 3),
+        ("demo_skill", 3, 5),
+        ("atomic_skill", 5, 11),
+        ("demo_skill", 11, 13),
+        ("demo_skill", 13, 20),
+    ]
+    with pytest.raises(ValueError, match="outside its source annotation"):
+        _execution_timeline([spans[0], {**spans[1], "fit_start": 2}, spans[2]], 20)
+
+
 def test_scene_pickup_defaults_are_explicit_validated_and_digest_bound(
     tmp_path,
 ) -> None:
@@ -364,26 +392,43 @@ def test_half_turn_preserves_runtime_tcp_origin_and_qualifies_its_actual_surface
     assert rank_grasps(candidates, reference, 0.05) == [1, 0]
 
 
-def test_contact_grounding_preserves_a_virtual_runtime_tcp(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "coupled", [False, True], ids=["direct_fingers", "mimic_driver"]
+)
+def test_contact_grounding_preserves_a_virtual_runtime_tcp(
+    tmp_path: Path, coupled: bool
+) -> None:
     """The configured TCP is 56 mm behind the geometry's contact centre."""
     parts = [
         '<link name="base"/><link name="hand"/>',
         '<joint name="pivot" type="revolute"><parent link="base"/><child link="hand"/><axis xyz="0 0 1"/><limit lower="-1" upper="1" effort="1" velocity="1"/></joint>',
     ]
+    if coupled:
+        parts.append(
+            '<link name="aperture"/><joint name="driver" type="prismatic">'
+            '<parent link="hand"/><child link="aperture"/><axis xyz="1 0 0"/>'
+            '<limit lower="0" upper="0.06" effort="1" velocity="1"/></joint>'
+        )
+    follower = '<mimic joint="driver" multiplier="0.5"/>' if coupled else ""
     for name, x, axis in (("one", -0.04, 1), ("two", 0.04, -1)):
         parts.append(
             f'<link name="{name}"><collision><origin xyz="0 0 0.05"/><geometry><box size="0.01 0.02 0.10"/></geometry></collision></link>'
         )
         parts.append(
-            f'<joint name="{name}" type="prismatic"><parent link="hand"/><child link="{name}"/><origin xyz="{x} 0 0.06"/><axis xyz="{axis} 0 0"/><limit lower="0" upper="0.03" effort="1" velocity="1"/></joint>'
+            f'<joint name="{name}" type="prismatic"><parent link="hand"/><child link="{name}"/><origin xyz="{x} 0 0.06"/><axis xyz="{axis} 0 0"/><limit lower="0" upper="0.03" effort="1" velocity="1"/>{follower}</joint>'
         )
     path = tmp_path / "hand.urdf"
     path.write_text('<robot name="calibrated_hand">' + "".join(parts) + "</robot>")
     tcp = np.eye(4)
     tcp[2, 3] = 0.10
     profile = RobotProfile(
-        joint_names=("pivot", "one", "two"),
-        control_parts={"drive": ["pivot"], "clamp": ["one", "two"]},
+        joint_names=(
+            ("pivot", "one", "two", "driver") if coupled else ("pivot", "one", "two")
+        ),
+        control_parts={
+            "drive": ["pivot"],
+            "clamp": ["driver"] if coupled else ["one", "two"],
+        },
         solvers={
             "drive": {
                 "urdf_path": str(path),
@@ -391,10 +436,19 @@ def test_contact_grounding_preserves_a_virtual_runtime_tcp(tmp_path: Path) -> No
                 "tcp": tcp.tolist(),
             }
         },
-        hand_commands={"clamp": {"open": [0.0, 0.0], "grasp": [0.03, 0.03]}},
+        hand_commands={
+            "clamp": (
+                {"open": [0.0], "grasp": [0.06]}
+                if coupled
+                else {"open": [0.0, 0.0], "grasp": [0.03, 0.03]}
+            )
+        },
     )
     geometry, model = _hand_geometry(
-        profile, {"motion": "drive", "grasp": "clamp"}, np.zeros(3), 0.004
+        profile,
+        {"motion": "drive", "grasp": "clamp"},
+        np.zeros(len(profile.joint_names)),
+        0.004,
     )
     contact = torch.eye(4)
     contact[:3, 3] = torch.tensor([1.0, 2.0, 3.0])
