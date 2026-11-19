@@ -180,6 +180,7 @@ def test_usd_static_compound_has_one_body_not_one_body_per_collider(tmp_path) ->
         prim for prim in stage.Traverse() if prim.HasAPI(UsdPhysics.CollisionAPI)
     ]
     assert len(owners) == 1
+    assert str(owners[0].GetPath()) == "/Assembly/part"
     assert not UsdPhysics.RigidBodyAPI(owners[0]).GetRigidBodyEnabledAttr().Get()
     assert len(colliders) == 2
     assert all(prim.GetParent() == owners[0] for prim in colliders)

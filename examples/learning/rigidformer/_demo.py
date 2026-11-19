@@ -362,12 +362,14 @@ def run_demo(args: argparse.Namespace) -> None:
         sim.prepare()
         for index in range(count):
             bodies[index].set_velocity(lin_vel=velocities[index : index + 1].to(device))
-        if not args.headless and visualization.backend != "viser":
-            if not sim.open_window():
+        if (
+            not args.headless or getattr(args, "web", False)
+        ) and visualization.backend != "viser":
+            if not sim.open_viewer():
                 raise RuntimeError(
                     "Unable to open the engine window; use --headless to record"
                 )
-            window = sim.get_world().get_windows()
+            window = sim.viewer
             window.set_look_at(
                 eye=np.array(_EYE), look_at=np.array(_TARGET), up=np.array([0, 0, 1])
             )
@@ -402,7 +404,7 @@ def run_demo(args: argparse.Namespace) -> None:
                 imageio.imwrite(args.output / "frame.png", image)
             if frame == _WARMUP - 1:
                 predicted = _predict(model, torch.stack(warmup), geometry, args)
-            if not args.headless:
+            if not args.headless or getattr(args, "web", False):
                 time.sleep(max(0.0, 1 / args.fps - (time.perf_counter() - tick)))
         writer.close()
         writer = None
@@ -442,8 +444,8 @@ def run_demo(args: argparse.Namespace) -> None:
         (args.output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
         print(json.dumps(summary, indent=2))
         print(f"Saved engine video: {args.output / 'rollout.mp4'}")
-        if not args.headless:
-            time.sleep(args.hold_seconds)
+        if not args.headless or getattr(args, "web", False):
+            sim.sleep(args.hold_seconds)
     except Exception as error:
         (args.output / "failure.json").write_text(
             json.dumps({"type": type(error).__name__, "message": str(error)}) + "\n"
