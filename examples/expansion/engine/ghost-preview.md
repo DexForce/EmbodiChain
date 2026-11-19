@@ -160,6 +160,15 @@ embodichain expansion preview \
 9 条轨迹均通过原有校验并确认回执，共保留 3642 个原始状态帧。
 该结果只代表这个固定小配方，不代表更大规模、其他任务或其他后端的资格结论。
 
+### Piper 书架取书
+
+下图来自 `piper-coverage-expansion` 的 8 环境 `scene_first` 回放。
+`object_pose`、`affordance` 和 `joint_residual` 各有 3 条通过验收的记录。
+该命令将首条记录 C-001 用作固定对照。图中独立开启 C-004 和 C-009，
+可在提书阶段比较抓取分支与关节扰动产生的差异。
+
+![Piper 从书架提起书本时，C-004 和 C-009 的虚影叠加在固定对照上](assets/piper-scene-first-replay.jpg)
+
 ## 数据到画面的运行逻辑
 
 1. 读取 `ArtifactEpisodeSink` 的确认回执，并通过 `load_expansion_episode`
