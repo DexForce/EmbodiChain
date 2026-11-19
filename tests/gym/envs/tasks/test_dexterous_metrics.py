@@ -338,6 +338,9 @@ def test_time_limit_respects_ignored_terminations(
             "done": torch.stack(
                 (terminated | truncated, torch.zeros(2, dtype=torch.bool)), dim=1
             ),
+            "terminated": torch.stack(
+                (terminated, torch.zeros(2, dtype=torch.bool)), dim=1
+            ),
             "truncated": torch.stack(
                 (truncated, torch.zeros(2, dtype=torch.bool)), dim=1
             ),
@@ -356,9 +359,12 @@ def test_physics_samples_opted_in_sensors(
 ) -> None:
     """Custom stepping samples each physics interval, including batched updates."""
     env = env_factory(task_id)
-    sensor = Mock(requires_substep_update=True)
+    sensor = Mock(requires_substep_update=True, cfg=SimpleNamespace(sample_phase=None))
     passive = Mock(requires_substep_update=False)
-    env.sensors = {"contacts": sensor, "camera": passive}
+    scheduled = Mock(
+        requires_substep_update=True, cfg=SimpleNamespace(sample_phase="physics")
+    )
+    env.sensors = {"contacts": sensor, "camera": passive, "scheduled": scheduled}
 
     def advance(dt, count, *, after_substep=None, **kwargs):
         for _ in range(count):
@@ -374,6 +380,8 @@ def test_physics_samples_opted_in_sensors(
     )
     passive.begin_control_step.assert_not_called()
     passive.update_physics_step.assert_not_called()
+    scheduled.begin_control_step.assert_not_called()
+    scheduled.update_physics_step.assert_not_called()
 
 
 @pytest.mark.no_sim

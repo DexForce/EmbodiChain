@@ -266,7 +266,10 @@ class RoughVelocityEnv(EmbodiChainVelocityEnv):
     def _advance_physics(self) -> None:
         """Update actuator effort at 200 Hz and sample lazy contacts at 50 Hz."""
         sensors = [
-            sensor for sensor in self.sensors.values() if sensor.requires_substep_update
+            sensor
+            for sensor in self.sensors.values()
+            if sensor.requires_substep_update
+            and getattr(getattr(sensor, "cfg", None), "sample_phase", None) is None
         ]
         for sensor in sensors:
             sensor.begin_control_step()
@@ -462,6 +465,7 @@ class RoughVelocityEnv(EmbodiChainVelocityEnv):
             if (
                 sensor is not self._reference_sensor
                 and not sensor.requires_substep_update
+                and getattr(getattr(sensor, "cfg", None), "sample_phase", None) is None
             ):
                 sensor.update(fetch_only=True)
             obs[name] = sensor.get_data()

@@ -738,7 +738,10 @@ class DexterousManipulationEnv(EmbodiedEnv):
             super()._advance_physics()
             return
         sensors = [
-            sensor for sensor in self.sensors.values() if sensor.requires_substep_update
+            sensor
+            for sensor in self.sensors.values()
+            if sensor.requires_substep_update
+            and getattr(getattr(sensor, "cfg", None), "sample_phase", None) is None
         ]
         for sensor in sensors:
             sensor.begin_control_step()

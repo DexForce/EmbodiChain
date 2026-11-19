@@ -126,17 +126,27 @@ def test_reference_observation_preserves_reset_contact_rows() -> None:
         update=lambda **kwargs: calls.append(kwargs),
         get_data=lambda: torch.ones((2, 1)),
     )
+    scheduled = Mock(
+        requires_substep_update=False, cfg=SimpleNamespace(sample_phase="physics")
+    )
+    scheduled.get_data.return_value = torch.zeros((2, 1))
     env = SimpleNamespace(
         sim=SimpleNamespace(render_camera_group=lambda ids: calls.append(ids)),
         _camera_group_ids=[3],
         num_envs=2,
         device=torch.device("cpu"),
-        sensors={"locomotion_contacts": contacts, "camera": camera},
+        sensors={
+            "locomotion_contacts": contacts,
+            "camera": camera,
+            "scheduled": scheduled,
+        },
         _reference_sensor=contacts,
     )
     obs = RoughVelocityEnv._get_sensor_obs(env)
     assert not obs["locomotion_contacts"]["is_valid"].any()
     assert obs["camera"].eq(1).all()
+    assert obs["scheduled"].eq(0).all()
+    scheduled.update.assert_not_called()
     assert calls == [[3], {"fetch_only": True}]
 
 
@@ -208,7 +218,7 @@ def test_joint_acceleration_matches_reference_update_interval(
         body_data=SimpleNamespace(fetch_state=fetch_state), set_qf=lambda *a, **kw: None
     )
     env.sim = SimpleNamespace(update=advance)
-    sensor = Mock(requires_substep_update=True)
+    sensor = Mock(requires_substep_update=True, cfg=SimpleNamespace(sample_phase=None))
     env.sensors = {"contacts": sensor}
     env._position_target = torch.zeros(1, 2)
     env._kp = torch.ones(2)
@@ -240,8 +250,11 @@ def test_graph_motor_samples_substep_sensors() -> None:
     env.sim_cfg = SimpleNamespace(physics_dt=0.005)
     env.cfg = SimpleNamespace(sim_steps_per_control=4)
     env._graph_motor = object()
-    sensor = Mock(requires_substep_update=True)
-    env.sensors = {"contacts": sensor}
+    sensor = Mock(requires_substep_update=True, cfg=SimpleNamespace(sample_phase=None))
+    scheduled = Mock(
+        requires_substep_update=True, cfg=SimpleNamespace(sample_phase="physics")
+    )
+    env.sensors = {"contacts": sensor, "scheduled": scheduled}
     env._sample_reference_contacts = Mock()
 
     def advance(dt, count, *, after_substep=None, **kwargs):
@@ -253,6 +266,8 @@ def test_graph_motor_samples_substep_sensors() -> None:
     env._advance_physics()
     sensor.begin_control_step.assert_called_once_with()
     assert sensor.update_physics_step.call_args_list == [call(0.005)] * 4
+    scheduled.begin_control_step.assert_not_called()
+    scheduled.update_physics_step.assert_not_called()
     env._sample_reference_contacts.assert_called_once_with()
 
 
