@@ -204,23 +204,21 @@ def test_destroy_releases_query_after_producer_and_preserves_observations(
     observation = sensor.get_data()
     expected = observation.clone()
     events = []
+    query.close = lambda: events.append("query_closed")
     query_ref = weakref.ref(query, lambda _: events.append("query_released"))
     del query
+    expected_events = ["query_closed", "query_released"]
     if pending_sample:
         sensor._sample_ready_stream = SimpleNamespace(
             synchronize=lambda: events.append("producer_completed")
         )
+        expected_events.insert(0, "producer_completed")
 
     sensor.destroy()
     assert query_ref() is None
-    assert events == (
-        ["producer_completed", "query_released"]
-        if pending_sample
-        else ["query_released"]
-    )
+    assert events == expected_events
     sensor.destroy()
-    assert events.count("query_released") == 1
-    assert events.count("producer_completed") == int(pending_sample)
+    assert events == expected_events
     for name in expected.keys():
         torch.testing.assert_close(observation[name], expected[name])
 

@@ -586,7 +586,7 @@ class ObjectRelativePositionValidatorCfg:
 
     Args:
         object: Logical scene object to validate.
-        reference: Logical scene object whose live position defines the origin.
+        reference: Logical scene object or articulation link defining the origin.
         position_offset: Desired XYZ displacement in the selected frame, in meters.
         position_tolerance: Exclusive XYZ error bounds in meters; ``None``
             disables the corresponding axis.

@@ -13,6 +13,7 @@ Paths are relative to `embodichain/gen_sim/` unless qualified.
 | External scene-provider lifecycle | `scene_providers.py`: request/job/cancellation contracts and selected entry-point loading |
 | Public staged workflow | `workflow.py`: Task Plan loading, provider job operations, generated-scene validation, qualification and deterministic deployment preparation |
 | Unified command dispatch | `embodichain/cli/gensim.py`: `gensim asset ingest`, `scene generate/edit/expand/preview`, `task plan`, `run`, `ui`; legacy top-level commands remain in `embodichain/cli/main.py` |
+| Remove robot hardware from a dual-arm head-camera frame | `scene_engine/cli/robot_cleanup.py` and `_robot_cleanup.py`: `gensim image clean-robot`, scoped masks, image-to-image edit, RGB audit |
 | Image to native execution | `_workflow.py`, `_run_config.py`, `_run_binding.py`, `_run_execution.py`; [command and run guide](../../../embodichain/gen_sim/README.md) |
 | Generate/edit CLI modes | `scene_engine/cli/start.py` |
 | Image → scene | `scene_engine/pipeline/generate.py`: `generate_scene_from_image()` |
@@ -63,6 +64,11 @@ references reject and failures retain stage artifacts. Native success and
 normative TaskSpec certification remain distinct. See the
 [command guide](../../../embodichain/gen_sim/README.md) and provider-free
 [scripted reproduction](../../../examples/gensim/scripted_pick_place/README.md).
+
+`_run_image.py` owns the optional head-frame preprocessing handoff. A verified
+`input_camera` declaration pins the raw head frame by hash. Task Engine and
+scene generation consume a single effective image. Task Plan reuse copies the
+previous run's effective image and checks its input provenance and pixel audit.
 
 Articulated USDC admission allows absent `gen_sim:closedPosition` metadata;
 present declarations must identify a finite joint-limit endpoint. Missing

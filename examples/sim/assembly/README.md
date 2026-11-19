@@ -4,14 +4,11 @@ See the [Precision Assembly guide](../../../docs/source/features/toolkits/precis
 for functional entry points, embedded native recordings, reproducible commands
 and the original mjfit paper citation.
 
-The project selects DexSim 0.6.0rc2. Python 3.12 direct-compound construction,
-raw-contact checks and native RGB previews were verified with rc2 using the
-installed SDK. The static compound USD import route is unavailable
-on 0.6.0rc1 and 0.6.0rc2: its parser drops child colliders under disabled rigid bodies.
-EmbodiChain rejects that loss explicitly. Exported USD retains the authored
-static ownership; use direct manifests for runtime construction until the SDK
-parser is corrected. This dependency gap is retained as one strict expected
-failure in the USD round-trip tests.
+DexSim 0.6.0 preserves child colliders under disabled rigid bodies in static
+compound USD imports. The 0.6.0rc1 and 0.6.0rc2 parsers drop those colliders.
+EmbodiChain rejects that loss explicitly. Use direct manifests for runtime
+construction with those release candidates. Python 3.12 direct-compound
+construction, raw-contact checks and native RGB previews were verified with rc2.
 
 The native path attaches multiple convex collision pieces to one rigid body.
 An independent visual mesh never closes its collision aperture. The generator

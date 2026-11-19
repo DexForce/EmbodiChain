@@ -111,6 +111,7 @@ def test_package_discovery_includes_only_runtime_trees() -> None:
         "embodichain_benchmarks",
         "embodichain_models",
         "embodichain_solvers",
+        "embodichain_sensors",
     }
     assert runtime_roots | {
         "embodichain_tasks.configs",
@@ -128,6 +129,7 @@ def test_package_discovery_includes_only_runtime_trees() -> None:
         "embodichain_benchmarks": "extensions/embodichain_benchmarks",
         "embodichain_models": "extensions/embodichain_models/embodichain_models",
         "embodichain_solvers": "extensions/embodichain_solvers/embodichain_solvers",
+        "embodichain_sensors": "extensions/embodichain_sensors",
     }
 
 
@@ -233,7 +235,8 @@ def test_project_metadata_has_no_direct_dependencies() -> None:
     [
         ("0.6.0.dev11491", False),
         ("0.6.0rc1", False),
-        ("0.6.0rc2", True),
+        ("0.6.0rc2", False),
+        ("0.6.0", True),
     ],
 )
 def test_dexsim_dependency_selects_cable_release_wheel(

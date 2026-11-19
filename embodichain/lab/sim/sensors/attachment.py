@@ -14,15 +14,18 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Resolve camera attachment targets from an explicit scene asset mapping."""
+"""Resolve semantic sensor attachments and adapt them for camera render nodes."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from dexsim.engine import Node
+
+    from .base_sensor import SensorCfg
 
     from embodichain.lab.sim.objects import Articulation
 
@@ -48,36 +51,61 @@ def resolve_parent_nodes(
         RuntimeError: If the asset count differs from ``num_envs``, or an
             environment is missing the link or its render node.
     """
-    asset_uid: str | None = None
-    link_name = parent
-    if "/" in parent:
-        candidate_uid, candidate_link = parent.split("/", maxsplit=1)
-        if candidate_uid in assets:
-            asset_uid, link_name = candidate_uid, candidate_link
+    _, asset, link = _resolve_link(parent, assets, num_envs)
+    return asset.get_link_render_nodes(link)
 
-    matches: list[tuple[str, list[Node]]] = []
-    for uid, asset in assets.items():
-        if asset_uid is not None and uid != asset_uid:
-            continue
-        if link_name not in asset.link_names:
+
+def _resolve_link(parent: str, assets: Mapping[str, Articulation], num_envs: int):
+    asset_uid, sep, qualified_link = parent.partition("/")
+    if sep and asset_uid in assets:
+        candidates = [(asset_uid, assets[asset_uid])]
+        link = qualified_link
+    else:
+        candidates = assets.items()
+        link = parent
+    matches = []
+    for uid, asset in candidates:
+        if link not in asset.link_names:
             continue
         if asset.num_instances != num_envs:
             raise RuntimeError(
-                f"Camera parent asset {uid!r} has {asset.num_instances} instances "
+                f"Sensor parent asset {uid!r} has {asset.num_instances} instances "
                 f"for {num_envs} arenas."
             )
-        matches.append((uid, asset.get_link_render_nodes(link_name)))
-
+        matches.append((uid, asset, link))
     if len(matches) == 1:
-        return matches[0][1]
-    if len(matches) > 1:
-        owners = ", ".join(uid for uid, _ in matches)
+        return matches[0]
+    if matches:
+        owners = ", ".join(uid for uid, _, _ in matches)
         raise ValueError(
-            f"Camera parent link {link_name!r} is ambiguous across assets "
-            f"[{owners}]; use '<asset_uid>/{link_name}'."
+            f"Sensor parent link {link!r} is ambiguous across assets "
+            f"[{owners}]; use '<asset_uid>/<link_name>'."
         )
-    scope = f" on asset {asset_uid!r}" if asset_uid is not None else ""
     raise ValueError(
-        f"Camera parent link {link_name!r} was not found{scope} in any "
-        "registered Robot or Articulation."
+        f"Sensor parent link {parent!r} was not found in any registered Robot or Articulation."
     )
+
+
+def _qualify_robot_mount(
+    cfg: SensorCfg, robot_uid: str, used_uids: set[str]
+) -> SensorCfg:
+    from .camera import CameraCfg
+
+    if not isinstance(cfg.uid, str) or not cfg.uid.strip():
+        raise ValueError("Mounted sensors require a non-empty uid.")
+    if cfg.uid in used_uids:
+        raise ValueError(f"Sensor {cfg.uid!r} already exists.")
+    offset = cfg.extrinsics if isinstance(cfg, CameraCfg) else cfg.mount
+    parent = offset.parent if offset is not None else None
+    if not isinstance(parent, str) or not parent.strip():
+        raise ValueError("Mounted sensors require a parent link.")
+    link = parent.removeprefix(f"{robot_uid}/")
+    if not link or "/" in link:
+        raise ValueError(
+            f"Mounted sensor {cfg.uid!r} must refer to a local link on robot {robot_uid!r}."
+        )
+    bound = deepcopy(cfg)
+    bound_offset = bound.extrinsics if isinstance(bound, CameraCfg) else bound.mount
+    bound_offset.parent = f"{robot_uid}/{link}"
+    used_uids.add(cfg.uid)
+    return bound

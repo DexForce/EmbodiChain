@@ -478,6 +478,21 @@ class ArticulationData:
             is_newton=self.is_newton_backend,
         )
 
+    def _read_link_com_position(self, link_index: int) -> torch.Tensor:
+        """Read the current body-local COM position of one link across environments."""
+        if self.is_newton_backend:
+            return self.com_pose[:, link_index, :3]
+
+        link_name = self.link_names[link_index]
+        positions = np.asarray(
+            [
+                self._entity_link_properties(entity, link_name).com_position
+                for entity in self.entities
+            ],
+            dtype=np.float32,
+        )
+        return torch.as_tensor(positions, device=self.device)
+
     def read_physical_properties(
         self,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:

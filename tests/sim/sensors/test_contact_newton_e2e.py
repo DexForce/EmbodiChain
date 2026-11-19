@@ -41,6 +41,8 @@ from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.sim_manager import SimulationManager, SimulationManagerCfg
 from embodichain_robots import URRobotCfg
 
+# Queue destruction in the tests and let conftest drain it after the test and
+# fixture frames release borrowed solver and contact buffers.
 pytestmark = [pytest.mark.requires_sim, pytest.mark.gpu]
 
 
@@ -147,10 +149,6 @@ def test_newton_contact_sensor_reports_each_arena(
             assert history.found.all()
     finally:
         sim.destroy(exit_process=False)
-        SimulationManager.flush_cleanup_queue()
-        from dexsim.engine.newton_physics import teardown_newton_physics
-
-        teardown_newton_physics()
 
 
 @pytest.fixture
@@ -215,10 +213,6 @@ def dexuni_contact_scene(tmp_path):
         yield sim, sensor
     finally:
         sim.destroy(exit_process=False)
-        SimulationManager.flush_cleanup_queue()
-        from dexsim.engine.newton_physics import teardown_newton_physics
-
-        teardown_newton_physics()
 
 
 def test_dexuni_physics_reset_keeps_initial_sensor_observations_readable(
@@ -433,10 +427,6 @@ def test_dexuni_pure_mujoco_contact_sensor_reports_impulse(solver_path: str) -> 
         # Release borrowed solver/query views while their Scene is still alive.
         sensor = backend = report = raw = None
         sim.destroy(exit_process=False)
-        SimulationManager.flush_cleanup_queue()
-        from dexsim.engine.newton_physics import teardown_newton_physics
-
-        teardown_newton_physics()
 
 
 @pytest.mark.usefixtures("requires_dexuni_contact_query")
@@ -505,7 +495,3 @@ def test_dexuni_vbd_contact_sensor_exposes_geometry_only() -> None:
         assert torch.count_nonzero(data["friction"][valid]) == 0
     finally:
         sim.destroy(exit_process=False)
-        SimulationManager.flush_cleanup_queue()
-        from dexsim.engine.newton_physics import teardown_newton_physics
-
-        teardown_newton_physics()

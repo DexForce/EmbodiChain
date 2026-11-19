@@ -298,6 +298,19 @@ def test_registered_trainer_checkpoint_restores_both_adam_updates(tmp_path):
         torch.testing.assert_close(x, y, rtol=0, atol=0)
 
 
+def test_apg_rejects_actor_and_critic_with_a_shared_trunk() -> None:
+    shared = nn.Linear(1, 3)
+    p = ActorCritic(
+        1,
+        1,
+        torch.device("cpu"),
+        nn.Sequential(shared, nn.Linear(3, 1)),
+        nn.Sequential(shared, nn.Linear(3, 1)),
+    )
+    with pytest.raises(ValueError, match="disjoint"):
+        algorithm(p)
+
+
 def test_rollout_context_freezes_critic_statistics_and_restores_training_mode():
     class CountingCritic(nn.Linear):
         def __init__(self):

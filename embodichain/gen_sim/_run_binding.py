@@ -21,6 +21,7 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import json
+import math
 from pathlib import Path
 import shutil
 from typing import Any, TYPE_CHECKING
@@ -33,6 +34,7 @@ __all__: list[str] = []
 
 # Scene exports and ObjectBaseCfg read ``init_rot`` as extrinsic x-y-z degrees.
 _EULER = "xyz"
+_LIFT_POSITION_TOLERANCE_M = 0.01
 
 
 def _load_runtime(
@@ -327,13 +329,13 @@ def _physical_scene(export: Path, data: dict[str, Any], assets: Path) -> dict[st
                 destination = asset_root / (entry["uid"] + ".obj")
                 mesh.export(destination, include_normals=True)
                 item["body_scale"] = [1.0, 1.0, 1.0]
-                item["shape"] = {
-                    **deepcopy(entry["shape"]),
-                    "fpath": str(destination),
-                    "collision": _mesh_collision_cfg(
+                item["shape"] = {**deepcopy(entry["shape"]), "fpath": str(destination)}
+                # An authored collision policy, such as the calibrated table's,
+                # takes precedence over the legacy hull budget.
+                if item["shape"].get("collision") is None:
+                    item["shape"]["collision"] = _mesh_collision_cfg(
                         entry.get("max_convex_hull_num", 32)
-                    ).to_dict(),
-                }
+                    ).to_dict()
             result[category].append(item)
     return result
 
@@ -473,6 +475,7 @@ def _held_contact_pose(
     upright: bool = False,
     twist: float | None = None,
     toward: Any = None,
+    lift_height_m: float | None = None,
 ) -> tuple[dict[str, Any], list[float]]:
     """Return a held-object transport target and its world displacement.
 
@@ -487,7 +490,8 @@ def _held_contact_pose(
     leaves a 5 cm gap and other relations a 2 mm contact gap. A reference
     the object already rests on, such as its table, is a lift instead: the
     object stays over its initial footprint. Without a reference the object
-    is held 10 cm above its initial footprint.
+    is held 10 cm above its initial footprint by default. An explicit lift
+    stays in place and raises the object origin above the requested minimum.
 
     Returns:
         The route pose declaration and the world offset of the object origin
@@ -528,10 +532,16 @@ def _held_contact_pose(
         contact = contact[s <= s.min() + 0.15 * (s.max() - s.min())]
     position = np.zeros(3)
     if reference_entry is None:
-        footprint = points @ initial.T + np.asarray(object_entry["init_pos"])
         origin = np.asarray(object_entry["init_pos"])
-        position[:2] = footprint[:, :2].mean(axis=0) - contact[:, :2].mean(axis=0)
-        position[2] = footprint[:, 2].min() + 0.10 - contact[:, 2].min()
+        if lift_height_m is None:
+            footprint = points @ initial.T + origin
+            position[:2] = footprint[:, :2].mean(axis=0) - contact[:, :2].mean(axis=0)
+            position[2] = footprint[:, 2].min() + 0.10 - contact[:, 2].min()
+        else:
+            position[:] = origin
+            # Even the lower edge of the terminal pose tolerance must exceed
+            # the minimum measured from the initial object origin.
+            position[2] += lift_height_m + 2 * _LIFT_POSITION_TOLERANCE_M
         displacement = position - origin
         quaternion = Rotation.from_matrix(orientation).as_quat()
         return {
@@ -1254,6 +1264,18 @@ def _bind_deployment(
             arguments = call["arguments"]
             annotation = annotations.get(node["id"], {})
             reference = annotation.get("reference") or arguments.get("reference")
+            intent = annotation.get("intent", {})
+            lift_height_m = intent.get("lift_height_m")
+            if lift_height_m is not None and (
+                reference is not None
+                or intent.get("direction") != "up"
+                or type(lift_height_m) not in {int, float}
+                or not math.isfinite(lift_height_m)
+                or lift_height_m <= 0
+            ):
+                raise ValueError(
+                    "A metric held lift requires a positive height, up, and no reference"
+                )
             if subject not in rigid or (
                 reference is not None and reference not in rigid
             ):
@@ -1262,9 +1284,7 @@ def _bind_deployment(
                     "object/reference geometry"
                 )
             aligned = subject in aligned_objects
-            upright = aligned or (
-                annotation.get("intent", {}).get("orientation_goal") == "upright"
-            )
+            upright = aligned or (intent.get("orientation_goal") == "upright")
             holder = call["resources"].get("primary")
             pose, displacement = _held_contact_pose(
                 entries[bindings["objects"][subject]],
@@ -1276,6 +1296,7 @@ def _bind_deployment(
                 # with its default zero heading twist.
                 twist=0.0 if aligned else None,
                 toward=anchors.get(holder),
+                lift_height_m=lift_height_m,
             )
             if reference is not None:
                 # The runtime resolves the logical reference, not its native UID.
@@ -1307,6 +1328,8 @@ def _bind_deployment(
                 validators = [
                     {"kind": "object_near_target", "object": subject, "target": target}
                 ]
+                if lift_height_m is not None:
+                    validators[0]["position_tolerance"] = _LIFT_POSITION_TOLERANCE_M
             if upright:
                 validators.append(
                     {
