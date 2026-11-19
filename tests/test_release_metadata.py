@@ -235,7 +235,8 @@ def test_project_metadata_has_no_direct_dependencies() -> None:
     [
         ("0.6.0.dev11491", False),
         ("0.6.0rc1", False),
-        ("0.6.0rc2", True),
+        ("0.6.0rc2", False),
+        ("0.6.0", True),
     ],
 )
 def test_dexsim_dependency_selects_cable_release_wheel(
