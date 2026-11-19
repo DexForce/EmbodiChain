@@ -31,6 +31,10 @@ ROBOT_ASSETS = {
         "class_path": "embodichain_robots.agibot.g1.assets:AgibotG1",
         "category": "robot",
     },
+    "AgibotG1ObservedReplay": {
+        "class_path": "embodichain_robots.agibot.g1.assets:AgibotG1ObservedReplay",
+        "category": "robot",
+    },
     "YamI2rt": {
         "class_path": "embodichain_robots.i2rt.yam.assets:YamI2rt",
         "category": "robot",

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Resolve the original GenieSim G1_120s USD bundle."""
+"""Resolve the original GenieSim USD and the distinct observed-replay URDF."""
 
 from __future__ import annotations
 
@@ -22,14 +22,18 @@ import hashlib
 from pathlib import Path
 from shutil import copyfileobj
 from tempfile import NamedTemporaryFile
+from typing import ClassVar
 from urllib.request import urlopen
 
 import open3d as o3d
 
-from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
+from embodichain.data.constants import (
+    EMBODICHAIN_DEFAULT_DATA_ROOT,
+    EMBODICHAIN_DOWNLOAD_PREFIX,
+)
 from embodichain.data.dataset import EmbodiChainDataset, _dataset_download_lock
 
-__all__ = ["AgibotG1"]
+__all__ = ["AgibotG1", "AgibotG1ObservedReplay"]
 
 _REVISION = "a0813aad7c16165daffbe6c2737754e0344809ee"
 _SOURCE = (
@@ -100,3 +104,81 @@ class AgibotG1(EmbodiChainDataset):
                     source = _SOURCE if relative == "LICENSE" else _MODEL_SOURCE
                     url = f"{source}/{relative}"
                 _ensure_file(url, Path(self.extract_dir) / relative, expected)
+
+
+class AgibotG1ObservedReplay(EmbodiChainDataset):
+    """Download the pinned, collision-bearing observed-replay G1 URDF.
+
+    The model bundle contains ``robot.urdf``, local visual and collision meshes,
+    collision provenance, attribution and the CC-BY-NC-SA-4.0 license. It uses
+    a separate versioned cache from the original :class:`AgibotG1` USD model.
+
+    Args:
+        data_root: Optional asset cache root; defaults to the configured
+            ``EMBODICHAIN_DATA_ROOT``.
+
+    Raises:
+        ValueError: The pinned archive, checksum manifest, or extracted files differ.
+
+    Example:
+        >>> from embodichain.data import get_data_path
+        >>> path = get_data_path("AgibotG1ObservedReplay/robot.urdf")
+    """
+
+    cache_prefix: ClassVar[str] = "AgibotG1ObservedReplayV2"
+    _archive_name: ClassVar[str] = "AgibotG1ObservedReplayV2.zip"
+    _revision: ClassVar[str] = "e002d649bb292d3e18c3a97d5b5c22c8ddcc81a3"
+    _archive_md5: ClassVar[str] = "b8dbea604576e68c1371cfc9eb55b337"
+    _archive_sha256: ClassVar[str] = (
+        "a289e751006be59e830119be1629a6a55a07338176d2ab4171e22463fc4e9c9c"
+    )
+    _checksums_sha256: ClassVar[str] = (
+        "4308a768e868127079934ca07ca0ceb541d80f2270c37f7269725a9b6e54fd80"
+    )
+
+    def __init__(self, data_root: str | None = None) -> None:
+        filename = "robot_assets/" + self._archive_name
+        origin = (
+            "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/"
+            f"{self._revision}/"
+        )
+        prefix = EMBODICHAIN_DOWNLOAD_PREFIX.replace(
+            "/resolve/main/", f"/resolve/{self._revision}/", 1
+        )
+        urls = [prefix + filename]
+        if origin != prefix:
+            urls.append(origin + filename)
+        descriptor = o3d.data.DataDescriptor(urls, self._archive_md5)
+        root = str(
+            Path(EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root)
+            .expanduser()
+            .resolve()
+        )
+        super().__init__(self.cache_prefix, descriptor, root)
+        with _dataset_download_lock(root, self.cache_prefix):
+            if (
+                _sha256(Path(self.download_dir) / self._archive_name)
+                != self._archive_sha256
+            ):
+                raise ValueError("AgiBot observed-replay archive SHA256 mismatch")
+            self._verify_files(Path(self.extract_dir))
+
+    @classmethod
+    def _verify_files(cls, root: Path) -> None:
+        root = root.resolve()
+        checksums = root / "SHA256SUMS"
+        if not checksums.is_file() or _sha256(checksums) != cls._checksums_sha256:
+            raise ValueError(
+                "AgiBot observed-replay checksum manifest is missing or changed"
+            )
+        for line in checksums.read_text(encoding="utf-8").splitlines():
+            expected, relative = line.split("  ", 1)
+            path = (root / relative).resolve()
+            if (
+                not path.is_relative_to(root)
+                or not path.is_file()
+                or _sha256(path) != expected
+            ):
+                raise ValueError(
+                    f"AgiBot observed-replay resource is missing or changed: {relative}"
+                )
