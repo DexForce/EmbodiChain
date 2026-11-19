@@ -99,7 +99,6 @@ const previewText = (() => {
     curveLabel: ['{title}（{unit}）', '{title} ({unit})'],
     curveWithBand: ['{title}随实测时间的均值曲线及最小值至最大值色带，单位 {unit}',
       '{title} over recorded time, with mean and minimum-to-maximum range, in {unit}'],
-    curveMean: ['{title}随实测时间的均值曲线，单位 {unit}', '{title} mean over recorded time, in {unit}'],
     tcpUnavailable: ['记录中缺少所选机械臂的完整 TCP 标定。', 'The selected arm has incomplete TCP calibration in the recordings.'],
     jointsUnavailable: ['记录中缺少可识别的机械臂关节组。', 'The recordings do not identify an arm joint group.'],
     jointNames: ['统计关节 · {names}', 'Included joints · {names}'],

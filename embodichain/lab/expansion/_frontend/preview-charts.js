@@ -37,14 +37,12 @@ const deviationCharts = (() => {
       const format = v => `${number.format(v)} ${plot.unit}`;
       if (value === null) {
         plot.value.textContent = previewText('deviationNoSample');
-      } else if (plot.range) {
+      } else {
         plot.value.textContent = previewText('deviationRange', {
           min: format(plot.range.min[frame]),
           mean: format(value),
           max: format(plot.range.max[frame]),
         });
-      } else {
-        plot.value.textContent = format(value);
       }
       plot.cursor.style.left = `calc(${fraction * 100}% + ${left - fraction * (left + right)}px)`;
     }
@@ -115,7 +113,7 @@ const deviationCharts = (() => {
     }
     const x = frame => left + w * data.time_s[frame] / duration;
     const y = value => top + h * (1 - value / plot.max);
-    if (plot.range) drawBand(ctx, plot.range, plot.color, x, y);
+    drawBand(ctx, plot.range, plot.color, x, y);
     ctx.strokeStyle = plot.color; ctx.lineWidth = 2;
     ctx.beginPath();
     let previous = false;
@@ -140,7 +138,7 @@ const deviationCharts = (() => {
   function addCurve(panel, key, titleKey, unit, color) {
     const values = data.mean[key];
     if (!values) return;
-    const range = data.range?.[key];
+    const range = data.range[key];
     const figure = document.createElement('figure');
     figure.className = 'curve'; figure.style.setProperty('--line', color);
     const caption = document.createElement('figcaption');
@@ -153,7 +151,7 @@ const deviationCharts = (() => {
     canvas.setAttribute('role', 'img');
     const cursor = document.createElement('i');
     area.append(canvas, cursor); figure.append(caption, area); panel.append(figure);
-    const peak = (range?.max ?? values).reduce((max, v) => v === null ? max : Math.max(max, v), 0);
+    const peak = range.max.reduce((max, v) => v === null ? max : Math.max(max, v), 0);
     const step = tickStep(peak || 1);
     const ticks = Math.ceil((peak || 1) / step);
     const plot = {values, value, range, titleKey, label, unit, color, canvas, cursor, step, ticks, max: step * ticks};
@@ -178,7 +176,7 @@ const deviationCharts = (() => {
       reference: previewText(data.explicit_reference ? 'reference' : 'firstReference'),
       count: data.episodes,
     });
-    if (Object.keys(data.range ?? {}).length) description.append(' ', previewText('deviationsBand'));
+    if (plots.length) description.append(' ', previewText('deviationsBand'));
     if (tcpNote) tcpNote.textContent = previewText('tcpUnavailable');
     if (jointNote) {
       const separator = document.documentElement.lang === 'en' ? ', ' : '、';
@@ -190,7 +188,7 @@ const deviationCharts = (() => {
     for (const plot of plots) {
       const values = {title: previewText(plot.titleKey), unit: plot.unit};
       plot.label.textContent = previewText('curveLabel', values);
-      plot.canvas.setAttribute('aria-label', previewText(plot.range ? 'curveWithBand' : 'curveMean', values));
+      plot.canvas.setAttribute('aria-label', previewText('curveWithBand', values));
       draw(plot);
     }
     updateReadout();

@@ -159,12 +159,9 @@ embodichain expansion preview \
 
 ### Piper 书架取书
 
-下图来自 `piper-coverage-expansion` 的 8 环境 `scene_first` 回放。
-`object_pose`、`affordance` 和 `joint_residual` 各有 3 条通过验收的记录。
-该命令将首条记录 C-001 用作固定对照。图中独立开启 C-004 和 C-009，
-可在提书阶段比较抓取分支与关节扰动产生的差异。
-
-![Piper 从书架提起书本时，C-004 和 C-009 的虚影叠加在固定对照上](assets/piper-scene-first-replay.jpg)
+`piper-coverage-expansion` 使用 8 个环境，`object_pose`、`affordance` 和
+`joint_residual` 各有 3 条通过验收的记录。回放以首条记录 C-001 为
+固定对照，可同时开启 C-004 和 C-009 比较提书阶段的抓取与关节扰动。
 
 ## 数据到画面的运行逻辑
 

@@ -14,9 +14,12 @@
 // limitations under the License.
 // ----------------------------------------------------------------------------
 
-let status=null,busy=false,dragging=false,filterKey=null,initialized=false,sending=false;
-const pending=[];
-const $=id=>document.getElementById(id);
+let status = null, busy = false, dragging = false, filterKey = null, sending = false;
+const pending = [];
+const filterKeys = ['space', 'aff', 'variant'];
+const selectKeys = [...filterKeys, 'align'];
+const layerKeys = ['paths', 'targets', 'positions'];
+const $ = id => document.getElementById(id);
 const viewport = $('viewport');
 let videoConnectionFailed = false;
 let video;
@@ -97,8 +100,8 @@ async function control(update) {
     sending = false;
   }
 }
-for(const k of ['space','aff','variant','align'])$(k).onchange=()=>control({[k]:$(k).value});
-for(const k of ['ghosts','paths','targets','positions'])$(k).onchange=()=>control({[k]:$(k).checked});
+for (const key of selectKeys) $(key).onchange = () => control({[key]: $(key).value});
+for (const key of ['ghosts', ...layerKeys]) $(key).onchange = () => control({[key]: $(key).checked});
 $('play').onclick=()=>control({toggle_playback:true});
 $('reset').onclick=()=>control({progress:0,playing:false});
 document.addEventListener('keydown',event=>{
@@ -152,9 +155,7 @@ function updateCandidates(s){
   }
   const shown=new Set(s.visible_ghosts);
   for(const button of list.children){
-    const pressed=shown.has(Number(button.dataset.index));
-    button.classList.toggle('active',pressed);
-    button.setAttribute('aria-pressed',String(pressed));
+    button.setAttribute('aria-pressed', String(shown.has(Number(button.dataset.index))));
   }
   const all=$('ghosts');
   all.disabled=s.count===0;
@@ -178,7 +179,6 @@ function renderCoverage(coverage) {
     const values = Object.entries(record.values).map(([name, value]) => `${name}=${Number(value).toPrecision(4)}`);
     return `${summary}\n${values.join(', ')}`;
   });
-  $('coverage-details').style.whiteSpace = 'pre-line';
   $('coverage-details').textContent = [previewText('coverageScope'), axes.join('\n'), records.join('\n\n')].join('\n\n');
 }
 
@@ -211,7 +211,7 @@ function renderReplayText() {
 }
 
 function populateFilters(s) {
-  for (const key of ['space', 'aff', 'variant']) {
+  for (const key of filterKeys) {
     for (const value of s.options[key]) {
       const option = new Option(recordedLabel(value), value);
       if (value === 'unrecorded') option.dataset.text = 'unrecorded';
@@ -229,17 +229,16 @@ async function poll() {
     if (!response.ok) throw Error('Could not read replay state');
     const s = await response.json();
     if (s.frame === undefined) return;
-    status = s;
-    if (!initialized) {
+    if (!status) {
       populateFilters(s);
       if (s.coverage) renderCoverage(s.coverage);
-      initialized = true;
     }
+    status = s;
     if (!sending) {
-      for (const key of ['space', 'aff', 'variant', 'align']) {
+      for (const key of selectKeys) {
         if (document.activeElement !== $(key)) $(key).value = s[key];
       }
-      for (const key of ['paths', 'targets', 'positions']) $(key).checked = s[key];
+      for (const key of layerKeys) $(key).checked = s[key];
       if (document.activeElement !== $('camera')) {
         $('camera').value = Object.keys(cameras).find(key =>
           Object.keys(cameras[key]).every(axis => Math.abs(s[axis] - cameras[key][axis]) < .001)
