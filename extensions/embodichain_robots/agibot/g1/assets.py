@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Resolve the GenieSim G1_120s USD bundle with its gripper collision repair."""
+"""Resolve the GenieSim G1_120s USD bundle with verified collision geometry."""
 
 from __future__ import annotations
 
@@ -40,10 +40,10 @@ _SOURCE = (
 )
 _MODEL_SOURCE = f"{_SOURCE}/robot/G1_120s"
 _ROBOT_USD = "robot.usda"
-_REPAIR_REVISION = "c2097aa5a6745d5d792dfec7dc9547893b7c0aba"
-_REPAIR_ENTRY = f"robot_assets/AgibotG1V2/{_ROBOT_USD}"
-_REPAIR_MD5 = "243c3f30529070db7a8a0f37061c60d6"
-_REPAIR_SHA256 = "e4973bcca8451e66f118bc98e5abf9cc1f154e4bac3b419f42006ab669dd6891"
+_REPAIR_REVISION = "703a381d751132b61a16b0e482bd54480af57f8b"
+_REPAIR_ENTRY = f"robot_assets/AgibotG1V3/{_ROBOT_USD}"
+_REPAIR_MD5 = "bd84fca08a0c4fa65d92965887ce9b09"
+_REPAIR_SHA256 = "4b0c06eb5392f5052b57a2d4650e6e892c0a197a7f3039fc121f9fcdda1c2628"
 # The upstream inventory also records the source entry before the repair.
 _FILES = {
     "LICENSE": "e66c269d4819aaab34b49ef5220c4ddab6756f21bb5180761a4eb8561f2b7bbd",
@@ -83,14 +83,15 @@ class AgibotG1(EmbodiChainDataset):
     """Download the G1 USD and verify its entry and referenced layers.
 
     The model is provided by AgiBot's GenieSimAssets under CC BY-NC-SA 4.0.
-    The repaired entry defines the authored gripper colliders on their meshes.
-    The referenced layers and arm collision configuration come from the source.
+    The entry defines the 120s gripper colliders on their meshes, enables the
+    authored arm cylinders, and adds body and shoulder colliders from the
+    official G1 OmniPicker variant. The referenced layers come from G1_120s.
 
     Args:
         data_root: Optional asset cache root.
     """
 
-    cache_prefix = f"AgibotG1_{_REVISION[:12]}_v2"
+    cache_prefix = f"AgibotG1_{_REVISION[:12]}_v3"
 
     def __init__(self, data_root: str | None = None) -> None:
         root = str(

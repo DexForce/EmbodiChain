@@ -47,6 +47,17 @@ GRIPPER_COLLISION_LINKS = {
         *(f"{jaw}_link{index}" for jaw in ("inner", "outer") for index in range(1, 6)),
     )
 }
+BODY_COLLISION_SHAPES = {
+    "base_link": 2,
+    "body_link1": 2,
+    "body_link2": 2,
+    "head_link2": 1,
+}
+ARM_COLLISION_SHAPES = {
+    f"arm_{side}_{link}": 1
+    for side in ("l", "r")
+    for link in ("base_link", *(f"link{index}" for index in range(1, 7)), "end_link")
+}
 ANCHOR_TOLERANCE_M = 1e-4
 MIN_OPENING_M = 1e-3
 RETURN_TOLERANCE_M = 1e-3
@@ -55,7 +66,7 @@ TARGET_TOLERANCE_RAD = 0.02
 
 @pytest.mark.subprocess_sim
 @pytest.mark.parametrize("entry_point", ["add_usd", "add_robot"])
-def test_import_preserves_g1_gripper_collisions_and_loops(entry_point: str) -> None:
+def test_import_preserves_g1_collisions_and_loops(entry_point: str) -> None:
     path = os.environ.get("EMBODICHAIN_G1_USD")
     if not path:
         pytest.skip("Set EMBODICHAIN_G1_USD to the downloaded AgibotG1/robot.usda")
@@ -142,16 +153,23 @@ def _check_g1(path: str, entry_point: str) -> None:
             assert len(closures) == len(CLOSURE_JOINTS)
             assert {handle.get_name() for handle in closures} == expected_names
             assert len(robot.mimic_ids) == 6  # Three source mimic joints per jaw.
+            collision_shape_counts = {
+                name: len(robot.get_link_collision_shapes(name))
+                for name in robot.link_names
+            }
             gripper_colliders = {
                 name
-                for name in robot.link_names
-                if name.startswith("gripper_") and robot.get_link_collision_shapes(name)
+                for name, count in collision_shape_counts.items()
+                if name.startswith("gripper_") and count
             }
             assert gripper_colliders == GRIPPER_COLLISION_LINKS
-            assert all(
-                not robot.get_link_collision_shapes(name)
-                for name in robot.link_names
-                if name.startswith("arm_")
+            body_and_arm_colliders = {
+                name: count
+                for name, count in collision_shape_counts.items()
+                if not name.startswith("gripper_") and count
+            }
+            assert (
+                body_and_arm_colliders == BODY_COLLISION_SHAPES | ARM_COLLISION_SHAPES
             )
             sim.get_world().enable_physics(True)
 
