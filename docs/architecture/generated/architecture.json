@@ -3,7 +3,7 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "f1a22b6b998a35cc5db6a3a75d08ce3bd3be9f83",
+  "revision": "c247197e8260700a32bff47c7fa74100c38b7377",
   "source_ref": "HEAD",
   "package_version": "0.3.2",
   "topic_index": "agent_context/MAP.yaml",
@@ -5812,15 +5812,15 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_robot",
-          "start_line": 4418,
-          "end_line": 4419,
+          "start_line": 4427,
+          "end_line": 4428,
           "excerpt": "        robot = self._declare_spawn_articulation(cfg, Robot)\n        self._robots[uid] = robot"
         },
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager._declare_spawn_articulation",
-          "start_line": 4458,
-          "end_line": 4461,
+          "start_line": 4467,
+          "end_line": 4470,
           "excerpt": "        facade = facade_type(\n            cfg=cfg,\n            device=self.device,\n        )"
         }
       ]
@@ -5855,8 +5855,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_robot",
-          "start_line": 4419,
-          "end_line": 4424,
+          "start_line": 4428,
+          "end_line": 4433,
           "excerpt": "        self._robots[uid] = robot\n        if was_materialized:\n            self.prepare()\n        for sensor_cfg in mounted_sensors:\n            self.add_sensor(sensor_cfg)\n        return robot"
         }
       ]
@@ -5873,8 +5873,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.enable_gizmo",
-          "start_line": 4614,
-          "end_line": 4614,
+          "start_line": 4623,
+          "end_line": 4623,
           "excerpt": "            gizmo = Gizmo(target, gizmo_cfg, control_part)"
         }
       ]
@@ -5891,8 +5891,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.create_rigid_constraint",
-          "start_line": 4080,
-          "end_line": 4080,
+          "start_line": 4089,
+          "end_line": 4089,
           "excerpt": "        constraint = RigidConstraint("
         }
       ]
@@ -5909,8 +5909,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_rigid_object_group",
-          "start_line": 4221,
-          "end_line": 4221,
+          "start_line": 4230,
+          "end_line": 4230,
           "excerpt": "        group = RigidObjectGroup("
         }
       ]
@@ -5927,8 +5927,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager._declare_rigid_objects",
-          "start_line": 3501,
-          "end_line": 3501,
+          "start_line": 3510,
+          "end_line": 3510,
           "excerpt": "            rigid_obj = RigidObject(cfg=cfg, device=self.device)"
         }
       ]
@@ -5945,8 +5945,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_articulation",
-          "start_line": 4322,
-          "end_line": 4322,
+          "start_line": 4331,
+          "end_line": 4331,
           "excerpt": "        self._articulations[uid] = articulation"
         }
       ]
@@ -5963,8 +5963,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_deformable_object",
-          "start_line": 3880,
-          "end_line": 3880,
+          "start_line": 3889,
+          "end_line": 3889,
           "excerpt": "        self._deformable_objects[uid] = deformable"
         }
       ]
@@ -5981,8 +5981,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_light",
-          "start_line": 3012,
-          "end_line": 3012,
+          "start_line": 3021,
+          "end_line": 3021,
           "excerpt": "        self._lights[uid] = batch_lights"
         }
       ]
