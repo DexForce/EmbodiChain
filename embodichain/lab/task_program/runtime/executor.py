@@ -30,7 +30,7 @@ from embodichain.utils.math import pose_inv
 from embodichain.lab.sim.atomic_skills.bindings import EndpointBinding
 from embodichain.lab.sim.atomic_skills.engine import AtomicSkillEngine
 from embodichain.lab.sim.atomic_skills.invocation import ResolvedSkillRequest
-from embodichain.lab.sim.atomic_skills.plans import SkillPlan
+from embodichain.lab.sim.atomic_skills.plans import PlanningFailure, SkillPlan
 from embodichain.lab.sim.atomic_skills.effects import StateDelta
 from embodichain.lab.sim.atomic_skills.execution import (
     ExecutionEvent,
@@ -491,6 +491,17 @@ class SemanticCallExecutor:
         that the buffered action was consumed by ``env.step``.
         """
         return self._last_sent_plan_reference
+
+    def _last_sent_command_phase(self) -> tuple[str, bool, int] | None:
+        reference = self._last_sent_plan_reference
+        if reference is None or self._runner is None:
+            return None
+        plan = self._runner.session._plan
+        if plan is None:
+            return None
+        index = reference[2]
+        segment = plan.segment_at(index)
+        return segment.name, index == segment.stop - 1, index
 
     @property
     def result(self) -> SemanticExecutionResult:
@@ -1203,7 +1214,13 @@ class SemanticCallExecutor:
                 nominal_source = self._nominal_source_factory.create_nominal_source(
                     plan_request, engine=self._engine
                 )
-        if effect_guards:
+        failures = getattr(grounded, "failed_preconditions", {})
+        if failures or effect_guards:
+            passes = (
+                ~torch.isin(context.env_ids, context.env_ids.new_tensor(list(failures)))
+                if failures
+                else None
+            )
             external_plan_transform = plan_transform
 
             def validate_guarded_plan(
@@ -1215,6 +1232,25 @@ class SemanticCallExecutor:
                     plan = external_plan_transform(request, planning_context, plan)
                 if not isinstance(plan, SkillPlan):
                     raise TypeError("Plan transform must return an SkillPlan.")
+                if passes is not None:
+                    plan = replace(
+                        plan,
+                        plan_success=plan.plan_success & passes,
+                        diagnostics=replace(
+                            plan.diagnostics,
+                            failure=plan.diagnostics.failure
+                            or PlanningFailure(
+                                "semantic_precondition_failed", retryable=False
+                            ),
+                            messages=(
+                                *plan.diagnostics.messages,
+                                *(
+                                    f"env {i}: {reason}"
+                                    for i, reason in failures.items()
+                                ),
+                            ),
+                        ),
+                    )
                 if plan.plan_success.any():
                     names = {segment.name for segment in plan.segments}
                     for guard in effect_guards:

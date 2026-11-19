@@ -43,6 +43,19 @@ Chunked planar distances preserve tensor batch axes, dtype and device.
 
 .. autofunction:: signed_distance_to_polygon
 
+embodichain.compute.geometry.cable
+----------------------------------
+
+Pure tensor geometry for ordered cable endpoints, material-coordinate sampling
+and slip of the same material point in a moving tool frame.
+
+.. currentmodule:: embodichain.compute.geometry.cable
+
+.. autosummary::
+
+   sample_cable_material
+   cable_endpoints
+   cable_grasp_slip
 
 embodichain.compute.geometry.particles
 --------------------------------------
@@ -3486,6 +3499,22 @@ embodichain.lab.sim.atomic_skills.primitives
 
    BUILTIN_SKILL_TYPES
 
+embodichain.lab.sim.atomic_skills.primitives.pick_up
+--------------------------------------------------
+
+PickUp shares motion assembly between rigid-object pickup and contact-only
+pickup. Contact goals require explicit physical verification and retain no
+fixed object-to-tool relation.
+
+.. currentmodule:: embodichain.lab.sim.atomic_skills.primitives.pick_up
+
+.. autosummary::
+
+   GraspGoal
+   ContactGraspGoal
+   PickUp
+   PickUpOptions
+
 embodichain.lab.sim.atomic_skills.requirements
 -----------------------------------------------
 
@@ -5136,6 +5165,19 @@ reference-state resets and terminal snapshots before automatic row resets.
 
 .. automodule:: embodichain_tasks.locomotion.tracking.g1_motion
    :members:
+
+embodichain_tasks.manipulation.cable.route_the_cable
+----------------------------------------------------
+
+Two-spool routing with observed material geometry and measured grasp-slip,
+penetration and end-insertion acceptance.
+
+.. currentmodule:: embodichain_tasks.manipulation.cable.route_the_cable
+
+.. autosummary::
+
+   RouteTheCableEnv
+   measure_route
 
 embodichain_tasks.manipulation.push_cube
 ----------------------------------------
@@ -7062,3 +7104,72 @@ Official sensor presets
 
    VLP16Cfg
    VLP16_REGISTRATION
+
+
+Observed contact manipulation
+=============================
+
+The existing ``PickUp`` and ``Place`` skills accept explicit contact paths.
+These keep one invocation while planning later chunks from fresh measurements;
+no rigid held-object relation or independently recoverable sub-skill is implied.
+The host must acknowledge commands and acquire the declared physical evidence.
+Paths reject offline projection, external trajectory transformations, replay
+recovery and mid-operation invocation revisions.
+
+Bounded plan continuation
+-------------------------
+
+.. currentmodule:: embodichain.lab.sim.atomic_skills.continuation
+
+.. autosummary::
+
+   PlanContinuation
+   PlanContinuationResult
+
+.. autoclass:: PlanContinuation
+   :members:
+
+.. autoclass:: PlanContinuationResult
+   :members:
+
+Contact goals and observation sources
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.atomic_skills.primitives.contact
+
+The source is registered through ``SkillPlanningServices.register_contact_source``
+and remains owned by its episode host. It resolves geometric snapshots and
+accepts observed physical boundaries; motion generation and simulation stepping
+remain with the engine and host respectively. Snapshots retain owned tensors
+and scalar metadata, with explicit batch and row identity.
+
+.. autosummary::
+
+   ContactPhase
+   ContactPostcondition
+   ContactPickUpGoal
+   ContactPlaceGoal
+   ContactPhaseSource
+   ContactContinuation
+   ResolvedContactPhase
+
+.. autoclass:: ContactPhase
+   :members:
+
+.. autoclass:: ContactPostcondition
+   :members:
+
+.. autoclass:: ContactPickUpGoal
+   :members:
+
+.. autoclass:: ContactPlaceGoal
+   :members:
+
+.. autoclass:: ContactPhaseSource
+   :members:
+
+.. autoclass:: ContactContinuation
+   :members:
+
+.. autoclass:: ResolvedContactPhase
+   :members:
