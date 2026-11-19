@@ -195,7 +195,7 @@ The animations below are the runnable simulator demonstrations under
 |---|---|---|---|---|---|
 | `move_end_effector` | `EndEffectorPoseGoal` | `primary.motion` | none | none | none |
 | `move_joints` | `JointPositionGoal` | `primary.motion` | named target only: command matching `target` on `primary.motion` | none | none |
-| `pick_up` | `GraspGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | semantic object/entity | attach object to the `primary.motion` target |
+| `pick_up` | `GraspGoal` or `ContactGraspGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | semantic object or explicit contact pose | rigid held relation or terminal contact verification |
 | `axis_align` | `AxisAlignGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | unheld object with `AxisAlignAffordance` | open-loop pick and align while retaining the grasp |
 | `move_held_object` | `HeldObjectPoseGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `grasp` | object held exclusively by the `primary.motion` target | preserve attachment |
 | `pour` | `PourGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `grasp` | exclusively held object with `AxisAlignAffordance` | preserve attachment; open-loop rotate and return |
@@ -410,17 +410,31 @@ named_goal = JointPositionGoal(target="home")
 
 ## `PickUp`
 
-Plans **approach -> close hand -> lift** and declares the object attached to the
-bound motion target.
+Plans **approach -> close hand -> lift**. A rigid `GraspGoal` declares a held-object
+relation for the bound motion target. `ContactGraspGoal(grasp_xpos=...)` uses an
+observed TCP pose and requires physical contact verification, with no fixed
+object-to-tool relation.
 
 | Contract | Value |
 |---|---|
 | Skill ID | `pick_up` |
-| Goal | `GraspGoal(semantics=..., grasp_xpos=None, object_pose=None)` |
+| Goal | `GraspGoal(semantics=..., grasp_xpos=None, object_pose=None)` or `ContactGraspGoal(grasp_xpos=...)` |
 | Binding contract | `primary.motion` plus disjoint `primary.grasp` |
-| Precondition | When `object_pose` is omitted, `ObjectSemantics.entity_id` must resolve in the planning snapshot (the deprecated live `entity` fallback remains temporarily); an explicit `SceneEntityPose` must reference a snapshot entity; an `AntipodalAffordance` is required when neither an explicit grasp pose nor `fixed_object_to_eef` is supplied |
-| Effect | write `HeldObjectState` for the bound motion target |
-| Verification | the attachment effect must be verified during closed-loop execution |
+| Precondition | Rigid goals resolve their object pose and require an affordance when no grasp is supplied; contact goals require a free task-state resource; late-bound poses resolve in the planning snapshot |
+| Effect | Rigid goals write `HeldObjectState`; contact goals declare a physical verification requirement |
+| Verification | Rigid held effects and contact-only grasp effects require physical verification during closed-loop execution |
+
+Contact goals require an unoccupied single/coordinated task-state resource.
+Their plan declares `EffectVerificationRequirement(kind="contact_grasp")`,
+which the host must resolve with physical evidence. The cable routing host
+measures material-point lift and retention in the tool frame. Rigid-object
+calibrations and downstream object targets belong to `GraspGoal` pickup.
+
+Contact pickup uses the existing `hand_interp_steps`, `grasp_settle_steps` and
+`lift_height` options. Its native IK lift is sampled using
+`MotionPolicy.interpolate_position_step` and the control period, then qualified
+against joint limits. The motion-generator and external-nominal paths retain
+their backend timing. Both goal types use the same effect assembly boundary.
 
 `grasp_xpos` may be `(4, 4)`, `(B, 4, 4)`, or a `SceneEntityPose`. A scene
 reference resolves the latest grasp pose and registers its entity as a recovery

@@ -1483,14 +1483,14 @@ class CoordinatedPickment(AtomicSkill[CoordinatedPickGoal, CoordinatedPickmentOp
             )
         left_valid &= torch.isfinite(left_projected).all(dim=-1)
         right_valid &= torch.isfinite(right_projected).all(dim=-1)
-        left_step_valid = self._joint_steps_within_velocity_limits(
+        left_step_valid = self.motion_generator.joint_steps_within_velocity_limits(
             left_start_qpos,
             left_projected,
             resources.left_arm.control_part,
             velocity_limit=velocity_limit,
             step_dt=step_dt,
         )
-        right_step_valid = self._joint_steps_within_velocity_limits(
+        right_step_valid = self.motion_generator.joint_steps_within_velocity_limits(
             right_start_qpos,
             right_projected,
             resources.right_arm.control_part,
@@ -1526,29 +1526,6 @@ class CoordinatedPickment(AtomicSkill[CoordinatedPickGoal, CoordinatedPickmentOp
             right_path_valid[:, None, None], right_projected, right_seed
         )
         return success_mask, left_projected, right_projected
-
-    def _joint_steps_within_velocity_limits(
-        self,
-        start_qpos: torch.Tensor,
-        trajectory: torch.Tensor,
-        control_part: str,
-        *,
-        velocity_limit: float | None,
-        step_dt: float,
-    ) -> torch.Tensor:
-        """Reject dense IK paths that jump farther than one control interval."""
-        limits = self.motion_generator._resolve_velocity_limits(
-            control_part=control_part,
-            batch_size=self.num_envs,
-            dof=start_qpos.shape[-1],
-            requested=velocity_limit,
-            reference=start_qpos,
-        )
-        positions = torch.cat((start_qpos[:, None], trajectory), dim=1)
-        max_step = limits.view(1, 1, -1) * step_dt
-        return torch.isfinite(positions).all(dim=(1, 2)) & (
-            positions.diff(dim=1).abs() <= max_step + 1.0e-6
-        ).all(dim=(1, 2))
 
     def _plan(
         self,

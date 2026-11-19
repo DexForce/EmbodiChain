@@ -951,6 +951,9 @@ class PlanningContext:
     control_dt: float | None = None
     """Explicit command period used by action-owned interpolation."""
 
+    planning_mask: torch.Tensor | None = field(default=None, kw_only=True)
+    """Eligible planning rows; inactive rows cannot determine path duration."""
+
     affordance_sampling: AffordanceSamplingContext | None = None
     """Optional immutable Affordance sampling stream supplied by the host."""
 
@@ -966,6 +969,15 @@ class PlanningContext:
     """Optional native-world source stamp; projected joint states keep this world scope."""
 
     def __post_init__(self) -> None:
+        if self.planning_mask is not None:
+            mask = self.planning_mask
+            if (
+                mask.dtype != torch.bool
+                or mask.shape != self.env_ids.shape
+                or mask.device != self.env_ids.device
+            ):
+                raise ValueError("planning_mask must match the selected context rows.")
+            object.__setattr__(self, "planning_mask", mask.clone())
         if type(self.is_preview) is not bool:
             raise TypeError("is_preview must be bool.")
         if self.world_source_stamp is not None:

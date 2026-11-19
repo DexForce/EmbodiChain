@@ -256,6 +256,7 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/gaussian_pick_place/task_program/integration.yaml"),
         Path("tasks/manipulation/gaussian_pick_place/catalog.yaml"),
         Path("tasks/manipulation/gaussian_pick_place/README.md"),
+        Path("tasks/manipulation/cable/route_the_cable/cable.usda"),
         Path("tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"),
         Path("tasks/manipulation/tableware/pour_cup/env.fluid.yaml"),
         Path("tasks/manipulation/tableware/pour_cup/task_program/program.fluid.yaml"),

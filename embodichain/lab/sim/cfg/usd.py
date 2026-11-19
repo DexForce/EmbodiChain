@@ -74,7 +74,10 @@ class UsdImportCfg:
 
     In sparse mappings with ``auto`` placement, explicit ``init_pos`` or
     ``init_rot`` keys select the configured pose, including zero values.
-    Omitted pose fields retain source placement.
+    Omitted pose fields retain source placement. For cables, sparse mappings
+    accept ``uid``, ``fixed_segments``, ``collision_filter_span`` and fields of
+    ``CablePhysicsCfg`` under ``attrs``. Overrides apply to all curves on
+    the targeted prim, preserving its authored geometry and placement.
     """
 
     robot_cfgs: dict[str, RobotCfg] = field(default_factory=dict)

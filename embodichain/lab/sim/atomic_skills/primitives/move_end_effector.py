@@ -63,6 +63,13 @@ class EndEffectorPoseGoal:
 class MoveEndEffectorOptions(SkillOptions):
     """Per-invocation behavior for :class:`MoveEndEffector`."""
 
+    preserve_cartesian_samples: bool = False
+    """Execute the supplied Cartesian samples on the control grid."""
+
+    def __post_init__(self) -> None:
+        if type(self.preserve_cartesian_samples) is not bool:
+            raise TypeError("preserve_cartesian_samples must be a bool.")
+
 
 class MoveEndEffector(AtomicSkill[EndEffectorPoseGoal, MoveEndEffectorOptions]):
     """Plan a free-space move for a bound manipulator."""
@@ -96,6 +103,10 @@ class MoveEndEffector(AtomicSkill[EndEffectorPoseGoal, MoveEndEffectorOptions]):
             num_envs=context.batch_size,
             device=self.device,
         )
+        if request.skill_options.preserve_cartesian_samples and move_xpos.ndim != 4:
+            raise ValueError(
+                "preserve_cartesian_samples requires batched pose samples."
+            )
         start_qpos = context.robot.qpos[:, joint_ids]
         result = self.motion_generator.generate(
             build_pose_plan_states(move_xpos),
@@ -103,6 +114,12 @@ class MoveEndEffector(AtomicSkill[EndEffectorPoseGoal, MoveEndEffectorOptions]):
                 start_qpos=start_qpos,
                 control_part=control_part,
                 interpolation_dt=context.control_dt,
+                cartesian_linear=request.skill_options.preserve_cartesian_samples,
+                sample_count=(
+                    move_xpos.shape[1] + 1
+                    if request.skill_options.preserve_cartesian_samples
+                    else None
+                ),
             ),
         )
         success, trajectory = to_full_robot_trajectory(

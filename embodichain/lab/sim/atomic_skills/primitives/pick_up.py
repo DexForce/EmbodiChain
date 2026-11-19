@@ -18,12 +18,21 @@
 
 from __future__ import annotations
 
+from embodichain.lab.sim.atomic_skills.continuation import PlanContinuationResult
+from embodichain.lab.sim.atomic_skills.primitives.contact import (
+    ContactPickUpGoal,
+    _plan_contact_phase,
+    _continue_contact_phase,
+    _begin_contact_phase,
+)
+
 import math
 from dataclasses import dataclass, field, replace
 from typing import ClassVar
 
 import torch
 
+from embodichain.lab.sim.motion.planners.utils import interpolate_xpos_batched
 from embodichain.utils import logger
 from embodichain.utils.math import (
     axis_angle_to_rotation_matrix,
@@ -66,6 +75,7 @@ from embodichain.lab.sim.atomic_skills.invocation import (
 from embodichain.lab.sim.atomic_skills.nominal import NominalMotionSource
 from embodichain.lab.sim.atomic_skills.plans import (
     SkillPlan,
+    EffectVerificationRequirement,
     PlannerDiagnostics,
     TimedTrajectory,
     normalize_success_mask,
@@ -85,6 +95,7 @@ from embodichain.lab.sim.atomic_skills.trajectory_ops import (
     resolve_pose_target,
     split_three_segments,
     translate_pose_world,
+    to_full_robot_trajectory,
 )
 from embodichain.lab.sim.atomic_skills.primitives._binding_contracts import (
     make_manipulation_slot,
@@ -128,6 +139,27 @@ class GraspGoal(ObjectSkillGoal):
             validate_pose_goal(self.object_pose, "object_pose", allow_waypoints=False)
         if self.grasp_xpos is not None:
             validate_pose_goal(self.grasp_xpos, "grasp_xpos", allow_waypoints=False)
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class ContactGraspGoal:
+    """Contact-only pickup at an observed TCP pose in the planning frame.
+
+    Args:
+        grasp_xpos: Explicit or late-bound grasp pose. The host supplies physical
+            evidence that the target remains pinched during lift. The goal does
+            not project a fixed object-to-tool relationship.
+    """
+
+    goal_kind: ClassVar[str] = "contact_grasp"
+    grasp_xpos: PoseGoalValue
+
+    def __post_init__(self) -> None:
+        validate_pose_goal(self.grasp_xpos, "grasp_xpos", allow_waypoints=False)
+        if isinstance(self.grasp_xpos, torch.Tensor) and not bool(
+            torch.isfinite(self.grasp_xpos).all()
+        ):
+            raise ValueError("grasp_xpos must be finite.")
 
 
 def _validate_single_se3(value: torch.Tensor, name: str) -> None:
@@ -327,11 +359,17 @@ class PickUpOptions(SkillOptions):
             )
 
 
-class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
+class PickUp(
+    AtomicSkill[GraspGoal | ContactGraspGoal | ContactPickUpGoal, PickUpOptions]
+):
     """Approach a grasp pose, close the gripper, lift."""
 
     skill_id: ClassVar[str] = "pick_up"
-    GoalType: ClassVar[type] = GraspGoal
+    GoalType: ClassVar[tuple[type, ...]] = (
+        GraspGoal,
+        ContactGraspGoal,
+        ContactPickUpGoal,
+    )
     OptionsType: ClassVar[type] = PickUpOptions
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
@@ -352,12 +390,30 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
         ),
     )
 
+    def continue_plan(
+        self,
+        request: ResolvedSkillRequest,
+        context: PlanningContext,
+        plan: SkillPlan,
+        active_mask: torch.Tensor,
+    ) -> PlanContinuationResult:
+        return _continue_contact_phase(self, request, context, plan, active_mask)
+
+    def on_plan_installed(
+        self, request: ResolvedSkillRequest, context: PlanningContext, plan: SkillPlan
+    ) -> None:
+        _begin_contact_phase(self, request, context, plan)
+
     def _scene_dependencies(
         self,
-        request: ResolvedSkillRequest[GraspGoal, PickUpOptions],
+        request: ResolvedSkillRequest[
+            GraspGoal | ContactGraspGoal | ContactPickUpGoal, PickUpOptions
+        ],
     ) -> tuple[str, ...]:
         """Monitor the acquired object and late-bound downstream targets."""
         dependencies = set(super()._scene_dependencies(request))
+        if isinstance(request.goal, (ContactGraspGoal, ContactPickUpGoal)):
+            return tuple(sorted(dependencies))
         entity_id = request.goal.semantics.entity_id
         # An explicit object pose is a scene-independent planning input.  Do
         # not retain the semantic entity as a dynamic dependency in that
@@ -384,6 +440,10 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
         hand_open_qpos: torch.Tensor,
         hand_grasp_qpos: torch.Tensor,
         interpolation_dt: float,
+        *,
+        contact_grasp: bool = False,
+        env_ids: torch.Tensor | None = None,
+        active_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, int]]:
         if options.cartesian_lift and motion_policy.phase_paths:
             raise ValueError("cartesian_lift and phase_paths are mutually exclusive.")
@@ -393,121 +453,257 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
             grasp_xpos, -approach_direction * options.pre_grasp_distance
         )
 
-        n_approach, n_close, n_lift = split_three_segments(
-            motion_policy.sample_count,
-            options.hand_interp_steps,
-            first_segment_name="approach",
-            third_segment_name="lift",
-        )
+        if contact_grasp and motion_policy.phase_paths:
+            raise ValueError(
+                "Contact pickup uses its fixed Cartesian grid, without phase_paths."
+            )
+        if contact_grasp and motion_policy.strategy == "ik_interp":
 
-        lift_xpos = translate_pose_world(
-            grasp_xpos,
-            torch.tensor([0, 0, 1], device=self.device) * options.lift_height,
-        )
-        motion_options = motion_policy.to_motion_gen_options(
-            start_qpos=start_arm_qpos,
-            control_part=manipulator.control_part,
-            sample_count=n_approach + n_lift,
-            interpolation_dt=interpolation_dt,
-        )
-        if motion_policy.strategy == "motion_gen":
-            # Keep the native combined path for the pose-based split. The
-            # motion generator resolves backend defaults when no explicit
-            # planner options were supplied.
-            motion_options.sample_count = None
-        waypoints = [pre_grasp_xpos, grasp_xpos, lift_xpos]
-        phase_names = ["pre_grasp", "grasp", "lift"]
-        if options.initial_lift_height > 0.0:
-            start_xpos = self.robot.compute_fk(
-                qpos=start_arm_qpos,
-                name=manipulator.control_part,
-                to_matrix=True,
-                **(
-                    {"env_ids": self.planning_services.env_ids}
-                    if self.planning_services.env_ids is not None
-                    else {}
-                ),
-            )
-            initial_lift = translate_pose_world(
-                start_xpos,
-                start_xpos.new_tensor([0.0, 0.0, options.initial_lift_height]),
-            )
-            waypoints.insert(0, initial_lift)
-            phase_names.insert(0, "initial_lift")
+            def sampled_move(
+                start_full: torch.Tensor, target_pose: torch.Tensor, sample_count: int
+            ) -> tuple[torch.Tensor, torch.Tensor]:
+                arm_ids = list(manipulator.joint_ids)
+                start_pose = self.robot.compute_fk(
+                    start_full[:, arm_ids],
+                    name=manipulator.control_part,
+                    to_matrix=True,
+                    **(
+                        {"env_ids": self.planning_services.env_ids}
+                        if self.planning_services.env_ids is not None
+                        else {}
+                    ),
+                )
+                poses = interpolate_xpos_batched(start_pose, target_pose, sample_count)[
+                    :, 1:
+                ]
+                if active_mask is not None:
+                    mask, sampled = plan_named_arm_trajectory(
+                        self.motion_generator,
+                        manipulator.control_part,
+                        start_full[:, arm_ids],
+                        poses,
+                        sample_count,
+                        motion_policy,
+                        interpolation_dt,
+                        active_mask=active_mask,
+                        cartesian_linear=True,
+                    )
+                    return mask, sampled
+                result = self.motion_generator.generate(
+                    build_pose_plan_states(poses),
+                    options=replace(
+                        motion_policy, sample_count=sample_count
+                    ).to_motion_gen_options(
+                        start_qpos=start_full[:, arm_ids],
+                        control_part=manipulator.control_part,
+                        interpolation_dt=interpolation_dt,
+                        cartesian_linear=True,
+                    ),
+                )
+                valid, trajectory = to_full_robot_trajectory(
+                    result,
+                    base_qpos=start_full,
+                    joint_ids=arm_ids,
+                    env_ids=env_ids,
+                    control_dt=interpolation_dt,
+                )
+                return valid, trajectory.positions[:, :, arm_ids]
 
-        if any(name in motion_policy.phase_paths for name in phase_names):
-            motion_options.waypoint_modes = tuple(
-                motion_policy.phase_paths.get(name, "joint") for name in phase_names
+            approach_start = last_qpos
+            prefix = None
+            prefix_valid = torch.ones(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+            if options.initial_lift_height > 0.0:
+                start_xpos = self.robot.compute_fk(
+                    qpos=start_arm_qpos,
+                    name=manipulator.control_part,
+                    to_matrix=True,
+                    **(
+                        {"env_ids": self.planning_services.env_ids}
+                        if self.planning_services.env_ids is not None
+                        else {}
+                    ),
+                )
+                initial_lift = translate_pose_world(
+                    start_xpos,
+                    start_xpos.new_tensor([0.0, 0.0, options.initial_lift_height]),
+                )
+                prefix_valid, prefix = sampled_move(
+                    approach_start, initial_lift, motion_policy.sample_count
+                )
+                approach_start = last_qpos.clone()
+                approach_start[:, list(manipulator.joint_ids)] = prefix[:, -1]
+            if options.pre_grasp_distance > 0:
+                pre_grasp_valid, pre_grasp = sampled_move(
+                    approach_start, pre_grasp_xpos, motion_policy.sample_count
+                )
+                prefix_valid &= pre_grasp_valid
+                prefix = (
+                    pre_grasp
+                    if prefix is None
+                    else torch.cat((prefix, pre_grasp), dim=1)
+                )
+                approach_start = last_qpos.clone()
+                approach_start[:, list(manipulator.joint_ids)] = prefix[:, -1]
+            is_success, approach_arm = sampled_move(
+                approach_start, grasp_xpos, motion_policy.sample_count
+            )
+            if prefix is not None:
+                approach_arm = torch.cat((prefix, approach_arm), dim=1)
+            lift_start_qpos = last_qpos.clone()
+            lift_start_qpos[:, list(manipulator.joint_ids)] = approach_arm[:, -1]
+            lift_start_qpos[:, list(end_effector.joint_ids)] = hand_grasp_qpos
+            lift_xpos = translate_pose_world(
+                grasp_xpos, grasp_xpos.new_tensor([0, 0, options.lift_height])
+            )
+            lift_samples = max(
+                2,
+                math.ceil(options.lift_height / motion_policy.interpolate_position_step)
+                + 1,
+            )
+            lift_success, lift_arm = sampled_move(
+                lift_start_qpos, lift_xpos, lift_samples
+            )
+            is_success = prefix_valid & is_success & lift_success
+            n_approach, n_close, n_lift = (
+                approach_arm.shape[1],
+                options.hand_interp_steps,
+                lift_arm.shape[1],
+            )
+            grasp_arm_qpos = approach_arm[:, -1]
+        else:
+            n_approach, n_close, n_lift = split_three_segments(
+                motion_policy.sample_count,
+                options.hand_interp_steps,
+                first_segment_name="approach",
+                third_segment_name="lift",
             )
 
-        if options.cartesian_lift:
-            if motion_policy.strategy != "ik_interp":
-                raise ValueError("cartesian_lift requires strategy='ik_interp'.")
-            if motion_policy.interpolation_mode == "adaptive":
-                n_approach = max(n_approach, len(waypoints))
-            approach_success, approach_arm = plan_named_arm_trajectory(
-                self.motion_generator,
-                manipulator.control_part,
-                start_arm_qpos,
-                torch.stack(waypoints[:-1], dim=1),
-                n_approach,
-                motion_policy,
-                interpolation_dt,
-            )
-            if n_lift < 2:
-                raise ValueError("cartesian_lift requires at least two lift samples.")
-            lift_targets = axis_translation_keyframes(
+            lift_xpos = translate_pose_world(
                 grasp_xpos,
-                lift_xpos,
-                grasp_xpos.new_tensor([0.0, 0.0, 1.0]),
-                n_waypoints=n_lift - 1,
+                torch.tensor([0, 0, 1], device=self.device) * options.lift_height,
             )
-            if bool(approach_success.any()):
-                lift_success, lift_arm = plan_named_arm_trajectory(
+            motion_options = motion_policy.to_motion_gen_options(
+                start_qpos=start_arm_qpos,
+                control_part=manipulator.control_part,
+                sample_count=n_approach + n_lift,
+                interpolation_dt=interpolation_dt,
+            )
+            if motion_policy.strategy == "motion_gen":
+                # Keep the native combined path for the pose-based split. The
+                # motion generator resolves backend defaults when no explicit
+                # planner options were supplied.
+                motion_options.sample_count = None
+            waypoints = [pre_grasp_xpos, grasp_xpos, lift_xpos]
+            phase_names = ["pre_grasp", "grasp", "lift"]
+            if options.initial_lift_height > 0.0:
+                start_xpos = self.robot.compute_fk(
+                    qpos=start_arm_qpos,
+                    name=manipulator.control_part,
+                    to_matrix=True,
+                    **(
+                        {"env_ids": self.planning_services.env_ids}
+                        if self.planning_services.env_ids is not None
+                        else {}
+                    ),
+                )
+                initial_lift = translate_pose_world(
+                    start_xpos,
+                    start_xpos.new_tensor([0.0, 0.0, options.initial_lift_height]),
+                )
+                waypoints.insert(0, initial_lift)
+                phase_names.insert(0, "initial_lift")
+
+            if any(name in motion_policy.phase_paths for name in phase_names):
+                motion_options.waypoint_modes = tuple(
+                    motion_policy.phase_paths.get(name, "joint") for name in phase_names
+                )
+
+            if options.cartesian_lift:
+                if motion_policy.strategy != "ik_interp":
+                    raise ValueError("cartesian_lift requires strategy='ik_interp'.")
+                if motion_policy.interpolation_mode == "adaptive":
+                    n_approach = max(n_approach, len(waypoints))
+                approach_success, approach_arm = plan_named_arm_trajectory(
                     self.motion_generator,
                     manipulator.control_part,
-                    approach_arm[:, -1],
-                    lift_targets,
-                    n_lift,
+                    start_arm_qpos,
+                    torch.stack(waypoints[:-1], dim=1),
+                    n_approach,
                     motion_policy,
                     interpolation_dt,
-                    active_mask=approach_success,
-                    cartesian_linear=True,
                 )
+                if n_lift < 2:
+                    raise ValueError(
+                        "cartesian_lift requires at least two lift samples."
+                    )
+                lift_targets = axis_translation_keyframes(
+                    grasp_xpos,
+                    lift_xpos,
+                    grasp_xpos.new_tensor([0.0, 0.0, 1.0]),
+                    n_waypoints=n_lift - 1,
+                )
+                if bool(approach_success.any()):
+                    lift_success, lift_arm = plan_named_arm_trajectory(
+                        self.motion_generator,
+                        manipulator.control_part,
+                        approach_arm[:, -1],
+                        lift_targets,
+                        n_lift,
+                        motion_policy,
+                        interpolation_dt,
+                        active_mask=approach_success,
+                        cartesian_linear=True,
+                    )
+                else:
+                    lift_arm = approach_arm[:, -1:].expand(-1, n_lift, -1).clone()
+                    lift_success = approach_success.clone()
+                is_success = approach_success & lift_success
             else:
-                lift_arm = approach_arm[:, -1:].expand(-1, n_lift, -1).clone()
-                lift_success = approach_success.clone()
-            is_success = approach_success & lift_success
-        else:
-            motion_result = self.motion_generator.generate(
-                build_pose_plan_states(torch.stack(waypoints, dim=1)),
-                options=motion_options,
-            )
-            assert isinstance(motion_result.success, torch.Tensor)
-            assert motion_result.positions is not None
-            assert motion_result.dt is not None
-            approach_arm, lift_arm = split_joint_trajectory_at_pose(
-                motion_result.positions,
-                grasp_xpos,
-                robot=self.robot,
-                control_part=manipulator.control_part,
-                first_sample_count=n_approach,
-                second_sample_count=n_lift,
-                dt=motion_result.dt,
-                control_dt=interpolation_dt,
-                arrival_indices=motion_result.waypoint_indices,
-                split_target_index=len(waypoints) - 2,
-                success=motion_result.success,
-                env_ids=self.planning_services.env_ids,
-            )
-            is_success = motion_result.success
-        n_approach = approach_arm.shape[1]
-        n_lift = lift_arm.shape[1]
-        grasp_arm_qpos = approach_arm[:, -1, :]
+                motion_result = self.motion_generator.generate(
+                    build_pose_plan_states(torch.stack(waypoints, dim=1)),
+                    options=motion_options,
+                )
+                assert isinstance(motion_result.success, torch.Tensor)
+                assert motion_result.positions is not None
+                assert motion_result.dt is not None
+                approach_arm, lift_arm = split_joint_trajectory_at_pose(
+                    motion_result.positions,
+                    grasp_xpos,
+                    robot=self.robot,
+                    control_part=manipulator.control_part,
+                    first_sample_count=n_approach,
+                    second_sample_count=n_lift,
+                    dt=motion_result.dt,
+                    control_dt=interpolation_dt,
+                    arrival_indices=motion_result.waypoint_indices,
+                    split_target_index=len(waypoints) - 2,
+                    success=motion_result.success,
+                    env_ids=self.planning_services.env_ids,
+                )
+                is_success = motion_result.success
+            n_approach = approach_arm.shape[1]
+            n_lift = lift_arm.shape[1]
+            grasp_arm_qpos = approach_arm[:, -1, :]
 
-        hand_close_path = interpolate_hand_qpos(
-            hand_open_qpos, hand_grasp_qpos, n_waypoints=n_close
-        )
+        if contact_grasp:
+            # Keep endpoint-weighted contact commands on their original grid.
+            weights = (
+                torch.linspace(
+                    0, 1, n_close, device=self.device, dtype=hand_open_qpos.dtype
+                )
+                if n_close > 1
+                else torch.ones(1, device=self.device, dtype=hand_open_qpos.dtype)
+            )[None, :, None]
+            hand_close_path = (
+                hand_open_qpos[:, None] * (1 - weights)
+                + hand_grasp_qpos[:, None] * weights
+            )
+        else:
+            hand_close_path = interpolate_hand_qpos(
+                hand_open_qpos, hand_grasp_qpos, n_waypoints=n_close
+            )
         n_settle = options.grasp_settle_steps
         close_start = n_approach
         settle_start = close_start + n_close
@@ -530,7 +726,9 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
             n_waypoints=n_approach,
         )
         full[:, :n_approach, arm_joint_ids] = approach_arm
-        full[:, :n_approach, hand_joint_ids] = approach_hand
+        full[:, :n_approach, hand_joint_ids] = (
+            hand_open_qpos.unsqueeze(1) if contact_grasp else approach_hand
+        )
         full[:, close_start:settle_start, arm_joint_ids] = grasp_arm_qpos.unsqueeze(1)
         full[:, close_start:settle_start, hand_joint_ids] = hand_close_path
         if n_settle:
@@ -554,11 +752,18 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
 
     def _plan(
         self,
-        request: ResolvedSkillRequest[GraspGoal, PickUpOptions],
+        request: ResolvedSkillRequest[
+            GraspGoal | ContactGraspGoal | ContactPickUpGoal, PickUpOptions
+        ],
         context: PlanningContext,
     ) -> SkillPlan:
         """Plan approach, close, and lift segments without committing attachment."""
         target = self.require_goal(request)
+        if isinstance(target, ContactPickUpGoal):
+            self._validate_contact_options(request.skill_options)
+            return _plan_contact_phase(self, request, context)
+        if isinstance(target, ContactGraspGoal):
+            self._validate_contact_goal(request, context)
         options = replace(
             request.skill_options,
             downstream_object_target_poses=tuple(
@@ -606,76 +811,85 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
             dtype=context.robot.qpos.dtype,
         )
         state = context
-        sem = target.semantics
-        if target.object_pose is None:
-            object_pose = _resolve_object_pose(
-                sem,
-                context,
-                name="pickup_object_pose",
-            )
-        else:
-            object_pose = resolve_pose_target(
-                resolve_pose_goal(
-                    target.object_pose,
-                    context,
-                    name="object_pose",
-                ),
-                num_envs=self.num_envs,
-                device=self.device,
-            )
-        if (
-            target.grasp_xpos is None
-            and options.fixed_object_to_eef is None
-            and not isinstance(sem.affordance, AntipodalAffordance)
-        ):
-            raise ValueError(
-                "PickUp requires an AntipodalAffordance when neither grasp_xpos "
-                "nor fixed_object_to_eef is set."
-            )
-        start_arm_qpos = arm_qpos_from_state(
-            state,
-            list(manipulator.joint_ids),
-        )
-        affordance_sample: AffordanceSample | None = None
-        if target.grasp_xpos is None:
-            if options.fixed_object_to_eef is None:
-                affordance_sample = self._resolve_grasp_pose(
-                    sem,
-                    object_pose,
-                    start_arm_qpos,
-                    manipulator,
-                    end_effector.target_id,
-                    options,
-                    approach_direction,
-                    context,
-                    sample_key=(request.invocation_id or self.skill_id) + ":grasp",
-                )
-                is_success = affordance_sample.success
-                grasp_xpos = affordance_sample.poses
-            else:
-                object_to_eef = options.fixed_object_to_eef.to(
-                    device=self.device,
-                    dtype=object_pose.dtype,
-                )
-                grasp_xpos = torch.matmul(object_pose, object_to_eef)
-                is_success = torch.ones(
-                    self.num_envs,
-                    dtype=torch.bool,
-                    device=self.device,
-                )
-        else:
+        start_arm_qpos = arm_qpos_from_state(state, list(manipulator.joint_ids))
+        if isinstance(target, ContactGraspGoal):
+            object_pose = None
+            affordance_sample = None
             grasp_xpos = resolve_pose_target(
                 resolve_pose_goal(target.grasp_xpos, context, name="grasp_xpos"),
                 num_envs=self.num_envs,
                 device=self.device,
             )
-            if options.rotate_upright is not None:
-                grasp_xpos = self._upright_adjusted_grasp_poses(
-                    grasp_xpos,
-                    object_pose,
-                    options,
-                )
             is_success = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+        else:
+            sem = target.semantics
+            if target.object_pose is None:
+                object_pose = _resolve_object_pose(
+                    sem,
+                    context,
+                    name="pickup_object_pose",
+                )
+            else:
+                object_pose = resolve_pose_target(
+                    resolve_pose_goal(
+                        target.object_pose,
+                        context,
+                        name="object_pose",
+                    ),
+                    num_envs=self.num_envs,
+                    device=self.device,
+                )
+            if (
+                target.grasp_xpos is None
+                and options.fixed_object_to_eef is None
+                and not isinstance(sem.affordance, AntipodalAffordance)
+            ):
+                raise ValueError(
+                    "PickUp requires an AntipodalAffordance when neither grasp_xpos "
+                    "nor fixed_object_to_eef is set."
+                )
+            affordance_sample: AffordanceSample | None = None
+            if target.grasp_xpos is None:
+                if options.fixed_object_to_eef is None:
+                    affordance_sample = self._resolve_grasp_pose(
+                        sem,
+                        object_pose,
+                        start_arm_qpos,
+                        manipulator,
+                        end_effector.target_id,
+                        options,
+                        approach_direction,
+                        context,
+                        sample_key=(request.invocation_id or self.skill_id) + ":grasp",
+                    )
+                    is_success = affordance_sample.success
+                    grasp_xpos = affordance_sample.poses
+                else:
+                    object_to_eef = options.fixed_object_to_eef.to(
+                        device=self.device,
+                        dtype=object_pose.dtype,
+                    )
+                    grasp_xpos = torch.matmul(object_pose, object_to_eef)
+                    is_success = torch.ones(
+                        self.num_envs,
+                        dtype=torch.bool,
+                        device=self.device,
+                    )
+            else:
+                grasp_xpos = resolve_pose_target(
+                    resolve_pose_goal(target.grasp_xpos, context, name="grasp_xpos"),
+                    num_envs=self.num_envs,
+                    device=self.device,
+                )
+                if options.rotate_upright is not None:
+                    grasp_xpos = self._upright_adjusted_grasp_poses(
+                        grasp_xpos,
+                        object_pose,
+                        options,
+                    )
+                is_success = torch.ones(
+                    self.num_envs, dtype=torch.bool, device=self.device
+                )
         grasp_success = normalize_success_mask(
             is_success,
             num_envs=self.num_envs,
@@ -700,6 +914,8 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
             hand_open_qpos,
             hand_grasp_qpos,
             context.require_control_dt(),
+            contact_grasp=isinstance(target, ContactGraspGoal),
+            env_ids=context.env_ids,
         )
         success_mask = grasp_success & normalize_success_mask(
             trajectory_success,
@@ -724,14 +940,58 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
             provenance=None,
         )
 
+    @staticmethod
+    def _validate_contact_options(options: PickUpOptions) -> None:
+        if (
+            options.fixed_object_to_eef is not None
+            or options.downstream_object_target_poses
+            or options.rotate_upright is not None
+            or options.obj_upright_direction is not None
+        ):
+            raise ValueError(
+                "Contact pickup requires an explicit grasp pose without rigid-object options."
+            )
+
+    def _validate_contact_goal(
+        self,
+        request: ResolvedSkillRequest[
+            GraspGoal | ContactGraspGoal | ContactPickUpGoal, PickUpOptions
+        ],
+        context: PlanningContext,
+    ) -> None:
+        self._validate_contact_options(request.skill_options)
+        motion = request.binding.endpoint("primary", "motion")
+        hand = request.binding.endpoint("primary", "grasp")
+        key = require_shared_task_state_key(
+            motion, hand, participant="PickUp primary participant"
+        )
+        held = context.task.get_held_object(key)
+        occupied = held is not None and (
+            held.env_mask is None or bool(held.env_mask.any())
+        )
+        coordinated = any(
+            key in pair and (value.env_mask is None or bool(value.env_mask.any()))
+            for pair, value in context.coordinated_held_objects.items()
+        )
+        if occupied or coordinated:
+            raise ValueError(
+                "Contact pickup requires an unoccupied task-state resource."
+            )
+
     def _plan_from_nominal(
         self,
-        request: ResolvedSkillRequest[GraspGoal, PickUpOptions],
+        request: ResolvedSkillRequest[
+            GraspGoal | ContactGraspGoal | ContactPickUpGoal, PickUpOptions
+        ],
         context: PlanningContext,
         nominal_source: NominalMotionSource,
     ) -> SkillPlan:
         """Assemble a Pick from an explicitly supplied external motion."""
         target = self.require_goal(request)
+        if isinstance(target, ContactPickUpGoal):
+            raise ValueError("Observed contact paths cannot replay nominal motion.")
+        if isinstance(target, ContactGraspGoal):
+            self._validate_contact_goal(request, context)
         motion = self._validate_nominal_motion(
             request, context, nominal_source, segments=("approach", "close", "lift")
         )
@@ -784,27 +1044,36 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
                 raise ValueError("external Pick grasp FK is unavailable")
         else:
             grasp_xpos = motion.grasp_pose.to(context.robot.qpos)
-        if target.object_pose is None:
-            object_pose = _resolve_object_pose(
-                target.semantics, context, name="pickup_object_pose"
-            )
-        else:
-            object_pose = resolve_pose_target(
-                resolve_pose_goal(target.object_pose, context, name="object_pose"),
-                num_envs=context.batch_size,
-                device=self.device,
-            )
-        expected_grasp = None
-        if target.grasp_xpos is not None:
+        if isinstance(target, ContactGraspGoal):
+            object_pose = None
             expected_grasp = resolve_pose_target(
                 resolve_pose_goal(target.grasp_xpos, context, name="grasp_xpos"),
-                num_envs=context.batch_size,
+                num_envs=self.num_envs,
                 device=self.device,
             )
-        elif request.skill_options.fixed_object_to_eef is not None:
-            expected_grasp = object_pose @ request.skill_options.fixed_object_to_eef.to(
-                object_pose
-            )
+        else:
+            if target.object_pose is None:
+                object_pose = _resolve_object_pose(
+                    target.semantics, context, name="pickup_object_pose"
+                )
+            else:
+                object_pose = resolve_pose_target(
+                    resolve_pose_goal(target.object_pose, context, name="object_pose"),
+                    num_envs=context.batch_size,
+                    device=self.device,
+                )
+            expected_grasp = None
+            if target.grasp_xpos is not None:
+                expected_grasp = resolve_pose_target(
+                    resolve_pose_goal(target.grasp_xpos, context, name="grasp_xpos"),
+                    num_envs=context.batch_size,
+                    device=self.device,
+                )
+            elif request.skill_options.fixed_object_to_eef is not None:
+                expected_grasp = (
+                    object_pose
+                    @ request.skill_options.fixed_object_to_eef.to(object_pose)
+                )
         if expected_grasp is not None and not torch.allclose(
             grasp_xpos, expected_grasp, atol=2e-3, rtol=0
         ):
@@ -837,19 +1106,23 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
 
     def _assemble_pick_plan(
         self,
-        request: ResolvedSkillRequest[GraspGoal, PickUpOptions],
+        request: ResolvedSkillRequest[
+            GraspGoal | ContactGraspGoal | ContactPickUpGoal, PickUpOptions
+        ],
         context: PlanningContext,
         *,
         success: torch.Tensor,
         trajectory: TimedTrajectory,
         grasp_xpos: torch.Tensor,
-        object_pose: torch.Tensor,
+        object_pose: torch.Tensor | None,
         segment_lengths: dict[str, int],
         affordance_sample: AffordanceSample | None,
         replannable: bool,
         provenance: dict[str, object] | None,
     ) -> SkillPlan:
         """Assemble Pick semantics shared by native and external motion."""
+        if isinstance(request.goal, ContactPickUpGoal):
+            raise ValueError("Observed contact paths cannot replay nominal motion.")
         target = request.goal
         options = request.skill_options
         motion = request.binding.endpoint("primary", "motion")
@@ -857,31 +1130,45 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
         task_state_key = require_shared_task_state_key(
             motion, grasp, participant="PickUp primary participant"
         )
-        sem = target.semantics
-        state = context
-        object_to_eef = torch.bmm(pose_inv(object_pose), grasp_xpos)
-        held = HeldObjectState(
-            semantics=sem, object_to_eef=object_to_eef, grasp_xpos=grasp_xpos
-        )
-        coordinated_updates = {
-            key: None for key in state.coordinated_held_objects if task_state_key in key
-        }
-        if target.object_pose is None:
-            monitored_object_id = sem.entity_id
-        elif isinstance(target.object_pose, SceneEntityPose):
-            monitored_object_id = target.object_pose.entity_id
+        requirement = None
+        if isinstance(target, ContactGraspGoal):
+            effects = StateDelta()
+            monitored_object_id = (
+                target.grasp_xpos.entity_id
+                if isinstance(target.grasp_xpos, SceneEntityPose)
+                else None
+            )
+            requirement = EffectVerificationRequirement(kind="contact_grasp")
         else:
-            monitored_object_id = None
+            sem = target.semantics
+            state = context
+            object_to_eef = torch.bmm(pose_inv(object_pose), grasp_xpos)
+            held = HeldObjectState(
+                semantics=sem, object_to_eef=object_to_eef, grasp_xpos=grasp_xpos
+            )
+            coordinated_updates = {
+                key: None
+                for key in state.coordinated_held_objects
+                if task_state_key in key
+            }
+            if target.object_pose is None:
+                monitored_object_id = sem.entity_id
+            elif isinstance(target.object_pose, SceneEntityPose):
+                monitored_object_id = target.object_pose.entity_id
+            else:
+                monitored_object_id = None
+            effects = StateDelta(
+                held_object_updates={task_state_key: held},
+                coordinated_held_object_updates=coordinated_updates,
+            )
         return self.build_plan(
             request,
             context,
             success=success,
             trajectory=trajectory,
             replannable=replannable,
-            expected_effects=StateDelta(
-                held_object_updates={task_state_key: held},
-                coordinated_held_object_updates=coordinated_updates,
-            ),
+            expected_effects=effects,
+            effect_verification=requirement,
             diagnostics=PlannerDiagnostics(
                 backend=(
                     self.planning_services.planner_name
@@ -1203,4 +1490,10 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
         return adjusted_grasp_xpos
 
 
-__all__ = ["GraspGoal", "PickUp", "PickUpOptions"]
+__all__ = [
+    "GraspGoal",
+    "ContactGraspGoal",
+    "ContactPickUpGoal",
+    "PickUp",
+    "PickUpOptions",
+]

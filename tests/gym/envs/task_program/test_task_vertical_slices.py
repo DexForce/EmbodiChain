@@ -531,14 +531,17 @@ def test_open_drawer_config_owns_registered_lowerer_factory() -> None:
     integration = _drawer_integration()
     registration = integration.registration
 
-    # The joint-target extension must preserve the shipped handle-only deployment.
+    # The handle-only deployment also fingerprints the shared PickUp goal types
+    # and the interpolation step declared by its motion policies. The added
+    # contact-path goal types intentionally extend those descriptors; restoring
+    # the pre-continuation types independently reproduces the previous goldens.
     assert (
         registration.fingerprint
-        == "c8767354951735e47897e046ba35bc26b8e8f47433915174655d4c5247ec2a88"
+        == "8c26f478773895d74399f6f50e7784625719062b20ce76dc3c3c94b8ac7a7005"
     )
     assert (
         integration.integration_fingerprint
-        == "aede0eed53368155b3d58bf288188079f9278fd883e342197ee38c101123b7da"
+        == "a40a3110b8db70c9ce1b4a1879dc41f12c0dd876dce09e1844f2dc01c4ebc8d7"
     )
     assert tuple(registration.catalog.registered_semantic_lowerer_declarations) == (
         _OPEN_DRAWER_CALL_ID,

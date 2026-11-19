@@ -47,6 +47,15 @@ implementation `_plan(request, context)` hook.
 - `ExecutionRunner` drives that session against observation, command, and clock
   ports without blocking `step()`.
 
+An opt-in `SkillPlan.continuation` requests fresh-observation planning inside
+one invocation. Progress is bounded and strictly advances; rejected rows cannot
+return. `PLAN_CONTINUED` records each installed chunk without consuming a retry
+or resetting the invocation timeout. Intermediate chunks commit no symbolic
+effects. Contact paths require execution, reject offline `compile()`, external
+nominal/expanded trajectories and invocation revisions, and retain loaded joint
+targets across internal holds. `PlanningContext.planning_mask` scopes geometric
+reductions and IK to the session's eligible rows before selecting shared timing.
+
 For a prequalified replay, `MoveJoints` accepts a typed full-robot
 `TimedTrajectory`. Each command occupies one environment control step.
 The motion binding covers all joints, and the selected rows match the planning

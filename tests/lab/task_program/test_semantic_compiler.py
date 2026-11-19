@@ -232,6 +232,7 @@ class _InspectLowerer(RegisteredSemanticLowerer):
 
     def __init__(self) -> None:
         self.option_templates: list[SkillOptions] = []
+        self.planning_masks: list[torch.Tensor | None] = []
 
     def lower(
         self,
@@ -241,7 +242,8 @@ class _InspectLowerer(RegisteredSemanticLowerer):
         bound: object,
         option_template: SkillOptions,
     ) -> SemanticLowering:
-        del call, context, bound
+        del call, bound
+        self.planning_masks.append(context.planning_mask)
         self.option_templates.append(option_template)
         return SemanticLowering(
             goal=GraspGoal(
@@ -1344,7 +1346,9 @@ def test_registered_call_without_monitor_has_no_effect_contract() -> None:
     )
     workflow = compiler.analyze((RegisteredSemanticCall(call_id="vendor.inspect"),))
 
-    grounded = compiler.ground(workflow, 0, _context(registry))
+    mask = torch.tensor([True, False])
+    grounded = compiler.ground(workflow, 0, _context(registry), eligible_mask=mask)
+    assert torch.equal(lowerer.planning_masks[0], mask)
 
     assert workflow.calls[0].symbolic_writes == frozenset()
     assert workflow.calls[0].opaque_symbolic_effect

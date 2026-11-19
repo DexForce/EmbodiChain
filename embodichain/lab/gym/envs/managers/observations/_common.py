@@ -234,6 +234,56 @@ def _get_evaluation_state(
     env: EmbodiedEnv, obs: EnvObs, *, field: str
 ) -> ObservationSample:
     parts = field.split("/")
+    if parts[0] == "cables":
+        from embodichain.compute.geometry._cable_route import (
+            _CABLE_METRICS as _METRICS,
+            _CABLE_METRIC_UNITS,
+        )
+
+        _, uid, quantity = parts
+        if quantity not in _METRICS:
+            raise ValueError(f"Unknown cable observation {quantity!r}.")
+        bridge = getattr(env, "_active_task_program_bridge", None)
+        service = getattr(
+            getattr(bridge, "post_policy_port", None), "_cable_runtime", None
+        )
+        shape = (3,) if quantity == "end_position" else (1,)
+        if service is None or service.cfg.simulation_uid != uid:
+            values = torch.zeros((env.num_envs, *shape), device=env.device)
+            valid = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+        else:
+            measured = (
+                service.metrics()[quantity]
+                .float()
+                .reshape(len(service.env_ids), *shape)
+            )
+            values = torch.zeros((env.num_envs, *shape), device=env.device)
+            valid = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+            values[service.env_ids] = measured
+            state = service.state()
+            valid[service.env_ids] = (
+                torch.isfinite(measured).all(-1)
+                & torch.isfinite(state).all(dim=(1, 2))
+                & (state[..., 3:7].norm(dim=-1) > 1e-8).all(-1)
+            )
+        descriptor = ObservationDescriptor(
+            uid,
+            quantity,
+            "arena",
+            "xyz" if shape == (3,) else "scalar",
+            (_CABLE_METRIC_UNITS[quantity],),
+            shape,
+            values.dtype,
+        )
+        return ObservationSample(
+            descriptor,
+            values,
+            valid,
+            tuple(
+                None if v else "Cable material session is unavailable."
+                for v in valid.tolist()
+            ),
+        )
     if parts[0] in ("links", "robot_links"):
         owner = parts[0]
         link = parts[-2]
