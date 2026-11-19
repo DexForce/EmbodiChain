@@ -1098,6 +1098,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 "middle_empty_ratio",
                 "grasp_seed",
                 "approach_alignment_max_angle",
+                "approach_tilts",
                 "obj_upright_direction",
                 "rotate_upright",
                 "grasp_frame_to_eef",
@@ -1160,6 +1161,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                     *(
                         (
                             "approach_along_grasp_axis",
+                            "approach_tilts",
                             "initial_lift_height",
                             "cartesian_lift",
                         )
@@ -1221,6 +1223,19 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                     expected_length=3,
                 ),
                 dtype=torch.float32,
+            )
+        if "approach_tilts" in config:
+            angles = config["approach_tilts"]
+            if type(angles) is not list:
+                raise TypeError(f"{path}.approach_tilts must be a list.")
+            kwargs["approach_tilts"] = tuple(
+                _real(
+                    angle,
+                    path=f"{path}.approach_tilts[{index}]",
+                    minimum=0.0,
+                    maximum=math.pi / 2,
+                )
+                for index, angle in enumerate(angles)
             )
         if "approach_alignment_max_angle" in config:
             kwargs["approach_alignment_max_angle"] = _real(

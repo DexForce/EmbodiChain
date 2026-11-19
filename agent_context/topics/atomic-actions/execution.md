@@ -253,6 +253,12 @@ The runner cancels/holds safely before its once-only abort notification.
 
 ## Contact-path selection
 
+PickUp samples grasps for one world approach direction and requires pre-grasp,
+grasp, lift and downstream targets to be reachable. Its optional
+`approach_tilts` also screen the approach rotated outward, from the arm base
+toward the object, by each angle; a row uses the direction that leaves the most
+reachable candidates, the configured one on ties. The default is unchanged.
+
 Pickup's optional `cartesian_lift` and placement's `cartesian_approach` use the
 existing sampled Cartesian path and joint-limit retiming with `ik_interp`.
 Pickup plans a separate straight world-Z lift only after a feasible approach;

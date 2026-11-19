@@ -3997,6 +3997,63 @@ def test_pick_holds_only_environment_without_a_feasible_grasp() -> None:
     assert held.env_mask.tolist() == [True, False]
 
 
+def test_pick_uses_the_approach_tilt_with_the_most_reachable_grasps() -> None:
+    generator = _motion_generator()
+    action = _bind_action(generator, PickUp())
+    angle = math.radians(25.0)
+    vertical = torch.tensor([0.0, 0.0, -1.0])
+    tilted_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    tilted_pose[:, 0, 3] = 0.5
+    # Row 0 keeps more reachable grasps along the configured direction; row 1
+    # has two there and nine with the tilt.
+    action._resolve_grasp_pose = Mock(
+        side_effect=[
+            AffordanceSample(
+                success=torch.tensor([True, True]),
+                poses=torch.eye(4).repeat(NUM_ENVS, 1, 1),
+                metadata={"candidate_ids": [3, 4], "valid_candidate_counts": [8, 2]},
+            ),
+            AffordanceSample(
+                success=torch.tensor([True, True]),
+                poses=tilted_pose,
+                metadata={"candidate_ids": [7, 9], "valid_candidate_counts": [8, 9]},
+            ),
+        ]
+    )
+    # Arm base at the origin, object one metre along +x.
+    action.robot.get_control_part_base_pose = Mock(
+        return_value=torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    )
+    object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    object_pose[:, 0, 3] = 1.0
+
+    sample, directions = action._resolve_grasp_pose_with_tilts(
+        ObjectSemantics(
+            affordance=AntipodalAffordance(),
+            geometry={},
+            label="object",
+            entity_id="target",
+        ),
+        object_pose,
+        torch.zeros(NUM_ENVS, ARM_DOF),
+        JointPositionTarget("arm", tuple(range(ARM_DOF))),
+        "gripper",
+        PickUpOptions(approach_tilts=(angle,)),
+        vertical,
+        _context(),
+        sample_key="grasp",
+    )
+
+    outward = torch.tensor([math.sin(angle), 0.0, -math.cos(angle)])
+    retried = action._resolve_grasp_pose.call_args_list[1].args[6]
+    torch.testing.assert_close(retried, outward.expand(NUM_ENVS, 3))
+    torch.testing.assert_close(directions, torch.stack([vertical, outward]))
+    assert sample.poses[:, 0, 3].tolist() == [0.0, 0.5]
+    assert sample.metadata["candidate_ids"] == [3, 9]
+    assert sample.metadata["valid_candidate_counts"] == [8, 9]
+    assert sample.metadata["approach_tilts"] == pytest.approx([0.0, angle])
+
+
 def test_pick_normalizes_integer_batch_ik_success_masks() -> None:
     """DexSim integer IK flags become boolean masks before tensor selection."""
     generator = _motion_generator()
