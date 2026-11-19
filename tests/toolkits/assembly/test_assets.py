@@ -170,22 +170,23 @@ def test_usd_static_compound_has_one_body_not_one_body_per_collider(
     from dexsim.kit.usd import parse_usd
     from importlib.metadata import version
 
-    if version("dexsim-engine") in {"0.6.0rc1", "0.6.0rc2"}:
+    asset = import_mjcf(SOURCE.replace('<freejoint name="part_joint"/>', ""))
+    path = asset.write_usd(tmp_path / "static.usda")
+    parsed = parse_usd(str(path), root_name="test")
+    assert len(parsed.mesh_objects) == 1
+
+    if version("dexsim-engine") in {"0.6.0rc1", "0.6.0rc2", "0.6.0"}:
         request.node.add_marker(
             pytest.mark.xfail(
                 strict=True,
                 raises=AssertionError,
                 reason=(
-                    "DexSim 0.6.0rc1/rc2 drop child colliders on disabled static USD bodies; "
+                    "DexSim 0.6.0rc1/rc2 and 0.6.0 drop child colliders on disabled static USD bodies; "
                     "native import rejects that loss, while direct compounds remain supported."
                 ),
             )
         )
 
-    asset = import_mjcf(SOURCE.replace('<freejoint name="part_joint"/>', ""))
-    path = asset.write_usd(tmp_path / "static.usda")
-    parsed = parse_usd(str(path), root_name="test")
-    assert len(parsed.mesh_objects) == 1
     assert len(parsed.mesh_objects[0].collisions) == 2
 
 
