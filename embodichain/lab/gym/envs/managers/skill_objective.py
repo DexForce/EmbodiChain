@@ -55,6 +55,7 @@ def validate_skill_objective(value: Mapping[str, Any]) -> dict[str, Any]:
     Args:
         value: Skill ID, binding, goal and optional acceptance declarations.
             Bindings use explicit runtime object and control-part identities.
+            Hosts may derive omitted hand links from a calibrated grasp endpoint.
 
     Returns:
         Owned declaration with finite numeric parameters and closed fields.
@@ -84,7 +85,7 @@ def validate_skill_objective(value: Mapping[str, Any]) -> dict[str, Any]:
     required_binding = {"robot", "motion_part"}
     if skill in ("pick_up", "place", "move_held_object"):
         allowed_binding |= {"object", "pad_links", "hand_links", "support"}
-        required_binding |= {"object", "pad_links", "hand_links", "support"}
+        required_binding |= {"object", "support"}
     binding = result["binding"]
     if (
         not isinstance(binding, Mapping)
@@ -105,7 +106,10 @@ def validate_skill_objective(value: Mapping[str, Any]) -> dict[str, Any]:
             raise ValueError("Skill binding values must be explicit nonempty names")
     if "pad_links" in binding and (
         len(binding["pad_links"]) != 2
-        or not set(binding["pad_links"]) <= set(binding["hand_links"])
+        or (
+            "hand_links" in binding
+            and not set(binding["pad_links"]) <= set(binding["hand_links"])
+        )
     ):
         raise ValueError(
             "Both opposing pads must be included in the complete hand link selection"
@@ -189,6 +193,39 @@ def validate_skill_objective(value: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _resolve_hand_binding(
+    objective: dict[str, Any], robot_cfg: Any, *, grasp_part: str | None = None
+) -> str | None:
+    """Resolve physical links from the selected calibrated hand, without a Robot."""
+    if objective["skill_id"] not in ("pick_up", "place", "move_held_object"):
+        return None
+    binding = objective["binding"]
+    if binding["robot"] != robot_cfg.uid:
+        raise ValueError("Measured objective must bind the selected robot")
+    hands = [
+        hand
+        for hand in (getattr(robot_cfg, "gripper_bindings", {}) or {}).values()
+        if hand["declaration"]["motion_part"] == binding["motion_part"]
+        and (grasp_part is None or hand["declaration"]["control_part"] == grasp_part)
+    ]
+    if len(hands) != 1:
+        raise ValueError(
+            "Measured manipulation requires one calibrated selected grasp endpoint"
+        )
+    hand = hands[0]
+    pads = [hand["link_names"][name] for name in hand["defaults"]["pad_links"]]
+    links = list(hand["link_names"].values())
+    if "pad_links" in binding and set(binding["pad_links"]) != set(pads):
+        raise ValueError("Measured pads must match the selected grasp endpoint")
+    if "hand_links" in binding and set(binding["hand_links"]) != set(links):
+        raise ValueError(
+            "Measured collision links must match the selected grasp endpoint"
+        )
+    binding["pad_links"] = pads
+    binding["hand_links"] = links
+    return hand["declaration"]["control_part"]
+
+
 def _shape_corners(shapes: Sequence[Any], device: torch.device) -> torch.Tensor:
     points = []
     signs = torch.tensor(
@@ -241,6 +278,7 @@ class _ObjectiveProposal:
     pose: torch.Tensor | None
     reference_pose: torch.Tensor | None
     hand_poses: torch.Tensor | None
+    target_reference: torch.Tensor | None
 
 
 class _ObjectiveInterval:
@@ -268,6 +306,7 @@ class _ObjectiveInterval:
 
     def begin_control_step(self):
         owner = self.objective
+        owner._require_scene_bindings()
         self.valid.fill_(True)
         progress = getattr(owner._env, "task_program_progress", None)
         index = (
@@ -292,6 +331,11 @@ class _ObjectiveInterval:
         self.witness.copy_from(owner.support_witness)
         pose = owner.object.get_local_pose(to_matrix=True)
         self.entry = (pose[:, 2, 3].clone(), pose[:, :3, :3].clone())
+        if owner._freeze_reference:
+            self.entry = (
+                *self.entry,
+                owner.reference.get_local_pose(to_matrix=True).clone(),
+            )
 
     def before_sample(self):
         return self.objective._env.sim.physics_step_index
@@ -369,6 +413,14 @@ class SkillObjectiveObservation(Functor):
         super().__init__(cfg, env)
         self.objective = validate_skill_objective(cfg.params["objective"])
         self.stage = cfg.params.get("stage")
+        self._freeze_reference = cfg.params.get("freeze_reference", False)
+        if type(self._freeze_reference) is not bool:
+            raise ValueError("freeze_reference must be a bool")
+        self._target_reference = (
+            torch.eye(4, device=env.device).expand(env.num_envs, 4, 4).clone()
+            if self._freeze_reference
+            else None
+        )
         self.profile = skill_reward_profiles(self.objective["skill_id"])[
             self.objective.get("reward_profile", "default")
         ]
@@ -376,6 +428,14 @@ class SkillObjectiveObservation(Functor):
         if self.robot is None:
             raise ValueError("Skill objective robot is not present")
         self.binding = self.objective["binding"]
+        if self.objective["skill_id"] in ("pick_up", "place", "move_held_object"):
+            robot_cfg = getattr(self.robot, "cfg", None)
+            if robot_cfg is not None:
+                _resolve_hand_binding(
+                    self.objective, robot_cfg, grasp_part=cfg.params.get("grasp_part")
+                )
+            if not {"pad_links", "hand_links"} <= set(self.binding):
+                raise ValueError("Measured manipulation requires calibrated hand links")
         self.part = self.binding["motion_part"]
         self.robot.get_joint_ids(self.part)
         self.a = self.objective["acceptance"]
@@ -402,6 +462,10 @@ class SkillObjectiveObservation(Functor):
             self.reference = env.sim.get_rigid_object(reference)
             if self.reference is None:
                 raise ValueError("Skill target reference is not a rigid scene object")
+        if self._freeze_reference and self.reference is None:
+            raise ValueError(
+                "Frozen program targets require a bound rigid-object reference"
+            )
         if "object" in self.binding:
             self.object = env.sim.get_rigid_object(self.binding["object"])
             if self.object is None:
@@ -487,6 +551,8 @@ class SkillObjectiveObservation(Functor):
         self._invocation_index[ids] = -1
         self._last_sample = None
         self._candidate = None
+        if self._target_reference is not None:
+            self._target_reference[ids] = torch.eye(4, device=self.device)
         if self.sensor is not None:
             self.support_witness.reset(env_ids)
             self._interval.reset(env_ids)
@@ -510,6 +576,8 @@ class SkillObjectiveObservation(Functor):
                 self._initial_height[env_ids] = proposal.height[env_ids]
                 self._initial_rotation[env_ids] = proposal.rotation[env_ids]
             self._invocation_index[env_ids] = proposal.index[env_ids]
+            if proposal.target_reference is not None:
+                self._target_reference[env_ids] = proposal.target_reference[env_ids]
 
     def advance_observation(self) -> None:
         """Commit only the canonical control-boundary proposal."""
@@ -527,6 +595,8 @@ class SkillObjectiveObservation(Functor):
         self._previous_relative.copy_(proposal.relative)
         self._last_step.fill_(proposal.step)
         self._invocation_index.copy_(proposal.index)
+        if proposal.target_reference is not None:
+            self._target_reference.copy_(proposal.target_reference)
         if self.object is not None:
             if self._interval.last is not None:
                 self.support_witness.copy_from(self._interval.witness)
@@ -535,7 +605,7 @@ class SkillObjectiveObservation(Functor):
             self._initial_height.copy_(proposal.baseline)
             self._initial_rotation.copy_(proposal.rotation)
 
-    def _pose_goal(self, current, preserved_rotation=None):
+    def _pose_goal(self, current, preserved_rotation=None, reference_pose=None):
         goal = self.objective["goal"]
         position = current.new_tensor(goal["position"]).expand(self.num_envs, 3)
         rotation = None
@@ -546,7 +616,11 @@ class SkillObjectiveObservation(Functor):
                 current.new_tensor(goal["quaternion_xyzw"]).expand(self.num_envs, 4)
             )
         if self.reference is not None:
-            reference = self.reference.get_local_pose(to_matrix=True)
+            reference = (
+                self.reference.get_local_pose(to_matrix=True)
+                if reference_pose is None
+                else reference_pose
+            )
             position = (
                 (reference[:, :3, :3] @ position[..., None]).squeeze(-1)
                 if goal.get("frame", "parent") == "parent"
@@ -576,6 +650,22 @@ class SkillObjectiveObservation(Functor):
             (distance <= self.a["position_tolerance"])
             & (angle <= self.a["orientation_tolerance"]),
         )
+
+    def _require_scene_bindings(self) -> None:
+        """Reject topology changes before touching a removed native handle."""
+        for uid, handle in (
+            (self.binding.get("object"), self.object),
+            (self.binding.get("support"), getattr(self, "support", None)),
+            (self.objective["goal"].get("reference"), self.reference),
+        ):
+            if (
+                uid is not None
+                and handle is not None
+                and self._env.sim.get_rigid_object(uid) is not handle
+            ):
+                raise RuntimeError(
+                    "A measured skill object was replaced or removed; rebuild the environment for new geometry"
+                )
 
     def _observe(
         self,
@@ -615,6 +705,21 @@ class SkillObjectiveObservation(Functor):
             )
         )
         entering = active & (invocation_index != self._invocation_index)
+        target_reference = None
+        if self._freeze_reference:
+            live_reference = self.reference.get_local_pose(to_matrix=True)
+            entry_reference = (
+                entry[2] if entry is not None and len(entry) > 2 else live_reference
+            )
+            observed_reference = torch.where(
+                active[:, None, None], entry_reference, live_reference
+            )
+            target_reference = torch.where(
+                (entering | ~self._initialized | ~active)[:, None, None],
+                observed_reference,
+                self._target_reference,
+            )
+            valid &= torch.isfinite(target_reference).all(dim=(1, 2))
         candidate_index = invocation_index.clone()
         candidate_height = self._initial_height
         candidate_baseline = self._initial_height
@@ -643,7 +748,9 @@ class SkillObjectiveObservation(Functor):
             success = error.abs().amax(-1) <= self.a["joint_tolerance"]
             valid &= torch.isfinite(positions).all(-1)
         elif skill == "move_end_effector":
-            position, orientation, success = self._pose_goal(motion)
+            position, orientation, success = self._pose_goal(
+                motion, reference_pose=target_reference
+            )
             scores = {"position": position, "orientation": orientation}
         else:
             pose = self.object.get_local_pose(to_matrix=True)
@@ -657,13 +764,15 @@ class SkillObjectiveObservation(Functor):
             valid &= torch.isfinite(hand_poses).all(dim=(1, 2, 3))
             candidate_height = pose[:, 2, 3].clone()
             entry_height, entry_rotation = (
-                (pose[:, 2, 3], pose[:, :3, :3]) if entry is None else entry
+                (pose[:, 2, 3], pose[:, :3, :3]) if entry is None else entry[:2]
             )
             candidate_baseline = torch.where(
                 entering, entry_height, self._initial_height
             )
             candidate_rotation = torch.where(
-                entering[:, None, None], entry_rotation, self._initial_rotation
+                (entering | ~self._initialized | ~active)[:, None, None],
+                torch.where(active[:, None, None], entry_rotation, pose[:, :3, :3]),
+                self._initial_rotation,
             )
             relative = (
                 motion[:, :3, :3].transpose(-1, -2)
@@ -727,7 +836,7 @@ class SkillObjectiveObservation(Functor):
                 self._held_time,
             )
             held = ((held_time >= self.a["hold_duration"] - 1e-7) & held_now).float()
-            pos, rot, near = self._pose_goal(pose, candidate_rotation)
+            pos, rot, near = self._pose_goal(pose, candidate_rotation, target_reference)
             pose_score = (pos + rot) / 2
             if skill == "pick_up":
                 reach_distance = torch.linalg.vector_norm(
@@ -839,10 +948,12 @@ class SkillObjectiveObservation(Functor):
             None if pose is None else pose.clone(),
             None if reference_pose is None else reference_pose.clone(),
             None if hand_poses is None else hand_poses.clone(),
+            None if target_reference is None else target_reference.clone(),
         )
 
     def __call__(self, env: EmbodiedEnv, obs: Any, **kwargs: Any) -> ObservationSample:
         """Propose the canonical result using a complete physical sampling interval."""
+        self._require_scene_bindings()
         if self.sensor is not None:
             self.sensor.update()
         interval = self._interval
@@ -1091,9 +1202,39 @@ def _validate_program_objective_bindings(cfg, registration, stages):
                 raise ValueError(
                     "Measured objective must bind its call's selected motion endpoint"
                 )
+            if objective["skill_id"] in ("pick_up", "place", "move_held_object"):
+                grasp = next(
+                    (e for e in resource.endpoints if e.endpoint_id == "grasp"), None
+                )
+                if grasp is None:
+                    raise ValueError(
+                        "Measured manipulation requires a selected grasp endpoint"
+                    )
+                term.params["grasp_part"] = _resolve_hand_binding(
+                    objective, cfg.robot, grasp_part=grasp.control_part
+                )
             goal = objective["goal"]
             if isinstance(call, (Place, MoveHeldObjectCall)):
                 target = call.at
+                preserve_orientation = False
+                if isinstance(call, Place):
+                    linked = manifest.link_call(call)
+                    preset = registration.catalog.robot_profile.presets[
+                        linked.preset_id
+                    ]
+                    options = preset.skill_option_templates.get("place")
+                    preserve_orientation = getattr(
+                        options, "preserve_current_object_orientation", False
+                    )
+                    if preserve_orientation:
+                        if (
+                            "quaternion_xyzw" in goal
+                            or goal.get("preserve_orientation", True) is False
+                        ):
+                            raise ValueError(
+                                "Preserved semantic orientation cannot be replaced by a fixed goal"
+                            )
+                        goal["preserve_orientation"] = True
                 if isinstance(call, Place) and call.on is not None:
                     surface = next(
                         (
@@ -1107,18 +1248,7 @@ def _validate_program_objective_bindings(cfg, registration, stages):
                         raise ValueError(
                             "Measured Place(on) requires an explicit bound support surface"
                         )
-                    linked = manifest.link_call(call)
-                    preset = registration.catalog.robot_profile.presets[
-                        linked.preset_id
-                    ]
-                    options = preset.skill_option_templates.get("place")
-                    if getattr(options, "preserve_current_object_orientation", False):
-                        if "quaternion_xyzw" in goal:
-                            raise ValueError(
-                                "Preserved semantic orientation cannot be replaced by a fixed goal"
-                            )
-                        goal["preserve_orientation"] = True
-                    else:
+                    if not preserve_orientation:
                         orientation(
                             goal,
                             quat_from_matrix(
@@ -1146,9 +1276,10 @@ def _validate_program_objective_bindings(cfg, registration, stages):
                             "Measured placement goal must match the semantic support frame"
                         )
                 elif isinstance(target, SemanticPose):
-                    orientation(goal, target.quaternion_xyzw)
+                    if not preserve_orientation:
+                        orientation(goal, target.quaternion_xyzw)
                     if "reference" in goal or not torch.allclose(
-                        torch.tensor(goal["position"]),
+                        target.position.new_tensor(goal["position"]),
                         target.position,
                         atol=1e-6,
                         rtol=0,
@@ -1157,9 +1288,15 @@ def _validate_program_objective_bindings(cfg, registration, stages):
                             "Measured goal must match the semantic world target"
                         )
                 elif isinstance(target, SemanticRelativePose):
-                    orientation(goal, target.quaternion_xyzw)
+                    expected_reference = objects.get(target.entity_id)
+                    if expected_reference is None:
+                        raise ValueError(
+                            "Program scene-relative goals require a bound rigid-object reference"
+                        )
+                    if not preserve_orientation:
+                        orientation(goal, target.quaternion_xyzw)
                     if (
-                        goal.get("reference") != objects.get(target.entity_id)
+                        goal.get("reference") != expected_reference
                         or goal.get("frame", "parent") != target.frame
                         or any(
                             abs(a - b) > 1e-6
@@ -1171,6 +1308,7 @@ def _validate_program_objective_bindings(cfg, registration, stages):
                         raise ValueError(
                             "Measured goal must match its semantic relative target"
                         )
+                    term.params["freeze_reference"] = True
                 else:
                     raise ValueError(
                         "Measured skill reward requires an explicit supported semantic target"

@@ -56,15 +56,17 @@ if TYPE_CHECKING:
 __all__ = ["TaskProgramProgress"]
 
 
+def _stage_aliases(stage):
+    aliases = [stage.name, stage.segment_id]
+    if len(stage.calls) == 1:
+        aliases.append(f"call:{stage.calls[0].call_index}")
+    if "/call:" in stage.segment_id:
+        aliases.append(stage.segment_id.rsplit("/call:", 1)[0])
+    return tuple(aliases)
+
+
 def _matches_stage(stage, selector):
-    return (
-        selector in (stage.name, stage.segment_id)
-        or (len(stage.calls) == 1 and selector == f"call:{stage.calls[0].call_index}")
-        or (
-            "/call:" in stage.segment_id
-            and selector == stage.segment_id.rsplit("/call:", 1)[0]
-        )
-    )
+    return selector in _stage_aliases(stage)
 
 
 def _policy_stages(program, skill_conditions):
@@ -661,11 +663,7 @@ def _validate_policy_deployment(cfg, registration):
         {},
         _program_objective_conditions(cfg),
     )
-    selections = (
-        {s.name for s in stages}
-        | {s.segment_id for s in stages}
-        | {f"call:{s.calls[0].call_index}" for s in stages if len(s.calls) == 1}
-    )
+    selections = {alias for stage in stages for alias in _stage_aliases(stage)}
     composition = getattr(cfg.rl_task, "reward_composition", None)
     if composition is not None:
         claimed = set()

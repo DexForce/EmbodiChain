@@ -626,3 +626,52 @@ def test_explicit_milestone_alias_suppresses_automatic_reward_for_same_event(sel
     value, _ = env.reward_manager.compute({}, torch.zeros(2, 1), info)
     # First stage: generic shaping .99*.5, explicitly selected event 7, no extra .5.
     torch.testing.assert_close(value, torch.tensor([7.495, 0.0]), atol=1e-6, rtol=0)
+
+
+@pytest.mark.parametrize("selector,first_reward", [("lift", 7.495), ("call:1", 0.995)])
+def test_episode_scoped_bonus_only_suppresses_events_it_can_pay(selector, first_reward):
+    from embodichain.lab.gym.envs.managers.reward_composition import (
+        compose_reward_terms,
+        _add_common_rewards,
+    )
+    from embodichain.lab.gym.envs.managers.reward_context import RewardTransitionContext
+
+    env, owner, _, _, _ = _setup(repeat=2)
+    env.step_dt = 0.04
+    progress = env.task_program_progress
+    manual = RewardCfg(
+        func=program_stage_reward,
+        weight=7.0,
+        params={"stage": selector, "mode": "first_achievement", "scope": "episode"},
+    )
+    specification = {"discount": 0.99, "skills": []}
+    generated = compose_reward_terms(specification, program=True)
+    _add_common_rewards(
+        SimpleNamespace(
+            rl_task=SimpleNamespace(reward_composition=specification),
+            rewards=SimpleNamespace(manual=manual),
+        ),
+        generated,
+        tuple(progress._program_for_test.iter_segments()),
+    )
+    manager = env.reward_manager = RewardManager({**generated, "manual": manual}, env)
+    manager.initialize_observation(_frame(owner, [0.0, 0.0], 0), [0, 1])
+    for step, expected in enumerate((first_reward, 0.99)):
+        frame = _frame(owner, [0.2, 0.0], step + 1)
+        progress.advance(frame, step=step, episode_owner=owner)
+        manager.transition_context = RewardTransitionContext(
+            frame, torch.zeros(2, dtype=torch.bool)
+        )
+        value, _ = manager.compute(
+            {},
+            torch.zeros(2, 1),
+            {
+                "task_outcome": {
+                    "accepted": torch.zeros(2, dtype=torch.bool),
+                    "failure": torch.zeros(2, dtype=torch.bool),
+                }
+            },
+        )
+        torch.testing.assert_close(
+            value, torch.tensor([expected, 0.0]), atol=1e-6, rtol=0
+        )

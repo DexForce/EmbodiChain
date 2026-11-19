@@ -67,6 +67,15 @@ class SkillRewardProfile:
             raise ValueError("Reward profile requires unique nonempty measured roles")
         if self.reduction not in (None, "mean", "product"):
             raise ValueError("Unknown potential reduction")
+        required = _DEFAULT_ROLES.get(self.skill_id)
+        if (
+            self.reduction is None
+            and required is not None
+            and set(roles) != set(required)
+        ):
+            raise ValueError(
+                f"Built-in {self.skill_id} formula requires roles {required}"
+            )
         object.__setattr__(self, "roles", roles)
 
     def potential(
@@ -99,13 +108,15 @@ class SkillRewardProfile:
         elif self.reduction == "mean":
             result = stacked.mean(0)
         elif self.skill_id == "pick_up":
-            reach, held, lifted = values
+            reach, held, lifted = (scores[role] for role in ("reach", "held", "lifted"))
             result = (reach + held + held * lifted) / 3
         elif self.skill_id == "place":
-            pose, released, stable = values
+            pose, released, stable = (
+                scores[role] for role in ("pose", "released", "stable")
+            )
             result = (pose + pose * released + pose * released * stable) / 3
         elif self.skill_id == "move_held_object":
-            pose, held = values
+            pose, held = scores["pose"], scores["held"]
             result = pose * held
         else:
             result = stacked.mean(0)

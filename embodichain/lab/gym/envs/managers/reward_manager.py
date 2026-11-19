@@ -126,19 +126,22 @@ class RewardManager(ManagerBase):
         """Qualify reward measurements before the host seals terminal results."""
         valid = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
         owner = self._env.episode_context
+        episode_matches = []
         if frame.episode_owner is not owner:
             valid.zero_()
         else:
+            episode_matches = [
+                a == b
+                for a, b in zip(frame.episode_ids, owner.episode_ids, strict=True)
+            ]
             valid &= torch.tensor(
-                [
-                    a == b
-                    for a, b in zip(frame.episode_ids, owner.episode_ids, strict=True)
-                ],
+                episode_matches,
                 device=self.device,
             )
         if frame.revision <= getattr(self, "_last_reward_revision", -1):
             valid.zero_()
-        self._last_reward_revision = frame.revision
+        elif any(episode_matches):
+            self._last_reward_revision = frame.revision
         for configs in self._mode_class_functor_cfgs.values():
             for cfg in configs:
                 prepare = getattr(cfg.func, "prepare_observation", None)

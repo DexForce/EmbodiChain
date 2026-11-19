@@ -87,10 +87,13 @@ the installed reward-profile revisions and resolved objective thresholds.
 
 A standalone objective declares the exact robot/control-part binding, a goal,
 and acceptance thresholds. Its measured success is independent of shaping weight.
-Manipulation objectives additionally declare target/support actors and two pads
-within the full hand collision-link selection. Contact evidence and collision
+Manipulation objectives additionally bind target/support actors and a calibrated
+gripper with two opposing pads and its full collision-link selection. Contact evidence and collision
 geometry are required; unsupported backends fail explicitly. Geometry is bound
 for the environment lifetime; rebuild after changing assets or topology.
+Measured physical goals reject `replace_assets_from_group` before reset events
+run. Program hand links come from the selected resource's calibrated `grasp`
+endpoint; omitted lists are derived and explicit lists must match the full hand.
 
 Program objectives select an authored `stage`, or a global expanded `call_index`.
 A multi-call segment requires explicit objectives for every call before its
@@ -113,6 +116,15 @@ skill target and sampling/acceptance parameter is explicit in the effective conf
 Equivalent stage names, occurrence IDs and `call:N` selectors suppress the same
 automatic milestone. Standalone `rl_task.skill` requires `reward_composition`
 with an explicit discount.
+Episode-scoped explicit bonuses suppress only the first occurrence of their
+authored name, leaving later automatic milestones available.
+
+Program `scene_relative` call targets freeze their rigid reference at activation
+per row/occurrence; repeats and reset rows rebind without retargeting peers.
+Place orientation preservation applies to both `at` and `on` destinations.
+Articulation/link references are not supported by measured skill targets.
+Dynamic replay seeds reward baselines from the final restored observation.
+Policy-only inference does not require an algorithm block.
 
 Dense formulas accept scalar role scores or error channels with finite `target`
 and finite positive `scale`; vector errors reduce by Euclidean norm. Named templates can

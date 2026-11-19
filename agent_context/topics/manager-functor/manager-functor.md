@@ -103,10 +103,14 @@ explicitly override them. `RewardManager` remains the sole weighting/reset owner
 Standalone `skill` declarations require an explicit composition and discount;
 omitting it rejects configuration rather than dropping the objective. Automatic
 milestones respect explicit terms selected by any equivalent stage/call alias.
+Episode-scoped terms suppress only the first authored-name occurrence they can
+pay; later occurrences retain automatic bonuses.
 Metric targets, as well as scales, must be finite before binding.
 Stateful potential shaping consumes one `RewardTransitionContext` from the
 canonical post-step observation after measured termination. Reset acquisition
 initializes baselines without paying rewards; repeated transition reads are cached.
+Dynamic replay resets histories and seeds the final restored frame. Rejected
+stale/foreign frames cannot move the accepted revision watermark.
 Unavailable required measurements terminate affected rows and cannot erase a
 negative shaping boundary. True task termination and time truncation remain distinct.
 
@@ -124,6 +128,11 @@ Single-skill goals and explicit per-call program criteria use the same measureme
 and skill-owned profile. Program object/resource/support bindings reject semantic
 contradictions. `compute.rewards` owns numerical transforms and chunk aggregation;
 registered templates live in `sim/atomic_skills/reward_profiles.py` without Gym imports.
+Program hand lists derive from the selected calibrated grasp endpoint; explicit
+lists must match. Named scene-relative call targets freeze per-row references at
+activation, and Place preserves entry orientation according to its effective
+options for both `at` and `on`. Non-rigid measured references and asset replacement
+with physical goals reject preflight; replaced bound handles reject before reads.
 
 See `examples/learning/task_program_progress/README.md` for configuration and
 native qualification commands. Cover numerical identities in `tests/compute/`,

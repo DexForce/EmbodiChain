@@ -8,9 +8,9 @@
       "steps": 893,
       "num_envs": 2,
       "passed": true,
-      "max_reward_error": 2.384185791015625e-07,
+      "max_reward_error": 4.76837158203125e-07,
       "max_repeat_read_error": 0.0,
-      "shaping_identity_error": 1.8602007597511754e-08,
+      "shaping_identity_error": 1.537810020583373e-08,
       "weighted_milestone_sums": [
         [
           0.5,
@@ -25,7 +25,7 @@
         10.0,
         0.0
       ],
-      "effective_contract_sha256": "c29d33949688b59ecf914a24e5c50bb872cb736876e82c8b760b9952db0c54c7"
+      "effective_contract_sha256": "6547afd95b50a286995e97770fab81abde75d56227f5693d89d2ac12bdd49ea2"
     },
     "hold": {
       "steps": 64,
@@ -48,15 +48,15 @@
         0.0,
         0.0
       ],
-      "effective_contract_sha256": "32d1ecbc27f53a89b48965de1fb81327c9c413d5be5cd89e745a628a1e6e86b8"
+      "effective_contract_sha256": "d48a80dfb11e115f4f4f1172cbf52aca60e6d372c2cd4ffdba3cae0887c8d7f8"
     },
     "truncated": {
       "steps": 600,
       "num_envs": 2,
       "passed": true,
-      "max_reward_error": 7.964670656335215e-08,
+      "max_reward_error": 8.054077627051015e-08,
       "max_repeat_read_error": 0.0,
-      "shaping_identity_error": 6.994881773412717e-09,
+      "shaping_identity_error": 1.2200861811964211e-08,
       "weighted_milestone_sums": [
         [
           0.5,
@@ -71,7 +71,7 @@
         0.0,
         0.0
       ],
-      "effective_contract_sha256": "7c2c030fa6455dc6af602489c64e8c985a0ffd755f4b3075f5195bd9dec6af11"
+      "effective_contract_sha256": "514037f5a24bcde4948fa33f0df205ab78ddee644ee452fa59df97946c6ea9d0"
     },
     "failure": {
       "steps": 1,
@@ -94,14 +94,14 @@
         -10.0,
         -10.0
       ],
-      "effective_contract_sha256": "694e25a20a97643fea8b32047161f423e954b37b160d150bf7bedaf37d218e03"
+      "effective_contract_sha256": "54e5bc12cf67e3b56fb3b752f5cabf8cfa2c57b07ba368726a67106f8488c304"
     }
   },
   "env_step_calls": 1559,
   "reward_samples": 3118,
-  "max_reward_error": 2.384185791015625e-07,
+  "max_reward_error": 4.76837158203125e-07,
   "max_repeat_read_error": 0.0,
-  "max_shaping_identity_error": 1.8602007597511754e-08,
+  "max_shaping_identity_error": 1.537810020583373e-08,
   "post_reset": {
     "reward": [
       5.033616616856307e-07,
@@ -141,28 +141,28 @@
       "event": "lift",
       "step_zero_based": 469,
       "milestone_bonus": 0.5,
-      "shape": 0.07863378524780273,
+      "shape": 0.11803179979324341,
       "program_progress_shape": 0.495,
-      "skill_goal_shape": -0.4163662271201611,
+      "skill_goal_shape": -0.3769681566208601,
       "outcome": 0.0,
-      "total": 0.5786337852478027
+      "total": 0.6180317997932434
     },
     {
       "event": "place",
       "step_zero_based": 892,
       "milestone_bonus": 0.5,
-      "shape": -0.9451625347137451,
+      "shape": -0.9455056190490723,
       "program_progress_shape": -0.5,
-      "skill_goal_shape": -0.4451625347137451,
+      "skill_goal_shape": -0.44550561904907227,
       "outcome": 10.0,
-      "total": 9.554837226867676
+      "total": 9.554494857788086
     }
   ],
   "oracle": "Independent scalar reward-composition arithmetic using canonical measured skill potentials; not an independent geometry/skill-formula oracle",
-  "preview_sha256": "790763df0ff7fb792639f13fd5463a3d0a6646e85f7628d0049b24b02122b55f",
+  "preview_sha256": "4ae0b8d0afddf5025ce446782fcf8157f8c513ae6186804319f1281899acbad3",
   "preview_source": {
-    "video_sha256": "c459179d901f356e052d3e3563754d2e8815bbc4972c6f230a66c4429f3846ed",
-    "trace_sha256": "653d240752e3cebf5b56d0d3f7e86f42e4155763a549f0c02124c33ed55bcf1d",
+    "video_sha256": "2ccd522f0b99ef21bfbb5256bfc8b21fc7386e4ac9bfa4d02196422030f5ec22",
+    "trace_sha256": "53a7c072d2bbffa00bbdc896a3b823d186b5812f0f91d9886c3fb6d05bdee62a",
     "frame_count": 447
   }
 }

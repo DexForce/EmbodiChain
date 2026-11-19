@@ -106,6 +106,51 @@ def test_recipe_values_and_invalid_measurements(skill, roles, expected):
     assert valid.tolist() == [True, False]
 
 
+@pytest.mark.parametrize(
+    "skill,roles,scores",
+    [
+        (
+            "pick_up",
+            ("lifted", "reach", "held"),
+            {"reach": 0.0, "held": 0.0, "lifted": 1.0},
+        ),
+        (
+            "place",
+            ("stable", "pose", "released"),
+            {"pose": 0.0, "released": 0.0, "stable": 1.0},
+        ),
+    ],
+)
+def test_builtin_skill_formula_uses_role_names_independently_of_declaration_order(
+    skill, roles, scores
+):
+    from embodichain.lab.sim.atomic_skills.reward_profiles import SkillRewardProfile
+
+    profile = SkillRewardProfile(skill, 1, roles)
+    value, valid = profile.potential(
+        {key: torch.tensor([v]) for key, v in scores.items()}
+    )
+    assert valid.tolist() == [True]
+    assert value.tolist() == [0.0]
+
+
+@pytest.mark.parametrize(
+    "skill,roles",
+    [
+        ("pick_up", ("reach", "held")),
+        ("place", ("pose", "released")),
+        ("move_held_object", ("pose",)),
+    ],
+)
+def test_builtin_skill_formula_rejects_incomplete_roles_before_measurement(
+    skill, roles
+):
+    from embodichain.lab.sim.atomic_skills.reward_profiles import SkillRewardProfile
+
+    with pytest.raises(ValueError, match="roles"):
+        SkillRewardProfile(skill, 1, roles)
+
+
 def test_program_switch_preserves_global_potential_boundary():
     manager = _manager(True)
     manager.initialize_observation(_frame([0.8, 0.6]), [0, 1])
@@ -159,6 +204,28 @@ def test_foreign_and_repeated_acquisitions_are_rejected_before_rewards():
     frame.revision = 2
     frame.episode_owner = SimpleNamespace(episode_ids=(0, 0))
     assert manager.prepare_observation(frame).tolist() == [False, False]
+
+
+@pytest.mark.parametrize(
+    "rejected_revision,foreign,next_revision,expected",
+    [(9, False, 10, False), (20, True, 11, True)],
+)
+def test_rejected_frames_cannot_rewind_or_poison_the_accepted_revision(
+    rejected_revision, foreign, next_revision, expected
+):
+    manager = _manager()
+    owner = SimpleNamespace(episode_ids=(0, 0))
+    manager._env.episode_context = owner
+    manager.initialize_observation(_frame([0.2, 0.4]), [0, 1])
+    initial = _frame([0.5, 0.6], 10)
+    initial.episode_owner = owner
+    assert manager.prepare_observation(initial).tolist() == [True, True]
+    rejected = _frame([0.5, 0.6], rejected_revision)
+    rejected.episode_owner = object() if foreign else owner
+    assert manager.prepare_observation(rejected).tolist() == [False, False]
+    following = _frame([0.5, 0.6], next_revision)
+    following.episode_owner = owner
+    assert manager.prepare_observation(following).tolist() == [expected, expected]
 
 
 def test_invalid_initial_measured_potential_still_yields_finite_terminal_reward():

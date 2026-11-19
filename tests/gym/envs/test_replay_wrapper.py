@@ -186,6 +186,115 @@ def test_control_mode_clamps_scrub_to_last_recorded_state(fake_restore):
     assert wrapper._replay_steps.tolist() == [1]
 
 
+def test_dynamic_replay_seeds_shaping_from_restored_goal_observation(monkeypatch):
+    from embodichain.lab.gym.envs.managers.cfg import ObservationCfg
+    from embodichain.lab.gym.envs.managers.skill_objective import (
+        SkillObjectiveObservation,
+    )
+    from embodichain.lab.gym.envs.managers.reward_composition import (
+        compose_reward_terms,
+    )
+    from embodichain.lab.gym.envs.managers.reward_context import RewardTransitionContext
+    from embodichain.lab.gym.envs.managers.reward_manager import RewardManager
+
+    env = _FakeEnv()
+    env.positions = torch.zeros(1, 2)
+    env.sim.physics_step_index = 0
+    env.robot.get_joint_ids = lambda part: [0, 1]
+    env.robot.get_qpos = lambda part: env.positions
+    env.sim.get_robot = lambda uid: env.robot
+    env.episode_context = SimpleNamespace(episode_ids=(0,))
+    env.cfg.rl_task = SimpleNamespace(reward_composition={"discount": 0.9})
+    cfg = ObservationCfg(
+        name="goal",
+        params={
+            "objective": {
+                "skill_id": "move_joints",
+                "binding": {"robot": "robot", "motion_part": "arm"},
+                "goal": {"positions": [0.0, 0.0]},
+            }
+        },
+    )
+    objective = SkillObjectiveObservation(cfg, env)
+    env.observation_manager = SimpleNamespace(
+        has_history=False,
+        _mode_class_functor_cfgs={"add": [SimpleNamespace(func=objective)]},
+        reset=lambda env_ids: objective.reset(env_ids),
+    )
+    env.reward_manager = RewardManager(
+        compose_reward_terms(
+            {
+                "discount": 0.9,
+                "skills": [
+                    {
+                        "skill_id": "move_joints",
+                        "profile": "measured_potential",
+                        "metrics": {"potential": {"field": "goal", "index": 0}},
+                    }
+                ],
+            },
+            program=False,
+        ),
+        env,
+    )
+    revision = 0
+
+    def capture():
+        nonlocal revision
+        revision += 1
+        sample = objective(env, {})
+        return SimpleNamespace(
+            policy={"obs": sample.values[:, :1]},
+            fields={"goal": sample},
+            episode_ids=(0,),
+            episode_owner=env.episode_context,
+            revision=revision,
+        )
+
+    def reset(**kwargs):
+        env.positions.zero_()
+        env.positions[:, 0] = 0.1 * torch.atanh(torch.tensor(0.8))
+        env.observation_manager.reset([0])
+        env.reward_manager.reset([0])
+        frame = capture()
+        env.reward_manager.initialize_observation(frame, [0])
+        return frame.policy, {}
+
+    def step(action):
+        env.sim.physics_step_index += 1
+        frame = capture()
+        objective.advance_observation()
+        env.reward_manager.transition_context = RewardTransitionContext(
+            frame, torch.zeros(1, dtype=torch.bool)
+        )
+        value, _ = env.reward_manager.compute(frame.policy, action, {})
+        return (
+            frame.policy,
+            value,
+            torch.zeros(1, dtype=torch.bool),
+            torch.zeros(1, dtype=torch.bool),
+            {},
+        )
+
+    env.reset, env.step, env._capture_observation = reset, step, capture
+    env.get_obs = lambda: capture().policy
+    trajectory = _trajectory()
+    trajectory["states"]["robot"]["qpos"].zero_()
+    trajectory["states"]["robot"]["qpos"][:, :, 0] = 0.1 * torch.atanh(
+        torch.tensor(0.2)
+    )
+    monkeypatch.setattr(
+        replay_module,
+        "restore_trajectory_state",
+        lambda host, state: setattr(host, "positions", state["robot"]["qpos"].clone()),
+    )
+    wrapper = ReplayWrapper(env, trajectory, mode="dynamic")
+    wrapper.reset()
+    _, value, _, _, _ = wrapper.step(None)
+    # Holding phi=.8 after restoration earns .9*.8-.8, with no reset-to-restore bonus.
+    torch.testing.assert_close(value, torch.tensor([-0.08]), atol=1e-6, rtol=0)
+
+
 def test_broadcast_replay_preserves_per_env_lengths():
     trajectory = _trajectory(
         num_envs=1,

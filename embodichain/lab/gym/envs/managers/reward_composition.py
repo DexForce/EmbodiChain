@@ -364,7 +364,12 @@ def compose_reward_terms(
 
 
 def _bind_skill_objectives(cfg):
-    from .skill_objective import _bind_objective
+    from .skill_objective import (
+        _bind_objective,
+        _resolve_hand_binding,
+        validate_skill_objective,
+        SkillObjectiveObservation,
+    )
 
     composition = cfg.rl_task.reward_composition
     if cfg.rl_task.skill is not None:
@@ -372,7 +377,13 @@ def _bind_skill_objectives(cfg):
             raise ValueError(
                 "Standalone skill requires reward_composition with explicit discount"
             )
-        generated = _bind_objective(cfg, "standalone", cfg.rl_task.skill)
+        objective = validate_skill_objective(cfg.rl_task.skill)
+        grasp_part = _resolve_hand_binding(objective, cfg.robot)
+        generated = _bind_objective(cfg, "standalone", objective)
+        if grasp_part is not None:
+            cfg.observations.skill_objective_standalone.params["grasp_part"] = (
+                grasp_part
+            )
         if "skills" in composition and composition["skills"] != [generated]:
             raise ValueError("Standalone skill owns its generated reward bindings")
         composition["skills"] = [generated]
@@ -401,6 +412,33 @@ def _bind_skill_objectives(cfg):
             else:
                 generated.append(item)
         composition["skills"] = generated
+    physical = any(
+        term.func is SkillObjectiveObservation
+        and (
+            "object" in term.params["objective"]["binding"]
+            or "reference" in term.params["objective"]["goal"]
+        )
+        for term in vars(cfg.observations).values()
+        if hasattr(term, "func")
+    )
+    if physical:
+        from .events import replace_assets_from_group
+
+        events = cfg.events
+        terms = (
+            events.values()
+            if isinstance(events, Mapping)
+            else vars(events).values() if events is not None else ()
+        )
+        if any(
+            isinstance(term.func, type)
+            and issubclass(term.func, replace_assets_from_group)
+            for term in terms
+            if hasattr(term, "func")
+        ):
+            raise ValueError(
+                "Asset replacement is unsupported with measured physical skill objectives; rebuild the environment for new geometry"
+            )
 
 
 class _OutcomeReward(Functor):
@@ -446,11 +484,18 @@ def _add_common_rewards(cfg, generated, stages):
     )
     if stages:
         budget = declaration.get("milestone_budget", 1.0)
+        seen_names = set()
         for index, stage in enumerate(stages):
+            first_in_episode = stage.name not in seen_names
+            seen_names.add(stage.name)
             if any(
                 t.func is program_stage_reward
                 and t.params.get("mode") == "first_achievement"
                 and _matches_stage(stage, t.params.get("stage"))
+                and (
+                    t.params.get("scope") == "occurrence"
+                    or (t.params.get("scope") == "episode" and first_in_episode)
+                )
                 for t in explicit
             ):
                 continue

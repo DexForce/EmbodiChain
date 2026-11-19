@@ -26,7 +26,7 @@ from embodichain.lab.gym.envs.managers.cfg import ObservationCfg
 from embodichain.lab.gym.envs.managers.skill_objective import SkillObjectiveObservation
 
 
-def _setup():
+def _setup(*, skill="place", goal=None, freeze_reference=False):
     pose = torch.eye(4)[None].repeat(2, 1, 1)
     pose[:, :3, 3] = torch.tensor([0.75, -0.1, 0.95])
     hand = torch.eye(4)[None].repeat(2, 1, 1)
@@ -108,10 +108,12 @@ def _setup():
         get_collision_shapes=lambda *args, **kw: [shape],
         body_data=SimpleNamespace(lin_vel=torch.zeros(2, 3), ang_vel=torch.zeros(2, 3)),
     )
+    reference_pose = torch.eye(4)[None].repeat(2, 1, 1)
+    reference = SimpleNamespace(get_local_pose=lambda **kw: reference_pose)
     sim = SimpleNamespace(
         physics_step_index=0,
         get_robot=lambda uid: robot,
-        get_rigid_object=lambda uid: cargo,
+        get_rigid_object=lambda uid: reference if uid == "reference" else cargo,
         add_sensor=lambda cfg: sensor,
     )
     env = SimpleNamespace(
@@ -123,7 +125,7 @@ def _setup():
         cfg=SimpleNamespace(sim_steps_per_control=1),
     )
     objective = {
-        "skill_id": "place",
+        "skill_id": skill,
         "binding": {
             "robot": "robot",
             "motion_part": "arm",
@@ -132,10 +134,14 @@ def _setup():
             "pad_links": ["pad_a", "pad_b"],
             "hand_links": ["pad_a", "pad_b"],
         },
-        "goal": {"position": [0.75, -0.1, 0.95]},
+        "goal": {"position": [0.75, -0.1, 0.95]} if goal is None else goal,
     }
     term = SkillObjectiveObservation(
-        ObservationCfg(name="test", params={"objective": objective}), env
+        ObservationCfg(
+            name="test",
+            params={"objective": objective, "freeze_reference": freeze_reference},
+        ),
+        env,
     )
     return env, term, data, pose
 
@@ -223,6 +229,116 @@ def test_each_repeated_occurrence_requires_a_new_stability_window():
     assert not term(env, {}).values[:, 1].bool().any()
     term.advance_observation()
     torch.testing.assert_close(term._stable_time, torch.zeros(2))
+
+
+@pytest.mark.parametrize("frame", ["parent", "world_axes"])
+def test_program_reference_pose_freezes_per_row_and_call_and_reseeds_on_reset(frame):
+    env, term, data, pose = _setup(
+        skill="move_held_object",
+        freeze_reference=True,
+        goal={
+            "position": [0.1, 0.0, 0.0],
+            "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+            "reference": "reference",
+            "frame": frame,
+        },
+    )
+    reference = term.reference.get_local_pose(to_matrix=True)
+    reference[:, :3, 3] = torch.tensor([1.0, 0.0, 1.0])
+    reference[:, :2, :2] = torch.tensor([[0.0, -1.0], [1.0, 0.0]])
+    pose[:, :3, 3] = torch.tensor(
+        [1.0, 0.1, 1.0] if frame == "parent" else [1.1, 0.0, 1.0]
+    )
+    if frame == "parent":
+        pose[:, :3, :3] = reference[:, :3, :3]
+    completed = torch.zeros(2, dtype=torch.long)
+    env.task_program_progress = SimpleNamespace(
+        ordered_progress=lambda: (completed, 2), indices=lambda stage: (0, 1)
+    )
+    term.stage = "repeat"
+    data.update(
+        user_ids=torch.tensor([[[1, 2], [1, 3]]] * 2),
+        normal=torch.tensor([[[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]]] * 2),
+        impulse=torch.ones(2, 2),
+        is_valid=torch.ones(2, 2, dtype=torch.bool),
+        impulse_valid=torch.ones(2, 2, dtype=torch.bool),
+    )
+    term(env, {})
+    term.initialize_observation(None, [0, 1])
+
+    def advance():
+        env.sim.physics_step_index += 1
+        sample = term(env, {})
+        term.advance_observation()
+        return sample
+
+    for _ in range(3):
+        sample = advance()
+    assert sample.values[:, 1].bool().all()
+    reference[:, 0, 3] = 2.0
+    reference[:, :3, :3] = torch.eye(3)
+    assert advance().values[:, 1].bool().all()
+    # Following the moved reference cannot satisfy the original call target.
+    hand = term.robot.compute_fk(None)
+    destination = torch.tensor([2.1, 0.0, 1.0])
+    hand[0, :3, 3] += destination - pose[0, :3, 3]
+    pose[0, :3, 3] = destination
+    pose[0, :3, :3] = torch.eye(3)
+    sample = advance()
+    assert sample.valid.all()
+    assert sample.values[:, 1].bool().tolist() == [False, True]
+    # Only row 0 enters the next call and resolves its new reference pose.
+    completed[0] = 1
+    assert advance().values[:, 1].bool().tolist() == [False, True]
+    for _ in range(2):
+        sample = advance()
+    assert sample.values[:, 1].bool().all()
+    term.reset([0])
+    completed[0] = 0
+    reference[0, 0, 3] = 3.0
+    hand[0, 0, 3] += 1.0
+    pose[0, 0, 3] = 3.1
+    term(env, {})
+    term.initialize_observation(None, [0])
+    for _ in range(3):
+        sample = advance()
+    assert sample.values[:, 1].bool().all()
+
+
+def test_inactive_place_previews_current_target_and_orientation_until_activation():
+    env, term, _, pose = _setup(
+        freeze_reference=True,
+        goal={
+            "position": [0.0, 0.0, 0.0],
+            "reference": "reference",
+            "frame": "world_axes",
+            "preserve_orientation": True,
+        },
+    )
+    reference = term.reference.get_local_pose(to_matrix=True)
+    reference[:] = pose
+    pose[:, :2, :2] = torch.tensor([[0.0, -1.0], [1.0, 0.0]])
+    completed = [0]
+    env.task_program_progress = SimpleNamespace(
+        ordered_progress=lambda: (torch.full((2,), completed[0]), 2),
+        indices=lambda stage: (1,),
+    )
+    term.stage = "next"
+    sample = term(env, {})
+    torch.testing.assert_close(sample.values[:, 0], torch.full((2,), 2 / 3))
+    term.initialize_observation(None, [0, 1])
+    reference[:, 0, 3] += 0.2
+    pose[:, 0, 3] += 0.2
+    pose[:, :2, :2] = -torch.eye(2)
+    env.sim.physics_step_index = 1
+    sample = term(env, {})
+    term.advance_observation()
+    torch.testing.assert_close(sample.values[:, 0], torch.full((2,), 2 / 3))
+    completed[0] = 1
+    env.sim.physics_step_index = 2
+    sample = term(env, {})
+    torch.testing.assert_close(sample.values[:, 0], torch.full((2,), 2 / 3))
+    assert not sample.values[:, 1].bool().any()
 
 
 def test_pick_cannot_succeed_without_measured_lift_even_with_bilateral_contact():
@@ -380,6 +496,20 @@ def test_transient_final_substep_contact_cannot_satisfy_a_physical_window(skill)
         sample = term(env, {})
         term.advance_observation()
     assert sample.values[:, 1].bool().all()
+
+
+@pytest.mark.parametrize("uid", ["cargo", "base"])
+def test_replaced_object_handles_reject_before_measuring_stale_geometry(uid):
+    env, term, _, _ = _setup()
+    previous = env.sim.get_rigid_object
+    replacement = SimpleNamespace(
+        get_local_pose=lambda **kw: torch.eye(4)[None].repeat(2, 1, 1)
+    )
+    env.sim.get_rigid_object = lambda name: (
+        replacement if name == uid else previous(name)
+    )
+    with pytest.raises(RuntimeError, match="replaced.*rebuild"):
+        term(env, {})
 
 
 def test_unobserved_physics_substep_invalidates_window_evidence():

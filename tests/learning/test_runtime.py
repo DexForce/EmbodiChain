@@ -65,13 +65,15 @@ class GymEnvironment:
         self.closed += 1
 
 
-def test_gym_environment_applies_runtime_overrides(tmp_path, monkeypatch):
+@pytest.mark.parametrize("composition", [None, {"discount": 0.9}])
+def test_gym_environment_applies_runtime_overrides(tmp_path, monkeypatch, composition):
     gym_config = tmp_path / "gym.yaml"
     gym_config.write_text("id: Example\n", encoding="utf-8")
     env_cfg = SimpleNamespace(
         num_envs=8,
         sim_cfg=None,
         profiler=None,
+        rl_task=SimpleNamespace(reward_composition=composition),
     )
     built = GymEnvironment()
     monkeypatch.setattr(
@@ -84,7 +86,7 @@ def test_gym_environment_applies_runtime_overrides(tmp_path, monkeypatch):
     )
 
     runtime = _build_gym_environment(
-        {"trainer": {"gym_config": "gym.yaml"}},
+        {"trainer": {"gym_config": "gym.yaml"}, "policy": _policy_config()},
         simulation_device=torch.device("cpu"),
         num_envs=1,
         headless=True,

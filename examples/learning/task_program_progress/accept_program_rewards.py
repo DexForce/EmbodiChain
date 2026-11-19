@@ -645,10 +645,15 @@ def _replay(args, root):
 def _report(args, root):
     import subprocess
 
-    reports = [
-        json.loads((args.output / f"reward_{name}.json").read_text())
-        for name in ("success", "hold", "truncated", "failure")
-    ]
+    reports = []
+    for name in ("success", "hold", "truncated", "failure"):
+        result = json.loads((args.output / f"reward_{name}.json").read_text())
+        if result.get("case") != name:
+            raise ValueError(
+                f"Acceptance result case must match filename: expected {name!r}, "
+                f"got {result.get('case')!r}"
+            )
+        reports.append(result)
     source_hash = _hash(args.output / "controller_source.json")
     for result in reports:
         if (

@@ -315,18 +315,44 @@ class ReplayWrapper(gym.Wrapper):
         recording = getattr(
             getattr(self.env, "observation_manager", None), "has_history", False
         )
-        frame = self.env._capture_observation() if recording else None
+        env_ids = torch.arange(self.env.num_envs, device=self.env.device)
+        reward_manager = getattr(self.env, "reward_manager", None)
+        initialize_rewards = (
+            self._mode == "dynamic"
+            and reward_manager is not None
+            and getattr(
+                getattr(getattr(self.env, "cfg", None), "rl_task", None),
+                "reward_composition",
+                None,
+            )
+            is not None
+        )
+        if initialize_rewards:
+            from embodichain.lab.sim.sensors.base_sensor import BaseSensor
+
+            for sensor in getattr(self.env, "sensors", {}).values():
+                sensor.reset(env_ids=env_ids)
+                if isinstance(sensor, BaseSensor):
+                    sensor._invalidate_samples(env_ids)
+            observation_manager = getattr(self.env, "observation_manager", None)
+            if observation_manager is not None:
+                observation_manager.reset(env_ids=env_ids)
+            reward_manager.reset(env_ids=env_ids)
+        frame = (
+            self.env._capture_observation() if recording or initialize_rewards else None
+        )
         obs = frame.policy if frame is not None else self.env.get_obs()
+        if initialize_rewards:
+            reward_manager.initialize_observation(frame, env_ids)
         if self._task_outcome_replay:
             info = self.env.get_info()
 
         # If the wrapped environment also records this replay, replace the
         # default-reset pending state with the state restored from the file.
-        env_ids = torch.arange(self.env.num_envs, device=self.env.device)
         seed_recording_state = getattr(self.env, "_seed_recording_state", None)
         if seed_recording_state is not None:
             seed_recording_state(obs, env_ids)
-        if frame is not None:
+        if recording and frame is not None:
             self.env._record_initial_observation(frame, env_ids)
         return obs, info
 

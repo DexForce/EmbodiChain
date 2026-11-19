@@ -725,6 +725,229 @@ def test_duplicate_program_reward_declarations_cannot_charge_an_occurrence_twice
         config_to_cfg(raw, source_path=path, _register_env=False)
 
 
+@pytest.mark.parametrize("selection", ["opposite_hand", "missing_palm"])
+def test_measured_hand_evidence_must_match_the_selected_grasp_endpoint(selection):
+    path, raw = _program_reward_config()
+    binding = raw["rl_task"]["reward_composition"]["skills"][0]["objective"]["binding"]
+    if selection == "opposite_hand":
+        for key in ("pad_links", "hand_links"):
+            binding[key] = [link.replace("right_", "left_") for link in binding[key]]
+    else:
+        binding["hand_links"] = list(binding["pad_links"])
+    with pytest.raises(ValueError, match="selected grasp|collision links"):
+        config_to_cfg(raw, source_path=path, _register_env=False)
+
+
+def test_measured_hand_links_are_resolved_from_the_selected_gripper():
+    path, raw = _program_reward_config()
+    binding = raw["rl_task"]["reward_composition"]["skills"][0]["objective"]["binding"]
+    binding.pop("pad_links")
+    binding.pop("hand_links")
+    cfg = config_to_cfg(raw, source_path=path, _register_env=False)
+    selected = cfg.observations.skill_objective_0.params["objective"]["binding"]
+    assert selected["pad_links"] == ["right_link7", "right_link8"]
+    assert set(selected["hand_links"]) == {
+        "right_gripper_base",
+        "right_link7",
+        "right_link8",
+    }
+
+
+def _target_reward_config(target):
+    path, raw = _program_reward_config()
+    program = yaml.safe_load(
+        (path.parent / "task_program/program.measured.yaml").read_text()
+    )
+    program["targets"] = {"destination": target}
+    program["program"][1]["steps"] = {
+        "place": {"object": "block_2", "at": "destination"}
+    }
+    raw["task_program"]["program"] = {"inline": program}
+    objective = raw["rl_task"]["reward_composition"]["skills"][0]["objective"]
+    objective["skill_id"] = "place"
+    objective["binding"]["support"] = "block_1"
+    objective["goal"] = {"position": list(target["position"])}
+    if target["kind"] == "scene_relative":
+        objective["goal"].update(reference=target["entity"], frame=target["frame"])
+    raw["rl_task"]["reward_composition"]["skills"] = [
+        {"stage": "stack_block", "objective": objective}
+    ]
+    return path, raw
+
+
+@pytest.mark.parametrize("position", [[0, 0, 1], [0.0, 0.0, 1.0]])
+def test_measured_world_targets_accept_equivalent_integer_and_float_coordinates(
+    position,
+):
+    path, raw = _target_reward_config(
+        {
+            "kind": "pose",
+            "frame": "world",
+            "position": [0.0, 0.0, 1.0],
+            "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+        }
+    )
+    raw["rl_task"]["reward_composition"]["skills"][0]["objective"]["goal"][
+        "position"
+    ] = position
+    cfg = config_to_cfg(raw, source_path=path, _register_env=False)
+    assert (
+        cfg.observations.skill_objective_0.params["objective"]["goal"]["position"]
+        == position
+    )
+
+
+@pytest.mark.parametrize("preserve", [True, False])
+def test_place_at_honors_effective_orientation_option(preserve):
+    path, raw = _target_reward_config(
+        {
+            "kind": "pose",
+            "frame": "world",
+            "position": [0.0, 0.0, 1.0],
+            "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+        }
+    )
+    integration = yaml.safe_load(
+        (path.parent / "task_program/integration.yaml").read_text()
+    )
+    integration["profile"]["skill_options"]["place"][
+        "preserve_current_object_orientation"
+    ] = preserve
+    raw["task_program"]["integration"] = {"inline": integration}
+    cfg = config_to_cfg(raw, source_path=path, _register_env=False)
+    goal = cfg.observations.skill_objective_0.params["objective"]["goal"]
+    if preserve:
+        assert goal.get("preserve_orientation") is True
+        assert "quaternion_xyzw" not in goal
+    else:
+        assert not goal.get("preserve_orientation", False)
+        assert goal["quaternion_xyzw"] == [0.0, 0.0, 0.0, 1.0]
+
+
+def test_program_scene_relative_goal_declares_occurrence_local_reference_snapshot():
+    path, raw = _target_reward_config(
+        {
+            "kind": "scene_relative",
+            "entity": "block_1",
+            "frame": "world_axes",
+            "position": [0.0, 0.0, 0.0],
+            "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+        }
+    )
+    cfg = config_to_cfg(raw, source_path=path, _register_env=False)
+    assert cfg.observations.skill_objective_0.params.get("freeze_reference") is True
+
+
+@pytest.mark.parametrize("reference", ["reference_arm", "reference_tcp"])
+def test_measured_scene_relative_goals_reject_unsupported_nonrigid_frames(
+    reference, tmp_path
+):
+    path, raw = _target_reward_config(
+        {
+            "kind": "scene_relative",
+            "entity": reference,
+            "frame": "parent",
+            "position": [0.0, 0.0, 0.0],
+            "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+        }
+    )
+    integration = yaml.safe_load(
+        (path.parent / "task_program/integration.yaml").read_text()
+    )
+    integration["scene_binding"]["articulations"] = [
+        {"entity_id": "reference_arm", "simulation_uid": "reference_fixture"}
+    ]
+    integration["scene_binding"]["links"] = [
+        {
+            "entity_id": "reference_tcp",
+            "articulation_id": "reference_arm",
+            "native_link_name": "right_link6",
+        }
+    ]
+    raw["task_program"]["integration"] = {"inline": integration}
+    urdf = tmp_path / "reference.urdf"
+    urdf.write_text(
+        '<robot name="reference_fixture"><link name="root"/><link name="right_link6"/>'
+        '<joint name="joint" type="revolute"><parent link="root"/><child link="right_link6"/>'
+        '<axis xyz="0 0 1"/><limit lower="-1" upper="1" effort="1" velocity="1"/></joint></robot>'
+    )
+    physical = yaml.safe_load((path.parent / "env.policy.yaml").read_text())
+    physical["simulation"]["articulation"] = [
+        {"uid": "reference_fixture", "fpath": str(urdf)}
+    ]
+    physical_path = tmp_path / "reference.yaml"
+    physical_path.write_text(yaml.safe_dump(physical))
+    raw["environment"]["component"] = str(physical_path)
+    raw["rl_task"]["reward_composition"]["skills"][0]["objective"]["goal"].pop(
+        "reference"
+    )
+    with pytest.raises(ValueError, match="rigid-object reference"):
+        config_to_cfg(raw, source_path=path, _register_env=False)
+
+
+def test_asset_replacement_rejects_measured_goals_before_reset_event(tmp_path):
+    path, raw = _program_reward_config()
+    physical = yaml.safe_load((path.parent / "env.policy.yaml").read_text())
+    physical["env"]["events"]["replace_goal"] = {
+        "func": "replace_assets_from_group",
+        "mode": "reset",
+        "params": {"entity_cfg": {"uid": "block_2"}, "folder_path": "unused"},
+    }
+    physical_path = tmp_path / "replace.yaml"
+    physical_path.write_text(yaml.safe_dump(physical))
+    raw["environment"]["component"] = str(physical_path)
+    with pytest.raises(ValueError, match="replacement.*measured|measured.*replacement"):
+        config_to_cfg(raw, source_path=path, _register_env=False)
+
+
+def test_multicall_parent_segment_id_is_valid_for_success_and_explicit_rewards(
+    tmp_path,
+):
+    from embodichain.lab.gym.envs.managers.cfg import RewardCfg
+    from embodichain.lab.gym.envs.managers.rewards import program_stage_reward
+    from embodichain.lab.task_program.integrations.progress import (
+        _validate_policy_deployment,
+    )
+
+    path, raw = _program_reward_config()
+    raw["id"] = "MultiCallParentRewardFixture-v1"
+    physical = yaml.safe_load((path.parent / "env.policy.yaml").read_text())
+    physical["env"]["rewards"] = {}
+    physical_path = tmp_path / "multicall.yaml"
+    physical_path.write_text(yaml.safe_dump(physical))
+    raw["environment"]["component"] = str(physical_path)
+    program = yaml.safe_load(
+        (path.parent / "task_program/program.measured.yaml").read_text()
+    )
+    pick, place = program["program"]
+    program["program"] = [
+        {**pick, "segment": "cycle", "steps": [pick["steps"], place["steps"]]}
+    ]
+    raw["task_program"]["program"] = {"inline": program}
+    goals = yaml.safe_load(
+        (
+            _ROOT / "examples/learning/task_program_progress/program_rewards.yaml"
+        ).read_text()
+    )["rewards"]["skills"]
+    raw["rl_task"]["reward_composition"]["skills"] = [
+        {"call_index": i, "objective": item["objective"]}
+        for i, item in enumerate(goals)
+    ]
+    cfg = config_to_cfg(raw, source_path=path)
+    registration = get_env_spec(raw["id"]).task_program_adapter_factory.registration
+    compiled = registration.catalog.preflight(cfg.task_program, strict_contracts=True)
+    parent = next(compiled.iter_segments()).segment_id
+    cfg.rl_task.success["stages"].params["stage"] = parent
+    cfg.rewards.explicit_parent = RewardCfg(
+        func=program_stage_reward,
+        mode="add",
+        weight=2.0,
+        params={"stage": parent, "mode": "first_achievement", "scope": "occurrence"},
+    )
+    result = _validate_policy_deployment(cfg, registration)
+    assert len(next(result.iter_segments()).calls) == 2
+
+
 @pytest.mark.parametrize("declaration", ["omitted", "null"])
 def test_standalone_skill_cannot_be_silently_ignored_without_reward_composition(
     declaration,

@@ -212,7 +212,7 @@ def _build_gym_environment(
     profiler: EnvProfilerCfg | None = None,
     trainer_events: Sequence[EventCfg] = (),
 ) -> _GymEnvironmentRuntime:
-    """Build the simulator Environment declared by a training config."""
+    """Build a Gym environment for training or policy-only inference."""
     trainer_cfg = config["trainer"]
     gym_config_path = _resolve_config_reference(
         trainer_cfg["gym_config"],
@@ -223,13 +223,13 @@ def _build_gym_environment(
         gym_config, manager_modules=get_manager_modules(), source_path=gym_config_path
     )
     composition = getattr(getattr(env_cfg, "rl_task", None), "reward_composition", None)
-    if composition is not None:
+    algorithm = config.get("algorithm")
+    if composition is not None and algorithm is not None:
         from embodichain.learning.rl.algo import (
             _ALGO_REGISTRY,
             _normalize_algo_cfg_kwargs,
         )
 
-        algorithm = config["algorithm"]
         cfg_type, _ = _ALGO_REGISTRY[algorithm["name"].lower()]
         algorithm_cfg = cfg_type(**_normalize_algo_cfg_kwargs(algorithm.get("cfg", {})))
         if composition["discount"] != algorithm_cfg.gamma:

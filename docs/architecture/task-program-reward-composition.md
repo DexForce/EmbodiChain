@@ -93,6 +93,11 @@ the same selected event. Authored names, occurrence IDs and `call:N` aliases use
 the same matcher. Existing reward terms must use `add` when automatic
 composition is enabled.
 
+Deduplication respects the explicit term's payout scope. An episode-scoped
+bonus covers only the first occurrence of its authored stage name; later
+occurrences keep their automatic milestone. Selecting only a later occurrence
+with episode scope does not suppress an automatic event that term cannot pay.
+
 Collision, energy and action-smoothness objectives can use existing or newly
 implemented reward functors. Composition does not automatically add them.
 
@@ -113,9 +118,13 @@ bindings reduce vector errors by Euclidean norm before applying
 
 `pose` combines position and orientation scores. `held` includes the required
 hold duration; `stable` measures progress through the stability window.
-Manipulation objectives require explicit object/support actors, opposing pads,
-the complete selected hand collision links, native contact evidence and
-collision geometry. Binding and acceptance declarations remain separate from
+Manipulation objectives require explicit object/support actors and a calibrated
+gripper binding. Program objectives resolve pads and complete collision links
+from the selected resource's `grasp` endpoint. Standalone objectives require one
+calibrated hand for their motion part. Omitted hand lists are derived; explicit
+lists must match that selected hand, including its palm/body collision links.
+Native contact evidence and collision geometry remain required. Binding and
+acceptance declarations remain separate from
 shaping weights. A zero shaping weight does not disable the physical goal.
 
 `register_skill_reward_profile()` installs a trusted named
@@ -125,6 +134,11 @@ used when omitted. A profile may use mean/product reduction or implement
 the skill's available physical roles. A new physical metric needs an observation
 implementation and binding before configuration can select it. Raw observation
 metric bindings can also select a registered `profile` directly.
+
+Built-in formulas read scores by role name, so a permutation of declared roles
+does not change the formula. With `reduction: None`, a built-in formula requires
+its complete role set; explicit mean/product reductions may select available
+subsets.
 
 Effective configurations retain objective thresholds and selected profile
 revisions. Saved-contract mismatches and unknown profiles reject instead of
@@ -155,10 +169,12 @@ Administrative truncation retains the pre-reset successor potential for
 bootstrap. Completing an intermediate skill changes the active phase without
 terminating the whole task. The training runtime validates composition
 `discount` against algorithm `gamma` before constructing simulation.
+Policy-only inference needs no algorithm block; discount matching runs only
+when a consuming algorithm is supplied.
 
 The terminal shaping contribution can be negative while task success is
 correctly rewarded. In the recorded two-stage fixture, the last step is
-`10 + 0.5 - 0.945163 = 9.554837`: success, milestone and absorbing-potential
+`10 + 0.5 - 0.945506 ≈ 9.554495`: success, milestone and absorbing-potential
 correction are separate ledger entries.
 
 ## Configuration and generated manager terms
@@ -182,6 +198,18 @@ compiled `call_index` and declare an `objective` containing `skill_id`,
 Multi-call segments require explicit objectives for every call before internal
 progress can be expanded. Objects, resources and semantic placement targets
 must agree with the compiled calls.
+
+Program `scene_relative` call targets retain a reference-pose snapshot per
+environment and call occurrence, captured at activation before the first
+physics step. Later reference motion does not retarget that call. New
+occurrences and reset rows acquire a new snapshot without changing peers.
+Inactive goals preview the live reference and current entry orientation, keeping
+the phase-handoff potential consistent with the canonical physical frame.
+These measured references currently require rigid-object bindings; articulation
+and link targets reject preflight. Standalone relative goals and `Place(on)`
+support-frame measurements retain their declared live-reference behavior.
+The effective Place preservation option applies to both `at` and `on` targets;
+fixed goal quaternions that contradict preserved orientation reject.
 
 Deployment `rl_task.reward_composition` overrides program defaults by top-level
 field; overriding `skills` replaces the entire list. A standalone declaration
@@ -233,6 +261,8 @@ measurement, progress, termination and reward. Episode ownership, row identity
 and acquisition revisions prevent foreign or stale evidence from advancing
 progress. Repeated transition reads return owned cached rewards without
 consuming events or advancing histories again.
+Rejected stale/foreign frames cannot rewind or advance the accepted revision
+watermark.
 
 Hold/stability windows inspect every physics substep. A first valid sample
 establishes a boundary; interrupted evidence restarts the dwell. Missing sample
@@ -250,6 +280,16 @@ Reset acquisition initializes selected potential baselines without paying
 reward. Partial resets preserve other rows' histories. Window state and the
 last sample have bounded per-row storage; canonical observations commit history,
 while read-only queries do not.
+
+Dynamic replay with composition clears measurement/objective/reward histories
+after restoring the recorded robot, object and task state. It seeds baselines
+from the final restored observation before the first replay action. Holding a
+restored potential of 0.8 with discount 0.9 therefore earns `-0.08`.
+
+Measured physical goals bind fixed topology for the environment lifetime.
+`replace_assets_from_group` rejects preflight when such goals are present;
+construct a fresh environment for new geometry. Direct replacement/removal of
+a bound object, support or reference also rejects before accessing old handles.
 
 ## Reuse with learned skills and action chunks
 
@@ -278,7 +318,7 @@ The [native acceptance reference](../../examples/learning/task_program_progress/
 records four passing CPU cases: success, hold, truncation and failure, totaling
 1,559 `env.step` calls and 3,118 environment reward samples, including a
 post-reset transition. The maximum scalar composition error is
-`2.3841858e-7`; repeated-read error is zero. The arithmetic oracle consumes
+`4.7683716e-7`; repeated-read error is zero. The arithmetic oracle consumes
 canonical measured skill potentials and is not an independent geometry or
 skill-formula oracle. Focused production tests cover those underlying contracts.
 
