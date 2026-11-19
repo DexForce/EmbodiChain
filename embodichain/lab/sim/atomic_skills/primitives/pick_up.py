@@ -18,6 +18,14 @@
 
 from __future__ import annotations
 
+from embodichain.lab.sim.atomic_skills.continuation import PlanContinuationResult
+from embodichain.lab.sim.atomic_skills.primitives.contact import (
+    ContactPickUpGoal,
+    _plan_contact_phase,
+    _continue_contact_phase,
+    _begin_contact_phase,
+)
+
 import math
 from dataclasses import dataclass, field, replace
 from typing import ClassVar
@@ -348,11 +356,17 @@ class PickUpOptions(SkillOptions):
             )
 
 
-class PickUp(AtomicSkill[GraspGoal | ContactGraspGoal, PickUpOptions]):
+class PickUp(
+    AtomicSkill[GraspGoal | ContactGraspGoal | ContactPickUpGoal, PickUpOptions]
+):
     """Approach a grasp pose, close the gripper, lift."""
 
     skill_id: ClassVar[str] = "pick_up"
-    GoalType: ClassVar[tuple[type, ...]] = (GraspGoal, ContactGraspGoal)
+    GoalType: ClassVar[tuple[type, ...]] = (
+        GraspGoal,
+        ContactGraspGoal,
+        ContactPickUpGoal,
+    )
     OptionsType: ClassVar[type] = PickUpOptions
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
@@ -373,13 +387,29 @@ class PickUp(AtomicSkill[GraspGoal | ContactGraspGoal, PickUpOptions]):
         ),
     )
 
+    def continue_plan(
+        self,
+        request: ResolvedSkillRequest,
+        context: PlanningContext,
+        plan: SkillPlan,
+        active_mask: torch.Tensor,
+    ) -> PlanContinuationResult:
+        return _continue_contact_phase(self, request, context, plan, active_mask)
+
+    def on_plan_installed(
+        self, request: ResolvedSkillRequest, context: PlanningContext, plan: SkillPlan
+    ) -> None:
+        _begin_contact_phase(self, request, context, plan)
+
     def _scene_dependencies(
         self,
-        request: ResolvedSkillRequest[GraspGoal | ContactGraspGoal, PickUpOptions],
+        request: ResolvedSkillRequest[
+            GraspGoal | ContactGraspGoal | ContactPickUpGoal, PickUpOptions
+        ],
     ) -> tuple[str, ...]:
         """Monitor the acquired object and late-bound downstream targets."""
         dependencies = set(super()._scene_dependencies(request))
-        if isinstance(request.goal, ContactGraspGoal):
+        if isinstance(request.goal, (ContactGraspGoal, ContactPickUpGoal)):
             return tuple(sorted(dependencies))
         entity_id = request.goal.semantics.entity_id
         # An explicit object pose is a scene-independent planning input.  Do
@@ -410,6 +440,7 @@ class PickUp(AtomicSkill[GraspGoal | ContactGraspGoal, PickUpOptions]):
         *,
         contact_grasp: bool = False,
         env_ids: torch.Tensor | None = None,
+        active_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, int]]:
         if options.approach_along_grasp_axis:
             approach_direction = grasp_xpos[:, :3, 2]
@@ -436,6 +467,19 @@ class PickUp(AtomicSkill[GraspGoal | ContactGraspGoal, PickUpOptions]):
                 poses = interpolate_xpos_batched(start_pose, target_pose, sample_count)[
                     :, 1:
                 ]
+                if active_mask is not None:
+                    mask, sampled = plan_named_arm_trajectory(
+                        self.motion_generator,
+                        manipulator.control_part,
+                        start_full[:, arm_ids],
+                        poses,
+                        sample_count,
+                        motion_policy,
+                        interpolation_dt,
+                        active_mask=active_mask,
+                        cartesian_linear=True,
+                    )
+                    return mask, sampled
                 result = self.motion_generator.generate(
                     build_pose_plan_states(poses),
                     options=replace(
@@ -692,11 +736,16 @@ class PickUp(AtomicSkill[GraspGoal | ContactGraspGoal, PickUpOptions]):
 
     def _plan(
         self,
-        request: ResolvedSkillRequest[GraspGoal | ContactGraspGoal, PickUpOptions],
+        request: ResolvedSkillRequest[
+            GraspGoal | ContactGraspGoal | ContactPickUpGoal, PickUpOptions
+        ],
         context: PlanningContext,
     ) -> SkillPlan:
         """Plan approach, close, and lift segments without committing attachment."""
         target = self.require_goal(request)
+        if isinstance(target, ContactPickUpGoal):
+            self._validate_contact_options(request.skill_options)
+            return _plan_contact_phase(self, request, context)
         if isinstance(target, ContactGraspGoal):
             self._validate_contact_goal(request, context)
         options = replace(
@@ -875,12 +924,8 @@ class PickUp(AtomicSkill[GraspGoal | ContactGraspGoal, PickUpOptions]):
             provenance=None,
         )
 
-    def _validate_contact_goal(
-        self,
-        request: ResolvedSkillRequest[GraspGoal | ContactGraspGoal, PickUpOptions],
-        context: PlanningContext,
-    ) -> None:
-        options = request.skill_options
+    @staticmethod
+    def _validate_contact_options(options: PickUpOptions) -> None:
         if (
             options.fixed_object_to_eef is not None
             or options.downstream_object_target_poses
@@ -890,6 +935,15 @@ class PickUp(AtomicSkill[GraspGoal | ContactGraspGoal, PickUpOptions]):
             raise ValueError(
                 "Contact pickup requires an explicit grasp pose without rigid-object options."
             )
+
+    def _validate_contact_goal(
+        self,
+        request: ResolvedSkillRequest[
+            GraspGoal | ContactGraspGoal | ContactPickUpGoal, PickUpOptions
+        ],
+        context: PlanningContext,
+    ) -> None:
+        self._validate_contact_options(request.skill_options)
         motion = request.binding.endpoint("primary", "motion")
         hand = request.binding.endpoint("primary", "grasp")
         key = require_shared_task_state_key(
@@ -910,12 +964,16 @@ class PickUp(AtomicSkill[GraspGoal | ContactGraspGoal, PickUpOptions]):
 
     def _plan_from_nominal(
         self,
-        request: ResolvedSkillRequest[GraspGoal | ContactGraspGoal, PickUpOptions],
+        request: ResolvedSkillRequest[
+            GraspGoal | ContactGraspGoal | ContactPickUpGoal, PickUpOptions
+        ],
         context: PlanningContext,
         nominal_source: NominalMotionSource,
     ) -> SkillPlan:
         """Assemble a Pick from an explicitly supplied external motion."""
         target = self.require_goal(request)
+        if isinstance(target, ContactPickUpGoal):
+            raise ValueError("Observed contact paths cannot replay nominal motion.")
         if isinstance(target, ContactGraspGoal):
             self._validate_contact_goal(request, context)
         motion = self._validate_nominal_motion(
@@ -1032,7 +1090,9 @@ class PickUp(AtomicSkill[GraspGoal | ContactGraspGoal, PickUpOptions]):
 
     def _assemble_pick_plan(
         self,
-        request: ResolvedSkillRequest[GraspGoal | ContactGraspGoal, PickUpOptions],
+        request: ResolvedSkillRequest[
+            GraspGoal | ContactGraspGoal | ContactPickUpGoal, PickUpOptions
+        ],
         context: PlanningContext,
         *,
         success: torch.Tensor,
@@ -1045,6 +1105,8 @@ class PickUp(AtomicSkill[GraspGoal | ContactGraspGoal, PickUpOptions]):
         provenance: dict[str, object] | None,
     ) -> SkillPlan:
         """Assemble Pick semantics shared by native and external motion."""
+        if isinstance(request.goal, ContactPickUpGoal):
+            raise ValueError("Observed contact paths cannot replay nominal motion.")
         target = request.goal
         options = request.skill_options
         motion = request.binding.endpoint("primary", "motion")
@@ -1412,4 +1474,10 @@ class PickUp(AtomicSkill[GraspGoal | ContactGraspGoal, PickUpOptions]):
         return adjusted_grasp_xpos
 
 
-__all__ = ["GraspGoal", "ContactGraspGoal", "PickUp", "PickUpOptions"]
+__all__ = [
+    "GraspGoal",
+    "ContactGraspGoal",
+    "ContactPickUpGoal",
+    "PickUp",
+    "PickUpOptions",
+]

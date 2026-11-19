@@ -18,6 +18,14 @@
 
 from __future__ import annotations
 
+from embodichain.lab.sim.atomic_skills.continuation import PlanContinuationResult
+from embodichain.lab.sim.atomic_skills.primitives.contact import (
+    ContactPlaceGoal,
+    _plan_contact_phase,
+    _continue_contact_phase,
+    _begin_contact_phase,
+)
+
 from dataclasses import dataclass, field
 from typing import ClassVar, Literal
 
@@ -168,7 +176,7 @@ class PlaceOptions(SkillOptions):
             raise TypeError("preserve_current_object_orientation must be a bool.")
 
 
-class Place(AtomicSkill[PlaceGoal | AssembleGoal, PlaceOptions]):
+class Place(AtomicSkill[PlaceGoal | AssembleGoal | ContactPlaceGoal, PlaceOptions]):
     """Lower the held object to a place pose, open the gripper, retract.
 
     The :class:`PlaceGoal` may carry either a single waypoint
@@ -190,6 +198,7 @@ class Place(AtomicSkill[PlaceGoal | AssembleGoal, PlaceOptions]):
     GoalType: ClassVar[type | tuple[type, ...]] = (
         PlaceGoal,
         AssembleGoal,
+        ContactPlaceGoal,
     )
     OptionsType: ClassVar[type] = PlaceOptions
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
@@ -210,9 +219,25 @@ class Place(AtomicSkill[PlaceGoal | AssembleGoal, PlaceOptions]):
         ),
     )
 
+    def continue_plan(
+        self,
+        request: ResolvedSkillRequest,
+        context: PlanningContext,
+        plan: SkillPlan,
+        active_mask: torch.Tensor,
+    ) -> PlanContinuationResult:
+        return _continue_contact_phase(self, request, context, plan, active_mask)
+
+    def on_plan_installed(
+        self, request: ResolvedSkillRequest, context: PlanningContext, plan: SkillPlan
+    ) -> None:
+        _begin_contact_phase(self, request, context, plan)
+
     def _scene_dependencies(
         self,
-        request: ResolvedSkillRequest[PlaceGoal | AssembleGoal, PlaceOptions],
+        request: ResolvedSkillRequest[
+            PlaceGoal | AssembleGoal | ContactPlaceGoal, PlaceOptions
+        ],
     ) -> tuple[str, ...]:
         """Include an explicitly snapshot-grounded assembly base."""
         dependencies = set(super()._scene_dependencies(request))
@@ -223,10 +248,14 @@ class Place(AtomicSkill[PlaceGoal | AssembleGoal, PlaceOptions]):
 
     def _plan(
         self,
-        request: ResolvedSkillRequest[PlaceGoal | AssembleGoal, PlaceOptions],
+        request: ResolvedSkillRequest[
+            PlaceGoal | AssembleGoal | ContactPlaceGoal, PlaceOptions
+        ],
         context: PlanningContext,
     ) -> SkillPlan:
         """Plan approach, release, and retract without committing detachment."""
+        if isinstance(request.goal, ContactPlaceGoal):
+            return _plan_contact_phase(self, request, context)
         target = request.goal
         options = request.skill_options
         binding = request.binding
@@ -488,12 +517,16 @@ class Place(AtomicSkill[PlaceGoal | AssembleGoal, PlaceOptions]):
 
     def _plan_from_nominal(
         self,
-        request: ResolvedSkillRequest[PlaceGoal | AssembleGoal, PlaceOptions],
+        request: ResolvedSkillRequest[
+            PlaceGoal | AssembleGoal | ContactPlaceGoal, PlaceOptions
+        ],
         context: PlanningContext,
         nominal_source: NominalMotionSource,
     ) -> SkillPlan:
         """Assemble external placement without replanning the source path."""
         target = self.require_goal(request)
+        if isinstance(request.goal, ContactPlaceGoal):
+            raise ValueError("Observed contact paths cannot replay nominal motion.")
         if not isinstance(target, PlaceGoal):
             raise ValueError("external placement currently requires a direct PlaceGoal")
         motion = self._validate_nominal_motion(
@@ -606,7 +639,9 @@ class Place(AtomicSkill[PlaceGoal | AssembleGoal, PlaceOptions]):
 
     def _assemble_place_plan(
         self,
-        request: ResolvedSkillRequest[PlaceGoal | AssembleGoal, PlaceOptions],
+        request: ResolvedSkillRequest[
+            PlaceGoal | AssembleGoal | ContactPlaceGoal, PlaceOptions
+        ],
         context: PlanningContext,
         *,
         success: torch.Tensor,
@@ -661,11 +696,13 @@ class Place(AtomicSkill[PlaceGoal | AssembleGoal, PlaceOptions]):
 
     def _resolve_place_xpos(
         self,
-        target: PlaceGoal | AssembleGoal,
+        target: PlaceGoal | AssembleGoal | ContactPlaceGoal,
         state: PlanningContext,
         task_state_key: str,
         *,
-        request: ResolvedSkillRequest[PlaceGoal | AssembleGoal, PlaceOptions],
+        request: ResolvedSkillRequest[
+            PlaceGoal | AssembleGoal | ContactPlaceGoal, PlaceOptions
+        ],
     ) -> tuple[torch.Tensor, AffordanceSample | None]:
         """Resolve the place EEF poses from a typed target.
 
@@ -842,4 +879,4 @@ class Place(AtomicSkill[PlaceGoal | AssembleGoal, PlaceOptions]):
         ]
 
 
-__all__ = ["AssembleGoal", "Place", "PlaceGoal", "PlaceOptions"]
+__all__ = ["AssembleGoal", "Place", "PlaceGoal", "ContactPlaceGoal", "PlaceOptions"]

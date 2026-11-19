@@ -946,12 +946,16 @@ def _plan_segment_contract_case(case_id: str) -> SkillPlan:
 def test_builtin_descriptors_expose_strict_goal_types() -> None:
     assert MoveEndEffector.GoalType is EndEffectorPoseGoal
     assert MoveJoints.GoalType is JointPositionGoal
-    from embodichain.lab.sim.atomic_skills import ContactGraspGoal
+    from embodichain.lab.sim.atomic_skills import (
+        ContactGraspGoal,
+        ContactPickUpGoal,
+        ContactPlaceGoal,
+    )
 
-    assert PickUp.GoalType == (GraspGoal, ContactGraspGoal)
+    assert PickUp.GoalType == (GraspGoal, ContactGraspGoal, ContactPickUpGoal)
     assert AxisAlign.GoalType is AxisAlignGoal
     assert MoveHeldObject.GoalType is HeldObjectPoseGoal
-    assert Place.GoalType == (PlaceGoal, AssembleGoal)
+    assert Place.GoalType == (PlaceGoal, AssembleGoal, ContactPlaceGoal)
     assert Pour.GoalType is PourGoal
     assert Press.GoalType is PressGoal
     assert PushObject.GoalType is PushObjectGoal

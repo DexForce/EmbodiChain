@@ -3383,6 +3383,20 @@ def _decode_runtime_services(
                 _CableCheckFactory,
             )
         )
+    if cable is not None and cable.operations:
+        from .simulation._cable_contact import (
+            CableCompactPickFactory,
+            CableCompactPlaceFactory,
+        )
+
+        lowerers += tuple(
+            factory(cable)
+            for kind, factory in (
+                ("pick_up", CableCompactPickFactory),
+                ("place", CableCompactPlaceFactory),
+            )
+            if any(operation.kind == kind for operation in cable.operations)
+        )
     lowerer_call_ids = tuple(factory.call_id for factory in lowerers)
     if len(set(lowerer_call_ids)) != len(lowerer_call_ids):
         raise ValueError(

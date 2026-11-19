@@ -36,6 +36,15 @@ use `MotionPolicy.interpolate_position_step` for lift sampling on the control
 grid; joint limits can lengthen them. Numerical material-coordinate geometry
 belongs to `compute/geometry/cable.py`.
 
+`ContactPickUpGoal` and `ContactPlaceGoal` opt into a bounded observed path in
+the same `PickUp`/`Place` invocation. `SkillPlan.continuation` carries an owned
+cursor; `ExecutionSession` installs the next plan only after the host acknowledges
+commands and physical checkpoints. The engine owns motion generation; the
+episode-owned `ContactPhaseSource` resolves geometry and observations only.
+Offline projection, external trajectory transforms, replay recovery and
+invocation revisions are rejected for this path. Its phases share one timeout
+and failure scope; `SkillPlan.segments` remain descriptive command ranges.
+
 ## Package map
 
 | Concern | Source of truth |

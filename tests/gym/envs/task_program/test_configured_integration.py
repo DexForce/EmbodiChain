@@ -4686,15 +4686,15 @@ def test_unrelated_task_program_identities_keep_pre_cable_program_values():
     integration = deployment.integration
     registration = integration.registration
     assert "evaluation" not in registration.fingerprint_payload()
-    # Independently recomputed at 694ddda7d before the cable Task Program
-    # migration. Contact-capable PickUp had already changed the old main golden.
+    # Extending the accepted PickUp/Place goal descriptors intentionally changes
+    # registration identity. The handover program and inactive options stay fixed.
     assert (
         registration.fingerprint
-        == "0b5253d265d1d88dc165138e915f56f3596f52525c9ae620943f68a3ecc1d79f"
+        == "d9cd591643cf8c29cbad04e532c6743208b78315a484796e90595d03ad98e6a8"
     )
     assert (
         integration.integration_fingerprint
-        == "400ee8ebb00e416a8c9b783f5a681b7f9566da92cef4cbc55ec966cd5c20b2c4"
+        == "785a9307300d193082e945cee747d37a688b0a7ba3a09d6569b418553b44379e"
     )
     compiled = registration.catalog.preflight(deployment.load_program())
     assert (

@@ -25,7 +25,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 import math
-from typing import ClassVar, Any
+from typing import ClassVar, Any, TYPE_CHECKING
 
 import torch
 
@@ -66,6 +66,9 @@ from embodichain.lab.task_program.semantics import (
 )
 from ..extensions import RegisteredSemanticLowererFactory
 
+if TYPE_CHECKING:
+    from ._cable_contact import CableContactOperation, CableContactSource
+
 __all__: list[str] = []
 
 from embodichain.compute.geometry._cable_route import _CABLE_METRICS as _METRICS
@@ -105,6 +108,7 @@ class _CableService:
     geometry: tuple[tuple[str, object], ...]
     motion_parts: tuple[str, ...]
     slip_limit: float = 0.012
+    operations: tuple[CableContactOperation, ...] = ()
 
     def target(self, target_id: str) -> _CableTarget:
         for target in self.targets:
@@ -157,6 +161,9 @@ class _CableRuntime:
         self.pending_pick: tuple[str, _CableTarget] | None = None
         self.hand_to_motion: dict[str, str] = {}
         self.grasps: dict[str, tuple[float, torch.Tensor]] = {}
+        self.grasp_active: dict[str, torch.Tensor] = {}
+        self.pending_pick_rows: torch.Tensor | None = None
+        self._contact_source: CableContactSource | None = None
         self.max_slip = torch.zeros(len(rows), device=env_ids.device)
         self.grasp_slip: dict[str, torch.Tensor] = {}
         self.last_targets: dict[str, torch.Tensor] = {}
@@ -204,6 +211,10 @@ class _CableRuntime:
     def observe(self) -> torch.Tensor:
         for part, (distance, baseline) in self.grasps.items():
             slip = (self.point_in_tool(part, distance) - baseline).norm(dim=-1)
+            if part in self.grasp_active:
+                slip = torch.where(
+                    self.grasp_active[part], slip, torch.zeros_like(slip)
+                )
             self.grasp_slip[part] = torch.maximum(self.grasp_slip[part], slip)
             self.max_slip = torch.maximum(self.max_slip, slip)
         state = self.state()
@@ -248,6 +259,45 @@ class _CableRuntime:
             ]
         ).all(0)
 
+    def condition(
+        self, target: _CableTarget, part: str
+    ) -> tuple[torch.Tensor, dict[str, list[float]]]:
+        """Measure a declared condition from current physical observations."""
+        passed = ~self.observe()
+        details = {}
+        if target.condition == "pose":
+            expected, actual = self.last_targets[part], self.tool(part)
+            error = (actual[:, :3, 3] - expected[:, :3, 3]).norm(dim=-1)
+            trace = (
+                (actual[:, :3, :3].transpose(1, 2) @ expected[:, :3, :3])
+                .diagonal(dim1=-2, dim2=-1)
+                .sum(-1)
+            )
+            angle = torch.acos(((trace - 1) / 2).clamp(-1, 1))
+            passed &= (error <= target.tolerance) & (
+                angle <= target.orientation_tolerance
+            )
+            if target.stop_when_seated:
+                # Above-channel release alignment still requires ordinary TCP
+                # tracking. Only an inserted endpoint may retain contact bias.
+                passed |= (
+                    self.seated() & self.metrics()["strict_port"] & ~self.observe()
+                )
+            details = {
+                "position_error_m": error.tolist(),
+                "orientation_error_rad": angle.tolist(),
+            }
+        elif target.condition == "lift":
+            distance, before = self.pick_initial[part]
+            lift = self.point(distance)[0][:, 2] - before
+            passed &= (lift > 0.008) & (part in self.grasps)
+            details = {"material_lift_m": lift.tolist()}
+        elif target.condition == "seated":
+            passed &= self.seated()
+        else:
+            raise ValueError("Unknown declared cable precondition.")
+        return passed, details
+
     def after_action(self, action: Any, runtime: Any) -> tuple[torch.Tensor, str]:
         """Capture only after Gym acknowledges the final physical close step."""
         self._scope_guard()
@@ -265,11 +315,23 @@ class _CableRuntime:
                 part, target = self.pending_pick
                 distance = target.material_distance
                 assert distance is not None
-                self.grasps[part] = (
-                    distance,
-                    self.point_in_tool(part, distance).clone(),
-                )
-                self.grasp_slip[part] = torch.zeros_like(self.max_slip)
+                rows = self.pending_pick_rows
+                if rows is None:
+                    rows = torch.ones_like(self.max_slip, dtype=torch.bool)
+                baseline = self.grasps.get(
+                    part, (distance, torch.zeros((len(rows), 3), device=rows.device))
+                )[1].clone()
+                baseline[rows] = self.point_in_tool(part, distance)[rows]
+                self.grasps[part] = (distance, baseline)
+                active = self.grasp_active.get(part, torch.zeros_like(rows)).clone()
+                active[rows] = True
+                self.grasp_active[part] = active
+                slip = self.grasp_slip.get(
+                    part, torch.zeros_like(self.max_slip)
+                ).clone()
+                slip[rows] = 0
+                self.grasp_slip[part] = slip
+                self.pending_pick_rows = None
                 self.pending_pick = None
                 self.closed_reference_samples.append(
                     {
@@ -279,7 +341,13 @@ class _CableRuntime:
                         "sample_index": phase[2],
                     }
                 )
-        return self.observe(), "cable_material_state_or_slip_guard_failed"
+        rejected = self.observe()
+        source = getattr(self, "_contact_source", None)
+        if source is not None:
+            source.observe(action, runtime)
+            if source.rejected is not None:
+                rejected |= source.rejected
+        return rejected, "cable_material_state_or_slip_guard_failed"
 
     def _material_pose(self, target: _CableTarget, part: str) -> torch.Tensor:
         assert target.material_distance is not None
@@ -564,6 +632,77 @@ class _CablePickLowerer(_CableLowerer):
         )
 
 
+def _ground_cable_move(
+    service: _CableRuntime, target: _CableTarget, part: str, control_dt: float
+) -> SemanticLowering:
+    env_ids = service.env_ids
+    start, end = service.tool(part), service.pose(target, part)
+    pivot_geometry = (
+        service._pivot_delta(target, part, start)
+        if target.kind in {"pitch_align", "lay_down"}
+        else None
+    )
+    if target.stop_when_seated:
+        # Seated rows retain the loaded command throughout the path;
+        # interpolating from their measured pose would first unload it.
+        start = torch.where(service.seated()[:, None, None], end, start)
+    if target.kind == "lay_down":
+        assert pivot_geometry is not None
+        holding = pivot_geometry[2] & (pivot_geometry[1] == 0)
+        start = torch.where(holding[:, None, None], end, start)
+    path_start, path_end = start, end
+    if pivot_geometry is not None:
+        valid = pivot_geometry[2][:, None, None]
+        identity = torch.eye(4, dtype=start.dtype, device=start.device)
+        # Invalid rows are rejected independently, including nonfinite
+        # observations; they must not poison the shared sample count.
+        path_start = torch.where(valid, start, identity)
+        path_end = torch.where(valid, end, identity)
+    distance = (path_start[:, :3, 3] - path_end[:, :3, 3]).norm(dim=-1).max().item()
+    trace = (
+        (path_start[:, :3, :3].transpose(1, 2) @ path_end[:, :3, :3])
+        .diagonal(dim1=-2, dim2=-1)
+        .sum(-1)
+    )
+    angle = torch.acos(((trace - 1) / 2).clamp(-1, 1)).max().item()
+    count = max(
+        3,
+        math.ceil(max(distance / target.speed, angle / 0.5) / control_dt) + 1,
+    )
+    service.last_targets[part] = end.clone()
+    path = interpolate_xpos_batched(path_start, path_end, count)[:, 1:]
+    failures = {}
+    if pivot_geometry is not None:
+        point, _, valid = pivot_geometry
+        local_point = start[:, :3, :3].transpose(1, 2) @ (
+            point - start[:, :3, 3]
+        ).unsqueeze(-1)
+        pivot_path = point[:, None] - (
+            path[:, :, :3, :3] @ local_point[:, None]
+        ).squeeze(-1)
+        path[:, :, :3, 3] = torch.where(
+            valid[:, None, None], pivot_path, path[:, :, :3, 3]
+        )
+        frozen = ~valid
+        if target.kind == "lay_down":
+            frozen |= holding
+        if target.stop_when_seated:
+            frozen |= service.seated()
+        path = torch.where(frozen[:, None, None, None], start[:, None], path)
+        reason = (
+            "Cable lay-down requires a seated tip and a finite, forward, "
+            "monotonically descending pivot arc above its TCP floor."
+            if target.kind == "lay_down"
+            else "The distal cable span or tool points away from the channel."
+        )
+        failures = {
+            int(env_ids[row]): reason for row in (~valid).nonzero().flatten().tolist()
+        }
+    return SemanticLowering(
+        goal=EndEffectorPoseGoal(path), failed_preconditions=failures
+    )
+
+
 class _CableMoveLowerer(_CableLowerer):
     call_id: ClassVar[str] = "simulation.cable_move"
     target_descriptor: ClassVar[SkillDescriptor] = MoveEndEffector.descriptor()
@@ -578,75 +717,45 @@ class _CableMoveLowerer(_CableLowerer):
     ) -> SemanticLowering:
         service, target = self._target(call)
         part = self._part(bound)
-        start, end = service.tool(part), service.pose(target, part)
-        pivot_geometry = (
-            service._pivot_delta(target, part, start)
-            if target.kind in {"pitch_align", "lay_down"}
-            else None
-        )
-        if target.stop_when_seated:
-            # Seated rows retain the loaded command throughout the path;
-            # interpolating from their measured pose would first unload it.
-            start = torch.where(service.seated()[:, None, None], end, start)
-        if target.kind == "lay_down":
-            assert pivot_geometry is not None
-            holding = pivot_geometry[2] & (pivot_geometry[1] == 0)
-            start = torch.where(holding[:, None, None], end, start)
-        path_start, path_end = start, end
-        if pivot_geometry is not None:
-            valid = pivot_geometry[2][:, None, None]
-            identity = torch.eye(4, dtype=start.dtype, device=start.device)
-            # Invalid rows are rejected independently, including nonfinite
-            # observations; they must not poison the shared sample count.
-            path_start = torch.where(valid, start, identity)
-            path_end = torch.where(valid, end, identity)
-        distance = (path_start[:, :3, 3] - path_end[:, :3, 3]).norm(dim=-1).max().item()
-        trace = (
-            (path_start[:, :3, :3].transpose(1, 2) @ path_end[:, :3, :3])
-            .diagonal(dim1=-2, dim2=-1)
-            .sum(-1)
-        )
-        angle = torch.acos(((trace - 1) / 2).clamp(-1, 1)).max().item()
-        count = max(
-            3,
-            math.ceil(
-                max(distance / target.speed, angle / 0.5) / context.require_control_dt()
+        return _ground_cable_move(service, target, part, context.require_control_dt())
+
+
+def _ground_cable_joint(
+    service: _CableRuntime,
+    target: _CableTarget,
+    part: str,
+    env_ids: torch.Tensor,
+) -> SemanticLowering:
+    ids = service.robot.get_joint_ids(name=part)
+    start = service.robot.get_qpos(target=True).index_select(0, env_ids)[:, ids]
+    path = start[:, None, :].repeat(1, target.samples, 1)
+    if target.kind in {"open", "grip_adjust"}:
+        if target.kind == "open":
+            # Only release the grasp whose configured gripper is being opened.
+            motion_part = target.release_part
+            if (
+                motion_part not in service.cfg.motion_parts
+                or service.hand_to_motion.get(part) != motion_part
+            ):
+                raise ValueError("Opening a hand requires its declared motion part.")
+            service.grasps.pop(motion_part, None)
+            service.pending_pick = None
+        elif service.hand_to_motion.get(part) not in service.grasps:
+            raise ValueError(
+                "Adjusting a grip requires an active grasp for the declared hand."
             )
-            + 1,
+        # Adjustment retains the original grasp reference and slip history;
+        # only the finger command changes while physical contact settles.
+        path = torch.lerp(
+            start[:, None],
+            torch.full_like(start[:, None], target.finger_position),
+            torch.linspace(0, 1, target.samples, device=start.device)[None, :, None],
         )
-        service.last_targets[part] = end.clone()
-        path = interpolate_xpos_batched(path_start, path_end, count)[:, 1:]
-        failures = {}
-        if pivot_geometry is not None:
-            point, _, valid = pivot_geometry
-            local_point = start[:, :3, :3].transpose(1, 2) @ (
-                point - start[:, :3, 3]
-            ).unsqueeze(-1)
-            pivot_path = point[:, None] - (
-                path[:, :, :3, :3] @ local_point[:, None]
-            ).squeeze(-1)
-            path[:, :, :3, 3] = torch.where(
-                valid[:, None, None], pivot_path, path[:, :, :3, 3]
-            )
-            frozen = ~valid
-            if target.kind == "lay_down":
-                frozen |= holding
-            if target.stop_when_seated:
-                frozen |= service.seated()
-            path = torch.where(frozen[:, None, None, None], start[:, None], path)
-            reason = (
-                "Cable lay-down requires a seated tip and a finite, forward, "
-                "monotonically descending pivot arc above its TCP floor."
-                if target.kind == "lay_down"
-                else "The distal cable span or tool points away from the channel."
-            )
-            failures = {
-                int(context.env_ids[row]): reason
-                for row in (~valid).nonzero().flatten().tolist()
-            }
-        return SemanticLowering(
-            goal=EndEffectorPoseGoal(path), failed_preconditions=failures
+    elif target.kind != "hold":
+        raise ValueError(
+            "Cable joint targets must be open, grip_adjust or hold declarations."
         )
+    return SemanticLowering(goal=JointPositionGoal(path))
 
 
 class _CableJointLowerer(_CableLowerer):
@@ -663,42 +772,7 @@ class _CableJointLowerer(_CableLowerer):
     ) -> SemanticLowering:
         service, target = self._target(call)
         part = self._part(bound)
-        ids = service.robot.get_joint_ids(name=part)
-        start = service.robot.get_qpos(target=True).index_select(0, context.env_ids)[
-            :, ids
-        ]
-        path = start[:, None, :].repeat(1, target.samples, 1)
-        if target.kind in {"open", "grip_adjust"}:
-            if target.kind == "open":
-                # Only release the grasp whose configured gripper is being opened.
-                motion_part = target.release_part
-                if (
-                    motion_part not in self.cfg.motion_parts
-                    or service.hand_to_motion.get(part) != motion_part
-                ):
-                    raise ValueError(
-                        "Opening a hand requires its declared motion part."
-                    )
-                service.grasps.pop(motion_part, None)
-                service.pending_pick = None
-            elif service.hand_to_motion.get(part) not in service.grasps:
-                raise ValueError(
-                    "Adjusting a grip requires an active grasp for the declared hand."
-                )
-            # Adjustment retains the original grasp reference and slip history;
-            # only the finger command changes while physical contact settles.
-            path = torch.lerp(
-                start[:, None],
-                torch.full_like(start[:, None], target.finger_position),
-                torch.linspace(0, 1, target.samples, device=start.device)[
-                    None, :, None
-                ],
-            )
-        elif target.kind != "hold":
-            raise ValueError(
-                "Cable joint targets must be open, grip_adjust or hold declarations."
-            )
-        return SemanticLowering(goal=JointPositionGoal(path))
+        return _ground_cable_joint(service, target, part, context.env_ids)
 
 
 class _CableCheckLowerer(_CableLowerer):
@@ -715,41 +789,7 @@ class _CableCheckLowerer(_CableLowerer):
     ) -> SemanticLowering:
         service, target = self._target(call)
         part = self._part(bound)
-        passed = ~service.observe()
-        details = {}
-        if target.condition == "pose":
-            expected, actual = service.last_targets[part], service.tool(part)
-            error = (actual[:, :3, 3] - expected[:, :3, 3]).norm(dim=-1)
-            trace = (
-                (actual[:, :3, :3].transpose(1, 2) @ expected[:, :3, :3])
-                .diagonal(dim1=-2, dim2=-1)
-                .sum(-1)
-            )
-            angle = torch.acos(((trace - 1) / 2).clamp(-1, 1))
-            passed &= (error <= target.tolerance) & (
-                angle <= target.orientation_tolerance
-            )
-            if target.stop_when_seated:
-                # Above-channel release alignment still requires ordinary TCP
-                # tracking. Only an inserted endpoint may retain contact bias.
-                passed |= (
-                    service.seated()
-                    & service.metrics()["strict_port"]
-                    & ~service.observe()
-                )
-            details = {
-                "position_error_m": error.tolist(),
-                "orientation_error_rad": angle.tolist(),
-            }
-        elif target.condition == "lift":
-            distance, before = service.pick_initial[part]
-            lift = service.point(distance)[0][:, 2] - before
-            passed &= (lift > 0.008) & (part in service.grasps)
-            details = {"material_lift_m": lift.tolist()}
-        elif target.condition == "seated":
-            passed &= service.seated()
-        else:
-            raise ValueError("Unknown declared cable precondition.")
+        passed, details = service.condition(target, part)
         failures = {}
         for row in (~passed).nonzero().flatten().tolist():
             measured = {name: values[row] for name, values in details.items()}
@@ -813,6 +853,12 @@ class _CableFactory(RegisteredSemanticLowererFactory):
             else torch.tensor(selected, dtype=torch.long, device=engine.device)
         )
         lowerer.runtime = _CableRuntime(self.cfg, simulation, robot, ids)
+        if self.cfg.operations:
+            from ._cable_contact import CableContactSource
+
+            source = CableContactSource(lowerer.runtime)
+            lowerer.runtime._contact_source = source
+            engine.planning_services.register_contact_source(source.source_id, source)
         return lowerer
 
 
@@ -853,7 +899,7 @@ def _decode_cable_service(value: object) -> _CableService:
         required=frozenset(
             {"entity_id", "simulation_uid", "motion_parts", "geometry", "targets"}
         ),
-        optional=frozenset({"slip_limit"}),
+        optional=frozenset({"slip_limit", "operations"}),
     )
     targets = []
     fields = {
@@ -1063,12 +1109,18 @@ def _decode_cable_service(value: object) -> _CableService:
     )
     if not parts or len(set(parts)) != len(parts):
         raise ValueError("Cable motion parts must be nonempty and unique.")
+    from ._cable_contact import decode_operations
+
+    operations = decode_operations(
+        config.get("operations", {}), {t.target_id: t for t in targets}
+    )
     return _CableService(
         entity_id=_identifier(config["entity_id"], path="cable_material.entity_id"),
         simulation_uid=_identifier(
             config["simulation_uid"], path="cable_material.simulation_uid"
         ),
         targets=tuple(targets),
+        operations=operations,
         geometry=tuple(frozen_geometry.items()),
         motion_parts=parts,
         slip_limit=_real(

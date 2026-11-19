@@ -11,3 +11,5 @@ default_deployment: yam
 deployments:
   yam:
     config: task.yam.yaml
+  yam_compact:
+    config: task.yam.compact.yaml

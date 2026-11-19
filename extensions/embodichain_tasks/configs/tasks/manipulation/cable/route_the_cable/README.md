@@ -338,3 +338,45 @@ Static composition/catalog preflight and intermediate physical qualification do
 not certify a complete cable task. Full acceptance remains strict after release,
 retreat and settling. Failed samples retain their measured stopping stage;
 changing orchestration does not by itself establish physical insertion success.
+
+
+## Experimental compact program
+
+`task.yam.compact.yaml` selects `RouteTheCableCompact-YAM-v1`, an opt-in variant
+with **8 Semantic Calls / 8 Atomic Skill invocations**: three right-arm
+`PickUp`/`Place` pairs, then one left-arm `PickUp`/`Place` pair. The ordinary
+`task.yam.yaml` remains the default 57-segment / 148-call deployment.
+
+```bash
+python -m embodichain run-task \
+  --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/cable/route_the_cable/task.yam.compact.yaml \
+  --max_episodes 1 --seed 73 --headless
+```
+
+The compact integration declares 55 observed phases. `PickUp`/`Place` plan them
+directly inside one execution session; they do not start nested Atomic Skills.
+The 48 original `cable_check` calls become acknowledged physical checkpoints,
+and 45 hold targets become command ranges. Their original order, thresholds,
+settling samples and initial control frames are retained. Home motion is part
+of the corresponding placement retreat. Every feedback-dependent target is
+resolved again from fresh observations before its phase is planned.
+
+The observation source supplies geometry and evidence; the existing Atomic
+engine owns IK, joint commands, timing and row-local execution. Failed rows are
+removed before geometry/timing reductions and IK. Physical grasp references are
+captured after the acknowledged close/settle command and released per row; no
+rigid cable/tool relation is projected. Newton/DexUni, scene, robot, cable
+coefficients, native contact handling and strict task acceptance are unchanged.
+
+Observed continuation is bounded and shares one invocation timeout. This
+variant sets that timeout to 120 seconds to cover the full left placement;
+it retains the 12,000-control-step episode ceiling. Offline `compile()`, external
+nominal trajectories/expansion, replay recovery and mid-operation invocation
+revisions are explicitly unsupported. Cancellation and failed-row holds use the
+ordinary runner. `PLAN_CONTINUED` events expose every installed phase plan.
+
+The extended accepted goal types intentionally change registration/integration
+fingerprints, including integrations which reference these descriptors. Saved
+registrations must be regenerated; the existing handover program fingerprint is
+unchanged. Fewer invocations are a structural simplification, not a claim of
+proportionally faster physics or of a general deformable-object policy.

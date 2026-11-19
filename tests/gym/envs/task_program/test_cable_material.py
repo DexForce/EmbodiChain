@@ -58,8 +58,8 @@ def _declaration():
     ]["cable_material"]
 
 
-def _deployment():
-    path = _TASK / "task.yam.yaml"
+def _deployment(*, compact=False):
+    path = _TASK / ("task.yam.compact.yaml" if compact else "task.yam.yaml")
     raw = yaml.safe_load(path.read_text())
     physical = resolve_gym_components(raw, base_dir=path.parent)
     deployment = load_configured_task_program_deployment(
@@ -87,6 +87,69 @@ def test_cable_deployment_preflights_all_calls_and_measured_final_acceptance():
     }
     for factory in factories:
         assert factory.argument_contract.required["target"]
+
+
+def test_compact_cable_preflight_has_eight_calls_and_retains_physical_checks():
+    deployment = _deployment(compact=True)
+    registration = deployment.integration.registration
+    compiled = registration.catalog.preflight(deployment.load_program())
+    assert compiled.segment_count == 8
+    cfg = next(
+        factory.cfg
+        for factory in registration.registered_semantic_lowerer_factories
+        if factory.call_id == "simulation.cable_pickup"
+    )
+    original = _decode_cable_service(_declaration())
+    assert (cfg.targets, cfg.geometry, cfg.motion_parts, cfg.slip_limit) == (
+        original.targets,
+        original.geometry,
+        original.motion_parts,
+        original.slip_limit,
+    )
+    operations = cfg.operations
+    assert len(operations) == 8
+    phases = [phase for operation in operations for phase in operation.phases]
+    assert len(phases) == 55
+    assert sum(phase.kind == "grasp" for phase in phases) == 4
+    assert sum(post.kind == "check" for phase in phases for post in phase.after) == 48
+    assert sum(post.kind == "hold" for phase in phases for post in phase.after) == 45
+    assert registration.evaluation_final_refs == ("route_success",)
+
+
+@pytest.mark.parametrize(
+    "operation_name,call_id",
+    [
+        ("right_pick_0", "simulation.cable_pickup"),
+        ("right_place_0", "simulation.cable_place"),
+    ],
+)
+def test_contact_catalog_accepts_a_single_declared_operation_kind(
+    operation_name, call_id
+):
+    path = _TASK / "task.yam.compact.yaml"
+    physical = resolve_gym_components(
+        yaml.safe_load(path.read_text()), base_dir=path.parent
+    )
+    declaration = yaml.safe_load(
+        (_TASK / "task_program/integration.compact.yaml").read_text()
+    )
+    operations = declaration["runtime_services"]["cable_material"]["operations"]
+    declaration["runtime_services"]["cable_material"]["operations"] = {
+        operation_name: operations[operation_name]
+    }
+    selection = deepcopy(physical.config["task_program"])
+    selection["integration"] = {"inline": declaration}
+    deployment = load_configured_task_program_deployment(
+        task_program=selection,
+        skill_profile=physical.embodiment_skill_profile,
+        evaluation=physical.evaluation,
+        base_dir=path.parent,
+    )
+    compact_ids = {
+        factory.call_id
+        for factory in deployment.integration.registration.registered_semantic_lowerer_factories
+    } & {"simulation.cable_pickup", "simulation.cable_place"}
+    assert compact_ids == {call_id}
 
 
 @pytest.mark.parametrize(
@@ -309,6 +372,142 @@ def test_material_reference_is_captured_after_close_and_tracks_slip_per_row():
     torch.testing.assert_close(service.grasps["right_arm"][1], baseline)
     fresh, _, _ = _runtime()
     assert not fresh.grasps and fresh.max_slip.tolist() == [0, 0]
+
+
+def test_partial_close_captures_only_acknowledged_rows_and_keeps_slip_history():
+    service, _, _ = _runtime()
+    part = "right_arm"
+    target = service.cfg.target("right_grasp_0.162")
+    original = torch.full((2, 3), 0.25)
+    service.grasps[part] = (target.material_distance, original.clone())
+    service.grasp_active[part] = torch.tensor([False, False])
+    service.grasp_slip[part] = torch.tensor([0.004, 0.003])
+    service.max_slip[:] = torch.tensor([0.013, 0.003])
+    service.pending_pick = (part, target)
+    service.pending_pick_rows = torch.tensor([False, True])
+    service.after_action(
+        SimpleNamespace(metadata={"bridge_action_kind": "runtime_command"}),
+        SimpleNamespace(_last_sent_command_phase=lambda: ("close", True, 7)),
+    )
+    torch.testing.assert_close(service.grasps[part][1][0], original[0])
+    torch.testing.assert_close(
+        service.grasps[part][1][1], service.point_in_tool(part, 0.162)[1]
+    )
+    assert service.grasp_active[part].tolist() == [False, True]
+    torch.testing.assert_close(service.max_slip, torch.tensor([0.013, 0.003]))
+
+
+def test_contact_source_partial_view_keeps_metric_rows_in_physical_id_order():
+    from embodichain.lab.task_program.integrations.simulation._cable_contact import (
+        CableContactSource,
+    )
+
+    original, _, measured = _runtime()
+    service = _CableRuntime(
+        original.cfg, original.simulation, original.robot, torch.tensor([3, 1, 0])
+    )
+    part = "left_arm"
+    service.grasps[part] = (0.162, service.point_in_tool(part, 0.162).clone())
+    service.grasp_slip[part] = torch.tensor([0.013, 0.002, 0.003])
+    service.grasp_active[part] = torch.tensor([False, True, True])
+    service.max_slip[:] = service.grasp_slip[part]
+    source = CableContactSource(service)
+    view, rows, _ = source._view(
+        SimpleNamespace(
+            env_ids=service.env_ids,
+            robot=SimpleNamespace(qpos=measured[service.env_ids]),
+        ),
+        torch.tensor([False, True, True]),
+    )
+    assert rows.tolist() == [1, 2]
+    assert view.env_ids.tolist() == [1, 0]
+    metrics = view.metrics()
+    torch.testing.assert_close(metrics["max_grasp_slip"], torch.tensor([0.002, 0.003]))
+    assert metrics["end_position"].shape == (2, 3)
+    torch.testing.assert_close(service.max_slip, torch.tensor([0.013, 0.002, 0.003]))
+
+
+def test_repeated_contact_check_is_measured_again_after_settling():
+    from embodichain.lab.task_program.integrations.simulation._cable_contact import (
+        CableContactSource,
+    )
+    from embodichain.lab.sim.atomic_skills.primitives.contact import (
+        ContactPhase,
+        ContactContinuation,
+        ResolvedContactPhase,
+    )
+
+    service, _, _ = _runtime()
+    source = CableContactSource(service)
+    observations = []
+
+    def condition(target, part):
+        observations.append(target.target_id)
+        return torch.tensor([len(observations) == 1, True]), {}
+
+    service.condition = condition
+    source.current = ContactContinuation(
+        1,
+        1,
+        "waypoint",
+        ContactPhase("pose", "waypoint"),
+        ResolvedContactPhase(
+            torch.zeros(2, 2, 4, 4),
+            torch.zeros(2, 3),
+            torch.ones(2, dtype=torch.bool),
+            data=(("part", "left_arm"),),
+        ),
+        ((1, "raise_0_tracking"), (5, "raise_0_tracking")),
+    )
+    source.rejected = torch.zeros(2, dtype=torch.bool)
+    runtime = SimpleNamespace(last_sent_plan_reference=(0, 0, 1))
+    source.observe(None, runtime)
+    runtime.last_sent_plan_reference = (0, 0, 5)
+    source.observe(None, runtime)
+    accepted, _ = source.finish(
+        source.current,
+        SimpleNamespace(env_ids=service.env_ids, robot=SimpleNamespace(timestamp=1.0)),
+        torch.ones(2, dtype=torch.bool),
+    )
+    assert observations == ["raise_0_tracking", "raise_0_tracking"]
+    assert accepted.tolist() == [False, True]
+
+
+def test_rejected_concurrent_contact_operation_preserves_the_live_observer():
+    from embodichain.lab.task_program.integrations.simulation._cable_contact import (
+        CableContactSource,
+    )
+    from embodichain.lab.sim.atomic_skills.primitives.contact import (
+        ContactPhase,
+        ContactContinuation,
+        ResolvedContactPhase,
+    )
+
+    service, _, _ = _runtime()
+    source = CableContactSource(service)
+    phase = ContactPhase("pose", "right_approach_0.162")
+    resolved = ResolvedContactPhase(
+        torch.zeros(2, 2, 4, 4),
+        torch.zeros(2, 3),
+        torch.ones(2, dtype=torch.bool),
+        data=(
+            ("operation_id", "first"),
+            ("rows", torch.tensor([0, 1])),
+            ("part", "right_arm"),
+        ),
+    )
+    first = ContactContinuation(1, 2, phase.target, phase, resolved)
+    context = SimpleNamespace(robot=SimpleNamespace(timestamp=0))
+    source.begin(first, context, torch.ones(2, dtype=torch.bool))
+    source.observed_checks.add((3, "tracking"))
+    other = replace(
+        first, resolved=replace(resolved, data=(("operation_id", "second"),))
+    )
+    with pytest.raises(ValueError, match="concurrent operations"):
+        source.begin(other, context, torch.ones(2, dtype=torch.bool))
+    assert source.current is first
+    assert source.owner == "first"
+    assert source.observed_checks == {(3, "tracking")}
 
 
 def test_port_stage_replaces_measured_tilt_with_selected_downward_orientation():
