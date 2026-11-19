@@ -126,15 +126,16 @@ def test_closing_floor_rejection_precedes_top_candidate_ranking() -> None:
     assert float(widths[0]) == pytest.approx(0.04)
 
 
-@pytest.mark.parametrize("second_center_x", [0.08, 0.0])
+@pytest.mark.parametrize(("second_center_x", "narrow_cost"), [(0.08, 0.5), (0.0, 0.0)])
 def test_default_grasp_mode_ranks_by_transformed_bounding_box_center(
-    second_center_x,
+    second_center_x: float, narrow_cost: float
 ) -> None:
     vertices, _ = _box_geometry(subdivide_end=True)
-    # One pair is at the geometric center; another is near the densely meshed end.
+    # Grasp across the long and short sides. Both closing axes are perpendicular
+    # to the approach, so the costs should tie when both grasps are centered.
     centers = torch.tensor([[0.0, 0.0, 0.0], [second_center_x, 0.0, 0.0]])
-    contact_offset = torch.tensor([0.0, 0.02, 0.0])
-    pairs = torch.stack([centers - contact_offset, centers + contact_offset], dim=1)
+    offsets = torch.tensor([[0.1, 0.0, 0.0], [0.0, 0.02, 0.0]])
+    pairs = torch.stack([centers - offsets, centers + offsets], dim=1)
     backend = _prepared_backend(vertices, pairs)
     backend._max_deviation_angle = 0.1
     backend._approach_direction_samples = 1
@@ -153,10 +154,10 @@ def test_default_grasp_mode_ranks_by_transformed_bounding_box_center(
     )
 
     assert success
-    assert torch.isfinite(costs).all()
     torch.testing.assert_close(poses[costs.argmin(), :3, 3], object_pose[:3, 3])
-    torch.testing.assert_close(widths, torch.full((len(poses),), 0.04))
-    assert costs.min() == pytest.approx(0.0, abs=1.0e-6)
+    by_width = widths.argsort()
+    torch.testing.assert_close(widths[by_width], torch.tensor([0.04, 0.2]))
+    torch.testing.assert_close(costs[by_width], torch.tensor([narrow_cost, 0.0]))
 
 
 @pytest.mark.parametrize("hard_angle", [None, math.radians(10)])

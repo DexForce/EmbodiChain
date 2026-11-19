@@ -945,8 +945,7 @@ class _AntipodalMeshBackend:
         center_cost = center_distance / center_distance.max().clamp_min(
             torch.finfo(center_distance.dtype).eps
         )
-        length_cost = 1 - valid_open_lengths / valid_open_lengths.max()
-        total_cost = 0.25 * angle_cost + 0.25 * length_cost + 0.5 * center_cost
+        total_cost = 0.5 * angle_cost + 0.5 * center_cost
 
         n_valid = valid_grasp_poses.shape[0]
         if n_valid == 0:
