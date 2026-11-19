@@ -317,7 +317,7 @@ def test_heatmap_bins_each_object_pose_target_once_at_its_measured_start(recorde
         )
         return replace(sample, measured=measured, object_pose_uids=targets)
 
-    a, b = (-0.25, 0.5), (0.125, -0.375)
+    a, b = (-0.25, 0.5 + 2**-20), (0.125, 0.5)
     data.reference = clip((20, 30), ("box", "goal"))
     data.clips = [
         clip(a, ("box", "goal")),
@@ -331,16 +331,25 @@ def test_heatmap_bins_each_object_pose_target_once_at_its_measured_start(recorde
     assert [box["uid"], goal["uid"]] == ["box", "goal"]
     assert set(box["views"]) == {"start"}
     view = box["views"]["start"]
-    np.testing.assert_allclose(view["bounds_m"], [[a[0], b[1]], [b[0], a[1]]])
-    assert box["x_edges_m"][-1] < 1 and box["y_edges_m"][0] > -1
+    np.testing.assert_array_equal(view["bounds_m"], [[a[0], b[1]], [b[0], a[1]]])
+    edges = np.array([box["x_edges_m"], box["y_edges_m"]])
+    centers = (edges[:, :-1] + edges[:, 1:]) / 2
+    np.testing.assert_allclose(
+        centers[:, [0, -1]].T, view["bounds_m"], rtol=0, atol=1e-12
+    )
     expected = np.zeros_like(view["counts"])
-    for (x, y), count in [(a, 2), (b, 1)]:
-        row = np.searchsorted(box["y_edges_m"], y, side="right") - 1
-        col = np.searchsorted(box["x_edges_m"], x, side="right") - 1
-        expected[row, col] = count
+    expected[-1, 0] = 2
+    expected[0, -1] = 1
     np.testing.assert_array_equal(view["counts"], expected)
     assert box["episodes"] == 3
     assert goal["episodes"] == np.sum(goal["views"]["start"]["counts"]) == 1
+    goal_edges = np.array([goal["x_edges_m"], goal["y_edges_m"]])
+    np.testing.assert_allclose(
+        goal_edges[:, [0, -1]],
+        anchor[0, :2, None] + [-0.0005, 0.0005],
+        rtol=0,
+        atol=1e-12,
+    )
 
     # A genuine input augmentation still contributes when it doubles as the solid replay.
     implicit = object_heatmaps(replace(data, reference=None))

@@ -116,7 +116,9 @@ calibration for TCP errors. At each reference time it reports the minimum, mean
 and maximum across recordings still in range for TCP translation distance,
 TCP rotation angle and each episode's worst joint deviation. `_preview_heatmap.py`
 bins the measured first-frame XY of each rigid target in an `object_pose` input
-episode's `joint_scene.pose_changes`. The recipe's selected motion operator takes
+episode's `joint_scene.pose_changes`. Each axis fits the object's measured starts
+independently with half a bin of padding at either end, or a 1 mm window for a
+constant coordinate. The recipe's selected motion operator takes
 precedence over the job-level operator. The explicit reference belongs to replay.
 The HTTP service
 publishes both chart datasets independently of the live image/state snapshots. FK and episode

@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import math
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -32,12 +31,14 @@ _BINS = 32
 
 
 def _grid_edges(bounds: np.ndarray) -> np.ndarray:
-    """Build equal-length XY axes with a margin and a useful scale for still objects."""
-    desired = max(float(np.max(bounds[1] - bounds[0])) / (_BINS - 2), 0.001)
-    magnitude = 10.0 ** math.floor(math.log10(desired))
-    step = next(n * magnitude for n in (1, 2, 2.5, 5, 10) if n * magnitude >= desired)
-    center = np.rint(bounds.mean(axis=0) / step)
-    return (center[:, None] + np.arange(_BINS + 1) - _BINS // 2) * step
+    """Fit each axis with half-cell margins or a 1 mm window for a constant coordinate."""
+    low, high = bounds
+    span = high - low
+    step = np.where(span > 0, span / (_BINS - 1), 0.001 / _BINS)
+    # Keep adjacent edges distinguishable at the measured world coordinates.
+    step = np.maximum(step, 2 * np.spacing(np.maximum(np.abs(low), np.abs(high))))
+    center = low + span / 2
+    return center[:, None] + (np.arange(_BINS + 1) - _BINS / 2) * step[:, None]
 
 
 def object_heatmaps(data: PreviewData) -> dict[str, Any]:

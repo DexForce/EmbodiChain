@@ -19,10 +19,19 @@
   const canvas = element('plot');
   const ctx = canvas.getContext('2d');
   const objectSelect = element('object');
-  const number = new Intl.NumberFormat('zh-CN', {maximumFractionDigits: 4});
-  const meters = (a, b) => `${number.format(a)} ～ ${number.format(b)} m`;
+  const millimeters = new Intl.NumberFormat('zh-CN', {maximumSignificantDigits: 4});
   const peak = counts => Math.max(...counts.map(row => Math.max(...row)));
-  let data, object, view, colors, area, cell = null;
+  let data, object, view, xAxis, yAxis, colors, area, cell = null;
+
+  function axisScale(edges) {
+    const bins = edges.length - 1;
+    const step = (edges[bins] - edges[0]) / bins;
+    const digits = Math.min(20, Math.max(0, 1 - Math.floor(Math.log10(step))));
+    const number = new Intl.NumberFormat('zh-CN', {maximumFractionDigits: digits, useGrouping: false});
+    const ticks = [0, 0.25, 0.5, 0.75, 1].map(t => number.format(edges[Math.round(t * bins)]));
+    const meters = (a, b) => `${number.format(a)} ～ ${number.format(b)} m`;
+    return {step, ticks, meters};
+  }
 
   function colorScale(max) {
     const stops = [[70, 111, 172], [47, 178, 166], [245, 215, 98]];
@@ -46,7 +55,16 @@
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
-    const left = 48, top = 22, size = Math.min(width - left - 18, height - top - 40);
+    ctx.font = '11px system-ui, sans-serif';
+    const labelWidth = axis => Math.max(...axis.ticks.map(label => ctx.measureText(label).width));
+    const xLabelWidth = labelWidth(xAxis);
+    const left = Math.ceil(Math.max(48, labelWidth(yAxis) + 9, xLabelWidth / 2 + 2));
+    const right = Math.ceil(Math.max(18, xLabelWidth / 2 + 2));
+    const top = 22, size = Math.min(width - left - right, height - top - 40);
+    if (size <= 0) {
+      area = null;
+      return;
+    }
     const n = view.counts.length, step = size / n;
     area = {left, top, size};
     ctx.fillStyle = colors[0];
@@ -59,22 +77,21 @@
       });
     }
 
-    ctx.font = '11px system-ui, sans-serif';
     ctx.fillStyle = '#b6c5d3';
     ctx.strokeStyle = '#94b2c340';
     ctx.lineWidth = 1;
-    const ticks = width < 260 ? 2 : 4;
-    for (let i = 0; i <= ticks; i++) {
-      const fraction = i / ticks, edge = Math.round(fraction * n);
+    const stride = [1, 2, 4].find(skip => size * skip / 4 >= xLabelWidth + 6) ?? 4;
+    for (let i = 0; i <= 4; i += stride) {
+      const fraction = i / 4;
       const x = left + size * fraction, y = top + size * (1 - fraction);
       ctx.beginPath();
       ctx.moveTo(x, top); ctx.lineTo(x, top + size);
       ctx.moveTo(left, y); ctx.lineTo(left + size, y);
       ctx.stroke();
       ctx.textAlign = 'center';
-      ctx.fillText(number.format(object.x_edges_m[edge]), x, top + size + 16);
+      ctx.fillText(xAxis.ticks[i], x, top + size + 16);
       ctx.textAlign = 'right';
-      ctx.fillText(number.format(object.y_edges_m[edge]), left - 7, y + 4);
+      ctx.fillText(yAxis.ticks[i], left - 7, y + 4);
     }
     ctx.fillStyle = '#d4dfe9';
     ctx.textAlign = 'left';
@@ -96,18 +113,20 @@
     }
     const {row, col} = cell;
     const x = object.x_edges_m, y = object.y_edges_m;
-    output.textContent = `起点 ${view.counts[row][col]} / ${object.episodes} 条轨迹 · X ${meters(x[col], x[col + 1])} · Y ${meters(y[row], y[row + 1])}`;
+    output.textContent = `起点 ${view.counts[row][col]} / ${object.episodes} 条轨迹 · X ${xAxis.meters(x[col], x[col + 1])} · Y ${yAxis.meters(y[row], y[row + 1])}`;
   }
 
   function selectObject() {
     object = data.objects[objectSelect.selectedIndex];
     view = object.views.start;
+    xAxis = axisScale(object.x_edges_m);
+    yAxis = axisScale(object.y_edges_m);
     cell = null;
-    element('description').textContent = `${object.episodes} 条 object_pose 扩增轨迹记录了 ${object.uid} 的起点。每条轨迹按首帧实测 XY 坐标计入一个网格。`;
+    element('description').textContent = `${object.episodes} 条 object_pose 扩增轨迹记录了 ${object.uid} 的起点。X、Y 轴按各自的首帧实测范围缩放。`;
     const [low, high] = view.bounds_m;
-    element('x').textContent = meters(low[0], high[0]);
-    element('y').textContent = meters(low[1], high[1]);
-    element('step').textContent = number.format(object.x_edges_m[1] - object.x_edges_m[0]) + ' m';
+    element('x').textContent = xAxis.meters(low[0], high[0]);
+    element('y').textContent = yAxis.meters(low[1], high[1]);
+    element('step').textContent = `${millimeters.format(xAxis.step * 1000)} × ${millimeters.format(yAxis.step * 1000)} mm`;
     const max = peak(view.counts);
     element('peak').textContent = `${max} / ${object.episodes} 条`;
     colors = colorScale(max);
@@ -117,7 +136,7 @@
       swatch.style.backgroundColor = color;
       return swatch;
     }));
-    canvas.setAttribute('aria-label', `${object.uid} 扩增起点 · X ${meters(low[0], high[0])} · Y ${meters(low[1], high[1])} · 单格最多 ${max} 条轨迹`);
+    canvas.setAttribute('aria-label', `${object.uid} 扩增起点 · X ${xAxis.meters(low[0], high[0])} · Y ${yAxis.meters(low[1], high[1])} · 单格最多 ${max} 条轨迹`);
     reportCell();
     draw();
   }
