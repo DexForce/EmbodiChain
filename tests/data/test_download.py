@@ -69,12 +69,7 @@ def test_migrated_robot_assets_keep_legacy_class_identity() -> None:
                 else "so101_assets" if name == "SO101FollowerAssets" else "robot_assets"
             )
         )
-        if name in {
-            "AgibotG1",
-            "AgibotG1ObservedReplay",
-            "AgilexPiperX",
-            "FlexivRizon4SMenagerie",
-        }:
+        if name in {"AgibotG1", "AgilexPiperX", "FlexivRizon4SMenagerie"}:
             assert not hasattr(import_module("embodichain.data.assets." + legacy), name)
             assert not hasattr(assets, name)
         else:

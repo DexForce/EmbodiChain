@@ -116,11 +116,6 @@ Keep its source revision and complete file checksums together when updating it.
 ZIP bundles must include directory entries before nested files for Open3D
 extraction. Validate new bundles through `get_data_path()` with an empty cache.
 
-`AgibotG1ObservedReplay/robot.urdf` resolves a pinned, model-only ZIP in a
-versioned robot cache. The verified archive contains the URDF, local meshes,
-model provenance and license. Recording inputs and run evidence belong to
-recording bundles. See the [model README](../../../extensions/embodichain_robots/agibot/g1/README.md).
-
 Captured Gaussian backgrounds register as `RoboSplatterOfficeGS`,
 `DiscoverseLab3GS` and `RoboSimGSTabletopGS` in `assets/scene_assets.py`.
 Each resolves `asset.usda` from an immutable Hub snapshot and a versioned cache.

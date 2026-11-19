@@ -24,14 +24,3 @@ preview and local source selection.
    Implementation of :class:`embodichain_robots.AgibotG1Cfg`.
 
 .. autoclass:: embodichain_robots.agibot.g1.assets.AgibotG1
-
-Observed-replay URDF asset
---------------------------
-
-The separate ``AgibotG1ObservedReplay`` data asset downloads a pinned physical
-URDF, its local mesh resources, collision provenance and license.
-Resolve ``AgibotG1ObservedReplay/robot.urdf`` with
-:func:`embodichain.data.get_data_path`. Its versioned cache and verified content
-are independent of the original ``AgibotG1`` USD asset and robot preset.
-
-.. autoclass:: embodichain_robots.agibot.g1.assets.AgibotG1ObservedReplay

@@ -1,32 +1,21 @@
 # AgiBot G1_120s asset
 
-The `AgibotG1` asset fetches the original [GenieSimAssets G1_120s USD][source]
-from AgiBot at revision `a0813aad7c16165daffbe6c2737754e0344809ee`. The
-dataset's [CC BY-NC-SA 4.0 license][license] is cached alongside the unchanged
-USD layers. SHA-256 hashes for the entry layer, dependencies and license live
-in [assets.py](assets.py). Keep the `configuration/` directory with the entry
-layer when supplying a local copy.
-
-## Observed-replay URDF
-
-`AgibotG1ObservedReplay` provides a physical URDF derived from the observed
-AgiBot G1, with 14 arm cylinders and 22 hand collision meshes. Download the
-model through the robot asset registry.
+The `AgibotG1` asset resolves a [repaired USD entry][repair] and its
+[GenieSimAssets G1_120s layers][source]. The repair moves the 18 gripper
+colliders authored on parent Xforms to their geometry meshes, preserving the
+source collision materials and approximation settings. The four existing
+tip colliders, arm collision settings, gripper linkages and sensor layers
+retain their source configuration.
 
 ```bash
-embodichain data download --name AgibotG1ObservedReplay
+embodichain data download --name AgibotG1
 ```
 
-```python
-from embodichain.data import get_data_path
-
-urdf = get_data_path("AgibotG1ObservedReplay/robot.urdf")
-```
-
-The versioned archive contains the URDF, referenced meshes, model provenance,
-the CC-BY-NC-SA-4.0 license and checksums. The [Hugging Face asset card][replay]
-records its source and provides a manual download.
+Resolve the model with `get_data_path("AgibotG1/robot.usda")`. The provider
+pins and verifies the entry, official dependencies and
+[CC BY-NC-SA 4.0 license][license]. Keep the `configuration/` directory
+with the entry layer when supplying a local copy.
 
 [source]: https://huggingface.co/datasets/agibot-world/GenieSimAssets/tree/a0813aad7c16165daffbe6c2737754e0344809ee/robot/G1_120s
 [license]: https://huggingface.co/datasets/agibot-world/GenieSimAssets/blob/a0813aad7c16165daffbe6c2737754e0344809ee/LICENSE
-[replay]: https://huggingface.co/datasets/DexForceAI/embodichain_data/blob/e002d649bb292d3e18c3a97d5b5c22c8ddcc81a3/robot_assets/AgibotG1ObservedReplayV2/README.md
+[repair]: https://huggingface.co/datasets/DexForceAI/embodichain_data/blob/c2097aa5a6745d5d792dfec7dc9547893b7c0aba/robot_assets/AgibotG1V2/README.md

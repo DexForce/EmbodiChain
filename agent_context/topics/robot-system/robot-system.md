@@ -32,8 +32,9 @@ and dual-arm construction. It imports only the selected preset; see
 [catalog contracts](catalogs.md) for IDs, variants, pure hand descriptions and
 locomotion profiles. Display classification does not grant runtime capabilities.
 
-`AgibotG1` selects the original GenieSim G1_120s USD and driven joints, with one
-driver per gripper part. The [USD import contract](../simulation-system/simulation-system.md#ownership)
+`AgibotG1` selects the GenieSim G1_120s USD with gripper collision schemas
+placed on their meshes. The source's arm collision settings and gripper
+drivers are preserved. The [USD import contract](../simulation-system/simulation-system.md#ownership)
 owns closed-loop constraints and backend support. Robot preview resolves local
 `source.file_path` USD and sensor URDF paths relative to the config file before
 World creation; inline sensor definitions and data IDs stay unchanged.
