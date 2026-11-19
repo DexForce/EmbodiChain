@@ -140,6 +140,14 @@ the first observation is unresolved. Registration/catalog preflight rejects
 non-rigid targets before live assembly. Preset names do not select algorithms,
 and plain settle configurations preserve existing defaults and fingerprints.
 
+The composite effect monitor leaves a pose error between its attached and
+detached thresholds unresolved until the skill deadline. Its optional
+`settled_linear_velocity_threshold` / `settled_angular_velocity_threshold`
+params, set together, count a matched pose in that band as expected once it
+stops changing and every other clause of the expectation is expected; unset,
+resolved params and behaviour are unchanged. GenSim sets them for every declared
+monitor with `binding.accept_settled_hold`.
+
 An optional nominal source is selected separately before Atomic planning and
 is bound to a compiled sequential call occurrence. Its configured declaration
 and verification boundary are described in [Real2Sim motion](../data-pipeline/real2sim.md).

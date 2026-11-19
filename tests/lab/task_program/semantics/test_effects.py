@@ -893,6 +893,44 @@ def test_monitor_reports_success_only_for_complete_consecutive_evidence() -> Non
     assert not second.failure_mask.any()
 
 
+def test_settled_pose_between_the_thresholds_counts_as_held() -> None:
+    # Row 0 rests 3 cm off its baseline while the constraint holds, row 1 rests
+    # there without the constraint, and row 2 keeps sliding at 1.4 cm/s.
+    samples = ((0.03, 0.03, 0.021), (0.03, 0.03, 0.035), (0.03, 0.03, 0.049))
+    decisions = {}
+    for name, cfg in (
+        ("strict", CompositeEffectMonitorCfg(consecutive_samples=2)),
+        (
+            "settled",
+            CompositeEffectMonitorCfg(
+                consecutive_samples=2,
+                settled_linear_velocity_threshold=0.01,
+                settled_angular_velocity_threshold=0.1,
+            ),
+        ),
+    ):
+        monitor = CompositeEffectMonitor(_attach_spec(), cfg)
+        for step, offsets in enumerate(samples):
+            decisions[name] = monitor.observe(
+                _request(),
+                _evidence(
+                    offsets,
+                    (True, False, True),
+                    timestamp=2.0 + step,
+                    revision=4 + step,
+                ),  # type: ignore[arg-type]
+            )
+        assert ("settled_linear_velocity_threshold" in monitor.resolved_params) is (
+            name == "settled"
+        )
+
+    assert not decisions["strict"].success_mask.any()
+    assert decisions["settled"].success_mask.tolist() == [True, False, False]
+    assert decisions["settled"].failure_mask.tolist() == [False, True, False]
+    with pytest.raises(ValueError, match="set together"):
+        CompositeEffectMonitorCfg(settled_linear_velocity_threshold=0.01)
+
+
 def test_invalid_evidence_is_unresolved_and_resets_hysteresis() -> None:
     monitor = CompositeEffectMonitor(
         _attach_spec(),

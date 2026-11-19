@@ -85,6 +85,7 @@ class _RunCfg:
                 "lowercase SHA-256 of its raw head frame"
             )
         if type(self.binding) is not dict or set(self.binding) - {
+            "accept_settled_hold",
             "profile",
             "release_clearance",
             "resource_anchors",
@@ -93,9 +94,11 @@ class _RunCfg:
             "segments",
         }:
             raise ValueError(
-                "binding supports profile, release_clearance, resource_anchors, "
-                "runtime_services, scene_binding and segments"
+                "binding supports accept_settled_hold, profile, release_clearance, "
+                "resource_anchors, runtime_services, scene_binding and segments"
             )
+        if type(self.binding.get("accept_settled_hold", False)) is not bool:
+            raise ValueError("accept_settled_hold must be a boolean")
         clearance = self.binding.get("release_clearance", 0.0)
         if (
             isinstance(clearance, bool)

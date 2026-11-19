@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Hashable, Iterable, Mapping
+from collections.abc import Hashable, Iterable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum
@@ -1866,7 +1866,18 @@ class EffectMonitorRegistry:
 
 @dataclass(frozen=True, slots=True)
 class CompositeEffectMonitorCfg:
-    """Strict hysteresis policy for typed pose/binary/scalar/joint clauses."""
+    """Strict hysteresis policy for typed pose/binary/scalar/joint clauses.
+
+    A pose error between the attached and the detached thresholds is unresolved.
+    That suits an object still moving, but a held object can shift in the hand
+    and then rest there, and strict hysteresis never resolves it.
+    ``settled_linear_velocity_threshold`` (m/s) and
+    ``settled_angular_velocity_threshold`` (rad/s), set together, resolve that
+    case: a matched pose clause in the unresolved band counts as expected once
+    the observed pose changes no faster than these velocities and every other
+    clause of its expectation is expected. A pose clause without such a
+    companion clause is never resolved this way.
+    """
 
     attached_translation_threshold: float = 0.02
     attached_rotation_threshold: float = 0.20
@@ -1877,6 +1888,8 @@ class CompositeEffectMonitorCfg:
     joint_success_tolerance: float = 0.02
     joint_failure_tolerance: float = 0.10
     consecutive_samples: int = 2
+    settled_linear_velocity_threshold: float | None = None
+    settled_angular_velocity_threshold: float | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -1917,6 +1930,26 @@ class CompositeEffectMonitorCfg:
             )
         if type(self.consecutive_samples) is not int or self.consecutive_samples <= 0:
             raise ValueError("consecutive_samples must be a positive integer.")
+        settled = (
+            self.settled_linear_velocity_threshold,
+            self.settled_angular_velocity_threshold,
+        )
+        if (settled[0] is None) != (settled[1] is None):
+            raise ValueError(
+                "settled_linear_velocity_threshold and settled_angular_velocity_threshold must be set together."
+            )
+        for field_name in (
+            "settled_linear_velocity_threshold",
+            "settled_angular_velocity_threshold",
+        ):
+            value = getattr(self, field_name)
+            if value is None:
+                continue
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise TypeError(f"{field_name} must be a number.")
+            if not math.isfinite(float(value)) or value <= 0.0:
+                raise ValueError(f"{field_name} must be finite and positive.")
+            object.__setattr__(self, field_name, float(value))
 
     @classmethod
     def from_params(
@@ -1934,6 +1967,8 @@ class CompositeEffectMonitorCfg:
             "joint_success_tolerance",
             "joint_failure_tolerance",
             "consecutive_samples",
+            "settled_linear_velocity_threshold",
+            "settled_angular_velocity_threshold",
         }
         unknown = set(params).difference(allowed)
         if unknown:
@@ -1943,8 +1978,12 @@ class CompositeEffectMonitorCfg:
         return cls(**dict(params))  # type: ignore[arg-type]
 
     def to_metadata(self) -> dict[str, object]:
-        """Return every resolved hysteresis threshold as JSON-safe data."""
-        return {
+        """Return every resolved hysteresis threshold as JSON-safe data.
+
+        The settled speeds appear only when set, so monitors that do not use
+        them keep their recorded parameters.
+        """
+        metadata: dict[str, object] = {
             "attached_translation_threshold": self.attached_translation_threshold,
             "attached_rotation_threshold": self.attached_rotation_threshold,
             "detached_translation_threshold": self.detached_translation_threshold,
@@ -1955,6 +1994,14 @@ class CompositeEffectMonitorCfg:
             "joint_failure_tolerance": self.joint_failure_tolerance,
             "consecutive_samples": self.consecutive_samples,
         }
+        if self.settled_linear_velocity_threshold is not None:
+            metadata["settled_linear_velocity_threshold"] = (
+                self.settled_linear_velocity_threshold
+            )
+            metadata["settled_angular_velocity_threshold"] = (
+                self.settled_angular_velocity_threshold
+            )
+        return metadata
 
 
 def _pose_errors(
@@ -1989,6 +2036,8 @@ class CompositeEffectMonitor(EffectMonitor):
         self._failure_counts: dict[tuple[str, int], int] = {}
         self._inverse_success_counts: dict[tuple[str, int], int] = {}
         self._last_observations: dict[int, tuple[float, int]] = {}
+        # Previous observation of each matched pose clause, for settled speeds.
+        self._last_poses: dict[tuple[str, int], tuple[float, torch.Tensor]] = {}
 
     @property
     def spec(self) -> SemanticEffectSpec:
@@ -2013,6 +2062,7 @@ class CompositeEffectMonitor(EffectMonitor):
             self._failure_counts.clear()
             self._inverse_success_counts.clear()
             self._last_observations.clear()
+            self._last_poses.clear()
             return
         if not active_env_ids.issubset(self._active_env_ids):
             raise ValueError(
@@ -2039,6 +2089,11 @@ class CompositeEffectMonitor(EffectMonitor):
             env_id: observation
             for env_id, observation in self._last_observations.items()
             if env_id in active_env_ids
+        }
+        self._last_poses = {
+            key: pose
+            for key, pose in self._last_poses.items()
+            if key[1] in active_env_ids
         }
 
     @staticmethod
@@ -2203,6 +2258,50 @@ class CompositeEffectMonitor(EffectMonitor):
             return -1
         return 0
 
+    def _accept_settled_poses(
+        self,
+        clauses: Sequence[EffectClause],
+        classifications: list[int],
+        batches: Mapping[str, EffectEvidenceBatch],
+        *,
+        evidence_row: int,
+        env_id: int,
+    ) -> None:
+        """Resolve matched poses that rest between the two thresholds.
+
+        See :class:`CompositeEffectMonitorCfg`. The previous observation of
+        every matched pose clause is kept whether or not it is resolved, so the
+        velocity is always measured over one observation interval.
+        """
+        linear = self._cfg.settled_linear_velocity_threshold
+        angular = self._cfg.settled_angular_velocity_threshold
+        if linear is None or angular is None:
+            return
+        for index, clause in enumerate(clauses):
+            if (
+                type(clause) is not PoseRelationClause
+                or clause.expectation is not PoseRelationExpectation.MATCHED
+            ):
+                continue
+            batch = batches[clause.clause_id]
+            assert type(batch) is PoseRelationEvidenceBatch
+            key = (clause.clause_id, env_id)
+            if not bool(batch.valid[evidence_row].item()):
+                self._last_poses.pop(key, None)
+                continue
+            observed = batch.object_to_endpoint[evidence_row]
+            previous = self._last_poses.get(key)
+            self._last_poses[key] = (batch.timestamp, observed.clone())
+            if classifications[index] != 0 or previous is None:
+                continue
+            elapsed = batch.timestamp - previous[0]
+            others = classifications[:index] + classifications[index + 1 :]
+            if elapsed <= 0.0 or not others or any(value != 1 for value in others):
+                continue
+            translation, rotation = _pose_errors(observed, previous[1])
+            if translation <= linear * elapsed and rotation <= angular * elapsed:
+                classifications[index] = 1
+
     def observe(
         self,
         request: EffectVerificationRequest,
@@ -2283,6 +2382,13 @@ class CompositeEffectMonitor(EffectMonitor):
                     )
                     for clause in clauses_by_expectation[expectation_id]
                 ]
+                self._accept_settled_poses(
+                    clauses_by_expectation[expectation_id],
+                    classifications,
+                    batches,
+                    evidence_row=evidence_row,
+                    env_id=env_id,
+                )
                 group_expected = all(value == 1 for value in classifications)
                 group_contradicted = any(value == -1 for value in classifications)
                 group_inverse_satisfied = all(value == -1 for value in classifications)
