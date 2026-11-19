@@ -1395,6 +1395,15 @@ class AtomicSkillEngine:
             original.dt,
         ):
             raise ValueError("same-grid plan rebuilding requires identical dt.")
+        bridge = owned_plan.diagnostics.metadata.get("reference_bridge")
+        if bridge:
+            protected = int(bridge["prefix_samples"]) + 3
+            if not torch.equal(
+                trajectory.positions[:, :protected], original.positions[:, :protected]
+            ):
+                raise ValueError(
+                    "Plan rebuilding cannot change the reference takeover or its join stencil"
+                )
         action = self._skills.get(request.skill_id)
         if action is None:
             raise KeyError(
@@ -1556,6 +1565,15 @@ class AtomicSkillEngine:
         device, dtype = original.positions.device, original.positions.dtype
         candidate_positions = candidate.positions.to(device=device, dtype=dtype)
         candidate_dt = candidate.dt.to(original.dt)
+        bridge = owned.diagnostics.metadata.get("reference_bridge")
+        if bridge:
+            protected = int(bridge["prefix_samples"]) + 3
+            if not torch.equal(
+                candidate_positions[:protected], original.positions[0, :protected]
+            ) or not torch.equal(candidate_dt[:protected], original.dt[0, :protected]):
+                raise ValueError(
+                    "Retiming cannot alter the reference takeover or its join stencil"
+                )
         if not torch.allclose(
             candidate_dt[1:],
             torch.full_like(candidate_dt[1:], context.require_control_dt()),

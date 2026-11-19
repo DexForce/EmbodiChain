@@ -238,6 +238,8 @@ def _canonical_value(value: object) -> object:
             metadata.pop("supports_segment_motion_recovery")
         from embodichain.lab.sim.atomic_skills.tracking import TrackingPolicy
 
+        if type(value) is TrackingPolicy and not value.boundary_reference_bridge:
+            metadata.pop("boundary_reference_bridge")
         if type(value) is TrackingPolicy and not value.boundary_stop:
             for key in (
                 "boundary_stop",

@@ -283,3 +283,13 @@ The state resets on plan installation/recovery; snapshots preserve independent
 ownership. This is not strict reference continuity, C1/C2 blending or a zero
 tracking-error guarantee. `boundary_diagnostic` events identify tolerances, elapsed
 physical time and per-row error/speed/readiness.
+
+`boundary_reference_bridge` optionally separates controller-reference continuity
+from measured state. Native free entry phases can receive a bounded rest-to-rest
+prefix from captured drive targets to their original first sample. The original
+phase name, held/contact guards and suffix remain; lengths/monitor indices shift
+together. Prefix and join stencils are protected from expansion and retiming;
+rebuilding cannot prepend twice. Projected observations advance owned references
+without overwriting measured evidence. External nominal/unsupported phases retain
+existing behavior with explicit unavailable diagnostics. Physical qualification
+remains required after collision certificates are invalidated.

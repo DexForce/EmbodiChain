@@ -281,3 +281,20 @@ def test_boundary_policy_snapshot_preserves_independent_terminal_contract():
         replace(original, boundary_stop=1)
     with pytest.raises(ValueError):
         replace(original, boundary_timeout=float("nan"))
+
+
+def test_reference_prefix_preserves_endpoints_ownership_and_limits():
+    from embodichain.lab.sim.atomic_skills._reference_bridge import _reference_prefix
+
+    start = torch.tensor([[0.01, 0.2]])
+    goal = torch.tensor([[0.0, 0.3]])
+    prefix = _reference_prefix(start, goal, (0,), 0.04, torch.tensor([0.5, 0.0]), 0.5)
+    path = torch.cat((prefix, goal[:, None]), dim=1)
+    assert path[0, 0, 0] == start[0, 0]
+    assert torch.equal(path[0, :, 1], torch.full_like(path[0, :, 1], 0.3))
+    assert torch.equal(path[:, -1], goal)
+    velocity = torch.diff(path, dim=1) / 0.04
+    assert velocity.abs().max() <= 0.5
+    assert (torch.diff(velocity, dim=1) / 0.04).abs().max() <= 0.5
+    prefix.zero_()
+    assert start[0, 0] == 0.01 and goal[0, 1] == 0.3

@@ -57,7 +57,25 @@ def _episodes(directory: Path) -> list[dict]:
                 dt = np.diff(t)
                 command_speed = np.diff(a, axis=0) / dt[:-1, None]
                 measured_speed = np.diff(q, axis=0) / dt[:, None]
+                attempts = [
+                    attempt
+                    for call in segment.get("runtime", {}).get("calls", ())
+                    for attempt in call.get("plan_attempts", ())
+                ]
+                prefix = next(
+                    (
+                        int(
+                            attempt.get("planner_diagnostics", {})
+                            .get("metadata", {})
+                            .get("reference_bridge", {})
+                            .get("prefix_samples", 0)
+                        )
+                        for attempt in reversed(attempts)
+                    ),
+                    0,
+                )
                 row = {
+                    "takeover_duration_s": prefix * float(dt[k]),
                     "episode": m["episode_id"],
                     "ordinal": meta["expansion_recipe"]["ordinal"],
                     "boundary": segment["name"],
@@ -65,6 +83,32 @@ def _episodes(directory: Path) -> list[dict]:
                     "duration_s": float(t[-1] - t[0]),
                     "steps": len(a),
                     "joint_names": names[:6],
+                    "acceleration_window_s": [
+                        float(t[max(0, k - 3) + 2] - t[k]),
+                        float(t[min(len(command_speed), k + 12)] - t[k]),
+                    ],
+                    "window_measured_acceleration_rad_s2": float(
+                        np.abs(
+                            np.diff(
+                                measured_speed[
+                                    max(0, k - 3) : min(len(measured_speed), k + 12)
+                                ],
+                                axis=0,
+                            )
+                            / float(dt[k])
+                        ).max()
+                    ),
+                    "window_command_acceleration_rad_s2": float(
+                        np.abs(
+                            np.diff(
+                                command_speed[
+                                    max(0, k - 3) : min(len(command_speed), k + 12)
+                                ],
+                                axis=0,
+                            )
+                            / float(dt[k])
+                        ).max()
+                    ),
                     "command_jump_rad": float(np.abs(a[k] - a[k - 1]).max()),
                     "command_difference_speed_rad_s": float(
                         np.abs(command_speed[k - 1]).max()
@@ -125,6 +169,14 @@ def _plot(before: dict, after: dict, output: Path) -> None:
                     )
     for j in range(6):
         for col in range(2):
+            if after.get("takeover_duration_s", 0):
+                axes[j, col].axvspan(
+                    0,
+                    after["takeover_duration_s"],
+                    color="#777777",
+                    alpha=0.09,
+                    label="planned takeover" if j == 0 and col == 0 else None,
+                )
             axes[j, col].axvline(0, color="#555", lw=0.8)
             axes[j, col].grid(alpha=0.2)
             axes[j, col].set_ylabel(
@@ -290,6 +342,8 @@ def _main() -> None:
                 "boundary_count": len(selected),
             }
             for metric in (
+                "window_measured_acceleration_rad_s2",
+                "window_command_acceleration_rad_s2",
                 "command_jump_rad",
                 "command_difference_speed_rad_s",
                 "command_difference_acceleration_rad_s2",
@@ -322,7 +376,25 @@ def _main() -> None:
     if pairs:
         before, after, error = max(pairs, key=lambda pair: pair[0]["command_jump_rad"])
         _plot(before, after, root)
+        before_zero = int(np.argmin(np.abs(before["curve"]["time_s"])))
+        after_zero = int(np.argmin(np.abs(after["curve"]["time_s"])))
         plot = {
+            "handoff_measured_q_difference_max_rad": float(
+                np.max(
+                    np.abs(
+                        np.asarray(before["curve"]["measured_q"][before_zero])
+                        - after["curve"]["measured_q"][after_zero]
+                    )
+                )
+            ),
+            "preceding_reference_difference_max_rad": float(
+                np.max(
+                    np.abs(
+                        np.asarray(before["curve"]["command_q"][before_zero - 1])
+                        - after["curve"]["command_q"][after_zero - 1]
+                    )
+                )
+            ),
             "selection": "largest before command jump among successful same-ordinal pairs with initial object poses within 1e-4",
             "ordinal": before["ordinal"],
             "max_initial_pose_component_error": error,
@@ -342,6 +414,43 @@ def _main() -> None:
     }
     (root / "boundary-report.json").write_text(
         json.dumps(report, indent=2, allow_nan=False)
+    )
+    import html
+    import statistics
+
+    lines = []
+    for value in summaries:
+        jump = value["command_jump_rad_p50_p95_max"]
+        acceleration = value["window_command_acceleration_rad_s2_p50_p95_max"]
+        lines.append(
+            "<tr>"
+            + "".join(
+                "<td>" + html.escape(str(item)) + "</td>"
+                for item in (
+                    value["group"],
+                    value["revision"],
+                    f"{value['confirmed']}/{value['executed']}",
+                    f"{statistics.mean(value['wall_s_runs']):.2f}",
+                    f"{jump[1]*1000:.3f}" if jump else "N/A",
+                    f"{acceleration[1]:.3f}" if acceleration else "N/A",
+                )
+            )
+            + "</tr>"
+        )
+    figure = (
+        '<img src="joint-boundaries.png" alt="六关节原始位置和控制网格速度对照">'
+        if plot
+        else "<p>没有满足配对条件的轨迹。</p>"
+    )
+    (root / "report.html").write_text(
+        '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+        "<title>技能边界接管对照</title><style>body{font:16px/1.7 system-ui;max-width:1200px;margin:32px auto;padding:0 20px;color:#20343a}table{border-collapse:collapse;width:100%}td,th{padding:10px;border-bottom:1px solid #dde5e7;text-align:left}img{width:100%;height:auto}a{color:#087d8c}.scroll{overflow:auto}</style>"
+        "<h1>技能边界接管对照</h1><p>固定配置，正反运行顺序。速度和加速度是控制网格差分；统计仅覆盖确认成功的边界，成功率分母保留全部执行尝试。蓝色为实现前、橙色为实现后；实线为命令，虚线为实测。</p>"
+        '<div class="scroll"><table><tr><th>采样</th><th>版本</th><th>成功/执行</th><th>平均耗时 s</th><th>跳变 P95 mrad</th><th>窗口加速度 P95 rad/s²</th></tr>'
+        + "".join(lines)
+        + "</table></div><p>初始布局匹配的代表轨迹，未对原始数据做平滑。具体窗口和配对规则见 JSON。</p>"
+        + figure
+        + '<p><a href="boundary-report.json">完整结构化结果</a> · <a href="joint-boundaries.pdf">PDF 曲线</a> · <a href="runs.json">运行记录与源码摘要</a></p></html>'
     )
     print(json.dumps(summaries, indent=2))
 

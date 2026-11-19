@@ -491,6 +491,10 @@ class TrackingPolicy:
     Args:
         in_flight: Existing motion tracking and recovery policy.
         terminal: Existing timed or feedback acceptance, retained unchanged.
+        boundary_reference_bridge: For supported native free entry phases, plan
+            a bounded controller-reference prefix before the original samples.
+            Requires independently captured position/velocity targets; external
+            nominal sources and undeclared phases retain their existing behavior.
         boundary_stop: Additionally qualify explicitly bound motion joints before
             completing an invocation. Hand endpoints retain their last commands.
         boundary_position_tolerance: Maximum terminal reference error in joint
@@ -510,9 +514,13 @@ class TrackingPolicy:
     boundary_position_tolerance: float = 0.01
     boundary_velocity_tolerance: float = 0.005
     boundary_timeout: float = 1.5
+    boundary_reference_bridge: bool = False
 
     def __post_init__(self) -> None:
-        if type(self.boundary_stop) is not bool:
+        if (
+            type(self.boundary_reference_bridge) is not bool
+            or type(self.boundary_stop) is not bool
+        ):
             raise TypeError("boundary_stop must be a bool")
         for name in (
             "boundary_position_tolerance",
@@ -559,12 +567,13 @@ class TrackingPolicy:
 
     def snapshot(self) -> TrackingPolicy:
         return TrackingPolicy(
-            self.in_flight,
-            self.terminal,
-            self.boundary_stop,
-            self.boundary_position_tolerance,
-            self.boundary_velocity_tolerance,
-            self.boundary_timeout,
+            in_flight=self.in_flight,
+            terminal=self.terminal,
+            boundary_stop=self.boundary_stop,
+            boundary_reference_bridge=self.boundary_reference_bridge,
+            boundary_position_tolerance=self.boundary_position_tolerance,
+            boundary_velocity_tolerance=self.boundary_velocity_tolerance,
+            boundary_timeout=self.boundary_timeout,
         )
 
     @classmethod

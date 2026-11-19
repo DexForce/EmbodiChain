@@ -519,6 +519,8 @@ def _tracking_policy_to_metadata(policy: TrackingPolicy) -> dict[str, object]:
             "velocity_source": "control_boundary_position_difference",
             "consecutive_observations": 2,
         }
+    if policy.boundary_reference_bridge:
+        result["boundary_reference_bridge"] = True
     return result
 
 

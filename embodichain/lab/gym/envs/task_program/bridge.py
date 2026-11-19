@@ -1616,6 +1616,8 @@ class TaskProgramDemoBridge:
                     or recovery.max_skill_retries != 0
                     or preset.workflow_recovery_policy.max_recovery_attempts != 0
                     or tracking.in_flight is not None
+                    or tracking.boundary_stop
+                    or tracking.boundary_reference_bridge
                     or getattr(tracking.terminal, "settle_duration", None) != 0.0
                 ):
                     return None

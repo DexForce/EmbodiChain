@@ -171,6 +171,9 @@ def _prepare_deployment(deployment: Path, output: Path) -> Path:
         policy.setdefault("tracking", {"kind": "timed"}).setdefault(
             "boundary_stop", True
         )
+        policy["tracking"].setdefault(
+            "boundary_reference_bridge", policy["tracking"]["boundary_stop"]
+        )
         boundary_policy = output / "execution_policy.yaml"
         boundary_policy.write_text(yaml.safe_dump(policy, sort_keys=False))
         snapshot["task_program"]["execution_policy"] = str(boundary_policy.resolve())

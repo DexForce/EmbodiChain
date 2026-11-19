@@ -246,6 +246,29 @@ def _expand_plan(
                     )
                 ),
             )
+        reference_bridge = plan.diagnostics.metadata.get("reference_bridge")
+        if reference_bridge:
+            # The takeover reference and its join stencil are not augmentation DOFs.
+            protected = int(reference_bridge["prefix_samples"]) + 2
+            phases = tuple(
+                (
+                    replace(phase, start_index=max(phase.start_index, protected))
+                    if phase.stop_index > max(phase.start_index, protected) + 2
+                    else replace(phase, allowed_operators=())
+                )
+                for phase in template.phases
+            )
+            template = replace(
+                template,
+                phases=phases,
+                allowed_operators=tuple(
+                    dict.fromkeys(
+                        operator
+                        for phase in phases
+                        for operator in phase.allowed_operators
+                    )
+                ),
+            )
         if plan.diagnostics.metadata.get("demo_skill") is not None:
             _, _, _, source_to_canonical = _canonical_samples(
                 trajectory.positions[row], trajectory.dt[row]

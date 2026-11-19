@@ -517,6 +517,8 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         owner_token: Factory identity used to reject mixed runtime components.
         runtime_scope_guard: Optional host epoch/lifetime validator. It must read
             no robot/sensor state and must not advance simulation.
+        capture_command_targets: Capture owned controller targets for profiles
+            declaring reference-conditioned handoffs; otherwise avoid those reads.
         capture_root_pose: Capture the robot's arena-local root transform in
             each observation. The default leaves ``RobotObservation.root_pose``
             unset and performs no root-pose query.
@@ -534,12 +536,15 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         owner_token: object,
         runtime_scope_guard: Callable[[], None] | None = None,
         capture_root_pose: bool = False,
+        capture_command_targets: bool = False,
         hold_qpos_source: Literal["observed", "drive_target"] = "observed",
     ) -> None:
         if type(scene_provider) is not SharedTickSceneProvider:
             raise TypeError("scene_provider must be exactly SharedTickSceneProvider.")
         if type(clock) is not EnvironmentStepClock:
             raise TypeError("clock must be exactly EnvironmentStepClock.")
+        if type(capture_command_targets) is not bool:
+            raise TypeError("capture_command_targets must be a bool")
         if type(capture_root_pose) is not bool:
             raise TypeError("capture_root_pose must be a bool.")
         if hold_qpos_source not in ("observed", "drive_target"):
@@ -576,6 +581,7 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         self._owner_token = owner_token
         self._validate_scope = validate_scope
         self._capture_root_pose = capture_root_pose
+        self._capture_command_targets = capture_command_targets
         self._hold_qpos_source = hold_qpos_source
         super().__init__(self._capture)
 
@@ -708,6 +714,16 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         context = PlanningContext(
             robot=RobotObservation(
                 timestamp=timestamp,
+                command_qpos=(
+                    self._robot.get_qpos(target=True).index_select(0, self._env_ids)
+                    if self._capture_command_targets
+                    else None
+                ),
+                command_qvel=(
+                    self._robot.get_qvel(target=True).index_select(0, self._env_ids)
+                    if self._capture_command_targets
+                    else None
+                ),
                 qpos=qpos.index_select(0, self._env_ids),
                 qvel=qvel.index_select(0, self._env_ids),
                 qeffort=(
@@ -1220,6 +1236,10 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             owner_token=self._owner_token,
             runtime_scope_guard=runtime_scope_guard,
             capture_root_pose=self._capture_root_pose,
+            capture_command_targets=any(
+                preset.tracking_policy.boundary_reference_bridge
+                for preset in self._registration.catalog.robot_profile.presets.values()
+            ),
             hold_qpos_source=self._hold_qpos_source,
         )
 

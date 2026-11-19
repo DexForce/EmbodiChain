@@ -224,7 +224,10 @@ validation dependencies but creates no World. See
 [distribution usage](../../../embodichain/lab/expansion/distribution.md).
 
 Native configured jobs snapshot execution policies through the canonical selector
-resolver and default `tracking.boundary_stop` on, preserving explicit opt-out and
+resolver and default `tracking.boundary_stop` on. Supported native free entry
+phases also inherit `boundary_reference_bridge` from that setting; explicit
+flags retain their values. Atomic planning owns the bounded prefix and protected
+join, not a postprocessing filter. Preserve explicit opt-out and
 component overrides. They do not mutate authored policy files or replace physical
 validators. The Atomic terminal gate owns additional real command frames; these
 consume ordinary rollout budgets and T+1 evidence. See

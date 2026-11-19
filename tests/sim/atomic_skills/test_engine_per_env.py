@@ -3598,3 +3598,162 @@ def test_boundary_stop_leaves_non_motion_command_contract_unchanged():
     session = engine.start((invocation,), _context(0.0, 0.0, 0.2, 0))
     assert session.tick(_context(0.0, 0.0, 0.2, 0)).command is not None
     assert session.tick(_context(0.1, 0.0, 0.2, 0)).status is ExecutionStatus.COMPLETED
+
+
+def test_reference_bridge_preserves_phase_and_rebuild_join(monkeypatch):
+    from embodichain.lab.sim.atomic_skills._expansion_phases import FREE_PHASES
+
+    engine, action = _engine(batch_size=2)
+    monkeypatch.setitem(FREE_PHASES, "dynamic", frozenset({"approach"}))
+    engine.robot.get_qvel_limits.return_value = torch.full((2, 2), 0.5)
+    engine.robot.get_qpos_limits.return_value = torch.tensor(
+        [[[-3.0, 3.0], [-3.0, 3.0]]] * 2
+    )
+
+    def plan(request, context):
+        points = torch.stack(
+            (
+                context.robot.qpos,
+                context.robot.qpos + 0.00005,
+                context.robot.qpos + 0.0001,
+            ),
+            dim=1,
+        )
+        return action.build_plan(
+            request,
+            context,
+            success=torch.tensor([True, False]),
+            trajectory=TimedTrajectory.from_uniform_step(
+                points, env_ids=context.env_ids, step_dt=0.1
+            ),
+            segment_lengths={"approach": 3},
+        )
+
+    monkeypatch.setattr(action, "_plan", plan)
+    context = _context(0.0, (0.0, 0.0), (0.0001, 0.0001), 0, control_dt=0.1)
+    reference = torch.tensor([[0.01, 0.01], [100.0, 100.0]])
+    context = replace(
+        context,
+        robot=replace(
+            context.robot,
+            command_qpos=reference,
+            command_qvel=torch.tensor([[0.0, 0.0], [10.0, 10.0]]),
+        ),
+    )
+    invocation = replace(
+        _invocation(engine),
+        tracking_policy=replace(TrackingPolicy.timed(), boundary_reference_bridge=True),
+    )
+    invocation = replace(
+        invocation,
+        recovery_policy=replace(
+            invocation.recovery_policy, max_replans=0, max_skill_retries=0
+        ),
+    )
+    result = engine.plan(invocation, context)
+    join = result.diagnostics.metadata["reference_bridge"]["prefix_samples"]
+    assert result.segments[0].name == "approach"
+    assert torch.equal(result.joint_trajectory.positions[0, 0], reference[0])
+    assert torch.equal(
+        result.joint_trajectory.positions[0, join], context.robot.qpos[0]
+    )
+    assert torch.equal(result.joint_trajectory.velocities[:, join], torch.zeros((2, 2)))
+    resolved = engine.resolve(invocation)
+    rebuilt = engine.rebuild_plan_from_trajectory(
+        resolved, context, result, replace(result.joint_trajectory, velocities=None)
+    )
+    assert rebuilt.commands.frame_count == result.commands.frame_count
+    assert torch.equal(
+        rebuilt.joint_trajectory.velocities[:, join], torch.zeros((2, 2))
+    )
+    changed = result.joint_trajectory.positions.clone()
+    changed[0, 0, 0] += 0.001
+    with pytest.raises(ValueError, match="reference takeover"):
+        engine.rebuild_plan_from_trajectory(
+            resolved,
+            context,
+            result,
+            replace(result.joint_trajectory, positions=changed),
+        )
+    changed_join = result.joint_trajectory.positions.clone()
+    changed_join[0, join + 2, 0] += 0.001
+    with pytest.raises(ValueError, match="reference takeover"):
+        engine.rebuild_plan_from_trajectory(
+            resolved,
+            context,
+            result,
+            replace(result.joint_trajectory, positions=changed_join),
+        )
+    zero_context = replace(
+        context, robot=replace(context.robot, command_qpos=torch.zeros((2, 2)))
+    )
+    already_continuous = engine.plan(invocation, zero_context)
+    assert (
+        already_continuous.diagnostics.metadata["reference_bridge"]["prefix_samples"]
+        == 0
+    )
+    assert already_continuous.commands.frame_count == 3
+    moving = replace(
+        context, robot=replace(context.robot, command_qvel=torch.ones((2, 2)))
+    )
+    moving_plan = engine.plan(invocation, moving)
+    assert moving_plan.commands.frame_count == 3
+    assert "reference_bridge_unavailable" in moving_plan.diagnostics.metadata
+    projected = context.robot.with_qpos(torch.ones((2, 2)))
+    assert torch.equal(projected.command_qpos, torch.ones((2, 2)))
+    projected.command_qpos.zero_()
+    assert torch.equal(context.robot.command_qpos, reference)
+
+
+def test_reference_bridge_retains_physical_gate_after_shifted_phase(monkeypatch):
+    from embodichain.lab.sim.atomic_skills._expansion_phases import FREE_PHASES
+
+    engine, _ = _engine()
+    engine.register(PhaseGateAction())
+    monkeypatch.setitem(FREE_PHASES, "phase_gate", frozenset({"prepare"}))
+    engine.robot.get_qvel_limits.return_value = torch.full((1, 2), 0.5)
+    engine.robot.get_qpos_limits.return_value = torch.tensor(
+        [[[-3.0, 3.0], [-3.0, 3.0]]]
+    )
+    context = _context(0.0, 0.0, 0.0001, 0, control_dt=0.1)
+    context = replace(
+        context,
+        robot=replace(
+            context.robot,
+            command_qpos=torch.full((1, 2), 0.01),
+            command_qvel=torch.zeros((1, 2)),
+        ),
+    )
+    invocation = replace(
+        _phase_gate_invocation(engine),
+        tracking_policy=replace(TrackingPolicy.timed(), boundary_reference_bridge=True),
+    )
+    invocation = replace(
+        invocation,
+        recovery_policy=replace(
+            invocation.recovery_policy, max_replans=0, max_skill_retries=0
+        ),
+    )
+    session = engine.start((invocation,), context)
+    boundary_index = session.active_plan.segments[1].start
+    assert boundary_index > 2
+    for i in range(boundary_index - 1):
+        tick = session.tick(
+            replace(context, robot=replace(context.robot, timestamp=i * 0.1))
+        )
+        assert tick.pending_phase_effect_gate is None
+    boundary = session.tick(
+        replace(
+            context, robot=replace(context.robot, timestamp=(boundary_index - 1) * 0.1)
+        )
+    )
+    request = boundary.pending_phase_effect_gate
+    assert request is not None and request.segment_name == "commit"
+    assert request.next_waypoint_index == boundary_index
+    blocked = session.tick(
+        replace(context, robot=replace(context.robot, timestamp=boundary_index * 0.1))
+    )
+    assert blocked.pending_phase_effect_gate is not None
+    assert torch.equal(
+        _joint_positions(blocked.command), _joint_positions(boundary.command)
+    )

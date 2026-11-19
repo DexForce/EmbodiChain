@@ -118,3 +118,84 @@ CUDA_VISIBLE_DEVICES=1 python -m scripts.benchmark.expansion.skill_boundaries \
   --collect --baseline /absolute/baseline-checkout \
   --revision /absolute/modified-checkout --input /absolute/new-comparison
 ```
+
+## Reference-conditioned takeover (follow-up)
+
+`tracking.boundary_reference_bridge` adds a rest-to-rest controller-reference
+prefix for supported native free entry phases. Expansion inherits its default
+from `boundary_stop`; an explicit stop opt-out therefore retains legacy behavior
+unless the bridge is separately enabled. The Gym observation provider captures
+owned position/velocity targets separately from measured qpos/qvel. Planning
+never relabels those references as measurements.
+
+The prefix starts at the previous drive target with zero target velocity and ends
+at the original first plan sample. Existing minimum-jerk interpolation provides
+bounded samples on the original control grid. Position limits, discrete speed
+and acceleration across the join, and velocity-target derivatives are checked.
+The original suffix positions and velocity references remain intact, with the
+original zero-velocity start enforced at the join. Prefix samples are real
+commands, not a smoothing pass over exported evidence.
+
+The prefix inherits the first phase name so held-object and phase guards remain
+active. Segment lengths and scene-monitor indices are shifted together. Expansion
+and mapped retiming cannot overwrite the prefix or join stencil. Rebuilding cannot
+prepend twice. Projected compilation advances reference snapshots consistently;
+failed rows do not contribute a stale reference or moving target to bridge sizing.
+Original collision evidence is invalidated for a changed plan; existing runtime
+geometry/contact/task acceptance still owns qualification. No continuous collision
+certificate is claimed. This initial bridge also requires revision zero and disabled action replanning/retry
+budgets: zero feedforward velocity alone cannot prove a position-only reference
+is stationary during an in-flight recovery. External nominal sources and undeclared entry phases keep
+their original behavior and report the unavailable bridge in diagnostics.
+
+### Drive-bias diagnosis
+
+Four matched layouts retain bitwise-identical Pick terminal command targets:
+
+| Diagnostic-only configuration | Mean per-episode maximum arm-joint error |
+| --- | --- |
+| Original arm stiffness 10000, damping 1000 | 5.842 mrad |
+| Stiffness 20000, damping 1000 | 2.900 mrad |
+| Stiffness 10000, damping 500 | 4.387 mrad |
+
+These controlled interventions support gain-dependent steady tracking bias rather
+than changed geometric endpoints. They are excluded from performance/success
+comparisons. Native post-substep velocity differs from control-grid displacement;
+the recorded effort channel is zero and is not treated as measured drive torque.
+A gravity-toggle probe had no independently verified post-reset readback and is
+inconclusive, so no claim attributes the entire bias to gravity or saturation.
+The handoff planner removes the reference reset; it does not eliminate physical
+tracking bias or retune the robot's gains.
+
+### Paired qualification against the stop-only version
+
+Baseline is `532fe6ef4`, with the same B=4, seed 7, 16-rollout/512-proposal budgets,
+Default CPU physics and both serial run orders used above. Every successful
+Pick→Place boundary has an exactly zero command position jump after the change.
+The acceleration window is reported explicitly in each JSON row (normally
+−0.04 to +0.48 s relative to handoff), so a shifted nearby spike is not hidden.
+
+| Group | Confirmed / executed before → after | Mean wall seconds | Jump P95 (mrad) | Window command acceleration P95 (rad/s²) |
+| --- | --- | --- | --- | --- |
+| A | 30/32 → 30/32 | 52.31 → 54.61 | 9.534 → 0 | 5.961 → 0.446 |
+| D | 18/26 → 18/26 | 48.76 → 50.16 | 5.695 → 0 | 3.560 → 0.400 |
+
+Window maxima are 0.459 and 0.400 rad/s² after takeover, below the unchanged
+0.5 bound. Wall-time increases are 4.4% and 2.9%. These are two repeats of one
+seed, not a general performance guarantee. Existing D quota shortfalls and
+stop-gate rejection remain; no gate was loosened to recover success.
+
+An additional joint-residual smoke is 4/4 before and 3/4 after: the original
+edited-phase acceleration validator rejects one generated Place variant
+(acceleration ratio 1.425). This failure is retained and the feature remains
+subject to broader operator qualification. Main matrix results are object-pose
+operator results, not a claim that all trajectory operators preserve yield.
+
+![Reference-conditioned six-joint handoff](assets/reference-handoff.png)
+
+The paired plot uses ordinal 15 with exactly matching initial object poses.
+Blue is stop-only; orange includes planned takeover. Solid lines are commands,
+dashed lines measurements. Velocities are unsmoothed control-grid differences;
+they are not native instantaneous velocity readings. The numerical matrix has
+per-run source manifests; later fail-closed rebuild/retiming and interface guards
+have focused tests plus a separate B=4 native smoke.

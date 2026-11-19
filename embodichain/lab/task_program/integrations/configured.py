@@ -1933,6 +1933,7 @@ def _decode_tracking_policy(value: object, *, path: str) -> TrackingPolicy:
         for name in tuple(config)
         if name
         in {
+            "boundary_reference_bridge",
             "boundary_stop",
             "boundary_position_tolerance",
             "boundary_velocity_tolerance",
