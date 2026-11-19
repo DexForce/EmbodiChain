@@ -116,10 +116,10 @@ def main(args: argparse.Namespace | None = None) -> None:
     sim.prepare()
 
     native_window_opened = False
-    if not args.headless:
+    if not args.headless or getattr(args, "web", False):
         entity_gizmo_config = dexsim.interaction.EntityGizmoConfig()
         entity_gizmo_config.max_gizmos = 0
-        native_window_opened = sim.open_window()
+        native_window_opened = sim.open_viewer()
         if native_window_opened:
             sim.enable_entity_gizmo(entity_gizmo_config)
 
@@ -142,7 +142,7 @@ def main(args: argparse.Namespace | None = None) -> None:
 
     logger.log_info("Scene setup complete!")
     logger.log_info(f"Running simulation with 1 environment(s)")
-    if native_window_opened or args.viser:
+    if native_window_opened or args.viser or getattr(args, "web", False):
         if args.viser and sim.has_gizmo("cube1"):
             logger.log_info("Gizmo enabled for cube1 - you can drag it around!")
         if args.viser and sim.has_gizmo("cube2"):

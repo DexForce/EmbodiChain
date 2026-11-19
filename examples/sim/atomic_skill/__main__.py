@@ -175,7 +175,7 @@ def _run_sample(cfg: AtomicSkillRunCfg, cli_args: argparse.Namespace, run: Any) 
     scene_args = _scene_args(cfg)
     scene_args.run = run
     for key, value in vars(cli_args).items():
-        if key == "viser" or key.startswith("viser_"):
+        if key in {"viser", "web"} or key.startswith(("viser_", "web_")):
             setattr(scene_args, key, value)
     scene = importlib.import_module(f"examples.sim.atomic_skill.{cfg.skill}")
     error = None

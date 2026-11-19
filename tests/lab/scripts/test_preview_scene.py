@@ -41,6 +41,10 @@ def preview_world(tmp_path, monkeypatch):
             self.simulation_time = 0.0
             self.visualization_runtime = None
             self.events = []
+            self.viewer = NS(
+                endpoint="http://127.0.0.1:8765/",
+                set_look_at=lambda *args: self.events.append("camera"),
+            )
             instances.append(self)
 
         def add_usd(self, cfg):
@@ -57,6 +61,11 @@ def preview_world(tmp_path, monkeypatch):
 
         def sync_render_state(self):
             self.events.append("publish")
+
+        def open_viewer(self):
+            assert self.events[-1] == "publish"
+            self.events.append("open")
+            return True
 
         def update(self, *, step):
             assert step == 1
@@ -82,7 +91,10 @@ def preview_world(tmp_path, monkeypatch):
         lambda _: ([2.0, -3.0, 2.0], [0.0, 0.0, 0.0]),
     )
     cfg = NS(
-        headless=True, visualization=NS(backend="none"), render_cfg=NS(renderer="auto")
+        headless=True,
+        web=False,
+        visualization=NS(backend="none"),
+        render_cfg=NS(renderer="auto"),
     )
     return source, cfg, instances, failure
 
@@ -142,9 +154,26 @@ def test_report_cannot_overwrite_source(preview_world):
     assert source.read_bytes() == original
 
 
-def test_paused_interactive_frames_do_not_integrate_physics(preview_world):
+@pytest.mark.parametrize("backend", ["viser", "dexsim-web"])
+def test_paused_interactive_frames_do_not_integrate_physics(
+    preview_world, monkeypatch, backend
+):
     source, cfg, instances, _ = preview_world
-    cfg.visualization.backend = "viser"
+    cfg.visualization.backend = backend
+    cfg.web = backend == "dexsim-web"
+    if cfg.web:
+        monkeypatch.setattr(
+            "embodichain.lab.scripts._preview._setup_viser_joint_control",
+            lambda *args, **kwargs: pytest.fail(
+                "Web must not initialize Viser joint controls"
+            ),
+        )
+    monkeypatch.setattr(
+        "embodichain.lab.scripts._scene_preview.install_native_controls",
+        lambda *args: pytest.fail(
+            "Browser preview must not install native input controls"
+        ),
+    )
     frames = []
 
     def callback(sim):
@@ -157,6 +186,10 @@ def test_paused_interactive_frames_do_not_integrate_physics(preview_world):
     assert result["physics_steps"] == 0
     assert instances[0].events.count("display") == 2
     assert instances[0].events[-2:] == ["destroy", "flush"]
+    if cfg.web:
+        assert result["frontend"] == "web"
+        assert result["endpoint"] == "http://127.0.0.1:8765/"
+        assert instances[0].events[:4] == ["load", "prepare", "publish", "open"]
 
 
 def test_reset_recreates_the_owned_world_instead_of_partial_state_restore(

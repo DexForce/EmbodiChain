@@ -142,9 +142,9 @@ def main() -> None:
                 trail[0], np.tile(actual_rgba, (sim.num_envs, 1)), async_update=False
             )
             actual_cloud.set_point_size(5.0)
-        if not args.headless and sim.open_window():
+        if (not args.headless or getattr(args, "web", False)) and sim.open_viewer():
             center = circle_world[0].mean(axis=0)
-            sim.get_world().get_windows().set_look_at(
+            sim.viewer.set_look_at(
                 eye=center + np.array([0.7, -1.2, 0.8], dtype=np.float32),
                 look_at=center - np.array([0.0, 0.0, 0.15], dtype=np.float32),
                 up=np.array([0.0, 0.0, 1.0], dtype=np.float32),

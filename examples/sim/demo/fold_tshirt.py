@@ -586,7 +586,7 @@ def register_runtime_controls(
 
 def configure_window_camera(sim: SimulationManager) -> None:
     """Frame both W1 arms and the shirt on the table."""
-    window = sim.get_world().get_windows()
+    window = sim.viewer
     if window is not None:
         window.set_look_at(
             eye=np.asarray([1.15, -2.10, 1.65], dtype=np.float32),
@@ -649,7 +649,7 @@ def main(args: argparse.Namespace | None = None) -> None:
                 f"W1 trajectory has {trajectory.shape[1]} columns, but the "
                 f"articulation has {robot.dof} DOFs."
             )
-        if not args.headless and sim.open_window():
+        if (not args.headless or getattr(args, "web", False)) and sim.open_viewer():
             sim.set_emission_light([1.0, 1.0, 1.0], 90.0)
             configure_window_camera(sim)
 
