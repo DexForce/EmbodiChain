@@ -203,11 +203,20 @@ def load_task_program_expansion(path: str | Path) -> dict[str, Any]:
         if (
             not isinstance(affordance, dict)
             or required_affordance - set(affordance)
-            or set(affordance) - required_affordance - {"grasp_generators"}
+            or set(affordance)
+            - required_affordance
+            - {"grasp_generators", "branch_selection"}
         ):
             raise ValueError("Invalid trajectory.affordance settings")
         if type(affordance["branches"]) is not int or affordance["branches"] < 2:
             raise ValueError("trajectory.affordance.branches must be at least two")
+        if affordance.get("branch_selection", "round_robin") not in (
+            "round_robin",
+            "outcome_guided",
+        ):
+            raise ValueError(
+                "affordance.branch_selection must be round_robin or outcome_guided"
+            )
         calls = affordance["call_indices"]
         if (
             not isinstance(calls, list)

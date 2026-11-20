@@ -207,6 +207,8 @@ class TaskProgramSameGridExpansionFactory:
         revision: str,
         output: Path | None = None,
         episode_id: int = 0,
+        affordance_branch: int | None = None,
+        preferred_local_poses: tuple[tuple[str, tuple[float, ...]], ...] = (),
     ) -> TaskProgramSameGridExpansionFactory:
         """Expand live Atomic plans on their existing measured control grid.
 
@@ -218,7 +220,10 @@ class TaskProgramSameGridExpansionFactory:
             scene_case: Measured scene and initial-state identity.
             revision: Pinned task/source revision.
             output: Optional directory for hashed reference/candidate attachments.
-            episode_id: Logical affordance branch identity.
+            episode_id: Logical episode identity, also used for round-robin sampling.
+            affordance_branch: Optional non-nominal branch frozen in the motion recipe.
+            preferred_local_poses: Previously accepted local grasp matrices by
+                sampling key for selecting among the current valid candidates.
 
         This source path retains native operators and Atomic reconstruction,
         protects phase-boundary derivative stencils and never claims physical
@@ -235,6 +240,8 @@ class TaskProgramSameGridExpansionFactory:
             revision=revision,
             output=output,
             episode_id=episode_id,
+            affordance_branch=affordance_branch,
+            preferred_local_poses=preferred_local_poses,
         )
         return instance
 

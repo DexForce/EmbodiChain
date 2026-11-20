@@ -1402,6 +1402,63 @@ def test_spawn_static_friction_uses_live_batch_and_selected_rows(monkeypatch):
     assert factory.call_args.args[0] is rebuilt
 
 
+def test_scoped_link_reads_use_arena_local_rows_and_own_the_result() -> None:
+    import numpy as np
+    from scipy.spatial.transform import Rotation
+    from embodichain.lab.sim.objects.articulation import Articulation
+    from embodichain.lab.sim.objects.backends._numeric_observations import (
+        numeric_observation_scope,
+    )
+
+    roots = {}
+    handles = []
+    expected = []
+    for row in range(2):
+        root = np.eye(4, dtype=np.float32)
+        root[:3, :3] = Rotation.from_euler("z", 0.7 * row).as_matrix()
+        root[0, 3] = 2.0 * row
+        local = np.eye(4, dtype=np.float32)
+        local[:3, :3] = Rotation.from_euler("x", 0.2 + row).as_matrix()
+        local[1, 3] = 1.0 + row
+        roots[str(row)] = Mock()
+        roots[str(row)].get_root_node.return_value.get_world_pose.return_value = root
+        handles.append(
+            SimpleNamespace(
+                arena_name=str(row), get_link_pose=Mock(return_value=root @ local)
+            )
+        )
+        expected.append(torch.from_numpy(local))
+    scene = SimpleNamespace(get_arena=roots.__getitem__, topology_revision=0)
+    data = SimpleNamespace(
+        articulation_view=SimpleNamespace(batch=object(), scene=scene)
+    )
+    robot = SimpleNamespace(
+        body_data=data, _data=data, _entities=handles, link_names=["base"]
+    )
+    sim = SimpleNamespace(
+        physics_backend="default",
+        device=torch.device("cpu"),
+        physics_step_index=0,
+        get_rigid_object_uid_list=lambda: [],
+    )
+    with numeric_observation_scope(sim, robot):
+        rows = [1, 0, 1]
+        poses = Articulation.get_link_pose(robot, "base", env_ids=rows, to_matrix=True)
+        torch.testing.assert_close(poses, torch.stack([expected[i] for i in rows]))
+        poses.zero_()
+        observed = Articulation.get_link_pose(
+            robot, "base", env_ids=torch.tensor([1]), to_matrix=True
+        )
+        torch.testing.assert_close(observed[0], expected[1])
+        handles[1].get_link_pose.assert_called_once_with("base")
+        sim.physics_step_index += 1
+        handles[0].get_link_pose.return_value = np.eye(4, dtype=np.float32)
+        observed = Articulation.get_link_pose(
+            robot, "base", env_ids=[0], to_matrix=True
+        )
+        torch.testing.assert_close(observed[0], torch.eye(4))
+
+
 def test_numeric_boundary_owns_samples_and_invalidates_writes_and_revisions() -> None:
     from contextvars import copy_context
     from embodichain.lab.sim.objects.backends._numeric_observations import (
