@@ -28,7 +28,12 @@ import re
 from typing import Any
 from .agent import TaskAgent
 from .contracts import canonical_hash
-from .interpretation import InstructionCaller
+from .interpretation import (
+    InstructionCaller,
+    _TERMINAL_PARK_CALL,
+    _TERMINAL_PARK_KINDS,
+    interpret_instruction_draft,
+)
 from .ontology import task_success_type
 from .task_spec import generate_task_spec
 from .semantic_graph import validate_semantic_task_graph
@@ -121,25 +126,55 @@ def generate_semantic_task_graph_from_image(
     artifacts = {"call_catalog": semantic_planning_catalog(), "model_attempts": []}
     try:
         if instruction_caller is None:
-            from .interpretation import _default_instruction_caller
+            from .interpretation import (
+                _SOURCE_INTENT_AUDIT_TITLE,
+                _default_instruction_caller,
+            )
 
             def audited_instruction_caller(**kwargs: Any) -> Any:
                 response = _default_instruction_caller(**kwargs, services=services)
-                artifacts["model_attempts"].append(
-                    {"stage": "interpretation", "response": response}
-                )
+                attempt = {"stage": "interpretation", "response": response}
+                if kwargs["schema"].get("title") == _SOURCE_INTENT_AUDIT_TITLE:
+                    attempt["purpose"] = "source_review"
+                artifacts["model_attempts"].append(attempt)
                 return response
 
             instruction_caller = audited_instruction_caller
-        candidates = TaskAgent(caller=instruction_caller, services=services).generate(
-            task_id, instruction, model=model, candidate_count=1
+        reviewed = interpret_instruction_draft(
+            instruction,
+            model=model,
+            caller=instruction_caller,
+            services=services,
+            _allow_terminal_park=_TERMINAL_PARK_CALL
+            in artifacts["call_catalog"]["calls"],
         )
+        candidates = TaskAgent(
+            interpreter=lambda *_args, **_kwargs: reviewed,
+            services=services,
+        ).generate(task_id, instruction, candidate_count=1)
         spec = generate_task_spec(candidates)
         candidate = next(
             c
             for c in candidates["candidates"]
             if c["candidate_id"] == spec.metadata["candidate_id"]
         )
+        park_subjects = {arm: kind for kind, arm in _TERMINAL_PARK_KINDS.items()}
+        terminal_park = [
+            {**row, "subject": park_subjects[row["arm"]]}
+            for row in reviewed.terminal_park
+        ]
+        park_payload = {"terminal_park": terminal_park} if terminal_park else {}
+        park_clauses = [
+            dict(
+                id=row["subject"],
+                quote=row["quote"],
+                target=candidate["draft"]["steps"][-1]["id"],
+                origin="explicit",
+                resolution="pending_binding",
+                constraint={"kind": row["subject"]},
+            )
+            for row in terminal_park
+        ]
         artifacts.update(task_candidates=candidates, task_spec=spec.to_dict())
         image_caller = (
             image_caller
@@ -157,7 +192,13 @@ def generate_semantic_task_graph_from_image(
         errors = []
         for attempt in range(max_repairs + 1):
             raw = image_caller(
-                system_prompt=_GROUNDING_PROMPT,
+                system_prompt=_GROUNDING_PROMPT
+                + (
+                    "\nDo not duplicate terminal_park quotes as visual clauses or create "
+                    "entities for their subjects; Task Engine supplies them for graph planning."
+                    if terminal_park
+                    else ""
+                ),
                 user_prompt=json.dumps(
                     {
                         "instruction": instruction,
@@ -168,6 +209,7 @@ def generate_semantic_task_graph_from_image(
                             "milestones": [m.id for m in spec.milestones],
                         },
                         "repair_errors": errors,
+                        **park_payload,
                     },
                     ensure_ascii=False,
                 ),
@@ -181,6 +223,19 @@ def generate_semantic_task_graph_from_image(
                 clauses = grounding.pop("clauses", [])
                 properties = grounding.pop("role_properties", {})
                 entities = {obj["id"]: obj for obj in grounding["objects"]}
+                for park in terminal_park:
+                    if park["subject"] in entities:
+                        raise ValueError(
+                            "Grounding must not declare a reserved terminal park subject"
+                        )
+                    grounding["objects"].append(
+                        dict(
+                            id=park["subject"],
+                            description=f"Logical {park['arm']} arm (posture pending binding)",
+                            bbox=None,
+                            provenance="runtime_required",
+                        )
+                    )
                 from .task_spec import _project_candidate
 
                 projected_spec = _project_candidate(candidate, grounding=grounding)
@@ -202,6 +257,15 @@ def generate_semantic_task_graph_from_image(
                     for p in spec.goal
                 }
                 for clause in clauses:
+                    constraint = (
+                        clause.get("constraint") if isinstance(clause, dict) else None
+                    )
+                    if isinstance(constraint, dict) and constraint.get("kind") in tuple(
+                        _TERMINAL_PARK_KINDS
+                    ):
+                        raise ValueError(
+                            "Only the source audit may declare terminal park"
+                        )
                     if clause["target"] in remap:
                         target = remap[clause["target"]]
                         if target is None:
@@ -229,7 +293,7 @@ def generate_semantic_task_graph_from_image(
                         for ref in refs
                     ],
                     generalization=variations,
-                    clauses=clauses,
+                    clauses=clauses + park_clauses,
                     role_properties=properties,
                     interpreted_steps=candidate["draft"]["steps"],
                 )
@@ -266,6 +330,7 @@ def generate_semantic_task_graph_from_image(
             "grounding": grounding,
             "catalog": artifacts["call_catalog"],
             "task_producer_obligations": semantic_plan_rules(),
+            **park_payload,
             "resource_identity": {
                 "intent_side_to_logical_resource": dict(_INTENT_RESOURCE_IDS),
                 "unspecified_single_arm_resources": {},
@@ -277,6 +342,16 @@ def generate_semantic_task_graph_from_image(
             raw = planning_caller(
                 system_prompt=(
                     _PLANNING_PROMPT
+                    + (
+                        f"\nFor each terminal_park row add exactly one {_TERMINAL_PARK_CALL} "
+                        "with empty arguments, resources.primary=arm and semantic.object=subject. "
+                        "Use null reference/relation and empty intent. Attach each to the final "
+                        "source step and make it depend on all other task actions, directly or "
+                        "transitively. Link its given verbatim quote to its node. Do not claim "
+                        "that the pending park posture equals a measured initial pose."
+                        if terminal_park
+                        else ""
+                    )
                     + ("\n\n" + _PLANNING_REPAIR_PROMPT if errors else "")
                 ),
                 user_prompt=json.dumps(

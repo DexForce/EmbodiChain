@@ -96,6 +96,22 @@ stage-selection flags. `image_planning.py` retains raw provider attempts and
 allows a bounded number of diagnostic repairs per grounding/planning stage (one
 by default). It contains no per-task graph construction templates.
 
+`template` and the default `TaskAgent` use `interpretation.py` to reconstruct
+typed instruction intent from the source in a second model call before
+grounding. A disagreement gets one diagnostic repair and must pass the audit
+again. Dependency reachability, not redundant edges, determines ordering
+agreement. A unique source mention quoted by both passes becomes the grounding
+selector. Different quote boundaries require the same independently declared
+reference to occur verbatim in both excerpts and uniquely in the instruction;
+overlap alone does not resolve a conflict. Without confirmed source evidence,
+labels must match. Other constraints still compare strictly. Image planning
+can freeze explicitly requested arm returns as quoted graph obligations when
+the catalog provides `simulation.park` and both passes agree on the arms.
+Each arm needs its own correctly ordered call; the posture stays pending
+binding. Standalone authoring does not defer requirements.
+Template model-attempt records mark audit responses with `purpose: source_review`;
+older published plans remain readable but their recorded responses lack this audit.
+
 `lab/task_program/language/semantic_contracts.py` owns provider-free call argument,
 resource, precondition/effect and runtime-binding declarations. Configured live
 lowerers consume those same argument contracts and retain their stricter scene

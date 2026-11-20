@@ -29,6 +29,7 @@ from embodichain.lab.task_program.language.semantic_contracts import (
 __all__ = ["validate_semantic_plan", "semantic_plan_rules"]
 
 from .ontology import TASK_CONTRACTS
+from .interpretation import _TERMINAL_PARK_CALL, _TERMINAL_PARK_KINDS
 
 # Task Engine side enums are distinct from logical resource IDs. This mapping
 # is deliberately closed: custom resource/control-part names are not rewritten.
@@ -106,6 +107,22 @@ def _validate_clause_coverage(
         {m["id"]: m["achieve"] for m in document["objectives"]["milestones"]}
     )
     entity_by_id = {item["id"]: item for item in grounding["objects"]}
+    declared_park = any(
+        c["origin"] == "explicit"
+        and (c.get("constraint") or {}).get("kind") in _TERMINAL_PARK_KINDS
+        for c in document["interpretation"]["clauses"]
+    )
+    park_ids = set()
+    park_ancestors = {}
+    task_nodes = set()
+    if declared_park:
+        nodes = validate_semantic_task_graph(graph)["nodes"]
+        park_ids = {
+            n["id"] for n in nodes if n["call"].get("call_id") == _TERMINAL_PARK_CALL
+        }
+        park_ancestors = _ancestor_sets(nodes)
+        task_nodes = {n["id"] for n in nodes} - park_ids
+    witnessed_park = set()
 
     def matches_role(uid: str | None, subjects: set[str]) -> bool:
         seen = set()
@@ -124,6 +141,37 @@ def _validate_clause_coverage(
         if not quoted:
             raise ValueError(f"Graph omits instruction qualifier {clause['id']!r}")
         target = clause["target"]
+        constraint = clause.get("constraint", {})
+        kind = constraint.get("kind")
+        node_ids = {node_id for r in quoted for node_id in r["node_ids"]}
+        if kind in _TERMINAL_PARK_KINDS:
+            arm = _TERMINAL_PARK_KINDS[kind]
+            matches = [
+                n["id"]
+                for n in graph["nodes"]
+                if n["id"] in node_ids & park_ids
+                and n["task_instance_id"] in target_groups.get(target, ())
+                and n["call"].get("resources", {}).get("primary") == arm
+                and annotations[n["id"]]
+                == dict(object=kind, reference=None, relation=None, intent={})
+                and task_nodes <= park_ancestors[n["id"]]
+            ]
+            if len(matches) != 1 or matches[0] in witnessed_park:
+                raise ValueError(
+                    f"Terminal park for {arm!r} must quote {clause['quote']!r} "
+                    "and have one matching park node after all task actions"
+                )
+            witnessed_park.update(matches)
+            report.append(
+                dict(
+                    clause_id=clause["id"],
+                    target=target,
+                    status="covered",
+                    node_ids=matches,
+                    reason="terminal_park_posture_pending_binding",
+                )
+            )
+            continue
         target_roles = (
             {target}
             if target in roles
@@ -134,7 +182,6 @@ def _validate_clause_coverage(
             & roles.keys()
         )
         subjects = {entity for role in target_roles for entity in entities[role]}
-        node_ids = {node_id for r in quoted for node_id in r["node_ids"]}
         candidates = [
             n
             for n in graph["nodes"]
@@ -152,8 +199,6 @@ def _validate_clause_coverage(
             raise ValueError(
                 f"Instruction qualifier {clause['id']!r} references the wrong target"
             )
-        constraint = clause.get("constraint", {})
-        kind = constraint.get("kind")
         covered = False
         if kind == "role_property":
             covered = (
@@ -222,6 +267,10 @@ def _validate_clause_coverage(
                     else "unsupported_or_unstructured_qualifier"
                 ),
             }
+        )
+    if declared_park and witnessed_park != park_ids:
+        raise ValueError(
+            "Terminal park nodes must match the audited arm requirements exactly"
         )
     return report
 
@@ -785,7 +834,8 @@ def _validate_interpreted_plan(
             arm = step.get(field, "none")
             expected_resource = _INTENT_RESOURCE_IDS.get(arm, arm)
             if arm not in {"none", "auto"} and not any(
-                n["call"].get("resources", {}).get(slot) == expected_resource
+                effects[n["id"]] != _TERMINAL_PARK_CALL
+                and n["call"].get("resources", {}).get(slot) == expected_resource
                 for n in calls
             ):
                 raise ValueError(

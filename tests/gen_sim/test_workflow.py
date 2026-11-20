@@ -164,10 +164,11 @@ def _services(
         ]
         plan["requirements"][0]["quote"] = f"Put the {required_color} cube on the table"
 
+    typed_intent = {"steps": [step or _step()]}
     return GenSimServices(
         GenSimServicesCfg(),
         injected={
-            "task_interpretation": _ScriptedChat({"steps": [step or _step()]}),
+            "task_interpretation": _ScriptedChat(typed_intent, typed_intent),
             "task_image_grounding": _ScriptedChat(
                 grounding,
                 {

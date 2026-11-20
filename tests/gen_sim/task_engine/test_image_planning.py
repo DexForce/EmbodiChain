@@ -233,6 +233,256 @@ def test_all_task_families_plan_using_real_catalog_without_simulation(
     assert source_image.read_bytes() == before
 
 
+def test_template_plan_publishes_the_reviewed_relation_and_records_the_audit(
+    source_image, monkeypatch
+):
+    from embodichain.gen_sim.task_engine import interpretation
+
+    instruction = "Tuck the source into the tray."
+    step, grounding, plan = _fixture()
+    plan["requirements"][0]["quote"] = instruction
+    answers = iter([dict(step, relation="on"), step, step, step])
+    monkeypatch.setattr(
+        interpretation,
+        "_default_instruction_caller",
+        lambda **_: {"steps": [next(answers)]},
+    )
+
+    result = generate_semantic_task_graph_from_image(
+        source_image,
+        instruction,
+        image_caller=lambda **_: json.dumps(grounding),
+        planning_caller=lambda **_: json.dumps(plan),
+    )
+    from embodichain.gen_sim.task_spec import TaskSpec
+
+    spec = TaskSpec.from_dict(result["task_spec"])
+    assert any(
+        predicate.arguments.get("relation") == "inside" for predicate in spec.goal
+    )
+    assert (
+        result["semantic_task_graph"]["nodes"][-1]["call"]["inside"]
+        == "inside__tray__source"
+    )
+    attempts = [a for a in result["model_attempts"] if a["stage"] == "interpretation"]
+    assert [a.get("purpose") for a in attempts] == [None, "source_review"] * 2
+    assert result["semantic_graph_validation"]["coverage"]["semantic_status"] == "valid"
+
+
+@pytest.mark.parametrize(
+    ("draft_ref", "review_ref", "draft_quote", "review_quote", "confirmed_ref"),
+    [
+        ("red cup", "blue cup", "the blue cup", "the blue cup", "the blue cup"),
+        ("cup", "cup", "the red cup", "the blue cup", None),
+        ("blue cup", "blue cup", "the blue cup", "blue cup", "blue cup"),
+    ],
+    ids=["verified-over-stale-label", "conflicting-quotes", "different-boundaries"],
+)
+def test_template_binds_the_confirmed_source_referent(
+    source_image, draft_ref, review_ref, draft_quote, review_quote, confirmed_ref
+):
+    action = "Set the blue cup upright"
+    instruction = f"{action} without moving the red cup."
+    step, grounding, plan = _fixture("E2")
+    grounding["objects"][0].update(id="blue_cup", description="the blue cup")
+    grounding["objects"].append(
+        dict(
+            id="red_cup",
+            description="the red cup",
+            bbox=[100, 500, 300, 800],
+            provenance="observed",
+        )
+    )
+    plan["requirements"][0]["quote"] = action
+    grounded_references = []
+
+    def interpret(*, schema, **_):
+        reviewed = schema["title"] == "ActionEngineInstructionSourceAudit"
+        return {
+            "steps": [
+                dict(step, object=_selector(review_ref if reviewed else draft_ref))
+            ],
+            "scene_ref_quotes": [
+                {"ref": "1.object", "quote": review_quote if reviewed else draft_quote}
+            ],
+        }
+
+    def ground(*, user_prompt, **_):
+        (reference,) = json.loads(user_prompt)["references"]
+        grounded_references.append(reference["reference"])
+        # An ambiguous or red label would bind the wrong object in this fixture.
+        selected = (
+            "blue_cup"
+            if reference["reference"] in {"blue cup", "the blue cup"}
+            else "red_cup"
+        )
+        grounding["bindings"][reference["reference_id"]] = [selected]
+        return json.dumps(grounding)
+
+    def plan_from_binding(*, user_prompt, **_):
+        (selected,) = json.loads(user_prompt)["grounding"]["bindings"]["step_01.object"]
+        for node in plan["nodes"]:
+            node["semantic"]["object"] = selected
+            node["call"].get("arguments", node["call"])["object"] = selected
+        return json.dumps(plan)
+
+    def generate():
+        return generate_semantic_task_graph_from_image(
+            source_image,
+            instruction,
+            instruction_caller=interpret,
+            image_caller=ground,
+            planning_caller=plan_from_binding,
+        )
+
+    if confirmed_ref is None:
+        with pytest.raises(
+            SemanticPlanningError, match="Source audit disagrees.*object"
+        ):
+            generate()
+        assert not grounded_references
+        return
+
+    result = generate()
+    assert grounded_references == [confirmed_ref]
+    (reference,) = result["task_spec_v1"]["interpretation"]["references"]
+    assert reference["description"] == confirmed_ref
+    assert [entity["id"] for entity in reference["entities"]] == ["blue_cup"]
+    align, _ = result["semantic_task_graph"]["nodes"]
+    assert align["call"]["arguments"]["object"] == "blue_cup"
+    assert result["semantic_graph_validation"]["coverage"]["semantic_status"] == "valid"
+
+
+@pytest.mark.parametrize(
+    ("defect", "diagnostic"),
+    [
+        (None, None),
+        ("missing_arm", "Terminal park"),
+        ("audit_missing_arm", "Source audit disagrees.*terminal_park"),
+        ("before_placement", "Terminal park"),
+        ("wrong_placement_arm", "Missing required arm"),
+    ],
+)
+def test_template_checks_audited_both_arm_parking_in_the_graph(
+    source_image, tmp_path, monkeypatch, defect, diagnostic
+):
+    place_quote = (
+        "Use the left arm to stack the brown block on the yellow block."
+        if defect == "wrong_placement_arm"
+        else "Stack the brown block on the yellow block."
+    )
+    park_quote = "Then return both arms to their initial poses."
+    step, grounding, plan = _fixture()
+    step.update(
+        object=_selector("brown block"), target=_selector("yellow block"), relation="on"
+    )
+    if defect == "wrong_placement_arm":
+        step["required_arm"] = "left_arm"
+    for node in plan["nodes"]:
+        node["semantic"].update(relation="on", intent={"relation": "on"})
+        if defect == "wrong_placement_arm":
+            node["call"]["resources"] = {"primary": "right"}
+    place = plan["nodes"][1]["call"]
+    place["on"] = "tray"
+    del place["inside"]
+    plan["requirements"][0]["quote"] = place_quote
+    park_arms = (
+        ("left",)
+        if defect in {"missing_arm", "audit_missing_arm"}
+        else ("left", "right")
+    )
+    previous = "n0" if defect == "before_placement" else "n1"
+    for arm in park_arms:
+        node_id = f"park_{arm}"
+        plan["nodes"].append(
+            dict(
+                id=node_id,
+                step_id="step_01",
+                call=dict(
+                    kind="registered",
+                    call_id="simulation.park",
+                    arguments={},
+                    resources={"primary": arm},
+                ),
+                depends_on=[previous],
+                semantic=dict(
+                    object=f"terminal_park_{arm}",
+                    reference=None,
+                    relation=None,
+                    intent={},
+                ),
+            )
+        )
+        previous = node_id
+    plan["requirements"].append(
+        dict(id="r2", quote=park_quote, node_ids=[f"park_{a}" for a in park_arms])
+    )
+
+    def caller(*, schema, **_):
+        response = {"steps": [step]}
+        if schema["title"] == "ActionEngineInstructionSourceAudit":
+            review_arms = (
+                ("left",) if defect == "audit_missing_arm" else ("left", "right")
+            )
+            response["terminal_park"] = [
+                dict(arm=arm, quote=park_quote) for arm in review_arms
+            ]
+        elif "terminal_park" in schema["properties"]:
+            response["terminal_park"] = [dict(arm="both", quote=park_quote)]
+        return response
+
+    def generate():
+        return generate_semantic_task_graph_from_image(
+            source_image,
+            f"{place_quote} {park_quote}",
+            instruction_caller=caller,
+            image_caller=lambda **_: json.dumps(grounding),
+            planning_caller=lambda **_: json.dumps(plan),
+            max_repairs=0,
+        )
+
+    if diagnostic is not None:
+        with pytest.raises(SemanticPlanningError, match=diagnostic):
+            generate()
+        return
+
+    result = generate()
+    clauses = result["task_spec_v1"]["interpretation"]["clauses"]
+    assert [
+        (c["quote"], c["resolution"], c["constraint"]["kind"]) for c in clauses
+    ] == [
+        (park_quote, "pending_binding", "terminal_park_left"),
+        (park_quote, "pending_binding", "terminal_park_right"),
+    ]
+    nodes = result["semantic_task_graph"]["nodes"]
+    assert [
+        n["call"]["resources"]["primary"]
+        for n in nodes
+        if n["call"].get("call_id") == "simulation.park"
+    ] == ["left", "right"]
+    assert {
+        b["node_id"]
+        for b in result["binding_requirements"]
+        if b["kind"] == "park_posture"
+    } == {"park_left", "park_right"}
+    assert result["semantic_graph_validation"]["coverage"]["execution_ready"] is False
+
+    from embodichain.gen_sim.task_engine import _image_run
+    from embodichain.gen_sim.workflow import load_task_plan
+
+    monkeypatch.setattr(
+        _image_run, "generate_semantic_task_graph_from_image", lambda *a, **kw: result
+    )
+    directory = tmp_path / "park-plan"
+    _image_run.plan_image_task(source_image, f"{place_quote} {park_quote}", directory)
+    loaded = load_task_plan(directory)
+    assert (
+        loaded["qualifier_coverage"]
+        == result["semantic_graph_validation"]["qualifier_coverage"]
+    )
+    assert (directory / "semantic_task_graph.html").is_file()
+
+
 def test_variation_permission_and_coverage_have_independent_identities(source_image):
     from embodichain.gen_sim.task_spec.publication import (
         project_expansion_requirements,
@@ -654,9 +904,9 @@ def test_metric_lift_keeps_the_source_height_on_the_held_transport(
 
     def mutate(step, grounding, plan):
         _terminal_hold("E1")(step, grounding, plan)
-        # The episode's original model output declared the motion but did not
-        # have a field for its height.
-        step.update(target=_selector(), relation="none", direction="up")
+        step.update(
+            target=_selector(), relation="none", direction="up", lift_height_m=0.10
+        )
         grounding["bindings"].pop("step_01.target")
         grounding["objects"] = [
             item for item in grounding["objects"] if item["id"] == "source"
