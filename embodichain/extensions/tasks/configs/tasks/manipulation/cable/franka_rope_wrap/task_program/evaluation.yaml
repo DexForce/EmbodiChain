@@ -1,0 +1,102 @@
+graph:
+  roots: [wrap_success]
+  rules:
+    completed:
+      kind: scalar_range
+      bindings: {value: cables/cable/wrap_completed}
+      params: {minimum: 1, maximum: 1}
+    finite:
+      kind: scalar_range
+      bindings: {value: cables/cable/wrap_finite}
+      params: {minimum: 1, maximum: 1}
+    joint_limits:
+      kind: scalar_range
+      bindings: {value: cables/cable/wrap_joint_limits}
+      params: {minimum: 1, maximum: 1}
+    direct_floor_pickup:
+      kind: scalar_range
+      bindings: {value: cables/cable/wrap_direct_floor_pickup}
+      params: {minimum: 1, maximum: 1}
+    grasp_retained:
+      kind: scalar_range
+      bindings: {value: cables/cable/wrap_grasp_retained}
+      params: {minimum: 1, maximum: 1}
+    material_grasp_slip:
+      kind: scalar_range
+      bindings: {value: cables/cable/wrap_material_grasp_slip}
+      params: {minimum: 1, maximum: 1}
+    bilateral_finger_contact:
+      kind: scalar_range
+      bindings: {value: cables/cable/wrap_bilateral_finger_contact}
+      params: {minimum: 1, maximum: 1}
+    actual_winding:
+      kind: scalar_range
+      bindings: {value: cables/cable/wrap_actual_winding}
+      params: {minimum: 1, maximum: 1}
+    post_contact_arc:
+      kind: scalar_range
+      bindings: {value: cables/cable/wrap_post_contact_arc}
+      params: {minimum: 1, maximum: 1}
+    hold_stable:
+      kind: scalar_range
+      bindings: {value: cables/cable/wrap_hold_stable}
+      params: {minimum: 1, maximum: 1}
+    rope_below_post_top:
+      kind: scalar_range
+      bindings: {value: cables/cable/wrap_rope_below_post_top}
+      params: {minimum: 1, maximum: 1}
+    post_nonpenetration:
+      kind: scalar_range
+      bindings: {value: cables/cable/wrap_post_nonpenetration}
+      params: {minimum: 1, maximum: 1}
+    robot_post_clearance:
+      kind: scalar_range
+      bindings: {value: cables/cable/wrap_robot_post_clearance}
+      params: {minimum: 1, maximum: 1}
+    anchor_points_toward_post:
+      kind: scalar_range
+      bindings: {value: cables/cable/wrap_anchor_points_toward_post}
+      params: {minimum: 1, maximum: 1}
+    smooth_anchor_exit:
+      kind: scalar_range
+      bindings: {value: cables/cable/wrap_smooth_anchor_exit}
+      params: {minimum: 1, maximum: 1}
+    anchor_fixed:
+      kind: scalar_range
+      bindings: {value: cables/cable/wrap_anchor_fixed}
+      params: {minimum: 1, maximum: 1}
+    length_preserved:
+      kind: scalar_range
+      bindings: {value: cables/cable/wrap_length_preserved}
+      params: {minimum: 1, maximum: 1}
+    contacts_not_dropped:
+      kind: scalar_range
+      bindings: {value: cables/cable/wrap_contacts_not_dropped}
+      params: {minimum: 1, maximum: 1}
+    floor_nonpenetration:
+      kind: scalar_range
+      bindings: {value: cables/cable/wrap_floor_nonpenetration}
+      params: {minimum: 1, maximum: 1}
+    wrap_success:
+      kind: all
+      refs:
+      - completed
+      - finite
+      - joint_limits
+      - direct_floor_pickup
+      - grasp_retained
+      - material_grasp_slip
+      - bilateral_finger_contact
+      - actual_winding
+      - post_contact_arc
+      - hold_stable
+      - rope_below_post_top
+      - post_nonpenetration
+      - robot_post_clearance
+      - anchor_points_toward_post
+      - smooth_anchor_exit
+      - anchor_fixed
+      - length_preserved
+      - contacts_not_dropped
+      - floor_nonpenetration
+final_acceptance: [wrap_success]

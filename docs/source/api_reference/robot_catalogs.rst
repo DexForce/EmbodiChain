@@ -629,6 +629,13 @@ and cache prefixes while using the shared core download and locking services.
 
 .. autoclass:: embodichain.extensions.robots.franka.assets.FrankaPandaArm
 
+.. autoclass:: embodichain.extensions.robots.franka.assets.FrankaRopePads
+
+   The cable-wrap embodiment resolves the flat-pad model through
+   ``FrankaRopePads/Panda/Fr3RopePadsV1.urdf``.
+
+.. autofunction:: embodichain.extensions.robots.franka.rope_pads.apply_rope_pads
+
 .. autofunction:: embodichain.extensions.robots.robotiq.two_finger.robotiq85_joint_positions
 
 

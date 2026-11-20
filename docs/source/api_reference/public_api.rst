@@ -5280,6 +5280,23 @@ reference-state resets and terminal snapshots before automatic row resets.
 .. automodule:: embodichain.extensions.tasks.locomotion.tracking.g1_motion
    :members:
 
+embodichain.extensions.tasks.manipulation.cable.franka_rope_wrap
+----------------------------------------------------------------
+
+Build the Franka floor-pickup scene. The configuration defines the cable centerline,
+fixed first segment, post and jaw geometry. The reset functor settles the cable
+before the motion clock starts.
+
+.. currentmodule:: embodichain.extensions.tasks.manipulation.cable.franka_rope_wrap
+
+.. autosummary::
+
+   cable_points
+   load_config
+   materialize_deployment
+   settle_franka_rope
+   task_directory
+
 embodichain.extensions.tasks.manipulation.cable.route_the_cable
 ---------------------------------------------------------------
 
@@ -5292,6 +5309,57 @@ penetration and end-insertion acceptance.
 
    RouteTheCableEnv
    measure_route
+
+embodichain.extensions.tasks.manipulation.cable.wrap_evaluation
+---------------------------------------------------------------
+
+Attach episode-scoped contact sampling after the scene settles. The monitor records
+both fingers at the same physical sample and tracks slip of the grasped material point.
+
+.. currentmodule:: embodichain.extensions.tasks.manipulation.cable.wrap_evaluation
+
+.. autosummary::
+
+   attach_wrap_monitor
+
+embodichain.extensions.tasks.manipulation.cable.wrap_integration
+----------------------------------------------------------------
+
+Bind a named wrap phase to the full-robot joint position and velocity commands
+executed by the standard Task Program bridge.
+
+.. currentmodule:: embodichain.extensions.tasks.manipulation.cable.wrap_integration
+
+.. autosummary::
+
+   CableWrapPhaseFactory
+
+embodichain.extensions.tasks.manipulation.cable.wrap_measurements
+-----------------------------------------------------------------
+
+Evaluate recorded control frames against all 19 physical acceptance checks,
+including bilateral grasp, line winding, post contact and the final hold.
+
+.. currentmodule:: embodichain.extensions.tasks.manipulation.cable.wrap_measurements
+
+.. autosummary::
+
+   evaluate_wrap
+
+embodichain.extensions.tasks.manipulation.cable.wrap_motion
+-----------------------------------------------------------
+
+Plan the continuous tool path and solve its joint targets in time order.
+The phase boundaries partition the trajectory on the configured control grid.
+The first sample describes the settled start at zero seconds.
+
+.. currentmodule:: embodichain.extensions.tasks.manipulation.cable.wrap_motion
+
+.. autosummary::
+
+   PHASE_END_S
+   WrapMotion
+   plan_wrap_motion
 
 embodichain.extensions.tasks.manipulation.push_cube
 ---------------------------------------------------

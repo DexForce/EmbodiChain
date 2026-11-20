@@ -73,6 +73,7 @@ def test_migrated_robot_assets_keep_legacy_class_identity() -> None:
             "AgibotG1",
             "AgilexPiperX",
             "FlexivRizon4SMenagerie",
+            "FrankaRopePads",
             "RoboPartyRP1",
             "RoboPartyRPO",
         }:
