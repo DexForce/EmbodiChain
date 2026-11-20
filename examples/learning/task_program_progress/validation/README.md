@@ -15,7 +15,7 @@ Each milestone pays 0.5 once; accepted task success pays 10 once. Failure pays -
 
 The second environment holds its initial joint targets. It receives no milestone or success events; the failure fixture deliberately fails both rows. Resetting only row 0 preserves row 1's next reward, with absolute error 9.8225428e-13.
 
-The scalar oracle independently evaluates reward composition using measured skill potentials. It is not an independent geometry or skill-potential-formula oracle. All actual, expected and repeated values are checked for finiteness.
+The scalar oracle independently evaluates reward composition using measured skill potentials. It is not an independent geometry or skill-potential-formula oracle. All actual, expected and repeated values are checked for finiteness. The separate physical qualification CLI passed the supported, floating and empty-grip fixtures, and a deliberately insufficient stable-window run saved a failing report and exited nonzero. Fifteen manual outcome/finiteness probes and two expert evidence-validity probes also passed; checkpoint task success remains informational.
 
 Physical hold/stability windows now inspect every physics substep and restart after interrupted or invalid evidence. Transient final-substep contact, missing samples, and object or independently actuated hand writes after sampling have production regressions. Invalid rows restart their windows even when a diagnostic host continues without automatic reset; unaffected rows retain their history. Equivalent call/stage aliases suppress the same automatic milestone. Missing standalone composition and nonfinite metric targets reject during configuration.
 

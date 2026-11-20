@@ -32,6 +32,28 @@ import torch
 import yaml
 
 
+def _qualification_result(report):
+    """Separate physical expectations from policy-performance diagnostics."""
+    source = report["source"]
+    if source == "checkpoint_policy":
+        expected, scope = None, "reward_finiteness_only"
+    elif source == "planning_expert_not_learned_policy":
+        expected, scope = report["num_envs"], "planning_expert"
+    else:
+        expected = {
+            "supported": report["num_envs"],
+            "floating": 0,
+            "empty_grip": 0,
+        }[report["case"]]
+        scope = "physical_fixture"
+    return {
+        "qualification_scope": scope,
+        "expected_success_rows": expected,
+        "passed": bool(report["finite_rewards"])
+        and (expected is None or report["success_rows"] == expected),
+    }
+
+
 def main() -> None:
     """Qualify a physical positive/negative fixture or preview a saved policy."""
     os.environ.setdefault("EMBODICHAIN_SIM_EXIT_PROCESS", "0")
@@ -322,10 +344,14 @@ def main() -> None:
             report["source"] = "planning_expert_not_learned_policy"
             report["expert_result"] = expert_result
             report["measured_pick_success"] = any(
-                row["measured"]["expert_pick"]["sample"][0][1] == 1 for row in trace
+                row["measured"]["expert_pick"]["valid"][0]
+                and row["measured"]["expert_pick"]["sample"][0][1] == 1
+                for row in trace
             )
             report["measured_place_success"] = any(
-                row["measured"]["expert_place"]["sample"][0][1] == 1 for row in trace
+                row["measured"]["expert_place"]["valid"][0]
+                and row["measured"]["expert_place"]["sample"][0][1] == 1
+                for row in trace
             )
             report["success_rows"] = int(
                 all(expert_result["success"])
@@ -333,6 +359,7 @@ def main() -> None:
                 and report["measured_place_success"]
             )
             report["success_rate"] = float(report["success_rows"])
+        report.update(_qualification_result(report))
         (args.output / f"{label}.json").write_text(json.dumps(report, indent=2) + "\n")
         print(
             json.dumps(
@@ -340,6 +367,10 @@ def main() -> None:
             ),
             flush=True,
         )
+        if not report["passed"]:
+            raise AssertionError(
+                f"Reward qualification failed: {label}; see the saved report"
+            )
     finally:
         if recorder:
             recorder.close()

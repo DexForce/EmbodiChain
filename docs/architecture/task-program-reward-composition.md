@@ -342,6 +342,10 @@ and [36.8-second native preview](../../examples/learning/task_program_progress/v
 retain numerical and capture provenance. Reporting binds footage to video/trace
 hashes and captured frame indices, and rejects failed qualification logs and
 missing/nonfinite optimizer evidence.
+The physical qualification CLI saves its diagnostic JSON before failing on
+nonfinite rewards or unexpected fixture outcomes. Planning-expert acceptance
+requires valid measured evidence; checkpoint task-success results remain
+informational while reward finiteness is still enforced.
 
 Physics-substep acquisition adds work. The recorded fixture timing includes
 rendering and scalar auditing and does not establish large-batch or GPU

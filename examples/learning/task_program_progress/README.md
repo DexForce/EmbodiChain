@@ -170,6 +170,10 @@ Checkpoint video loads the actual saved policy with deterministic inference;
 fixture videos explicitly identify zero-action physical scenes. The performance
 benchmark excludes contact acquisition, rendering and policy inference, and
 reports correctness agreement separately from physical task success.
+Qualification writes its JSON before returning a failing exit status for
+nonfinite rewards or mismatched fixture outcomes: all `supported` rows must
+succeed, and `floating`/`empty_grip` rows must remain unsuccessful. Checkpoint
+previews enforce reward finiteness while keeping policy task success informational.
 
 
 A complete planning-expert grasp/place trace can qualify the same measured
@@ -188,6 +192,9 @@ only while both physical poses remain unchanged; motion, invalid acquisition or
 reset invalidates it. No reward bonus or symbolic attachment establishes support.
 A measured objective may select a trusted `reward_profile` while retaining the
 same independent physical acceptance thresholds.
+Planning-expert qualification additionally requires successful execution and
+valid measured grasp/place acceptance; incomplete or invalid evidence exits
+unsuccessfully after saving its report.
 
 
 ## Task Program reward acceptance without training
