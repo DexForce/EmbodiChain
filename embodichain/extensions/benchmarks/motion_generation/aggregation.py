@@ -1736,12 +1736,16 @@ def aggregate_results(
                 for case in view_cases
                 if case.case_parameters.get("affordance_group") == group
             ]
+            tracks = {case.track for case in view_cases}
             case_ids = {case.case_id for case in view_cases}
             view_records = [
                 record
                 for record in view_records
-                if record.case_id in case_ids
-                or record.phase in (TrialPhase.CONSTRUCT, TrialPhase.PREPARE)
+                if record.track in tracks
+                and (
+                    record.case_id in case_ids
+                    or record.phase in (TrialPhase.CONSTRUCT, TrialPhase.PREPARE)
+                )
             ]
             if not view_cases:
                 continue

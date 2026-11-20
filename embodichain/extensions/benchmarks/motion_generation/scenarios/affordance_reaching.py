@@ -164,7 +164,7 @@ def _project_case(
         suite_version=suite.suite_version,
         track=track.id,
         track_group=track.group_id or track.id,
-        case_id=f"affordance_reaching:{source.case_id}",
+        case_id=f"affordance_reaching:{track.id}:{source.case_id}",
         primary_success="geometry_valid",
         num_waypoints=targets.shape[1],
         target_waypoints=targets,

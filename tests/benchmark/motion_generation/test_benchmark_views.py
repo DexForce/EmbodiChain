@@ -832,10 +832,16 @@ def test_performance_replay_does_not_claim_independent_quality_uncertainty():
     assert row["uncertainty_warning"] == "performance_replay_not_independent_quality"
 
 
-def test_affordance_report_separates_task_geometry_from_controls_and_physics(tmp_path):
+@pytest.mark.parametrize("separate_tracks", [False, True])
+def test_affordance_report_separates_task_geometry_from_controls_and_physics(
+    tmp_path, separate_tracks
+):
     task = replace(_case(), case_parameters={"affordance_group": "task"})
     control = replace(
-        task, case_id="control", case_parameters={"affordance_group": "control"}
+        task,
+        track="controls" if separate_tracks else task.track,
+        case_id="control",
+        case_parameters={"affordance_group": "control"},
     )
     failed = replace(
         _outcome(timed=None),
@@ -845,25 +851,23 @@ def test_affordance_report_separates_task_geometry_from_controls_and_physics(tmp
     records = [
         _record(task, "raw", outcome=failed, timed=False),
         _record(control, "raw", outcome=_outcome(timed=None), timed=False),
-        replace(
-            _record(control, "raw", timed=False),
-            phase=TrialPhase.CONSTRUCT,
-            cost_time_ms=2.0,
-            outcomes=(),
-        ),
-        replace(
-            _record(control, "raw", timed=False),
-            phase=TrialPhase.PREPARE,
-            cost_time_ms=3.0,
-            outcomes=(),
-        ),
     ]
+    records.extend(
+        replace(
+            _record(case, "raw", timed=False),
+            phase=phase,
+            cost_time_ms=cost,
+            outcomes=(),
+        )
+        for case in ([task, control] if separate_tracks else [control])
+        for phase, cost in ((TrialPhase.CONSTRUCT, 2.0), (TrialPhase.PREPARE, 3.0))
+    )
     result = aggregate_results(
         records,
         [_metadata("raw", timed=False)],
         [task, control],
         1,
-        track_scenarios={task.track: "affordance_reaching"},
+        track_scenarios={case.track: "affordance_reaching" for case in (task, control)},
     )
     assert [row["view"] for row in result["report_views"]] == [
         "affordance_reaching",
@@ -878,7 +882,16 @@ def test_affordance_report_separates_task_geometry_from_controls_and_physics(tmp
         result["affordance_reaching_timing_leaderboard"][0]["overall_success_rate"]
         is None
     )
-    for view in ("affordance_reaching", "reaching_controls"):
+    for view, case in (("affordance_reaching", task), ("reaching_controls", control)):
+        descriptor = next(row for row in result["report_views"] if row["view"] == view)
+        assert descriptor["tracks"] == [case.track]
+        for table in (
+            "leaderboard",
+            "timing_leaderboard",
+            "time_and_memory",
+            "success_and_metrics",
+        ):
+            assert [row["track"] for row in result[f"{view}_{table}"]] == [case.track]
         assert result[f"{view}_leaderboard"][0]["latency_p95_ms"] == 4.0
         performance = result[f"{view}_time_and_memory"][0]
         assert performance["planning_time_ms"] == 4.0

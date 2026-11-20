@@ -30,11 +30,16 @@ from embodichain.lab.sim.motion.planners.utils import PlanResult
 from embodichain.extensions.benchmarks.motion_generation.artifacts import (
     TrialJsonlWriter,
     _case_to_dict,
+    _read_case_manifest,
+    write_case_manifest,
 )
 from embodichain.extensions.benchmarks.motion_generation.config import (
     PlannerSpecCfg,
     SuiteCfg,
     TrackCfg,
+)
+from embodichain.extensions.benchmarks.motion_generation.embodiments import (
+    resolve_embodiment,
 )
 from embodichain.extensions.benchmarks.motion_generation.models import (
     BenchmarkCase,
@@ -133,6 +138,33 @@ def test_transport_projection_restores_full_task_without_mutating_atomic():
         result.case_id != source.case_id
         and result.suite_version != source.suite_version
     )
+
+
+def test_reaching_tracks_keep_distinct_replayable_case_identities(tmp_path):
+    source = source_case()
+    suite = SuiteCfg(
+        suite_version="reaching_v1",
+        planners=[PlannerSpecCfg(id="curobo", adapter="curobo", enabled=True)],
+        tracks=[replace(reaching_track(), id=name) for name in ("reach_a", "reach_b")],
+    )
+    suite.validate_benchmark()
+    robot = CartesianRobot()
+    cases = [
+        _project_case(source, suite, track, robot, "arm")
+        for track in suite.evaluation_tracks()
+    ]
+    resolution = resolve_embodiment(suite.embodiment, suite.robot, base_dir=tmp_path)
+    path = write_case_manifest(
+        tmp_path / "reaching.json",
+        cases,
+        suite=suite,
+        embodiment_resolution=resolution,
+    )
+    restored = _read_case_manifest(path, robot.device, expected_embodiment=resolution)
+    assert len({case.case_id for case in restored}) == 2
+    assert {
+        case.track: case.case_parameters["source_case_id"] for case in restored
+    } == {"reach_a": source.case_id, "reach_b": source.case_id}
 
 
 @pytest.mark.parametrize(

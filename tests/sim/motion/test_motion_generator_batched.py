@@ -121,6 +121,13 @@ def _timing_generator(
     )
     planner.cfg = SimpleNamespace(planner_type=planner_type, grid_size=100)
     planner.device = torch.device("cpu")
+
+    def get_qpos_limits(*, joint_ids, env_ids=None):
+        limits = torch.tensor([[-2.0, 2.0]], dtype=torch.float64).expand(
+            planner.robot.num_instances, len(planner.robot.joint_names), 2
+        )
+        return (limits if env_ids is None else limits[env_ids])[:, joint_ids]
+
     planner.robot = (
         robot
         if robot is not None
@@ -130,6 +137,7 @@ def _timing_generator(
             mimic_parents=(),
             mimic_multipliers=(),
             num_instances=1,
+            get_qpos_limits=get_qpos_limits,
             get_qvel_limits=lambda **kwargs: torch.tensor([[0.2, 0.2]]),
         )
     )
@@ -1783,6 +1791,14 @@ class _CartesianRobot:
 
     def get_joint_ids(self, name: str) -> list[int]:
         return [0]
+
+    def get_qpos_limits(
+        self, *, joint_ids: list[int], env_ids: list[int] | None = None
+    ) -> torch.Tensor:
+        limits = torch.tensor([[[-2.0, 2.0]]], dtype=torch.float64).expand(
+            self.num_instances, 1, 2
+        )
+        return (limits if env_ids is None else limits[env_ids])[:, joint_ids]
 
     def get_qvel_limits(self, *, joint_ids: list[int]) -> torch.Tensor:
         return torch.full((self.num_instances, 1), 0.2)[:, joint_ids]
