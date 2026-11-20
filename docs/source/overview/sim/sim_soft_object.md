@@ -3,111 +3,143 @@
 ```{currentmodule} embodichain.lab.sim
 ```
 
-{class}`~objects.VolumeDeformableObject` represents batched Newton volumetric
-particle sets. Volume deformables
-require the Newton backend on CUDA and a particle-capable solver.
+{class}`~objects.VolumeDeformableObject` simulates a soft solid using a
+tetrahedral mesh. Its simulation nodes carry world-frame positions and
+velocities. Use a {doc}`sim_cloth` for geometry simulated as a triangle surface.
 
-See {doc}`sim_manager/physics/newton` for solver selection, mixed rigid/deformable scene
-limitations, and the requirement to declare deformables before preparation.
+Use Newton on CUDA with a particle-capable solver and gradients disabled.
+Declare the soft object before `sim.prepare()`. See
+{doc}`sim_manager/physics/newton/runtime_qualification` for supported solver
+and scene combinations.
 
 ## Configuration
 
-{class}`~cfg.VolumeDeformableObjectCfg` separates physical parameters under
-`attrs` from mesh generation under `meshing`.
+{class}`~cfg.VolumeDeformableObjectCfg` separates the volume topology from
+the material and contact settings.
 
 | Field | Default | Meaning |
 | :--- | :--- | :--- |
+| `shape` | `MeshCfg()` | Source surface mesh, or array-backed vertices for an explicit tetrahedral mesh. |
+| `source` | `None` | Optional USD input selected with `UsdSourceCfg`. It supplies the authored simulation and render topology. |
+| `meshing.simulation_mesh_resolution` | `8` | Voxel resolution when building a tetrahedral mesh from a source surface. |
+| `meshing.embedding_impl` | `"dexsim_exact_cpu"` | Render-to-volume embedding implementation for generated meshes. |
+| `tetrahedra` | `None` | Explicit `(M, 4)` vertex indices. Supply array-backed `shape.vertices` and optionally boundary triangles. |
+| `particle_radius` | `None` | Contact radius per particle. Omission uses the solver default. |
 | `attrs.density` | `1000.0` | Volume density in kg/m³. |
 | `attrs.youngs` | `1e6` | Young's modulus in Pa. |
-| `attrs.poissons` | `0.45` | Poisson's ratio in (-1, 0.5). |
+| `attrs.poissons` | `0.45` | Poisson's ratio, with a valid range of `(-1, 0.5)`. |
 | `attrs.elasticity_damping` | `0.0` | Volumetric damping. |
-| `attrs.surface_props` | Seven zero coefficients | Optional Newton surface forces. |
-| `attrs.add_surface_edges` | `True` | Create surface bending-edge constraints. |
-| `meshing.triangle_remesh_resolution` | `8` | Source surface remeshing resolution. |
-| `meshing.triangle_simplify_target` | `0` | Target proxy face count; zero disables simplification. |
-| `meshing.simulation_mesh_resolution` | `8` | Voxel resolution for the tetrahedral mesh. |
-| `meshing.voxel_num_relaxation_iters` | `5` | Tetrahedral-mesh relaxation iterations. |
-| `meshing.voxel_rel_min_tet_volume` | `0.05` | Relative minimum tetrahedral volume. |
-| `meshing.voxel_surface_dist_ratio` | `0.2` | Surface distance as a voxel-size ratio. |
-| `meshing.embedding_impl` | `dexsim_exact_cpu` | Render-to-volume binding implementation. |
+| `attrs.surface_props`, `attrs.add_surface_edges` | Zero coefficients, `True` | Optional surface forces and surface bending-edge constraints. |
 
-`attrs.surface_props` uses the same
-{class}`~cfg.SurfaceElementPropertiesCfg` as cloth. Volume defaults are
-zero rather than cloth's `None`; explicitly omitted coefficients in a partial
-surface group also resolve to zero for volume descriptors.
+A generated tetrahedral mesh has its own node order, so a per-node array
+must follow the generated topology. For stable authored indices, supply
+`tetrahedra` and array-backed `shape.vertices`. The vertices become the
+simulation nodes in that order. The boundary is derived from the tetrahedra
+when `shape.triangles` is omitted.
+
+Use {class}`~cfg.VolumeDeformableMeshingCfg` to tune voxelization, surface
+remeshing, simplification, and embedding. `attrs.surface_props` uses
+{class}`~cfg.SurfaceElementPropertiesCfg`, with omitted coefficients
+resolved to zero for volume descriptors. `attrs.contact_material` can specify
+a DexUni per-object contact material on SDK builds that support it.
+
+## Setup & Initialization
+
+This headless example uses an explicit tetrahedron to keep the four
+simulation-node indices stable. The same configuration fields work with a
+larger explicit mesh.
 
 ```python
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
+    NewtonPhysicsCfg,
+    RenderCfg,
     VolumeDeformableObjectCfg,
     VolumeDeformablePhysicsCfg,
-    VolumeDeformableMeshingCfg,
 )
 from embodichain.lab.sim.shapes import MeshCfg
 
-cfg = VolumeDeformableObjectCfg(
-    uid="soft_body",
-    shape=MeshCfg(fpath="body.obj"),
-    attrs=VolumeDeformablePhysicsCfg(
-        youngs=1e5, poissons=0.4, density=75.0,
-    ),
-    meshing=VolumeDeformableMeshingCfg(simulation_mesh_resolution=12),
+sim = SimulationManager(
+    SimulationManagerCfg(
+        headless=True,
+        physics_cfg=NewtonPhysicsCfg(
+            device="cuda:0", solver_cfg={"solver_type": "dexuni"}
+        ),
+        render_cfg=RenderCfg(renderer="no-render"),
+    )
 )
+try:
+    soft = sim.add_deformable_object(
+        VolumeDeformableObjectCfg(
+            uid="soft_body",
+            init_pos=(0.0, 0.0, 0.5),
+            shape=MeshCfg(
+                vertices=[(0, 0, 0), (0.1, 0, 0), (0, 0.1, 0), (0, 0, 0.1)],
+            ),
+            tetrahedra=[(0, 1, 2, 3)],
+            attrs=VolumeDeformablePhysicsCfg(youngs=1e5, poissons=0.4, density=75.0),
+        )
+    )
+    sim.prepare()
+    sim.update(step=1, render_final_step=False)
+    state = soft.data.nodal_state_w  # (1, 4, 6)
+finally:
+    sim.destroy(exit_process=False)
+    SimulationManager.flush_cleanup_queue()
 ```
 
-Add this configuration through `sim.add_deformable_object(cfg)` and call
-`sim.prepare()` before reading object data. For a runnable example, see
-{doc}`Soft Body Simulation </tutorial/create_softbody>`.
+For a file-backed mesh, set `shape=MeshCfg(fpath="body.obj")` and configure
+`meshing` to control the generated tetrahedra. Use a closed surface that
+encloses the desired volume.
 
 ### Soft Object Class
+
 #### Nodal State
 
-After `sim.prepare()`, read simulation nodes through `object.data`. Each state
-property returns an independent tensor snapshot.
+These properties return independent snapshots after preparation. `E` is the
+instance count and `V = soft.data.n_nodes`.
 
-| Property | Shape | Description |
+| Property | Shape | Meaning |
 | :--- | :--- | :--- |
-| `data.nodal_pos_w` | `(N, V, 3)` | Current simulation-node positions in world coordinates. |
-| `data.nodal_vel_w` | `(N, V, 3)` | Current simulation-node velocities in world coordinates. |
-| `data.default_nodal_state_w` | `(N, V, 6)` | Positions and velocities captured at Spawn binding. |
+| `data.nodal_pos_w`, `data.nodal_vel_w` | `(E, V, 3)` | Simulation-node world positions and velocities. |
+| `data.nodal_state_w` | `(E, V, 6)` | Position followed by velocity at each node. |
+| `data.default_nodal_state_w` | `(E, V, 6)` | Initial state captured at binding. |
 
-`N` is the number of instances; `V` is `data.n_nodes`. Render vertices are
-separate and are read through `get_surface_vertices()`.
+Use `set_nodal_state(state, env_ids=...)` to initialize a deformed state.
+For example, the following compresses the prepared object in environment
+zero along its world Z axis and sets its initial velocity to zero.
 
 ```python
-# Example: Accessing vertex data
-sim_verts = soft_object.data.nodal_pos_w
-print(f"Simulation Vertices Shape: {sim_verts.shape}")
-
-velocities = soft_object.data.nodal_vel_w
-print(f"Vertex Velocities: {velocities}")
+state = soft.data.default_nodal_state_w[0:1]
+height = state[..., 2:3]
+base_height = height.amin(dim=1, keepdim=True)
+state[..., 2:3] = base_height + 0.9 * (height - base_height)
+state[..., 3:] = 0
+soft.set_nodal_state(state, env_ids=[0])
 ```
+
+Use `get_surface_vertices()` and `get_surface_triangles()` for the rendered
+surface. `get_collision_surface_triangles()` indexes the simulated body
+nodes on its physical boundary.
 
 #### Visual Material
 
-When a soft object is constructed, EmbodiChain wraps the first valid material already attached to each environment's render body. The original dexsim material instance is retained.
-
-```python
-materials = soft_object.get_visual_material_inst()
-if materials[0] is not None:
-    materials[0].set_base_color([0.8, 0.3, 0.2, 1.0])
-```
-
-`set_visual_material(mat, env_ids=None, shared=False)` assigns a replacement material, while `restore_visual_material(env_ids=None)` restores the original per-segment assignments. `get_visual_material_inst(env_ids=None)` returns one representative `VisualMaterialInst | None` per selected environment. `reset()` restores the original material before resetting the selected soft bodies.
+With native rendering, `get_visual_material_inst()` reports one
+representative material or `None` per selected environment. Use
+`set_visual_material()` for a replacement, and
+`restore_visual_material()` to restore the source assignments.
 
 #### Pose Management
-You can set the global pose of a soft object (which transforms all its vertices), but getting a single "pose" from a deformed object is not supported.
 
-| Method | Description |
-| :--- | :--- |
-| `set_local_pose(pose)` | Sets the pose of the object by transforming all vertices. |
-| `get_local_pose()` | **Not Supported**. Raises `NotImplementedError` because a deformed object does not have a single rigid pose. |
+`set_local_pose(pose, env_ids=...)` places the captured rest shape at an
+arena-local `xyz + xyzw` pose or 4×4 transform and zeros node velocities.
+Use `set_nodal_state()` for a deformed initial shape. `reset()` restores
+the configured placement and materials, while the nodal snapshots expose the
+current shape.
 
+## Related Topics
 
-```python
-# Reset or Move the Soft Object
-target_pose = torch.tensor([[0, 0, 1.0, 0, 0, 0, 1]], device=device) # (x, y, z, qx, qy, qz, qw)
-soft_object.set_local_pose(target_pose)
-
-# Important: Step simulation to apply changes
-sim.update()
-```
+- {doc}`Soft Body Simulation </tutorial/create_softbody>` for a rendered
+  tutorial using volume meshing.
+- {doc}`sim_cloth` for triangle-surface topology and nodal controls.
+- {doc}`sim_assets` for the asset overview.

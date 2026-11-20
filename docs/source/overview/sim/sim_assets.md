@@ -14,16 +14,16 @@ selects the environment.
 
 | Use case | Configuration | Manager method |
 | :--- | :--- | :--- |
-| A single rigid body with collision | {class}`~cfg.RigidObjectCfg` | `add_rigid_object()` |
-| Several independent rigid bodies managed together | {class}`~cfg.RigidObjectGroupCfg` | `add_rigid_object_group()` |
-| Jointed mechanisms such as doors and drawers | {class}`~cfg.ArticulationCfg` | `add_articulation()` |
-| A robot with control groups and kinematics | {class}`~cfg.RobotCfg` | `add_robot()` |
-| Scenery or props that only need to render | {class}`~cfg.VisualObjectCfg` | `add_visual_object()` |
-| Soft solids and cloth with node-based state | {class}`~cfg.VolumeDeformableObjectCfg`, {class}`~cfg.SurfaceDeformableObjectCfg` | `add_deformable_object()` |
-| Ropes, wires, and hoses with segment-based state | {class}`~cfg.CableObjectCfg` | `add_cable_object()` |
-| Liquid sampled from an initial fill | {class}`~cfg.fluid.FluidObjectCfg` | `add_fluid_object()` |
-| Explicit lights in a rendered scene | {class}`~cfg.LightCfg` | `add_light()` |
-| Cameras, contact sensors, and other observation sources | {doc}`Sensor configuration <sensors/index>` | `add_sensor()` |
+| {doc}`Rigid body <sim_rigid_object>` with collision | {class}`~cfg.RigidObjectCfg` | `add_rigid_object()` |
+| {doc}`Group of independent rigid bodies <sim_rigid_object_group>` | {class}`~cfg.RigidObjectGroupCfg` | `add_rigid_object_group()` |
+| {doc}`Jointed mechanism <sim_articulation>` such as a door or drawer | {class}`~cfg.ArticulationCfg` | `add_articulation()` |
+| {doc}`Robot <sim_robot>` with control parts and kinematics | {class}`~cfg.RobotCfg` | `add_robot()` |
+| [Visual object](#visual-objects) for scenery or props | {class}`~cfg.VisualObjectCfg` | `add_visual_object()` |
+| {doc}`Soft solid <sim_soft_object>` or {doc}`cloth <sim_cloth>` with nodal state | {class}`~cfg.VolumeDeformableObjectCfg`, {class}`~cfg.SurfaceDeformableObjectCfg` | `add_deformable_object()` |
+| [Cable](#cable-objects) such as a rope, wire, or hose | {class}`~cfg.CableObjectCfg` | `add_cable_object()` |
+| [Fluid](#fluid-objects) sampled from an initial fill | {class}`~cfg.fluid.FluidObjectCfg` | `add_fluid_object()` |
+| [Direct light](#lights) in a rendered scene | {class}`~cfg.LightCfg` | `add_light()` |
+| [Sensor](#sensors) for images, contacts, or other observations | {doc}`Sensor configuration <sensors/index>` | `add_sensor()` |
 
 The manager provides `get_asset(uid)` for lookup by runtime UID. Lights and
 sensors have their own configuration and interfaces alongside scene objects.
@@ -71,6 +71,18 @@ finally:
     SimulationManager.flush_cleanup_queue()
 ```
 
+### Read the scene inventory
+
+The startup table counts registered UIDs under `Scene assets`. A batch of
+replicated bodies contributes one logical asset, and a rigid object group
+contributes one entry for the group. `Particle deformables` covers soft
+solids and cloth. `Cable objects` and `Fluid objects` have their own rows.
+
+`startup_summary="full"` adds asset UIDs and per-light type and scope to the
+inventory. Sensor detail rows include the sensor class and, for cameras, the
+resolution and enabled outputs. Select `startup_summary="off"` to disable the
+EmbodiChain summary.
+
 ## Objects
 
 Most individual object configurations inherit the placement fields in
@@ -83,6 +95,10 @@ member configuration.
 | `init_pos` | `(0.0, 0.0, 0.0)` | Initial position in metres. Replicated procedural objects use the same arena-local placement in each environment. |
 | `init_rot` | `(0.0, 0.0, 0.0)` | Initial Euler angles in degrees. |
 | `init_local_pose` | `None` | Explicit 4×4 initial transform. It takes precedence over `init_pos` and `init_rot`. |
+
+Pose vectors use `[x, y, z, qx, qy, qz, qw]`. Arena-local poses are relative
+to each environment's origin. The world-frame state fields for particles and
+cable segments already include their environment origins.
 
 ## Rigid Object
 

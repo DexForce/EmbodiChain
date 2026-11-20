@@ -3,109 +3,139 @@
 ```{currentmodule} embodichain.lab.sim
 ```
 
-{class}`~objects.SurfaceDeformableObject` represents batched Newton cloth
-particle sets. Cloth requires the
-Newton backend on CUDA and a particle-capable solver.
+{class}`~objects.SurfaceDeformableObject` simulates a triangle surface such
+as cloth or a membrane. Its state is the world-frame position and velocity
+of each simulation node. Choose a {doc}`sim_soft_object` for a solid that
+needs an interior simulation mesh.
 
-See {doc}`sim_manager/physics/newton` for solver selection, mixed rigid/deformable scene
-limitations, and the requirement to declare deformables before preparation.
+Use Newton on CUDA with a particle-capable solver and gradients disabled.
+Declare the cloth before `sim.prepare()`. See
+{doc}`sim_manager/physics/newton/runtime_qualification` for supported solver
+and scene combinations.
 
 ## Configuration
 
-Use {class}`~cfg.SurfaceDeformableObjectCfg` with physical parameters grouped
-in `attrs`, following the rigid-object configuration convention.
+Configure the asset with {class}`~cfg.SurfaceDeformableObjectCfg`.
 
 | Field | Default | Meaning |
 | :--- | :--- | :--- |
+| `shape` | `MeshCfg()` | Triangle simulation mesh. It also provides the default render mesh. |
+| `source` | `None` | Optional authored USD cloth selected with `UsdSourceCfg`. The source supplies the topology and physics. |
+| `visual_shape` | `None` | Separate render mesh for features such as UV seams. |
+| `visual_binding_mode` | `"auto"` | Surface embedding by default. Use `"nearest_vertex"` when the render mesh duplicates simulation vertices along texture seams. |
+| `particle_radius` | `None` | Contact radius per particle. Omission uses the solver default. |
 | `attrs.density` | `1.0` | Surface density in kg/m². |
-| `attrs.surface_props.tri_ke/tri_ka/tri_kd` | `None` | Triangle elastic stiffness, area stiffness, and damping. |
-| `attrs.surface_props.tri_drag/tri_lift` | `None` | Aerodynamic drag and lift. |
-| `attrs.surface_props.edge_ke/edge_kd` | `None` | Bending stiffness and damping. |
-| `attrs.add_springs` | `False` | Create explicit mesh-edge springs. |
-| `attrs.spring_ke/spring_kd` | `None` | Spring stiffness and damping. |
-| `particle_radius` | `None` | Particle radius; inherit solver default when omitted. |
-| `shape` | `MeshCfg()` | Simulation source mesh and default render mesh. |
-| `visual_shape` | `None` | Optional independently indexed render mesh. |
+| `attrs.surface_props` | Solver defaults | `tri_ke`, `tri_ka`, and `tri_kd` control triangle stiffness and damping. `tri_drag` and `tri_lift` configure aerodynamics. `edge_ke` and `edge_kd` control bending. |
+| `attrs.add_springs` | `False` | Enable explicit mesh-edge springs with optional `spring_ke` and `spring_kd`. |
 
-The seven `surface_props` coefficients use
-{class}`~cfg.SurfaceElementPropertiesCfg`. `None` preserves Newton's
-cloth defaults. Cloth uses its source triangle mesh directly and does not
-require volume voxelization.
+`attrs.surface_props` uses {class}`~cfg.SurfaceElementPropertiesCfg`.
+`None` inherits the solver value for that coefficient. An explicit
+`attrs.contact_material` configures DexUni contact stiffness, damping, and
+dynamic friction on SDK builds that support per-object contact materials.
+With a compatible DexSim build, `attrs.edge_rest_angle` sets a signed rest
+dihedral angle in radians. Use `attrs.pneumatic` for DexUni cavity pressure
+parameters on a closed surface.
+
+Use an array-backed `MeshCfg` when a controller depends on stable node
+indices. Its vertex order is the simulation-node order. File-based meshes
+can be reordered by the importer. `particle_flags` and
+`register_kinematic_nodal_trajectory()` address these simulation nodes.
+Register nodal trajectories before preparing the scene and clear Newton's
+`ACTIVE` flag for the driven nodes in the configuration.
+
+## Setup & Initialization
+
+This example declares a four-node cloth patch without a mesh file. The
+prepared scene uses CUDA and the DexUni solver.
 
 ```python
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
-    SurfaceElementPropertiesCfg,
+    NewtonPhysicsCfg,
+    RenderCfg,
     SurfaceDeformableObjectCfg,
     SurfaceDeformablePhysicsCfg,
+    SurfaceElementPropertiesCfg,
 )
 from embodichain.lab.sim.shapes import MeshCfg
 
-cfg = SurfaceDeformableObjectCfg(
-    uid="cloth",
-    shape=MeshCfg(fpath="cloth.obj"),
-    attrs=SurfaceDeformablePhysicsCfg(
-        density=0.2,
-        surface_props=SurfaceElementPropertiesCfg(
-            tri_ke=1000.0, tri_ka=1000.0, edge_ke=0.001,
+sim = SimulationManager(
+    SimulationManagerCfg(
+        headless=True,
+        physics_cfg=NewtonPhysicsCfg(
+            device="cuda:0", solver_cfg={"solver_type": "dexuni"}
         ),
-    ),
+        render_cfg=RenderCfg(renderer="no-render"),
+    )
 )
+try:
+    cloth = sim.add_deformable_object(
+        SurfaceDeformableObjectCfg(
+            uid="cloth",
+            init_pos=(0.0, 0.0, 0.5),
+            shape=MeshCfg(
+                vertices=[(0, 0, 0), (0.2, 0, 0), (0.2, 0.2, 0), (0, 0.2, 0)],
+                triangles=[(0, 1, 2), (0, 2, 3)],
+            ),
+            attrs=SurfaceDeformablePhysicsCfg(
+                density=0.2,
+                surface_props=SurfaceElementPropertiesCfg(tri_ke=1000.0, tri_ka=1000.0),
+            ),
+        )
+    )
+    sim.prepare()
+    sim.update(step=1, render_final_step=False)
+    state = cloth.data.nodal_state_w  # (1, 4, 6)
+finally:
+    sim.destroy(exit_process=False)
+    SimulationManager.flush_cleanup_queue()
 ```
-
-Add this configuration through `sim.add_deformable_object(cfg)` and call
-`sim.prepare()` before accessing `cloth.data`. For a runnable example, see
-{doc}`Cloth Body Simulation </tutorial/create_cloth>`.
 
 ### Cloth Object Class
+
 #### Nodal State
 
-After `sim.prepare()`, read simulation nodes through `object.data`. Each state
-property returns an independent tensor snapshot.
+These properties return independent snapshots after preparation. `E` is the
+instance count and `V = cloth.data.n_nodes`.
 
-| Property | Shape | Description |
+| Property | Shape | Meaning |
 | :--- | :--- | :--- |
-| `data.nodal_pos_w` | `(N, V, 3)` | Current simulation-node positions in world coordinates. |
-| `data.nodal_vel_w` | `(N, V, 3)` | Current simulation-node velocities in world coordinates. |
-| `data.default_nodal_state_w` | `(N, V, 6)` | Positions and velocities captured at Spawn binding. |
+| `data.nodal_pos_w`, `data.nodal_vel_w` | `(E, V, 3)` | Simulation-node world positions and velocities. |
+| `data.nodal_state_w` | `(E, V, 6)` | Position followed by velocity at each node. |
+| `data.default_nodal_state_w` | `(E, V, 6)` | Initial state captured at binding. |
 
-`N` is the number of instances; `V` is `data.n_nodes`. Render vertices are
-separate and are read through `get_surface_vertices()`.
+Use `set_nodal_state(state, env_ids=...)` to write positions and velocities
+for selected environments. Input rows follow the selected order and use
+world coordinates including the arena offsets. For example, translate the
+current shape in a prepared scene by editing a snapshot and writing it back.
 
 ```python
-# Example: Accessing vertex data
-vert_position = cloth_object.data.nodal_pos_w
-print(f"vertices positions: {vert_position}")
-
-vert_velocity = cloth_object.data.nodal_vel_w
-print(f"Vertex Velocities: {vert_velocity}")
+state = cloth.data.nodal_state_w[0:1]
+state[..., 2] += 0.05
+cloth.set_nodal_state(state, env_ids=[0])
 ```
+
+`get_surface_vertices()` and `get_surface_triangles()` describe the render
+mesh. Use the nodal properties for physics observations and controls.
 
 #### Visual Material
 
-When a cloth object is constructed, EmbodiChain wraps the first valid material already attached to each environment's render body. The original dexsim material instance is retained.
-
-```python
-materials = cloth_object.get_visual_material_inst()
-if materials[0] is not None:
-    materials[0].set_roughness(0.8)
-```
-
-`set_visual_material(mat, env_ids=None, shared=False)` assigns a replacement material, while `restore_visual_material(env_ids=None)` restores the original per-segment assignments. `get_visual_material_inst(env_ids=None)` returns one representative `VisualMaterialInst | None` per selected environment. `reset()` restores the original material before resetting the selected cloth bodies.
+With native rendering, `get_visual_material_inst()` reports one
+representative material or `None` per selected environment. Use
+`set_visual_material()` to assign a replacement, and
+`restore_visual_material()` to restore the authored assignments.
 
 #### Pose Management
-You can set the global pose of a cloth object (which transforms all its vertices), but getting a single "pose" from a deformed surface object is not supported.
 
-| Method | Description |
-| :--- | :--- |
-| `set_local_pose(pose)` | Sets the pose of the object by transforming all vertices. |
-| `get_local_pose()` | **Not Supported**. Raises `NotImplementedError` because a deformed object does not have a single rigid pose. |
+`set_local_pose(pose, env_ids=...)` places the captured rest shape at an
+arena-local `xyz + xyzw` pose or 4×4 transform and zeros node velocities.
+Use `set_nodal_state()` to preserve the current deformation while moving or
+initializing the nodes. To restore the configured resting placement and
+materials, call `reset(env_ids=...)`. Read the current shape through
+`data.nodal_pos_w`.
 
+## Related Topics
 
-```python
-# Reset or Move the Cloth Object
-target_pose = torch.tensor([[0, 0, 1.0, 0, 0, 0, 1]], device=device) # (x, y, z, qx, qy, qz, qw)
-cloth_object.set_local_pose(target_pose)
-
-# Important: Step simulation to apply changes
-sim.update()
-```
+- {doc}`Cloth Body Simulation </tutorial/create_cloth>` for a rendered tutorial.
+- {doc}`sim_soft_object` for particle sets with a tetrahedral interior.
+- {doc}`sim_assets` for the asset overview and the cable segment-state interface.

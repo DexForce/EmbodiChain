@@ -3,411 +3,297 @@
 ```{currentmodule} embodichain.lab.sim
 ```
 
-The {class}`~objects.Articulation` class represents the fundamental physics entity for articulated objects (e.g., robots, grippers, cabinets, doors) in EmbodiChain.
+An {class}`~objects.Articulation` joins rigid links with joints. Use it for
+mechanisms such as doors, drawers, and hinges. For a robot that needs named
+control parts and part-specific kinematic solvers, use {doc}`sim_robot`.
 
 ## Configuration
 
-Articulations are configured using the {class}`~cfg.ArticulationCfg` dataclass.
+Declare an {class}`~cfg.ArticulationCfg` with `sim.add_articulation(cfg)`.
 
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `fpath` | `str` | `None` | Path to the asset file (URDF/USD). |
-| `init_pos` | `tuple` | `(0,0,0)` | Initial root position `(x, y, z)`. |
-| `init_rot` | `tuple` | `(0,0,0)` | Initial root rotation `(r, p, y)` in degrees. |
-| `root_props` | `ArticulationRootPropertiesCfg` | `fixed_base=True`, `self_collision_enabled=False`; other fields `None` | Fixed-base/self-collision are portable; root sleep and paired solver iterations are Default-only and ignored by Newton. Explicit `None` preserves source/backend values. |
-| `asset_physics_mode` | `"preserve" \| "overlay"` | `"preserve"` | Preserve source link/joint physics, or apply explicitly configured overlays after source resolution. |
-| `init_qpos` | `List[float]` | `None` | Initial joint positions. |
-| `qpos_limits` | `Tensor` / `Dict[str, List[float]]` | `None` | Override limits by flattened source-resolved DOF order or joint-name/regex rules before backend build. |
-| `body_scale` | `List[float]` | `[1.0, 1.0, 1.0]` | Scaling factors for the articulation links. |
-| `joint_drive_props` | `JointDrivePropertiesCfg` | `None` | Optional sparse joint drive, limit, friction, and armature overlay. |
-| `attrs` | `RigidBodyPhysicsCfg` | empty groups | Grouped rigid-body physics applied to all links. |
-| `link_attrs` | `dict[str, LinkPhysicsOverrideCfg]` | `None` | Optional per-link overrides keyed by group name; each group matches link names via regex. |
+| Field | Meaning |
+| :--- | :--- |
+| `fpath` or `source` | A local URDF path, or an authored USD articulation selected with `UsdSourceCfg`. |
+| `uid`, `init_pos`, `init_rot` | Scene identity and initial arena-local placement. A homogeneous `init_local_pose` takes precedence over position and Euler angles. |
+| `root_props` | Root settings such as fixed base and self-collision. Defaults are fixed base and disabled self-collision. |
+| `asset_physics_mode` | `"preserve"` retains source link and joint physics. `"overlay"` applies explicit physical overrides. Root policy and scale are configured separately. |
+| `init_qpos` | Initial positions in source-resolved DOF order. |
+| `qpos_limits` | Position-limit overrides by joint name or regex, or as a `(dof, 2)` array. |
+| `joint_drive_props` | Sparse overrides of source or backend joint drive properties. |
+| `attrs`, `link_attrs` | Shared rigid-body properties and per-link overrides. |
+| `build_pk_chain` | Defaults to `True` for FK and Jacobians. Set `False` to load a supported simulation topology that cannot be represented as a kinematic tree. |
 
-At runtime, call `articulation.set_gravity(...)` to change gravity for every
-environment or for a selected set of environment indices.
+## Setup & Initialization
 
-### Combined state writes
-
-Use `Articulation.set_state` (also inherited by `Robot`) to reset selected
-articulations in one Scene batch operation:
+Run this headless example from the repository root. The bundled hinge URDF
+contains its link geometry and joint limits. An explicit position drive
+commands the hinge from its measured state.
 
 ```python
-robot.set_state(
-    env_ids=env_ids,
-    joint_ids=policy_joint_ids,
-    root_pose=pose,             # (N, 7): environment-local xyz + xyzw
-    qpos=joint_position,        # (N, J), clipped to the selected joint limits
-    target_qpos=joint_position,
-    clear_dynamics=True,
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.cfg import ArticulationCfg, JointDrivePropertiesCfg, RenderCfg
+
+sim = SimulationManager(
+    SimulationManagerCfg(
+        headless=True,
+        device="cpu",
+        render_cfg=RenderCfg(renderer="no-render"),
+    )
+)
+try:
+    articulation = sim.add_articulation(
+        ArticulationCfg(
+            uid="hinged_arm",
+            fpath="examples/sim/sensors/state/hinge.urdf",
+            init_pos=(0.0, 0.0, 0.3),
+            asset_physics_mode="overlay",
+            joint_drive_props=JointDrivePropertiesCfg(
+                drive_type="force",
+                target_mode="position",
+                stiffness=40.0,
+                damping=4.0,
+            ),
+        )
+    )
+    sim.prepare()
+    qpos = articulation.get_qpos()
+    target = qpos + 0.2  # radians for the revolute joint
+    articulation.set_qpos(target, target=True)
+    sim.update(step=1, render_final_step=False)
+finally:
+    sim.destroy(exit_process=False)
+    SimulationManager.flush_cleanup_queue()
+```
+
+### USD Import
+
+Set `source_prim_path` to choose one articulation from the USD source. A
+scene can contain several jointed mechanisms, so select the exact prim.
+
+```python
+from embodichain.lab.sim.cfg import ArticulationCfg, UsdSourceCfg
+
+door_cfg = ArticulationCfg(
+    uid="door",
+    source=UsdSourceCfg(file_path="workcell.usda", source_prim_path="/World/Door"),
+    asset_physics_mode="preserve",
 )
 ```
 
-All supplied joint fields share the selected row and joint order. Optional
-`qvel`, `target_qvel`, `qf`, and `root_velocity` fields override reset defaults.
-`clear_dynamics=True` clears velocities, forces, external wrenches and solver
-history, and holds the final joint positions where no target is supplied.
-Newton/MJWarp requires all articulations in each affected solver world when
-clearing solver history. Other environments retain their state.
+Declare constrained USD assets before preparation on the Default backend.
+Use `sim.add_usd()` to import a scene with constraints between distinct
+objects or between an object and the world. See {doc}`sim_assets` for scene
+import and placement guidance.
 
-The Scene batch validates shapes and selections before writes, then propagates
-final joint kinematics once. Native execution errors are reported to the caller.
-Single-field joint setters use this same writer; target-only writes do not
-recompute kinematics. State changes follow the existing render-frame publication lifecycle.
+## Articulation Class
+
+`E = articulation.num_instances`, `J = articulation.dof`, and
+`L = len(articulation.link_names)`. Joint tensors follow `joint_names`.
+Link tensors follow `link_names`.
+
+| Read | Shape | Meaning |
+| :--- | :--- | :--- |
+| `get_local_pose()` | `(E, 7)` | Root pose relative to the environment origin, in `xyz + xyzw` order. |
+| `get_link_pose(link_name)` | `(E, 7)` | Pose of one named link in the local arena. Use `to_matrix=True` for homogeneous matrices. |
+| `get_qpos()`, `get_qvel()` | `(E, J)` | Current joint positions and velocities. Pass `target=True` to read the commanded targets. |
+| `body_data.mass` | `(E, L)` | Mass for every link. |
+| `get_qpos_limits()` | `(E, J, 2)` | Effective lower and upper position limits. |
+
+Clone state views that you need to keep across subsequent reads.
+
+### Joint Control
+
+Use `set_qpos(..., target=True)` and `set_qvel(..., target=True)` for motion
+through the configured drives. Step the simulation after writing the
+targets so the solver can act on them. With `target=False`, the same methods
+write the current state directly. Use `set_qf()` to apply generalized
+joint effort where supported.
+
+### Combined state writes
+
+Use `Articulation.set_state()` (also inherited by `Robot`) to write selected
+root and joint state in one operation. Every supplied joint tensor shares the
+selected environment and joint order.
+
+```python
+env_ids = [0]
+joint_ids = [0]
+qpos = articulation.get_qpos()[env_ids][:, joint_ids].clone()
+articulation.set_state(
+    env_ids=env_ids,
+    joint_ids=joint_ids,
+    qpos=qpos,
+    target_qpos=qpos,
+)
+```
+
+Optional fields include `qvel`, `target_qvel`, `qf`, `root_pose`, and
+`root_velocity`. With `clear_dynamics=True`, the write clears velocities,
+forces, external wrenches, and supported solver history, and holds the final
+positions where no target is supplied. Explicit fields override these
+reset defaults. Newton/MJWarp requires all articulations in each affected
+solver world when clearing solver history. Use
+`sim.reset_objects_state(env_ids=...)` for an episode reset across the scene.
 
 ### Root velocity writes
 
-`Articulation.set_root_velocity(velocity, env_ids=None)` writes root-link velocities
-in world coordinates. The tensor has shape `(N, 6)`: linear velocity in m/s,
-followed by angular velocity in rad/s. Omitting `env_ids` selects all environments;
-selected writes use the requested environment order and preserve other rows.
-`Robot` inherits this method. Writes use the existing Scene batch APIs.
+`set_root_velocity(velocity, env_ids=...)` accepts world-frame root-link
+velocity, with shape `(selected_envs, 6)`. Put linear velocity in m/s first
+and angular velocity in rad/s second. The input rows follow `env_ids`.
+
+### Pose Control
+
+Use `set_local_pose(pose, env_ids=...)` to reposition the root. Pass
+`(selected_envs, 7)` pose vectors in `xyz + xyzw` order or
+`(selected_envs, 4, 4)` matrices. Named link poses can then be read through
+`get_link_pose()`.
+
+### State Reset
+
+`articulation.reset(env_ids=...)` restores the selected instances' initial
+poses, joint state, and captured properties. In code that owns the entire
+episode, call `sim.reset_objects_state(env_ids=...)` to coordinate the reset
+with the engine and the rest of the scene.
+
+## Physics and Drives
+
+Fixed-base and self-collision settings are portable. The Default backend
+also accepts root sleep and solver iteration settings in `root_props`.
 
 ### Per-link physics (`link_attrs`)
 
-By default, `attrs` applies the same rigid-body physics to every link. Use `link_attrs` to
-override specific links (matched by regex, same rules as joint drive dict keys):
+In overlay mode, `attrs` applies rigid-body properties to every link.
+`link_attrs` applies a sparse {class}`~cfg.LinkPhysicsOverrideCfg` on top of
+that baseline. Each group matches source link names by regex. Assign each
+link to at most one group.
 
 ```python
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
-    CollisionPropertiesCfg,
     LinkPhysicsOverrideCfg,
     RigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
 )
 
-art_cfg = ArticulationCfg(
-    fpath="path/to/robot.urdf",
+cfg = ArticulationCfg(
+    uid="hinged_arm",
+    fpath="examples/sim/sensors/state/hinge.urdf",
     asset_physics_mode="overlay",
-    attrs=RigidBodyPhysicsCfg(
-        material_props=RigidBodyMaterialCfg(static_friction=0.5),
-    ),
     link_attrs={
-        "eef": LinkPhysicsOverrideCfg(
-            link_names_expr=[".*(hand|finger|ee).*"],
+        "contact_link": LinkPhysicsOverrideCfg(
+            link_names_expr=["arm"],
             attrs=RigidBodyPhysicsCfg(
-                material_props=RigidBodyMaterialCfg(static_friction=0.95),
-                collision_props=CollisionPropertiesCfg(contact_offset=0.001),
+                material_props=RigidBodyMaterialCfg(static_friction=0.8),
             ),
         ),
     },
 )
 ```
 
-At runtime, use `articulation.set_link_physical_attr(...)` and `get_link_physical_attr(...)`
-for the same partial-override behavior.
+Use `set_link_physical_attr()` and `get_link_physical_attr()` for supported
+runtime reads and partial overrides.
 
 ### Source mass properties
 
-For URDF-backed articulations, `MassPropertiesCfg.recompute_inertia` is the
-only switch that permits geometry-derived mass properties to replace the
-asset's authored inertia. It defaults to `False` (or `None`, which resolves to
-the same behavior), so an `overlay` that only configures joint drives or other
-unrelated attributes retains the source mass, inertia, and center of mass in
-both backends. Set it to `True` only when collision geometry should be used to
-derive a new tensor. A positive `mass` can be overridden while retaining the
-source tensor; `density` requires `recompute_inertia=True` when the source
-already provides a valid tensor. An all-zero or otherwise invalid source
-tensor is not preserved: when the link has collision geometry, both backends
-derive a fallback tensor from that geometry.
+With URDF sources, `MassPropertiesCfg.recompute_inertia=True` allows the
+collision geometry to replace an authored inertia tensor. By default, an
+overlay that changes a drive or other unrelated field preserves valid source
+mass, inertia, and COM. A positive mass override can retain the authored
+tensor. To use density as an override when a valid source tensor exists,
+enable recomputation. If the source inertia is invalid and collision geometry
+is available, both backends can derive a fallback tensor.
 
 ### Reading current mass properties
 
-`articulation.body_data.read_physical_properties()` refreshes and returns mass,
-principal inertia and local center-of-mass (COM) pose tensors. Shapes are
-`(N, num_links)`, `(N, num_links, 3)` and `(N, num_links, 7)` respectively, in
-the public `link_names` order. COM poses use `(x, y, z, qx, qy, qz, qw)`.
+`articulation.body_data.read_physical_properties()` returns mass, principal
+inertia, and local center-of-mass pose in the public link order. Their
+shapes are `(E, L)`, `(E, L, 3)`, and `(E, L, 7)`. Clone the returned
+buffers for a snapshot across reads.
 
-On Newton, this read uses DexSim's batch property APIs and reuses the output
-buffers, avoiding per-link transfers to the host. Clone returned tensors when
-retaining a snapshot across subsequent reads. Other backends retain their
-existing property read path.
-
-`set_inertia()` keeps the current principal frame; `set_com_pose()` keeps the
-current principal moments and changes their orientation and COM position.
-EmbodiChain composes `R diag(I) R.T` before writing DexSim's body-frame mat33.
-`get_newton_link_properties()` exposes that matrix plus `com_position`, without
-a separate quaternion. Principal axes can differ by ordering or quaternion sign;
-compare reconstructed matrices when checking physical equivalence.
-
-Initialization defaults remain separate. `reset(env_ids=...)` restores the
-saved inertia/frame pair and COM position only for selected environments.
+`set_inertia()` keeps the current principal frame. `set_com_pose()` keeps
+the principal moments while changing their orientation and COM position.
+The corresponding body-frame inertia matrix is `R diag(I) Rᵀ`.
+`get_newton_link_properties()` exposes that matrix and the COM position.
+Reset restores the captured inertia and COM frame for the selected instances.
 
 ### Drive Configuration
 
-The `joint_drive_props` parameter uses `JointDrivePropertiesCfg` for sparse
-joint-property overlays. Each field defaults to `None`, preserving its source
-or backend value. Generic articulations default to
-`asset_physics_mode="preserve"`; explicit drive changes require `"overlay"`.
-Robot configurations default to `"overlay"`. An unspecified drive is not an
-instruction to remove an existing source-authored actuator.
+Use {class}`~cfg.JointDrivePropertiesCfg` in overlay mode to configure gains,
+limits, friction, and targets. Omitted fields preserve their source or
+backend values.
 
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `stiffness` | `float` / `Dict` | `None` | Position gain; force-drive units are N/m or N·m/rad. |
-| `damping` | `float` / `Dict` | `None` | Velocity gain; force-drive units are N·s/m or N·m·s/rad. |
-| `max_effort` | `float` / `Dict` | `None` | Authored effort limit in N or N·m; solver enforcement varies. |
-| `max_velocity` | `float` / `Dict` | `None` | Authored speed limit in m/s or rad/s; solver enforcement varies. |
-| `friction` | `float` / `Dict` | `None` | Passive joint friction; interpretation depends on backend/solver. |
-| `armature` | `float` / `Dict` | `None` | Added joint-space inertia in kg for prismatic joints or kg·m² for revolute joints. |
-| `drive_type` | `str` | `None` | `"force"`, `"acceleration"` (Default only), or `"none"`; omission preserves the source value. |
-| `target_mode` | `str` / `int` / `Dict` | `None` | Target components: `none`/0, `position`/1, `velocity`/2, `position_velocity`/3, or `effort`/4. |
+| Field | Meaning |
+| :--- | :--- |
+| `stiffness`, `damping` | Position and velocity gains. For force drives, units follow linear force or rotary torque. |
+| `max_effort`, `max_velocity` | Authored effort and speed limits. Enforcement depends on the solver. |
+| `friction`, `armature` | Passive friction and added joint-space inertia, subject to solver support. |
+| `drive_type` | `"force"`, `"acceleration"` (Default only), or `"none"`. |
+| `target_mode` | `"none"` / 0, `"position"` / 1, `"velocity"` / 2, `"position_velocity"` / 3, or `"effort"` / 4. |
 
-`None` is accepted for every field in this table. Gain units shown apply to
-force/torque drives; Default acceleration drives use a mass-independent
-response. Newton rejects active acceleration drives. Unless `target_mode` is
-explicit, `drive_type="force"` or `"acceleration"` selects
-`position_velocity`, while `drive_type="none"` selects `none`.
+Without an explicit target mode, an active force or acceleration drive uses
+position and velocity targets. Default implements target modes through
+effective gains. Newton uses native modes where supported and gain-based
+fallbacks elsewhere. Non-MuJoCo Newton position mode assumes a zero velocity
+target.
 
-Default implements target components through effective gains. Newton authors
-its target mode and uses gain-based fallbacks for solvers without native mode
-support: `none` and `effort` clear both gains, and `velocity` clears position
-gain. Non-MuJoCo Newton position mode assumes a zero velocity target.
-
-Newton support for effort/velocity limits, passive friction, and armature is
-solver-dependent; storing a value is not proof that the solver enforces it.
-Inspect the resolved properties and test the response after changing solvers.
+Use `get_joint_drive()` to inspect stiffness, damping, effort limit,
+velocity limit, friction, and armature in that order. Each tensor has shape
+`(E, J)` for a full read. `get_joint_drive_type()` reports the resolved
+drive types. Use `set_joint_drive()` for supported runtime updates and
+validate the motion response on the solver you selected.
 
 ### Joint Position Limits
 
-When binding a finalized Scene, `ArticulationData` initializes position,
-velocity and effort limits through one DexSim `ArticulationBatch` property
-read. Each environment retains its own values in public DOF order. The
-`joint_stiffness`, `joint_damping`, `joint_friction` and `joint_armature`
-properties also use this batch interface and return independent snapshots of
-the current model. Retained descriptor edits that require a Scene rebuild
-become visible after that rebuild.
+Set `qpos_limits` on the configuration to replace source limits before
+preparation. A dictionary selects joints by name or regex, for example
+`qpos_limits={"hinge": [-1.2, 1.2]}`. An array supplies one row per joint
+in source-resolved DOF order. After preparation, read the effective limits
+with `get_qpos_limits()` or change supported limits with
+`set_qpos_limits()`. `set_qpos()` clips to effective limits by default.
 
-Use `qpos_limits` to override the limits defined in the asset file. This is the
-articulation's effective physical limit in simulation, so it is also the range
-used when `set_qpos(...)` clamps requested joint positions.
+Use `SolverCfg.user_qpos_limits` to constrain planning or IK inside the
+physical limits. See {doc}`sim_robot` for part-specific limits.
+
+## Kinematics
+
+With `build_pk_chain=True`, `compute_fk()` evaluates the configured
+kinematic tree at the supplied joint positions. For example, on the
+prepared hinge above, compute the `arm` transform relative to `base`.
 
 ```python
-from embodichain.lab.sim.cfg import ArticulationCfg
-import torch
-
-# Override specific joints by name or regex at initialization.
-art_cfg = ArticulationCfg(
-    fpath="assets/robots/franka/franka.urdf",
-    qpos_limits={
-        "panda_joint1": [-2.5, 2.5],
-        "panda_joint[2-4]": [-1.5, 1.5],
-    },
-)
-
-# Or provide a (dof, 2) tensor/array applied to all environments.
-dof = 7
-art_cfg = ArticulationCfg(
-    fpath="assets/robots/franka/franka.urdf",
-    qpos_limits=torch.tensor([[-2.0, 2.0]] * dof),
+transform = articulation.compute_fk(
+    qpos=articulation.get_qpos(),
+    root_link_name="base",
+    end_link_name="arm",
 )
 ```
 
-You can also change the active limits at runtime:
-
-```python
-# Tighten limits for joints 0 and 1 on all environments.
-new_limits = torch.tensor([[-0.1, 0.1], [-0.2, 0.2]], device=device)
-articulation.set_qpos_limits(new_limits, joint_ids=[0, 1])
-
-# Query the effective limits.
-effective_limits = articulation.get_qpos_limits(joint_ids=[0, 1])
-```
-
-If you need solver-only planning limits that are tighter than the physical
-articulation limits, configure them on the solver with
-`SolverCfg.user_qpos_limits`; that behavior lives in the solver layer, not the
-articulation layer.
-
-### Setup & Initialization
-
-```python
-import torch
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import ArticulationCfg, ArticulationRootPropertiesCfg
-from embodichain.lab.sim.objects import Articulation
-
-# 1. Initialize Simulation
-device = "cuda" if torch.cuda.is_available() else "cpu"
-sim_cfg = SimulationManagerCfg(device=device)
-sim = SimulationManager(sim_config=sim_cfg)
-
-# 2. Configure Articulation
-art_cfg = ArticulationCfg(
-    fpath="assets/robots/franka/franka.urdf",
-    init_pos=(0, 0, 0.5),
-    root_props=ArticulationRootPropertiesCfg(fixed_base=True),
-)
-
-# 3. Spawn Articulation
-# Note: The method is 'add_articulation'
-articulation: Articulation = sim.add_articulation(cfg=art_cfg)
-
-# 4. Reset Simulation
-# This performs a global reset of the simulation state
-sim.reset_objects_state()
-```
-
-### USD Import
-
-You can import USD files (`.usd`, `.usda`, `.usdc`) as articulations:
-
-```python
-from embodichain.data import get_data_path
-
-# Import USD with properties from file
-usd_art_cfg = ArticulationCfg(
-    fpath=get_data_path("path/to/robot.usd"),
-    init_pos=(0, 0, 0.5),
-    asset_physics_mode="preserve",
-)
-usd_robot = sim.add_articulation(cfg=usd_art_cfg)
-
-# Or override USD properties with config (URDF behavior)
-usd_art_cfg_override = ArticulationCfg(
-    fpath=get_data_path("path/to/robot.usd"),
-    init_pos=(0, 0, 0.5),
-    asset_physics_mode="overlay",
-    joint_drive_props=JointDrivePropertiesCfg(stiffness=5000, damping=500),
-)
-robot = sim.add_articulation(cfg=usd_art_cfg_override)
-```
-
-## Articulation Class
-
-State data is accessed via getter methods that return batched tensors (`N` environments). Certain static properties are available as standard class properties.
-
-| Property | Type | Description |
-| :--- | :--- | :--- |
-| `num_envs` | `int` | Number of simulation environments this articulation is instantiated in. |
-| `dof` | `int` | Degrees of freedom (number of actuated joints). |
-| `joint_names` | `List[str]` | Names of all movable joints. |
-| `link_names` | `List[str]` | Names of all rigid links. |
-| `mass` | `Tensor` | Total mass of the articulation per environment `(N, 1)`. |
-
-| Method | Shape / Return Type | Description |
-| :--- | :--- | :--- |
-| `get_local_pose(to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Root link pose `[x, y, z, qx, qy, qz, qw]` or a 4x4 matrix. |
-| `get_link_pose(link_name, to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Specific link pose `[x, y, z, qx, qy, qz, qw]` or a 4x4 matrix. |
-| `get_qpos(target=False)` | `(N, dof)` | Current joint positions (or joint targets if `target=True`). |
-| `get_qvel(target=False)` | `(N, dof)` | Current joint velocities (or velocity targets if `target=True`). |
-| `get_joint_drive()` | `Tuple[Tensor, ...]` | Returns `(stiffness, damping, max_effort, max_velocity, friction, armature)`, each shaped `(N, dof)`. |
-| `get_joint_drive_type()` | `list[list[DriveType]]` | Backend drive type for each selected environment and joint. |
-
-```python
-# Example: Accessing state
-print(f"Degrees of freedom: {articulation.dof}")
-print(f"Current Joint Positions: {articulation.get_qpos()}")
-print(f"End Effector Pose: {articulation.get_link_pose('ee_link')}")
-```
+For full-chain FK, pass `qpos_joint_names` when the input tensor follows a
+named order that differs from the chain. For measured simulation link poses,
+call `get_link_pose()`.
 
 ### Atomic Skill Geometry Adapter
 
-`Articulation` exposes deterministic, domain-neutral facts through APIs such as
-`get_link_vert_face()`, `compute_fk()`, and `get_parent_joint_chain()`. Atomic
-Action integrations compose those facts with initial-state mesh transforms,
-Open3D surface sampling, and affordance-specific geometry metadata through
-`sample_initial_articulation_geometry()` in
-`embodichain.lab.sim.atomic_skills`. The adapter returns a typed value; call
-`to_object_geometry()` only at the `ObjectSemantics.geometry` boundary.
-
-Keeping this stochastic conversion in the Atomic Skill layer means simulation
-objects do not own private point-cloud keys or affordance interpretation.
+`get_link_vert_face()`, `compute_fk()`, and `get_parent_joint_chain()`
+expose link geometry and kinematics. For sampled affordance geometry, use
+`sample_initial_articulation_geometry()` from
+`embodichain.lab.sim.atomic_skills`. The adapter returns a typed result.
+Convert it with `to_object_geometry()` at the `ObjectSemantics.geometry`
+boundary.
 
 ### Visual Appearance
 
-Asset materials are wrapped automatically during articulation construction. Materials are organized by environment and link:
+Set `link_visuals` by exact source link name to customize appearance at
+declaration. For a prepared scene with a native renderer,
+`get_visual_material_inst()` returns one dictionary per environment,
+keyed by link name. Use `get_existing_visual_material()` for per-segment
+edits and `restore_visual_material()` to restore the authored assignments.
+`reset()` also restores those assignments for the selected environments.
 
-```python
-materials = articulation.get_visual_material_inst()
-base_material = materials[0].get("base_link")
-if base_material is not None:
-    base_material.set_roughness(0.5)
-```
+## Related Topics
 
-| Method | Return / Args | Description |
-| :--- | :--- | :--- |
-| `set_visual_material(mat, env_ids=None, link_names=None, shared=False)` | `mat: VisualMaterial` | Create and assign material instances to selected links. |
-| `restore_visual_material(env_ids=None, link_names=None)` | - | Restore the asset's original per-link, per-segment materials. |
-| `get_visual_material_inst(env_ids=None, link_names=None)` | `List[Dict[str, VisualMaterialInst]]` | Get representative materials by environment and link. Missing materials are omitted from each dictionary. |
-| `get_existing_visual_material(env_ids=None, link_names=None, shared=False)` | `List[Dict[str, List[ReuseSegmentState]]]` | Retain each original segment instance and create a working instance from the link's existing material template. |
-
-For links with multiple mesh segments, `get_visual_material_inst()` exposes the first valid material. Use `get_existing_visual_material()` for per-segment operations. Segments on the same link share one working instance, while each link keeps an independent working instance. `shared=True` builds link state from the first environment for reuse across the batch. `reset()` restores the original materials for every link in each selected environment before resetting articulation state.
-
-### Control & Dynamics
-You can control the articulation by setting target states or directly applying forces.
-
-### Joint Control
-```python
-# Set joint position targets (PD Control)
-# Get current qpos to create a target tensor of correct shape
-current_qpos = articulation.get_qpos()
-target_qpos = torch.zeros_like(current_qpos)
-
-# Set target position
-# target=True: Sets the drive target. The physics engine applies forces to reach this position.
-# target=False: Instantly resets/teleports joints to this position (ignoring physics).
-articulation.set_qpos(target_qpos, target=True)
-
-# Set target velocities
-target_qvel = torch.zeros_like(current_qpos)
-articulation.set_qvel(target_qvel, target=True)
-
-# Apply forces directly
-# Sets an external force tensor (N, dof) applied at the degree of freedom. 
-target_qf = torch.ones_like(current_qpos) * 10.0
-articulation.set_qf(target_qf)
-
-# Important: Step simulation to apply control
-sim.update()
-```
-
-### Pose Control
-```python
-# Teleport the articulation root to a new pose
-# shape: (N, 7) formatted as [x, y, z, qx, qy, qz, qw]
-new_root_pose = torch.tensor([[0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]], device=device).repeat(sim.num_envs, 1)
-articulation.set_local_pose(new_root_pose)
-```
-
-### Drive Configuration
-Dynamically adjust drive properties.
-
-```python
-# Set stiffness for all joints
-articulation.set_joint_drive(
-    stiffness=torch.tensor([100.0], device=device), 
-    damping=torch.tensor([10.0], device=device)
-)
-```
-
-### Kinematics
-Supports differentiable Forward Kinematics (FK) and Jacobian computation.
-
-```python
-# Compute Forward Kinematics
-# Note: Ensure `build_pk_chain=True` in cfg
-if getattr(art_cfg, 'build_pk_chain', False):
-    # Returns (batch_size, 4, 4) homogeneous transformation matrix
-    ee_pose = articulation.compute_fk(
-        qpos=articulation.get_qpos(),
-        end_link_name="ee_link" # Replace with actual link name
-    )
-    
-    # Or return a dictionary of multiple link transforms (pytorch_kinematics Transform3d objects)
-    link_poses = articulation.compute_fk(
-        qpos=articulation.get_qpos(),
-        link_names=["link1", "link2"],
-        to_dict=True
-    )
-```
-
-### State Reset
-Resetting an articulation returns it to its initial state properties.
-```python
-# Clear the physical dynamics and velocities
-articulation.clear_dynamics()
-
-# Reset the articulation entirely (resets pose, velocities, and root states to config defaults)
-articulation.reset()
-```
+- {doc}`sim_robot` for named control parts, robot presets, FK, and IK.
+- {doc}`Robot Articulation tutorial </tutorial/robot_articulation>` for a
+  complete rendered example.
+- {doc}`sim_manager/physics/newton/runtime_qualification` for runtime and
+  solver-specific support.

@@ -3,160 +3,120 @@
 ```{currentmodule} embodichain.lab.sim
 ```
 
-The `RigidObjectGroup` class represents a logical collection of rigid objects that are created and managed together. It is useful for spawning multiple related rigid bodies (e.g., multi-part props, object sets) and performing batch operations such as resetting, applying transforms, or querying group-level observations.
+Use {class}`~objects.RigidObjectGroup` to declare several independent rigid
+bodies under one scene UID. Each environment gets the same ordered group of
+members. A group exposes both an environment axis and a member axis. For a
+single body with several collider shapes, use `CompoundShapeCfg` with
+{doc}`sim_rigid_object`.
 
 ## Configuration
 
-Configured via the {class}`~cfg.RigidObjectGroupCfg` class.
+Supply a {class}`~cfg.RigidObjectGroupCfg` to
+`sim.add_rigid_object_group(cfg)`.
 
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `uid` | `str` | `None` | Unique identifier for the group. |
-| `rigid_objects` | `Dict[str, RigidObjectCfg]` | `MISSING` | Mapping from member uid to its `RigidObjectCfg`. Each entry spawns one rigid object. When `folder_path` is provided, this acts as a template. |
-| `body_type` | `Literal["dynamic","kinematic"]` | `"dynamic"` | Default body type applied to group members (can be overridden per-member). |
-| `folder_path` | `str | None` | `None` | Optional folder to initialize many objects from mesh files; if specified, `rigid_objects` should contain a template `RigidObjectCfg`. |
-| `max_num` | `int` | `1` | When `folder_path` is used, number of objects to sample/create from the folder. |
-| `ext` | `str` | `".obj"` | File extension filter when loading assets from `folder_path`. |
-| `init_pos` / `init_rot` | `Sequence` (optional) | group-level transform | Optional transform to apply as a base offset to all members. |
+| Field | Meaning |
+| :--- | :--- |
+| `uid` | Unique scene identifier for the whole group. |
+| `rigid_objects` | Ordered mapping of member names to `RigidObjectCfg`. Each member supplies its own shape, placement, and physical properties. |
+| `body_type` | One actor type for every member. Use `"dynamic"` or `"kinematic"`. |
+| `folder_path`, `max_num`, `ext` | Folder-backed member expansion via `RigidObjectGroupCfg.from_dict()`. |
 
-Refer to {class}`~cfg.RigidObjectCfg` and {class}`~cfg.RigidBodyPhysicsCfg` for per-member configuration options (mass, friction, restitution, collision options, shapes, etc.).
+The manager creates internal UIDs for group members. Use the order of
+`rigid_objects` to address those members with `obj_ids`. Declare a separate
+`RigidObject` when a body needs its own scene lookup or a different actor type.
 
 ### Folder-based initialization
 
-If `RigidObjectGroupCfg.folder_path` is specified, the group can be auto-populated from files under that folder. The `from_dict` implementation will:
-
-- list files with extension `ext` under `folder_path`,
-- select up to `max_num` files (wrapping if necessary),
-- copy the template `RigidObjectCfg` provided in `rigid_objects` and set each member's `shape.fpath` to the selected file path and give each member a generated uid.
-
-This makes it convenient to spawn many similar objects from an asset directory.
+`RigidObjectGroupCfg.from_dict()` can expand a directory of mesh files. Give
+it a valid `folder_path`, an extension such as `".obj"`, a positive
+`max_num`, and one entry in `rigid_objects` as the configuration template.
+The loader requires at least one matching file and cycles the available files
+if more members are requested. An explicit ordered mapping is the right
+choice when member order must be reproducible.
 
 ## Setup & Initialization
 
+This headless CPU example creates two bodies in each of two environments.
+The pose write targets member zero in environment zero.
+
 ```python
 import torch
+
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.cfg import RenderCfg, RigidObjectCfg, RigidObjectGroupCfg
 from embodichain.lab.sim.shapes import CubeCfg
-from embodichain.lab.sim.objects import (
-    RigidObjectGroup, RigidObjectGroupCfg, RigidObjectCfg
+
+sim = SimulationManager(
+    SimulationManagerCfg(
+        headless=True,
+        device="cpu",
+        num_envs=2,
+        render_cfg=RenderCfg(renderer="no-render"),
+    )
 )
-from embodichain.lab.sim.cfg import (
-    MassPropertiesCfg,
-    RigidBodyMaterialCfg,
-    RigidBodyPhysicsCfg,
-)
-
-# 1. Initialize Simulation
-device = "cuda" if torch.cuda.is_available() else "cpu"
-sim_cfg = SimulationManagerCfg(device=device)
-sim = SimulationManager(sim_cfg)
-
-# 2. Define shared physics attributes
-physics_attrs = RigidBodyPhysicsCfg(
-    mass_props=MassPropertiesCfg(mass=1.0),
-    material_props=RigidBodyMaterialCfg(
-        dynamic_friction=0.5,
-        static_friction=0.5,
-        restitution=0.1,
-    ),
-)
-
-# 3. Create group config with multiple members
-group_cfg = RigidObjectGroupCfg(
-    uid="obj_group",
-    rigid_objects={
-        "cube_1": RigidObjectCfg(uid="cube_1", shape=CubeCfg(size=[0.1,0.1,0.1]), attrs=physics_attrs, init_pos=[0.0,0.0,1.0]),
-        "cube_2": RigidObjectCfg(uid="cube_2", shape=CubeCfg(size=[0.2,0.2,0.2]), attrs=physics_attrs, init_pos=[0.5,0.0,1.0]),
-        "cube_3": RigidObjectCfg(uid="cube_3", shape=CubeCfg(size=[0.3,0.3,0.3]), attrs=physics_attrs, init_pos=[-0.5,0.0,1.0]),
-    }
-)
-
-# 4. Spawn the rigid object group
-obj_group: RigidObjectGroup = sim.add_rigid_object_group(cfg=group_cfg)
-
-# 5. Commit the complete scene, then run or step simulation
-sim.prepare()
-sim.update()
+try:
+    group = sim.add_rigid_object_group(
+        RigidObjectGroupCfg(
+            uid="blocks",
+            rigid_objects={
+                "small": RigidObjectCfg(
+                    shape=CubeCfg(size=[0.08] * 3), init_pos=(-0.2, 0.0, 0.2)
+                ),
+                "large": RigidObjectCfg(
+                    shape=CubeCfg(size=[0.12] * 3), init_pos=(0.2, 0.0, 0.2)
+                ),
+            },
+        )
+    )
+    sim.prepare()
+    poses = group.get_local_pose().clone()  # (2, 2, 7)
+    # Shape (1, 1, 7) for one environment and one member, with xyzw rotation.
+    target = torch.tensor([[[0.0, 0.0, 0.5, 0, 0, 0, 1]]], device=sim.device)
+    group.set_local_pose(target, env_ids=[0], obj_ids=[0])
+    sim.update(step=1, render_final_step=False)
+finally:
+    sim.destroy(exit_process=False)
+    SimulationManager.flush_cleanup_queue()
 ```
-
-The example `scripts/tutorials/sim/create_rigid_object_group.py` demonstrates creating and running a scene with a `RigidObjectGroup`.
 
 ## Rigid Object Group — Common Methods & Attributes
 
-
-A group provides batch operations on multiple rigid objects. Key APIs include:
-
-| Method / Property | Return / Args | Description |
-| :--- | :--- | :--- |
-| `num_objects` | `int` | Number of objects in each group instance. |
-| `body_data` | `RigidBodyGroupData` | Data manager providing `pose`, `lin_vel`, `ang_vel` properties. |
-| `body_state` | `(N, M, 13)` | Full body state of all members: [x, y, z, qx, qy, qz, qw, lin_x, lin_y, lin_z, ang_x, ang_y, ang_z]. |
-| `get_local_pose(to_matrix=False)` | `(N, M, 7)` or `(N, M, 4, 4)` | Poses of all members as `[x, y, z, qx, qy, qz, qw]` or matrices; M = number of members. |
-| `set_local_pose(pose, env_ids=None, obj_ids=None)` | `pose: (N, M, 7)` or `(N, M, 4, 4)` | Set poses in `[x, y, z, qx, qy, qz, qw]` or matrix form; requires `sim.update()` to apply. |
-| `get_user_ids()` | `(N, M)` | Get user IDs tensor for all members in the group. |
-| `clear_dynamics(env_ids=None)` | - | Reset velocities and clear all forces/torques for the group. |
-| `set_visual_material(mat, env_ids=None)` | `mat: VisualMaterial` | Change visual appearance for all members. |
-| `set_visible(visible=True)` | `visible: bool` | Set visibility for all members in the group. |
-| `set_physical_visible(visible=True, rgba=None)` | - | Set collision body visibility for debugging. |
-| `reset(env_ids=None)` | - | Reset all members to their initial configured transforms. |
-
 ### Observation Shapes
 
-- Group member poses (`body_data.pose`): `(N, M, 7)` where N is number of environments and M is number of objects in the group.
-- Member linear velocities (`body_data.lin_vel`): `(N, M, 3)`.
-- Member angular velocities (`body_data.ang_vel`): `(N, M, 3)`.
-- Full body state (`body_state`): `(N, M, 13)` containing [position (3), orientation (4), linear velocity (3), angular velocity (3)].
+`E = group.num_instances` and `M = group.num_objects`. Whole-group reads
+preserve both dimensions.
 
-Use these shapes when collecting vectorized observations for multi-environment training.
+| Read | Shape | Meaning |
+| :--- | :--- | :--- |
+| `get_local_pose()` | `(E, M, 7)` | Arena-local poses in `xyz + xyzw` order. `to_matrix=True` gives `(E, M, 4, 4)`. |
+| `body_data.lin_vel`, `body_data.ang_vel` | `(E, M, 3)` | Velocity vectors per body. |
+| `body_state` | `(E, M, 13)` | Pose, linear velocity, and angular velocity per body. |
+| `get_user_ids()` | `(E, M)` | Engine user IDs per member. |
 
-## Best Practices
-
-- Groups are convenient for batch operations: resetting, setting visibility, and applying transforms to multiple objects together.
-- Use `obj_ids` parameter in `set_local_pose()` to control specific objects within the group rather than all members.
-- Prefer simplified collision meshes or an explicit `MeshCfg.collision` convex-decomposition strategy with a bounded `max_hulls` for complex visual meshes.
-- `RigidObjectGroup` only supports `dynamic` and `kinematic` body types (not `static`).
-- When teleporting many members, batch pose updates and call `sim.update()` once to avoid synchronization overhead.
-- Add every initial scene asset, then call the backend-neutral `sim.prepare()`
-  before reading state or stepping. `BaseEnv` performs this boundary
-  automatically.
-- Use `clear_dynamics()` to reset velocities without changing poses.
+Clone arrays you plan to retain across subsequent state reads.
 
 ## Example: Working with Group Poses
 
+For selected pose writes, the leading axes must match the number of requested
+environment and member indices. The values are interpreted in the order
+supplied. For example, the following moves the second member of environment
+one up by 10 cm in a prepared two-environment scene.
+
 ```python
-import torch
-
-# Get current poses of all members
-poses = obj_group.get_local_pose()  # (N, M, 7) where N=num_envs, M=num_objects
-
-# Move specific objects in the group
-# Example: Move only the first object (cube_1) in all environments
-new_pose = torch.tensor([[[0.0, 1.0, 0.5, 1, 0, 0, 0]]], device=sim.device)  # (1, 1, 7)
-obj_group.set_local_pose(new_pose, env_ids=[0], obj_ids=[0])
-sim.update()
-
-# Access velocity data for all members
-linear_vels = obj_group.body_data.lin_vel  # (N, M, 3)
-angular_vels = obj_group.body_data.ang_vel  # (N, M, 3)
-
-# Reset all objects to initial configuration
-obj_group.reset()
-sim.update()
+target = group.get_local_pose()[1:2, 1:2].clone()
+target[..., 2] += 0.1
+group.set_local_pose(target, env_ids=[1], obj_ids=[1])
 ```
 
-## Integration with Sensors 
-
-Members in a group behave like normal `RigidObject`s and can be observed by
-cameras. They can also be included in a `ContactSensor` on the Default backend;
-Newton currently rejects that sensor through its capability boundary. You can
-operate on individual members or treat the group as a single unit depending on
-your scenario.
+Use `reset(env_ids=[1])` to restore the initial states of all members in
+environment one. `clear_dynamics(env_ids=[1])` clears velocities and wrenches
+for its dynamic members. `set_visual_material(mat, env_ids=[1])` assigns one
+material instance to all members in that environment.
 
 ## Related Topics
 
-- Rigid objects: See the Rigid Object overview for single-body.
-- Soft bodies: Deformable objects have different observation semantics (vertex-level data); see the {doc}`Soft Body Simulation Tutorial </tutorial/create_softbody>`.
-- Examples: `scripts/tutorials/sim/create_rigid_object_group.py` 
-
-
-<!-- End of rigid object group overview -->
+- {doc}`sim_rigid_object` for per-member shape and physics options.
+- {doc}`sensors/contact_sensor` and {doc}`sensors/backend_support` for
+  contact-target selection and backend capabilities.
+- [Rigid object group tutorial](https://github.com/DexForce/EmbodiChain/blob/main/scripts/tutorials/sim/create_rigid_object_group.py)
+  for a rendered example.
