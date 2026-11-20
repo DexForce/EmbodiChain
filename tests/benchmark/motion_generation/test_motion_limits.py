@@ -56,6 +56,7 @@ from embodichain.extensions.benchmarks.motion_generation.planners.toppra import 
 def _robot() -> SimpleNamespace:
     """Provide reordered control joints and a speed-limited mimic follower."""
     caps = torch.tensor([[4.0, 3.0, 1.0], [2.0, 5.0, 0.6]])
+    position_limits = torch.tensor([[[-2.0, 2.0]] * 3]).repeat(2, 1, 1)
     return SimpleNamespace(
         uid="robot",
         device=torch.device("cpu"),
@@ -65,6 +66,9 @@ def _robot() -> SimpleNamespace:
         mimic_parents=[0],
         mimic_multipliers=[-2.0],
         get_joint_ids=lambda name: [1, 0],
+        get_qpos_limits=lambda *, joint_ids, env_ids=None: (
+            position_limits if env_ids is None else position_limits[env_ids]
+        )[:, joint_ids],
         get_qvel_limits=lambda *, name=None, joint_ids=None: caps[
             :, [1, 0] if name else joint_ids
         ],

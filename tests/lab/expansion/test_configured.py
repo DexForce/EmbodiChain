@@ -193,7 +193,7 @@ def test_expansion_boundary_policy_preserves_selector_and_original_file(
     root = Path(__file__).resolve().parents[3]
     source = (
         root
-        / "extensions/embodichain_tasks/configs/components/execution_policies/trajectory_open_loop.yaml"
+        / "embodichain/extensions/tasks/configs/components/execution_policies/trajectory_open_loop.yaml"
     )
     policy = yaml.safe_load(source.read_text())
     owned = tmp_path / "policy.yaml"

@@ -282,7 +282,8 @@ class BenchmarkRunner:
                 physics_cfg=DefaultPhysicsCfg(
                     num_substeps=self.suite.protocol.physics_substeps
                 ),
-            )
+            ),
+            requires_native_renderer=not self.headless or self.video.enabled,
         )
         try:
             robot = self.robot_provider.add_robot(sim)

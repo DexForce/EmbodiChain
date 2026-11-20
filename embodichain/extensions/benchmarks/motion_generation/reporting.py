@@ -288,6 +288,22 @@ def write_markdown_report(
                 "compile_time_ms_p95",
             )
             metric_columns = _ATOMIC_METRIC_COLUMNS
+        elif view in {"affordance_reaching", "reaching_controls"}:
+            lines.extend(
+                [
+                    "Complete task-derived goal sequences are independently checked by FK. "
+                    "Geometry is the primary metric; hand actions, tracking and object physics are not evaluated. "
+                    "Task families and MoveEndEffector/MoveJoints controls are reported separately. "
+                    "AxisAlign uses a frozen full-pose realization. Raw nominal timing has no timed rank.",
+                    "",
+                ]
+            )
+            time_columns = tuple(
+                column
+                for column in _TIME_COLUMNS
+                if column not in {"execution_time_ms", "end_to_end_time_ms"}
+            )
+            metric_columns = _MOTION_METRIC_COLUMNS
         else:
             lines.extend(
                 [
@@ -375,7 +391,9 @@ def write_markdown_report(
         lines.extend(_format_table(rows["success_and_metrics"], metric_columns))
         lines.extend(["", "### Leaderboard", ""])
         leaderboard = rows["leaderboard"] + (
-            aggregates["motion_timing_leaderboard"] if view == "motion_planning" else []
+            aggregates["motion_timing_leaderboard"]
+            if view == "motion_planning"
+            else aggregates.get(f"{view}_timing_leaderboard", [])
         )
         lines.extend(_format_table(leaderboard, _VIEW_LEADERBOARD_COLUMNS))
         lines.append("")

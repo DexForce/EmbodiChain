@@ -42,6 +42,7 @@ from embodichain.extensions.benchmarks.motion_generation.robots.base import (
     EmbodimentRobotProvider,
 )
 from embodichain.extensions.benchmarks.motion_generation.runner import BenchmarkRunner
+from embodichain.extensions.benchmarks.motion_generation.video import VideoRecordCfg
 
 pytestmark = pytest.mark.no_sim
 
@@ -207,9 +208,22 @@ def test_multiple_resources_need_explicit_selection(component: Path) -> None:
     assert EmbodimentRobotProvider(resolved, "secondary").control_part == "custom_arm"
 
 
-@pytest.mark.parametrize("substeps", [1, 8])
+@pytest.mark.parametrize(
+    "substeps,headless,video_enabled,requires_native_renderer",
+    [
+        (1, True, False, False),
+        (8, True, False, False),
+        (1, False, False, True),
+        (1, True, True, True),
+    ],
+)
 def test_runner_uses_component_robot_and_preserves_input_suite(
-    component: Path, monkeypatch, substeps: int
+    component: Path,
+    monkeypatch,
+    substeps: int,
+    headless: bool,
+    video_enabled: bool,
+    requires_native_renderer: bool,
 ) -> None:
     from embodichain.extensions.benchmarks.motion_generation import (
         runner as runner_module,
@@ -217,7 +231,13 @@ def test_runner_uses_component_robot_and_preserves_input_suite(
 
     suite = SuiteCfg.from_dict(_suite_data(str(component)))
     suite.protocol.physics_substeps = substeps
-    runner = BenchmarkRunner(suite, suite.planners, device="cpu")
+    runner = BenchmarkRunner(
+        suite,
+        suite.planners,
+        device="cpu",
+        headless=headless,
+        video=VideoRecordCfg(enabled=video_enabled),
+    )
     factory = Mock()
     monkeypatch.setattr(runner_module, "SimulationManager", factory)
 
@@ -226,6 +246,9 @@ def test_runner_uses_component_robot_and_preserves_input_suite(
     assert sim is factory.return_value
     assert robot is sim.add_robot.return_value
     sim_cfg = factory.call_args.args[0]
+    assert (
+        factory.call_args.kwargs["requires_native_renderer"] is requires_native_renderer
+    )
     assert sim_cfg.physics_cfg.num_substeps == substeps
     assert sim_cfg.physics_dt == 0.01
     assert suite_to_dict(suite)["protocol"]["physics_substeps"] == substeps

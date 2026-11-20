@@ -21,6 +21,7 @@ import torch
 def _set_identity_policy_frames(planner) -> None:
     planner._policy_frame_from_world = torch.eye(4)
     planner._runtime_tcp_from_policy_tcp = torch.eye(4)
+    planner._policy_tcp_to_runtime_origin = None
 
 
 class TestNeuralParseWaypoints:
