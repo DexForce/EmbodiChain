@@ -390,6 +390,8 @@ def test_metrics_upload_is_optional_but_test_failures_still_block(
         None,
         "missing_robots",
         "missing_models",
+        "missing_sensors",
+        "missing_solvers",
         "missing_entry_point",
         "wrong_entry_point_group",
         "missing_asset_entry_point",
@@ -443,6 +445,8 @@ def test_release_guard_validates_bundled_runtime_packages(
         "embodichain_robots/dexforce/w1/assets.py": "",
         "embodichain_benchmarks/__init__.py": "",
         "embodichain_models/__init__.py": "",
+        "embodichain_sensors/__init__.py": "",
+        "embodichain_solvers/__init__.py": "",
         f"embodichain-{version}.data/data/share/embodichain/examples/__init__.py": "",
         f"embodichain-{version}.dist-info/METADATA": f"Version: {version}\n",
         f"embodichain-{version}.dist-info/entry_points.txt": entry_points,
@@ -458,6 +462,11 @@ def test_release_guard_validates_bundled_runtime_packages(
             path: data
             for path, data in members.items()
             if not path.startswith("embodichain_models/")
+        }
+    elif invalid_contents in {"missing_sensors", "missing_solvers"}:
+        prefix = "embodichain_" + invalid_contents.removeprefix("missing_") + "/"
+        members = {
+            path: data for path, data in members.items() if not path.startswith(prefix)
         }
     elif invalid_contents == "retired_robot_module":
         members["embodichain_robots/franka_panda.py"] = ""

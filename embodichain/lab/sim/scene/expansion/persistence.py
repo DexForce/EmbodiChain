@@ -39,6 +39,7 @@ from .layout import (
     prepare_scene_randomization,
 )
 from ._layout_numeric import _numeric_geometry
+from ._root_support import _root_support_offsets
 
 __all__ = ["LoadedSceneVariants", "save_scene_variants", "load_scene_variants"]
 
@@ -505,9 +506,33 @@ def load_scene_variants(
                 or np.any(bounds[0] >= bounds[1])
             ):
                 raise ValueError("Invalid saved support bounds.")
+            policy = _policy_data(policy)
+            if "root_support_offsets" in geometry:
+                # Anchors can narrow the saved policy after preparation. Verify
+                # the full stored rectangle independently against the source.
+                offsets = geometry["root_support_offsets"]
+                for value in offsets.values():
+                    limits = np.asarray(value, dtype=float)
+                    if (
+                        limits.shape != (2, 2)
+                        or not np.isfinite(limits).all()
+                        or np.any(limits[0] > limits[1])
+                    ):
+                        raise ValueError("Invalid saved root support offsets.")
+                verified = _root_support_offsets(
+                    source,
+                    geometry["nodes"],
+                    bounds,
+                    offsets,
+                    {uids[i] for i in saved["movable_roots"]},
+                )
+                if offsets != verified:
+                    raise ValueError(
+                        "Saved root support offsets differ from the source contact patches."
+                    )
             prepared = PreparedSceneRandomization(
                 source,
-                _policy_data(policy),
+                policy,
                 manifest["geometry_sha256"],
                 moving,
                 geometry,

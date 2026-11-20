@@ -153,7 +153,7 @@ def get_package_data() -> dict[str, list[str]]:
     ]
     return {
         "embodichain": ["VERSION"],
-        "embodichain.lab.expansion": ["_preview.html", "_distribution.html"],
+        "embodichain.lab.expansion._frontend": ["*.html", "*.css", "*.js"],
         "embodichain.lab.visualization": [
             "web_assets/*.html",
             "web_assets/*.js",
@@ -178,6 +178,7 @@ def get_package_data() -> dict[str, list[str]]:
         **{name: list(extension_patterns) for name in _extension_package_dirs()},
         "embodichain_tasks.configs": [
             "tasks/manipulation/cloth_fold/task_program/trajectory.npz",
+            "**/*.usda",
             "**/*.json",
             "**/*.yaml",
             "**/*.yml",

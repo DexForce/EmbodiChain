@@ -30,6 +30,8 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from embodichain.utils.config_paths import resolve_config_path
+
 try:
     from importlib.resources.abc import Traversable
 except ModuleNotFoundError:
@@ -316,10 +318,10 @@ def _backend(config: Mapping[str, Any], resource: Traversable) -> str | None:
     if isinstance(environment, Mapping) and isinstance(
         environment.get("component"), str
     ):
-        # Components are normally siblings or ancestors. Path resources support
-        # this without importing simulator-dependent configuration decoders.
         if isinstance(resource, Path):
-            component = resource.parent / environment["component"]
+            component = resolve_config_path(
+                environment["component"], base_dir=resource.parent
+            )
             if not component.is_file():
                 raise ValueError(f"Missing environment component: {component}")
             return _load_mapping(component).get("physics")

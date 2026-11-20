@@ -73,6 +73,7 @@ class ExecutionEventKind(str, Enum):
 
     SKILL_PLANNED = "skill_planned"
     INVOCATION_REVISED = "invocation_revised"
+    PLAN_CONTINUED = "plan_continued"
     REPLANNED = "replanned"
     TRACKING_DIVERGED = "tracking_diverged"
     TRACKING_FEEDBACK_FAILED = "tracking_feedback_failed"
@@ -181,6 +182,7 @@ class ExecutionPlanAttempt:
         if self.event_kind not in {
             ExecutionEventKind.SKILL_PLANNED,
             ExecutionEventKind.INVOCATION_REVISED,
+            ExecutionEventKind.PLAN_CONTINUED,
             ExecutionEventKind.REPLANNED,
         }:
             raise ValueError("event_kind must describe an installed action plan.")
@@ -683,6 +685,10 @@ class ExecutionSession:
             raise TypeError("invocation must be an SkillInvocation.")
         if self._status is not ExecutionStatus.RUNNING:
             raise RuntimeError("Only a running execution session can be revised.")
+        if self._plan is not None and self._plan.continuation is not None:
+            raise ValueError(
+                "Observed continuation does not support invocation revisions."
+            )
         self._require_accepted_plan_installation()
         if (
             self._pending_effect is not None
@@ -710,6 +716,10 @@ class ExecutionSession:
             raise TypeError("replacement must be a ResolvedSkillRequest.")
         if self._status is not ExecutionStatus.RUNNING:
             raise RuntimeError("Only a running execution session can be revised.")
+        if self._plan is not None and self._plan.continuation is not None:
+            raise ValueError(
+                "Observed continuation does not support invocation revisions."
+            )
         self._require_accepted_plan_installation()
         if (
             self._pending_effect is not None
@@ -1417,7 +1427,7 @@ class ExecutionSession:
         request = self._requests[self._invocation_index]
         plan = self._engine._plan_request(
             request,
-            context,
+            replace(context, planning_mask=self._pending),
             plan_transform=self._plan_transform,
             nominal_source=self._nominal_source,
         )
@@ -1432,6 +1442,12 @@ class ExecutionSession:
         destination_continuity_validated: bool = False,
     ) -> None:
         """Install a plan, checking target continuity unless already checked."""
+        if plan.continuation is not None and (
+            self._plan_transform is not None or self._nominal_source is not None
+        ):
+            raise ValueError(
+                "Observed continuation does not support external nominal motion or plan transforms."
+            )
         replacement_targets = {
             (target.transport_id, target.target_id): target
             for target in plan.commands.targets
@@ -1451,6 +1467,7 @@ class ExecutionSession:
             not in (
                 ExecutionEventKind.REPLANNED,
                 ExecutionEventKind.INVOCATION_REVISED,
+                ExecutionEventKind.PLAN_CONTINUED,
             )
             or replacement_destinations
         ):
@@ -1460,6 +1477,7 @@ class ExecutionSession:
             not in (
                 ExecutionEventKind.REPLANNED,
                 ExecutionEventKind.INVOCATION_REVISED,
+                ExecutionEventKind.PLAN_CONTINUED,
             )
             or replacement_tracking_routes
         ):
@@ -1514,6 +1532,13 @@ class ExecutionSession:
                 # cancel/hold and the once-only abort notification to the host.
                 self._plan_installation_failure = f"{type(error).__name__}: {error}"
                 raise
+        try:
+            self._engine._skills[plan.skill_id].on_plan_installed(
+                self._requests[self._invocation_index], context, plan
+            )
+        except Exception as error:
+            self._plan_installation_failure = f"{type(error).__name__}: {error}"
+            raise
         self._plan_attempts.append(attempt)
         self._queued_events.append(
             self._event(event_kind, planned_mask, "Planned from the latest context.")
@@ -1576,6 +1601,7 @@ class ExecutionSession:
         if event_kind not in (
             ExecutionEventKind.REPLANNED,
             ExecutionEventKind.INVOCATION_REVISED,
+            ExecutionEventKind.PLAN_CONTINUED,
         ):
             return
         replacement_targets = {
@@ -1637,6 +1663,7 @@ class ExecutionSession:
         if event_kind not in (
             ExecutionEventKind.REPLANNED,
             ExecutionEventKind.INVOCATION_REVISED,
+            ExecutionEventKind.PLAN_CONTINUED,
         ):
             return
         if self._plan is None:
@@ -1892,6 +1919,36 @@ class ExecutionSession:
                 events.extend(barrier_events)
                 return None, hold_targets, events
             return None, active_targets, events
+
+        if self._plan.continuation is not None:
+            decision = self._engine.continue_request(
+                self._requests[self._invocation_index],
+                self._context,
+                self._plan,
+                execution_mask & self._pending & self._eligible,
+            )
+            rejected = self._pending & ~decision.accepted
+            if rejected.any():
+                self.deactivate_rows(
+                    rejected,
+                    reason="; ".join(decision.messages)
+                    or "Contact phase condition failed.",
+                )
+                events.extend(self._drain_events())
+                if self._status is not ExecutionStatus.RUNNING:
+                    return None, active_targets, events
+            if decision.plan is not None and self._eligible.any():
+                started = self._action_started_at
+                self._install_plan(
+                    decision.plan, self._context, ExecutionEventKind.PLAN_CONTINUED
+                )
+                self._action_started_at = started
+                events.extend(self._drain_events())
+                if self._status is not ExecutionStatus.RUNNING:
+                    return None, active_targets, events
+                return None, (), events
+            self._plan = replace(self._plan, continuation=None)
+            execution_mask &= decision.accepted
 
         failed_effect = torch.zeros_like(execution_mask)
         unresolved = torch.zeros_like(execution_mask)

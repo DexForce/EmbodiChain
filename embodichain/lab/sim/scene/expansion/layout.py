@@ -38,6 +38,7 @@ from ..geometry import SupportSurfaceConfig, detect_support_region
 from ..query import _backend_tensor
 from .contracts import ScenePoseChange, SceneVariant
 from .conditions import SceneLayoutCondition, _condition_prepared
+from ._root_support import _root_support_offsets
 from ._layout_numeric import (
     _hierarchy_batch_limit,
     _numeric_geometry,
@@ -359,7 +360,9 @@ def prepare_scene_randomization(
     key = _digest(
         {
             "source": source.fingerprint,
-            "extractor": "scene-layout-support/v3",
+            "extractor": "scene-layout-support/v4",
+            "root_offsets": policy["group_xy_offset_bounds_m"],
+            "movable_roots": sorted(selected_roots),
             "intra": policy["intra_group"],
         }
     )
@@ -433,6 +436,11 @@ def prepare_scene_randomization(
             )
         lo_x, lo_y, hi_x, hi_y = rectangle.bounds
         table = ((lo_x, lo_y), (hi_x, hi_y))
+        offsets = _root_support_offsets(
+            source, nodes, table, policy["group_xy_offset_bounds_m"], selected_roots
+        )
+        if offsets:
+            geometry["root_support_offsets"] = offsets
         if path is not None:
             from .persistence import _write_atomic
 
@@ -560,6 +568,14 @@ def generate_scene_variants(
         if policy["randomize_groups"]
         else policy["batch_size"]
     )
+    support_offsets = prepared._geometry.get("root_support_offsets", {})
+    root_support_offsets = {
+        i: torch.as_tensor(
+            support_offsets[node["uid"]], dtype=spec[0].dtype, device=device
+        )
+        for i, node in enumerate(prepared._geometry["nodes"])
+        if node["uid"] in support_offsets
+    }
     deltas, samples, ordinals = [], [], []
     accepted = attempts = 0
     while attempts < max_attempts and accepted < candidate_count:
@@ -575,6 +591,7 @@ def generate_scene_variants(
             support_gap=policy["intra_group"]["support_gap_m"],
             movable_roots=prepared._movable_roots,
             anchored_roots=anchored_roots,
+            root_support_offsets=root_support_offsets,
             root_offset_bounds={
                 i: torch.tensor(
                     policy["group_xy_offset_bounds_m"][node["uid"]],

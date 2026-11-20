@@ -100,14 +100,31 @@ cross-group frame through the public marker layer. Task assets and any collectio
 process orchestration remain outside the replay core.
 
 `embodichain expansion preview --input` reads confirmed job outputs through `_preview_data.py`,
-then replays full measured states using `_preview_render.py` and a loopback-only
-`_preview_server.py`. Inputs retain their original evidence; no collection or
+then replays full measured states using `_preview_render.py` and
+`_preview_server.py`. Browser replay defaults to the DexSim WebRTC observer
+and its owner-thread application. `_frontend/` owns the packaged preview
+HTML, CSS and JavaScript and the offline distribution report template.
+Video is separate from the HTTP replay state; authenticated commands queue only
+validated replay controls. Inputs retain their original evidence; no collection or
 physics stepping occurs. It accepts one URDF robot and recorded rigid visual
 objects (including file Mesh/USD via native visual loading), with fixed layouts;
 unsupported geometry is rejected. Constant static backgrounds remain single
-instances. Space filters group
-input directories; missing motion annotations remain explicit. HTTP publishes a
-single immutable image/state snapshot; WebRTC is follow-up work. FK and episode
+instances. The solid robot and objects always follow the explicit reference,
+or the first input recording when a reference is absent. The play button and
+Space key toggle playback. Candidate buttons toggle individual ghosts. See the
+[UR5 layout and grasp tutorial](../../../scripts/tutorials/expansion/ur5_pick_place/README.md)
+for collection and replay. Filters preserve each toggle and playback of the solid
+trajectory. Space filters group input directories and missing motion annotations
+remain explicit. `_preview_deviations.py` reuses recorded world FK and gripper
+calibration for TCP errors. At each reference time it reports the minimum, mean
+and maximum across recordings still in range for TCP translation distance,
+TCP rotation angle and each episode's worst joint deviation. `_preview_heatmap.py`
+bins the measured first-frame XY of each rigid target in an `object_pose` input
+episode's `joint_scene.pose_changes`. Each axis fits the object's measured starts
+independently with half a bin of padding at either end, or a 1 mm window for a
+constant coordinate. The recipe's selected motion operator takes
+precedence over the job-level operator. The explicit reference belongs to replay.
+Static chart payloads and HTTP replay metadata are independent of the encoded video. FK and episode
 budgets bound preload, controls are queued for the render owner, and native
 resources/ports close on exit. See the example's `ghost-preview.md` for usage.
 

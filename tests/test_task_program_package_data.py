@@ -259,6 +259,7 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/gaussian_pick_place/task_program/integration.yaml"),
         Path("tasks/manipulation/gaussian_pick_place/catalog.yaml"),
         Path("tasks/manipulation/gaussian_pick_place/README.md"),
+        Path("tasks/manipulation/cable/route_the_cable/cable.usda"),
         Path("tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"),
         Path("tasks/manipulation/tableware/pour_cup/env.fluid.yaml"),
         Path("tasks/manipulation/tableware/pour_cup/task_program/program.fluid.yaml"),
@@ -486,6 +487,7 @@ def test_setup_stages_all_official_task_programs(
     assert get_package_dir()[_CONFIG_PACKAGE] == "extensions/embodichain_tasks/configs"
     assert staged_config_package.package_data[_CONFIG_PACKAGE] == [
         "tasks/manipulation/cloth_fold/task_program/trajectory.npz",
+        "**/*.usda",
         "**/*.json",
         "**/*.yaml",
         "**/*.yml",

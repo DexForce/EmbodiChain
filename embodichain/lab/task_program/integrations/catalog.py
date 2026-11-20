@@ -254,6 +254,23 @@ def _canonical_value(value: object) -> object:
             # An inactive phase-path extension preserves existing registration seals.
             if not value.phase_paths:
                 metadata.pop("phase_paths")
+        # Inactive additions do not change an existing integration's identity.
+        from embodichain.lab.sim.atomic_skills.primitives.move_joints import (
+            MoveJointsOptions,
+        )
+        from embodichain.lab.sim.atomic_skills.primitives.move_end_effector import (
+            MoveEndEffectorOptions,
+        )
+
+        if type(value) is SimulationSceneBinding and not value.cables:
+            metadata.pop("cables")
+        if type(value) is MoveJointsOptions and not value.preserve_samples:
+            metadata.pop("preserve_samples")
+        if (
+            type(value) is MoveEndEffectorOptions
+            and not value.preserve_cartesian_samples
+        ):
+            metadata.pop("preserve_cartesian_samples")
         if type(value) is RecoveryPolicy and value.retry_all_failed_plans is True:
             metadata.pop("retry_all_failed_plans")
         if isinstance(value, PickUpOptions) and value.initial_lift_height == 0.0:

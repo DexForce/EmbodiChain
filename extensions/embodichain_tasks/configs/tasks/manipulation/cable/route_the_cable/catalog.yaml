@@ -1,0 +1,12 @@
+task_key: route_the_cable
+title: Route the Cable
+summary: Eight-call contact routing with fast pacing and preserved critical settling.
+tags:
+- cable
+- deformable
+- manipulation
+- task_program_expert
+default_deployment: yam
+deployments:
+  yam:
+    config: task.yam.yaml
