@@ -1487,6 +1487,38 @@ def _curobo_adapter():
     return adapter
 
 
+@pytest.mark.parametrize(
+    ("settings", "expected"),
+    [
+        ({}, (0.005, 0.05)),
+        (
+            {"position_tolerance": 0.01, "orientation_tolerance": 0.09995833854135666},
+            (0.01, 0.09995833854135666),
+        ),
+    ],
+)
+def test_curobo_adapter_forwards_convergence_settings(monkeypatch, settings, expected):
+    from embodichain_benchmarks.motion_generation.planners import curobo
+
+    adapter = _curobo_adapter()
+    adapter.spec.config.update(settings)
+    adapter.spec.config["use_runtime_tcp"] = bool(settings)
+    adapter.context.robot.uid = "robot"
+    monkeypatch.setattr(
+        adapter,
+        "_backend_motion_limits",
+        lambda: {"max_velocity": [1.0], "max_acceleration": [2.0]},
+    )
+    generator = Mock()
+    monkeypatch.setattr(curobo, "MotionGenerator", generator)
+
+    adapter.build()
+
+    cfg = generator.call_args.args[0].planner_cfg
+    assert (cfg.position_tolerance, cfg.orientation_tolerance) == expected
+    assert cfg.use_runtime_tcp is bool(settings)
+
+
 def _joint_waypoint_case() -> tuple[BenchmarkCase, torch.Tensor]:
     joint_targets = torch.tensor(
         [[[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], [0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]]]

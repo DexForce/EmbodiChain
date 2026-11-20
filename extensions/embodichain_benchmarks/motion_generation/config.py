@@ -384,6 +384,8 @@ class SuiteCfg:
                 config = _merge_mappings(track.config, domain.overrides)
                 if track.scenario == _FREE_SPACE_SCENARIO:
                     _validate_free_space(FreeSpaceTrackCfg(**config))
+                elif track.scenario == "affordance_reaching":
+                    _validate_affordance_reaching_track(replace(track, config=config))
                 elif track.scenario == "atomic_skill":
                     _validate_atomic_skill_track(
                         replace(track, id=effective_id, config=config)
@@ -553,6 +555,8 @@ class SuiteCfg:
                 _validate_free_space(FreeSpaceTrackCfg(**track.config))
             if track.scenario == "atomic_skill":
                 _validate_atomic_skill_track(track)
+            if track.scenario == "affordance_reaching":
+                _validate_affordance_reaching_track(track)
         for nmg in (spec for spec in self.planners if spec.adapter == "nmg_onnx"):
             for field, default in (
                 ("num_waypoints", 5),
@@ -1323,3 +1327,25 @@ def stable_hash(value: object) -> str:
     """Return a stable SHA256 hash for JSON-compatible configuration data."""
     payload = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _validate_affordance_reaching_track(track: TrackCfg) -> None:
+    """Require a hash-bound frozen source; never silently regenerate tasks."""
+    required = {"source_manifest", "source_cases_sha256", "source_track", "batch_size"}
+    config = track.config
+    if set(config) != required:
+        raise ValueError(
+            "affordance_reaching config requires exactly " + str(sorted(required))
+        )
+    for key in ("source_manifest", "source_track"):
+        if not isinstance(config[key], str) or not config[key].strip():
+            raise ValueError(f"affordance_reaching {key} must be a nonempty string.")
+    digest = config["source_cases_sha256"]
+    if (
+        not isinstance(digest, str)
+        or len(digest) != 64
+        or set(digest) - set("0123456789abcdef")
+    ):
+        raise ValueError("affordance_reaching source_cases_sha256 must be a SHA-256.")
+    if type(config["batch_size"]) is not int or config["batch_size"] < 1:
+        raise ValueError("affordance_reaching batch_size must be positive.")

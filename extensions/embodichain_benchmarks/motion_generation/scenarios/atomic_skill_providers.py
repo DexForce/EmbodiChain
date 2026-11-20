@@ -1337,7 +1337,17 @@ class _PourCases(AtomicSkillCaseProvider):
         del adapter
         return scenario.require_engine().make_invocation(
             self.skill_id,
-            PourGoal(),
+            PourGoal(
+                reference_object_pose=_translate(
+                    case_pose(
+                        case, "object_initial_pose", device=scenario.robot.device
+                    ),
+                    torch.tensor(
+                        [0.0, 0.0, float(case.case_parameters["lift_height_m"])],
+                        device=scenario.robot.device,
+                    ),
+                )
+            ),
             control_parts=_primary_control_parts(scenario, "Pour"),
             motion_policy=MotionPolicy(
                 strategy="motion_gen",

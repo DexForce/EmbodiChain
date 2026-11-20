@@ -251,6 +251,11 @@ fixed-base assembly through `policy_frame_from_world_by_control_part`; every
 requested arm must have an entry. The selected transform applies to targets,
 rollout FK, and retimed arrival checks. Atomic task orchestration coordinates
 the arms; reusing the policy does not create a jointly trained dual-arm policy.
+Acceptance uses the caller's runtime TCP origin even when the actor observes
+an offset policy TCP. Undo the right-hand tool transform when measuring
+position error; orientation error can move the two origins differently.
+The same acceptance rule applies after retiming, without changing policy
+observations or configured tolerances.
 Target/FK quaternions follow the shared
 [simulation convention](../simulation-system/simulation-system.md); do not
 convert a value twice. Failed waypoint convergence retains native rollout

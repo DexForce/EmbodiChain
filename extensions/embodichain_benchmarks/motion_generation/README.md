@@ -7,12 +7,13 @@ The extension ships in the main wheel with the same version and dependencies;
 `extensions/` is a source directory, not an import prefix. After updating a
 source checkout, refresh its editable mappings with `pip install -e . --no-deps`.
 
-One framework evaluates two families selected by `TrackCfg.scenario`:
+Select an evaluation family with `TrackCfg.scenario`:
 
 | Family | Scenario | Workload |
 | --- | --- | --- |
 | Motion Planning | `free_space` | EEF/joint goals, ordered waypoints, batches, path shapes and start bins |
 | Atomic Skills | `atomic_skill` | Skill compilation, physics replay and measured physical stages |
+| Task-space Affordance Reaching | `affordance_reaching` | Complete frozen Atomic goal sequences checked by independent FK, without hand actions or physics |
 
 They share planner adapters, robot configuration, motion limits and raw
 artifacts, while keeping their populations and rankings separate. See the
@@ -429,8 +430,8 @@ establish better overall quality.
 ## Configure a suite
 
 Copy the closest suite and change its `suite_version` when altering thresholds,
-populations or success semantics. Select `scenario: free_space` or
-`scenario: atomic_skill` per track; a second family selector is unnecessary.
+populations or success semantics. Select `free_space`, `atomic_skill` or
+`affordance_reaching` as the track `scenario`; no second family selector is needed.
 
 Motion Planning populations live only in `tracks[].config`, including when
 constructing `SuiteCfg` directly. Edit that mapping to change a track; validation
@@ -793,12 +794,10 @@ defines evidence boundaries, stage progression and success semantics.
 
 ## Current limits
 
-- cuRobo receives an empty external collision world in the supplied suites.
-  Physical contact replay does not certify collision safety against non-target
-  links or environment geometry. Dual-arm suites use TOPPRA; coordinated skills
+- See the [physical evaluation contract](./BENCHMARK_DESIGN.md#4-physical-evaluation)
+  for collision-world limits and [future extensions](./BENCHMARK_DESIGN.md#9-future-extensions)
+  for unimplemented comparisons. Dual-arm suites use TOPPRA; coordinated skills
   currently reject cuRobo.
-- Collision-aware comparison, latency-budget sweeps and recovery benchmarks
-  remain future work; process isolation and seed-cluster intervals are available.
 - Embodiment sensor acquisition and Task Program runtime services are outside
   this host. Other benchmark domains under `scripts/benchmark/` still require
   a source checkout.

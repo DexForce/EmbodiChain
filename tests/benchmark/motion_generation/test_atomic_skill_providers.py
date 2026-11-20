@@ -1706,6 +1706,27 @@ def test_object_rotation_providers_screen_every_pose_row(
     torch.testing.assert_close(
         torch.stack([call[1] for call in references], dim=1), case.target_waypoints
     )
+    if skill_id == "pour":
+        engine = SimpleNamespace(
+            make_invocation=lambda skill, goal, **kwargs: SimpleNamespace(goal=goal)
+        )
+        invocation = create_atomic_skill_provider("pour").build_invocation(
+            SimpleNamespace(
+                robot=robot,
+                control_part="arm",
+                end_effector_part="eef",
+                require_engine=lambda: engine,
+            ),
+            case,
+            None,
+        )
+        initial_pose = torch.tensor(case.case_parameters["object_initial_pose"])
+        grasp_pose = torch.tensor(case.case_parameters["grasp_pose"])
+        object_to_eef = pose_inv(initial_pose) @ grasp_pose
+        torch.testing.assert_close(
+            invocation.goal.reference_object_pose @ object_to_eef,
+            case.target_waypoints[:, -1],
+        )
     for index, call in enumerate(references):
         torch.testing.assert_close(call[2], case.start_qpos + index * 0.01)
     generator_factory.assert_called_once_with(

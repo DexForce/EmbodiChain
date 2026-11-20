@@ -31,6 +31,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import logging
+import math
 import os
 import threading
 import time
@@ -414,6 +415,31 @@ class CuroboPlannerCfg(BasePlannerCfg):
     collision_activation_distance: float = 0.01
     """cuRobo collision activation distance (optimizer setting)."""
 
+    position_tolerance: float = field(default=0.005, kw_only=True)
+    """Native tool-position convergence tolerance in meters.
+
+    Passed to both IK and trajectory optimization. The default preserves
+    cuRobo V2-Fast's 5 mm acceptance bound; external scoring is independent.
+    """
+
+    orientation_tolerance: float = field(default=0.05, kw_only=True)
+    """Native quaternion-vector convergence tolerance.
+
+    V2-Fast uses the residual norm ``2 * sin(theta / 2)`` for a full orientation
+    goal, not the geodesic angle ``theta`` itself. For an angular bound of
+    0.1 rad, use ``2 * sin(0.1 / 2)``. The default preserves native behavior.
+    These tolerances also set the native default IK seed-ranking normalization.
+    """
+
+    use_runtime_tcp: bool = field(default=False, kw_only=True)
+    """Evaluate native pose costs and convergence at the simulator TCP.
+
+    When the solver TCP is offset from its URDF end link, add a massless fixed
+    tool frame carrying that transform. This makes position tolerance refer to
+    the requested TCP origin, including its coupling to orientation error.
+    ``False`` preserves the historical end-link goal conversion and tolerances.
+    """
+
     graph_planner_algorithm: str = field(default="rrt", kw_only=True)
     """Fallback route initializer: GPU ``"rrt"`` or legacy ``"prm"``.
 
@@ -515,6 +541,21 @@ class CuroboPlannerCfg(BasePlannerCfg):
     runs at least one coordinated warmup because otherwise the first real plan
     would perform an uncoordinated lazy capture.
     """
+
+    def __post_init__(self) -> None:
+        if type(self.use_runtime_tcp) is not bool:
+            raise TypeError("CuroboPlannerCfg.use_runtime_tcp must be a boolean.")
+        for name in ("position_tolerance", "orientation_tolerance"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value <= 0.0
+            ):
+                raise ValueError(
+                    f"CuroboPlannerCfg.{name} must be positive and finite."
+                )
 
 
 @configclass
@@ -1585,6 +1626,9 @@ class CuroboPlanner(BasePlanner):
         if self.cfg.enable_timeopt:
             backend.gravity = self._timeopt_gravity(backend)
         robot_config = self._query_runtime_robot_config(profile.robot_config_path)
+        if self.cfg.use_runtime_tcp and profile.tool_frame_to_tcp is not None:
+            profile = self._configure_runtime_tcp(robot_config, profile)
+            backend.profile = profile
         if backend.gravity is not None:
             robot_config["robot_cfg"]["load_dynamics"] = True
         with (
@@ -1605,6 +1649,8 @@ class CuroboPlanner(BasePlanner):
                 graph_planner_algorithm=algorithm,
                 enable_timeopt=self.cfg.enable_timeopt,
                 interpolation_dt=float(self.cfg.interpolation_dt),
+                position_tolerance=float(self.cfg.position_tolerance),
+                orientation_tolerance=float(self.cfg.orientation_tolerance),
             )
             if backend.gravity is not None:
                 # All rollout configurations share this native model. Bind its
@@ -1639,6 +1685,36 @@ class CuroboPlanner(BasePlanner):
         backend.planner = planner
         backend.tool_frame = tool_frame
         return backend
+
+    @staticmethod
+    def _configure_runtime_tcp(
+        robot_config: dict, profile: _CuroboProfile
+    ) -> _CuroboProfile:
+        """Add the physical TCP as a fixed native goal frame, without extra mass."""
+        if profile.tool_frame_name is None or profile.tool_frame_to_tcp is None:
+            raise ValueError("Runtime TCP requires a parent tool frame and transform.")
+        kinematics = robot_config["robot_cfg"]["kinematics"]
+        parent = profile.tool_frame_name
+        frame = f"__embodichain_tcp_{parent}"
+        extra_links = kinematics.setdefault("extra_links", {})
+        if frame in extra_links or frame in kinematics["tool_frames"]:
+            raise ValueError(f"Reserved runtime TCP frame already exists: {frame}.")
+        position, quaternion = _matrix_to_position_quaternion(
+            torch.as_tensor(profile.tool_frame_to_tcp, dtype=torch.float32)[None]
+        )
+        extra_links[frame] = {
+            "link_name": frame,
+            "joint_name": f"{frame}_fixed",
+            "joint_type": "FIXED",
+            "parent_link_name": parent,
+            "fixed_transform": torch.cat((position[0], quaternion[0])).tolist(),
+            "link_mass": 0.0,
+            "link_inertia": [0.0] * 6,
+        }
+        kinematics["tool_frames"] = [
+            frame if name == parent else name for name in kinematics["tool_frames"]
+        ]
+        return replace(profile, tool_frame_name=frame, tool_frame_to_tcp=None)
 
     def _timeopt_gravity(self, backend: "_CuroboBackend") -> tuple[float, float, float]:
         """Resolve one gravity vector shared by every native planning row.

@@ -1311,9 +1311,7 @@ def _view_leaderboard(
                 excluded_case_ids=excluded,
             )
             success = (
-                (timed if timing else geometry)
-                if view == "motion_planning"
-                else primary
+                (timed if timing else geometry) if view != "atomic_skills" else primary
             )
             if not any(case.case_id not in excluded for case in attributed_cases):
                 success = None
@@ -1325,7 +1323,7 @@ def _view_leaderboard(
                     if timing
                     else (
                         "geometry"
-                        if view == "motion_planning"
+                        if view != "atomic_skills"
                         else _primary_ranking(track_cases)
                     )
                 ),
@@ -1354,7 +1352,7 @@ def _view_leaderboard(
                     measured_trials=measured_trials,
                     excluded_case_ids=excluded,
                 ),
-                "latency_p95_ms": latency if view == "motion_planning" else None,
+                "latency_p95_ms": latency if view != "atomic_skills" else None,
                 "compile_latency_p95_ms": latency if view == "atomic_skills" else None,
                 "peak_gpu_mb": _peak_gpu(measured),
             }
@@ -1501,7 +1499,7 @@ def _view_performance(
             "atomic_skill_compile" if view == "atomic_skills" else "planner_call"
         )
         row["planning_time_ms"] = (
-            row["cost_time_ms"] if view == "motion_planning" else None
+            row["cost_time_ms"] if view != "atomic_skills" else None
         )
         row["compile_time_ms"] = (
             row["cost_time_ms"] if view == "atomic_skills" else None
@@ -1701,7 +1699,11 @@ def aggregate_results(
         raise ValueError(
             f"Missing report scenario for tracks: {sorted(missing_tracks)}"
         )
-    unknown = set(track_scenarios.values()) - {"free_space", "atomic_skill"}
+    unknown = set(track_scenarios.values()) - {
+        "free_space",
+        "atomic_skill",
+        "affordance_reaching",
+    }
     if unknown:
         raise ValueError(f"Unsupported report scenarios: {sorted(unknown)}")
     result = {
@@ -1713,6 +1715,12 @@ def aggregate_results(
     for scenario, view, title in (
         ("free_space", "motion_planning", "Motion Planning"),
         ("atomic_skill", "atomic_skills", "Atomic Skills"),
+        (
+            "affordance_reaching",
+            "affordance_reaching",
+            "Task-space Affordance Reaching",
+        ),
+        ("affordance_reaching", "reaching_controls", "Reaching Controls"),
     ):
         tracks = {
             track for track, owner in track_scenarios.items() if owner == scenario
@@ -1721,6 +1729,22 @@ def aggregate_results(
             continue
         view_cases = [case for case in cases if case.track in tracks]
         view_records = [record for record in records if record.track in tracks]
+        if scenario == "affordance_reaching":
+            group = "control" if view == "reaching_controls" else "task"
+            view_cases = [
+                case
+                for case in view_cases
+                if case.case_parameters.get("affordance_group") == group
+            ]
+            case_ids = {case.case_id for case in view_cases}
+            view_records = [
+                record
+                for record in view_records
+                if record.case_id in case_ids
+                or record.phase in (TrialPhase.CONSTRUCT, TrialPhase.PREPARE)
+            ]
+            if not view_cases:
+                continue
         result["report_views"].append(
             {
                 "view": view,
@@ -1753,13 +1777,22 @@ def aggregate_results(
                 measured_trials,
                 confidence_level,
                 success_attribute=(
-                    "geometry_valid" if view == "motion_planning" else None
+                    "geometry_valid" if view != "atomic_skills" else None
                 ),
             )
         ]
         result[f"{view}_leaderboard"] = _view_leaderboard(
             view_records, metadata, view_cases, measured_trials, view=view
         )
+        if scenario == "affordance_reaching":
+            result[f"{view}_timing_leaderboard"] = _view_leaderboard(
+                view_records,
+                metadata,
+                view_cases,
+                measured_trials,
+                view=view,
+                timing=True,
+            )
         if view == "motion_planning":
             result["motion_planning_workload_summary"] = [
                 {**row, **labels, "view": view}
