@@ -58,7 +58,7 @@ class SceneObject:
     category: str  # Semantic category identified by scene understanding.
     name: str  # Human-readable visual name.
     description: str  # Detailed semantic and spatial description.
-    is_articulated: bool = False  # Whether this object has movable links or joints.
+    is_articulated: bool = False  # Whether to generate an articulated asset.
     mask_path: str | None = None  # Absolute path to the validated binary image mask.
     visible_rgba_path: str | None = None  # None for future unsegmented objects.
     simready_glb_path: str | None = None  # Absolute path to the canonical SimReady GLB.

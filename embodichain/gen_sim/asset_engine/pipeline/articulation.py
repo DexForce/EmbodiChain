@@ -64,11 +64,6 @@ def generate_articulated_usdcs(
     """
     articulated_objects = []
     for asset in asset_objects:
-        if _is_rubiks_cube(asset):
-            asset.is_articulated = False
-            asset.articulated_usdc_path = None
-            asset.articulated_usdc_scale = None
-            continue
         if asset.is_articulated:
             articulated_objects.append(asset)
     if not articulated_objects:
@@ -130,14 +125,4 @@ def _articulation_prompt(asset: Any) -> str:
         "a vertical hinge axis, not fold down about a horizontal axis. Deliver "
         "a self-contained USDC with an articulation root, meshes, and enabled "
         "non-fixed joints; a rigid GLB proxy is not enough."
-    )
-
-
-def _is_rubiks_cube(asset: Any) -> bool:
-    text = " ".join(
-        (str(asset.category), str(asset.name), str(asset.description))
-    ).lower()
-    return any(
-        token in text
-        for token in ("rubik", "rubik's", "rubiks", "puzzle_cube", "puzzle cube")
     )

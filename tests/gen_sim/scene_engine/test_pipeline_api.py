@@ -82,15 +82,52 @@ def _table_scene() -> tuple[Scene, SceneGraph]:
     return scene, graph
 
 
+def _write_task_spec(root: Path) -> Path:
+    path = root / "task_spec.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "task_spec/v1",
+                "interpretation": {
+                    "references": [
+                        {
+                            "entities": [
+                                {
+                                    "id": "evidence_001",
+                                    "description": "A microwave with a hinged door.",
+                                    "is_articulated": True,
+                                }
+                            ]
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+@pytest.mark.parametrize("with_task_spec", [False, True])
 def test_analyze_image_persists_blueprint_and_artifact_hashes(
     tmp_path: Path,
     monkeypatch,
+    with_task_spec: bool,
 ) -> None:
     image_path = tmp_path / "input.png"
     image_path.write_bytes(b"image")
     scene, graph = _table_scene()
+    task_spec = _write_task_spec(tmp_path) if with_task_spec else None
 
     def fake_understand_scene(**kwargs):
+        assert [
+            (entity.id, entity.description, entity.is_articulated)
+            for entity in kwargs["task_entities"]
+        ] == (
+            [("evidence_001", "A microwave with a hinged door.", True)]
+            if with_task_spec
+            else []
+        )
         stage_root = Path(kwargs["output_root"]) / "scene_understanding"
         stage_root.mkdir(parents=True)
         (stage_root / "table-mask.png").write_bytes(b"mask")
@@ -103,6 +140,7 @@ def test_analyze_image_persists_blueprint_and_artifact_hashes(
         tmp_path / "output",
         vlm_client=object(),
         image_segmentation_client=segmentation,
+        task_spec=task_spec,
     )
     document = json.loads(package.manifest_path.read_text(encoding="utf-8"))
 
@@ -113,6 +151,17 @@ def test_analyze_image_persists_blueprint_and_artifact_hashes(
     assert document["scene_graph"] == graph.to_dict()
     assert document["artifacts"][0]["path"].endswith("table-mask.png")
     assert len(document["artifacts"][0]["sha256"]) == 64
+    if task_spec is not None:
+        assert document["artifacts"][-1]["path"] == task_spec.as_posix()
+
+
+def test_analyze_image_requires_image_for_task_spec(tmp_path, monkeypatch) -> None:
+    def unexpected(*args, **kwargs):
+        raise AssertionError("invalid input must fail before client setup")
+
+    monkeypatch.setattr(api, "VisionFacade", unexpected)
+    with pytest.raises(ValueError, match="requires an image"):
+        api.analyze_image(None, tmp_path, task_spec=tmp_path / "task_spec.json")
 
 
 def test_analyze_edit_persists_post_edit_blueprint(
@@ -352,7 +401,7 @@ def test_materialize_blueprint_owns_articulated_client_lifecycle(
     scene, graph = _table_scene()
     scene.objects.append(
         SceneObject(
-            id="microwave_001",
+            id="evidence_001",
             kind="asset",
             category="microwave",
             name="microwave",
@@ -362,7 +411,7 @@ def test_materialize_blueprint_owns_articulated_client_lifecycle(
     )
     graph.nodes.append(
         SceneGraphNode(
-            object_id="microwave_001",
+            object_id="evidence_001",
             parent_id="table",
             parent_relation="on",
             pose_description="Stand upright on its base.",
@@ -376,6 +425,7 @@ def test_materialize_blueprint_owns_articulated_client_lifecycle(
         tmp_path,
         vlm_client=object(),
         image_segmentation_client=_HealthyClient(),
+        task_spec=_write_task_spec(tmp_path),
     )
     manifest_path = package.manifest_path
     audited_manifest = manifest_path.read_text(encoding="utf-8")
@@ -414,7 +464,9 @@ def test_materialize_blueprint_owns_articulated_client_lifecycle(
     assert articulated.close_calls == 1
 
 
-@pytest.mark.parametrize("change", ["modify", "delete", "reanalyze", "image"])
+@pytest.mark.parametrize(
+    "change", ["modify", "delete", "reanalyze", "image", "task_spec"]
+)
 def test_materialize_rejects_stale_observations_before_any_clients(
     tmp_path, monkeypatch, change
 ):
@@ -429,8 +481,13 @@ def test_materialize_rejects_stale_observations_before_any_clients(
         return scene, graph
 
     monkeypatch.setattr(api, "understand_scene", understand)
+    task_spec = _write_task_spec(tmp_path) if change == "task_spec" else None
     package = api.analyze_image(
-        image, tmp_path, vlm_client=object(), image_segmentation_client=_HealthyClient()
+        image,
+        tmp_path,
+        vlm_client=object(),
+        image_segmentation_client=_HealthyClient(),
+        task_spec=task_spec,
     )
     if change == "modify":
         mask.write_bytes(b"changed")
@@ -438,6 +495,8 @@ def test_materialize_rejects_stale_observations_before_any_clients(
         mask.unlink()
     elif change == "image":
         image.write_bytes(b"changed source")
+    elif change == "task_spec":
+        task_spec.write_text("{}", encoding="utf-8")
     else:
         image.write_bytes(b"second source")
         api.analyze_image(

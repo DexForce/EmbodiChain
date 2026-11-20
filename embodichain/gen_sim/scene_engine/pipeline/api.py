@@ -40,6 +40,9 @@ from embodichain.gen_sim.services.compat import GeometryClient
 from embodichain.gen_sim.services.compat import ImageClient
 from embodichain.gen_sim.services.compat import SegmentationClient
 from embodichain.gen_sim.scene_engine.core.scene import Scene
+from embodichain.gen_sim.scene_engine.task_spec_input import (
+    load_task_entities,
+)
 from embodichain.gen_sim.scene_engine.core.scene_edit_plan import SceneEditPlan
 from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraph
 from embodichain.gen_sim.services.compat import VisionClient
@@ -135,6 +138,7 @@ def analyze_image(
     image_path: str | Path,
     output_root: str | Path,
     *,
+    task_spec: str | Path | None = None,
     vlm_client: VisionClient | None = None,
     image_segmentation_client: SegmentationClient | None = None,
     services: GenSimServices | None = None,
@@ -144,12 +148,22 @@ def analyze_image(
     Args:
         image_path: Source scene image.
         output_root: Directory receiving understanding artifacts and the blueprint.
+        task_spec: Optional TaskSpec JSON providing entity IDs and articulation
+            flags. The input file is audited with the image and mask artifacts.
         vlm_client: Optional caller-owned scene-understanding client.
         image_segmentation_client: Optional caller-owned segmentation client.
 
     Returns:
         In-process scene and graph with the persisted blueprint identity.
     """
+    if task_spec is not None and image_path is None:
+        raise ValueError("TaskSpec input requires an image.")
+    resolved_task_spec = (
+        Path(task_spec).expanduser().resolve() if task_spec is not None else None
+    )
+    task_entities = (
+        load_task_entities(resolved_task_spec) if resolved_task_spec is not None else ()
+    )
     resolved_image = Path(image_path).expanduser().resolve()
     resolved_output = Path(output_root).expanduser().resolve()
     resolved_output.mkdir(parents=True, exist_ok=True)
@@ -165,6 +179,7 @@ def analyze_image(
             output_root=resolved_output,
             vlm_client=effective_vlm,
             image_segmentation_client=segmentation,
+            task_entities=task_entities,
         )
     finally:
         if owns_segmentation:
@@ -179,6 +194,11 @@ def analyze_image(
         "artifacts": [
             *_artifact_records(resolved_output / "scene_understanding"),
             _artifact_record(resolved_image),
+            *(
+                [_artifact_record(resolved_task_spec)]
+                if resolved_task_spec is not None
+                else []
+            ),
         ],
     }
     blueprint_id = _canonical_hash(payload)

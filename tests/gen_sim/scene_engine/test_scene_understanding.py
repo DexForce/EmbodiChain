@@ -25,6 +25,7 @@ import pytest
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
+from embodichain.gen_sim.scene_engine.task_spec_input import TaskEntity
 from embodichain.gen_sim.scene_engine.pipeline.generation import scene_understanding
 from embodichain.gen_sim.scene_engine.pipeline.utils import image_segmentation_utils
 from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils import (
@@ -40,14 +41,12 @@ def _response(*, asset_name: str = "cup") -> str:
                 "category": "dining_table",
                 "name": "wooden table",
                 "description": "A rectangular wooden table.",
-                "is_articulated": False,
             },
             "assets": [
                 {
                     "category": "cup",
                     "name": asset_name,
                     "description": "A small ceramic cup.",
-                    "is_articulated": False,
                 }
             ],
         }
@@ -65,46 +64,6 @@ def test_image_object_analysis_parses_code_fence_and_assigns_stable_ids() -> Non
     assert scene.assets[0].is_articulated is False
 
 
-def test_image_object_analysis_preserves_articulated_object_metadata() -> None:
-    response = json.loads(_response())
-    response["assets"][0]["category"] = "drawer"
-    response["assets"][0]["is_articulated"] = True
-
-    scene = scene_understanding._parse_image_object_analysis_response(
-        json.dumps(response)
-    )
-
-    assert scene.assets[0].is_articulated is True
-
-
-@pytest.mark.parametrize("category", ["bell", "push_button", "water_dispenser", "knob"])
-def test_known_movable_categories_are_promoted_to_articulation(category: str) -> None:
-    scene = scene_understanding._parse_image_object_analysis_response(_response())
-    scene.assets[0].category = category
-    scene.assets[0].is_articulated = False
-
-    scene_understanding._force_known_movable_objects_articulated(scene)
-
-    assert scene.assets[0].is_articulated is True
-
-
-@pytest.mark.parametrize("category", ["cup", "wooden_cube", "puzzle_cube", "oven_mitt"])
-def test_articulation_promotion_preserves_rigid_objects(category: str) -> None:
-    scene = scene_understanding._parse_image_object_analysis_response(_response())
-    scene.assets[0].category = category
-    scene_understanding._force_known_movable_objects_articulated(scene)
-    assert scene.assets[0].is_articulated is False
-
-
-def test_button_box_description_promotes_generic_box() -> None:
-    scene = scene_understanding._parse_image_object_analysis_response(_response())
-    scene.assets[0].category = "box"
-    scene.assets[0].name = "gray box with green button"
-    scene.assets[0].description = "gray rectangular box with a push button on top"
-    scene_understanding._force_known_movable_objects_articulated(scene)
-    assert scene.assets[0].is_articulated is True
-
-
 @pytest.mark.parametrize(
     ("category", "required_alias"),
     [("bell", "hotel bell"), ("water_dispenser", "dispenser")],
@@ -115,9 +74,16 @@ def test_segmentation_aliases_cover_observed_service_vocabulary(
     assert required_alias in scene_understanding._SEGMENTATION_PROMPT_ALIASES[category]
 
 
-def test_image_analysis_promotes_bell_before_generation(tmp_path: Path) -> None:
+@pytest.mark.parametrize("category", ["bell", "drawer", "box"])
+def test_image_analysis_defaults_to_rigid_without_task_spec(
+    tmp_path: Path, category: str
+) -> None:
     payload = json.loads(_response())
-    payload["assets"][0].update(category="bell", name="silver service bell")
+    payload["assets"][0].update(
+        category=category,
+        name="gray object with a button",
+        description="A gray object with a visible push button.",
+    )
 
     class VLM:
         def complete(self, **_: object) -> str:
@@ -131,7 +97,7 @@ def test_image_analysis_promotes_bell_before_generation(tmp_path: Path) -> None:
         image_path=image,
         vlm_client=VLM(),  # type: ignore[arg-type]
     )
-    assert scene.assets[0].is_articulated is True
+    assert scene.assets[0].is_articulated is False
 
 
 def test_image_object_analysis_accepts_name_with_spatial_words() -> None:
@@ -176,6 +142,157 @@ def test_image_object_analysis_retries_then_updates_scene(tmp_path: Path) -> Non
     assert [asset.id for asset in scene.assets] == ["cup_001"]
 
 
+@pytest.mark.parametrize("with_task_spec", [False, True])
+def test_understanding_keeps_visual_metadata_and_matches_ids_before_segmentation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, with_task_spec: bool
+) -> None:
+    image = tmp_path / "scene.png"
+    Image.new("RGB", (16, 16)).save(image)
+    payload = json.loads(_response(asset_name="blue cup"))
+    payload["assets"].append(
+        {"category": "spoon", "name": "silver spoon", "description": "A metal spoon."}
+    )
+    task_entities = (
+        (
+            TaskEntity("evidence_001", "blue cup", True),
+            TaskEntity("evidence_002", "missing block", False),
+        )
+        if with_task_spec
+        else ()
+    )
+    expected_cup_id = "evidence_001" if with_task_spec else "cup_001"
+    matching_calls = []
+
+    class VLM:
+        def complete(self, *, system_prompt: str, user_prompt: str, **_: object) -> str:
+            if system_prompt == scene_understanding._SYSTEM_PROMPT:
+                return json.dumps(payload)
+            if system_prompt == scene_understanding._TASK_ENTITY_MATCH_SYSTEM_PROMPT:
+                matching_calls.append(json.loads(user_prompt))
+                return json.dumps({"evidence_001": "cup_001", "evidence_002": None})
+            return json.dumps(
+                {
+                    "nodes": [
+                        {
+                            "object_id": asset["id"],
+                            "parent_id": "table",
+                            "parent_relation": "on",
+                            "pose_description": None,
+                        }
+                        for asset in json.loads(user_prompt)["assets"]
+                    ]
+                }
+            )
+
+    def segment_scene(*, scene: Scene, **_: object) -> Path:
+        assert [obj.id for obj in scene.objects] == [
+            "table",
+            expected_cup_id,
+            "spoon_001",
+        ]
+        assert scene.assets[0].is_articulated is with_task_spec
+        assert scene.assets[0].name == "blue cup"
+        assert scene.assets[0].description == "A small ceramic cup."
+        assert scene.assets[1].is_articulated is False
+        return image
+
+    monkeypatch.setattr(scene_understanding, "_segment_scene", segment_scene)
+    scene, graph = scene_understanding.understand_scene(
+        scene=Scene(),
+        image_path=image,
+        output_root=tmp_path / "output",
+        vlm_client=VLM(),
+        image_segmentation_client=object(),
+        task_entities=task_entities,
+    )
+    assert set(graph.node_by_id()) == {obj.id for obj in scene.objects}
+    report = tmp_path / "output" / "scene_understanding" / "task_entity_matches.json"
+    if with_task_spec:
+        assert json.loads(report.read_text())["entity_to_scene"] == {
+            "evidence_001": "cup_001",
+            "evidence_002": None,
+        }
+        assert matching_calls[0]["task_entities"] == [
+            {"id": entity.id, "description": entity.description}
+            for entity in task_entities
+        ]
+    else:
+        assert matching_calls == []
+        assert not report.exists()
+
+
+@pytest.mark.parametrize(
+    "matches,entities,error",
+    [
+        ({"e1": "missing"}, (TaskEntity("e1", "cup", False),), "Unknown scene asset"),
+        (
+            {"e1": "cup_001", "e2": "cup_001"},
+            (TaskEntity("e1", "cup", False), TaskEntity("e2", "cup", False)),
+            "same scene asset",
+        ),
+        ({}, (TaskEntity("e1", "cup", False),), "every task entity"),
+        (
+            {"cup_002": "cup_001"},
+            (TaskEntity("cup_002", "cup", False),),
+            "duplicate scene object",
+        ),
+    ],
+)
+def test_task_entity_matching_rejects_invalid_assignments_without_mutation(
+    matches: dict[str, str | None], entities: tuple[TaskEntity, ...], error: str
+) -> None:
+    scene = scene_understanding._parse_image_object_analysis_response(_response())
+    scene.objects.append(
+        SceneObject(
+            id="cup_002",
+            kind="asset",
+            category="cup",
+            name="red cup",
+            description="A red cup.",
+        )
+    )
+    original = scene.to_dict()
+    with pytest.raises(ValueError, match=error):
+        scene_understanding._parse_task_entity_matches(
+            json.dumps(matches), scene, entities
+        )
+    assert scene.to_dict() == original
+
+
+def test_task_entity_matching_retries_and_allows_atomic_id_swaps(
+    tmp_path: Path,
+) -> None:
+    scene = scene_understanding._parse_image_object_analysis_response(_response())
+    scene.objects.append(
+        SceneObject(
+            id="cup_002",
+            kind="asset",
+            category="cup",
+            name="red cup",
+            description="A red cup.",
+        )
+    )
+    entities = (
+        TaskEntity("cup_002", "blue cup", False),
+        TaskEntity("cup_001", "red cup", True),
+    )
+
+    class VLM:
+        responses = ["invalid JSON", '{"cup_002":"cup_001","cup_001":"cup_002"}']
+
+        def complete(self, **_: object) -> str:
+            return self.responses.pop(0)
+
+    matches = scene_understanding._match_task_entities(
+        scene=scene,
+        task_entities=entities,
+        image_path=tmp_path / "image.png",
+        vlm_client=VLM(),
+    )
+    assert matches == {"cup_002": "cup_001", "cup_001": "cup_002"}
+    assert [asset.id for asset in scene.assets] == ["cup_001", "cup_002"]
+
+
 class _PromptedSegmentation:
     """Return one rectangular mask only for the prompts it recognizes."""
 
@@ -191,7 +308,39 @@ class _PromptedSegmentation:
         return [self.mask] if prompt in self.known else []
 
 
-def test_seamless_tabletop_falls_back_to_a_surface_prompt(tmp_path: Path) -> None:
+def test_opaque_task_id_uses_visual_prompts_for_segmentation(tmp_path: Path) -> None:
+    image = tmp_path / "scene.png"
+    Image.new("RGB", (48, 32), "white").save(image)
+    cup = SceneObject(
+        id="evidence_002",
+        kind="asset",
+        category="cup",
+        name="blue cup",
+        description="A blue ceramic cup.",
+    )
+    segmentation = _PromptedSegmentation((48, 32), {"cup"})
+
+    class VLM:
+        def complete(self, **_: object) -> str:
+            return '{"assignments":[{"asset_id":"evidence_002","mask_index":1}]}'
+
+    scene_understanding._segment_assets(
+        image,
+        tmp_path,
+        tmp_path,
+        Scene(objects=[cup]),
+        vlm_client=VLM(),
+        image_segmentation_client=segmentation,
+    )
+    assert segmentation.prompts == ["cup", "blue cup"]
+    assert cup.mask_path == str(tmp_path / "evidence_002_mask.png")
+    assert Image.open(cup.mask_path).getbbox() == (8, 8, 25, 21)
+
+
+@pytest.mark.parametrize("table_state", ["normal", "degraded"])
+def test_table_visibility_states_accept_the_surface_prompt(
+    tmp_path: Path, table_state: str
+) -> None:
     image_path = tmp_path / "scene.png"
     Image.new("RGB", (48, 32), "white").save(image_path)
     scene = Scene(
@@ -209,7 +358,7 @@ def test_seamless_tabletop_falls_back_to_a_surface_prompt(tmp_path: Path) -> Non
 
     class VLM:
         def complete(self, **_: object) -> str:
-            return json.dumps({"selected_mask_index": 1})
+            return json.dumps({"table_state": table_state, "selected_mask_index": 1})
 
     scene_understanding._segment_table(
         image_path,
@@ -224,6 +373,72 @@ def test_seamless_tabletop_falls_back_to_a_surface_prompt(tmp_path: Path) -> Non
 
     assert segmentation.prompts[-1] == "surface"
     assert scene.table is not None and scene.table.mask_path is not None
+    assert Image.open(scene.table.mask_path).getbbox() == (8, 8, 25, 21)
+    assert json.loads((tmp_path / "table_validation_surface.json").read_text()) == {
+        "table_state": table_state,
+        "selected_mask_index": 1,
+    }
+
+
+def test_visible_table_without_a_matching_mask_tries_the_next_prompt(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "scene.png"
+    Image.new("RGB", (48, 32), "white").save(image_path)
+    scene = scene_understanding._parse_image_object_analysis_response(_response())
+    segmentation = _PromptedSegmentation((48, 32), {"wooden table", "surface"})
+    responses = iter(
+        [
+            {"table_state": "degraded", "selected_mask_index": None},
+            {"table_state": "degraded", "selected_mask_index": 1},
+        ]
+    )
+
+    class VLM:
+        def complete(self, **_: object) -> str:
+            return json.dumps(next(responses))
+
+    scene_understanding._segment_table(
+        image_path,
+        image_path,
+        Image.new("L", (48, 32), 0),
+        tmp_path,
+        tmp_path,
+        scene,
+        vlm_client=VLM(),  # type: ignore[arg-type]
+        image_segmentation_client=segmentation,  # type: ignore[arg-type]
+    )
+
+    assert segmentation.prompts[-1] == "surface"
+    assert scene.table is not None and scene.table.mask_path is not None
+    assert json.loads((tmp_path / "table_validation_name.json").read_text()) == {
+        "table_state": "degraded",
+        "selected_mask_index": None,
+    }
+
+
+def test_absent_table_state_has_no_selected_mask() -> None:
+    validation = scene_understanding._parse_table_validation_response(
+        '{"table_state":null,"selected_mask_index":null}', []
+    )
+    assert validation.table_state is None
+    assert validation.selected_mask_index is None
+
+
+@pytest.mark.parametrize(
+    ("payload", "error"),
+    [
+        ({"table_state": None, "selected_mask_index": 1}, "cannot select"),
+        ({"table_state": "unknown", "selected_mask_index": None}, "table_state"),
+        ({"selected_mask_index": 1}, "exactly table_state"),
+        ({"table_state": "degraded", "selected_mask_index": True}, "integer"),
+    ],
+)
+def test_table_validation_rejects_inconsistent_or_invalid_decisions(
+    payload: dict[str, object], error: str
+) -> None:
+    with pytest.raises(ValueError, match=error):
+        scene_understanding._parse_table_validation_response(json.dumps(payload), [])
 
 
 def test_unsegmented_asset_retries_with_vlm_appearance_prompts(

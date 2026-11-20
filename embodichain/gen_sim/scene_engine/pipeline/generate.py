@@ -35,6 +35,9 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.scene.expansion import SceneRandomizationJobCfg
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
+from embodichain.gen_sim.scene_engine.task_spec_input import (
+    load_task_entities,
+)
 from embodichain.gen_sim.services.compat import VisionClient
 from embodichain.gen_sim.services.compat import GeometryClient
 from embodichain.gen_sim.services.compat import ArticulationClient
@@ -63,6 +66,7 @@ def generate_scene_from_image(
     image_path: str | Path,
     output_root: str | Path,
     *,
+    task_spec: str | Path | None = None,
     scene_z_rotation_degrees: float = 0.0,
     scene_randomization: SceneRandomizationJobCfg | dict | str | Path | None = None,
     services: GenSimServices | None = None,
@@ -72,6 +76,8 @@ def generate_scene_from_image(
     Args:
         image_path: Source tabletop image.
         output_root: Directory receiving intermediate and exported artifacts.
+        task_spec: Optional JSON whose entity IDs and articulation flags are
+            matched to the image's normally analyzed objects.
         scene_z_rotation_degrees: Final counterclockwise world-z rotation applied
             rigidly to the complete scene before export.
         scene_randomization: Optional grouped layout policy applied to the final
@@ -79,7 +85,20 @@ def generate_scene_from_image(
 
     Returns:
         The final scene in the rotated export frame.
+
+    Raises:
+        ValueError: If TaskSpec is combined with randomization or lacks an image.
     """
+    if task_spec is not None:
+        if image_path is None:
+            raise ValueError("TaskSpec input requires an image.")
+        if scene_randomization is not None:
+            raise ValueError("TaskSpec input cannot be combined with randomization.")
+    task_entities = (
+        load_task_entities(Path(task_spec).expanduser().resolve())
+        if task_spec is not None
+        else ()
+    )
     resolved_output_root = Path(output_root).expanduser().resolve()
     resolved_output_root.mkdir(parents=True, exist_ok=True)
 
@@ -99,6 +118,7 @@ def generate_scene_from_image(
             output_root=resolved_output_root,
             vlm_client=vlm_client,
             image_segmentation_client=image_segmentation_client,
+            task_entities=task_entities,
         )
     finally:
         image_segmentation_client.close()  # Close the session after scene understanding.

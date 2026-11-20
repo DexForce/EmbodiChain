@@ -142,6 +142,27 @@ def test_scene_operations_preserve_legacy_inputs(
         }
 
 
+def test_scene_generation_accepts_task_spec_json(monkeypatch) -> None:
+    from embodichain.gen_sim.scene_engine.cli import start
+
+    dispatch = Mock()
+    monkeypatch.setattr(start, "cli_scene_engine", dispatch)
+    main(
+        [
+            "gensim",
+            "scene",
+            "generate",
+            "--image",
+            "scene.png",
+            "--output",
+            "out",
+            "--task-spec",
+            "task_spec.json",
+        ]
+    )
+    assert dispatch.call_args.kwargs["task_spec"] == Path("task_spec.json")
+
+
 @pytest.mark.parametrize(
     "command",
     [
@@ -149,6 +170,37 @@ def test_scene_operations_preserve_legacy_inputs(
         ["gensim", "scene", "generate", "--output", "out"],
         ["gensim", "scene", "edit", "--scene", "out"],
         ["gensim", "asset", "ingest", "--bogus"],
+        [
+            "scene-engine",
+            "--output",
+            "out",
+            "--task-spec",
+            "task.json",
+        ],
+        [
+            "scene-engine",
+            "--image",
+            "scene.png",
+            "--output",
+            "out",
+            "--task-spec",
+            "task.json",
+            "--edit-prompt",
+            "move the cup",
+        ],
+        [
+            "gensim",
+            "scene",
+            "generate",
+            "--image",
+            "scene.png",
+            "--output",
+            "out",
+            "--task-spec",
+            "task.json",
+            "--expansion-config",
+            "policy.yaml",
+        ],
     ],
 )
 def test_invalid_operation_fails_before_loading_runtime(command: list[str]) -> None:

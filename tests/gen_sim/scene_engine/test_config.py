@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -247,3 +248,90 @@ def test_scene_engine_cli_rejects_invalid_image_inputs(
 
     with pytest.raises((FileNotFoundError, ValueError)):
         start.cli_scene_engine(image_path, tmp_path / "output")
+
+
+@pytest.mark.parametrize(
+    "image,options,message",
+    [
+        (None, {}, "requires --image"),
+        ("scene.png", {"edit_prompt": "move the cup"}, "cannot be combined"),
+        ("scene.png", {"scene_randomization": {}}, "cannot be combined"),
+    ],
+)
+def test_task_spec_rejects_unsupported_cli_modes_before_generation(
+    tmp_path: Path, image: str | None, options: dict, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        start.cli_scene_engine(
+            image,
+            tmp_path / "output",
+            task_spec=tmp_path / "task_spec.json",
+            **options,
+        )
+
+
+@pytest.mark.parametrize("has_task_spec", [False, True])
+def test_generate_forwards_task_entities_to_normal_understanding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, has_task_spec: bool
+) -> None:
+    task_spec = tmp_path / "task_spec.json"
+    task_spec.write_text(
+        json.dumps(
+            {
+                "schema_version": "task_spec/v1",
+                "interpretation": {
+                    "references": [
+                        {
+                            "entities": [
+                                {
+                                    "id": "evidence_001",
+                                    "description": "red button",
+                                    "is_articulated": True,
+                                }
+                            ]
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    segmentation = Mock()
+    monkeypatch.setattr(generation, "VisionFacade", lambda *args: object())
+    monkeypatch.setattr(generation, "SegmentationFacade", lambda *args: segmentation)
+
+    class UnderstandingComplete(Exception):
+        pass
+
+    def understand(**kwargs):
+        assert [
+            (entity.id, entity.description, entity.is_articulated)
+            for entity in kwargs["task_entities"]
+        ] == ([("evidence_001", "red button", True)] if has_task_spec else [])
+        raise UnderstandingComplete
+
+    monkeypatch.setattr(generation, "understand_scene", understand)
+    with pytest.raises(UnderstandingComplete):
+        generation.generate_scene_from_image(
+            tmp_path / "image.png",
+            tmp_path / "output",
+            task_spec=task_spec if has_task_spec else None,
+        )
+    segmentation.close.assert_called_once_with()
+
+
+@pytest.mark.parametrize("image,randomization", [(None, None), ("image.png", {})])
+def test_generate_rejects_invalid_task_spec_modes_before_clients(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, image, randomization
+) -> None:
+    def unexpected(*args, **kwargs):
+        raise AssertionError("invalid inputs must fail before client setup")
+
+    monkeypatch.setattr(generation, "VisionFacade", unexpected)
+    with pytest.raises(ValueError, match="requires an image|cannot be combined"):
+        generation.generate_scene_from_image(
+            image,
+            tmp_path,
+            task_spec=tmp_path / "task_spec.json",
+            scene_randomization=randomization,
+        )

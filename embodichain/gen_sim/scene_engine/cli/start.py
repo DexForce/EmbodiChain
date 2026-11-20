@@ -33,12 +33,20 @@ def cli_scene_engine(
     image: str | Path | None,
     output_root: str | Path,
     *,
+    task_spec: str | Path | None = None,
     edit_prompt: str | None = None,
     scene_z_rotation_degrees: float = 180.0,
     scene_randomization: dict | str | Path | None = None,
     services: GenSimServices | None = None,
 ) -> None:
-    """Generate a scene from an image, edit an export, or do both in sequence."""
+    """Generate a scene, optionally using task entity IDs, or edit an export."""
+    if task_spec is not None:
+        if image is None:
+            raise ValueError("TaskSpec input requires --image.")
+        if edit_prompt is not None or scene_randomization is not None:
+            raise ValueError(
+                "TaskSpec input cannot be combined with scene editing or randomization."
+            )
     resolved_output_root = Path(output_root).expanduser().resolve()
     if edit_prompt is not None:
         edit_prompt = edit_prompt.strip()
@@ -84,6 +92,7 @@ def cli_scene_engine(
             output_root=resolved_output_root,
             scene_z_rotation_degrees=scene_z_rotation_degrees,
             services=services,
+            **({"task_spec": task_spec} if task_spec is not None else {}),
         )
         if edit_prompt is not None:
             from embodichain.gen_sim.scene_engine.pipeline.edit import edit_scene
@@ -132,6 +141,12 @@ def main(
     else:
         parser.set_defaults(image=None)
     parser.add_argument(
+        "--task-spec",
+        type=Path,
+        default=None,
+        help="Optional TaskSpec JSON for entity IDs and articulation flags",
+    )
+    parser.add_argument(
         "--scene" if operation == "edit" else "--output",
         "--output-root",
         "--output_root",
@@ -165,6 +180,13 @@ def main(
         help="Optional post-export layout policy YAML",
     )
     args = parser.parse_args(argv)
+    if args.task_spec is not None:
+        if args.image is None:
+            parser.error("--task-spec requires --image")
+        if args.edit_prompt is not None or args.scene_randomization_config is not None:
+            parser.error(
+                "--task-spec cannot be combined with scene editing or randomization"
+            )
 
     cli_scene_engine(
         args.image,
@@ -172,6 +194,7 @@ def main(
         edit_prompt=args.edit_prompt,
         scene_z_rotation_degrees=180.0,
         scene_randomization=args.scene_randomization_config,
+        **({"task_spec": args.task_spec} if args.task_spec is not None else {}),
     )
 
 
