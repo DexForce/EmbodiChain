@@ -299,6 +299,9 @@ from the final restored observation before the first replay action. Holding a
 restored potential of 0.8 with discount 0.9 therefore earns `-0.08`.
 Camera and stereo-camera poses retain the episode randomization applied by
 `env.reset()`; replay invalidates their samples without resetting extrinsics.
+It rearms the scheduled camera acquisition before rendering the restored scene,
+so a render-period limit cannot reuse the reset image at the same simulation
+time. The new sample initializes rewards; subsequent reads resume normal cadence.
 Other sensors retain their state/history reset before acquiring restored state.
 
 Measured physical goals bind fixed topology for the environment lifetime.
@@ -346,6 +349,11 @@ The physical qualification CLI saves its diagnostic JSON before failing on
 nonfinite rewards or unexpected fixture outcomes. Planning-expert acceptance
 requires valid measured evidence; checkpoint task-success results remain
 informational while reward finiteness is still enforced.
+Physical qualification also records per-row `task_outcome.invalid_measurement`
+and requires valid measurements at every recorded step. Missing or invalid
+evidence cannot qualify a floating/empty-grip negative merely because it reports
+zero successes and finite failure penalties. Policy previews enforce any reported
+measurement-quality failures while leaving task success informational.
 
 Physics-substep acquisition adds work. The recorded fixture timing includes
 rendering and scalar auditing and does not establish large-batch or GPU

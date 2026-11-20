@@ -440,8 +440,17 @@ class BaseSensor(BatchEntity):
         }
 
     def _invalidate_samples(
-        self, env_ids: Sequence[int] | torch.Tensor | None = None
+        self,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        *,
+        resample: bool = False,
     ) -> None:
+        """Invalidate rows, optionally rearming the sensor-wide sample schedule.
+
+        Rearming preserves sample IDs and physical state. Hosts restoring the
+        whole sensed scene can request one immediate acquisition without
+        disabling the configured cadence for later samples.
+        """
         if self._sample_metadata is None:
             return
         rows = (
@@ -450,6 +459,9 @@ class BaseSensor(BatchEntity):
             else torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
         )
         self._sample_metadata["valid"][rows] = False
+        if resample:
+            self._sample_boundary = None
+            self._sample_time = -math.inf
 
     def _sample(self, boundary: int, time: float, physics_step: int, dt: float) -> None:
         metadata = self._sample_metadata

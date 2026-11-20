@@ -225,6 +225,106 @@ def test_dynamic_replay_preserves_randomized_camera_pose(fake_restore, compositi
     assert camera._sample_metadata["valid"].tolist() == [composition is None]
 
 
+def test_dynamic_replay_resamples_scheduled_stereo_before_seeding_rewards(monkeypatch):
+    from embodichain.lab.sim import SimulationManager
+    from embodichain.lab.sim.sensors import (
+        BaseSensor,
+        SensorContext,
+        StereoCamera,
+        StereoCameraCfg,
+    )
+
+    env = _FakeEnv()
+    scene = SimpleNamespace(disparity=2.0, boundary=0)
+    context = SensorContext(
+        device=env.device,
+        num_instances=1,
+        clock=SimpleNamespace(),
+        state=SimpleNamespace(),
+    )
+
+    class SyntheticStereo(StereoCamera):
+        def __init__(self):
+            self.randomized_pose = torch.zeros(1, 3)
+            BaseSensor.__init__(
+                self,
+                StereoCameraCfg(
+                    uid="stereo",
+                    sample_phase="render",
+                    sample_period=0.1,
+                    enable_disparity=True,
+                ),
+                context=context,
+            )
+
+        def _build_sensor_from_config(self, cfg, device):
+            self._data_buffer = TensorDict(
+                {"disparity": torch.zeros(1, 1, 1, 1)}, batch_size=[1]
+            )
+
+        def update(self, **kwargs):
+            assert kwargs["fetch_only"]
+            self._data_buffer["disparity"].fill_(scene.disparity)
+
+        def set_ground_plane_visibility(self, *args):
+            pass
+
+        def _reset_pose(self, env_ids):
+            self.randomized_pose.zero_()
+
+    camera = SyntheticStereo()
+    env.sensors = {"stereo": camera}
+    env.sim._sampling_sensors = {"render": {"stereo": camera}}
+    env.sim.simulation_time = 0.0
+    env.sim.physics_step_index = 0
+    seeds = []
+
+    def capture():
+        scene.boundary += 1
+        SimulationManager._sample_managed_sensors(
+            env.sim, "render", scene.boundary, 0.01, rendered_camera_uids={camera.uid}
+        )
+        return SimpleNamespace(
+            policy={"obs": camera.get_data()["disparity"].flatten(1).clone()}
+        )
+
+    def seed(frame, ids):
+        seeds.append(
+            (frame.policy["obs"].item(), camera.get_sample_metadata()["valid"].item())
+        )
+
+    def reset(**kwargs):
+        camera.reset()
+        camera.randomized_pose[:, 0] = 0.25
+        frame = capture()
+        seed(frame, [0])
+        return frame.policy, {}
+
+    env.reset = reset
+    env._capture_observation = capture
+    env.get_obs = lambda: capture().policy
+    env.cfg.rl_task = SimpleNamespace(reward_composition={"discount": 0.9})
+    env.observation_manager = SimpleNamespace(
+        has_history=False, reset=lambda **kw: None
+    )
+    env.reward_manager = SimpleNamespace(
+        reset=lambda **kw: None, initialize_observation=seed
+    )
+    monkeypatch.setattr(
+        replay_module,
+        "restore_trajectory_state",
+        lambda *args: setattr(scene, "disparity", 8.0),
+    )
+    wrapper = ReplayWrapper(env, _trajectory(), mode="dynamic")
+    observation, _ = wrapper.reset()
+    torch.testing.assert_close(observation["obs"], torch.tensor([[8.0]]))
+    assert seeds == [(2.0, True), (8.0, True)]
+    torch.testing.assert_close(camera.randomized_pose[:, 0], torch.tensor([0.25]))
+    sample_id = camera.get_sample_metadata()["sample_id"].clone()
+    capture()
+    torch.testing.assert_close(camera.get_sample_metadata()["sample_id"], sample_id)
+
+
 def test_dynamic_replay_seeds_shaping_from_restored_goal_observation(monkeypatch):
     from embodichain.lab.gym.envs.managers.cfg import ObservationCfg
     from embodichain.lab.gym.envs.managers.skill_objective import (

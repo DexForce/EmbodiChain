@@ -128,6 +128,8 @@ Place orientation preservation applies to both `at` and `on` destinations.
 Articulation/link references are not supported by measured skill targets.
 Dynamic replay seeds reward baselines from the final restored observation.
 It preserves randomized camera extrinsics while invalidating stale samples.
+Scheduled cameras acquire a fresh restored-scene image immediately, including
+same-time render resets, before reward initialization; normal cadence then resumes.
 Policy-only inference does not require an algorithm block.
 
 Checkpoint snapshots persist all effective reward scalars, including a suppressed
@@ -173,7 +175,11 @@ reports correctness agreement separately from physical task success.
 Qualification writes its JSON before returning a failing exit status for
 nonfinite rewards or mismatched fixture outcomes: all `supported` rows must
 succeed, and `floating`/`empty_grip` rows must remain unsuccessful. Checkpoint
-previews enforce reward finiteness while keeping policy task success informational.
+previews enforce reward quality while keeping policy task success informational.
+Physical reports retain each step's per-row `invalid_measurement` flags and fail
+on invalid or missing measurements, even when a negative case reports zero
+successes and finite rewards. A legacy policy environment without those flags
+reports measurement validity as unknown; reported invalidity still fails.
 
 
 A complete planning-expert grasp/place trace can qualify the same measured

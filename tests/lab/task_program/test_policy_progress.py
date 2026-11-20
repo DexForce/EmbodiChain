@@ -517,6 +517,45 @@ def test_multicall_segment_requires_each_measured_call_in_order():
         )
 
 
+def test_progress_rejects_unmatched_skill_conditions_in_direct_python_calls():
+    env, owner, _, _, graph = _setup()
+    program = env.task_program_progress._program_for_test
+    registry = builtin_predicates()
+
+    def unsatisfied(arguments, params):
+        height = arguments["height"]
+        return PredicateMeasurement(height >= 0.5, torch.isfinite(height), {})
+
+    registry.register(
+        "extra_height", PredicateDefinition(1, ("height",), dict, unsatisfied)
+    )
+    extra = registry.compile(
+        EvaluationSpec(
+            {"extra": PredicateSpec("extra_height", {"height": "height"}, {})},
+            ("extra",),
+        )
+    )
+    progress = TaskProgramProgress(
+        program,
+        {"lifted": graph},
+        env_ids=(0, 1),
+        episode_ids=owner.episode_ids,
+        skill_conditions={("call", 0): extra},
+    )
+    progress.advance(_frame(owner, [0.2, 0.2], 1), step=0, episode_owner=owner)
+    assert not progress.snapshot()["achieved"].any()
+    for selector in (("call", 99), "missing_stage"):
+        with pytest.raises(ValueError) as error:
+            TaskProgramProgress(
+                program,
+                {"lifted": graph},
+                env_ids=(0, 1),
+                episode_ids=owner.episode_ids,
+                skill_conditions={selector: extra},
+            )
+        assert repr(selector) in str(error.value)
+
+
 def test_progress_identity_binds_additional_skill_acceptance_graph():
     env, owner, _, _, graph = _setup()
     original = env.task_program_progress

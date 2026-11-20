@@ -392,6 +392,8 @@ the equivalent automatic bonus for that event.
 Preflight and runtime share a selector index, including original parent IDs of
 expanded multi-call segments. Authored names precede textual aliases; structural
 `call_index` bindings and numeric progress occurrences remain unambiguous.
+Progress graph construction rejects unmatched acceptance selectors, including
+direct Python `skill_conditions` callers, before any condition can be discarded.
 Measured call targets preserve call-start relative
 references and effective Place orientation; the manager contract owns their
 binding and topology restrictions.

@@ -32,11 +32,27 @@ import torch
 import yaml
 
 
+def _measurement_validity(trace, num_envs):
+    """Return false for any invalid row, or unknown for missing evidence."""
+    complete = bool(trace)
+    for row in trace:
+        invalid = row.get("invalid_measurement")
+        if invalid is None:
+            complete = False
+        elif (
+            not isinstance(invalid, (list, tuple))
+            or len(invalid) != num_envs
+            or any(invalid)
+        ):
+            return False
+    return True if complete else None
+
+
 def _qualification_result(report):
     """Separate physical expectations from policy-performance diagnostics."""
     source = report["source"]
     if source == "checkpoint_policy":
-        expected, scope = None, "reward_finiteness_only"
+        expected, scope = None, "reward_quality_only"
     elif source == "planning_expert_not_learned_policy":
         expected, scope = report["num_envs"], "planning_expert"
     else:
@@ -50,6 +66,11 @@ def _qualification_result(report):
         "qualification_scope": scope,
         "expected_success_rows": expected,
         "passed": bool(report["finite_rewards"])
+        and (
+            report.get("valid_measurements") is not False
+            if expected is None
+            else report.get("valid_measurements") is True
+        )
         and (expected is None or report["success_rows"] == expected),
     }
 
@@ -267,6 +288,10 @@ def main() -> None:
                         "reward": [0.0],
                         "success": [False],
                         "failure": [False],
+                        "invalid_measurement": [
+                            not all(value["valid"][i] for value in measured.values())
+                            for i in range(env.num_envs)
+                        ],
                         "measured": measured,
                     }
                 )
@@ -297,6 +322,7 @@ def main() -> None:
                             ),
                         )
                 observation, reward, terminated, truncated, info = env.step(action)
+                invalid = info.get("task_outcome", {}).get("invalid_measurement")
                 if recorder:
                     recorder(env, env_ids=[0], name=label)
                 trace.append(
@@ -305,6 +331,9 @@ def main() -> None:
                         "reward": reward.tolist(),
                         "success": info["success"].tolist(),
                         "failure": info["fail"].tolist(),
+                        "invalid_measurement": (
+                            invalid.tolist() if invalid is not None else None
+                        ),
                         "terminated": terminated.tolist(),
                         "truncated": truncated.tolist(),
                         "terms": {
@@ -359,6 +388,7 @@ def main() -> None:
                 and report["measured_place_success"]
             )
             report["success_rate"] = float(report["success_rows"])
+        report["valid_measurements"] = _measurement_validity(trace, env.num_envs)
         report.update(_qualification_result(report))
         (args.output / f"{label}.json").write_text(json.dumps(report, indent=2) + "\n")
         print(

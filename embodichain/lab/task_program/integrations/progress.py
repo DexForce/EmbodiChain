@@ -177,7 +177,18 @@ def _progress_graph(
     selections = _stage_selections(stages)
     extra_conditions = {i: [] for i in range(len(stages))}
     for selector, spec in (skill_conditions or {}).items():
-        for index in selections.get(selector, ()):
+        structural_call = (
+            type(selector) is tuple
+            and len(selector) == 2
+            and selector[0] == "call"
+            and type(selector[1]) is int
+        )
+        if (
+            not (_is_stage_selector(selector) or structural_call)
+            or selector not in selections
+        ):
+            raise ValueError(f"Unknown policy stage {selector!r} in skill_conditions.")
+        for index in selections[selector]:
             extra_conditions[index].append(spec)
     for i, segment in enumerate(stages):
         path = segment.source_path

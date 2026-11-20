@@ -335,7 +335,9 @@ class ReplayWrapper(gym.Wrapper):
                 if not isinstance(sensor, Camera):
                     sensor.reset(env_ids=env_ids)
                 if isinstance(sensor, BaseSensor):
-                    sensor._invalidate_samples(env_ids)
+                    sensor._invalidate_samples(
+                        env_ids, resample=isinstance(sensor, Camera)
+                    )
             observation_manager = getattr(self.env, "observation_manager", None)
             if observation_manager is not None:
                 observation_manager.reset(env_ids=env_ids)

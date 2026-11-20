@@ -115,6 +115,8 @@ Dynamic replay resets histories and seeds the final restored frame. Rejected
 stale/foreign frames cannot move the accepted revision watermark.
 Replay invalidates camera samples while preserving randomized extrinsics;
 non-camera sensors still reset their state and history after restoration.
+Replay rearms camera sampling once before rendering the restored scene and seeding
+rewards, so an unchanged simulation timestamp cannot retain the old image.
 Unavailable required measurements terminate affected rows and cannot erase a
 negative shaping boundary. True task termination and time truncation remain distinct.
 
