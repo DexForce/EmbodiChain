@@ -2341,6 +2341,18 @@ Fixed-count fluid sources, physical properties and native particle or surface di
 
 .. autoclass:: embodichain.lab.sim.cfg.fluid.FluidObjectCfg
 
+embodichain.lab.sim.dexsim_session
+----------------------------------
+
+Read a control group's measured joints inside a borrowed DexSim World.
+
+.. currentmodule:: embodichain.lab.sim.dexsim_session
+
+.. autosummary::
+
+   read_robot_state
+   run
+
 embodichain.lab.sim.motion.expansion.session_coverage
 -----------------------------------------------------
 
@@ -6606,6 +6618,31 @@ embodichain.lab.sim.utility.gripper_binding
    prepare_robot_grippers
 
 .. autofunction:: prepare_robot_grippers
+
+embodichain.mcp.server
+----------------------
+
+Install ``embodichain[mcp]`` on the client and the same version of EmbodiChain
+in the DexSim World host. Start ``embodichain mcp --session ID`` as the MCP
+client's stdio server. For a custom discovery directory, add
+``--session-directory DIR``.
+
+For a UR5 articulation at path ``ur5_b``, call
+``embodichain_get_robot_state`` with these arguments:
+
+.. code-block:: json
+
+   {"object_ref": "ur5_b", "robot_cfg": "URRobot", "variant": "ur5", "control_part": "arm"}
+
+The response contains measured positions and units in the configured group
+order, the corresponding public DOF indices and the host session identity.
+Clock fields are nullable. Closing the stdio client detaches from the World.
+
+.. currentmodule:: embodichain.mcp.server
+
+.. autosummary::
+
+   cli
 
 embodichain.robot_registry
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
