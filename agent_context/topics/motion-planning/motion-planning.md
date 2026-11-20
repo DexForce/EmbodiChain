@@ -146,3 +146,11 @@ and [design contract](../../../extensions/embodichain_benchmarks/motion_generati
 For stale obstacles inspect identity/capabilities; for duration or acceleration
 changes inspect normalization and the destination clock before tuning limits.
 Tests target production owners rather than importing tutorial implementations.
+
+For physical single-object grasp evaluation, the installed
+`embodichain_benchmarks.grasp_pose_generator` runner freezes ranked object-local
+TCPs and delegates independent base/X/Y trials to
+`embodichain.lab.sim.grasp_validation.GraspValidator`. The
+[physical suite](../../../extensions/embodichain_benchmarks/grasp_pose_generator/README.md)
+owns held-out splits, fixed attempt budgets and reports. The legacy CoffeeCup
+sweep measures geometric sampling and selection.

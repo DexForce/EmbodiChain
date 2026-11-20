@@ -1,0 +1,21 @@
+grippers: [FrankaPandaHand, DHPGI14080, RobotiqArg2F85]
+seeds: [0]
+algorithms:
+  antipodal: null
+objects:
+  - id: cube
+    family: calibration_cube
+    holdout: false
+    rigid:
+      body_type: dynamic
+      attrs: {mass_props: {mass: 0.035}, material_props: {static_friction: 0.99, dynamic_friction: 0.97}}
+      shape: {shape_type: Cube, size: [0.04, 0.04, 0.04]}
+      init_pos: [0, 0, 0.025]
+  - id: brick
+    family: rectangular_brick
+    holdout: true
+    rigid:
+      body_type: dynamic
+      attrs: {mass_props: {mass: 0.035}, material_props: {static_friction: 0.99, dynamic_friction: 0.97}}
+      shape: {shape_type: Cube, size: [0.035, 0.06, 0.045]}
+      init_pos: [0, 0, 0.026]

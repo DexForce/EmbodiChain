@@ -176,6 +176,7 @@ def get_package_data() -> dict[str, list[str]]:
             "_graph_assets/*",
         ],
         **{name: list(extension_patterns) for name in _extension_package_dirs()},
+        "embodichain_benchmarks.grasp_pose_generator": ["candidates.jsonl"],
         "embodichain_tasks.configs": [
             "tasks/manipulation/cloth_fold/task_program/trajectory.npz",
             "**/*.usda",
