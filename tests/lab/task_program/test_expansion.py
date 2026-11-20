@@ -1182,3 +1182,77 @@ def test_native_via_point_refines_after_the_raw_proposal_budget(
     assert torch.equal(positions[:, :8], original[:, :8])
     assert torch.equal(positions[:, -2:], original[:, -2:])
     assert torch.equal(positions[:, :, 1:], original[:, :, 1:])
+
+
+@pytest.mark.parametrize("prefix", [0, 4])
+@pytest.mark.parametrize("operator", ["joint_residual", "via_points"])
+def test_native_expansion_keeps_reference_bridge_prefix(monkeypatch, prefix, operator):
+    from embodichain.lab.task_program.integrations._native_plan_expansion import (
+        _NativePlanExpansion,
+    )
+
+    def plan_place(action, request, context):
+        q = torch.zeros((1, 26, 3))
+        q[:, :20, 0] = torch.linspace(0, 0.01, 20)
+        q[:, 20:, 0] = 0.01
+        q[:, 20:, 2] = 0.02
+        return action.build_plan(
+            request,
+            context,
+            success=True,
+            trajectory=TimedTrajectory.from_uniform_step(
+                q, env_ids=context.env_ids, step_dt=CONTROL_DT
+            ),
+            segment_lengths={"approach": 20, "release": 3, "retract": 3},
+        )
+
+    monkeypatch.setattr(_ThreePhasePlaceAction, "_plan", plan_place)
+    engine, invocation, resolved, context, plan = _planned_place()
+    engine.robot.get_qpos_limits.return_value = torch.tensor([[[-2.0, 2.0]] * 3])
+    engine.robot.get_qvel_limits.return_value = torch.full((1, 3), 0.5)
+    monkeypatch.setattr(_NativePlanExpansion, "_kinematics", lambda *_: (None, ()))
+    plan = replace(
+        plan,
+        diagnostics=replace(
+            plan.diagnostics,
+            metadata={
+                "reference_bridge": {
+                    "prefix_samples": prefix,
+                    "joint_ids": (0, 1, 2),
+                    "control_dt": CONTROL_DT,
+                }
+            },
+        ),
+    )
+    factory = TaskProgramSameGridExpansionFactory.from_native_plan(
+        operator,
+        {
+            "free_phases": {"place": ["approach"]},
+            "velocity_limit": 0.5,
+            "acceleration_limit": 0.5,
+            "max_proposals": 16,
+            "minimum_joint_delta": 0.00001,
+            "joint_offset_scale": 0.0005,
+            "via_count": 1,
+            "nullspace_task_rows": [0],
+        },
+        seed=7,
+        scene_case=SceneCase(
+            "case", "state", "scene", "repeated_cube_pick_place", "robot"
+        ),
+        revision="reference",
+    )
+    transform = factory.create_plan_transform(_plan_request(invocation), engine=engine)
+    rebuilt = transform(resolved, context, plan)
+    assert torch.equal(
+        rebuilt.joint_trajectory.positions[:, : prefix + 3],
+        plan.joint_trajectory.positions[:, : prefix + 3],
+    )
+    assert not torch.equal(
+        rebuilt.joint_trajectory.positions, plan.joint_trajectory.positions
+    )
+    assert torch.equal(
+        rebuilt.joint_trajectory.positions[:, 20:],
+        plan.joint_trajectory.positions[:, 20:],
+    )
+    assert torch.equal(rebuilt.joint_trajectory.dt, plan.joint_trajectory.dt)

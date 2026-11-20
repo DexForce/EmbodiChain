@@ -3757,3 +3757,19 @@ def test_reference_bridge_retains_physical_gate_after_shifted_phase(monkeypatch)
     assert torch.equal(
         _joint_positions(blocked.command), _joint_positions(boundary.command)
     )
+
+
+def test_boundary_ready_row_retains_terminal_targets_while_peer_waits():
+    engine, _ = _engine(batch_size=2)
+    invocation = replace(
+        _invocation(engine),
+        tracking_policy=replace(TrackingPolicy.timed(), boundary_stop=True),
+    )
+    session = engine.start((invocation,), _context(0.0, (0.0, 0.0), (0.2, 0.2), 0))
+    session.tick(_context(0.0, (0.0, 0.0), (0.2, 0.2), 0))
+    session.tick(_context(0.1, (0.0, 0.0), (0.2, 0.2), 0))
+    for time in (0.2, 0.3, 0.4):
+        waiting = session.tick(_context(time, (0.1995, 0.0), (0.2, 0.2), 0))
+    assert waiting.status is ExecutionStatus.RUNNING
+    assert waiting.command.active_mask.tolist() == [True, True]
+    assert torch.allclose(_joint_positions(waiting.command), torch.full((2, 2), 0.2))

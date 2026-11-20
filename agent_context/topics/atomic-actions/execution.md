@@ -285,6 +285,8 @@ retention and final acceptance still require the original physical evidence.
 timed/feedback terminal acceptance or effect verification. It retains the exact
 terminal command, including hand targets, until two distinct observations satisfy
 the configured target error and control-grid measured-position speed tolerances.
+Rows that are ready retain their terminal arm/hand targets while eligible peers
+wait at the batch barrier; failed rows remain masked out.
 Native qvel remains a finite-data check and is logged separately; its post-substep
 value is not substituted for the control-grid derivative. Invalid rows and physical
 timeouts fail closed without keeping failed rows in another terminal gate's mask.

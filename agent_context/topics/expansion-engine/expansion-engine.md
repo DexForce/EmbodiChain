@@ -257,3 +257,9 @@ shrink one closest motion rejection under unchanged minimum-delta, joint, motion
 FK and physical checks. It preserves the time grid and protected samples; metadata
 records the raw proposal count, refinement scale and both validation results.
 See [boundary and residual qualification](../../../examples/expansion/engine/skill-boundaries.md).
+
+Native same-grid generators narrow editable phases using the handoff protection
+range before sampling. Raw protected indices are mapped through zero-time sample
+canonicalization; protected-only motion does not make a joint editable. Empty
+remaining phases are disabled. Engine reconstruction retains its independent
+exact-prefix check as the final boundary.

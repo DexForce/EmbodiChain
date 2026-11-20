@@ -1352,8 +1352,11 @@ class ExecutionSession:
                     "Terminal settling requires an executable terminal command "
                     "frame."
                 )
+            # Readiness is a batch barrier, not permission to drop an eligible
+            # row's arm/grasp references. Failed rows stay masked out.
+            hold_mask = execution_mask if boundary.boundary_stop else terminal_pending
             terminal_command = plan.commands.frames[-1].with_active_mask(
-                plan.commands.frames[-1].active_mask & terminal_pending
+                plan.commands.frames[-1].active_mask & hold_mask
             )
             self._last_commanded_plan_sample = (
                 plan.invocation_id,

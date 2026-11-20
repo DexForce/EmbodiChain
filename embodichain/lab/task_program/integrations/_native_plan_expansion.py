@@ -283,9 +283,50 @@ class _NativePlanExpansion:
             )
             for p in template.phases
         )
+        bridge = plan.diagnostics.metadata.get("reference_bridge")
+        if bridge:
+            from embodichain.lab.sim.atomic_skills._expansion_phases import (
+                _canonical_samples,
+                _free_joint_indices,
+            )
+
+            trajectory = plan.joint_trajectory
+            _, _, _, canonical = _canonical_samples(
+                trajectory.positions[0], trajectory.dt[0]
+            )
+            # Engine protects raw [0, prefix+3). Operators edit strictly inside
+            # phase endpoints, so retain the corresponding last canonical index.
+            last_raw = min(
+                int(bridge["prefix_samples"]) + 2, trajectory.waypoint_count - 1
+            )
+            protected_end = int(canonical[last_raw])
+            phases = tuple(
+                (
+                    (
+                        replace(p, start_index=max(p.start_index, protected_end))
+                        if p.stop_index - max(p.start_index, protected_end) >= 3
+                        else replace(p, allowed_operators=())
+                    )
+                    if p.allowed_operators
+                    else p
+                )
+                for p in phases
+            )
+            active_ids = _free_joint_indices(
+                template.positions, phases, template.controlled_joint_indices
+            )
+            if not active_ids:
+                return plan
+            template = replace(template, controlled_joint_indices=active_ids)
         if not any(p.allowed_operators for p in phases):
             return plan
-        template = replace(template, phases=phases)
+        template = replace(
+            template,
+            phases=phases,
+            allowed_operators=tuple(
+                dict.fromkeys(op for p in phases for op in p.allowed_operators)
+            ),
+        )
         limits = engine.robot.get_qpos_limits().detach().cpu()
         if limits.ndim == 3:
             limits = limits[int(context.env_ids[0])]
