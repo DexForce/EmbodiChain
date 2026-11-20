@@ -143,6 +143,17 @@ class HandOverOptions(SkillOptions):
     explicit ``source`` and ``destination`` resource slots are authoritative.
     """
 
+    source_hand_hold: Literal["observed", "grasp"] = field(
+        default="observed", kw_only=True
+    )
+    """Source-hand command while an existing hold is transferred.
+
+    ``"observed"`` holds the measured finger positions. A position-driven
+    gripper then stops squeezing, because its command equals its position.
+    ``"grasp"`` keeps commanding the configured grasp setpoint, as PickUp does
+    while lifting, so the source keeps its grip until it releases.
+    """
+
     def __post_init__(self) -> None:
         for name in (
             "pre_grasp_distance",
@@ -170,6 +181,8 @@ class HandOverOptions(SkillOptions):
             raise TypeError("release_at_target must be a bool.")
         if self.arm_selection not in ("nearest", "bound"):
             raise ValueError("arm_selection must be exactly 'nearest' or 'bound'.")
+        if self.source_hand_hold not in ("observed", "grasp"):
+            raise ValueError("source_hand_hold must be exactly 'observed' or 'grasp'.")
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -971,11 +984,16 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
         )
         lengths["retreat"] = source_retreat.shape[1]
 
-        # An existing hold is already physically established.  Preserve the
-        # observed source-hand closure until the release phase instead of
-        # commanding a configured grasp setpoint that may be tighter than the
-        # contact-supported pose.
-        source_hand_qpos = context.last_qpos[:, list(resources.first.hand.joint_ids)]
+        # An existing hold is already physically established.  By default,
+        # preserve the observed source-hand closure until the release phase
+        # instead of commanding a configured grasp setpoint that may be tighter
+        # than the contact-supported pose.
+        if options.source_hand_hold == "grasp":
+            source_hand_qpos = resources.first.hand_grasp_qpos
+        else:
+            source_hand_qpos = context.last_qpos[
+                :, list(resources.first.hand.joint_ids)
+            ]
         destination_hand_qpos = context.last_qpos[
             :, list(resources.second.hand.joint_ids)
         ]

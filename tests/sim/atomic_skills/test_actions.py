@@ -7426,10 +7426,19 @@ def test_handover_can_end_with_receiving_resource_holding_object(
     assert torch.all(trajectory.positions[:, -1, DUAL_ARM_DOF + 2 :] == 1)
 
 
-@pytest.mark.parametrize("packed", [False, True, "sequential"])
+@pytest.mark.parametrize(
+    ("packed", "source_hand_hold"),
+    [
+        (False, "observed"),
+        (True, "observed"),
+        ("sequential", "observed"),
+        (False, "grasp"),
+    ],
+)
 def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
     monkeypatch: pytest.MonkeyPatch,
     packed: bool | str,
+    source_hand_hold: str,
 ) -> None:
     """The receiver enters diagonally from its embodiment side."""
     generator = _dual_motion_generator()
@@ -7516,6 +7525,7 @@ def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
             skill_options=HandOverOptions(
                 release_at_target=False,
                 receive_pick_object_part="center",
+                source_hand_hold=source_hand_hold,
             ),
         ),
         context,
@@ -7564,15 +7574,21 @@ def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
     trajectory = _joint_trajectory(plan).positions
     transfer = plan.segment("transfer")
     release = plan.segment("handover_release")
+    # The source holds its observed closure, or on request its grasp command (1).
+    held_hand_qpos = (
+        source_hand_qpos
+        if source_hand_hold == "observed"
+        else torch.ones_like(source_hand_qpos)
+    )
     torch.testing.assert_close(
         trajectory[
             :, transfer.start : release.start, DUAL_ARM_DOF : DUAL_ARM_DOF + HAND_DOF
         ],
-        source_hand_qpos[:, None].expand(-1, release.start - transfer.start, -1),
+        held_hand_qpos[:, None].expand(-1, release.start - transfer.start, -1),
     )
     torch.testing.assert_close(
         trajectory[:, release.start, DUAL_ARM_DOF : DUAL_ARM_DOF + HAND_DOF],
-        source_hand_qpos,
+        held_hand_qpos,
     )
 
 

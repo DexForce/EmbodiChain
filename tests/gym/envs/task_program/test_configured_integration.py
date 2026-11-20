@@ -1456,6 +1456,19 @@ def test_coordinated_transport_config_decodes_closed_routes_and_options() -> Non
     assert options.grasp_seed == 17393
 
 
+def test_handover_source_hand_hold_decodes_and_defaults_to_observed() -> None:
+    options = _decode_skill_options(
+        {"kind": "hand_over", "source_hand_hold": "grasp"}, path="options"
+    )
+    assert options.source_hand_hold == "grasp"
+    default = _decode_skill_options({"kind": "hand_over"}, path="options")
+    assert default.source_hand_hold == "observed"
+    with pytest.raises(ValueError, match="source_hand_hold"):
+        _decode_skill_options(
+            {"kind": "hand_over", "source_hand_hold": "tight"}, path="options"
+        )
+
+
 def test_slide_clearance_options_decode() -> None:
     options = _decode_skill_options(
         {

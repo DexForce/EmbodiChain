@@ -1100,6 +1100,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 "release",
                 "release_at_target",
                 "arm_selection",
+                "source_hand_hold",
                 "release_steps",
                 "retreat_distance",
                 "retreat_steps",
@@ -1764,6 +1765,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                     "receive_pick_object_part",
                     "release_at_target",
                     "arm_selection",
+                    "source_hand_hold",
                 }
             ),
         )
@@ -1803,11 +1805,12 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 config["release_at_target"],
                 path=f"{path}.release_at_target",
             )
-        if "arm_selection" in config:
-            kwargs["arm_selection"] = _identifier(
-                config["arm_selection"],
-                path=f"{path}.arm_selection",
-            )
+        for field_name in ("arm_selection", "source_hand_hold"):
+            if field_name in config:
+                kwargs[field_name] = _identifier(
+                    config[field_name],
+                    path=f"{path}.{field_name}",
+                )
         return HandOverOptions(**kwargs)
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "

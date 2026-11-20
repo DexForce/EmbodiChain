@@ -267,6 +267,8 @@ def _canonical_value(value: object) -> object:
             metadata.pop("cartesian_lift")
         if isinstance(value, HandOverOptions) and value.grasp_retract_distance == 0.0:
             metadata.pop("grasp_retract_distance")
+        if isinstance(value, HandOverOptions) and value.source_hand_hold == "observed":
+            metadata.pop("source_hand_hold")
         if isinstance(value, PlaceOptions) and value.cartesian_approach is False:
             metadata.pop("cartesian_approach")
         if isinstance(value, PlaceOptions) and value.release_settle_duration == 0.0:
