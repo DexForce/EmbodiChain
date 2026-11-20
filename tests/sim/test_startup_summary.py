@@ -23,7 +23,13 @@ import pytest
 import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import DefaultPhysicsCfg, NewtonPhysicsCfg, RenderCfg
+from embodichain.lab.sim.cfg import (
+    DefaultPhysicsCfg,
+    LightCfg,
+    NewtonPhysicsCfg,
+    RenderCfg,
+)
+from embodichain.lab.sim.objects import Light
 
 pytestmark = pytest.mark.no_sim
 
@@ -54,6 +60,9 @@ def _sim(physics_cfg=None):
         _rigid_objects={},
         _rigid_object_groups={},
         _deformable_objects={},
+        _cable_objects={},
+        _fluid_objects={},
+        _visual_objects={},
         _sensors={},
         _lights={},
         _constraints={},
@@ -217,6 +226,46 @@ def test_scene_emission_waits_for_readiness_and_is_once(monkeypatch):
     sim._log_scene_summary()
     sim._log_scene_summary()
     assert len(calls) == 1 and "READY" in calls[0]
+
+
+@pytest.mark.parametrize("mode", ["compact", "full"])
+def test_scene_counts_registered_assets_once_across_environments(mode: str) -> None:
+    summary = importlib.import_module("embodichain.lab.sim._startup_summary")
+    sim = _sim()
+    sim.num_envs = 4
+    sim.sim_config.startup_summary = mode
+    sim.spawn_result = SimpleNamespace(topology_revision=1, needs_rebuild=False)
+    sim._ready_spawn_topology_revision = 1
+    sim._deformable_objects = {"cloth": object()}
+    sim._cable_objects = {"routing_cable": object()}
+    sim._fluid_objects = {"water": object(), "oil": object()}
+    for uid, light_type in (("global_sun", "sun"), ("local_fill", "point")):
+        light = object.__new__(Light)
+        light.cfg = LightCfg(uid=uid, light_type=light_type)
+        sim._lights[uid] = light
+
+    rows = summary.scene_rows(sim)
+    counts = {
+        label: value for section, label, value in rows if section == "Scene assets"
+    }
+    light_details = {
+        uid: value for section, uid, value in rows if section == "Light details"
+    }
+    assert counts["Rigid objects"] == "0"
+    assert counts["Direct lights"] == "2"
+    if mode == "full":
+        assert counts["Particle deformables"] == "1 (cloth)"
+        assert counts["Cable objects"] == "1 (routing_cable)"
+        assert counts["Fluid objects"] == "2 (water, oil)"
+        assert light_details == {
+            "global_sun": "sun · global",
+            "local_fill": "point · per env",
+        }
+    else:
+        assert counts["Particle deformables"] == "1"
+        assert counts["Cable objects"] == "1"
+        assert counts["Fluid objects"] == "2"
+        assert not light_details
 
 
 def test_newton_scene_emission_waits_for_cuda_graph_capture(monkeypatch):
