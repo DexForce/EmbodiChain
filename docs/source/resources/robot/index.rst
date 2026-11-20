@@ -87,6 +87,18 @@ Manufacturers
      - :doc:`MicroDuck <pollen_robotics/microduck>`
      - ``MicroDuckCfg``
      - Fourteen-joint floating-base biped with simulation PD defaults.
+   * - :doc:`RoboParty <roboparty/index>`
+     - :doc:`Roboto Origin <roboparty/rpo>`
+     - ``RoboPartyRPOCfg``
+     - Twenty-three-joint floating-base humanoid with simulation PD defaults.
+   * - :doc:`RoboParty <roboparty/index>`
+     - :doc:`RP1 <roboparty/rp1>`
+     - ``RoboPartyRP1Cfg``
+     - Floating-base humanoid with 24- and 28-joint body variants and optional articulated or fixed hands.
+   * - :doc:`RoboParty <roboparty/index>`
+     - :doc:`RP Hand <roboparty/rp_hand>`
+     - ``RoboPartyRPHandCfg``
+     - Standalone left/right hand with six joint commands and five source mimic followers.
    * - :doc:`The Robot Studio <the_robot_studio/index>`
      - :doc:`SO101 Follower <the_robot_studio/so101>`
      - ``SO101FollowerCfg``
@@ -118,11 +130,10 @@ Manufacturers
 
 .. toctree::
    :maxdepth: 2
-
-   parallel_jaw_grippers
    :caption: Manufacturers
    :hidden:
 
+   parallel_jaw_grippers
    agibot/index
    agilex/index
    anybotics/index
@@ -140,20 +151,19 @@ Manufacturers
    franka/index
    i2rt/index
    pollen_robotics/index
+   roboparty/index
    the_robot_studio/index
    tianji/index
    unitree/index
-   agibot/index
    universal_robots/index
 
 End-effector Assets
 -------------------
 
 Hands and grippers share the manufacturer/model organization above.
-BrainCo Revo 1, Sharpa Wave 01 and Wuji Hand provide standalone hand presets;
-asset-only
-entries provide source assets for caller-owned assembly. ``eef`` is a control-group
-convention and does not identify grasping capabilities.
+BrainCo Revo 1, Sharpa Wave 01, Wuji Hand and RP Hand provide standalone hand
+presets. Asset-only entries provide source assets for caller-owned assembly.
+``eef`` names the control group for end-effector joints.
 
 See :doc:`end_effectors` for the asset IDs, canonical imports, migration
 instructions, provenance boundaries and rendered source-model illustrations.
@@ -178,6 +188,9 @@ instructions, provenance boundaries and rendered source-model illustrations.
    * - :doc:`Sharpa Robotics <sharpa/index>`
      - :doc:`Sharpa Wave 01 <sharpa/wave>`
      - Left/right assets and standalone preset.
+   * - :doc:`RoboParty <roboparty/index>`
+     - :doc:`RP Hand <roboparty/rp_hand>`
+     - Left/right assets and standalone preset derived from RP1.
    * - :doc:`ChangingTek <changingtek/index>`
      - :doc:`CTM2F110 <changingtek/ctm2f110>`
      - Gripper asset.

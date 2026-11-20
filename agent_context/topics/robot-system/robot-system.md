@@ -14,7 +14,8 @@ identity and calibrated defaults belong to `embodichain.extensions.robots`.
 | Config decoding, construction hooks, backend alternatives | `embodichain/lab/sim/cfg/robot.py` → `RobotCfg`, `RobotPresetCfg` |
 | Available robot configs and variants | `embodichain/extensions/robots/_catalog.py`; `embodichain/extensions/robots/__init__.py` owns lazy exports |
 | YAM dual-arm defaults and source-aligned FK/IK | `embodichain/extensions/robots/i2rt/yam/cfg.py` → [model and asset usage](../../../docs/source/resources/robot/i2rt/yam.md) |
-| Locomotion assets, standing poses, drives and reference frames | `embodichain/extensions/robots/locomotion_profiles.py` reads each vendor/model's `profile.json`; model packages own `cfg.py` and `assets.py` |
+| JSON-backed locomotion assets, standing poses, drives and reference frames | `embodichain/extensions/robots/locomotion_profiles.py` reads each vendor/model's `profile.json`; model packages own `cfg.py` and `assets.py` |
+| RoboParty RPO, RP1 variants and standalone RP Hand | `embodichain/extensions/robots/roboparty/` owns source archives and URDF-backed joint defaults |
 | Shared Gym/CLI/dual-arm selection | `embodichain/robot_registry.py` → `list_robot_cfgs`, `resolve_robot_cfg` |
 | Robot listing CLI | `embodichain/cli/list_robot.py` → `embodichain list-robot` |
 | Generic robot preview and standalone RobotCfg files | `embodichain/lab/scripts/preview_robot.py` → `embodichain preview-robot` |

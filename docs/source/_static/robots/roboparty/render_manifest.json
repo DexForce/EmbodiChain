@@ -1,0 +1,366 @@
+{
+  "render_cfg": {
+    "renderer": "rt",
+    "spp": 1,
+    "denoising": {
+      "offscreen": "dlss"
+    },
+    "dlss": {
+      "dlss_quality": 2,
+      "exposure_compensation": 1.0
+    },
+    "tone_mapping_enabled": false,
+    "tone_mapping_exposure": 1.0
+  },
+  "scene": {
+    "ground_plane": true,
+    "emission_color": [
+      0.92,
+      0.95,
+      1.0
+    ],
+    "emission_intensity": 80.0,
+    "rect_lights": []
+  },
+  "warmup_frames": 48,
+  "physics_stepped": false,
+  "runtime": {
+    "dexsim": "0.6.0"
+  },
+  "cameras": {
+    "rpo": {
+      "width": 1000,
+      "height": 800,
+      "intrinsics": [
+        1600.0,
+        1600.0,
+        500.0,
+        400.0
+      ],
+      "near": 0.03,
+      "far": 60.0,
+      "eye": [
+        1.7991497653727468,
+        -2.459468636304055,
+        1.4957917089684103
+      ],
+      "target": [
+        0.0006633250757602793,
+        -4.833494715583697e-13,
+        0.527375933423879
+      ],
+      "up": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    "rp1": {
+      "width": 1000,
+      "height": 800,
+      "intrinsics": [
+        1600.0,
+        1600.0,
+        500.0,
+        400.0
+      ],
+      "near": 0.03,
+      "far": 60.0,
+      "eye": [
+        2.3939049884582633,
+        -3.0974602891684966,
+        1.883442242280894
+      ],
+      "target": [
+        0.13109036166512963,
+        -0.0030129362889970007,
+        0.6650035970845913
+      ],
+      "up": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    }
+  },
+  "images": {
+    "roboto_origin.png": {
+      "catalog_id": "RoboPartyRPO",
+      "variant": null,
+      "source_asset": "RoboPartyRPO/rpo.urdf",
+      "source_urdf_sha256": "1a828bc49c77ac81be60302450cda00775345023b6af20dffd8aab517b073222",
+      "source": {
+        "repository": "https://github.com/Roboparty/rpo_description",
+        "revision": "8e0f8f78903dc147a5c094c0fdc14b4a78f1b667",
+        "archive_md5": "da87a55aba3ca787a4c44ac2ec8cfbb2"
+      },
+      "image_sha256": "4930683044c3ea427d4b47752e7682c3c3b1c6a1f181954acff67918f3fc2d09",
+      "root_position": [
+        0.0,
+        0.0,
+        0.75
+      ],
+      "root_rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "joint_positions": {
+        "left_thigh_yaw_joint": 0.0,
+        "right_thigh_yaw_joint": 0.0,
+        "torso_joint": 0.0,
+        "left_thigh_roll_joint": 0.0,
+        "right_thigh_roll_joint": 0.0,
+        "left_arm_pitch_joint": 0.0,
+        "right_arm_pitch_joint": 0.0,
+        "left_thigh_pitch_joint": 0.0,
+        "right_thigh_pitch_joint": 0.0,
+        "left_arm_roll_joint": 0.0,
+        "right_arm_roll_joint": 0.0,
+        "left_knee_joint": 0.0,
+        "right_knee_joint": 0.0,
+        "left_arm_yaw_joint": 0.0,
+        "right_arm_yaw_joint": 0.0,
+        "left_ankle_pitch_joint": 0.0,
+        "right_ankle_pitch_joint": 0.0,
+        "left_elbow_pitch_joint": 0.0,
+        "right_elbow_pitch_joint": 0.0,
+        "left_ankle_roll_joint": 0.0,
+        "right_ankle_roll_joint": 0.0,
+        "left_elbow_yaw_joint": 0.0,
+        "right_elbow_yaw_joint": 0.0
+      },
+      "camera": "rpo"
+    },
+    "rp1_28dof.png": {
+      "catalog_id": "RoboPartyRP1",
+      "variant": "28dof",
+      "source_asset": "RoboPartyRP1/rp1.urdf",
+      "source_urdf_sha256": "1f90b217bc1b88e970582e82f781b640272b790fbffa90422bd969a08cb5403f",
+      "source": {
+        "repository": "https://github.com/Roboparty/rp1_description",
+        "revision": "7b7d807e52cbec23f22f36444ed3129f082d76ca",
+        "archive_md5": "f2ebdac8c8978d2299be44b66f1558b2"
+      },
+      "image_sha256": "5f039485f83b47c8ea6a6f130cb7005250f89cd44ea6e739f3709738731f7c7a",
+      "root_position": [
+        0.0,
+        0.0,
+        0.78
+      ],
+      "root_rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "joint_positions": {
+        "left_hip_pitch_joint": 0.0,
+        "right_hip_pitch_joint": 0.0,
+        "waist_roll_joint": 0.0,
+        "left_hip_roll_joint": 0.0,
+        "right_hip_roll_joint": 0.0,
+        "waist_yaw_joint": 0.0,
+        "left_hip_yaw_joint": 0.0,
+        "right_hip_yaw_joint": 0.0,
+        "left_shoulder_pitch_joint": 0.0,
+        "right_shoulder_pitch_joint": 0.0,
+        "left_knee_joint": 0.0,
+        "right_knee_joint": 0.0,
+        "left_shoulder_roll_joint": 0.0,
+        "right_shoulder_roll_joint": 0.0,
+        "left_ankle_pitch_joint": 0.0,
+        "right_ankle_pitch_joint": 0.0,
+        "left_shoulder_yaw_joint": 0.0,
+        "right_shoulder_yaw_joint": 0.0,
+        "left_ankle_roll_joint": 0.0,
+        "right_ankle_roll_joint": 0.0,
+        "left_elbow_joint": 0.0,
+        "right_elbow_joint": 0.0,
+        "left_wrist_roll_joint": 0.0,
+        "right_wrist_roll_joint": 0.0,
+        "left_wrist_yaw_joint": 0.0,
+        "right_wrist_yaw_joint": 0.0,
+        "left_wrist_pitch_joint": 0.0,
+        "right_wrist_pitch_joint": 0.0
+      },
+      "camera": "rp1"
+    },
+    "rp1_24dof.png": {
+      "catalog_id": "RoboPartyRP1",
+      "variant": "24dof",
+      "source_asset": "RoboPartyRP1/rp1_24dof.urdf",
+      "source_urdf_sha256": "e06dc8ed78b884ec397a10262ca2e7d4aa155dc9ee3dce12ef0b6ce402e9ef70",
+      "source": {
+        "repository": "https://github.com/Roboparty/rp1_description",
+        "revision": "7b7d807e52cbec23f22f36444ed3129f082d76ca",
+        "archive_md5": "f2ebdac8c8978d2299be44b66f1558b2"
+      },
+      "image_sha256": "b3c2f3b4b56f15c8ab28e151e99a7905e3b957e2773715f37a67a2482d0b02ea",
+      "root_position": [
+        0.0,
+        0.0,
+        0.78
+      ],
+      "root_rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "joint_positions": {
+        "left_hip_pitch_joint": 0.0,
+        "right_hip_pitch_joint": 0.0,
+        "waist_roll_joint": 0.0,
+        "left_hip_roll_joint": 0.0,
+        "right_hip_roll_joint": 0.0,
+        "waist_yaw_joint": 0.0,
+        "left_hip_yaw_joint": 0.0,
+        "right_hip_yaw_joint": 0.0,
+        "left_shoulder_pitch_joint": 0.0,
+        "right_shoulder_pitch_joint": 0.0,
+        "left_knee_joint": 0.0,
+        "right_knee_joint": 0.0,
+        "left_shoulder_roll_joint": 0.0,
+        "right_shoulder_roll_joint": 0.0,
+        "left_ankle_pitch_joint": 0.0,
+        "right_ankle_pitch_joint": 0.0,
+        "left_shoulder_yaw_joint": 0.0,
+        "right_shoulder_yaw_joint": 0.0,
+        "left_ankle_roll_joint": 0.0,
+        "right_ankle_roll_joint": 0.0,
+        "left_elbow_joint": 0.0,
+        "right_elbow_joint": 0.0,
+        "left_wrist_joint": 0.0,
+        "right_wrist_joint": 0.0
+      },
+      "camera": "rp1"
+    },
+    "rp1_hand.png": {
+      "catalog_id": "RoboPartyRP1",
+      "variant": "hand",
+      "source_asset": "RoboPartyRP1/rp1_hand.urdf",
+      "source_urdf_sha256": "90e4633af18caabeb63170c967658682278f0a772601a1a54809a2303ac15e69",
+      "source": {
+        "repository": "https://github.com/Roboparty/rp1_description",
+        "revision": "7b7d807e52cbec23f22f36444ed3129f082d76ca",
+        "archive_md5": "f2ebdac8c8978d2299be44b66f1558b2"
+      },
+      "image_sha256": "2011108e4ea8b3a1397e57d37cba51e73959df85474e519bd432eb7d398d5454",
+      "root_position": [
+        0.0,
+        0.0,
+        0.78
+      ],
+      "root_rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "joint_positions": {
+        "left_hip_pitch_joint": 0.0,
+        "right_hip_pitch_joint": 0.0,
+        "waist_roll_joint": 0.0,
+        "left_hip_roll_joint": 0.0,
+        "right_hip_roll_joint": 0.0,
+        "waist_yaw_joint": 0.0,
+        "left_hip_yaw_joint": 0.0,
+        "right_hip_yaw_joint": 0.0,
+        "left_shoulder_pitch_joint": 0.0,
+        "right_shoulder_pitch_joint": 0.0,
+        "left_knee_joint": 0.0,
+        "right_knee_joint": 0.0,
+        "left_shoulder_roll_joint": 0.0,
+        "right_shoulder_roll_joint": 0.0,
+        "left_ankle_pitch_joint": 0.0,
+        "right_ankle_pitch_joint": 0.0,
+        "left_shoulder_yaw_joint": 0.0,
+        "right_shoulder_yaw_joint": 0.0,
+        "left_ankle_roll_joint": 0.0,
+        "right_ankle_roll_joint": 0.0,
+        "left_elbow_joint": 0.0,
+        "right_elbow_joint": 0.0,
+        "left_wrist_roll_joint": 0.0,
+        "right_wrist_roll_joint": 0.0,
+        "left_wrist_yaw_joint": 0.0,
+        "right_wrist_yaw_joint": 0.0,
+        "left_wrist_pitch_joint": 0.0,
+        "right_wrist_pitch_joint": 0.0,
+        "lh_finger11": 0.0,
+        "lh_finger21": 0.019999999552965164,
+        "lh_finger31": 0.003498000092804432,
+        "lh_finger41": 0.0,
+        "lh_finger51": 0.03826500102877617,
+        "rh_finger11": 0.0,
+        "rh_finger21": 0.03594600036740303,
+        "rh_finger31": 0.0,
+        "rh_finger41": 0.04317000135779381,
+        "rh_finger51": 0.0,
+        "lh_finger12": 0.035218000411987305,
+        "lh_finger22": 0.0,
+        "lh_finger32": 0.019999999552965164,
+        "lh_finger42": 0.003498000092804432,
+        "lh_finger52": 0.0,
+        "rh_finger12": 0.03826500102877617,
+        "rh_finger22": 0.0,
+        "rh_finger32": 0.03594600036740303,
+        "rh_finger42": 0.0,
+        "rh_finger52": 0.04317000135779381,
+        "lh_finger13": 0.0,
+        "rh_finger13": 0.035218000411987305
+      },
+      "camera": "rp1"
+    },
+    "rp1_hand_fixed.png": {
+      "catalog_id": "RoboPartyRP1",
+      "variant": "hand_fixed",
+      "source_asset": "RoboPartyRP1/rp1_hand_fixed.urdf",
+      "source_urdf_sha256": "241d683331c1021c1c498ebf3184fc179de918d9defd26fe3ddb998abac99d51",
+      "source": {
+        "repository": "https://github.com/Roboparty/rp1_description",
+        "revision": "7b7d807e52cbec23f22f36444ed3129f082d76ca",
+        "archive_md5": "f2ebdac8c8978d2299be44b66f1558b2"
+      },
+      "image_sha256": "201501a3c83ba3beed09c9465e2307b80c9422eb3079a213e408425865ec1488",
+      "root_position": [
+        0.0,
+        0.0,
+        0.78
+      ],
+      "root_rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "joint_positions": {
+        "left_hip_pitch_joint": 0.0,
+        "right_hip_pitch_joint": 0.0,
+        "waist_roll_joint": 0.0,
+        "left_hip_roll_joint": 0.0,
+        "right_hip_roll_joint": 0.0,
+        "waist_yaw_joint": 0.0,
+        "left_hip_yaw_joint": 0.0,
+        "right_hip_yaw_joint": 0.0,
+        "left_shoulder_pitch_joint": 0.0,
+        "right_shoulder_pitch_joint": 0.0,
+        "left_knee_joint": 0.0,
+        "right_knee_joint": 0.0,
+        "left_shoulder_roll_joint": 0.0,
+        "right_shoulder_roll_joint": 0.0,
+        "left_ankle_pitch_joint": 0.0,
+        "right_ankle_pitch_joint": 0.0,
+        "left_shoulder_yaw_joint": 0.0,
+        "right_shoulder_yaw_joint": 0.0,
+        "left_ankle_roll_joint": 0.0,
+        "right_ankle_roll_joint": 0.0,
+        "left_elbow_joint": 0.0,
+        "right_elbow_joint": 0.0,
+        "left_wrist_roll_joint": 0.0,
+        "right_wrist_roll_joint": 0.0,
+        "left_wrist_yaw_joint": 0.0,
+        "right_wrist_yaw_joint": 0.0,
+        "left_wrist_pitch_joint": 0.0,
+        "right_wrist_pitch_joint": 0.0
+      },
+      "camera": "rp1"
+    }
+  }
+}

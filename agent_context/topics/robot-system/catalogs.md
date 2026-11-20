@@ -69,7 +69,7 @@ existing construction behavior; `default_variant` remains display metadata.
 
 ## Locomotion model profiles
 
-The locomotion catalog IDs are `UnitreeGo1`, `UnitreeGo2`, `UnitreeG1`,
+The JSON-backed locomotion catalog IDs are `UnitreeGo1`, `UnitreeGo2`, `UnitreeG1`,
 `UnitreeH1_2`, `ANYmalC` and `MicroDuck`. They select the bundled simulation
 assets, including the 29-joint G1 and 27-joint H1_2 models, through ordinary
 `RobotCfg` subclasses. Model descriptions and catalog listing remain independent
@@ -92,6 +92,14 @@ unselected joints keep their defaults. Runtime direct-rule priority and caller
 ambiguity validation remain unchanged. Keep source-ordered `asset.init_qpos`
 separate from `robot.joint_names` / `robot.default_joint_position`. These are
 simulation PD presets, without external learned actuator implementations.
+
+RoboParty presets read joint order and mimic relations from pinned URDFs.
+`RoboPartyRPO` and `RoboPartyRP1` expose floating-base `locomotion` groups.
+The articulated RP1 variant exposes independent `left_eef` and `right_eef`
+commands and preserves passive mimic followers. `RoboPartyRPHand` derives
+standalone hands from the same RP1 archive and uses an `eef` group on each side.
+See the [RoboParty model pages](../../../docs/source/resources/robot/roboparty/index.rst)
+for variant defaults and asset provenance.
 
 ## Model-specific calibration
 
