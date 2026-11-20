@@ -29,6 +29,8 @@ profile:
       lift_height: 0.08
       hand_interp_steps: 40
       arm_selection: bound
+      # Back off both grasp poses to reduce contact as the source hand opens.
+      grasp_retract_distance: 0.005
       hold_steps: 20
   effect_monitors:
     hand_over:
