@@ -27,12 +27,23 @@ import pytest
 import torch
 
 from embodichain.lab.sim.motion.planners.utils import PlanResult
-from embodichain.extensions.benchmarks.motion_generation.artifacts import _case_to_dict
+from embodichain.extensions.benchmarks.motion_generation.artifacts import (
+    TrialJsonlWriter,
+    _case_to_dict,
+)
 from embodichain.extensions.benchmarks.motion_generation.config import (
+    PlannerSpecCfg,
     SuiteCfg,
     TrackCfg,
 )
-from embodichain.extensions.benchmarks.motion_generation.models import BenchmarkCase
+from embodichain.extensions.benchmarks.motion_generation.models import (
+    BenchmarkCase,
+    TrialPhase,
+)
+from embodichain.extensions.benchmarks.motion_generation.planners.base import (
+    PlannerAdapter,
+)
+from embodichain.extensions.benchmarks.motion_generation.runner import BenchmarkRunner
 from embodichain.extensions.benchmarks.motion_generation.scenarios.affordance_reaching import (
     AffordanceReachingScenario,
     _project_case,
@@ -214,3 +225,58 @@ def test_reaching_config_rejects_physical_knobs():
     track.config["physics"] = {"relaxed": True}
     with pytest.raises(ValueError, match="exactly"):
         AffordanceReachingScenario().batch_sizes(SuiteCfg(), track)
+
+
+@pytest.mark.parametrize("missing_capability", ["batched", "empty_world", None])
+def test_reaching_runner_checks_scenario_capabilities(tmp_path, missing_capability):
+    class CapabilityProbe(PlannerAdapter):
+        capabilities = frozenset({"eef_waypoint", "batched", "empty_world"}) - {
+            missing_capability
+        }
+
+        def availability(self) -> tuple[bool, str | None]:
+            return False, "stop after capability checks"
+
+        def build(self) -> None:
+            pytest.fail("capability probe must not build a planner")
+
+        def plan(self, case: BenchmarkCase) -> PlanResult:
+            pytest.fail("capability probe must not plan")
+
+    suite, provider = SuiteCfg(), AffordanceReachingScenario()
+    case = _project_case(
+        source_case(), suite, reaching_track(), CartesianRobot(), "arm"
+    )
+    batch_size = 8
+    case = replace(
+        case,
+        batch_size=batch_size,
+        start_qpos=case.start_qpos.expand(batch_size, -1).clone(),
+        target_waypoints=case.target_waypoints.expand(batch_size, -1, -1, -1).clone(),
+        reference_qpos=case.reference_qpos.expand(batch_size, -1, -1).clone(),
+    )
+    spec = PlannerSpecCfg(id="probe", adapter="capability_probe", enabled=True)
+    runner = BenchmarkRunner(
+        suite,
+        [spec],
+        device="cpu",
+        output_root=tmp_path,
+        adapters={"capability_probe": CapabilityProbe},
+    )
+    runner._run_adapter(
+        TrialJsonlWriter(tmp_path / "trials.jsonl"),
+        SimpleNamespace(),
+        CartesianRobot(),
+        spec,
+        [case],
+        provider.required_capabilities,
+        provider,
+    )
+    assert len(runner.records) == 1
+    record = runner.records[0]
+    assert record.phase is TrialPhase.AVAILABILITY
+    assert record.failure_code == (
+        "unsupported_capability" if missing_capability else "runtime_unavailable"
+    )
+    if missing_capability:
+        assert missing_capability in record.failure_message

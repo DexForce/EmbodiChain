@@ -186,6 +186,8 @@ class AffordanceReachingScenario(ScenarioProvider):
     AxisAlign remains its frozen full-pose realization, not an axis-only request.
     """
 
+    required_capabilities = frozenset({"batched", "empty_world"})
+
     def batch_sizes(self, suite: SuiteCfg, track: TrackCfg) -> list[int]:
         """Return the source batch size declared by the validated track."""
         _validate_affordance_reaching_track(track)

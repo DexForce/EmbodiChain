@@ -173,7 +173,11 @@ class _PourEvaluator:
                 device=poses.device,
             )
             axis = axis / torch.linalg.vector_norm(axis)
-            reference = poses[0, :, :3, :3]
+            reference = torch.as_tensor(
+                case.case_parameters["object_initial_pose"],
+                dtype=poses.dtype,
+                device=poses.device,
+            )[:, :3, :3]
             world_axis = reference @ axis
             angles = torch.stack(
                 [
