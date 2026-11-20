@@ -295,6 +295,13 @@ selected robot rows to native cable arenas. Evaluation consumes qualified
 `cables/<uid>/<measurement>` channels, including strict endpoint geometry and
 episode slip. Keep routing acceptance in the deployment's named evaluation rules.
 
+`FrankaRopeWrap-v1` uses the registered `simulation.cable_wrap_phase` call.
+Each phase lowers its checked portion of the full Franka arm and finger trajectory
+to `MoveJoints`. Scene reset owns pre-roll. The monitor latches its slip reference
+after closure and a simultaneous two-finger contact sample. The final
+`wrap_success` condition reads all 19 measured checks. Task components live
+under `configs/tasks/manipulation/cable/franka_rope_wrap/` in the task extension.
+
 The configured lowerer allowlist also exposes profile-owned Park, AxisAlign,
 relative Place and coordinated transport. Their declarations in
 `integrations/_configured_services.py` select exact Atomic Skill descriptors;

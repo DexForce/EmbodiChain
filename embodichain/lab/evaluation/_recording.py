@@ -375,9 +375,17 @@ def _field_projection(field, descriptor, expected_names=None):
             _CABLE_METRIC_UNITS,
         )
 
-        if quantity not in _METRICS:
+        if quantity.startswith("wrap_"):
+            from embodichain_tasks.manipulation.cable.wrap_measurements import (
+                WRAP_CHECKS,
+            )
+
+            if quantity.removeprefix("wrap_") not in WRAP_CHECKS:
+                return None
+            contract = ("arena", "scalar", ("1",), (1,))
+        elif quantity not in _METRICS:
             return None
-        if quantity == "end_position":
+        elif quantity == "end_position":
             contract = ("arena", "xyz", ("m",), (3,))
         else:
             contract = ("arena", "scalar", (_CABLE_METRIC_UNITS[quantity],), (1,))
