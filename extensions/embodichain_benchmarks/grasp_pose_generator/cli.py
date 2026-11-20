@@ -53,6 +53,19 @@ PROTOCOL = dict(
 )
 
 
+def _physics_protocol(physics):
+    if physics == "newton":
+        return dict(
+            physics="newton",
+            solver="dexuni",
+            coupling="two_way",
+            contact_evidence="positive_impulse_or_nonpositive_signed_distance",
+        )
+    return dict(
+        physics="default", solver="default", contact_evidence="positive_impulse"
+    )
+
+
 def _save(path, value):
     with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as f:
         json.dump(value, f, allow_nan=False)
@@ -151,17 +164,25 @@ def _run_case(spec, method, source, root, out, args):
             "placement",
         )
     }
-    case = dict(meta, algorithm=method, case_config=spec, count=0, trials=[])
+    case = dict(
+        meta,
+        physics=args.physics,
+        algorithm=method,
+        case_config=spec,
+        count=0,
+        trials=[],
+    )
     digests = {}
     rigid = _asset_config(spec["rigid"], root, digests)
     protocol = {
-        "version": 3,
+        "version": 4,
+        **_physics_protocol(args.physics),
         "gripper_defaults": resolve_gripper_defaults(spec["gripper"]),
         "dexsim": version("dexsim-engine"),
         "object_files": digests,
         "newton": version("newton"),
     }
-    case["protocol"] = dict(PROTOCOL)
+    case["protocol"] = dict(PROTOCOL, **_physics_protocol(args.physics))
     case["provenance"] = protocol
     encoded = json.dumps(
         [protocol, spec, method, source, args.command], sort_keys=True, allow_nan=False
@@ -183,7 +204,7 @@ def _run_case(spec, method, source, root, out, args):
     initial_gpu = torch.cuda.memory_allocated(device)
     torch.cuda.reset_peak_memory_stats(device)
     cfg = RigidObjectCfg.from_dict(rigid)
-    v = GraspValidator(cfg, spec["gripper"], args.num_envs)
+    v = GraspValidator(cfg, spec["gripper"], args.num_envs, physics=args.physics)
     try:
         if args.resume and path.exists():
             case = json.loads(path.read_text())
@@ -260,6 +281,12 @@ def main(argv: list[str] | None = None) -> None:
     run = sub.add_parser("run")
     run.add_argument("--suite", type=Path, required=True)
     for p in (run, validate):
+        p.add_argument(
+            "--physics",
+            choices=("default", "newton"),
+            default="default",
+            help="Select Default physics or Newton with the DexUni solver.",
+        )
         p.add_argument("--num-envs", type=int, default=1)
         p.add_argument("--output", type=Path, required=True)
         p.add_argument("--resume", action="store_true")
@@ -379,7 +406,7 @@ def main(argv: list[str] | None = None) -> None:
     if not held or not set(held) <= set(suite["grippers"]):
         raise ValueError("held_grippers must select evaluated grippers")
     report = summarize(cases, held)
-    report["protocol"] = dict(PROTOCOL)
+    report["protocol"] = dict(PROTOCOL, **_physics_protocol(args.physics))
     elapsed = time.perf_counter() - started
     report["wall_s"] = elapsed
     report["case_inventory"] = [

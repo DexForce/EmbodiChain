@@ -23,11 +23,13 @@ from importlib.resources import files
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 import numpy as np
+import torch
 from embodichain_benchmarks.grasp_pose_generator.metrics import summarize
-from embodichain.lab.sim.grasp_validation import _result
+from embodichain.lab.sim.grasp_validation import GraspValidator, _result
 
 
 def _trace(length=361):
@@ -119,9 +121,35 @@ def test_macro_weighting_and_paired_intervals():
     assert not summarize(records[:-1], ["hand"])["complete"]
 
 
+def test_dexuni_contact_evidence_uses_distance_only_for_unmeasured_rows():
+    validator = GraspValidator.__new__(GraspValidator)
+    validator._geometry_contacts = True
+    validator.target_id = torch.tensor([[1]])
+    validator.pad_ids = torch.tensor([[2, 3]])
+    validator.support_id = torch.tensor([[4]])
+    data = dict(
+        user_ids=torch.tensor([[[1, 2], [3, 1], [1, 4]]]),
+        is_valid=torch.ones(1, 3, dtype=torch.bool),
+        impulse_valid=torch.tensor([[True, False, False]]),
+        impulse=torch.tensor([[0.0, 0.0, 0.0]]),
+        distance=torch.tensor([[-0.001, 0.0, 0.001]]),
+    )
+    validator.sensor = SimpleNamespace(
+        update=lambda: None,
+        get_data=lambda: data,
+        get_latest_contact_loss_mask=lambda: torch.tensor([False]),
+    )
+    fingers, support, lost = validator._contacts()
+    assert fingers.tolist() == [[False, True]]
+    assert not support.item() and not lost.item()
+    data["distance"][0, 1] = float("nan")
+    assert validator._contacts()[2].item()
+
+
 @pytest.mark.gpu
 @pytest.mark.subprocess_sim
-def test_gpu_cli_isolates_missed_and_held_grasps(tmp_path: Path) -> None:
+@pytest.mark.parametrize("physics", ["default", "newton"])
+def test_gpu_cli_isolates_missed_and_held_grasps(tmp_path: Path, physics: str) -> None:
     """Two misses and a centred grasp share a native nine-arena batch."""
     fixtures = files("embodichain_benchmarks.grasp_pose_generator")
     subprocess.run(
@@ -132,6 +160,8 @@ def test_gpu_cli_isolates_missed_and_held_grasps(tmp_path: Path) -> None:
             "benchmark",
             "grasp-pose-generator",
             "validate",
+            "--physics",
+            physics,
             "--case",
             str(fixtures / "block.yaml"),
             "--poses",
@@ -146,6 +176,10 @@ def test_gpu_cli_isolates_missed_and_held_grasps(tmp_path: Path) -> None:
     )
     (checkpoint,) = tmp_path.glob("*.json")
     case = json.loads(checkpoint.read_text())
+    assert case["protocol"]["physics"] == physics
+    assert case["protocol"]["solver"] == (
+        "dexuni" if physics == "newton" else "default"
+    )
     assert case["finished"]
     trials = {(r["rank"], r["condition"]): r for r in case["trials"]}
     assert len(trials) == 9
@@ -154,4 +188,12 @@ def test_gpu_cli_isolates_missed_and_held_grasps(tmp_path: Path) -> None:
         assert not trials[2, direction]["success"]
         assert trials[3, direction]["success"]
     for direction in ("x", "y"):
-        assert 1.5 < trials[3, direction]["peak_acceleration_m_s2"] < 2.5
+        trial = trials[3, direction]
+        assert np.isfinite(trial["peak_acceleration_m_s2"])
+        assert (
+            1.5
+            < trial["peak_axis_acceleration_m_s2"]
+            <= trial["peak_acceleration_m_s2"]
+        )
+        if physics == "default":
+            assert trial["peak_acceleration_m_s2"] < 2.5

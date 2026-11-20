@@ -8,6 +8,16 @@ embodichain benchmark grasp-pose-generator validate --case "$d/block.yaml" --pos
 embodichain benchmark grasp-pose-generator run --suite "$d/suite.yaml" --num-envs 30 --output outputs/benchmarks/grasp-suite --resume
 ```
 
+Both commands accept `--physics default` (the default GPU backend) and
+`--physics newton` (Newton with the DexUni solver). Each invocation evaluates
+one backend. Use distinct output directories to keep both aggregate reports.
+Checkpoint identities include the backend and solver, so a resumed run
+reuses results only from the matching physics configuration. Default uses a
+stationary kinematic table for GPU contact actor identification. DexUni uses
+two-way coupling. Both paths use positive impulses for measured contact rows.
+For geometry-only DexUni rows, a finite signed separation at or below zero
+qualifies contact. Reports record the contact policy alongside the solver.
+
 Use the same YAML/JSONL inputs with the installed CLI. Each JSON line contains a
 4×4 rigid transform `T_object_tcp` in metres, ordered best first. A case selects
 a native parallel-jaw gripper by catalog ID and a target through an ordinary
@@ -23,6 +33,8 @@ Optional named `placements` override top-level rigid config fields.
 built-in antipodal generator on the object's semantic mesh. Use an empty file
 to record an algorithm's abstention. Missing files are input errors.
 
+Settling checks the target pose five times in the last 0.5 s before the snapshot,
+with tolerances of 1 mm translation and 0.005 rad rotation.
 Each scene checkpoint stores the frozen candidates and measured starting pose.
 Each condition starts from the same settled target pose with cleared velocities.
 The base trial approaches 8 cm, closes, lifts 10 cm and holds for 3 seconds.

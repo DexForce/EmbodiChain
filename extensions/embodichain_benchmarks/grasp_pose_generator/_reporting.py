@@ -30,7 +30,7 @@ def _export_trials(out, cases):
 
     dest = out / "trials"
     dest.mkdir(exist_ok=True)
-    identity = ("algorithm", "object", "family", "gripper", "placement")
+    identity = ("physics", "algorithm", "object", "family", "gripper", "placement")
     schema = {
         k: pl.String
         for k in (
@@ -105,6 +105,8 @@ def _export_trials(out, cases):
 def _write_report(out, report):
     lines = [
         "# Physical grasp benchmark",
+        "",
+        f"Physics: {report['protocol']['physics']} (solver: {report['protocol']['solver']})",
         "",
         "## Time & Memory",
         "",

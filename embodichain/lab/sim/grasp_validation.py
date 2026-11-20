@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Independent parallel-jaw grasp trials on batched Newton arenas."""
+"""Independent parallel-jaw grasp trials on batched physics arenas."""
 
 from __future__ import annotations
 
@@ -28,7 +28,12 @@ import torch
 
 from embodichain.robot_registry import resolve_robot_cfg
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import NewtonPhysicsCfg, RenderCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import (
+    DefaultPhysicsCfg,
+    NewtonPhysicsCfg,
+    RenderCfg,
+    RigidObjectCfg,
+)
 from embodichain.lab.sim.sensors import ContactSensorCfg, ArticulationContactFilterCfg
 from embodichain.lab.sim.shapes import CubeCfg
 
@@ -121,13 +126,38 @@ def _smooth(x):
 
 
 class GraspValidator:
-    """Own a prepared hand, support and dynamic target for independent trials."""
+    """Own a prepared hand, support and dynamic target for independent trials.
+
+    Args:
+        object_cfg: Dynamic target shared by the replicated arenas.
+        gripper: Catalog ID of a calibrated parallel-jaw hand.
+        num_envs: Number of independent trial arenas.
+        physics: GPU backend, either ``default`` or ``newton``. Newton runs
+            DexUni with two-way coupling between the hand and target.
+    """
 
     def __init__(
-        self, object_cfg: RigidObjectCfg, gripper: str, num_envs: int = 1
+        self,
+        object_cfg: RigidObjectCfg,
+        gripper: str,
+        num_envs: int = 1,
+        *,
+        physics: str = "default",
     ) -> None:
         if object_cfg.env_variants:
             raise ValueError("Each validator batch requires a single target geometry")
+        if physics == "default":
+            physics_cfg = DefaultPhysicsCfg(
+                device="cuda:0", physics_dt=DT, num_substeps=4
+            )
+        elif physics == "newton":
+            physics_cfg = NewtonPhysicsCfg(
+                physics_dt=DT,
+                num_substeps=4,
+                solver_cfg={"solver_type": "dexuni", "coupling": "two_way"},
+            )
+        else:
+            raise ValueError("physics must be default or newton")
         self.temp = TemporaryDirectory()
         self.sim = SimulationManager(
             SimulationManagerCfg(
@@ -135,11 +165,7 @@ class GraspValidator:
                 headless=True,
                 enable_ground_plane=False,
                 render_cfg=RenderCfg(renderer="no-render"),
-                physics_cfg=NewtonPhysicsCfg(
-                    physics_dt=DT,
-                    num_substeps=4,
-                    solver_cfg={"solver_type": "mujoco_warp"},
-                ),
+                physics_cfg=physics_cfg,
             )
         )
         try:
@@ -152,7 +178,8 @@ class GraspValidator:
                     uid="support",
                     shape=CubeCfg(size=(4.0, 4.0, 0.1)),
                     init_pos=(0.0, 0.0, -0.05),
-                    body_type="static",
+                    # Direct GPU exposes an actor ID for a stationary kinematic support.
+                    body_type="kinematic" if physics == "default" else "static",
                 )
             )
             object_cfg = object_cfg.copy()
@@ -173,8 +200,24 @@ class GraspValidator:
             self.sim.prepare()
             if self.obj.is_non_dynamic:
                 raise ValueError("Grasp target must be dynamic")
-            self.sim.update(step=150)
-            if self.obj.body_data.vel.abs().max().item() > 0.02:
+            # Measure residual motion over the final 0.5 s. Resting contacts
+            # on Default GPU can report nonzero instantaneous angular velocity.
+            self.sim.update(step=100)
+            reference = self.obj.get_local_pose(to_matrix=True).clone()
+            settled = torch.ones(
+                self.sim.num_envs, dtype=torch.bool, device=self.sim.device
+            )
+            for _ in range(5):
+                self.sim.update(step=10)
+                current = self.obj.get_local_pose(to_matrix=True)
+                displacement = torch.linalg.vector_norm(
+                    current[:, :3, 3] - reference[:, :3, 3], dim=1
+                )
+                cosine = (
+                    (current[:, :3, :3] * reference[:, :3, :3]).sum((1, 2)) - 1
+                ) * 0.5
+                settled &= (displacement <= 0.001) & (cosine >= np.cos(0.005))
+            if not settled.all().item():
                 raise ValueError("Target did not settle")
             self.initial = self.obj.get_local_pose(to_matrix=True)[0].clone()
             self.com = self.obj.body_data.com_pose[0, :3].clone()
@@ -191,7 +234,11 @@ class GraspValidator:
                 [cfg.joint_commands["grasp"].get(j, 0.0) for j in self.hand.joint_names]
             )
             self.axes = [self.hand.joint_names.index(f"stage_{i}") for i in range(3)]
-            if not self.sensor.contact_capabilities.impulse:
+            self._geometry_contacts = physics == "newton"
+            if (
+                not self._geometry_contacts
+                and not self.sensor.contact_capabilities.impulse
+            ):
                 raise ValueError("Grasp validation requires measured contact impulses")
             fingers, support, lost = self._contacts()
             if not bool((support & ~lost & ~fingers.any(1)).all()):
@@ -254,14 +301,23 @@ class GraspValidator:
         paired = torch.where(
             a == self.target_id, b, torch.where(b == self.target_id, a, -1)
         )
-        valid = data["is_valid"] & data["impulse_valid"] & (data["impulse"] > 0)
+        impulse = data["impulse"]
+        measured = data["impulse_valid"]
+        evidence = measured & torch.isfinite(impulse)
+        touching = evidence & (impulse > 0)
+        if self._geometry_contacts:
+            # DexUni can publish geometric VBD rows alongside measured impulses.
+            distance = data["distance"]
+            geometry = ~measured & torch.isfinite(distance)
+            evidence |= geometry
+            touching |= geometry & (distance <= 0)
+        valid = data["is_valid"] & touching
         fingers = (
             (paired[:, :, None] == self.pad_ids[:, None, :]) & valid[:, :, None]
         ).any(1)
         supported = ((paired == self.support_id) & valid).any(1)
-        lost = self.sensor.get_latest_contact_loss_mask() | (
-            data["is_valid"] & ~data["impulse_valid"]
-        ).any(1)
+        lost = self.sensor.get_latest_contact_loss_mask()
+        lost = lost | (data["is_valid"] & ~evidence).any(1)
         return fingers, supported, lost
 
     def validate(self, poses: np.ndarray, directions: list[str]) -> list[dict]:
