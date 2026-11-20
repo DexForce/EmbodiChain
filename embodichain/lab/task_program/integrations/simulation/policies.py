@@ -458,6 +458,23 @@ class SimulationSegmentPolicyPort:
         """Return installed post-policy preset IDs in declaration order."""
         return tuple(self._settle_presets)
 
+    def _observe_consumed_action(
+        self, action: Any, *, runtime: Any
+    ) -> tuple[torch.Tensor, torch.Tensor, str] | None:
+        """Measure provider-owned invariants after a host-acknowledged command.
+
+        Returns row rejection and a proposed hold. The bridge remains the only
+        owner of command encoding and dispatch; this port never steps physics.
+        """
+        cable = getattr(self, "_cable_runtime", None)
+        if cable is None:
+            return None
+        rejected, reason = cable.after_action(action, runtime)
+        if not bool(rejected.any()):
+            return None
+        hold = self._robot.get_qpos(target=True).index_select(0, self._env_ids)
+        return rejected, hold, reason
+
     def new_task_program_session(self) -> SimulationSegmentPolicyPort:
         """Create fresh episode state while retaining the validated scene bindings.
 
@@ -468,6 +485,7 @@ class SimulationSegmentPolicyPort:
         self._require_open()
         session = copy(self)
         session._hold_observer = None
+        session._cable_runtime = None
         session._target_observer = None
         session._post_policy_results = {}
         session._post_policy_success = {}
@@ -735,6 +753,7 @@ class SimulationSegmentPolicyPort:
                 context, attached, previous_target = self._hold_observer(
                     cfg.object, accepted
                 )
+                attached = attached.to(device=active_mask.device)
                 self.validate_observation_scope(clock)
                 if clock.step_index != start + tick:
                     raise ValueError("Hold observation changed its execution clock.")
@@ -760,6 +779,7 @@ class SimulationSegmentPolicyPort:
                             name="hold.at",
                         )
                     )
+                target = target.to(device=active_mask.device)
                 pose = context.scene.entities[cfg.object].pose.to(target)
                 if pose.ndim == 2:
                     pose = pose.unsqueeze(0).expand(active_mask.numel(), -1, -1)
@@ -1912,7 +1932,14 @@ class SimulationSegmentPolicyPort:
             target.native_entity,
             entity_id=target.canonical_id,
         )
-        pose = pose.index_select(0, row_indices.to(pose.device))
+        # _read_pose already selects this port's bound physical rows. Convert
+        # the requested World IDs to local offsets instead of selecting twice
+        # with the original IDs (for example row 7 in a B=1 policy port).
+        matches = row_indices[:, None] == self._row_indices[None, :]
+        if not bool((matches.sum(dim=1) == 1).all()):
+            raise ValueError("Pose-delta settling requested an unbound physical row")
+        local = matches.long().argmax(dim=1).to(pose.device)
+        pose = pose.index_select(0, local)
         row_count = row_indices.numel()
         if previous_pose is None:
             speed = torch.full(

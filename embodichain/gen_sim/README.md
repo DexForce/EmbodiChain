@@ -146,9 +146,17 @@ through the existing closed decoders. `binding.resource_anchors` maps declared
 resources to planar `[x, y]` anchors: a single-arm call without a resource then
 uses the arm already holding its object, or the arm anchored nearest to it, and
 a placement on a support prefers its robot-side region. `binding.release_clearance`
-(metres, default 0) releases placements above their resting pose while validators
-keep the resting target; the place gate otherwise expects a released object to
-separate from the open gripper before retracting.
+(metres, default 0.02) releases placements above their resting pose so fingers
+can open without wedging against the support. An explicit zero keeps contact
+placement. Ordinary generated Place calls also hold the final open command for
+0.4 physical seconds before the unchanged release gate; the native planner
+rounds this duration upward to the actual control grid. Explicit
+`release_settle_duration` values, including zero, are retained; declaring
+`release_settle_steps` suppresses that generated duration default. When both
+options are explicitly supplied, the longer hold applies. External nominal
+sources retain their authored timing. The gate measures opening before retract,
+terminal verification measures separation, and the original resting-position
+and stability validators remain unchanged.
 
 Further optional run fields: `task` reuses a published task-plan directory instead
 of planning, after verifying its artifacts and that it planned the same instruction

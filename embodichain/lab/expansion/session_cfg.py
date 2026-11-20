@@ -125,6 +125,13 @@ def _decode(cls: type, data: Mapping[str, Any], path: str = "") -> Any:
                     )
                     for item_key, item_value in value.items()
                 }
+            elif value_type is float:
+                if any(
+                    type(v) not in (int, float) or not math.isfinite(v)
+                    for v in value.values()
+                ):
+                    raise ValueError(f"{name} must map strings to finite numbers")
+                decoded[key] = {k: float(v) for k, v in value.items()}
             elif value_type is str:
                 if any(type(item_value) is not str for item_value in value.values()):
                     raise ValueError(f"{name} must map strings to strings")

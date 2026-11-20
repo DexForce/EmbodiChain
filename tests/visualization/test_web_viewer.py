@@ -65,6 +65,7 @@ def viewer():
     value.orbit = np.array(value.cfg.target)
     value.group = object()
     value.application = Mock()
+    value._application_handler = value._request
     value.arena = Mock()
     value.error = None
     value.frames = 0

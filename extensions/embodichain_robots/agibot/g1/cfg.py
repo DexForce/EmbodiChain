@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Joint-control preset for the original AgiBot G1_120s USD."""
+"""Joint-control preset for the AgiBot G1_120s USD."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ __all__ = ["AgibotG1Cfg"]
 
 @configclass
 class AgibotG1Cfg(RobotCfg):
-    """Configure the original G1_120s USD for Default joint control.
+    """Configure the G1_120s USD for Default joint control.
 
     The preset preserves the authored mass, limits, drives, mimic joints and
     closed-loop grippers. Each end-effector group commands its outer driver

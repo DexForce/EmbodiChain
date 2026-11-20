@@ -1102,6 +1102,7 @@ class SimulationManager:
         uid_list = (
             ["default_plane"]
             if getattr(self.sim_config, "enable_ground_plane", True)
+            and not getattr(self, "_ground_plane_removed", False)
             else []
         )
         uid_list.extend(list(self._lights.keys()))
@@ -2067,7 +2068,11 @@ class SimulationManager:
             self._env = result.get_arena("default")
             self._arenas = [result.get_arena(name) for name in scene.arena_names]
             self.__dict__.pop("arena_offsets", None)
-            if self._default_plane is None and self.sim_config.enable_ground_plane:
+            if (
+                self._default_plane is None
+                and self.sim_config.enable_ground_plane
+                and "default_plane" in scene
+            ):
                 self._bind_default_plane(scene.handles("default_plane")[0])
 
         # Runtime readiness belongs to the SimulationManager. Keep this and
@@ -2937,6 +2942,7 @@ class SimulationManager:
             per_env=False,
         )
         self._spawn_default_plane_descriptor = descriptor
+        self._ground_plane_removed = False
 
         if hasattr(descriptor, "render_categories"):
             descriptor.render_categories = self._GROUND_RENDER_CATEGORY
@@ -3011,6 +3017,25 @@ class SimulationManager:
         handles = self._spawn_scene.handles("default_plane")
         if handles:
             self._bind_default_plane(handles[0])
+
+    def remove_ground_plane(self) -> None:
+        """Remove the default global ground plane before preparing scene physics.
+
+        Use this when an imported scene stage already authors its own per-arena
+        ground geometry and solver ownership domain.
+
+        Raises:
+            RuntimeError: The scene physics has already been prepared.
+        """
+        if self.spawn_result is not None:
+            raise RuntimeError(
+                "The default ground plane must be removed before prepare()."
+            )
+        if self._spawn_scene is not None and "default_plane" in self._spawn_scene:
+            self._spawn_scene.remove("default_plane")
+        self._spawn_default_plane_descriptor = None
+        self._default_plane = None
+        self._ground_plane_removed = True
 
     def set_default_global_lighting(self) -> None:
         """Set default global lighting for the scene.
@@ -3265,10 +3290,15 @@ class SimulationManager:
                 ]
             return False
         if self.num_envs != 1:
-            raise NotImplementedError(
-                "DexSim USD Gaussian visuals cannot be replicated across Arenas; "
-                "use explicit GaussianSplatCfg visuals for multi-environment scenes."
-            )
+            from dexsim.scene.objects import SpawnedRigidBody
+
+            if not callable(
+                getattr(SpawnedRigidBody, "get_gaussian_resource_ids", None)
+            ):
+                raise NotImplementedError(
+                    "USD Gaussian arena replication requires a qualified DexSim "
+                    "build with native companion cloning and resource-ID queries."
+                )
         if self.sim_config.visualization.backend == "viser":
             raise NotImplementedError(
                 "USD Gaussian visuals require native camera or window rendering."
@@ -3319,7 +3349,13 @@ class SimulationManager:
     ) -> (
         UsdImportResult
         | dict[
-            str, VisualObject | RigidObject | Articulation | Robot | DeformableObject
+            str,
+            VisualObject
+            | RigidObject
+            | Articulation
+            | Robot
+            | DeformableObject
+            | CableObject,
         ]
     ):
         """Declare a USD import through a validated configuration recipe.
@@ -3348,7 +3384,8 @@ class SimulationManager:
             asset_cfgs: Legacy per-asset overrides; use ``cfg.asset_cfgs``.
 
         Returns:
-            Source-path mapping of declared facades and imported resource UIDs.
+            Source-path mapping of declared facades, including USD cables,
+            and imported resource UIDs.
             Legacy argument forms retain the mutable asset dictionary result.
         """
         from .cfg.usd import _normalize_usd_import
@@ -3400,6 +3437,7 @@ class SimulationManager:
                 ),
                 "soft_object": self._deformable_objects,
                 "cloth_object": self._deformable_objects,
+                "cable_object": self._cable_objects,
             }[kind]
             registry[descriptor.name] = facade
             assets[source_path] = facade
@@ -3549,7 +3587,7 @@ class SimulationManager:
                         "USD-native Gaussian appearance cannot be replaced by visuals; "
                         "use a Mesh USD source with explicit GaussianSplatCfg visuals."
                     )
-                descriptor.per_env = False
+                descriptor.per_env = self.num_envs > 1
         else:
             descriptor, materials = visual_desc_from_cfg(cfg)
         visual = VisualObject(cfg, self.device)
@@ -3704,7 +3742,7 @@ class SimulationManager:
                             "USD-native Gaussian appearance cannot be replaced by visuals; "
                             "use a Mesh USD source with explicit GaussianSplatCfg visuals."
                         )
-                    descriptor.per_env = False
+                    descriptor.per_env = self.num_envs > 1
             else:
                 descriptor, materials = rigid_desc_from_cfg(
                     cfg,
@@ -3898,22 +3936,8 @@ class SimulationManager:
             raise RuntimeError("Fluid diagnostics require prepare().")
         return self.physics.fluid_diagnostics(fluid)
 
-    def add_cable_object(self, cfg: CableObjectCfg) -> CableObject:
-        """Declare a cable before ``prepare()`` using DexSim's public Spawn API.
-
-        Args:
-            cfg: Typed cable geometry, four-mode material and visual configuration.
-
-        Returns:
-            A declared facade whose data becomes available after ``prepare()``.
-
-        Raises:
-            NotImplementedError: Backend/device/solver/gradient mode is unsupported,
-                or the physical scene has already been finalized.
-            ValueError: Required configuration or the asset UID is invalid.
-        """
-        if not isinstance(cfg, CableObjectCfg):
-            raise TypeError("Cable objects require CableObjectCfg.")
+    def _require_cable_declaration(self) -> None:
+        """Check the shared runtime requirements for declaring cables."""
         if not self.physics.supports_cables:
             raise NotImplementedError("Cable objects require the Newton backend.")
         if self.device.type != "cuda":
@@ -3930,6 +3954,24 @@ class SimulationManager:
             raise NotImplementedError(
                 "Declare cable objects before scene finalization."
             )
+
+    def add_cable_object(self, cfg: CableObjectCfg) -> CableObject:
+        """Declare a cable before ``prepare()`` using DexSim's public Spawn API.
+
+        Args:
+            cfg: Typed cable geometry, four-mode material and visual configuration.
+
+        Returns:
+            A declared facade whose data becomes available after ``prepare()``.
+
+        Raises:
+            NotImplementedError: Backend/device/solver/gradient mode is unsupported,
+                or the physical scene has already been finalized.
+            ValueError: Required configuration or the asset UID is invalid.
+        """
+        if not isinstance(cfg, CableObjectCfg):
+            raise TypeError("Cable objects require CableObjectCfg.")
+        self._require_cable_declaration()
         descriptor, materials = cable_desc_from_cfg(cfg, per_env=True)
         if descriptor.name in self.asset_uids or descriptor.name in self._spawn_scene:
             raise ValueError(
@@ -6921,6 +6963,33 @@ class SimulationManager:
                 "DexSim Scene articulation clear_dynamics failed with "
                 f"status {status}."
             )
+
+    def clear_articulation_dynamics(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Clear dynamic state and solver history for all articulations in selected worlds.
+
+        Args:
+            env_ids: Environment indices whose articulation dynamics should be cleared.
+                Defaults to all environments when ``None``.
+        """
+        articulation_uids = tuple(self._robots) + tuple(self._articulations)
+        if not articulation_uids:
+            return
+        if self.physics.name == "newton":
+            batch = self._newton_articulation_reset_batch(articulation_uids, env_ids)
+            self._clear_newton_articulation_dynamics(batch)
+            return
+        ids = (
+            None
+            if env_ids is None
+            else torch.as_tensor(env_ids, dtype=torch.long).reshape(-1).tolist()
+        )
+        for robot in self._robots.values():
+            robot.clear_dynamics(env_ids=ids)
+        for articulation in self._articulations.values():
+            articulation.clear_dynamics(env_ids=ids)
 
     def export_usd(self, fpath: str) -> bool:
         """Export the current simulation scene to a USD file.

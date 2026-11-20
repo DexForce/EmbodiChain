@@ -212,6 +212,8 @@ def _sample_hierarchy(
     support_gap: float,
     movable_roots: tuple[int, ...] | None = None,
     root_offset_bounds: dict[int, torch.Tensor] | None = None,
+    anchored_roots: tuple[int, ...] = (),
+    root_support_offsets: dict[int, torch.Tensor] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """One proposal per ordinal, with no per-member retry loops."""
     local = [matrix.expand(count, 4, 4).clone() for matrix in relative]
@@ -299,7 +301,8 @@ def _sample_hierarchy(
         world.append(
             local[node] if parent < 0 else _matrix_product(world[parent], local[node])
         )
-    root_boxes, deltas = [], []
+    root_support_offsets = root_support_offsets or {}
+    root_boxes, deltas = [], {}
     fixed_boxes = {}
     if randomize_groups and movable_roots is not None:
         for root in root_keys:
@@ -315,9 +318,13 @@ def _sample_hierarchy(
             box = torch.stack(
                 (points[:, :, :2].amin(1), points[:, :, :2].amax(1)), dim=1
             )
-            valid &= (box[:, 0] >= table[0] - 1e-10).all(-1) & (
-                box[:, 1] <= table[1] + 1e-10
-            ).all(-1)
+            if root in root_support_offsets:
+                low, high = root_support_offsets[root]
+                valid &= (low <= 0).all() & (high >= 0).all()
+            else:
+                valid &= (box[:, 0] >= table[0] - 1e-10).all(-1) & (
+                    box[:, 1] <= table[1] + 1e-10
+                ).all(-1)
             for other in root_boxes:
                 valid &= (
                     torch.maximum(
@@ -327,7 +334,15 @@ def _sample_hierarchy(
                 )
             fixed_boxes[root] = box
             root_boxes.append(box)
-    for root, key in root_keys.items():
+    # Place exact anchors before variable groups, so their space is already
+    # reserved when choosing the free region of an unanchored sibling.
+    roots = (
+        sorted(root_keys, key=lambda root: root not in anchored_roots)
+        if anchored_roots
+        else root_keys
+    )
+    for root in roots:
+        key = root_keys[root]
         points = (
             _rotate_points(
                 _subtree_points(root, local, corners, parents), world[root][:, :3, :3]
@@ -336,8 +351,8 @@ def _sample_hierarchy(
         )
         box = torch.stack((points[:, :, :2].amin(1), points[:, :, :2].amax(1)), dim=1)
         if root in fixed_boxes:
-            deltas.append(
-                torch.zeros((count, 2), dtype=relative.dtype, device=relative.device)
+            deltas[root] = torch.zeros(
+                (count, 2), dtype=relative.dtype, device=relative.device
             )
             continue
         if randomize_groups:
@@ -345,7 +360,10 @@ def _sample_hierarchy(
                 key=key, start=start, count=count, width=3, device=relative.device
             )
             half = (box[:, 1] - box[:, 0]) / 2
-            center_region = torch.stack((table[0] + half, table[1] - half), dim=1)
+            if root in root_support_offsets:
+                center_region = box.mean(1)[:, None] + root_support_offsets[root]
+            else:
+                center_region = torch.stack((table[0] + half, table[1] - half), dim=1)
             if root_offset_bounds and root in root_offset_bounds:
                 offset = root_offset_bounds[root]
                 center_region = torch.stack(
@@ -383,18 +401,22 @@ def _sample_hierarchy(
                 (count, 2), dtype=relative.dtype, device=relative.device
             )
         box = box + delta[:, None, :]
-        valid &= (box[:, 0] >= table[0] - 1e-10).all(-1) & (
-            box[:, 1] <= table[1] + 1e-10
-        ).all(-1)
+        if root in root_support_offsets:
+            low, high = root_support_offsets[root]
+            valid &= (delta >= low - 1e-10).all(-1) & (delta <= high + 1e-10).all(-1)
+        else:
+            valid &= (box[:, 0] >= table[0] - 1e-10).all(-1) & (
+                box[:, 1] <= table[1] + 1e-10
+            ).all(-1)
         for other in root_boxes:
             valid &= (
                 torch.maximum(box[:, 0] - other[:, 1], other[:, 0] - box[:, 1]).amax(-1)
                 >= group_margin - 1e-10
             )
         root_boxes.append(box)
-        deltas.append(delta)
+        deltas[root] = delta
     return (
-        torch.stack(deltas, dim=1),
+        torch.stack([deltas[root] for root in root_keys], dim=1),
         (
             torch.stack([sampled[node] for node in sorted(targets)], dim=1)
             if targets

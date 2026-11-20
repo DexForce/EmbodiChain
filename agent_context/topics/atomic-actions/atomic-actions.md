@@ -24,6 +24,33 @@ Hosts acquire versioned measurements; verification is the boundary that commits
 or invalidates observed effects. Preserve required stop/hold boundaries on the
 executed control grid instead of relying only on native planner timing.
 
+`PickUp` accepts a rigid `GraspGoal` or an explicit `ContactGraspGoal`.
+The rigid path projects its existing held-object relation. Contact pickup
+requires a free task-state resource, shares the approach/close/lift command
+assembly and declares `EffectVerificationRequirement(kind="contact_grasp")`
+without a rigid held-object update. Hosts supply physical evidence such as
+material-point lift and tool-frame retention before accepting that boundary.
+The routing host samples its material reference at the end of the `close`
+phase, including `grasp_settle_steps`, before lifting. Native contact IK paths
+use `MotionPolicy.interpolate_position_step` for lift sampling on the control
+grid; joint limits can lengthen them. Numerical material-coordinate geometry
+belongs to `compute/geometry/cable.py`.
+
+`ContactPickUpGoal` and `ContactPlaceGoal` opt into a bounded observed path in
+the same `PickUp`/`Place` invocation. `SkillPlan.continuation` carries an owned
+cursor; `ExecutionSession` installs the next plan only after the host acknowledges
+commands and physical checkpoints. The engine owns motion generation; the
+episode-owned `ContactPhaseSource` resolves geometry and observations only.
+Offline projection, external trajectory transforms, replay recovery and
+invocation revisions are rejected for this path. Its phases share one timeout
+and failure scope; `SkillPlan.segments` remain descriptive command ranges.
+
+Row-local planning within a larger World must carry the same explicit
+`context.env_ids` through FK/IK, root poses and diagnostics. HandOver applies this
+to both source/destination arms, including its continuation and failed-waypoint
+diagnostic routes. A one-row planning context does not implicitly select arena
+zero or all arenas of the robot.
+
 ## Package map
 
 | Concern | Source of truth |
@@ -99,6 +126,10 @@ are calibrated scene inputs. Preserve their selected owners and fingerprints;
 never infer capabilities or general physical success from a sample name. The
 host's sampled footprint/support checks remain finite measured acceptance,
 separate from geometric proposal qualification.
+`CoordinatedPlacement` retains each binding's configured grasp command during
+approach/hold and on the support hand through release/retreat. Contact-blocked
+measured jaw positions cannot replace these closing targets. Measured robot
+observations and held-object transforms still supply geometry and validation.
 
 ## Reward templates
 

@@ -1275,9 +1275,9 @@
         {
           "path": "embodichain/lab/sim/scene/expansion/__init__.py",
           "symbol": "<module>",
-          "start_line": 25,
-          "end_line": 27,
-          "excerpt": "from .cfg import SceneExpansionCfg\nfrom .contracts import ScenePoseChange, SceneVariant\nfrom .source import FixedSceneCandidateSource"
+          "start_line": 28,
+          "end_line": 31,
+          "excerpt": "from .cfg import SceneExpansionCfg\nfrom .contracts import ScenePoseChange, SceneVariant\nfrom .conditions import SceneLayoutCondition\nfrom .source import FixedSceneCandidateSource"
         },
         {
           "path": "embodichain/lab/sim/scene/expansion/source.py",

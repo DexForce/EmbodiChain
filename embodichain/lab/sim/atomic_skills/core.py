@@ -34,6 +34,7 @@ from embodichain.compute.trajectory import differentiate_positions
 
 from .affordance import Affordance
 from .bindings import EndpointBinding, JointPositionTarget
+from .continuation import PlanContinuationResult
 from .effects import StateDelta
 from .goals import collect_scene_dependencies
 from .invocation import (
@@ -61,6 +62,8 @@ from .policies import (
 )
 from .requirements import GRASP_CAPABILITY, SkillBindingContract
 from .runtime_commands import (
+    _sequence_from_fresh_frames,
+    _frame_from_fresh_commands,
     EndpointCommand,
     JointPositionPayload,
     RuntimeCommandFrame,
@@ -1366,8 +1369,8 @@ class AtomicSkill(Generic[GoalT, OptionsT], ABC):
                     EndpointCommand(target=target, payload=command.payload)
                 )
             frames.append(
-                RuntimeCommandFrame(
-                    commands=tuple(endpoint_commands),
+                _frame_from_fresh_commands(
+                    endpoint_commands,
                     active_mask=(
                         frame.active_mask
                         if active_mask is None
@@ -1377,7 +1380,7 @@ class AtomicSkill(Generic[GoalT, OptionsT], ABC):
                     hold_duration=frame.hold_duration,
                 )
             )
-        return TimedCommandSequence(frames=tuple(frames), env_ids=commands.env_ids)
+        return _sequence_from_fresh_frames(frames, commands.env_ids)
 
     def _joint_command_sequence(
         self,
@@ -1428,14 +1431,14 @@ class AtomicSkill(Generic[GoalT, OptionsT], ABC):
             # dispatching it, wait for the next arrival interval; the terminal
             # frame reuses its own interval as the action's settling window.
             frames.append(
-                RuntimeCommandFrame(
-                    commands=tuple(endpoint_commands),
+                _frame_from_fresh_commands(
+                    endpoint_commands,
                     active_mask=active_mask,
                     env_ids=trajectory.env_ids,
                     hold_duration=trajectory.dt[:, next_waypoint_index],
                 )
             )
-        return TimedCommandSequence(frames=tuple(frames), env_ids=trajectory.env_ids)
+        return _sequence_from_fresh_frames(frames, trajectory.env_ids)
 
     @staticmethod
     def _build_segments(
@@ -1521,6 +1524,37 @@ class AtomicSkill(Generic[GoalT, OptionsT], ABC):
             replannable=True,
             diagnostics=diagnostics,
         )
+
+    def continue_plan(
+        self,
+        request: ResolvedSkillRequest,
+        context: PlanningContext,
+        plan: SkillPlan,
+        active_mask: torch.Tensor,
+    ) -> PlanContinuationResult:
+        """Plan a later chunk without beginning another logical skill.
+
+        Args:
+            request: The unchanged resolved invocation.
+            context: Fresh observations with authoritative row identity and timing.
+            plan: Completed chunk and its owned continuation cursor.
+            active_mask: Eligible rows that executed the completed chunk.
+
+        Returns:
+            Physical row acceptance and an optional later plan.
+        """
+        raise ValueError(f"Skill {self.skill_id!r} does not support continuation.")
+
+    def on_plan_installed(
+        self, request: ResolvedSkillRequest, context: PlanningContext, plan: SkillPlan
+    ) -> None:
+        """Publish bookkeeping only after an execution plan was accepted.
+
+        Args:
+            request: The installed plan's resolved invocation.
+            context: Observations used for this plan.
+            plan: Validated plan after destination and lifecycle acceptance.
+        """
 
     @abstractmethod
     def _plan(

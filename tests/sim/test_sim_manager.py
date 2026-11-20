@@ -20,6 +20,7 @@ from contextlib import nullcontext
 import gc
 import queue
 import threading
+import weakref
 
 from pathlib import Path
 
@@ -601,10 +602,7 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
 
     class CyclicView:
         def __init__(self) -> None:
-            self.cycle = self
-
-        def __del__(self) -> None:
-            events.append("view_release")
+            self.retained_view = self
 
     sim = object.__new__(SimulationManager)
     spawn_scene = MagicMock()
@@ -614,9 +612,14 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
     )
     sim._gizmos = {}
     sim._markers = {}
+    view = CyclicView()
+    released = weakref.finalize(view, events.append, "view_released")
     sim._rigid_objects = {
-        "body": SimpleNamespace(_data=CyclicView(), _entities=[], _spawn_result=None)
+        "asset": SimpleNamespace(
+            _data=view, _entities=[view], _spawn_result=spawn_scene
+        )
     }
+    del view
     sim._constraints = {}
     sim._rigid_object_groups = {}
     sim._fluid_objects = {}
@@ -658,9 +661,12 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
 
     sim._deferred_destroy()
 
+    # Clearing a facade can make its cyclic native views collectible. Their
+    # finalizers must run before the owning native Scene/World are closed.
+    assert not released.alive
+    assert events.index("backend_prepare") < events.index("view_released")
+    assert events.index("view_released") < events.index("spawn_close")
     assert events.index("backend_prepare") < events.index("gc_collect")
-    assert "view_release" in events
-    assert events.index("view_release") < events.index("spawn_close")
     assert events.index("backend_prepare") < events.index("spawn_close")
     assert events.index("backend_prepare") < events.index("world_quit")
     assert instances == ({} if owns_registry_entry else {0: replacement})

@@ -622,6 +622,8 @@ jobs:
               "embodichain_robots/__init__.py",
               "embodichain_robots/_catalog.py",
               "embodichain_models/__init__.py",
+              "embodichain_sensors/__init__.py",
+              "embodichain_solvers/__init__.py",
               "embodichain_robots/_asset_catalog.py",
               "embodichain/data/_asset_registry.py",
               "embodichain_robots/franka/assets.py",
@@ -661,6 +663,8 @@ jobs:
                       "embodichain_robots/",
                       "embodichain_benchmarks/",
                       "embodichain_models/",
+                      "embodichain_sensors/",
+                      "embodichain_solvers/",
                       f"embodichain-{version}.data/data/share/embodichain/examples/",
                       dist_info,
                   )

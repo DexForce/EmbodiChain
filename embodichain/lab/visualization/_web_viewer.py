@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import ctypes
+from collections.abc import Callable
 from copy import deepcopy
 import os
 from pathlib import Path
@@ -121,10 +122,33 @@ class _WebViewer:
                     ("/style.css", "style.css", "text/css; charset=utf-8"),
                 )
             }
-            self.application = dexsim.WebApplication(sim.get_world(), assets)
+            self._replace_application(assets, self._request)
         except BaseException:
             self.close()
             raise
+
+    def _replace_application(
+        self,
+        assets: dict[str, tuple[str, bytes]],
+        handler: Callable[[str, str], tuple[int, str]],
+    ) -> None:
+        """Install host-owned routes on the existing observer and listener."""
+        import dexsim
+
+        self._assert_owner()
+        if self.closed:
+            raise RuntimeError("WebRTC viewer is closed.")
+        if self.application is not None:
+            self.application.close()
+            self.application = None
+        self.application = dexsim.WebApplication(self.sim.get_world(), assets)
+        self._application_handler = handler
+
+    def _process_application_requests(self) -> None:
+        """Service application requests without scheduling an observer render."""
+        self._assert_owner()
+        if self.application is not None:
+            self.application.process(self._application_handler)
 
     def _assert_owner(self) -> None:
         if threading.get_ident() != self.owner:
@@ -210,7 +234,7 @@ class _WebViewer:
         self._assert_owner()
         if self.closed:
             return False
-        self.application.process(self._request)
+        self._process_application_requests()
         if self.error is not None:
             return False
         if not (force or self.dirty or time.monotonic() >= self.next_render):
