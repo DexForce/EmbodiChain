@@ -2,7 +2,7 @@ Sharpa Robotics
 ===============
 
 Official hand descriptions and standalone joint-controlled presets are owned by
-``embodichain_robots.sharpa``. Model availability does not imply grasping or
+``embodichain.extensions.robots.sharpa``. Model availability does not imply grasping or
 retargeting capability.
 
 .. list-table::

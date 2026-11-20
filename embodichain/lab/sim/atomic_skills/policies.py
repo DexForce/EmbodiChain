@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum
@@ -63,6 +63,16 @@ class MotionPolicy:
     strategy: Literal["motion_gen", "ik_interp"] = "ik_interp"
     """Motion strategy: ``motion_gen`` or ``ik_interp``."""
 
+    phase_paths: Mapping[str, Literal["joint", "cartesian"]] = field(
+        default_factory=dict, kw_only=True
+    )
+    """Explicit primitive phase paths; empty preserves each skill's defaults.
+
+    PickUp reads pre_grasp/grasp/lift (and optional initial_lift); Place reads
+    pre_place/place/retreat. Other primitives retain their own declared paths.
+    Placement translation keyframes all retain their original phase's path.
+    """
+
     sample_count: int = 50
     """Minimum trajectory sample count when the backend does not preserve samples."""
 
@@ -74,6 +84,13 @@ class MotionPolicy:
 
     plan_opts: PlanOptions | None = None
     """Optional typed planner-specific options."""
+
+    interpolate_position_step: float = field(default=0.002, kw_only=True)
+    """Cartesian sampling distance in metres, forwarded to motion generation.
+
+    PickUp contact motions also use this distance to sample their lift on the
+    control grid. Joint-limit qualification can lengthen the resulting path.
+    """
 
     velocity_limit: float | None = None
     """Optional scalar speed request, capped by effective Robot joint limits."""
@@ -143,6 +160,22 @@ class MotionPolicy:
     """
 
     def __post_init__(self) -> None:
+        if not isinstance(self.phase_paths, Mapping) or any(
+            type(name) is not str
+            or not name.strip()
+            or mode not in ("joint", "cartesian")
+            for name, mode in self.phase_paths.items()
+        ):
+            raise ValueError("phase_paths must map phase names to joint/cartesian")
+        if self.phase_paths and (
+            self.strategy != "ik_interp"
+            or self.interpolation_mode != "fixed_grid"
+            or self.ik_seed_mode != "sequential"
+        ):
+            raise ValueError("phase_paths requires fixed-grid sequential ik_interp")
+        from embodichain.utils._owned_json import freeze_metadata
+
+        object.__setattr__(self, "phase_paths", freeze_metadata(self.phase_paths))
         if self.final_velocity_rejection not in {"hold", "mask_only"}:
             raise ValueError("final_velocity_rejection must be hold or mask_only.")
         segment_retries = self.segment_sample_count_retries
@@ -205,9 +238,13 @@ class MotionPolicy:
             raise ValueError("velocity_targets must be auto or zero.")
         if self.sample_count < 2:
             raise ValueError("sample_count must be at least 2.")
-        for name in ("velocity_limit", "acceleration_limit"):
+        for name in (
+            "velocity_limit",
+            "acceleration_limit",
+            "interpolate_position_step",
+        ):
             value = getattr(self, name)
-            if value is None:
+            if value is None and name != "interpolate_position_step":
                 if (
                     name == "velocity_limit"
                     or self.strategy == "motion_gen"
@@ -301,6 +338,7 @@ class MotionPolicy:
             interpolation_dt=interpolation_dt,
             is_linear=cartesian_linear or cartesian_keyframes,
             preserve_cartesian_samples=cartesian_linear,
+            interpolate_position_step=self.interpolate_position_step,
             cartesian_path_sampler=cartesian_path_sampler,
             interpolation_mode=self.interpolation_mode,
             ik_seed_mode=self.ik_seed_mode,

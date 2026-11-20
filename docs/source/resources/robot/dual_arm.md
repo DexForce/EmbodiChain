@@ -116,7 +116,7 @@ applies the `left_` / `right_` prefixes consistently with the assembled URDF.
 ## Programmatic Build Path
 
 ```python
-from embodichain_robots import URRobotCfg
+from embodichain.extensions.robots import URRobotCfg
 from embodichain.lab.sim.robots.dual_arm import build_dual_arm_cfg, resolve_mounts
 
 base = URRobotCfg.from_dict({"robot_type": "ur5"})
@@ -130,7 +130,7 @@ A single-arm robot becomes dual-arm-ready by:
 
 1. following the existing `"arm"` convention in its single-arm cfg,
 2. exposing `control_parts["arm"]` and `solver_cfg["arm"]`,
-3. registering its ID in `embodichain_robots/_catalog.py` or an installed
+3. registering its ID in `embodichain/extensions/robots/_catalog.py` or an installed
    `embodichain.robots` catalog,
 4. declaring `supports_dual_arm=True` in its catalog metadata to advertise the
    base in `list-robot`.

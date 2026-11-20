@@ -60,12 +60,10 @@ def transition_view(rollout: TensorDict, flatten: bool = False) -> TensorDict:
 
     if "critic_obs" in rollout.keys():
         td["critic_obs"] = rollout["critic_obs"][:, :-1]
-    for key in ("action_mean", "action_std"):
-        if key in rollout.keys():
-            td[key] = rollout[key][:, :-1]
-
-    for key in ("advantage", "return", "seq_mask", "seq_return", "entropy"):
-        if key in rollout.keys():
+    # Extra fields (including training-only labels) share the root batch layout
+    # and are aligned with the state that produced this transition's action.
+    for key in rollout.keys():
+        if key not in td.keys():
             td[key] = rollout[key][:, :-1]
 
     if flatten:

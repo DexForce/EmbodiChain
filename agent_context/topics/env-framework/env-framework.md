@@ -15,7 +15,7 @@ managers, demonstration collection and the opt-in Task Program bridge.
 | Public execution-free component expansion | `embodichain/lab/gym/utils/composition.py` → shared strict decoders |
 | Config decoding | `embodichain/lab/gym/utils/gym_utils.py` |
 | Robot selector decoding | `robot.class_type` → `embodichain/robot_registry.py`; catalog ownership is in [robot-system](../robot-system/robot-system.md) |
-| Import registration | `embodichain/lab/gym/utils/registration.py`; official task imports under `extensions/embodichain_tasks/embodichain_tasks/` |
+| Import registration | `embodichain/lab/gym/utils/registration.py`; official task imports under `embodichain/extensions/tasks/` |
 | Environment cadence resolution | `embodichain/lab/gym/utils/control_timing.py`: `resolve_control_timing`, `ControlTiming` |
 | Environment loop | `embodichain/lab/gym/envs/base_env.py`: `EnvCfg`, `BaseEnv` |
 | Scene, managers, RL outcomes and demonstration integration | `embodichain/lab/gym/envs/embodied_env.py` |
@@ -26,8 +26,13 @@ managers, demonstration collection and the opt-in Task Program bridge.
 | Cable scene declarations and raw recording | `gym_utils.py` → `EmbodiedEnv._setup_interactive_objects()`; `trajectory_state.py` → `observations.get_entity_state` |
 | Demo segment execution / outcomes / collection qualification | `embodichain/lab/gym/envs/demo.py` |
 | Configured Task Program registration | `embodichain/lab/gym/envs/task_program/registration.py` |
-| Captured-GS Pick/Place deployments | `extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/`; reusable components under `extensions/embodichain_tasks/configs/components/` |
+| Captured-GS Pick/Place deployments | `embodichain/extensions/tasks/configs/tasks/manipulation/gaussian_pick_place/`; reusable components under `embodichain/extensions/tasks/configs/components/` |
 | Timing instrumentation | `embodichain/lab/gym/utils/profiler.py` |
+
+Captured-GS backgrounds retain native USD references and their authored placement.
+Arena replication requires the qualified DexSim companion-cloning build; explicit
+`GaussianSplatCfg` visuals remain a separate supported path. Read the capability
+and renderer boundaries in [rendering](../simulation-system/rendering.md#gaussian-composition).
 
 Read [configuration and registration](configuration.md) for task-first layout,
 physical/semantic component ownership, config IDs and paths; [execution](execution.md)
@@ -37,7 +42,7 @@ Task Program execution, DexUni rigid/DFSPH dynamics and fluid coordinates.
 Official model defaults stay in the robot catalog; task
 contracts own locomotion actions, observations, rewards and termination.
 Reference-motion task state/snapshots live under
-`embodichain_tasks/locomotion/tracking/`, with model rollout boundaries in
+`embodichain/extensions/tasks/locomotion/tracking/`, with model rollout boundaries in
 [robot world model](../robot-world-model/robot-world-model.md).
 
 ## Launcher argument ownership

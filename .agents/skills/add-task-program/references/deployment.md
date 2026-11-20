@@ -51,7 +51,8 @@ reference remains supported. Do not add policy inheritance or arbitrary merges.
   handwritten or RL deployment.
 - A physical scene component contains no Task Program metadata.
 - Embodiment robot installation `overrides` are limited to `uid`, `init_pos`,
-  `init_rot`, and `init_qpos`. A separate UID-keyed `camera_overrides` may change
+  `init_rot`, `init_qpos`, and bounded calibration of existing drive gains and
+  hand `open`/`grasp` commands. A separate UID-keyed `camera_overrides` may change
   only declared ordinary cameras' intrinsics/extrinsics; sensor membership,
   type, parent, resolution and outputs remain component-owned. See the
   [calibration contract](../../../../agent_context/topics/env-framework/configuration.md#reusable-gym-deployment-components).

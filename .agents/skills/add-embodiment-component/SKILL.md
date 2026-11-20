@@ -13,7 +13,7 @@ configuration serve many tasks.
 An embodiment component belongs at:
 
 ```text
-extensions/embodichain_tasks/configs/components/embodiments/<embodiment_id>.yaml
+embodichain/extensions/tasks/configs/components/embodiments/<embodiment_id>.yaml
 ```
 
 It owns exactly:
@@ -37,7 +37,7 @@ Read `agent_context/MAP.yaml`, then resolve:
 - `task-programs` when a `skill_profile` is requested.
 
 Inspect the closest current component under
-`extensions/embodichain_tasks/configs/components/embodiments/` and the intended runnable
+`embodichain/extensions/tasks/configs/components/embodiments/` and the intended runnable
 task deployment.
 
 ## Reuse or add the robot
@@ -119,7 +119,10 @@ embodiment:
 ```
 
 Optional robot installation `overrides` are limited to `uid`, `init_pos`,
-`init_rot`, and `init_qpos`. The separate `camera_overrides` mapping may select
+`init_rot`, `init_qpos`, and bounded calibration: replacing existing named
+`joint_drive_props.stiffness`/`damping` values and a declared hand's complete
+`open`/`grasp` commands. Prefer these over copying a component for task-local
+gains or commands. The separate `camera_overrides` mapping may select
 an ordinary Camera UID explicitly declared in `sensor` or `simulation.sensors`
 and change only intrinsics/extrinsics. Keep sensor membership, parent, resolution
 and output flags with the component. Do not repeat inline `robot` or `sensor`

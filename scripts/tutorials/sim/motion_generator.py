@@ -91,7 +91,7 @@ from embodichain.lab.sim.motion.planners import (
     ToppraPlannerCfg,
 )
 from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
-from embodichain_robots import CobotMagicCfg
+from embodichain.extensions.robots import CobotMagicCfg
 
 RECORD_WIDTH = 1920
 RECORD_HEIGHT = 1080
@@ -265,8 +265,8 @@ def main(args: argparse.Namespace | None = None) -> None:
 
     sim.prepare()
 
-    if not args.headless:
-        sim.open_window()
+    if not args.headless or getattr(args, "web", False):
+        sim.open_viewer()
 
     print(
         f"[INFO]: Running motion generator tutorial with {sim.num_envs} environment(s)"

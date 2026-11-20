@@ -5,6 +5,7 @@ Use the unified namespace; every command also works with `python -m embodichain`
 ```bash
 embodichain gensim --help
 embodichain gensim asset ingest --input raw_asset --category cup --output outputs/assets
+embodichain gensim image clean-robot --image head.png --output outputs/clean-head
 embodichain gensim scene generate --image table.png --output outputs/scene
 embodichain gensim scene edit --scene outputs/scene --prompt "Move the cup to the left"
 embodichain gensim scene expand --scene outputs/scene --config layouts.yaml
@@ -53,6 +54,23 @@ Install the `embodichain[gensim]` extra for its optional dependencies.
 Model implementations and serving frameworks remain operator-selected; see the
 [deployment and BYOS guide](services/DEPLOYMENT.md) and the versioned
 [HTTP protocol](services/spec/v1/README.md).
+
+### Clean a tabletop reference frame
+
+`gensim image clean-robot` accepts a dual-arm head-camera RGB frame with the
+two arms at opposite sides and a visible camera plate at the bottom center.
+It uses the regular [GenSim service configuration](services/README.md) for
+`image_segmentation` and an `image_generation` adapter with image-to-image
+editing. For the built-in `image_http` adapter, the `generate_image_by_image_path`
+option defaults to `/generate_image_by_image`. The endpoint accepts multipart
+`image`, `prompt`, `width`, `height`, and `seed` fields and returns a PNG.
+
+The output directory must be new. It contains `input.png`, the original RGB
+frame, the per-part and combined masks, the editor response, and a
+`preparation.json` pixel audit. The cleaned PNG keeps the input dimensions
+and every decoded RGB pixel outside `robot-mask.png`. The camera support
+must resolve to an unambiguous bottom-edge component. An edit that leaves all
+detected robot pixels unchanged fails without publishing `input.png`.
 
 External whole-scene generators use the independent
 `embodichain.gensim_scene_providers` contract. Public operations in
@@ -128,9 +146,17 @@ through the existing closed decoders. `binding.resource_anchors` maps declared
 resources to planar `[x, y]` anchors: a single-arm call without a resource then
 uses the arm already holding its object, or the arm anchored nearest to it, and
 a placement on a support prefers its robot-side region. `binding.release_clearance`
-(metres, default 0) releases placements above their resting pose while validators
-keep the resting target; the place gate otherwise expects a released object to
-separate from the open gripper before retracting.
+(metres, default 0.02) releases placements above their resting pose so fingers
+can open without wedging against the support. An explicit zero keeps contact
+placement. Ordinary generated Place calls also hold the final open command for
+0.4 physical seconds before the unchanged release gate; the native planner
+rounds this duration upward to the actual control grid. Explicit
+`release_settle_duration` values, including zero, are retained; declaring
+`release_settle_steps` suppresses that generated duration default. When both
+options are explicitly supplied, the longer hold applies. External nominal
+sources retain their authored timing. The gate measures opening before retract,
+terminal verification measures separation, and the original resting-position
+and stability validators remain unchanged.
 
 Further optional run fields: `task` reuses a published task-plan directory instead
 of planning, after verifying its artifacts and that it planned the same instruction
@@ -138,13 +164,39 @@ and image; `planning_repairs` (default 1) bounds diagnostic re-planning;
 `source_calibration` names a JSON camera/tabletop calibration of the input image,
 which rescales and places each rigid object so its projection matches its image
 mask (scenes with articulations, or whose table does not stay world-axis aligned
-under the calibrated yaw, are rejected);
+under the calibrated yaw, are rejected). The calibrated table is decomposed
+with V-HACD, so objects rest at the calibrated surface height;
 `room` adds a scene asset room (for example `WoodLab`) as a visual shell with its
 authored floor collider; `recording` streams every camera frame and per-step state
 to `recording/` during execution. Missing native parts, hidden or ambiguous
 references, unsupported geometry and incompatible capabilities reject rather
 than selecting a substitute or claiming execution readiness. Model grounding
 never creates capabilities, rewrites control-part names or chooses physics.
+
+### Automatic cleanup for verified head-camera inputs
+
+For a verified RoboDojo dual-arm head frame, add its camera view and the
+SHA-256 from the reference episode's `cam_head.first_png_sha256`:
+
+```yaml
+input_camera:
+  view: robodojo_dual_arm_head
+  sha256: <64 lowercase hex digits>
+```
+
+`image` must be that exact raw 640 × 480 frame. Other views and already cleaned
+images use the ordinary configuration without `input_camera`. GenSim uses its
+shared service configuration to clean the verified raw frame before Task Engine
+and scene generation. Both stages consume the same cleaned PNG. If cleanup
+fails, the run stops at `image_preprocessing`.
+
+To reuse a plan on the same raw frame, keep the previous run directory with
+`run_manifest.json`, `image_preprocessing/`, and `task/`. Run with the same
+`input_camera` declaration and `--task PREVIOUS_RUN/task`. GenSim checks the
+raw image, the Task Plan digest, and the previously grounded PNG and mask.
+It copies the cleanup artifacts without requesting a new image edit. For an
+independent published Task Plan, supply its exact grounded image as `image`
+and omit `input_camera`.
 
 ## Outputs and verdicts
 
@@ -196,7 +248,9 @@ still rejects the scene.
 
 A new run directory contains:
 
-- `source_image.*`: the input frozen for the run, with a SHA-256 in the manifest;
+- `source_image.*`: the raw input frozen as `source_image_sha256`;
+- `image_preprocessing/`: when enabled, both images, masks and the pixel audit.
+  The manifest's `image_sha256` identifies the effective image used downstream;
 - `task/`: source semantic graph, TaskSpec, image grounding and offline viewer;
 - `scene/`: generated workspace, unless an existing workspace was selected;
 - `deployment/`: robot/policy snapshots, native mesh copies, integration,

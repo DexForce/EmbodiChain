@@ -2,13 +2,13 @@
 
 ## Entry points and ownership
 
-The main wheel bundles `embodichain_models` with the same version and dependencies.
+The main wheel bundles `embodichain.extensions.models` with the same version and dependencies.
 It is an import package under `extensions/`, not a separate distribution or a
 runtime registry. Shared MLPs and feature normalization stay in core
 `embodichain.learning.models`; generic supervised orchestration stays in
 [SL](../supervised-learning/supervised-learning.md).
 
-The [model catalog contract](../../../extensions/embodichain_models/README.md)
+The [model catalog contract](../../../embodichain/extensions/models/README.md)
 owns domain and public-import naming. Policy models predict actions; dynamics
 models predict future state or geometry. Canonical RWM and RigidFormer paths are
 `dynamics.rwm` and `dynamics.rigidformer`; the catalog tracks implemented families.
@@ -18,10 +18,10 @@ World-model naming does not introduce a parallel `world_models` domain.
 
 | Request | Owner |
 |---|---|
-| NeRD network, portable checkpoint, physical codec | `extensions/embodichain_models/embodichain_models/dynamics/nerd/{model,checkpoint,codec}.py` |
+| NeRD network, portable checkpoint, physical codec | `embodichain/extensions/models/dynamics/nerd/{model,checkpoint,codec}.py` |
 | Online canonical state/history, injected FK/contact geometry and prediction | Model package `transition.py`, `geometry.py` |
 | Lightweight Cartpole/Ant learning factories | Example `_support/{_cartpole_env,_ant_env,_model_env,_model_factory}.py` |
-| Optional native Provider, indices and physics admission | `extensions/embodichain_solvers/embodichain_solvers/physics/nerd/` |
+| Optional native Provider, indices and physics admission | `embodichain/extensions/solvers/physics/nerd/` |
 | Committed HDF5 shards and bounded windows | Model package `data.py`, private `_resident.py` |
 | Encoding, frozen moments and offline errors | Model package `integration.py` |
 | Objective and common trainer factory | Model package `supervised.py`, `sl_recipe.py` |
@@ -32,7 +32,7 @@ World-model naming does not introduce a parallel `world_models` domain.
 | Original-repository comparison and acceptance | Example `_support/` runners; protocol in `research/` |
 
 The showcase defaults to `sl.train.yaml` and the installable
-`embodichain_models.dynamics.nerd.sl_recipe:build_supervised_trainer` factory.
+`embodichain.extensions.models.dynamics.nerd.sl_recipe:build_supervised_trainer` factory.
 Direct `embodichain train-sl --config FILE` works independently of example
 bootstrap. An explicitly selected `dynamics.train.*.yaml` uses the historical
 trainer for controlled comparisons and its legacy checkpoint contract.
@@ -63,7 +63,7 @@ runtime identity and viewer limits.
 ## RigidFormer author model
 
 The native family lives in
-`extensions/embodichain_models/embodichain_models/dynamics/rigidformer/`.
+`embodichain/extensions/models/dynamics/rigidformer/`.
 `model.py` owns geometry/configuration; `_native/` preserves licensed author
 code. Checkpoint import validates recorded architecture and named tensors.
 The community `rigidformer` package is not a runtime dependency.
@@ -93,7 +93,7 @@ loading and model-frame conversion. Its package imports neither simulation
 nor examples. Coordinate transport stays FP32 even under caller autocast;
 the original frozen network uses BF16. No learned-robot codec or history
 contract is shared with NeRD. Both families use the existing optional Newton
-Provider lifecycle in `embodichain_solvers.physics` for native deployment.
+Provider lifecycle in `embodichain.extensions.solvers.physics` for native deployment.
 
 `physics.worldparticle.provider.WorldParticleProvider` owns native admission and
 delegates stream/state/force/write/reset machinery to the SDK's generic

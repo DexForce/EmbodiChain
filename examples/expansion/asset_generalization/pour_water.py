@@ -60,7 +60,7 @@ from embodichain.lab.task_program.integrations.simulation.asset_pouring import (
 from embodichain.utils.config_paths import resolve_config_path
 
 CONFIGS = resolve_config_path(
-    "extensions/embodichain_tasks/configs", base_dir=Path(__file__).parent
+    "embodichain/extensions/tasks/configs", base_dir=Path(__file__).parent
 )
 TASK = Path(__file__).resolve().parent / "configs/pour_water"
 

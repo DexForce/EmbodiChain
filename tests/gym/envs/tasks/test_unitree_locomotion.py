@@ -23,20 +23,34 @@ from pathlib import Path
 import pytest
 import torch
 
-from embodichain_tasks.locomotion.velocity.contracts.g1 import config as g1_config
-from embodichain_tasks.locomotion.velocity.contracts.g1 import mdp as g1_mdp
-from embodichain_tasks.locomotion.velocity.contracts.go1 import config as go1_config
-from embodichain_tasks.locomotion.velocity.contracts.go1 import mdp as go1_mdp
-from embodichain_tasks.locomotion.velocity.contracts.go2 import config as go2_config
-from embodichain_tasks.locomotion.velocity.contracts.go2 import mdp as go2_mdp
-from embodichain_tasks.locomotion.velocity.contracts.h1_2 import config as h1_config
-from embodichain_tasks.locomotion.velocity.contracts.h1_2 import mdp as h1_mdp
+from embodichain.extensions.tasks.locomotion.velocity.contracts.g1 import (
+    config as g1_config,
+)
+from embodichain.extensions.tasks.locomotion.velocity.contracts.g1 import mdp as g1_mdp
+from embodichain.extensions.tasks.locomotion.velocity.contracts.go1 import (
+    config as go1_config,
+)
+from embodichain.extensions.tasks.locomotion.velocity.contracts.go1 import (
+    mdp as go1_mdp,
+)
+from embodichain.extensions.tasks.locomotion.velocity.contracts.go2 import (
+    config as go2_config,
+)
+from embodichain.extensions.tasks.locomotion.velocity.contracts.go2 import (
+    mdp as go2_mdp,
+)
+from embodichain.extensions.tasks.locomotion.velocity.contracts.h1_2 import (
+    config as h1_config,
+)
+from embodichain.extensions.tasks.locomotion.velocity.contracts.h1_2 import (
+    mdp as h1_mdp,
+)
 
-from embodichain_tasks.locomotion.velocity.contracts.anymal_c import (
+from embodichain.extensions.tasks.locomotion.velocity.contracts.anymal_c import (
     config as anymal_config,
     mdp as anymal_mdp,
 )
-from embodichain_tasks.locomotion.velocity.contracts.microduck import (
+from embodichain.extensions.tasks.locomotion.velocity.contracts.microduck import (
     config as microduck_config,
     mdp as microduck_mdp,
 )
@@ -70,9 +84,7 @@ def test_contract_dimensions_and_action_mapping(
 
 
 def test_contract_package_has_no_backend_imports():
-    root = Path(
-        "extensions/embodichain_tasks/embodichain_tasks/locomotion/velocity/contracts"
-    )
+    root = Path("embodichain/extensions/tasks/locomotion/velocity/contracts")
     forbidden = ("embodichain.lab", "dexsim")
     imports: set[str] = set()
     for path in root.rglob("*.py"):
@@ -88,7 +100,7 @@ def test_contract_package_has_no_backend_imports():
 def test_heading_commands_consume_xyzw_quaternions() -> None:
     import math
     from types import SimpleNamespace
-    from embodichain_tasks.locomotion.velocity._embodichain import (
+    from embodichain.extensions.tasks.locomotion.velocity._embodichain import (
         EmbodiChainVelocityEnv,
     )
 
@@ -117,7 +129,7 @@ def test_locomotion_state_binds_new_action_term_buffers() -> None:
     """Velocity state reads current, previous, and encoder-bias buffers."""
     from types import SimpleNamespace
 
-    from embodichain_tasks.locomotion.velocity._embodichain import (
+    from embodichain.extensions.tasks.locomotion.velocity._embodichain import (
         EmbodiChainVelocityEnv,
     )
 
@@ -141,7 +153,7 @@ def test_locomotion_state_keeps_legacy_named_action_binding() -> None:
     """A compatible named custom action remains valid without a contract ID."""
     from types import SimpleNamespace
 
-    from embodichain_tasks.locomotion.velocity._embodichain import (
+    from embodichain.extensions.tasks.locomotion.velocity._embodichain import (
         EmbodiChainVelocityEnv,
     )
 
@@ -180,13 +192,13 @@ def test_unitree_deployments_preserve_task_physics(
     monkeypatch.setattr(sim_cfg, "get_data_path", lambda value: value)
     name = "env.yaml" if backend == "default" else "env.newton.yaml"
     path = Path(
-        f"extensions/embodichain_tasks/configs/tasks/locomotion/velocity/{robot}_flat/{name}"
+        f"embodichain/extensions/tasks/configs/tasks/locomotion/velocity/{robot}_flat/{name}"
     )
     config = config_to_cfg(
         load_config(str(path)),
         source_path=path,
         manager_modules=[
-            f"embodichain_tasks.locomotion.managers.{module}"
+            f"embodichain.extensions.tasks.locomotion.managers.{module}"
             for module in ("observations", "rewards")
         ],
     )
@@ -229,7 +241,8 @@ def test_locomotion_env_preserves_ordered_unbounded_joint_actions(
     from embodichain.utils.utility import load_config
 
     env_type = getattr(
-        import_module(f"embodichain_tasks.locomotion.velocity.{robot}_flat"), env_name
+        import_module(f"embodichain.extensions.tasks.locomotion.velocity.{robot}_flat"),
+        env_name,
     )
     task = env_type.velocity_task_config
 
@@ -237,7 +250,7 @@ def test_locomotion_env_preserves_ordered_unbounded_joint_actions(
     filename = "env.yaml" if backend == "default" else "env.newton.yaml"
     path = (
         Path(
-            f"extensions/embodichain_tasks/configs/tasks/locomotion/velocity/{robot}_flat"
+            f"embodichain/extensions/tasks/configs/tasks/locomotion/velocity/{robot}_flat"
         )
         / filename
     )
@@ -245,7 +258,7 @@ def test_locomotion_env_preserves_ordered_unbounded_joint_actions(
         load_config(path),
         source_path=path,
         manager_modules=[
-            f"embodichain_tasks.locomotion.managers.{module}"
+            f"embodichain.extensions.tasks.locomotion.managers.{module}"
             for module in ("observations", "rewards")
         ],
     )
@@ -301,12 +314,14 @@ def test_locomotion_keeps_explicit_robot_overrides(
     from embodichain.lab.gym.utils.gym_utils import config_to_cfg
     from embodichain.lab.sim import cfg as sim_cfg
     from embodichain.utils.utility import load_config
-    from embodichain_tasks.locomotion.velocity.go2_flat import UnitreeGo2FlatEnv
+    from embodichain.extensions.tasks.locomotion.velocity.go2_flat import (
+        UnitreeGo2FlatEnv,
+    )
 
     monkeypatch.setattr(sim_cfg, "get_data_path", lambda value: value)
     filename = "env.yaml" if backend == "default" else "env.newton.yaml"
     path = (
-        Path("extensions/embodichain_tasks/configs/tasks/locomotion/velocity/go2_flat")
+        Path("embodichain/extensions/tasks/configs/tasks/locomotion/velocity/go2_flat")
         / filename
     )
     raw = load_config(path)
@@ -317,7 +332,7 @@ def test_locomotion_keeps_explicit_robot_overrides(
         raw,
         source_path=path,
         manager_modules=[
-            f"embodichain_tasks.locomotion.managers.{module}"
+            f"embodichain.extensions.tasks.locomotion.managers.{module}"
             for module in ("observations", "rewards")
         ],
     )
@@ -336,7 +351,7 @@ def test_locomotion_keeps_explicit_robot_overrides(
 def test_policy_viewer_target_pose_preserves_world_xyzw_and_copies_state():
     from types import SimpleNamespace
 
-    from embodichain_tasks.locomotion.velocity._embodichain import (
+    from embodichain.extensions.tasks.locomotion.velocity._embodichain import (
         EmbodiChainVelocityEnv,
     )
 
@@ -348,3 +363,58 @@ def test_policy_viewer_target_pose_preserves_world_xyzw_and_copies_state():
     assert target.tolist() == pytest.approx(pose[0].tolist())
     target[:] = 0
     assert pose[0].tolist() == pytest.approx([1, 2, 3, 0, 0, 0.6, 0.8])
+
+
+@pytest.mark.parametrize(
+    "rough,override,expected",
+    [
+        (False, {}, 0.5),
+        (True, {}, 1.0),
+        (False, {"clip": None}, 1.0),
+        (True, {"clip": 0.5}, 0.25),
+    ],
+)
+def test_environment_action_clipping_defaults_and_overrides(
+    monkeypatch, rough, override, expected
+):
+    from dataclasses import dataclass
+    from types import SimpleNamespace, MethodType
+    from embodichain.lab.gym.envs import EmbodiedEnv
+    from embodichain.lab.gym.envs.managers.actions import DefaultJointPositionAction
+    from embodichain.extensions.tasks.locomotion.velocity._embodichain import (
+        EmbodiChainVelocityEnv,
+    )
+    from embodichain.extensions.tasks.locomotion.velocity.rough.runtime import (
+        RoughVelocityEnv,
+    )
+
+    @dataclass
+    class State:
+        qpos: torch.Tensor
+
+    cls = RoughVelocityEnv if rough else EmbodiChainVelocityEnv
+    host = object.__new__(cls)
+    host.state_type = State
+    host.velocity_task_config = SimpleNamespace(
+        data={}, joint_names=["joint"], default_joint_position=[0.0], action_scale=[0.5]
+    )
+    params = dict(override)
+    cfg = SimpleNamespace(
+        robot=object(), actions={"joint_position": SimpleNamespace(params=params)}
+    )
+    monkeypatch.setattr(EmbodiedEnv, "__init__", lambda *args, **kwargs: None)
+    cls.__init__(host, cfg)
+    term = SimpleNamespace(
+        num_envs=1,
+        action_dim=1,
+        _raw_actions=torch.zeros(1, 1),
+        _previous_raw_actions=torch.zeros(1, 1),
+        _processed_actions=torch.zeros(1, 1),
+        _offset=torch.tensor(params["offset"]),
+        _scale=torch.tensor(params["scale"]),
+        position_bias=torch.zeros(1, 1),
+        _clip=params["clip"],
+    )
+    term._store_raw = MethodType(DefaultJointPositionAction._store_raw, term)
+    DefaultJointPositionAction.process_actions(term, torch.tensor([[2.0]]))
+    assert term._processed_actions.item() == expected

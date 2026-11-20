@@ -605,7 +605,7 @@ def test_build_robot_cfg_asset_control_part_defaults_to_arm():
 def test_build_preset_robot_cfg_franka():
     """--robot FrankaPanda loads the bare-arm preset without manual frame flags."""
     from embodichain.lab.scripts.analyze_workspace import build_robot_cfg
-    from embodichain_robots import FrankaPandaCfg
+    from embodichain.extensions.robots import FrankaPandaCfg
 
     cfg, part, urdf = build_robot_cfg(
         _robot_ns(
@@ -628,7 +628,7 @@ def test_build_preset_robot_cfg_franka():
 def test_build_preset_robot_cfg_cobotmagic_control_part_and_params():
     """--robot CobotMagic honors --control-part and --robot-params overrides."""
     from embodichain.lab.scripts.analyze_workspace import build_robot_cfg
-    from embodichain_robots import CobotMagicCfg
+    from embodichain.extensions.robots import CobotMagicCfg
 
     cfg, part, _urdf = build_robot_cfg(
         _robot_ns(
@@ -705,7 +705,7 @@ def _cache_robot_scene(request: pytest.FixtureRequest) -> Iterator[None]:
     robot = None
     try:
         from embodichain.lab.sim import SimulationManagerCfg
-        from embodichain_robots import CobotMagicCfg
+        from embodichain.extensions.robots import CobotMagicCfg
 
         config = SimulationManagerCfg(headless=True, sim_device="cpu")
         sim = SimulationManager(config)

@@ -2371,3 +2371,58 @@ def test_cartesian_timing_budget_exhaustion_returns_failed_safe_hold(monkeypatch
     )
     assert success.tolist() == [False]
     assert torch.equal(positions, q[:, :1].repeat(1, 2, 1))
+
+
+@pytest.mark.parametrize("modes", [("joint",), ("joint", "cartesian")])
+def test_phase_paths_materialize_owned_velocity_and_hold_failed_rows(
+    modes, monkeypatch
+):
+    generator = _mock_generator()
+    start = torch.zeros(BATCH_SIZE, CONTROLLED_DOF)
+    states = [PlanState.from_xpos(torch.eye(4).repeat(BATCH_SIZE, 1, 1)) for _ in modes]
+    pieces = []
+
+    def segment(_self, targets, options=None, *, defer_recovery=False):
+        positions = (
+            options.start_qpos[:, None]
+            + torch.arange(options.sample_count, dtype=torch.float32)[
+                None, :, None
+            ].expand(BATCH_SIZE, -1, CONTROLLED_DOF)
+            * 0.25
+        )
+        result = _timed_result(
+            positions, success=torch.tensor([True, False]), step_dt=0.25
+        )
+        pieces.append(result)
+        return result
+
+    # Exercise the public composition and real normalization with deterministic
+    # segment outputs, independent of IK convergence or simulation resources.
+    original = MotionGenerator.generate
+    monkeypatch.setattr(MotionGenerator, "generate", segment)
+    result = original(
+        generator,
+        states,
+        MotionGenOptions(
+            strategy="ik_interp",
+            interpolation_mode="fixed_grid",
+            ik_seed_mode="sequential",
+            waypoint_modes=modes,
+            sample_count=5,
+            interpolation_dt=0.25,
+            start_qpos=start,
+            control_part="arm",
+        ),
+    )
+    expected = torch.ones_like(result.positions)
+    expected[:, 0] = expected[:, -1] = 0
+    expected[1] = 0
+    torch.testing.assert_close(result.velocities, expected)
+    torch.testing.assert_close(
+        result.positions[1], torch.zeros_like(result.positions[1])
+    )
+    assert result.positions.shape[1] == 5
+    assert result.dt.sum(dim=1).tolist() == [1.0, 1.0]
+    saved = result.positions.clone()
+    pieces[0].positions.fill_(99)
+    torch.testing.assert_close(result.positions, saved)

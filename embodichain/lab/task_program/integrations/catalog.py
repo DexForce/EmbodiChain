@@ -27,7 +27,7 @@ import math
 from _thread import LockType
 from threading import Lock
 from types import MappingProxyType
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 import torch
 
 from embodichain.lab.evaluation import CompiledEvaluation
@@ -68,6 +68,7 @@ from embodichain.lab.task_program.semantics import (
     SceneAffordanceRef,
     SceneArticulationRef,
     SceneEntityRef,
+    SceneLinkRef,
     SceneManifest,
     SceneObjectRef,
     SceneRegistry,
@@ -235,8 +236,41 @@ def _canonical_value(value: object) -> object:
             and not value.supports_segment_motion_recovery
         ):
             metadata.pop("supports_segment_motion_recovery")
-        if type(value) is MotionPolicy and value.final_velocity_rejection == "hold":
-            metadata.pop("final_velocity_rejection")
+        from embodichain.lab.sim.atomic_skills.tracking import TrackingPolicy
+
+        if type(value) is TrackingPolicy and not value.boundary_reference_bridge:
+            metadata.pop("boundary_reference_bridge")
+        if type(value) is TrackingPolicy and not value.boundary_stop:
+            for key in (
+                "boundary_stop",
+                "boundary_position_tolerance",
+                "boundary_velocity_tolerance",
+                "boundary_timeout",
+            ):
+                metadata.pop(key)
+        if type(value) is MotionPolicy:
+            if value.final_velocity_rejection == "hold":
+                metadata.pop("final_velocity_rejection")
+            # An inactive phase-path extension preserves existing registration seals.
+            if not value.phase_paths:
+                metadata.pop("phase_paths")
+        # Inactive additions do not change an existing integration's identity.
+        from embodichain.lab.sim.atomic_skills.primitives.move_joints import (
+            MoveJointsOptions,
+        )
+        from embodichain.lab.sim.atomic_skills.primitives.move_end_effector import (
+            MoveEndEffectorOptions,
+        )
+
+        if type(value) is SimulationSceneBinding and not value.cables:
+            metadata.pop("cables")
+        if type(value) is MoveJointsOptions and not value.preserve_samples:
+            metadata.pop("preserve_samples")
+        if (
+            type(value) is MoveEndEffectorOptions
+            and not value.preserve_cartesian_samples
+        ):
+            metadata.pop("preserve_cartesian_samples")
         if type(value) is RecoveryPolicy and value.retry_all_failed_plans is True:
             metadata.pop("retry_all_failed_plans")
         if isinstance(value, PickUpOptions) and value.initial_lift_height == 0.0:
@@ -247,6 +281,8 @@ def _canonical_value(value: object) -> object:
             metadata.pop("grasp_retract_distance")
         if isinstance(value, PlaceOptions) and value.cartesian_approach is False:
             metadata.pop("cartesian_approach")
+        if isinstance(value, PlaceOptions) and value.release_settle_duration == 0.0:
+            metadata.pop("release_settle_duration")
         if isinstance(value, SlideOptions) and value.push_approach_offset is None:
             metadata.pop("push_approach_offset")
         return {"type": _qualified_name(value), "fields": metadata}
@@ -610,6 +646,9 @@ def _planning_contracts(factories):
 @dataclass(frozen=True, slots=True)
 class TaskProgramIntegrationCatalog:
     """Provider-free integration directory owned by one task registration."""
+
+    supports_link_references: ClassVar[bool] = True
+    """Validate relative-position references as objects or articulation links."""
 
     scene_registry_id: str
     robot_profile_id: str
@@ -1070,6 +1109,7 @@ class TaskProgramIntegrationCatalog:
             "articulation": (SceneArticulationRef,),
             "affordance": (SceneAffordanceRef,),
             "object_or_affordance": (SceneObjectRef, SceneAffordanceRef),
+            "object_or_link": (SceneObjectRef, SceneLinkRef),
         }
         expected_types = expected.get(role)
         if expected_types is None:

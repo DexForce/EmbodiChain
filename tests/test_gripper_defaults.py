@@ -337,6 +337,212 @@ def test_mounted_drive_defaults_and_explicit_overrides_share_production_path(tmp
     )
 
 
+def _compose_calibrated(tmp_path, overrides):
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+
+    declaration = {
+        "embodiment_id": "calibrated",
+        "simulation": {
+            "class_type": "URRobot",
+            "robot_type": "ur5",
+            "joint_drive_props": {
+                "stiffness": {"gripper_finger1_joint_1": 1000.0},
+                "damping": {"gripper_finger1_joint_1": 100.0},
+            },
+            "urdf_cfg": {"fpath_prefix": str(tmp_path / "assembled")},
+        },
+        "sensor": [],
+        "grippers": {
+            "eef": {
+                "class_type": "DHPGI14080",
+                "mode": "mounted",
+                "component_type": "hand",
+                "motion_part": "arm",
+                "control_part": "eef",
+            }
+        },
+        "skill_profile": {
+            "contract_id": "single_arm_parallel_gripper",
+            "profile_id": "calibrated",
+            "resources": [
+                {
+                    "resource_id": "primary",
+                    "endpoints": [
+                        {
+                            "endpoint_id": "grasp",
+                            "control_part": "eef",
+                            "capabilities": ["interaction.grasp"],
+                            "gripper": "eef",
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+    snapshot = deepcopy(declaration)
+    embodiment = {"component": "hand.yaml"}
+    if overrides is not None:
+        embodiment["overrides"] = overrides
+    physical = resolve_gym_components(
+        {"embodiment": embodiment},
+        base_dir=tmp_path,
+        component_sources={str(tmp_path / "hand.yaml"): declaration},
+    )
+    assert declaration == snapshot
+    return physical
+
+
+_FULL_CLOSURE = {
+    "gripper_finger1_joint_1": 0.04,
+    "gripper_finger2_joint_1": 0.04,
+}
+
+
+def test_task_calibration_overrides_replace_existing_drives_and_commands(tmp_path):
+    """Deployments retune named drive gains and hand commands of a shared hand."""
+    physical = _compose_calibrated(
+        tmp_path,
+        {
+            "joint_drive_props": {
+                "stiffness": {"gripper_finger1_joint_1": 3000.0},
+                "damping": {"gripper_finger1_joint_1": 300},
+            },
+            "grippers": {"eef": {"commands": {"grasp": dict(_FULL_CLOSURE)}}},
+        },
+    )
+    drives = physical.config["robot"]["joint_drive_props"]
+    assert drives["stiffness"]["gripper_finger1_joint_1"] == 3000.0
+    assert drives["damping"]["gripper_finger1_joint_1"] == 300.0
+    commands = physical.embodiment_skill_profile["command_presets"][0]["commands"]
+    assert commands == {"open": [0.0, 0.0], "grasp": [0.04, 0.04]}
+
+    default = _compose_calibrated(tmp_path, None)
+    drives = default.config["robot"]["joint_drive_props"]
+    assert drives["stiffness"]["gripper_finger1_joint_1"] == 1000.0
+    assert default.embodiment_skill_profile["command_presets"][0]["commands"][
+        "grasp"
+    ] == [0.024, 0.024]
+
+
+@pytest.mark.parametrize(
+    ("overrides", "error"),
+    (
+        (
+            {"joint_drive_props": {"max_effort": {"gripper_finger1_joint_1": 1.0}}},
+            "unsupported fields",
+        ),
+        (
+            {"joint_drive_props": {"stiffness": {"gripper_finger2_joint_1": 1.0}}},
+            "no existing entry",
+        ),
+        (
+            {"joint_drive_props": {"stiffness": {"gripper_finger1_joint_1": -1.0}}},
+            "finite and nonnegative",
+        ),
+        (
+            {
+                "joint_drive_props": {
+                    "damping": {"gripper_finger1_joint_1": float("nan")}
+                }
+            },
+            "finite and nonnegative",
+        ),
+        (
+            {"grippers": {"left": {"commands": {"grasp": dict(_FULL_CLOSURE)}}}},
+            "no existing gripper instance",
+        ),
+        (
+            {
+                "grippers": {
+                    "eef": {
+                        "class_type": "DHPGI14080",
+                        "commands": {"grasp": dict(_FULL_CLOSURE)},
+                    }
+                }
+            },
+            "unsupported fields",
+        ),
+        (
+            {"grippers": {"eef": {"commands": {"pinch": dict(_FULL_CLOSURE)}}}},
+            "unsupported fields",
+        ),
+        (
+            {
+                "grippers": {
+                    "eef": {"commands": {"grasp": {"gripper_finger1_joint_1": 0.04}}}
+                }
+            },
+            "cover all native hand joints",
+        ),
+        (
+            {
+                "grippers": {
+                    "eef": {
+                        "commands": {
+                            "grasp": {
+                                "gripper_finger1_joint_1": 0.5,
+                                "gripper_finger2_joint_1": 0.5,
+                            }
+                        }
+                    }
+                }
+            },
+            "exceeds",
+        ),
+    ),
+)
+def test_task_calibration_overrides_reject_structural_or_invalid_changes(
+    tmp_path, overrides, error
+):
+    with pytest.raises(ValueError, match=error):
+        _compose_calibrated(tmp_path, overrides)
+
+
+def test_task_calibration_override_preserves_yaml_aliased_gains(tmp_path):
+    """Overriding one gain does not rewrite another that shares its YAML node."""
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+
+    (tmp_path / "arm.yaml").write_text(
+        "embodiment_id: aliased\n"
+        "simulation:\n"
+        "  class_type: URRobot\n"
+        "  robot_type: ur5\n"
+        "  joint_drive_props:\n"
+        "    stiffness: &gains {elbow_joint: 100.0}\n"
+        "    damping: *gains\n"
+        "sensor: []\n"
+    )
+    physical = resolve_gym_components(
+        {
+            "embodiment": {
+                "component": "arm.yaml",
+                "overrides": {
+                    "joint_drive_props": {"stiffness": {"elbow_joint": 200.0}}
+                },
+            }
+        },
+        base_dir=tmp_path,
+    )
+    drives = physical.config["robot"]["joint_drive_props"]
+    assert drives["stiffness"] == {"elbow_joint": 200.0}
+    assert drives["damping"] == {"elbow_joint": 100.0}
+
+
+def test_explicit_null_grippers_remain_invalid(tmp_path):
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+
+    (tmp_path / "arm.yaml").write_text(
+        "embodiment_id: nulled\n"
+        "simulation: {class_type: URRobot, robot_type: ur5}\n"
+        "sensor: []\n"
+        "grippers: null\n"
+    )
+    with pytest.raises(TypeError, match="embodiment.grippers must be a mapping"):
+        resolve_gym_components(
+            {"embodiment": {"component": "arm.yaml"}}, base_dir=tmp_path
+        )
+
+
 def test_static_decode_rejects_missing_physical_geometry(tmp_path):
     from embodichain.lab.task_program.integrations.configured import (
         _decode_grasp_generator,
@@ -435,7 +641,7 @@ def test_native_drive_mapping_and_optional_resource_corrections(tmp_path, monkey
         _decode_grasp_generator,
     )
     from embodichain.robot_registry import resolve_robot_cfg
-    import embodichain_robots.dh_robotics.pgi_140_80._gripper_defaults as provider
+    import embodichain.extensions.robots.dh_robotics.pgi_140_80._gripper_defaults as provider
 
     original = provider.get_gripper_defaults()
     original["joint_drive_props"]["stiffness"] = {
@@ -523,7 +729,7 @@ def test_generic_dual_bound_hands_preserve_source_order_limit_overrides(tmp_path
 def test_generator_capabilities_are_explicit_and_do_not_grant_undeclared_endpoints(
     tmp_path, monkeypatch, supported
 ):
-    import embodichain_robots.dh_robotics.pgi_140_80._gripper_defaults as provider
+    import embodichain.extensions.robots.dh_robotics.pgi_140_80._gripper_defaults as provider
 
     values = provider.get_gripper_defaults()
     values["grasp_generators"] = supported
@@ -602,7 +808,7 @@ def test_w1_pika_partial_prefixes_match_assembled_hand_names():
 
     source = (
         Path(__file__).resolve().parents[1]
-        / "extensions/embodichain_tasks/configs/components/embodiments/dexforce_w1_030_pika.yaml"
+        / "embodichain/extensions/tasks/configs/components/embodiments/dexforce_w1_030_pika.yaml"
     )
     declaration = yaml.safe_load(source.read_text())
     declaration["simulation"]["urdf_cfg"]["component_prefix"] = [

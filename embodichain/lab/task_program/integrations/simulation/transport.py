@@ -20,7 +20,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import ClassVar
+
+import torch
 from embodichain.lab.sim.atomic_skills import (
+    SceneEntityPose,
     SkillOptions,
     AtomicSkillEngine,
     MoveHeldObject,
@@ -46,6 +49,7 @@ from embodichain.lab.task_program.compiler.lowering import (
 from embodichain.lab.task_program.integrations.extensions import (
     RegisteredSemanticLowererFactory,
 )
+from embodichain.lab.sim.atomic_skills.goals import resolve_pose_goal
 from .targets import (
     AbsolutePoseTarget,
     SceneEntityTarget,
@@ -66,17 +70,30 @@ class HeldObjectTransportRoute:
         object_id: Canonical carried-object identity.
         target_id: Named target selected by registered call arguments.
         pose: Immutable absolute or scene-relative pose declaration.
+        preserve_current_object_orientation: Retain the observed carried-object rotation.
+        waypoints: Optional object-pose waypoints visited before the final pose.
     """
 
     object_id: str
     target_id: str
     pose: AbsolutePoseTarget | SceneEntityTarget
+    preserve_current_object_orientation: bool = False
+    waypoints: tuple[AbsolutePoseTarget | SceneEntityTarget, ...] = ()
 
     def __post_init__(self) -> None:
         _identifier(self.object_id, field_name="object_id")
         _identifier(self.target_id, field_name="target_id")
+        if type(self.preserve_current_object_orientation) is not bool:
+            raise TypeError("preserve_current_object_orientation must be a bool.")
         resolve_pose_target(self.pose)
         object.__setattr__(self, "pose", self.pose.snapshot())
+        if type(self.waypoints) is not tuple:
+            raise TypeError("waypoints must be an exact tuple.")
+        for waypoint in self.waypoints:
+            resolve_pose_target(waypoint)
+        object.__setattr__(
+            self, "waypoints", tuple(value.snapshot() for value in self.waypoints)
+        )
 
 
 class _RoutedMoveHeldObjectLowerer(RegisteredSemanticLowerer):
@@ -128,15 +145,39 @@ class _RoutedMoveHeldObjectLowerer(RegisteredSemanticLowerer):
         option_template: SkillOptions,
     ) -> SemanticLowering:
         """Bind an exact target without observing the robot or solving IK."""
-        del context, bound
+        del bound
         if type(option_template) is not MoveHeldObjectOptions:
             raise TypeError(
                 "Configured transport requires exact MoveHeldObjectOptions."
             )
         route = self._route(call)
-        return _held_transport_lowering(
-            route.object_id, resolve_pose_target(route.pose)
-        )
+        declarations = (*route.waypoints, route.pose)
+        targets = [resolve_pose_target(value) for value in declarations]
+        if route.preserve_current_object_orientation or route.waypoints:
+            # Absolute declarations resolve on the host while scene-relative
+            # ones resolve on the planning device; stacking needs one device.
+            targets = [
+                resolve_pose_goal(value, context, name="transport target").to(
+                    device=context.robot.qpos.device, dtype=torch.float32, copy=True
+                )
+                for value in targets
+            ]
+            targets = [
+                (
+                    value.unsqueeze(0).expand(context.batch_size, -1, -1).clone()
+                    if value.ndim == 2
+                    else value
+                )
+                for value in targets
+            ]
+        if route.preserve_current_object_orientation:
+            observed = resolve_pose_goal(
+                SceneEntityPose(route.object_id), context, name="transport object"
+            )
+            for value in targets:
+                value[..., :3, :3] = observed[..., :3, :3]
+        target = torch.stack(targets, dim=1) if route.waypoints else targets[0]
+        return _held_transport_lowering(route.object_id, target)
 
     def pick_lookahead_targets(
         self,
@@ -151,14 +192,16 @@ class _RoutedMoveHeldObjectLowerer(RegisteredSemanticLowerer):
         route = self._route(call)
         if picked_object.entity_id != route.object_id:
             return None
-        return (
+        return tuple(
             SemanticObjectTarget(
                 pose=(
-                    SemanticPose(route.pose.position, route.pose.quaternion_xyzw)
-                    if type(route.pose) is AbsolutePoseTarget
-                    else resolve_pose_target(route.pose)
-                )
-            ),
+                    SemanticPose(pose.position, pose.quaternion_xyzw)
+                    if type(pose) is AbsolutePoseTarget
+                    else resolve_pose_target(pose)
+                ),
+                preserve_current_object_orientation=route.preserve_current_object_orientation,
+            )
+            for pose in (*route.waypoints, route.pose)
         )
 
 
@@ -173,7 +216,7 @@ class RoutedMoveHeldObjectLowererFactory(RegisteredSemanticLowererFactory):
     """
 
     call_id: ClassVar[str] = _MOVE_HELD_OBJECT_CALL_ID
-    revision: ClassVar[str] = "routed-2"
+    revision: ClassVar[str] = "routed-3"
     target_descriptor: ClassVar[SkillDescriptor] = MoveHeldObject.descriptor()
     routes: tuple[HeldObjectTransportRoute, ...]
 
@@ -228,10 +271,10 @@ class RoutedMoveHeldObjectLowererFactory(RegisteredSemanticLowererFactory):
                 raise ValueError(
                     "Transport objects require canonical scene identities."
                 )
-            if type(route.pose) is SceneEntityTarget:
+            for pose in (*route.waypoints, route.pose):
                 if (
-                    scene.resolve(route.pose.entity_id).entity_id
-                    != route.pose.entity_id
+                    type(pose) is SceneEntityTarget
+                    and scene.resolve(pose.entity_id).entity_id != pose.entity_id
                 ):
                     raise ValueError(
                         "Transport references require canonical scene identities."

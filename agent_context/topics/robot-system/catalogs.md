@@ -1,7 +1,7 @@
 # Robot catalogs
 
 Catalog selection and display metadata are owned by `embodichain/robot_registry.py`,
-`embodichain/cli/list_robot.py` and `extensions/embodichain_robots/_catalog.py`.
+`embodichain/cli/list_robot.py` and `embodichain/extensions/robots/_catalog.py`.
 For runtime configuration, return to [robot-system](robot-system.md).
 
 The `embodichain.robots` entry points provide lightweight catalog mappings from
@@ -114,7 +114,7 @@ one. Source URDFs, runtime joint names and PK chains must remain aligned.
 
 AgiBot G2 uses seed-local SRS search with its original 18 mm elbow offset and
 mounting-frame TCPs on CPU/CUDA. Its preset derives geometry from the URDF; see
-the [G2 model notes](../../../extensions/embodichain_robots/agibot/g2/README.md)
+the [G2 model notes](../../../embodichain/extensions/robots/agibot/g2/README.md)
 before introducing a legacy SRS DH calibration.
 
 Marvin catalog configs preserve source mass, inertia and COM. The bundled

@@ -8,7 +8,7 @@ learned dynamics. It does not require a simulator or an RL environment.
 A model recipe defines the network, data encoding and loss. The SL layer runs
 that recipe without assuming an observation layout, action representation or
 sequence length. Shared networks live in `learning.models`; concrete models and
-their recipes live in the bundled `embodichain_models` extension.
+their recipes live in the bundled `embodichain.extensions.models` extension.
 See [Integrated models](#integrated-models) to choose a model and find its data
 preparation and training workflow.
 
@@ -271,7 +271,7 @@ not establish that its data source supports exact recovery.
 
 ## Recipe factories and related workflows
 
-Factory identifiers use the `embodichain_models.` prefix followed by the module
+Factory identifiers use the `embodichain.extensions.models.` prefix followed by the module
 and function below, joined with `:`.
 
 | Model | Factory module / function | Model-owned behavior |

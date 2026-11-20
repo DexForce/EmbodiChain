@@ -61,8 +61,8 @@ import warp as wp
             [
                 "embodichain.lab",
                 "embodichain.gen_sim",
-                "embodichain_robots",
-                "embodichain_tasks",
+                "embodichain.extensions.robots",
+                "embodichain.extensions.tasks",
                 "dexsim",
                 "fcl",
             ],

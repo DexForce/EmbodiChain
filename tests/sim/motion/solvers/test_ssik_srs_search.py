@@ -27,7 +27,7 @@ from scipy.spatial.transform import Rotation
 
 from embodichain.lab.sim.motion.solvers import SSIKSolver, SSIKSolverCfg, SolverCfg
 from embodichain.lab.sim.objects.robot import Robot
-from embodichain_robots import TianjiMarvinCfg
+from embodichain.extensions.robots import TianjiMarvinCfg
 
 _DEVICES = [
     "cpu",

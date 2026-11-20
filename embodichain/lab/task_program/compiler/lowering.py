@@ -609,7 +609,20 @@ class SemanticLowering:
     )
     registered_effect: RegisteredSemanticEffect | None = None
 
+    failed_preconditions: Mapping[int, str] = field(default_factory=dict)
+    """Measured grounding failures by physical environment ID."""
+
     def __post_init__(self) -> None:
+        failures = dict(self.failed_preconditions)
+        if any(
+            type(env_id) is not int
+            or env_id < 0
+            or not isinstance(reason, str)
+            or not reason
+            for env_id, reason in failures.items()
+        ):
+            raise ValueError("Grounding failures require physical env IDs and reasons.")
+        object.__setattr__(self, "failed_preconditions", MappingProxyType(failures))
         if self.skill_options is not None and not isinstance(
             self.skill_options, SkillOptions
         ):
@@ -639,6 +652,15 @@ class RegisteredSemanticLowerer(ABC):
     transfer a held object.  This declaration does not make the call
     transparent to geometric pickup look-ahead; that remains governed by
     :meth:`pick_lookahead_targets`.
+    """
+
+    requires_unoccupied_slots: ClassVar[tuple[str, ...]] = ()
+    """Bound resource slots that must hold no verified object before lowering.
+
+    Grounding rejects the call when a listed slot's logical state key holds an
+    object in any eligible environment. The default declares no requirement.
+    Use it for calls that carry no payload and therefore install no
+    held-object retention guard or terminal attachment check.
     """
 
     def pick_lookahead_targets(
@@ -866,6 +888,7 @@ class GroundedSemanticCall:
     effect_monitor: EffectMonitor | None = field(repr=False, compare=False)
     effect_guards: tuple[GroundedHeldObjectGuard, ...]
     effect_gates: tuple[GroundedPhaseEffectGate, ...]
+    failed_preconditions: Mapping[int, str]
     _eligible_mask: torch.Tensor = field(repr=False, compare=False)
 
     def __init__(self, *args: object, **kwargs: object) -> None:
@@ -886,6 +909,7 @@ class GroundedSemanticCall:
         effect_monitor: EffectMonitor | None,
         effect_guards: tuple[GroundedHeldObjectGuard, ...],
         effect_gates: tuple[GroundedPhaseEffectGate, ...],
+        failed_preconditions: Mapping[int, str],
         eligible_mask: torch.Tensor,
     ) -> GroundedSemanticCall:
         """Create one compiler-owned grounded result."""
@@ -896,6 +920,11 @@ class GroundedSemanticCall:
         object.__setattr__(instance, "effect_monitor", effect_monitor)
         object.__setattr__(instance, "effect_guards", tuple(effect_guards))
         object.__setattr__(instance, "effect_gates", tuple(effect_gates))
+        object.__setattr__(
+            instance,
+            "failed_preconditions",
+            MappingProxyType(dict(failed_preconditions)),
+        )
         object.__setattr__(instance, "_eligible_mask", eligible_mask.clone())
         instance.__post_init__()
         return instance
@@ -1030,6 +1059,10 @@ class _TypedMoveHeldObjectLowerer(RegisteredSemanticLowerer):
         return (SemanticObjectTarget(pose=call.at),)
 
 
+_HOLD_ENDPOINT_IDS = ("motion", "grasp")
+"""Resource endpoints that carry or address a held-object relation."""
+
+
 class SemanticCallCompiler:
     """Analyze semantic workflows and JIT-lower exactly one call at a time."""
 
@@ -1103,6 +1136,20 @@ class SemanticCallCompiler:
                 raise ValueError(
                     f"Lowerer {call_id!r} cannot both preserve symbolic state and "
                     "declare an effect contract."
+                )
+            unoccupied_slots = getattr(type(lowerer), "requires_unoccupied_slots", None)
+            if type(unoccupied_slots) is not tuple:
+                raise TypeError(
+                    f"Lowerer {call_id!r} requires_unoccupied_slots must be a tuple."
+                )
+            binding_contract = target_descriptor.binding_contract
+            known_slots = () if binding_contract is None else binding_contract.slot_ids
+            if len(set(unoccupied_slots)) != len(unoccupied_slots) or any(
+                slot_id not in known_slots for slot_id in unoccupied_slots
+            ):
+                raise ValueError(
+                    f"Lowerer {call_id!r} requires_unoccupied_slots must name "
+                    f"unique target skill slots from {known_slots!r}."
                 )
             lowerers[call_id] = lowerer
         if isinstance(relation_grounders, (str, bytes)):
@@ -1619,7 +1666,15 @@ class SemanticCallCompiler:
         elif type(call) is HandOver:
             lowering = self._lower_handover(analyzed, context, eligible, path=path)
         elif type(call) in (RegisteredSemanticCall, MoveHeldObjectCall):
-            lowering = self._lower_registered(analyzed, context, path=path)
+            self._require_unoccupied_slots(
+                analyzed,
+                context,
+                eligible,
+                path=(*path, call_index, "call"),
+            )
+            lowering = self._lower_registered(
+                analyzed, replace(context, planning_mask=eligible), path=path
+            )
             self._validate_registered_held_effects(
                 analyzed,
                 lowering,
@@ -1717,6 +1772,17 @@ class SemanticCallCompiler:
                 invocation,
                 phase_effect_gates=tuple(value.requirement for value in effect_gates),
             )
+        failures = lowering.failed_preconditions
+        if failures:
+            if not failures.keys() <= set(context.env_ids.tolist()):
+                raise ValueError(
+                    "Grounding failures must refer to selected environment IDs."
+                )
+            failures = {
+                i: failures[i]
+                for i in context.env_ids[eligible].tolist()
+                if i in failures
+            }
         return GroundedSemanticCall._create(
             analyzed=analyzed,
             invocation=invocation,
@@ -1724,6 +1790,7 @@ class SemanticCallCompiler:
             effect_monitor=effect_monitor,
             effect_guards=effect_guards,
             effect_gates=effect_gates,
+            failed_preconditions=failures,
             eligible_mask=eligible,
         )
 
@@ -2028,7 +2095,7 @@ class SemanticCallCompiler:
         option_template = self._skill_option_template(analyzed, PlaceOptions)
         if call.at is not None:
             object_target = self._broadcast_pose(
-                call.at.to_matrix(),
+                self._ground_object_target(SemanticObjectTarget(pose=call.at), context),
                 context,
                 name="Place.at",
             )
@@ -2308,6 +2375,82 @@ class SemanticCallCompiler:
             state_expectations=tuple(state_expectations),
             clauses=tuple(clauses),
         )
+
+    def _require_unoccupied_slots(
+        self,
+        analyzed: AnalyzedSemanticCall,
+        context: PlanningContext,
+        eligible: torch.Tensor,
+        *,
+        path: tuple[PathPart, ...],
+    ) -> None:
+        """Reject declared payload-free calls while an eligible row holds an object."""
+        lowerer = self._registered_lowerers.get(analyzed.call.call_id)
+        if lowerer is None:
+            return
+        for slot_id in lowerer.requires_unoccupied_slots:
+            resource = analyzed.bound.binding.resources[slot_id]
+            endpoint = resource.endpoints.get("motion")
+            if endpoint is None:
+                raise _diagnostic(
+                    "missing_effect_endpoint",
+                    (*path, "resources", slot_id, "motion"),
+                    "An unoccupied-resource check requires a bound motion endpoint.",
+                    tuple(resource.endpoints),
+                )
+            task_state_key = endpoint.task_state_key
+            assert isinstance(task_state_key, str)
+            # Aliases of the same physical manipulator keep separate state keys.
+            # Compare only the endpoints that move or hold; holds are keyed by
+            # motion endpoints, and auxiliary endpoints must not join them.
+            own = [
+                resource.endpoints[endpoint_id]
+                for endpoint_id in _HOLD_ENDPOINT_IDS
+                if endpoint_id in resource.endpoints
+            ]
+            state_keys = {task_state_key}
+            for candidate in self._integration.robot_profile.resources.values():
+                holder = candidate.endpoints.get("motion")
+                if holder is None:
+                    continue
+                if any(
+                    mine.conflicts_with(candidate.endpoints[endpoint_id])
+                    for endpoint_id in _HOLD_ENDPOINT_IDS
+                    if endpoint_id in candidate.endpoints
+                    for mine in own
+                ):
+                    state_keys.add(holder.task_state_key)
+            occupied = torch.zeros_like(eligible)
+            holders = []
+            for key in sorted(state_keys):
+                held = context.task.held_object_mask(key)
+                if (held & eligible).any():
+                    holders.append(key)
+                occupied |= held
+            for keys, coordinated in context.task.coordinated_held_objects.items():
+                if state_keys.intersection(keys):
+                    assert coordinated.env_mask is not None
+                    if (coordinated.env_mask & eligible).any():
+                        holders.extend(key for key in keys if key in state_keys)
+                    occupied |= coordinated.env_mask
+            occupied &= eligible
+            if occupied.any():
+                raise _diagnostic(
+                    "unoccupied_resource_required",
+                    (*path, "resources", slot_id),
+                    f"Call {analyzed.call.semantic_id!r} carries no payload, but "
+                    f"logical state keys {sorted(set(holders))!r} of the bound "
+                    "manipulator hold a verified object in an eligible "
+                    "environment. Move held objects with the verified "
+                    "held-object transport call.",
+                    tuple(
+                        str(value)
+                        for value in context.env_ids[occupied]
+                        .detach()
+                        .to("cpu")
+                        .tolist()
+                    ),
+                )
 
     def _validate_registered_held_effects(
         self,

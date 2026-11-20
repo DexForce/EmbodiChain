@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -27,6 +28,9 @@ import torch
 from pxr import Sdf, Usd, UsdGeom, UsdPhysics
 
 from dexsim.spawn import (
+    CableDesc,
+    CablePhysicsDesc,
+    NewtonCollisionDesc,
     MeshObjectDesc,
     ConstraintDesc,
     RigidBodyPhysicsDesc,
@@ -43,6 +47,7 @@ from dexsim.types import ActorType
 from embodichain.lab.sim.sim_manager import SimulationManager
 from embodichain.lab.sim.spawn.scene import SpawnScene
 from embodichain.lab.sim.cfg import UsdImportCfg, UsdSourceCfg
+from embodichain.lab.sim.objects import CableObject
 
 pytestmark = pytest.mark.no_sim
 
@@ -61,6 +66,7 @@ def _manager():
         "_rigid_object_groups",
         "_deformable_objects",
         "_fluid_objects",
+        "_cable_objects",
         "_articulations",
     ):
         setattr(manager, name, {})
@@ -110,8 +116,11 @@ def test_callable_mounted_camera_keeps_multiple_usd_declarations_open(
     import dexsim.kit.usd
     from embodichain.lab.sim.cfg import RobotCfg
     from embodichain.lab.sim.sensors import (
+        BaseSensor,
         Camera,
         CameraCfg,
+        SensorCfg,
+        SensorContext,
         SensorRegistration,
         register_sensor,
         registry,
@@ -126,10 +135,22 @@ def test_callable_mounted_camera_keeps_multiple_usd_declarations_open(
     manager.num_envs = 1
     created = []
 
+    class TestCamera(Camera):
+        def _build_sensor_from_config(
+            self, config: CameraCfg, device: torch.device
+        ) -> None:
+            pass
+
     def factory(cfg, *args, **kwargs):
         assert manager._spawn_scene.builder.is_finalized
-        camera = object.__new__(Camera)
-        camera.cfg = cfg
+        camera = object.__new__(TestCamera)
+        BaseSensor.__init__(
+            camera,
+            cfg,
+            device=manager.device,
+            num_instances=manager.num_envs,
+            context=kwargs.get("context"),
+        )
         camera.attach_to_parent_nodes = MagicMock()
         created.append(camera)
         return camera
@@ -140,6 +161,24 @@ def test_callable_mounted_camera_keeps_multiple_usd_declarations_open(
             "DeferredMounted", MountedCfg, factory, legacy_factory=legacy
         )
     )
+
+    @configclass
+    class MountedProbeCfg(SensorCfg):
+        sensor_type: str = "DeferredProbe"
+
+    def canceled_factory(cfg: MountedProbeCfg, *, context: SensorContext) -> BaseSensor:
+        pytest.fail("Removing the owner must cancel its deferred probe")
+
+    register_sensor(
+        SensorRegistration("DeferredProbe", MountedProbeCfg, canceled_factory)
+    )
+    sensors: list[SensorCfg] = [
+        MountedCfg(uid="camera", extrinsics=CameraCfg.ExtrinsicsCfg(parent="base"))
+    ]
+    if reuse_camera_uid:
+        sensors.append(
+            MountedProbeCfg(uid="probe", mount=SensorCfg.OffsetCfg(parent="base"))
+        )
     manager.add_sensor = lambda cfg: SimulationManager.add_sensor(manager, cfg)
     manager._resolve_spawn_sensor_parent_nodes = MagicMock(return_value=[object()])
 
@@ -168,12 +207,7 @@ def test_callable_mounted_camera_keeps_multiple_usd_declarations_open(
                 "/Robot": RobotCfg(
                     build_pk_chain=False,
                     enable_sensor=True,
-                    sensors=[
-                        MountedCfg(
-                            uid="camera",
-                            extrinsics=CameraCfg.ExtrinsicsCfg(parent="base"),
-                        )
-                    ],
+                    sensors=sensors,
                     joint_drive_props=None,
                 )
             },
@@ -226,7 +260,9 @@ def test_callable_mounted_camera_keeps_multiple_usd_declarations_open(
         )
         manager._spawn_scene._require_removable = lambda uid: None
         manager._spawn_scene.remove = lambda uid: None
+        assert manager._pending_mounted_sensors["probe"].mount.parent == "Robot/base"
         assert manager.remove_asset("Robot")
+        assert "probe" not in manager._pending_mounted_sensors
         assert "RobotB" in manager._robots
         assert (
             manager._pending_mounted_sensors["camera"].extrinsics.parent
@@ -898,6 +934,11 @@ def test_curve_prim_resources_keep_all_uids_and_stable_source_keys(
     )
     for namespace in (None, "copy"):
         manager = _manager()
+        manager.device = torch.device("cuda:0")
+        manager.physics = SimpleNamespace(
+            name="newton", solver_type="dexuni", supports_cables=True
+        )
+        manager.sim_config.physics_cfg = SimpleNamespace(requires_grad=False)
         result = manager.add_usd(
             UsdImportCfg(
                 name="scene",
@@ -913,9 +954,79 @@ def test_curve_prim_resources_keep_all_uids_and_stable_source_keys(
         assert dict(result.resource_source_paths) == {
             key: "/World/Cable" for key in expected_keys
         }
-        assert len(result) == 0
+        assert list(result) == expected_keys
+        for key in expected_keys:
+            cable = result[key]
+            uid = result.resource_uids[key]
+            assert isinstance(cable, CableObject)
+            assert cable is manager.get_cable_object(uid) is manager.get_asset(uid)
+            assert cable.is_declared and cable.data is None
         with pytest.raises(TypeError):
             result.resource_source_paths[expected_keys[0]] = "/Other"
+
+
+def test_usd_cable_sparse_overrides_preserve_source_geometry_and_material(monkeypatch):
+    import dexsim.kit.usd
+
+    source = _source()
+    key = "/World/Wire"
+    points = np.array([[0, 0, 1], [0.2, 0, 1], [0.55, 0, 1]], dtype=np.float32)
+    source.cables.append(
+        CableDesc(
+            name="wire",
+            points=points,
+            radius=0.015,
+            usd=UsdSourceDesc(prim_path=key),
+            physics=CablePhysicsDesc(density=321, twist_stiffness=7, bend_damping=2),
+            collision=NewtonCollisionDesc(mu=0.77),
+        )
+    )
+    monkeypatch.setattr(dexsim.kit.usd, "parse_usd", lambda *a, **k: deepcopy(source))
+    manager = _manager()
+    manager.device = torch.device("cuda")
+    manager.physics = SimpleNamespace(
+        name="newton", solver_type="dexuni", supports_cables=True
+    )
+    manager.sim_config.physics_cfg = SimpleNamespace(requires_grad=False)
+    recipe = UsdImportCfg(
+        name="scene",
+        source=UsdSourceCfg(file_path="scene.usda"),
+        asset_cfgs={key: {"fixed_segments": [2]}},
+    )
+    with pytest.raises(ValueError, match="fixed_segments"):
+        manager.add_usd(recipe)
+    manager._spawn_scene.builder.add_scene.assert_not_called()
+
+    recipe.asset_cfgs[key] = {
+        "uid": "cable",
+        "fixed_segments": [0],
+        "collision_filter_span": 2,
+        "attrs": {
+            "stretch_stiffness": 1e5,
+            "bend_damping": 0,
+            "collision_props": {"contact_offset": 0.01, "rest_offset": 0.0},
+            "material_props": {"backend": "newton", "ke": 10000, "kd": 0.1},
+        },
+    }
+    imported = manager.add_usd(recipe)
+    native = manager._spawn_scene.builder.add_scene.call_args.args[0].cables[0]
+    assert native.name == imported.resource_uids[key] == "cable"
+    facade = manager.get_cable_object("cable")
+    assert facade is imported[key]
+    np.testing.assert_array_equal(native.points, points)
+    assert native.radius == pytest.approx(0.015)
+    assert native.fixed_segments == facade.cfg.fixed_segments == (0,)
+    assert native.collision_filter_span == facade.cfg.collision_filter_span == 2
+    for physics in (native.physics, facade.cfg.attrs):
+        assert physics.stretch_stiffness == 1e5
+        assert physics.bend_damping == 0
+        assert physics.density == 321
+        assert physics.twist_stiffness == 7
+    assert native.collision.mu == 0.77
+    assert native.collision.margin == 0
+    assert native.collision.gap == 0.01
+    assert native.collision.ke == 10000
+    assert native.collision.kd == 0.1
 
 
 def test_portable_sparse_articulation_pose_matrix_is_decoded(monkeypatch):

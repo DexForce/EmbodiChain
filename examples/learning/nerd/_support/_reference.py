@@ -299,7 +299,9 @@ def run_reference(
     """
     if not trust_external_code:
         raise ValueError("Official source execution requires trust_external_code=True")
-    from embodichain_models.dynamics.nerd._numerics import _validate_numerical_profile
+    from embodichain.extensions.models.dynamics.nerd._numerics import (
+        _validate_numerical_profile,
+    )
 
     if (
         _validate_numerical_profile(
@@ -316,9 +318,9 @@ def run_reference(
     import numpy as np
     from algorithms.vanilla_trainer import VanillaTrainer
     from utils.time_report import TimeReport
-    from embodichain_models.dynamics.nerd.codec import NeRDStateCodec
-    from embodichain_models.dynamics.nerd.data import DynamicsWindowDataset
-    from embodichain_models.dynamics.nerd import load_model, export_model
+    from embodichain.extensions.models.dynamics.nerd.codec import NeRDStateCodec
+    from embodichain.extensions.models.dynamics.nerd.data import DynamicsWindowDataset
+    from embodichain.extensions.models.dynamics.nerd import load_model, export_model
     from ._trainer import (
         DynamicsTrainCfg,
         evaluate_model,
@@ -587,8 +589,8 @@ def export_legacy_dataset(
     import h5py
     import numpy as np
     import torch
-    from embodichain_models.dynamics.nerd.codec import NeRDStateCodec
-    from embodichain_models.dynamics.nerd.data import (
+    from embodichain.extensions.models.dynamics.nerd.codec import NeRDStateCodec
+    from embodichain.extensions.models.dynamics.nerd.data import (
         load_manifest,
         dataset_fingerprint,
     )
@@ -693,8 +695,8 @@ def import_legacy_datasets(
     import h5py
     import numpy as np
     import torch
-    from embodichain_models.dynamics.nerd.codec import NeRDStateCodec
-    from embodichain_models.dynamics.nerd.data import (
+    from embodichain.extensions.models.dynamics.nerd.codec import NeRDStateCodec
+    from embodichain.extensions.models.dynamics.nerd.data import (
         DynamicsShardWriter,
         load_manifest,
         dataset_fingerprint,
@@ -709,7 +711,10 @@ def import_legacy_datasets(
             "Preserved legacy velocity requires the source world frame without rotation"
         )
     codec = NeRDStateCodec(**metadata["codec"])
-    from embodichain_models.dynamics.nerd.codec import quat_rotate, quat_multiply
+    from embodichain.extensions.models.dynamics.nerd.codec import (
+        quat_rotate,
+        quat_multiply,
+    )
 
     rotation = (
         None
@@ -974,7 +979,7 @@ def generate_official_dataset(
     import math
     import time
     import xml.etree.ElementTree as ET
-    from embodichain_models.dynamics.nerd.codec import quat_multiply
+    from embodichain.extensions.models.dynamics.nerd.codec import quat_multiply
 
     robot = str(spec["robot"]).lower()
     if robot not in {"cartpole", "ant"}:

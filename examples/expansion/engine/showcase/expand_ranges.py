@@ -60,13 +60,13 @@ def main() -> None:
         resolved = (source.parent / reference).resolve()
         if (
             not resolved.exists()
-            and "extensions/embodichain_tasks/configs/" in reference
+            and "embodichain/extensions/tasks/configs/" in reference
         ):
             from embodichain.utils.config_paths import resolve_config_path
 
             resolved = resolve_config_path(
-                "extensions/embodichain_tasks/configs/"
-                + reference.split("extensions/embodichain_tasks/configs/", 1)[1]
+                "embodichain/extensions/tasks/configs/"
+                + reference.split("embodichain/extensions/tasks/configs/", 1)[1]
             )
         cfg["task_program"][k] = str(resolved)
     search = R / "configs/search.wide.yaml"

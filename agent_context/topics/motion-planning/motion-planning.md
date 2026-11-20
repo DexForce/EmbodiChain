@@ -17,7 +17,7 @@ collection belong to their hosts.
 | Sampled Cartesian geometry → timing → robot IK | `embodichain/lab/sim/motion/planners/_cartesian_profiles.py` (internal adapter) |
 | Collision planning and scene conversion | `embodichain/lab/sim/motion/planners/curobo/` |
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
-| Installable evaluation suites and external planner adapters | `extensions/embodichain_benchmarks/motion_generation/api.py`, `planners/base.py` in that package |
+| Installable evaluation suites and external planner adapters | `embodichain/extensions/benchmarks/motion_generation/api.py`, `planners/base.py` in that package |
 | Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
 | Contact-qualified paired grasp sampling and explicit URDF surfaces | `embodichain/toolkits/graspkit/pg_grasp/coordinated.py`, `urdf_surfaces.py` in that directory |
 | Bounded interaction pose refinement before expansion | `embodichain/lab/sim/motion/refinement.py`, with numeric fitting in `compute/trajectory/refinement.py`; [Real2Sim boundary](../data-pipeline/real2sim.md) |
@@ -53,12 +53,28 @@ positions `(B, N, dof)`. Use `PlanState.single()` for one environment.
 duration is their sum. Failed results may omit positions. Planning timing never
 changes simulator `physics_dt`.
 
+`MotionGenOptions.waypoint_modes` explicitly selects joint/Cartesian paths to
+individual keyframes under fixed-grid sequential IK. Adjacent equal modes share
+ordinary native requests; composition retains the total control grid and row
+failure masks. No robot UID or waypoint count enables the behavior. Atomic
+`MotionPolicy.phase_paths` names the PickUp/Place phases that opt into this path;
+ordinary calls and other primitives retain their own planning semantics.
+All inserted Place translation keyframes inherit their original phase's mode.
+PickUp's explicit `cartesian_lift` and Place's `cartesian_approach` are mutually
+exclusive with `phase_paths`; conflicting declarations reject before trajectory
+generation.
+
 `motion_gen` delegates timing to its backend. `ik_interp` needs explicit
 start/count/dt, rejects backend-specific options and uses minimum-jerk segments
 when limits apply. Adaptive timing and batched IK remain defaults. Explicit
 `fixed_grid` preserves count/intervals and rejects overspeed rows against runtime
 and authored joint caps; `sequential` retains previous-valid-posture seeds and
 callback/RNG order. Neither mode is a generic option for other strategies.
+Solvers may opt into `supports_sequential_batch_ik` only when their continuous
+path hook enumerates the ordinary candidate pool against each preceding valid
+seed. SSIK Warp SRS `seed_local` supplies this stronger contract, allowing
+bounded path batches instead of Python point dispatch. Other solvers and active
+planning budgets retain the original point-query sequence and charging rules.
 
 Rejected rows hold their start; `rejected_candidate` retains original samples
 and rejected-row identity for audit/recovery. A zero-speed hold does not prove
@@ -86,6 +102,12 @@ unchanged physics substeps; Gym experts use their environment's command period. 
 prepared actions without retiming again. See
 [retiming and playback](planner-details.md#retiming-and-playback).
 
+Gripper surface queries with CPU inputs still classify convex distances on CUDA.
+Native multi-chunk calls own one query-local geometry snapshot and bounded scratch,
+retain CPU point/ground transforms and all samples, and return owned reduced CPU
+results. This is distinct from the simulation physics device. Visualization,
+custom point-query overrides and already-device-resident callers keep their paths.
+
 GraspKit owns sampled/native geometric qualification from explicit hand inputs;
 Scene captures geometry and Robot adapters provide FK/calibration. GraspKit
 performs no hardware lookup. Sampling uses the contact frame and maps to runtime
@@ -102,15 +124,15 @@ owns cross-domain collection; [scene expansion](../scene-expansion/scene-expansi
 owns layout proposals and host integration. [Real2Sim](../data-pipeline/real2sim.md)
 owns protected source mapping and retiming.
 
-The installed benchmark host is `embodichain_benchmarks.motion_generation`.
+The installed benchmark host is `embodichain.extensions.benchmarks.motion_generation`.
 It owns scene lifetime, frozen cases, evaluation and artifacts; adapters return
 `PlanResult` and expose `MotionGenerator` for Atomic evaluation. Configuration
 preflight and runtime capability declarations remain separate. Frozen inputs do
 not guarantee identical stochastic outcomes across schedules. Parallel quality
 work uses spawned processes; performance replay stays serial and excludes
 contended timing. Population, masked-constraint, contact-scoring and uncertainty
-rules live in the [benchmark README](../../../extensions/embodichain_benchmarks/motion_generation/README.md)
-and [design contract](../../../extensions/embodichain_benchmarks/motion_generation/BENCHMARK_DESIGN.md).
+rules live in the [benchmark README](../../../embodichain/extensions/benchmarks/motion_generation/README.md)
+and [design contract](../../../embodichain/extensions/benchmarks/motion_generation/BENCHMARK_DESIGN.md).
 
 ## Focused validation
 

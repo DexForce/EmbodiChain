@@ -27,6 +27,7 @@ from .configured import ExpansionRunCfg
 from .journal import ExpansionJournal, RecipeAttempt
 from .recipes import BatchCompatibility, OperatorCapability, ExpansionRecipe
 from .contracts import CandidateIdentity, ValidationResult
+from .host_extensions import GymExpansionHostExtensions
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv, EmbodiedEnvCfg
@@ -71,6 +72,7 @@ class GymHostContext:
     auxiliary_baseline: Mapping[str, torch.Tensor] | None = None
     profile: Real2SimTabletopCollectionCfg | None = None
     scene_source: JointSceneSource | None = None
+    feedback: Any | None = None
     motion_profile: CombinedExpansionProfile | None = None
     motion_recipes: tuple[CandidateRecipe, ...] = ()
     names: tuple[str, ...] = ()
@@ -90,3 +92,6 @@ class GymHostContext:
     services: dict[int, _EpisodeSource] = field(default_factory=dict)
     bridges: dict[int, TaskProgramDemoBridge] = field(default_factory=dict)
     recipe: Callable[[int], ExpansionRecipe] | None = None
+    extensions: GymExpansionHostExtensions = field(
+        default_factory=GymExpansionHostExtensions
+    )

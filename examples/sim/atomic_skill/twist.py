@@ -277,7 +277,7 @@ def run(args: argparse.Namespace) -> None:
     ]
     look_at = [camera_position, focus_position, [0, 0, 1]]
     if wait_for_user:
-        input("Press Enter to replay the Twist demo...")
+        sim.wait_for_input("Press Enter to replay the Twist demo...")
     replay_trajectory(
         sim,
         robot,
@@ -293,7 +293,7 @@ def run(args: argparse.Namespace) -> None:
         compiled=compiled,
     )
     if wait_for_user:
-        input("Press Enter to exit the simulation...")
+        sim.wait_for_input("Press Enter to exit the simulation...")
 
 
 def main() -> None:

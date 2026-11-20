@@ -31,7 +31,7 @@ before being voxelized into an ESDF grid.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 import xml.etree.ElementTree as ET
@@ -1197,6 +1197,8 @@ def visualize_curobo_collision_models(
     ) = None,
     world_scene: Any | None = None,
     env_id: int = 0,
+    *,
+    wait_for_input: Callable[[str], str] | None = None,
 ) -> None:
     """Show robot and world collision models in DexSim until Enter is pressed.
 
@@ -1213,6 +1215,7 @@ def visualize_curobo_collision_models(
         rigid_objects: Optional live world obstacles represented by ``world_scene``.
         world_scene: Optional tensor-backed scene or cuRobo ``Scene`` instance.
         env_id: Simulator environment instance to visualize.
+        wait_for_input: Optional viewport-aware terminal wait callback.
     """
     import dexsim
     import yaml
@@ -1283,7 +1286,7 @@ def visualize_curobo_collision_models(
         if not visualization_actors:
             raise ValueError("The cuRobo caches contain no collision geometry.")
 
-        input(
+        (input if wait_for_input is None else wait_for_input)(
             f"Showing {sphere_count} cuRobo collision spheres in "
             "DexSim. Press Enter to remove them and continue..."
         )

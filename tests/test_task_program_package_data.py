@@ -22,6 +22,7 @@ import ast
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -31,13 +32,12 @@ import pytest
 from setuptools import Distribution
 from setuptools.command.build_py import build_py
 
-from setup import get_package_data, get_package_dir
+from setup import get_package_data, get_packages
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _SETUP_PATH = _REPOSITORY_ROOT / "setup.py"
-_CONFIG_PACKAGE = "embodichain_tasks.configs"
-_CONFIG_SOURCE = _REPOSITORY_ROOT / "extensions" / "embodichain_tasks" / "configs"
 _PROGRAMS = (
+    Path("tasks/manipulation/drawer_storage/task_program/program.long_horizon.yaml"),
     *(
         Path(
             f"tasks/manipulation/gaussian_pick_place/task_program/program.{scene}.yaml"
@@ -62,6 +62,11 @@ _PROGRAMS = (
     ),
 )
 _DEPLOYMENTS = {
+    Path("tasks/manipulation/drawer_storage/task.ur5.long_horizon.yaml"): (
+        "drawer_storage_long_horizon",
+        "task_program_drawer_storage_long_horizon",
+        "ur5_dh_pgi_140_80",
+    ),
     **{
         Path(f"tasks/manipulation/gaussian_pick_place/task.{scene}.yaml"): (
             "franka_gs_pick_place",
@@ -251,6 +256,7 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/gaussian_pick_place/task_program/integration.yaml"),
         Path("tasks/manipulation/gaussian_pick_place/catalog.yaml"),
         Path("tasks/manipulation/gaussian_pick_place/README.md"),
+        Path("tasks/manipulation/cable/route_the_cable/cable.usda"),
         Path("tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"),
         Path("tasks/manipulation/tableware/pour_cup/env.fluid.yaml"),
         Path("tasks/manipulation/tableware/pour_cup/task_program/program.fluid.yaml"),
@@ -301,6 +307,17 @@ _RESOURCE_PATHS = frozenset(
         ),
         Path("components/execution_policies/real2sim_verified.yaml"),
         *_DUAL_ARM_RESOURCES,
+        *(
+            Path("tasks/manipulation/drawer_storage") / name
+            for name in (
+                "env.long_horizon.yaml",
+                "catalog.yaml",
+                "README.md",
+                "task_program/evaluation.long_horizon.yaml",
+                "task_program/integration.long_horizon.yaml",
+                "task_program/execution_policy.long_horizon.yaml",
+            )
+        ),
         *_PROGRAMS,
         *_DEPLOYMENTS,
         *(
@@ -384,7 +401,6 @@ class _StagedConfigPackage(NamedTuple):
 
     build_lib: Path
     relative_outputs: frozenset[Path]
-    package_data: dict[str, list[str]]
     include_package_data: bool
 
 
@@ -410,27 +426,20 @@ def _literal_setup_keyword(keyword_name: str) -> object:
     return ast.literal_eval(keywords[keyword_name])
 
 
-@pytest.fixture
-def staged_config_package(tmp_path: Path) -> _StagedConfigPackage:
+@pytest.fixture(scope="module")
+def staged_config_package(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> _StagedConfigPackage:
     """Stage official Task Program resources through the real build command."""
     package_data = get_package_data()
     include_package_data = _literal_setup_keyword("include_package_data")
     assert type(package_data) is dict
     assert type(include_package_data) is bool
 
-    isolated_source = tmp_path / "source" / "embodichain_tasks" / "configs"
-    isolated_source.mkdir(parents=True)
-    shutil.copyfile(_CONFIG_SOURCE / "__init__.py", isolated_source / "__init__.py")
-    for relative_path in _RESOURCE_PATHS:
-        destination = isolated_source / relative_path
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(_CONFIG_SOURCE / relative_path, destination)
-
-    build_lib = tmp_path / "build_lib"
+    build_lib = tmp_path_factory.mktemp("task-config-build")
     distribution = Distribution(
         {
-            "packages": [_CONFIG_PACKAGE],
-            "package_dir": {_CONFIG_PACKAGE: str(isolated_source)},
+            "packages": get_packages(),
             "package_data": package_data,
             "include_package_data": include_package_data,
         }
@@ -454,7 +463,6 @@ def staged_config_package(tmp_path: Path) -> _StagedConfigPackage:
     return _StagedConfigPackage(
         build_lib=build_lib,
         relative_outputs=relative_outputs,
-        package_data=package_data,
         include_package_data=include_package_data,
     )
 
@@ -464,22 +472,14 @@ def test_setup_stages_all_official_task_programs(
 ) -> None:
     """The actual setup patterns put nested Task Programs in wheel staging."""
     assert staged_config_package.include_package_data is False
-    assert get_package_dir()[_CONFIG_PACKAGE] == "extensions/embodichain_tasks/configs"
-    assert staged_config_package.package_data[_CONFIG_PACKAGE] == [
-        "tasks/manipulation/cloth_fold/task_program/trajectory.npz",
-        "**/*.json",
-        "**/*.yaml",
-        "**/*.yml",
-        "**/README.md",
-    ]
     expected_outputs = {
-        Path("embodichain_tasks") / "configs" / relative_path
+        Path("embodichain/extensions/tasks/configs") / relative_path
         for relative_path in _RESOURCE_PATHS
     }
     assert expected_outputs <= staged_config_package.relative_outputs
     assert not (
         staged_config_package.build_lib
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/assets"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_cup/assets"
     ).exists()
 
 
@@ -501,23 +501,14 @@ import sys
 
 build_lib = Path(sys.argv[1]).resolve()
 expected_deployments = json.loads(sys.argv[2])
-# An installed ``embodichain_tasks`` parent package can shadow the staged
-# namespace package. Pin its search path to the isolated build output
-# so this subprocess really exercises the staged package resources.
-import types
-
-staged_namespace = types.ModuleType("embodichain_tasks")
-staged_namespace.__path__ = [str(build_lib / "embodichain_tasks")]
-sys.modules["embodichain_tasks"] = staged_namespace
-
-import embodichain_tasks.configs as config_package
+import embodichain.extensions.tasks.configs as config_package
 from embodichain.lab.task_program import load_task_program
 from embodichain.lab.task_program.integrations._configured_composition import (
     _load_configured_task_program_deployment,
 )
 from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
 from embodichain.utils.utility import load_config
-from embodichain_tasks.configs import get_config_path
+from embodichain.extensions.tasks.configs import get_config_path
 
 module_path = Path(config_package.__file__).resolve()
 assert module_path.is_relative_to(build_lib), (module_path, build_lib)
@@ -578,13 +569,32 @@ print(json.dumps(decoded_deployments, sort_keys=True))
     }
 
 
+def test_drawer_storage_readme_links_survive_wheel_installation(
+    staged_config_package: _StagedConfigPackage,
+) -> None:
+    """Relative README links target files shipped in the installed package."""
+    readme = (
+        staged_config_package.build_lib
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/drawer_storage/README.md"
+    )
+    targets = re.findall(r"\]\(([^)\s#]+)", readme.read_text(encoding="utf-8"))
+    relative = [
+        readme.parent / target
+        for target in targets
+        if re.match(r"[a-z][a-z0-9+.-]*:", target) is None
+    ]
+
+    assert relative
+    assert all(path.is_file() for path in relative)
+
+
 def test_installed_wheel_registers_configured_tasks(tmp_path: Path) -> None:
     """Register drawer/GS deployments from installed YAML and discover their IDs."""
     source = tmp_path / "source"
     source.mkdir()
     for name in ("setup.py", "pyproject.toml", "README.md", "VERSION", "MANIFEST.in"):
         shutil.copyfile(_REPOSITORY_ROOT / name, source / name)
-    for name in ("embodichain", "extensions", "examples"):
+    for name in ("embodichain", "examples"):
         shutil.copytree(
             _REPOSITORY_ROOT / name,
             source / name,
@@ -631,6 +641,8 @@ def test_installed_wheel_registers_configured_tasks(tmp_path: Path) -> None:
             "-I",
             "-c",
             """
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 import sys
 
@@ -647,23 +659,30 @@ from embodichain.utils.config_paths import resolve_config_path
 import embodichain
 assert Path(embodichain.__file__).is_relative_to(installed)
 
-configs = installed / "embodichain_tasks/configs/tasks/manipulation/drawer_storage"
-assert not (installed / "embodichain_tasks/manipulation/drawer_storage.py").exists()
+configs = installed / "embodichain/extensions/tasks/configs/tasks/manipulation/drawer_storage"
+assert not (installed / "embodichain/extensions/tasks/manipulation/drawer_storage.py").exists()
 assert (configs / "task_program/evaluation.yaml").is_file()
-assert "embodichain_tasks" not in sys.modules
+assert "embodichain.extensions.tasks" not in sys.modules
 
-for name, open_positions in (("ur5", (0.0,)), ("franka", (0.04, 0.04))):
+for name, open_positions, contained, clearance_fields, finger_stiffness in (
+    ("ur5", (0.0,), "cube_contained", 3, 1000.0),
+    ("franka", (0.04, 0.04), "cube_contained", 3, None),
+    ("ur5.long_horizon", (0.0,), "paper_cup_contained", 6, 3000.0),
+):
     path = configs / f"task.{name}.yaml"
     raw = load_config(path)
     assert raw["id"] not in registry
-    config_to_cfg(raw, source_path=path)
+    cfg = config_to_cfg(raw, source_path=path)
+    if finger_stiffness is not None:
+        stiffness = cfg.robot.joint_drive_props.stiffness
+        assert stiffness["gripper_finger1_joint_1"] == finger_stiffness
     spec = get_env_spec(raw["id"])
     assert spec.cls is EmbodiedEnv
     registration = spec.task_program_registration
     rules = registration.evaluation_conditions
     assert rules["hand_open"].parameters["hand_open"]["positions"] == open_positions
-    assert len(rules["fingers_clear"].required_fields) == 3
-    assert "cube_contained" in registration.evaluation_final_refs
+    assert len(rules["fingers_clear"].required_fields) == clearance_fields
+    assert contained in registration.evaluation_final_refs
 
 gaussian_ids = {
     "office": "FrankaGSPickPlace-Office-v1",
@@ -678,7 +697,7 @@ gaussian_calibration = {
 shared_embodiments = set()
 for scene, expected_id in gaussian_ids.items():
     path = resolve_config_path(
-        "extensions/embodichain_tasks/configs/tasks/manipulation/"
+        "embodichain/extensions/tasks/configs/tasks/manipulation/"
         f"gaussian_pick_place/task.{scene}.yaml",
         base_dir=Path.cwd(),
     )
@@ -711,20 +730,25 @@ for scene, expected_id in gaussian_ids.items():
     assert all((camera.width, camera.height) == (960, 540) for camera in cameras.values())
     assert all(camera.enable_color and not camera.enable_depth for camera in cameras.values())
 assert len(shared_embodiments) == 1
-assert not (installed / "embodichain_tasks/manipulation/gaussian_pick_place.py").exists()
+assert not (installed / "embodichain/extensions/tasks/manipulation/gaussian_pick_place.py").exists()
 assert not (installed / "share/embodichain/examples/gym/gaussian_pick_place/configs").exists()
 
-import embodichain_tasks
+import embodichain.extensions.tasks
 from embodichain.cli.list_task import _collect_environment_entries
+from embodichain.cli.main import main
 
-assert Path(embodichain_tasks.__file__).is_relative_to(installed)
-assert "embodichain_tasks.manipulation.drawer_storage" not in sys.modules
+assert Path(embodichain.extensions.tasks.__file__).is_relative_to(installed)
+assert "embodichain.extensions.tasks.manipulation.drawer_storage" not in sys.modules
 assert {entry.env_id for entry in _collect_environment_entries()} >= {
     "TaskProgramDrawerStorage-UR5-v1",
     "TaskProgramDrawerStorage-Franka-v1",
+    "TaskProgramDrawerStorage-UR5-LongHorizon-v1",
     *gaussian_ids.values(),
 }
-
+with redirect_stdout(StringIO()) as details:
+    main(["show-task", "embodichain.extensions.tasks:pour_water"])
+assert "pour_water" in details.getvalue()
+assert "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water/" in details.getvalue()
 """,
             str(installed),
         ],

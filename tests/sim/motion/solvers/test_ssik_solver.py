@@ -39,7 +39,7 @@ from embodichain.compute.kinematics._warp.ssik_7r import (
     vec8i,
 )
 from embodichain.lab.sim.motion.solvers import SSIKSolver, SSIKSolverCfg, SolverCfg
-from embodichain_robots import AlohaMiniCfg, TianjiMarvinCfg
+from embodichain.extensions.robots import AlohaMiniCfg, TianjiMarvinCfg
 
 _DEVICE_CASES = [
     "cpu",

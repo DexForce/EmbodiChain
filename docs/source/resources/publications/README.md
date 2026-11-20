@@ -42,13 +42,13 @@ This page contains bibliographic information for academic papers and competition
 
 **Examples:**
 
-- **PointMass APG training:** [Training configuration](https://github.com/DexForce/EmbodiChain/blob/main/extensions/embodichain_tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml) and [differentiable environment](https://github.com/DexForce/EmbodiChain/blob/main/extensions/embodichain_tasks/embodichain_tasks/classic_control/point_mass.py). Run the configuration with:
+- **PointMass APG training:** [Training configuration](https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml) and [differentiable environment](https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/tasks/classic_control/point_mass.py). Run the configuration with:
 
   ```bash
-  embodichain train-rl --config extensions/embodichain_tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml
+  embodichain train-rl --config embodichain/extensions/tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml
   ```
 
-- **Franka FR3 differentiable kinematics:** [Reference environment](https://github.com/DexForce/EmbodiChain/blob/main/extensions/embodichain_tasks/embodichain_tasks/special/franka_reach_apg.py), demonstrating the Warp-tape / PyTorch-autograd bridge through forward kinematics and reward kernels.
+- **Franka FR3 differentiable kinematics:** [Reference environment](https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/tasks/special/franka_reach_apg.py), demonstrating the Warp-tape / PyTorch-autograd bridge through forward kinematics and reward kernels.
 
 ```bibtex
 @article{deng2026backpropagating,

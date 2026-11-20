@@ -163,7 +163,7 @@ headless evaluation keep their original behavior.
 ## Headless locomotion checkpoint example
 
 Use a checkpoint trained with the Go2 Default deployment's
-`embodichain_tasks/configs/tasks/locomotion/velocity/go2_flat/agents/ppo.yaml`.
+`embodichain/extensions/tasks/configs/tasks/locomotion/velocity/go2_flat/agents/ppo.yaml`.
 Set `go2_run` to that run's directory and `go2_checkpoint` to the specific saved
 checkpoint to assess. Keep the training and environment snapshots from the same
 run; a Newton checkpoint uses the snapshots produced by `agents/ppo.newton.yaml`.

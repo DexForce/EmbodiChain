@@ -39,7 +39,7 @@ from embodichain.learning.rl.train import (
     train_from_config,
 )
 from embodichain.learning.rl.utils.trainer import Trainer
-from embodichain_tasks.classic_control.point_mass import PointMassEnv
+from embodichain.extensions.tasks.classic_control.point_mass import PointMassEnv
 
 
 def _export_prepared_policy_resource(env, config, config_dir):
@@ -97,6 +97,94 @@ def _assert_state_equal(first, second) -> None:
             _assert_state_equal(a, b)
     else:
         assert first == second
+
+
+def _attach_curriculum(trainer: Trainer, level: int) -> None:
+    """Expose rank-local task state on the existing lightweight environment."""
+    env = trainer.env
+    env.levels = torch.full((env.num_envs,), level, dtype=torch.long)
+
+    def validate(state):
+        if state["levels"].shape != env.levels.shape:
+            raise ValueError("Curriculum instance count differs")
+
+    def load(state):
+        validate(state)
+        env.levels.copy_(state["levels"])
+
+    env.get_training_state = lambda: {"levels": env.levels.clone()}
+    env.validate_training_state = validate
+    env.load_training_state = load
+
+
+def test_v2_restores_environment_state_before_reset(tmp_path, monkeypatch):
+    source = _trainer(tmp_path / "source")
+    _attach_curriculum(source, 3)
+    source.train(16)
+    path = source.save_checkpoint()
+    payload = torch.load(path, weights_only=True)
+    assert payload["schema_version"] == 2
+    assert len(payload["environment_state_by_rank"]) == 1
+    restored = _trainer(tmp_path / "restored")
+    _attach_curriculum(restored, 0)
+    reset = restored.collector._reset_env
+
+    def check_reset():
+        torch.testing.assert_close(restored.env.levels, source.env.levels)
+        return reset()
+
+    monkeypatch.setattr(restored.collector, "_reset_env", check_reset)
+    restored.load_checkpoint(path)
+    _assert_state_equal(source.policy.state_dict(), restored.policy.state_dict())
+    _assert_state_equal(source.algorithm.state_dict(), restored.algorithm.state_dict())
+    restored.train(32)
+    assert restored.num_updates == 2
+    again = torch.load(restored.save_checkpoint(), weights_only=True)
+    assert again["schema_version"] == 2
+    _assert_state_equal(
+        payload["environment_state_by_rank"], again["environment_state_by_rank"]
+    )
+
+
+@pytest.mark.parametrize("defect", ["rank_count", "instance_count", "loader"])
+def test_environment_state_rejected_before_learning_state_changes(tmp_path, defect):
+    source = _trainer(tmp_path / "source")
+    _attach_curriculum(source, 3)
+    source.train(16)
+    payload = torch.load(source.save_checkpoint(), weights_only=True)
+    restored = _trainer(tmp_path / "restored")
+    _attach_curriculum(restored, 0)
+    if defect == "rank_count":
+        payload["environment_state_by_rank"] = []
+    elif defect == "instance_count":
+        payload["environment_state_by_rank"][0]["levels"] = torch.zeros(3)
+    else:
+        del restored.env.load_training_state
+    path = tmp_path / "invalid.pt"
+    torch.save(payload, path)
+    policy = deepcopy(restored.policy.state_dict())
+    optimizer = deepcopy(restored.algorithm.state_dict())
+    with pytest.raises(ValueError, match="[Ee]nvironment|[Cc]urriculum"):
+        restored.load_checkpoint(path)
+    _assert_state_equal(policy, restored.policy.state_dict())
+    _assert_state_equal(optimizer, restored.algorithm.state_dict())
+    assert restored.num_updates == 0
+    assert not restored.env.levels.any()
+
+
+def test_older_v2_reports_missing_environment_state(tmp_path):
+    source = _trainer(tmp_path / "source")
+    source.train(16)
+    payload = torch.load(source.save_checkpoint(), weights_only=True)
+    payload.pop("environment_state_by_rank")
+    path = tmp_path / "older-v2.pt"
+    torch.save(payload, path)
+    restored = _trainer(tmp_path / "restored")
+    _attach_curriculum(restored, 0)
+    with pytest.warns(UserWarning, match="environment training state"):
+        restored.load_checkpoint(path)
+    assert restored.num_updates == 1
+    _assert_state_equal(source.policy.state_dict(), restored.policy.state_dict())
 
 
 @pytest.mark.parametrize("algorithm", ["ppo", "grpo"])
@@ -227,6 +315,25 @@ def test_pending_scheduler_restart_survives_checkpoint_round_trip(
     _assert_state_equal(direct.policy.state_dict(), again.policy.state_dict())
 
 
+def test_schema_v2_ppo_without_optional_auxiliary_coefficient_restores(
+    tmp_path,
+) -> None:
+    trainer = _trainer(tmp_path / "first")
+    trainer.train(16)
+    payload = torch.load(trainer.save_checkpoint(), weights_only=True)
+    assert payload["schema_version"] == 2
+    payload["metadata"]["algorithm_config"].pop("auxiliary_coef")
+    path = tmp_path / "without-coefficient.pt"
+    torch.save(payload, path)
+    restored = _trainer(tmp_path / "restored")
+    restored.load_checkpoint(path)
+    _assert_state_equal(trainer.policy.state_dict(), restored.policy.state_dict())
+    _assert_state_equal(trainer.algorithm.state_dict(), restored.algorithm.state_dict())
+    assert restored.global_step == trainer.global_step == 16
+    restored.train(32)
+    assert restored.global_step == 32
+
+
 def test_checkpoint_without_pending_restart_field_restores(tmp_path):
     trainer = _trainer(
         tmp_path / "first", scheduler=dict(name="linear", kwargs=dict(total_iters=4))
@@ -249,6 +356,10 @@ def test_checkpoint_without_pending_restart_field_restores(tmp_path):
         (lambda c: c.update(schema_version=999), "schema version"),
         (lambda c: c.pop("rng_by_rank"), "required fields"),
         (lambda c: c["metadata"].update(environment="different"), "environment"),
+        (
+            lambda c: c["metadata"]["algorithm_config"].update(auxiliary_coef=0.5),
+            "auxiliary_coef",
+        ),
         (lambda c: c.update(world_size=2), "world_size"),
         (lambda c: c.update(restart_schedule="false"), "restart_schedule"),
         (
@@ -273,29 +384,19 @@ def test_invalid_checkpoint_fails_before_policy_changes(tmp_path, mutation, matc
     _assert_state_equal(initial, restored.policy.state_dict())
 
 
-def test_legacy_ppo_loads_available_state_and_grpo_requires_reference(tmp_path):
+@pytest.mark.parametrize("version", [None, 1])
+def test_old_checkpoint_schemas_are_rejected_before_mutation(tmp_path, version):
     trainer = _trainer(tmp_path / "ppo")
     trainer.train(16)
     checkpoint = torch.load(trainer.save_checkpoint(), weights_only=True)
-    for field in (
-        "schema_version",
-        "metadata",
-        "rng_by_rank",
-        "normalizer_by_rank",
-        "world_size",
-        "best_checkpoint",
-    ):
-        checkpoint.pop(field)
-    path = tmp_path / "legacy.pt"
+    checkpoint["schema_version"] = version
+    path = tmp_path / "unsupported.pt"
     torch.save(checkpoint, path)
     restored = _trainer(tmp_path / "restored")
-    with pytest.warns(UserWarning, match="Legacy checkpoint"):
+    before = deepcopy(restored.policy.state_dict())
+    with pytest.raises(ValueError, match="Unsupported checkpoint schema"):
         restored.load_checkpoint(path)
-    restored.train(32)
-    assert restored.num_updates == 2
-    grpo = _trainer(tmp_path / "grpo", "grpo")
-    with pytest.raises(ValueError, match="ref_policy"):
-        grpo.load_checkpoint(path)
+    _assert_state_equal(before, restored.policy.state_dict())
 
 
 def _config(name: str) -> dict:
@@ -696,30 +797,6 @@ def test_cli_rejects_invalid_resume_arguments(args):
         parse_args(["--config", "train.yaml", *args])
 
 
-def test_legacy_manifest_rejects_changed_algorithm_config(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    config = _config("ppo")
-    config_path = tmp_path / "train.json"
-    config_path.write_text(json.dumps(config))
-    first = train_from_config(str(config_path))
-    path = Path(first["latest_checkpoint_path"])
-    payload = torch.load(path, weights_only=True)
-    for field in (
-        "schema_version",
-        "metadata",
-        "rng_by_rank",
-        "normalizer_by_rank",
-        "world_size",
-        "best_checkpoint",
-    ):
-        payload.pop(field)
-    torch.save(payload, path)
-    config["algorithm"]["cfg"]["gamma"] = 0.5
-    config_path.write_text(json.dumps(config))
-    with pytest.raises(ValueError, match="legacy checkpoint configuration"):
-        train_from_config(str(config_path), resume=path)
-
-
 def test_scheduler_validation_does_not_mutate_policy(tmp_path):
     trainer = _trainer(
         tmp_path, scheduler=dict(name="linear", kwargs=dict(total_iters=4))
@@ -1017,7 +1094,7 @@ def test_saved_policy_task_program_reloads_from_unrelated_directory(
 
     source = (
         Path(__file__).resolve().parents[2]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.policy.cobotmagic.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.policy.cobotmagic.yaml"
     )
     raw = yaml.safe_load(source.read_text())
     if export_resources:

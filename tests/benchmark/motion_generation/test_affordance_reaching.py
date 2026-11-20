@@ -27,10 +27,13 @@ import pytest
 import torch
 
 from embodichain.lab.sim.motion.planners.utils import PlanResult
-from embodichain_benchmarks.motion_generation.artifacts import _case_to_dict
-from embodichain_benchmarks.motion_generation.config import SuiteCfg, TrackCfg
-from embodichain_benchmarks.motion_generation.models import BenchmarkCase
-from embodichain_benchmarks.motion_generation.scenarios.affordance_reaching import (
+from embodichain.extensions.benchmarks.motion_generation.artifacts import _case_to_dict
+from embodichain.extensions.benchmarks.motion_generation.config import (
+    SuiteCfg,
+    TrackCfg,
+)
+from embodichain.extensions.benchmarks.motion_generation.models import BenchmarkCase
+from embodichain.extensions.benchmarks.motion_generation.scenarios.affordance_reaching import (
     AffordanceReachingScenario,
     _project_case,
     _task_targets,

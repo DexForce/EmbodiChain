@@ -2309,7 +2309,7 @@ def _build_curobo_scene(sim_device: str = "cuda") -> tuple[object, object, objec
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg
     from embodichain.lab.sim.objects import RigidObjectCfg
-    from embodichain_robots import FrankaPandaCfg
+    from embodichain.extensions.robots import FrankaPandaCfg
     from embodichain.lab.sim.shapes import CubeCfg
 
     sim = SimulationManager(

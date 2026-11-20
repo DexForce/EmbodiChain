@@ -1,0 +1,87 @@
+program_id: route_the_cable
+instruction: Route the anchored cable around two spools and seat its free end in the port.
+targets: {}
+program:
+- segment: right_pick_0
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_pickup
+      arguments:
+        target: right_pick_0
+      resources:
+        primary: right_manipulator
+- segment: right_place_0
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_place
+      arguments:
+        target: right_place_0
+      resources:
+        primary: right_manipulator
+- segment: right_pick_1
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_pickup
+      arguments:
+        target: right_pick_1
+      resources:
+        primary: right_manipulator
+- segment: right_place_1
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_place
+      arguments:
+        target: right_place_1
+      resources:
+        primary: right_manipulator
+- segment: right_pick_2
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_pickup
+      arguments:
+        target: right_pick_2
+      resources:
+        primary: right_manipulator
+- segment: right_place_2
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_place
+      arguments:
+        target: right_place_2
+      resources:
+        primary: right_manipulator
+- segment: left_pick
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_pickup
+      arguments:
+        target: left_pick
+      resources:
+        primary: left_manipulator
+- segment: left_place
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_place
+      arguments:
+        target: left_place
+      resources:
+        primary: left_manipulator
+  validators:
+  - kind: condition
+    ref: route_success

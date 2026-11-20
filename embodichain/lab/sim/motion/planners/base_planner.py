@@ -184,8 +184,10 @@ def validate_plan_options(_func=None, *, options_cls: type = PlanOptions):
             target_states = kwargs.get("target_states", args[0] if args else None)
             if target_states is not None and hasattr(self, "robot"):
                 robot_num = getattr(self.robot, "num_instances", None)
+                selected = getattr(self, "_planning_env_ids", None)
+                expected = len(selected) if selected is not None else robot_num
                 _check_batch_consistency(
-                    target_states, expected_b=robot_num, robot_num_instances=robot_num
+                    target_states, expected_b=expected, robot_num_instances=expected
                 )
             return func(self, *args, **kwargs)
 

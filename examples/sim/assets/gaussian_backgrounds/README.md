@@ -92,6 +92,6 @@ converter is deliberately not used because it also generates an enclosing box.
 
 The publication includes actual native render previews in `validation/`.
 The official physical consumer is
-[the Franka dual-camera Pick/Place task](../../../../extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/README.md).
+[the Franka dual-camera Pick/Place task](../../../../embodichain/extensions/tasks/configs/tasks/manipulation/gaussian_pick_place/README.md).
 The [recording example](../../../gym/gaussian_pick_place/README.md) consumes those
 definitions and adds complete RGB capture, video export and offline acceptance.

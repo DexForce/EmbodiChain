@@ -14,7 +14,7 @@ and trajectory execution in the simulation loop.
 
 Model-owned hand defaults and embodiment TCP binding are described in
 :doc:`../../resources/robot/parallel_jaw_grippers`. Concrete hand values come
-from ``embodichain_robots``; GraspKit consumes explicit physical descriptions
+from ``embodichain.extensions.robots``; GraspKit consumes explicit physical descriptions
 and keeps sampling, collision and annotation policy separate.
 
 Processing Pipeline

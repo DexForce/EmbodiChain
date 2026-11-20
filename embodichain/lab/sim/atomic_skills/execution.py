@@ -73,9 +73,11 @@ class ExecutionEventKind(str, Enum):
 
     SKILL_PLANNED = "skill_planned"
     INVOCATION_REVISED = "invocation_revised"
+    PLAN_CONTINUED = "plan_continued"
     REPLANNED = "replanned"
     TRACKING_DIVERGED = "tracking_diverged"
     TRACKING_FEEDBACK_FAILED = "tracking_feedback_failed"
+    BOUNDARY_DIAGNOSTIC = "boundary_diagnostic"
     TERMINAL_ACCEPTANCE_PENDING = "terminal_acceptance_pending"
     TERMINAL_ACCEPTANCE_FAILED = "terminal_acceptance_failed"
     DYNAMIC_GOAL_CHANGED = "dynamic_goal_changed"
@@ -180,6 +182,7 @@ class ExecutionPlanAttempt:
         if self.event_kind not in {
             ExecutionEventKind.SKILL_PLANNED,
             ExecutionEventKind.INVOCATION_REVISED,
+            ExecutionEventKind.PLAN_CONTINUED,
             ExecutionEventKind.REPLANNED,
         }:
             raise ValueError("event_kind must describe an installed action plan.")
@@ -422,6 +425,10 @@ class ExecutionSession:
         )
         self._terminal_started_at: float | None = None
         self._terminal_pending_reported = False
+        self._boundary_samples = 0
+        self._boundary_stable = None
+        self._boundary_observed_at = None
+        self._boundary_position = None
         self._eligible = (
             torch.ones_like(self._last_command_mask)
             if eligible_mask is None
@@ -678,6 +685,10 @@ class ExecutionSession:
             raise TypeError("invocation must be an SkillInvocation.")
         if self._status is not ExecutionStatus.RUNNING:
             raise RuntimeError("Only a running execution session can be revised.")
+        if self._plan is not None and self._plan.continuation is not None:
+            raise ValueError(
+                "Observed continuation does not support invocation revisions."
+            )
         self._require_accepted_plan_installation()
         if (
             self._pending_effect is not None
@@ -705,6 +716,10 @@ class ExecutionSession:
             raise TypeError("replacement must be a ResolvedSkillRequest.")
         if self._status is not ExecutionStatus.RUNNING:
             raise RuntimeError("Only a running execution session can be revised.")
+        if self._plan is not None and self._plan.continuation is not None:
+            raise ValueError(
+                "Observed continuation does not support invocation revisions."
+            )
         self._require_accepted_plan_installation()
         if (
             self._pending_effect is not None
@@ -1212,6 +1227,115 @@ class ExecutionSession:
                 f"Unsupported terminal acceptance {type(terminal).__name__}."
             )
 
+        # A normal task handoff may retain a tracking residual even though its
+        # nominal endpoint velocity is zero. Keep the exact validated terminal
+        # command (including grasp targets) until the selected motion joints settle.
+        boundary = plan.tracking_policy
+        ids = (
+            [
+                i
+                for endpoint in self._requests[self._invocation_index].binding.endpoints
+                if endpoint.endpoint_id == "motion"
+                for i in endpoint.joint_ids
+            ]
+            if boundary.boundary_stop
+            else []
+        )
+        ids = list(dict.fromkeys(ids))
+        # Non-motion commands retain their existing terminal/effect semantics.
+        if ids and plan.joint_trajectory is not None:
+            import json
+
+            target = plan.joint_trajectory.positions[:, -1, ids]
+            measured = self._context.robot.qpos[:, ids]
+            velocity = self._context.robot.qvel[:, ids]
+            error = (target - measured).abs().amax(dim=1)
+            native_speed = velocity.abs().amax(dim=1)
+            speed = native_speed
+            timestamp = self._context.robot.timestamp
+            if (
+                self._boundary_position is not None
+                and timestamp > self._boundary_observed_at
+            ):
+                speed = (
+                    (
+                        (measured - self._boundary_position)
+                        / (timestamp - self._boundary_observed_at)
+                    )
+                    .abs()
+                    .amax(dim=1)
+                )
+            elif self._boundary_position is None:
+                speed = torch.full_like(native_speed, float("inf"))
+            finite = torch.isfinite(error) & torch.isfinite(native_speed)
+            ready = (
+                finite
+                & (error <= boundary.boundary_position_tolerance)
+                & (speed <= boundary.boundary_velocity_tolerance)
+            )
+            if self._boundary_stable is None:
+                self._boundary_stable = torch.zeros_like(error, dtype=torch.long)
+            if self._boundary_observed_at != self._context.robot.timestamp:
+                self._boundary_stable = torch.where(
+                    ready & execution_mask, self._boundary_stable + 1, 0
+                )
+                self._boundary_observed_at = self._context.robot.timestamp
+                self._boundary_position = measured.clone()
+            pending = execution_mask & (self._boundary_stable < 2)
+            timed_out = pending & (elapsed_terminal >= boundary.boundary_timeout)
+            invalid = execution_mask & ~finite
+            if (
+                self._boundary_samples == 0
+                or not pending.any()
+                or timed_out.any()
+                or invalid.any()
+            ):
+                events.append(
+                    self._event(
+                        ExecutionEventKind.BOUNDARY_DIAGNOSTIC,
+                        execution_mask,
+                        json.dumps(
+                            {
+                                "joint_ids": ids,
+                                "elapsed_s": elapsed_terminal,
+                                "samples": self._boundary_samples,
+                                "position_error": [
+                                    v if math.isfinite(v) else None
+                                    for v in error.detach().cpu().tolist()
+                                ],
+                                "measured_speed": [
+                                    v if math.isfinite(v) else None
+                                    for v in speed.detach().cpu().tolist()
+                                ],
+                                "native_speed": [
+                                    v if math.isfinite(v) else None
+                                    for v in native_speed.detach().cpu().tolist()
+                                ],
+                                "velocity_source": "control_boundary_position_difference",
+                                "position_tolerance": boundary.boundary_position_tolerance,
+                                "velocity_tolerance": boundary.boundary_velocity_tolerance,
+                                "ready": ready.detach().cpu().tolist(),
+                                "timeout": timed_out.detach().cpu().tolist(),
+                            },
+                            allow_nan=False,
+                        ),
+                    )
+                )
+            self._boundary_samples += 1
+            if (timed_out | invalid).any():
+                events.extend(
+                    self._fail_tracking_feedback(
+                        timed_out | invalid,
+                        "Boundary takeover did not settle within its bounded timeout.",
+                    )
+                )
+                if self._status is not ExecutionStatus.RUNNING:
+                    return self._tick_result(command=None, events=events)
+                execution_mask = self._pending & plan.plan_success
+                pending &= execution_mask
+                terminal_pending &= execution_mask
+            terminal_pending |= pending
+
         if terminal_pending.any():
             if not self._terminal_pending_reported:
                 events.append(
@@ -1228,8 +1352,11 @@ class ExecutionSession:
                     "Terminal settling requires an executable terminal command "
                     "frame."
                 )
+            # Readiness is a batch barrier, not permission to drop an eligible
+            # row's arm/grasp references. Failed rows stay masked out.
+            hold_mask = execution_mask if boundary.boundary_stop else terminal_pending
             terminal_command = plan.commands.frames[-1].with_active_mask(
-                plan.commands.frames[-1].active_mask & terminal_pending
+                plan.commands.frames[-1].active_mask & hold_mask
             )
             self._last_commanded_plan_sample = (
                 plan.invocation_id,
@@ -1303,7 +1430,7 @@ class ExecutionSession:
         request = self._requests[self._invocation_index]
         plan = self._engine._plan_request(
             request,
-            context,
+            replace(context, planning_mask=self._pending),
             plan_transform=self._plan_transform,
             nominal_source=self._nominal_source,
         )
@@ -1318,6 +1445,12 @@ class ExecutionSession:
         destination_continuity_validated: bool = False,
     ) -> None:
         """Install a plan, checking target continuity unless already checked."""
+        if plan.continuation is not None and (
+            self._plan_transform is not None or self._nominal_source is not None
+        ):
+            raise ValueError(
+                "Observed continuation does not support external nominal motion or plan transforms."
+            )
         replacement_targets = {
             (target.transport_id, target.target_id): target
             for target in plan.commands.targets
@@ -1337,6 +1470,7 @@ class ExecutionSession:
             not in (
                 ExecutionEventKind.REPLANNED,
                 ExecutionEventKind.INVOCATION_REVISED,
+                ExecutionEventKind.PLAN_CONTINUED,
             )
             or replacement_destinations
         ):
@@ -1346,6 +1480,7 @@ class ExecutionSession:
             not in (
                 ExecutionEventKind.REPLANNED,
                 ExecutionEventKind.INVOCATION_REVISED,
+                ExecutionEventKind.PLAN_CONTINUED,
             )
             or replacement_tracking_routes
         ):
@@ -1358,6 +1493,10 @@ class ExecutionSession:
         self._last_tracking_frame = None
         self._last_command_mask.zero_()
         self._tracking_violation_counts.zero_()
+        self._boundary_samples = 0
+        self._boundary_stable = None
+        self._boundary_observed_at = None
+        self._boundary_position = None
         self._terminal_acceptance_counts.zero_()
         self._terminal_started_at = None
         self._terminal_pending_reported = False
@@ -1396,6 +1535,13 @@ class ExecutionSession:
                 # cancel/hold and the once-only abort notification to the host.
                 self._plan_installation_failure = f"{type(error).__name__}: {error}"
                 raise
+        try:
+            self._engine._skills[plan.skill_id].on_plan_installed(
+                self._requests[self._invocation_index], context, plan
+            )
+        except Exception as error:
+            self._plan_installation_failure = f"{type(error).__name__}: {error}"
+            raise
         self._plan_attempts.append(attempt)
         self._queued_events.append(
             self._event(event_kind, planned_mask, "Planned from the latest context.")
@@ -1458,6 +1604,7 @@ class ExecutionSession:
         if event_kind not in (
             ExecutionEventKind.REPLANNED,
             ExecutionEventKind.INVOCATION_REVISED,
+            ExecutionEventKind.PLAN_CONTINUED,
         ):
             return
         replacement_targets = {
@@ -1519,6 +1666,7 @@ class ExecutionSession:
         if event_kind not in (
             ExecutionEventKind.REPLANNED,
             ExecutionEventKind.INVOCATION_REVISED,
+            ExecutionEventKind.PLAN_CONTINUED,
         ):
             return
         if self._plan is None:
@@ -1774,6 +1922,36 @@ class ExecutionSession:
                 events.extend(barrier_events)
                 return None, hold_targets, events
             return None, active_targets, events
+
+        if self._plan.continuation is not None:
+            decision = self._engine.continue_request(
+                self._requests[self._invocation_index],
+                self._context,
+                self._plan,
+                execution_mask & self._pending & self._eligible,
+            )
+            rejected = self._pending & ~decision.accepted
+            if rejected.any():
+                self.deactivate_rows(
+                    rejected,
+                    reason="; ".join(decision.messages)
+                    or "Contact phase condition failed.",
+                )
+                events.extend(self._drain_events())
+                if self._status is not ExecutionStatus.RUNNING:
+                    return None, active_targets, events
+            if decision.plan is not None and self._eligible.any():
+                started = self._action_started_at
+                self._install_plan(
+                    decision.plan, self._context, ExecutionEventKind.PLAN_CONTINUED
+                )
+                self._action_started_at = started
+                events.extend(self._drain_events())
+                if self._status is not ExecutionStatus.RUNNING:
+                    return None, active_targets, events
+                return None, (), events
+            self._plan = replace(self._plan, continuation=None)
+            execution_mask &= decision.accepted
 
         failed_effect = torch.zeros_like(execution_mask)
         unresolved = torch.zeros_like(execution_mask)

@@ -26,9 +26,8 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-for _source in (_REPO_ROOT, _REPO_ROOT / "extensions"):
-    if str(_source) not in sys.path:
-        sys.path.insert(0, str(_source))
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 import torch
 from embodichain.utils import logger, set_seed
@@ -217,7 +216,7 @@ def main() -> None:
     )
     measured.finish(sim, target)
     if wait:
-        input("Press Enter to finish...")
+        sim.wait_for_input("Press Enter to finish...")
     serve_tutorial_scene(sim, args)
 
 

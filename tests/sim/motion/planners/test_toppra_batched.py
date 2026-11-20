@@ -156,7 +156,7 @@ class TestToppraPlanBatched:
             ToppraPlannerCfg,
         )
         from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-        from embodichain_robots import CobotMagicCfg
+        from embodichain.extensions.robots import CobotMagicCfg
 
         sim = SimulationManager(
             SimulationManagerCfg(headless=True, device="cpu", num_envs=2)
@@ -764,7 +764,7 @@ def test_stopped_waypoints_keep_rest_goals_on_exact_control_grid(batch: int) -> 
         ToppraPlanOptions,
     )
     from embodichain.lab.sim.motion.planners.utils import PlanState
-    from embodichain_benchmarks.motion_generation.metrics.trajectory import (
+    from embodichain.extensions.benchmarks.motion_generation.metrics.trajectory import (
         _trajectory_derivatives,
     )
 

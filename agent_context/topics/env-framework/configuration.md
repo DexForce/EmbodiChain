@@ -28,11 +28,9 @@ class MyTaskEnv(EmbodiedEnv):
    classes/types). A `RuntimeError` is raised otherwise.
 6. Use `override=True` to re-register an existing uid (useful in scripts/tests).
 
-In a source checkout, `embodichain_tasks/__init__.py` resolves the sibling
-`configs` package before eager registration. This keeps task code and resources
-in the same selected worktree even when an editable install maps configs to
-another checkout. Its temporary search path is removed before walking task
-modules; wheel installations retain their normal nested resource layout.
+The official task package is `embodichain.extensions.tasks`. Task modules and the
+`configs` package share the same directory in source checkouts and installed
+wheels. The `embodichain.tasks` entry point runs automatic task registration.
 
 ### Gym ID convention
 
@@ -132,9 +130,8 @@ an embodiment's simulation robot and sensor suite while keeping its events,
 observations, objects, and Python demo logic task-local. Ordinary component
 paths resolve relative to the runnable config that declares them
 (conventionally `task.<embodiment>.yaml`). References starting with
-`extensions/embodichain_tasks/configs/` or the legacy
-`embodichain_tasks/configs/` resolve through the imported SDK's configs, including
-from an external deployment or installed wheel; same-named CWD files do not
+`embodichain/extensions/tasks/configs/` resolve through the imported SDK's
+configs, including from an external deployment or installed wheel. Same-named CWD files do not
 override these selections. Both component resolvers reuse
 `resolve_config_path(..., base_dir=owner_directory)`. Calling that public helper
 without `base_dir` retains its ordinary filesystem/CWD behavior.
@@ -143,8 +140,13 @@ inline counterparts are mutually exclusive; without a selector, the original
 inline `robot`, `sensor`, and scene fields continue to parse unchanged.
 
 An embodiment selector permits robot installation `overrides` (`uid`,
-`init_pos`, `init_rot`, `init_qpos`) and a separate `camera_overrides` mapping
-keyed by camera UID. The latter selects ordinary `Camera` entries explicitly
+`init_pos`, `init_rot`, `init_qpos`), bounded robot calibration in the same
+mapping, and a separate `camera_overrides` mapping keyed by camera UID.
+Calibration may replace finite, nonnegative `joint_drive_props.stiffness` or
+`damping` values for entries the component already names, and a declared
+hand's `grippers.<instance>.commands.open` or `grasp` with positions for every
+native hand joint within the hand limits; new entries, other drive fields and
+structural hand changes are rejected. The latter selects ordinary `Camera` entries explicitly
 declared in the component's independent `sensor` or mounted
 `simulation.sensors` list. It changes only `intrinsics: [fx, fy, cx, cy]` and
 `extrinsics`; it cannot add sensors, change type, parent, resolution or outputs,
@@ -238,7 +240,7 @@ The dual-UR5 and Marvin embodiments also own the shared `cam_high`
 view; Marvin retains its robot-owned wrist cameras. Their `left` / `right`
 resources expose primary/secondary manipulator aliases as composite resources
 with the same physical leaves, so both program naming conventions retain
-physical conflict detection. See `extensions/embodichain_tasks/README.md` for
+physical conflict detection. See `embodichain/extensions/tasks/README.md` for
 the supported task/deployment matrix and qualification boundaries.
 
 Gym copies the selected robot configuration
@@ -378,7 +380,7 @@ See [execution](execution.md) for the separate result authority and reset contra
 Use the `/add-task-env` skill. It first selects one of two registration paths:
 
 1. Import-backed handwritten or RL tasks add a task-named module at
-   `extensions/embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`, keep
+   `embodichain/extensions/tasks/<category-path>/<task>.py`, keep
    `@register_env("<GymId>")` and `__all__` there, and add a runnable config.
 2. Supported configuration-defined manipulation RL deployments omit the Python
    module and declare `rl_task`; see the configuration-owned RL contract above.

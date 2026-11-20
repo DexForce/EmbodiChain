@@ -29,6 +29,7 @@ import time
 import threading
 import zlib
 from contextlib import contextmanager
+import math
 import dexsim
 import torch
 import numpy as np
@@ -103,7 +104,11 @@ from embodichain.lab.sim.sensors import (
     SensorContext,
 )
 from embodichain.lab.sim.sensors import _builtin_sensor_factories
-from embodichain.lab.sim.sensors.attachment import resolve_parent_nodes
+from embodichain.lab.sim.sensors.attachment import (
+    _qualify_robot_mount,
+    _resolve_link,
+    resolve_parent_nodes,
+)
 from embodichain.lab.sim.sensors._camera_group_pool import _CameraGroupPool
 from embodichain.lab.sim.sensors.registry import _resolve_sensor_factory
 from embodichain.lab.sim.cfg import (
@@ -174,6 +179,7 @@ from embodichain.utils.math import (
 if TYPE_CHECKING:
     from dexsim.spawn import GeometryDesc, NewtonCollisionDesc
     from dexsim.engine import PhysicsScene
+    from embodichain.lab.visualization._web_viewer import _WebViewer
     from dexsim.scene import Scene
     from dexsim.interaction import EntityGizmoConfig, EntityGizmoManipulator
     from embodichain.lab.visualization import (
@@ -278,6 +284,7 @@ class SimulationManagerCfg:
         scene_node_capacity: int | None = None,
         enable_ground_plane: bool = True,
         ground_plane_attrs: RigidBodyPhysicsCfg | None = None,
+        web: bool = False,
     ) -> None:
         if not isinstance(enable_ground_plane, bool):
             raise TypeError("enable_ground_plane must be boolean")
@@ -289,6 +296,7 @@ class SimulationManagerCfg:
         self.width = width
         self.height = height
         self.headless = headless
+        self.web = web
         self.render_cfg = RenderCfg() if render_cfg is None else render_cfg
         self.gpu_id = gpu_id
         self.thread_mode = thread_mode
@@ -344,7 +352,7 @@ class SimulationManagerCfg:
     """The width of the simulation window."""
 
     startup_summary: Literal["compact", "full", "off"] = "compact"
-    """Startup table detail. ``off`` disables both simulation and Gym summaries."""
+    """Startup detail. ``off`` disables terminal and Web initialization tables."""
 
     dexsim_startup_info: bool = False
     """Show DexSim's native startup information in addition to our summary.
@@ -369,10 +377,13 @@ class SimulationManagerCfg:
     headless: bool = False
     """Whether to run without an automatically opened native window.
 
-    This is forced to ``True`` when the Viser backend is enabled. Viser and
-    the native DexSim window are mutually exclusive; browser Gizmos do not
-    require a native window.
+    Browser backends force this to ``True`` and exclude the native window.
+    ``dexsim-web`` uses a separate native observation camera; Viser exports
+    scene snapshots to its own browser renderer.
     """
+
+    web: bool = False
+    """Present the native scene in a browser instead of a local window."""
 
     enable_entity_gizmo: bool = True
     """Enable native object interaction when the first native window opens.
@@ -472,8 +483,15 @@ class SimulationManagerCfg:
             self.robot_ik_gizmo, GizmoCfg
         ):
             raise TypeError("robot_ik_gizmo must be a GizmoCfg, mapping, or None.")
-        if self.visualization.backend == "viser":
+        if self.web:
+            if self.visualization.backend == "viser":
+                raise ValueError("web and Viser are mutually exclusive.")
+            self.visualization.backend = "dexsim-web"
+        self.web = self.visualization.backend == "dexsim-web"
+        if self.visualization.backend != "none":
             self.headless = True
+        if self.web and self.render_cfg.renderer == "no-render":
+            raise ValueError("web requires a native renderer.")
 
     @property
     def physics_dt(self) -> float:
@@ -669,6 +687,9 @@ class SimulationManager:
             tuple[ObjectManipulator, Path]
         ] = queue.SimpleQueue()
         self._visualization_runtime = None
+        self._web_viewer = None
+        self._web_viewer_stopped = False
+        self._web_camera_group = None
         self._arenas: list[dexsim.environment.Arena] = []
         self._gizmos: dict[str, object] = {}
         self._markers: dict[str, _AxisMarkerGroup] = {}
@@ -704,6 +725,7 @@ class SimulationManager:
         ]:
             os.makedirs(path, exist_ok=True)
 
+        sim_config.__post_init__()
         self.sim_config = sim_config
         self.device = torch.device("cpu")
 
@@ -1080,6 +1102,7 @@ class SimulationManager:
         uid_list = (
             ["default_plane"]
             if getattr(self.sim_config, "enable_ground_plane", True)
+            and not getattr(self, "_ground_plane_removed", False)
             else []
         )
         uid_list.extend(list(self._lights.keys()))
@@ -1097,7 +1120,7 @@ class SimulationManager:
 
     @property
     def visualization_runtime(self) -> VisualizationRuntime | None:
-        """Return the active visualization runtime, if one has been started."""
+        """Return the active Viser scene runtime, if one has been started."""
         return self._visualization_runtime
 
     @property
@@ -1105,9 +1128,19 @@ class SimulationManager:
         """Return current visualization service and client health."""
         from embodichain.lab.visualization import RuntimeHealth
 
+        if getattr(self, "_web_viewer", None) is not None:
+            viewer = self._web_viewer
+            return RuntimeHealth(
+                status="failed" if viewer.error else "ready",
+                running=not viewer.closed,
+                endpoint=viewer.endpoint,
+                client_count=0,  # Native peer count is not exposed by WebApplication.
+                published_scene_revision=self._visualization_topology_revision,
+                worker_error=viewer.error,
+            )
         if self._visualization_runtime is not None:
             return self._visualization_runtime.health
-        configured = self.sim_config.visualization.backend == "viser"
+        configured = self.sim_config.visualization.backend != "none"
         return RuntimeHealth(
             status="stopped" if configured else "disabled",
             running=False,
@@ -1152,8 +1185,27 @@ class SimulationManager:
         return self._visualization_topology_revision
 
     def start_visualization(self) -> VisualizationRuntime | None:
-        """Start the configured live visualizer and publish the current scene."""
+        """Start browser presentation without finalizing an empty scene.
+
+        Returns:
+            Viser snapshot runtime, or None for native WebRTC/disabled mode.
+            WebRTC exposes status through :attr:`visualization_health` and
+            pumps requests through :meth:`capture_visualization` on the World
+            creator thread. Its listener remains owned by the World.
+        """
         if self.sim_config.visualization.backend == "none":
+            return None
+        if self.sim_config.visualization.backend == "dexsim-web":
+            self._web_viewer_stopped = False
+            if getattr(self, "_web_viewer", None) is None:
+                from embodichain.lab.visualization._web_viewer import _WebViewer
+
+                self._web_viewer = _WebViewer(self)
+                self._visualization_error_reported = False
+                logger.log_info(
+                    f"WebRTC viewer ready at {self._web_viewer.endpoint} "
+                    "(native listener binds all IPv4 interfaces; trusted networks only)."
+                )
             return None
         visualizable_assets = (
             getattr(self, "_visual_objects", {}),
@@ -1219,6 +1271,9 @@ class SimulationManager:
 
     def refresh_visualization(self) -> SceneManifest | None:
         """Publish current scene topology when Viser is active."""
+        if self.sim_config.visualization.backend == "dexsim-web":
+            self.capture_visualization(force=True)
+            return None
         runtime = self.start_visualization()
         if runtime is None:
             return None
@@ -1238,7 +1293,11 @@ class SimulationManager:
         *,
         capture_camera_images: bool = True,
     ) -> bool:
-        """Capture current scene data for the configured visualizer.
+        """Capture scene data or pump/render the native WebRTC observation view.
+
+        WebRTC calls belong to the World creator thread and never step physics.
+        Call this while simulation is paused to keep application commands live.
+        WebRTC consumes existing sensor images without rendering sensors again.
 
         Args:
             force: Whether to bypass visualization frame-rate limiting.
@@ -1247,6 +1306,11 @@ class SimulationManager:
         Returns:
             Whether scene or camera data was captured.
         """
+        if self.sim_config.visualization.backend == "dexsim-web":
+            if getattr(self, "_web_viewer_stopped", False):
+                return False
+            self.start_visualization()
+            return self._web_viewer.capture(force=force)
         runtime = self.start_visualization()
         if runtime is None:
             return False
@@ -1272,14 +1336,17 @@ class SimulationManager:
     ) -> None:
         """Update visualization without allowing failures to stop simulation.
 
-        The first visualization failure is logged and subsequent captures are
-        skipped until the runtime is restarted.
+        The first visualization failure is logged and subsequent rendering is
+        skipped until restart. Web information requests remain available.
 
         Args:
             force: Whether to bypass visualization frame-rate limiting.
             capture_camera_images: Whether camera images may be captured.
         """
-        if self._visualization_error_reported:
+        if (
+            self._visualization_error_reported
+            and getattr(self, "_web_viewer", None) is None
+        ):
             return
         try:
             self.capture_visualization(
@@ -1288,11 +1355,26 @@ class SimulationManager:
             )
         except Exception as error:
             if not self._visualization_error_reported:
-                logger.log_warning(f"Viser visualization update failed: {error!r}")
+                logger.log_warning(f"Visualization update failed: {error!r}")
+                if getattr(self, "_web_viewer", None) is not None:
+                    self._web_viewer.error = str(error)
                 self._visualization_error_reported = True
 
     def stop_visualization(self) -> None:
-        """Stop the visualization server and release its worker thread."""
+        """Close the visualizer; the native WebRTC listener lives until World teardown."""
+        if getattr(self, "_web_viewer", None) is not None:
+            recording = getattr(self, "_window_record_state", None)
+            if (
+                recording is not None
+                and recording.pose_provider is None
+                and recording.fixed_pose is None
+            ):
+                self.stop_window_record()
+            self._web_viewer.close()
+            self._web_viewer = None
+            self._web_viewer_stopped = True
+            self._window_record_input_control = None
+            self._window_camera_pose_input_control = None
         runtime = self._visualization_runtime
         if runtime is None:
             return
@@ -1342,6 +1424,27 @@ class SimulationManager:
         world_config.backend = Backend.VULKAN
         world_config.thread_mode = sim_config.thread_mode
         world_config.cache_path = str(self._material_cache_dir)
+
+        if sim_config.visualization.backend == "dexsim-web":
+            from embodichain.lab.visualization._web_viewer import (
+                _NO_INPUT_CAMERA_NAME,
+                _require_webrtc_runtime,
+            )
+
+            if not hasattr(dexsim, "WebApplication") or not hasattr(
+                world_config, "webrtc_enabled"
+            ):
+                raise RuntimeError(
+                    "dexsim-web requires a WebRTC-enabled DexSim build with WebApplication (8b867e321 or later)."
+                )
+            if sim_config.render_cfg.renderer == "no-render":
+                raise ValueError("dexsim-web requires a native renderer.")
+            _require_webrtc_runtime()
+            world_config.webrtc_enabled = True
+            world_config.webrtc_port = sim_config.visualization.web.port
+            world_config.webrtc_input_camera = _NO_INPUT_CAMERA_NAME
+            if sim_config.visualization.web.ice is not None:
+                world_config.webrtc_ice = sim_config.visualization.web.ice
 
         process_renderer = SimulationManager._get_process_renderer()
 
@@ -1403,6 +1506,8 @@ class SimulationManager:
                 f"native-renderer reservation was {sim_config.scene_node_capacity}."
             )
 
+        if sim_config.web and sim_config.render_cfg.renderer == "no-render":
+            raise ValueError("web requires a native renderer.")
         sim_config.render_cfg.apply_to_dexsim_config(world_config)
         if sim_config.render_cfg.renderer == "no-render":
             if not sim_config.headless:
@@ -1938,6 +2043,7 @@ class SimulationManager:
     def prepare(self) -> None:
         """Materialize declarations, bind state, and restore camera parents."""
         self._ready_spawn_topology_revision = -1
+        managed_sensors = getattr(self, "_managed_sensors", {})
         scene = self._spawn_scene
         result = scene.builder.result
         if (
@@ -1947,6 +2053,8 @@ class SimulationManager:
             or scene.builder.has_pending_changes
         ):
             if result is not None:
+                for sensor in managed_sensors.values():
+                    sensor._unbind()
                 # Clear configured parent paths before rebuilding native links;
                 # semantic parent resolution is retried after facade binding.
                 for sensor in self._sensors.values():
@@ -1960,7 +2068,11 @@ class SimulationManager:
             self._env = result.get_arena("default")
             self._arenas = [result.get_arena(name) for name in scene.arena_names]
             self.__dict__.pop("arena_offsets", None)
-            if self._default_plane is None and self.sim_config.enable_ground_plane:
+            if (
+                self._default_plane is None
+                and self.sim_config.enable_ground_plane
+                and "default_plane" in scene
+            ):
                 self._bind_default_plane(scene.handles("default_plane")[0])
 
         # Runtime readiness belongs to the SimulationManager. Keep this and
@@ -1991,6 +2103,9 @@ class SimulationManager:
         ):
             self._attach_parented_cameras()
             self._camera_attachment_topology_revision = topology_revision
+        for sensor in managed_sensors.values():
+            if sensor._bound_topology != topology_revision:
+                self._bind_sensor(sensor, topology_revision)
         self._ready_spawn_topology_revision = topology_revision
         self._refresh_marker_attachments()
         self._prepare_mounted_sensors()
@@ -2105,7 +2220,7 @@ class SimulationManager:
                         self._window_record_state, record_dt
                     )
             frame_complete = True
-            if self.sim_config.visualization.backend == "viser":
+            if self.sim_config.visualization.backend in {"viser", "dexsim-web"}:
                 with self.profiler.section("visualization_capture"):
                     self.capture_visualization_safely(
                         force=force_visualization,
@@ -2253,7 +2368,43 @@ class SimulationManager:
                 self._world.render_camera_group(group_ids)
                 for sensor in cameras:
                     sensor._snapshot_render_metadata()
+            if getattr(self, "_sampling_sensors", {}).get("render"):
+                self._sensor_frame_index = getattr(self, "_sensor_frame_index", 0) + 1
+                self._sample_managed_sensors(
+                    "render",
+                    self._sensor_frame_index,
+                    0.0,
+                    rendered_camera_uids={camera.uid for camera in cameras},
+                )
+        if getattr(self, "_render_state_published", None) is None:
+            self.poll_viewer()
         self._log_scene_summary()
+
+    def _sample_managed_sensors(
+        self,
+        phase: str,
+        boundary: int,
+        dt: float,
+        *,
+        rendered_camera_uids: set[str] | None = None,
+    ) -> None:
+        previous_reads = getattr(self, "_hydroelastic_surface_reads", None)
+        self._hydroelastic_surface_reads = {}
+        try:
+            for sensor in (
+                getattr(self, "_sampling_sensors", {}).get(phase, {}).values()
+            ):
+                if (
+                    rendered_camera_uids is not None
+                    and isinstance(sensor, Camera)
+                    and sensor.uid not in rendered_camera_uids
+                ):
+                    continue
+                sensor._sample(
+                    boundary, self.simulation_time, self.physics_step_index, dt
+                )
+        finally:
+            self._hydroelastic_surface_reads = previous_reads
 
     def _plan_camera_groups(self, configs: Sequence[SensorCfg]) -> None:
         """Reserve startup camera slots before the first sensor is created."""
@@ -2378,6 +2529,10 @@ class SimulationManager:
                     self._visualization_sim_step += 1
                     self._visualization_sim_time += physics_dt
                     self._pending_record_dt += physics_dt
+                    if getattr(self, "_sampling_sensors", {}).get("physics"):
+                        self._sample_managed_sensors(
+                            "physics", self.physics_step_index, physics_dt
+                        )
                     if after_substep is not None:
                         with self.profiler.section("after_substep"):
                             after_substep(physics_dt)
@@ -2511,33 +2666,137 @@ class SimulationManager:
         """
         return self.physics.get_scene()
 
+    @property
+    def viewer(self) -> Windows | _WebViewer | None:
+        """Return the active local or Web viewport (camera and input operations)."""
+        return getattr(self, "_web_viewer", None) or self._window
+
+    @property
+    def is_viewer_open(self) -> bool:
+        """Whether a local window or Web application is available."""
+        if getattr(self, "_web_viewer", None) is not None:
+            return not self._web_viewer.closed
+        return self._window is not None and self._world.is_window_initialized()
+
+    def open_viewer(self) -> bool:
+        """Open the selected presentation without changing physics or sensors.
+
+        Returns:
+            Whether the selected viewport is available. Viser has its own
+            scene UI and does not expose a native viewport.
+        """
+        if self.sim_config.web:
+            self.start_visualization()
+            return self.is_viewer_open
+        return self.open_window()
+
+    def _setup_viewer_controls(self) -> None:
+        """Bind native viewport controls through the shared registration owner."""
+        self._enable_default_entity_gizmo()
+        self._register_default_window_controls()
+
+    def close_viewer(self) -> None:
+        """Close the selected viewport on the World creator thread."""
+        if self.sim_config.web:
+            if self.is_window_recording():
+                self.stop_window_record()
+            self.stop_visualization()
+        else:
+            self.close_window()
+
+    def poll_viewer(self) -> None:
+        """Process controls and redraw while paused, without stepping physics.
+
+        Call on the World creator thread from waiting or render-only loops.
+        The native window runs its own event loop; Web renders are rate limited.
+        """
+        if getattr(self, "_web_viewer", None) is not None:
+            self.capture_visualization_safely()
+
+    def sleep(self, seconds: float) -> None:
+        """Wait in wall time while keeping the Web viewport responsive.
+
+        Args:
+            seconds: Finite, nonnegative duration. Physics does not advance.
+
+        Raises:
+            ValueError: If the duration is negative or nonfinite.
+        """
+        if not math.isfinite(seconds) or seconds < 0:
+            raise ValueError("seconds must be finite and nonnegative.")
+        if not self.sim_config.web:
+            time.sleep(seconds)
+            return
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            self.poll_viewer()
+            time.sleep(min(0.02, max(0.0, deadline - time.monotonic())))
+
+    def wait_for_input(self, prompt: str = "") -> str:
+        """Read a terminal line while keeping Web presentation responsive.
+
+        Args:
+            prompt: Text printed before waiting.
+
+        Returns:
+            The entered line without its trailing newline.
+
+        Raises:
+            EOFError: If the terminal input is closed.
+        """
+        if not self.sim_config.web:
+            return input(prompt)
+        import select
+        import sys
+
+        print(prompt, end="", flush=True)
+        stream = sys.stdin
+        descriptor = stream.fileno()
+        line = bytearray()
+        while True:
+            self.poll_viewer()
+            ready, _, _ = select.select([descriptor], [], [], 0.05)
+            if not ready:
+                continue
+            # Do not combine fd readiness with buffered TextIO reads: readline
+            # can consume future lines or block on a partial pipe write. Reading
+            # one byte leaves subsequent prompts/terminal consumers untouched.
+            value = os.read(descriptor, 1)
+            if not value or value == b"\n":
+                if not value and not line:
+                    raise EOFError
+                return line.decode(
+                    stream.encoding or "utf-8", stream.errors or "strict"
+                ).removesuffix("\r")
+            line.extend(value)
+
     def can_open_native_window(self) -> bool:
         """Return whether the native DexSim window may be opened.
 
-        The Viser backend owns visualization while it is configured or
-        running, so a native window must not be opened for the same simulation.
+        Browser backends own presentation while configured or running, so a
+        native window must not be opened for the same simulation.
 
         Returns:
-            ``True`` unless the Viser backend is configured or running.
+            ``True`` unless a browser backend is configured or running.
         """
         return (
-            self.sim_config.visualization.backend != "viser"
+            self.sim_config.visualization.backend == "none"
             and self._visualization_runtime is None
         )
 
     def open_window(self) -> bool:
         """Open the native DexSim simulation window when allowed.
 
-        Viser owns visualization while it is configured or running. In that
+        Browser backends own presentation while configured or running. In that
         case this method safely skips the native window so launchers do not
-        need a separate Viser condition.
+        need a separate browser-backend condition.
 
         Returns:
             ``True`` when the native window is open, otherwise ``False``.
         """
         if not self.can_open_native_window():
             logger.log_info(
-                "Skipping the native DexSim window because the Viser backend "
+                "Skipping the native DexSim window because a browser backend "
                 "is configured or running."
             )
             return False
@@ -2683,6 +2942,7 @@ class SimulationManager:
             per_env=False,
         )
         self._spawn_default_plane_descriptor = descriptor
+        self._ground_plane_removed = False
 
         if hasattr(descriptor, "render_categories"):
             descriptor.render_categories = self._GROUND_RENDER_CATEGORY
@@ -2757,6 +3017,25 @@ class SimulationManager:
         handles = self._spawn_scene.handles("default_plane")
         if handles:
             self._bind_default_plane(handles[0])
+
+    def remove_ground_plane(self) -> None:
+        """Remove the default global ground plane before preparing scene physics.
+
+        Use this when an imported scene stage already authors its own per-arena
+        ground geometry and solver ownership domain.
+
+        Raises:
+            RuntimeError: The scene physics has already been prepared.
+        """
+        if self.spawn_result is not None:
+            raise RuntimeError(
+                "The default ground plane must be removed before prepare()."
+            )
+        if self._spawn_scene is not None and "default_plane" in self._spawn_scene:
+            self._spawn_scene.remove("default_plane")
+        self._spawn_default_plane_descriptor = None
+        self._default_plane = None
+        self._ground_plane_removed = True
 
     def set_default_global_lighting(self) -> None:
         """Set default global lighting for the scene.
@@ -3011,10 +3290,15 @@ class SimulationManager:
                 ]
             return False
         if self.num_envs != 1:
-            raise NotImplementedError(
-                "DexSim USD Gaussian visuals cannot be replicated across Arenas; "
-                "use explicit GaussianSplatCfg visuals for multi-environment scenes."
-            )
+            from dexsim.scene.objects import SpawnedRigidBody
+
+            if not callable(
+                getattr(SpawnedRigidBody, "get_gaussian_resource_ids", None)
+            ):
+                raise NotImplementedError(
+                    "USD Gaussian arena replication requires a qualified DexSim "
+                    "build with native companion cloning and resource-ID queries."
+                )
         if self.sim_config.visualization.backend == "viser":
             raise NotImplementedError(
                 "USD Gaussian visuals require native camera or window rendering."
@@ -3065,7 +3349,13 @@ class SimulationManager:
     ) -> (
         UsdImportResult
         | dict[
-            str, VisualObject | RigidObject | Articulation | Robot | DeformableObject
+            str,
+            VisualObject
+            | RigidObject
+            | Articulation
+            | Robot
+            | DeformableObject
+            | CableObject,
         ]
     ):
         """Declare a USD import through a validated configuration recipe.
@@ -3094,7 +3384,8 @@ class SimulationManager:
             asset_cfgs: Legacy per-asset overrides; use ``cfg.asset_cfgs``.
 
         Returns:
-            Source-path mapping of declared facades and imported resource UIDs.
+            Source-path mapping of declared facades, including USD cables,
+            and imported resource UIDs.
             Legacy argument forms retain the mutable asset dictionary result.
         """
         from .cfg.usd import _normalize_usd_import
@@ -3146,6 +3437,7 @@ class SimulationManager:
                 ),
                 "soft_object": self._deformable_objects,
                 "cloth_object": self._deformable_objects,
+                "cable_object": self._cable_objects,
             }[kind]
             registry[descriptor.name] = facade
             assets[source_path] = facade
@@ -3295,7 +3587,7 @@ class SimulationManager:
                         "USD-native Gaussian appearance cannot be replaced by visuals; "
                         "use a Mesh USD source with explicit GaussianSplatCfg visuals."
                     )
-                descriptor.per_env = False
+                descriptor.per_env = self.num_envs > 1
         else:
             descriptor, materials = visual_desc_from_cfg(cfg)
         visual = VisualObject(cfg, self.device)
@@ -3450,7 +3742,7 @@ class SimulationManager:
                             "USD-native Gaussian appearance cannot be replaced by visuals; "
                             "use a Mesh USD source with explicit GaussianSplatCfg visuals."
                         )
-                    descriptor.per_env = False
+                    descriptor.per_env = self.num_envs > 1
             else:
                 descriptor, materials = rigid_desc_from_cfg(
                     cfg,
@@ -3644,22 +3936,8 @@ class SimulationManager:
             raise RuntimeError("Fluid diagnostics require prepare().")
         return self.physics.fluid_diagnostics(fluid)
 
-    def add_cable_object(self, cfg: CableObjectCfg) -> CableObject:
-        """Declare a cable before ``prepare()`` using DexSim's public Spawn API.
-
-        Args:
-            cfg: Typed cable geometry, four-mode material and visual configuration.
-
-        Returns:
-            A declared facade whose data becomes available after ``prepare()``.
-
-        Raises:
-            NotImplementedError: Backend/device/solver/gradient mode is unsupported,
-                or the physical scene has already been finalized.
-            ValueError: Required configuration or the asset UID is invalid.
-        """
-        if not isinstance(cfg, CableObjectCfg):
-            raise TypeError("Cable objects require CableObjectCfg.")
+    def _require_cable_declaration(self) -> None:
+        """Check the shared runtime requirements for declaring cables."""
         if not self.physics.supports_cables:
             raise NotImplementedError("Cable objects require the Newton backend.")
         if self.device.type != "cuda":
@@ -3676,6 +3954,24 @@ class SimulationManager:
             raise NotImplementedError(
                 "Declare cable objects before scene finalization."
             )
+
+    def add_cable_object(self, cfg: CableObjectCfg) -> CableObject:
+        """Declare a cable before ``prepare()`` using DexSim's public Spawn API.
+
+        Args:
+            cfg: Typed cable geometry, four-mode material and visual configuration.
+
+        Returns:
+            A declared facade whose data becomes available after ``prepare()``.
+
+        Raises:
+            NotImplementedError: Backend/device/solver/gradient mode is unsupported,
+                or the physical scene has already been finalized.
+            ValueError: Required configuration or the asset UID is invalid.
+        """
+        if not isinstance(cfg, CableObjectCfg):
+            raise TypeError("Cable objects require CableObjectCfg.")
+        self._require_cable_declaration()
         descriptor, materials = cable_desc_from_cfg(cfg, per_env=True)
         if descriptor.name in self.asset_uids or descriptor.name in self._spawn_scene:
             raise ValueError(
@@ -4371,25 +4667,9 @@ class SimulationManager:
             sensor_uids = set(self._sensors)
             sensor_uids.update(getattr(self, "_pending_mounted_sensors", {}))
             for sensor_cfg in cfg.sensors:
-                if not isinstance(sensor_cfg, CameraCfg):
-                    raise TypeError("RobotCfg.sensors supports mounted cameras only.")
-                if not isinstance(sensor_cfg.uid, str) or not sensor_cfg.uid.strip():
-                    raise ValueError("Mounted sensors require a non-empty uid.")
-                if sensor_cfg.uid in sensor_uids:
-                    raise ValueError(f"Sensor {sensor_cfg.uid!r} already exists.")
-                sensor_uids.add(sensor_cfg.uid)
-                parent = sensor_cfg.extrinsics.parent
-                if not isinstance(parent, str) or not parent.strip():
-                    raise ValueError("Mounted sensors require a parent link.")
-                link_name = parent.removeprefix(f"{uid}/")
-                if not link_name or "/" in link_name:
-                    raise ValueError(
-                        f"Mounted sensor {sensor_cfg.uid!r} must refer to a "
-                        f"local link on robot {uid!r}."
-                    )
-                bound_cfg = deepcopy(sensor_cfg)
-                bound_cfg.extrinsics.parent = f"{uid}/{link_name}"
-                mounted_sensors.append(bound_cfg)
+                mounted_sensors.append(
+                    _qualify_robot_mount(sensor_cfg, uid, sensor_uids)
+                )
 
         was_materialized = self.spawn_result is not None
         robot = self._declare_spawn_articulation(cfg, Robot)
@@ -4928,12 +5208,21 @@ class SimulationManager:
                 f"ContactSensor is not supported by the {self.physics.name} "
                 "physics backend."
             )
+        if legacy_factory and (
+            getattr(sensor_cfg, "mount", None) is not None
+            or getattr(sensor_cfg, "sample_phase", None) is not None
+        ):
+            raise TypeError(
+                "Physical mounts and scheduled sampling require a context-backed sensor registration."
+            )
         if not legacy_factory:
             if not isinstance(sensor_cfg, registration.config_cls):
                 raise TypeError(
                     f"Sensor {sensor_type!r} requires {registration.config_cls.__name__}."
                 )
             sensor_cfg.validate()
+            if sensor_cfg.sample_phase == "render":
+                self._require_native_renderer("Render-sampled sensors")
             self.prepare()
             if (
                 isinstance(sensor_cfg, CameraCfg)
@@ -4948,12 +5237,6 @@ class SimulationManager:
                 raise TypeError(
                     f"Sensor factory {sensor_type!r} must return BaseSensor."
                 )
-            if isinstance(sensor, Camera):
-                try:
-                    self._attach_camera_parent(sensor)
-                except Exception:
-                    sensor.destroy()
-                    raise
         elif isinstance(sensor_factory, type) and issubclass(sensor_factory, Camera):
             if len(self._arenas) != self.num_envs:
                 raise RuntimeError(
@@ -5026,9 +5309,67 @@ class SimulationManager:
             except Exception:
                 sensor.destroy()
                 raise
+        if not legacy_factory:
+            try:
+                result = self.spawn_result
+                revision = int(result.topology_revision) if result is not None else 0
+                self._bind_sensor(sensor, revision)
+                if isinstance(sensor, Camera):
+                    self._attach_camera_parent(sensor)
+            except BaseException:
+                self._release_sensor(sensor)
+                raise
+            self.__dict__.setdefault("_managed_sensors", {})[uid] = sensor
+            if sensor.cfg.sample_phase is not None:
+                self.__dict__.setdefault("_sampling_sensors", {}).setdefault(
+                    sensor.cfg.sample_phase, {}
+                )[uid] = sensor
         self._sensors[uid] = sensor
         self.notify_visualization_topology_changed()
         return sensor
+
+    def _bind_sensor(self, sensor: BaseSensor, topology: int) -> None:
+        offset = sensor.cfg.mount
+        mount_pose = None
+        parent_uid = None
+        if offset is not None:
+            transform = offset.transformation.to(device=self.device)
+            if offset.parent is None:
+                mount_pose = lambda: transform.expand(self.num_envs, -1, -1).clone()
+            elif offset.parent in self._rigid_objects:
+                parent_uid = offset.parent
+                asset = self._rigid_objects[parent_uid]
+                if asset.num_instances not in (1, self.num_envs):
+                    raise RuntimeError(
+                        f"Invalid instance count for sensor parent {offset.parent!r}."
+                    )
+                mount_pose = (
+                    lambda: asset.get_local_pose(to_matrix=True).expand(
+                        self.num_envs, -1, -1
+                    )
+                    @ transform
+                )
+            else:
+                parent_uid, asset, link = _resolve_link(
+                    offset.parent,
+                    {**self._articulations, **self._robots},
+                    self.num_envs,
+                )
+                mount_pose = (
+                    lambda: asset.get_link_pose(link, to_matrix=True) @ transform
+                )
+        sensor._bind(topology, mount_pose)
+        sensor._mount_parent_uid = parent_uid
+
+    @staticmethod
+    def _release_sensor(sensor: BaseSensor) -> None:
+        try:
+            if isinstance(sensor, BaseSensor):
+                sensor._unbind()
+        finally:
+            destroy = getattr(sensor, "destroy", None)
+            if callable(destroy):
+                destroy()
 
     def _attach_camera_parent(self, sensor: Camera) -> None:
         """Resolve and attach one camera to its configured parent nodes."""
@@ -5104,9 +5445,10 @@ class SimulationManager:
             return True
         if uid in self._sensors:
             sensor = self._sensors.pop(uid)
-            destroy = getattr(sensor, "destroy", None)
-            if callable(destroy):
-                destroy()
+            getattr(self, "_managed_sensors", {}).pop(uid, None)
+            for sensors in getattr(self, "_sampling_sensors", {}).values():
+                sensors.pop(uid, None)
+            self._release_sensor(sensor)
             self.notify_visualization_topology_changed()
             return True
 
@@ -5127,19 +5469,39 @@ class SimulationManager:
         if robot is not None and robot.cfg.enable_sensor:
             for sensor_cfg in robot.cfg.sensors:
                 queued = pending.get(sensor_cfg.uid)
-                if (
-                    queued is not None
-                    and queued.extrinsics.parent is not None
-                    and queued.extrinsics.parent.startswith(f"{uid}/")
-                ):
-                    pending.pop(sensor_cfg.uid)
+                if queued is not None:
+                    offset = (
+                        queued.extrinsics
+                        if isinstance(queued, CameraCfg)
+                        else queued.mount
+                    )
+                    if offset is not None and (offset.parent or "").startswith(
+                        f"{uid}/"
+                    ):
+                        pending.pop(sensor_cfg.uid)
                 sensor = self._sensors.get(sensor_cfg.uid)
                 if (
-                    isinstance(sensor, Camera)
-                    and sensor.cfg.extrinsics.parent is not None
-                    and sensor.cfg.extrinsics.parent.startswith(f"{uid}/")
+                    sensor is not None
+                    and (
+                        sensor.cfg.extrinsics
+                        if isinstance(sensor, Camera)
+                        else sensor.cfg.mount
+                    )
+                    is not None
+                    and (
+                        (
+                            sensor.cfg.extrinsics
+                            if isinstance(sensor, Camera)
+                            else sensor.cfg.mount
+                        ).parent
+                        or ""
+                    ).startswith(f"{uid}/")
                 ):
                     self.remove_asset(sensor_cfg.uid)
+
+        for sensor_uid, sensor in tuple(getattr(self, "_managed_sensors", {}).items()):
+            if sensor._mount_parent_uid == uid:
+                self.remove_asset(sensor_uid)
 
         for group in tuple(getattr(self, "_marker_groups", {}).values()):
             group._detach_parent(uid)
@@ -5502,12 +5864,12 @@ class SimulationManager:
                 If no window is available, the controls are not added and a
                 warning is logged.
         """
-        if self._window is None:
+        if self.viewer is None:
             logger.log_warning("No window available to add custom controls.")
             return
 
         for control in controls:
-            self._window.add_input_control(control)
+            self.viewer.add_input_control(control)
 
     def _register_default_window_controls(self) -> None:
         """Register configured built-in controls on an available window."""
@@ -5898,8 +6260,8 @@ class SimulationManager:
         if state.fixed_pose is not None:
             return np.asarray(state.fixed_pose, dtype=np.float32)
 
-        if self._window is not None:
-            return np.asarray(self._window.get_pose_matrix(), dtype=np.float32)
+        if self.viewer is not None:
+            return np.asarray(self.viewer.get_pose_matrix(), dtype=np.float32)
 
         return None
 
@@ -6015,10 +6377,15 @@ class SimulationManager:
             fixed_pose: Optional fixed 4x4 camera pose matrix.
             look_at: Optional ``(eye, target, up)`` tuple used to derive a fixed pose.
             use_sim_time: Whether to capture frames from simulation time instead of
-                wall time. Defaults to headless mode when no viewer window exists.
+                wall time. Defaults to simulation time for Web-follow and headless
+                recordings. Web-follow recordings require simulation time so the
+                observation camera is read on the World creator thread.
 
         Returns:
             bool: True if recording starts successfully, otherwise False.
+
+        Raises:
+            ValueError: If a Web-follow recording requests wall-clock capture.
         """
         if getattr(getattr(self, "_spawn_scene", None), "has_gaussians", False) is True:
             raise NotImplementedError(
@@ -6051,15 +6418,28 @@ class SimulationManager:
         if look_at is not None:
             fixed_pose = self._build_window_record_pose_from_look_at(*look_at)
 
-        if pose_provider is None and fixed_pose is None and self._window is None:
+        if pose_provider is None and fixed_pose is None and self.viewer is None:
             logger.log_warning(
                 "No simulation window available for viewer recording. "
                 "Provide `pose_provider`, `fixed_pose`, or `look_at` to record in headless mode."
             )
             return False
 
+        follows_web_viewer = (
+            getattr(self, "_web_viewer", None) is not None
+            and pose_provider is None
+            and fixed_pose is None
+        )
+        if follows_web_viewer:
+            if use_sim_time is False:
+                raise ValueError(
+                    "Web-follow recording requires use_sim_time=True because its "
+                    "camera pose belongs to the World creator thread. For wall-time "
+                    "recording, provide a fixed pose or a render-thread-safe pose_provider."
+                )
+            use_sim_time = True
         if use_sim_time is None:
-            use_sim_time = self._window is None
+            use_sim_time = self.viewer is None
 
         width = self.sim_config.width
         height = self.sim_config.height
@@ -6103,14 +6483,14 @@ class SimulationManager:
 
         follow_source = (
             "live viewer pose"
-            if pose_provider is None and fixed_pose is None and self._window is not None
+            if pose_provider is None and fixed_pose is None and self.viewer is not None
             else "custom pose source"
         )
         timing_source = (
             "simulation time" if state.capture_from_sim_update else "wall time"
         )
         save_target = os.path.join(output_dir, video_name + ".mp4")
-        if self._window is not None:
+        if self.viewer is not None:
             logger.log_info(
                 f"Viewer recording started ({follow_source}, {timing_source}). Press 'r' again to stop and save to "
                 f"{save_target}"
@@ -6202,7 +6582,7 @@ class SimulationManager:
             "max_memory": max_memory,
             "video_prefix": video_prefix,
         }
-        if self._window is None:
+        if self.viewer is None:
             logger.log_warning(
                 "No simulation window available yet. The viewer record hotkey will be registered after `open_window()`."
             )
@@ -6221,7 +6601,7 @@ class SimulationManager:
                     sim.toggle_window_record(**hotkey_cfg)
 
         self._window_record_input_control = WindowRecordEvent()
-        self._window.add_input_control(self._window_record_input_control)
+        self.viewer.add_input_control(self._window_record_input_control)
         logger.log_info(
             "Viewer record hotkey registered. Press 'r' to start/stop recording."
         )
@@ -6319,11 +6699,11 @@ class SimulationManager:
         Returns:
             The printed snippet, or ``None`` when no viewer window is open.
         """
-        if self._window is None:
+        if self.viewer is None:
             logger.log_warning("No simulation window available to print its pose.")
             return None
 
-        pose = np.asarray(self._window.get_pose_matrix(), dtype=np.float32)
+        pose = np.asarray(self.viewer.get_pose_matrix(), dtype=np.float32)
         snippet = self._format_window_camera_pose(pose, convert_to_look_at)
         print(snippet)
         return snippet
@@ -6339,7 +6719,7 @@ class SimulationManager:
             Whether the control is registered on an available window.
         """
         self._window_camera_pose_hotkey_cfg = {"convert_to_look_at": convert_to_look_at}
-        if self._window is None:
+        if self.viewer is None:
             logger.log_warning(
                 "No simulation window available yet. The camera pose print "
                 "hotkey will be registered after `open_window()`."
@@ -6359,7 +6739,7 @@ class SimulationManager:
                     sim.print_window_camera_pose(**hotkey_cfg)
 
         self._window_camera_pose_input_control = WindowCameraPoseEvent()
-        self._window.add_input_control(self._window_camera_pose_input_control)
+        self.viewer.add_input_control(self._window_camera_pose_input_control)
         logger.log_info(
             "Camera pose print hotkey registered. Press 'p' to print the "
             "current viewer pose."
@@ -6466,6 +6846,8 @@ class SimulationManager:
                 for uid, sensor in self._sensors.items():
                     if uid not in excluded_uids and uid not in excluded_sensor_uids:
                         sensor.reset(reset_ids)
+                        if isinstance(sensor, BaseSensor):
+                            sensor._invalidate_samples(reset_ids)
             return
         articulation_uids = tuple(self._robots) + tuple(self._articulations)
         reset_articulation_uids = tuple(
@@ -6530,6 +6912,8 @@ class SimulationManager:
         for uid, sensor in self._sensors.items():
             if uid not in excluded_uids and uid not in excluded_sensor_uids:
                 sensor.reset(env_ids)
+                if isinstance(sensor, BaseSensor):
+                    sensor._invalidate_samples(env_ids)
         if use_coordinated_newton_clear:
             self._clear_newton_articulation_dynamics(newton_articulation_batch)
 
@@ -6579,6 +6963,33 @@ class SimulationManager:
                 "DexSim Scene articulation clear_dynamics failed with "
                 f"status {status}."
             )
+
+    def clear_articulation_dynamics(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Clear dynamic state and solver history for all articulations in selected worlds.
+
+        Args:
+            env_ids: Environment indices whose articulation dynamics should be cleared.
+                Defaults to all environments when ``None``.
+        """
+        articulation_uids = tuple(self._robots) + tuple(self._articulations)
+        if not articulation_uids:
+            return
+        if self.physics.name == "newton":
+            batch = self._newton_articulation_reset_batch(articulation_uids, env_ids)
+            self._clear_newton_articulation_dynamics(batch)
+            return
+        ids = (
+            None
+            if env_ids is None
+            else torch.as_tensor(env_ids, dtype=torch.long).reshape(-1).tolist()
+        )
+        for robot in self._robots.values():
+            robot.clear_dynamics(env_ids=ids)
+        for articulation in self._articulations.values():
+            articulation.clear_dynamics(env_ids=ids)
 
     def export_usd(self, fpath: str) -> bool:
         """Export the current simulation scene to a USD file.
@@ -6647,6 +7058,7 @@ class SimulationManager:
 
         try:
             self.stop_visualization()
+            self._web_camera_group = None
         except Exception as error:
             logger.log_warning(f"Failed to stop Viser visualization cleanly: {error!r}")
 
@@ -6690,9 +7102,6 @@ class SimulationManager:
         # Release backend-owned views before Scene closes the native
         # resources that back them. Newton also synchronizes its device here.
         self.physics.prepare_for_teardown()
-        # Run wrapper destructors while their World is still alive. The later
-        # collections continue to break cycles left by the native teardown.
-        gc.collect()
 
         # Render-only cameras may be attached to Spawn articulation link
         # nodes. Remove their Arena views before closing Scene, which
@@ -6700,7 +7109,7 @@ class SimulationManager:
         # CameraGroups.
         for sensor in list(getattr(self, "_sensors", {}).values()):
             try:
-                sensor.destroy()
+                self._release_sensor(sensor)
             except Exception as error:
                 logger.log_warning(
                     f"Failed to destroy sensor {getattr(sensor, 'uid', None)!r}: "
@@ -6740,6 +7149,13 @@ class SimulationManager:
                         asset._spawn_result = None
                     if hasattr(asset, "_entities"):
                         asset._entities = []
+
+        # Drop facade-owned references before collecting their wrapper cycles.
+        # Otherwise those cycles can survive until a later GC, after Scene
+        # has destroyed the native resources backing the views.
+        gc.collect()
+
+        if self._spawn_scene is not None:
             try:
                 self._spawn_scene.close()
             finally:

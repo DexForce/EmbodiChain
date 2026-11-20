@@ -280,7 +280,7 @@ def test_locomotion_observation_keeps_legacy_import_and_selects_requested_group(
     from embodichain.lab.gym.envs.managers.observations import (
         velocity_locomotion_observation,
     )
-    from embodichain_tasks.locomotion.managers.observations import (
+    from embodichain.extensions.tasks.locomotion.managers.observations import (
         velocity_locomotion_observation as legacy,
     )
 

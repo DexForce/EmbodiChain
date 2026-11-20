@@ -179,7 +179,7 @@ def main(args: argparse.Namespace | None = None) -> None:
             )
         )
         if args.scene == "factory":
-            from embodichain_robots.dexforce.w1.cfg import DexforceW1Cfg
+            from embodichain.extensions.robots.dexforce.w1.cfg import DexforceW1Cfg
 
             w1_robot: Robot = sim.add_robot(
                 cfg=DexforceW1Cfg.from_dict(
@@ -202,8 +202,8 @@ def main(args: argparse.Namespace | None = None) -> None:
     logger.log_info(f"Running simulation with {args.num_envs} environment(s)")
     logger.log_info("Press Ctrl+C to stop the simulation")
 
-    if not args.headless:
-        sim.open_window()
+    if not args.headless or getattr(args, "web", False):
+        sim.open_viewer()
 
     run_simulation(sim)
 

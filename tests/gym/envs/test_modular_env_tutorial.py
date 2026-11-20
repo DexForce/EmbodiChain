@@ -39,7 +39,7 @@ def test_tutorial_rigid_objects_compile_to_spawn_descriptors(tutorial) -> None:
 @pytest.fixture
 def tutorial(monkeypatch):
     from embodichain.lab.sim.cfg import RobotCfg
-    from embodichain_robots import DexforceW1Cfg
+    from embodichain.extensions.robots import DexforceW1Cfg
 
     # These tests exercise object descriptors and event setup, not W1 assembly.
     # Its imported asset resolvers can bypass the package-level path stub.

@@ -484,7 +484,7 @@ def rigid_desc_from_cfg(
         if "env_variants" not in {item.name for item in fields(ObjectDesc)}:
             raise NotImplementedError(
                 "This DexSim build cannot prepare per-environment rigid variants. "
-                "Apply scripts/patches/dexsim_assembly_variants.patch to the DexSim source and rebuild."
+                "Install a DexSim build exposing ObjectDesc.env_variants."
             )
         if not per_env:
             raise ValueError("env_variants requires per_env=True.")
@@ -809,6 +809,22 @@ def _explicit_tet_mesh_from_cfg(
     }
 
 
+def _cable_contact_spec(attrs: CablePhysicsCfg) -> _RigidPhysicsSpec:
+    if not isinstance(attrs, CablePhysicsCfg):
+        raise TypeError("Cable attrs must be CablePhysicsCfg.")
+    if isinstance(attrs.collision_props, DefaultCollisionPropertiesCfg):
+        raise NotImplementedError(
+            "Cable contact properties require common or Newton configuration."
+        )
+    return _resolve_rigid_physics(
+        RigidBodyPhysicsCfg(
+            collision_props=attrs.collision_props,
+            material_props=attrs.material_props,
+        ),
+        newton_solver_type="dexuni",
+    )
+
+
 def cable_desc_from_cfg(
     cfg: CableObjectCfg,
     *,
@@ -835,19 +851,7 @@ def cable_desc_from_cfg(
         ) from exc
     cfg.validate()
     uid = _required_uid(cfg.uid, "Cable object")
-    if not isinstance(cfg.attrs, CablePhysicsCfg):
-        raise TypeError("Cable attrs must be CablePhysicsCfg.")
-    if isinstance(cfg.attrs.collision_props, DefaultCollisionPropertiesCfg):
-        raise NotImplementedError(
-            "Cable contact properties require common or Newton configuration."
-        )
-    contact = _resolve_rigid_physics(
-        RigidBodyPhysicsCfg(
-            collision_props=cfg.attrs.collision_props,
-            material_props=cfg.attrs.material_props,
-        ),
-        newton_solver_type="dexuni",
-    )
+    contact = _cable_contact_spec(cfg.attrs)
     collision = _compile_newton_collision(
         contact, newton_solver_type="dexuni", author_shape_defaults=True
     )
@@ -2120,8 +2124,8 @@ def _compile_newton_collision(
     if unsupported_fields:
         raise NotImplementedError(
             "This DexSim build cannot preserve raw MuJoCo contact parameters "
-            f"{sorted(unsupported_fields)}. Apply scripts/patches/"
-            "dexsim_assembly_contact.patch to the DexSim source and rebuild; "
+            f"{sorted(unsupported_fields)}. Install a DexSim build exposing these "
+            "NewtonCollisionDesc fields; "
             "ke/kd are not an equivalent replacement for authored solimp."
         )
     contact_offset, rest_offset = _common_collision_envelope(physics)

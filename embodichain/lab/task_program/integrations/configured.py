@@ -53,6 +53,7 @@ from ._configured_services import (
     _CoordinatedTransportRoute,
     _JointPositionConstraintEvidenceProviderFactory,
     _MoveHeldObjectLowererFactory,
+    _MoveEndEffectorLowererFactory,
     _ParkLowererFactory,
     _PourLowererFactory,
     _PourTargetBinding,
@@ -884,6 +885,7 @@ def _decode_scene(value: object) -> SimulationSceneBinding:
         optional=frozenset(
             {
                 "rigid_objects",
+                "cables",
                 "rigidized_articulations",
                 "articulations",
                 "links",
@@ -892,6 +894,23 @@ def _decode_scene(value: object) -> SimulationSceneBinding:
         ),
     )
 
+    from .simulation.bindings import _SimulationCableBinding
+
+    cables = []
+    for index, value in enumerate(
+        _sequence(config.get("cables", ()), path=f"{path}.cables")
+    ):
+        item = _mapping(
+            value,
+            path=f"{path}.cables[{index}]",
+            required=frozenset({"entity_id", "simulation_uid"}),
+        )
+        cables.append(
+            _SimulationCableBinding(
+                _identifier(item["entity_id"], path=path),
+                _identifier(item["simulation_uid"], path=path),
+            )
+        )
     antipodal_grasps: list[AntipodalGraspAffordanceBinding] = []
     rigidized_articulation_grasps: list[RigidizedArticulationAntipodalGraspBinding] = []
     support_surfaces: list[SupportSurfaceAffordanceBinding] = []
@@ -940,6 +959,7 @@ def _decode_scene(value: object) -> SimulationSceneBinding:
     return SimulationSceneBinding(
         registry_id=_identifier(config["registry_id"], path=f"{path}.registry_id"),
         rigid_objects=rigid_objects,
+        cables=tuple(cables),
         rigidized_articulations=rigidized_articulations,
         articulations=articulations,
         links=links,
@@ -1074,6 +1094,8 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
         optional=frozenset(
             {
                 "hand_interp_steps",
+                "preserve_samples",
+                "preserve_cartesian_samples",
                 "hold_steps",
                 "release",
                 "release_at_target",
@@ -1087,6 +1109,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 "object_motion_keyframes",
                 "grasp_settle_steps",
                 "release_settle_steps",
+                "release_settle_duration",
                 "pick_object_part",
                 "lift_height",
                 "pre_grasp_distance",
@@ -1287,6 +1310,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 {
                     "hand_interp_steps",
                     "release_settle_steps",
+                    "release_settle_duration",
                     "lift_height",
                     "max_approach_retract_z",
                     "cartesian_waypoint_count",
@@ -1311,6 +1335,12 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 config["release_settle_steps"],
                 path=f"{path}.release_settle_steps",
                 minimum=0,
+            )
+        if "release_settle_duration" in config:
+            kwargs["release_settle_duration"] = _real(
+                config["release_settle_duration"],
+                path=f"{path}.release_settle_duration",
+                minimum=0.0,
             )
         if "lift_height" in config:
             kwargs["lift_height"] = _real(
@@ -1339,15 +1369,27 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
         _mapping(value, path=path, required=frozenset({"kind"}))
         return MoveHeldObjectOptions()
     if kind == "move_joints":
-        _mapping(
+        config = _mapping(
             value,
             path=path,
             required=frozenset({"kind"}),
+            optional=frozenset({"preserve_samples"}),
         )
-        return MoveJointsOptions()
+        return MoveJointsOptions(
+            preserve_samples=_boolean(config.get("preserve_samples", False), path=path)
+        )
     if kind == "move_end_effector":
-        _mapping(value, path=path, required=frozenset({"kind"}))
-        return MoveEndEffectorOptions()
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind"}),
+            optional=frozenset({"preserve_cartesian_samples"}),
+        )
+        return MoveEndEffectorOptions(
+            preserve_cartesian_samples=_boolean(
+                config.get("preserve_cartesian_samples", False), path=path
+            )
+        )
     if kind == "coordinated_pickment":
         config = _mapping(
             value,
@@ -1790,7 +1832,9 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
                 "velocity_targets",
                 "plan_opts",
                 "interpolation_mode",
+                "interpolate_position_step",
                 "ik_seed_mode",
+                "phase_paths",
                 "sample_count_retries",
                 "segment_sample_count_retries",
                 "segment_continuous_ik_recovery",
@@ -1803,6 +1847,7 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
         config["sample_count"], path=f"{path}.sample_count", minimum=2
     )
     kwargs: dict[str, object] = {
+        "phase_paths": dict(config.get("phase_paths", {})),
         "strategy": _identifier(
             config.get("strategy", "ik_interp"),
             path=f"{path}.strategy",
@@ -1857,7 +1902,11 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
             path=f"{path}.dynamic_collision_mode",
         ),
     }
-    for field_name in ("velocity_limit", "acceleration_limit"):
+    for field_name in (
+        "velocity_limit",
+        "acceleration_limit",
+        "interpolate_position_step",
+    ):
         if field_name in config:
             kwargs[field_name] = (
                 None
@@ -1912,6 +1961,27 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
 
 
 def _decode_tracking_policy(value: object, *, path: str) -> TrackingPolicy:
+    from dataclasses import replace
+
+    if not isinstance(value, Mapping):
+        return _decode_tracking_policy_base(value, path=path)
+    config = dict(value)
+    boundary = {
+        name: config.pop(name)
+        for name in tuple(config)
+        if name
+        in {
+            "boundary_reference_bridge",
+            "boundary_stop",
+            "boundary_position_tolerance",
+            "boundary_velocity_tolerance",
+            "boundary_timeout",
+        }
+    }
+    return replace(_decode_tracking_policy_base(config, path=path), **boundary)
+
+
+def _decode_tracking_policy_base(value: object, *, path: str) -> TrackingPolicy:
     """Decode one allowlisted tracking policy."""
     common = _mapping(
         value,
@@ -2622,6 +2692,7 @@ def _decode_registered_lowerer(
     | _AxisAlignLowererFactory
     | _CoordinatedTransportLowererFactory
     | _MoveHeldObjectLowererFactory
+    | _MoveEndEffectorLowererFactory
     | _ParkLowererFactory
     | RoutedMoveHeldObjectLowererFactory
     | _PourLowererFactory
@@ -2702,6 +2773,28 @@ def _decode_registered_lowerer(
                 path=f"{path}.object_ids",
             )
         )
+    if kind == "move_end_effector":
+        config = _mapping(value, path=path, required=frozenset({"kind", "routes"}))
+        routes = []
+        for index, value in enumerate(
+            _sequence(config["routes"], path=f"{path}.routes")
+        ):
+            route_path = f"{path}.routes[{index}]"
+            route = _mapping(
+                value, path=route_path, required=frozenset({"target_id", "poses"})
+            )
+            poses = tuple(
+                _finite_tuple(
+                    pose, path=f"{route_path}.poses[{pose_index}]", expected_length=16
+                )
+                for pose_index, pose in enumerate(
+                    _sequence(route["poses"], path=f"{route_path}.poses")
+                )
+            )
+            routes.append(
+                (_identifier(route["target_id"], path=f"{route_path}.target_id"), poses)
+            )
+        return _MoveEndEffectorLowererFactory(pose_routes=tuple(routes))
     if kind == "articulation_link_slide":
         config = _mapping(
             value,
@@ -2784,6 +2877,9 @@ def _decode_registered_lowerer(
                 item,
                 path=route_path,
                 required=frozenset({"object_id", "target_id", "pose"}),
+                optional=frozenset(
+                    {"preserve_current_object_orientation", "waypoints"}
+                ),
             )
             routes.append(
                 HeldObjectTransportRoute(
@@ -2794,6 +2890,19 @@ def _decode_registered_lowerer(
                         route["target_id"], path=f"{route_path}.target_id"
                     ),
                     pose=_decode_goal_pose(route["pose"], path=f"{route_path}.pose"),
+                    waypoints=tuple(
+                        _decode_goal_pose(value, path=f"{route_path}.waypoints[{i}]")
+                        for i, value in enumerate(
+                            _sequence(
+                                route.get("waypoints", []),
+                                path=f"{route_path}.waypoints",
+                            )
+                        )
+                    ),
+                    preserve_current_object_orientation=_boolean(
+                        route.get("preserve_current_object_orientation", False),
+                        path=f"{route_path}.preserve_current_object_orientation",
+                    ),
                 )
             )
         return RoutedMoveHeldObjectLowererFactory(routes=tuple(routes))
@@ -3025,7 +3134,7 @@ def _decode_registered_lowerer(
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "
         "['press', 'twist', 'open_door', 'articulation_link_slide', 'axis_align', 'coordinated_transport', "
-        "'move_held_object', 'park', 'place_relative', 'pour', 'push_object']."
+        "'move_end_effector', 'move_held_object', 'park', 'place_relative', 'pour', 'push_object']."
     )
 
 
@@ -3091,6 +3200,7 @@ class _DecodedRuntimeServices:
         | _AxisAlignLowererFactory
         | _CoordinatedTransportLowererFactory
         | _MoveHeldObjectLowererFactory
+        | _MoveEndEffectorLowererFactory
         | _ParkLowererFactory
         | RoutedMoveHeldObjectLowererFactory
         | _PourLowererFactory
@@ -3101,6 +3211,7 @@ class _DecodedRuntimeServices:
     ] = ()
     control_part_evidence: _JointPositionConstraintEvidenceProviderFactory | None = None
     nominal_motion_sources: tuple[_ConfiguredPrototypeSource, ...] = ()
+    cable_material: object | None = None
     settle_presets: (
         tuple[
             tuple[
@@ -3217,6 +3328,7 @@ def _decode_runtime_services(
                 "registered_semantic_lowerers",
                 "control_part_evidence",
                 "nominal_motion_sources",
+                "cable_material",
                 "settle_presets",
             }
         ),
@@ -3267,6 +3379,19 @@ def _decode_runtime_services(
             )
         )
     )
+    from .simulation.cable import (
+        _decode_cable_service,
+        _CablePickFactory,
+        _CableMoveFactory,
+        _CableJointFactory,
+        _CableCheckFactory,
+    )
+
+    cable = (
+        None
+        if "cable_material" not in config
+        else _decode_cable_service(config["cable_material"])
+    )
     lowerers = tuple(
         _decode_registered_lowerer(
             item,
@@ -3279,6 +3404,30 @@ def _decode_runtime_services(
             )
         )
     )
+    if cable is not None:
+        lowerers += tuple(
+            factory(cable)
+            for factory in (
+                _CablePickFactory,
+                _CableMoveFactory,
+                _CableJointFactory,
+                _CableCheckFactory,
+            )
+        )
+    if cable is not None and cable.operations:
+        from .simulation._cable_contact import (
+            CableCompactPickFactory,
+            CableCompactPlaceFactory,
+        )
+
+        lowerers += tuple(
+            factory(cable)
+            for kind, factory in (
+                ("pick_up", CableCompactPickFactory),
+                ("place", CableCompactPlaceFactory),
+            )
+            if any(operation.kind == kind for operation in cable.operations)
+        )
     lowerer_call_ids = tuple(factory.call_id for factory in lowerers)
     if len(set(lowerer_call_ids)) != len(lowerer_call_ids):
         raise ValueError(
@@ -3434,6 +3583,7 @@ def _decode_runtime_services(
         hand_geometries=hand_geometries,
         handover_pose_providers=handover,
         registered_semantic_lowerers=lowerers,
+        cable_material=cable,
         control_part_evidence=evidence,
         nominal_motion_sources=tuple(nominal),
         settle_presets=(
@@ -3462,6 +3612,8 @@ class _ConfiguredTaskProgramAdapterFactory:
     def create_adapter(
         self,
         environment: object,
+        *,
+        grasp_contact_frames: Mapping[str, object] | None = None,
     ) -> TaskProgramEnvironmentAdapter:
         """Create a live adapter for an initialized environment."""
         from .demo_skill import _ConfiguredDemoSkillSource
@@ -3472,7 +3624,9 @@ class _ConfiguredTaskProgramAdapterFactory:
         ):
             if getattr(environment, "num_envs", None) != 1:
                 raise ValueError("configured Demo Skills require num_envs == 1")
-        adapter = self.delegate.create_adapter(environment)
+        adapter = self.delegate.create_adapter(
+            environment, grasp_contact_frames=grasp_contact_frames
+        )
         adapter._set_configured_nominal_sources(self.nominal_motion_sources)
         return adapter
 
@@ -3484,6 +3638,7 @@ def _decode_evaluation(
     robot_profile: SimulationRobotSkillProfileBinding | None = None,
     robot_links: Mapping[str, str] | None = None,
     registry: PredicateRegistry | None = None,
+    cable_material: object | None = None,
     transport_targets: Mapping[str, _MoveHeldObjectLowererFactory] | None = None,
 ) -> tuple[dict[str, CompiledEvaluation], tuple[str, ...], tuple[str, ...]]:
     if value is None:
@@ -3500,6 +3655,13 @@ def _decode_evaluation(
         for binding in scene.rigid_objects
         for quantity in ("pose", "frame", "segment_start_frame", "lin_vel", "ang_vel")
     }
+    if cable_material is not None:
+        from .simulation.cable import _METRICS
+
+        for quantity in _METRICS:
+            channels[f"cables/{cable_material.entity_id}/{quantity}"] = (
+                f"cables/{cable_material.simulation_uid}/{quantity}"
+            )
     articulations = {
         binding.entity_id: binding.simulation_uid for binding in scene.articulations
     }
@@ -3667,6 +3829,16 @@ def _decode_configured_task_program_integration(
         config.get("runtime_services", {}), robot_profile_binding=robot_profile_binding
     )
 
+    if services.cable_material is not None:
+        cable = services.cable_material
+        if not any(
+            binding.entity_id == cable.entity_id
+            and binding.simulation_uid == cable.simulation_uid
+            for binding in scene_binding.cables
+        ):
+            raise ValueError(
+                "The cable material service must match one declared scene cable binding."
+            )
     call_catalog = builtin_semantic_call_catalog(
         include_transport=any(
             "move_held_object" in preset.skill_option_templates
@@ -3687,6 +3859,7 @@ def _decode_configured_task_program_integration(
         robot_profile=robot_profile_binding,
         robot_links=evaluation_robot_links,
         registry=evaluation_registry,
+        cable_material=services.cable_material,
         transport_targets={
             factory.target_id: factory
             for factory in services.registered_semantic_lowerers

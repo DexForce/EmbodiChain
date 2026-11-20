@@ -108,7 +108,7 @@ def _rows(path: Path) -> list[dict[str, Any]]:
 def prepare(raw: Path, output: Path, dataset: str, *, limit_per_split: int = 0) -> Path:
     """Write author-compatible packed vertices without storing videos."""
     import trimesh
-    from embodichain_models.dynamics.rigidformer._native.data.dataset import (
+    from embodichain.extensions.models.dynamics.rigidformer._native.data.dataset import (
         MultiObjectDynamics,
     )
 

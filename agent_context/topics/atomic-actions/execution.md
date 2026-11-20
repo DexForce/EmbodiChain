@@ -47,6 +47,15 @@ implementation `_plan(request, context)` hook.
 - `ExecutionRunner` drives that session against observation, command, and clock
   ports without blocking `step()`.
 
+An opt-in `SkillPlan.continuation` requests fresh-observation planning inside
+one invocation. Progress is bounded and strictly advances; rejected rows cannot
+return. `PLAN_CONTINUED` records each installed chunk without consuming a retry
+or resetting the invocation timeout. Intermediate chunks commit no symbolic
+effects. Contact paths require execution, reject offline `compile()`, external
+nominal/expanded trajectories and invocation revisions, and retain loaded joint
+targets across internal holds. `PlanningContext.planning_mask` scopes geometric
+reductions and IK to the session's eligible rows before selecting shared timing.
+
 For a prequalified replay, `MoveJoints` accepts a typed full-robot
 `TimedTrajectory`. Each command occupies one environment control step.
 The motion binding covers all joints, and the selected rows match the planning
@@ -213,7 +222,7 @@ configured minimum cycle up to an advertised clock quantum before sleeping.
 The benchmark extension's `scenarios/_replay_diagnostics.py` and
 `atomic_replay.py` collect optional Atomic replay evidence without changing
 stage scoring or controller commands. The
-[benchmark README](../../../extensions/embodichain_benchmarks/motion_generation/README.md#physical-replay-diagnostics)
+[benchmark README](../../../embodichain/extensions/benchmarks/motion_generation/README.md#physical-replay-diagnostics)
 owns the configuration, recorded fields and timing interpretation.
 
 ## Planning budgets and adoption
@@ -269,3 +278,29 @@ unchanged. HandOver can explicitly retract
 sampled grasp TCPs through `grasp_retract_distance` before deriving transport
 and handover targets. The offset is a planning declaration; acquisition,
 retention and final acceptance still require the original physical evidence.
+
+## Tolerance-bounded invocation handoff
+
+`TrackingPolicy.boundary_stop` adds a joint-motion stop gate without replacing
+timed/feedback terminal acceptance or effect verification. It retains the exact
+terminal command, including hand targets, until two distinct observations satisfy
+the configured target error and control-grid measured-position speed tolerances.
+Rows that are ready retain their terminal arm/hand targets while eligible peers
+wait at the batch barrier; failed rows remain masked out.
+Native qvel remains a finite-data check and is logged separately; its post-substep
+value is not substituted for the control-grid derivative. Invalid rows and physical
+timeouts fail closed without keeping failed rows in another terminal gate's mask.
+The state resets on plan installation/recovery; snapshots preserve independent
+ownership. This is not strict reference continuity, C1/C2 blending or a zero
+tracking-error guarantee. `boundary_diagnostic` events identify tolerances, elapsed
+physical time and per-row error/speed/readiness.
+
+`boundary_reference_bridge` optionally separates controller-reference continuity
+from measured state. Native free entry phases can receive a bounded rest-to-rest
+prefix from captured drive targets to their original first sample. The original
+phase name, held/contact guards and suffix remain; lengths/monitor indices shift
+together. Prefix and join stencils are protected from expansion and retiming;
+rebuilding cannot prepend twice. Projected observations advance owned references
+without overwriting measured evidence. External nominal/unsupported phases retain
+existing behavior with explicit unavailable diagnostics. Physical qualification
+remains required after collision certificates are invalidated.

@@ -91,10 +91,10 @@ class _Candidate:
 
 
 def _embodiment() -> dict[str, Any]:
-    # Importing embodichain_tasks auto-registers Gym environments. Resolve the
+    # Importing embodichain.extensions.tasks auto-registers Gym environments. Resolve the
     # physical resource through the core path helper instead, including wheels.
     path = resolve_config_path(
-        "extensions/embodichain_tasks/configs/components/embodiments/ur5_dh_pgi_140_80.yaml",
+        "embodichain/extensions/tasks/configs/components/embodiments/ur5_dh_pgi_140_80.yaml",
         base_dir=Path(__file__).parent,
     )
     from embodichain.lab.gym.utils.composition import resolve_gym_components

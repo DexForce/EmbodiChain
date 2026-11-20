@@ -26,20 +26,31 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg, load_suite
-from embodichain_benchmarks.motion_generation.limits import (
+from embodichain.extensions.benchmarks.motion_generation.config import (
+    PlannerSpecCfg,
+    load_suite,
+)
+from embodichain.extensions.benchmarks.motion_generation.limits import (
     resolve_dynamic_limit,
     resolve_robot_velocity_limits,
     resolve_velocity_limits,
 )
-from embodichain_benchmarks.motion_generation.models import BenchmarkCase
-from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
-from embodichain_benchmarks.motion_generation.planners.curobo import CuroboAdapter
-from embodichain_benchmarks.motion_generation.planners.ik_interpolate import (
+from embodichain.extensions.benchmarks.motion_generation.models import BenchmarkCase
+from embodichain.extensions.benchmarks.motion_generation.planners.base import (
+    PlannerContext,
+)
+from embodichain.extensions.benchmarks.motion_generation.planners.curobo import (
+    CuroboAdapter,
+)
+from embodichain.extensions.benchmarks.motion_generation.planners.ik_interpolate import (
     IkInterpolateAdapter,
 )
-from embodichain_benchmarks.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
-from embodichain_benchmarks.motion_generation.planners.toppra import ToppraAdapter
+from embodichain.extensions.benchmarks.motion_generation.planners.nmg_onnx import (
+    NmgOnnxAdapter,
+)
+from embodichain.extensions.benchmarks.motion_generation.planners.toppra import (
+    ToppraAdapter,
+)
 
 
 def _robot() -> SimpleNamespace:
@@ -174,7 +185,7 @@ def test_curobo_atomic_policy_preserves_prepared_backend_budget() -> None:
         MotionPolicy,
     )
     from embodichain.lab.sim.motion.motion_generator import MotionGenerator
-    from embodichain_benchmarks.motion_generation.scenarios.atomic_policy import (
+    from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_policy import (
         with_plan_options,
     )
 
@@ -207,7 +218,7 @@ def test_curobo_atomic_policy_preserves_prepared_backend_budget() -> None:
 
 def test_curobo_benchmark_forwards_fast_settings(monkeypatch) -> None:
     """A/B suite settings must reach the production planner configuration."""
-    from embodichain_benchmarks.motion_generation.planners import curobo
+    from embodichain.extensions.benchmarks.motion_generation.planners import curobo
 
     generator = Mock()
     monkeypatch.setattr(curobo, "MotionGenerator", generator)
@@ -311,7 +322,7 @@ def test_explicit_zero_speed_cap_is_preserved_and_moving_path_fails() -> None:
 @pytest.mark.parametrize(
     "path",
     sorted(
-        Path("extensions/embodichain_benchmarks/motion_generation/suites").glob(
+        Path("embodichain/extensions/benchmarks/motion_generation/suites").glob(
             "*.yaml"
         )
     ),
@@ -335,7 +346,7 @@ def test_shipped_suites_share_explicit_timed_planning_budgets(path: Path) -> Non
 
 def test_atomic_migration_preserves_existing_toppra_budgets() -> None:
     """Moving budgets to protocol must not accelerate existing Atomic tasks."""
-    for path in Path("extensions/embodichain_benchmarks/motion_generation/suites").glob(
+    for path in Path("embodichain/extensions/benchmarks/motion_generation/suites").glob(
         "atomic*.yaml"
     ):
         suite = load_suite(path)

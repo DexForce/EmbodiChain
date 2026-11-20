@@ -190,6 +190,37 @@ class ExpansionJournal:
         _atomic_json(path, record)
         return record
 
+    def allocate_recipe(self, recipe: ExpansionRecipe) -> RecipeAttempt:
+        """Allocate one fresh rolling attempt while independent peers are active.
+
+        The single writer supplies a unique, monotonically increasing ordinal.
+        This port does not resume interrupted attempts or change collection
+        budgets; native workload admission remains responsible for those limits.
+        """
+        if self.run_id is None or self.operation != "all":
+            raise RuntimeError("rolling allocation requires an open collection run")
+        records = self.attempts()
+        if records and recipe.context.ordinal <= max(r["ordinal"] for r in records):
+            raise ValueError("rolling recipe ordinals must increase")
+        sequence = len(records)
+        directory = self.root / "attempts" / f"{sequence:08d}"
+        if directory.exists():
+            raise FileExistsError("attempt sequence already exists")
+        _atomic_json(
+            directory / "attempt.json",
+            {
+                "sequence": sequence,
+                "ordinal": recipe.context.ordinal,
+                "recipe_id": recipe.recipe_id,
+                "recipe_spec": recipe.to_dict(),
+                "attempt_id": 0,
+                "run_id": self.run_id,
+                "status": "proposed",
+                "steps": 0,
+            },
+        )
+        return RecipeAttempt(recipe, 0, sequence, directory)
+
     def reconcile(self, sink: object) -> None:
         """Repair frozen writes before admitting any physical retry."""
         confirmed = {r.commit_id: r for r in sink.inspect()}

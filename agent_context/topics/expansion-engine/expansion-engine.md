@@ -10,13 +10,21 @@ algorithms stay in `sim.motion.expansion`; scene and workspace algorithms stay i
 | Closed configuration and preflight | `embodichain/lab/expansion/configured.py` |
 | Canonical in-memory session, lifecycle limits and coverage port | `embodichain/lab/expansion/session.py`, `session_cfg.py`, `coverage.py` |
 | Shared scheduling, admission and commit ports | `embodichain/lab/expansion/engine.py` |
+| Rolling workload × B execution in one caller-owned World | `embodichain/lab/expansion/workloads.py` |
+| Native workload World, source/evidence assembly and bounded export | `embodichain/lab/expansion/gym_workloads.py` |
+| Declarative scene/motion jobs and pure configuration validation | `embodichain/lab/expansion/task_program_jobs.py`, `_task_program_config.py` |
+| Owned result-preview launch, wait and stop | `embodichain/lab/expansion/preview.py` |
 | Job assembly, stage recovery and inspect | `embodichain/lab/expansion/workflow.py`, `stages.py` |
 | Native World ownership and compatibility facade | `embodichain/lab/expansion/host.py` |
+| Task-owned render/source/transform/acceptance ports | `embodichain/lab/expansion/host_extensions.py` |
+| Measured geometry, native substeps and sustained-contact acceptance | `embodichain/lab/expansion/acceptance.py` |
+| Physics-free measured reference/ghost comparison | `embodichain/lab/expansion/comparison.py` |
 | Native recipes, cohort preparation, step observation and episode assembly | `embodichain/lab/expansion/_gym_recipe.py`, `_gym_prepare.py`, `_gym_execution.py`, `_gym_frames.py`, `_gym_episode.py` |
 | Durable recipes, attempts and invocation budgets | `embodichain/lab/expansion/journal.py` |
 | Task Program execution with native or prototype motion | `embodichain/lab/expansion/program.py`, `real2sim.py` |
 | Source-pinned sampling and joint scene candidates | `embodichain/lab/expansion/recipes.py`, `scene.py` |
 | Artifact staging, checks and dataset export | `embodichain/lab/expansion/persistence.py`, `export.py` |
+| Portable one-episode dataset export | `embodichain/lab/expansion/episode_export.py` |
 | Native appearance and state rerender | `embodichain/lab/expansion/visual.py` |
 | Bounded media blocks | `embodichain/data_pipeline/recording/media.py` |
 
@@ -38,7 +46,10 @@ configured jobs. `sampled_rigid_v1` collision profiles independently check all
 physical box/plane scene bodies and task predicates from measured states. Their
 robot-base transforms are rebound after each cohort's scene preparation.
 State-only jobs retain independent and robot-mounted ContactSensors while
-omitting cameras; contact acquisition does not require media capture.
+omitting cameras; contact acquisition does not require media capture. Sustained
+contact windows round off-grid durations upward, allowing only ULP-scale grid
+roundoff. Their elapsed time sums measured physics intervals within the bounded
+window; it does not subtract accumulated World clocks.
 Immutable recipes declare
 source/backend/phase/scope and shared-resource compatibility; the host checks them
 before mutating the World.
@@ -71,6 +82,63 @@ sampling, whole-cohort preparation, active-row frame buffering and measured epis
 assembly have separate owners. Preserve the host constructor, port methods and
 existing readout properties used by benchmark/showcase instrumentation.
 
+`GymExpansionHostExtensions` supplies non-owning callbacks for collection renderer,
+scene source, immutable recipe transformation, measured validator and row plan
+factory. `ExpansionRowContext` carries pinned identity without exposing mutable
+host buffers. Hosts retain preparation, control clocks, T+1 capture, attachment
+archival and confirmed receipts. Do not replace configured nominal sources with
+an extension transform. `MeasuredExpansionValidator` presents the same lifecycle
+for independent geometry and native contacts, including task-declared sustained
+finger contact and drift limits. Every original physical substep remains required;
+missing impulses, unknown actors and dropped samples reject acceptance.
+
+`preview_expansion_comparison` consumes a caller-owned environment factory and
+qualified measured episodes. Shared-time pause/switch controls retain the selected
+time; physics stays disabled and render updates do not mutate saved evidence.
+`MarkerFramePublisher` owns resident robot/object groups and publishes a coherent
+cross-group frame through the public marker layer. Task assets and any collection
+process orchestration remain outside the replay core.
+
+`embodichain expansion preview --input` reads confirmed job outputs through `_preview_data.py`,
+then replays full measured states using `_preview_render.py` and
+`_preview_server.py`. Browser replay defaults to the DexSim WebRTC observer
+and its owner-thread application. `_frontend/` owns the packaged preview
+HTML, CSS and JavaScript and the offline distribution report template.
+Video is separate from the HTTP replay state; authenticated commands queue only
+validated replay controls. Inputs retain their original evidence; no collection or
+physics stepping occurs. It accepts one URDF robot and recorded rigid visual
+objects (including file Mesh/USD via native visual loading), with fixed layouts;
+unsupported geometry is rejected. Constant static backgrounds remain single
+instances. The solid robot and objects always follow the explicit reference,
+or the first input recording when a reference is absent. The play button and
+Space key toggle playback. Candidate buttons toggle individual ghosts. See the
+[UR5 layout and grasp tutorial](../../../scripts/tutorials/expansion/ur5_pick_place/README.md)
+for collection and replay. Filters preserve each toggle and playback of the solid
+trajectory. Space filters group input directories and missing motion annotations
+remain explicit. `_preview_deviations.py` reuses recorded world FK and gripper
+calibration for TCP errors. At each reference time it reports the minimum, mean
+and maximum across recordings still in range for TCP translation distance,
+TCP rotation angle and each episode's worst joint deviation. `_preview_heatmap.py`
+bins the measured first-frame XY of each rigid target in an `object_pose` input
+episode's `joint_scene.pose_changes`. Each axis fits the object's measured starts
+independently with half a bin of padding at either end, or a 1 mm window for a
+constant coordinate. The recipe's selected motion operator takes
+precedence over the job-level operator. The explicit reference belongs to replay.
+Static chart payloads and HTTP replay metadata are independent of the encoded video. FK and episode
+budgets bound preload, controls are queued for the render owner, and native
+resources/ports close on exit. See the example's `ghost-preview.md` for usage.
+
+`preview --job` uses `_preview_job.py` to freeze lower/upper/center and stratified
+interior parameter points, then invokes ordinary native collection in owned child
+processes before opening the viewer. Physical ranges, atlas request domains and
+explicit joint/via-point draws retain original validation. Each point enumerates
+its configured motion/affordance recipes; exact-zero residuals collapse to the
+unique nominal variant. Source semantics and aggregate attempts/time budgets are
+checked, failed endpoints remain in the coverage manifest, and no replacement
+sampling or success credit is allowed. Original job outputs remain untouched. Episodes archive `source_env_id` for
+row-correct diagnostics even without a motion profile; ambiguous legacy grasp
+annotations remain unavailable rather than selecting row zero.
+
 `TaskProgramDemoBridge.program_id` and `env_ids` expose binding identity without
 runtime traversal. `EmbodiedEnv.task_program_bridge_scope()` restores the borrowed
 bridge even after failure. `Real2SimTabletopSource` and explicit
@@ -82,7 +150,7 @@ journal/duplicate-submission behavior.
 Cohorts have fixed robot/joint topology, backend, clock, observation schema and
 World appearance. Native scene-atlas input retains the complete layout/installation
 candidate. Assets with different topology require separate deployment Worlds.
-All rows reset and settle together. Only the owner steps physics, and row generators
+The configured cohort path resets and settles its rows together. Only the owner steps physics, and row generators
 acknowledge commands only after successful steps. Early termination must drain the
 Task Program safe-stop handshake; completed rows stop contributing frames.
 Native vector rejection cancels the row across semantic lanes and masks retained
@@ -90,6 +158,27 @@ commands. Its safe hold uses the next ordinary step, preserving surviving rows'
 post-policy observation clock. Expected Real2Sim acceptance rejection retains
 measured checks and rejects only that row; source corruption and runtime errors
 still stop collection.
+
+`WorkloadProgramExecutor` is an optional rolling integration for custom native
+sources. Its supplied environment must have exactly `workload_count * batch_size`
+rows and be the sole live World in the process. Each workload owns quotas, local
+candidate ordinals and admission budgets; its B-row lane is reused after that
+group drains. Preparing rows settle through ordinary control steps while live
+rows continue to record and validate every boundary. The source owns scene
+proposals, bridge binding and all physical checks, using `ExpansionEngine.admit_row`,
+`mark_row_started` and `complete_row` instead of editing private engine queues.
+Only confirmed native receipts earn quota or permit reuse; duplicate identities
+cannot earn credit twice. Clock spans must equal each trajectory's command count.
+Compatible fixed-grid planning and pure solver requests can be cooperatively
+merged on the owner thread. Scoped planning budgets retain per-row charges;
+unsupported requests keep native execution. Export callbacks receive frozen
+group evidence and never access the World. See [rolling execution](workloads.md).
+Optional idle-row reuse keeps the same W×B capacity while competing retry
+candidates use otherwise idle slots. Native write reservations still enforce
+the original quota; peers are cancelled only after a confirmed receipt, using
+measured partial evidence and the bridge's ordinary stop handshake. The low-level
+source must supply an explicit cancellation port. Native Task Program jobs opt in
+with the [idle-row reuse setting](workloads.md#source-ports-and-native-accounting).
 
 Native numerical evidence has T submitted actions and T+1 measured states. It includes
 all represented dynamic scene entities, source/action semantics, physical parameters
@@ -102,6 +191,11 @@ has bounded transient copies; no per-candidate dense full-episode image array is
 Frame readers stream selected frames from stored blocks; full artifact audits still
 validate bounded blocks. LeRobot export streams confirmed parents and visual children through the existing
 recorder and checks the exact final journal identity set. ODS remains unchanged.
+`export_expansion_episodes` additionally publishes one portable LeRobot dataset
+per confirmed parent. Cached evidence reads still hash every file byte and
+reconstruct checked, independently owned numerical tensors; source/receipt/media
+inspection remains required. Immutable JSON nodes can be shared internally, while
+public mutable projections own separate containers.
 
 Pure visual replay requires complete scene state and an explicit observation-independent
 expert contract. Physics is disabled across the entire World; render-state publication
@@ -130,3 +224,42 @@ measured state plus explicitly labeled FK, and pure-visual children retain their
 physical parent's clock. Qualification requires admitted operator evidence, not
 just a requested profile or completed nominal episodes. Report completeness and
 capability acceptance are separate, including diagnostic unsupported combinations.
+
+## Offline distribution reports
+
+`python -m embodichain.lab.expansion._distribution` compares explicit before/after
+confirmed job directories using the existing receipt inspector and episode loader.
+It emits structured JSON/JSONL and a standalone HTML report with world-XY layout
+bins, start/end joint counts, measured object paths, joint-motion summaries, and
+existing geometry descriptor buckets. Version 2 adds full SO(3) orientation
+features and recorded-URDF TCP FK with explicit gripper calibration. A lightweight
+index drives filters; 100-record detail pages are shared by the offline viewer
+and Agent JSON consumers. Matching task/robot/scene domains are required.
+The report distinguishes cumulative additions from independent cohorts; observed
+bins are not a feasible-volume certificate. The reader uses existing artifact
+validation dependencies but creates no World. See
+[distribution usage](../../../embodichain/lab/expansion/distribution.md).
+
+Native configured jobs snapshot execution policies through the canonical selector
+resolver and default `tracking.boundary_stop` on. Supported native free entry
+phases also inherit `boundary_reference_bridge` from that setting; explicit
+flags retain their values. Atomic planning owns the bounded prefix and protected
+join, not a postprocessing filter. Preserve explicit opt-out and
+component overrides. They do not mutate authored policy files or replace physical
+validators. The Atomic terminal gate owns additional real command frames; these
+consume ordinary rollout budgets and T+1 evidence. See
+[invocation handoff](../atomic-actions/execution.md#tolerance-bounded-invocation-handoff)
+and [boundary diagnostics](../../../examples/expansion/engine/skill-boundaries.md).
+
+Native joint-residual and via-point generation retain their original proposal budgets and
+full-amplitude preference. On exhaustion, the adapter may deterministically
+shrink one closest motion rejection under unchanged minimum-delta, joint, motion,
+FK and physical checks. It preserves the time grid and protected samples; metadata
+records the raw proposal count, refinement scale and both validation results.
+See [boundary and residual qualification](../../../examples/expansion/engine/skill-boundaries.md).
+
+Native same-grid generators narrow editable phases using the handoff protection
+range before sampling. Raw protected indices are mapped through zero-time sample
+canonicalization; protected-only motion does not make a joint editable. Empty
+remaining phases are disabled. Engine reconstruction retains its independent
+exact-prefix check as the final boundary.

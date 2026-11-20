@@ -20,7 +20,7 @@ the caller's module modes and does not retain a gradient graph.
 Public model family
 -------------------
 
-.. currentmodule:: embodichain_models.dynamics.rigidformer
+.. currentmodule:: embodichain.extensions.models.dynamics.rigidformer
 
 .. autosummary::
 
@@ -58,7 +58,7 @@ Public model family
 Architecture and geometry contract
 ----------------------------------
 
-.. currentmodule:: embodichain_models.dynamics.rigidformer.model
+.. currentmodule:: embodichain.extensions.models.dynamics.rigidformer.model
 
 .. autosummary::
 
@@ -76,7 +76,7 @@ Architecture and geometry contract
 Official weights and native SL export
 -------------------------------------
 
-.. currentmodule:: embodichain_models.dynamics.rigidformer.checkpoint
+.. currentmodule:: embodichain.extensions.models.dynamics.rigidformer.checkpoint
 
 .. autosummary::
 
@@ -90,7 +90,7 @@ Official weights and native SL export
 Prepared packed scenes
 ----------------------
 
-.. currentmodule:: embodichain_models.dynamics.rigidformer.data
+.. currentmodule:: embodichain.extensions.models.dynamics.rigidformer.data
 
 .. autosummary::
 
@@ -102,7 +102,7 @@ Prepared packed scenes
 Shifted supervision and anchor losses
 -------------------------------------
 
-.. currentmodule:: embodichain_models.dynamics.rigidformer.supervised
+.. currentmodule:: embodichain.extensions.models.dynamics.rigidformer.supervised
 
 .. autosummary::
 
@@ -117,7 +117,7 @@ Shifted supervision and anchor losses
 Recoverable EMA state
 ---------------------
 
-.. currentmodule:: embodichain_models.dynamics.rigidformer.ema
+.. currentmodule:: embodichain.extensions.models.dynamics.rigidformer.ema
 
 .. autosummary::
 
@@ -129,7 +129,7 @@ Recoverable EMA state
 Shared SL training recipe
 -------------------------
 
-.. currentmodule:: embodichain_models.dynamics.rigidformer.sl_recipe
+.. currentmodule:: embodichain.extensions.models.dynamics.rigidformer.sl_recipe
 
 .. autosummary::
 

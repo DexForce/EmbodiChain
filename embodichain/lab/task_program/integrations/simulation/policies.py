@@ -82,6 +82,7 @@ from .stability import (
     SimulationStabilityConditionCfg,
     SimulationJointStabilityConditionCfg,
 )
+from embodichain.lab.task_program.semantics.scene import SceneLinkRef
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs.episode_context import EpisodeContext
@@ -321,6 +322,13 @@ class SimulationSegmentPolicyPort:
                         "Joint stability requires its exact bound articulation and joint."
                     )
                 self._joint_conditions[name] = (art, art.joint_names.index(cfg.joint))
+        self._reference_links = {
+            binding.entity_id: (
+                self._articulations[binding.articulation_id],
+                binding.native_link_name,
+            )
+            for binding in scene_binding.links
+        }
         self._post_policy_results: dict[int, dict[str, object]] = {}
         self._post_policy_success: dict[int, torch.Tensor] = {}
         self._validator_results: dict[int, dict[str, object]] = {}
@@ -450,6 +458,23 @@ class SimulationSegmentPolicyPort:
         """Return installed post-policy preset IDs in declaration order."""
         return tuple(self._settle_presets)
 
+    def _observe_consumed_action(
+        self, action: Any, *, runtime: Any
+    ) -> tuple[torch.Tensor, torch.Tensor, str] | None:
+        """Measure provider-owned invariants after a host-acknowledged command.
+
+        Returns row rejection and a proposed hold. The bridge remains the only
+        owner of command encoding and dispatch; this port never steps physics.
+        """
+        cable = getattr(self, "_cable_runtime", None)
+        if cable is None:
+            return None
+        rejected, reason = cable.after_action(action, runtime)
+        if not bool(rejected.any()):
+            return None
+        hold = self._robot.get_qpos(target=True).index_select(0, self._env_ids)
+        return rejected, hold, reason
+
     def new_task_program_session(self) -> SimulationSegmentPolicyPort:
         """Create fresh episode state while retaining the validated scene bindings.
 
@@ -460,6 +485,7 @@ class SimulationSegmentPolicyPort:
         self._require_open()
         session = copy(self)
         session._hold_observer = None
+        session._cable_runtime = None
         session._target_observer = None
         session._post_policy_results = {}
         session._post_policy_success = {}
@@ -727,6 +753,7 @@ class SimulationSegmentPolicyPort:
                 context, attached, previous_target = self._hold_observer(
                     cfg.object, accepted
                 )
+                attached = attached.to(device=active_mask.device)
                 self.validate_observation_scope(clock)
                 if clock.step_index != start + tick:
                     raise ValueError("Hold observation changed its execution clock.")
@@ -752,6 +779,7 @@ class SimulationSegmentPolicyPort:
                             name="hold.at",
                         )
                     )
+                target = target.to(device=active_mask.device)
                 pose = context.scene.entities[cfg.object].pose.to(target)
                 if pose.ndim == 2:
                     pose = pose.unsqueeze(0).expand(active_mask.numel(), -1, -1)
@@ -1225,7 +1253,12 @@ class SimulationSegmentPolicyPort:
             return
         if type(validator) is CompiledObjectStateValidator:
             for ref in (validator.object, validator.reference):
-                if ref is not None and ref.entity_id not in self._objects:
+                bindings = (
+                    self._reference_links
+                    if type(ref) is SceneLinkRef
+                    else self._objects
+                )
+                if ref is not None and ref.entity_id not in bindings:
                     raise KeyError(
                         f"Canonical validator object {ref.entity_id!r} has no explicit object binding."
                     )
@@ -1444,14 +1477,30 @@ class SimulationSegmentPolicyPort:
             }
         elif validator.cfg.kind == "object_relative_position":
             assert validator.reference is not None
-            reference = self._read_pose(
-                self._objects[validator.reference.entity_id],
-                entity_id=validator.reference.entity_id,
-                require_finite=False,
-            ).to(device=pose.device, dtype=pose.dtype)
+            if type(validator.reference) is SceneLinkRef:
+                articulation, native_name = self._reference_links[
+                    validator.reference.entity_id
+                ]
+                reference = articulation.get_link_pose(
+                    native_name,
+                    env_ids=self._row_indices.detach().cpu().tolist(),
+                    to_matrix=True,
+                )
+                if (
+                    not isinstance(reference, torch.Tensor)
+                    or not reference.is_floating_point()
+                    or reference.shape != pose.shape
+                ):
+                    raise ValueError("Reference link pose must have shape (B, 4, 4).")
+            else:
+                reference = self._read_pose(
+                    self._objects[validator.reference.entity_id],
+                    entity_id=validator.reference.entity_id,
+                    require_finite=False,
+                )
             measured = _relative_position(
                 pose,
-                reference,
+                reference.to(device=pose.device, dtype=pose.dtype),
                 pose.new_tensor(validator.cfg.position_offset),
                 validator.cfg.position_tolerance,
                 parent_axes=validator.cfg.reference_frame == "parent",
@@ -1883,7 +1932,14 @@ class SimulationSegmentPolicyPort:
             target.native_entity,
             entity_id=target.canonical_id,
         )
-        pose = pose.index_select(0, row_indices.to(pose.device))
+        # _read_pose already selects this port's bound physical rows. Convert
+        # the requested World IDs to local offsets instead of selecting twice
+        # with the original IDs (for example row 7 in a B=1 policy port).
+        matches = row_indices[:, None] == self._row_indices[None, :]
+        if not bool((matches.sum(dim=1) == 1).all()):
+            raise ValueError("Pose-delta settling requested an unbound physical row")
+        local = matches.long().argmax(dim=1).to(pose.device)
+        pose = pose.index_select(0, local)
         row_count = row_indices.numel()
         if previous_pose is None:
             speed = torch.full(

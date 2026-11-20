@@ -73,6 +73,7 @@ def test_map_registers_the_supported_context_domains() -> None:
         "task-spec",
         "task-engine",
         "gen-sim",
+        "assembly-assets",
         "data-assets",
         "asset-generalization",
         "data-pipeline",
@@ -169,7 +170,7 @@ def test_rl_only_config_changes_do_not_select_task_program_context() -> None:
     affected = helper.affected_topics(
         data,
         [
-            "extensions/embodichain_tasks/configs/tasks/"
+            "embodichain/extensions/tasks/configs/tasks/"
             "classic_control/cart_pole/agents/ppo.yaml"
         ],
     )
@@ -181,7 +182,7 @@ def test_rl_only_config_changes_do_not_select_task_program_context() -> None:
 def test_task_program_deployments_and_shared_components_remain_watched() -> None:
     helper = _load_helper()
     data = helper.load_map(_REPOSITORY_ROOT)
-    config_root = "extensions/embodichain_tasks/configs/"
+    config_root = "embodichain/extensions/tasks/configs/"
     paths = [
         "tasks/manipulation/repeated_pick_place/task.ur5.yaml",
         "tasks/manipulation/repeated_pick_place/task_program/integration.yaml",

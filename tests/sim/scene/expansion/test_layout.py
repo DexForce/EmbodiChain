@@ -24,6 +24,7 @@ import pytest
 import torch
 
 from embodichain.lab.sim.scene.expansion import (
+    SceneLayoutCondition,
     SceneLayoutInput,
     SceneRandomizationPolicyCfg,
     ScenePoseChange,
@@ -144,6 +145,72 @@ def test_root_offset_bounds_preserve_batch_prefix_and_saved_poses(
         assert np.all(delta <= np.asarray(bounds)[1] + 1e-10)
     run = save_scene_variants(results[0], tmp_path / "run")
     assert tuple(load_scene_variants(run).variants) == tuple(results[0].variants)
+
+
+def test_bounded_roots_on_separate_support_patches_and_over_a_gap(tmp_path) -> None:
+    import trimesh
+
+    def pad(width, x):
+        part = trimesh.creation.box([width, 0.18, 0.04])
+        part.apply_translation([x, 0, 0])
+        return part
+
+    # The largest top is elsewhere. Two planks overhang their own smaller pads.
+    support = trimesh.util.concatenate(
+        [pad(0.5, 0.55), pad(0.12, -0.4), pad(0.12, -0.05)]
+    )
+    plank = trimesh.creation.box([0.20, 0.06, 0.04])
+    meshes = {"rack": support, "moving": plank, "fixed": plank}
+    poses = {uid: np.eye(4) for uid in meshes}
+    poses["moving"][:3, 3] = [-0.4, 0, 0.04]
+    poses["fixed"][:3, 3] = [-0.05, 0, 0.04]
+    source = SceneLayoutInput(
+        "rack-layout",
+        "rack",
+        poses,
+        {u: m.vertices for u, m in meshes.items()},
+        {u: m.faces for u, m in meshes.items()},
+        {"moving": "rack", "fixed": "rack"},
+        ("moving",),
+    )
+    policy = dict(
+        group_targets=["moving"],
+        group_xy_offset_bounds_m={"moving": [[-0.1, -0.1], [0.1, 0.1]]},
+    )
+    prepared = prepare_scene_randomization(source, policy)
+    result = generate_scene_variants(prepared, candidate_count=8, seed=13)
+    assert result.status == "completed"
+    centers = np.array([v.pose_changes[0].arena_pose for v in result.variants])[
+        :, :2, 3
+    ]
+    assert np.ptp(centers[:, 0]) > 0.005
+    assert np.all(np.abs(centers - [-0.4, 0]) <= [0.06, 0.09])
+    anchor = poses["moving"].copy()
+    anchor[0, 3] += 0.01
+    anchored = generate_scene_variants(
+        prepared, candidate_count=1, conditions=SceneLayoutCondition({"moving": anchor})
+    )
+    assert anchored.status == "completed"
+    run = save_scene_variants(anchored, tmp_path / "supported")
+    assert tuple(load_scene_variants(run, scene_input=source).variants) == tuple(
+        anchored.variants
+    )
+    anchor[0, 3] = -0.31
+    assert (
+        generate_scene_variants(
+            prepared,
+            candidate_count=1,
+            max_attempts=4,
+            conditions=SceneLayoutCondition({"moving": anchor}),
+        ).status
+        == "budget_exhausted"
+    )
+    poses["fixed"][1, 3] = 0.35
+    unsupported = prepare_scene_randomization(replace(source, poses=poses), policy)
+    assert (
+        generate_scene_variants(unsupported, candidate_count=1, max_attempts=4).status
+        == "budget_exhausted"
+    )
 
 
 def test_fixed_descendant_permission_is_not_implicitly_relaxed() -> None:

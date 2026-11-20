@@ -24,14 +24,18 @@ from embodichain.lab.sim.motion.planners.utils import PlanResult
 import pytest
 import torch
 
-from embodichain_benchmarks.motion_generation.aggregation import aggregate_results
-from embodichain_benchmarks.motion_generation.config import SuiteCfg
-from embodichain_benchmarks.motion_generation.contracts import EvaluationDomain
-from embodichain_benchmarks.motion_generation.metrics.trajectory import (
+from embodichain.extensions.benchmarks.motion_generation.aggregation import (
+    aggregate_results,
+)
+from embodichain.extensions.benchmarks.motion_generation.config import SuiteCfg
+from embodichain.extensions.benchmarks.motion_generation.contracts import (
+    EvaluationDomain,
+)
+from embodichain.extensions.benchmarks.motion_generation.metrics.trajectory import (
     compute_case_outcomes,
     make_failure_outcomes,
 )
-from embodichain_benchmarks.motion_generation.models import (
+from embodichain.extensions.benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
@@ -39,7 +43,9 @@ from embodichain_benchmarks.motion_generation.models import (
     TrialPhase,
     TrialRecord,
 )
-from embodichain_benchmarks.motion_generation.reporting import write_markdown_report
+from embodichain.extensions.benchmarks.motion_generation.reporting import (
+    write_markdown_report,
+)
 
 
 def _case(track: str = "neutral", *, atomic: bool = False) -> BenchmarkCase:

@@ -2,7 +2,7 @@ Tableware Manipulation Tasks
 ============================
 
 Tableware tasks live under
-``embodichain_tasks/configs/tasks/manipulation/tableware``. They use task-local
+``embodichain/extensions/tasks/configs/tasks/manipulation/tableware``. They use task-local
 configuration files and remain grouped beneath the manipulation domain in the
 catalog.
 
@@ -52,4 +52,4 @@ For example, launch Pour Water through its Task Program deployment:
 .. code-block:: bash
 
    embodichain run-task \
-       --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml
+       --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml

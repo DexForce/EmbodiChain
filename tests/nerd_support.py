@@ -22,13 +22,17 @@ from pathlib import Path
 
 import torch
 
-from embodichain_models.dynamics.nerd import NeRDModel, NeRDModelCfg, export_model
+from embodichain.extensions.models.dynamics.nerd import (
+    NeRDModel,
+    NeRDModelCfg,
+    export_model,
+)
 
 
 def small_nerd_export(destination: Path, robot: str) -> Path:
     from examples.learning.nerd._support._reference_assets import reference_profile
     from examples.learning.nerd._support._reference_model import make_reference_model
-    from embodichain_solvers.physics.nerd._binding import NeRDBinding
+    from embodichain.extensions.solvers.physics.nerd._binding import NeRDBinding
 
     profile = reference_profile(robot)
     model = make_reference_model(robot, "cpu", 2, "native")

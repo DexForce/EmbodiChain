@@ -6,7 +6,7 @@ Cartpole and Ant are the supported reference systems. Teacher collection and
 historical trainer comparisons remain private support workflows.
 
 Reusable networks, physical codecs, committed trajectory readers and the NeRD
-SL recipe live in `embodichain_models.dynamics.nerd`, bundled in the main wheel.
+SL recipe live in `embodichain.extensions.models.dynamics.nerd`, bundled in the main wheel.
 Core `embodichain.learning.sl` owns the optimizer and training lifecycle; shared
 MLPs remain in `embodichain.learning.models`. The runtime model package does not
 import this example or simulation.
@@ -54,7 +54,7 @@ embodichain train-sl --config /path/to/recipe.yaml
 ```
 
 The factory is the installable
-`embodichain_models.dynamics.nerd.sl_recipe:build_supervised_trainer`; it does
+`embodichain.extensions.models.dynamics.nerd.sl_recipe:build_supervised_trainer`; it does
 not require example bootstrap. Paths in a common SL recipe resolve from the
 working directory. `--resource-root` replaces paths only for the showcase's
 implicit default presets, not an explicitly supplied configuration.
@@ -107,7 +107,7 @@ The task returns pre-reset terminal rewards and a full graph-connected
 uses `detach_state()` as the explicit TBPTT boundary. Existing RWM and Warp
 kinematic environments retain their own execution contracts.
 
-Optional native deployment lives in `embodichain_solvers.physics.nerd` and uses
+Optional native deployment lives in `embodichain.extensions.solvers.physics.nerd` and uses
 the existing `nerd` solver entry point or a direct SDK Provider configuration.
 Its native and functional adapters call the same transition. SDK Scene owns
 native scheduling/publication; no NeRD functional forwarding is added to

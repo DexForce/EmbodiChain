@@ -28,13 +28,15 @@ import torch
 import warp as wp
 from datetime import datetime, timezone
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
-from embodichain_models.policies.motion_tracking import (
+from embodichain.extensions.models.policies.motion_tracking import (
     MotionTrackingPolicy,
     MotionTrackingPolicyCfg,
 )
-from embodichain_models.dynamics.rwm.robot_state import pack_robot_state
+from embodichain.extensions.models.dynamics.rwm.robot_state import pack_robot_state
 from embodichain.lab.gym.utils.registration import build_env
-from embodichain_tasks.locomotion.tracking import g1_motion  # Register physical task.
+from embodichain.extensions.tasks.locomotion.tracking import (
+    g1_motion,
+)  # Register physical task.
 from run_metadata import write_run_metadata
 from _configuration import normalize_recipe
 

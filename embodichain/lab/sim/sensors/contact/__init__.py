@@ -48,10 +48,12 @@ from .observation import JointContactObservation, JointContactObserver
 from .history import (
     ContactHistory,
 )
+from .permissions import ContactPermissionChecker
 
 __all__ = [
     "ArticulationContactFilterCfg",
     "ContactSensor",
+    "ContactPermissionChecker",
     "ContactSensorCfg",
     "ContactSamplingObserver",
     "CONTACT_ACTOR_IDS",

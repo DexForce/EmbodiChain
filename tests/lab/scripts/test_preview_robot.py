@@ -34,7 +34,7 @@ import pytest
 
 from embodichain.lab.scripts import preview_robot
 from embodichain import robot_registry as registry
-from embodichain_robots._catalog import ROBOT_CONFIGS
+from embodichain.extensions.robots._catalog import ROBOT_CONFIGS
 
 pytestmark = pytest.mark.no_sim
 _ROOT = Path(__file__).resolve().parents[3]
@@ -135,7 +135,7 @@ def test_registered_body_configs_pass_preview_validation(
     from importlib import import_module
     import embodichain.data
     import embodichain.lab.sim.cfg as sim_cfg
-    from embodichain_robots.dexforce.w1 import utils
+    from embodichain.extensions.robots.dexforce.w1 import utils
 
     # Import before patching the shared resolver so newly loaded presets cannot
     # retain the temporary asset function after monkeypatch teardown.
@@ -164,7 +164,7 @@ def test_w1_catalog_variants_pass_preview_validation(
     monkeypatch: pytest.MonkeyPatch, robot_asset: Path, variant: str
 ) -> None:
     import embodichain.lab.sim.cfg as sim_cfg
-    from embodichain_robots.dexforce.w1 import utils as w1_utils
+    from embodichain.extensions.robots.dexforce.w1 import utils as w1_utils
 
     monkeypatch.setattr(w1_utils, "get_data_path", lambda _: str(robot_asset))
     monkeypatch.setattr(sim_cfg, "get_data_path", lambda _: str(robot_asset))
@@ -380,7 +380,7 @@ try:
     main(sys.argv[1:] or ["--help"])
 except SystemExit as error:
     assert error.code == 0
-for prefix in ("torch", "dexsim", "embodichain.lab.sim", "embodichain.lab.gym", "embodichain.lab.task_program", "embodichain_robots"):
+for prefix in ("torch", "dexsim", "embodichain.lab.sim", "embodichain.lab.gym", "embodichain.lab.task_program", "embodichain.extensions.robots"):
     assert not any(name == prefix or name.startswith(prefix + ".") for name in sys.modules), prefix
 """
     result = subprocess.run(
@@ -423,6 +423,9 @@ def fake_simulation(monkeypatch, robot_asset):
         def open_window(self):
             events.append("window")
             return True
+
+        def open_viewer(self):
+            return self.open_window()
 
         def update_gizmos(self):
             events.append("gizmos")

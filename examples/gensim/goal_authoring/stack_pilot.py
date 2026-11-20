@@ -195,7 +195,7 @@ def run(root):
     )
     configs = (
         Path(__file__).resolve().parents[3]
-        / "extensions/embodichain_tasks/configs/components"
+        / "embodichain/extensions/tasks/configs/components"
     )
     embodiment = yaml.safe_load(
         (configs / "embodiments/ur5_dh_pgi_140_80.yaml").read_text()

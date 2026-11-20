@@ -24,7 +24,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from embodichain_models.policy.act import build_act_train_config, dataset_fingerprint
+from embodichain.extensions.models.policy.act import (
+    build_act_train_config,
+    dataset_fingerprint,
+)
 
 pytestmark = pytest.mark.skipif(
     version("lerobot") != "0.6.1",

@@ -19,14 +19,16 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from dexsim.spawn import (
     ArticulationDesc,
+    CableDesc,
     ConstraintDesc,
     MeshObjectDesc,
     SoftBodyDesc,
@@ -36,6 +38,9 @@ from dexsim.spawn import (
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     ArticulationRootPropertiesCfg,
+    CableAttachmentCfg,
+    CableObjectCfg,
+    CablePhysicsCfg,
     RigidObjectCfg,
     RobotCfg,
     VisualObjectCfg,
@@ -46,6 +51,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.objects import (
     Articulation,
+    CableObject,
     RigidObject,
     Robot,
     VisualObject,
@@ -54,10 +60,17 @@ from embodichain.lab.sim.objects import (
 )
 from embodichain.lab.sim.sensors import Camera, CameraCfg, StereoCamera, StereoCameraCfg
 from embodichain.lab.sim.sensors.registry import _resolve_sensor_factory
-from .descriptors import _pose_from_cfg, configure_articulation_desc
+from .descriptors import (
+    _cable_contact_spec,
+    _compile_newton_collision,
+    _pose_from_cfg,
+    _required_uid,
+    configure_articulation_desc,
+)
 from .usd import (
     _configure_articulation_usd,
     _configure_rigid_usd,
+    _overlay_optional_properties,
     _parse_usd_source,
     _source_pose,
     _set_resolved_usd_pose,
@@ -89,6 +102,67 @@ class _UsdImportPlan:
 def _source_path(descriptor: Any) -> str:
     usd = getattr(descriptor, "usd", None)
     return usd.prim_path if usd is not None and usd.prim_path else descriptor.name
+
+
+def _usd_cable_cfg(
+    descriptor: CableDesc, overrides: Mapping[str, Any] | None
+) -> CableObjectCfg:
+    """Apply sparse cable properties before declaring the descriptor and its facade."""
+    if overrides is None:
+        overrides = {}
+    if not isinstance(overrides, Mapping):
+        raise TypeError("USD cable overrides must be a sparse mapping.")
+    unknown = overrides.keys() - {
+        "uid",
+        "attrs",
+        "fixed_segments",
+        "collision_filter_span",
+    }
+    if unknown:
+        raise ValueError(f"Unknown USD cable override fields: {sorted(unknown)}.")
+    attrs = overrides.get("attrs", {})
+    if not isinstance(attrs, Mapping):
+        raise TypeError("USD cable attrs must be a sparse mapping.")
+    parsed_physics = {
+        item.name: getattr(descriptor.physics, item.name)
+        for item in fields(descriptor.physics)
+    }
+    physics_cfg = CablePhysicsCfg(**{**parsed_physics, **attrs})
+    if overrides:
+        if "uid" in overrides:
+            descriptor.name = _required_uid(overrides["uid"], "Cable object")
+        # Preserve the difference between an omitted coefficient and an explicit zero/None.
+        descriptor.physics = replace(
+            descriptor.physics,
+            **{key: attrs[key] for key in attrs.keys() & parsed_physics.keys()},
+        )
+        contact = _cable_contact_spec(physics_cfg)
+        descriptor.collision = _overlay_optional_properties(
+            descriptor.collision,
+            _compile_newton_collision(contact, newton_solver_type="dexuni"),
+        )
+        if contact.collision_enabled is not None:
+            descriptor.enable_collision = contact.collision_enabled
+        for name in ("fixed_segments", "collision_filter_span"):
+            if name in overrides:
+                setattr(descriptor, name, overrides[name])
+        # Revalidate indices, attachments and thickness against the source
+        # geometry before publishing any part of this freshly parsed scene.
+        descriptor.__post_init__()
+
+    frames = descriptor.segment_quaternions
+    return CableObjectCfg(
+        uid=descriptor.name,
+        points=descriptor.points,
+        radius=descriptor.radius,
+        init_local_pose=descriptor.pose,
+        segment_quaternions=None if frames is None else frames[:, [1, 2, 3, 0]],
+        closed=descriptor.closed,
+        fixed_segments=descriptor.fixed_segments,
+        attrs=physics_cfg,
+        collision_filter_span=descriptor.collision_filter_span,
+        render_mode=descriptor.render_mode,
+    )
 
 
 def _compile_usd_import(
@@ -129,7 +203,7 @@ def _compile_usd_import(
         if native_gaussians:
             for item in source.mesh_objects:
                 if _has_native_gaussian_renders(item):
-                    item.per_env = False
+                    item.per_env = manager.num_envs > 1
     unsupported_particles = [
         type(item).__name__
         for item in source.particle_sets
@@ -143,6 +217,8 @@ def _compile_usd_import(
         manager._spawn_scene._require_compatible_particles(
             cables=bool(source.cables), particles=bool(source.particle_sets)
         )
+        if source.cables:
+            manager._require_cable_declaration()
     resources = list(source.iter_entities())
     source_paths_by_id = {id(item): _source_path(item) for item in resources}
     counts = Counter(source_paths_by_id.values())
@@ -163,7 +239,12 @@ def _compile_usd_import(
             if item.usd is not None and item.usd.prim_path
             else item.name
         )
-        for item in (*source.mesh_objects, *source.articulations, *source.particle_sets)
+        for item in (
+            *source.mesh_objects,
+            *source.articulations,
+            *source.particle_sets,
+            *source.cables,
+        )
     }
     overlap = robot_cfgs.keys() & asset_cfgs.keys()
     missing = (robot_cfgs.keys() | asset_cfgs.keys()) - source_paths
@@ -251,6 +332,21 @@ def _compile_usd_import(
             and descriptor.physics is None
             and not descriptor.collisions
         )
+        if isinstance(descriptor, CableDesc):
+            if root_pose is not None:
+                descriptor.pose = root_pose @ descriptor.pose
+            cfg = _usd_cable_cfg(descriptor, configured)
+            if descriptor.name in occupied:
+                raise ValueError(f"USD asset UID already exists: {descriptor.name!r}.")
+            occupied.add(descriptor.name)
+            renamed[original_name] = descriptor.name
+            facade = (
+                None if manager is None else CableObject(cfg, device=manager.device)
+            )
+            declarations.append(
+                (resource_keys[id(descriptor)], "cable_object", descriptor, facade)
+            )
+            continue
         if configured is not None and not isinstance(
             descriptor, (MeshObjectDesc, ArticulationDesc, SoftBodyDesc, ClothDesc)
         ):
@@ -470,62 +566,62 @@ def _compile_usd_import(
         if root_pose is not None:
             descriptor.pose = root_pose @ descriptor.pose
         _set_resolved_usd_pose(cfg, descriptor.pose)
-        if native_gaussians and _has_native_gaussian_renders(descriptor):
-            # Per-asset configuration resolves physics but must not re-enable
-            # unsupported native USD Gaussian Arena replication.
-            descriptor.per_env = False
+        if (
+            native_gaussians
+            and manager is not None
+            and _has_native_gaussian_renders(descriptor)
+        ):
+            # Preserve singleton placement while allowing qualified native
+            # companion replication in multi-Arena imports.
+            descriptor.per_env = manager.num_envs > 1
         source.materials.update(materials)
         if isinstance(cfg, RobotCfg) and cfg.enable_sensor:
             if manager is None and cfg.sensors:
                 raise ValueError("Static environment imports do not bind USD robots.")
             for sensor_cfg in cfg.sensors:
-                if not isinstance(sensor_cfg, CameraCfg):
-                    raise TypeError("RobotCfg.sensors supports mounted cameras only.")
                 from embodichain.lab.sim.sim_manager import SimulationManager
+                from embodichain.lab.sim.sensors.attachment import _qualify_robot_mount
 
                 factories = (
                     SimulationManager.SUPPORTED_SENSOR_TYPES
                     if manager is None
                     else manager.SUPPORTED_SENSOR_TYPES
                 )
-                _, sensor_factory, _ = _resolve_sensor_factory(
+                _, sensor_factory, legacy = _resolve_sensor_factory(
                     sensor_cfg.sensor_type, factories
                 )
-                if isinstance(sensor_factory, type) and not issubclass(
-                    sensor_factory, Camera
-                ):
-                    raise ValueError(
-                        f"Unsupported mounted camera type {sensor_cfg.sensor_type!r}."
-                    )
-                if (
-                    isinstance(sensor_factory, type)
-                    and issubclass(sensor_factory, StereoCamera)
-                    and not isinstance(sensor_cfg, StereoCameraCfg)
-                ):
+                if isinstance(sensor_cfg, CameraCfg):
+                    if isinstance(sensor_factory, type) and not issubclass(
+                        sensor_factory, Camera
+                    ):
+                        raise ValueError(
+                            f"Unsupported mounted camera type {sensor_cfg.sensor_type!r}."
+                        )
+                    if (
+                        isinstance(sensor_factory, type)
+                        and issubclass(sensor_factory, StereoCamera)
+                        and not isinstance(sensor_cfg, StereoCameraCfg)
+                    ):
+                        raise TypeError(
+                            "StereoCamera requires a StereoCameraCfg configuration."
+                        )
+                    if manager is not None:
+                        manager._require_native_renderer("Mounted cameras")
+                elif legacy:
                     raise TypeError(
-                        "StereoCamera requires a StereoCameraCfg configuration."
+                        "Nonvisual mounted sensors require a context-backed registration."
                     )
-                if manager is not None:
-                    manager._require_native_renderer("Mounted cameras")
-                if not isinstance(sensor_cfg.uid, str) or not sensor_cfg.uid.strip():
-                    raise ValueError("Mounted sensors require a non-empty uid.")
-                if sensor_cfg.uid in sensor_uids:
-                    raise ValueError(f"Sensor {sensor_cfg.uid!r} already exists.")
-                sensor_uids.add(sensor_cfg.uid)
-                parent = sensor_cfg.extrinsics.parent
-                if not isinstance(parent, str) or not parent.strip():
-                    raise ValueError("Mounted sensors require a parent link.")
-                link_name = parent.removeprefix(f"{uid}/")
-                if not link_name or "/" in link_name:
-                    raise ValueError(
-                        f"Mounted sensor {sensor_cfg.uid!r} must refer to a local link on robot {uid!r}."
-                    )
+                bound_cfg = _qualify_robot_mount(sensor_cfg, uid, sensor_uids)
+                offset = (
+                    bound_cfg.extrinsics
+                    if isinstance(bound_cfg, CameraCfg)
+                    else bound_cfg.mount
+                )
+                link_name = offset.parent.removeprefix(f"{uid}/")
                 if link_name not in {link.name for link in descriptor.links}:
                     raise ValueError(
                         f"Mounted sensor {sensor_cfg.uid!r} refers to unknown link {link_name!r} on robot {uid!r}."
                     )
-                bound_cfg = deepcopy(sensor_cfg)
-                bound_cfg.extrinsics.parent = f"{uid}/{link_name}"
                 mounted_sensors.append(bound_cfg)
         facade = (
             None if manager is None else facade_type(cfg=cfg, device=manager.device)
@@ -546,6 +642,23 @@ def _compile_usd_import(
     def renamed_endpoint(endpoint: str) -> str:
         owner, separator, suffix = endpoint.partition("/")
         return renamed.get(owner, owner) + separator + suffix
+
+    for _, kind, descriptor, facade in declarations:
+        if kind == "cable_object":
+            for name in ("start_attachment", "end_attachment"):
+                anchor = getattr(descriptor, name)
+                if anchor is not None:
+                    anchor.target = renamed.get(anchor.target, anchor.target)
+                    if facade is not None:
+                        setattr(
+                            facade.cfg,
+                            name,
+                            CableAttachmentCfg(
+                                target=anchor.target,
+                                position=anchor.position.copy(),
+                                link_name=anchor.link_name,
+                            ),
+                        )
 
     for constraint in source.constraints:
         if constraint.body0 is not None:
@@ -577,6 +690,7 @@ def _compile_usd_import(
     public_kinds = {
         "soft_object": "volume_deformable",
         "cloth_object": "surface_deformable",
+        "cable_object": "cable",
     }
     resource_types = {
         path: "robot" if path in robot_paths else public_kinds.get(kind, kind)
@@ -586,7 +700,6 @@ def _compile_usd_import(
         ("cameras", "camera"),
         ("lights", "light"),
         ("records", "record"),
-        ("cables", "cable"),
         ("constraints", "constraint"),
     ):
         resource_types.update(

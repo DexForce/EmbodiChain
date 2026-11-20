@@ -3,7 +3,7 @@ Supported Robots
 
 EmbodiChain provides configuration classes for the robot families and composed
 layouts below. Concrete robots follow their manufacturer or community project
-namespaces in ``embodichain_robots``. Each model page documents construction,
+namespaces in ``embodichain.extensions.robots``. Each model page documents construction,
 control parts, kinematics, and the currently supported variants.
 
 Run ``embodichain list-robot`` to discover installed families, variants,

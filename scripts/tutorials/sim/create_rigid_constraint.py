@@ -139,8 +139,8 @@ def main(args: argparse.Namespace | None = None) -> None:
     print("[INFO]: Created constraint 'cube_weld' between cube_a and cube_b.")
 
     # Open the viewer (unless --headless) so the welded motion is visible.
-    if not args.headless:
-        sim.open_window()
+    if not args.headless or getattr(args, "web", False):
+        sim.open_viewer()
 
     print("[INFO]: Stepping physics while ATTACHED (relative pose held):")
     _run_phase(sim, cube_a, cube_b, attached=True)
@@ -152,7 +152,7 @@ def main(args: argparse.Namespace | None = None) -> None:
 
     import time
 
-    time.sleep(2.0)  # Wait a moment so the viewer can show the constraint removal.
+    sim.sleep(2.0)  # Wait a moment so the viewer can show the constraint removal.
 
     print("[INFO]: Stepping physics while DETACHED (relative pose may drift):")
     _run_phase(sim, cube_a, cube_b, attached=False)

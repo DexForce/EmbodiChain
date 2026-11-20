@@ -1,0 +1,36 @@
+#usda 1.0
+(
+    defaultPrim = "World"
+    metersPerUnit = 0.001
+    kilogramsPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "World"
+{
+    def BasisCurves "cable" (
+        prepend apiSchemas = ["PhysicsCurvesDeformableSimAPI", "PhysicsCollisionAPI"]
+    )
+    {
+        uniform token type = "linear"
+        uniform token wrap = "nonperiodic"
+        int[] curveVertexCounts = [51]
+        point3f[] points = [
+            (0, 0, 0), (0, 12, 0), (0, 24, 0), (0, 36, 0), (0, 48, 0),
+            (0, 60, 0), (0, 72, 0), (0, 84, 0), (0, 96, 0), (0, 108, 0),
+            (0, 120, 0), (0, 132, 0), (0, 144, 0), (0, 156, 0), (0, 168, 0),
+            (0, 180, 0), (0, 192, 0), (0, 204, 0), (0, 216, 0), (0, 228, 0),
+            (0, 240, 0), (0, 252, 0), (0, 264, 0), (0, 276, 0), (0, 288, 0),
+            (0, 300, 0), (0, 312, 0), (0, 324, 0), (0, 336, 0), (0, 348, 0),
+            (0, 360, 0), (0, 372, 0), (0, 384, 0), (0, 396, 0), (0, 408, 0),
+            (0, 420, 0), (0, 432, 0), (0, 444, 0), (0, 456, 0), (0, 468, 0),
+            (0, 480, 0), (0, 492, 0), (0, 504, 0), (0, 516, 0), (0, 528, 0),
+            (0, 540, 0), (0, 552, 0), (0, 564, 0), (0, 576, 0), (0, 588, 0),
+            (0, 600, 0)
+        ]
+        float[] physics:thicknesses = [7]
+        token physics:thicknesses:elementType = "constant"
+        double3 xformOp:translate = (420, -360, 753.5)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+}

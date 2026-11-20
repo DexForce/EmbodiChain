@@ -73,24 +73,23 @@ for dependency profiles, ownership and compatibility boundaries.
 
 ## Official Extensions
 
-EmbodiChain bundles four extension modules alongside the core framework. They
-provide reusable tasks, robot presets, models, and evaluation workflows, and
-ship in the main `embodichain` distribution with the same version.
+EmbodiChain bundles six official extensions under `embodichain.extensions`
+in the main `embodichain` distribution.
 
 | Module | What it provides | Explore |
 | --- | --- | --- |
-| `embodichain_tasks` | Official task environments, runnable deployments, and reusable scene and embodiment components for manipulation, locomotion, and classic control. | [Task configurations and authoring](extensions/embodichain_tasks/README.md) |
-| `embodichain_robots` | Concrete robot presets, model assets, and calibrated defaults, organized by vendor and model. | [Robot catalog and configuration](extensions/embodichain_robots/README.md) |
-| `embodichain_models` | Policy models for action prediction, and world models / neural dynamics models for predicting future states and environment dynamics. | [Model families and workflows](extensions/embodichain_models/README.md) |
-| `embodichain_benchmarks` | Motion planning and Atomic Skill evaluation suites with scenarios, planner adapters, scoring, and reports. | [Benchmark suites and usage](extensions/embodichain_benchmarks/motion_generation/README.md) |
+| `embodichain.extensions.tasks` | Official task environments, runnable deployments, and reusable scene and embodiment components for manipulation, locomotion, and classic control. | [Task configurations and authoring](embodichain/extensions/tasks/README.md) |
+| `embodichain.extensions.robots` | Concrete robot presets, model assets, and calibrated defaults, organized by vendor and model. | [Robot catalog and configuration](embodichain/extensions/robots/README.md) |
+| `embodichain.extensions.models` | Policy models for action prediction, and world models / neural dynamics models for predicting future states and environment dynamics. | [Model families and workflows](embodichain/extensions/models/README.md) |
+| `embodichain.extensions.solvers` | Native physics deployment adapters. | [Solver adapters](embodichain/extensions/solvers/README.md) |
+| `embodichain.extensions.sensors` | Official sensor presets, including the nominal VLP-16 lidar. | [Sensor backend support](docs/source/overview/sim/sensors/backend_support.md) |
+| `embodichain.extensions.benchmarks` | Motion planning and Atomic Skill evaluation suites with scenarios, planner adapters, scoring, and reports. | [Benchmark suites and usage](embodichain/extensions/benchmarks/motion_generation/README.md) |
 
-The core provides shared simulation, data, and learning infrastructure; extensions
-build on those APIs for specific robots, tasks, models, and evaluations. Import
-modules by their `embodichain_*` names: `extensions/` is their source directory,
-not a Python import prefix. Model weights, datasets, and optional runtime
-dependencies are configured through each workflow's guide.
+The core provides shared simulation, data, and learning infrastructure.
+Extensions build on those APIs for specific workflows. See each workflow's
+guide for model weights, datasets, and optional runtime dependencies.
 
-See the [extension development guide](extensions/README.md) for package layout
+See the [extension development guide](embodichain/extensions/README.md) for package layout
 and how to add a bundled extension.
 
 ## Contribution Guide

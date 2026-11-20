@@ -37,6 +37,8 @@ from .._validation import _identifier, _rigid_pose
 from ..geometry import SupportSurfaceConfig, detect_support_region
 from ..query import _backend_tensor
 from .contracts import ScenePoseChange, SceneVariant
+from .conditions import SceneLayoutCondition, _condition_prepared
+from ._root_support import _root_support_offsets
 from ._layout_numeric import (
     _hierarchy_batch_limit,
     _numeric_geometry,
@@ -44,13 +46,10 @@ from ._layout_numeric import (
     _specification,
 )
 from ._policy import (
-    IntraGroupRandomizationCfg,
     SceneRandomizationPolicyCfg,
-    _decode_intra,
-    _intra_payload,
+    _policy_data,
     _validate_backend,
     _validate_generation_parameters,
-    _validate_intra,
 )
 
 if TYPE_CHECKING:
@@ -252,66 +251,6 @@ def scene_layout_input_from_sim(
     )
 
 
-def _policy_data(cfg: SceneRandomizationPolicyCfg | Mapping) -> dict:
-    if isinstance(cfg, Mapping):
-        raw = dict(cfg)
-        cfg = SceneRandomizationPolicyCfg(**raw)
-    if not isinstance(cfg, SceneRandomizationPolicyCfg):
-        raise TypeError("policy must be a SceneRandomizationPolicyCfg or mapping")
-    cfg = cfg.copy()
-    cfg.validate()
-    _validate_backend(backend=cfg.backend, device=cfg.device, batch_size=cfg.batch_size)
-    if cfg.backend != "batched":
-        raise ValueError(
-            "The source-independent layout API supports backend='batched'."
-        )
-    _validate_generation_parameters(
-        seed=0,
-        candidate_count=1,
-        max_attempts=1,
-        collision_margin_m=cfg.collision_margin_m,
-    )
-    if type(cfg.randomize_groups) is not bool:
-        raise ValueError("randomize_groups must be a boolean.")
-    intra = cfg.intra_group
-    if isinstance(intra, dict) or intra is None:
-        intra = _decode_intra(intra)
-    if intra is None:
-        intra = IntraGroupRandomizationCfg()
-    _validate_intra(intra)
-    if not isinstance(cfg.group_xy_offset_bounds_m, dict):
-        raise ValueError("group_xy_offset_bounds_m must map root UIDs to XY bounds.")
-    for uid, bounds in cfg.group_xy_offset_bounds_m.items():
-        if bounds is None:
-            raise ValueError(
-                "Root XY bounds must be explicit lower/upper corners; omit unbounded roots."
-            )
-        _decode_intra(
-            {
-                "targets": {
-                    uid: {"xy_offset_bounds_m": bounds, "yaw_delta_range_deg": [0, 0]}
-                }
-            }
-        )
-    if cfg.group_xy_offset_bounds_m and not cfg.randomize_groups:
-        raise ValueError("Root XY bounds require randomize_groups=True.")
-    if cfg.group_targets is not None and (
-        isinstance(cfg.group_targets, str)
-        or len(set(cfg.group_targets)) != len(cfg.group_targets)
-    ):
-        raise ValueError("group_targets must contain unique root UIDs.")
-    return {
-        "backend": cfg.backend,
-        "device": cfg.device,
-        "batch_size": cfg.batch_size,
-        "collision_margin_m": float(cfg.collision_margin_m),
-        "randomize_groups": cfg.randomize_groups,
-        "group_targets": None if cfg.group_targets is None else list(cfg.group_targets),
-        "group_xy_offset_bounds_m": deepcopy(cfg.group_xy_offset_bounds_m),
-        "intra_group": _intra_payload(intra),
-    }
-
-
 @dataclass(frozen=True)
 class PreparedSceneRandomization:
     """Own reusable numeric geometry, policy, permissions and source identity."""
@@ -421,7 +360,9 @@ def prepare_scene_randomization(
     key = _digest(
         {
             "source": source.fingerprint,
-            "extractor": "scene-layout-support/v3",
+            "extractor": "scene-layout-support/v4",
+            "root_offsets": policy["group_xy_offset_bounds_m"],
+            "movable_roots": sorted(selected_roots),
             "intra": policy["intra_group"],
         }
     )
@@ -495,6 +436,11 @@ def prepare_scene_randomization(
             )
         lo_x, lo_y, hi_x, hi_y = rectangle.bounds
         table = ((lo_x, lo_y), (hi_x, hi_y))
+        offsets = _root_support_offsets(
+            source, nodes, table, policy["group_xy_offset_bounds_m"], selected_roots
+        )
+        if offsets:
+            geometry["root_support_offsets"] = offsets
         if path is not None:
             from .persistence import _write_atomic
 
@@ -571,6 +517,7 @@ def generate_scene_variants(
     candidate_count: int = 10,
     max_attempts: int = 1000,
     start_ordinal: int = 0,
+    conditions: SceneLayoutCondition | None = None,
 ) -> SceneRandomizationBatch:
     """Generate a batch without loading meshes or constructing simulation objects.
 
@@ -580,10 +527,17 @@ def generate_scene_variants(
         candidate_count: Requested valid layouts.
         max_attempts: Whole-layout proposal budget.
         start_ordinal: First logical proposal; allows bounded continuation.
+        conditions: Optional owned arena-pose anchors. They restrict existing
+            root XY/member XY-yaw domains and never authorize extra motion.
+            Moving ancestors must be anchored explicitly. Empty conditions
+            preserve the ordinary sequence. Infeasible geometry exhausts the
+            declared proposal budget without moving or repairing anchors.
 
     Returns:
         Complete or budget-exhausted proposals with exact continuation ordinal.
     """
+    if conditions is not None:
+        prepared = _condition_prepared(prepared, conditions)
     _validate_generation_parameters(
         seed=seed,
         candidate_count=candidate_count,
@@ -600,11 +554,28 @@ def generate_scene_variants(
     ):
         raise ValueError("Requested CUDA device is unavailable.")
     spec = _specification(prepared._geometry, policy, device)
+    anchored_roots = (
+        tuple(
+            i
+            for i in prepared._movable_roots
+            if prepared._geometry["nodes"][i]["uid"] in conditions.poses
+        )
+        if conditions is not None
+        else ()
+    )
     limit = (
         _hierarchy_batch_limit(policy["batch_size"], len(spec[-1]))
         if policy["randomize_groups"]
         else policy["batch_size"]
     )
+    support_offsets = prepared._geometry.get("root_support_offsets", {})
+    root_support_offsets = {
+        i: torch.as_tensor(
+            support_offsets[node["uid"]], dtype=spec[0].dtype, device=device
+        )
+        for i, node in enumerate(prepared._geometry["nodes"])
+        if node["uid"] in support_offsets
+    }
     deltas, samples, ordinals = [], [], []
     accepted = attempts = 0
     while attempts < max_attempts and accepted < candidate_count:
@@ -619,6 +590,8 @@ def generate_scene_variants(
             group_margin=policy["collision_margin_m"],
             support_gap=policy["intra_group"]["support_gap_m"],
             movable_roots=prepared._movable_roots,
+            anchored_roots=anchored_roots,
+            root_support_offsets=root_support_offsets,
             root_offset_bounds={
                 i: torch.tensor(
                     policy["group_xy_offset_bounds_m"][node["uid"]],
@@ -656,6 +629,11 @@ def generate_scene_variants(
             ("generator", _ALGORITHM),
             ("source_sha256", prepared.source.fingerprint),
             ("geometry_sha256", prepared.geometry_sha256),
+            *(
+                (("conditions_sha256", _digest(conditions.to_dict())),)
+                if conditions is not None and conditions.poses
+                else ()
+            ),
         ),
     )
     return SceneRandomizationBatch(

@@ -44,6 +44,8 @@ from embodichain.lab.sim.atomic_skills import (
     HandOverOptions,
     HeldObjectState,
     MotionPolicy,
+    MoveEndEffector,
+    MoveEndEffectorOptions,
     ObjectSemantics,
     PickUp,
     PickUpOptions,
@@ -230,6 +232,7 @@ class _InspectLowerer(RegisteredSemanticLowerer):
 
     def __init__(self) -> None:
         self.option_templates: list[SkillOptions] = []
+        self.planning_masks: list[torch.Tensor | None] = []
 
     def lower(
         self,
@@ -239,7 +242,8 @@ class _InspectLowerer(RegisteredSemanticLowerer):
         bound: object,
         option_template: SkillOptions,
     ) -> SemanticLowering:
-        del call, context, bound
+        del call, bound
+        self.planning_masks.append(context.planning_mask)
         self.option_templates.append(option_template)
         return SemanticLowering(
             goal=GraspGoal(
@@ -1342,7 +1346,9 @@ def test_registered_call_without_monitor_has_no_effect_contract() -> None:
     )
     workflow = compiler.analyze((RegisteredSemanticCall(call_id="vendor.inspect"),))
 
-    grounded = compiler.ground(workflow, 0, _context(registry))
+    mask = torch.tensor([True, False])
+    grounded = compiler.ground(workflow, 0, _context(registry), eligible_mask=mask)
+    assert torch.equal(lowerer.planning_masks[0], mask)
 
     assert workflow.calls[0].symbolic_writes == frozenset()
     assert workflow.calls[0].opaque_symbolic_effect
@@ -1382,6 +1388,248 @@ def test_registered_state_preserving_call_keeps_held_dependency() -> None:
     assert workflow.calls[1].symbolic_writes == frozenset()
     assert workflow.effect_dependencies[0].producer_index == 0
     assert workflow.calls[0].downstream_object_targets == ()
+
+
+def test_cartesian_transit_requires_unoccupied_hand_in_eligible_rows() -> None:
+    """Payload-free Cartesian transit cannot carry a verified held object."""
+    from embodichain.lab.task_program.integrations._configured_services import (
+        _MoveEndEffectorLowerer,
+    )
+
+    call_id = "simulation.move_end_effector"
+    registry, _ = _scene_registry()
+    templates = _skill_option_templates()
+    templates[call_id] = MoveEndEffectorOptions()
+    profile = _profile(preset=_preset("safe", skill_option_templates=templates))
+    manifest = SemanticIntegrationManifest(
+        scene=SceneManifest.from_registry(registry),
+        robot_profile=profile,
+        call_catalog=builtin_semantic_call_catalog().with_descriptor(
+            SemanticCallDescriptor(
+                call_id=call_id,
+                spec_type=RegisteredSemanticCall,
+                target_descriptor=MoveEndEffector.descriptor(),
+            )
+        ),
+    )
+    bound = manifest.bind(registry, _engine(profile))
+    route = (("outside", (tuple(torch.eye(4).flatten().tolist()),)),)
+    compiler = SemanticCallCompiler(
+        bound, registered_lowerers=(_MoveEndEffectorLowerer(route),)
+    )
+    workflow = compiler.analyze(
+        (
+            Pick(object=SceneObjectRef("cube")),
+            RegisteredSemanticCall(call_id=call_id, arguments={"target": "outside"}),
+            Place(
+                object=SceneObjectRef("cube"),
+                at=SemanticPose((0.3, 0.0, 0.2), (0.0, 0.0, 0.0, 1.0)),
+            ),
+        )
+    )
+    held = _held_context(
+        registry,
+        ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, entity_id="cube"
+        ),
+        torch.eye(4).repeat(2, 1, 1),
+        env_mask=torch.tensor([False, True]),
+    )
+
+    with pytest.raises(SemanticValidationError) as error:
+        compiler.ground(workflow, 1, held)
+
+    assert error.value.diagnostic.code == "unoccupied_resource_required"
+    assert error.value.diagnostic.path == (
+        "workflow",
+        1,
+        "call",
+        "resources",
+        "primary",
+    )
+    assert error.value.diagnostic.candidates == ("1",)
+    free_row = compiler.ground(
+        workflow, 1, held, eligible_mask=torch.tensor([True, False])
+    )
+    assert free_row.invocation.goal.xpos.shape == (2, 1, 4, 4)
+    compiler.ground(workflow, 1, _context(registry))
+
+    class _UnknownSlotLowerer(_MoveEndEffectorLowerer):
+        requires_unoccupied_slots = ("missing",)
+
+    with pytest.raises(ValueError, match="requires_unoccupied_slots"):
+        SemanticCallCompiler(bound, registered_lowerers=(_UnknownSlotLowerer(route),))
+
+
+def test_cartesian_transit_rejects_object_held_through_manipulator_alias() -> None:
+    """A composite alias of the holding manipulator cannot bypass occupancy."""
+    from embodichain.lab.task_program.integrations._configured_services import (
+        _MoveEndEffectorLowerer,
+    )
+
+    call_id = "simulation.move_end_effector"
+    registry, _ = _scene_registry()
+    templates = _skill_option_templates()
+    templates[call_id] = MoveEndEffectorOptions()
+    endpoints = {
+        "motion": ControlPartEndpoint(
+            control_part="arm", capabilities=_MOTION_CAPABILITIES
+        ),
+        "grasp": ControlPartEndpoint(
+            control_part="hand", capabilities=frozenset({GRASP_CAPABILITY})
+        ),
+    }
+    profile = RobotSkillProfile(
+        profile_id="aliased_robot",
+        resources={
+            "manipulator": RobotResource("manipulator", endpoints=endpoints),
+            "transit_arm": RobotResource(
+                "transit_arm", endpoints=endpoints, members=("manipulator",)
+            ),
+        },
+        command_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=torch.tensor([0.0]), grasp=torch.tensor([1.0])
+            )
+        },
+        defaults={
+            "pick_up": ResourceBinding({"primary": "manipulator"}),
+            "place": ResourceBinding({"primary": "manipulator"}),
+            "move_end_effector": ResourceBinding({"primary": "transit_arm"}),
+        },
+        presets={"safe": _preset("safe", skill_option_templates=templates)},
+        default_preset="safe",
+    )
+    manifest = SemanticIntegrationManifest(
+        scene=SceneManifest.from_registry(registry),
+        robot_profile=profile,
+        call_catalog=builtin_semantic_call_catalog().with_descriptor(
+            SemanticCallDescriptor(
+                call_id=call_id,
+                spec_type=RegisteredSemanticCall,
+                target_descriptor=MoveEndEffector.descriptor(),
+            )
+        ),
+    )
+    bound = manifest.bind(registry, _engine(profile))
+    route = (("outside", (tuple(torch.eye(4).flatten().tolist()),)),)
+    compiler = SemanticCallCompiler(
+        bound, registered_lowerers=(_MoveEndEffectorLowerer(route),)
+    )
+    workflow = compiler.analyze(
+        (
+            Pick(object=SceneObjectRef("cube")),
+            RegisteredSemanticCall(call_id=call_id, arguments={"target": "outside"}),
+        )
+    )
+    held = _held_context(
+        registry,
+        ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, entity_id="cube"
+        ),
+        torch.eye(4).repeat(2, 1, 1),
+        env_mask=torch.tensor([False, True]),
+    )
+
+    with pytest.raises(SemanticValidationError) as error:
+        compiler.ground(workflow, 1, held)
+
+    assert error.value.diagnostic.code == "unoccupied_resource_required"
+    assert "manipulator" in error.value.diagnostic.message
+
+
+def test_cartesian_transit_ignores_auxiliary_endpoints_of_the_holding_resource() -> (
+    None
+):
+    """A hold through one arm leaves transit with the other, disjoint arm free."""
+    from embodichain.lab.task_program.integrations._configured_services import (
+        _MoveEndEffectorLowerer,
+    )
+
+    call_id = "simulation.move_end_effector"
+    registry, _ = _scene_registry()
+    templates = _skill_option_templates()
+    templates[call_id] = MoveEndEffectorOptions()
+
+    def arm(side: str) -> dict[str, ControlPartEndpoint]:
+        return {
+            "motion": ControlPartEndpoint(
+                control_part=f"{side}_arm", capabilities=_MOTION_CAPABILITIES
+            ),
+            "grasp": ControlPartEndpoint(
+                control_part=f"{side}_hand",
+                capabilities=frozenset({GRASP_CAPABILITY}),
+            ),
+        }
+
+    profile = RobotSkillProfile(
+        profile_id="bimanual_robot",
+        resources={
+            "left": RobotResource("left", endpoints=arm("left")),
+            "right": RobotResource("right", endpoints=arm("right")),
+            "bimanual": RobotResource(
+                "bimanual",
+                endpoints={
+                    **arm("right"),
+                    "support": ControlPartEndpoint(
+                        control_part="left_arm", capabilities=_MOTION_CAPABILITIES
+                    ),
+                },
+                members=("right", "left"),
+            ),
+        },
+        command_profiles={
+            f"{side}_hand": ControlPartCommandProfile.joint_positions(
+                open=torch.tensor([0.0]), grasp=torch.tensor([1.0])
+            )
+            for side in ("left", "right")
+        },
+        defaults={
+            "pick_up": ResourceBinding({"primary": "bimanual"}),
+            "place": ResourceBinding({"primary": "bimanual"}),
+            "move_end_effector": ResourceBinding({"primary": "left"}),
+        },
+        presets={"safe": _preset("safe", skill_option_templates=templates)},
+        default_preset="safe",
+    )
+    manifest = SemanticIntegrationManifest(
+        scene=SceneManifest.from_registry(registry),
+        robot_profile=profile,
+        call_catalog=builtin_semantic_call_catalog().with_descriptor(
+            SemanticCallDescriptor(
+                call_id=call_id,
+                spec_type=RegisteredSemanticCall,
+                target_descriptor=MoveEndEffector.descriptor(),
+            )
+        ),
+    )
+    bound = manifest.bind(registry, _engine(profile))
+    route = (("outside", (tuple(torch.eye(4).flatten().tolist()),)),)
+    compiler = SemanticCallCompiler(
+        bound, registered_lowerers=(_MoveEndEffectorLowerer(route),)
+    )
+    workflow = compiler.analyze(
+        (
+            Pick(object=SceneObjectRef("cube")),
+            RegisteredSemanticCall(call_id=call_id, arguments={"target": "outside"}),
+        )
+    )
+    hold_key = (
+        bound.robot_profile.resources["bimanual"].endpoints["motion"].task_state_key
+    )
+    held = _held_context(
+        registry,
+        ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, entity_id="cube"
+        ),
+        torch.eye(4).repeat(2, 1, 1),
+        env_mask=torch.tensor([True, True]),
+        task_state_key=hold_key,
+        robot_dof=4,
+    )
+
+    lowered = compiler.ground(workflow, 1, held)
+    assert lowered.invocation.goal.xpos.shape == (2, 1, 4, 4)
 
 
 def test_registered_monitor_without_effect_grounder_fails_during_analysis() -> None:
@@ -2373,3 +2621,30 @@ def test_occurrence_policy_rejects_unknown_preset_and_assurance_changes(
             (Pick(object=SceneObjectRef("cube")),), preset_ids=(preset_id,)
         )
     assert all(provider.calls == 0 for provider in providers)
+
+
+def test_place_grounds_scene_relative_pose_from_current_observation() -> None:
+    from embodichain.lab.task_program.semantics.calls import SemanticRelativePose
+
+    registry, (_, table) = _scene_registry()
+    compiler, _ = _compiler(registry)
+    pick = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
+    semantics = compiler.ground(pick, 0, _context(registry)).invocation.goal.semantics
+    object_to_eef = torch.eye(4).repeat(2, 1, 1)
+    object_to_eef[:, 2, 3] = 0.12
+    target = SemanticRelativePose("table", (0.1, 0.0, 0.02), (0, 0, 0, 1))
+    workflow = compiler.analyze((Place(object=SceneObjectRef("cube"), at=target),))
+    first = compiler.ground(
+        workflow, 0, _held_context(registry, semantics, object_to_eef)
+    )
+    expected = table.pose.clone()
+    expected[:, 0, 3] += 0.1
+    expected[:, 2, 3] += 0.14
+    torch.testing.assert_close(first.invocation.goal.xpos, expected)
+    table.pose[:, 1, 3] += 0.2
+    second = compiler.ground(
+        workflow, 0, _held_context(registry, semantics, object_to_eef)
+    )
+    expected[:, 1, 3] += 0.2
+    torch.testing.assert_close(second.invocation.goal.xpos, expected)
+    assert not torch.equal(first.invocation.goal.xpos, second.invocation.goal.xpos)

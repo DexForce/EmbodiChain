@@ -17,12 +17,68 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
 from embodichain.cli import _task_catalog as catalog
 from embodichain.cli.main import main
+
+
+def test_runtime_resources_prefer_the_selected_source_checkout(tmp_path: Path) -> None:
+    foreign = tmp_path / "foreign_configs"
+    foreign.mkdir()
+    (foreign / "__init__.py").write_text("ORIGIN = 'another checkout'\n")
+    root = Path(__file__).resolve().parents[1]
+    script = """
+import importlib.abc
+import importlib.machinery
+import importlib.util
+from importlib.resources import files
+from pathlib import Path
+import sys
+
+class StaleEditableFinder(importlib.abc.MetaPathFinder):
+    @classmethod
+    def find_spec(cls, fullname, path=None, target=None):
+        if fullname == 'embodichain.extensions.tasks.configs':
+            return importlib.util.spec_from_file_location(fullname, sys.argv[1])
+
+sys.meta_path.insert(sys.meta_path.index(importlib.machinery.PathFinder) + 1, StaleEditableFinder())
+import embodichain.extensions.tasks
+assert Path(str(files('embodichain.extensions.tasks.configs'))).resolve() == Path(sys.argv[2]).resolve()
+from embodichain.extensions.tasks.locomotion.velocity.contracts._config import load_task_data
+assert len(load_task_data('anymal_c_flat')['robot']['joint_names']) == 12
+assert 'embodichain.extensions.tasks.embodichain.extensions.tasks' not in sys.modules
+"""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            script,
+            str(foreign / "__init__.py"),
+            str(root / "embodichain/extensions/tasks/configs"),
+        ],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        timeout=45,
+        env={
+            **os.environ,
+            "PYTHONPATH": os.pathsep.join(
+                [
+                    str(root),
+                    str(root / "extensions"),
+                    str(root / "embodichain/extensions/tasks"),
+                    os.environ.get("PYTHONPATH", ""),
+                ]
+            ),
+        },
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def write(path: Path, value: dict) -> None:
@@ -33,10 +89,12 @@ def write(path: Path, value: dict) -> None:
 def test_gaussian_pick_place_is_one_official_task_with_three_deployments() -> None:
     root = (
         Path(__file__).resolve().parents[1]
-        / "extensions/embodichain_tasks/configs/tasks"
+        / "embodichain/extensions/tasks/configs/tasks"
     )
-    tasks = catalog._load_catalog({"embodichain_tasks": root})
-    task = catalog._select_task(tasks, "embodichain_tasks:gaussian_pick_place")
+    tasks = catalog._load_catalog({"embodichain.extensions.tasks": root})
+    task = catalog._select_task(
+        tasks, "embodichain.extensions.tasks:gaussian_pick_place"
+    )
     assert task.task_path == ("manipulation", "gaussian_pick_place")
     assert task.default_deployment == "office"
     assert {deployment.name: deployment.env_id for deployment in task.deployments} == {
@@ -96,27 +154,28 @@ def test_only_linked_deployment_acquires_rl(task_root: Path) -> None:
     assert a.embodiments == ("Arm",)
 
 
-@pytest.mark.parametrize(
-    "prefix", ["embodichain_tasks/configs", "extensions/embodichain_tasks/configs"]
-)
 def test_official_agent_references_match_outside_checkout(
-    task_root: Path, monkeypatch: pytest.MonkeyPatch, prefix: str
+    task_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Both config prefixes retain RL discovery without matching CWD files."""
+    """Use the packaged YAML path to match agent and deployment metadata."""
     monkeypatch.chdir(task_root)
     write(
         task_root / "manipulation/pick/agents/ppo.json",
-        {"trainer": {"gym_config": f"{prefix}/tasks/manipulation/pick/task.a.yaml"}},
+        {
+            "trainer": {
+                "gym_config": "embodichain/extensions/tasks/configs/tasks/manipulation/pick/task.a.yaml"
+            }
+        },
     )
-    (task,) = catalog._load_catalog({"embodichain_tasks": task_root})
+    (task,) = catalog._load_catalog({"embodichain.extensions.tasks": task_root})
     deployment = task.deployments[0]
     assert (
         deployment.config_ref
-        == "extensions/embodichain_tasks/configs/tasks/manipulation/pick/task.a.yaml"
+        == "embodichain/extensions/tasks/configs/tasks/manipulation/pick/task.a.yaml"
     )
     assert catalog._RL in deployment.capabilities
     assert deployment.agent_refs == (
-        "extensions/embodichain_tasks/configs/tasks/manipulation/pick/agents/ppo.json",
+        "embodichain/extensions/tasks/configs/tasks/manipulation/pick/agents/ppo.json",
     )
 
 
@@ -212,14 +271,27 @@ def test_show_and_filtered_gallery_use_static_records(
     assert "Pick &lt;cube&gt;" not in output.read_text()
 
 
-def test_environment_component_supplies_backend(task_root: Path) -> None:
+@pytest.mark.parametrize(
+    ("component", "backend"),
+    [
+        ("env.yaml", "newton"),
+        (
+            "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/stack_blocks_two/env.yaml",
+            "default",
+        ),
+    ],
+    ids=["relative", "packaged"],
+)
+def test_environment_component_supplies_backend(
+    task_root: Path, component: str, backend: str
+) -> None:
     write(
         task_root / "manipulation/pick/task.a.yaml",
-        {"id": "Pick-A-v1", "environment": {"component": "env.yaml"}},
+        {"id": "Pick-A-v1", "environment": {"component": component}},
     )
     write(task_root / "manipulation/pick/env.yaml", {"physics": "newton"})
     (task,) = catalog._load_catalog({"demo": task_root})
-    assert task.deployments[0].physics == "newton"
+    assert task.deployments[0].physics == backend
 
 
 def test_duplicate_authored_fields_fail(task_root: Path) -> None:
@@ -274,9 +346,9 @@ def test_runtime_only_and_registered_capabilities_are_preserved(
 def test_official_catalogs_resolve_real_deployments() -> None:
     root = (
         Path(__file__).resolve().parents[1]
-        / "extensions/embodichain_tasks/configs/tasks"
+        / "embodichain/extensions/tasks/configs/tasks"
     )
-    tasks = catalog._load_catalog({"embodichain_tasks": root})
+    tasks = catalog._load_catalog({"embodichain.extensions.tasks": root})
     pick = catalog._select_task(tasks, "repeated_pick_place")
     assert {d.name for d in pick.deployments} >= {
         "franka",
@@ -333,21 +405,6 @@ def test_authored_nested_deployment_stays_in_one_logical_task(task_root: Path) -
     tasks = catalog._load_catalog({"demo": task_root})
     assert len(tasks) == 1
     assert tasks[0].deployments[0].env_id == "Nested-v1"
-
-
-def test_official_discovery_prefers_core_colocated_worktree(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    stale_package = tmp_path / "stale"
-    (stale_package / "tasks").mkdir(parents=True)
-    monkeypatch.setattr(
-        catalog.importlib.resources, "files", lambda name: stale_package
-    )
-    expected = (
-        Path(__file__).resolve().parents[1]
-        / "extensions/embodichain_tasks/configs/tasks"
-    )
-    assert catalog._task_config_roots(("embodichain_tasks",)) == (expected,)
 
 
 def test_validation_links_independent_physical_failure(
@@ -448,7 +505,7 @@ def test_carton_source_and_ordinary_rgbd_deployments_without_loading_assets(
 ) -> None:
     root = (
         Path(__file__).resolve().parents[1]
-        / "extensions/embodichain_tasks/configs/tasks"
+        / "embodichain/extensions/tasks/configs/tasks"
     )
 
     def forbidden(*args):
@@ -457,8 +514,8 @@ def test_carton_source_and_ordinary_rgbd_deployments_without_loading_assets(
     monkeypatch.setattr("embodichain.data.get_data_class", forbidden)
     task = next(
         t
-        for t in catalog._load_catalog({"embodichain_tasks": root})
-        if t.qualified_key == "embodichain_tasks:carton_stocking"
+        for t in catalog._load_catalog({"embodichain.extensions.tasks": root})
+        if t.qualified_key == "embodichain.extensions.tasks:carton_stocking"
     )
     assert task.default_deployment == "panda"
     deployments = {deployment.name: deployment for deployment in task.deployments}

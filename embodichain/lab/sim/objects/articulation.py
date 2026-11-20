@@ -101,6 +101,9 @@ from embodichain.lab.sim.objects.backends.controls import (
     set_physical_visible,
 )
 from embodichain.lab.sim.objects.backends.base import ArticulationViewBase
+from embodichain.lab.sim.objects.backends._numeric_observations import (
+    scoped_link_matrices,
+)
 from embodichain.lab.sim.objects.backends.newton import (
     _configure_newton_mimic_compliance,
     _stabilize_newton_mimic_target_write,
@@ -477,6 +480,21 @@ class ArticulationData:
             link_name,
             is_newton=self.is_newton_backend,
         )
+
+    def _read_link_com_position(self, link_index: int) -> torch.Tensor:
+        """Read the current body-local COM position of one link across environments."""
+        if self.is_newton_backend:
+            return self.com_pose[:, link_index, :3]
+
+        link_name = self.link_names[link_index]
+        positions = np.asarray(
+            [
+                self._entity_link_properties(entity, link_name).com_position
+                for entity in self.entities
+            ],
+            dtype=np.float32,
+        )
+        return torch.as_tensor(positions, device=self.device)
 
     def read_physical_properties(
         self,
@@ -1738,6 +1756,10 @@ class Articulation(BatchEntity):
             )
 
         link_idx = self.link_names.index(link_name)
+        if to_matrix:
+            selected = scoped_link_matrices(self, link_name, local_env_ids)
+            if selected is not None:
+                return selected
         link_pose = self.body_data.body_link_pose[local_env_ids, link_idx, :]
 
         if to_matrix:
@@ -2039,8 +2061,8 @@ class Articulation(BatchEntity):
                 )
         if (
             (root_pose is not None or qpos is not None)
-            and self.device.type == "cpu"
             and not self._data.is_newton_backend
+            and not self._world.get_physics_scene().is_direct_gpu()
         ):
             # Direct root/joint writes update native kinematics, but CPU link
             # transforms are published by World.update. Do not advance physics

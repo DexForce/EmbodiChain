@@ -17,7 +17,7 @@ settings are recorded in the [render manifest](../../../_static/robots/flexiv_ri
 
 ```python
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain_robots import FlexivRizon4SCfg
+from embodichain.extensions.robots import FlexivRizon4SCfg
 
 sim = SimulationManager(SimulationManagerCfg(headless=True))
 try:

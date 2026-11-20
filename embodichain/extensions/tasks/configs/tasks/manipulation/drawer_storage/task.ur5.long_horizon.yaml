@@ -1,0 +1,27 @@
+id: TaskProgramDrawerStorage-UR5-LongHorizon-v1
+environment:
+  component: env.long_horizon.yaml
+evaluation:
+  component: task_program/evaluation.long_horizon.yaml
+task_program:
+  program: task_program/program.long_horizon.yaml
+  integration: task_program/integration.long_horizon.yaml
+  execution_policy: task_program/execution_policy.long_horizon.yaml
+embodiment:
+  component: ../../../components/embodiments/ur5_dh_pgi_140_80.yaml
+  overrides:
+    init_qpos: [0.0, -1.57, 1.57, -3.14, -1.57, 0.0, 0.0, 0.0]
+    init_pos: [0.0, 0.0, 0.24]
+    # Close fully and stiffen the jaws so they hold the slender handle against
+    # rail damping; larger objects block the fingers before this endpoint.
+    joint_drive_props:
+      stiffness:
+        gripper_finger1_joint_1: 3000.0
+      damping:
+        gripper_finger1_joint_1: 300.0
+    grippers:
+      eef:
+        commands:
+          grasp:
+            gripper_finger1_joint_1: 0.04
+            gripper_finger2_joint_1: 0.04

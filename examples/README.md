@@ -50,7 +50,7 @@ The [NeRD showcase](learning/nerd/README.md) prepares pinned external resources,
 trains through the shared SL recipe, exports models and evaluates saved
 transitions. Its private support code owns teacher collection, historical
 training and reference experiments. Reusable models and codecs are installed
-as `embodichain_models`; downloaded datasets, weights and raw reference assets
+as `embodichain.extensions.models`; downloaded datasets, weights and raw reference assets
 are stored outside the repository and wheel.
 
 The [SL data-source example](learning/sl_data_source/README.md) connects resident
@@ -64,7 +64,7 @@ held-out targets, with frozen inference for interactive target edits.
 
 The [RWM fitting example](learning/rwm/README.md) qualifies controlled supervised
 state-transition fitting and state/action gradients. Its generated recipes use
-the installable `embodichain_models.dynamics.rwm` model family and shared SL
+the installable `embodichain.extensions.models.dynamics.rwm` model family and shared SL
 trainer; its corpus generation and acceptance helpers remain private to the example.
 
 The [Sharpa in-hand example](learning/sharpa_inhand/README.md) trains cylinder
@@ -139,15 +139,14 @@ python scripts/tutorials/sim/create_cable.py
 python scripts/tutorials/sim/create_cable.py --headless --renderer no-render --num-envs 2
 ```
 
-The cable examples use CUDA and DexSim `0.6.0rc2` (engine commit
-`dbaca660471d5aaa7e750093e7fe1c207465c4af`). The DexForce package index
-provides Linux x86_64 wheels for Python 3.11 and 3.12. To install the pinned
-engine in your EmbodiChain environment and check its build, run:
+The cable examples use CUDA and the project-pinned DexSim engine. The DexForce
+package index provides Linux x86_64 wheels for Python 3.11 and 3.12. To install
+the engine and check its build, run:
 
 ```bash
 python -m pip install --index-url https://pypi.org/simple \
   --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site \
-  dexsim-engine==0.6.0rc2
+  dexsim-engine==0.6.0
 python -c "import dexsim; from dexsim.scene import SpawnedCable; print(dexsim.__version__, dexsim.__commit_id__)"
 ```
 

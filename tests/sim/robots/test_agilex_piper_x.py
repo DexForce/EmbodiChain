@@ -34,7 +34,7 @@ pytestmark = [pytest.mark.slow, pytest.mark.requires_sim]
 
 _EMBODIMENT = (
     Path(__file__).resolve().parents[3]
-    / "extensions/embodichain_tasks/configs/components/embodiments"
+    / "embodichain/extensions/tasks/configs/components/embodiments"
     / "piper_x_agx_gripper.yaml"
 )
 _ARM_JOINTS = [f"joint{index}" for index in range(1, 7)]

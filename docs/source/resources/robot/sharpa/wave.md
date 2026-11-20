@@ -1,6 +1,6 @@
 # Sharpa Wave 01
 
-`embodichain_robots.SharpaWaveCfg` configures a standalone left or right
+`embodichain.extensions.robots.SharpaWaveCfg` configures a standalone left or right
 Sharpa Wave 01. The robot catalog ID is `SharpaWave`; `left` and `right` select the
 native models, with right as the default.
 
@@ -31,7 +31,7 @@ Given an existing `SimulationManager` named `sim`:
 
 ```python
 from embodichain.robot_registry import resolve_robot_cfg
-from embodichain_robots import SharpaWaveCfg
+from embodichain.extensions.robots import SharpaWaveCfg
 
 cfg = resolve_robot_cfg("SharpaWave", variant="left")
 # Equivalent model-local selection:
@@ -48,7 +48,7 @@ embodichain preview-robot --robot SharpaWave --variant right --headless --device
 ```
 
 The model package also lazily exports `SharpaWaveCfg` from
-`embodichain_robots.sharpa.wave`. Listing catalogs does not
+`embodichain.extensions.robots.sharpa.wave`. Listing catalogs does not
 import configurations or download assets. Unsupported sides fail before asset
 lookup. `from_dict()` builds defaults and applies isolated overrides through the
 standard `RobotCfg` path. An existing local `fpath` bypasses asset download.
@@ -97,7 +97,7 @@ manipulation or other physics backends.
 
 ```python
 from embodichain.data import get_data_path
-from embodichain_robots.sharpa.wave.assets import SharpaWave
+from embodichain.extensions.robots.sharpa.wave.assets import SharpaWave
 
 right_urdf = get_data_path("SharpaWave/right_sharpa_wave/right_sharpa_wave.urdf")
 ```
@@ -105,6 +105,6 @@ right_urdf = get_data_path("SharpaWave/right_sharpa_wave/right_sharpa_wave.urdf"
 The [published V1 archive](https://huggingface.co/datasets/DexForceAI/embodichain_data/blob/541650b05674ead90b58e9edcac650e87d1a35a6/eef_assets/SharpaWaveV1.zip)
 contains both sides and uses the `SharpaWaveV1` cache. Source:
 [sharpa-robotics/sharpa-urdf-usd-xml at `0d19cac602f4`](https://github.com/sharpa-robotics/sharpa-urdf-usd-xml/tree/0d19cac602f46456b819e4b6a2c09a74982c9a3e).
-The model-owned [provenance record](https://github.com/DexForce/EmbodiChain/blob/main/extensions/embodichain_robots/sharpa/wave/README.md)
+The model-owned [provenance record](https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/robots/sharpa/wave/README.md)
 records licensing, preparation, archive hashes and native MJCF resources.
 Host assemblies own mount transforms, naming prefixes and task-specific interfaces.

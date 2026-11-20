@@ -227,6 +227,38 @@ class ContactSensor(BaseSensor):
 
         super().__init__(config, device, num_instances=owner.num_envs)
 
+    def destroy(self) -> None:
+        """Release query and sampling resources before the owning Scene closes.
+
+        Complete the recorded producer before dropping borrowed native views.
+        Repeated destruction is safe. Previously returned observation/history
+        tensors retain their owned storage; further sampling needs a new sensor.
+        """
+        if self._sample_ready_stream is not None:
+            self._sample_ready_stream.synchronize()
+        self._sample_ready_stream = None
+        self._sample_graph = None
+        self._sample_graph_key = None
+        self._sample_stream = None
+        self._sample_torch_stream = None
+        self._last_contact_buffer = None
+        self._empty_contact_buffer = None
+        self._metadata_actor_table = None
+        self._metadata_selected_ids = None
+        if self._query is not None:
+            close = getattr(self._query, "close", None)
+            if callable(close):
+                close()
+        self._query = None
+        self._last_update_key = None
+        self._last_history_key = None
+        self._sampling_observers.clear()
+        self._histories.clear()
+        if self._visualizer is not None:
+            self._visualizer.clear()
+            self._visualizer = None
+        self._sim = None
+
     @property
     def max_total_contacts(self) -> int:
         """Get the maximum total number of contacts across all environments.
@@ -855,19 +887,37 @@ class ContactSensor(BaseSensor):
             for observer, token in tokens:
                 observer.after_sample(dt, token)
 
-    def _sample_physics_contacts(self, buffer: ContactBuffer, dt: float) -> None:
-        """Run the reduction on the existing caller/capture stream boundary."""
-        impulse_dt = dt
-        if (
-            self._histories
-            and getattr(getattr(self._sim, "physics", None), "name", None) == "newton"
-        ):
+    @property
+    def normal_impulse_available(self) -> bool:
+        """Whether the reported scalar impulse is the signed-normal magnitude."""
+        return not (self._sim.physics.name == "default" and self.device.type == "cpu")
+
+    def get_impulse_duration(self, physics_dt: float) -> float:
+        """Return the duration represented by the current solver's impulse.
+
+        Args:
+            physics_dt: Duration of one completed manager physics step, in seconds.
+
+        Returns:
+            Duration of the native impulse integration interval.
+        """
+        if getattr(getattr(self._sim, "physics", None), "name", None) == "newton":
             from dexsim.engine.newton_physics.backend_registry import get_newton_backend
 
             backend = get_newton_backend(self._sim._world)
-            # Newton reports the last internal solver substep's impulse, not
-            # the impulse integrated over the whole World.update interval.
-            impulse_dt = dt / max(int(backend.cfg.num_substeps), 1)
+            return physics_dt / max(int(backend.cfg.num_substeps), 1)
+        return physics_dt
+
+    def get_latest_contact_loss_mask(self) -> torch.Tensor:
+        """Return per-environment loss, including query-wide overflow."""
+        self._wait_for_sample()
+        return (self._sample_scatter_dropped_count != 0) | (
+            self._latest_query_dropped_count != 0
+        )
+
+    def _sample_physics_contacts(self, buffer: ContactBuffer, dt: float) -> None:
+        """Run the reduction on the existing caller/capture stream boundary."""
+        impulse_dt = self.get_impulse_duration(dt) if self._histories else dt
         if self.device.type != "cuda":
             self._sample_contacts(buffer, dt, impulse_dt)
             return

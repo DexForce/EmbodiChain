@@ -1,6 +1,6 @@
 # Pick/Place in three 3DGS scenes with Franka and two cameras
 
-Record the official Task Program deployments from `embodichain_tasks` against
+Record the official Task Program deployments from `embodichain.extensions.tasks` against
 the registered, standardized Gaussian scene packages. The example retains the
 FR3/parallel-hand model and initial pose,
 executes physical Pick/Place, and records a fixed third-person camera plus a
@@ -26,16 +26,16 @@ through `embodichain data download --name <asset-name>`.
 
 | Scene | Runnable config | Registered background |
 | --- | --- | --- |
-| RoboSplatter office | [task.office.yaml](../../../extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/task.office.yaml) | `RoboSplatterOfficeGS/asset.usda` |
-| DISCOVERSE lab3 | [task.discoverse.yaml](../../../extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/task.discoverse.yaml) | `DiscoverseLab3GS/asset.usda` |
-| RoboSimGS tabletop | [task.robosimgs.yaml](../../../extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/task.robosimgs.yaml) | `RoboSimGSTabletopGS/asset.usda` |
+| RoboSplatter office | [task.office.yaml](../../../embodichain/extensions/tasks/configs/tasks/manipulation/gaussian_pick_place/task.office.yaml) | `RoboSplatterOfficeGS/asset.usda` |
+| DISCOVERSE lab3 | [task.discoverse.yaml](../../../embodichain/extensions/tasks/configs/tasks/manipulation/gaussian_pick_place/task.discoverse.yaml) | `DiscoverseLab3GS/asset.usda` |
+| RoboSimGS tabletop | [task.robosimgs.yaml](../../../embodichain/extensions/tasks/configs/tasks/manipulation/gaussian_pick_place/task.robosimgs.yaml) | `RoboSimGSTabletopGS/asset.usda` |
 
 Task discovery and ordinary trajectory collection work without this recorder:
 
 ```bash
 embodichain show-task gaussian_pick_place
 embodichain run-task \
-  --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/task.office.yaml \
+  --gym-config embodichain/extensions/tasks/configs/tasks/manipulation/gaussian_pick_place/task.office.yaml \
   --headless --seed 42 --max_episodes 2 --record_trajectory \
   --trajectory_save_dir outputs/gaussian_pick_place/office
 ```
@@ -53,8 +53,10 @@ The deployments preserve each scene's `cam_third` calibration with UID-scoped
 `camera_overrides`; the wrist calibration remains shared.
 Programs own `Pick → Place → wait_stable`, world targets and acceptance.
 The integration binds only the cube and support surface to semantics. Gaussian
-backgrounds are imported as pure visuals with their authored placement preserved;
-Office's packaged coordinate rotation must not be repeated in the deployment.
+backgrounds import the packages' USD visual subtrees, preserving their authored
+placement. A qualified DexSim build replicates the parent and its native Gaussian
+companions with shared point resources and independent instance state. Office's
+X-axis rotation of 90 degrees comes from USD and must not be repeated in YAML.
 
 Preparation resolves the authoritative definitions through the imported SDK,
 including an installed wheel, and freezes them in the existing flat `resolved/`
@@ -97,6 +99,31 @@ This is a real mount transform, not a video rotation or a tracking camera.
 
 Hybrid/8 spp and OptiX offscreen denoising are used. The captures are
 display-referred, so `apply_display_srgb=False` avoids an extra display transfer.
+
+## Parallel qualification
+
+The official deployments support `run-task --num_envs 4 --max_episodes 4`.
+USD replication requires the DexSim native companion-cloning build exposing
+`SpawnedRigidBody.get_gaussian_resource_ids()`; older SDKs retain singleton use.
+The required SDK implementation is in
+[DexSim MR !1628](http://192.168.3.16/Engine/dexverse/-/merge_requests/1628).
+The existing `run`/`run_all` recorders retain their single-environment format.
+To qualify a batched deployment, use:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 embodichain run-example gym/gaussian_pick_place/verify_parallel \
+  --scene office --num-envs 4 --seed 42
+```
+
+Repeat for `discoverse` and `robosimgs`. This executes the official Task Program
+with measured Pick/Place acceptance in every arena. Before the episode, hiding
+only arena 1's background must change only that arena's two views. Every live
+RGB boundary checks completed native Gaussian identities, control clocks,
+fixed third-person extrinsics, rigid wrist mounting and nonblank uint8 images;
+initial projected cube pixels must be red in each view. Each row stores raw
+RGB with a 32 MiB spool budget, native batch trajectories and capture metadata.
+The exporter decodes every camera-video frame against its original RGB.
+`run.json` is marked complete only after all rows and video audits pass.
 
 ## Recording and completion
 

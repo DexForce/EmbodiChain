@@ -60,11 +60,11 @@ simulator FPS claim is made.
 ## Reproduce
 
 ```bash
-PYTHONPATH="$PWD:$PWD/extensions:$PWD/extensions/embodichain_tasks:$PWD/extensions/embodichain_models" \
+PYTHONPATH="$PWD" \
 python -m scripts.benchmark.sensors.contact_loss --device cpu --output /tmp/contact-loss-cpu.json
 
 CUDA_VISIBLE_DEVICES=4 \
-PYTHONPATH="$PWD:$PWD/extensions:$PWD/extensions/embodichain_tasks:$PWD/extensions/embodichain_models" \
+PYTHONPATH="$PWD" \
 python -m scripts.benchmark.sensors.contact_loss --device cuda:0 --output /tmp/contact-loss-cuda.json
 ```
 

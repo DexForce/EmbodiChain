@@ -59,7 +59,7 @@ def _run_scene_expansion_smoke(output: Path) -> None:
 
     path = (
         _REPOSITORY_ROOT
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
     )
     cfg = config_to_cfg(load_config(path), source_path=path)
     cfg.seed = 0

@@ -361,7 +361,7 @@ Swapping either UR5 or W1's gripper keeps that robot's object, start, destinatio
 and task frame fixed. Different robots use reachable fixture heights while
 preserving the object-goal formulation and task recipe. ARX5 uses a 50 mm table,
 inherits the outward-elbow ready pose and enabled self-collision from
-``embodichain_robots.ARX5Cfg``, and selects an unflipped wrist branch for this
+``embodichain.extensions.robots.ARX5Cfg``, and selects an unflipped wrist branch for this
 fixture to keep the wrist clear of its forearm. The dual-arm beam rests on
 central supports that leave space beneath both grasp regions.
 

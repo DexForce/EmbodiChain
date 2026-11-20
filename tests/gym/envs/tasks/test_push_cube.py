@@ -28,7 +28,7 @@ import torch
 from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg, get_manager_modules
 from embodichain.utils.utility import load_config
-from embodichain_tasks.manipulation.push_cube import PushCubeEnv
+from embodichain.extensions.tasks.manipulation.push_cube import PushCubeEnv
 from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.gym.envs.managers import EventManager, SceneEntityCfg
 from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
@@ -38,7 +38,7 @@ from embodichain.lab.sim.cfg import VisualObjectCfg
 def _configuration(filename: str):
     path = (
         Path(__file__).resolve().parents[4]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/push_cube"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/push_cube"
         / filename
     )
     physical = _resolve_gym_components(load_config(path), base_dir=path.parent).config

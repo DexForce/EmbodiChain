@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from embodichain_robots.the_robot_studio.so101 import assets as so101_assets
+from embodichain.extensions.robots.the_robot_studio.so101 import assets as so101_assets
 
 pytestmark = pytest.mark.no_sim
 
