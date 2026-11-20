@@ -239,3 +239,27 @@ The report distinguishes cumulative additions from independent cohorts; observed
 bins are not a feasible-volume certificate. The reader uses existing artifact
 validation dependencies but creates no World. See
 [distribution usage](../../../embodichain/lab/expansion/distribution.md).
+
+Native configured jobs snapshot execution policies through the canonical selector
+resolver and default `tracking.boundary_stop` on. Supported native free entry
+phases also inherit `boundary_reference_bridge` from that setting; explicit
+flags retain their values. Atomic planning owns the bounded prefix and protected
+join, not a postprocessing filter. Preserve explicit opt-out and
+component overrides. They do not mutate authored policy files or replace physical
+validators. The Atomic terminal gate owns additional real command frames; these
+consume ordinary rollout budgets and T+1 evidence. See
+[invocation handoff](../atomic-actions/execution.md#tolerance-bounded-invocation-handoff)
+and [boundary diagnostics](../../../examples/expansion/engine/skill-boundaries.md).
+
+Native joint-residual and via-point generation retain their original proposal budgets and
+full-amplitude preference. On exhaustion, the adapter may deterministically
+shrink one closest motion rejection under unchanged minimum-delta, joint, motion,
+FK and physical checks. It preserves the time grid and protected samples; metadata
+records the raw proposal count, refinement scale and both validation results.
+See [boundary and residual qualification](../../../examples/expansion/engine/skill-boundaries.md).
+
+Native same-grid generators narrow editable phases using the handoff protection
+range before sampling. Raw protected indices are mapped through zero-time sample
+canonicalization; protected-only motion does not make a joint editable. Empty
+remaining phases are disabled. Engine reconstruction retains its independent
+exact-prefix check as the final boundary.

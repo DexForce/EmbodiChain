@@ -5423,3 +5423,21 @@ def test_inspector_json_stdout_contains_only_the_result(tmp_path: Path) -> None:
     assert data["deployments"][0]["resolved_configuration"]["components"][
         "integration"
     ].endswith("integration.tabletop.yaml")
+
+
+def test_boundary_policy_decoding_keeps_existing_tracking_requirements():
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_tracking_policy,
+    )
+
+    raw = {
+        "kind": "timed",
+        "settle_duration": 0.4,
+        "boundary_stop": True,
+        "boundary_timeout": 2.0,
+    }
+    policy = _decode_tracking_policy(raw, path="tracking")
+    assert policy.boundary_stop and policy.boundary_timeout == 2.0
+    assert policy.terminal.settle_duration == 0.4
+    assert raw["boundary_stop"] is True
+    assert not _decode_tracking_policy({"kind": "timed"}, path="tracking").boundary_stop

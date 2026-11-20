@@ -489,6 +489,25 @@ class _GymWorkloadSource:
             receipt = None
             try:
                 receipt = group["engine"].complete_row(state["native"], episode)
+                if (
+                    ctx.extensions.plan_outcome is not None
+                    and result.world_control_start is not None
+                    and outcome.expansion_records
+                    and outcome.expansion_records[0]
+                    and outcome.reasons[0]
+                    in (
+                        "completed",
+                        "program_rejected",
+                        "segment_rejected",
+                        "measured_validation_failed",
+                        "environment_terminated",
+                    )
+                ):
+                    ctx.extensions.plan_outcome(
+                        result.assignment.ordinal,
+                        episode is not None and episode.validation.accepted,
+                        outcome,
+                    )
                 return receipt
             finally:
                 if ctx.feedback is not None:

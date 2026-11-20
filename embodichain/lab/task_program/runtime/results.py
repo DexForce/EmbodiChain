@@ -483,7 +483,7 @@ def _tracking_policy_to_metadata(policy: TrackingPolicy) -> dict[str, object]:
     """Serialize independent in-flight and terminal tracking contracts."""
     in_flight = policy.in_flight
     terminal = policy.terminal
-    return {
+    result = {
         "in_flight": (
             None
             if in_flight is None
@@ -511,6 +511,17 @@ def _tracking_policy_to_metadata(policy: TrackingPolicy) -> dict[str, object]:
             }
         ),
     }
+    if policy.boundary_stop:
+        result["boundary_stop"] = {
+            "position_tolerance": policy.boundary_position_tolerance,
+            "velocity_tolerance": policy.boundary_velocity_tolerance,
+            "timeout": policy.boundary_timeout,
+            "velocity_source": "control_boundary_position_difference",
+            "consecutive_observations": 2,
+        }
+    if policy.boundary_reference_bridge:
+        result["boundary_reference_bridge"] = True
+    return result
 
 
 def _tracking_sequence_to_metadata(

@@ -540,7 +540,13 @@ class TaskState:
 
 @dataclass(frozen=True, slots=True, eq=False)
 class RobotObservation:
-    """Measured robot state used as the start of planning or replanning."""
+    """Measured robot state used as the start of planning or replanning.
+
+    Optional ``command_qpos`` and ``command_qvel`` are independently owned
+    snapshots of controller references at the same control boundary. They are
+    not physical measurements and never replace ``qpos`` or ``qvel``. Projection
+    advances available references to the projected terminal position and rest.
+    """
 
     timestamp: float
     qpos: torch.Tensor
@@ -548,6 +554,8 @@ class RobotObservation:
     qeffort: torch.Tensor | None = None
     root_pose: torch.Tensor | None = None
     root_twist: torch.Tensor | None = None
+    command_qpos: torch.Tensor | None = None
+    command_qvel: torch.Tensor | None = None
 
     def __post_init__(self) -> None:
         if self.timestamp < 0.0:
@@ -601,6 +609,20 @@ class RobotObservation:
                 )
             if not torch.isfinite(self.root_twist).all():
                 raise ValueError("RobotObservation.root_twist must be finite.")
+        for name in ("command_qpos", "command_qvel"):
+            value = getattr(self, name)
+            if value is not None:
+                if not isinstance(value, torch.Tensor):
+                    raise TypeError(f"{name} must be a torch.Tensor or None")
+                if (
+                    value.shape != self.qpos.shape
+                    or value.device != self.qpos.device
+                    or not torch.isfinite(value).all()
+                ):
+                    raise ValueError(
+                        f"{name} must be a finite aligned command snapshot"
+                    )
+                object.__setattr__(self, name, value.clone())
         object.__setattr__(self, "qpos", self.qpos.clone())
         object.__setattr__(self, "qvel", self.qvel.clone())
         if self.qeffort is not None:
@@ -636,6 +658,10 @@ class RobotObservation:
             qeffort=self.qeffort,
             root_pose=self.root_pose,
             root_twist=self.root_twist,
+            command_qpos=qpos if self.command_qpos is not None else None,
+            command_qvel=(
+                torch.zeros_like(qpos) if self.command_qvel is not None else None
+            ),
         )
 
 

@@ -236,6 +236,18 @@ def _canonical_value(value: object) -> object:
             and not value.supports_segment_motion_recovery
         ):
             metadata.pop("supports_segment_motion_recovery")
+        from embodichain.lab.sim.atomic_skills.tracking import TrackingPolicy
+
+        if type(value) is TrackingPolicy and not value.boundary_reference_bridge:
+            metadata.pop("boundary_reference_bridge")
+        if type(value) is TrackingPolicy and not value.boundary_stop:
+            for key in (
+                "boundary_stop",
+                "boundary_position_tolerance",
+                "boundary_velocity_tolerance",
+                "boundary_timeout",
+            ):
+                metadata.pop(key)
         if type(value) is MotionPolicy:
             if value.final_velocity_rejection == "hold":
                 metadata.pop("final_velocity_rejection")

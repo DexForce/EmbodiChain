@@ -101,6 +101,9 @@ from embodichain.lab.sim.objects.backends.controls import (
     set_physical_visible,
 )
 from embodichain.lab.sim.objects.backends.base import ArticulationViewBase
+from embodichain.lab.sim.objects.backends._numeric_observations import (
+    scoped_link_matrices,
+)
 from embodichain.lab.sim.objects.backends.newton import (
     _configure_newton_mimic_compliance,
     _stabilize_newton_mimic_target_write,
@@ -1753,6 +1756,10 @@ class Articulation(BatchEntity):
             )
 
         link_idx = self.link_names.index(link_name)
+        if to_matrix:
+            selected = scoped_link_matrices(self, link_name, local_env_ids)
+            if selected is not None:
+                return selected
         link_pose = self.body_data.body_link_pose[local_env_ids, link_idx, :]
 
         if to_matrix:
