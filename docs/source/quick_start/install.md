@@ -235,12 +235,12 @@ Both a published-wheel install and `pip install -e .` register the
 `embodichain.tasks` entry point automatically; do not install
 `embodichain/extensions/tasks/` separately.
 
-If an older checkout was installed with `pip install -e embodichain/extensions/tasks/`,
-remove that legacy editable distribution once before reinstalling the main
-project:
+If you previously installed the separate `embodichain_tasks` distribution
+with `pip install -e embodichain_tasks/` from an older checkout, remove it
+before reinstalling the main project.
 
 ```bash
-pip uninstall -y embodichain.extensions.tasks
+pip uninstall -y embodichain_tasks
 pip install -e .
 ```
 

@@ -44,19 +44,20 @@ class BuildPy(build_py):
     """Remove retired extension packages from reused build staging."""
 
     def run(self) -> None:
-        for extension in (
-            "benchmarks",
-            "models",
-            "robots",
-            "sensors",
-            "solvers",
-            "tasks",
-        ):
-            stale_package = Path(self.build_lib) / f"embodichain_{extension}"
-            if stale_package.is_symlink():
-                stale_package.unlink(missing_ok=True)
-            elif stale_package.is_dir():
-                shutil.rmtree(stale_package)
+        if not self.dry_run:
+            for extension in (
+                "benchmarks",
+                "models",
+                "robots",
+                "sensors",
+                "solvers",
+                "tasks",
+            ):
+                stale_package = Path(self.build_lib) / f"embodichain_{extension}"
+                if stale_package.is_symlink():
+                    stale_package.unlink(missing_ok=True)
+                elif stale_package.is_dir():
+                    shutil.rmtree(stale_package)
         super().run()
 
 

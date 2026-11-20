@@ -123,6 +123,25 @@ def test_package_discovery_includes_only_runtime_trees() -> None:
     assert all(package.partition(".")[0] == "embodichain" for package in packages)
 
 
+def test_dry_run_preserves_retired_extension_staging(tmp_path: Path) -> None:
+    stale_dir = tmp_path / "embodichain_tasks"
+    stale_dir.mkdir()
+    payload = stale_dir / "__init__.py"
+    payload.touch()
+    stale_link = tmp_path / "embodichain_models"
+    stale_link.symlink_to(stale_dir, target_is_directory=True)
+
+    distribution = Distribution()
+    distribution.dry_run = True
+    command = package_setup.BuildPy(distribution)
+    command.build_lib = str(tmp_path)
+    command.ensure_finalized()
+    command.run()
+
+    assert payload.is_file()
+    assert stale_link.is_symlink()
+
+
 def test_new_extension_package_and_resources_are_discovered(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
