@@ -693,7 +693,11 @@ class SkillObjectiveObservation(Functor):
         progress = getattr(env, "task_program_progress", None)
         if self.stage is not None and progress is not None:
             completed, total = progress.ordered_progress()
-            indices = progress.indices(self.stage)
+            indices = (
+                progress._indices(self.stage)
+                if isinstance(self.stage, tuple)
+                else progress.indices(self.stage)
+            )
             active = torch.stack([completed == i for i in indices]).any(0)
             if total - 1 in indices:
                 active |= completed == total
@@ -1114,12 +1118,16 @@ def _bind_objective(cfg, name, objective, *, stage=None):
             if objective.get("reward_profile", "default") != "default"
             else {}
         ),
-        **({"stage": stage} if stage else {}),
+        **(
+            ({"call_index": stage[1]} if isinstance(stage, tuple) else {"stage": stage})
+            if stage is not None
+            else {}
+        ),
     }
 
 
 def _validate_program_objective_bindings(cfg, registration, stages):
-    from embodichain.lab.task_program.integrations.progress import _matches_stage
+    from embodichain.lab.task_program.integrations.progress import _stage_selections
     from embodichain.lab.task_program.semantics.calls import (
         Place,
         MoveHeldObjectCall,
@@ -1162,6 +1170,7 @@ def _validate_program_objective_bindings(cfg, registration, stages):
         binding.entity_id: binding.simulation_uid
         for binding in registration.scene_binding.rigid_objects
     }
+    selections = _stage_selections(stages)
     for term in vars(cfg.observations).values():
         if (
             not isinstance(term, ObservationCfg)
@@ -1170,9 +1179,8 @@ def _validate_program_objective_bindings(cfg, registration, stages):
         ):
             continue
         objective = term.params["objective"]
-        for stage in stages:
-            if not _matches_stage(stage, term.params["stage"]):
-                continue
+        for index in selections.get(term.params["stage"], ()):
+            stage = stages[index]
             call = stage.calls[0].call
             binding = objective["binding"]
             if hasattr(call, "object") and binding.get("object") != objects.get(
@@ -1240,7 +1248,8 @@ def _validate_program_objective_bindings(cfg, registration, stages):
                         (
                             s
                             for s in registration.scene_binding.support_surfaces
-                            if s.entity_id == call.on.entity_id
+                            if s.entity_id
+                            == linked.affordances["destination"].entity_id
                         ),
                         None,
                     )

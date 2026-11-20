@@ -65,20 +65,62 @@ def _stage_aliases(stage):
     return tuple(aliases)
 
 
-def _matches_stage(stage, selector):
-    return selector in _stage_aliases(stage)
+def _is_stage_selector(selector):
+    return isinstance(selector, str) or type(selector) is int
+
+
+def _stage_selector(binding):
+    if "call_index" in binding:
+        index = binding["call_index"]
+        if type(index) is not int or index < 0:
+            raise ValueError(
+                "call_index must be a nonnegative compiled call occurrence"
+            )
+        return ("call", index)
+    stage = binding["stage"]
+    if not _is_stage_selector(stage) or (isinstance(stage, int) and stage < 0):
+        raise ValueError(
+            "stage must be a name or nonnegative progress occurrence index"
+        )
+    return stage
+
+
+def _stage_selections(stages):
+    """Index names before aliases, keeping structural selectors separate."""
+    names = {stage.name for stage in stages}
+    selections = {}
+    for index, stage in enumerate(stages):
+        selections[index] = [index]
+        for alias in dict.fromkeys(_stage_aliases(stage)):
+            if alias == stage.name or alias not in names:
+                selections.setdefault(alias, []).append(index)
+        for call in stage.calls:
+            selections.setdefault(("call", call.call_index), []).append(index)
+    return {
+        selector: tuple(dict.fromkeys(indices))
+        for selector, indices in selections.items()
+    }
 
 
 def _policy_stages(program, skill_conditions):
     """Expand multi-call policy segments only with explicit per-call criteria."""
     result = []
-    for segment in program.iter_segments():
+    segments = tuple(program.iter_segments())
+    names = {segment.name for segment in segments}
+
+    def has_call_criterion(call):
+        alias = f"call:{call.call_index}"
+        return ("call", call.call_index) in skill_conditions or (
+            alias not in names and alias in skill_conditions
+        )
+
+    for segment in segments:
         calls = segment.calls
-        requested = any(f"call:{call.call_index}" in skill_conditions for call in calls)
+        requested = any(has_call_criterion(call) for call in calls)
         if len(calls) == 1 or not requested:
             result.append(replace(segment, segment_index=len(result)))
             continue
-        if any(f"call:{call.call_index}" not in skill_conditions for call in calls):
+        if any(not has_call_criterion(call) for call in calls):
             raise ValueError(
                 "Multi-call policy stages require a measured objective for every call_index"
             )
@@ -132,6 +174,11 @@ def _progress_graph(
 
     stages = _policy_stages(program, skill_conditions or {})
     roots, current, achievements = [], [], []
+    selections = _stage_selections(stages)
+    extra_conditions = {i: [] for i in range(len(stages))}
+    for selector, spec in (skill_conditions or {}).items():
+        for index in selections.get(selector, ()):
+            extra_conditions[index].append(spec)
     for i, segment in enumerate(stages):
         path = segment.source_path
 
@@ -157,13 +204,9 @@ def _progress_graph(
                     "Policy prerequisites must reference measured conditions, not expert symbolic state."
                 )
             refs.append(include(conditions[entry.ref]))
-        if (
-            not segment.validators
-            and not any(
-                _matches_stage(segment, selector)
-                for selector in (skill_conditions or {})
-            )
-        ) or any(type(v) is not CompiledConditionValidator for v in segment.validators):
+        if (not segment.validators and not extra_conditions[i]) or any(
+            type(v) is not CompiledConditionValidator for v in segment.validators
+        ):
             fail("Policy segment validators must use named shared conditions.")
         for entry in segment.contract.outcomes:
             if entry.required and entry.kind != "validator":
@@ -172,9 +215,7 @@ def _progress_graph(
                 )
         for validator in segment.validators:
             refs.append(include(conditions[validator.cfg.ref]))
-        for selection, spec in (skill_conditions or {}).items():
-            if _matches_stage(segment, selection):
-                refs.append(include(spec))
+        refs.extend(include(spec) for spec in extra_conditions[i])
         goal, reached = f"stage/{i}/current", f"stage/{i}/achieved"
         nodes.append((goal, BooleanRule("all", tuple(dict.fromkeys(refs)))))
         nodes.append(
@@ -189,11 +230,7 @@ def _progress_graph(
     for label, specs in (("final", final_rules), ("process", process_rules)):
         refs = tuple(include(spec) for spec in specs.values())
         if label == "final":
-            refs += tuple(
-                include(spec)
-                for selector, spec in (skill_conditions or {}).items()
-                if _matches_stage(stages[-1], selector)
-            )
+            refs += tuple(include(spec) for spec in extra_conditions[len(stages) - 1])
         if refs:
             key = f"gate/{label}"
             nodes.append((key, BooleanRule("all", tuple(dict.fromkeys(refs)))))
@@ -250,7 +287,9 @@ class TaskProgramProgress:
         device: str | torch.device = "cpu",
         final_rules: Mapping[str, CompiledEvaluation] | None = None,
         process_rules: Mapping[str, CompiledEvaluation] | None = None,
-        skill_conditions: Mapping[str, CompiledEvaluation] | None = None,
+        skill_conditions: (
+            Mapping[str | int | tuple[str, int], CompiledEvaluation] | None
+        ) = None,
     ) -> None:
         (
             self._stages,
@@ -265,6 +304,7 @@ class TaskProgramProgress:
             process_rules or {},
             skill_conditions,
         )
+        self._stage_lookup = _stage_selections(self._stages)
         self.program_identity = task_program_fingerprint(program)
         self._session = RuleSession(
             self.compiled,
@@ -303,22 +343,26 @@ class TaskProgramProgress:
         """Return authored stage names, including repeated occurrences."""
         return tuple(stage.name for stage in self._stages)
 
-    def indices(self, stage: str | None) -> tuple[int, ...]:
+    def indices(self, stage: str | int | None) -> tuple[int, ...]:
         """Resolve a stage selection.
 
         Args:
-            stage: Authored name or occurrence ID; None selects all stages.
+            stage: Authored name, occurrence ID or zero-based progress occurrence
+                index; None selects all stages. Names take precedence over aliases.
 
         Returns:
             Matching occurrence indices in program order.
         """
-        if stage is None:
-            return tuple(range(len(self._stages)))
-        selected = tuple(
-            i for i, s in enumerate(self._stages) if _matches_stage(s, stage)
-        )
-        if not selected:
+        if stage is not None and not _is_stage_selector(stage):
             raise ValueError(f"Unknown policy stage {stage!r}.")
+        return self._indices(stage)
+
+    def _indices(self, selector):
+        if selector is None:
+            return tuple(range(len(self._stages)))
+        selected = self._stage_lookup.get(selector, ())
+        if not selected:
+            raise ValueError(f"Unknown policy stage {selector!r}.")
         return selected
 
     def advance(
@@ -421,7 +465,7 @@ class TaskProgramProgress:
 
     def reward(
         self,
-        stage: str,
+        stage: str | int,
         *,
         mode: str,
         scope: str | None = None,
@@ -435,7 +479,7 @@ class TaskProgramProgress:
         Weight, sign and shaping scale belong to RewardManager configuration.
 
         Args:
-            stage: Authored name or exact expanded occurrence ID.
+            stage: Authored name, expanded occurrence ID or progress occurrence index.
             mode: satisfied, rising, first_achievement or metric.
             scope: Explicit occurrence/episode first-achievement scope.
             metric: Exact scalar metric key, required in metric mode.
@@ -513,12 +557,13 @@ class TaskProgramProgress:
         return selected
 
     def condition(
-        self, stage: str | None = None, *, state: str = "achieved"
+        self, stage: str | int | None = None, *, state: str = "achieved"
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Read cached satisfaction and evidence validity.
 
         Args:
-            stage: Authored name or occurrence ID; None selects the whole program.
+            stage: Authored name, occurrence ID or zero-based progress occurrence
+                index; None selects the whole program. Names precede textual aliases.
             state: Historical achieved or revocable current truth.
 
         Returns:
@@ -663,16 +708,15 @@ def _validate_policy_deployment(cfg, registration):
         {},
         _program_objective_conditions(cfg),
     )
-    selections = {alias for stage in stages for alias in _stage_aliases(stage)}
+    selections = _stage_selections(stages)
     composition = getattr(cfg.rl_task, "reward_composition", None)
     if composition is not None:
         claimed = set()
         for skill in composition.get("skills", []):
-            matching = [
-                stage for stage in stages if _matches_stage(stage, skill["stage"])
-            ]
+            selector = _stage_selector(skill)
+            matching = [stages[index] for index in selections.get(selector, ())]
             if not matching:
-                raise ValueError(f"Unknown reward stage {skill['stage']!r}")
+                raise ValueError(f"Unknown reward stage {selector!r}")
             for stage in matching:
                 if stage.segment_id in claimed:
                     raise ValueError("Overlapping reward stage selectors")
@@ -711,9 +755,9 @@ def _validate_policy_deployment(cfg, registration):
                     raise ValueError(
                         "Program condition state must be achieved or current."
                     )
-                if (
-                    term.params.get("stage") is not None
-                    and term.params["stage"] not in selections
+                if term.params.get("stage") is not None and (
+                    not _is_stage_selector(term.params["stage"])
+                    or term.params["stage"] not in selections
                 ):
                     raise ValueError("Unknown policy stage in termination binding.")
     rewards = cfg.rewards
@@ -737,7 +781,10 @@ def _validate_policy_deployment(cfg, registration):
             or not math.isfinite(scale)
         ):
             raise ValueError("Program reward scale must be finite and numeric.")
-        if params.get("stage") not in selections:
+        if (
+            not _is_stage_selector(params.get("stage"))
+            or params["stage"] not in selections
+        ):
             raise ValueError("Unknown policy stage in reward binding.")
         mode = params.get("mode")
         if mode not in ("satisfied", "first_achievement", "rising", "metric"):

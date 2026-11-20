@@ -186,6 +186,45 @@ def test_control_mode_clamps_scrub_to_last_recorded_state(fake_restore):
     assert wrapper._replay_steps.tolist() == [1]
 
 
+@pytest.mark.parametrize("composition", [None, {"discount": 0.9}])
+def test_dynamic_replay_preserves_randomized_camera_pose(fake_restore, composition):
+    from unittest.mock import Mock
+    from embodichain.lab.sim.sensors.camera import Camera
+
+    env = _FakeEnv()
+    pose = torch.zeros(1, 3)
+    camera = Camera.__new__(Camera)
+    camera.cfg = SimpleNamespace(ground_plane_visible=True)
+    camera._device = env.device
+    camera._sample_metadata = {"valid": torch.ones(1, dtype=torch.bool)}
+    camera.set_ground_plane_visibility = lambda *args: None
+    camera._reset_pose = lambda env_ids: pose.zero_()
+    contact = SimpleNamespace(reset=Mock())
+    env.sensors = {"camera": camera, "contact": contact}
+    env.cfg.rl_task = SimpleNamespace(reward_composition=composition)
+    env.reward_manager = SimpleNamespace(
+        reset=lambda **kwargs: None, initialize_observation=lambda *args: None
+    )
+    env.observation_manager = SimpleNamespace(
+        has_history=False, reset=lambda **kwargs: None
+    )
+    env._capture_observation = lambda: SimpleNamespace(
+        policy={"obs": pose[:, :1].clone()}
+    )
+
+    def randomized_reset(**kwargs):
+        pose[:, 0] = 0.25
+        camera._sample_metadata["valid"].fill_(True)
+        return env.get_obs(), {}
+
+    env.reset = randomized_reset
+    wrapper = ReplayWrapper(env, _trajectory(), mode="dynamic")
+    wrapper.reset()
+    torch.testing.assert_close(pose[:, 0], torch.tensor([0.25]))
+    assert contact.reset.call_count == int(composition is not None)
+    assert camera._sample_metadata["valid"].tolist() == [composition is None]
+
+
 def test_dynamic_replay_seeds_shaping_from_restored_goal_observation(monkeypatch):
     from embodichain.lab.gym.envs.managers.cfg import ObservationCfg
     from embodichain.lab.gym.envs.managers.skill_objective import (

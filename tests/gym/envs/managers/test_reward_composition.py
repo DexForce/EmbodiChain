@@ -151,6 +151,54 @@ def test_builtin_skill_formula_rejects_incomplete_roles_before_measurement(
         SkillRewardProfile(skill, 1, roles)
 
 
+def test_custom_formula_can_register_only_the_roles_it_consumes(monkeypatch):
+    from embodichain.lab.sim.atomic_skills.reward_profiles import (
+        SkillRewardProfile,
+        register_skill_reward_profile,
+        _PROFILES,
+    )
+
+    class ReachOnly(SkillRewardProfile):
+        def potential(self, scores):
+            value = scores["reach"].square()
+            return value, torch.isfinite(value)
+
+    monkeypatch.setitem(_PROFILES, "pick_up", dict(_PROFILES["pick_up"]))
+    profile = ReachOnly("pick_up", 1, ("reach",))
+    register_skill_reward_profile("reach_only", profile)
+    terms = compose_reward_terms(
+        {
+            "discount": 0.9,
+            "skills": [
+                {
+                    "skill_id": "pick_up",
+                    "profile": "reach_only",
+                    "metrics": {"reach": {"field": "score"}},
+                }
+            ],
+        },
+        program=False,
+    )
+    env = SimpleNamespace(num_envs=2, device=torch.device("cpu"), sim=SimpleNamespace())
+    manager = env.reward_manager = RewardManager(terms, env)
+    manager.initialize_observation(_frame([0.5, 0.2]), [0, 1])
+    manager.transition_context = RewardTransitionContext(
+        _frame([0.8, 0.6], 1), torch.zeros(2, dtype=torch.bool)
+    )
+    reward, _ = manager.compute({}, torch.zeros(2, 1), {})
+    torch.testing.assert_close(reward, torch.tensor([0.326, 0.284]))
+
+
+def test_inherited_builtin_formula_still_requires_its_complete_roles():
+    from embodichain.lab.sim.atomic_skills.reward_profiles import SkillRewardProfile
+
+    class Inherited(SkillRewardProfile):
+        pass
+
+    with pytest.raises(ValueError, match="roles"):
+        Inherited("pick_up", 1, ("reach",))
+
+
 def test_program_switch_preserves_global_potential_boundary():
     manager = _manager(True)
     manager.initialize_observation(_frame([0.8, 0.6]), [0, 1])

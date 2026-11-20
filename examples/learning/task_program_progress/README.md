@@ -118,13 +118,23 @@ automatic milestone. Standalone `rl_task.skill` requires `reward_composition`
 with an explicit discount.
 Episode-scoped explicit bonuses suppress only the first occurrence of their
 authored name, leaving later automatic milestones available.
+Authored names precede textual aliases. A stage named `call:0` selects that
+stage, while an explicit `call_index: 0` selects the compiled call. Generated
+bonuses use numeric progress occurrences to avoid name collisions.
 
 Program `scene_relative` call targets freeze their rigid reference at activation
 per row/occurrence; repeats and reset rows rebind without retargeting peers.
 Place orientation preservation applies to both `at` and `on` destinations.
 Articulation/link references are not supported by measured skill targets.
 Dynamic replay seeds reward baselines from the final restored observation.
+It preserves randomized camera extrinsics while invalidating stale samples.
 Policy-only inference does not require an algorithm block.
+
+Checkpoint snapshots persist all effective reward scalars, including a suppressed
+success default of zero, so changing referenced program reward defaults does not
+change a saved run's rewards. Custom potential overrides declare the roles they
+consume; complete built-in role requirements apply to inherited formulas.
+Measured `Place(on)` accepts the same linked support-surface shorthand as planning.
 
 Dense formulas accept scalar role scores or error channels with finite `target`
 and finite positive `scale`; vector errors reduce by Euclidean norm. Named templates can

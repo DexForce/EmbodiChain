@@ -100,6 +100,8 @@ state orders. Physical joint IDs are not observation-column indices.
 and standalone `skill` goals into standard `RewardCfg` terms. Program-authored
 reward defaults are declared in `TaskProgramCfg.rewards`; the deployment may
 explicitly override them. `RewardManager` remains the sole weighting/reset owner.
+Checkpoint declarations freeze all resolved reward scalars, including suppressed
+success defaults, instead of consulting changed program YAML defaults on reload.
 Standalone `skill` declarations require an explicit composition and discount;
 omitting it rejects configuration rather than dropping the objective. Automatic
 milestones respect explicit terms selected by any equivalent stage/call alias.
@@ -111,6 +113,8 @@ canonical post-step observation after measured termination. Reset acquisition
 initializes baselines without paying rewards; repeated transition reads are cached.
 Dynamic replay resets histories and seeds the final restored frame. Rejected
 stale/foreign frames cannot move the accepted revision watermark.
+Replay invalidates camera samples while preserving randomized extrinsics;
+non-camera sensors still reset their state and history after restoration.
 Unavailable required measurements terminate affected rows and cannot erase a
 negative shaping boundary. True task termination and time truncation remain distinct.
 
@@ -126,7 +130,8 @@ may persist through sleeping-body reports only while both physical poses remain
 unchanged; sensor invalidity, geometry motion and reset invalidate that history.
 Single-skill goals and explicit per-call program criteria use the same measurement
 and skill-owned profile. Program object/resource/support bindings reject semantic
-contradictions. `compute.rewards` owns numerical transforms and chunk aggregation;
+contradictions; `Place(on)` uses the linked destination surface, including object
+shorthand. `compute.rewards` owns numerical transforms and chunk aggregation;
 registered templates live in `sim/atomic_skills/reward_profiles.py` without Gym imports.
 Program hand lists derive from the selected calibrated grasp endpoint; explicit
 lists must match. Named scene-relative call targets freeze per-row references at

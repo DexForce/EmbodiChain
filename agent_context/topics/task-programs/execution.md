@@ -389,8 +389,10 @@ an explicit objective for every compiled `call_index`; progress expands these
 into ordered occurrence-local criteria while retaining authored segment aliases.
 Explicit milestone terms selected by stage name, occurrence or `call:N` suppress
 the equivalent automatic bonus for that event.
-Preflight shares the runtime alias resolver, including original parent IDs of
-expanded multi-call segments. Measured call targets preserve call-start relative
+Preflight and runtime share a selector index, including original parent IDs of
+expanded multi-call segments. Authored names precede textual aliases; structural
+`call_index` bindings and numeric progress occurrences remain unambiguous.
+Measured call targets preserve call-start relative
 references and effective Place orientation; the manager contract owns their
 binding and topology restrictions.
 The [manager-owned reward contract](../manager-functor/manager-functor.md#composed-skill-rewards)

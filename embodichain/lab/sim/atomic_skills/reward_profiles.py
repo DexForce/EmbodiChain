@@ -41,7 +41,9 @@ class SkillRewardProfile:
         revision: Positive revision persisted with effective reward configs.
         roles: Explicit scalar measured scores, each in [0, 1].
         reduction: Bounded combination. None selects the built-in skill formula.
-            A trusted extension can subclass ``potential`` for another formula.
+            A trusted subclass can override ``potential`` and declare only the
+            roles consumed by its custom formula. Inherited built-in formulas
+            require their complete role set.
     """
 
     skill_id: str
@@ -70,6 +72,7 @@ class SkillRewardProfile:
         required = _DEFAULT_ROLES.get(self.skill_id)
         if (
             self.reduction is None
+            and type(self).potential is SkillRewardProfile.potential
             and required is not None
             and set(roles) != set(required)
         ):

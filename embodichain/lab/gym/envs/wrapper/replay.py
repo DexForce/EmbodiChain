@@ -329,9 +329,11 @@ class ReplayWrapper(gym.Wrapper):
         )
         if initialize_rewards:
             from embodichain.lab.sim.sensors.base_sensor import BaseSensor
+            from embodichain.lab.sim.sensors.camera import Camera
 
             for sensor in getattr(self.env, "sensors", {}).values():
-                sensor.reset(env_ids=env_ids)
+                if not isinstance(sensor, Camera):
+                    sensor.reset(env_ids=env_ids)
                 if isinstance(sensor, BaseSensor):
                     sensor._invalidate_samples(env_ids)
             observation_manager = getattr(self.env, "observation_manager", None)

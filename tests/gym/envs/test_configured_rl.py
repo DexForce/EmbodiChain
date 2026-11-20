@@ -701,6 +701,138 @@ def _program_reward_config():
     return path, raw
 
 
+@pytest.mark.parametrize("explicit_success", [False, True])
+def test_checkpoint_freezes_effective_reward_defaults_when_program_yaml_changes(
+    tmp_path, explicit_success
+):
+    from embodichain.learning.rl.train import (
+        _configure_checkpoint_files,
+        _gym_snapshot_fingerprint,
+    )
+
+    path, raw = _program_reward_config()
+    if explicit_success:
+        physical = yaml.safe_load((path.parent / "env.policy.yaml").read_text())
+        physical["env"].setdefault("rewards", {})["manual_success"] = {
+            "func": "success_reward",
+            "params": {},
+            "mode": "add",
+            "weight": 1.0,
+        }
+        physical_path = tmp_path / "physical.yaml"
+        physical_path.write_text(yaml.safe_dump(physical))
+        raw["environment"]["component"] = str(physical_path)
+    program = yaml.safe_load(
+        (path.parent / "task_program/program.measured.yaml").read_text()
+    )
+    program_path = tmp_path / "program.yaml"
+    program_path.write_text(yaml.safe_dump(program))
+    raw["task_program"]["program"] = str(program_path)
+    cfg = config_to_cfg(raw, source_path=path, _register_env=False)
+    expected_success = 0 if explicit_success else 10
+    assert cfg.rewards.composed_outcome.params["success"] == expected_success
+    trainer = SimpleNamespace(env=SimpleNamespace(cfg=cfg), _checkpoint_config={})
+    run = tmp_path / "run"
+    _configure_checkpoint_files(
+        trainer, tmp_path / "train.yaml", run, gym_config=path, gym_data=raw
+    )
+    checkpoint = run / "checkpoint.pt"
+    checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint.write_bytes(b"checkpoint fixture")
+    trainer._checkpoint_callback(
+        {"latest_checkpoint_path": str(checkpoint), "best_checkpoint_path": None}
+    )
+    snapshot = run / "configs/gym.yaml"
+    frozen = yaml.safe_load(snapshot.read_text())
+    fingerprint = trainer._checkpoint_gym_snapshot_hash
+    assert _gym_snapshot_fingerprint(frozen) == fingerprint
+
+    program["rewards"] = {
+        "success": 70,
+        "failure": -90,
+        "milestone_budget": 4,
+        "time_cost": 3,
+        "weight": 2,
+    }
+    program_path.write_text(yaml.safe_dump(program))
+    changed = config_to_cfg(raw, source_path=path, _register_env=False)
+    assert changed.rewards.composed_outcome.params["success"] == 70
+    restored = config_to_cfg(frozen, source_path=snapshot, _register_env=False)
+    assert _gym_snapshot_fingerprint(frozen) == fingerprint
+    assert (
+        restored.rewards.composed_outcome.params == cfg.rewards.composed_outcome.params
+    )
+    assert (
+        restored.rewards.composed_potential.weight
+        == cfg.rewards.composed_potential.weight
+    )
+    assert {
+        key: frozen["rl_task"]["reward_composition"][key] for key in program["rewards"]
+    } == {
+        "success": expected_success,
+        "failure": -10,
+        "milestone_budget": 1,
+        "time_cost": 0,
+        "weight": 1,
+    }
+
+
+def test_measured_place_accepts_the_linked_object_support_surface():
+    path, raw = _program_reward_config()
+    program = yaml.safe_load(
+        (
+            _ROOT / "examples/learning/task_program_progress/program_rewards.yaml"
+        ).read_text()
+    )
+    raw["task_program"]["program"] = {"inline": program}
+    raw["rl_task"]["reward_composition"] = deepcopy(program["rewards"])
+    explicit = config_to_cfg(raw, source_path=path, _register_env=False)
+    program["program"][1]["steps"]["place"]["on"] = "block_1"
+    by_object = config_to_cfg(raw, source_path=path, _register_env=False)
+    assert (
+        by_object.observations.skill_objective_1.params["objective"]
+        == explicit.observations.skill_objective_1.params["objective"]
+    )
+
+
+def test_call_index_objectives_remain_unambiguous_when_a_stage_name_shadows_an_alias(
+    tmp_path,
+):
+    path, raw = _program_reward_config()
+    program = yaml.safe_load(
+        (path.parent / "task_program/program.measured.yaml").read_text()
+    )
+    program["program"][1]["segment"] = "call:0"
+    raw["task_program"]["program"] = {"inline": program}
+    raw["rl_task"]["success"]["stages"]["params"]["stage"] = "call:0"
+    physical = yaml.safe_load((path.parent / "env.policy.yaml").read_text())
+    for term in physical["env"]["rewards"].values():
+        if term["params"].get("stage") == "stack_block":
+            term["params"]["stage"] = "call:0"
+    physical_path = tmp_path / "physical.yaml"
+    physical_path.write_text(yaml.safe_dump(physical))
+    raw["environment"]["component"] = str(physical_path)
+    goals = yaml.safe_load(
+        (
+            _ROOT / "examples/learning/task_program_progress/program_rewards.yaml"
+        ).read_text()
+    )["rewards"]["skills"]
+    raw["rl_task"]["reward_composition"]["skills"] = [
+        {"call_index": index, "objective": goal["objective"]}
+        for index, goal in enumerate(goals)
+    ]
+    cfg = config_to_cfg(raw, source_path=path, _register_env=False)
+    assert [
+        skill["call_index"] for skill in cfg.rl_task.reward_composition["skills"]
+    ] == [0, 1]
+    raw["rl_task"]["reward_composition"]["skills"][0] = {
+        "stage": ("call", 0),
+        "objective": goals[0]["objective"],
+    }
+    with pytest.raises(ValueError, match="stage must"):
+        config_to_cfg(raw, source_path=path, _register_env=False)
+
+
 def test_program_rewards_bind_to_the_same_semantic_object_and_endpoint():
     path, raw = _program_reward_config()
     cfg = config_to_cfg(raw, source_path=path, _register_env=False)

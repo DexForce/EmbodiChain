@@ -97,6 +97,11 @@ Deduplication respects the explicit term's payout scope. An episode-scoped
 bonus covers only the first occurrence of its authored stage name; later
 occurrences keep their automatic milestone. Selecting only a later occurrence
 with episode scope does not suppress an automatic event that term cannot pay.
+Authored stage names take precedence over textual call and occurrence aliases.
+An explicit `call_index` remains a structural compiled-call selection, even when
+a stage is named `call:0`. Generated milestones select numeric progress
+occurrences, so authored names cannot redirect them. Preflight and runtime use
+the same selector index.
 
 Collision, energy and action-smoothness objectives can use existing or newly
 implemented reward functors. Composition does not automatically add them.
@@ -136,13 +141,17 @@ implementation and binding before configuration can select it. Raw observation
 metric bindings can also select a registered `profile` directly.
 
 Built-in formulas read scores by role name, so a permutation of declared roles
-does not change the formula. With `reduction: None`, a built-in formula requires
-its complete role set; explicit mean/product reductions may select available
-subsets.
+does not change the formula. Profiles inheriting the built-in `potential()`
+implementation require its complete role set when `reduction` is `None`.
+A trusted subclass overriding `potential()` declares the roles its custom
+formula consumes. Explicit mean/product reductions may select available subsets.
 
 Effective configurations retain objective thresholds and selected profile
-revisions. Saved-contract mismatches and unknown profiles reject instead of
-silently selecting different reward behavior.
+revisions. Checkpoint snapshots also freeze every resolved reward scalar,
+including the suppressed success default of zero, failure, milestone budget,
+time cost and shaping weight. Editing reward defaults in a referenced program
+YAML cannot silently change the checkpoint's rewards on reload. Saved-contract
+mismatches and unknown profiles reject instead of selecting different behavior.
 
 ## Composition mathematics and terminal boundaries
 
@@ -174,7 +183,7 @@ when a consuming algorithm is supplied.
 
 The terminal shaping contribution can be negative while task success is
 correctly rewarded. In the recorded two-stage fixture, the last step is
-`10 + 0.5 - 0.944451 ≈ 9.555549`: success, milestone and absorbing-potential
+`10 + 0.5 - 0.9424504 ≈ 9.5575495`: success, milestone and absorbing-potential
 correction are separate ledger entries.
 
 ## Configuration and generated manager terms
@@ -210,6 +219,9 @@ and link targets reject preflight. Standalone relative goals and `Place(on)`
 support-frame measurements retain their declared live-reference behavior.
 The effective Place preservation option applies to both `at` and `on` targets;
 fixed goal quaternions that contradict preserved orientation reject.
+`Place(on)` binds the destination affordance returned by semantic linking.
+Object shorthand such as `on: block_1` therefore uses the same unique support
+surface as the planner's explicit `on: block_1_top` selection.
 
 Deployment `rl_task.reward_composition` overrides program defaults by top-level
 field; overriding `skills` replaces the entire list. A standalone declaration
@@ -285,6 +297,9 @@ Dynamic replay with composition clears measurement/objective/reward histories
 after restoring the recorded robot, object and task state. It seeds baselines
 from the final restored observation before the first replay action. Holding a
 restored potential of 0.8 with discount 0.9 therefore earns `-0.08`.
+Camera and stereo-camera poses retain the episode randomization applied by
+`env.reset()`; replay invalidates their samples without resetting extrinsics.
+Other sensors retain their state/history reset before acquiring restored state.
 
 Measured physical goals bind fixed topology for the environment lifetime.
 `replace_assets_from_group` rejects preflight when such goals are present;

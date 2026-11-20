@@ -99,6 +99,10 @@ class ComposedPotentialReward(Functor):
 
     def _potential(self, env, frame):
         if self.program:
+            from embodichain.lab.task_program.integrations.progress import (
+                _stage_selector,
+            )
+
             progress = env.task_program_progress
             current, count = progress.ordered_progress()
             potential = current.float() / count
@@ -121,7 +125,12 @@ class ComposedPotentialReward(Functor):
             else:
                 score, available = profile.potential(scores)
             if self.program:
-                indices = progress.indices(declaration["stage"])
+                selector = _stage_selector(declaration)
+                indices = (
+                    progress._indices(selector)
+                    if isinstance(selector, tuple)
+                    else progress.indices(selector)
+                )
                 active = torch.stack([current == index for index in indices]).any(0)
             else:
                 active = torch.ones_like(valid)
@@ -214,6 +223,8 @@ def compose_reward_terms(
     Args:
         declaration: Discount, weight and skill/metric bindings. Metrics select
             exact raw observation fields, optional vector targets and scales.
+            Program bindings select either ``stage`` (a name or progress
+            occurrence index) or a structural compiled ``call_index``.
         program: Whether stage selectors bind TaskProgramProgress occurrences.
 
     Returns:
@@ -254,15 +265,22 @@ def compose_reward_terms(
             not isinstance(skill, dict)
             or set(skill)
             - (
-                {"skill_id", "metrics", "stage", "profile", "source_profile"}
+                {
+                    "skill_id",
+                    "metrics",
+                    "stage",
+                    "call_index",
+                    "profile",
+                    "source_profile",
+                }
                 if program
                 else {"skill_id", "metrics", "profile", "source_profile"}
             )
             or not {"skill_id", "metrics"} <= set(skill)
-            or (program and "stage" not in skill)
+            or (program and len({"stage", "call_index"} & set(skill)) != 1)
         ):
             raise ValueError(
-                "Each skill requires skill_id, metrics, and a stage for programs"
+                "Each skill requires skill_id, metrics, and stage or call_index for programs"
             )
         profiles = skill_reward_profiles(skill["skill_id"])
         selected = skill.get("profile", "default")
@@ -287,9 +305,14 @@ def compose_reward_terms(
                 f"{profile.skill_id} requires measured roles {profile.roles}"
             )
         if program:
-            if skill["stage"] in stages:
+            from embodichain.lab.task_program.integrations.progress import (
+                _stage_selector,
+            )
+
+            selector = _stage_selector(skill)
+            if selector in stages:
                 raise ValueError("Duplicate skill shaping for one stage")
-            stages.add(skill["stage"])
+            stages.add(selector)
         for metric in skill["metrics"].values():
             if (
                 not isinstance(metric, dict)
@@ -399,13 +422,11 @@ def _bind_skill_objectives(cfg):
                     raise ValueError(
                         "Program objectives require stage or call_index, and objective"
                     )
-                if "call_index" in item and (
-                    type(item["call_index"]) is not int or item["call_index"] < 0
-                ):
-                    raise ValueError(
-                        "call_index must be a nonnegative compiled call occurrence"
-                    )
-                selector = item.get("stage", f"call:{item.get('call_index')}")
+                from embodichain.lab.task_program.integrations.progress import (
+                    _stage_selector,
+                )
+
+                selector = _stage_selector(item)
                 generated.append(
                     _bind_objective(cfg, str(index), item["objective"], stage=selector)
                 )
@@ -465,7 +486,7 @@ class _OutcomeReward(Functor):
 
 def _add_common_rewards(cfg, generated, stages):
     from .rewards import success_reward, program_stage_reward
-    from embodichain.lab.task_program.integrations.progress import _matches_stage
+    from embodichain.lab.task_program.integrations.progress import _stage_selections
 
     declaration = cfg.rl_task.reward_composition
     explicit = [
@@ -474,6 +495,14 @@ def _add_common_rewards(cfg, generated, stages):
     success = declaration.get(
         "success", 0.0 if any(t.func is success_reward for t in explicit) else 10.0
     )
+    for name, value in (
+        ("weight", generated["composed_potential"].weight),
+        ("success", success),
+        ("failure", -10.0),
+        ("milestone_budget", 1.0),
+        ("time_cost", 0.0),
+    ):
+        declaration.setdefault(name, value)
     generated["composed_outcome"] = RewardCfg(
         func=_OutcomeReward,
         params={
@@ -484,26 +513,31 @@ def _add_common_rewards(cfg, generated, stages):
     )
     if stages:
         budget = declaration.get("milestone_budget", 1.0)
+        selections = _stage_selections(stages)
+        explicit_milestones = [
+            (
+                t.params.get("scope"),
+                frozenset(selections.get(t.params.get("stage"), ())),
+            )
+            for t in explicit
+            if t.func is program_stage_reward
+            and t.params.get("mode") == "first_achievement"
+        ]
         seen_names = set()
         for index, stage in enumerate(stages):
             first_in_episode = stage.name not in seen_names
             seen_names.add(stage.name)
             if any(
-                t.func is program_stage_reward
-                and t.params.get("mode") == "first_achievement"
-                and _matches_stage(stage, t.params.get("stage"))
-                and (
-                    t.params.get("scope") == "occurrence"
-                    or (t.params.get("scope") == "episode" and first_in_episode)
-                )
-                for t in explicit
+                index in selected
+                and (scope == "occurrence" or (scope == "episode" and first_in_episode))
+                for scope, selected in explicit_milestones
             ):
                 continue
             generated[f"composed_stage_{index}"] = RewardCfg(
                 func=program_stage_reward,
                 weight=budget / len(stages),
                 params={
-                    "stage": stage.segment_id,
+                    "stage": index,
                     "mode": "first_achievement",
                     "scope": "occurrence",
                 },
@@ -511,7 +545,7 @@ def _add_common_rewards(cfg, generated, stages):
 
 
 def _snapshot_reward_composition(cfg, declaration):
-    """Bind the effective template revisions while retaining authored objective bindings."""
+    """Freeze resolved scalars and revisions, retaining authored objective bindings."""
     result = deepcopy(getattr(cfg.task_program, "rewards", None) or {})
     result.update(deepcopy(declaration or {}))
     effective = cfg.rl_task.reward_composition
