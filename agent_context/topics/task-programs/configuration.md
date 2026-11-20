@@ -131,7 +131,7 @@ three typed selections: `environment.component`,
 `embodiment.component`. The reusable `env.yaml` owns only
 embodiment-independent Gym values and physical simulation entities. All
 ordinary deployment component paths resolve from `task.<embodiment>.yaml`.
-Official `extensions/embodichain_tasks/configs/` references for program, integration and
+Official `embodichain/extensions/tasks/configs/` references for program, integration and
 execution policy use the imported SDK's packaged configs. The shared
 [Gym component path contract](../env-framework/configuration.md#reusable-gym-deployment-components)
 defines the owner-directory and CWD-shadow behavior.
@@ -245,7 +245,7 @@ normal policy decoders. Contracts, planner selection, tracking and effect
 assurance remain component-owned. Paths in either form resolve from the runnable
 deployment. Reuse the base policy and declare tuning in the selector instead of
 copying a policy for each robot or sampling rate; the supported fields and
-example are in the [task package usage](../../../extensions/embodichain_tasks/README.md).
+example are in the [task package usage](../../../embodichain/extensions/tasks/README.md).
 
 Configured `motion` policies accept optional finite, strictly positive
 `velocity_limit` and `acceleration_limit` values. Configured Pour action options

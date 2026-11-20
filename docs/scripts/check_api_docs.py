@@ -124,29 +124,7 @@ class CheckResult:
         return not self.missing
 
 
-DEFAULT_PACKAGE_ROOTS = (
-    PackageRoot("embodichain", REPO_ROOT / "embodichain"),
-    PackageRoot(
-        "embodichain_models",
-        REPO_ROOT / "extensions" / "embodichain_models" / "embodichain_models",
-    ),
-    PackageRoot("embodichain_robots", REPO_ROOT / "extensions" / "embodichain_robots"),
-    PackageRoot(
-        "embodichain_solvers",
-        REPO_ROOT / "extensions" / "embodichain_solvers" / "embodichain_solvers",
-    ),
-    PackageRoot(
-        "embodichain_benchmarks", REPO_ROOT / "extensions" / "embodichain_benchmarks"
-    ),
-    PackageRoot(
-        "embodichain_tasks",
-        REPO_ROOT / "extensions" / "embodichain_tasks" / "embodichain_tasks",
-    ),
-    PackageRoot(
-        "embodichain_tasks.configs",
-        REPO_ROOT / "extensions" / "embodichain_tasks" / "configs",
-    ),
-)
+DEFAULT_PACKAGE_ROOTS = (PackageRoot("embodichain", REPO_ROOT / "embodichain"),)
 
 
 def _module_scope_statements(node: ast.AST) -> Iterator[ast.stmt]:

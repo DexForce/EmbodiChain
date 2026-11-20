@@ -2,7 +2,7 @@ INSPIRE ROBOTS
 ==============
 
 Model-owned assets and any standalone configurations live under
-``embodichain_robots.inspire``. Asset availability does not imply a
+``embodichain.extensions.robots.inspire``. Asset availability does not imply a
 standalone robot preset or a grasping capability.
 
 .. list-table::

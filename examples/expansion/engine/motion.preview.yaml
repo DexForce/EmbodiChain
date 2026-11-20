@@ -34,7 +34,7 @@ trajectory:
     enabled: false
 visual:
   enabled: false
-  profile_file: extensions/embodichain_tasks/configs/components/randomization_profiles/rgb_visual.yaml
+  profile_file: embodichain/extensions/tasks/configs/components/randomization_profiles/rgb_visual.yaml
   profiles: []
   apply_per_rollout: true
   balance: round_robin

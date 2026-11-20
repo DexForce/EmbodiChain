@@ -29,7 +29,10 @@ import numpy as np
 import torch
 import warp as wp
 
-from embodichain_models.dynamics.nerd.codec import plane_contact_features, quat_rotate
+from embodichain.extensions.models.dynamics.nerd.codec import (
+    plane_contact_features,
+    quat_rotate,
+)
 from ._reference_assets import (
     _ant_reference_friction,
     _import_reference,

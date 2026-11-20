@@ -237,7 +237,7 @@ must agree; unsupported dynamic grasp replacement rejects. Normal scene preparat
 planning, measured acceptance and persistence still determine success. Feedback
 checkpoints do not restore a live World or replace job receipt reconciliation.
 The configured acceptance task is
-`extensions/embodichain_tasks/configs/tasks/manipulation/workspace_pose_pick_place`;
+`embodichain/extensions/tasks/configs/tasks/manipulation/workspace_pose_pick_place`;
 its four-way runner is `scripts/benchmark/expansion/task_pose_coverage.py`.
 
 ## Conditional layout proposals and task screening

@@ -48,7 +48,7 @@ pytestmark = pytest.mark.no_sim
 _ROOT = Path(__file__).resolve().parents[4]
 _TASK = (
     _ROOT
-    / "extensions/embodichain_tasks/configs/tasks/manipulation/cable/route_the_cable"
+    / "embodichain/extensions/tasks/configs/tasks/manipulation/cable/route_the_cable"
 )
 
 

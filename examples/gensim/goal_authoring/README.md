@@ -66,7 +66,7 @@ image-to-execution success.
 ## Unsupported hinge closing
 
 ```bash
-embodichain gensim task plan --route goal --task-id door --instruction 关上铰链门 --proposal examples/gensim/goal_authoring/close_hinge.json --deployment extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml --output outputs/door-preflight
+embodichain gensim task plan --route goal --task-id door --instruction 关上铰链门 --proposal examples/gensim/goal_authoring/close_hinge.json --deployment embodichain/extensions/tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml --output outputs/door-preflight
 ```
 
 For this Pick/Place installation, the declared hinge-closing operation must

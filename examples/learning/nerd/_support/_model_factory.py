@@ -24,8 +24,12 @@ from pathlib import Path
 
 import torch
 
-from embodichain_models.dynamics.nerd import load_model, NeRDStateCodec, NeRDTransition
-from embodichain_solvers.physics.nerd._binding import NeRDBinding
+from embodichain.extensions.models.dynamics.nerd import (
+    load_model,
+    NeRDStateCodec,
+    NeRDTransition,
+)
+from embodichain.extensions.solvers.physics.nerd._binding import NeRDBinding
 
 from ._model_env import NeRDModelEnv
 from ._reference_assets import reference_profile

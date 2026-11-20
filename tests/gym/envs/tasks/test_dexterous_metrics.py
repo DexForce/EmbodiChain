@@ -30,11 +30,11 @@ import torch
 
 from embodichain.lab.gym.envs.episode_context import EpisodeContext
 from embodichain.learning.rl.evaluation import evaluate_episodes
-from embodichain_tasks.manipulation.dexterous._runtime import (
+from embodichain.extensions.tasks.manipulation.dexterous._runtime import (
     DexterousManipulationEnv,
     TASK_SPECS,
 )
-from embodichain_tasks.manipulation.dexterous._shadow_task import ShadowState
+from embodichain.extensions.tasks.manipulation.dexterous._shadow_task import ShadowState
 
 
 class _Policy(torch.nn.Module):

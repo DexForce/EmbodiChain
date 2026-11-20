@@ -35,7 +35,7 @@ from embodichain.learning.rl.policy_evaluation.manifest import RunManifest
 from embodichain.learning.rl.train import _build_learning_policy, train_from_config
 from embodichain.learning.rl.utils import OptimizerCfg
 from embodichain.learning.rl.utils.trainer import Trainer
-from embodichain_tasks.classic_control.point_mass import PointMassEnv
+from embodichain.extensions.tasks.classic_control.point_mass import PointMassEnv
 
 
 def test_point_mass_is_registered_differentiable_environment() -> None:

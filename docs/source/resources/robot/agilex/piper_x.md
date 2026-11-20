@@ -22,7 +22,7 @@ embodichain preview-robot --robot AgilexPiperX
 ```
 
 ```python
-from embodichain_robots import AgilexPiperXCfg
+from embodichain.extensions.robots import AgilexPiperXCfg
 
 cfg = AgilexPiperXCfg.from_dict({})
 ```
@@ -36,7 +36,7 @@ Download the `AgxGripper` asset separately with
 mimic joints.
 
 Select `configs/components/embodiments/piper_x_agx_gripper.yaml` from the
-`embodichain_tasks` extension as a deployment's embodiment component.
+`embodichain.extensions.tasks` extension as a deployment's embodiment component.
 It places the tool 4.5 mm along flange Z with a +90° rotation about that
 axis, following the [official assembly Xacro](https://github.com/agilexrobotics/agx_arm_urdf/blob/680fa925cd00db7e2628563d2edc5540963045de/piper_x/urdf/piper_x_with_gripper_description.xacro#L49-L53).
 The embodiment configures the `eef` control group and locates the arm TCP

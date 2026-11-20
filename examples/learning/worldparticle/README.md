@@ -1,9 +1,9 @@
 # WorldParticle
 
-The model layer lives in `embodichain_models.dynamics.worldparticle`: original
+The model layer lives in `embodichain.extensions.models.dynamics.worldparticle`: original
 network, strict checkpoint loading, authored features/topology and coordinate
 conversion. It imports neither simulation nor examples. The integration layer
-is `embodichain_solvers.physics.worldparticle.provider.WorldParticleProvider`; the native
+is `embodichain.extensions.solvers.physics.worldparticle.provider.WorldParticleProvider`; the native
 solver adapter is DexSim's model-independent `ParticleInferenceSolver`.
 Providers are constructed per scene through the existing Newton lifecycle.
 
@@ -45,7 +45,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import yaml
-from embodichain_models.dynamics.worldparticle import load_model
+from embodichain.extensions.models.dynamics.worldparticle import load_model
 
 assets = Path("outputs/worldparticle/assets").resolve()
 config_path = assets / "checkpoints/fancy_fluid/config.yaml"

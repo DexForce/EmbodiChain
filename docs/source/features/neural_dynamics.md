@@ -7,7 +7,7 @@ action-conditioned robot state prediction, and **RigidFormer** for the motion
 of interacting rigid geometry. **WorldParticle** provides frozen particle
 prediction and optional native forward-inference deployment.
 
-The models ship as `embodichain_models.dynamics.<family>` in the main
+The models ship as `embodichain.extensions.models.dynamics.<family>` in the main
 `embodichain` wheel. Import the family you need explicitly. Model imports do
 not start a simulator; datasets, reference assets and pretrained weights are
 prepared separately by each example.
@@ -54,9 +54,9 @@ NeRD, RWM and RigidFormer provide installable factories for the common
 
 | Model | Recipe factory |
 | --- | --- |
-| NeRD | `embodichain_models.dynamics.nerd.sl_recipe:build_supervised_trainer` |
-| RWM | `embodichain_models.dynamics.rwm.sl_recipe:build_rwm_trainer` |
-| RigidFormer | `embodichain_models.dynamics.rigidformer.sl_recipe:build_rigidformer_trainer` |
+| NeRD | `embodichain.extensions.models.dynamics.nerd.sl_recipe:build_supervised_trainer` |
+| RWM | `embodichain.extensions.models.dynamics.rwm.sl_recipe:build_rwm_trainer` |
+| RigidFormer | `embodichain.extensions.models.dynamics.rigidformer.sl_recipe:build_rigidformer_trainer` |
 
 WorldParticle currently has no shared-SL recipe, learning-env or APG entry point.
 
@@ -106,5 +106,5 @@ reference workflow for published-weight or retraining comparisons.
   and supervised training.
 - [RigidFormer API](../api_reference/model_rigidformer.rst): geometry inputs,
   checkpoint loading, MOVi source, objective and trainer factory.
-- [Model catalog](https://github.com/DexForce/EmbodiChain/blob/main/extensions/embodichain_models/README.md):
+- [Model catalog](https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/models/README.md):
   model families and public import conventions.

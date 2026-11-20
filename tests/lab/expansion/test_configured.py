@@ -64,7 +64,7 @@ def test_official_layout_jobs_load_without_simulation_imports():
 
     task_root = (
         Path(__file__).resolve().parents[3]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation"
     )
     paths = sorted(task_root.glob("**/acceptance/scene_first/expansion.yaml"))
     assert paths

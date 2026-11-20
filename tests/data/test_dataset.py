@@ -41,10 +41,12 @@ def test_source_cache_validation_keeps_prepared_models_readable(
     tmp_path: Path, monkeypatch, healthy: bool
 ) -> None:
     from concurrent.futures import ThreadPoolExecutor
-    from embodichain_robots.flexiv.rizon4s._menagerie_assets import (
+    from embodichain.extensions.robots.flexiv.rizon4s._menagerie_assets import (
         FlexivRizon4SMenagerie,
     )
-    from embodichain_benchmarks.assembly.robot_reference import prepare_rizon4s_urdf
+    from embodichain.extensions.benchmarks.assembly.robot_reference import (
+        prepare_rizon4s_urdf,
+    )
 
     root = tmp_path / "cache"
     prefix = "FlexivRizon4SMenagerie"
@@ -66,7 +68,7 @@ def test_source_cache_validation_keeps_prepared_models_readable(
     declaration = load_config(
         str(
             Path(__file__).resolve().parents[2]
-            / "extensions/embodichain_tasks/configs/components/embodiments/"
+            / "embodichain/extensions/tasks/configs/components/embodiments/"
             "flexiv_rizon4s_robotiq2f85.nominal.yaml"
         )
     )

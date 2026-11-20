@@ -42,7 +42,7 @@ from embodichain.lab.scripts.run_task import _create_parser, _resolve_expansion_
 _ROOT = Path(__file__).parents[4]
 _TASK_ROOT = (
     _ROOT
-    / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
+    / "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place"
 )
 
 

@@ -28,7 +28,7 @@ from embodichain.lab.expansion import run_task_program_expansion
 HERE = Path(__file__).resolve().parent
 TASK = (
     HERE.parents[3]
-    / "extensions/embodichain_tasks/configs/tasks/manipulation"
+    / "embodichain/extensions/tasks/configs/tasks/manipulation"
     / "workspace_pose_pick_place/acceptance/scene_first/task.yaml"
 )
 

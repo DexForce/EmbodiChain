@@ -28,7 +28,7 @@ import numpy as np
 import torch
 import yaml
 
-from embodichain_models.dynamics.rigidformer import (
+from embodichain.extensions.models.dynamics.rigidformer import (
     build_rigidformer_trainer,
     export_rigidformer_checkpoint,
 )

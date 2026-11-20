@@ -2,7 +2,7 @@ Franka
 ======
 
 Official Franka robot configurations live in the
-``embodichain_robots.franka`` manufacturer namespace.
+``embodichain.extensions.robots.franka`` manufacturer namespace.
 ``Franka`` is the unified bare-arm catalog entry. ``FrankaPanda`` preserves
 the historical FR3 selector; native-hand task deployments select an explicit
 embodiment component.

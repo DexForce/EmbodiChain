@@ -25,7 +25,9 @@ import shutil
 
 from embodichain.data_pipeline.datasets import MotionLibrary
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
-from embodichain_robots.locomotion_profiles import load_locomotion_robot_profile
+from embodichain.extensions.robots.locomotion_profiles import (
+    load_locomotion_robot_profile,
+)
 
 _REPOSITORY = "lvhaidong/LAFAN1_Retargeting_Dataset"
 _REVISION = "ce1572906efe6157840e8474d5a0d7aa87481e74"

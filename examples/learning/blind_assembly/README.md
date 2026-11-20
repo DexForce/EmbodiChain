@@ -34,7 +34,7 @@ Use the registered default Rizon4S and Robotiq2F85 assets through the task
 embodiment component:
 
 ```bash
-embodichain train-rl --config extensions/embodichain_tasks/configs/tasks/manipulation/assembly/peg_insertion/agents/ppo.study.default_assets.dev.yaml
+embodichain train-rl --config embodichain/extensions/tasks/configs/tasks/manipulation/assembly/peg_insertion/agents/ppo.study.default_assets.dev.yaml
 embodichain eval-policy RUN --checkpoint best --episodes 8192 --num-envs 1024 --episode-allocation balanced --renderer no-render
 ```
 

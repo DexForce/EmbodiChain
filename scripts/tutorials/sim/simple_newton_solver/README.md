@@ -25,7 +25,7 @@ without reinstalling its editable package or SDK:
 
 ```bash
 conda activate open
-export PYTHONPATH="$PWD:$PWD/extensions${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"
 python scripts/tutorials/sim/simple_newton_solver/demo.py --device cpu
 python scripts/tutorials/sim/simple_newton_solver/demo.py --device cuda:0
 python scripts/tutorials/sim/simple_newton_solver/demo.py --device cpu \

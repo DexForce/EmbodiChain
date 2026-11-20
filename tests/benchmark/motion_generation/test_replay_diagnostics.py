@@ -25,7 +25,7 @@ import pytest
 import torch
 from tensordict import TensorDict
 
-from embodichain_benchmarks.motion_generation.scenarios._replay_diagnostics import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios._replay_diagnostics import (
     ReplayDiagnostics,
     resolve_diagnostics_config,
 )

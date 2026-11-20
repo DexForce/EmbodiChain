@@ -28,7 +28,7 @@ import pytest
 import torch
 
 from embodichain.robot_registry import list_robot_cfgs, resolve_robot_cfg
-from embodichain_robots.wuji.hand import cfg as hand_cfg
+from embodichain.extensions.robots.wuji.hand import cfg as hand_cfg
 
 
 @pytest.fixture
@@ -102,7 +102,7 @@ def test_native_side_control_and_round_trip(
 def test_catalog_defaults_overrides_and_isolation(
     local_asset: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from embodichain_robots._catalog import ROBOT_CONFIGS
+    from embodichain.extensions.robots._catalog import ROBOT_CONFIGS
 
     assert "WujiHand" in list_robot_cfgs()
     metadata = ROBOT_CONFIGS["WujiHand"]

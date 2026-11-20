@@ -29,7 +29,7 @@ import torch
 import warp as wp
 
 from embodichain.lab.sim.cfg import NewtonPhysicsCfg
-from embodichain_solvers.physics.nerd._binding import NeRDBinding
+from embodichain.extensions.solvers.physics.nerd._binding import NeRDBinding
 
 from ._scene_assets import reference_profile
 from ._scene_setup import declare_reference_scene, reference_friction
@@ -39,8 +39,8 @@ __all__: list[str] = []
 
 def _runtime_identity(device: torch.device) -> dict[str, Any]:
     """Record actual execution identity separately from historical teacher metadata."""
-    from embodichain_models.dynamics.nerd import geometry, transition
-    from embodichain_solvers.physics.nerd import provider
+    from embodichain.extensions.models.dynamics.nerd import geometry, transition
+    from embodichain.extensions.solvers.physics.nerd import provider
     from embodichain.lab.sim.diff import _newton_fk
 
     sources = {
@@ -130,7 +130,9 @@ class DynamicsSimulation:
                 raise ValueError(
                     "NeRD native deployment requires one prediction per step"
                 )
-            from embodichain_solvers.physics.nerd.provider import NeRDProvider
+            from embodichain.extensions.solvers.physics.nerd.provider import (
+                NeRDProvider,
+            )
 
             solver_cfg = ProviderNewtonSolverCfg(
                 provider_factory=NeRDProvider, options=configured.get("options", {})

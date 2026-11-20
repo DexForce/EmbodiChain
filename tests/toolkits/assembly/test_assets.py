@@ -49,7 +49,7 @@ def test_portable_formats_do_not_require_simulation_or_generation(
             def find_spec(self, fullname, path=None, target=None):
                 blocked = (
                     "embodichain.gen_sim", "embodichain.lab",
-                    "embodichain_tasks", "embodichain_benchmarks",
+                    "embodichain.extensions.tasks", "embodichain.extensions.benchmarks",
                     "mjfit", "mujoco", "dexsim",
                 )
                 if any(fullname == name or fullname.startswith(name + ".") for name in blocked):
@@ -151,7 +151,9 @@ def test_usd_preserves_body_ownership_vertices_and_mass(tmp_path) -> None:
     # This comparison consumes the native parser. Register its schemas before
     # the portable exporter creates the first stage in an isolated test run.
     pytest.importorskip("dexsim.kit.usd")
-    from embodichain_benchmarks.assembly.precision import compare_usd_geometry
+    from embodichain.extensions.benchmarks.assembly.precision import (
+        compare_usd_geometry,
+    )
 
     asset = import_mjcf(SOURCE)
     path = asset.write_usd(tmp_path / "part.usda")
@@ -170,7 +172,9 @@ def test_usd_static_compound_has_one_body_not_one_body_per_collider(tmp_path) ->
     from importlib.metadata import version
     from pxr import Usd, UsdPhysics
     from embodichain.toolkits.assembly.native import to_rigid_config
-    from embodichain_benchmarks.assembly.precision import compare_usd_geometry
+    from embodichain.extensions.benchmarks.assembly.precision import (
+        compare_usd_geometry,
+    )
 
     asset = import_mjcf(SOURCE.replace('<freejoint name="part_joint"/>', ""))
     path = asset.write_usd(tmp_path / "static.usda")

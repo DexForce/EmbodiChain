@@ -232,7 +232,7 @@ route. For example, smoke-test stacking without writing a dataset:
 .. code-block:: bash
 
    embodichain run-task \
-       --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml \
+       --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml \
        --headless --filter_dataset_saving --max_episodes 1
 
 To collect demonstrations, remove ``--filter_dataset_saving`` and configure
@@ -256,7 +256,7 @@ Compose the deployment
 
 The runnable deployment is intentionally thin:
 
-.. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml
+.. literalinclude:: ../../../embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml
    :language: yaml
    :linenos:
 
@@ -266,7 +266,7 @@ only physical simulation and ordinary Gym values:
 .. dropdown:: Pour Water reusable environment
    :icon: code
 
-   .. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml
+   .. literalinclude:: ../../../embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml
       :language: yaml
       :linenos:
 
@@ -284,7 +284,7 @@ Python callables or naming simulator joints:
 .. dropdown:: Pour Water Task Program
    :icon: code
 
-   .. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task_program/program.yaml
+   .. literalinclude:: ../../../embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water/task_program/program.yaml
       :language: yaml
       :linenos:
 
@@ -295,7 +295,7 @@ registered transport and pour lowerers:
 .. dropdown:: Pour Water integration
    :icon: code
 
-   .. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task_program/integration.yaml
+   .. literalinclude:: ../../../embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water/task_program/integration.yaml
       :language: yaml
       :linenos:
 
@@ -314,7 +314,7 @@ runnable deployment can record directly:
 .. code-block:: bash
 
    embodichain run-task \
-       --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml \
+       --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml \
        --headless \
        --max_episodes 1
 
@@ -378,7 +378,7 @@ Important fields are:
 
 The real Pour Water recorder block can be inspected directly:
 
-.. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml
+.. literalinclude:: ../../../embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml
    :language: yaml
    :start-at: dataset:
    :end-at: control_parts: [left_arm, left_eef, right_arm, right_eef]

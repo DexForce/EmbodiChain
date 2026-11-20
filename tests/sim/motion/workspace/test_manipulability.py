@@ -25,7 +25,7 @@ import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot
-from embodichain_robots import CobotMagicCfg
+from embodichain.extensions.robots import CobotMagicCfg
 from embodichain.lab.sim.motion.workspace.analyzer import (
     AnalysisMode,
     WorkspaceAnalyzer,

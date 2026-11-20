@@ -29,8 +29,10 @@ import torch
 from embodichain.compute.kinematics import TreeKinematics
 from embodichain.data_pipeline.datasets.motion import MotionLibrary
 from embodichain.lab.gym.envs.managers.cfg import ActionTermCfg
-from embodichain_tasks.locomotion.managers.actions import ReferenceJointPositionAction
-from embodichain_tasks.locomotion.tracking._task import MotionTrackingTask
+from embodichain.extensions.tasks.locomotion.managers.actions import (
+    ReferenceJointPositionAction,
+)
+from embodichain.extensions.tasks.locomotion.tracking._task import MotionTrackingTask
 
 
 @pytest.mark.subprocess_sim
@@ -61,7 +63,9 @@ def _run_g1_state_injection_and_selected_reset(update_data_interval: int) -> Non
 
     from embodichain.lab.gym.utils.gym_utils import config_to_cfg
     from embodichain.lab.sim import SimulationManager
-    from embodichain_tasks.locomotion.tracking.g1_motion import UnitreeG1MotionEnv
+    from embodichain.extensions.tasks.locomotion.tracking.g1_motion import (
+        UnitreeG1MotionEnv,
+    )
 
     data_root = os.environ.get("EMBODICHAIN_DATA_ROOT")
     archive = Path(data_root or "") / "LAFAN1G1/motion.npz"
@@ -70,7 +74,7 @@ def _run_g1_state_injection_and_selected_reset(update_data_interval: int) -> Non
     root = Path(__file__).resolve().parents[4]
     config_path = (
         root
-        / "extensions/embodichain_tasks/configs/tasks/locomotion/tracking/g1_motion/env.newton.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/locomotion/tracking/g1_motion/env.newton.yaml"
     )
     gym = yaml.safe_load(config_path.read_text())
     gym["num_envs"] = 2
@@ -256,7 +260,7 @@ def test_tracking_diagnostics_distinguish_alignment_and_failure_conditions():
     assert torch.equal(failed, reasons["height"] | reasons["tilt"])
 
     # Equal headings with different root tilts must not introduce a yaw offset.
-    from embodichain_models.dynamics.rwm.robot_state import rotation_exp
+    from embodichain.extensions.models.dynamics.rwm.robot_state import rotation_exp
 
     task, ref = task_and_state()
     state = {k: v.clone() for k, v in ref.items()}
@@ -282,7 +286,7 @@ def test_rotation_error_has_correct_values_and_gradients_near_zero_and_pi(
     compiled: bool,
 ) -> None:
     """Check rotation values and gradients with a default device active."""
-    from embodichain_models.dynamics.rwm.robot_state import rotation_exp
+    from embodichain.extensions.models.dynamics.rwm.robot_state import rotation_exp
 
     task, original = task_and_state()
     angles = torch.tensor(

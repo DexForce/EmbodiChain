@@ -9,7 +9,7 @@ Choose it when the transition depends on recent motion and applied efforts,
 using a dataset and codec that match the physical system.
 
 The simulation-independent network, codec, trajectory reader and SL recipe live
-in `embodichain_models.dynamics.nerd`. The `learning/nerd` example prepares
+in `embodichain.extensions.models.dynamics.nerd`. The `learning/nerd` example prepares
 resources and provides collection, training, export and evaluation commands.
 Native simulation deployment is a separate consumer of the model and codec.
 
@@ -125,9 +125,9 @@ from pathlib import Path
 
 import torch
 
-from embodichain_models.dynamics.nerd import NeRDStateCodec, load_model
-from embodichain_models.dynamics.nerd.data import DynamicsWindowDataset
-from embodichain_models.dynamics.nerd.integration import encode_batch
+from embodichain.extensions.models.dynamics.nerd import NeRDStateCodec, load_model
+from embodichain.extensions.models.dynamics.nerd.data import DynamicsWindowDataset
+from embodichain.extensions.models.dynamics.nerd.integration import encode_batch
 
 root = Path("outputs/nerd-resources")
 model, manifest = load_model(
@@ -171,7 +171,7 @@ These are separate consumers of the same `NeRDTransition`:
 | --- | --- | --- |
 | Online tensor rollout | `NeRDState` plus `NeRDTransition.step(state, effort)` | State/history are explicit; the caller owns detach and reset |
 | Policy learning | `trainer.learning_env`, bootstrapped by `run-example learning/nerd train-policy` | Environment owns reward, terminal observations, row reset and `detach_state()` |
-| Native scene inference | `embodichain_solvers.physics.nerd.provider.NeRDProvider` | SDK owns buffers/step/reset/close; native prediction uses `no_grad` |
+| Native scene inference | `embodichain.extensions.solvers.physics.nerd.provider.NeRDProvider` | SDK owns buffers/step/reset/close; native prediction uses `no_grad` |
 
 Online `step` computes current-state FK/contact features through its injected
 `NeRDGeometry`, appends history, predicts and decodes the next state. Offline
@@ -281,7 +281,7 @@ Relative paths in a common SL recipe resolve from the working directory. Its
 installable factory is:
 
 ```text
-embodichain_models.dynamics.nerd.sl_recipe:build_supervised_trainer
+embodichain.extensions.models.dynamics.nerd.sl_recipe:build_supervised_trainer
 ```
 
 Export accepts both SL checkpoints and historical NeRD checkpoints and preserves

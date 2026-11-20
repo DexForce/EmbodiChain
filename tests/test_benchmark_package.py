@@ -49,17 +49,12 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
     ):
         shutil.copy2(root / name, source / name)
     ignore = shutil.ignore_patterns("__pycache__", "*.pyc", "*.egg-info")
-    for name in (
-        "embodichain",
-        "examples",
-        "extensions/embodichain_robots",
-        "extensions/embodichain_tasks",
-        "extensions/embodichain_benchmarks",
-        "extensions/embodichain_models",
-        "extensions/embodichain_solvers",
-        "extensions/embodichain_sensors",
-    ):
+    for name in ("embodichain", "examples"):
         shutil.copytree(root / name, source / name, ignore=ignore)
+    # Reuse staging from the retired top-level layout.
+    stale = source / "build" / "lib" / "embodichain_tasks"
+    stale.mkdir(parents=True)
+    (stale / "__init__.py").touch()
     built = subprocess.run(
         [
             sys.executable,
@@ -87,11 +82,16 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
             Requirement(value).name.lower() == "mujoco"
             for value in metadata.get_all("Requires-Dist", [])
         )
-        assert "embodichain_benchmarks/__init__.py" in entries
-        assert "embodichain_benchmarks/motion_generation/api.py" in entries
+        assert "embodichain/extensions/benchmarks/__init__.py" in entries
+        assert "embodichain/extensions/benchmarks/motion_generation/api.py" in entries
         assert "embodichain/cli/benchmark.py" in entries
-        assert "embodichain_benchmarks/assembly/robot_reference.py" in entries
-        assert "embodichain_robots/flexiv/rizon4s/rizon4s_sources.json" in entries
+        assert (
+            "embodichain/extensions/benchmarks/assembly/robot_reference.py" in entries
+        )
+        assert (
+            "embodichain/extensions/robots/flexiv/rizon4s/rizon4s_sources.json"
+            in entries
+        )
         assert "embodichain/toolkits/assembly/native.py" in entries
         assert not any(
             name.startswith("embodichain/lab/sim/assembly/") for name in entries
@@ -101,22 +101,29 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
         )
 
         for name in ("LICENSE.worldparticle", "LICENSE.tome", "PROVENANCE.json"):
-            assert f"embodichain_models/dynamics/worldparticle/{name}" in entries
+            assert (
+                f"embodichain/extensions/models/dynamics/worldparticle/{name}"
+                in entries
+            )
         suites = {
             Path(name).name
             for name in entries
-            if name.startswith("embodichain_benchmarks/motion_generation/suites/")
+            if name.startswith(
+                "embodichain/extensions/benchmarks/motion_generation/suites/"
+            )
             and name.endswith(".yaml")
         }
         assert suites == {
             path.name
             for path in (
-                root / "extensions/embodichain_benchmarks/motion_generation/suites"
+                root / "embodichain/extensions/benchmarks/motion_generation/suites"
             ).glob("*.yaml")
         }
         assert not any(name.startswith("scripts/") for name in entries)
         assert not any(name.startswith("embodichain/benchmarks/") for name in entries)
-        assert not any(name.startswith("extensions/") for name in entries)
+        assert not any(
+            name.startswith(("extensions/", "embodichain_")) for name in entries
+        )
     target = workspace / "consumer_env"
     created = subprocess.run(
         [sys.executable, "-I", "-m", "venv", "--system-site-packages", str(target)],
@@ -201,15 +208,15 @@ class RejectSamples(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, RejectSamples())
 from embodichain.cli.benchmark import main as benchmark_cli
 benchmark_cli(["--help"])
-assert not any(name == "embodichain_benchmarks" or name.startswith("embodichain_benchmarks.") for name in sys.modules)
-import embodichain_benchmarks.motion_generation as benchmark
-from embodichain_benchmarks.motion_generation import load_suite, run_benchmark
+assert not any(name == "embodichain.extensions.benchmarks" or name.startswith("embodichain.extensions.benchmarks.") for name in sys.modules)
+import embodichain.extensions.benchmarks.motion_generation as benchmark
+from embodichain.extensions.benchmarks.motion_generation import load_suite, run_benchmark
 assert Path(benchmark.__file__).is_relative_to(target)
 assert "embodichain.lab.sim" not in sys.modules
 from embodichain.toolkits.assembly import native
 assert Path(native.__file__).is_relative_to(target)
 assert callable(native.prepare_native_configs)
-from embodichain_benchmarks.assembly.precision import PrecisionRunCfg
+from embodichain.extensions.benchmarks.assembly.precision import PrecisionRunCfg
 profile = PrecisionRunCfg(backend="newton", newton_solver="dexuni", solver="cg")
 assert profile.to_dict()["newton_solver"] == "dexuni"
 assert "embodichain.lab.sim" not in sys.modules
@@ -224,19 +231,19 @@ for name in suite_names:
     suite = load_suite(name)
     assert suite.name
 assert load_suite().name == "motion_panda_free_space_smoke"
-from embodichain_benchmarks.motion_generation import PlannerAdapter
-from embodichain_benchmarks.motion_generation.scenarios.atomic_grasps import parallel_jaw_sampler
+from embodichain.extensions.benchmarks.motion_generation import PlannerAdapter
+from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_grasps import parallel_jaw_sampler
 assert parallel_jaw_sampler(2)
-from embodichain_benchmarks.motion_generation.scenarios._placement_geometry import build_support_object_target_pose
+from embodichain.extensions.benchmarks.motion_generation.scenarios._placement_geometry import build_support_object_target_pose
 import torch
 assert build_support_object_target_pose(torch.eye(4), torch.device("cpu")).shape == (4, 4)
-from embodichain_benchmarks.motion_generation.artifacts import environment_metadata
+from embodichain.extensions.benchmarks.motion_generation.artifacts import environment_metadata
 assert environment_metadata()["git_commit"] is None
 from embodichain.data import get_data_class
-from embodichain_benchmarks.assembly import robot_reference
+from embodichain.extensions.benchmarks.assembly import robot_reference
 assert Path(robot_reference.__file__).is_relative_to(target)
-assert get_data_class("FlexivRizon4SMenagerie").__module__ == "embodichain_robots.flexiv.rizon4s._menagerie_assets"
-assert files("embodichain_robots.flexiv.rizon4s").joinpath("rizon4s_sources.json").is_file()
+assert get_data_class("FlexivRizon4SMenagerie").__module__ == "embodichain.extensions.robots.flexiv.rizon4s._menagerie_assets"
+assert files("embodichain.extensions.robots.flexiv.rizon4s").joinpath("rizon4s_sources.json").is_file()
 from embodichain.cli.main import main
 try:
     main(["benchmark", "motion-generation", "--help"])
@@ -281,7 +288,7 @@ print("installed benchmark suites and CLI passed")
             str(target / "bin/python"),
             "-I",
             "-m",
-            "embodichain_benchmarks.assembly.robot_reference",
+            "embodichain.extensions.benchmarks.assembly.robot_reference",
             "--help",
         ],
         cwd=tmp_path,
@@ -323,15 +330,16 @@ from importlib import metadata
 from pathlib import Path
 import sys
 
-import embodichain_solvers.physics.nerd
-import embodichain_solvers.physics.worldparticle
-assert Path(embodichain_solvers.__file__).is_relative_to(Path(sys.prefix))
-for name in ('torch', 'newton', 'dexsim', 'embodichain_models'):
+import embodichain.extensions.solvers.physics.nerd
+import embodichain.extensions.solvers.physics.worldparticle
+assert Path(embodichain.extensions.solvers.__file__).is_relative_to(Path(sys.prefix))
+for name in ('torch', 'newton', 'dexsim', 'embodichain.extensions.models'):
     assert name not in sys.modules, name
 
 class ConcreteImportsForbidden(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split('.')[0] in {'embodichain_models', 'embodichain_solvers'}:
+        packages = ('embodichain.extensions.models', 'embodichain.extensions.solvers')
+        if any(fullname == package or fullname.startswith(package + '.') for package in packages):
             raise AssertionError('Core imported a concrete implementation: ' + fullname)
 
 blocker = ConcreteImportsForbidden()
@@ -339,19 +347,19 @@ sys.meta_path.insert(0, blocker)
 from embodichain.lab.gym.envs.differentiable_env import DifferentiableEnv
 from embodichain.lab.sim.diff._newton_fk import _newton_fk
 sys.meta_path.remove(blocker)
-assert 'embodichain_models' not in sys.modules
+assert 'embodichain.extensions.models' not in sys.modules
 entries = [entry for entry in metadata.entry_points(group='dexsim.newton_solvers') if entry.name == 'nerd']
 assert len(entries) == 1
-assert entries[0].value == 'embodichain_solvers.physics.nerd.provider:NeRDProvider'
+assert entries[0].value == 'embodichain.extensions.solvers.physics.nerd.provider:NeRDProvider'
 provider = entries[0].load()
 assert provider.capabilities.supported_control_fields == ('joint_f',)
 entries = [entry for entry in metadata.entry_points(group='dexsim.newton_solvers') if entry.name == 'worldparticle']
 assert len(entries) == 1
-assert entries[0].value == 'embodichain_solvers.physics.worldparticle.provider:WorldParticleProvider'
+assert entries[0].value == 'embodichain.extensions.solvers.physics.worldparticle.provider:WorldParticleProvider'
 provider = entries[0].load()
 assert provider.capabilities.supported_particle_kinds == ('fluid',)
 assert not provider.capabilities.cuda_graph
-assert 'embodichain_models.dynamics.worldparticle' not in sys.modules
+assert 'embodichain.extensions.models.dynamics.worldparticle' not in sys.modules
 assert 'open3d.ml.torch' not in sys.modules
 assert 'flash_attn' not in sys.modules
 import dexsim
@@ -433,12 +441,12 @@ from types import SimpleNamespace
 import inspect,sys
 sys.meta_path=[finder for finder in sys.meta_path if "__editable__" not in str(finder)]
 import torch
-from embodichain_tasks.manipulation.assembly.functors import AssemblyProprioception,assembly_milestone_reward
+from embodichain.extensions.tasks.manipulation.assembly.functors import AssemblyProprioception,assembly_milestone_reward
 from embodichain.lab.gym.envs.managers import observations
 from embodichain.lab.gym.utils.gym_utils import get_manager_modules
 assert Path(inspect.getfile(AssemblyProprioception)).is_relative_to(sys.prefix)
 assert not hasattr(observations,"AssemblyProprioception")
-assert "embodichain_tasks.manipulation.assembly.functors" in get_manager_modules()
+assert "embodichain.extensions.tasks.manipulation.assembly.functors" in get_manager_modules()
 state=SimpleNamespace(refresh_assembly_state=lambda:None,_assembly_new_milestones=torch.tensor([[True,False,True,False],[False,False,False,False]]))
 env=SimpleNamespace(assembly_state=state,device=torch.device("cpu"))
 torch.testing.assert_close(assembly_milestone_reward(env,None,None,{},[1.,0.,2.,0.]),torch.tensor([3.,0.]))
@@ -466,7 +474,7 @@ def test_bundled_vlp16_entry_point_accepts_yaml(
             "-I",
             "-c",
             "import yaml; from embodichain.lab.sim.sensors import SensorCfg; "
-            "from embodichain_sensors import VLP16Cfg; "
+            "from embodichain.extensions.sensors import VLP16Cfg; "
             "cfg=SensorCfg.from_dict(yaml.safe_load('sensor_type: VLP16')); "
             "assert isinstance(cfg,VLP16Cfg); assert cfg.horizontal_samples == 1800; "
             "assert tuple(cfg.vertical_angles[::2]) == tuple(range(-15,0,2)); "

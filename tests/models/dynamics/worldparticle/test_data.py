@@ -16,7 +16,7 @@
 from __future__ import annotations
 import numpy as np
 import pytest
-from embodichain_models.dynamics.worldparticle.data import load_sample
+from embodichain.extensions.models.dynamics.worldparticle.data import load_sample
 
 
 def test_initial_state_and_reference_follow_config_slice(tmp_path):

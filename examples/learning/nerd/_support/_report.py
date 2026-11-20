@@ -369,7 +369,7 @@ def _dataset_evidence(teacher: str, declaration: dict[str, Any]) -> dict[str, An
     """Check provenance in immutable data, rather than trusting a matrix row label."""
     if declaration.get("status") != "available":
         return {"status": "pending", "reason": "Teacher dataset unavailable"}
-    from embodichain_models.dynamics.nerd.data import (
+    from embodichain.extensions.models.dynamics.nerd.data import (
         dataset_fingerprint,
         load_manifest,
     )

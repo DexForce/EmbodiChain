@@ -2,7 +2,7 @@ ChangingTek
 ===========
 
 Model-owned assets and any standalone configurations live under
-``embodichain_robots.changingtek``. Asset availability does not imply a
+``embodichain.extensions.robots.changingtek``. Asset availability does not imply a
 standalone robot preset or a grasping capability.
 
 .. list-table::

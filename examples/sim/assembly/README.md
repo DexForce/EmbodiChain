@@ -36,7 +36,7 @@ load an `AssemblyAsset` at runtime. Native conversion belongs to
 `embodichain.toolkits.assembly.native`. Its `prepare_native_configs` prepares
 rigid and hinged bodies together, including optional file-backed appearance,
 while preserving authored collision pieces and mass properties. Precision measurements belong to
-`embodichain_benchmarks.assembly`. GenSim pipelines can consume the same toolkit.
+`embodichain.extensions.benchmarks.assembly`. GenSim pipelines can consume the same toolkit.
 
 The gallery writes self-contained manifests and USD files. A manifest can be
 loaded and constructed without mjfit or MuJoCo installed. Raw MJCF conversion
@@ -165,7 +165,7 @@ source/direct cells continue. Worker crashes and mismatched output identities
 are reported as failures; earlier runs are never reused.
 Unmeasured memory and unavailable overflow accounting are marked explicitly.
 Passive success is distinct from S0/S2/S3/S4 clearance qualification.
-The constrained reference probes in `embodichain_benchmarks.assembly.probes` use
+The constrained reference probes in `embodichain.extensions.benchmarks.assembly.probes` use
 analytic circle/square ground truth and real slide/hinge DOFs; unsupported
 outlines are rejected rather than measured against the wrong oracle.
 Constrained probes disable the global ground. Passive probes author the source

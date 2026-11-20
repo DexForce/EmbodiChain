@@ -1,8 +1,8 @@
 # YAM dual arms
 
-`embodichain_robots.YamI2rtCfg` configures the converted I2RT YAM dual-arm
+`embodichain.extensions.robots.YamI2rtCfg` configures the converted I2RT YAM dual-arm
 assembly. Its implementation and asset definition live together in
-`embodichain_robots.i2rt.yam`; the robot catalog ID is `YamI2rt`.
+`embodichain.extensions.robots.i2rt.yam`; the robot catalog ID is `YamI2rt`.
 Catalog listing reads metadata without loading the model or downloading assets.
 
 :::{figure} ../../../_static/robots/yam_i2rt.png
@@ -23,7 +23,7 @@ and [gripper](../../../_static/robots/yam_i2rt_gripper.render.json).
 
 ```python
 from embodichain.robot_registry import resolve_robot_cfg
-from embodichain_robots import YamI2rtCfg
+from embodichain.extensions.robots import YamI2rtCfg
 
 cfg = resolve_robot_cfg("YamI2rt")
 restored = YamI2rtCfg.from_dict(cfg.to_dict())

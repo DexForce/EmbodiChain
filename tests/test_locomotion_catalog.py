@@ -27,7 +27,7 @@ from embodichain.cli import _task_catalog as catalog
 from embodichain.cli.show_task import main as show_task
 
 _CONFIG_ROOT = (
-    Path(__file__).resolve().parents[1] / "extensions/embodichain_tasks/configs/tasks"
+    Path(__file__).resolve().parents[1] / "embodichain/extensions/tasks/configs/tasks"
 )
 _TASK_PATHS = (
     "locomotion/velocity/g1_flat",
@@ -42,7 +42,7 @@ _TASK_PATHS = (
 
 @pytest.fixture(scope="module")
 def locomotion_catalog() -> list:
-    return catalog._load_catalog({"embodichain_tasks": _CONFIG_ROOT})
+    return catalog._load_catalog({"embodichain.extensions.tasks": _CONFIG_ROOT})
 
 
 @pytest.mark.parametrize("task_path", _TASK_PATHS)
@@ -58,7 +58,7 @@ def test_locomotion_deployments_resolve_matching_ppo(
     assert {deployment.name for deployment in task.deployments} == {"default", "newton"}
     for deployment in task.deployments:
         suffix = ".newton" if deployment.name == "newton" else ""
-        prefix = f"extensions/embodichain_tasks/configs/tasks/{task_path}"
+        prefix = f"embodichain/extensions/tasks/configs/tasks/{task_path}"
         env_path = _CONFIG_ROOT / task_path / f"env{suffix}.yaml"
         env = yaml.safe_load(env_path.read_text())
         agent = yaml.safe_load(
@@ -83,7 +83,11 @@ def test_locomotion_details_and_gallery(
     gallery = catalog._render_html(tasks, static_only=True)
     for task in tasks:
         show_task(
-            [task.qualified_key, "--config-root", f"embodichain_tasks={_CONFIG_ROOT}"]
+            [
+                task.qualified_key,
+                "--config-root",
+                f"embodichain.extensions.tasks={_CONFIG_ROOT}",
+            ]
         )
         detail = capsys.readouterr().out
         assert task.title in detail and task.title in gallery

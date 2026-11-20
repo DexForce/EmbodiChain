@@ -159,7 +159,7 @@ def _native_gym_probe(backend: str) -> None:
     root = Path(__file__).resolve().parents[4]
     path = (
         root
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
     )
     raw = load_config(path)
     raw.pop("task_program", None)

@@ -22,7 +22,9 @@ import torch
 import warp as wp
 
 from embodichain.utils.math import quat_apply_inverse
-from embodichain_tasks.locomotion.velocity.rough._frame import _reference_frame_vectors
+from embodichain.extensions.tasks.locomotion.velocity.rough._frame import (
+    _reference_frame_vectors,
+)
 
 __all__: list[str] = []
 pytestmark = pytest.mark.no_sim

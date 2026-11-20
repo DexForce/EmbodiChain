@@ -222,7 +222,7 @@ configured minimum cycle up to an advertised clock quantum before sleeping.
 The benchmark extension's `scenarios/_replay_diagnostics.py` and
 `atomic_replay.py` collect optional Atomic replay evidence without changing
 stage scoring or controller commands. The
-[benchmark README](../../../extensions/embodichain_benchmarks/motion_generation/README.md#physical-replay-diagnostics)
+[benchmark README](../../../embodichain/extensions/benchmarks/motion_generation/README.md#physical-replay-diagnostics)
 owns the configuration, recorded fields and timing interpretation.
 
 ## Planning budgets and adoption

@@ -25,18 +25,18 @@ import pytest
 import torch
 import yaml
 
-from embodichain_benchmarks.motion_generation.config import (
+from embodichain.extensions.benchmarks.motion_generation.config import (
     BENCHMARK_ROOT,
     DomainCfg,
     SuiteCfg,
     load_suite,
 )
-from embodichain_benchmarks.motion_generation.models import BenchmarkCase
-from embodichain_benchmarks.motion_generation.planners.base import (
+from embodichain.extensions.benchmarks.motion_generation.models import BenchmarkCase
+from embodichain.extensions.benchmarks.motion_generation.planners.base import (
     PlannerAdapter,
     PlannerContext,
 )
-from embodichain_benchmarks.motion_generation.scenarios.free_space import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios.free_space import (
     FreeSpaceScenario,
 )
 
@@ -300,8 +300,10 @@ def test_franka_pose_batch_uses_the_same_policy_frames_as_its_robot_assembly():
 )
 def test_packaged_franka_atomic_suites_bind_robotiq_geometry_and_policy_tcp(suite_path):
     """Every shipped Franka Atomic track must describe its mounted Robotiq."""
-    from embodichain_benchmarks.motion_generation.registry import create_robot_provider
-    from embodichain_benchmarks.motion_generation import robots as _robots
+    from embodichain.extensions.benchmarks.motion_generation.registry import (
+        create_robot_provider,
+    )
+    from embodichain.extensions.benchmarks.motion_generation import robots as _robots
 
     suite = load_suite(suite_path)
     dual = suite.robot.provider == "dual_arm"
@@ -343,7 +345,9 @@ def test_packaged_franka_atomic_suites_bind_robotiq_geometry_and_policy_tcp(suit
 
 
 def test_component_ur5_policy_tcp_is_inverse_of_the_component_solver_tcp():
-    from embodichain_benchmarks.motion_generation.embodiments import resolve_embodiment
+    from embodichain.extensions.benchmarks.motion_generation.embodiments import (
+        resolve_embodiment,
+    )
 
     suite = load_suite("atomic_ur5_embodiment")
     resolution = resolve_embodiment(suite.embodiment, suite.robot)

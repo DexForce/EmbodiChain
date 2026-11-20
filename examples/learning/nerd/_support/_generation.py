@@ -32,8 +32,8 @@ from typing import Any
 import numpy as np
 import torch
 
-from embodichain_models.dynamics.nerd.codec import quat_rotate
-from embodichain_models.dynamics.nerd.data import DynamicsShardWriter
+from embodichain.extensions.models.dynamics.nerd.codec import quat_rotate
+from embodichain.extensions.models.dynamics.nerd.data import DynamicsShardWriter
 from embodichain.utils import configclass
 from ._reference_assets import reference_profile
 from ._newton import _NewtonTeacher

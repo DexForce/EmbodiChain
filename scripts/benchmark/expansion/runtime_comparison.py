@@ -206,8 +206,8 @@ def main() -> None:
     root = a.root.resolve()
     sys.path[:0] = [
         str(root),
-        str(root / "extensions/embodichain_tasks"),
-        str(root / "extensions/embodichain_robots"),
+        str(root / "embodichain/extensions/tasks"),
+        str(root / "embodichain/extensions/robots"),
     ]
     import torch
     from embodichain.lab.gym.utils.gym_utils import config_to_cfg
@@ -223,7 +223,7 @@ def main() -> None:
     torch.set_num_threads(1)
     path = (
         root
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
     )
     discover_task_packages()
     execute_init_hooks()

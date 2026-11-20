@@ -67,4 +67,4 @@ unchanged.
 maintains counters and records metrics. Online model-learning workflows can
 call it between supervised updates. ``train()`` also manages periodic evaluation
 and checkpoints. The PointMass configuration is
-``extensions/embodichain_tasks/configs/tasks/classic_control/point_mass/agents/apg_actor_critic.yaml``.
+``embodichain/extensions/tasks/configs/tasks/classic_control/point_mass/agents/apg_actor_critic.yaml``.

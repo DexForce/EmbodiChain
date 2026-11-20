@@ -506,7 +506,7 @@ def test_config_environment_entries_infer_inline_robot_embodiments(
 
 def test_handwritten_demo_detection_uses_environment_hooks() -> None:
     """Only task classes overriding a demo hook are handwritten demos."""
-    from embodichain_tasks.manipulation.tableware.blocks_ranking_size import (
+    from embodichain.extensions.tasks.manipulation.tableware.blocks_ranking_size import (
         BlocksRankingSizeEnv,
     )
     from embodichain.lab.gym.envs import EmbodiedEnv
@@ -611,7 +611,7 @@ def test_motion_generation_dispatch_selects_suite(
     expected_suite: str,
 ) -> None:
     """The domain command forwards either family and its canonical default."""
-    from embodichain_benchmarks.motion_generation import cli as run_benchmark
+    from embodichain.extensions.benchmarks.motion_generation import cli as run_benchmark
 
     received: dict[str, object] = {}
 
@@ -705,8 +705,8 @@ def test_benchmark_dispatch_loads_extension_only_for_motion_generation(
     original_import = builtins.__import__
 
     def reject_extension(name, *args, **kwargs):
-        if name == "embodichain_benchmarks" or name.startswith(
-            "embodichain_benchmarks."
+        if name == "embodichain.extensions.benchmarks" or name.startswith(
+            "embodichain.extensions.benchmarks."
         ):
             raise AssertionError("An unrelated benchmark command loaded the extension")
         return original_import(name, *args, **kwargs)

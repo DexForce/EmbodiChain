@@ -104,8 +104,8 @@ def test_dirty_check_checks_index_and_worktree_independently(seed):
     [
         ("pkg", "pkg"),
         (
-            "extensions/embodichain_models/embodichain_models/dynamics/nerd",
-            "embodichain_models.dynamics.nerd",
+            "embodichain/extensions/models/dynamics/nerd",
+            "embodichain.extensions.models.dynamics.nerd",
         ),
     ],
 )

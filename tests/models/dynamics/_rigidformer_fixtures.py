@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import torch
-from embodichain_models.dynamics.rigidformer import RigidFormerCfg
+from embodichain.extensions.models.dynamics.rigidformer import RigidFormerCfg
 
 
 def tiny_cfg() -> RigidFormerCfg:

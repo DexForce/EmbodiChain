@@ -39,7 +39,7 @@ import numpy as np
 import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
-TASKS = ROOT / "extensions/embodichain_tasks/configs/tasks/manipulation"
+TASKS = ROOT / "embodichain/extensions/tasks/configs/tasks/manipulation"
 CASES = {
     "pick_place": TASKS / "workspace_pose_pick_place/acceptance/scene_first",
     "stack": TASKS / "tableware/stack_blocks_two/acceptance/scene_first",
@@ -152,8 +152,8 @@ def worker(args):
     """Execute one isolated source/case/seed with complete failure denominators."""
     sys.path[:0] = [
         str(ROOT),
-        str(ROOT / "extensions/embodichain_tasks"),
-        str(ROOT / "extensions/embodichain_robots"),
+        str(ROOT / "embodichain/extensions/tasks"),
+        str(ROOT / "embodichain/extensions/robots"),
     ]
     from embodichain.lab.expansion.task_program_jobs import run_task_program_expansion
 
@@ -197,7 +197,7 @@ def worker(args):
                 "embodichain/lab/expansion/",
                 "embodichain/lab/sim/scene/",
                 "embodichain/compute/geometry/",
-                "extensions/embodichain_tasks/configs/tasks/manipulation/",
+                "embodichain/extensions/tasks/configs/tasks/manipulation/",
             )
         )
         and (ROOT / p).is_file()

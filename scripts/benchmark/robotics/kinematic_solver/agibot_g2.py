@@ -36,7 +36,7 @@ import torch
 import warp as wp
 
 from embodichain.lab.sim.motion.solvers import PytorchSolverCfg, SSIKSolverCfg
-from embodichain_robots import AgibotG2Cfg
+from embodichain.extensions.robots import AgibotG2Cfg
 
 __all__ = []
 
