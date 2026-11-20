@@ -1,0 +1,8 @@
+task_key: franka_rope_wrap
+title: Franka Rope Wrap
+summary: Pick up a rope from the floor, wrap it around a post and keep hold of the free end.
+tags: [cable, deformable, manipulation, task_program_expert]
+default_deployment: franka
+deployments:
+  franka:
+    config: task.franka.yaml

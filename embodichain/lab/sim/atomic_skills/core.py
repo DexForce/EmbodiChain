@@ -984,6 +984,7 @@ class AtomicSkill(Generic[GoalT, OptionsT], ABC):
         effect_candidates: StateDelta | None = None,
         effect_verification: EffectVerificationRequirement | None = None,
         replannable: bool = True,
+        preserve_velocity_samples: bool = False,
         diagnostics: PlannerDiagnostics | None = None,
         segment_lengths: Mapping[str, int] | None = None,
         scene_dependency_monitor_until: Mapping[str, int] | None = None,
@@ -1002,6 +1003,9 @@ class AtomicSkill(Generic[GoalT, OptionsT], ABC):
             effect_verification: Optional explicit physical-effect boundary.
                 Use this when verification is required without a symbolic task-
                 state delta.
+            preserve_velocity_samples: Keep explicitly authored arrival velocities across
+                consecutive timed segments. Derived velocity targets retain their usual
+                boundary and stationary treatment.
             replannable: Whether the execution runtime may replan this action.
             diagnostics: Optional retained planner diagnostics.
             segment_lengths: Optional ordered mapping from semantic segment
@@ -1056,7 +1060,9 @@ class AtomicSkill(Generic[GoalT, OptionsT], ABC):
             velocities = differentiate_positions(timed.positions, timed.dt)
         else:
             velocities = velocities.clone()
-        if timed.waypoint_count:
+        if timed.waypoint_count and not (
+            preserve_velocity_samples and timed.velocities is not None
+        ):
             # Commands are held until the next arrival. A stationary interval
             # and the final settling window must never retain a moving target.
             stationary = timed.positions[:, 1:] == timed.positions[:, :-1]

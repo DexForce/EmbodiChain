@@ -1,0 +1,23 @@
+integration_id: franka_rope_wrap_v1
+program_id: franka_rope_wrap
+requires:
+  scene_contract: cable_post_v1
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: cable_post_v1
+  registry_id: cable_post
+  cables:
+  - entity_id: cable
+    simulation_uid: cable
+profile:
+  defaults:
+    move_joints:
+      primary: arm_and_hand
+  skill_options:
+    simulation.cable_wrap_phase:
+      kind: move_joints
+      preserve_velocity_samples: true
+  effect_monitors: {}
+runtime_services:
+  registered_semantic_lowerers:
+  - kind: cable_wrap_phase

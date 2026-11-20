@@ -260,6 +260,21 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/gaussian_pick_place/catalog.yaml"),
         Path("tasks/manipulation/gaussian_pick_place/README.md"),
         Path("tasks/manipulation/cable/route_the_cable/cable.usda"),
+        Path("components/embodiments/franka_flat_pads.yaml"),
+        *(
+            Path("tasks/manipulation/cable/franka_rope_wrap") / filename
+            for filename in (
+                "README.md",
+                "cable.usda",
+                "catalog.yaml",
+                "config.json",
+                "env.yaml",
+                "task.franka.yaml",
+                "task_program/evaluation.yaml",
+                "task_program/integration.yaml",
+                "task_program/program.yaml",
+            )
+        ),
         Path("tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"),
         Path("tasks/manipulation/tableware/pour_cup/env.fluid.yaml"),
         Path("tasks/manipulation/tableware/pour_cup/task_program/program.fluid.yaml"),

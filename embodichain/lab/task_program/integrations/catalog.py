@@ -252,8 +252,11 @@ def _canonical_value(value: object) -> object:
 
         if type(value) is SimulationSceneBinding and not value.cables:
             metadata.pop("cables")
-        if type(value) is MoveJointsOptions and not value.preserve_samples:
-            metadata.pop("preserve_samples")
+        if type(value) is MoveJointsOptions:
+            if not value.preserve_samples:
+                metadata.pop("preserve_samples")
+            if not value.preserve_velocity_samples:
+                metadata.pop("preserve_velocity_samples")
         if (
             type(value) is MoveEndEffectorOptions
             and not value.preserve_cartesian_samples

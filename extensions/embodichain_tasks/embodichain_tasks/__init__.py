@@ -57,6 +57,7 @@ register_manager_modules(
         "embodichain_tasks.manipulation.assembly.functors",
         "embodichain_tasks.manipulation.assembly._control",
         "embodichain_tasks.manipulation.assembly._state",
+        "embodichain_tasks.manipulation.cable.franka_rope_wrap",
         "embodichain_tasks.locomotion.managers.observations",
         "embodichain_tasks.locomotion.managers.rewards",
     ]
