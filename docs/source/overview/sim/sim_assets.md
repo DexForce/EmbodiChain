@@ -18,11 +18,11 @@ selects the environment.
 | {doc}`Group of independent rigid bodies <sim_rigid_object_group>` | {class}`~cfg.RigidObjectGroupCfg` | `add_rigid_object_group()` |
 | {doc}`Jointed mechanism <sim_articulation>` such as a door or drawer | {class}`~cfg.ArticulationCfg` | `add_articulation()` |
 | {doc}`Robot <sim_robot>` with control parts and kinematics | {class}`~cfg.RobotCfg` | `add_robot()` |
-| [Visual object](#visual-objects) for scenery or props | {class}`~cfg.VisualObjectCfg` | `add_visual_object()` |
+| {doc}`Visual object <sim_visual_object>` for scenery or props | {class}`~cfg.VisualObjectCfg` | `add_visual_object()` |
 | {doc}`Soft solid <sim_soft_object>` or {doc}`cloth <sim_cloth>` with nodal state | {class}`~cfg.VolumeDeformableObjectCfg`, {class}`~cfg.SurfaceDeformableObjectCfg` | `add_deformable_object()` |
-| [Cable](#cable-objects) such as a rope, wire, or hose | {class}`~cfg.CableObjectCfg` | `add_cable_object()` |
-| [Fluid](#fluid-objects) sampled from an initial fill | {class}`~cfg.fluid.FluidObjectCfg` | `add_fluid_object()` |
-| [Direct light](#lights) in a rendered scene | {class}`~cfg.LightCfg` | `add_light()` |
+| {doc}`Cable <sim_cable_object>` such as a rope, wire, or hose | {class}`~cfg.CableObjectCfg` | `add_cable_object()` |
+| {doc}`Fluid <sim_fluid_object>` sampled from an initial fill | {class}`~cfg.fluid.FluidObjectCfg` | `add_fluid_object()` |
+| {doc}`Direct light <sim_light>` in a rendered scene | {class}`~cfg.LightCfg` | `add_light()` |
 | [Sensor](#sensors) for images, contacts, or other observations | {doc}`Sensor configuration <sensors/index>` | `add_sensor()` |
 
 The manager provides `get_asset(uid)` for lookup by runtime UID. Lights and
@@ -164,7 +164,8 @@ object if the same asset also needs a physics body and colliders. For a
 physical object with custom appearance, use `RigidObjectCfg.visuals` or
 `ArticulationCfg.link_visuals` to replace its rendered geometry while keeping
 the physical model. See {doc}`simulation configuration </api_reference/embodichain/embodichain.lab.sim.cfg>`
-for visual composition and source examples.
+for visual composition and source examples. See {doc}`sim_visual_object`
+for setup, selected poses, visibility, and materials.
 
 ## Deformable objects
 
@@ -220,7 +221,8 @@ state = cable.data.segment_state_w  # (environments, 2, 13)
 
 The current cable reset path requires separate scenes for cables and fluid,
 cloth, or soft-body particles. See {class}`~objects.cable.CableObject` for state
-writes, loads, and reset behavior.
+writes, loads, and reset behavior. See {doc}`sim_cable_object` for a complete
+setup example, attachments, and state layouts.
 
 ## Fluid objects
 
@@ -237,6 +239,8 @@ Use `renderer="no-render"` and `FluidRenderCfg(mode="none")` for physics-only
 runs. Native liquid rendering requires `fast-rt` or `rt`. The
 [fluid tutorial](https://github.com/dexforce/EmbodiChain/blob/main/scripts/tutorials/sim/create_fluid.py)
 demonstrates setup, stepping, particle reads, and reset with a container.
+See {doc}`sim_fluid_object` for source recipes and selected particle-state
+writes.
 
 ## Import assets from USD
 
@@ -352,7 +356,8 @@ advanced PBR parameters.
 Use {class}`~cfg.LightCfg` and `sim.add_light()` for direct lights. These
 require a native renderer and work in headless scenes with offscreen rendering.
 The manager configures environment emission and environment maps separately
-through `set_emission_light()` and `set_indirect_lighting()`.
+through `set_emission_light()` and `set_indirect_lighting()`. See
+{doc}`sim_light` for creation, global scope, and selected light updates.
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -392,4 +397,8 @@ sim_cloth.md
 sim_soft_object.md
 sim_articulation.md
 sim_robot.md
+sim_visual_object.md
+sim_cable_object.md
+sim_fluid_object.md
+sim_light.md
 ```
