@@ -390,6 +390,8 @@ def test_metrics_upload_is_optional_but_test_failures_still_block(
         None,
         "missing_robots",
         "missing_models",
+        "missing_sensors",
+        "missing_solvers",
         "missing_entry_point",
         "wrong_entry_point_group",
         "missing_asset_entry_point",
@@ -433,6 +435,7 @@ def test_release_guard_validates_bundled_runtime_packages(
         "embodichain/gen_sim/asset_engine/configs/gen_config.json": "{}",
         "embodichain/extensions/__init__.py": "",
         "embodichain/extensions/solvers/__init__.py": "",
+        "embodichain/extensions/sensors/__init__.py": "",
         "embodichain/extensions/tasks/__init__.py": "",
         task_config: source.read_text(),
         "embodichain/extensions/robots/__init__.py": "",
@@ -458,6 +461,13 @@ def test_release_guard_validates_bundled_runtime_packages(
             path: data
             for path, data in members.items()
             if not path.startswith("embodichain/extensions/models/")
+        }
+    elif invalid_contents in {"missing_sensors", "missing_solvers"}:
+        prefix = (
+            "embodichain/extensions/" + invalid_contents.removeprefix("missing_") + "/"
+        )
+        members = {
+            path: data for path, data in members.items() if not path.startswith(prefix)
         }
     elif invalid_contents == "retired_robot_module":
         members["embodichain/extensions/robots/franka_panda.py"] = ""

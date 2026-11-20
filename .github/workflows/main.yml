@@ -619,6 +619,7 @@ jobs:
               "embodichain/extensions/__init__.py",
               "embodichain/extensions/benchmarks/__init__.py",
               "embodichain/extensions/solvers/__init__.py",
+              "embodichain/extensions/sensors/__init__.py",
               "embodichain/extensions/tasks/__init__.py",
               "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml",
               "embodichain/extensions/robots/__init__.py",

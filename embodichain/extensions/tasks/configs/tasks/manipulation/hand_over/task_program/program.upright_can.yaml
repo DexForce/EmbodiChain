@@ -7,7 +7,7 @@ targets:
     position:
     - 0.0
     - -0.2
-    - 0.6
+    - 0.5632232  # Rest height plus 5 mm of release clearance.
     quaternion_xyzw:
     - 0.7071067812
     - 0.0

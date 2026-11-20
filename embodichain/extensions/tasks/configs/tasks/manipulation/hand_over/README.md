@@ -47,8 +47,8 @@ against an upright, uniformly scaled can and a 50 cm support surface. It selects
 explicit left/right participants, uses 40-step hand transitions and a compatible
 280-sample motion budget, and retains the original source hand configuration.
 
-The final target is a release pose. `delivery_rest_pose` accounts for the can's
-source mesh height after release onto the support. Acceptance requires a settled
+The final target releases the can 5 mm above `delivery_rest_pose`, which accounts
+for the can's source mesh height on the support. Acceptance requires a settled
 can within 4 cm of that rest position and its local Y axis aligned with world Z
 for at least half a second. The can's source longitudinal axis is Y, so a generic
 local-Z upright validator would measure the wrong axis.
