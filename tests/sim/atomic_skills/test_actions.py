@@ -10487,3 +10487,45 @@ def test_presampled_joint_commands_cannot_bypass_motion_gen_backend():
     )
     with pytest.raises(ValueError, match="requires strategy"):
         _plan_action(action, invocation, _context())
+
+
+@pytest.mark.parametrize("preserve", [False, True])
+def test_timed_joint_trajectory_can_preserve_explicit_phase_boundary_velocities(
+    preserve: bool,
+):
+    from embodichain.lab.sim.atomic_skills.policies import DynamicCollisionMode
+
+    generator = _motion_generator()
+    generator.robot.control_parts["whole_robot"] = object()
+    action = _bind_action(generator, MoveJoints())
+    context = _context()
+    position = (
+        torch.tensor([0.003, 0.006, 0.009])
+        .view(1, 3, 1)
+        .expand(NUM_ENVS, -1, ROBOT_DOF)
+    )
+    velocity = torch.full_like(position, 0.18)
+    goal = JointPositionGoal(
+        TimedTrajectory(
+            positions=position,
+            velocities=velocity,
+            accelerations=None,
+            dt=torch.full((NUM_ENVS, 3), CONTROL_DT),
+            env_ids=context.env_ids,
+        )
+    )
+    plan = _plan_action(
+        action,
+        SkillInvocation(
+            skill_id="move_joints",
+            binding=_binding(action, motion="whole_robot"),
+            goal=goal,
+            motion_policy=MotionPolicy(dynamic_collision_mode=DynamicCollisionMode.OFF),
+            skill_options=MoveJointsOptions(preserve_velocity_samples=preserve),
+        ),
+        context,
+    )
+    expected = velocity.clone()
+    if not preserve:
+        expected[:, 0] = expected[:, -1] = 0
+    torch.testing.assert_close(_joint_trajectory(plan).velocities, expected)

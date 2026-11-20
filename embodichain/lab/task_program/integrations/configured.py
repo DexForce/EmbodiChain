@@ -144,6 +144,9 @@ from embodichain.lab.task_program.semantics import (
 )
 
 if TYPE_CHECKING:
+    from embodichain_tasks.manipulation.cable.wrap_integration import (
+        CableWrapPhaseFactory,
+    )
     from .environment import TaskProgramEnvironmentAdapter
 
 __all__: list[str] = []
@@ -1095,6 +1098,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
             {
                 "hand_interp_steps",
                 "preserve_samples",
+                "preserve_velocity_samples",
                 "preserve_cartesian_samples",
                 "hold_steps",
                 "release",
@@ -1373,10 +1377,13 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
             value,
             path=path,
             required=frozenset({"kind"}),
-            optional=frozenset({"preserve_samples"}),
+            optional=frozenset({"preserve_samples", "preserve_velocity_samples"}),
         )
         return MoveJointsOptions(
-            preserve_samples=_boolean(config.get("preserve_samples", False), path=path)
+            preserve_samples=_boolean(config.get("preserve_samples", False), path=path),
+            preserve_velocity_samples=_boolean(
+                config.get("preserve_velocity_samples", False), path=path
+            ),
         )
     if kind == "move_end_effector":
         config = _mapping(
@@ -2678,8 +2685,16 @@ def _decode_registered_lowerer(
     | _PushObjectLowererFactory
     | _RelativePlaceLowererFactory
     | _KinematicReplayFactory
+    | CableWrapPhaseFactory
 ):
     """Decode one allowlisted registered semantic lowerer factory."""
+    if isinstance(value, Mapping) and value.get("kind") == "cable_wrap_phase":
+        from embodichain_tasks.manipulation.cable.wrap_integration import (
+            CableWrapPhaseFactory,
+        )
+
+        _mapping(value, path=path, required=frozenset({"kind"}))
+        return CableWrapPhaseFactory()
     if isinstance(value, Mapping) and value.get("kind") == "kinematic_joint_replay":
         return _decode_kinematic_replay(value, path=path)
     if isinstance(value, Mapping) and value.get("kind") in {
@@ -3185,7 +3200,8 @@ class _DecodedRuntimeServices:
         | _PourLowererFactory
         | _PushObjectLowererFactory
         | _RelativePlaceLowererFactory
-        | _KinematicReplayFactory,
+        | _KinematicReplayFactory
+        | CableWrapPhaseFactory,
         ...,
     ] = ()
     control_part_evidence: _JointPositionConstraintEvidenceProviderFactory | None = None
@@ -3618,6 +3634,7 @@ def _decode_evaluation(
     robot_links: Mapping[str, str] | None = None,
     registry: PredicateRegistry | None = None,
     cable_material: object | None = None,
+    cable_wrap: bool = False,
     transport_targets: Mapping[str, _MoveHeldObjectLowererFactory] | None = None,
 ) -> tuple[dict[str, CompiledEvaluation], tuple[str, ...], tuple[str, ...]]:
     if value is None:
@@ -3641,6 +3658,14 @@ def _decode_evaluation(
             channels[f"cables/{cable_material.entity_id}/{quantity}"] = (
                 f"cables/{cable_material.simulation_uid}/{quantity}"
             )
+    if cable_wrap:
+        from embodichain_tasks.manipulation.cable.wrap_measurements import WRAP_CHECKS
+
+        for binding in scene.cables:
+            for name in WRAP_CHECKS:
+                channels[f"cables/{binding.entity_id}/wrap_{name}"] = (
+                    f"cables/{binding.simulation_uid}/wrap_{name}"
+                )
     articulations = {
         binding.entity_id: binding.simulation_uid for binding in scene.articulations
     }
@@ -3839,6 +3864,10 @@ def _decode_configured_task_program_integration(
         robot_links=evaluation_robot_links,
         registry=evaluation_registry,
         cable_material=services.cable_material,
+        cable_wrap=any(
+            factory.call_id == "simulation.cable_wrap_phase"
+            for factory in services.registered_semantic_lowerers
+        ),
         transport_targets={
             factory.target_id: factory
             for factory in services.registered_semantic_lowerers

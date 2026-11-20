@@ -1,0 +1,66 @@
+embodiment_id: franka_flat_pads
+simulation:
+  uid: franka
+  fpath: FrankaRopePads/Panda/Fr3RopePadsV1.urdf
+  init_pos: [0, 0, 0.002]
+  init_qpos: [0.0, -0.569, 0.0, -2.81, 0.0, 3.037, 0.741, 0.0395, 0.0395]
+  control_parts:
+    arm: ["fr3_joint[1-7]"]
+    eef: ["fr3_finger_joint[1-2]"]
+    arm_and_hand: ["fr3_joint[1-7]", "fr3_finger_joint[1-2]"]
+  solver_cfg:
+    arm:
+      class_type: PytorchSolver
+      root_link_name: fr3_link0
+      end_link_name: fr3_hand_tcp
+  joint_drive_props:
+    # Preserve the source URDF joint armature and friction as in the calibrated scene.
+    drive_type: null
+    armature: null
+    friction: null
+    stiffness: {arm: 6000.0, eef: 6000.0}
+    damping: {arm: 150.0, eef: 35.0}
+    max_effort: {arm: 87.0, eef: 20.0}
+    target_mode: position_velocity
+  root_props:
+    newton_gravity_compensation: 1.0
+  attrs:
+    collision_props: {backend: newton, margin: 0.0, gap: 0.00005}
+    material_props: {backend: newton, dynamic_friction: 1.2, ke: 20000.0, kd: 1.0}
+sensor:
+- sensor_type: ContactSensor
+  uid: contacts
+  rigid_uid_list: [post]
+  articulation_cfg_list:
+  - articulation_uid: franka
+    link_name_list: []
+  filter_need_both_actor: false
+  max_contacts_per_env: 4096
+skill_profile:
+  contract_id: single_arm_parallel_gripper
+  profile_id: franka_rope_wrap
+  evaluation_links:
+    first_grasp_finger: fr3_leftfinger
+    second_grasp_finger: fr3_rightfinger
+  resources:
+  - resource_id: primary_manipulator
+    endpoints:
+    - endpoint_id: motion
+      control_part: arm
+      capabilities: [kinematics.batch_inverse, motion.cartesian_pose, kinematics.forward, motion.joint_position]
+    - endpoint_id: grasp
+      control_part: eef
+      capabilities: [interaction.grasp, motion.joint_position]
+      command_preset: flat_pads
+  - resource_id: arm_and_hand
+    endpoints:
+    - endpoint_id: motion
+      control_part: arm_and_hand
+      capabilities: [motion.joint_position]
+    members: [primary_manipulator]
+  command_presets:
+  - preset_id: flat_pads
+    control_part: eef
+    commands:
+      open: [0.0395, 0.0395]
+      grasp: [0.0018, 0.0018]

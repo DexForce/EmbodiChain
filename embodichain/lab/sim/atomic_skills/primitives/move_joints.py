@@ -88,7 +88,12 @@ class MoveJointsOptions(SkillOptions):
     preserve_samples: bool = False
     """Keep authored joint samples at host cadence, rejecting overspeed rows."""
 
+    preserve_velocity_samples: bool = False
+    """Retain explicit arrival velocities, including the ends of consecutive timed phases."""
+
     def __post_init__(self) -> None:
+        if type(self.preserve_velocity_samples) is not bool:
+            raise TypeError("preserve_velocity_samples must be a bool.")
         if type(self.preserve_samples) is not bool:
             raise TypeError("preserve_samples must be a bool.")
 
@@ -120,6 +125,13 @@ class MoveJoints(AtomicSkill[JointPositionGoal, MoveJointsOptions]):
         motion_target = motion.require_target(JointPositionTarget)
         control_part = motion_target.control_part
         joint_ids = list(motion_target.joint_ids)
+        if request.skill_options.preserve_velocity_samples and (
+            not isinstance(goal.target, TimedTrajectory)
+            or goal.target.velocities is None
+        ):
+            raise ValueError(
+                "Preserving velocity samples requires an explicitly timed velocity trajectory."
+            )
         if isinstance(goal.target, TimedTrajectory):
             trajectory = goal.target
             if sorted(joint_ids) != list(range(context.robot.robot_dof)):
@@ -147,7 +159,12 @@ class MoveJoints(AtomicSkill[JointPositionGoal, MoveJointsOptions]):
                     "Each timed replay command must occupy one control step."
                 )
             return self.build_plan(
-                request, context, success=True, trajectory=trajectory, replannable=False
+                request,
+                context,
+                success=True,
+                trajectory=trajectory,
+                replannable=False,
+                preserve_velocity_samples=request.skill_options.preserve_velocity_samples,
             )
 
         joint_dof = len(motion_target.joint_ids)
