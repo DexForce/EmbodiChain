@@ -65,6 +65,44 @@ def test_sampling_context_rejects_invalid_stream_identity(field: str, value: obj
         AffordanceSamplingContext(**values)
 
 
+def test_preferred_grasp_requires_a_current_valid_nonnominal_local_pose():
+    ref = torch.eye(4)[None]
+    ref[:, 0, 3] = 2.0
+    poses = ref[:, None].repeat(1, 3, 1, 1)
+    poses[0, :, 0, 3] += torch.tensor([0.0, 0.125, 0.5])
+    costs = torch.arange(3.0)[None]
+    valid = torch.ones((1, 3), dtype=torch.bool)
+
+    def sample(preferred_x, mask, branch=1):
+        desired = torch.eye(4)
+        desired[0, 3] = preferred_x
+        ctx = AffordanceSamplingContext(
+            count=3,
+            branch_override=branch,
+            preferred_local_poses=(("pick", tuple(desired.flatten().tolist())),),
+        )
+        return sampling_module._sample_pose_candidates(
+            AffordancePoseCandidates(poses, costs, mask),
+            sampling=ctx,
+            key="pick",
+            env_ids=torch.tensor([0]),
+            reference_poses=ref,
+        ).metadata
+
+    matched = sample(0.125, valid)
+    assert matched["matched_preferred_local_pose"] == [True]
+    assert matched["candidate_ids"] == [1]
+    for preferred_x, mask in (
+        (0.0, valid),
+        (0.2, valid),
+        (0.125, torch.tensor([[True, False, True]])),
+    ):
+        ranked = sample(preferred_x, mask)
+        assert ranked["matched_preferred_local_pose"] == [False]
+        assert ranked["candidate_ids"] == [2]
+    assert sample(0.125, valid, branch=0)["candidate_ids"] == [0]
+
+
 def test_sampling_context_uses_private_reproducible_generators():
     context = AffordanceSamplingContext(count=4, seed=3, episode_id=2, attempt_id=1)
     global_state = torch.random.get_rng_state().clone()

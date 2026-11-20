@@ -99,16 +99,26 @@ def test_missing_asset_reports_download_command(
         YamI2rtCfg.from_dict({})
 
 
+@pytest.mark.parametrize("use_component", [False, True], ids=["fpath", "arm-component"])
 def test_local_override_roundtrips_without_network(
-    monkeypatch: pytest.MonkeyPatch, arm_asset: Path
+    monkeypatch: pytest.MonkeyPatch, arm_asset: Path, use_component: bool
 ) -> None:
     def no_download(*args):
         raise AssertionError("Explicit offline assets must not download")
 
     monkeypatch.setattr(yam_i2rt, "get_data_path", no_download)
-    cfg = YamI2rtCfg.from_dict({"fpath": str(arm_asset)})
+    if use_component:
+        override = {
+            "urdf_cfg": {
+                "components": [{"component_type": "arm", "urdf_path": str(arm_asset)}]
+            }
+        }
+    else:
+        override = {"fpath": str(arm_asset)}
+    cfg = YamI2rtCfg.from_dict(override)
     restored = YamI2rtCfg.from_dict(cfg.to_dict())
-    assert restored.fpath == str(arm_asset)
+    assert restored.fpath == (None if use_component else str(arm_asset))
+    assert restored.urdf_cfg.assemble_urdf() == str(arm_asset)
     assert restored._pk_urdf_path == str(arm_asset)
     assert restored.control_parts == cfg.control_parts
 

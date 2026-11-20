@@ -21,9 +21,12 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from collections import OrderedDict
 from dataclasses import dataclass
+from functools import cached_property
 from importlib.metadata import version
+from itertools import islice
 import math
 from numbers import Integral
+from typing import ClassVar
 
 import numpy as np
 
@@ -32,6 +35,11 @@ from ._values import count, digest, finite, names
 from .contracts import FeasibilityCheck
 
 __all__ = ["CollisionBody", "NewtonCollisionChecker", "UnsupportedFeasibilityError"]
+
+# Each explicit pair has one mask entry. Its ordinal fits exactly in the
+# float32 contact summary, including when a heavily decomposed shape has a large ID.
+_MAX_QUERY_PAIRS = 1 << 20
+_MAX_CONTACTS = 1 << 20
 
 
 class UnsupportedFeasibilityError(RuntimeError):
@@ -70,6 +78,7 @@ class CollisionBody:
         vertices: Mesh-local positions; scale must already be applied.
         triangles: Mesh triangle indices.
         robot: Whether this shape belongs to a robot.
+        source_collision_id: Physical collider shared by its convex parts.
     """
 
     collision_id: str
@@ -85,10 +94,13 @@ class CollisionBody:
     vertices: tuple[tuple[float, float, float], ...] = ()
     triangles: tuple[tuple[int, int, int], ...] = ()
     robot: bool = False
+    source_collision_id: str | None = None
 
     def __post_init__(self) -> None:
         _identifier(self.collision_id, "collision_id")
         _identifier(self.frame_uid, "frame_uid")
+        if self.source_collision_id is not None:
+            _identifier(self.source_collision_id, "source_collision_id")
         object.__setattr__(self, "local_pose", _rigid_pose(self.local_pose))
         size = finite(self.dimensions, "shape dimensions")
         expected = {
@@ -151,7 +163,8 @@ class NewtonCollisionChecker:
         numeric_tolerance_m: Conservative contact threshold and returned-distance
             allowance for float32 geometry.
         use_cuda_graph: Capture repeated CUDA queries after a warm call.
-        max_shapes: Explicit shape budget, at most 512; bounds pair storage.
+        max_shapes: Optional caller limit on physical shapes. Storage is budgeted
+            separately for eligible collision pairs and actual contacts.
         max_contacts: Upper contact-buffer budget; saturation is unsupported.
 
     Returns from check contain a capped conservative clearance estimate, not
@@ -163,6 +176,8 @@ class NewtonCollisionChecker:
     representation/precision budgets return unsupported.
     """
 
+    query_contract: ClassVar[str] = "newton-convex-query/v2"
+
     def __init__(
         self,
         bodies: Sequence[CollisionBody],
@@ -173,15 +188,18 @@ class NewtonCollisionChecker:
         detection_gap_m: float = 0.03,
         numeric_tolerance_m: float = 1e-6,
         use_cuda_graph: bool = True,
-        max_shapes: int = 256,
-        max_contacts: int = 1048576,
+        max_shapes: int | None = None,
+        max_contacts: int = _MAX_CONTACTS,
     ) -> None:
         self.bodies = tuple(bodies)
-        count(max_shapes, "max_shapes")
+        if max_shapes is not None:
+            count(max_shapes, "max_shapes")
         count(max_contacts, "max_contacts")
-        if max_contacts > 1048576:
-            raise ValueError("max_contacts must not exceed 1048576")
-        if max_shapes > 512 or not 1 <= len(self.bodies) <= max_shapes:
+        if max_contacts > _MAX_CONTACTS:
+            raise ValueError(f"max_contacts must not exceed {_MAX_CONTACTS}")
+        if not self.bodies or (
+            max_shapes is not None and len(self.bodies) > max_shapes
+        ):
             raise UnsupportedFeasibilityError(
                 "Physical collision shape budget exceeded"
             )
@@ -257,8 +275,21 @@ class NewtonCollisionChecker:
         self._use_cuda_graph = use_cuda_graph
         self._aliases = {}
         ids = {b.collision_id for b in self.bodies}
+        sources = {}
         for body in self.bodies:
             self._aliases.setdefault(body.frame_uid, set()).add(body.collision_id)
+            if body.source_collision_id is not None:
+                frame, parts = sources.setdefault(
+                    body.source_collision_id, (body.frame_uid, set())
+                )
+                if frame != body.frame_uid:
+                    raise ValueError("A source collider must belong to a single frame")
+                parts.add(body.collision_id)
+        for source, (_, parts) in sources.items():
+            if self._aliases.setdefault(source, parts) != parts:
+                raise ValueError(
+                    "Source collider and frame aliases must be unambiguous"
+                )
         if any(
             token in ids and targets != {token}
             for token, targets in self._aliases.items()
@@ -268,7 +299,8 @@ class NewtonCollisionChecker:
             )
         for collision_id in ids:
             self._aliases.setdefault(collision_id, {collision_id})
-        self.ignored_pairs = frozenset(self._expand_pairs(ignored_pairs))
+        self._ignored_alias_pairs = self._permission_pairs(ignored_pairs)
+        ignored_targets = self._permission_targets(self._ignored_alias_pairs)
         self.last_pair = None
         self.last_clearance_interval: tuple[float, float] | None = None
         self._frame_uids = tuple(dict.fromkeys(b.frame_uid for b in self.bodies))
@@ -278,23 +310,36 @@ class NewtonCollisionChecker:
         self._native_lookup = {
             logical: index for index, logical in enumerate(self._native)
         }
-        self._pairs = tuple(
+        eligible = (
             (i, j)
             for i in range(len(self.bodies))
             for j in range(i + 1, len(self.bodies))
             if self.bodies[i].frame_uid != self.bodies[j].frame_uid
-            and frozenset((self.bodies[i].collision_id, self.bodies[j].collision_id))
-            not in self.ignored_pairs
+            and self.bodies[j].frame_uid not in ignored_targets[i]
+            and self.bodies[j].collision_id not in ignored_targets[i]
+            and self.bodies[j].source_collision_id not in ignored_targets[i]
         )
-        native_pairs = [
-            (self._native_lookup[i], self._native_lookup[j])
-            for i, j in self._pairs
+        pairs = tuple(islice(eligible, _MAX_QUERY_PAIRS + 1))
+        if len(pairs) > _MAX_QUERY_PAIRS:
+            raise UnsupportedFeasibilityError("Explicit collision pair budget exceeded")
+        self._native_pairs = tuple(
+            (i, j)
+            for i, j in pairs
             if i in self._native_lookup and j in self._native_lookup
-        ]
-        requested_capacity = max(64, 16 * len(native_pairs))
-        if requested_capacity > 1048576:
-            raise UnsupportedFeasibilityError("Physical collision pair budget exceeded")
-        self._capacity = min(max_contacts, requested_capacity)
+        )
+        self._plane_pairs = tuple(
+            (i, j)
+            for i, j in pairs
+            if i not in self._native_lookup or j not in self._native_lookup
+        )
+        self._shape_pairs = np.asarray(
+            [
+                (self._native_lookup[i], self._native_lookup[j])
+                for i, j in self._native_pairs
+            ],
+            dtype=np.int32,
+        ).reshape(-1, 2)
+        self._capacity = min(max_contacts, max(64, 16 * len(self._native_pairs)))
         self._mask_cache = OrderedDict()
         self._batch_queries = OrderedDict()
         self.last_batch_pairs: tuple[tuple[str, str] | None, ...] = ()
@@ -302,17 +347,17 @@ class NewtonCollisionChecker:
         self._graph = self._active = self._output = self._empty_count = (
             self._explicit
         ) = None
-        self._tolerance = None
+        self._pair_keys = self._tolerance = None
         self._meshes = []
         self._closed = False
         self._version = version("newton")
         self.verification_id = digest(
             (
-                "newton-convex-query/v1",
+                self.query_contract,
                 "relative-origin/scale-allowance/v1",
                 self._version,
                 self.bodies,
-                self.ignored_pairs,
+                self._ignored_alias_pairs,
                 self.clearance_m,
                 self.detection_gap_m,
                 self.numeric_tolerance_m,
@@ -323,8 +368,8 @@ class NewtonCollisionChecker:
             )
         )
         try:
-            if native_pairs:
-                self._build_query(native_pairs)
+            if self._native_pairs:
+                self._build_query()
         except Exception:
             self.close()
             raise
@@ -348,13 +393,14 @@ class NewtonCollisionChecker:
             "max_effective_tolerance_m": self._max_effective_tolerance,
             "max_abs_query_coordinate_m": 1e6,
             "shape_count": len(self.bodies),
+            "native_pair_count": len(self._native_pairs),
             "contact_capacity": self._capacity,
             "cuda_graph": "captured" if self._graph is not None else "disabled",
             "halfspace_check": "analytic_physical_support",
             "continuous": False,
         }
 
-    def _build_query(self, pairs: list[tuple[int, int]]) -> None:
+    def _build_query(self) -> None:
         import newton
         import warp as wp
         from embodichain.compute.geometry._warp.contact_query import _contact_summary
@@ -366,6 +412,9 @@ class NewtonCollisionChecker:
             gap=self.detection_gap_m / 2,
             margin=0.0,
             density=0.0,
+            # Leave the builder's default pair table empty. The explicit
+            # pipeline supplies all eligible pairs.
+            collision_group=0,
             collision_filter_parent=False,
         )
         for index in self._native:
@@ -406,9 +455,13 @@ class NewtonCollisionChecker:
                 )
         self._model = builder.finalize(device=self.device)
         self._state = self._model.state()
-        self._explicit = wp.array(
-            np.asarray(pairs, dtype=np.int32), dtype=wp.vec2i, device=self.device
+        self._explicit = wp.array(self._shape_pairs, dtype=wp.vec2i, device=self.device)
+        # Native shape IDs follow logical order, so these keys are sorted.
+        keys = (
+            self._shape_pairs[:, 0].astype(np.int64) * len(self._native)
+            + self._shape_pairs[:, 1]
         )
+        self._pair_keys = wp.array(keys, dtype=wp.int64, device=self.device)
         self._pipeline = newton.CollisionPipeline(
             self._model,
             broad_phase="explicit",
@@ -423,13 +476,26 @@ class NewtonCollisionChecker:
             )
         self._contacts = self._pipeline.contacts()
         self._active = wp.zeros(
-            len(self._native) ** 2, dtype=wp.int32, device=self.device
+            len(self._native_pairs), dtype=wp.int32, device=self.device
         )
         self._output = wp.empty(4, dtype=float, device=self.device)
         self._empty_count = wp.zeros(1, dtype=wp.int32, device=self.device)
         self._tolerance = wp.empty(1, dtype=float, device=self.device)
 
-    def _expand_pairs(self, pairs: Sequence[tuple[str, str]]) -> set[frozenset[str]]:
+    @cached_property
+    def ignored_pairs(self) -> frozenset[frozenset[str]]:
+        """Return the expanded physical IDs for callers exporting the query."""
+        return frozenset(
+            frozenset((a, b))
+            for left, right in self._ignored_alias_pairs
+            for a in self._aliases[left]
+            for b in self._aliases[right]
+            if a != b
+        )
+
+    def _permission_pairs(
+        self, pairs: Sequence[tuple[str, str]]
+    ) -> frozenset[tuple[str, str]]:
         output = set()
         for pair in pairs:
             if (
@@ -440,13 +506,23 @@ class NewtonCollisionChecker:
                 raise ValueError(
                     "contact permissions require two distinct known physical IDs or frames"
                 )
-            output.update(
-                frozenset((a, b))
-                for a in self._aliases[pair[0]]
-                for b in self._aliases[pair[1]]
-                if a != b
-            )
-        return output
+            output.add(tuple(sorted(pair)))
+        return frozenset(output)
+
+    def _permission_targets(self, pairs):
+        # A permission can name a whole frame or just one of its colliders.
+        # Keep frame exemptions compact even for heavily decomposed assets.
+        targets = {}
+        for left, right in pairs:
+            targets.setdefault(left, set()).add(right)
+            targets.setdefault(right, set()).add(left)
+        empty = frozenset()
+        return tuple(
+            targets.get(body.frame_uid, empty)
+            | targets.get(body.collision_id, empty)
+            | targets.get(body.source_collision_id, empty)
+            for body in self.bodies
+        )
 
     def _mask(
         self,
@@ -461,30 +537,38 @@ class NewtonCollisionChecker:
             raise UnsupportedFeasibilityError(
                 "Moving object has no physical collision geometry"
             )
-        allowed = frozenset(self._expand_pairs(allowed_contacts))
+        allowed = self._permission_pairs(allowed_contacts)
         key = (allowed, frozenset(moving), all_pairs)
         if key in self._mask_cache:
             self._mask_cache.move_to_end(key)
             return self._mask_cache[key]
-        mask = np.zeros(len(self._native) ** 2, dtype=np.int32)
-        planes = []
-        for i, j in self._pairs:
+
+        allowed_targets = self._permission_targets(allowed)
+
+        def active(pair):
+            i, j = pair
             a, b = self.bodies[i], self.bodies[j]
-            if frozenset((a.collision_id, b.collision_id)) in allowed or not (
-                all_pairs
-                or a.robot
-                or b.robot
-                or a.frame_uid in moving
-                or b.frame_uid in moving
-            ):
-                continue
-            if a.kind == "halfspace" or b.kind == "halfspace":
-                planes.append((i, j))
-            else:
-                x, y = self._native_lookup[i], self._native_lookup[j]
-                mask[x * len(self._native) + y] = mask[y * len(self._native) + x] = 1
+            return (
+                b.frame_uid not in allowed_targets[i]
+                and b.collision_id not in allowed_targets[i]
+                and b.source_collision_id not in allowed_targets[i]
+                and (
+                    all_pairs
+                    or a.robot
+                    or b.robot
+                    or a.frame_uid in moving
+                    or b.frame_uid in moving
+                )
+            )
+
+        mask = np.fromiter(
+            map(active, self._native_pairs),
+            dtype=np.int32,
+            count=len(self._native_pairs),
+        )
+        planes = tuple(filter(active, self._plane_pairs))
         mask.setflags(write=False)
-        value = mask, tuple(planes), bool(mask.any())
+        value = mask, planes, bool(mask.any())
         self._mask_cache[key] = value
         if len(self._mask_cache) > 16:
             self._mask_cache.popitem(last=False)
@@ -521,6 +605,7 @@ class NewtonCollisionChecker:
                 c.rigid_contact_margin1,
                 self._model.shape_body,
                 self._state.body_q,
+                self._pair_keys,
                 self._active,
                 len(self._native),
                 self.clearance_m,
@@ -696,8 +781,7 @@ class NewtonCollisionChecker:
             upper_clearance = min(upper_clearance, max(0.0, separation + tolerance))
             if math.isfinite(summary[1]):
                 self.last_clearance_interval = (clearance, upper_clearance)
-                a, b = divmod(int(summary[1]), len(self._native))
-                return self._failure(self._native[a], self._native[b]), clearance
+                return self._failure(*self._native_pairs[int(summary[1])]), clearance
         self.last_clearance_interval = (clearance, upper_clearance)
         return FeasibilityCheck(
             "collision",
@@ -714,7 +798,7 @@ class NewtonCollisionChecker:
         all_pairs: bool = False,
         env_ids: Sequence[int] | None = None,
     ) -> tuple[FeasibilityCheck, ...]:
-        """Check independent measured rows with one bounded numerical query.
+        """Check independent measured rows in bounded numerical batches.
 
         Args:
             frame_poses: Every declared frame with arena poses ``(B, 4, 4)``.
@@ -763,30 +847,43 @@ class NewtonCollisionChecker:
         if type(all_pairs) is not bool:
             raise TypeError("all_pairs must be a bool")
         # Resolve permissions with the same native validation before caching.
-        allowed = frozenset(self._expand_pairs(allowed_contacts))
+        allowed = self._permission_pairs(allowed_contacts)
         self._mask(allowed_contacts, moving_objects, all_pairs)
-        key = size, allowed, frozenset(moving_objects), all_pairs
-        query = self._batch_queries.get(key)
-        if query is None:
-            if size * self._capacity > 1048576:
-                raise UnsupportedFeasibilityError(
-                    "Batched collision contact budget exceeded"
+        width = min(
+            _MAX_CONTACTS // self._capacity,
+            _MAX_QUERY_PAIRS // max(1, len(self._native_pairs)),
+        )
+        reports = {}
+        for start in range(0, size, width):
+            count = min(width, size - start)
+            key = count, allowed, frozenset(moving_objects), all_pairs
+            query = self._batch_queries.get(key)
+            if query is None:
+                query = _CollisionBatches(
+                    self, count, allowed_contacts, moving_objects, all_pairs
                 )
-            query = _CollisionBatches(
-                self, size, allowed_contacts, moving_objects, all_pairs
-            )
-            self._batch_queries[key] = query
-            while len(self._batch_queries) > 2:
-                _, old = self._batch_queries.popitem(last=False)
-                old.close()
-        else:
-            self._batch_queries.move_to_end(key)
-        result = query.check(frames, rows)
-        self.last_batch_pairs = tuple(pair for _, _, pair in result)
-        return tuple(report for _, report, _ in result)
+                self._batch_queries[key] = query
+                if len(self._batch_queries) > 2:
+                    _, old = self._batch_queries.popitem(last=False)
+                    old.close()
+            else:
+                self._batch_queries.move_to_end(key)
+            local_rows = [row - start for row in rows if start <= row < start + count]
+            chunk = {uid: poses[start : start + count] for uid, poses in frames.items()}
+            for row, report, pair in query.check(chunk, local_rows):
+                reports[start + row] = report, pair
+        self.last_batch_pairs = tuple(reports[row][1] for row in rows)
+        return tuple(reports[row][0] for row in rows)
+
+    def _physical_pair(self, i: int, j: int) -> tuple[str, str]:
+        a, b = self.bodies[i], self.bodies[j]
+        return (
+            a.source_collision_id or a.collision_id,
+            b.source_collision_id or b.collision_id,
+        )
 
     def _failure(self, i: int, j: int) -> FeasibilityCheck:
-        self.last_pair = self.bodies[i].collision_id, self.bodies[j].collision_id
+        self.last_pair = self._physical_pair(i, j)
         return FeasibilityCheck(
             "collision",
             "failed",
@@ -821,7 +918,7 @@ class NewtonCollisionChecker:
         self._graph = self._pipeline = self._contacts = self._state = self._model = None
         self._active = self._output = self._empty_count = None
         self._tolerance = None
-        self._explicit = None
+        self._explicit = self._pair_keys = None
         self._meshes.clear()
         self._mask_cache.clear()
         self._closed = True

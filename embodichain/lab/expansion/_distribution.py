@@ -26,10 +26,13 @@ from collections import Counter
 from collections.abc import Mapping
 from copy import deepcopy
 import hashlib
+from importlib.resources import files
 import json
 from pathlib import Path
 from typing import Any
 import numpy as np
+
+from . import _frontend
 
 __all__: list[str] = []
 
@@ -345,7 +348,9 @@ def _run(
     (output / "summary.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False)
     )
-    template = Path(__file__).with_name("_distribution.html").read_text()
+    template = (
+        files(_frontend).joinpath("distribution.html").read_text(encoding="utf-8")
+    )
     (output / "report.html").write_text(
         template.replace(
             "__REPORT__",

@@ -17,6 +17,11 @@ must also be anchored. Anchored roots reserve space before unanchored groups
 are sampled. Invalid domains reject before generation; unsupported
 geometry returns budget exhaustion rather than silently moving the anchors.
 The source/policy remain reusable; empty conditions preserve the old stream.
+A rigid leaf root with an explicit XY offset range may overhang the primary
+support rectangle. Preparation verifies a bounded translation range on the
+named mesh using faces near the authored bottom, the projected mass centroid
+and the convex hull of the contact patches. Fixed neighbors retain their full
+projected clearance bounds. Saved layouts revalidate these offsets on load.
 `SimulationSceneExpansionHost` prepares/restores ordered rows with independent
 validation. Offline scheduling and confirmed persistence belong to the
 [Expansion Engine](../expansion-engine/expansion-engine.md).

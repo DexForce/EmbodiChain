@@ -58,6 +58,7 @@ _RUNTIME_SERVICE_FIELDS = frozenset(
         "registered_semantic_lowerers",
         "control_part_evidence",
         "settle_presets",
+        "cable_material",
     }
 )
 _TASK_RUNTIME_SERVICE_FIELDS = _RUNTIME_SERVICE_FIELDS | frozenset(
@@ -266,6 +267,12 @@ def _merge_runtime_services(
     evidence = task_evidence if task_evidence is not None else skill_profile_evidence
     if evidence is not None:
         result["control_part_evidence"] = deepcopy(evidence)
+    if "cable_material" in skill_profile and "cable_material" in task:
+        raise ValueError("cable_material must have exactly one owner.")
+    if "cable_material" in task or "cable_material" in skill_profile:
+        result["cable_material"] = deepcopy(
+            task.get("cable_material", skill_profile.get("cable_material"))
+        )
     if "nominal_motion_sources" in task:
         result["nominal_motion_sources"] = _owned_sequence(
             task["nominal_motion_sources"],
@@ -789,6 +796,7 @@ def _load_configured_task_program_deployment(
         optional=frozenset(
             {
                 "rigid_objects",
+                "cables",
                 "rigidized_articulations",
                 "articulations",
                 "links",

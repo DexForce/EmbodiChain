@@ -634,7 +634,7 @@ def build_feasibility_host(
         + digest(
             (
                 adapter,
-                "newton-convex-query/v1",
+                NewtonCollisionChecker.query_contract,
                 version("newton"),
                 cfg.collision_device,
                 cfg.collision_use_cuda_graph,

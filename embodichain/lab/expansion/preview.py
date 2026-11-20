@@ -144,7 +144,7 @@ def launch_expansion_preview(
     Args:
         paths: Native job, aggregate result or preview-plan directories.
         output: New directory for owned service status and logs.
-        port: Loopback port; zero allocates an available port.
+        port: Browser preview port; zero selects an available port.
         gpu: Visible GPU index used by the read-only renderer.
         duration: Service seconds after readiness; zero waits for interruption.
         open_browser: Open a browser after native rendering is ready.

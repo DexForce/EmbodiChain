@@ -22,7 +22,6 @@ from contextlib import nullcontext
 from dataclasses import replace
 from functools import wraps
 
-from dataclasses import replace
 from copy import deepcopy
 from types import MappingProxyType
 from typing import Callable, Iterable, Mapping, TYPE_CHECKING
@@ -33,6 +32,7 @@ from .affordance_sampling import AffordanceSamplingContext
 from .bindings import SkillBinding
 from .core import AtomicSkill, SkillDescriptor
 from .control import SkillControlOverrides, ControlPartCommandProfile
+from .continuation import PlanContinuationResult
 from .invocation import SkillInvocation, GoalT, OptionsT, ResolvedSkillRequest
 from .nominal import NominalMotionSource
 from .plans import (
@@ -608,32 +608,7 @@ class AtomicSkillEngine:
                 external_nominal=nominal_source is not None,
             )
             self._validate_plan(result, current, request)
-        if (
-            request.motion_policy.require_final_velocity
-            and request.motion_policy.final_velocity_rejection == "mask_only"
-        ):
-            velocity_mask = self._final_velocity_mask(result)
-            success = result.plan_success & velocity_mask
-            failure = result.diagnostics.failure
-            if failure is None and not success.all():
-                failure = PlanningFailure("final_velocity_limit", retryable=False)
-            result = replace(
-                result,
-                plan_success=success,
-                diagnostics=replace(
-                    result.diagnostics,
-                    failure=failure,
-                    metadata={
-                        **result.diagnostics.metadata,
-                        "final_velocity_qualification": {
-                            "scope": "complete_request_post_recovery_and_transform",
-                            "valid_mask": velocity_mask.detach().cpu().tolist(),
-                            "physical_evidence": False,
-                        },
-                    },
-                ),
-            )
-            self._validate_plan(result, current, request)
+        result = self._qualify_mask_only_velocity(request, current, result)
         failure = result.diagnostics.failure
         if (
             not request.recovery_policy.retry_all_failed_plans
@@ -837,6 +812,10 @@ class AtomicSkillEngine:
     ) -> SkillPlan:
         """Apply one owned caller transform with standard validation."""
         if plan_transform is not None:
+            if plan.continuation is not None:
+                raise ValueError(
+                    "Observed continuation does not support plan transforms."
+                )
             recovery_outcome = plan.planning_recovery_outcome
             if not callable(plan_transform):
                 raise TypeError("plan_transform must be callable or None.")
@@ -858,6 +837,38 @@ class AtomicSkillEngine:
                 plan = replace(plan, planning_recovery_outcome=recovery_outcome)
             self._validate_plan(plan, context, request)
         return plan
+
+    def _qualify_mask_only_velocity(
+        self, request: ResolvedSkillRequest, context: PlanningContext, result: SkillPlan
+    ) -> SkillPlan:
+        """Apply the same mask-only command qualification to every observed chunk."""
+        if (
+            request.motion_policy.require_final_velocity
+            and request.motion_policy.final_velocity_rejection == "mask_only"
+        ):
+            velocity_mask = self._final_velocity_mask(result)
+            success = result.plan_success & velocity_mask
+            failure = result.diagnostics.failure
+            if failure is None and not success.all():
+                failure = PlanningFailure("final_velocity_limit", retryable=False)
+            result = replace(
+                result,
+                plan_success=success,
+                diagnostics=replace(
+                    result.diagnostics,
+                    failure=failure,
+                    metadata={
+                        **result.diagnostics.metadata,
+                        "final_velocity_qualification": {
+                            "scope": "complete_request_post_recovery_and_transform",
+                            "valid_mask": velocity_mask.detach().cpu().tolist(),
+                            "physical_evidence": False,
+                        },
+                    },
+                ),
+            )
+            self._validate_plan(result, context, request)
+        return result
 
     def _final_velocity_mask(self, plan: SkillPlan) -> torch.Tensor:
         """Check actual full-robot samples against unchanged authored/runtime caps."""
@@ -1082,6 +1093,45 @@ class AtomicSkillEngine:
             nominal_source=nominal_source,
         )
 
+    def continue_request(
+        self,
+        request: ResolvedSkillRequest,
+        context: PlanningContext,
+        previous: SkillPlan,
+        active_mask: torch.Tensor,
+    ) -> PlanContinuationResult:
+        """Prepare another bounded observed chunk of the current invocation."""
+        action = self._skills[request.skill_id]
+        current = replace(context, planning_mask=active_mask)
+        decision = action.continue_plan(request, current, previous, active_mask)
+        if not isinstance(decision, PlanContinuationResult):
+            raise TypeError("Expected PlanContinuationResult.")
+        if (
+            decision.accepted.shape != active_mask.shape
+            or decision.accepted.device != active_mask.device
+            or (decision.accepted & ~active_mask).any()
+        ):
+            raise ValueError("Continuation acceptance must be a subset of active rows.")
+        plan = decision.plan
+        if plan is not None:
+            if (plan.plan_success & ~decision.accepted).any():
+                raise ValueError("Continuation cannot reactivate rejected rows.")
+            if (
+                plan.continuation is None
+                or previous.continuation is None
+                or plan.continuation.position <= previous.continuation.position
+                or plan.continuation.limit != previous.continuation.limit
+            ):
+                raise ValueError("Continuation must advance within its original bound.")
+            plan = replace(
+                plan, commands=action._authorize_command_targets(request, plan.commands)
+            )
+            plan = self._qualify_completed_plan(action, request, current, plan, None)
+            plan = self._qualify_mask_only_velocity(request, current, plan)
+            self._validate_plan(plan, current, request)
+            decision = replace(decision, plan=plan)
+        return decision
+
     def initial_context(
         self,
         *,
@@ -1202,6 +1252,10 @@ class AtomicSkillEngine:
                 if preserve_failed_positions
                 else plan.joint_trajectory.hold_rows(step_success, previous_qpos)
             )
+            if plan.continuation is not None:
+                raise ValueError(
+                    "Observed contact paths require an execution session; offline projection cannot supply future evidence."
+                )
             plans.append(plan)
             trajectories.append(trajectory)
 
@@ -1374,6 +1428,10 @@ class AtomicSkillEngine:
         """
         if not isinstance(plan, SkillPlan):
             raise TypeError("plan must be an SkillPlan.")
+        if plan.continuation is not None:
+            raise ValueError(
+                "Observed continuation cannot be rebuilt from external motion."
+            )
         if not isinstance(trajectory, TimedTrajectory):
             raise TypeError("trajectory must be a TimedTrajectory.")
         self._validate_context(context)
@@ -1479,6 +1537,10 @@ class AtomicSkillEngine:
         )
         from ._expansion_phases import FREE_PHASES
 
+        if plan.continuation is not None:
+            raise ValueError(
+                "Observed continuation cannot be rebuilt from external motion."
+            )
         if not isinstance(reference, TrajectoryTemplate) or not isinstance(
             result, MappedRetimeResult
         ):

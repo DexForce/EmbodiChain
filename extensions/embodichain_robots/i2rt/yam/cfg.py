@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
-import numpy as np
 import torch
 from embodichain.data import get_data_path
 from embodichain.lab.sim.cfg import (
@@ -63,26 +62,45 @@ class YamI2rtCfg(RobotCfg):
         return merge_robot_cfg(cfg, init_dict)
 
     def _build_defaults(self, init_dict: dict[str, Any] | None = None) -> None:
+        overrides = init_dict or {}
         self.uid = "yam"
-        self.fpath = (init_dict or {}).get("fpath") or self.fpath
-        urdf_path = self._pk_urdf_path
-        if self.fpath:
-            self.fpath = urdf_path
-        if not Path(urdf_path).is_file():
-            raise FileNotFoundError(
-                f"YAM robot asset not found: {urdf_path}. Run "
-                "`python -m embodichain data download --name YamI2rt`, "
-                "or set the robot's fpath to an already prepared yam_i2rt.urdf."
-            )
-        self.urdf_cfg = URDFCfg(
-            components=[
-                {
-                    "component_type": "arm",
-                    "urdf_path": urdf_path,
-                    "transform": np.eye(4),
-                }
-            ]
-        )
+        self.fpath = overrides.get("fpath") or self.fpath
+        arm_override = None
+        urdf_override = overrides.get("urdf_cfg")
+        if not self.fpath and isinstance(urdf_override, dict):
+            components = urdf_override.get("components")
+            if isinstance(components, dict):
+                arm = components.get("arm")
+            elif isinstance(components, list):
+                arm = next(
+                    (
+                        component
+                        for component in components
+                        if isinstance(component, dict)
+                        and component.get("component_type") == "arm"
+                        and component.get("urdf_path")
+                    ),
+                    None,
+                )
+            else:
+                arm = None
+            if isinstance(arm, dict):
+                arm_override = arm.get("urdf_path")
+        if arm_override:
+            # Seed the arm as the first component. The shared merge applies
+            # the caller's transform and other component metadata afterward.
+            urdf_path = arm_override
+        else:
+            urdf_path = self._pk_urdf_path
+            if self.fpath:
+                self.fpath = urdf_path
+            if not Path(urdf_path).is_file():
+                raise FileNotFoundError(
+                    f"YAM robot asset not found: {urdf_path}. Run "
+                    "`python -m embodichain data download --name YamI2rt`, "
+                    "or set the robot's fpath to an already prepared yam_i2rt.urdf."
+                )
+        self.urdf_cfg = URDFCfg().add_component("arm", urdf_path)
         self.init_pos = (0.2525, 0, 0.75)
         self.asset_physics_mode = "overlay"
         self.control_parts = {

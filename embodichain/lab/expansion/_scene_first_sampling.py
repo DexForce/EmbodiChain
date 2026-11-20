@@ -39,6 +39,16 @@ from embodichain.lab.sim.scene.expansion.conditions import _LayoutConditionDomai
 __all__: list[str] = []
 
 
+def _layout_collision_bodies(env):
+    from embodichain.lab.task_program.integrations.simulation.feasibility_geometry import (
+        _physical_collision_bodies,
+    )
+
+    mesh_parts = {}
+    bodies = _physical_collision_bodies(env, env_id=0, layout_mesh_parts=mesh_parts)
+    return bodies, mesh_parts
+
+
 class _LayoutPoseSource(_AdaptivePoseSource):
     """Generate or certify complete layouts before checking task branches.
 
@@ -141,18 +151,15 @@ class _LayoutPoseSource(_AdaptivePoseSource):
             )
             self._workspace_seconds = time.perf_counter() - started
 
-        from embodichain.lab.task_program.integrations.simulation.feasibility_geometry import (
-            collision_bodies_from_simulation,
-        )
         from .acceptance import _GeometryRow
         from embodichain.lab.sim.scene.feasibility import NewtonCollisionChecker
 
-        bodies = collision_bodies_from_simulation(env)
+        bodies, self._layout_mesh_parts = _layout_collision_bodies(env)
         known = {b.frame_uid for b in bodies}
         ignored, _ = _GeometryRow.contact_permissions(env, options["validation"], known)
         try:
             self._collision = NewtonCollisionChecker(
-                bodies, ignored_pairs=ignored, device="cpu", max_shapes=512
+                bodies, ignored_pairs=ignored, device="cpu"
             )
             self._check_clock(env.sim, before)
         except BaseException:
@@ -381,6 +388,8 @@ class _LayoutPoseSource(_AdaptivePoseSource):
                 dict(
                     phase_checks=self._task_checks,
                     layout_source=self._prepared_layout.source.fingerprint,
+                    mesh_convex_parts=self._layout_mesh_parts,
+                    rigid_mesh_box_proxies=[],  # Retained for existing report readers.
                     conditions=self._conditions.to_dict(),
                     workspace_prior=[pool.metrics() for pool in self._anchor_pools],
                     workspace_anchor_checks=self._anchor_checks,

@@ -17,6 +17,7 @@
 """Declarative scene/motion jobs composed through the native workload engine."""
 
 from __future__ import annotations
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import replace
@@ -34,6 +35,7 @@ from ._task_program_config import load_task_program_expansion, load_expansion_vi
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.scene.feasibility import JointSceneCandidate
+    from .program import ProgramBatchResult
 
 __all__ = [
     "load_task_program_expansion",
@@ -58,28 +60,130 @@ def _load_deployment(path: Path) -> None:
 from ._pose_sampling import _BoundedPoseSource, _AdaptivePoseSource
 
 
+def _accepted_local_poses(
+    records: Sequence[Mapping[str, Any]],
+) -> dict[str, list[float]]:
+    """Express each recorded grasp in its own measured reference frame."""
+    import numpy as np
+
+    poses = {}
+    for record in records:
+        for sample in record.get("samples", {}).values():
+            if (
+                sample.get("pose_frame") == "world"
+                and sample.get("success") == [True]
+                and sample.get("reference_poses") is not None
+                and sample.get("selected_poses") is not None
+                and sample.get("key")
+            ):
+                local = np.linalg.solve(
+                    sample["reference_poses"][0], sample["selected_poses"][0]
+                )
+                poses[sample["key"]] = local.reshape(16).tolist()
+    return poses
+
+
+class _AffordanceBranchSchedule:
+    """Select non-nominal branches using measured outcomes from one workload."""
+
+    def __init__(self, count: int, exploration_fraction: float) -> None:
+        self.count = count - 1  # Branch zero is the nominal grasp.
+        self.exploration_fraction = exploration_fraction
+        self.assignments: dict[int, int] = {}
+        self.allocations: Counter[int] = Counter()
+        self.successes: Counter[int] = Counter()
+        self.failures: Counter[int] = Counter()
+        self.verified_segments: Counter[int] = Counter()
+        self.finished: set[int] = set()
+        self.exemplars: dict[int, dict] = {}
+        self.preferences: dict[int, dict] = {}
+
+    def select(self, ordinal: int) -> int:
+        """Freeze one choice per recipe, including concurrently admitted rows."""
+        if ordinal in self.assignments:
+            return self.assignments[ordinal]
+        if len(self.allocations) < self.count:
+            branch = len(self.allocations) + 1
+        else:
+            n = len(self.assignments) - self.count
+            explore = int((n + 1) * self.exploration_fraction) > int(
+                n * self.exploration_fraction
+            )
+
+            compare_progress = not self.successes and len(self.failures) == self.count
+
+            def priority(branch: int) -> tuple[int, float, int, int]:
+                wins = self.successes[branch]
+                # Beta(1, 1) prior. Only observed physical outcomes change it.
+                rate = (1 + wins) / (2 + wins + self.failures[branch])
+                return (
+                    (
+                        self.verified_segments[branch]
+                        if compare_progress and not explore
+                        else 0
+                    ),
+                    rate if self.failures and not explore else 0.0,
+                    -self.allocations[branch],
+                    -branch,
+                )
+
+            branch = max(self.allocations, key=priority)
+            if not explore and self.failures and branch in self.exemplars:
+                self.preferences[ordinal] = self.exemplars[branch]
+        self.assignments[ordinal] = branch
+        self.allocations[branch] += 1
+        return branch
+
+    def observe(self, ordinal: int, accepted: bool, result: ProgramBatchResult) -> None:
+        """Credit an applied branch once, independently of dataset admission."""
+        if ordinal not in self.finished:
+            branch = self.assignments[ordinal]
+            counts = self.successes if accepted else self.failures
+            counts[branch] += 1
+            verified_segments = sum(
+                segment.get("success") is True for segment in result.segments[0]
+            )
+            self.verified_segments[branch] = max(
+                self.verified_segments[branch], verified_segments
+            )
+            if accepted:
+                poses = _accepted_local_poses(result.expansion_records[0])
+                if poses:
+                    self.exemplars[branch] = {"ordinal": ordinal, "local_poses": poses}
+            self.finished.add(ordinal)
+
+
 def _task_expansion_extensions(*, options, operator, seed, report):
     """Declare task proposals; upstream owns collection and persistence."""
     from .host_extensions import GymExpansionHostExtensions
 
     pose_source = None
+    affordance = options["trajectory"].get("affordance", {})
+    branches = None
+    if (
+        operator == "affordance"
+        and affordance.get("branch_selection") == "outcome_guided"
+    ):
+        branches = _AffordanceBranchSchedule(
+            affordance["branches"],
+            options.get("scheduling", {}).get("exploration_fraction", 0.25),
+        )
 
     def source(env):
         nonlocal pose_source
         from ._scene_first_sampling import _LayoutPoseSource
 
-        source_type = (
-            _LayoutPoseSource
-            if "layout" in options.get("scene_sampling", {})
-            else _AdaptivePoseSource
-        )
-        pose_source = (
-            source_type(env, options, seed=seed, revision=report["semantic_id"])
-            if "scene_sampling" in options
-            else _BoundedPoseSource(
-                env, options["scene"], seed=seed, revision=report["semantic_id"]
+        revision = report["semantic_id"]
+        if "layout" in options.get("scene_sampling", {}):
+            pose_source = _LayoutPoseSource(env, options, seed=seed, revision=revision)
+        elif "scene_sampling" in options:
+            pose_source = _AdaptivePoseSource(
+                env, options, seed=seed, revision=revision
             )
-        )
+        else:
+            pose_source = _BoundedPoseSource(
+                env, options["scene"], seed=seed, revision=revision
+            )
         return pose_source
 
     def feedback(env, source, path):
@@ -93,6 +197,14 @@ def _task_expansion_extensions(*, options, operator, seed, report):
             payload = json.loads(operation.payload_json)
             if operation.name == "motion":
                 payload.update(operator=operator, options=options["trajectory"])
+                if branches is not None:
+                    payload["affordance_branch"] = branches.select(
+                        recipe.context.ordinal
+                    )
+                    if (
+                        prior := branches.preferences.get(recipe.context.ordinal)
+                    ) is not None:
+                        payload["accepted_grasps"] = prior
             elif operation.name == "joint_scene":
                 candidate = pose_source.candidate(recipe.context.ordinal)
                 payload["pose_changes"] = {
@@ -107,6 +219,10 @@ def _task_expansion_extensions(*, options, operator, seed, report):
             TaskProgramSameGridExpansionFactory,
         )
 
+        payload = {}
+        if branches is not None:
+            motion = next(op for op in row.recipe.operations if op.name == "motion")
+            payload = json.loads(motion.payload_json)
         return TaskProgramSameGridExpansionFactory.from_native_plan(
             operator,
             options["trajectory"],
@@ -115,6 +231,13 @@ def _task_expansion_extensions(*, options, operator, seed, report):
             revision=report["recipe_revision"],
             output=row.directory / "plans",
             episode_id=row.ordinal,
+            affordance_branch=payload.get("affordance_branch"),
+            preferred_local_poses=tuple(
+                (key, tuple(pose))
+                for key, pose in payload.get("accepted_grasps", {})
+                .get("local_poses", {})
+                .items()
+            ),
         )
 
     return GymExpansionHostExtensions(
@@ -123,6 +246,7 @@ def _task_expansion_extensions(*, options, operator, seed, report):
         recipe_transform=recipe_transform,
         plan_transform_factory=plans,
         require_plan_transform=operator != "object_pose",
+        plan_outcome=None if branches is None else branches.observe,
     )
 
 
