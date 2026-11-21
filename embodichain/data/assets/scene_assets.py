@@ -35,6 +35,12 @@ __all__ = [
     "RoboSplatterOfficeGS",
     "DiscoverseLab3GS",
     "RoboSimGSTabletopGS",
+    "PolarisDroidBlockStackKitchen",
+    "PolarisDroidFoodBussing",
+    "PolarisDroidMoveLatteCup",
+    "PolarisDroidOrganizeTools",
+    "PolarisDroidPanClean",
+    "PolarisDroidTapeIntoContainer",
 ]
 
 scene_assets = "scene_assets"
@@ -44,27 +50,29 @@ scene_assets = "scene_assets"
 _GAUSSIAN_REVISION = "3ec5b1fb7d320599c54f07bc20d4c49d570a2e2b"
 
 
-class _GaussianBackground(EmbodiChainDataset):
-    """Shared locked transport for versioned visual-only Gaussian packages."""
+class _VersionedScene(EmbodiChainDataset):
+    """Shared locked transport for versioned scene packages."""
 
+    revision: ClassVar[str] = _GAUSSIAN_REVISION
+    directory: ClassVar[str] = "scene_assets/gaussian_backgrounds_v1/"
     cache_prefix: ClassVar[str]
     archive_file: ClassVar[str]
     archive_md5: ClassVar[str]
 
     def __init__(self, data_root: str | None = None) -> None:
-        """Download a complete USD-entry package under a version-specific cache.
+        """Download and extract the scene under a version-specific cache prefix.
 
         Args:
             data_root: Optional cache root overriding the EmbodiChain default.
         """
-        relative = "scene_assets/gaussian_backgrounds_v1/" + self.archive_file
+        relative = self.directory + self.archive_file
         prefix = EMBODICHAIN_DOWNLOAD_PREFIX.replace(
-            "/resolve/main/", f"/resolve/{_GAUSSIAN_REVISION}/", 1
+            "/resolve/main/", f"/resolve/{self.revision}/", 1
         )
         urls = [prefix + relative]
         official = (
             "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/"
-            + _GAUSSIAN_REVISION
+            + self.revision
             + "/"
             + relative
         )
@@ -75,7 +83,7 @@ class _GaussianBackground(EmbodiChainDataset):
         super().__init__(self.cache_prefix, descriptor, root)
 
 
-class RoboSplatterOfficeGS(_GaussianBackground):
+class RoboSplatterOfficeGS(_VersionedScene):
     """RoboSplatter office scan with a metre/Z-up USD and AssetRevision entry.
 
     Resolve ``RoboSplatterOfficeGS/asset.usda`` through ``get_data_path``.
@@ -88,7 +96,7 @@ class RoboSplatterOfficeGS(_GaussianBackground):
     archive_md5 = "c36ff7550a47677479f22a21a8ee3c40"
 
 
-class DiscoverseLab3GS(_GaussianBackground):
+class DiscoverseLab3GS(_VersionedScene):
     """DISCOVERSE lab3 with preserved source and decoded Gaussian PLY bytes.
 
     Resolve ``DiscoverseLab3GS/asset.usda`` through ``get_data_path``.
@@ -102,7 +110,7 @@ class DiscoverseLab3GS(_GaussianBackground):
     archive_md5 = "ec9f17d4610e0dd5347ddb4815c531ad"
 
 
-class RoboSimGSTabletopGS(_GaussianBackground):
+class RoboSimGSTabletopGS(_VersionedScene):
     """RoboSimGS single-view tabletop with a visual-only USD/AssetRevision entry.
 
     Resolve ``RoboSimGSTabletopGS/asset.usda`` through ``get_data_path``.
@@ -113,6 +121,85 @@ class RoboSimGSTabletopGS(_GaussianBackground):
     cache_prefix = "RoboSimGSTabletopGSV1"
     archive_file = "robosimgs_tabletop_v1.zip"
     archive_md5 = "b6fc69397d64ccff611bff5712931b1a"
+
+
+class _PolarisScene(_VersionedScene):
+    """Original PolaRiS capture and textured object geometry, distributed under MIT."""
+
+    revision = "3ea9841c1bdccb999f3f7cd447937aed1579df13"
+    directory = "scene_assets/polaris_droid_v1/"
+
+
+class PolarisDroidBlockStackKitchen(_PolarisScene):
+    """PolaRiS DROID capture containing the green tray and two stacking cubes.
+
+    Resolve ``PolarisDroidBlockStackKitchen/background.ply`` for the visual background.
+    The archive also contains textured object meshes and canonical initial conditions.
+    """
+
+    cache_prefix = "PolarisDroidBlockStackKitchenV1"
+    archive_file = "PolarisDroidBlockStackKitchen.zip"
+    archive_md5 = "3f468cb5895e6f9deaaab36d429b69eb"
+
+
+class PolarisDroidFoodBussing(_PolarisScene):
+    """PolaRiS DROID capture containing the ice cream, grapes and yellow bowl.
+
+    Resolve ``PolarisDroidFoodBussing/background.ply`` for the visual background.
+    The archive also contains textured object meshes and canonical initial conditions.
+    """
+
+    cache_prefix = "PolarisDroidFoodBussingV1"
+    archive_file = "PolarisDroidFoodBussing.zip"
+    archive_md5 = "d1b312de8f9b4c3bdadfa951a2bcf9ed"
+
+
+class PolarisDroidMoveLatteCup(_PolarisScene):
+    """PolaRiS DROID capture containing the latte art cup and cutting board.
+
+    Resolve ``PolarisDroidMoveLatteCup/background.ply`` for the visual background.
+    The archive also contains textured object meshes and canonical initial conditions.
+    """
+
+    cache_prefix = "PolarisDroidMoveLatteCupV1"
+    archive_file = "PolarisDroidMoveLatteCup.zip"
+    archive_md5 = "b12b8011da35701fd24184d73e951fed"
+
+
+class PolarisDroidOrganizeTools(_PolarisScene):
+    """PolaRiS DROID capture containing the scissors and large container.
+
+    Resolve ``PolarisDroidOrganizeTools/background.ply`` for the visual background.
+    The archive also contains textured object meshes and canonical initial conditions.
+    """
+
+    cache_prefix = "PolarisDroidOrganizeToolsV1"
+    archive_file = "PolarisDroidOrganizeTools.zip"
+    archive_md5 = "789c988addab94b65e56255c48e2a634"
+
+
+class PolarisDroidPanClean(_PolarisScene):
+    """PolaRiS DROID capture containing the sponge and frying pan.
+
+    Resolve ``PolarisDroidPanClean/background.ply`` for the visual background.
+    The archive also contains textured object meshes and canonical initial conditions.
+    """
+
+    cache_prefix = "PolarisDroidPanCleanV1"
+    archive_file = "PolarisDroidPanClean.zip"
+    archive_md5 = "639d2428e9508cb8f1efe0bf81172aac"
+
+
+class PolarisDroidTapeIntoContainer(_PolarisScene):
+    """PolaRiS DROID capture containing the tape and target container.
+
+    Resolve ``PolarisDroidTapeIntoContainer/background.ply`` for the visual background.
+    The archive also contains textured object meshes and canonical initial conditions.
+    """
+
+    cache_prefix = "PolarisDroidTapeIntoContainerV1"
+    archive_file = "PolarisDroidTapeIntoContainer.zip"
+    archive_md5 = "1b3abd5d1926db3dcd74bd8538d0875c"
 
 
 class SceneData(EmbodiChainDataset):

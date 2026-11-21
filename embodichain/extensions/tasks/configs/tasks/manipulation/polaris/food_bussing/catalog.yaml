@@ -1,0 +1,11 @@
+task_key: polaris_food_bussing
+title: PolaRiS Food Bussing
+summary: Put all the foods in the bowl
+tags:
+- polaris
+- real2sim
+- policy_evaluation
+default_deployment: droid
+deployments:
+  droid:
+    config: task.droid.yaml

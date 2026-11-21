@@ -1,0 +1,7 @@
+id: PolarisDroidOrganizeTools-v1
+headless: true
+enable_sensor: true
+environment:
+  component: env.yaml
+embodiment:
+  component: ../../../../components/embodiments/polaris_droid.yaml
