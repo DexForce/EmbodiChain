@@ -20,17 +20,70 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import numpy as np
 import pytest
 import torch
 
-from embodichain.extensions.tasks.manipulation.cable.franka_rope_wrap import load_config
-from embodichain.extensions.tasks.manipulation.cable.wrap_evaluation import attach_wrap_monitor
+from embodichain.extensions.tasks.manipulation.cable.franka_rope_wrap import (
+    load_config,
+    settle_franka_rope,
+)
+from embodichain.extensions.tasks.manipulation.cable.wrap_evaluation import (
+    attach_wrap_monitor,
+)
+from embodichain.extensions.tasks.manipulation.cable.wrap_integration import (
+    _CableWrapPhaseLowerer,
+)
 from embodichain.extensions.tasks.manipulation.cable.wrap_measurements import evaluate_wrap
+from embodichain.extensions.tasks.manipulation.cable.wrap_motion import _JOINT_NAMES
 
 pytestmark = pytest.mark.no_sim
+
+
+def test_pre_roll_sets_the_robot_at_rest_after_settling_the_rope(tmp_path) -> None:
+    config = load_config()
+    config["pre_roll_s"] = 2 / (config["control_hz"] * config["substeps"])
+    scenario = tmp_path / "config.json"
+    scenario.write_text(json.dumps(config))
+    env = Mock(num_envs=1, device="cpu")
+    env.robot.joint_names = _JOINT_NAMES
+
+    settle_franka_rope(env, None, str(scenario))
+
+    assert [item[0] for item in env.mock_calls] == [
+        "robot.set_qpos",
+        "sim.update",
+        "sim.update",
+        "robot.set_state",
+    ]
+    assert env.sim.update.call_args_list == [call(step=1, render_final_step=False)] * 2
+    home = torch.tensor([[*config["home_qpos"], *([config["open_half_gap_m"]] * 2)]])
+    state = env.robot.set_state.call_args.kwargs
+    assert set(state) == {"qpos", "qvel", "target_qpos", "target_qvel"}
+    torch.testing.assert_close(state["qpos"], home, rtol=0, atol=0)
+    torch.testing.assert_close(state["target_qpos"], home, rtol=0, atol=0)
+    torch.testing.assert_close(state["qvel"], torch.zeros_like(home), rtol=0, atol=0)
+    torch.testing.assert_close(state["target_qvel"], state["qvel"], rtol=0, atol=0)
+
+
+def test_pickup_handoff_keeps_the_authored_start_of_the_orbit() -> None:
+    nominal = torch.linspace(0, 0.25, 181)[None, :, None].expand(-1, -1, 9)
+    loaded = torch.full((1, 9), 0.125)
+    monitor = SimpleNamespace(
+        rows=[None] * 391,
+        robot=Mock(**{"get_qpos.return_value": loaded}),
+    )
+    lowerer = _CableWrapPhaseLowerer(monitor, 60)
+    context = SimpleNamespace(env_ids=torch.tensor([0]))
+
+    joined = lowerer._join_pickup(nominal, 420, context)
+
+    assert joined.shape == (1, 211, 9)
+    torch.testing.assert_close(joined[:, :31], loaded[:, None].expand(-1, 31, -1))
+    torch.testing.assert_close(joined[:, -1], nominal[:, -1], rtol=0, atol=0)
+    monitor.robot.get_qpos.assert_called_once_with(target=True)
 
 
 def test_scaled_pickup_and_final_hold_are_evaluated_at_their_measured_times(tmp_path):

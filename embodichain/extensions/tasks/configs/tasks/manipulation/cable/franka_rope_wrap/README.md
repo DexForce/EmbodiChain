@@ -29,8 +29,10 @@ rope follows the resulting forces throughout the episode.
 
 ## Acceptance
 
-The [program](task_program/program.yaml) runs ten phases from home through the
-final two-second hold. Its default 36-second control sequence uses 2,160 steps
+The [program](task_program/program.yaml) uses `simulation.cable_pickup` to
+approach, grip and lift the live cable. The other six stages use `MoveJoints` to
+go from home through the wrap and the final two-second hold. The default
+36-second control sequence uses 2,160 steps
 at 60 Hz. The [evaluation graph](task_program/evaluation.yaml) requires all 19
 checks to pass, including floor pickup, grip retention, material slip, bilateral
 contact, measured winding, contact arc, clearance, anchor stability and the

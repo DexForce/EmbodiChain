@@ -20,7 +20,8 @@ Record one successful episode first with EmbodiChain's standard run-task
 entrypoint and task.franka.yaml. Pass the resulting .pt file and the
 FrankaRopePads/Panda/Fr3RopePadsV1.urdf asset with its adjacent meshes.
 
-The replay initializes from the authored scene and performs a fresh pre-roll.
+The replay initializes from the authored scene and performs a fresh pre-roll,
+then restores the robot home joints while retaining the settled cable state.
 Each control interval uses the recorded position and velocity targets exactly
 once. The output archives the native command readbacks and newly simulated
 states, plus input hashes and a geometry summary. The geometry summary does
@@ -241,6 +242,27 @@ def _initialize_rest_poses(builder: newton.ModelBuilder) -> None:
         ]
 
 
+def _restore_robot_home(
+    model: newton.Model, state: newton.State, joint_ids: list[int], home: np.ndarray
+) -> None:
+    """Update the live robot state after pre-roll without touching the cable."""
+    articulation_ids = np.unique(model.joint_articulation.numpy()[joint_ids])
+    if np.any(articulation_ids < 0):
+        raise RuntimeError("Expected the Franka joints to belong to an articulation.")
+    q, qd = state.joint_q.numpy(), state.joint_qd.numpy()
+    q[model.joint_q_start.numpy()[joint_ids]] = home
+    qd[model.joint_qd_start.numpy()[joint_ids]] = 0
+    state.joint_q.assign(q)
+    state.joint_qd.assign(qd)
+    newton.eval_fk(
+        model,
+        state.joint_q,
+        state.joint_qd,
+        state,
+        indices=wp.array(articulation_ids, dtype=wp.int32, device=model.device),
+    )
+
+
 @wp.kernel
 def _compensate_gravity(
     ids: wp.array(dtype=wp.int32),
@@ -297,6 +319,7 @@ def _replay(
     write_command(home, np.zeros_like(home))
     for _ in range(pre_roll_steps):
         sim.step(render=False)
+    _restore_robot_home(model, manager.get_state(), joints, home)
     capture(0)
     for index, (q, qd) in enumerate(zip(positions, velocities, strict=True)):
         write_command(q, qd)
@@ -423,7 +446,6 @@ def _main() -> None:
         args.recording,
         control_hz=config["control_hz"],
         substeps=config["substeps"],
-        expected_steps=round(config["duration_s"] * config["control_hz"]),
     )
     urdf = ElementTree.parse(args.robot_urdf)
     for finger in ("fr3_leftfinger", "fr3_rightfinger"):

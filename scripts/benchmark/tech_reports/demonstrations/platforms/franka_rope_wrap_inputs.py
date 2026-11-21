@@ -27,7 +27,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 import yaml
 
-_CONFIGS = Path(__file__).resolve().parents[5] / "extensions/embodichain_tasks/configs"
+_CONFIGS = Path(__file__).resolve().parents[5] / "embodichain/extensions/tasks/configs"
 _TASK = _CONFIGS / "tasks/manipulation/cable/franka_rope_wrap"
 TASK_CONFIG = _TASK / "task.franka.yaml"
 JOINT_NAMES = (
@@ -35,6 +35,10 @@ JOINT_NAMES = (
     "fr3_finger_joint1",
     "fr3_finger_joint2",
 )
+_WRAP_SKILLS = {
+    "simulation.cable_pickup": "pick_up",
+    "simulation.cable_wrap_phase": "move_joints",
+}
 
 
 def _scene_paths() -> tuple[Path, Path, Path]:
@@ -65,6 +69,8 @@ def file_info(path: Path) -> dict[str, str]:
 
 def input_metadata(recording: Path, robot_urdf: Path) -> dict[str, dict[str, str]]:
     config_path, env_path, robot_path = _scene_paths()
+    deployment = yaml.safe_load(TASK_CONFIG.read_text())
+    program = deployment["task_program"]
     return {
         name: file_info(path)
         for name, path in {
@@ -75,12 +81,16 @@ def input_metadata(recording: Path, robot_urdf: Path) -> dict[str, dict[str, str
             "environment": env_path,
             "embodiment": robot_path,
             "deployment": TASK_CONFIG,
+            "program": _TASK / program["program"],
+            "integration": _TASK / program["integration"],
+            "execution_policy": _TASK / program["execution_policy"],
+            "evaluation": _TASK / deployment["evaluation"]["component"],
         }.items()
     }
 
 
 def load_commands(
-    path: Path, *, control_hz: int, substeps: int, expected_steps: int
+    path: Path, *, control_hz: int, substeps: int
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     """Read the position and velocity targets of a completed Franka wrap recording."""
     import torch
@@ -92,6 +102,7 @@ def load_commands(
     with torch.serialization.safe_globals([TensorDict, _make_td]):
         recording = torch.load(path, map_location="cpu", weights_only=True, mmap=True)
     meta = recording["meta"]
+    steps = meta.get("num_steps")
     if (
         meta.get("artifact_purpose") != "recording"
         or meta.get("action_kind") != "expert"
@@ -101,8 +112,9 @@ def load_commands(
         or meta.get("robot_dof") != 9
         or meta.get("initial_state_step") != 0
         or meta.get("num_envs") != 1
-        or meta.get("num_steps") != expected_steps
-        or meta.get("lengths") != [expected_steps]
+        or type(steps) is not int
+        or steps < 2 * control_hz
+        or meta.get("lengths") != [steps]
         or meta.get("qpos_slice") != [0, 9]
         or meta.get("qvel_slice") != [9, 18]
     ):
@@ -131,7 +143,7 @@ def load_commands(
     order = [joint_names.index(name) for name in JOINT_NAMES]
     actions = recording["actions"]
     if (
-        actions.shape != (1, expected_steps, 18)
+        actions.shape != (1, steps, 18)
         or actions.dtype != torch.float32
         or not torch.isfinite(actions).all().item()
     ):
@@ -145,7 +157,7 @@ def load_commands(
         episode.get("instruction_source") != "task_program"
         or episode.get("completed") is not True
         or episode.get("success") is not True
-        or episode.get("length") != expected_steps
+        or episode.get("length") != steps
     ):
         raise ValueError(
             "Expected a completed and accepted Task Program source episode."
@@ -157,29 +169,38 @@ def load_commands(
         details = segment["metadata"]
         calls = details["runtime"]["calls"]
         end = segment["end_step"]
+        semantic_id = calls[0].get("semantic_id") if len(calls) == 1 else None
+        skill_id = _WRAP_SKILLS.get(semantic_id)
         if (
             details.get("task_program_id") != "franka_rope_wrap"
-            or len(calls) != 1
-            or calls[0].get("semantic_id") != "simulation.cable_wrap_phase"
-            or calls[0].get("skill_id") != "move_joints"
+            or skill_id is None
+            or calls[0].get("skill_id") != skill_id
             or calls[0].get("command_count") != end - start
             or segment.get("start_step") != start
-            or not start < end <= expected_steps
+            or not start < end <= steps
         ):
             raise ValueError(
-                "Recording does not contain a continuous MoveJoints wrap program."
+                "Recording does not contain continuous supported Franka wrap commands."
             )
-        phases.append({"name": segment["name"], "start_step": start, "end_step": end})
+        phases.append(
+            {
+                "name": segment["name"],
+                "semantic_id": semantic_id,
+                "skill_id": skill_id,
+                "start_step": start,
+                "end_step": end,
+            }
+        )
         start = end
-    if start != expected_steps or len(phases) != 10:
-        raise ValueError("Expected all ten wrap phases to cover the entire recording.")
+    if start != steps or phases[-1]["name"] != "hold_closed":
+        raise ValueError("Expected continuous wrap phases ending in a closed grasp.")
 
     targets = actions[0].numpy()
     provenance = {
         "episode_uuid": episode["episode_uuid"],
         "program_hash": meta["program_hash"],
+        "seed": episode.get("seed"),
         "task_program_id": "franka_rope_wrap",
-        "skill_id": "move_joints",
         "joint_names": list(JOINT_NAMES),
         "recorded_joint_names": list(joint_names),
         "phases": phases,

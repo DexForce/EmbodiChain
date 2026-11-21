@@ -10,38 +10,15 @@ program:
       call_id: simulation.cable_wrap_phase
       arguments:
         phase: home
-- segment: approach
+- segment: pickup
+  instruction: Locate the rope's free end, grasp it and lift it from the floor.
   steps:
   - kind: invoke
     call:
       kind: registered
-      call_id: simulation.cable_wrap_phase
+      call_id: simulation.cable_pickup
       arguments:
-        phase: approach
-- segment: descend
-  steps:
-  - kind: invoke
-    call:
-      kind: registered
-      call_id: simulation.cable_wrap_phase
-      arguments:
-        phase: descend
-- segment: close
-  steps:
-  - kind: invoke
-    call:
-      kind: registered
-      call_id: simulation.cable_wrap_phase
-      arguments:
-        phase: close
-- segment: lift
-  steps:
-  - kind: invoke
-    call:
-      kind: registered
-      call_id: simulation.cable_wrap_phase
-      arguments:
-        phase: lift
+        target: pick_free_end
 - segment: approach_post
   steps:
   - kind: invoke
