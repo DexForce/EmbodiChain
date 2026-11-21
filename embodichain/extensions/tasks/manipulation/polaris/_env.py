@@ -19,14 +19,13 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import ClassVar
 
 import torch
 
 from embodichain.data import get_data_path
-from embodichain.lab.gym.envs import DemoSegment, EmbodiedEnv, EmbodiedEnvCfg
+from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.utils.math import matrix_from_quat
 
 # Object, target, minimum height of the object's collision geometry above the table.
@@ -102,16 +101,6 @@ class PolarisDroidEnv(EmbodiedEnv):
     scene: ClassVar[str]
     _gripper_link = "robotiq_arg2f_base_link"
 
-    def __init__(
-        self,
-        cfg: EmbodiedEnvCfg | None = None,
-        *,
-        expert_initial_condition: int | None = None,
-        **kwargs: Any,
-    ) -> None:
-        self._default_initial_condition = expert_initial_condition
-        super().__init__(cfg=cfg, **kwargs)
-
     def _initialize_physical_objective(self) -> None:
         super()._initialize_physical_objective()
         scene = self.scene
@@ -159,7 +148,9 @@ class PolarisDroidEnv(EmbodiedEnv):
 
     def _initialize_episode(self, env_ids, **kwargs):
         super()._initialize_episode(env_ids, **kwargs)
-        index = kwargs.get("initial_condition", self._default_initial_condition)
+        index = kwargs.get(
+            "initial_condition", 0 if self.cfg.task_program is not None else None
+        )
         if index is not None and (
             type(index) is not int or not 0 <= index < self._pose_count
         ):
@@ -205,7 +196,7 @@ class PolarisDroidEnv(EmbodiedEnv):
 
     def compute_task_state(self, **kwargs):
         reached = self.rubric.reached
-        success = reached.all(dim=1)
+        success = self.is_task_success(**kwargs)
         return (
             success,
             torch.zeros_like(success),
@@ -213,12 +204,7 @@ class PolarisDroidEnv(EmbodiedEnv):
         )
 
     def is_task_success(self, **kwargs) -> torch.Tensor:
-        return self.rubric.reached.all(dim=1)
-
-    def create_demo_segments(self, **kwargs: Any) -> Iterator[DemoSegment]:
-        """Yield calibrated contact-based pick-and-place actions for this scene."""
-        from embodichain.extensions.tasks.manipulation.polaris._expert import (
-            DroidExpert,
-        )
-
-        return DroidExpert(self).segments()
+        measured = self.rubric.reached.all(dim=1)
+        if self.cfg.task_program is not None:
+            return measured & super().is_task_success(**kwargs)
+        return measured

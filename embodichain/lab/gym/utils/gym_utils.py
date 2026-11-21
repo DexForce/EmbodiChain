@@ -685,8 +685,9 @@ def config_to_cfg(
     Every resolved environment explicitly owns one ``physics`` backend and an
     optional ``physics_config`` mapping whose fields must belong to that backend.
     The existing
-    :class:`~embodichain.lab.gym.envs.EmbodiedEnv` class is registered under
-    the config's ``id`` with the decoded integration factory.
+    :class:`~embodichain.lab.gym.envs.EmbodiedEnv` class, or the registered
+    physical class named by ``task_program_host``, is registered under the
+    expert config's ``id`` with the decoded integration factory.
     Re-loading an identical declaration is idempotent; an ID collision with a
     different declaration fails closed.
 
@@ -862,6 +863,25 @@ def config_to_cfg(
         if key not in config:
             log_error(f"Missing required config key: {key}")
 
+    host = None
+    if "task_program_host" in config:
+        if "task_program" not in config or "rl_task" in config:
+            raise ValueError(
+                "task_program_host requires an expert Task Program deployment."
+            )
+        from embodichain.lab.gym.envs import EmbodiedEnv
+        from embodichain.lab.gym.utils.registration import get_env_spec
+
+        host = get_env_spec(config["task_program_host"])
+        if (
+            host.uid == config["id"]
+            or not issubclass(host.cls, EmbodiedEnv)
+            or host.task_program_adapter_factory is not None
+        ):
+            raise ValueError(
+                f"task_program_host {host.uid!r} must name a separate physical "
+                "EmbodiedEnv registration without a Task Program adapter."
+            )
     configured_task_program_integration = None
     configured_task_program_selection = None
     configured_task_program_id: str | None = None
@@ -1557,6 +1577,7 @@ def config_to_cfg(
             config["id"],
             configured_task_program_integration,
             max_episode_steps=env_cfg.max_episode_steps,
+            host=host,
         )
 
     return env_cfg

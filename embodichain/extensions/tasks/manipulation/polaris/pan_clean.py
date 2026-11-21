@@ -25,12 +25,6 @@ __all__ = ["PolarisDroidPanCleanEnv"]
 
 
 @register_env(
-    "PolarisDroidPanCleanExpert-v1",
-    max_episode_steps=450,
-    supports_handwritten_demo=True,
-    expert_initial_condition=0,
-)
-@register_env(
     "PolarisDroidPanClean-v1", max_episode_steps=450, supports_handwritten_demo=False
 )
 class PolarisDroidPanCleanEnv(PolarisDroidEnv):

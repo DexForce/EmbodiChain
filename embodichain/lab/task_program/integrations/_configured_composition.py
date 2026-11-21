@@ -87,7 +87,9 @@ _EXECUTION_POLICY_OVERRIDE_FIELDS = {
             "ik_seed_mode",
         }
     ),
-    "recovery": frozenset({"skill_timeout", "goal_rotation_threshold"}),
+    "recovery": frozenset(
+        {"skill_timeout", "goal_rotation_threshold", "goal_translation_threshold"}
+    ),
 }
 
 

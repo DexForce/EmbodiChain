@@ -5,7 +5,7 @@ The six catalog entries run independently. Each pairs a real captured Gaussian b
 | Catalog key | Object and goal |
 |---|---|
 | [polaris_move_latte_cup](move_latte_cup/README.md) | Place the latte cup on the cutting board. |
-| [polaris_block_stack_kitchen](block_stack_kitchen/README.md) | Place both cubes in the green tray, then stack the green cube over the wood cube. |
+| [polaris_block_stack_kitchen](block_stack_kitchen/README.md) | Place the wood cube in the green tray, then place the green cube on it. |
 | [polaris_food_bussing](food_bussing/README.md) | Place both the ice cream and the grapes in the yellow bowl. |
 | [polaris_pan_clean](pan_clean/README.md) | Scrub the frying pan with the sponge and release it in the pan. |
 | [polaris_organize_tools](organize_tools/README.md) | Place the scissors in the large container. |
@@ -38,9 +38,9 @@ finally:
     env.close()
 ```
 
-## Running the handwritten expert
+## Running a Task Program expert
 
-Each catalog entry also offers an `expert` deployment. It uses the same physical scene, DROID robot, controller, 450-step limit and evaluator as the `droid` deployment. Its default reset selects published initial condition 0. To run one autonomous episode of Pan Clean from a checkout:
+Each catalog entry also offers an `expert` deployment. It uses the policy deployment’s physical scene, robot, controller and measured scoring rules. Each expert starts from published initial condition 0 by default. The experts share the same 450-step limit. To run one autonomous episode of Pan Clean from a checkout:
 
 ```bash
 embodichain run-task --gym-config embodichain/extensions/tasks/configs/tasks/manipulation/polaris/pan_clean/task.expert.yaml --headless --seed 42 --max_episodes 1
@@ -48,7 +48,7 @@ embodichain run-task --gym-config embodichain/extensions/tasks/configs/tasks/man
 
 Use another scene folder from the table to run its expert. In Python, load the scene's `task.expert.yaml` as above, then call `env.reset(seed=42)` followed by `execute_demo_episode(env)` from `embodichain.lab.gym.envs`. The result includes the step count, segment outcomes and task success.
 
-The expert reads simulator object geometry and gripper pose, solves Panda inverse kinematics, and sends the same eight joint-position and gripper commands available to a policy. Grasp, lift, transport and release use simulated finger contact. The per-scene grasp and placement coordinates live under `env.extensions.expert` in the scene configuration. Pan Clean includes an outward and a return scrubbing stroke before release.
+Each scene’s `task_program/program.yaml` orders the registered Pick, Place and, for Pan Clean, held-object transport calls. Its `integration.yaml` binds object IDs and placement surfaces or interiors to the scanned meshes. Grasp transforms refer to the DROID end-effector frame. Food Bussing and Block Stack Kitchen declare a separate object-relative grasp for each item. The DROID profile selects the Panda arm and mounted Robotiq 2F-85. Pick closes the fingers before lifting. Place opens them and withdraws. The environment continues to compute the original criteria from the simulated object geometry, gripper pose and finger angle. Pan Clean adds a 25 mm outward stroke and a return at the pan floor before releasing the sponge. It checks the measured sponge position at both stroke endpoints. Block Stack Kitchen waits for both cubes to settle and checks the upper cube’s position and tilt.
 
 ## Scoring and physical scope
 

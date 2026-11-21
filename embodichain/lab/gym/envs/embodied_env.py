@@ -867,8 +867,8 @@ class EmbodiedEnv(BaseEnv):
             self._traj_save_count = 0
             self._traj_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
             if self.cfg.record_trajectory:
-                self._trajectory_action_kind = (
-                    "policy" if self.action_manager is not None else "expert"
+                self._trajectory_action_kind, trajectory_space = (
+                    self._trajectory_action_layout()
                 )
                 self._traj_buffer = build_trajectory_buffer(
                     env=self,
@@ -876,7 +876,7 @@ class EmbodiedEnv(BaseEnv):
                     num_envs=self.num_envs,
                     device=self.device,
                     uids=self.cfg.trajectory_uids,
-                    action_space=self._trajectory_action_space(),
+                    action_space=trajectory_space,
                 )
                 self._rollout_storage["trajectory"] = self._traj_buffer
                 fields = {
@@ -3200,11 +3200,15 @@ class EmbodiedEnv(BaseEnv):
         expected_dim = int(np.prod(self.single_action_space.shape))
         return self._normalize_demo_action_tensor(action, expected_dim)
 
-    def _trajectory_action_space(self) -> gym.spaces.Space:
-        """Return the fixed action layout owned by trajectory recording."""
-        if self.action_manager is not None:
-            return self.action_space
-        return self._expert_action_space
+    def _trajectory_action_layout(self) -> tuple[str, gym.spaces.Space]:
+        """Allocate trajectories for the commands produced by this deployment."""
+        if self.action_manager is not None and (
+            self._task_program_adapter is None
+            or self.cfg.expert_trajectory.use_action_manager
+            or self._record_raw_actions
+        ):
+            return "policy", self.action_space
+        return "expert", self._expert_action_space
 
     def _trajectory_action_metadata(self) -> dict[str, Any]:
         """Describe the action layout stored in trajectory files."""
@@ -3719,6 +3723,16 @@ class EmbodiedEnv(BaseEnv):
             getattr(self, "_trajectory_action_kind", None) == "policy"
         )
         policy_recording = bool(getattr(self, "_record_raw_actions", False))
+        if (
+            not is_controller_action
+            and self.action_manager is not None
+            and self._traj_buffer is not None
+            and getattr(self, "_trajectory_action_kind", None) == "expert"
+        ):
+            raise ValueError(
+                "Recording policy actions on a Task Program expert requires "
+                "rollout_action_semantics='policy_request'."
+            )
         if (
             is_controller_action
             and not managed_expert

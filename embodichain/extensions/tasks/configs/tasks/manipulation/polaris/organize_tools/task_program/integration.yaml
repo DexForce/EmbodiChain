@@ -1,0 +1,74 @@
+integration_id: polaris_organize_tools
+program_id: polaris_organize_tools
+requires:
+  scene_contract: organize_tools_scene
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: organize_tools_scene
+  registry_id: organize_tools_native
+  rigid_objects:
+  - entity_id: scissor
+    dynamics: dynamic
+    semantic_type: scissor
+    affordances:
+    - entity_id: scissor_grasp
+      kind: antipodal_grasp
+  - entity_id: container_00
+    dynamics: dynamic
+    semantic_type: container_00
+    affordances:
+    - entity_id: container_00_for_scissor
+      kind: container
+      native_name: interior_scissor
+      object_target_frame: parent
+      object_target_pose:
+        position: [-0.017372, -0.009972, 0.078]
+        quaternion_xyzw: [0.0, 0.0, 0.974223, -0.225587]
+profile:
+  defaults:
+    pick_up:
+      primary: primary_manipulator
+    place:
+      primary: primary_manipulator
+  skill_options:
+    pick:
+      kind: pick_up
+      lift_height: 0.14
+      pre_grasp_distance: 0.095
+      hand_interp_steps: 12
+      grasp_settle_steps: 10
+      fixed_object_to_eef:
+        position: [0.033557, 0.00188, -0.003]
+        rotation_matrix:
+        - [1.0, 0.0, 0.0]
+        - [0.0, -1.0, 0.0]
+        - [0.0, 0.0, -1.0]
+    place:
+      kind: place
+      lift_height: 0.085
+      hand_interp_steps: 12
+      release_settle_steps: 10
+      preserve_current_object_orientation: true
+  effect_monitors:
+    pick:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 2
+        attached_translation_threshold: 0.04
+        attached_rotation_threshold: 0.70
+        detached_rotation_threshold: 0.85
+    place:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 2
+        attached_translation_threshold: 0.01
+        detached_translation_threshold: 0.015
+runtime_services:
+  control_part_evidence:
+    kind: joint_position_constraint
+    control_parts:
+    - eef
+    open_qpos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    minimum_displacement: 0.008

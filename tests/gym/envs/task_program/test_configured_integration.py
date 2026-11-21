@@ -475,6 +475,7 @@ def test_execution_policy_overrides_reach_runtime_without_changing_the_base(
                 "recovery": {
                     override_key: 90.0,
                     "goal_rotation_threshold": 0.75,
+                    "goal_translation_threshold": 0.035,
                 },
             },
         },
@@ -490,6 +491,7 @@ def test_execution_policy_overrides_reach_runtime_without_changing_the_base(
     assert preset.motion_policy.acceleration_limit == 0.4
     assert preset.motion_policy.dynamic_collision_mode.value == "off"
     assert preset.recovery_policy.skill_timeout == 90.0
+    assert preset.recovery_policy.goal_translation_threshold == 0.035
     assert preset.recovery_policy.goal_rotation_threshold == 0.75
     assert preset.recovery_policy.max_replans == 3
     assert preset.effect_assurance.value == "verified"

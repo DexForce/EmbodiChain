@@ -1,0 +1,18 @@
+program_id: polaris_move_latte_cup
+instruction: put the latte art cup on top of the cutting board
+targets: {}
+program:
+- segment: pick
+  steps:
+    pick:
+      object: latte_art_cup
+      grasp: latte_art_cup_grasp
+  validators:
+  - kind: object_lifted
+    object: latte_art_cup
+    minimum_lift: 0.03
+- segment: release
+  steps:
+    place:
+      object: latte_art_cup
+      'on': cutting_board_surface

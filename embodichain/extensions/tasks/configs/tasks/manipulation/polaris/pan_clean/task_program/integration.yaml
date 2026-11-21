@@ -1,0 +1,102 @@
+integration_id: polaris_pan_clean
+program_id: polaris_pan_clean
+requires:
+  scene_contract: pan_clean_scene
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: pan_clean_scene
+  registry_id: pan_clean_native
+  rigid_objects:
+  - entity_id: sponge
+    dynamics: dynamic
+    semantic_type: sponge
+    affordances:
+    - entity_id: sponge_grasp
+      kind: antipodal_grasp
+  - entity_id: frying_pan
+    dynamics: dynamic
+    semantic_type: frying_pan
+    affordances:
+    - entity_id: frying_pan_surface
+      kind: support_surface
+      native_name: top
+      object_target_frame: parent
+      object_target_pose:
+        position: [0.069484, 0.000856, 0.0075]
+        quaternion_xyzw: [0.0, 0.0, 0.899635, -0.436642]
+profile:
+  defaults:
+    pick_up:
+      primary: primary_manipulator
+    move_held_object:
+      primary: primary_manipulator
+    place:
+      primary: primary_manipulator
+  skill_options:
+    pick:
+      kind: pick_up
+      lift_height: 0.14
+      pre_grasp_distance: 0.095
+      hand_interp_steps: 12
+      grasp_settle_steps: 10
+      fixed_object_to_eef:
+        position: [9.5e-05, 0.000616, 0.0044]
+        rotation_matrix:
+        - [1.0, 0.0, 0.0]
+        - [0.0, -1.0, 0.0]
+        - [0.0, 0.0, -1.0]
+      cartesian_lift: true
+    simulation.move_held_object:
+      kind: move_held_object
+    place:
+      kind: place
+      lift_height: 0.085
+      hand_interp_steps: 12
+      release_settle_steps: 10
+      preserve_current_object_orientation: true
+  effect_monitors:
+    pick:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 2
+    place:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 2
+        attached_translation_threshold: 0.01
+        detached_translation_threshold: 0.015
+    simulation.move_held_object:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 2
+runtime_services:
+  registered_semantic_lowerers:
+  - kind: move_held_object
+    routes:
+    - object_id: sponge
+      target_id: near_stroke_end
+      pose:
+        kind: scene_entity
+        entity_id: frying_pan
+        relative_pose:
+          position: [0.069484, 0.000856, 0.0075]
+          quaternion_xyzw: [0.0, 0.0, 0.899635, -0.436642]
+      preserve_current_object_orientation: true
+    - object_id: sponge
+      target_id: far_stroke_end
+      pose:
+        kind: scene_entity
+        entity_id: frying_pan
+        relative_pose:
+          position: [0.094484, 0.000856, 0.0075]
+          quaternion_xyzw: [0.0, 0.0, 0.899635, -0.436642]
+      preserve_current_object_orientation: true
+  control_part_evidence:
+    kind: joint_position_constraint
+    control_parts:
+    - eef
+    open_qpos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    minimum_displacement: 0.02

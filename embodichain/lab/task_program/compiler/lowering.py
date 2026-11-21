@@ -2061,8 +2061,13 @@ class SemanticCallCompiler:
                     context=context,
                 )
             downstream_targets.append(grounded_target)
+        grasp_pose = None
+        if isinstance(call.at, SemanticRelativePose):
+            grasp_pose = call.at.to_goal()
+        elif call.at is not None:
+            grasp_pose = call.at.to_matrix()
         return SemanticLowering(
-            goal=GraspGoal(semantics=semantics),
+            goal=GraspGoal(semantics=semantics, grasp_xpos=grasp_pose),
             skill_options=replace(
                 option_template,
                 pick_object_part=(

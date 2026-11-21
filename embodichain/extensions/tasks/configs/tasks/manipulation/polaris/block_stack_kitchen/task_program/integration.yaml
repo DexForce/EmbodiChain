@@ -1,0 +1,79 @@
+integration_id: polaris_block_stack_kitchen
+program_id: polaris_block_stack_kitchen
+requires:
+  scene_contract: block_stack_kitchen_scene
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: block_stack_kitchen_scene
+  registry_id: block_stack_kitchen_native
+  rigid_objects:
+  - entity_id: wood_cube
+    dynamics: dynamic
+    semantic_type: wood_cube
+    affordances:
+    - entity_id: wood_cube_grasp
+      kind: antipodal_grasp
+    - entity_id: wood_cube_for_green_cube
+      kind: support_surface
+      native_name: top
+      object_target_frame: parent
+      object_target_pose:
+        position: [9.9e-05, -0.000309, 0.071706]
+        quaternion_xyzw: [0.0, 0.0, 0.932007, 0.362441]
+  - entity_id: green_tray
+    dynamics: dynamic
+    semantic_type: green_tray
+    affordances:
+    - entity_id: green_tray_for_wood_cube
+      kind: support_surface
+      native_name: top
+      object_target_frame: parent
+      object_target_pose:
+        position: [-0.000184, -0.001945, 0.021108]
+        quaternion_xyzw: [0.0, 0.0, 0.994837, 0.101483]
+  - entity_id: green_cube
+    dynamics: dynamic
+    semantic_type: green_cube
+    affordances:
+    - entity_id: green_cube_grasp
+      kind: antipodal_grasp
+profile:
+  defaults:
+    pick_up:
+      primary: primary_manipulator
+    place:
+      primary: primary_manipulator
+  skill_options:
+    pick:
+      kind: pick_up
+      lift_height: 0.14
+      pre_grasp_distance: 0.095
+      hand_interp_steps: 12
+      grasp_settle_steps: 10
+      cartesian_lift: true
+    place:
+      kind: place
+      lift_height: 0.085
+      hand_interp_steps: 12
+      release_settle_steps: 15
+      preserve_current_object_orientation: true
+  effect_monitors:
+    pick:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 2
+    place:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 2
+        attached_translation_threshold: 0.01
+        detached_translation_threshold: 0.015
+runtime_services:
+  control_part_evidence:
+    kind: joint_position_constraint
+    control_parts:
+    - eef
+    open_qpos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    minimum_displacement: 0.02

@@ -139,6 +139,10 @@ defines the owner-directory and CWD-shadow behavior.
 scene, validates the task's required scene/embodiment contracts, composes the
 immutable integration catalog, injects its trusted profile/scene/preset
 selection into the unbound program, and registers the common `EmbodiedEnv`.
+An expert whose physical task owns reset or scoring in a Python subclass can
+set `task_program_host` in the runnable deployment to that registered physical
+Gym ID. The expert uses a distinct ID and the same class and constructor
+defaults, with the configured Task Program supplying demonstration actions.
 The CLI may override only the program. Components have closed fields and
 intentionally omit compatibility `version` values.
 
@@ -227,6 +231,8 @@ Built-in composite monitor
 defaults are resolved through `CompositeEffectMonitorCfg`; other providers'
 defaults are not inferred. Inspection neither constructs simulation nor provides
 physical-effect evidence. See the task package usage for the authoring forms.
+
+A `pick` call may name a calibrated TCP target with `at`. Use a `scene_relative` target with its object as the parent to follow the measured pose at execution time. Each pick in a multi-object program can select its own grasp pose while sharing the same pickup skill and effect checks.
 
 Contact-sensitive tasks may explicitly select pickup `cartesian_lift` or
 placement `cartesian_approach` in skill options. They require `ik_interp` and

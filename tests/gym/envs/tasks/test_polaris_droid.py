@@ -55,12 +55,23 @@ def test_official_deployment_composes_and_registers(scene):
     expert = yaml.safe_load(
         (folder / manifest["deployments"]["expert"]["config"]).read_text()
     )
+    expert_path = folder / manifest["deployments"]["expert"]["config"]
+    expert_cfg = config_to_cfg(expert, source_path=expert_path)
     spec = REGISTERED_ENVS[expert["id"]]
-    assert spec.supports_handwritten_demo
+    assert expert["task_program_host"] == deployment["id"]
+    assert REGISTERED_ENVS[deployment["id"]].task_program_adapter_factory is None
     assert spec.cls is REGISTERED_ENVS[deployment["id"]].cls
-    assert spec.default_kwargs["expert_initial_condition"] == 0
-    for grasp in cfg.extensions["expert"]:
-        assert {grasp["object"], grasp["target"]} <= names
+    assert spec.task_program_adapter_factory is not None
+    assert expert_cfg.task_program.program_id == f"polaris_{scene}"
+
+
+def test_expert_cannot_replace_its_policy_host():
+    path = ROOT / "move_latte_cup/task.expert.yaml"
+    deployment = yaml.safe_load(path.read_text())
+    deployment["id"] = deployment["task_program_host"]
+    with pytest.raises(ValueError, match="must name a separate physical"):
+        config_to_cfg(deployment, source_path=path)
+    assert REGISTERED_ENVS[deployment["id"]].task_program_adapter_factory is None
 
 
 def test_single_object_order_release_and_partial_reset():
@@ -183,9 +194,13 @@ def test_pan_clean_expert_scrubs_and_releases_sponge():
         assert result.completed and result.all_success
         assert not any(result.truncated)
         names = [segment.name for segment in result.segments]
-        assert names.index("sponge_lift") < names.index("sponge_scrub_out")
-        assert names.index("sponge_scrub_out") < names.index("sponge_scrub_back")
-        assert names.index("sponge_scrub_back") < names.index("sponge_release")
+        assert names == [
+            "pick_sponge",
+            "lower_sponge",
+            "scrub_out",
+            "scrub_back",
+            "release_sponge",
+        ]
         assert target.rubric.reached[0].all()
     finally:
         env.unwrapped.close(exit_process=False)

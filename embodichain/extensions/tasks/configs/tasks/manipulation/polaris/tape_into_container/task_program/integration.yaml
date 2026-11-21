@@ -1,0 +1,72 @@
+integration_id: polaris_tape_into_container
+program_id: polaris_tape_into_container
+requires:
+  scene_contract: tape_into_container_scene
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: tape_into_container_scene
+  registry_id: tape_into_container_native
+  rigid_objects:
+  - entity_id: tape_00
+    dynamics: dynamic
+    semantic_type: tape_00
+    affordances:
+    - entity_id: tape_00_grasp
+      kind: antipodal_grasp
+  - entity_id: container_02
+    dynamics: dynamic
+    semantic_type: container_02
+    affordances:
+    - entity_id: container_02_for_tape_00
+      kind: container
+      native_name: interior_tape_00
+      object_target_frame: parent
+      object_target_pose:
+        position: [-0.016516, -0.010019, 0.073]
+        quaternion_xyzw: [-0.178833, -0.129122, -0.688197, 0.691181]
+profile:
+  defaults:
+    pick_up:
+      primary: primary_manipulator
+    place:
+      primary: primary_manipulator
+  skill_options:
+    pick:
+      kind: pick_up
+      lift_height: 0.14
+      pre_grasp_distance: 0.095
+      hand_interp_steps: 12
+      grasp_settle_steps: 10
+      fixed_object_to_eef:
+        position: [-0.049146, -9.3e-05, -0.02214]
+        rotation_matrix:
+        - [0.0, -1.0, 0.0]
+        - [-1.0, 0.0, 0.0]
+        - [0.0, 0.0, -1.0]
+      cartesian_lift: true
+    place:
+      kind: place
+      lift_height: 0.085
+      hand_interp_steps: 12
+      release_settle_steps: 10
+  effect_monitors:
+    pick:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 2
+        attached_translation_threshold: 0.032
+    place:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 2
+        attached_translation_threshold: 0.01
+        detached_translation_threshold: 0.015
+runtime_services:
+  control_part_evidence:
+    kind: joint_position_constraint
+    control_parts:
+    - eef
+    open_qpos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    minimum_displacement: 0.02

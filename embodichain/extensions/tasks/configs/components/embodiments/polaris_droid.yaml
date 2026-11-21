@@ -67,3 +67,28 @@ grippers:
     - [0.707106781, -0.707106781, 0.0, 0.0]
     - [0.0, 0.0, 1.0, 0.0]
     - [0.0, 0.0, 0.0, 1.0]
+
+skill_profile:
+  contract_id: single_arm_parallel_gripper
+  profile_id: polaris_droid
+  resources:
+  - resource_id: primary_manipulator
+    endpoints:
+    - endpoint_id: motion
+      control_part: arm
+      capabilities:
+      - kinematics.batch_inverse
+      - motion.cartesian_pose
+      - motion.joint_position
+      - kinematics.forward
+    - endpoint_id: grasp
+      control_part: eef
+      capabilities:
+      - interaction.grasp
+      command_preset: parallel_jaw_commands
+      gripper: eef
+  command_presets: []
+  runtime_services:
+    grasp_pose_generators:
+      eef:
+        kind: antipodal_parallel_jaw

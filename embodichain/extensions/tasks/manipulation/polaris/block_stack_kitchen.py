@@ -25,12 +25,6 @@ __all__ = ["PolarisDroidBlockStackKitchenEnv"]
 
 
 @register_env(
-    "PolarisDroidBlockStackKitchenExpert-v1",
-    max_episode_steps=450,
-    supports_handwritten_demo=True,
-    expert_initial_condition=0,
-)
-@register_env(
     "PolarisDroidBlockStackKitchen-v1",
     max_episode_steps=450,
     supports_handwritten_demo=False,

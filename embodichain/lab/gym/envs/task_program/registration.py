@@ -40,8 +40,9 @@ def _register_configured_task_program_integration(
     integration: _ConfiguredTaskProgramIntegration,
     *,
     max_episode_steps: object,
+    host: EnvSpec | None = None,
 ) -> EnvSpec:
-    """Register ``EmbodiedEnv`` under a config-owned ID, idempotently."""
+    """Register a configured expert on the chosen physical host, idempotently."""
     selected_env_id = _identifier(env_id, path="id")
     selected_max_episode_steps = _integer(
         max_episode_steps,
@@ -62,6 +63,8 @@ def _register_configured_task_program_integration(
         register_env_function,
     )
 
+    cls = EmbodiedEnv if host is None else host.cls
+    default_kwargs = {} if host is None else host.default_kwargs
     with _REGISTER_LOCK:
         existing = REGISTERED_ENVS.get(selected_env_id)
         if existing is None:
@@ -71,10 +74,11 @@ def _register_configured_task_program_integration(
                     f"{selected_env_id!r}: Gymnasium already owns that ID."
                 )
             register_env_function(
-                EmbodiedEnv,
+                cls,
                 selected_env_id,
                 max_episode_steps=selected_max_episode_steps,
                 task_program_adapter_factory=integration.adapter_factory,
+                **default_kwargs,
             )
             return get_env_spec(selected_env_id)
 
@@ -85,7 +89,8 @@ def _register_configured_task_program_integration(
             None,
         )
         if (
-            existing.cls is not EmbodiedEnv
+            existing.cls is not cls
+            or existing.default_kwargs != default_kwargs
             or existing.max_episode_steps != selected_max_episode_steps
             or existing_fingerprint != integration.integration_fingerprint
         ):
