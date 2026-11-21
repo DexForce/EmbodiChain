@@ -168,29 +168,12 @@ def main() -> None:
     official.add_argument("--output", type=Path, required=True)
     official.add_argument("--steps", type=int, default=100)
     official.add_argument("--compare-cem", action="store_true")
-    native = commands.add_parser(
-        "official-kinematics", help="Check the Cube robot in DexSim"
-    )
-    native.add_argument("--reference", type=Path, required=True)
-    native.add_argument("--device", default="cuda:0")
     official_eval = commands.add_parser(
         "official-eval-reference", help="Run the original 50-query MuJoCo evaluator"
     )
     for name in ("swm-root", "ogbench-root", "data", "queries", "weights", "output"):
         official_eval.add_argument(f"--{name}", type=Path, required=True)
     official_eval.add_argument("--device", default="cuda:0")
-    native_eval = commands.add_parser(
-        "official-eval-dexsim",
-        help="Evaluate the Cube prototype on the official queries",
-    )
-    for name in ("reference", "queries", "weights", "output"):
-        native_eval.add_argument(f"--{name}", type=Path, required=True)
-    native_eval.add_argument("--device", default="cuda:0")
-    native_eval.add_argument("--worker-devices", nargs=2)
-    native_eval.add_argument("--reference-planner-root", type=Path)
-    native_eval.add_argument(
-        "--replay", type=Path, help="Replay a reference trace as a physics diagnostic"
-    )
     collect = commands.add_parser(
         "collect", help="Collect a simulator image/action split"
     )
@@ -379,22 +362,6 @@ def main() -> None:
         if args.compare_cem:
             report["cem"] = _compare_cem(args.output)
         _write_report(report, str(args.output / "reference-report.json"))
-    elif args.command == "official-eval-dexsim":
-        from ._official_eval import evaluate_dexsim
-
-        _write_report(
-            evaluate_dexsim(
-                reference=args.reference,
-                queries=args.queries,
-                weights=args.weights,
-                output=args.output,
-                device=args.device,
-                replay=args.replay,
-                worker_devices=args.worker_devices,
-                reference_planner_root=args.reference_planner_root,
-            ),
-            None,
-        )
     elif args.command == "official-eval-reference":
         from ._official_eval import evaluate_reference
 
@@ -410,10 +377,6 @@ def main() -> None:
             ),
             None,
         )
-    elif args.command == "official-kinematics":
-        from ._official_dexsim import audit_kinematics
-
-        _write_report(audit_kinematics(args.reference, device=args.device), None)
     elif args.command in {"prepare", "reference"}:
         from ._reference import compare, prepare
 

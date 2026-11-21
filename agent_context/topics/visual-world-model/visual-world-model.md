@@ -8,8 +8,7 @@ rejects multi-process training: rank-local SIGReg statistics do not implement a
 global batch objective. `examples/learning/lewm/` owns pinned reference
 comparison, official OGBench-Cube migration checks, historical UR push-cube
 collection and paired simulator evaluation. `official-reference` compiles a
-pinned MuJoCo reference and exports the robot/physical contract;
-`official-kinematics` checks that robot in DexSim without stepping dynamics.
+pinned MuJoCo reference and exports the robot and physical contract.
 The [Cube contract](../../../examples/learning/lewm/OFFICIAL_CUBE.md) owns task
 parameters and the official-query protocol. The
 [validation record](../../../examples/learning/lewm/cube/VALIDATION.md) owns
@@ -18,11 +17,9 @@ physical task and validation set.
 Its validation diagnostics compare fixed physical candidates; frozen-visual
 predictor ablations use the common SL trainer and source-bound latent caches.
 CEM sampling and sequence-selection options are recorded evaluation contracts.
-`official-eval-reference` uses the pinned original evaluator;
-`official-eval-dexsim` keeps native worlds alive across planning barriers while
-one planner preserves global query/RNG order. Physical replay can reuse the
-reference's raw actions. The DexUni deployment `OGBenchCubeDexUni-v0` owns
-the CPU rigid-body scene and authors its gripper linkage before finalization.
+`official-eval-reference` uses the pinned original evaluator.
+`OGBenchCubeDexUni-v0` owns the DexUni CPU rigid-body scene and authors its
+gripper linkage before finalization.
 `embodichain run-example learning/lewm/cube` prepares pinned public inputs,
 collects RGB, exports a validation-selected model and renders initial, goal and
 replanning observations through the native camera. The single-world CPU solver

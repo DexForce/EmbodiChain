@@ -26,14 +26,6 @@ or contact observations between native steps.
 `None` retains the native default. Gym accepts the former in `physics_config`
 and the latter at the top level through `config_to_cfg()`.
 
-Default scene settings and GPU capacities are submitted by
-`DefaultPhysicsBackend.configure_world()` before native World construction.
-World captures `PxSceneDesc` during construction; changing only the global
-defaults afterwards does not update that descriptor. The post-World
-`activate()` hook does no additional Default setup. `enable_tgs=False` selects
-native PGS; the ordinary default remains TGS. Default CUDA uses Direct GPU,
-which rejects scene CCD; that unsupported combination fails before allocation.
-
 `SimulationManagerCfg.enable_ground_plane` controls creation of the built-in
 physical/render plane, defaults true, and is not a runtime visibility switch.
 Contact-free or model-authored-boundary scenes disable it explicitly. A Gym
@@ -108,21 +100,6 @@ its one-way CPU MuJoCo path can expose geometry-only contacts, while CPU
 MuJoCo force reports are unavailable. See `physics/` and
 [sensors](../sensor-system/sensor-system.md).
 
-Default compliant point constraints are configured by `RigidConstraintCfg` in
-`cfg/scene.py` and owned by `SimulationManager`. Optional linear velocity targets
-use endpoint B relative to A, in A's joint axes, with units m/s. Creation without
-a target keeps the zero-target behavior and requires no new SDK method.
-`linear_drive_point_anchors` selects each endpoint's own force moment arm for
-the linear springs. It requires the matching GPU capability, checked against
-the already-loaded solver; CPU and older GPU libraries reject the selection.
-The default retains ordinary D6 geometry. Runtime gain updates retain the
-explicit anchor selection.
-`update_rigid_constraint_linear_drive()` changes active selected arenas between
-explicit physics steps; it leaves the creation config unchanged and resets the
-target to zero when omitted. Inputs and SDK capabilities are checked before
-writes, but a native rejection can leave earlier rows updated. Use the manager
-API rather than borrowing native joints or introducing another constraint owner.
-
 ## Sparse source physics
 
 `asset_physics_mode="preserve"` retains source physics;
@@ -182,15 +159,6 @@ preserve mode, without replacing explicit zero, margins or materials. Inspect
 `spawn/descriptors.py` for these application defaults rather than altering
 DexSim global defaults.
 
-`DefaultRigidBodyMaterialCfg` owns native combine rules and constant compliant
-normal-contact springs. Its coefficients keep force units through Spawn;
-positive stiffness replaces restitution, and zero restores rigid contact.
-Sparse damping can inherit a compliant source material. This implicit spring
-does not encode a position-dependent impedance law. Compilation rejects an
-SDK missing the capability; CUDA shape overrides also require material caching
-before scene creation. Source articulation overlays restore these fields through
-the SDK contact-only replay after uniform link-property writes.
-
 Newton `condim`, `contype` and `conaffinity` belong in collision descriptors
 before preparation; friction coefficients and raw MuJoCo `solref`, `solimp` and
 `solmix` belong in material properties. Explicit `solref` retains its native
@@ -238,7 +206,5 @@ and [robot context](../robot-system/robot-system.md).
 Focused coverage: `tests/sim/test_rigid_physics_cfg.py`,
 `tests/sim/test_sim_manager_cfg.py`, `tests/sim/test_cfg.py`,
 `tests/sim/spawn/test_descriptors.py`, `tests/sim/spawn/test_source.py`, and
-`tests/sim/objects/test_backend_physics_helpers.py`. Constraint creation, selected
-updates and rollback use `tests/sim/objects/test_rigid_constraint.py`.
-Select tests for the affected
+`tests/sim/objects/test_backend_physics_helpers.py`. Select tests for the affected
 property, particularly sparse overlays, inertia fallback and backend rejection.

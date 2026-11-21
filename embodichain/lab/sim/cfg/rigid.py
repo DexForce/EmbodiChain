@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import fields
-from typing import Any, Literal, Sequence
+from typing import Any, Sequence
 import warnings
 
 import numpy as np
@@ -36,7 +36,6 @@ __all__ = [
     "DefaultCollisionPropertiesCfg",
     "NewtonCollisionPropertiesCfg",
     "RigidBodyMaterialCfg",
-    "DefaultRigidBodyMaterialCfg",
     "NewtonRigidBodyMaterialCfg",
     "RigidBodyPhysicsCfg",
 ]
@@ -317,38 +316,6 @@ class RigidBodyMaterialCfg:
     """Coefficient of restitution, where zero is inelastic and one is elastic.
 
     The active backend/solver may further restrict or ignore restitution.
-    """
-
-
-@configclass
-class DefaultRigidBodyMaterialCfg(RigidBodyMaterialCfg):
-    """Default-native combination and compliance for rigid contact materials.
-
-    The native pair uses the higher-valued combine-mode rule of its materials.
-    These fields are unsupported by Newton; common friction/restitution values
-    retain their usual sparse-overlay semantics.
-    """
-
-    friction_combine_mode: Literal["average", "min", "multiply", "max"] | None = None
-    """Rule used to combine the two surfaces' friction coefficients."""
-
-    restitution_combine_mode: Literal["average", "min", "multiply", "max"] | None = None
-    """Rule used to combine the two surfaces' restitution coefficients."""
-
-    compliant_contact_stiffness: float | None = None
-    """Implicit normal-contact force spring stiffness [N/m].
-
-    Positive values replace restitution with a compliant spring; zero restores
-    rigid contact. ``None`` preserves the source or backend material. This
-    constant spring does not encode a position-dependent impedance law.
-    """
-
-    compliant_contact_damping: float | None = None
-    """Compliant normal-contact damping [N s/m].
-
-    Damping requires positive configured or inherited stiffness. Both
-    coefficients must be finite and non-negative. Default CUDA shape overrides
-    require :attr:`DefaultPhysicsCfg.cache_material` to be enabled.
     """
 
 
@@ -696,10 +663,7 @@ class RigidBodyPhysicsCfg:
             cfg.material_props = _physics_property_cfg_from_dict(
                 init_dict["material_props"],
                 common_type=RigidBodyMaterialCfg,
-                backend_types={
-                    "default": DefaultRigidBodyMaterialCfg,
-                    "newton": NewtonRigidBodyMaterialCfg,
-                },
+                backend_types={"newton": NewtonRigidBodyMaterialCfg},
                 field_name="material_props",
             )
         return cfg
@@ -727,10 +691,7 @@ class RigidBodyPhysicsCfg:
             "material_props": _physics_property_cfg_to_dict(
                 self.material_props,
                 common_type=RigidBodyMaterialCfg,
-                backend_types={
-                    "default": DefaultRigidBodyMaterialCfg,
-                    "newton": NewtonRigidBodyMaterialCfg,
-                },
+                backend_types={"newton": NewtonRigidBodyMaterialCfg},
                 field_name="material_props",
             ),
         }

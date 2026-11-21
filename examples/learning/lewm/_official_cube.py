@@ -100,9 +100,8 @@ def _collapse_robot(
 ) -> tuple[ET.Element, dict[str, Any]]:
     """Fold massless fixed frames while retaining physical fixed bodies.
 
-    A zero-mass site must not become a moving epsilon-mass PhysX link. Preserve
-    it as a rigid binding. Positive-mass fixed bodies remain independent so
-    their incoming-joint wrenches can recover source body external forces.
+    Preserve each massless site as a rigid frame binding to its physical
+    link. Keep positive-mass fixed bodies available to the scene solver.
     """
     links = {x.attrib["name"]: x for x in robot.findall("link")}
     joints = {x.find("child").attrib["link"]: x for x in robot.findall("joint")}
@@ -659,7 +658,6 @@ def _physical_contract(env: Any) -> dict[str, Any]:
         "qpos_spring": m.qpos_spring.tolist(),
         "joint_names": [m.joint(i).name for i in range(m.njnt)],
         "body_names": [m.body(i).name for i in range(m.nbody)],
-        "body_invweight0": m.body_invweight0.tolist(),
         "excluded_body_pairs": [
             [m.body(int(signature) >> 16).name, m.body(int(signature) & 0xFFFF).name]
             for signature in m.exclude_signature

@@ -32,7 +32,6 @@ from .visuals import GaussianSplatCfg, VisualElementCfg, _visual_elements
 from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
 from .source import UsdSourceCfg, _raise_removed_source_fields, _usd_source_from_value
 from .rigid import (
-    RigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
     _rigid_body_physics_from_dict,
 )
@@ -237,14 +236,6 @@ class LinkPhysicsOverrideCfg:
     :attr:`RigidBodyPhysicsCfg.mass_props`.
     """
 
-    collision_materials: dict[str, RigidBodyMaterialCfg] = {}
-    """Sparse Default material overrides keyed by exact URDF collision name.
-
-    Source geometry is retained. The SDK resolves uniquely matching named box
-    and sphere colliders, independent of its cooked shape order. Other source
-    formats/geometries and Newton currently reject these overrides.
-    """
-
     @classmethod
     def from_dict(cls, init_dict: Dict[str, Any]) -> LinkPhysicsOverrideCfg:
         """Initialize the configuration from a dictionary."""
@@ -257,17 +248,6 @@ class LinkPhysicsOverrideCfg:
         for key, value in init_dict.items():
             if key == "attrs" and isinstance(value, dict):
                 setattr(cfg, key, _rigid_body_physics_from_dict(value))
-            elif key == "collision_materials":
-                cfg.collision_materials = {
-                    name: (
-                        _rigid_body_physics_from_dict(
-                            {"material_props": material}
-                        ).material_props
-                        if isinstance(material, Mapping)
-                        else material
-                    )
-                    for name, material in value.items()
-                }
             elif hasattr(cfg, key):
                 setattr(cfg, key, value)
             else:
@@ -592,13 +572,6 @@ class ArticulationCfg(ObjectBaseCfg):
     fpath: str = None
     """Path to the articulation asset file."""
 
-    urdf_override_material: bool = False
-    """Use URDF color materials for file meshes in the Default renderer.
-
-    The default retains materials embedded in mesh files. Set this when the
-    URDF, rather than the mesh file, owns the intended visual appearance.
-    """
-
     source: UsdSourceCfg | None = field(default=None, kw_only=True)
     """USD source asset; mutually exclusive with :attr:`fpath`."""
 
@@ -641,9 +614,6 @@ class ArticulationCfg(ObjectBaseCfg):
     Each group applies :attr:`LinkPhysicsOverrideCfg.attrs` on top of :attr:`attrs` for
     matched links only. A link must not match more than one group.
     """
-
-    filtered_link_pairs: list[tuple[str, str]] = []
-    """Exact source-link pairs excluded from articulation self-collision."""
 
     root_props: ArticulationRootPropertiesCfg = ArticulationRootPropertiesCfg()
     """Grouped articulation-root properties.

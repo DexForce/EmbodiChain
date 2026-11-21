@@ -35,15 +35,6 @@ perform native access. Spawn owns replication/isolation and source overlays.
 Contact sensors use the finalized Scene query boundary. Cameras/lights use the
 same Scene, including its pre-finalization prepared-Arena phase.
 
-The manager removes rigid constraints before removing either endpoint.
-Default point connections use D6 joints with free rotation and can attach to
-physical articulation links. Optional compliant linear drives require native SDK
-support. See [physics configuration](physics-configuration.md) for drive frames
-and runtime updates.
-Spawn replication replaces arena/isolation filter words while preserving
-body-specific category/exclusion masks. Static filters must be authored before
-materialization; applying only arena defaults discards task collision semantics.
-
 The private `_GeometryNetForceSensor` qualifies native MuJoCo-Warp geometry-pair
 net forces for the Sharpa reference experiment. It resolves named source
 colliders after preparation, rejects ambiguous decompositions and topology

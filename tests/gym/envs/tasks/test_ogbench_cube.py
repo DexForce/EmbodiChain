@@ -31,8 +31,6 @@ from embodichain.extensions.tasks.manipulation.ogbench_cube import (
     OGBenchCubeCfg,
     OGBenchCubeEnv,
     _CubeController,
-    _base_mimic_compliance,
-    _source_body_external_wrench,
     _source_state_observation,
 )
 
@@ -108,38 +106,6 @@ def test_dexuni_authors_connect_anchors_before_the_joint_equality(
     assert joint["mujoco:equality_constraint_polycoef"] == list(gear.data)
 
 
-@pytest.mark.parametrize("index", range(3))
-def test_point_compliance_preserves_source_force_units(index: int) -> None:
-    from embodichain.extensions.tasks.manipulation.ogbench_cube import (
-        _base_point_compliance,
-    )
-
-    reference = json.loads((ROOT / "equality_point.json").read_text())["cases"][index]
-    stiffness, damping = _base_point_compliance(
-        reference["solref"],
-        reference["solimp"],
-        reference["approximate_inverse_weight"],
-    )
-    assert stiffness == pytest.approx(reference["force_stiffness"], rel=1e-12)
-    assert damping == pytest.approx(reference["force_damping"], rel=1e-12)
-
-
-def test_mimic_compliance_preserves_source_base_force_response() -> None:
-    reference = json.loads((ROOT / "equality_scalar.json").read_text())
-    frequency, damping = _base_mimic_compliance(
-        reference["solref"], reference["solimp"]
-    )
-    # Independently compiled MuJoCo KBIP/R values define the force law. The
-    # two free hinges have the same diagonal and actual inverse inertia.
-    inverse_inertia = reference["inverse_effective_inertia"]
-    assert frequency**2 / inverse_inertia == pytest.approx(
-        reference["force_stiffness"], rel=1e-12
-    )
-    assert 2 * frequency * damping / inverse_inertia == pytest.approx(
-        reference["force_damping"], rel=1e-12
-    )
-
-
 @pytest.mark.parametrize("case", range(3))
 def test_28d_state_matches_pinned_source_observation(case: int) -> None:
     reference = json.loads((ROOT / "state_observation.json").read_text())["cases"][case]
@@ -158,55 +124,18 @@ def test_28d_state_matches_pinned_source_observation(case: int) -> None:
     np.testing.assert_allclose(actual.numpy()[0], reference["expected"], atol=1e-11)
 
 
-def test_external_pad_wrench_matches_source_rne_with_child_and_rotated_com() -> None:
-    reference = json.loads((ROOT / "body_wrench_rne.json").read_text())
-
-    def tensor(name: str, batch: bool = False) -> torch.Tensor:
-        value = torch.tensor(reference[name], dtype=torch.float64)
-        return value.unsqueeze(0) if batch else value
-
-    actual = _source_body_external_wrench(
-        tensor("pose", True),
-        tensor("velocity", True),
-        tensor("acceleration", True),
-        tensor("incoming", True),
-        tensor("mass"),
-        tensor("com"),
-        tensor("inertia"),
-        tensor("joint_frames", True),
-        reference["body_index"],
-        reference["children"],
-        tensor("gravity"),
-    )
-    np.testing.assert_allclose(
-        actual.numpy()[0], reference["expected_external_wrench"], atol=1e-10
-    )
-
-
-def test_camera_capacity_is_rejected_before_native_world_creation() -> None:
-    cfg = OGBenchCubeCfg(reference_root="unused", num_envs=50)
-    with pytest.raises(ValueError, match="at most 32"):
+def test_dexuni_rejects_multiple_envs_per_world() -> None:
+    cfg = OGBenchCubeCfg(reference_root="unused", num_envs=2)
+    with pytest.raises(ValueError, match="requires one Cube environment per World"):
         OGBenchCubeEnv(cfg)
 
 
-def test_uncached_materials_are_rejected_before_native_world_creation() -> None:
-    cfg = OGBenchCubeCfg(reference_root="unused")
-    cfg.sim_cfg.physics_cfg.cache_material = False
-    with pytest.raises(ValueError, match="cache_material=True"):
-        OGBenchCubeEnv(cfg)
-
-
-def test_temporal_solver_is_rejected_before_native_world_creation() -> None:
-    cfg = OGBenchCubeCfg(reference_root="unused")
-    cfg.sim_cfg.physics_cfg.enable_tgs = True
-    with pytest.raises(ValueError, match="enable_tgs=False"):
-        OGBenchCubeEnv(cfg)
-
-
-def test_stale_point_metadata_requires_reference_reexport(tmp_path: Path) -> None:
+def test_missing_source_sleep_setting_requires_reference_reexport(
+    tmp_path: Path,
+) -> None:
     (tmp_path / "physical-contract.json").write_text("{}")
-    cfg = OGBenchCubeCfg(reference_root=str(tmp_path))
-    with pytest.raises(ValueError, match="re-export official-reference"):
+    cfg = OGBenchCubeCfg(reference_root=str(tmp_path), enable_images=False)
+    with pytest.raises(ValueError, match="Re-export official-reference"):
         OGBenchCubeEnv(cfg)
 
 

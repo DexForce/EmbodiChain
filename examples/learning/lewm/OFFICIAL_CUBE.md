@@ -7,9 +7,8 @@ in [VALIDATION.md](cube/VALIDATION.md).
 
 ## Scene and controller
 
-The task shares the UR5e and Robotiq 2F85 asset export and five-dimensional
-controller between `OGBenchCube-v0` and `OGBenchCubeDexUni-v0`. Only the
-DexUni deployment drives the reproduction example.
+The `OGBenchCubeDexUni-v0` task uses the compiled UR5e and Robotiq 2F85
+asset export and five-dimensional controller.
 
 | Boundary | Setting |
 | --- | --- |
@@ -44,6 +43,6 @@ and the development set are excluded from the new training and validation
 splits. The world model uses RGB and standardized actions during planning.
 Object position is used for the physical success check.
 
-The MuJoCo and DexSim reference commands remain available under
-`embodichain run-example learning/lewm --help`. They supply independent
-diagnostics and archived comparisons for the native workflow.
+Use `embodichain run-example learning/lewm --help` for the upstream MuJoCo
+asset and evaluation commands. The [Cube example](cube/README.md) runs the
+corresponding DexUni evaluation.

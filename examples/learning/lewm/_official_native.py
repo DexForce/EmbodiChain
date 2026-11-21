@@ -30,7 +30,7 @@ import h5py
 import numpy as np
 import torch
 
-from embodichain.extensions.tasks.manipulation.ogbench_cube import _OGBenchCubeDexUniCfg
+from embodichain.extensions.tasks.manipulation.ogbench_cube import OGBenchCubeCfg
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.cfg import DenoisingCfg, RenderCfg
 
@@ -109,7 +109,7 @@ def prepare_dexuni_reference(reference: Path, output: Path) -> dict[str, Any]:
 def _make_cube(
     reference: Path, num_envs: int, gpu_id: int, *, images: bool = True
 ) -> gym.Env:
-    cfg = _OGBenchCubeDexUniCfg(
+    cfg = OGBenchCubeCfg(
         reference_root=str(reference), num_envs=num_envs, enable_images=images
     )
     cfg.sim_cfg.gpu_id = gpu_id
