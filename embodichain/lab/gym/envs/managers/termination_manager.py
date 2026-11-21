@@ -235,6 +235,22 @@ class TerminationManager(ManagerBase):
             self._terminated.zero_()
         self._steps += 1
 
+    def invalidate_reward_evidence(
+        self, valid: torch.Tensor, *, ignore_terminations: bool = False
+    ) -> None:
+        """Reject rows whose required reward measurements are unavailable."""
+        if (
+            valid.shape != self._valid.shape
+            or valid.dtype != torch.bool
+            or valid.device != self._valid.device
+        ):
+            raise ValueError("Reward validity must match the environment rows")
+        self._valid &= valid
+        self._failure |= ~valid
+        self._terminated.copy_(self._accepted_success() | self._failure)
+        if ignore_terminations:
+            self._terminated.zero_()
+
     def _accepted_success(self) -> torch.Tensor:
         return self._success & self._valid & ~self._failure & ~self._truncation
 

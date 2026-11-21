@@ -52,14 +52,15 @@ __all__ = [
 
 
 def program_stage_condition(
-    env: EmbodiedEnv, state: str, stage: str | None = None
+    env: EmbodiedEnv, state: str, stage: str | int | None = None
 ) -> ConditionResult:
     """Read shared measured progress without activating the expert executor.
 
     Args:
         env: Policy-owned deployment containing Task Program declarations.
         state: ``achieved`` for ordered history, or ``current`` for current truth.
-        stage: Authored name/exact occurrence ID, or all stages when omitted.
+        stage: Authored name, occurrence ID or zero-based progress occurrence index;
+            all stages when omitted. Names take precedence over textual aliases.
 
     Returns:
         Cached satisfaction, validity and scalar progress metrics.

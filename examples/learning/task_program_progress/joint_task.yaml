@@ -1,0 +1,25 @@
+id: CobotJointReward-v1
+environment:
+  component: joint_environment.yaml
+embodiment:
+  component: ../../../embodichain/extensions/tasks/configs/components/embodiments/cobotmagic.yaml
+rl_task:
+  reward_composition:
+    discount: 0.99
+  skill:
+    skill_id: move_joints
+    binding:
+      robot: CobotMagic
+      motion_part: right_arm
+    goal:
+      positions:
+      - 0.35
+      - 1.0
+      - -1.2
+      - 0.0
+      - 0.6
+      - 0.0
+    acceptance:
+      joint_tolerance: 0.02
+      joint_scale: 0.1
+enable_sensor: false
