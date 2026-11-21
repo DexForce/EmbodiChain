@@ -760,3 +760,16 @@ topics:
     docs/source/api_reference/rwm.rst]
   related_topics: [supervised-learning, learning-layers, neural-dynamics]
   status: active
+
+- id: visual-world-model
+  title: Visual World Model
+  aliases: [visual world model, LeWM, LeWorldModel, 视觉世界模型, 图像世界模型]
+  keywords: [LeWMCfg, LeWMSequenceSource, LeWMObjective, LeWMCEMPlanner, build_lewm_trainer, preprocess_rgb,
+    OGBenchCubeDexUni-v0, learning/lewm/cube]
+  paths: [topics/visual-world-model/visual-world-model.md]
+  source_of_truth:
+  - embodichain/extensions/models/dynamics/lewm/
+  - examples/learning/lewm/
+  watch_paths: [docs/source/api_reference/lewm.rst]
+  related_topics: [supervised-learning, data-pipeline, robot-world-model, env-framework]
+  status: active

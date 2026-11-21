@@ -3593,6 +3593,45 @@
       ]
     },
     {
+      "id": "visual-world-model",
+      "label": "LeWM visual world model",
+      "kind": "package",
+      "topic_ids": [
+        "visual-world-model"
+      ],
+      "summary": "Predicts action-conditioned visual latents for image-goal planning.",
+      "details": "LeWM encodes observed RGB histories and predicts future latents under candidate actions. The CEM planner scores candidates against an encoded goal image. The Cube example owns DexUni simulation, native camera collection and closed-loop evaluation.",
+      "boundaries": [
+        "The model and planner operate on tensors supplied by the caller. The example owns rendering and execution."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/extensions/models/dynamics/lewm/model.py",
+          "symbol": "LeWM",
+          "start_line": 101,
+          "end_line": 101,
+          "excerpt": "class LeWM(nn.Module):"
+        },
+        {
+          "path": "embodichain/extensions/models/dynamics/lewm/planner.py",
+          "symbol": "LeWMCEMPlanner",
+          "start_line": 74,
+          "end_line": 74,
+          "excerpt": "class LeWMCEMPlanner:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/neural_dynamics/lewm",
+          "label": "LeWM model and Cube workflow"
+        },
+        {
+          "docname": "api_reference/lewm",
+          "label": "LeWM API"
+        }
+      ]
+    },
+    {
       "id": "task-spec",
       "label": "TaskSpec",
       "kind": "module",
@@ -6194,6 +6233,7 @@
         "supervised-learning",
         "nerd-showcase",
         "robot-world-model",
+        "visual-world-model",
         "task-spec",
         "task-engine"
       ],
@@ -6422,7 +6462,8 @@
             "neural-dynamics",
             "supervised-learning",
             "nerd-showcase",
-            "robot-world-model"
+            "robot-world-model",
+            "visual-world-model"
           ]
         },
         {
@@ -6766,7 +6807,8 @@
         "supervised-learning",
         "neural-dynamics",
         "nerd-showcase",
-        "robot-world-model"
+        "robot-world-model",
+        "visual-world-model"
       ],
       "edge_ids": [
         "cli-calls-training-assembly",
@@ -6840,7 +6882,8 @@
             "supervised-learning",
             "neural-dynamics",
             "nerd-showcase",
-            "robot-world-model"
+            "robot-world-model",
+            "visual-world-model"
           ]
         },
         {

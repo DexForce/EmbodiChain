@@ -36,6 +36,7 @@ Use the following canonical packages for the current model directions:
 | Visual ACT | `embodichain.extensions.models.policy.act` | Official LeRobot ACT configuration, provenance and simulator inference. |
 | NeRD | `embodichain.extensions.models.dynamics.nerd` | Network/codec, shared SL, independent transition/geometry and learning-env consumers. |
 | Robot world model (RWM) | `embodichain.extensions.models.dynamics.rwm` | Implemented. |
+| LeWM visual latent dynamics | `embodichain.extensions.models.dynamics.lewm` | Image-conditioned dynamics, shared SL and CEM planning. |
 | RigidFormer | `embodichain.extensions.models.dynamics.rigidformer` | Native author architecture, official weights and shared-SL recipe. |
 | WorldParticle | `embodichain.extensions.models.dynamics.worldparticle` | Frozen particle transition; optional native deployment and operator qualification are separate. |
 
@@ -57,6 +58,11 @@ learning-env policy optimization and the optional
 Its [execution record](../../../examples/learning/nerd/VALIDATION.md) states the
 tested runtime/budgets. Native deployment adapters have their own
 [solver extension guide](../solvers/README.md).
+
+LeWM's [Cube showcase](../../../examples/learning/lewm/cube/README.md) runs
+native collection, supervised training and CEM evaluation. Its
+[validation record](../../../examples/learning/lewm/cube/VALIDATION.md)
+reports the measured fixed-query results.
 
 RWM predicts action-conditioned robot state transitions, so it belongs to
 `dynamics`. World models also describe future-state/observation prediction;
