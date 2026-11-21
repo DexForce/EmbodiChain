@@ -11,13 +11,63 @@ scene_binding:
     simulation_uid: cable
 profile:
   defaults:
+    pick_up:
+      primary: primary_manipulator
     move_joints:
       primary: arm_and_hand
   skill_options:
+    simulation.cable_pickup:
+      kind: pick_up
+      pre_grasp_distance: 0.0
+      lift_height: 0.0
+      hand_interp_steps: 60
+      grasp_settle_steps: 15
     simulation.cable_wrap_phase:
       kind: move_joints
       preserve_velocity_samples: true
   effect_monitors: {}
 runtime_services:
+  cable_material:
+    entity_id: cable
+    simulation_uid: cable
+    motion_parts: [arm]
+    slip_limit: 0.008
+    targets:
+      approach_free_end:
+        kind: material
+        material_inset: 0.025
+        z_offset: 0.09
+        speed: 0.20
+        angular_speed: 1.2
+      grasp_free_end:
+        kind: material
+        material_inset: 0.025
+      lift_free_end:
+        kind: material_lift
+        material_inset: 0.025
+        z_offset: 0.09
+        speed: 0.06
+        angular_speed: 1.2
+      settle_lift:
+        kind: hold
+        samples: 8
+      lifted_free_end:
+        kind: check
+        condition: lift
+    operations:
+      pick_free_end:
+        kind: pick_up
+        phases:
+        - kind: pose
+          target: approach_free_end
+        - kind: grasp
+          target: grasp_free_end
+        - kind: pose
+          target: lift_free_end
+          after:
+          - kind: hold
+            target: settle_lift
+          - kind: check
+            target: lifted_free_end
   registered_semantic_lowerers:
   - kind: cable_wrap_phase

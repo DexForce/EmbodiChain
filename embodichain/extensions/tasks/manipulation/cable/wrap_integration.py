@@ -46,13 +46,16 @@ from embodichain.lab.task_program.semantics import (
     RegisteredSemanticCall,
     SceneRegistry,
 )
-from .wrap_motion import PHASE_END_S, WrapMotion, plan_wrap_motion
+from .wrap_motion import plan_wrap_motion
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
     from embodichain.lab.sim.objects.robot import Robot
+    from .wrap_evaluation import _WrapMonitor
 
 __all__ = ["CableWrapPhaseFactory"]
+
+_WRAP_PHASES = ("home", "approach_post", "orbit", "tighten", "settle", "hold_closed")
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,7 +69,7 @@ class CableWrapPhaseFactory:
     @property
     def argument_contract(self) -> SemanticCallContract:
         """Expose the supported semantic phases during static preflight."""
-        return SemanticCallContract(required={"phase": tuple(PHASE_END_S)}, optional={})
+        return SemanticCallContract(required={"phase": _WRAP_PHASES}, optional={})
 
     def create(
         self,
@@ -105,10 +108,9 @@ class CableWrapPhaseFactory:
             robot_path = Path(robot.cfg.fpath)
             motion = plan_wrap_motion(config, robot_path)
             monitor = attach_wrap_monitor(environment, config, motion, robot_path)
-        motion = monitor.motion
         # The registration retains its lowerer identities. The episode monitor owns
         # the full trajectory so expired episodes can release their command arrays.
-        return _CableWrapPhaseLowerer(proxy(motion), int(config["control_hz"]))
+        return _CableWrapPhaseLowerer(proxy(monitor), int(config["control_hz"]))
 
 
 class _CableWrapPhaseLowerer(RegisteredSemanticLowerer):
@@ -116,8 +118,8 @@ class _CableWrapPhaseLowerer(RegisteredSemanticLowerer):
     target_descriptor: ClassVar[SkillDescriptor] = MoveJoints.descriptor()
     preserves_symbolic_state: ClassVar[bool] = True
 
-    def __init__(self, motion: WrapMotion, hz: int) -> None:
-        self._motion = motion
+    def __init__(self, monitor: _WrapMonitor, hz: int) -> None:
+        self._monitor = monitor
         self._hz = hz
 
     def lower(
@@ -139,13 +141,16 @@ class _CableWrapPhaseLowerer(RegisteredSemanticLowerer):
             raise ValueError(
                 "Franka wrap commands must run at the scene's configured control rate."
             )
-        phase = self._motion.phase_slice(call.arguments["phase"])
+        phase_name = call.arguments["phase"]
+        phase = self._monitor.motion.phase_slice(phase_name)
         # Include the last command of the preceding phase so its incoming
         # finite difference is preserved at every segment boundary.
-        samples = self._motion.positions[phase.start - 1 : phase.stop]
+        samples = self._monitor.motion.positions[phase.start - 1 : phase.stop]
         positions = torch.as_tensor(
             samples.copy(), device=context.robot.qpos.device
         ).unsqueeze(0)
+        if phase_name == "approach_post" and not context.is_preview:
+            positions = self._join_pickup(positions, phase.start - 1, context)
         trajectory = TimedTrajectory(
             positions=positions[:, 1:],
             velocities=positions.diff(dim=1) * self._hz,
@@ -159,3 +164,23 @@ class _CableWrapPhaseLowerer(RegisteredSemanticLowerer):
             env_ids=context.env_ids,
         )
         return SemanticLowering(goal=JointPositionGoal(trajectory))
+
+    def _join_pickup(
+        self, nominal: torch.Tensor, lift_frame: int, context: PlanningContext
+    ) -> torch.Tensor:
+        # Hold the loaded command until the authored lift boundary. Blend out
+        # the pickup offset during the tangential approach to the post.
+        pad = lift_frame - (len(self._monitor.rows) - 1)
+        if pad < 0:
+            raise RuntimeError(
+                f"Franka cable pickup exceeded the {lift_frame / self._hz:g}s lift boundary."
+            )
+        last = self._monitor.robot.get_qpos(target=True).index_select(
+            0, context.env_ids
+        )[:, None]
+        u = torch.linspace(
+            0, 1, nominal.shape[1], dtype=nominal.dtype, device=nominal.device
+        )
+        remaining = (1 - u) ** 3 * (1 + 3 * u + 6 * u.square())
+        corrected = nominal[:, 1:] + remaining[None, 1:, None] * (last - nominal[:, :1])
+        return torch.cat((last.expand(-1, pad + 1, -1), corrected), dim=1)

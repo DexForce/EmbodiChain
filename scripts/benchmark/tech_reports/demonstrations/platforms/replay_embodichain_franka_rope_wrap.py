@@ -65,11 +65,11 @@ def main() -> None:
     config, _, _, _ = load_scene()
     control_hz = config["control_hz"]
     substeps = config["substeps"]
-    steps = round(config["duration_s"] * control_hz)
     segments = config["cable_segments"]
-    _, _, source = load_commands(
-        recording, control_hz=control_hz, substeps=substeps, expected_steps=steps
+    positions, _, source = load_commands(
+        recording, control_hz=control_hz, substeps=substeps
     )
+    steps = len(positions)
     output.mkdir(parents=True, exist_ok=False)
 
     poses = np.empty((steps + 1, segments, 7), dtype=np.float32)
@@ -139,6 +139,8 @@ def main() -> None:
         "--replay_trajectory",
         str(recording),
     ]
+    if source["seed"] is not None:
+        replay_args += ["--seed", str(source["seed"])]
     if args.device is not None:
         replay_args += ["--device", args.device]
     cli(replay_args, replay_observer=observe)

@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Plan a floor pickup and a continuous, fixed-wrist cable wrap around a post."""
+"""Plan a nominal joint-space reference for the continuous cable wrap."""
 
 from __future__ import annotations
 
@@ -74,7 +74,7 @@ class WrapMotion:
 
 
 def plan_wrap_motion(config: dict[str, Any], robot_path: Path) -> WrapMotion:
-    """Sample the complete TCP trajectory, solve seeded IK and verify FK and joint limits."""
+    """Solve and check the wrap reference from the calibrated pickup posture."""
     import pytorch_kinematics as pk
 
     arm_names = list(_JOINT_NAMES[:7])
@@ -190,6 +190,8 @@ def plan_wrap_motion(config: dict[str, Any], robot_path: Path) -> WrapMotion:
     tangent = direction * np.array([-np.sin(theta_end), np.cos(theta_end), 0.0])
     tightened = orbit_end.copy()
     tightened[:3, 3] += radial_pull * radial + tangent_pull * tangent
+    # The nominal pickup only seeds the IK branch for the authored wrap.
+    # The Task Program commands the live cable pickup instead.
     pickup_keys = [
         (0.0, home_pose, open_gap, "HOME"),
         (PHASE_END_S["home"], home_pose, open_gap, "HOME"),

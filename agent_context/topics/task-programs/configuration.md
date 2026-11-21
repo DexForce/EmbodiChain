@@ -291,13 +291,16 @@ acknowledged close frame and checks material slip after every consumed action.
 Measured cable conditions reject individual eligible rows. Healthy rows continue
 to the next stage.
 References are fresh per bridge, guarded by its episode scope, and mapped from
-selected robot rows to native cable arenas. Evaluation consumes qualified
-`cables/<uid>/<measurement>` channels, including strict endpoint geometry and
-episode slip. Keep routing acceptance in the deployment's named evaluation rules.
+selected robot rows to native cable arenas. Generic pickup may omit routing
+geometry. Its material targets can locate a point by arc-length inset from the
+free end and offset Z from that point's observed height. Routing geometry adds
+slot-specific observations to the `cables/<uid>/<measurement>` channels.
+Keep routing acceptance in the deployment's named evaluation rules.
 
-`FrankaRopeWrap-v1` uses the registered `simulation.cable_wrap_phase` call.
-Each phase lowers its checked portion of the full Franka arm and finger trajectory
-to `MoveJoints`. Scene reset owns pre-roll. The monitor latches its slip reference
+`FrankaRopeWrap-v1` uses `simulation.cable_pickup` to approach, grasp and lift
+the live cable. `simulation.cable_wrap_phase` lowers the wrap trajectory to
+`MoveJoints`. The approach to the post joins the pickup's final command to the
+authored orbit. Scene reset owns pre-roll. The monitor latches its slip reference
 after closure and a simultaneous two-finger contact sample. The final
 `wrap_success` condition reads all 19 measured checks. Task components live
 under `configs/tasks/manipulation/cable/franka_rope_wrap/` in the task extension.

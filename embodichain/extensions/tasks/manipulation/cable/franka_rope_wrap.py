@@ -282,6 +282,10 @@ def settle_franka_rope(
     steps = round(config["pre_roll_s"] * config["control_hz"] * config["substeps"])
     for _ in range(steps):
         env.sim.update(step=1, render_final_step=False)
+    # Preserve the settled rope's solver history and start the arm at its
+    # authored home state, without the velocity residue of the pre-roll.
+    qvel = torch.zeros_like(qpos)
+    env.robot.set_state(qpos=qpos, qvel=qvel, target_qpos=qpos, target_qvel=qvel)
 
 
 def _contact(config: dict[str, Any], friction: float) -> dict[str, Any]:
@@ -470,9 +474,19 @@ def materialize_deployment(config: dict[str, Any], robot_path: Path, out: Path) 
     scenario_path = folder / "config.json"
     _json(scenario_path, config)
     environment = _environment(config, scenario_path)
-    for section in ("task_program", "evaluation"):
-        for key, path in deployment[section].items():
-            deployment[section][key] = str((reference / path).resolve())
+    task_program = deployment["task_program"]
+    task_program["program"] = str((reference / task_program["program"]).resolve())
+    evaluation = deployment["evaluation"]
+    evaluation["component"] = str((reference / evaluation["component"]).resolve())
+    integration_path = reference / task_program["integration"]
+    integration = yaml.safe_load(integration_path.read_text())
+    pickup_targets = integration["runtime_services"]["cable_material"]["targets"]
+    for target in pickup_targets.values():
+        if "material_inset" in target:
+            target["material_inset"] = config["grasp_inset_m"]
+        if "z_offset" in target:
+            target["z_offset"] = config.get("pickup_lift_m", 0.09)
+    task_program["integration"] = "integration.yaml"
     # The orbit is one atomic action. Its timeout uses simulation seconds and
     # must cover all its samples, including the boundary acknowledgement.
     from embodichain.lab.sim.atomic_skills.policies import RecoveryPolicy
@@ -481,17 +495,19 @@ def materialize_deployment(config: dict[str, Any], robot_path: Path, out: Path) 
     ends = np.asarray([0.0, *PHASE_END_S.values()])
     longest_phase_s = float(np.diff(ends).max()) * config["duration_s"] / ends[-1]
     required_timeout = float(longest_phase_s + 2 / config["control_hz"])
-    policy_path = deployment["task_program"]["execution_policy"]
-    recovery = yaml.safe_load(Path(policy_path).read_text())["recovery"]
+    policy_path = (reference / task_program["execution_policy"]).resolve()
+    task_program["execution_policy"] = str(policy_path)
+    recovery = yaml.safe_load(policy_path.read_text())["recovery"]
     if required_timeout > recovery.get("skill_timeout", RecoveryPolicy().skill_timeout):
-        deployment["task_program"]["execution_policy"] = {
-            "component": policy_path,
+        task_program["execution_policy"] = {
+            "component": str(policy_path),
             "overrides": {"recovery": {"skill_timeout": required_timeout}},
         }
     deployment["embodiment"]["component"] = "embodiment.yaml"
     for name, values in [
         ("env.yaml", environment),
         ("embodiment.yaml", embodiment),
+        ("integration.yaml", integration),
         ("task.franka.yaml", deployment),
     ]:
         (folder / name).write_text(yaml.safe_dump(values, sort_keys=False))

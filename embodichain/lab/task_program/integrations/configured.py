@@ -3705,9 +3705,7 @@ def _decode_evaluation(
         for quantity in ("pose", "frame", "segment_start_frame", "lin_vel", "ang_vel")
     }
     if cable_material is not None:
-        from .simulation.cable import _METRICS
-
-        for quantity in _METRICS:
+        for quantity in cable_material.metrics:
             channels[f"cables/{cable_material.entity_id}/{quantity}"] = (
                 f"cables/{cable_material.simulation_uid}/{quantity}"
             )

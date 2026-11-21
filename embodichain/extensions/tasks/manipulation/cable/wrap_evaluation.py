@@ -26,6 +26,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from .wrap_measurements import _capsule_pad_gap, _rope_geometry, evaluate_wrap
+from .wrap_motion import PHASE_END_S
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
@@ -178,6 +179,21 @@ class _WrapMonitor:
         state = cable.data.segment_state_w[0].cpu().numpy()
         qpos = robot.get_qpos()[0].cpu().numpy()
         tcp = robot.get_link_pose("fr3_hand_tcp", to_matrix=True)[0].cpu().numpy()
+        command_tcp = targets[frame]
+        label = labels[frame]
+        scale = config["duration_s"] / PHASE_END_S["hold_closed"]
+        if PHASE_END_S["home"] * scale < t <= PHASE_END_S["approach_post"] * scale:
+            command_tcp = (
+                robot.compute_fk(
+                    qpos=robot.get_qpos(name="arm", target=True),
+                    name="arm",
+                    to_matrix=True,
+                )[0]
+                .cpu()
+                .numpy()
+            )
+            if t <= config["lift_complete_s"]:
+                label = "CABLE PICKUP"
         pad_gaps = []
         for name in ("fr3_leftfinger", "fr3_rightfinger"):
             pose = robot.get_link_pose(name, to_matrix=True)[0].cpu().numpy()
@@ -203,11 +219,11 @@ class _WrapMonitor:
         nodes = geometry.pop("nodes")
         row = {
             "time_s": t,
-            "phase": labels[frame],
+            "phase": label,
             **geometry,
             "actual_tcp_pose": tcp.tolist(),
-            "command_tcp_pose": targets[frame].tolist(),
-            "tcp_error_m": float(np.linalg.norm(tcp[:3, 3] - targets[frame, :3, 3])),
+            "command_tcp_pose": command_tcp.tolist(),
+            "tcp_error_m": float(np.linalg.norm(tcp[:3, 3] - command_tcp[:3, 3])),
             "tail_tcp_distance_m": float(np.linalg.norm(nodes[-1] - tcp[:3, 3])),
             "grasp_region_tcp_distance_m": float(
                 np.linalg.norm(state[-6:, :3] - tcp[:3, 3], axis=1).min()
