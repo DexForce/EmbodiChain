@@ -77,6 +77,15 @@ class _RoboPartyRobotCfg(RobotCfg):
             cfg, init_dict, list(cfg.init_qpos_joint_names or ())
         )
         overrides = dict(init_dict)
+        drive = overrides.get("joint_drive_props")
+        if isinstance(drive, dict) and drive.get("backend") == "newton":
+            # Pass the complete RoboParty rules to the typed Newton decoder.
+            rules = dict(drive)
+            for field, value in drive.items():
+                defaults = getattr(cfg.joint_drive_props, field, None)
+                if isinstance(defaults, dict) and isinstance(value, dict):
+                    rules[field] = {**defaults, **value}
+            overrides["joint_drive_props"] = rules
         # The joint reader already selected and resolved these file fields.
         overrides.pop("fpath", None)
         overrides.pop("source", None)

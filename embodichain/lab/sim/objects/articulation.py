@@ -893,7 +893,7 @@ class Articulation(BatchEntity):
 
         if self.cfg.init_qpos is None:
             self.cfg.init_qpos = torch.zeros(self.dof, dtype=torch.float32)
-        if self.cfg.init_qpos_joint_names is not None:
+        if getattr(self.cfg, "init_qpos_joint_names", None) is not None:
             qpos = torch.as_tensor(self.cfg.init_qpos, dtype=torch.float32)
             self.cfg.init_qpos = self._source_qpos_to_state_order(qpos).tolist()
             self.cfg.init_qpos_joint_names = self.joint_names
@@ -1132,12 +1132,12 @@ class Articulation(BatchEntity):
         return get_state_joint_names(self._entities[0])
 
     def _source_qpos_to_state_order(self, qpos: torch.Tensor) -> torch.Tensor:
-        """Map source-ordered initial qpos values to the runtime state order."""
+        """Map source-ordered or named initial qpos into runtime state order."""
         return map_source_qpos_to_state_order(
             self._entities[0],
             qpos,
             is_spawn_bound=self.is_spawn_bound,
-            joint_names=self.cfg.init_qpos_joint_names,
+            joint_names=getattr(self.cfg, "init_qpos_joint_names", None),
         )
 
     def _state_mimic_info(self) -> _MimicInfo:

@@ -285,14 +285,9 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
             user_joint_drive_props_dict = override_cfg_dict.get("joint_drive_props")
             if isinstance(user_joint_drive_props_dict, dict):
                 if user_joint_drive_props_dict.get("backend") == "newton":
-                    defaults = base_cfg.joint_drive_props
-                    fields = dict(user_joint_drive_props_dict)
-                    for prop, value in user_joint_drive_props_dict.items():
-                        previous = getattr(defaults, prop, None)
-                        if isinstance(previous, dict) and isinstance(value, dict):
-                            fields[prop] = {**previous, **value}
                     base_cfg.joint_drive_props = JointDrivePropertiesCfg.from_dict(
-                        fields, defaults=defaults
+                        user_joint_drive_props_dict,
+                        defaults=base_cfg.joint_drive_props,
                     )
                     continue
                 for prop, val in user_joint_drive_props_dict.items():
