@@ -28,6 +28,7 @@ import numpy as np
 import torch
 
 from embodichain.extensions.models.dynamics.lewm import LeWM, LeWMCfg, preprocess_rgb
+from embodichain.extensions.models.dynamics.lewm.model import _remap_vit_layer_keys
 
 HF_REV = "22b330c28c27ead4bfd1888615af1340e3fe9052"
 SWM_REV = "21446f1ede6d5284e981bd7b47f432b994e6d812"
@@ -115,8 +116,10 @@ def _load_reference_model(
         num_attention_heads=3,
         intermediate_size=768,
     )
+    encoder = ViTModel(vision, add_pooling_layer=False, use_mask_token=False)
+    encoder.register_load_state_dict_pre_hook(_remap_vit_layer_keys)
     model = upstream.LeWM(
-        encoder=ViTModel(vision, add_pooling_layer=False, use_mask_token=False),
+        encoder=encoder,
         predictor=blocks.Predictor(
             num_frames=3,
             depth=6,
