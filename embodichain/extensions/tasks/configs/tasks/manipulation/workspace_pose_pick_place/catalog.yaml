@@ -1,0 +1,14 @@
+task_key: workspace_pose_pick_place
+group: pick_place
+title: Goal Pose Pick and Place
+summary: Place a cuboid at a scene-relative position and yaw with workspace-conditioned sampling.
+tags: [manipulation, pick_place, trajectory_expansion]
+default_deployment: ur5
+deployments:
+  ur5:
+    config: task.ur5.yaml
+  ur5_obstacle:
+    config: task.obstacle.ur5.yaml
+  scene_first_acceptance:
+    alias: scene_first
+    config: acceptance/scene_first/task.yaml

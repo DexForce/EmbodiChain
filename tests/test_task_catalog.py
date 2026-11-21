@@ -86,7 +86,7 @@ def write(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
-def test_gaussian_pick_place_is_one_official_task_with_three_deployments() -> None:
+def test_pick_place_catalog_groups_tasks_and_preserves_deployment_lookups() -> None:
     root = (
         Path(__file__).resolve().parents[1]
         / "embodichain/extensions/tasks/configs/tasks"
@@ -95,7 +95,31 @@ def test_gaussian_pick_place_is_one_official_task_with_three_deployments() -> No
     task = catalog._select_task(
         tasks, "embodichain.extensions.tasks:gaussian_pick_place"
     )
-    assert task.task_path == ("manipulation", "gaussian_pick_place")
+    assert {
+        t.key for t in tasks if t.task_path[:-1] == ("manipulation", "pick_place")
+    } == {
+        "gaussian_pick_place",
+        "repeated_pick_place",
+        "workspace_pose_pick_place",
+    }
+    acceptance = catalog._select_task(tasks, "scene_first")
+    assert acceptance.key == "workspace_pose_pick_place"
+    assert acceptance.default_deployment == "scene_first_acceptance"
+    repeated = catalog._select_task(tasks, "repeated_pick_place")
+    for key in (
+        "rubiks_cube_pick_place",
+        "embodichain.extensions.tasks:rubiks_cube_pick_place",
+    ):
+        alias = catalog._select_task(tasks, key)
+        assert alias.qualified_key == repeated.qualified_key
+        assert alias.default_deployment == "ur5_rubiks_cube"
+        (rubiks,) = alias.deployments
+        assert rubiks in repeated.deployments
+        assert rubiks.env_id == "TaskProgramRubiksCubePickPlace-v1"
+        assert (
+            rubiks.resource
+            == root / "manipulation/rubiks_cube_pick_place/task.ur5.yaml"
+        )
     assert task.default_deployment == "office"
     assert {deployment.name: deployment.env_id for deployment in task.deployments} == {
         "office": "FrankaGSPickPlace-Office-v1",
@@ -366,6 +390,28 @@ def test_official_catalogs_resolve_real_deployments() -> None:
         for deployment in task.deployments:
             if deployment.config_ref:
                 assert deployment.resource.is_file()
+
+
+def test_official_portfolio_keeps_deployment_purposes_and_evidence_separate() -> None:
+    root = (
+        Path(__file__).resolve().parents[1]
+        / "embodichain/extensions/tasks/configs/tasks"
+    )
+    tasks = catalog._load_catalog({"embodichain.extensions.tasks": root})
+    assert all(
+        d.purpose in catalog._PURPOSES for task in tasks for d in task.deployments
+    )
+    research = catalog._portfolio_view(tasks, "research", False)
+    stack = catalog._select_task(research, "stack_blocks_two")
+    assert [d.env_id for d in stack.deployments] == ["StackBlocksTwoPolicy-v1"]
+    featured = catalog._portfolio_view(tasks, None, True)
+    drawer = catalog._select_task(featured, "drawer_storage")
+    assert drawer.default_deployment == "ur5"
+    assert drawer.deployments[0].validation["attempts"] == 10
+    assert all(task.key != "cart_pole" for task in featured)
+    assert (
+        catalog._select_task(tasks, "cart_pole").deployments[0].purpose == "reference"
+    )
 
 
 def test_offline_gallery_explains_runtime_capability_limit(

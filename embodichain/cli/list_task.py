@@ -30,6 +30,8 @@ from prettytable import PrettyTable, TableStyle
 
 from embodichain.cli._task_catalog import (
     _CAPABILITY_ORDER,
+    _PURPOSES,
+    _portfolio_view,
     _TASK_PROGRAM,
     _HANDWRITTEN_DEMO,
     _RL,
@@ -184,10 +186,24 @@ def main(argv: Sequence[str] | None = None) -> None:
         metavar="PATH",
         help="Write a static HTML task gallery.",
     )
+    display = parser.add_mutually_exclusive_group()
+    display.add_argument(
+        "--featured",
+        action="store_true",
+        help="Show selected starting deployments grouped by purpose.",
+    )
+    display.add_argument(
+        "--all",
+        action="store_true",
+        help="Include the full inventory, including in the HTML gallery.",
+    )
+    parser.add_argument(
+        "--purpose", choices=_PURPOSES, help="Filter deployments by intended workflow."
+    )
     _add_source_argument(parser)
     args = parser.parse_args(argv)
     try:
-        if not args.config_root and not args.export_html:
+        if not (args.config_root or args.export_html or args.purpose or args.featured):
             from embodichain.lab.gym.utils.registration import discover_task_packages
 
             discover_task_packages()
@@ -201,6 +217,15 @@ def main(argv: Sequence[str] | None = None) -> None:
                     for task in tasks
                     if task.task_path[:-1][: len(category)] == category
                 ]
+            curated_gallery = (
+                args.export_html
+                and not (args.all or args.category or args.purpose)
+                and any(d.featured for task in tasks for d in task.deployments)
+            )
+            if args.featured or args.purpose or curated_gallery:
+                tasks = _portfolio_view(
+                    tasks, args.purpose, bool(args.featured or curated_gallery)
+                )
             if args.export_html:
                 args.export_html.parent.mkdir(parents=True, exist_ok=True)
                 args.export_html.write_text(
@@ -209,7 +234,9 @@ def main(argv: Sequence[str] | None = None) -> None:
                 )
                 print(f"Exported task gallery: {args.export_html}")
             entries = _sort_entries(_catalog_entries(tasks).values())
-        if args.category:
+        if args.category and not (
+            args.config_root or args.export_html or args.purpose or args.featured
+        ):
             category = tuple(args.category.strip("/").split("/"))
             entries = [
                 entry
