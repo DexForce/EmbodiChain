@@ -40,7 +40,7 @@ pytestmark = pytest.mark.no_sim
 def _route_geometry():
     path = (
         Path(__file__).resolve().parents[4]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/cable/route_the_cable/task_program/integration.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/cable/route_the_cable/task_program/integration.yaml"
     )
     return yaml.safe_load(path.read_text())["runtime_services"]["cable_material"][
         "geometry"
@@ -56,7 +56,7 @@ def measure_route(state, lengths, hands, origins):
 @pytest.fixture(autouse=True)
 def local_yam_config_asset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Keep configuration tests independent of external model publication."""
-    from embodichain_robots.i2rt.yam import cfg as yam_i2rt
+    from embodichain.extensions.robots.i2rt.yam import cfg as yam_i2rt
 
     robot = ET.Element("robot", name="yam_config_fixture")
     ET.SubElement(robot, "link", name="base_link")
@@ -96,7 +96,7 @@ def local_yam_config_asset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> P
 def test_route_deployment_composes_registered_robot_cable_and_board():
     p = (
         Path(__file__).resolve().parents[4]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/cable/route_the_cable/task.yam.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/cable/route_the_cable/task.yam.yaml"
     )
     cfg = config_to_cfg(yaml.safe_load(p.read_text()), source_path=p)
     assert cfg.robot.root_props.newton_gravity_compensation == 1.0
@@ -165,7 +165,7 @@ def test_route_viser_launcher_keeps_expert_deployment_read_only():
 
     path = (
         Path(__file__).resolve().parents[4]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/cable/route_the_cable/task.yam.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/cable/route_the_cable/task.yam.yaml"
     )
     parser = argparse.ArgumentParser()
     add_env_launcher_args_to_parser(parser, require_gym_config=True)
@@ -229,7 +229,7 @@ def test_cylinder_uses_native_collision_geometry():
 def test_cable_deployment_rejects_duplicate_component_ownership():
     p = (
         Path(__file__).resolve().parents[4]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/cable/route_the_cable/task.yam.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/cable/route_the_cable/task.yam.yaml"
     )
     data = yaml.safe_load(p.read_text())
     data["usd_scene"] = {}
@@ -332,7 +332,7 @@ def test_reference_metrics_reject_invalid_or_incomplete_observations(invalid):
 def test_contact_penetration_uses_the_configured_native_back_wall():
     p = (
         Path(__file__).resolve().parents[4]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/cable/route_the_cable/task.yam.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/cable/route_the_cable/task.yam.yaml"
     )
     cfg = config_to_cfg(yaml.safe_load(p.read_text()), source_path=p)
     wall = next(obj for obj in cfg.background if obj.uid == "port_back")
@@ -350,7 +350,7 @@ def test_contact_penetration_uses_the_configured_native_back_wall():
 def test_unknown_cable_fields_are_rejected_by_production_loader(tmp_path):
     p = (
         Path(__file__).resolve().parents[4]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/cable/route_the_cable/task.yam.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/cable/route_the_cable/task.yam.yaml"
     )
     data = yaml.safe_load(p.read_text())
     physical = yaml.safe_load((p.parent / "env.yaml").read_text())

@@ -61,7 +61,7 @@ from embodichain.utils.utility import load_config
 __all__ = ["main"]
 
 TASK = resolve_config_path(
-    "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
+    "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
 )
 
 

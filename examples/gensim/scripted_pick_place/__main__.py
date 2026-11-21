@@ -115,7 +115,7 @@ def _worker(output: Path) -> int:
         "instruction": "Put the cube on the table",
         "output": "run",
         "runtime": "runtime.yaml",
-        "execution_policy": "extensions/embodichain_tasks/configs/components/execution_policies/motion_gen_verified.yaml",
+        "execution_policy": "embodichain/extensions/tasks/configs/components/execution_policies/motion_gen_verified.yaml",
         "scene": "scene",
         "task_id": "gensim_task",
         "headless": True,

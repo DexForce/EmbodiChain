@@ -26,6 +26,36 @@ from typing import Any
 __all__: list[str] = []
 
 
+def _fit_joint_residual(
+    reference, candidate, *, active, joint_limits, minimum_delta, checks
+):
+    """Bound a sampled residual without changing time, endpoints or validators.
+
+    Try the original draw first, then at most eight halvings. No new random
+    draws or smaller-than-declared variants are admitted. Each materialized
+    candidate is checked in its actual storage dtype before it can leave here.
+    """
+    delta = candidate.positions - reference.positions
+    for refinement in range(9):
+        scale = 0.5**refinement
+        fitted = (
+            replace(candidate)
+            if refinement == 0
+            else replace(candidate, positions=reference.positions + scale * delta)
+        )
+        magnitude = float((fitted.positions - reference.positions).abs().max())
+        if magnitude < minimum_delta:
+            break
+        values = fitted.positions[:, active]
+        bounds = joint_limits[active]
+        if bool(((values < bounds[:, 0]) | (values > bounds[:, 1])).any()):
+            continue
+        result = checks(fitted)
+        if all(check.accepted for check in result):
+            return fitted, result, scale
+    return None
+
+
 @dataclass(frozen=True)
 class TaskProgramNativeExpansionRecord:
     """Owned measured-plan expansion provenance and hashed numeric attachment."""
@@ -60,6 +90,8 @@ class _NativePlanExpansion:
         revision: str,
         output: Path | None = None,
         episode_id: int = 0,
+        affordance_branch: int | None = None,
+        preferred_local_poses: tuple[tuple[str, tuple[float, ...]], ...] = (),
     ):
         if operator not in (
             "object_pose",
@@ -77,6 +109,18 @@ class _NativePlanExpansion:
         self.scene_case, self.revision = scene_case, revision
         self.output = output
         self.episode_id = episode_id
+        if affordance_branch is not None and (
+            operator != "affordance"
+            or type(affordance_branch) is not int
+            or not 1 <= affordance_branch < self.options["affordance"]["branches"]
+        ):
+            raise ValueError(
+                "affordance_branch must select a non-nominal configured branch"
+            )
+        self.affordance_branch = affordance_branch
+        if preferred_local_poses and operator != "affordance":
+            raise ValueError("preferred_local_poses requires the affordance operator")
+        self.preferred_local_poses = preferred_local_poses
         self._records: list[TaskProgramNativeExpansionRecord] = []
 
     @property
@@ -126,7 +170,12 @@ class _NativePlanExpansion:
                 count=settings["branches"],
                 seed=self.seed,
                 episode_id=self.episode_id,
-                branch_override=1 + self.episode_id % (settings["branches"] - 1),
+                preferred_local_poses=self.preferred_local_poses,
+                branch_override=(
+                    self.affordance_branch
+                    if self.affordance_branch is not None
+                    else 1 + self.episode_id % (settings["branches"] - 1)
+                ),
             ),
         )
 
@@ -234,9 +283,50 @@ class _NativePlanExpansion:
             )
             for p in template.phases
         )
+        bridge = plan.diagnostics.metadata.get("reference_bridge")
+        if bridge:
+            from embodichain.lab.sim.atomic_skills._expansion_phases import (
+                _canonical_samples,
+                _free_joint_indices,
+            )
+
+            trajectory = plan.joint_trajectory
+            _, _, _, canonical = _canonical_samples(
+                trajectory.positions[0], trajectory.dt[0]
+            )
+            # Engine protects raw [0, prefix+3). Operators edit strictly inside
+            # phase endpoints, so retain the corresponding last canonical index.
+            last_raw = min(
+                int(bridge["prefix_samples"]) + 2, trajectory.waypoint_count - 1
+            )
+            protected_end = int(canonical[last_raw])
+            phases = tuple(
+                (
+                    (
+                        replace(p, start_index=max(p.start_index, protected_end))
+                        if p.stop_index - max(p.start_index, protected_end) >= 3
+                        else replace(p, allowed_operators=())
+                    )
+                    if p.allowed_operators
+                    else p
+                )
+                for p in phases
+            )
+            active_ids = _free_joint_indices(
+                template.positions, phases, template.controlled_joint_indices
+            )
+            if not active_ids:
+                return plan
+            template = replace(template, controlled_joint_indices=active_ids)
         if not any(p.allowed_operators for p in phases):
             return plan
-        template = replace(template, phases=phases)
+        template = replace(
+            template,
+            phases=phases,
+            allowed_operators=tuple(
+                dict.fromkeys(op for p in phases for op in p.allowed_operators)
+            ),
+        )
         limits = engine.robot.get_qpos_limits().detach().cpu()
         if limits.ndim == 3:
             limits = limits[int(context.env_ids[0])]
@@ -285,35 +375,72 @@ class _NativePlanExpansion:
                 f"{reference_checks}"
             )
         reason = "no distinct candidate"
-        for attempt in range(self.options["max_proposals"]):
-            arguments = dict(
-                joint_limits=limits,
-                normalized_scale=self.options["joint_offset_scale"],
-                generator=generator,
-            )
-            try:
-                if self.operator == "joint_residual":
-                    candidate = joint_residual(template, **arguments)
-                elif self.operator == "via_points":
-                    candidate = via_points(
-                        template, via_count=self.options["via_count"], **arguments
-                    )
-                elif self.operator == "nullspace_residual":
-                    candidate = nullspace_residual(
-                        template, task_jacobians=jacobians, **arguments
-                    )
-                else:
-                    raise ValueError(f"Unsupported operator: {self.operator}")
-            except ProposalRejected as exc:
-                reason = str(exc)
-                continue
-            delta = float((candidate.positions - template.positions).abs().max())
-            if delta < self.options["minimum_joint_delta"]:
-                continue
-            checks = motion_checks(candidate)
-            if any(not check.accepted for check in checks):
-                reason = f"edited-phase motion limits: {checks}"
-                continue
+        best_rejected = None
+        can_scale_residual = self.operator in ("joint_residual", "via_points")
+        budget = self.options["max_proposals"]
+        for iteration in range(budget + 1):
+            residual_scale = 1.0
+            if iteration == budget:
+                # Preserve the existing random draws and full-amplitude preference.
+                # Only budget exhaustion activates this bounded deterministic fallback.
+                if not can_scale_residual or best_rejected is None:
+                    break
+                _, attempt, sampled, raw_checks = best_rejected
+                fitted = _fit_joint_residual(
+                    template,
+                    sampled,
+                    active=active,
+                    joint_limits=limits,
+                    minimum_delta=self.options["minimum_joint_delta"],
+                    checks=motion_checks,
+                )
+                if fitted is None:
+                    reason = f"best motion rejection at proposal {attempt}: {raw_checks}; bounded refinement cannot meet unchanged limits and minimum delta"
+                    break
+                candidate, checks, residual_scale = fitted
+                sampled_positions = sampled.positions
+                delta = float((candidate.positions - template.positions).abs().max())
+            else:
+                attempt = iteration
+                arguments = dict(
+                    joint_limits=limits,
+                    normalized_scale=self.options["joint_offset_scale"],
+                    generator=generator,
+                )
+                try:
+                    if self.operator == "joint_residual":
+                        candidate = joint_residual(template, **arguments)
+                    elif self.operator == "via_points":
+                        candidate = via_points(
+                            template, via_count=self.options["via_count"], **arguments
+                        )
+                    elif self.operator == "nullspace_residual":
+                        candidate = nullspace_residual(
+                            template, task_jacobians=jacobians, **arguments
+                        )
+                    else:
+                        raise ValueError(f"Unsupported operator: {self.operator}")
+                except ProposalRejected as exc:
+                    reason = str(exc)
+                    continue
+                delta = float((candidate.positions - template.positions).abs().max())
+                if delta < self.options["minimum_joint_delta"]:
+                    continue
+                sampled_positions = candidate.positions
+                checks = motion_checks(candidate)
+                raw_checks = checks
+                if any(not check.accepted for check in checks):
+                    reason = f"edited-phase motion limits: {checks}"
+                    if can_scale_residual:
+                        score = max(
+                            value
+                            for report in checks
+                            for check in report.checks
+                            for value in check.metrics.values()
+                        )
+                        if best_rejected is None or score < best_rejected[0]:
+                            best_rejected = (score, attempt, candidate, checks)
+                    continue
             fk = self._check_fk(template, candidate, kinematics)
             if self.operator == "nullspace_residual" and (
                 fk["max_translation_m"]
@@ -340,6 +467,11 @@ class _NativePlanExpansion:
                 "task_rows": self.options["nullspace_task_rows"],
                 "max_joint_delta": delta,
                 "proposal": attempt,
+                "residual_scale": residual_scale,
+                "raw_proposal_count": min(iteration + 1, budget),
+                "raw_motion_checks": [
+                    dict(c.metrics) for r in raw_checks for c in r.checks
+                ],
                 "same_time_grid": True,
                 "motion_validation_scope": "edited_phases_and_boundary_stencils",
                 "motion": {
@@ -370,6 +502,11 @@ class _NativePlanExpansion:
                         candidate=candidate.positions.numpy(),
                         dt=template.dt.numpy(),
                         editable=editable.numpy(),
+                        **(
+                            {"raw_candidate": sampled_positions.numpy()}
+                            if residual_scale < 1
+                            else {}
+                        ),
                     )
                 evidence["plan_artifact"] = {
                     "path": str(path),

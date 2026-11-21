@@ -9,8 +9,8 @@ Native preparation is an explicit opt-in through `embodichain.toolkits.assembly.
 |---|---|
 | Pinned mjfit provider, manifests, sampling and USD format export | `embodichain/toolkits/assembly/` |
 | Native compound configs and actual hinge articulations | `embodichain/toolkits/assembly/native.py` |
-| Robot-held mating geometry recipes | `extensions/embodichain_tasks/embodichain_tasks/manipulation/assembly/assets.py` |
-| Reference execution, analytic probes and measurement | `extensions/embodichain_benchmarks/assembly/` |
+| Robot-held mating geometry recipes | `embodichain/extensions/tasks/manipulation/assembly/assets.py` |
+| Reference execution, analytic probes and measurement | `embodichain/extensions/benchmarks/assembly/` |
 
 `build_assembly` produces source body-local geometry, independent visual parts,
 mass/COM/inertia, world attachments and source contact metadata. Loading a
@@ -100,7 +100,7 @@ the generated collision geometry's physical scale. Nut advancement uses scaled
 pitch for thresholds and scaled pitch times thread starts for lead.
 No import-owned task registration aliases or environment-method replacements are used.
 
-`embodichain_benchmarks.assembly.robot_reference` prepares the historical public Rizon/Robotiq approximation
+`embodichain.extensions.benchmarks.assembly.robot_reference` prepares the historical public Rizon/Robotiq approximation
 from pinned source assets, with explicit gripper approximation and fidelity
 metadata. Preparation is optional and runs before config loading; replay uses
 frozen resources. Prepared models and their manifest/licenses live under the
@@ -108,7 +108,7 @@ data root's `generated/assembly/` tree, outside source-cache `extract/` repair.
 Source validation never renames a prepared model seen by concurrent readers. Default arm/tool assembly belongs to task embodiment YAML,
 not this converter or a combined robot preset.
 
-`embodichain_benchmarks.assembly.precision` checks geometry/USD ownership and runs passive source/native
+`embodichain.extensions.benchmarks.assembly.precision` checks geometry/USD ownership and runs passive source/native
 comparisons. MuJoCo Warp references declare their constants protocol through
 `PrecisionRunCfg.warp_reference_initialization`: `cpu_compiled` preserves the
 imported reference baseline; `warp_recomputed` explicitly calls public
@@ -137,7 +137,7 @@ contact/algorithm profile. Report grouping uses requested family/CPU identity,
 including unsuccessful cells; actual dispatch is shown independently. Every
 matrix cell owns its preparation directory.
 
-`embodichain_benchmarks.assembly.probes` owns independent constrained circle/square clearance oracles.
+`embodichain.extensions.benchmarks.assembly.probes` owns independent constrained circle/square clearance oracles.
 Many-pegs endpoint seating and gear ratios do not replace those independent
 measurements. Constrained `integration_substeps` defaults to four, resolving
 stiff float32 contacts with a finer interval on every reference/native route.

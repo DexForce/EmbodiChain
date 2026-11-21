@@ -26,11 +26,11 @@ import sys
 import pytest
 
 from embodichain.data import get_data_path
-from embodichain_robots.i2rt.yam.assets import YamI2rt
+from embodichain.extensions.robots.i2rt.yam.assets import YamI2rt
 from embodichain.data import dataset
 from embodichain.data.download import find_asset_class, get_registry
 
-robot_assets = importlib.import_module("embodichain_robots.i2rt.yam.assets")
+robot_assets = importlib.import_module("embodichain.extensions.robots.i2rt.yam.assets")
 
 pytestmark = pytest.mark.no_sim
 
@@ -86,7 +86,7 @@ def test_asset_import_does_not_load_robot_configuration() -> None:
         [
             sys.executable,
             "-c",
-            "import sys; import embodichain_robots.i2rt.yam.assets; assert 'embodichain_robots.i2rt.yam.cfg' not in sys.modules",
+            "import sys; import embodichain.extensions.robots.i2rt.yam.assets; assert 'embodichain.extensions.robots.i2rt.yam.cfg' not in sys.modules",
         ],
         capture_output=True,
         text=True,

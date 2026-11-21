@@ -2,7 +2,7 @@ AgileX
 ======
 
 Official AgileX robot configurations live in the
-``embodichain_robots.agilex`` manufacturer namespace.
+``embodichain.extensions.robots.agilex`` manufacturer namespace.
 
 .. list-table::
    :class: robot-catalog

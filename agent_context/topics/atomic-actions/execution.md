@@ -222,7 +222,7 @@ configured minimum cycle up to an advertised clock quantum before sleeping.
 The benchmark extension's `scenarios/_replay_diagnostics.py` and
 `atomic_replay.py` collect optional Atomic replay evidence without changing
 stage scoring or controller commands. The
-[benchmark README](../../../extensions/embodichain_benchmarks/motion_generation/README.md#physical-replay-diagnostics)
+[benchmark README](../../../embodichain/extensions/benchmarks/motion_generation/README.md#physical-replay-diagnostics)
 owns the configuration, recorded fields and timing interpretation.
 
 ## Planning budgets and adoption
@@ -255,7 +255,7 @@ The runner cancels/holds safely before its once-only abort notification.
 | PickUp / AxisAlign | Normalize approach directions per row and preserve each frozen realization; explicit grasp-axis approach uses realized TCP +Z. Alignment twist/offset do not prove feasibility. |
 | MoveHeldObject | Keep the verified grasp while consuming ordered object poses; optional final yaw is the only freed pose component. An explicit object ID must match and reports attachment; omission retains effectless transport. |
 | Slide | An explicit joint target is absolute, with calibrated axis sign and same-timestamp state. Satisfied rows hold, invalid observations fail, and mixed active directions reject. Fixed-distance mode remains separate and open-loop. |
-| Pour | A supplied receiver/source-mouth target determines compensated geometry; omission retains local-axis mode. `PourOptions.rotation_duration` sets an optional minimum for each tilt/return leg. Local-axis mode stretches each row's native timing before control-grid resampling and batch padding, retaining planning policy and motion limits. Hosts measure mouth alignment/height during tilt and physical outcome. |
+| Pour | A supplied receiver/source-mouth target determines compensated geometry; omission retains local-axis mode. An optional `reference_object_pose` anchors local-axis tilt and return to an authored upright object pose instead of propagating a preceding endpoint error; it is exclusive with a receiver target and retains the actual start joints. `PourOptions.rotation_duration` sets an optional minimum for each tilt/return leg. Local-axis mode stretches each row's native timing before control-grid resampling and batch padding, retaining planning policy and motion limits. Hosts measure mouth alignment/height during tilt and physical outcome. |
 | Held transport / Place / Pour | Continue the bound closing command until release; a contact-blocked measured aperture does not maintain closing effort. |
 | ExecuteDemoSkill | Internal demonstration events do not introduce independent recovery boundaries. |
 
@@ -278,3 +278,29 @@ unchanged. HandOver can explicitly retract
 sampled grasp TCPs through `grasp_retract_distance` before deriving transport
 and handover targets. The offset is a planning declaration; acquisition,
 retention and final acceptance still require the original physical evidence.
+
+## Tolerance-bounded invocation handoff
+
+`TrackingPolicy.boundary_stop` adds a joint-motion stop gate without replacing
+timed/feedback terminal acceptance or effect verification. It retains the exact
+terminal command, including hand targets, until two distinct observations satisfy
+the configured target error and control-grid measured-position speed tolerances.
+Rows that are ready retain their terminal arm/hand targets while eligible peers
+wait at the batch barrier; failed rows remain masked out.
+Native qvel remains a finite-data check and is logged separately; its post-substep
+value is not substituted for the control-grid derivative. Invalid rows and physical
+timeouts fail closed without keeping failed rows in another terminal gate's mask.
+The state resets on plan installation/recovery; snapshots preserve independent
+ownership. This is not strict reference continuity, C1/C2 blending or a zero
+tracking-error guarantee. `boundary_diagnostic` events identify tolerances, elapsed
+physical time and per-row error/speed/readiness.
+
+`boundary_reference_bridge` optionally separates controller-reference continuity
+from measured state. Native free entry phases can receive a bounded rest-to-rest
+prefix from captured drive targets to their original first sample. The original
+phase name, held/contact guards and suffix remain; lengths/monitor indices shift
+together. Prefix and join stencils are protected from expansion and retiming;
+rebuilding cannot prepend twice. Projected observations advance owned references
+without overwriting measured evidence. External nominal/unsupported phases retain
+existing behavior with explicit unavailable diagnostics. Physical qualification
+remains required after collision certificates are invalidated.

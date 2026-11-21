@@ -61,9 +61,14 @@ def test_qualification_requires_installed_code_and_resources(
     metadata.mkdir()
     (metadata / "METADATA").write_text("Name: embodichain\nVersion: 0.0.0\n")
     repo = tmp_path / "checkout"
-    for name in ("embodichain", "embodichain_tasks", "embodichain_robots"):
+    package_names = (
+        "embodichain",
+        "embodichain.extensions.tasks",
+        "embodichain.extensions.robots",
+    )
+    for name in package_names:
         for base in (site, repo):
-            package = base / name
+            package = base.joinpath(*name.split("."))
             package.mkdir(parents=True)
             source = (
                 "raise RuntimeError('source checkout imported')\n"
@@ -75,8 +80,7 @@ def test_qualification_requires_installed_code_and_resources(
     if installation == "wheel":
         (site / "embodichain/payload.txt").write_text("shipped")
     if installation == "editable":
-        for name in ("embodichain", "embodichain_tasks", "embodichain_robots"):
-            shutil.rmtree(site / name)
+        shutil.rmtree(site / "embodichain")
         (site / "editable.pth").write_text(str(repo) + "\n")
 
     (repo / "scripts").mkdir()
@@ -102,8 +106,7 @@ def test_qualification_requires_installed_code_and_resources(
         assert result == {
             "cases": 1,
             "imports": {
-                name: str(site / name)
-                for name in ("embodichain", "embodichain_tasks", "embodichain_robots")
+                name: str(site.joinpath(*name.split("."))) for name in package_names
             },
         }
     else:

@@ -6,14 +6,14 @@ WorldParticle predicts particle positions and velocities from the current
 state, total acceleration and fixed authored features/boundaries/topology.
 The family preserves the original frozen networks and published checkpoints
 for Fancy Fluid, Cloth on Ball, Duck forward deformation and Deep Fluid.
-Its [source provenance](https://github.com/DexForce/EmbodiChain/blob/main/extensions/embodichain_models/embodichain_models/dynamics/worldparticle/PROVENANCE.json)
+Its [source provenance](https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/models/dynamics/worldparticle/PROVENANCE.json)
 records the upstream revision and retained licenses, including the separate
 ToMe notice.
 
 | Owner | Responsibility |
 | --- | --- |
-| `embodichain_models.dynamics.worldparticle` | Frozen network, strict weights, feature normalization, topology and coordinate conversion |
-| `embodichain_solvers.physics.worldparticle.provider` | Native scene admission and the optional `worldparticle` Provider |
+| `embodichain.extensions.models.dynamics.worldparticle` | Frozen network, strict weights, feature normalization, topology and coordinate conversion |
+| `embodichain.extensions.solvers.physics.worldparticle.provider` | Native scene admission and the optional `worldparticle` Provider |
 | SDK `ParticleInferenceSolver` | Streams, native buffers, force-to-acceleration conversion, writes, reset and close |
 | `examples/learning/worldparticle` | Resource preparation, scene construction, demos and usage contracts |
 

@@ -5224,141 +5224,141 @@ embodichain.toolkits.urdf_assembly.urdf_assembly_manager
 
    URDFAssemblyManager
 
-embodichain_tasks.classic_control.cart_pole
---------------------------------------------
+embodichain.extensions.tasks.classic_control.cart_pole
+------------------------------------------------------
 
 Cart-pole environment registration under the task-first import path.
 
-.. currentmodule:: embodichain_tasks.classic_control.cart_pole
+.. currentmodule:: embodichain.extensions.tasks.classic_control.cart_pole
 
 .. autosummary::
 
    CartPoleEnv
 
-embodichain_tasks.classic_control.point_mass
----------------------------------------------
+embodichain.extensions.tasks.classic_control.point_mass
+-------------------------------------------------------
 
 Differentiable lightweight point-mass task and learning-environment registration.
 
-.. currentmodule:: embodichain_tasks.classic_control.point_mass
+.. currentmodule:: embodichain.extensions.tasks.classic_control.point_mass
 
 .. autosummary::
 
    PointMassEnv
 
-embodichain_tasks.configs
--------------------------
+embodichain.extensions.tasks.configs
+------------------------------------
 
-.. currentmodule:: embodichain_tasks.configs
+.. currentmodule:: embodichain.extensions.tasks.configs
 
 .. autosummary::
 
    get_config_path
 
-embodichain_tasks.locomotion.managers.actions
-----------------------------------------------
+embodichain.extensions.tasks.locomotion.managers.actions
+--------------------------------------------------------
 
 The reference position action combines a policy output with the next motion
 frame using the task's per-joint reference weights, then applies encoder bias.
 
-.. automodule:: embodichain_tasks.locomotion.managers.actions
+.. automodule:: embodichain.extensions.tasks.locomotion.managers.actions
    :members:
 
-embodichain_tasks.locomotion.tracking.g1_motion
------------------------------------------------
+embodichain.extensions.tasks.locomotion.tracking.g1_motion
+----------------------------------------------------------
 
 The G1 motion task connects reference data and differentiable tracking
 calculations to the simulator Gym loop. It owns frame progress, history,
 reference-state resets and terminal snapshots before automatic row resets.
 
-.. automodule:: embodichain_tasks.locomotion.tracking.g1_motion
+.. automodule:: embodichain.extensions.tasks.locomotion.tracking.g1_motion
    :members:
 
-embodichain_tasks.manipulation.cable.route_the_cable
-----------------------------------------------------
+embodichain.extensions.tasks.manipulation.cable.route_the_cable
+---------------------------------------------------------------
 
 Two-spool routing with observed material geometry and measured grasp-slip,
 penetration and end-insertion acceptance.
 
-.. currentmodule:: embodichain_tasks.manipulation.cable.route_the_cable
+.. currentmodule:: embodichain.extensions.tasks.manipulation.cable.route_the_cable
 
 .. autosummary::
 
    RouteTheCableEnv
    measure_route
 
-embodichain_tasks.manipulation.push_cube
-----------------------------------------
+embodichain.extensions.tasks.manipulation.push_cube
+---------------------------------------------------
 
-.. currentmodule:: embodichain_tasks.manipulation.push_cube
+.. currentmodule:: embodichain.extensions.tasks.manipulation.push_cube
 
 .. autosummary::
 
    PushCubeEnv
 
-embodichain_tasks.manipulation.repeated_pick_place
---------------------------------------------------
+embodichain.extensions.tasks.manipulation.repeated_pick_place
+-------------------------------------------------------------
 
 RLinf-facing repeated pick-and-place task registrations with explicit EEF and
 joint-position action variants.
 
-.. currentmodule:: embodichain_tasks.manipulation.repeated_pick_place
+.. currentmodule:: embodichain.extensions.tasks.manipulation.repeated_pick_place
 
 .. autosummary::
 
 
-embodichain_tasks.manipulation.tableware.blocks_ranking_size
-------------------------------------------------------------
+embodichain.extensions.tasks.manipulation.tableware.blocks_ranking_size
+-----------------------------------------------------------------------
 
-.. currentmodule:: embodichain_tasks.manipulation.tableware.blocks_ranking_size
+.. currentmodule:: embodichain.extensions.tasks.manipulation.tableware.blocks_ranking_size
 
 .. autosummary::
 
    BlocksRankingSizeEnv
 
-embodichain_tasks.manipulation.tableware.match_object_container
----------------------------------------------------------------
+embodichain.extensions.tasks.manipulation.tableware.match_object_container
+--------------------------------------------------------------------------
 
-.. currentmodule:: embodichain_tasks.manipulation.tableware.match_object_container
+.. currentmodule:: embodichain.extensions.tasks.manipulation.tableware.match_object_container
 
 .. autosummary::
 
    MatchObjectContainerEnv
 
-embodichain_tasks.manipulation.tableware.place_object_drawer
-------------------------------------------------------------
+embodichain.extensions.tasks.manipulation.tableware.place_object_drawer
+-----------------------------------------------------------------------
 
-.. currentmodule:: embodichain_tasks.manipulation.tableware.place_object_drawer
+.. currentmodule:: embodichain.extensions.tasks.manipulation.tableware.place_object_drawer
 
 .. autosummary::
 
    PlaceObjectDrawerEnv
 
-embodichain_tasks.manipulation.tableware.stack_cups
----------------------------------------------------
+embodichain.extensions.tasks.manipulation.tableware.stack_cups
+--------------------------------------------------------------
 
-.. currentmodule:: embodichain_tasks.manipulation.tableware.stack_cups
+.. currentmodule:: embodichain.extensions.tasks.manipulation.tableware.stack_cups
 
 .. autosummary::
 
    StackCupsEnv
 
-embodichain_tasks.special.franka_reach_apg
--------------------------------------------
+embodichain.extensions.tasks.special.franka_reach_apg
+-----------------------------------------------------
 
 Differentiable Franka FR3 reach environment that demonstrates the explicit
 kinematics route used by analytic policy-gradient experiments.
 
-.. currentmodule:: embodichain_tasks.special.franka_reach_apg
+.. currentmodule:: embodichain.extensions.tasks.special.franka_reach_apg
 
 .. autosummary::
 
    FrankaReachApgEnv
 
-embodichain_tasks.utils.importer
---------------------------------
+embodichain.extensions.tasks.utils.importer
+-------------------------------------------
 
-.. currentmodule:: embodichain_tasks.utils.importer
+.. currentmodule:: embodichain.extensions.tasks.utils.importer
 
 .. autosummary::
 
@@ -5723,12 +5723,12 @@ Self-contained body-local geometry, joint attachment and mass-property records w
 
 
 
-embodichain_benchmarks.assembly.precision
------------------------------------------
+embodichain.extensions.benchmarks.assembly.precision
+----------------------------------------------------
 
 Independent USD geometry/mass acceptance and passive source/native simulation measurements. Missing overflow accounting remains unverified rather than a precision certification. ``PrecisionRunCfg.newton_solver`` explicitly selects MuJoCo Warp or DexUni; ``solver`` retains the MuJoCo algorithm. Native results retain the prepared family and actual SDK dispatch.
 
-.. currentmodule:: embodichain_benchmarks.assembly.precision
+.. currentmodule:: embodichain.extensions.benchmarks.assembly.precision
 
 .. autosummary::
 
@@ -5739,14 +5739,14 @@ Independent USD geometry/mass acceptance and passive source/native simulation me
 
 
 
-embodichain_benchmarks.assembly.probes
---------------------------------------
+embodichain.extensions.benchmarks.assembly.probes
+-------------------------------------------------
 
 Circle/square analytic clearance oracles, state-controlled S0 contact scans and
 real slide/hinge S2-S4 equilibrium probes. Native and source runners preserve
 the same force/torque and geometry; unmeasured health limits qualification.
 
-.. currentmodule:: embodichain_benchmarks.assembly.probes
+.. currentmodule:: embodichain.extensions.benchmarks.assembly.probes
 
 .. autosummary::
 
@@ -5770,12 +5770,12 @@ existing locomotion configuration name while implementations move into a package
 
 
    assembly_robot_reference
-embodichain_tasks.manipulation.assembly.assets
-----------------------------------------------
+embodichain.extensions.tasks.manipulation.assembly.assets
+---------------------------------------------------------
 
 Public-generator composition of held pegs, perforated gears and nuts with physically mating fixtures. Task topology changes are recorded in asset provenance.
 
-.. currentmodule:: embodichain_tasks.manipulation.assembly.assets
+.. currentmodule:: embodichain.extensions.tasks.manipulation.assembly.assets
 
 .. autosummary::
 
@@ -6429,12 +6429,12 @@ Robot, reset-state and frozen-terrain archives use the standard asset cache.
    :members:
 
 
-embodichain_tasks.locomotion.velocity.g1_rough
-----------------------------------------------
+embodichain.extensions.tasks.locomotion.velocity.g1_rough
+---------------------------------------------------------
 
 The G1 Rough environment registers the 37-action rough-terrain locomotion task with terrain height observations.
 
-.. currentmodule:: embodichain_tasks.locomotion.velocity.g1_rough
+.. currentmodule:: embodichain.extensions.tasks.locomotion.velocity.g1_rough
 
 .. autosummary::
 
@@ -6444,12 +6444,12 @@ The G1 Rough environment registers the 37-action rough-terrain locomotion task w
    :members:
 
 
-embodichain_tasks.locomotion.velocity.rough
--------------------------------------------
+embodichain.extensions.tasks.locomotion.velocity.rough
+------------------------------------------------------
 
 Load rough-terrain velocity task configurations from a supplied scene bundle. The loader validates robot joint order, shared initial states and terrain inputs.
 
-.. currentmodule:: embodichain_tasks.locomotion.velocity.rough
+.. currentmodule:: embodichain.extensions.tasks.locomotion.velocity.rough
 
 .. autosummary::
 
@@ -6458,12 +6458,12 @@ Load rough-terrain velocity task configurations from a supplied scene bundle. Th
 .. autofunction:: load_rough_env_cfg
 
 
-embodichain_tasks.locomotion.velocity.rough.config
---------------------------------------------------
+embodichain.extensions.tasks.locomotion.velocity.rough.config
+-------------------------------------------------------------
 
 Packaged task definitions retain policy joint order, observation dimensions and fixed physics/control periods.
 
-.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.config
+.. currentmodule:: embodichain.extensions.tasks.locomotion.velocity.rough.config
 
 .. autosummary::
 
@@ -6476,12 +6476,12 @@ Packaged task definitions retain policy joint order, observation dimensions and 
 .. autofunction:: load_config
 
 
-embodichain_tasks.locomotion.velocity.rough.curriculum
-------------------------------------------------------
+embodichain.extensions.tasks.locomotion.velocity.rough.curriculum
+-----------------------------------------------------------------
 
 Terrain assignment and selected-row curriculum updates use terminal positions and commands before resetting each episode.
 
-.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.curriculum
+.. currentmodule:: embodichain.extensions.tasks.locomotion.velocity.rough.curriculum
 
 .. autosummary::
 
@@ -6491,12 +6491,12 @@ Terrain assignment and selected-row curriculum updates use terminal positions an
    :members:
 
 
-embodichain_tasks.locomotion.velocity.rough.environment
--------------------------------------------------------
+embodichain.extensions.tasks.locomotion.velocity.rough.environment
+------------------------------------------------------------------
 
 Resolve the rough-terrain deployment against exported robot and terrain assets, with optional training randomization and contact generation selection.
 
-.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.environment
+.. currentmodule:: embodichain.extensions.tasks.locomotion.velocity.rough.environment
 
 .. autosummary::
 
@@ -6505,12 +6505,12 @@ Resolve the rough-terrain deployment against exported robot and terrain assets, 
 .. autofunction:: load_rough_env_cfg
 
 
-embodichain_tasks.locomotion.velocity.rough.mdp
------------------------------------------------
+embodichain.extensions.tasks.locomotion.velocity.rough.mdp
+----------------------------------------------------------
 
 Pure Torch state, action, observation, reward and termination functions share the rough-terrain task definitions. Device constants cache fixed values and reward joint selectors.
 
-.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.mdp
+.. currentmodule:: embodichain.extensions.tasks.locomotion.velocity.rough.mdp
 
 .. autosummary::
 
@@ -6549,12 +6549,12 @@ Pure Torch state, action, observation, reward and termination functions share th
 .. autofunction:: update_contact_times
 
 
-embodichain_tasks.locomotion.velocity.rough.runtime
----------------------------------------------------
+embodichain.extensions.tasks.locomotion.velocity.rough.runtime
+--------------------------------------------------------------
 
 The runtime adapts the shared task definitions to EmbodiChain managers, state and sensors. Explicit motors retain the configured outer physics cadence; implicit torque telemetry is sampled before the final physical step.
 
-.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.runtime
+.. currentmodule:: embodichain.extensions.tasks.locomotion.velocity.rough.runtime
 
 .. autosummary::
 
@@ -6564,12 +6564,12 @@ The runtime adapts the shared task definitions to EmbodiChain managers, state an
    :members:
 
 
-embodichain_tasks.locomotion.velocity.rough.terrain
----------------------------------------------------
+embodichain.extensions.tasks.locomotion.velocity.rough.terrain
+--------------------------------------------------------------
 
 The scanner evaluates 187 torso-relative terrain rays and replays a fixed-buffer CUDA graph when the geometry and buffers remain unchanged.
 
-.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.terrain
+.. currentmodule:: embodichain.extensions.tasks.locomotion.velocity.rough.terrain
 
 .. autosummary::
 
@@ -6579,12 +6579,12 @@ The scanner evaluates 187 torso-relative terrain rays and replays a fixed-buffer
    :members:
 
 
-embodichain_tasks.manipulation.dexterous
-----------------------------------------
+embodichain.extensions.tasks.manipulation.dexterous
+---------------------------------------------------
 
 USD-native Shadow Hand and LEAP Hand dexterous manipulation RL environments built on ``EmbodiedEnv``.
 
-.. currentmodule:: embodichain_tasks.manipulation.dexterous
+.. currentmodule:: embodichain.extensions.tasks.manipulation.dexterous
 
 .. autosummary::
 
@@ -6595,12 +6595,12 @@ USD-native Shadow Hand and LEAP Hand dexterous manipulation RL environments buil
    ShadowPenFixedEnv
 
 
-embodichain_tasks.manipulation.dexterous.leap_cube_face_turn
-------------------------------------------------------------
+embodichain.extensions.tasks.manipulation.dexterous.leap_cube_face_turn
+-----------------------------------------------------------------------
 
 LEAP Hand top-layer articulated cube face-turning environment (``LeapCubeFaceTurnRL-v1``).
 
-.. currentmodule:: embodichain_tasks.manipulation.dexterous.leap_cube_face_turn
+.. currentmodule:: embodichain.extensions.tasks.manipulation.dexterous.leap_cube_face_turn
 
 .. autosummary::
 
@@ -6610,12 +6610,12 @@ LEAP Hand top-layer articulated cube face-turning environment (``LeapCubeFaceTur
    :members:
 
 
-embodichain_tasks.manipulation.dexterous.leap_cube_reorient
------------------------------------------------------------
+embodichain.extensions.tasks.manipulation.dexterous.leap_cube_reorient
+----------------------------------------------------------------------
 
 LEAP Hand in-hand cube 3D orientation tracking environment (``LeapCubeReorientRL-v1``).
 
-.. currentmodule:: embodichain_tasks.manipulation.dexterous.leap_cube_reorient
+.. currentmodule:: embodichain.extensions.tasks.manipulation.dexterous.leap_cube_reorient
 
 .. autosummary::
 
@@ -6625,12 +6625,12 @@ LEAP Hand in-hand cube 3D orientation tracking environment (``LeapCubeReorientRL
    :members:
 
 
-embodichain_tasks.manipulation.dexterous.leap_cube_rotate_z
------------------------------------------------------------
+embodichain.extensions.tasks.manipulation.dexterous.leap_cube_rotate_z
+----------------------------------------------------------------------
 
 LEAP Hand continuous cube Z-axis rotation environment (``LeapCubeRotateZAxisRL-v1``).
 
-.. currentmodule:: embodichain_tasks.manipulation.dexterous.leap_cube_rotate_z
+.. currentmodule:: embodichain.extensions.tasks.manipulation.dexterous.leap_cube_rotate_z
 
 .. autosummary::
 
@@ -6640,12 +6640,12 @@ LEAP Hand continuous cube Z-axis rotation environment (``LeapCubeRotateZAxisRL-v
    :members:
 
 
-embodichain_tasks.manipulation.dexterous.shadow_pen_continuous
---------------------------------------------------------------
+embodichain.extensions.tasks.manipulation.dexterous.shadow_pen_continuous
+-------------------------------------------------------------------------
 
 Shadow Hand continuous multi-pose pen-spinning environment (``ShadowPenContinuousRL-v1``).
 
-.. currentmodule:: embodichain_tasks.manipulation.dexterous.shadow_pen_continuous
+.. currentmodule:: embodichain.extensions.tasks.manipulation.dexterous.shadow_pen_continuous
 
 .. autosummary::
 
@@ -6655,12 +6655,12 @@ Shadow Hand continuous multi-pose pen-spinning environment (``ShadowPenContinuou
    :members:
 
 
-embodichain_tasks.manipulation.dexterous.shadow_pen_fixed
----------------------------------------------------------
+embodichain.extensions.tasks.manipulation.dexterous.shadow_pen_fixed
+--------------------------------------------------------------------
 
 Shadow Hand fixed-grasp pen-spinning environment (``ShadowPenFixedRL-v1``).
 
-.. currentmodule:: embodichain_tasks.manipulation.dexterous.shadow_pen_fixed
+.. currentmodule:: embodichain.extensions.tasks.manipulation.dexterous.shadow_pen_fixed
 
 .. autosummary::
 
@@ -6727,10 +6727,10 @@ embodichain.robot_registry
 
 .. autofunction:: resolve_gripper_defaults
 
-embodichain_robots
-~~~~~~~~~~~~~~~~~~
+embodichain.extensions.robots
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. currentmodule:: embodichain_robots
+.. currentmodule:: embodichain.extensions.robots
 
 .. autosummary::
    :nosignatures:
@@ -6771,10 +6771,10 @@ embodichain_robots
    :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
-embodichain_robots.agilex.cobotmagic.gripper.cfg
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+embodichain.extensions.robots.agilex.cobotmagic.gripper.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. currentmodule:: embodichain_robots.agilex.cobotmagic.gripper.cfg
+.. currentmodule:: embodichain.extensions.robots.agilex.cobotmagic.gripper.cfg
 
 .. autosummary::
    :nosignatures:
@@ -6785,10 +6785,10 @@ embodichain_robots.agilex.cobotmagic.gripper.cfg
    :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
-embodichain_robots.agilex.pika.cfg
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+embodichain.extensions.robots.agilex.pika.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. currentmodule:: embodichain_robots.agilex.pika.cfg
+.. currentmodule:: embodichain.extensions.robots.agilex.pika.cfg
 
 .. autosummary::
    :nosignatures:
@@ -6799,10 +6799,10 @@ embodichain_robots.agilex.pika.cfg
    :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
-embodichain_robots.dh_robotics.pgi_140_80.cfg
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+embodichain.extensions.robots.dh_robotics.pgi_140_80.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. currentmodule:: embodichain_robots.dh_robotics.pgi_140_80.cfg
+.. currentmodule:: embodichain.extensions.robots.dh_robotics.pgi_140_80.cfg
 
 .. autosummary::
    :nosignatures:
@@ -6813,10 +6813,10 @@ embodichain_robots.dh_robotics.pgi_140_80.cfg
    :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
-embodichain_robots.franka.hand.cfg
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+embodichain.extensions.robots.franka.hand.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. currentmodule:: embodichain_robots.franka.hand.cfg
+.. currentmodule:: embodichain.extensions.robots.franka.hand.cfg
 
 .. autosummary::
    :nosignatures:
@@ -6827,10 +6827,10 @@ embodichain_robots.franka.hand.cfg
    :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
-embodichain_robots.robotiq.arg2f140.cfg
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+embodichain.extensions.robots.robotiq.arg2f140.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. currentmodule:: embodichain_robots.robotiq.arg2f140.cfg
+.. currentmodule:: embodichain.extensions.robots.robotiq.arg2f140.cfg
 
 .. autosummary::
    :nosignatures:
@@ -6841,10 +6841,10 @@ embodichain_robots.robotiq.arg2f140.cfg
    :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
-embodichain_robots.robotiq.arg2f85.cfg
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+embodichain.extensions.robots.robotiq.arg2f85.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. currentmodule:: embodichain_robots.robotiq.arg2f85.cfg
+.. currentmodule:: embodichain.extensions.robots.robotiq.arg2f85.cfg
 
 .. autosummary::
    :nosignatures:
@@ -6855,10 +6855,10 @@ embodichain_robots.robotiq.arg2f85.cfg
    :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :show-inheritance:
 
-embodichain_robots.tianji.marvin.gripper.cfg
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+embodichain.extensions.robots.tianji.marvin.gripper.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. currentmodule:: embodichain_robots.tianji.marvin.gripper.cfg
+.. currentmodule:: embodichain.extensions.robots.tianji.marvin.gripper.cfg
 
 .. autosummary::
    :nosignatures:
@@ -7200,13 +7200,13 @@ Terrain scan
 Official sensor presets
 -----------------------
 
-.. currentmodule:: embodichain_sensors
+.. currentmodule:: embodichain.extensions.sensors
 
 .. autosummary::
 
    VLP16Cfg
 
-.. currentmodule:: embodichain_sensors.vlp16
+.. currentmodule:: embodichain.extensions.sensors.vlp16
 
 .. autosummary::
 

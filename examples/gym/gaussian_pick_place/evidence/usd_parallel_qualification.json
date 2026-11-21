@@ -510,9 +510,9 @@
     "embodichain/lab/sim/sim_manager.py": "420343a433d39a2f7374f20d167e3ae29ae08cc192792f2baca39c4017ccde6a",
     "embodichain/lab/sim/spawn/usd_import.py": "6940a9485c3df369e4f21b4a4e84179990f241256f1a4f52ce44a586a776ca51",
     "examples/gym/gaussian_pick_place/_prepare.py": "7154f697bccab53e6e376aef128030e9683de755421196b898141e0614269026",
-    "extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/env.discoverse.yaml": "e26a614baaed624e49cdf3c64aff1b3a41024179153562bd8faf57a65f6cf668",
-    "extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/env.office.yaml": "c2fdcca4cbbaf7919a622fbdcfc5fbca5e05426da4697720ed61f958d12f0b66",
-    "extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/env.robosimgs.yaml": "61bcde9fcfde224d1a44952f1222c4d88f37428c93e2348be8fddb96be8c9903"
+    "embodichain/extensions/tasks/configs/tasks/manipulation/gaussian_pick_place/env.discoverse.yaml": "e26a614baaed624e49cdf3c64aff1b3a41024179153562bd8faf57a65f6cf668",
+    "embodichain/extensions/tasks/configs/tasks/manipulation/gaussian_pick_place/env.office.yaml": "c2fdcca4cbbaf7919a622fbdcfc5fbca5e05426da4697720ed61f958d12f0b66",
+    "embodichain/extensions/tasks/configs/tasks/manipulation/gaussian_pick_place/env.robosimgs.yaml": "61bcde9fcfde224d1a44952f1222c4d88f37428c93e2348be8fddb96be8c9903"
   },
   "source_identity_note": "The source hashes identify the candidate runtime used for qualification. DexSim MR !1628 contains the same implementation; its final pinned-format correction preserves Python AST. An unpatched 0.6.0rc2 build does not provide native USD arena replication.",
   "raw_evidence_location": "outputs/usd-gaussian-parallel-validation/ (retained locally; raw RGB/captures/trajectories/videos are not included here)",

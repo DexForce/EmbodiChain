@@ -30,7 +30,7 @@ materials are preserved; the exact settings are recorded in each manifest.
 Canonical download-class import:
 
 ```python
-from embodichain_robots.robotiq.assets import Robotiq
+from embodichain.extensions.robots.robotiq.assets import Robotiq
 ```
 
 Use the stable asset reference for normal loading:
@@ -53,12 +53,12 @@ captions above.
 
 ## Ownership and provenance
 
-The download class lives in `extensions/embodichain_robots/robotiq/assets.py` and registers through the
+The download class lives in `embodichain/extensions/robots/robotiq/assets.py` and registers through the
 existing `embodichain.assets` catalog with category `eef`. This asset-only
 package does not introduce a standalone robot preset. Host assembly owns the
 mounting transform, naming prefix, control-group mapping and task-specific TCP.
 
-The [asset provenance record](https://github.com/DexForce/EmbodiChain/blob/main/extensions/embodichain_robots/robotiq/README.md)
+The [asset provenance record](https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/robots/robotiq/README.md)
 separately records manufacturer affiliation, model matching, asset production,
 archive distribution, modifications and license status. Missing upstream or
 license evidence stays explicitly unverified. The Python implementation's

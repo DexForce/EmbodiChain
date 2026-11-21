@@ -27,7 +27,7 @@ import sys
 import pytest
 import torch
 
-from embodichain_models.policy.act import load_act_policy, policy_fingerprint
+from embodichain.extensions.models.policy.act import load_act_policy, policy_fingerprint
 
 pytestmark = pytest.mark.skipif(
     version("lerobot") != "0.6.1",
@@ -37,7 +37,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture
 def artifact(act_data, tmp_path: Path):
-    from embodichain_models.policy.act import build_act_train_config
+    from embodichain.extensions.models.policy.act import build_act_train_config
     from lerobot.policies.act.modeling_act import ACTPolicy
     from lerobot.policies.act.processor_act import make_act_pre_post_processors
 
@@ -81,7 +81,7 @@ def test_import_does_not_initialize_simulation():
         [
             sys.executable,
             "-c",
-            "from embodichain_models.policy.act import load_act_policy; import sys; assert 'dexsim' not in sys.modules",
+            "from embodichain.extensions.models.policy.act import load_act_policy; import sys; assert 'dexsim' not in sys.modules",
         ],
         check=True,
     )

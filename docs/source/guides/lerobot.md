@@ -41,7 +41,7 @@ arguments, seeds and fresh output directories. Smoke collection produces an
 unqualified corpus and is not evidence of learning acceptance.
 
 The policy observes RGB and measured joints and predicts absolute arm targets
-plus a normalized gripper command. The adapter in `embodichain_models.policy.act`
+plus a normalized gripper command. The adapter in `embodichain.extensions.models.policy.act`
 validates ordered data/control contracts. Loading uses native weights and
 processors together with `embodichain_act.json`; keep the complete
 `pretrained_model/` directory or portable development `best/` directory.

@@ -15,7 +15,7 @@
 # ----------------------------------------------------------------------------
 """Bounded shared native reads during a single World-owner planning boundary.
 
-Only Default CPU full-batch numeric reads are shared. Each consumer still
+Only Default CPU numeric reads are shared. Each consumer still
 receives its own output buffer. Checked native writes invalidate all samples;
 physics/topology revisions and scope exit prevent reuse across boundaries.
 Raw SDK mutations and concurrent World writers are outside this internal
@@ -30,10 +30,12 @@ from contextvars import ContextVar
 from threading import get_ident
 from typing import Any, Iterator, TYPE_CHECKING
 import torch
+import numpy as np
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.sim_manager import SimulationManager
     from embodichain.lab.sim.objects.robot import Robot
+    from embodichain.lab.sim.objects.articulation import Articulation
 
 __all__: list[str] = []
 _READS = frozenset(
@@ -101,6 +103,62 @@ class _NumericReads:
         ):
             return None
         return (id(batch), method, out.shape, out.dtype)
+
+
+def scoped_link_matrices(
+    articulation: Articulation, link_name: str, rows: object
+) -> torch.Tensor | None:
+    """Read a named link in the selected arenas during a Default CPU gather."""
+    reads = _ACTIVE.get()
+    if reads is None or not reads.refresh():
+        return None
+    view = articulation.body_data.articulation_view
+    batch = getattr(view, "batch", None)
+    if id(batch) not in reads.batches:
+        return None
+    if isinstance(rows, torch.Tensor):
+        if (
+            rows.device.type != "cpu"
+            or rows.ndim != 1
+            or rows.dtype not in (torch.int32, torch.int64)
+        ):
+            return None
+        rows = rows.tolist()
+    if (
+        not isinstance(rows, (tuple, list))
+        or not rows
+        or any(
+            type(row) is not int or not 0 <= row < len(articulation._entities)
+            for row in rows
+        )
+    ):
+        return None
+
+    from scipy.spatial.transform import Rotation
+    from embodichain.utils.math import matrix_from_quat
+
+    matrices = []
+    for row in rows:
+        key = (id(batch), "link_matrix", row, link_name)
+        cached = reads.values.get(key)
+        if cached is None:
+            handle = articulation._entities[row]
+            root = view.scene.get_arena(handle.arena_name).get_root_node()
+            arena = np.asarray(root.get_world_pose(), dtype=np.float32).reshape(4, 4)
+            world = np.asarray(
+                handle.get_link_pose(link_name), dtype=np.float32
+            ).reshape(4, 4)
+            local = np.linalg.inv(arena) @ world
+            # Match the native CPU batch's float32 xyzw round-trip, including
+            # orthogonalization of slightly non-orthogonal physics rotations.
+            quat = Rotation.from_matrix(local[:3, :3]).as_quat().astype(np.float32)
+            matrix = torch.eye(4, device="cpu", dtype=torch.float32)
+            matrix[:3, :3] = matrix_from_quat(torch.from_numpy(quat))
+            matrix[:3, 3] = torch.from_numpy(local[:3, 3])
+            cached = (matrix, None)
+            reads.values[key] = cached
+        matrices.append(cached[0])
+    return torch.stack(matrices)
 
 
 def shared_pose(

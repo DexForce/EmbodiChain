@@ -48,7 +48,7 @@ from embodichain.toolkits.graspkit.pg_grasp import FixedGripperCollisionGeometry
 
 from .gripper_geometry import geometry_from_asset
 from embodichain.utils import configclass, logger
-from embodichain_robots import (
+from embodichain.extensions.robots import (
     ARX5Cfg,
     CobotMagicCfg,
     DexforceW1Cfg,
@@ -273,7 +273,7 @@ def create_embodiment(args: argparse.Namespace) -> EmbodimentCfg:
     if args.robot in ("ur5", "w1_030"):
         _mount_grippers(args, cfg)
     elif args.robot == "franka":
-        from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+        from embodichain.extensions.benchmarks.motion_generation._atomic_fixtures import (
             _create_franka_native_hand_cfg,
         )
 
@@ -360,7 +360,7 @@ def create_embodiment(args: argparse.Namespace) -> EmbodimentCfg:
         # Task Program runtime are created by this direct Atomic caller.
         from importlib.resources import files
 
-        path = files("embodichain_tasks.configs").joinpath(
+        path = files("embodichain.extensions.tasks.configs").joinpath(
             "components/embodiments/tianji_marvin.yaml"
         )
         from embodichain.lab.gym.utils.composition import resolve_gym_components

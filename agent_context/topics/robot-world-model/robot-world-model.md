@@ -2,7 +2,7 @@
 
 ## Ownership and entry points
 
-`embodichain_models.dynamics.rwm` is the canonical model package. Its `model.py`
+`embodichain.extensions.models.dynamics.rwm` is the canonical model package. Its `model.py`
 owns body-frame state increments; `kinematic.py` owns `KinematicWorldModel`,
 with heading-frame increments and full-body FK features. `robot_state.py` owns the
 canonical state representation and SO(3) transforms. They have no simulation or example
@@ -60,7 +60,7 @@ policy performance.
 
 ## Online motion learning
 
-`embodichain_models.policies.motion_tracking` owns the goal encoder/decoder actor
+`embodichain.extensions.models.policies.motion_tracking` owns the goal encoder/decoder actor
 and scalar critic. The official task's `tracking/motion_model.py` composes shared
 FK, reference queries and reward/continuation rules into a tensor-only environment.
 Replay starts include clean history, previous actions, physical context and frame

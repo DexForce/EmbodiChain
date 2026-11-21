@@ -101,7 +101,7 @@ from embodichain.lab.task_program.semantics import (
     SkillPolicyPreset,
 )
 from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain_robots import URRobotCfg
+from embodichain.extensions.robots import URRobotCfg
 
 _CALL_ID = "tutorial.move_end_effector"
 _RETURN_TOLERANCE = 0.02  # Metres; this tutorial does not tune the arm's controller.

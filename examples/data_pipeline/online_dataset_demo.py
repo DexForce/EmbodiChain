@@ -69,7 +69,7 @@ def _build_engine(args: argparse.Namespace) -> OnlineDataEngine:
     from embodichain.utils.config_paths import resolve_config_path
 
     config_path = resolve_config_path(
-        "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml",
+        "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml",
         base_dir=Path(__file__).parent,
     )
     if not config_path.exists():

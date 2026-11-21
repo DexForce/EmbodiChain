@@ -116,7 +116,7 @@ search:
   beam_width: 4
   max_rrt_nodes: 128
 task_program:
-  deployment: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
+  deployment: ../../../embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
   program: program.yaml
   simulation_device: cpu
   enable_sensor: false

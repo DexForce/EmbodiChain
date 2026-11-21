@@ -60,10 +60,10 @@ class _NativeImportGC:
         domain_roots = {
             "dexsim",
             "embodichain",
-            "embodichain_tasks",
-            "embodichain_robots",
-            "embodichain_models",
-            "embodichain_benchmarks",
+            "embodichain.extensions.tasks",
+            "embodichain.extensions.robots",
+            "embodichain.extensions.models",
+            "embodichain.extensions.benchmarks",
         }
         test_prefix = str(root / "tests") + os.sep
         return any(

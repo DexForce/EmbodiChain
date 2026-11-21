@@ -35,21 +35,21 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
 )
 from embodichain.lab.sim.motion.workspace import RobotWorkspaceCfg
-from embodichain_robots.dexforce.w1 import DexforceW1Cfg
-from embodichain_robots.dexforce.w1.params import W1ArmKineParams
-from embodichain_robots.dexforce.w1.types import (
+from embodichain.extensions.robots.dexforce.w1 import DexforceW1Cfg
+from embodichain.extensions.robots.dexforce.w1.params import W1ArmKineParams
+from embodichain.extensions.robots.dexforce.w1.types import (
     DexforceW1ArmSide,
     DexforceW1HandBrand,
     DexforceW1HandVersion,
     DexforceW1Type,
     DexforceW1Version,
 )
-from embodichain_robots.dexforce.w1.hand_specs import (
+from embodichain.extensions.robots.dexforce.w1.hand_specs import (
     get_default_w1_hand_version,
     get_w1_hand_spec,
 )
-from embodichain_robots.dexforce.w1.specs import get_w1_version_spec
-from embodichain_robots.dexforce.w1.utils import (
+from embodichain.extensions.robots.dexforce.w1.specs import get_w1_version_spec
+from embodichain.extensions.robots.dexforce.w1.utils import (
     build_dexforce_w1_assembly_urdf_cfg,
     build_dexforce_w1_control_parts,
 )
@@ -141,7 +141,7 @@ def test_arx5_source_chain_commands_and_ik_roundtrip(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """X5A retains two independent fingers and a six-joint flange/TCP chain."""
-    from embodichain_robots.arx.arx5 import cfg as arx5
+    from embodichain.extensions.robots.arx.arx5 import cfg as arx5
 
     source = Path(__file__).parents[2] / "fixtures/kinematics/arx5_x5a.urdf"
     monkeypatch.setattr(arx5, "get_data_path", lambda _: str(source))
@@ -269,10 +269,11 @@ def test_mounted_sensor_config_roundtrip_and_instance_isolation() -> None:
 
 
 def test_cobotmagic_mounted_defaults_replace_and_clear(monkeypatch) -> None:
-    from embodichain_robots import CobotMagicCfg
+    from embodichain.extensions.robots import CobotMagicCfg
 
     monkeypatch.setattr(
-        "embodichain_robots.agilex.cobotmagic.cfg.get_data_path", lambda value: value
+        "embodichain.extensions.robots.agilex.cobotmagic.cfg.get_data_path",
+        lambda value: value,
     )
     cfg = CobotMagicCfg.from_dict({})
     assert cfg.enable_sensor is False
@@ -306,7 +307,7 @@ def test_cobotmagic_mounted_defaults_replace_and_clear(monkeypatch) -> None:
 
 def _mock_w1_asset_paths(monkeypatch, tmp_path):
     import embodichain.lab.sim.cfg as sim_cfg
-    from embodichain_robots.dexforce.w1 import utils as w1_utils
+    from embodichain.extensions.robots.dexforce.w1 import utils as w1_utils
 
     def resolve(path):
         resolved = tmp_path / path
@@ -480,7 +481,7 @@ def test_w1_v022_provisional_eef_baseline_is_composed_consistently():
 
 def test_w1_v022_cfg_uses_registered_asset_paths(tmp_path, monkeypatch):
     import embodichain.lab.sim.cfg as sim_cfg
-    from embodichain_robots.dexforce.w1 import utils as w1_utils
+    from embodichain.extensions.robots.dexforce.w1 import utils as w1_utils
 
     registered_paths = []
 
@@ -532,7 +533,7 @@ def test_w1_cfg_builds_complete_dual_arm_robot(monkeypatch, tmp_path):
 
 def test_w1_hand_version_is_independent_of_robot_version(monkeypatch, tmp_path):
     _mock_w1_asset_paths(monkeypatch, tmp_path)
-    from embodichain_robots.dexforce.w1 import utils as w1_utils
+    from embodichain.extensions.robots.dexforce.w1 import utils as w1_utils
 
     selected_versions = []
     original_get_urdf = w1_utils.hand_manager.get_urdf
@@ -818,10 +819,15 @@ def test_root_property_overrides_preserve_unspecified_preset_fields(
     assert override == original
 
 
-from embodichain_robots.agilex.cobotmagic.cfg import CobotMagicCfg
-from embodichain_robots import AlohaMiniCfg, TianjiMarvinCfg, ARX5Cfg, FlexivRizon4SCfg
-from embodichain_robots.franka.panda import FrankaPandaCfg
-from embodichain_robots.universal_robots.ur_robot import URRobotCfg
+from embodichain.extensions.robots.agilex.cobotmagic.cfg import CobotMagicCfg
+from embodichain.extensions.robots import (
+    AlohaMiniCfg,
+    TianjiMarvinCfg,
+    ARX5Cfg,
+    FlexivRizon4SCfg,
+)
+from embodichain.extensions.robots.franka.panda import FrankaPandaCfg
+from embodichain.extensions.robots.universal_robots.ur_robot import URRobotCfg
 from embodichain.lab.sim.motion.solvers import OPWSolverCfg
 
 
@@ -857,7 +863,8 @@ def test_specified_robot_defaults_use_eef_control_part_names(
         module_path = "franka.cfg"
     monkeypatch.setattr("embodichain.data.get_data_path", lambda value: value)
     monkeypatch.setattr(
-        f"embodichain_robots.{module_path}.get_data_path", lambda value: value
+        f"embodichain.extensions.robots.{module_path}.get_data_path",
+        lambda value: value,
     )
     cfg = robot_class.from_dict({})
 
@@ -1064,7 +1071,8 @@ def test_tianji_marvin_custom_asset_does_not_inherit_demo_inertials(
     monkeypatch, tmp_path
 ):
     monkeypatch.setattr(
-        "embodichain_robots.tianji.marvin.cfg.get_data_path", lambda value: value
+        "embodichain.extensions.robots.tianji.marvin.cfg.get_data_path",
+        lambda value: value,
     )
     asset = tmp_path / "custom.urdf"
     asset.write_text('<robot name="custom"/>')
@@ -1584,7 +1592,7 @@ def test_specified_robots_use_portable_joint_drive_semantics(
 
 
 def test_explicit_franka_hand_embodiment_owns_contact_defaults() -> None:
-    from embodichain_tasks.configs import get_config_path
+    from embodichain.extensions.tasks.configs import get_config_path
     from embodichain.utils.utility import load_config
     from embodichain.lab.gym.utils.gym_utils import _robot_cfg_from_dict
 
@@ -1718,8 +1726,10 @@ def test_original_panda_robotiq_tcp_linkage_limits_and_model_isolation(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    from embodichain_robots.franka import cfg as panda
-    from embodichain_robots.robotiq.two_finger import robotiq85_joint_positions
+    from embodichain.extensions.robots.franka import cfg as panda
+    from embodichain.extensions.robots.robotiq.two_finger import (
+        robotiq85_joint_positions,
+    )
     import pinocchio as pin
 
     fixtures = Path(__file__).parents[2] / "fixtures/kinematics"
@@ -1732,7 +1742,7 @@ def test_original_panda_robotiq_tcp_linkage_limits_and_model_isolation(
         return str(sources[name]) if not Path(name).is_absolute() else name
 
     monkeypatch.setattr(panda, "get_data_path", source)
-    from embodichain_tasks.configs import get_config_path
+    from embodichain.extensions.tasks.configs import get_config_path
     from embodichain.utils.utility import load_config
     from embodichain.lab.gym.utils.gym_utils import _robot_cfg_from_dict
 
@@ -1789,7 +1799,7 @@ def test_original_panda_robotiq_tcp_linkage_limits_and_model_isolation(
 
 @pytest.mark.no_sim
 def test_franka_family_preserves_legacy_configuration_and_isolates_overrides() -> None:
-    from embodichain_robots import FrankaCfg
+    from embodichain.extensions.robots import FrankaCfg
 
     legacy = FrankaPandaCfg.from_dict({"robot_type": "panda"})
     family = FrankaCfg.from_dict({})
@@ -1827,7 +1837,7 @@ def test_franka_family_preserves_legacy_configuration_and_isolates_overrides() -
 def test_franka_family_rejects_unqualified_combinations_before_downloading(
     monkeypatch, values
 ) -> None:
-    from embodichain_robots.franka import cfg as module
+    from embodichain.extensions.robots.franka import cfg as module
 
     def download_forbidden(*args):
         pytest.fail("invalid Franka selection downloaded an asset")
@@ -1841,7 +1851,7 @@ def test_franka_family_rejects_unqualified_combinations_before_downloading(
 @pytest.mark.parametrize("model", ["fr3", "panda"])
 def test_franka_bare_arm_has_only_seven_source_dofs(model: str) -> None:
     import xml.etree.ElementTree as ET
-    from embodichain_robots import FrankaCfg
+    from embodichain.extensions.robots import FrankaCfg
 
     cfg = FrankaCfg.from_dict({"arm_model": model})
     source = ET.parse(cfg.urdf_cfg.components["arm"]["urdf_path"]).getroot()

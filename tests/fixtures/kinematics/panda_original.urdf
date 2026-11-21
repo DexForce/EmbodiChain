@@ -2,7 +2,7 @@
 <!-- Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 Licensed under the Apache License, Version 2.0.
 Kinematic fixture from the pinned Panda V2 / Robotiq model; visual meshes omitted.
-See extensions/embodichain_robots/franka/assets.py for original asset identity. -->
+See embodichain/extensions/robots/franka/assets.py for original asset identity. -->
 <robot name="Franka_Panda">
   <link name="base_link">
     </link>

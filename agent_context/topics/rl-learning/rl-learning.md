@@ -17,7 +17,7 @@ lazy so lightweight APG imports do not initialize the simulator-backed Trainer.
 | Differentiable collection/training | `embodichain/learning/rl/differentiable_trainer.py`, `collector/` |
 | Completed-episode evaluation | `embodichain/learning/rl/evaluation.py` |
 | Checkpoint, manifest and policy Viewer | `embodichain/learning/rl/checkpoint.py`, `policy_evaluation/` |
-| Official deployment/agent settings | `extensions/embodichain_tasks/configs/tasks/<domain>/<task>/agents/` |
+| Official deployment/agent settings | `embodichain/extensions/tasks/configs/tasks/<domain>/<task>/agents/` |
 
 The module training entry remains a compatibility path. Concrete settings come
 from the selected config/classes, not example recipes. [Training details](training.md)

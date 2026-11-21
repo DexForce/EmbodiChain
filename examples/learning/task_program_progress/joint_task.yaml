@@ -2,7 +2,7 @@ id: CobotJointReward-v1
 environment:
   component: joint_environment.yaml
 embodiment:
-  component: ../../../extensions/embodichain_tasks/configs/components/embodiments/cobotmagic.yaml
+  component: ../../../embodichain/extensions/tasks/configs/components/embodiments/cobotmagic.yaml
 rl_task:
   reward_composition:
     discount: 0.99

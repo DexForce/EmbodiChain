@@ -2,18 +2,18 @@ id: StackBlocksTwoComposedReward-v1
 environment:
   component: joint_environment.yaml
 evaluation:
-  component: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task_program/evaluation.measured.yaml
+  component: ../../../embodichain/extensions/tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task_program/evaluation.measured.yaml
 task_program:
   program: program_rewards.yaml
-  integration: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task_program/integration.yaml
+  integration: ../../../embodichain/extensions/tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task_program/integration.yaml
   execution: policy
   action_owners:
     primary_manipulator: policy
     secondary_manipulator: policy
   execution_policy:
-    component: ../../../extensions/embodichain_tasks/configs/components/execution_policies/trajectory_open_loop.yaml
+    component: ../../../embodichain/extensions/tasks/configs/components/execution_policies/trajectory_open_loop.yaml
 embodiment:
-  component: ../../../extensions/embodichain_tasks/configs/components/embodiments/cobotmagic.yaml
+  component: ../../../embodichain/extensions/tasks/configs/components/embodiments/cobotmagic.yaml
 rl_task:
   success:
     stages:

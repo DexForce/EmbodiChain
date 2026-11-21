@@ -2,7 +2,7 @@ Universal Robots
 ================
 
 Official Universal Robots configurations live in the
-``embodichain_robots.universal_robots`` manufacturer namespace. The six
+``embodichain.extensions.robots.universal_robots`` manufacturer namespace. The six
 supported UR models share one family page and configuration class.
 
 .. list-table::

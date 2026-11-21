@@ -36,7 +36,7 @@ pytestmark = pytest.mark.no_sim
 ROOT = Path(__file__).resolve().parents[3]
 TASK = (
     ROOT
-    / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
+    / "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
 )
 
 

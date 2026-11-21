@@ -3,7 +3,7 @@
 `embodichain.learning.sl` owns common supervised optimizer updates and offline
 training orchestration. Shared MLPs and feature normalization remain in
 `learning.models`; concrete model families and their model-specific adapters live
-in the bundled `embodichain_models` extension. Generic numerical state and geometry
+in the bundled `embodichain.extensions.models` extension. Generic numerical state and geometry
 operations remain in `compute`; source storage belongs to data adapters.
 
 ## Entry points
@@ -31,13 +31,13 @@ operations remain in `compute`; source storage belongs to data adapters.
   callers; it cleans up only groups it creates. Launch commands and a complete
   masked-regression factory live in `examples/learning/sl_ddp/`.
 - The [NeRD recipe](../neural-dynamics/neural-dynamics.md) is an installable factory
-  at `embodichain_models.dynamics.nerd.sl_recipe:build_supervised_trainer`.
+  at `embodichain.extensions.models.dynamics.nerd.sl_recipe:build_supervised_trainer`.
   The core does not import the model extension or example helpers. The NeRD
   showcase's default `train` command uses this same common recipe.
 - The [RWM recipe](../robot-world-model/robot-world-model.md) is
-  `embodichain_models.dynamics.rwm.sl_recipe:build_rwm_trainer`. Its model,
+  `embodichain.extensions.models.dynamics.rwm.sl_recipe:build_rwm_trainer`. Its model,
   state codec, objective, predictor and replay belong to that model family.
-- Visual ACT belongs to `embodichain_models.policy.act` and invokes LeRobot
+- Visual ACT belongs to `embodichain.extensions.models.policy.act` and invokes LeRobot
   0.6.1's official trainer rather than this SL trainer. `build_act_train_config`
   validates ordered data/control contracts; `load_act_policy` loads native
   weights and processors with a portable task/data manifest. The runtime uses

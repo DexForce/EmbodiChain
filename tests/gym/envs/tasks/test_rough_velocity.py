@@ -40,16 +40,18 @@ from embodichain.lab.gym.envs.episode_context import EpisodeContext
 from embodichain.lab.gym.envs.managers.action_manager import ActionTermCfg
 from embodichain.lab.gym.envs.managers.actions import DefaultJointPositionAction
 from embodichain.lab.sim.sim_manager import SimulationManager, SimulationManagerCfg
-from embodichain_tasks.locomotion.velocity.rough.curriculum import (
+from embodichain.extensions.tasks.locomotion.velocity.rough.curriculum import (
     TerrainCurriculum,
 )
-from embodichain_tasks.locomotion.velocity.rough.config import load_config
-from embodichain_tasks.locomotion.velocity.rough.environment import (
+from embodichain.extensions.tasks.locomotion.velocity.rough.config import load_config
+from embodichain.extensions.tasks.locomotion.velocity.rough.environment import (
     load_rough_env_cfg,
 )
-from embodichain_tasks.locomotion.velocity.rough.runtime import RoughVelocityEnv
-from embodichain_tasks.locomotion.velocity.rough.terrain import HeightScanner
-from embodichain_tasks.locomotion.velocity.rough.mdp import (
+from embodichain.extensions.tasks.locomotion.velocity.rough.runtime import (
+    RoughVelocityEnv,
+)
+from embodichain.extensions.tasks.locomotion.velocity.rough.terrain import HeightScanner
+from embodichain.extensions.tasks.locomotion.velocity.rough.mdp import (
     RoughVelocityConstants,
     RoughVelocityState,
     action_target,
@@ -153,7 +155,7 @@ def test_reference_observation_preserves_reset_contact_rows() -> None:
 @pytest.mark.no_sim
 def test_reference_uses_control_frame_contacts_without_parent_histories() -> None:
     """Reference normal-force histories replace the generic substep histories."""
-    from embodichain_tasks.locomotion.velocity._embodichain import (
+    from embodichain.extensions.tasks.locomotion.velocity._embodichain import (
         EmbodiChainVelocityEnv,
     )
 
@@ -181,7 +183,7 @@ def test_joint_acceleration_matches_reference_update_interval(
     monkeypatch, native_go2
 ) -> None:
     """Match G1's final 5 ms derivative and Go2's fused 20 ms derivative."""
-    from embodichain_tasks.locomotion.velocity._embodichain import (
+    from embodichain.extensions.tasks.locomotion.velocity._embodichain import (
         EmbodiChainVelocityEnv,
     )
 
@@ -768,7 +770,7 @@ def test_rough_reset_curriculum_uses_terminal_step_command(monkeypatch) -> None:
     def stop_after_curriculum(self, *args, **kwargs):
         raise ResetRecorded
 
-    from embodichain_tasks.locomotion.velocity._embodichain import (
+    from embodichain.extensions.tasks.locomotion.velocity._embodichain import (
         EmbodiChainVelocityEnv,
     )
 
@@ -788,7 +790,7 @@ def test_rough_reset_curriculum_uses_terminal_step_command(monkeypatch) -> None:
 @pytest.mark.no_sim
 def test_reference_step_orders_events_after_rewards_and_resets(monkeypatch) -> None:
     """Commands and pushes must precede only the returned observation."""
-    from embodichain_tasks.locomotion.velocity._embodichain import (
+    from embodichain.extensions.tasks.locomotion.velocity._embodichain import (
         EmbodiChainVelocityEnv,
     )
 
@@ -839,7 +841,7 @@ def test_reference_step_orders_events_after_rewards_and_resets(monkeypatch) -> N
 def test_training_step_defers_only_unused_observations(
     monkeypatch, recording, task_managers
 ) -> None:
-    from embodichain_tasks.locomotion.velocity._embodichain import (
+    from embodichain.extensions.tasks.locomotion.velocity._embodichain import (
         EmbodiChainVelocityEnv,
     )
 
@@ -907,7 +909,7 @@ def test_training_step_defers_only_unused_observations(
 def test_reference_reset_writes_once_and_preserves_sampled_state(monkeypatch, task):
     """Deferred parent writes preserve final states, RNG and untouched rows."""
     from embodichain.lab.gym.envs import EmbodiedEnv
-    from embodichain_tasks.locomotion.velocity._embodichain import (
+    from embodichain.extensions.tasks.locomotion.velocity._embodichain import (
         EmbodiChainVelocityEnv,
     )
 

@@ -119,7 +119,7 @@ def main() -> None:
 
         source = (
             root
-            / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml"
+            / "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml"
         )
         config = load_config(source)
         config.update(
@@ -230,7 +230,7 @@ def main() -> None:
             "embodiment": {
                 "component": str(
                     root
-                    / "extensions/embodichain_tasks/configs/components/embodiments/cobotmagic.yaml"
+                    / "embodichain/extensions/tasks/configs/components/embodiments/cobotmagic.yaml"
                 )
             },
             "device": "cuda:0",

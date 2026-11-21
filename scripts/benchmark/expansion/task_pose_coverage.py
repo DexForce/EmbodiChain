@@ -40,7 +40,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[3]
 TASK = (
     ROOT
-    / "extensions/embodichain_tasks/configs/tasks/manipulation/workspace_pose_pick_place"
+    / "embodichain/extensions/tasks/configs/tasks/manipulation/workspace_pose_pick_place"
 )
 GROUPS = {
     "A": ("bounded_pose", "fifo"),
@@ -57,8 +57,8 @@ def _write(path: Path, value: object) -> None:
 def _worker(args) -> None:
     sys.path[:0] = [
         str(ROOT),
-        str(ROOT / "extensions/embodichain_tasks"),
-        str(ROOT / "extensions/embodichain_robots"),
+        str(ROOT / "embodichain/extensions/tasks"),
+        str(ROOT / "embodichain/extensions/robots"),
     ]
     from embodichain.lab.expansion.task_program_jobs import run_task_program_expansion
 
@@ -115,8 +115,10 @@ def _worker(args) -> None:
         if path.startswith(
             (
                 "embodichain/lab/expansion/",
+                "embodichain/lab/sim/atomic_skills/",
+                "embodichain/lab/gym/envs/task_program/",
                 "embodichain/lab/task_program/",
-                "extensions/embodichain_tasks/configs/tasks/manipulation/workspace_pose_pick_place/",
+                "embodichain/extensions/tasks/configs/tasks/manipulation/workspace_pose_pick_place/",
                 "scripts/benchmark/expansion/task_pose_coverage.py",
             )
         )
@@ -387,7 +389,9 @@ def main() -> None:
     p.add_argument("--nominal", action="store_true")
     p.add_argument("--media", action="store_true")
     p.add_argument(
-        "--operator", choices=("object_pose", "joint_residual"), default="object_pose"
+        "--operator",
+        choices=("object_pose", "joint_residual", "via_points"),
+        default="object_pose",
     )
     args = p.parse_args()
     args.output = args.output.resolve()
@@ -494,6 +498,7 @@ def main() -> None:
                         (
                             "joint_residual"
                             if args.suite == "trajectory"
+                            and args.operator == "object_pose"
                             else args.operator
                         ),
                     ]

@@ -22,6 +22,8 @@ from pathlib import Path
 
 __all__ = ["resolve_config_path"]
 
+_OFFICIAL_TASK_CONFIGS = Path("embodichain/extensions/tasks/configs")
+
 
 def resolve_config_path(
     path: str | Path, *, base_dir: str | Path | None = None
@@ -30,10 +32,8 @@ def resolve_config_path(
 
     Existing, absolute, and ordinary relative paths preserve their normal
     filesystem meaning. Repository-style paths below
-    ``extensions/embodichain_tasks/configs`` (or the legacy
-    ``embodichain_tasks/configs`` prefix) are redirected to the packaged task-config
-    resource so the same configuration reference works from an installed
-    wheel.
+    ``embodichain/extensions/tasks/configs`` resolve to the packaged task
+    resources when opening them from outside the checkout.
 
     With an explicit owner directory, ordinary relative references resolve
     from that directory even when a same-named CWD file exists. Official-task
@@ -56,41 +56,17 @@ def resolve_config_path(
     if resolved_path.is_absolute() or (base_dir is None and resolved_path.exists()):
         return resolved_path
 
-    task_prefixes = (
-        ("extensions", "embodichain_tasks", "configs"),
-        ("embodichain_tasks", "configs"),
-    )
-    task_prefix = next(
-        (
-            prefix
-            for prefix in task_prefixes
-            if resolved_path.parts[: len(prefix)] == prefix
-        ),
-        None,
-    )
-    if task_prefix is None:
+    if not resolved_path.is_relative_to(_OFFICIAL_TASK_CONFIGS):
         return (
             resolved_path
             if base_dir is None
             else Path(base_dir).expanduser() / resolved_path
         )
 
-    relative_path = Path(*resolved_path.parts[len(task_prefix) :])
-    if relative_path.is_absolute() or ".." in relative_path.parts:
+    relative_path = resolved_path.relative_to(_OFFICIAL_TASK_CONFIGS)
+    if ".." in relative_path.parts:
         raise ValueError(f"Config path must stay within the package: {relative_path}")
 
-    # Prefer configs co-located with the imported core package. This keeps a
-    # source worktree self-contained even when another checkout is installed
-    # in editable mode, and resolves to the same location in a wheel install.
+    # Bind packaged configs to the same checkout or wheel as the imported SDK.
     sdk_root = Path(__file__).resolve().parents[2]
-    for prefix in task_prefixes:
-        colocated_root = sdk_root / Path(*prefix)
-        colocated_path = colocated_root / relative_path
-        if colocated_path.exists() or (
-            base_dir is not None and colocated_root.is_dir()
-        ):
-            return colocated_path
-
-    from embodichain_tasks.configs import get_config_path
-
-    return get_config_path(relative_path)
+    return sdk_root / _OFFICIAL_TASK_CONFIGS / relative_path

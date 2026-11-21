@@ -68,7 +68,7 @@ from embodichain.lab.sim.motion.expansion.real2sim_collision import (
 from embodichain.lab.task_program.integrations.nominal import (
     BoundTaskProgramNominalSources,
 )
-from embodichain_robots.robotiq.two_finger import robotiq85_joint_positions
+from embodichain.extensions.robots.robotiq.two_finger import robotiq85_joint_positions
 from embodichain.utils.config_paths import resolve_config_path
 from embodichain.toolkits.graspkit.box_region import (
     BoxSideGraspRegionCfg,
@@ -77,7 +77,7 @@ from embodichain.toolkits.graspkit.box_region import (
 
 __all__: list[str] = []
 
-_TASK_CONFIG = "extensions/embodichain_tasks/configs/tasks/manipulation/carton_stocking/task.panda.yaml"
+_TASK_CONFIG = "embodichain/extensions/tasks/configs/tasks/manipulation/carton_stocking/task.panda.yaml"
 
 
 def task_config() -> Path:

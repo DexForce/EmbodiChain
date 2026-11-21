@@ -1,5 +1,5 @@
 [build-system]
-# setup.py supplies package discovery, source mappings and bundled resources.
+# setup.py supplies package discovery and bundled resources.
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
@@ -95,20 +95,20 @@ gensim = [
 embodichain = "embodichain.__main__:main"
 
 [project.entry-points."dexsim.newton_solvers"]
-nerd = "embodichain_solvers.physics.nerd.provider:NeRDProvider"
-worldparticle = "embodichain_solvers.physics.worldparticle.provider:WorldParticleProvider"
+nerd = "embodichain.extensions.solvers.physics.nerd.provider:NeRDProvider"
+worldparticle = "embodichain.extensions.solvers.physics.worldparticle.provider:WorldParticleProvider"
 
 [project.entry-points."embodichain.tasks"]
-embodichain_tasks = "embodichain_tasks"
+official_tasks = "embodichain.extensions.tasks"
 
 [project.entry-points."embodichain.robots"]
-official = "embodichain_robots._catalog:ROBOT_CONFIGS"
+official = "embodichain.extensions.robots._catalog:ROBOT_CONFIGS"
 
 [project.entry-points."embodichain.sensors"]
-VLP16 = "embodichain_sensors.vlp16:VLP16_REGISTRATION"
+VLP16 = "embodichain.extensions.sensors.vlp16:VLP16_REGISTRATION"
 
 [project.entry-points."embodichain.assets"]
-official_robots = "embodichain_robots._asset_catalog:ROBOT_ASSETS"
+official_robots = "embodichain.extensions.robots._asset_catalog:ROBOT_ASSETS"
 official_rl = "embodichain.data.assets.rl_assets:_ASSET_CATALOG"
 
 [tool.uv.sources]

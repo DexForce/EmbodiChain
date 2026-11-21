@@ -35,8 +35,8 @@ from typing import Any
 import numpy as np
 import torch
 
-from embodichain_models.dynamics.nerd.codec import NeRDStateCodec
-from embodichain_models.dynamics.nerd.data import (
+from embodichain.extensions.models.dynamics.nerd.codec import NeRDStateCodec
+from embodichain.extensions.models.dynamics.nerd.data import (
     DynamicsWindowDataset,
     dataset_fingerprint,
     load_manifest,
@@ -49,7 +49,10 @@ from examples.learning.nerd._support._trainer import (
     normalized_mse,
 )
 from examples.learning.nerd._support._workflow import run_export
-from embodichain_models.dynamics.nerd import convert_legacy_checkpoint, load_model
+from embodichain.extensions.models.dynamics.nerd import (
+    convert_legacy_checkpoint,
+    load_model,
+)
 
 __all__: list[str] = []
 

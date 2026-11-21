@@ -105,7 +105,7 @@ def test_packaged_deployment_and_agent_config_agree(
 ) -> None:
     """Real config decoding must work without smoke-script backend overrides."""
     monkeypatch.setattr(sim_cfg, "get_data_path", lambda value: value)
-    directory = Path("extensions/embodichain_tasks/configs/tasks") / task
+    directory = Path("embodichain/extensions/tasks/configs/tasks") / task
     suffix = "" if backend == "default" else ".newton"
     path = directory / f"env{suffix}.yaml"
     raw = load_config(str(path))
@@ -116,7 +116,7 @@ def test_packaged_deployment_and_agent_config_agree(
         raw,
         source_path=path,
         manager_modules=[
-            f"embodichain_tasks.locomotion.managers.{module}"
+            f"embodichain.extensions.tasks.locomotion.managers.{module}"
             for module in ("observations", "rewards")
         ],
     )
@@ -401,9 +401,9 @@ def _verify_native_no_render(task: str, backend: str) -> dict[str, object]:
     runtime = env = sim = observation = None
     try:
         importlib.import_module(
-            f"embodichain_tasks.locomotion.velocity.{task.rsplit('/', 1)[-1]}"
+            f"embodichain.extensions.tasks.locomotion.velocity.{task.rsplit('/', 1)[-1]}"
         )
-        directory = Path("extensions/embodichain_tasks/configs/tasks") / task
+        directory = Path("embodichain/extensions/tasks/configs/tasks") / task
         suffix = "" if backend == "default" else ".newton"
         agent_path = directory / f"agents/ppo{suffix}.yaml"
         agent = load_config(agent_path)

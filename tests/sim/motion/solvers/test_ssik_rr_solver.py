@@ -26,7 +26,7 @@ import pytest
 import torch
 
 from embodichain.lab.sim.motion.solvers import SSIKSolverCfg, SolverCfg
-from embodichain_robots import FlexivRizon4SCfg
+from embodichain.extensions.robots import FlexivRizon4SCfg
 
 
 def _make_solver(device: str = "cuda", *, legacy: bool = False, **kwargs: Any):

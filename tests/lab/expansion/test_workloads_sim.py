@@ -58,7 +58,7 @@ def _probe(output: str) -> None:
     root = Path(__file__).resolve().parents[3]
     path = (
         root
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
     )
     discover_task_packages()
     execute_init_hooks()
@@ -387,7 +387,7 @@ def _facade_probe(output: str) -> None:
     root = Path(__file__).resolve().parents[3]
     task = (
         root
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place"
     )
     deployment = task / "task.ur5.yaml"
     path = Path(output)
@@ -617,7 +617,7 @@ def _reuse_probe(output: str) -> None:
     root = Path(__file__).resolve().parents[3]
     task = (
         root
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place"
     )
     path = Path(output)
     path.mkdir(exist_ok=True)
@@ -812,7 +812,7 @@ def _declarative_probe(output: str) -> None:
     root = Path(__file__).resolve().parents[3]
     result = run_task_program_expansion(
         root
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml",
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml",
         Path(__file__).parent / "fixtures/task_program_job.yaml",
         output,
     )

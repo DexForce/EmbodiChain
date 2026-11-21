@@ -2,7 +2,7 @@ Wuji Technology
 ===============
 
 Official hand descriptions and standalone joint-controlled presets are owned by
-``embodichain_robots.wuji``. Model availability does not imply grasping or
+``embodichain.extensions.robots.wuji``. Model availability does not imply grasping or
 retargeting capability.
 
 .. list-table::

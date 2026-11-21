@@ -34,16 +34,16 @@ __all__ = [
 from importlib import import_module
 
 _ASSET_EXPORTS = {
-    "DexforceW1V021": "embodichain_robots.dexforce.w1.assets",
-    "DexforceW1V022": "embodichain_robots.dexforce.w1.assets",
-    "DexforceW1V025": "embodichain_robots.dexforce.w1.assets",
-    "DexforceW1V030": "embodichain_robots.dexforce.w1.assets",
-    "DexforceW1ChassisV021": "embodichain_robots.dexforce.w1.assets",
-    "DexforceW1TorsoV021": "embodichain_robots.dexforce.w1.assets",
-    "DexforceW1EyesV021": "embodichain_robots.dexforce.w1.assets",
-    "DexforceW1HeadV021": "embodichain_robots.dexforce.w1.assets",
-    "DexforceW1LeftArmV021": "embodichain_robots.dexforce.w1.assets",
-    "DexforceW1RightArmV021": "embodichain_robots.dexforce.w1.assets",
+    "DexforceW1V021": "embodichain.extensions.robots.dexforce.w1.assets",
+    "DexforceW1V022": "embodichain.extensions.robots.dexforce.w1.assets",
+    "DexforceW1V025": "embodichain.extensions.robots.dexforce.w1.assets",
+    "DexforceW1V030": "embodichain.extensions.robots.dexforce.w1.assets",
+    "DexforceW1ChassisV021": "embodichain.extensions.robots.dexforce.w1.assets",
+    "DexforceW1TorsoV021": "embodichain.extensions.robots.dexforce.w1.assets",
+    "DexforceW1EyesV021": "embodichain.extensions.robots.dexforce.w1.assets",
+    "DexforceW1HeadV021": "embodichain.extensions.robots.dexforce.w1.assets",
+    "DexforceW1LeftArmV021": "embodichain.extensions.robots.dexforce.w1.assets",
+    "DexforceW1RightArmV021": "embodichain.extensions.robots.dexforce.w1.assets",
 }
 
 

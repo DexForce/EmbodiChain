@@ -17,6 +17,7 @@
 """Typed, transport-neutral tracking contracts for atomic-skill execution."""
 
 from __future__ import annotations
+import math
 
 from abc import ABC, abstractmethod
 from copy import deepcopy
@@ -485,12 +486,54 @@ TerminalAcceptance = FeedbackTerminalAcceptance | TimedTerminalAcceptance
 
 @dataclass(frozen=True, slots=True)
 class TrackingPolicy:
-    """Independent in-flight recovery signal and terminal acceptance contract."""
+    """Independent in-flight recovery signal and terminal acceptance contract.
+
+    Args:
+        in_flight: Existing motion tracking and recovery policy.
+        terminal: Existing timed or feedback acceptance, retained unchanged.
+        boundary_reference_bridge: For supported native free entry phases, plan
+            a bounded controller-reference prefix before the original samples.
+            Requires independently captured position/velocity targets; external
+            nominal sources and undeclared phases retain their existing behavior.
+        boundary_stop: Additionally qualify explicitly bound motion joints before
+            completing an invocation. Hand endpoints retain their last commands.
+        boundary_position_tolerance: Maximum terminal reference error in joint
+            coordinates (radians for revolute, metres for prismatic joints).
+        boundary_velocity_tolerance: Maximum measured control-grid position
+            difference per second. Native velocity is separately checked finite.
+        boundary_timeout: Maximum physical seconds for boundary qualification.
+            Two distinct stable observations are required; failure is row-local.
+
+    This is a tolerance-bounded stop, not a C1/C2 blending guarantee. It never
+    replaces original terminal, contact or effect gates.
+    """
 
     in_flight: InFlightTrackingPolicy | None
     terminal: TerminalAcceptance
+    boundary_stop: bool = False
+    boundary_position_tolerance: float = 0.01
+    boundary_velocity_tolerance: float = 0.005
+    boundary_timeout: float = 1.5
+    boundary_reference_bridge: bool = False
 
     def __post_init__(self) -> None:
+        if (
+            type(self.boundary_reference_bridge) is not bool
+            or type(self.boundary_stop) is not bool
+        ):
+            raise TypeError("boundary_stop must be a bool")
+        for name in (
+            "boundary_position_tolerance",
+            "boundary_velocity_tolerance",
+            "boundary_timeout",
+        ):
+            value = getattr(self, name)
+            if (
+                type(value) not in (int, float)
+                or not math.isfinite(value)
+                or value <= 0
+            ):
+                raise ValueError(f"{name} must be finite and positive")
         if self.in_flight is not None and not isinstance(
             self.in_flight, InFlightTrackingPolicy
         ):
@@ -523,7 +566,15 @@ class TrackingPolicy:
                     )
 
     def snapshot(self) -> TrackingPolicy:
-        return TrackingPolicy(self.in_flight, self.terminal)
+        return TrackingPolicy(
+            in_flight=self.in_flight,
+            terminal=self.terminal,
+            boundary_stop=self.boundary_stop,
+            boundary_reference_bridge=self.boundary_reference_bridge,
+            boundary_position_tolerance=self.boundary_position_tolerance,
+            boundary_velocity_tolerance=self.boundary_velocity_tolerance,
+            boundary_timeout=self.boundary_timeout,
+        )
 
     @classmethod
     def timed(cls, *, settle_duration: float = 0.0) -> TrackingPolicy:

@@ -195,7 +195,7 @@ def run(root, image, execute):
     )
     components = (
         Path(__file__).resolve().parents[3]
-        / "extensions/embodichain_tasks/configs/components"
+        / "embodichain/extensions/tasks/configs/components"
     )
     runtime = root / "runtime.yaml"
     runtime.write_text(

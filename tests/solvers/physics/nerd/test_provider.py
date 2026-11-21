@@ -26,8 +26,8 @@ newton = pytest.importorskip("newton")
 pytest.importorskip("dexsim")
 
 from dexsim.engine.newton_physics import NewtonSolverContext
-from embodichain_models.dynamics.nerd import NeRDState
-from embodichain_solvers.physics.nerd.provider import NeRDProvider
+from embodichain.extensions.models.dynamics.nerd import NeRDState
+from embodichain.extensions.solvers.physics.nerd.provider import NeRDProvider
 from examples.learning.nerd._support._reference_model import make_reference_model
 from examples.learning.nerd._support._reference_assets import reference_profile
 from nerd_support import small_nerd_export

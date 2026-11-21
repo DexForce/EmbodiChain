@@ -170,7 +170,7 @@ class _NeverObserveProvider:
 
 def _read_payload(relative_path: Path) -> dict[str, object]:
     """Load one packaged JSON/YAML example as inert data."""
-    path = _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs" / relative_path
+    path = _REPOSITORY_ROOT / "embodichain/extensions/tasks/configs" / relative_path
     if path.suffix == ".json":
         payload = json.loads(path.read_text(encoding="utf-8"))
     else:
@@ -181,7 +181,7 @@ def _read_payload(relative_path: Path) -> dict[str, object]:
 
 def _deployment(relative_path: Path):
     """Compose one packaged environment deployment."""
-    path = _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs" / relative_path
+    path = _REPOSITORY_ROOT / "embodichain/extensions/tasks/configs" / relative_path
     payload = _read_payload(relative_path)
     physical = _resolve_gym_components(payload, base_dir=path.parent)
     assert physical.embodiment_skill_profile is not None
@@ -235,7 +235,7 @@ def _configure_cube_environment():
     """Load the packaged config and register its declared integration."""
     path = (
         _REPOSITORY_ROOT
-        / "extensions/embodichain_tasks/configs"
+        / "embodichain/extensions/tasks/configs"
         / _REPEATED_CUBE_GYM_CONFIG
     )
     payload = _read_payload(_REPEATED_CUBE_GYM_CONFIG)
@@ -245,7 +245,7 @@ def _configure_cube_environment():
 
 def _configure_packaged_environment(relative_path: Path, *, physics: str | None = None):
     """Load one packaged deployment and its selected physical component."""
-    path = _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs" / relative_path
+    path = _REPOSITORY_ROOT / "embodichain/extensions/tasks/configs" / relative_path
     payload = _read_payload(relative_path)
     if physics is not None:
         payload = _resolve_environment_component(

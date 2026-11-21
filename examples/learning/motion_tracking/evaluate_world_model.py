@@ -28,7 +28,7 @@ import time
 import torch
 
 from embodichain.data import get_data_path
-from embodichain_models.dynamics.rwm.robot_state import unpack_robot_state
+from embodichain.extensions.models.dynamics.rwm.robot_state import unpack_robot_state
 from run_metadata import write_run_metadata
 from train import MotionTraining
 from _configuration import normalize_recipe

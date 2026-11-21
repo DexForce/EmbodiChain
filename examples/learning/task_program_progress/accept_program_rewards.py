@@ -50,7 +50,7 @@ def _json(value):
 def _source(root):
     return (
         root
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml"
     )
 
 
@@ -68,9 +68,9 @@ def _source_inputs(root):
             for name in ("program.yaml", "integration.yaml", "evaluation.yaml")
         ],
         root
-        / "extensions/embodichain_tasks/configs/components/embodiments/cobotmagic.yaml",
+        / "embodichain/extensions/tasks/configs/components/embodiments/cobotmagic.yaml",
         root
-        / "extensions/embodichain_tasks/configs/components/execution_policies/trajectory_open_loop.yaml",
+        / "embodichain/extensions/tasks/configs/components/execution_policies/trajectory_open_loop.yaml",
     ]
     return {str(path.relative_to(root)): _hash(path) for path in paths}
 
@@ -188,13 +188,13 @@ def _configuration(args, root):
     config["task_program"]["execution_policy"] = {
         "component": str(
             root
-            / "extensions/embodichain_tasks/configs/components/execution_policies/trajectory_open_loop.yaml"
+            / "embodichain/extensions/tasks/configs/components/execution_policies/trajectory_open_loop.yaml"
         )
     }
     config["embodiment"] = deepcopy(expert["embodiment"])
     config["embodiment"]["component"] = str(
         root
-        / "extensions/embodichain_tasks/configs/components/embodiments/cobotmagic.yaml"
+        / "embodichain/extensions/tasks/configs/components/embodiments/cobotmagic.yaml"
     )
     config.update(
         device="cpu",

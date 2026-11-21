@@ -2,7 +2,7 @@ The Robot Studio
 ================
 
 Robot configurations for The Robot Studio live in the
-``embodichain_robots.the_robot_studio`` manufacturer namespace.
+``embodichain.extensions.robots.the_robot_studio`` manufacturer namespace.
 
 .. list-table::
    :class: robot-catalog

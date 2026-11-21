@@ -27,11 +27,13 @@ from embodichain.lab.sim.atomic_skills import (
     PickUpOptions,
     MotionPolicy,
     RecoveryPolicy,
+    TrackingPolicy,
 )
 from embodichain.lab.sim.atomic_skills.primitives.contact import (
     ContactPlaceGoal,
     ContactPickUpGoal,
     ContactPhase,
+    ContactPostcondition,
     ResolvedContactPhase,
 )
 from embodichain.lab.sim.atomic_skills.state import RobotObservation
@@ -339,6 +341,47 @@ def test_contact_pickup_plans_pose_close_and_lift_without_rigid_projection():
     assert pose_plan.continuation.phase_name == "approach"
     # The observed start and two authored waypoints all occupy the control grid.
     assert pose_plan.commands.frame_count == 3
+
+
+def test_contact_checkpoint_follows_lift_after_reference_bridge():
+    action = _bind_action(_motion_generator(), PickUp())
+    engine = _ACTION_ENGINES[id(action)]
+    source = _GeometrySource()
+    engine.planning_services.register_contact_source("geometry", source)
+    phase = ContactPhase("grasp", "pinch", (ContactPostcondition("check", "held"),))
+    invocation = replace(
+        _invocation(action, ContactPickUpGoal("geometry", (phase,))),
+        motion_policy=MotionPolicy(
+            strategy="ik_interp", dynamic_collision_mode="off", acceleration_limit=2.0
+        ),
+        recovery_policy=RecoveryPolicy(max_replans=0, max_skill_retries=0),
+        tracking_policy=replace(TrackingPolicy.timed(), boundary_reference_bridge=True),
+        skill_options=PickUpOptions(pre_grasp_distance=0, lift_height=0),
+    )
+    context = _context()
+    arm = invocation.binding.endpoint("primary", "motion").target.joint_ids
+    reference = context.robot.qpos.clone()
+    reference[:, arm[0]] += 0.001  # A stationary reference offset requires a prefix.
+    context = replace(
+        context,
+        robot=replace(
+            context.robot,
+            command_qpos=reference,
+            command_qvel=torch.zeros_like(reference),
+        ),
+    )
+    velocity_limits = engine.robot.get_qvel_limits.side_effect
+    engine.robot.get_qvel_limits.side_effect = (
+        lambda env_ids=None, **kw: velocity_limits(**kw)
+    )
+    engine.robot.get_qpos_limits.return_value = torch.tensor([-2.0, 2.0]).repeat(
+        context.batch_size, len(arm), 1
+    )
+
+    plan = engine.plan(invocation, context)
+    assert plan.diagnostics.metadata["reference_bridge"]["prefix_samples"] > 0
+    lift = next(segment for segment in plan.segments if segment.name == "lift")
+    assert plan.continuation.checkpoints == ((lift.stop - 1, "held"),)
 
 
 def test_velocity_qualification_also_rejects_an_unsafe_continued_grasp(monkeypatch):

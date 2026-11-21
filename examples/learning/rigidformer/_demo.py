@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from embodichain.lab.sim import SimulationManager
     from embodichain.lab.sim.objects import RigidObject, VisualObject
     from embodichain.lab.sim.sensors import Camera
-    from embodichain_models.dynamics.rigidformer import RigidFormerModel
+    from embodichain.extensions.models.dynamics.rigidformer import RigidFormerModel
 
 __all__ = ["run_demo"]
 
@@ -63,7 +63,7 @@ class _Geometry:
 
 def _load_geometry(args: argparse.Namespace, config: dict[str, Any]) -> _Geometry:
     """Read committed sphere templates, anchors and physical properties."""
-    from embodichain_models.dynamics.rigidformer._native.data.dataset import (
+    from embodichain.extensions.models.dynamics.rigidformer._native.data.dataset import (
         MultiObjectDynamics,
     )
 
@@ -258,8 +258,12 @@ def run_demo(args: argparse.Namespace) -> None:
     from embodichain.lab.sim.sensors import CameraCfg
     from embodichain.lab.sim.shapes import SphereCfg
     from embodichain.lab.visualization.cli import visualization_cfg_from_args
-    from embodichain_models.dynamics.rigidformer import load_rigidformer_checkpoint
-    from embodichain_models.dynamics.rigidformer.data import _verified_manifest
+    from embodichain.extensions.models.dynamics.rigidformer import (
+        load_rigidformer_checkpoint,
+    )
+    from embodichain.extensions.models.dynamics.rigidformer.data import (
+        _verified_manifest,
+    )
 
     if not _WARMUP < args.frames <= 480 or args.stride < 1 or args.fps < 1:
         raise ValueError("frames must be in [5, 480]; stride and fps must be positive")

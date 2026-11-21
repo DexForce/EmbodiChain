@@ -1,6 +1,6 @@
 # BrainCo Revo 1
 
-`embodichain_robots.BrainCoRevo1Cfg` configures a standalone left or right
+`embodichain.extensions.robots.BrainCoRevo1Cfg` configures a standalone left or right
 BrainCo Revo 1 hand. The catalog ID is `BrainCoRevo1`; `left` and `right`
 variants select the native hand asset, with right as the default.
 
@@ -29,7 +29,7 @@ Given an existing `SimulationManager` instance named `sim`:
 
 ```python
 from embodichain.robot_registry import resolve_robot_cfg
-from embodichain_robots import BrainCoRevo1Cfg
+from embodichain.extensions.robots import BrainCoRevo1Cfg
 
 cfg = resolve_robot_cfg("BrainCoRevo1", variant="left")
 # Equivalent native side selection:
@@ -92,7 +92,7 @@ replace these simulation settings.
 ## Shared model and W1 mounting
 
 The asset class is
-`embodichain_robots.brainco.revo1.assets.BrainCoHandRevo1`. Its shared archive
+`embodichain.extensions.robots.brainco.revo1.assets.BrainCoHandRevo1`. Its shared archive
 contains both `BrainCoLeftHand/BrainCoLeftHand.urdf` and
 `BrainCoRightHand/BrainCoRightHand.urdf`. Stable references remain:
 
@@ -115,5 +115,5 @@ model definition.
 The [BrainCo product documentation](https://www.brainco-hz.com/docs/revolimb-hand/revo1/parameters.html)
 confirms product affiliation. The exact packaged CAD release, original author,
 upstream revision and asset license remain unverified. See the
-[archive-specific source record](https://github.com/DexForce/EmbodiChain/blob/main/extensions/embodichain_robots/brainco/revo1/README.md)
+[archive-specific source record](https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/robots/brainco/revo1/README.md)
 for the download digest, inspection evidence and pending questions.

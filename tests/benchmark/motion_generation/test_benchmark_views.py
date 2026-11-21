@@ -24,14 +24,18 @@ from embodichain.lab.sim.motion.planners.utils import PlanResult
 import pytest
 import torch
 
-from embodichain_benchmarks.motion_generation.aggregation import aggregate_results
-from embodichain_benchmarks.motion_generation.config import SuiteCfg
-from embodichain_benchmarks.motion_generation.contracts import EvaluationDomain
-from embodichain_benchmarks.motion_generation.metrics.trajectory import (
+from embodichain.extensions.benchmarks.motion_generation.aggregation import (
+    aggregate_results,
+)
+from embodichain.extensions.benchmarks.motion_generation.config import SuiteCfg
+from embodichain.extensions.benchmarks.motion_generation.contracts import (
+    EvaluationDomain,
+)
+from embodichain.extensions.benchmarks.motion_generation.metrics.trajectory import (
     compute_case_outcomes,
     make_failure_outcomes,
 )
-from embodichain_benchmarks.motion_generation.models import (
+from embodichain.extensions.benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
@@ -39,7 +43,9 @@ from embodichain_benchmarks.motion_generation.models import (
     TrialPhase,
     TrialRecord,
 )
-from embodichain_benchmarks.motion_generation.reporting import write_markdown_report
+from embodichain.extensions.benchmarks.motion_generation.reporting import (
+    write_markdown_report,
+)
 
 
 def _case(track: str = "neutral", *, atomic: bool = False) -> BenchmarkCase:
@@ -824,3 +830,75 @@ def test_performance_replay_does_not_claim_independent_quality_uncertainty():
     assert row["seed_clusters"] is None
     assert row["success_ci_lower"] is row["success_ci_upper"] is None
     assert row["uncertainty_warning"] == "performance_replay_not_independent_quality"
+
+
+@pytest.mark.parametrize("separate_tracks", [False, True])
+def test_affordance_report_separates_task_geometry_from_controls_and_physics(
+    tmp_path, separate_tracks
+):
+    task = replace(_case(), case_parameters={"affordance_group": "task"})
+    control = replace(
+        task,
+        track="controls" if separate_tracks else task.track,
+        case_id="control",
+        case_parameters={"affordance_group": "control"},
+    )
+    failed = replace(
+        _outcome(timed=None),
+        ordered_waypoints_reached=False,
+        completed_waypoint_ratio=0.0,
+    )
+    records = [
+        _record(task, "raw", outcome=failed, timed=False),
+        _record(control, "raw", outcome=_outcome(timed=None), timed=False),
+    ]
+    records.extend(
+        replace(
+            _record(case, "raw", timed=False),
+            phase=phase,
+            cost_time_ms=cost,
+            outcomes=(),
+        )
+        for case in ([task, control] if separate_tracks else [control])
+        for phase, cost in ((TrialPhase.CONSTRUCT, 2.0), (TrialPhase.PREPARE, 3.0))
+    )
+    result = aggregate_results(
+        records,
+        [_metadata("raw", timed=False)],
+        [task, control],
+        1,
+        track_scenarios={case.track: "affordance_reaching" for case in (task, control)},
+    )
+    assert [row["view"] for row in result["report_views"]] == [
+        "affordance_reaching",
+        "reaching_controls",
+    ]
+    main = result["affordance_reaching_leaderboard"][0]
+    assert main["overall_success_rate"] == 0.0
+    assert main["planning_success_rate"] == 1.0
+    assert main["physical_skill_success_rate"] is None
+    assert result["reaching_controls_leaderboard"][0]["overall_success_rate"] == 1.0
+    assert (
+        result["affordance_reaching_timing_leaderboard"][0]["overall_success_rate"]
+        is None
+    )
+    for view, case in (("affordance_reaching", task), ("reaching_controls", control)):
+        descriptor = next(row for row in result["report_views"] if row["view"] == view)
+        assert descriptor["tracks"] == [case.track]
+        for table in (
+            "leaderboard",
+            "timing_leaderboard",
+            "time_and_memory",
+            "success_and_metrics",
+        ):
+            assert [row["track"] for row in result[f"{view}_{table}"]] == [case.track]
+        assert result[f"{view}_leaderboard"][0]["latency_p95_ms"] == 4.0
+        performance = result[f"{view}_time_and_memory"][0]
+        assert performance["planning_time_ms"] == 4.0
+        assert performance["trajectories_per_second"] == 250.0
+        assert performance["planner_construct_ms"] == 2.0
+        assert performance["backend_prepare_ms"] == 3.0
+    report = write_markdown_report(tmp_path / "report.md", SuiteCfg(), result)
+    text = report.read_text()
+    assert "Task-space Affordance Reaching" in text and "Reaching Controls" in text
+    assert "physics are not evaluated" in text

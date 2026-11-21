@@ -48,7 +48,7 @@ from embodichain.lab.gym.utils.registration import get_env_spec
 _ROOT = Path(__file__).resolve().parents[3]
 _CONFIG = (
     _ROOT
-    / "extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/env.configured_rl.yaml"
+    / "embodichain/extensions/tasks/configs/tasks/manipulation/push_cube/env.configured_rl.yaml"
 )
 
 
@@ -648,7 +648,7 @@ def test_configured_rl_rejects_mid_episode_virtual_target_resampling():
 
 
 def test_falling_is_failure_only_in_configured_deployment(monkeypatch):
-    from embodichain_tasks.manipulation.push_cube import PushCubeEnv
+    from embodichain.extensions.tasks.manipulation.push_cube import PushCubeEnv
 
     env = _env()
     env.pose[:, 2, 3] = -0.2
@@ -671,7 +671,7 @@ def test_falling_is_failure_only_in_configured_deployment(monkeypatch):
 def _program_reward_config():
     path = (
         _ROOT
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.policy.cobotmagic.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.policy.cobotmagic.yaml"
     )
     raw = yaml.safe_load(path.read_text())
     raw["rl_task"]["reward_composition"] = {

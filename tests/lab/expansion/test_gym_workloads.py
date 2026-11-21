@@ -260,7 +260,7 @@ def test_workload_action_schema_checked_before_constructing_world(
 
     deployment = (
         Path(__file__).resolve().parents[3]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
     )
     base = utils.config_to_cfg(load_config(deployment), source_path=deployment)
     workloads, configs = [], {}
@@ -378,7 +378,7 @@ def test_real_deployments_validate_shared_world_setup(
 
     task = (
         Path(__file__).resolve().parents[3]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
     )
     inputs = tmp_path / "inputs"
     inputs.mkdir()

@@ -32,7 +32,7 @@ import pytest
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 _CONFIG_DIRECTORY = (
     _REPOSITORY_ROOT
-    / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water"
+    / "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water"
 )
 # Keep the bottle near its authored pour center while rotating by 60 degrees.
 _MAX_POUR_POSITION_ERROR_M = 0.02

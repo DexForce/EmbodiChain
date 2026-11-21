@@ -32,9 +32,11 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 
 from embodichain.learning.sl import SupervisedLearner
-from embodichain_models.dynamics.rigidformer import RigidFormerModel
-from embodichain_models.dynamics.rigidformer.sl_recipe import build_rigidformer_trainer
-from embodichain_models.dynamics.rigidformer.supervised import (
+from embodichain.extensions.models.dynamics.rigidformer import RigidFormerModel
+from embodichain.extensions.models.dynamics.rigidformer.sl_recipe import (
+    build_rigidformer_trainer,
+)
+from embodichain.extensions.models.dynamics.rigidformer.supervised import (
     RigidFormerObjective,
     rigidformer_batch,
 )

@@ -106,7 +106,7 @@ class _RejectingValidationContext:
 
 _STACK_BLOCKS_TWO_PROGRAM = (
     Path(__file__).parents[3]
-    / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware"
+    / "embodichain/extensions/tasks/configs/tasks/manipulation/tableware"
     / "stack_blocks_two/task_program/program.yaml"
 )
 

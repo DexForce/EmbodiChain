@@ -1,5 +1,5 @@
 # Standalone SL recipe; run from the repository root after downloading data.
-factory: embodichain_models.dynamics.nerd.sl_recipe:build_supervised_trainer
+factory: embodichain.extensions.models.dynamics.nerd.sl_recipe:build_supervised_trainer
 model:
   input_dims:
     states_embedding: 29

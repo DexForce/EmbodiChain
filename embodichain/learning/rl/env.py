@@ -185,8 +185,8 @@ ScheduledDifferentiableVecEnv = ScheduledDifferentiableEnvProtocol
 def _is_nested_package_shadow(existing: Any, candidate: Any) -> bool:
     """Return True when ``candidate`` is an editable-install nested duplicate.
 
-    Legacy editable installs can expose both a canonical ``embodichain_tasks``
-    module and a nested ``embodichain_tasks.embodichain_tasks`` duplicate.
+    Legacy editable installs can expose both a canonical ``embodichain.extensions.tasks``
+    module and a nested ``embodichain.extensions.tasks.embodichain.extensions.tasks`` duplicate.
     Prefer the shorter canonical module path already registered.
     """
     existing_module = getattr(existing, "__module__", "") or ""

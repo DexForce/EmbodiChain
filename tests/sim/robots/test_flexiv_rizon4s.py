@@ -31,13 +31,13 @@ import yaml
 
 from embodichain.data.assets.robot_assets import FlexivRizon4S
 from embodichain.lab.sim.cfg import RobotCfg
-from embodichain_robots import FlexivRizon4SCfg
+from embodichain.extensions.robots import FlexivRizon4SCfg
 
 
 @pytest.mark.no_sim
 def test_rizon_preserves_explicit_usd_source(tmp_path: Path, monkeypatch) -> None:
     from embodichain.lab.sim.cfg.source import _asset_file_path
-    from embodichain_robots.flexiv.rizon4s import cfg as module
+    from embodichain.extensions.robots.flexiv.rizon4s import cfg as module
 
     arm = tmp_path / "arm.urdf"
     arm.write_text('<robot name="arm"><link name="base_link"/></robot>')
@@ -55,7 +55,7 @@ def test_rizon_preserves_explicit_usd_source(tmp_path: Path, monkeypatch) -> Non
 def test_rizon_composition_keeps_sensor_and_component_prefix(
     tmp_path: Path, monkeypatch
 ) -> None:
-    from embodichain_robots.flexiv.rizon4s import cfg as module
+    from embodichain.extensions.robots.flexiv.rizon4s import cfg as module
 
     arm = tmp_path / "arm.urdf"
     arm.write_text(
@@ -97,7 +97,7 @@ def test_rizon_composition_keeps_sensor_and_component_prefix(
 def test_rizon_preserves_explicit_calibrated_solver_urdf(
     tmp_path: Path, monkeypatch, typed: bool
 ) -> None:
-    from embodichain_robots.flexiv.rizon4s import cfg as module
+    from embodichain.extensions.robots.flexiv.rizon4s import cfg as module
     from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
 
     arm = tmp_path / "simulation.urdf"

@@ -13,7 +13,7 @@
 | Six-axis parent reaction at a child link | `embodichain/lab/sim/sensors/joint_wrench.py` |
 | Collision/visual ray provider, terrain scan, geometric LiDAR and ray depth | `embodichain/lab/sim/sensors/ray.py` |
 | Curved pad geometry and indentation depth | `embodichain/lab/sim/sensors/tactile_indentation.py` |
-| Official VLP-16 preset | `extensions/embodichain_sensors/vlp16.py` and the `embodichain.sensors` entry point |
+| Official VLP-16 preset | `embodichain/extensions/sensors/vlp16.py` and the `embodichain.sensors` entry point |
 | Image configuration, data flags, extrinsics | `embodichain/lab/sim/sensors/camera.py` → `CameraCfg`, `Camera` |
 | UID-scoped deployment calibration | `embodichain/lab/gym/utils/_component_composition.py`; [configuration ownership](../env-framework/configuration.md#reusable-gym-deployment-components) |
 | Two-eye transforms and attachment | `embodichain/lab/sim/sensors/stereo.py` → `StereoCameraCfg`, `StereoCamera` |

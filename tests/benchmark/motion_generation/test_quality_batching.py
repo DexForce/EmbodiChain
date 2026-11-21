@@ -28,23 +28,31 @@ import torch
 from embodichain.lab.sim.motion.planners.neural_planner import NeuralPlanner
 from embodichain.lab.sim.motion.planners.toppra_planner import retime_joint_paths
 from embodichain.lab.sim.motion.planners.utils import PlanResult
-from embodichain_benchmarks.motion_generation import run_benchmark
-from embodichain_benchmarks.motion_generation._quality_batching import (
+from embodichain.extensions.benchmarks.motion_generation import run_benchmark
+from embodichain.extensions.benchmarks.motion_generation._quality_batching import (
     case_groups,
     pack_cases,
     split_result,
 )
-from embodichain_benchmarks.motion_generation.artifacts import write_case_manifest
-from embodichain_benchmarks.motion_generation.config import (
+from embodichain.extensions.benchmarks.motion_generation.artifacts import (
+    write_case_manifest,
+)
+from embodichain.extensions.benchmarks.motion_generation.config import (
     PlannerSpecCfg,
     SuiteCfg,
     TrackCfg,
 )
-from embodichain_benchmarks.motion_generation.models import BenchmarkCase
-from embodichain_benchmarks.motion_generation.embodiments import resolve_embodiment
-from embodichain_benchmarks.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
-from embodichain_benchmarks.motion_generation.planners import nmg_onnx as nmg_module
-from embodichain_benchmarks.motion_generation import runner as runner_module
+from embodichain.extensions.benchmarks.motion_generation.models import BenchmarkCase
+from embodichain.extensions.benchmarks.motion_generation.embodiments import (
+    resolve_embodiment,
+)
+from embodichain.extensions.benchmarks.motion_generation.planners.nmg_onnx import (
+    NmgOnnxAdapter,
+)
+from embodichain.extensions.benchmarks.motion_generation.planners import (
+    nmg_onnx as nmg_module,
+)
+from embodichain.extensions.benchmarks.motion_generation import runner as runner_module
 
 pytestmark = pytest.mark.no_sim
 
@@ -224,7 +232,9 @@ def test_public_batch_replay_preserves_original_records_and_scores(
             pose[..., :3, 3] = qpos[..., :3]
             return pose
 
-    def simulation(cfg):
+    def simulation(cfg, *, requires_native_renderer):
+        assert cfg.headless is True
+        assert requires_native_renderer is False
         return SimpleNamespace(
             robot=Robot(cfg.num_envs),
             update=lambda **kw: None,

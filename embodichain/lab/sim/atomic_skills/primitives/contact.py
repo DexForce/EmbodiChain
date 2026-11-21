@@ -408,21 +408,20 @@ def _plan_contact_phase(
             active_mask=valid,
         )
         success &= valid
-    checkpoints = []
-    count = positions.shape[1]
+    checkpoint_targets = {}
     for post in phase.after:
+        segment_name = f"{post.kind}:{post.target}:{len(segments)}"
         if post.kind == "hold":
             n = source.hold_steps(post.target)
         else:
-            checkpoints.append((count - 1, post.target))
+            checkpoint_targets[segment_name] = post.target
             n = 2
         if type(n) is not int or n < 1:
             raise ValueError(
                 "Contact settling targets must supply positive integer steps."
             )
         positions = torch.cat((positions, positions[:, -1:].expand(-1, n, -1)), 1)
-        segments[f"{post.kind}:{post.target}:{len(segments)}"] = n
-        count += n
+        segments[segment_name] = n
     plan = action.build_plan(
         request,
         context,
@@ -430,6 +429,12 @@ def _plan_contact_phase(
         trajectory=_trajectory(context, positions),
         segment_lengths=segments,
         replannable=False,
+    )
+    # A controller-reference prefix can shift the final command indices.
+    checkpoints = tuple(
+        (segment.start - 1, checkpoint_targets[segment.name])
+        for segment in plan.segments
+        if segment.name in checkpoint_targets
     )
     return replace(
         plan,
@@ -439,7 +444,7 @@ def _plan_contact_phase(
             phase.target,
             phase,
             resolved,
-            tuple(checkpoints),
+            checkpoints,
         ),
     )
 

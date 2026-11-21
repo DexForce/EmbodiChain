@@ -60,7 +60,7 @@ def requires_dexuni_two_way() -> None:
 def _discover_task_packages():
     """Discover all installed task packages once per test session.
 
-    Official task environments now ship as the ``embodichain_tasks`` import
+    Official task environments now ship as the ``embodichain.extensions.tasks`` import
     package inside the main EmbodiChain distribution. Third-party packages can
     also declare an ``embodichain.tasks`` entry point. Tasks are no longer
     auto-registered by importing

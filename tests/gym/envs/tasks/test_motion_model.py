@@ -24,18 +24,21 @@ import pytest
 from tensordict import TensorDict
 from embodichain.compute.kinematics import TreeKinematics
 from embodichain.data_pipeline.datasets.motion import MotionLibrary
-from embodichain_models.dynamics.rwm import KinematicWorldModel, KinematicWorldModelCfg
-from embodichain_models.dynamics.rwm.model import frozen_world_model
-from embodichain_models.dynamics.rwm.robot_state import pack_robot_state
-from embodichain_models.policies.motion_tracking import (
+from embodichain.extensions.models.dynamics.rwm import (
+    KinematicWorldModel,
+    KinematicWorldModelCfg,
+)
+from embodichain.extensions.models.dynamics.rwm.model import frozen_world_model
+from embodichain.extensions.models.dynamics.rwm.robot_state import pack_robot_state
+from embodichain.extensions.models.policies.motion_tracking import (
     MotionTrackingPolicy,
     MotionTrackingPolicyCfg,
 )
-from embodichain_tasks.locomotion.tracking._task import (
+from embodichain.extensions.tasks.locomotion.tracking._task import (
     MotionTrackingTask,
     MotionTrackingCfg,
 )
-from embodichain_tasks.locomotion.tracking.motion_model import (
+from embodichain.extensions.tasks.locomotion.tracking.motion_model import (
     MotionModelEnv,
     MotionModelCfg,
     MotionModelStart,
@@ -248,7 +251,9 @@ def test_task_analytics_preserves_values_and_state_gradients(compiled):
 def test_physical_transition_excludes_nonfinite_rows(compiled):
     """Divergent state rows terminate with finite features and zero return."""
     from types import SimpleNamespace
-    from embodichain_tasks.locomotion.tracking.g1_motion import UnitreeG1MotionEnv
+    from embodichain.extensions.tasks.locomotion.tracking.g1_motion import (
+        UnitreeG1MotionEnv,
+    )
 
     env, _ = make_env()
     frame = torch.tensor([1, 3])
@@ -284,7 +289,9 @@ def test_physical_episode_metrics_own_storage_across_task_invocations(monkeypatc
     """Reset metrics remain writable when a compiled producer reuses its output."""
     from types import SimpleNamespace
     from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
-    from embodichain_tasks.locomotion.tracking.g1_motion import UnitreeG1MotionEnv
+    from embodichain.extensions.tasks.locomotion.tracking.g1_motion import (
+        UnitreeG1MotionEnv,
+    )
 
     model_env, _ = make_env()
     env = object.__new__(UnitreeG1MotionEnv)

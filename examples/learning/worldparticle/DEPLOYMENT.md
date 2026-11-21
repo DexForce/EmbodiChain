@@ -27,7 +27,7 @@ import yaml
 import dexsim
 from dexsim.engine.newton_physics import NewtonCfg, ProviderNewtonSolverCfg
 from dexsim.spawn import SceneBuilder, FluidRenderMode
-from embodichain_solvers.physics.worldparticle.provider import WorldParticleProvider
+from embodichain.extensions.solvers.physics.worldparticle.provider import WorldParticleProvider
 
 assets = Path("outputs/worldparticle/assets").resolve()
 checkpoint = assets / "checkpoints/fancy_fluid/final.ckpt"

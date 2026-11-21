@@ -272,7 +272,7 @@ callbacks own optimizer steps and complete backward passes before returning.
 Configuration paths below resolve through the installed task package:
 
 ```bash
-CONFIGS=extensions/embodichain_tasks/configs/tasks/locomotion/tracking/g1_motion/agents
+CONFIGS=embodichain/extensions/tasks/configs/tasks/locomotion/tracking/g1_motion/agents
 CUDA_VISIBLE_DEVICES=0 embodichain run-example learning/motion_tracking/train.py \
   --config "$CONFIGS/model_based.yaml" --output outputs/functional
 ```

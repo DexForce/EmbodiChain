@@ -23,7 +23,7 @@ __all__ = ["SO101FollowerAssets"]
 from importlib import import_module
 
 _ASSET_EXPORTS = {
-    "SO101FollowerAssets": "embodichain_robots.the_robot_studio.so101.assets"
+    "SO101FollowerAssets": "embodichain.extensions.robots.the_robot_studio.so101.assets"
 }
 
 
