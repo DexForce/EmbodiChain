@@ -134,5 +134,6 @@ teardown, which releases the owning scene.
 ## Related topics
 
 - {doc}`sim_assets` for asset selection and UID lookup.
-- {doc}`sim_cloth` and {doc}`sim_soft_object` for node-based deformables.
+- {doc}`sim_surface_deformable_object` and {doc}`sim_volume_deformable_object` for
+  node-based deformables.
 - {doc}`visualization/viser` for cable segment visualization.

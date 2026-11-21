@@ -1,11 +1,13 @@
-# Soft Object
+(soft-object)=
+# Volume Deformable Object
 
 ```{currentmodule} embodichain.lab.sim
 ```
 
 {class}`~objects.VolumeDeformableObject` simulates a soft solid using a
 tetrahedral mesh. Its simulation nodes carry world-frame positions and
-velocities. Use a {doc}`sim_cloth` for geometry simulated as a triangle surface.
+velocities. Use a {doc}`surface deformable <sim_surface_deformable_object>` for
+geometry simulated as a triangle surface.
 
 Use Newton on CUDA with a particle-capable solver and gradients disabled.
 Declare the soft object before `sim.prepare()`. See
@@ -92,7 +94,8 @@ For a file-backed mesh, set `shape=MeshCfg(fpath="body.obj")` and configure
 `meshing` to control the generated tetrahedra. Use a closed surface that
 encloses the desired volume.
 
-### Soft Object Class
+(soft-object-class)=
+### Volume Deformable Object API
 
 #### Nodal State
 
@@ -141,5 +144,5 @@ current shape.
 
 - {doc}`Soft Body Simulation </tutorial/create_softbody>` for a rendered
   tutorial using volume meshing.
-- {doc}`sim_cloth` for triangle-surface topology and nodal controls.
+- {doc}`sim_surface_deformable_object` for triangle-surface topology and nodal controls.
 - {doc}`sim_assets` for the asset overview.

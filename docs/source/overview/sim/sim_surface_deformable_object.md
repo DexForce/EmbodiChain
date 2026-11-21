@@ -1,12 +1,13 @@
-# Cloth Object
+(cloth-object)=
+# Surface Deformable Object
 
 ```{currentmodule} embodichain.lab.sim
 ```
 
 {class}`~objects.SurfaceDeformableObject` simulates a triangle surface such
 as cloth or a membrane. Its state is the world-frame position and velocity
-of each simulation node. Choose a {doc}`sim_soft_object` for a solid that
-needs an interior simulation mesh.
+of each simulation node. Choose a {doc}`volume deformable <sim_volume_deformable_object>`
+for a solid that needs an interior simulation mesh.
 
 Use Newton on CUDA with a particle-capable solver and gradients disabled.
 Declare the cloth before `sim.prepare()`. See
@@ -91,7 +92,8 @@ finally:
     SimulationManager.flush_cleanup_queue()
 ```
 
-### Cloth Object Class
+(cloth-object-class)=
+### Surface Deformable Object API
 
 #### Nodal State
 
@@ -137,5 +139,5 @@ materials, call `reset(env_ids=...)`. Read the current shape through
 ## Related Topics
 
 - {doc}`Cloth Body Simulation </tutorial/create_cloth>` for a rendered tutorial.
-- {doc}`sim_soft_object` for particle sets with a tetrahedral interior.
+- {doc}`sim_volume_deformable_object` for particle sets with a tetrahedral interior.
 - {doc}`sim_assets` for the asset overview and the cable segment-state interface.

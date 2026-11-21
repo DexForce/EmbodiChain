@@ -19,7 +19,7 @@ selects the environment.
 | {doc}`Jointed mechanism <sim_articulation>` such as a door or drawer | {class}`~cfg.ArticulationCfg` | `add_articulation()` |
 | {doc}`Robot <sim_robot>` with control parts and kinematics | {class}`~cfg.RobotCfg` | `add_robot()` |
 | {doc}`Visual object <sim_visual_object>` for scenery or props | {class}`~cfg.VisualObjectCfg` | `add_visual_object()` |
-| {doc}`Soft solid <sim_soft_object>` or {doc}`cloth <sim_cloth>` with nodal state | {class}`~cfg.VolumeDeformableObjectCfg`, {class}`~cfg.SurfaceDeformableObjectCfg` | `add_deformable_object()` |
+| {doc}`Soft solid <sim_volume_deformable_object>` or {doc}`cloth <sim_surface_deformable_object>` with nodal state | {class}`~cfg.VolumeDeformableObjectCfg`, {class}`~cfg.SurfaceDeformableObjectCfg` | `add_deformable_object()` |
 | {doc}`Cable <sim_cable_object>` such as a rope, wire, or hose | {class}`~cfg.CableObjectCfg` | `add_cable_object()` |
 | {doc}`Fluid <sim_fluid_object>` sampled from an initial fill | {class}`~cfg.fluid.FluidObjectCfg` | `add_fluid_object()` |
 | {doc}`Direct light <sim_light>` in a rendered scene | {class}`~cfg.LightCfg` | `add_light()` |
@@ -176,8 +176,8 @@ angular velocity of each segment.
 
 | Asset | Simulated geometry | World-frame state after `prepare()` |
 | :--- | :--- | :--- |
-| {doc}`Volume deformable <sim_soft_object>` | Tetrahedral volume mesh | `data.nodal_state_w` has shape `(environments, nodes, 6)` with position and velocity per node. |
-| {doc}`Surface deformable <sim_cloth>` | Triangle surface mesh | `data.nodal_state_w` uses the same node layout. |
+| {doc}`Volume deformable <sim_volume_deformable_object>` | Tetrahedral volume mesh | `data.nodal_state_w` has shape `(environments, nodes, 6)` with position and velocity per node. |
+| {doc}`Surface deformable <sim_surface_deformable_object>` | Triangle surface mesh | `data.nodal_state_w` uses the same node layout. |
 | Cable | Ordered centreline represented by capsule segments | `data.segment_state_w` has shape `(environments, segments, 13)` with position, `xyzw` orientation, linear velocity, and angular velocity per segment. |
 
 This terminology follows [Isaac Lab 3.0's overview of deformables](https://isaac-sim.github.io/IsaacLab/v3.0.0/source/concepts/deformables.html).
@@ -393,8 +393,8 @@ outputs, and attachment examples.
 
 sim_rigid_object.md
 sim_rigid_object_group.md
-sim_cloth.md
-sim_soft_object.md
+sim_surface_deformable_object.md
+sim_volume_deformable_object.md
 sim_articulation.md
 sim_robot.md
 sim_visual_object.md
