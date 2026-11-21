@@ -79,17 +79,52 @@ def main() -> None:
 
     manifest = RunManifest.load(policy["run"])
     run = manifest.root
+    checkpoint_path = (policy.get("checkpoint") or {}).get("path")
+    if not checkpoint_path:
+        raise ValueError(
+            "Checkpoint preview must record its loaded checkpoint; re-run qualification."
+        )
+    checkpoint = Path(checkpoint_path).expanduser().resolve()
     benchmark = read("benchmark.json")
     evaluations = []
+    required_metrics = (
+        "eval/success_rate",
+        "eval/success_samples",
+        "eval/avg_reward",
+        "eval/avg_length",
+        "eval/success_ci95_low",
+        "eval/success_ci95_high",
+    )
     for path in sorted((output / "final_evaluation").rglob("evaluation.json")):
         candidate = json.loads(path.read_text())
-        source_run = candidate.get("inputs", {}).get("run")
-        if source_run and Path(source_run).expanduser().resolve() == run:
+        inputs = candidate.get("inputs", {})
+        source_run = inputs.get("run")
+        source_checkpoint = (inputs.get("checkpoint") or {}).get("path")
+        metrics = candidate.get("result", {}).get("metrics", {})
+        if (
+            candidate.get("mode") == "headless"
+            and source_run
+            and Path(source_run).expanduser().resolve() == run
+            and source_checkpoint
+            and Path(source_checkpoint).expanduser().resolve() == checkpoint
+            and all(
+                type(metrics.get(key)) in (float, int) and math.isfinite(metrics[key])
+                for key in required_metrics
+            )
+            and metrics["eval/success_samples"] > 0
+            and float(metrics["eval/success_samples"]).is_integer()
+            and 0 <= metrics["eval/success_rate"] <= 1
+        ):
             evaluations.append((path, candidate))
     if not evaluations:
-        raise ValueError(f"No independent evaluation matches training run: {run}")
+        raise ValueError(
+            "No eligible headless evaluation with complete finite metrics matches "
+            f"training run {run} and preview checkpoint {checkpoint}."
+        )
     evaluation_file, evaluation = evaluations[-1]
     metrics = evaluation["result"]["metrics"]
+    evaluation_samples = int(metrics["eval/success_samples"])
+    evaluation_successes = round(metrics["eval/success_rate"] * evaluation_samples)
     test_log = (output / "final_tests.log").read_text()
     passed = re.findall(r"(\d+) passed", test_log)
     if not passed or re.search(
@@ -130,13 +165,17 @@ def main() -> None:
         "training_seed": training_seed,
         "evaluation_seed": evaluation_seed,
         "run": str(run),
+        "checkpoint": str(checkpoint),
         "train_config": str(train_config),
         "evaluation_file": str(evaluation_file),
         "evaluation": metrics,
+        "evaluation_successes": evaluation_successes,
+        "evaluation_samples": evaluation_samples,
         "policy_preview": {
             "passed": policy["passed"],
             "finite_rewards": policy["finite_rewards"],
             "valid_measurements": policy.get("valid_measurements"),
+            "checkpoint": policy["checkpoint"],
         },
         "expert": {
             "control_steps": expert["steps"],
@@ -210,7 +249,7 @@ def main() -> None:
         f"| 相关回归测试 | {summary['tests_passed']} 通过 | 数值、配置、目标、生命周期、恢复和上下文 |",
         f"| PPO 短程训练 | {updates} 次更新 / {transitions} 条转移 | {summary['training_envs']} 环境，验证链路 |",
         f"| 保存与恢复 | step={transitions}、updates={updates} 恢复成功 | 包含优化器、折扣和目标/模板契约校验 |",
-        f"| 独立 PPO 评估 | {int(metrics['eval/success_rate']*metrics['eval/success_samples'])}/{int(metrics['eval/success_samples'])} 成功 | 评估 seed={evaluation_seed}，与训练 seed={training_seed} {seed_relation} |",
+        f"| 独立 PPO 评估 | {evaluation_successes}/{evaluation_samples} 成功 | 评估 seed={evaluation_seed}，与训练 seed={training_seed} {seed_relation} |",
         f"| 评估平均回报 / 长度 | {metrics['eval/avg_reward']:.6f} / {metrics['eval/avg_length']:.1f} | 短程策略尚未学会目标动作 |",
         f"| 成功率 Wilson 95% 区间 | [{metrics['eval/success_ci95_low']:.3f}, {metrics['eval/success_ci95_high']:.3f}] | 小样本，不是收敛实验 |",
         f"| 策略预览奖励检查 | 通过 | finite_rewards={policy['finite_rewards']}、passed={policy['passed']}；任务成功率仅作记录 |",

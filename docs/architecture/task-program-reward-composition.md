@@ -375,6 +375,11 @@ eligible for the latest-result selection. Missing matches and failed/nonfinite
 checkpoint previews stop reporting. Accepted summaries retain the preview's
 reward-quality flags and the selected config/evaluation paths; policy task
 success remains informational.
+Checkpoint previews retain the loaded path and selected role. Aggregate reporting
+matches both canonical run and checkpoint identities and selects only headless
+evaluations with complete finite metrics. Viewer outputs and incomplete metric
+sets are ineligible. Missing checkpoint provenance requires requalification.
+Summary/Markdown use rounded episode counts when reconstructing them from rates.
 
 Physics-substep acquisition adds work. The recorded fixture timing includes
 rendering and scalar auditing and does not establish large-batch or GPU

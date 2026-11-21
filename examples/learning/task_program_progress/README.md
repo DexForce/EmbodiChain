@@ -192,6 +192,12 @@ of 1. Evaluations are filtered by their canonical `inputs.run` before selecting
 the latest matching file; no match is an error. Failed or nonfinite checkpoint
 previews stop aggregate reporting. Their reward-quality flags remain in accepted
 summaries and Markdown, while policy task success stays informational.
+Checkpoint qualification records the checkpoint path and selected role actually
+loaded. Reporting requires a matching checkpoint and run, `mode: headless`, and
+complete finite success/reward/length/interval metrics before selecting the latest
+eligible evaluation. Viewer results cannot replace headless statistics. Re-run
+older previews without checkpoint identity before reporting. Counts reconstructed
+from success rates are rounded to the nearest episode, avoiding float truncation.
 
 
 A complete planning-expert grasp/place trace can qualify the same measured

@@ -112,6 +112,8 @@ def main() -> None:
     renderer = "hybrid" if args.video else "no-render"
     policy = None
     runtime = None
+    checkpoint = None
+    checkpoint_role = None
     label = args.case
     started = time.perf_counter()
     if args.expert:
@@ -189,7 +191,7 @@ def main() -> None:
             seed=args.seed,
             config_dir=manifest.configs["train"].parent,
         )
-        _, checkpoint = manifest.select_checkpoint("latest")
+        checkpoint_role, checkpoint = manifest.select_checkpoint("latest")
         policy = runtime.policy
         policy.load_state_dict(_load_policy_state_dict(checkpoint))
         policy.eval()
@@ -357,6 +359,11 @@ def main() -> None:
                 else "fixed_physical_fixture_zero_actions"
             ),
             "run": str(args.run.resolve()) if args.run else None,
+            "checkpoint": (
+                {"path": str(checkpoint), "selected": checkpoint_role}
+                if checkpoint is not None
+                else None
+            ),
             "seed": args.seed,
             "steps": len(trace),
             "num_envs": env.num_envs,
