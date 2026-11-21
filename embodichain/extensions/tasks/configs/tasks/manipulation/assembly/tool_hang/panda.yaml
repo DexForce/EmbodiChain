@@ -1,0 +1,32 @@
+embodiment_id: tool_hang_panda
+simulation:
+  class_type: Franka
+  arm_model: panda
+  uid: FrankaPanda
+  urdf_cfg: {fname: tool_hang_panda_v1}
+  init_pos: [-0.56, 0, 0.912]
+  init_qpos: [0, 0.19635, 0, -2.61799, 0, 2.94159, 0.78540, 0.04, 0.04]
+grippers:
+  eef:
+    class_type: FrankaPandaHand
+    mode: mounted
+    motion_part: arm
+    control_part: eef
+    component_type: hand
+    transform:
+    - [0.7071067812, 0.7071067812, 0, 0]
+    - [-0.7071067812, 0.7071067812, 0, 0]
+    - [0, 0, 1, 0]
+    - [0, 0, 0, 1]
+sensor:
+- sensor_type: ContactSensor
+  uid: tool_contacts
+  filter_need_both_actor: true
+  max_contacts_per_env: 256
+  articulation_cfg_list:
+  - articulation_uid: frame
+    link_name_list: [horizontal_bar]
+  - articulation_uid: tool
+    link_name_list: [tool, large_ring]
+  - articulation_uid: FrankaPanda
+    link_name_list: [fr3_hand, fr3_leftfinger, fr3_rightfinger]
