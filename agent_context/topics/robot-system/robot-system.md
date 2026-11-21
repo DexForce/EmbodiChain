@@ -25,6 +25,21 @@ identity and calibrated defaults belong to `embodichain.extensions.robots`.
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
 | Shared articulation state and drive properties | `embodichain/lab/sim/objects/articulation.py`, `embodichain/lab/sim/cfg/articulation.py` |
 
+## Reading a robot in an existing DexSim World
+
+Install the same EmbodiChain version in the DexSim host and the stdio server
+environment, with the `mcp` extra on the server. Use `embodichain mcp --session ID`
+and optionally `--session-directory DIR` for a custom discovery directory.
+`embodichain_get_robot_state` takes a finalized scene articulation path,
+registered robot config ID, optional variant and configured control part.
+For a bare UR5, use `robot_cfg=URRobot`, `variant=ur5` and `control_part=arm`.
+The CLI delegates session ownership to `embodichain/mcp/server.py`.
+Robot tools in `embodichain/mcp/tools/robot.py` use the shared measurement type
+in `embodichain/lab/observations/joints.py`. The host adapter in
+`embodichain/lab/sim/dexsim_session/robot_state.py` resolves current DOF spans
+on each read and reports measured positions and velocities with aligned joint names and units, scene topology
+revision and available simulation clock. Disconnecting leaves the World running.
+
 ## Configuration resolution
 
 The lightweight catalog is the selection boundary for Gym, preview, workspace

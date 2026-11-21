@@ -11,6 +11,8 @@ sphinx-design==0.6.1
 sphinx-autodoc-typehints==2.3.0
 pypandoc-binary==1.17
 packaging>=23.0
+# Import the stdio server when building its Python API reference.
+mcp>=2,<3
 
 # Source-backed architecture documentation tooling
 -r architecture/requirements.txt
