@@ -893,6 +893,10 @@ class Articulation(BatchEntity):
 
         if self.cfg.init_qpos is None:
             self.cfg.init_qpos = torch.zeros(self.dof, dtype=torch.float32)
+        if self.cfg.init_qpos_joint_names is not None:
+            qpos = torch.as_tensor(self.cfg.init_qpos, dtype=torch.float32)
+            self.cfg.init_qpos = self._source_qpos_to_state_order(qpos).tolist()
+            self.cfg.init_qpos_joint_names = self.joint_names
 
         self._capture_default_physical_properties()
         self.default_joint_stiffness = self._data.joint_stiffness.clone()
@@ -1133,6 +1137,7 @@ class Articulation(BatchEntity):
             self._entities[0],
             qpos,
             is_spawn_bound=self.is_spawn_bound,
+            joint_names=self.cfg.init_qpos_joint_names,
         )
 
     def _state_mimic_info(self) -> _MimicInfo:

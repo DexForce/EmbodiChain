@@ -70,8 +70,10 @@ configured root frame; they do not belong in compute.
 Control-part keys are explicit configuration, not inferred hand capabilities.
 Official conventions live in AGENTS; custom keys and asset-defined link/joint
 names remain valid. Pattern expansion for Spawn-bound robots resolves against
-final batch qpos ordering. Source-ordered initial positions, mimic followers and
-parents are remapped consistently; select independent joints explicitly.
+final batch qpos ordering. Initial positions can declare their exact joint order
+through `init_qpos_joint_names`. Binding and Newton initializer seeds remap
+those positions along with the mimic relations to the state-buffer order.
+Select independent joints explicitly for control groups.
 
 Action terms remove mimic followers and cannot overlap another term's joint
 and command type. A scalar parallel-gripper policy input still maps to the

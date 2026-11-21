@@ -38,7 +38,7 @@ class RoboPartyRPOCfg(_RoboPartyRobotCfg):
     def _build_defaults(self, init_dict: dict[str, Any] | None = None) -> None:
         joints = self._load_joints("RoboPartyRPO/rpo.urdf", init_dict)
         self.uid = "RoboPartyRPO"
-        self.control_parts = {"locomotion": [joint.attrib["name"] for joint in joints]}
+        self.control_parts = {"locomotion": [joint.name for joint in joints]}
         self.init_pos = [0.0, 0.0, 0.75]
         self._set_initial_joint_positions(joints, {})
         self.root_props = ArticulationRootPropertiesCfg(fixed_base=False)
@@ -46,6 +46,6 @@ class RoboPartyRPOCfg(_RoboPartyRobotCfg):
             drive_type="force",
             stiffness=100.0,
             damping=4.0,
-            max_effort=_source_drive_limit(joints, "effort"),
-            max_velocity=_source_drive_limit(joints, "velocity"),
+            max_effort=_source_drive_limit(joints, "effort_limit"),
+            max_velocity=_source_drive_limit(joints, "velocity_limit"),
         )

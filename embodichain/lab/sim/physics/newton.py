@@ -223,6 +223,7 @@ class NewtonPhysicsBackend(PhysicsBackend):
                     uid
                 ].cfg.root_props.newton_mimic_stabilizer,
                 has_permanent_attachment=uid in attached_articulations,
+                joint_names=articulations[uid].cfg.init_qpos_joint_names,
             )
             for uid, values in positions.items()
             if values is None or values.size

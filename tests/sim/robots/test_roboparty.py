@@ -18,17 +18,18 @@
 
 from __future__ import annotations
 
+from math import degrees
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
 import pytest
+import torch
 
 from embodichain.robot_registry import resolve_robot_cfg
 from embodichain.extensions.robots._catalog import ROBOT_CONFIGS
 
-pytestmark = pytest.mark.no_sim
 
-
+@pytest.mark.no_sim
 @pytest.mark.slow
 @pytest.mark.parametrize(
     "robot_id,variant,root_link,independent_dof,mimic_count",
@@ -91,7 +92,8 @@ def test_pinned_description_matches_robot_preset(
     assert cfg.build_pk_serial_chain() == {}
 
     assert len(cfg.init_qpos) == len(moving)
-    qpos = {joint.attrib["name"]: value for joint, value in zip(moving, cfg.init_qpos)}
+    assert cfg.init_qpos_joint_names == [joint.attrib["name"] for joint in moving]
+    qpos = dict(zip(cfg.init_qpos_joint_names, cfg.init_qpos, strict=True))
     for joint in moving:
         limit = joint.find("limit")
         assert (
@@ -122,6 +124,7 @@ def test_pinned_description_matches_robot_preset(
     assert type(cfg).from_dict(override).to_dict() == override
 
 
+@pytest.mark.no_sim
 def test_local_urdf_limits_survive_a_partial_drive_override(tmp_path: Path) -> None:
     """Apply a regex override while retaining unaffected source limits."""
     urdf = tmp_path / "rpo.urdf"
@@ -147,6 +150,243 @@ def test_local_urdf_limits_survive_a_partial_drive_override(tmp_path: Path) -> N
     )
     assert cfg.joint_drive_props.max_velocity == {"left_.*": 5.0, "right_joint": 12.0}
     assert cfg.joint_drive_props.max_effort == {"left_joint": 60.0, "right_joint": 70.0}
+
+
+_RIGHT_HAND_PARENTS = {
+    "11": None,
+    "12": "11",
+    "13": "12",
+    "21": None,
+    "22": "21",
+    "31": None,
+    "32": "31",
+    "41": None,
+    "42": "41",
+    "51": None,
+    "52": "51",
+}
+_RIGHT_HAND_MIMICS = {
+    "13": (0.929, -0.015082),
+    "22": (0.8847, 0.038265),
+    "32": (0.8485, 0.035946),
+    "42": (0.8321, 0.043170),
+    "52": (0.7349, 0.035218),
+}
+
+
+@pytest.fixture
+def right_hand_urdf(tmp_path: Path) -> Path:
+    """Author the RP Hand's movable tree with child joints declared first."""
+    tree = ET.Element("robot", name="local_right_hand")
+    names = ["rh_base_link", *(f"rh_finger{i}_link" for i in _RIGHT_HAND_PARENTS)]
+    for name in names:
+        link = ET.SubElement(tree, "link", name=name)
+        inertial = ET.SubElement(link, "inertial")
+        ET.SubElement(inertial, "mass", value="0.1")
+        ET.SubElement(
+            inertial,
+            "inertia",
+            ixx="0.001",
+            ixy="0",
+            ixz="0",
+            iyy="0.001",
+            iyz="0",
+            izz="0.001",
+        )
+    for finger, parent in reversed(_RIGHT_HAND_PARENTS.items()):
+        joint = ET.SubElement(tree, "joint", name=f"rh_finger{finger}", type="revolute")
+        parent_link = "rh_base_link" if parent is None else f"rh_finger{parent}_link"
+        ET.SubElement(joint, "parent", link=parent_link)
+        ET.SubElement(joint, "child", link=f"rh_finger{finger}_link")
+        ET.SubElement(joint, "axis", xyz="1 0 0")
+        ET.SubElement(joint, "limit", lower="0", upper="1.75", effort="0", velocity="0")
+        if finger in _RIGHT_HAND_MIMICS:
+            multiplier, offset = _RIGHT_HAND_MIMICS[finger]
+            ET.SubElement(
+                joint,
+                "mimic",
+                joint=f"rh_finger{parent}",
+                multiplier=str(multiplier),
+                offset=str(offset),
+            )
+    path = tmp_path / "right_hand.urdf"
+    ET.ElementTree(tree).write(path, encoding="utf-8")
+    return path
+
+
+@pytest.fixture
+def right_hand_usd(tmp_path: Path) -> Path:
+    """Author the same hand joint topology as a local USD articulation."""
+    from physx_usd_schemas import PhysxSchema
+    from pxr import Usd, UsdGeom, UsdPhysics
+
+    path = tmp_path / "right_hand.usda"
+    stage = Usd.Stage.CreateNew(str(path))
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    assembly = UsdGeom.Xform.Define(stage, "/Hand")
+    stage.SetDefaultPrim(assembly.GetPrim())
+    UsdPhysics.ArticulationRootAPI.Apply(assembly.GetPrim())
+    names = ["rh_base_link", *(f"rh_finger{i}_link" for i in _RIGHT_HAND_PARENTS)]
+    for name in names:
+        body = UsdGeom.Xform.Define(stage, f"/Hand/{name}")
+        UsdPhysics.RigidBodyAPI.Apply(body.GetPrim())
+        UsdPhysics.MassAPI.Apply(body.GetPrim()).CreateMassAttr(0.1)
+        cube = UsdGeom.Cube.Define(stage, f"/Hand/{name}/mesh")
+        cube.CreateSizeAttr(0.02)
+        UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
+    for finger, parent in _RIGHT_HAND_PARENTS.items():
+        joint = UsdPhysics.RevoluteJoint.Define(stage, f"/Hand/rh_finger{finger}")
+        parent_link = "rh_base_link" if parent is None else f"rh_finger{parent}_link"
+        joint.CreateBody0Rel().SetTargets([f"/Hand/{parent_link}"])
+        joint.CreateBody1Rel().SetTargets([f"/Hand/rh_finger{finger}_link"])
+        joint.CreateAxisAttr("X")
+        joint.CreateLowerLimitAttr(0.0)
+        joint.CreateUpperLimitAttr(degrees(1.75))
+        if finger in _RIGHT_HAND_MIMICS:
+            multiplier, offset = _RIGHT_HAND_MIMICS[finger]
+            mimic = PhysxSchema.PhysxMimicJointAPI.Apply(joint.GetPrim(), "rotX")
+            mimic.CreateReferenceJointRel().SetTargets([f"/Hand/rh_finger{parent}"])
+            mimic.CreateReferenceJointAxisAttr("rotX")
+            mimic.CreateGearingAttr(-multiplier)
+            mimic.CreateOffsetAttr(-degrees(offset))
+    stage.GetRootLayer().Save()
+    return path
+
+
+@pytest.mark.requires_sim
+@pytest.mark.parametrize("file_field", ("fpath", "source"))
+def test_rp_hand_loads_a_local_usd_source(
+    right_hand_usd: Path, file_field: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both file selectors use the local USD articulation and its mimic metadata."""
+    from embodichain.extensions.robots.roboparty import _cfg
+    from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+
+    def local_path(reference: str) -> str:
+        assert reference == str(right_hand_usd), reference
+        return reference
+
+    monkeypatch.setattr(_cfg, "get_data_path", local_path)
+    override = (
+        {"fpath": str(right_hand_usd)}
+        if file_field == "fpath"
+        else {"source": {"file_path": str(right_hand_usd), "source_prim_path": "/Hand"}}
+    )
+    cfg = resolve_robot_cfg("RoboPartyRPHand", override)
+    assert (cfg.fpath is not None) == (file_field == "fpath")
+    assert (cfg.source is not None) == (file_field == "source")
+    cfg = type(cfg).from_dict(cfg.to_dict())
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            device="cpu",
+            startup_summary="off",
+        )
+    )
+    try:
+        robot = sim.add_robot(cfg)
+        sim.prepare()
+        assert set(robot.joint_names) == {f"rh_finger{i}" for i in _RIGHT_HAND_PARENTS}
+        assert len(robot.get_joint_ids("eef")) == 6
+        assert len(robot.mimic_ids) == 5
+        thumb = robot.joint_names.index("rh_finger12")
+        assert robot.get_qpos()[0, thumb].item() == pytest.approx(0.02)
+    finally:
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.requires_sim
+@pytest.mark.parametrize(
+    "physics,explicit_override_backend",
+    [("default", False), ("newton", False), ("newton", True)],
+)
+def test_rp_hand_reset_by_name_preserves_partial_drive_limits(
+    right_hand_urdf: Path, physics: str, explicit_override_backend: bool
+) -> None:
+    """Reset restores the named thumb pose and all untouched speed limits."""
+    from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+    from embodichain.lab.sim.cfg import physics_cfg_for_backend
+
+    drive = {"max_velocity": {"rh_finger12": 2.0}}
+    if explicit_override_backend:
+        drive["backend"] = "newton"
+    cfg = resolve_robot_cfg(
+        "RoboPartyRPHand", {"fpath": str(right_hand_urdf), "joint_drive_props": drive}
+    )
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            device="cpu",
+            physics_cfg=physics_cfg_for_backend(physics),
+            startup_summary="off",
+        )
+    )
+    try:
+        robot = sim.add_robot(cfg)
+        sim.prepare()
+        names = robot.joint_names
+        speeds = dict(zip(names, robot.get_qvel_limits()[0].tolist(), strict=True))
+        assert speeds == {name: 2.0 if name == "rh_finger12" else 5.0 for name in names}
+        robot.set_qpos(torch.full_like(robot.get_qpos(), 0.2), target=False)
+        robot.reset()
+        qpos = dict(zip(names, robot.get_qpos()[0].tolist(), strict=True))
+        assert qpos["rh_finger12"] == pytest.approx(0.02)
+        assert qpos["rh_finger21"] == pytest.approx(0.0)
+        for follower, (multiplier, offset) in _RIGHT_HAND_MIMICS.items():
+            leader = _RIGHT_HAND_PARENTS[follower]
+            expected = multiplier * qpos[f"rh_finger{leader}"] + offset
+            assert qpos[f"rh_finger{follower}"] == pytest.approx(expected, abs=1e-6)
+    finally:
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.requires_sim
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
+)
+def test_rp1_newton_index_followers_track_from_first_step(device: str) -> None:
+    """The source-coupled fingers stay inside their limits during a command step."""
+    from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+    from embodichain.lab.sim.cfg import NewtonPhysicsCfg
+
+    cfg = resolve_robot_cfg("RoboPartyRP1", variant="hand")
+    physics_cfg = NewtonPhysicsCfg(
+        solver_cfg={
+            "solver_type": "dexuni",
+            "mujoco_options": {"njmax": 512, "nconmax": 256},
+        }
+    )
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            device=device,
+            physics_cfg=physics_cfg,
+            startup_summary="off",
+        )
+    )
+    try:
+        robot = sim.add_robot(cfg)
+        sim.prepare()
+        names = robot.joint_names
+        leaders = [names.index(f"{side}_finger21") for side in ("lh", "rh")]
+        followers = [names.index(f"{side}_finger22") for side in ("lh", "rh")]
+        robot.set_qpos(torch.full((1, 2), 0.25, device=device), joint_ids=leaders)
+        for _ in range(8):
+            sim.update(step=1)
+            qpos = robot.get_qpos()
+            measured = qpos[:, followers]
+            assert torch.all((0 <= measured) & (measured <= 1.75))
+            torch.testing.assert_close(
+                measured, 0.8847 * qpos[:, leaders] + 0.038265, atol=0.02, rtol=0
+            )
+        assert torch.all(qpos[:, leaders] > 0.0)
+    finally:
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
 
 
 if __name__ == "__main__":

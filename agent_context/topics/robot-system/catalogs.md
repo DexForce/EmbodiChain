@@ -93,7 +93,9 @@ ambiguity validation remain unchanged. Keep source-ordered `asset.init_qpos`
 separate from `robot.joint_names` / `robot.default_joint_position`. These are
 simulation PD presets, without external learned actuator implementations.
 
-RoboParty presets read joint order and mimic relations from pinned URDFs.
+RoboParty presets read joint metadata from their URDFs or a caller-selected
+USD articulation. Exact joint names align the preset reset pose with the
+finalized backend layout.
 `RoboPartyRPO` and `RoboPartyRP1` expose floating-base `locomotion` groups.
 The articulated RP1 variant exposes independent `left_eef` and `right_eef`
 commands and preserves passive mimic followers. `RoboPartyRPHand` derives

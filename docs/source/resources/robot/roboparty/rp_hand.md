@@ -38,6 +38,11 @@ cfg = RoboPartyRPHandCfg.from_dict({"side": "left"})
 robot = sim.add_robot(cfg=cfg)
 ```
 
+Use `fpath` for a compatible local URDF or USD. A structured `source` can
+select an individual articulation prim in a USD file. The preset reads
+joint names and mimic relations from the selected file and aligns its
+initial pose by joint name during binding and reset.
+
 ## Control and physical defaults
 
 The `eef` group accepts six joint position targets in radians. The source

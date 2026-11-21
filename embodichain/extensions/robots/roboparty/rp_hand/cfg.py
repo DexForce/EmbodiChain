@@ -63,9 +63,7 @@ class RoboPartyRPHandCfg(_RoboPartyRobotCfg):
             newton_mimic_stabilizer=True,
         )
         self.control_parts = {
-            "eef": [
-                joint.attrib["name"] for joint in joints if joint.find("mimic") is None
-            ]
+            "eef": [joint.name for joint in joints if joint.mimic_parent is None]
         }
         prefix = "lh" if self.side == "left" else "rh"
         self._set_initial_joint_positions(

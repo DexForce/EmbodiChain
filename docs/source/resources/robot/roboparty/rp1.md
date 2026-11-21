@@ -36,8 +36,10 @@ fingers move as a unit with each wrist.
 The floating base starts at 0.78 m from the upstream MJCF. The body uses
 simulation PD gains and source URDF joint limits. The articulated finger
 drives apply simulation limits of 2 N·m and 5 rad/s because the source
-declares zero effort and velocity for the fingers. The presets expose
-joint-space control with `build_pk_chain=False`.
+declares zero effort and velocity for the fingers. The finger armature
+is 0.01 kg·m², matching the source MJCF and stabilizing the native mimic
+response in Newton. The presets expose joint-space control with
+`build_pk_chain=False`.
 
 ## Usage
 

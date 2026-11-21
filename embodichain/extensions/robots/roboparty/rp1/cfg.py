@@ -38,6 +38,9 @@ from .._cfg import (
 
 __all__ = ["RoboPartyRP1Cfg"]
 
+# Match the finger armature in the source MJCF hand class.
+_FINGER_ARMATURE = 0.01
+
 _URDF_NAMES = {
     "28dof": "rp1.urdf",
     "24dof": "rp1_24dof.urdf",
@@ -60,15 +63,13 @@ class RoboPartyRP1Cfg(_RoboPartyRobotCfg):
                 f"Unknown RP1 model {self.model!r}; choose from {tuple(_URDF_NAMES)}."
             )
         joints = self._load_joints(f"RoboPartyRP1/{_URDF_NAMES[self.model]}", init_dict)
-        independent = [
-            joint.attrib["name"] for joint in joints if joint.find("mimic") is None
-        ]
+        independent = [joint.name for joint in joints if joint.mimic_parent is None]
 
         self.uid = "RoboPartyRP1"
         self.init_pos = [0.0, 0.0, 0.78]
         self.root_props = ArticulationRootPropertiesCfg(fixed_base=False)
-        max_effort = _source_drive_limit(joints, "effort")
-        max_velocity = _source_drive_limit(joints, "velocity")
+        max_effort = _source_drive_limit(joints, "effort_limit")
+        max_velocity = _source_drive_limit(joints, "velocity_limit")
 
         if self.model == "hand":
             self.control_parts = {
@@ -99,6 +100,11 @@ class RoboPartyRP1Cfg(_RoboPartyRobotCfg):
                     **max_velocity,
                     "left_eef": _HAND_MAX_VELOCITY,
                     "right_eef": _HAND_MAX_VELOCITY,
+                },
+                armature={
+                    joint.name: _FINGER_ARMATURE
+                    for joint in joints
+                    if joint.name.startswith(("lh_", "rh_"))
                 },
             )
             initial_positions = {

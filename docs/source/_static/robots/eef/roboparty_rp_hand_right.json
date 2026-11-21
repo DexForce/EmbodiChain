@@ -9,7 +9,7 @@
     "archive_md5": "f2ebdac8c8978d2299be44b66f1558b2"
   },
   "image": "roboparty_rp_hand_right.png",
-  "image_sha256": "3b6894e2bb5cbf9e590d47fdc0fbd7e675af60e1c2b46f15c46c70da49b78a84",
+  "image_sha256": "45316169cc324e582a07ffddefc6fe9db14957a7dc2c64e9437f138c7ee8abd5",
   "camera": {
     "width": 1600,
     "height": 1080,
@@ -118,16 +118,16 @@
   ],
   "joint_positions": {
     "rh_finger11": 0.0,
-    "rh_finger21": 0.019999999552965164,
-    "rh_finger31": 0.003498000092804432,
+    "rh_finger21": 0.0,
+    "rh_finger31": 0.0,
     "rh_finger41": 0.0,
-    "rh_finger51": 0.03826500102877617,
-    "rh_finger12": 0.0,
-    "rh_finger22": 0.03594600036740303,
-    "rh_finger32": 0.0,
+    "rh_finger51": 0.0,
+    "rh_finger12": 0.019999999552965164,
+    "rh_finger22": 0.03826500102877617,
+    "rh_finger32": 0.03594600036740303,
     "rh_finger42": 0.04317000135779381,
-    "rh_finger52": 0.0,
-    "rh_finger13": 0.035218000411987305
+    "rh_finger52": 0.035218000411987305,
+    "rh_finger13": 0.003498000092804432
   },
   "warmup_frames": 48,
   "physics_stepped": false,
