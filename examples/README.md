@@ -54,10 +54,10 @@ training and reference experiments. Reusable models and codecs are installed
 as `embodichain.extensions.models`; downloaded datasets, weights and raw reference assets
 are stored outside the repository and wheel.
 
-The [LeWM Cube showcase](learning/lewm/cube/README.md) prepares the official
-Cube corpus, trains from native camera observations and evaluates the fixed
-queries in DexUni. It exports weights and native MP4 previews to caller-owned
-directories.
+The [LeWM Cube example](learning/lewm/cube/README.md) prepares the official
+Cube corpus, adapts the published visual encoder to native camera observations,
+and evaluates the fixed queries in DexUni. It exports weights and optional MP4
+previews to caller-owned directories.
 
 The [SL data-source example](learning/sl_data_source/README.md) connects resident
 causal windows to explicit action or state-transition encoders, and describes

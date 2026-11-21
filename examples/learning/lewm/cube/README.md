@@ -1,59 +1,75 @@
-# LeWM Cube showcase
+# Reproduce LeWM on OGBench Cube
 
-Prepare the pinned OGBench single-Cube resources, collect EmbodiChain camera
-observations, train LeWM, and evaluate the same 50 queries as the upstream
-example. The closed-loop rollout constructs the example's DexUni environment
-from `_env.py`.
-
-Start with the [runtime setup](DEPLOYMENT.md). The [validation record](VALIDATION.md)
-gives measured success rates and the [task contract](../OFFICIAL_CUBE.md)
-describes the control and evaluation settings.
+This example starts from the published LeWM Single-Cube checkpoint, adapts its
+visual encoder and projector to the EmbodiChain camera, and evaluates it on
+the 50 fixed OGBench queries in DexUni. Set up the Python and GPU environment
+with the [runtime guide](DEPLOYMENT.md). See the controller, camera, and
+simulator settings in the [Cube task contract](../OFFICIAL_CUBE.md).
 
 ## Reproduce the native camera benchmark
 
-From a source checkout or an installation with the Cube dependencies, choose
-caller-owned resource and result directories.
-
-For the 35/50 run, use the [Python 3.11 runtime and MuJoCo 3.11 asset compiler](DEPLOYMENT.md#mujoco-311-asset-compiler),
-and supply that interpreter through `prepare --reference-python`. The
-single-environment Python 3.12 run is also recorded in the validation table.
+<!-- cube-reproduction-start -->
+Run from the repository root with the Cube environment active. Keep the
+resource directory for repeated runs and use a fresh run directory for each
+collection, training, and evaluation.
 
 ```bash
-CUBE_RESOURCES=outputs/lewm-cube/resources
-CUBE_RUN=outputs/lewm-cube/reproduction
+CUBE_PROFILE=reproduce
+CUBE_RESOURCES=${CUBE_RESOURCES:-outputs/lewm-cube/resources}
+CUBE_RUN=outputs/lewm-cube/$CUBE_PROFILE
 
+# 1. Prepare the pinned dataset, weights, and simulator assets.
 embodichain run-example learning/lewm/cube prepare --resource-root "$CUBE_RESOURCES"
+
+# 2. Render native images from the archived poses.
 embodichain run-example learning/lewm/cube collect \
-  --resource-root "$CUBE_RESOURCES" --output "$CUBE_RUN/pairs" --gpu-ids 0 --workers 8
+  --resource-root "$CUBE_RESOURCES" --output "$CUBE_RUN/pairs" \
+  --profile "$CUBE_PROFILE" --gpu-ids 0 --workers 8
+
+# 3. Fit the visual encoder and projector and export the selected checkpoint.
 embodichain run-example learning/lewm/cube train \
   --resource-root "$CUBE_RESOURCES" --data "$CUBE_RUN/pairs" \
-  --output "$CUBE_RUN/vision" --device cuda:0
+  --output "$CUBE_RUN/vision" --profile "$CUBE_PROFILE" --device cuda:0
+
+# 4. Evaluate the fixed queries and save frames for an optional preview.
 embodichain run-example learning/lewm/cube eval \
   --resource-root "$CUBE_RESOURCES" --checkpoint "$CUBE_RUN/vision/export" \
   --output "$CUBE_RUN/evaluation" --device cuda:0 --gpu-id 0 --preview-query 12
+
+# 5. Optionally render the saved frames as an MP4.
 embodichain run-example learning/lewm/cube demo \
   --evaluation "$CUBE_RUN/evaluation" --query 12 --output "$CUBE_RUN/query-12.mp4"
 ```
 
-The default [reproduce preset](configs/reproduce.json) renders 224 training
-episodes and 48 validation episodes at 40 recorded poses per episode. The
-encoder receives native images. The published LeWM encoder supplies target
-features from the paired upstream frames. The dynamics and action statistics
-come from the official weights. The trainer selects the visual checkpoint
-by held-out paired error and writes a portable weights-only export to
-`vision/export`.
+1. `prepare` fetches and verifies the public LeWM checkpoint and expert corpus,
+   checks out pinned upstream revisions, and builds the native assets and
+   seed-42 evaluation queries. It writes `resources.json` with the input digests.
+2. `collect` renders 40 poses per episode and saves the images and episode
+   splits under `pairs/`. The `reproduce` preset uses 224 training episodes and
+   48 validation episodes, with the fixed evaluation episodes held out.
+3. `train` aligns native frame embeddings to embeddings from the upstream
+   encoder at the same poses. It saves the checkpoint with the lowest
+   held-out paired error as `vision/export/weights.pt` alongside `manifest.json`.
+4. `eval` runs the pinned upstream CEM on native initial, goal, and replanning
+   images. Each plan covers 25 controller steps. If the cube has yet to reach
+   the goal, the evaluator replans and executes up to 50 steps in total.
+   Success means the cube center comes within 4 cm of the target after a
+   control step. Check `num_eval` (50), `success_count`, and `success_rate`
+   in `evaluation/report.json`. The evaluator also writes `trace.npz` and
+   `observations.npz`.
+5. `demo` uses the frames saved by `eval --preview-query 12` to write
+   `query-12.mp4`, with the live camera on the left and the goal on the right.
 
-`eval` uses native start, goal and replanning images with the pinned upstream
-CEM. It writes `report.json`, `trace.npz` and `observations.npz`.
-The MP4 uses recorded online frames, with the live camera at left and the
-native goal image at right. Run `eval` without `--checkpoint` to use the
-published Cube weights with the same native images.
+For a shorter collection and training run, change `CUBE_PROFILE` to `smoke`
+and use `--workers 1` in `collect`. This preset uses 8 training episodes,
+2 validation episodes, and 40 updates. Evaluation still runs all 50 queries.
+Omit `--checkpoint` from `eval` to use the published weights on native images.
+<!-- cube-reproduction-end -->
 
-Use [`--profile smoke`](configs/smoke.json) for both `collect` and `train`
-to check the workflow at a smaller budget. The smoke checkpoint can run the
-same evaluator. Its optimization budget is for integration checks.
+## Fine-tune on native expert trajectories
 
-## Generate successful native expert trajectories
+After `prepare`, use `--kind expert` to collect new successful trajectories in
+DexUni and fine-tune both the encoder and the dynamics predictor.
 
 ```bash
 embodichain run-example learning/lewm/cube collect --kind expert \
@@ -66,11 +82,10 @@ embodichain run-example learning/lewm/cube eval \
   --output "$CUBE_RUN/expert-evaluation" --device cuda:0 --gpu-id 0
 ```
 
-The expert path uses the upstream plan oracle with online state readback,
-the archived initial distribution and a fixed target per episode. It saves
-384 successful training and 64 successful validation episodes in the
-reproduction profile. Each contains 201 native RGB frames, physical state
-and 200 outgoing controls. Expert training warm-starts the official
-weights and updates LeWM using next-embedding prediction and SIGReg.
+The expert path uses the upstream plan oracle and a fixed target per episode.
+The `reproduce` preset collects 384 successful training and 64 successful
+validation episodes. Each contains 201 native RGB frames, physical state,
+and 200 outgoing controls. Expert training starts from the published weights
+and updates LeWM with next-embedding prediction and SIGReg.
 `--cache-mib 20480` enables a bounded per-split device cache for this
 profile on GPUs with sufficient free memory.
