@@ -52,6 +52,10 @@ def viewer():
         _rigid_objects={"cube": object()},
         _rigid_object_groups={},
         _deformable_objects={},
+        _cable_objects={},
+        _fluid_objects={},
+        _visual_objects={},
+        _lights={},
         _sensors={},
         _default_plane=object(),
     )
@@ -130,7 +134,7 @@ def test_information_table_shares_terminal_rows_and_tracks_scene_readiness(viewe
     rows = state["summary"]["rows"]
     assert ["Rendering", "Viewer resolution", "640 × 360"] in rows
     assert ["Physics", "Physics timestep", "10 ms (100 Hz)"] in rows
-    assert ["Scene / env", "Rigid objects", "1"] in rows
+    assert ["Scene assets", "Rigid objects", "1"] in rows
     assert ["Scene", "State", "READY"] in rows
     viewer.sim.spawn_result.needs_rebuild = True
     assert ("Scene", "State", "PENDING (not prepared)") in viewer.state()["summary"][
