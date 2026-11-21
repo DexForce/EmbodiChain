@@ -676,7 +676,16 @@ class ArticulationCfg(ObjectBaseCfg):
     """Initial joint positions of the articulation.
 
     If None, the joint positions will be set to zero.
-    If provided, it should be an array of shape ``(num_dofs,)``.
+    If provided, it should be an array of shape ``(num_dofs,)`` in the source
+    articulation's joint order. Set :attr:`init_qpos_joint_names` to declare
+    the order explicitly.
+    """
+
+    init_qpos_joint_names: Sequence[str] | None = field(default=None, kw_only=True)
+    """Exact joint names corresponding to the values in :attr:`init_qpos`.
+
+    A named pose covers every movable joint, including mimic followers. The
+    simulator maps it to the finalized joint order when binding and resetting.
     """
 
     qpos_limits: (

@@ -1,0 +1,48 @@
+trainer:
+  exp_name: joint_reward_qualification
+  gym_config: joint_task.yaml
+  seed: 7
+  device: cuda:0
+  headless: true
+  gpu_id: 0
+  num_envs: 4
+  iterations: 3
+  buffer_size: 32
+  enable_eval: false
+  num_eval_envs: 16
+  num_eval_episodes: 100
+  eval_freq: 3276800
+  save_freq: 1
+  use_wandb: false
+  wandb_project_name: embodichain-push_cube
+  renderer: no-render
+policy:
+  name: actor_critic
+  actor:
+    type: mlp
+    network_cfg:
+      hidden_sizes:
+      - 64
+      - 64
+      activation: relu
+  critic:
+    type: mlp
+    network_cfg:
+      hidden_sizes:
+      - 64
+      - 64
+      activation: relu
+algorithm:
+  name: ppo
+  cfg:
+    optimizer:
+      name: adam
+      learning_rate: 0.0001
+    n_epochs: 2
+    batch_size: 64
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_coef: 0.2
+    ent_coef: 0.01
+    vf_coef: 0.5
+    max_grad_norm: 0.5

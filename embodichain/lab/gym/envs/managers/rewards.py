@@ -654,7 +654,7 @@ def program_stage_reward(
     obs: dict,
     action: EnvAction,
     info: dict,
-    stage: str,
+    stage: str | int,
     mode: str,
     scope: str | None = None,
     metric: str | None = None,
@@ -667,7 +667,8 @@ def program_stage_reward(
         obs: Existing policy observation, unused by this read-only adapter.
         action: Existing policy action, unused by this read-only adapter.
         info: Existing transition report, unused by this read-only adapter.
-        stage: Authored stage name or exact expanded occurrence ID.
+        stage: Authored name, exact occurrence ID or zero-based progress occurrence
+            index. Authored names take precedence over textual aliases.
         mode: satisfied, first_achievement, rising, or metric.
         scope: Required occurrence/episode scope for a first-achievement bonus.
         metric: Exact scalar measurement key for metric mode.

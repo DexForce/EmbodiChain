@@ -49,6 +49,9 @@ filters, and the query never advances the simulation clock. Explicit pair
 lists and phase masks contain only eligible pairs. Batched rows share a
 bounded pair/contact budget and run in chunks when needed. Callers can set a
 separate shape quota. Saturation and nonfinite results remain unverified.
+Selected physical rows are packed before transform/precision validation and
+querying, preserving caller order. Inactive rows cannot invalidate an active
+row's evidence; unsupported selected rows still reject normally.
 The host closes the owned query arrays/graphs after every attempt.
 
 Query transforms are rebased before composing local offsets; precision budgets

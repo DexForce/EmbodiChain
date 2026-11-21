@@ -1,0 +1,71 @@
+program_id: stack_two_blocks
+instruction: Lift block 2 above the configured table clearance, then stack it on block
+  1.
+targets: {}
+program:
+- segment: lift_block
+  instruction: Lift block 2 clear of the table.
+  steps:
+    pick:
+      object: block_2
+      grasp: block_2_grasp
+  validators:
+  - kind: condition
+    ref: lifted
+  contract:
+    outcomes:
+    - kind: validator
+      ref: 0
+- segment: stack_block
+  instruction: Place block 2 on block 1.
+  steps:
+    place:
+      object: block_2
+      'on': block_1_top
+  validators:
+  - kind: condition
+    ref: stacked
+  contract:
+    outcomes:
+    - kind: validator
+      ref: 0
+rewards:
+  discount: 0.99
+  skills:
+  - stage: lift_block
+    objective:
+      skill_id: pick_up
+      binding:
+        robot: CobotMagic
+        motion_part: right_arm
+        object: block_2
+        support: table
+        pad_links: &id001
+        - right_link7
+        - right_link8
+        hand_links: &id002
+        - right_gripper_base
+        - right_link7
+        - right_link8
+      goal:
+        position:
+        - 0.75
+        - 0.1
+        - 1.05
+  - stage: stack_block
+    objective:
+      skill_id: place
+      binding:
+        robot: CobotMagic
+        motion_part: right_arm
+        object: block_2
+        support: block_1
+        pad_links: *id001
+        hand_links: *id002
+      goal:
+        position:
+        - 0.0
+        - 0.0
+        - 0.05
+        reference: block_1
+        frame: world_axes

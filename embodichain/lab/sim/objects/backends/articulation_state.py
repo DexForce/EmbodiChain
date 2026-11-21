@@ -62,13 +62,37 @@ def map_source_qpos_to_state_order(
     qpos: torch.Tensor,
     *,
     is_spawn_bound: bool,
+    joint_names: Sequence[str] | None = None,
 ) -> torch.Tensor:
-    """Map source-ordered initial qpos values into runtime state order."""
+    """Map source-ordered or explicitly named initial values to runtime state order.
+
+    Args:
+        entity: Source articulation handle with joint metadata.
+        qpos: Initial positions with joints on the last axis.
+        is_spawn_bound: Whether the state-buffer order is available.
+        joint_names: Optional explicit names in the input order.
+
+    Returns:
+        Initial positions aligned with the joint state buffer.
+    """
     if not is_spawn_bound:
         return qpos
 
-    source_joint_names = entity.get_actived_joint_names()
     state_joint_names = get_state_joint_names(entity)
+    if joint_names is None:
+        source_joint_names = entity.get_actived_joint_names()
+    else:
+        source_joint_names = list(joint_names)
+        if (
+            qpos.ndim == 0
+            or len(source_joint_names) != qpos.shape[-1]
+            or len(set(source_joint_names)) != len(source_joint_names)
+            or set(source_joint_names) != set(state_joint_names)
+        ):
+            raise ValueError(
+                "init_qpos_joint_names must name each movable joint exactly once "
+                "and match the length of init_qpos."
+            )
     if source_joint_names == state_joint_names:
         return qpos
 

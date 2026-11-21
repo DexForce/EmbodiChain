@@ -338,6 +338,15 @@ class TerrainScan(_ReadOnlySensor):
         context: Manager-owned ray provider and time services.
     """
 
+    @property
+    def supports_restored_state_sampling(self) -> bool:
+        """Allow geometric queries against the restored scene.
+
+        Returns:
+            True; ray acquisition does not require a completed physics interval.
+        """
+        return True
+
     def __init__(self, config: TerrainScanCfg, *, context: SensorContext) -> None:
         super().__init__(config, context=context)
 

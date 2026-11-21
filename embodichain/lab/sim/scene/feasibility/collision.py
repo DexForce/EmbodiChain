@@ -806,7 +806,8 @@ class NewtonCollisionChecker:
             allowed_contacts: Shared explicit contact exemptions for these rows.
             moving_objects: Dynamic frames requiring environment checks.
             all_pairs: Also inspect static layout pairs.
-            env_ids: Ordered selected rows; None selects all B rows.
+            env_ids: Ordered selected rows; None selects all B rows. Unselected
+                transforms do not participate in geometry or precision checks.
 
         Returns:
             Discrete checks in selected-row order. ``last_batch_pairs`` records
@@ -854,8 +855,9 @@ class NewtonCollisionChecker:
             _MAX_QUERY_PAIRS // max(1, len(self._native_pairs)),
         )
         reports = {}
-        for start in range(0, size, width):
-            count = min(width, size - start)
+        for start in range(0, len(rows), width):
+            selected = rows[start : start + width]
+            count = len(selected)
             key = count, allowed, frozenset(moving_objects), all_pairs
             query = self._batch_queries.get(key)
             if query is None:
@@ -868,10 +870,14 @@ class NewtonCollisionChecker:
                     old.close()
             else:
                 self._batch_queries.move_to_end(key)
-            local_rows = [row - start for row in rows if start <= row < start + count]
-            chunk = {uid: poses[start : start + count] for uid, poses in frames.items()}
-            for row, report, pair in query.check(chunk, local_rows):
-                reports[start + row] = report, pair
+            selection = (
+                slice(selected[0], selected[0] + count)
+                if selected == tuple(range(selected[0], selected[0] + count))
+                else list(selected)
+            )
+            chunk = {uid: poses[selection] for uid, poses in frames.items()}
+            for row, report, pair in query.check(chunk, range(count)):
+                reports[selected[row]] = report, pair
         self.last_batch_pairs = tuple(reports[row][1] for row in rows)
         return tuple(reports[row][0] for row in rows)
 
