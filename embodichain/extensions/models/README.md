@@ -59,10 +59,9 @@ Its [execution record](../../../examples/learning/nerd/VALIDATION.md) states the
 tested runtime/budgets. Native deployment adapters have their own
 [solver extension guide](../solvers/README.md).
 
-LeWM's [Cube showcase](../../../examples/learning/lewm/cube/README.md) runs
-native collection, supervised training and CEM evaluation. Its
-[validation record](../../../examples/learning/lewm/cube/VALIDATION.md)
-reports the measured fixed-query results.
+LeWM's [Cube reproduction guide](../../../examples/learning/lewm/cube/README.md)
+covers native image collection, visual encoder adaptation, and fixed-query
+CEM evaluation.
 
 RWM predicts action-conditioned robot state transitions, so it belongs to
 `dynamics`. World models also describe future-state/observation prediction;

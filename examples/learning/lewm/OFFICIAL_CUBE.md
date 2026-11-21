@@ -2,8 +2,7 @@
 
 The [reproduction example](cube/README.md) prepares the fixed data and source
 revisions. Resources and runtime requirements are in
-[DEPLOYMENT.md](cube/DEPLOYMENT.md). Measured outcomes and experiment limits are
-in [VALIDATION.md](cube/VALIDATION.md).
+[DEPLOYMENT.md](cube/DEPLOYMENT.md).
 
 ## Scene and controller
 
@@ -29,13 +28,14 @@ compiled URDF colors and exported floor texture.
 
 ## Training and evaluation
 
-The prediction model accepts five raw commands per model step and has a maximum
-history of three observed frames. The official CEM run begins with a single
-frame, samples 300 candidates across 30 iterations with 30 elites, and plans
-five blocks of five controls. Each initial state and its 25-step future goal
-are restored and rendered in the native scene. The first planned 25 controls
-execute before replanning from the live camera. Each query has a maximum
-budget of 50 controls.
+One model step packs five consecutive five-dimensional controller commands
+into a 25-dimensional vector. The predictor supports a history of up to three
+observed frames. The native evaluator supplies one camera frame per planning
+call. CEM samples 300 candidates in each of 30 iterations, keeps 30 elites,
+and plans five blocks of five controls. Each initial state and its 25-step
+future goal are restored and rendered in the native scene. The evaluator
+replans from the live camera after 25 controls if the query is still active.
+Each query has a maximum budget of 50 controls.
 
 The example reconstructs the official seed-42 query selection and checks the
 source archive and query digests. Source episodes used for the fixed queries
