@@ -28,7 +28,6 @@ import math
 from pathlib import Path
 import re
 import subprocess
-import yaml
 
 
 def main() -> None:
@@ -64,11 +63,32 @@ def main() -> None:
                 "Re-run qualification with valid measurements before reporting."
             )
     policy = read("trained_policy.json")
+    if (
+        policy.get("passed") is not True
+        or policy.get("finite_rewards") is not True
+        or policy.get("valid_measurements") is False
+    ):
+        raise ValueError(
+            "Checkpoint preview failed reward qualification: "
+            f"passed={policy.get('passed')!r}, "
+            f"finite_rewards={policy.get('finite_rewards')!r}, "
+            f"valid_measurements={policy.get('valid_measurements')!r}."
+        )
+    from embodichain.learning.rl.policy_evaluation.manifest import RunManifest
+    from embodichain.utils.utility import load_config
+
+    manifest = RunManifest.load(policy["run"])
+    run = manifest.root
     benchmark = read("benchmark.json")
-    evaluations = sorted((output / "final_evaluation").rglob("evaluation.json"))
+    evaluations = []
+    for path in sorted((output / "final_evaluation").rglob("evaluation.json")):
+        candidate = json.loads(path.read_text())
+        source_run = candidate.get("inputs", {}).get("run")
+        if source_run and Path(source_run).expanduser().resolve() == run:
+            evaluations.append((path, candidate))
     if not evaluations:
-        raise ValueError("Independent evaluation artifact is required")
-    evaluation = json.loads(evaluations[-1].read_text())
+        raise ValueError(f"No independent evaluation matches training run: {run}")
+    evaluation_file, evaluation = evaluations[-1]
     metrics = evaluation["result"]["metrics"]
     test_log = (output / "final_tests.log").read_text()
     passed = re.findall(r"(\d+) passed", test_log)
@@ -90,11 +110,10 @@ def main() -> None:
         for name in sorted(set(changed + added))
         if (root / name).is_file()
     }
-    saved_train = yaml.safe_load(
-        (Path(policy["run"]) / "configs/train.yaml").read_text()
-    )
-    training_seed = saved_train["trainer"]["seed"]
-    evaluation_seed = evaluation["inputs"]["seed"]
+    train_config = manifest.configs["train"]
+    saved_train = load_config(train_config)
+    training_seed = int(saved_train["trainer"].get("seed", 1))
+    evaluation_seed = int(evaluation["inputs"]["seed"])
     seed_relation = "相同" if training_seed == evaluation_seed else "不同"
     restored = re.search(
         r"Resumed step=(\d+), updates=(\d+)", (output / "resume.log").read_text()
@@ -110,8 +129,15 @@ def main() -> None:
         "training_envs": saved_train["trainer"]["num_envs"],
         "training_seed": training_seed,
         "evaluation_seed": evaluation_seed,
-        "run": policy["run"],
+        "run": str(run),
+        "train_config": str(train_config),
+        "evaluation_file": str(evaluation_file),
         "evaluation": metrics,
+        "policy_preview": {
+            "passed": policy["passed"],
+            "finite_rewards": policy["finite_rewards"],
+            "valid_measurements": policy.get("valid_measurements"),
+        },
         "expert": {
             "control_steps": expert["steps"],
             "seed": expert["seed"],
@@ -147,9 +173,7 @@ def main() -> None:
     }
     from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
-    events = EventAccumulator(
-        str(Path(policy["run"]) / "logs" / saved_train["trainer"]["exp_name"])
-    )
+    events = EventAccumulator(str(run / "logs" / saved_train["trainer"]["exp_name"]))
     events.Reload()
     optimization = {}
     for tag in (
@@ -189,6 +213,7 @@ def main() -> None:
         f"| 独立 PPO 评估 | {int(metrics['eval/success_rate']*metrics['eval/success_samples'])}/{int(metrics['eval/success_samples'])} 成功 | 评估 seed={evaluation_seed}，与训练 seed={training_seed} {seed_relation} |",
         f"| 评估平均回报 / 长度 | {metrics['eval/avg_reward']:.6f} / {metrics['eval/avg_length']:.1f} | 短程策略尚未学会目标动作 |",
         f"| 成功率 Wilson 95% 区间 | [{metrics['eval/success_ci95_low']:.3f}, {metrics['eval/success_ci95_high']:.3f}] | 小样本，不是收敛实验 |",
+        f"| 策略预览奖励检查 | 通过 | finite_rewards={policy['finite_rewards']}、passed={policy['passed']}；任务成功率仅作记录 |",
         f"| 规划专家完整抓放 | {expert['steps']} 控制步，抓取={expert['measured_pick_success']}、放置={expert['measured_place_success']} | 1 个固定场景 episode，CPU 原生物理 |",
         f"| 放稳正例 | {supported['success_rows']}/{supported['num_envs']} 通过 | 完整稳定窗口、支撑及手物分离 |",
         f"| 悬空反例 | {floating['success_rows']}/{floating['num_envs']} 误接受 | 位置正确且速度低，但无支撑 |",
@@ -239,7 +264,7 @@ def main() -> None:
         "- 规划专家抓放：" + link(output / "previews/expert_preview.mp4"),
         "- 短程 PPO 策略：" + link(output / "previews/policy_preview.mp4"),
         "- 专家逐步物理轨迹：" + link(output / "expert_grasp_place.json"),
-        "- 独立策略评估：" + link(evaluations[-1]),
+        "- 独立策略评估：" + link(evaluation_file),
         "- 测试日志：" + link(output / "final_tests.log"),
         "- 训练 / 恢复日志："
         + link(output / "train_final.log")

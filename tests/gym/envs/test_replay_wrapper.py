@@ -361,12 +361,21 @@ def test_dynamic_replay_acquires_restored_state_without_fabricating_step_samples
         FrameTransformCfg,
         JointEncoder,
         JointEncoderCfg,
+        RayDepthCamera,
+        RayDepthCameraCfg,
         SensorContext,
     )
 
     env = _FakeEnv()
     qpos, qvel = torch.tensor([[2.0, 3.0]]), torch.tensor([[0.1, 0.2]])
     pose = torch.tensor([[2.0, 0, 0, 0, 0, 0, 1]])
+    plane_height = torch.tensor([2.0])
+
+    class PlaneRays:
+        def cast(self, origins, directions, max_distance):
+            distance = (plane_height[:, None] - origins[..., 2]) / directions[..., 2]
+            return distance, torch.zeros_like(distance, dtype=torch.int32)
+
     context = SensorContext(
         device=env.device,
         num_instances=1,
@@ -376,6 +385,7 @@ def test_dynamic_replay_acquires_restored_state_without_fabricating_step_samples
             get_joint_state=lambda uid: {"qpos": qpos, "qvel": qvel},
             get_frame_state=lambda *args: {"pose": pose},
         ),
+        ray_factory=lambda *args: PlaneRays(),
     )
 
     class StepBoundEncoder(JointEncoder):
@@ -400,9 +410,16 @@ def test_dynamic_replay_acquires_restored_state_without_fabricating_step_samples
         JointEncoderCfg(uid="stepped", asset_uid="robot", sample_period=1.0),
         context=context,
     )
-    env.sensors = {s.uid: s for s in (encoder, frame_sensor, stepped)}
+    depth_camera = RayDepthCamera(
+        RayDepthCameraCfg(uid="depth", width=1, height=1, sample_period=1.0),
+        context=context,
+    )
+    env.sensors = {s.uid: s for s in (encoder, frame_sensor, stepped, depth_camera)}
     for sensor in env.sensors.values():
-        sensor._bind(0, None)
+        sensor._bind(
+            0,
+            (lambda: torch.eye(4).unsqueeze(0)) if sensor is depth_camera else None,
+        )
     env.sim._sampling_sensors = {"physics": env.sensors}
     env.sim.simulation_time, env.sim.physics_step_index = 0.01, 1
     seeds = []
@@ -413,11 +430,12 @@ def test_dynamic_replay_acquires_restored_state_without_fabricating_step_samples
                 "qpos": encoder.get_data()["qpos"].clone(),
                 "qvel": encoder.get_data()["qvel"].clone(),
                 "position": frame_sensor.get_data()["transform"][:, :3, 3].clone(),
+                "depth": depth_camera.get_data()["depth"].clone(),
             }
         )
 
     def seed(frame, ids):
-        seeds.append(frame.policy["qpos"].clone())
+        seeds.append(frame.policy)
 
     def reset(**kwargs):
         for sensor in env.sensors.values():
@@ -431,6 +449,7 @@ def test_dynamic_replay_acquires_restored_state_without_fabricating_step_samples
         qpos.copy_(torch.tensor([[8.0, 9.0]]))
         qvel.copy_(torch.tensor([[0.5, 0.6]]))
         pose[:, 0] = 8.0
+        plane_height.fill_(8.0)
 
     env.reset, env._capture_observation = reset, capture
     env.cfg.rl_task = SimpleNamespace(reward_composition={"discount": 0.9})
@@ -439,13 +458,17 @@ def test_dynamic_replay_acquires_restored_state_without_fabricating_step_samples
     )
     monkeypatch.setattr(replay_module, "restore_trajectory_state", restore)
     observation, _ = ReplayWrapper(env, _trajectory(), mode="dynamic").reset()
+    torch.testing.assert_close(observation["depth"], torch.tensor([[[8.0]]]))
     torch.testing.assert_close(observation["qpos"], torch.tensor([[8.0, 9.0]]))
     torch.testing.assert_close(observation["qvel"], torch.tensor([[0.5, 0.6]]))
     torch.testing.assert_close(observation["position"], torch.tensor([[8.0, 0, 0]]))
-    torch.testing.assert_close(seeds[0], torch.tensor([[2.0, 3.0]]))
-    torch.testing.assert_close(seeds[1], observation["qpos"])
+    torch.testing.assert_close(seeds[0]["qpos"], torch.tensor([[2.0, 3.0]]))
+    torch.testing.assert_close(seeds[1]["qpos"], observation["qpos"])
+    torch.testing.assert_close(seeds[0]["depth"], torch.tensor([[[2.0]]]))
+    torch.testing.assert_close(seeds[1]["depth"], observation["depth"])
     assert encoder.get_sample_metadata()["valid"].tolist() == [True]
     assert frame_sensor.get_sample_metadata()["valid"].tolist() == [True]
+    assert depth_camera.get_sample_metadata()["valid"].tolist() == [True]
     assert stepped.get_sample_metadata()["valid"].tolist() == [False]
     assert env.sim.updates == []
     sample_id = encoder.get_sample_metadata()["sample_id"].clone()

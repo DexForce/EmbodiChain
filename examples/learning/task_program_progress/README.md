@@ -186,6 +186,12 @@ inputs stop reporting with a diagnostic error before a success summary is writte
 Accepted summaries retain `passed` and `valid_measurements`. Training/evaluation
 seeds are read from the saved train config and evaluation artifact; the report
 labels them as equal or different using those actual values.
+The training snapshot is resolved through `RunManifest`, including `.json` and
+`.yml` inputs. Training seeds use the trainer's integer conversion and default
+of 1. Evaluations are filtered by their canonical `inputs.run` before selecting
+the latest matching file; no match is an error. Failed or nonfinite checkpoint
+previews stop aggregate reporting. Their reward-quality flags remain in accepted
+summaries and Markdown, while policy task success stays informational.
 
 
 A complete planning-expert grasp/place trace can qualify the same measured

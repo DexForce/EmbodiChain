@@ -103,7 +103,8 @@ Legacy Gym-driven camera and contact acquisition keeps its existing ordering.
 
 `BaseSensor.supports_restored_state_sampling` declares whether a zero-duration
 acquisition can read a restored scene without stepping physics. Cameras, joint
-encoders and frame transforms opt in. Plugins may opt in only when their update
+encoders, frame transforms and the geometric `TerrainScan` family (including
+`RayDepthCamera` and `RayLidar`) opt in. Plugins may opt in only when their update
 reads current state without solver outputs or interval history. Replay rearms
 all scheduled clocks, acquires supported physics-phase sensors immediately and
 keeps other measurements invalid until the first completed sampling boundary.

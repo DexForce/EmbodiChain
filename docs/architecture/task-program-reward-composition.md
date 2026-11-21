@@ -311,6 +311,8 @@ and frame-transform acquisition. Plugins must explicitly opt in to this
 zero-duration operation. Solver/history-dependent sensors stay invalid until a
 real physics step; all scheduled clocks are rearmed after restoration, so an old
 period cannot postpone that first valid sample. No synthetic interval is added.
+The geometric `TerrainScan` family, including `RayDepthCamera`, also opts in to
+read restored geometry before the initial observation and reward baseline.
 
 Measured physical goals bind fixed topology for the environment lifetime.
 `replace_assets_from_group` rejects preflight when such goals are present;
@@ -366,6 +368,13 @@ The aggregate report rejects failed or incomplete physical qualification inputs
 before writing a success summary. Accepted summaries preserve `passed` and
 `valid_measurements`; training and evaluation seeds come from their saved
 configuration and evaluation artifact, with an explicit equality comparison.
+The training snapshot comes from `RunManifest`, preserving JSON/YAML/YML support;
+training seed resolution uses the trainer's integer conversion and default of 1.
+Only evaluations whose `inputs.run` resolves to the qualified policy run are
+eligible for the latest-result selection. Missing matches and failed/nonfinite
+checkpoint previews stop reporting. Accepted summaries retain the preview's
+reward-quality flags and the selected config/evaluation paths; policy task
+success remains informational.
 
 Physics-substep acquisition adds work. The recorded fixture timing includes
 rendering and scalar auditing and does not establish large-batch or GPU
