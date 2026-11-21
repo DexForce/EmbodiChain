@@ -497,13 +497,19 @@ ROBOT_CONFIGS["PikaGripper"].update(
     }
 )
 
+_FRANKA_HAND_CONTROL = {
+    "dof": 1,
+    "mimic_joints": {"fr3_finger_joint2": "fr3_finger_joint1"},
+    "control_part_mimics": {"eef": ["fr3_finger_joint2"]},
+    "control_parts": {"eef": 2},
+}
 ROBOT_CONFIGS["FrankaPandaHand"].update(
-    {
-        "dof": 1,
-        "mimic_joints": {"fr3_finger_joint2": "fr3_finger_joint1"},
-        "control_part_mimics": {"eef": ["fr3_finger_joint2"]},
-        "control_parts": {"eef": 2},
-    }
+    **_FRANKA_HAND_CONTROL,
+    default_variant="default",
+    variants={
+        variant: {**_FRANKA_HAND_CONTROL, "defaults": {"variant": variant}}
+        for variant in ("default", "robosuite_tool_hang")
+    },
 )
 
 ROBOT_CONFIGS["RobotiqArg2F140"].update(

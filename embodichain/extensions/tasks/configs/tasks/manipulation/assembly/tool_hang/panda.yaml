@@ -3,12 +3,37 @@ simulation:
   class_type: Franka
   arm_model: panda
   uid: FrankaPanda
-  urdf_cfg: {fname: tool_hang_panda_v1}
+  # Preserve the physical leader/follower constraint under the wrench load.
+  root_props:
+    fixed_base: true
+    newton_mimic_stabilizer: true
+    newton_mimic_solref: [0.005, 1.0]
+    newton_mimic_solimp: [0.99, 0.999, 0.001, 0.5, 2.0]
+  urdf_cfg: {fname: tool_hang_panda_pads_v1}
+  asset_physics_mode: overlay
+  link_attrs:
+    fingerpads:
+      link_names_expr: ['fr3_(left|right)pad']
+      attrs:
+        material_props:
+          backend: newton
+          static_friction: 2.0
+          dynamic_friction: 2.0
+          torsional_friction: 0.05
+          rolling_friction: 0.0001
+          solref: [0.01, 0.5]
+        collision_props: {backend: newton, condim: 3}
+    fingers:
+      link_names_expr: ['fr3_(left|right)finger']
+      attrs:
+        material_props: {backend: newton, solref: [0.02, 1.0]}
+        collision_props: {backend: newton, condim: 4}
   init_pos: [-0.56, 0, 0.912]
   init_qpos: [0, 0.19635, 0, -2.61799, 0, 2.94159, 0.78540, 0.04, 0.04]
 grippers:
   eef:
     class_type: FrankaPandaHand
+    variant: robosuite_tool_hang
     mode: mounted
     motion_part: arm
     control_part: eef
@@ -29,4 +54,4 @@ sensor:
   - articulation_uid: tool
     link_name_list: [tool, large_ring]
   - articulation_uid: FrankaPanda
-    link_name_list: [fr3_hand, fr3_leftfinger, fr3_rightfinger]
+    link_name_list: [fr3_hand, fr3_leftfinger, fr3_rightfinger, fr3_leftpad, fr3_rightpad]

@@ -33,7 +33,7 @@ from embodichain.data.constants import (
     EMBODICHAIN_DEFAULT_DATA_ROOT,
 )
 
-__all__ = ["Franka", "FrankaPandaArm"]
+__all__ = ["Franka", "FrankaPandaArm", "RobosuiteToolHangPadsV1"]
 
 robot_assets = "robot_assets"
 
@@ -218,3 +218,57 @@ class FrankaPandaArm(EmbodiChainDataset):
                 finally:
                     if temporary is not None:
                         temporary.unlink(missing_ok=True)
+
+
+class RobosuiteToolHangPadsV1(EmbodiChainDataset):
+    """The robosuite fingertip contact boxes mounted on the registered FR3 hand.
+
+    Resolve ``RobosuiteToolHangPadsV1/hand.urdf`` to an assembled hand that
+    reuses the four meshes in the native Franka cache. The downloaded archive
+    contains the two fixed pad links and joints, provenance and source license.
+    """
+
+    archive_md5 = "2a20da805c21cf43d6cb3094a365015f"
+    archive_directory = "scene_assets/robosuite_tool_hang_pads_v1"
+    revision = "883569d6dc614a7773f6e24d5b9b344e0f499956"
+
+    def __init__(self, data_root: str | None = None) -> None:
+        """Resolve the pads and their native hand in the same asset cache.
+
+        Args:
+            data_root: Optional cache root overriding the EmbodiChain default.
+        """
+        from embodichain.extensions.robots.franka.hand._gripper_defaults import (
+            get_gripper_defaults,
+        )
+
+        root = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+        key = type(self).__name__
+        archive = f"{self.archive_directory}/{key}.zip"
+        origin = f"https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/{self.revision}/"
+        prefix = EMBODICHAIN_DOWNLOAD_PREFIX.replace(
+            "/resolve/main/", f"/resolve/{self.revision}/", 1
+        )
+        urls = list(dict.fromkeys((prefix + archive, origin + archive)))
+        super().__init__(key, o3d.data.DataDescriptor(urls, self.archive_md5), root)
+        native_hand = Path(Franka(data_root=root).extract_dir) / "Panda/Fr3HandV1.urdf"
+        directory = Path(self.extract_dir)
+        hand = ElementTree.parse(native_hand).getroot()
+        for mesh in hand.iter("mesh"):
+            source = native_hand.parent / mesh.attrib["filename"]
+            mesh.set("filename", Path(os.path.relpath(source, directory)).as_posix())
+        hand.extend(ElementTree.parse(directory / "pads.xml").getroot())
+        output = ElementTree.tostring(hand, encoding="utf-8", xml_declaration=True)
+        expected = get_gripper_defaults("robosuite_tool_hang")["source_sha256"]
+        if hashlib.sha256(output).hexdigest() != expected:
+            raise ValueError(
+                f"The ToolHang hand assembled from {native_hand} and {directory / 'pads.xml'} differs from its pinned source."
+            )
+        target = directory / "hand.urdf"
+        with _dataset_download_lock(root, type(self).__name__):
+            if target.is_file() and target.read_bytes() == output:
+                return
+            # Serialized writers and atomic replacement keep concurrent readers safe.
+            pending = target.with_suffix(".tmp")
+            pending.write_bytes(output)
+            pending.replace(target)

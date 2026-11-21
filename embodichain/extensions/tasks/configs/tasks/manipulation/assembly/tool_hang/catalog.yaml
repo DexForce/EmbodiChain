@@ -6,3 +6,5 @@ default_deployment: panda
 deployments:
   panda:
     config: task.panda.yaml
+  panda_expert:
+    config: task.expert.panda.yaml

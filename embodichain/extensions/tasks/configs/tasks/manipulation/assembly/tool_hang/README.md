@@ -32,3 +32,17 @@ PY
 ```
 
 The three URDFs reproduce the primitive stand, hook frame and ratcheting wrench from robosuite. The versioned archive includes the generator, upstream MIT notice and asset provenance. Materials use flat colors. The arm and hand resolve independently from EmbodiChain's robot registry. [robosuite ToolHang](https://github.com/ARISE-Initiative/robosuite/blob/5ce6643f3092639d08f7b0f90ed1c6a84f50552c/robosuite/environments/manipulation/tool_hang.py) · [Versioned object archive](https://huggingface.co/datasets/DexForceAI/embodichain_data/blob/256a4cb8f6b66db4f3e6722847725f6509aae48c/scene_assets/robosuite_tool_hang_v1/RobosuiteToolHangV1.zip)
+
+### Scripted demonstration
+
+`RobosuiteToolHangExpert-v1` uses a single arena and the same scene, reset distribution and contact conditions. Its 2,000-step horizon allows time for the closed-loop insertion. The Panda uses joint-position and velocity targets with bounded motion between IK waypoints. A gripping effort holds each object between the physical pads. The demonstration measures the rod tip relative to the socket and the wrench ring relative to the observed bar, and tests support after the fingers open.
+
+Run one demonstration from the repository root.
+
+```bash
+embodichain run-task \
+  --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/assembly/tool_hang/task.expert.panda.yaml \
+  --headless --seed 7 --max_episodes 1
+```
+
+In the recorded seed-7 episode the Panda lifted the loose frame by step 266, seated and released it by step 704, and triggered the native success condition at step 951. The camera continued through jaw withdrawal and 4.5 seconds of settling. At the last frame the ring touched the bar halfway along its length and both fingers were open. This is one Newton GPU rollout. Contact dynamics can vary between runs, including with the same reset seed.

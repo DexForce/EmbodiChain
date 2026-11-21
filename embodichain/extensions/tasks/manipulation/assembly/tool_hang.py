@@ -19,19 +19,24 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from collections.abc import Iterator
+from typing import Any
 
 import torch
 
+from embodichain.lab.gym.envs import DemoSegment, EmbodiedEnv, EmbodiedEnvCfg
+from embodichain.lab.gym.envs.managers.cfg import ConditionCfg, RLTaskCfg
+from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.gym.envs.managers.manager_base import Functor
 from embodichain.lab.gym.envs.objectives.conditions import ConditionResult
 from embodichain.utils.math import quat_from_euler_xyz, quat_mul
 
-if TYPE_CHECKING:
-    from embodichain.lab.gym.envs import EmbodiedEnv
-    from embodichain.lab.gym.envs.managers.cfg import ConditionCfg
-
-__all__ = ["ToolHangSuccess", "reset_tool_hang", "tool_hang_fallen"]
+__all__ = [
+    "ToolHangExpertEnv",
+    "ToolHangSuccess",
+    "reset_tool_hang",
+    "tool_hang_fallen",
+]
 
 
 def _transform_sites(pose: torch.Tensor, sites: torch.Tensor) -> torch.Tensor:
@@ -63,7 +68,14 @@ class ToolHangSuccess(Functor):
         self._bar = self._sensor.get_actor_ids("frame", ["horizontal_bar"])
         self._tool_ids = self._sensor.get_actor_ids("tool", ["tool", "large_ring"])
         self._hand = self._sensor.get_actor_ids(
-            "FrankaPanda", ["fr3_hand", "fr3_leftfinger", "fr3_rightfinger"]
+            "FrankaPanda",
+            [
+                "fr3_hand",
+                "fr3_leftfinger",
+                "fr3_rightfinger",
+                "fr3_leftpad",
+                "fr3_rightpad",
+            ],
         )
         self._stand_sites = torch.tensor(
             [
@@ -169,7 +181,7 @@ class ToolHangSuccess(Functor):
         )
 
 
-def tool_hang_fallen(env: EmbodiedEnv, height: float) -> ConditionResult:
+def tool_hang_fallen(env: EmbodiedEnv, height: float = 0.7) -> ConditionResult:
     """Detect a frame or wrench falling below the table.
 
     Args:
@@ -224,3 +236,64 @@ def reset_tool_hang(
     qpos = env.robot.get_qpos()[env_ids][:, arm_ids]
     qpos += torch.empty_like(qpos).uniform_(-joint_jitter, joint_jitter)
     env.robot.set_state(env_ids=env_ids, joint_ids=arm_ids, qpos=qpos, target_qpos=qpos)
+
+
+@register_env(
+    "RobosuiteToolHangExpert-v1", max_episode_steps=2000, supports_handwritten_demo=True
+)
+class ToolHangExpertEnv(EmbodiedEnv):
+    """Use measured Panda motions with the same insertion and contact evaluator as the policy."""
+
+    def __init__(self, cfg: EmbodiedEnvCfg, **kwargs: Any) -> None:
+        cfg.rl_task = RLTaskCfg(
+            success={"hanging": ConditionCfg(func=ToolHangSuccess)},
+            failure={"fallen": ConditionCfg(func=tool_hang_fallen)},
+        )
+        # Tune the expert position and velocity servos to the Panda torque limits.
+        # The finger drives, arm effort limits and policy controller are independent.
+        drives = cfg.robot.joint_drive_props
+        for key, values in (
+            ("stiffness", (4500, 4500, 3500, 2500, 500, 400, 250)),
+            ("damping", (130, 130, 100, 80, 22, 18, 10)),
+        ):
+            field = {
+                k: v
+                for k, v in getattr(drives, key).items()
+                if not k.startswith("Joint")
+            }
+            field.update({f"Joint{i}": value for i, value in enumerate(values, 1)})
+            setattr(drives, key, field)
+        super().__init__(cfg=cfg, **kwargs)
+
+    def create_demo_segments(self, **kwargs: Any) -> Iterator[DemoSegment]:
+        """Plan each stage against the physical result of the preceding one."""
+        from embodichain.extensions.tasks.manipulation.assembly._tool_hang_expert import (
+            ToolHangMotion,
+        )
+
+        motion = ToolHangMotion(self)
+        yield DemoSegment(
+            name="lift_frame",
+            target_uid="frame",
+            instruction="Grasp the frame and raise its rod over the stand.",
+            actions=motion.lift_frame(),
+        )
+        yield DemoSegment(
+            name="seat_frame",
+            target_uid="frame",
+            instruction="Guide the rod into the socket and release the frame.",
+            actions=motion.seat_frame(),
+            validator=lambda: self.compute_task_state()[2][
+                "success.hanging.frame_assembled"
+            ],
+        )
+        from embodichain.extensions.tasks.manipulation.assembly._tool_hang_wrench import (
+            hang_wrench,
+        )
+
+        yield DemoSegment(
+            name="hang_wrench",
+            target_uid="tool",
+            instruction="Pick up the wrench, thread its large ring over the hook and release it.",
+            actions=hang_wrench(motion),
+        )

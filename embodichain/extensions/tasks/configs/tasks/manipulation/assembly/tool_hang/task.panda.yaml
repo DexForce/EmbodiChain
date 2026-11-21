@@ -1,4 +1,5 @@
 id: RobosuiteToolHang-v1
+max_episode_steps: 200
 headless: true
 device: cuda:0
 environment:
@@ -12,4 +13,3 @@ rl_task:
   failure:
     fallen:
       func: tool_hang_fallen
-      params: {height: 0.7}

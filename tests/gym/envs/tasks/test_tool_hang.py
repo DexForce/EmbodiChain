@@ -127,6 +127,25 @@ def _exercise_hanging_scene() -> None:
         tool.set_root_velocity(torch.zeros((1, 6), device=env.device))
         accepted, metrics = measure(1)
         assert metrics["hand_tool_contact"] and not accepted, metrics
+
+        # Each dedicated rubber pad is a distinct collision actor. A wrench
+        # touching either pad is still held even after the finger bodies clear.
+        sensor = env.get_sensor("tool_contacts")
+        tool_ids = sensor.get_actor_ids("tool", ["tool", "large_ring"])[0]
+        for side in ("left", "right"):
+            name = f"fr3_{side}pad"
+            pad = env.robot.get_link_pose(name, to_matrix=True)
+            tool_pose[:, :3] = (pad @ pad.new_tensor([0, -0.004, 0, 1]))[:, :3]
+            tool.set_local_pose(tool_pose)
+            tool.set_root_velocity(torch.zeros((1, 6), device=env.device))
+            accepted, metrics = measure(1)
+            assert metrics["hand_tool_contact"] and not accepted, (name, metrics)
+            report = sensor.get_data()
+            pairs = report["user_ids"][0][report["is_valid"][0]]
+            actor = sensor.get_actor_ids("FrankaPanda", [name])[0, 0]
+            assert (
+                (pairs == actor).any(-1) & torch.isin(pairs, tool_ids).any(-1)
+            ).any(), name
     finally:
         env.close(exit_process=False)
         SimulationManager.flush_cleanup_queue()
@@ -138,10 +157,13 @@ def _exercise_hanging_scene() -> None:
 @pytest.mark.skipif(
     not torch.cuda.is_available(), reason="Newton MuJoCo-Warp needs CUDA"
 )
-def test_native_hanging_requires_both_stages_and_a_released_supported_ring() -> None:
+@pytest.mark.parametrize("case", ["contact", "expert"])
+def test_native_hanging_requires_both_stages_and_a_released_supported_ring(
+    case: str,
+) -> None:
     """Use a fresh process so the deployment owns its NoRender world."""
     result = subprocess.run(
-        [sys.executable, str(Path(__file__).resolve())],
+        [sys.executable, str(Path(__file__).resolve()), case],
         capture_output=True,
         text=True,
         timeout=300,
@@ -149,5 +171,44 @@ def test_native_hanging_requires_both_stages_and_a_released_supported_ring() -> 
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def _exercise_expert_episode() -> None:
+    import gymnasium as gym
+    import embodichain.extensions.tasks
+    from embodichain.lab.gym.envs import execute_demo_episode
+    from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+    from embodichain.lab.sim import SimulationManager
+
+    path = (
+        Path(__file__).resolve().parents[4]
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/assembly/tool_hang/task.expert.panda.yaml"
+    )
+    declaration = yaml.safe_load(path.read_text())
+    env = gym.make(
+        declaration["id"], cfg=config_to_cfg(declaration, source_path=path)
+    ).unwrapped
+    try:
+        env.reset(seed=2)
+        assert not env.compute_task_state()[0].item()
+        result = execute_demo_episode(env)
+        assert result.success == (True,) and result.terminated == (True,), result
+        assert result.truncated == (False,)
+        assert [segment.name for segment in result.segments] == [
+            "lift_frame",
+            "seat_frame",
+            "hang_wrench",
+        ]
+        _, _, metrics = env.compute_task_state()
+        assert metrics["success.hanging.frame_assembled"].item()
+        assert metrics["success.hanging.hole_threaded"].item()
+        assert metrics["success.hanging.ring_bar_contact"].item()
+        assert not metrics["success.hanging.hand_tool_contact"].item()
+    finally:
+        env.close(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
+
+
 if __name__ == "__main__":
-    _exercise_hanging_scene()
+    if len(sys.argv) > 1 and sys.argv[1] == "expert":
+        _exercise_expert_episode()
+    else:
+        _exercise_hanging_scene()

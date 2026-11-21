@@ -1,0 +1,8 @@
+id: RobosuiteToolHangExpert-v1
+max_episode_steps: 2000
+headless: true
+device: cuda:0
+environment:
+  component: env.yaml
+embodiment:
+  component: panda.yaml

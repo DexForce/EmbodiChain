@@ -6916,9 +6916,16 @@ Tool Hang assembly
 ------------------
 
 The ``RobosuiteToolHang-v1`` deployment uses versioned composite geometry
-and a contact sensor to measure insertion and wrench support.
+and a contact sensor to measure insertion and wrench support. Its stand, frame
+and wrench resolve through the task asset ``RobosuiteToolHangV1``. The Franka
+end-effector asset ``RobosuiteToolHangPadsV1/hand.urdf`` combines the registered
+hand meshes with the two robosuite fingertip pads.
+
+.. autoclass:: embodichain.extensions.robots.franka.assets.RobosuiteToolHangPadsV1
 
 .. autoclass:: embodichain.data.assets.task_assets.RobosuiteToolHangV1
+
+.. autoclass:: embodichain.extensions.tasks.manipulation.assembly.tool_hang.ToolHangExpertEnv
 
 .. autoclass:: embodichain.extensions.tasks.manipulation.assembly.tool_hang.ToolHangSuccess
 
