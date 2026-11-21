@@ -329,14 +329,12 @@ def _original_cube_planner(
     def plan(pixels: np.ndarray, goals: np.ndarray, indices: np.ndarray) -> np.ndarray:
         prepared = processor._prepare_info(
             {
-                "pixels": pixels[:, None],
-                "goal": goals[:, None],
-                "action": np.zeros((50, 1, 5), dtype=np.float32),
+                "pixels": pixels[indices, None],
+                "goal": goals[indices, None],
+                "action": np.zeros((len(indices), 1, 5), dtype=np.float32),
             }
         )
-        normalized = solver.solve(
-            {key: value[indices] for key, value in prepared.items()}
-        )["actions"]
+        normalized = solver.solve(prepared)["actions"]
         return scaler.inverse_transform(
             normalized.cpu().numpy().reshape(-1, 5)
         ).reshape(-1, 5, 25)

@@ -1,2 +1,0 @@
-# Unified diffs retain upstream tabs and trailing context bytes as patch data.
-*.patch -whitespace

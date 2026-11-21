@@ -449,7 +449,7 @@ def _export_robot(env: Any, root: Path) -> dict[str, Any]:
                 geom = ET.SubElement(link, role, name=f"geom_{gid}")
                 _origin(geom, model.geom_pos[gid] - pivot, model.geom_quat[gid])
                 geometry = ET.SubElement(geom, "geometry")
-                kind, size = model.geom_type[gid], model.geom_size[gid]
+                kind, size = int(model.geom_type[gid]), model.geom_size[gid]
                 if kind == mujoco.mjtGeom.mjGEOM_MESH:
                     mid = int(model.geom_dataid[gid])
                     fname = f"mesh_{mid}.obj"

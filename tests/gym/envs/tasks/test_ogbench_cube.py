@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -36,6 +38,74 @@ from embodichain.extensions.tasks.manipulation.ogbench_cube import (
 
 ROOT = Path(__file__).with_name("data") / "ogbench_cube"
 REFERENCE = json.loads((ROOT / "controller.json").read_text())
+
+
+def test_dexuni_authors_connect_anchors_before_the_joint_equality(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dexsim.spawn import NewtonEqualityDesc
+    from dexsim.spawn.adapters.newton_adapter import NewtonSpawnAdapter
+
+    from embodichain.extensions.tasks.manipulation._ogbench_cube_newton import (
+        _CubeNewtonSpawnAdapter,
+    )
+
+    parent = Mock()
+    monkeypatch.setattr(NewtonSpawnAdapter, "_build_scene", parent)
+    connect = NewtonEqualityDesc(
+        name="anchor",
+        equality_type=0,
+        object1="arm",
+        object2="finger",
+        data=(0.01, 0.02, 0.03),
+        solref=(0.01, 1.0),
+        solimp=(0.9, 0.95, 0.001, 0.5, 2.0),
+    )
+    gear = NewtonEqualityDesc(
+        name="gear",
+        equality_type=2,
+        object1="leader",
+        object2="follower",
+        data=(0.0, 1.0, 0.0, 0.0, 0.0),
+        solref=(0.01, 1.0),
+        solimp=(0.9, 0.95, 0.001, 0.5, 2.0),
+    )
+    adapter = _CubeNewtonSpawnAdapter((connect, gear))
+    binding = SimpleNamespace(
+        links=[
+            SimpleNamespace(name="arm", body_id=4),
+            SimpleNamespace(name="finger", body_id=7),
+        ],
+        joints=[
+            SimpleNamespace(name="leader", joint_id=8),
+            SimpleNamespace(name="follower", joint_id=9),
+        ],
+    )
+    result = Mock()
+    result.get_articulation.return_value._physics_binding = binding
+    backend = Mock()
+    empty = SimpleNamespace(articulations=[])
+    adapter._build_scene(result, None, 0, empty, "", backend, -1)
+    backend.builder.add_custom_values.assert_not_called()
+
+    arena = SimpleNamespace(articulations=[SimpleNamespace(name="ogbench_robot")])
+    adapter._build_scene(result, None, 1, arena, "arena_0/", backend, 0)
+    parent.assert_called_with(result, None, 1, arena, "arena_0/", backend, 0)
+    result.get_articulation.assert_called_once_with("arena_0/ogbench_robot")
+    point, joint = (
+        call.kwargs for call in backend.builder.add_custom_values.call_args_list
+    )
+    assert point["mujoco:equality_constraint_type"] == 0
+    assert point["mujoco:equality_constraint_body1"] == 4
+    assert point["mujoco:equality_constraint_body2"] == 7
+    assert point["mujoco:eq_solref"] == connect.solref
+    np.testing.assert_allclose(
+        tuple(point["mujoco:equality_constraint_anchor"]), (0.01, 0.02, 0.03)
+    )
+    assert joint["mujoco:equality_constraint_type"] == 2
+    assert joint["mujoco:equality_constraint_joint1"] == 8
+    assert joint["mujoco:equality_constraint_joint2"] == 9
+    assert joint["mujoco:equality_constraint_polycoef"] == list(gear.data)
 
 
 @pytest.mark.parametrize("index", range(3))

@@ -10,17 +10,26 @@ comparison, official OGBench-Cube migration checks, historical UR push-cube
 collection and paired simulator evaluation. `official-reference` compiles a
 pinned MuJoCo reference and exports the robot/physical contract;
 `official-kinematics` checks that robot in DexSim without stepping dynamics.
-The example's [official alignment plan](../../../examples/learning/lewm/OFFICIAL_CUBE.md)
-owns the task parameters and remaining physical/evaluation gates. Historical
-UR reachable-query success does not establish official-task alignment.
+The [Cube contract](../../../examples/learning/lewm/OFFICIAL_CUBE.md) owns task
+parameters and the official-query protocol. The
+[validation record](../../../examples/learning/lewm/cube/VALIDATION.md) owns
+measured outcomes. Historical UR reachable-query experiments use their own
+physical task and validation set.
 Its validation diagnostics compare fixed physical candidates; frozen-visual
 predictor ablations use the common SL trainer and source-bound latent caches.
 CEM sampling and sequence-selection options are recorded evaluation contracts.
 `official-eval-reference` uses the pinned original evaluator;
 `official-eval-dexsim` keeps native worlds alive across planning barriers while
 one planner preserves global query/RNG order. Physical replay can reuse the
-reference's raw actions. Planning observation history is independent of the
-network's maximum trained context. Small pointwise neural differences can change
+reference's raw actions. The DexUni deployment `OGBenchCubeDexUni-v0` owns
+the CPU rigid-body scene and authors its gripper linkage before finalization.
+`embodichain run-example learning/lewm/cube` prepares pinned public inputs,
+collects RGB, exports a validation-selected model and renders initial, goal and
+replanning observations through the native camera. The single-world CPU solver
+keeps each query alive across both action blocks. The
+[Cube workflow](../../../examples/learning/lewm/cube/README.md) owns runnable
+commands, presets and the deployment requirements. Planning observation history
+is independent of the network's maximum trained context. Small pointwise neural differences can change
 CEM elite selection, so numerical tolerances alone do not prove identical plans.
 Training-statistics sampling still supplies raw controller actions to the model;
 final-mean selection reports the recomputed cost of that complete sequence.
@@ -37,13 +46,13 @@ windows sample strided frames and concatenate every intervening raw action;
 the portable model configuration binds that block length. Optional bounded
 uint8 device caches preserve source identity, RNG and independent batch ownership;
 their resident-memory limit excludes output batches and model activations.
-Training/validation seeds must be
-disjoint. Action statistics are computed only from training episodes and saved
-with model weights; exported metadata binds the camera, control period and
-action and rendering contracts. Evaluation rejects missing or mismatched render
-contracts unless explicitly permitted and reported as unverified. The example
-uses the project's default offscreen DLSS rendering; disabling denoising is an
-explicit diagnostic mode. Optional
+Training and validation seeds are disjoint. The common SL recipe computes
+action statistics from training episodes. The Cube benchmark keeps the
+published action statistics for its pinned CEM. Exports carry the moments
+and document the camera, control period and rendering contract. Evaluation rejects missing or mismatched render
+contracts unless explicitly permitted and reported as unverified. The Cube recipe
+uses Hybrid rendering with OptiX offscreen denoising. The historical UR runs use
+the project's default offscreen DLSS rendering. Optional
 simulator traces retain per-step observations, physical states, actions and
 planner RNG; `check-trace` rechecks saved decisions without claiming identical
 simulator replay. Rollout receives H observed latents, H-1 executed actions and

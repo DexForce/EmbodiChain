@@ -28,6 +28,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import xml.etree.ElementTree as ET
 from typing import Any
 
 import gymnasium as gym
@@ -51,6 +52,7 @@ from embodichain.lab.sim.cfg import (
     LinkPhysicsOverrideCfg,
     MassPropertiesCfg,
     MimicComplianceCfg,
+    NewtonPhysicsCfg,
     RigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
     RigidConstraintCfg,
@@ -59,7 +61,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.material import VisualMaterialCfg
 from embodichain.lab.sim.sensors import CameraCfg
-from embodichain.lab.sim.shapes import CubeCfg
+from embodichain.lab.sim.shapes import CubeCfg, PlaneCfg
 from embodichain.utils import configclass
 from embodichain.utils.math import matrix_from_quat, xyz_quat_to_4x4_matrix
 
@@ -293,17 +295,7 @@ class OGBenchCubeEnv(BaseEnv):
                 "the Cube camera path supports at most 32 environments per World; "
                 "use official-eval-dexsim's persistent workers for 50 queries"
             )
-        if (
-            not isinstance(cfg.sim_cfg.physics_cfg, DefaultPhysicsCfg)
-            or not cfg.sim_cfg.physics_cfg.cache_material
-        ):
-            raise ValueError(
-                "official Cube requires DefaultPhysicsCfg(cache_material=True) for GPU contact materials"
-            )
-        if cfg.sim_cfg.physics_cfg.enable_tgs:
-            raise ValueError(
-                "official Cube point compliance requires enable_tgs=False (PGS)"
-            )
+        self._validate_physics(cfg)
         self.root = Path(cfg.reference_root)
         self.contract = json.loads((self.root / "physical-contract.json").read_text())
         if not {"body_invweight0", "sleep_enabled"}.issubset(self.contract):
@@ -354,10 +346,26 @@ class OGBenchCubeEnv(BaseEnv):
         self._control[:, :6] = self.contract["home_qpos"]
         super().__init__(cfg, **kwargs)
 
+    def _validate_physics(self, cfg: OGBenchCubeCfg) -> None:
+        if (
+            not isinstance(cfg.sim_cfg.physics_cfg, DefaultPhysicsCfg)
+            or not cfg.sim_cfg.physics_cfg.cache_material
+        ):
+            raise ValueError(
+                "official Cube requires DefaultPhysicsCfg(cache_material=True) for GPU contact materials"
+            )
+        if cfg.sim_cfg.physics_cfg.enable_tgs:
+            raise ValueError(
+                "official Cube point compliance requires enable_tgs=False (PGS)"
+            )
+
     def _requires_native_renderer(self) -> bool:
         return self.cfg.enable_images or super()._requires_native_renderer()
 
     def _declare_robot(self, **kwargs: Any):
+        return self.sim.add_robot(self._robot_cfg())
+
+    def _robot_cfg(self) -> RobotCfg:
         if not self.asset.get("mimics"):
             raise ValueError(
                 "official Cube requires the compiled driver joint equality"
@@ -410,68 +418,66 @@ class OGBenchCubeEnv(BaseEnv):
                         friction_combine_mode="min",
                     )
                 )
-        return self.sim.add_robot(
-            RobotCfg(
-                uid="ogbench_robot",
-                fpath=str((self.root / "robot/robot.urdf").resolve()),
-                urdf_override_material=True,
-                init_local_pose=np.array(self.asset["root_pose"]),
-                control_parts={"arm": self._names[:6], "eef": self._names[6:]},
-                init_qpos=self.contract["home_qpos"] + [0.0] * 8,
-                solver_cfg=None,
-                build_pk_chain=False,
-                asset_physics_mode="overlay",
-                attrs=RigidBodyPhysicsCfg(
-                    rigid_props=DefaultRigidBodyPropertiesCfg(
-                        linear_damping=0, angular_damping=0, has_gravity=True
-                    ),
-                    material_props=RigidBodyMaterialCfg(
-                        static_friction=1, dynamic_friction=1, restitution=0
-                    ),
-                    collision_props=CollisionPropertiesCfg(
-                        contact_offset=1e-6, rest_offset=0
-                    ),
+        return RobotCfg(
+            uid="ogbench_robot",
+            fpath=str((self.root / "robot/robot.urdf").resolve()),
+            urdf_override_material=True,
+            init_local_pose=np.array(self.asset["root_pose"]),
+            control_parts={"arm": self._names[:6], "eef": self._names[6:]},
+            init_qpos=self.contract["home_qpos"] + [0.0] * 8,
+            solver_cfg=None,
+            build_pk_chain=False,
+            asset_physics_mode="overlay",
+            attrs=RigidBodyPhysicsCfg(
+                rigid_props=DefaultRigidBodyPropertiesCfg(
+                    linear_damping=0, angular_damping=0, has_gravity=True
                 ),
-                link_attrs=attrs,
-                mimic_compliance={mimic["leader"]: compliance},
-                filtered_link_pairs=sorted(
-                    {
-                        tuple(
-                            sorted(
-                                (
-                                    self.bindings[first]["link"],
-                                    self.bindings[second]["link"],
-                                )
+                material_props=RigidBodyMaterialCfg(
+                    static_friction=1, dynamic_friction=1, restitution=0
+                ),
+                collision_props=CollisionPropertiesCfg(
+                    contact_offset=1e-6, rest_offset=0
+                ),
+            ),
+            link_attrs=attrs,
+            mimic_compliance={mimic["leader"]: compliance},
+            filtered_link_pairs=sorted(
+                {
+                    tuple(
+                        sorted(
+                            (
+                                self.bindings[first]["link"],
+                                self.bindings[second]["link"],
                             )
                         )
-                        for first, second in self.contract["excluded_body_pairs"]
-                        if self.bindings[first]["link"] != self.bindings[second]["link"]
-                    }
-                    | {
-                        tuple(sorted(pair))
-                        for pair in self.asset.get("implicit_collision_exclusions", [])
-                    }
-                ),
-                root_props=ArticulationRootPropertiesCfg(
-                    fixed_base=True,
-                    self_collision_enabled=True,
-                    sleep_threshold=0,
-                    min_position_iters=100,
-                    min_velocity_iters=1,
-                ),
-                joint_drive_props=JointDrivePropertiesCfg(
-                    drive_type="force",
-                    target_mode={
-                        name: "position_velocity" if index < 6 else "none"
-                        for index, name in enumerate(self._names)
-                    },
-                    stiffness=stiffness,
-                    damping=damping,
-                    max_effort=efforts,
-                    friction=0,
-                    armature=dict(zip(self._names, self.contract["dof_armature"][:14])),
-                ),
-            )
+                    )
+                    for first, second in self.contract["excluded_body_pairs"]
+                    if self.bindings[first]["link"] != self.bindings[second]["link"]
+                }
+                | {
+                    tuple(sorted(pair))
+                    for pair in self.asset.get("implicit_collision_exclusions", [])
+                }
+            ),
+            root_props=ArticulationRootPropertiesCfg(
+                fixed_base=True,
+                self_collision_enabled=True,
+                sleep_threshold=0,
+                min_position_iters=100,
+                min_velocity_iters=1,
+            ),
+            joint_drive_props=JointDrivePropertiesCfg(
+                drive_type="force",
+                target_mode={
+                    name: "position_velocity" if index < 6 else "none"
+                    for index, name in enumerate(self._names)
+                },
+                stiffness=stiffness,
+                damping=damping,
+                max_effort=efforts,
+                friction=0,
+                armature=dict(zip(self._names, self.contract["dof_armature"][:14])),
+            ),
         )
 
     def _prepare_scene(self, **kwargs: Any) -> None:
@@ -844,3 +850,282 @@ class OGBenchCubeEnv(BaseEnv):
     def close(self) -> None:
         """Release the owned simulator without terminating the host process."""
         self.sim.destroy(exit_process=False)
+
+
+# The compiled scene retains 21 robot links and a free Cube joint.
+_CUBE_RIGID_JOINTS = tuple(range(22))
+
+
+@configclass
+class _OGBenchCubeDexUniCfg(OGBenchCubeCfg):
+    """Cube deployment using the CPU rigid-body path of DexUni."""
+
+    enable_source_state: bool = False
+    sim_cfg: SimulationManagerCfg = SimulationManagerCfg(
+        physics_cfg=NewtonPhysicsCfg(
+            device="cpu",
+            physics_dt=0.002,
+            num_substeps=1,
+            use_cuda_graph=False,
+            solver_cfg={
+                "solver_type": "dexuni",
+                "mujoco_joints": _CUBE_RIGID_JOINTS,
+                "mujoco_options": {
+                    "use_mujoco_cpu": True,
+                    "use_mujoco_contacts": True,
+                    "separate_worlds": False,
+                    "solver": "newton",
+                    "integrator": "implicitfast",
+                    "cone": "elliptic",
+                },
+            },
+        ),
+        headless=True,
+        enable_ground_plane=False,
+    )
+
+
+@register_env(
+    "OGBenchCubeDexUni-v0", max_episode_steps=100, supports_handwritten_demo=False
+)
+class _OGBenchCubeDexUniEnv(OGBenchCubeEnv):
+    """Expose the Cube controller and camera on a Newton/DexUni scene."""
+
+    def __init__(self, cfg: _OGBenchCubeDexUniCfg, **kwargs: Any) -> None:
+        super().__init__(cfg, **kwargs)
+
+    def _validate_physics(self, cfg: _OGBenchCubeDexUniCfg) -> None:
+        if cfg.num_envs != 1:
+            raise ValueError("DexUni CPU requires one Cube environment per World")
+        physics = cfg.sim_cfg.physics_cfg
+        if not isinstance(physics, NewtonPhysicsCfg):
+            raise ValueError("OGBenchCubeDexUni requires NewtonPhysicsCfg")
+        solver = physics.to_dexsim_cfg(gpu_id=cfg.sim_cfg.gpu_id).solver_cfg
+        if (
+            solver.solver_type != "dexuni"
+            or tuple(solver.mujoco_joints or ()) != _CUBE_RIGID_JOINTS
+            or not solver.mujoco_options.get("use_mujoco_cpu")
+            or torch.device(physics.device).type != "cpu"
+            or physics.num_substeps != 1
+        ):
+            raise ValueError(
+                "OGBenchCubeDexUni needs the DexUni CPU rigid-body path "
+                "with all joints in MuJoCo ownership and one solver step per physics step"
+            )
+        if cfg.enable_source_state:
+            raise ValueError("The DexUni Cube deployment provides RGB and cube pose")
+        if (
+            cfg.enable_images
+            and not (
+                Path(cfg.reference_root) / "dexuni-render-materials.json"
+            ).is_file()
+        ):
+            raise ValueError(
+                "Prepare assets with 'embodichain run-example learning/lewm/cube prepare'"
+            )
+
+    def _declare_robot(self, **kwargs: Any):
+        robot = self._robot_cfg()
+        robot.attrs.rigid_props = None
+        robot.attrs.material_props = None
+        robot.attrs.collision_props = None
+        robot.mimic_compliance = None
+        for override in robot.link_attrs.values():
+            override.collision_materials.clear()
+        return self.sim.add_robot(robot)
+
+    def _prepare_scene(self, **kwargs: Any) -> None:
+        from dexsim.spawn import NewtonEqualityDesc, NewtonSceneDesc
+
+        from ._ogbench_cube_newton import _CubeNewtonSpawnAdapter
+
+        geoms = self.contract["geoms"]
+        static = {"floor", *(g["name"] for g in geoms if g["name"].startswith("wall_"))}
+        self.walls = []
+        for geom in geoms:
+            name = geom["name"]
+            if name not in static and name != "object_0":
+                continue
+            shape = (
+                PlaneCfg(
+                    size=(2.0, 2.0),
+                    visual_material=VisualMaterialCfg(
+                        base_color=[1, 1, 1, 1],
+                        roughness=1,
+                        base_color_texture=str(self.root / "textures/grid.png"),
+                    ),
+                )
+                if name == "floor"
+                else CubeCfg(
+                    size=(2 * np.asarray(geom["size"])).tolist(),
+                    visual_material=VisualMaterialCfg(
+                        base_color=geom["rgba"], roughness=1
+                    ),
+                )
+            )
+            if name in static:
+                obj = self.sim.add_rigid_object(
+                    RigidObjectCfg(
+                        uid=name, shape=shape, body_type="static", init_pos=geom["pos"]
+                    )
+                )
+                if name != "floor":
+                    self.walls.append(obj)
+            else:
+                self.cube = self.sim.add_rigid_object(
+                    RigidObjectCfg(
+                        uid="cube",
+                        shape=shape,
+                        init_pos=(0.425, 0.1, 0.02),
+                        attrs=RigidBodyPhysicsCfg(
+                            mass_props=MassPropertiesCfg(mass=0.07936)
+                        ),
+                    )
+                )
+        if self.cfg.enable_images:
+            self.sim.add_light(
+                LightCfg(
+                    uid="ogbench_light",
+                    light_type="direction",
+                    intensity=5,
+                    direction=(0, 0, -1),
+                )
+            )
+
+        # Resolve the ordinary EmbodiChain declarations before authoring the
+        # source-specific Newton scene metadata. Spawn materializes them once.
+        spawn = self.sim._spawn_scene
+        spawn.resolve_sources()
+        scene = spawn.builder.scene_desc
+        robot = scene.articulations[0]
+        by_name = {g["name"]: g for g in geoms}
+        collision_sources = {}
+        for obj in scene.mesh_objects:
+            source = by_name["object_0" if obj.name == "cube" else obj.name]
+            collision = obj.collisions[0]
+            collision.segment_name = source["name"]
+            collision.newton = self._contact(source)
+            collision_sources[collision.segment_name] = source
+
+        authored = {
+            link.get("name"): link.findall("collision")
+            for link in ET.parse(self.root / "robot/robot.urdf")
+            .getroot()
+            .findall("link")
+        }
+        for link in robot.links:
+            link.collisions = []
+            for node in authored[link.name]:
+                name = node.get("name")
+                source = geoms[int(name.removeprefix("geom_"))]
+                link.collisions.append(self._link_collision(node, source))
+                collision_sources[name] = source
+        for joint in robot.joints:
+            # The source's compliant joint equality supplies the mimic relation.
+            joint.mimic_parent = None
+
+        equalities = []
+        data = self.contract["equality"]
+        for i, kind in enumerate(data["type"]):
+            a, b = data["obj1id"][i], data["obj2id"][i]
+            values = data["data"][i]
+            if kind == 0:
+                left, right = (
+                    self.bindings[self.contract["body_names"][j]] for j in (a, b)
+                )
+                a, b = left["link"], right["link"]
+                anchor = np.asarray(left["transform"]) @ np.r_[values[:3], 1]
+                values = (*anchor[:3], *values[3:])
+            else:
+                a, b = self._names[a], self._names[b]
+            equalities.append(
+                NewtonEqualityDesc(
+                    name=f"cube_eq_{i}",
+                    equality_type=kind,
+                    object1=a,
+                    object2=b,
+                    data=tuple(values),
+                    solref=tuple(data["solref"][i]),
+                    solimp=tuple(data["solimp"][i]),
+                )
+            )
+        sources = list(collision_sources.items())
+        filtered = [
+            (name, peer)
+            for i, (name, source) in enumerate(sources)
+            for peer, other in sources[i + 1 :]
+            if not (
+                source["contype"] & other["conaffinity"]
+                or other["contype"] & source["conaffinity"]
+            )
+        ]
+        scene.newton = NewtonSceneDesc(
+            options={
+                key: self.contract[key]
+                for key in ("iterations", "tolerance", "impratio")
+            },
+            filtered_geom_pairs=filtered,
+        )
+        spawn.builder._adapter = _CubeNewtonSpawnAdapter(tuple(equalities))
+
+    def _link_collision(self, node: ET.Element, source: dict[str, Any]):
+        from dexsim.spawn import CollisionDesc
+
+        origin = node.find("origin")
+        frame = np.eye(4)
+        if origin is not None:
+            frame[:3, 3] = np.fromstring(origin.get("xyz", "0 0 0"), sep=" ")
+            rpy = np.fromstring(origin.get("rpy", "0 0 0"), sep=" ")
+            frame[:3, :3] = Rotation.from_euler("xyz", rpy).as_matrix()
+        options = {"segment_name": node.get("name"), "local_transform": frame}
+        size = source["size"]
+        kind = source["type"]
+        if kind == 2:
+            collision = CollisionDesc.sphere(size[0], **options)
+        elif kind == 3:
+            collision = CollisionDesc.capsule(size[0], size[1], **options)
+        elif kind == 5:
+            collision = CollisionDesc.cylinder(size[0], size[1], **options)
+        elif kind == 6:
+            collision = CollisionDesc.cube(tuple(2 * np.asarray(size)), **options)
+        elif kind == 7:
+            import trimesh
+
+            filename = node.find("./geometry/mesh").get("filename")
+            mesh = trimesh.load_mesh(self.root / "robot" / filename, process=False)
+            collision = CollisionDesc.mesh(
+                vertices=np.asarray(mesh.vertices, dtype=np.float32),
+                triangles=np.asarray(mesh.faces, dtype=np.int32),
+                **options,
+            )
+        else:
+            raise ValueError(f"Unsupported Cube collider type {kind}")
+        collision.newton = self._contact(source)
+        return collision
+
+    @staticmethod
+    def _contact(source):
+        from dexsim.spawn import NewtonCollisionDesc
+
+        return NewtonCollisionDesc(
+            solref=tuple(source["solref"]),
+            solimp=tuple(source["solimp"]),
+            mu=source["friction"][0],
+            mu_torsional=source["friction"][1],
+            mu_rolling=source["friction"][2],
+            condim=source["condim"],
+            priority=source["priority"],
+            margin=source.get("margin", 0.0),
+            gap=source.get("gap", 0.0),
+            solmix=source.get("solmix", 1.0),
+        )
+
+    def _setup_robot(self, **kwargs: Any):
+        solver = self.sim.spawn_result.get_solver_diagnostics()
+        if solver["model"]["joint_count"] != len(_CUBE_RIGID_JOINTS):
+            raise RuntimeError("Compiled DexUni Cube rigid-joint layout changed")
+        self._joint_ids = [self.robot.joint_names.index(name) for name in self._names]
+        for wall in self.walls:
+            wall.set_visible(False)
+        self.single_action_space = gym.spaces.Box(-1, 1, (5,), dtype=np.float32)
+        return self.robot

@@ -59,6 +59,11 @@ Its [execution record](../../../examples/learning/nerd/VALIDATION.md) states the
 tested runtime/budgets. Native deployment adapters have their own
 [solver extension guide](../solvers/README.md).
 
+LeWM's [Cube showcase](../../../examples/learning/lewm/cube/README.md) runs
+native collection, supervised training and CEM evaluation. Its
+[validation record](../../../examples/learning/lewm/cube/VALIDATION.md)
+reports the measured fixed-query results.
+
 RWM predicts action-conditioned robot state transitions, so it belongs to
 `dynamics`. World models also describe future-state/observation prediction;
 `world_models` is not a parallel top-level domain or an alternative import path.

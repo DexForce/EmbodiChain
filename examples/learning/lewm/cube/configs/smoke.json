@@ -1,0 +1,8 @@
+{
+  "paired_train_episodes": 8,
+  "paired_validation_episodes": 2,
+  "visual_updates": 40,
+  "expert_train_episodes": 2,
+  "expert_validation_episodes": 1,
+  "expert_updates": 4
+}
