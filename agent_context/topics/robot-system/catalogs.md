@@ -94,8 +94,10 @@ separate from `robot.joint_names` / `robot.default_joint_position`. These are
 simulation PD presets, without external learned actuator implementations.
 
 RoboParty presets read joint metadata from their URDFs or a caller-selected
-USD articulation. Exact joint names align the preset reset pose with the
-finalized backend layout.
+USD articulation after resolving the asset path. Exact joint names align
+the reset pose with the finalized backend layout and let caller drive rules
+override selected preset joints. The hand presets constrain thumb travel to
+the range shared with the source follower.
 `RoboPartyRPO` and `RoboPartyRP1` expose floating-base `locomotion` groups.
 The articulated RP1 variant exposes independent `left_eef` and `right_eef`
 commands and preserves passive mimic followers. `RoboPartyRPHand` derives

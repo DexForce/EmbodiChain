@@ -38,8 +38,9 @@ simulation PD gains and source URDF joint limits. The articulated finger
 drives apply simulation limits of 2 N·m and 5 rad/s because the source
 declares zero effort and velocity for the fingers. The finger armature
 is 0.01 kg·m², matching the source MJCF and stabilizing the native mimic
-response in Newton. The presets expose joint-space control with
-`build_pk_chain=False`.
+response in Newton. Each `finger12` thumb leader uses the same
+[mimic-feasible range as the standalone hand](rp_hand.md#control-and-physical-defaults).
+The presets expose joint-space control with `build_pk_chain=False`.
 
 ## Usage
 

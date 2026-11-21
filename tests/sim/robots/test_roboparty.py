@@ -28,6 +28,11 @@ import torch
 from embodichain.robot_registry import resolve_robot_cfg
 from embodichain.extensions.robots._catalog import ROBOT_CONFIGS
 
+# Source finger12 and finger13 limits intersect through the thumb mimic relation.
+_THUMB_SOURCE_LIMIT = 1.4
+_THUMB_FOLLOWER_LIMIT = 1.13
+_THUMB_COMMAND_RANGE = (0.01623466, 1.23259634)
+
 
 @pytest.mark.no_sim
 @pytest.mark.slow
@@ -106,6 +111,12 @@ def test_pinned_description_matches_robot_preset(
             float(mimic.attrib["multiplier"]) * qpos[mimic.attrib["joint"]]
             + float(mimic.attrib["offset"])
         )
+    thumb_joints = qpos.keys() & {"lh_finger12", "rh_finger12"}
+    if thumb_joints:
+        assert cfg.qpos_limits.keys() == thumb_joints
+        for thumb in thumb_joints:
+            assert cfg.qpos_limits[thumb] == pytest.approx(_THUMB_COMMAND_RANGE)
+
     body_joint_names = cfg.control_parts.get("locomotion", ())
     for joint in moving:
         name = joint.attrib["name"]
@@ -172,6 +183,7 @@ _RIGHT_HAND_MIMICS = {
     "42": (0.8321, 0.043170),
     "52": (0.7349, 0.035218),
 }
+_HAND_UPPER_LIMITS = {"12": _THUMB_SOURCE_LIMIT, "13": _THUMB_FOLLOWER_LIMIT}
 
 
 @pytest.fixture
@@ -199,7 +211,14 @@ def right_hand_urdf(tmp_path: Path) -> Path:
         ET.SubElement(joint, "parent", link=parent_link)
         ET.SubElement(joint, "child", link=f"rh_finger{finger}_link")
         ET.SubElement(joint, "axis", xyz="1 0 0")
-        ET.SubElement(joint, "limit", lower="0", upper="1.75", effort="0", velocity="0")
+        ET.SubElement(
+            joint,
+            "limit",
+            lower="0",
+            upper=str(_HAND_UPPER_LIMITS.get(finger, 1.75)),
+            effort="0",
+            velocity="0",
+        )
         if finger in _RIGHT_HAND_MIMICS:
             multiplier, offset = _RIGHT_HAND_MIMICS[finger]
             ET.SubElement(
@@ -242,7 +261,7 @@ def right_hand_usd(tmp_path: Path) -> Path:
         joint.CreateBody1Rel().SetTargets([f"/Hand/rh_finger{finger}_link"])
         joint.CreateAxisAttr("X")
         joint.CreateLowerLimitAttr(0.0)
-        joint.CreateUpperLimitAttr(degrees(1.75))
+        joint.CreateUpperLimitAttr(degrees(_HAND_UPPER_LIMITS.get(finger, 1.75)))
         if finger in _RIGHT_HAND_MIMICS:
             multiplier, offset = _RIGHT_HAND_MIMICS[finger]
             mimic = PhysxSchema.PhysxMimicJointAPI.Apply(joint.GetPrim(), "rotX")
@@ -260,23 +279,39 @@ def test_rp_hand_loads_a_local_usd_source(
     right_hand_usd: Path, file_field: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Both file selectors use the local USD articulation and its mimic metadata."""
-    from embodichain.extensions.robots.roboparty import _cfg
+    from embodichain.data import constants, dataset
+    from embodichain.lab.gym.utils.gym_utils import config_to_cfg
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 
-    def local_path(reference: str) -> str:
-        assert reference == str(right_hand_usd), reference
-        return reference
+    def unexpected_download(asset: str) -> None:
+        pytest.fail(f"Local USD unexpectedly requested a dataset: {asset!r}.")
 
-    monkeypatch.setattr(_cfg, "get_data_path", local_path)
     override = (
         {"fpath": str(right_hand_usd)}
         if file_field == "fpath"
-        else {"source": {"file_path": str(right_hand_usd), "source_prim_path": "/Hand"}}
+        else {"source": {"file_path": right_hand_usd.name, "source_prim_path": "/Hand"}}
     )
-    cfg = resolve_robot_cfg("RoboPartyRPHand", override)
-    assert (cfg.fpath is not None) == (file_field == "fpath")
-    assert (cfg.source is not None) == (file_field == "source")
-    cfg = type(cfg).from_dict(cfg.to_dict())
+    with monkeypatch.context() as paths:
+        paths.setattr(
+            constants, "EMBODICHAIN_DEFAULT_DATA_ROOT", str(right_hand_usd.parent)
+        )
+        paths.setattr(dataset, "get_data_class", unexpected_download)
+        cfg = config_to_cfg(
+            {
+                "id": "EmbodiedEnv-v1",
+                "physics": "default",
+                "env": {},
+                "robot": {"class_type": "RoboPartyRPHand", **override},
+            }
+        ).robot
+        if file_field == "source":
+            assert cfg.fpath is None
+            assert cfg.source.file_path == str(right_hand_usd)
+            assert cfg.source.source_prim_path == "/Hand"
+        else:
+            assert cfg.source is None
+            assert cfg.fpath == str(right_hand_usd)
+        cfg = type(cfg).from_dict(cfg.to_dict())
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
@@ -292,6 +327,9 @@ def test_rp_hand_loads_a_local_usd_source(
         assert len(robot.mimic_ids) == 5
         thumb = robot.joint_names.index("rh_finger12")
         assert robot.get_qpos()[0, thumb].item() == pytest.approx(0.02)
+        assert robot.get_qpos_limits(joint_ids=[thumb])[0, 0].tolist() == pytest.approx(
+            _THUMB_COMMAND_RANGE
+        )
     finally:
         sim.destroy(exit_process=False)
         SimulationManager.flush_cleanup_queue()
@@ -338,9 +376,55 @@ def test_rp_hand_reset_by_name_preserves_partial_drive_limits(
             leader = _RIGHT_HAND_PARENTS[follower]
             expected = multiplier * qpos[f"rh_finger{leader}"] + offset
             assert qpos[f"rh_finger{follower}"] == pytest.approx(expected, abs=1e-6)
+
+        thumb = names.index("rh_finger12")
+        limits = robot.get_qpos_limits(joint_ids=[thumb])[0, 0].tolist()
+        assert limits == pytest.approx(_THUMB_COMMAND_RANGE)
+        for command, limit in zip((0.0, _THUMB_SOURCE_LIMIT), limits, strict=True):
+            robot.set_qpos(torch.tensor([[command]]), joint_ids=[thumb])
+            assert robot.get_qpos(target=True)[0, thumb].item() == pytest.approx(limit)
     finally:
         sim.destroy(exit_process=False)
         SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("solver", (None, "dexuni"))
+def test_rp1_thumb_group_override_preserves_other_finger_gains(
+    right_hand_urdf: Path, solver: str | None
+) -> None:
+    """Compile a custom thumb group alongside the preset finger drives."""
+    from dexsim.engine import JointType
+    from dexsim.spawn import ArticulationDesc, JointDesc
+
+    from embodichain.lab.sim.spawn.descriptors import _compile_joint_properties
+
+    cfg = resolve_robot_cfg(
+        "RoboPartyRP1",
+        {
+            "fpath": str(right_hand_urdf),
+            "control_parts": {"thumb": ["rh_finger12"]},
+            "joint_drive_props": {"stiffness": {"thumb": 7.0}},
+        },
+        variant="hand",
+    )
+    desc = ArticulationDesc(
+        name="rp1",
+        joints=[
+            JointDesc(
+                name=joint.attrib["name"],
+                parent_link_name=joint.find("parent").attrib["link"],
+                child_link_name=joint.find("child").attrib["link"],
+                joint_type=JointType.REVOLUTE,
+            )
+            for joint in ET.parse(right_hand_urdf).findall("joint")
+        ],
+    )
+    drives, _, _, _ = _compile_joint_properties(desc, cfg, newton_solver_type=solver)
+    for name in cfg.control_parts["right_eef"]:
+        default, newton = drives[name]
+        expected = 7.0 if name == "rh_finger12" else 3.0
+        assert default.stiffness == newton.target_ke == expected
 
 
 @pytest.mark.requires_sim

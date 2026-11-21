@@ -31,7 +31,6 @@ from .._cfg import (
     _HAND_MAX_EFFORT,
     _HAND_MAX_VELOCITY,
     _HAND_STIFFNESS,
-    _THUMB_FLEXION,
     _RoboPartyRobotCfg,
     _source_drive_limit,
 )
@@ -79,38 +78,23 @@ class RoboPartyRP1Cfg(_RoboPartyRobotCfg):
                 "left_eef": [name for name in independent if name.startswith("lh_")],
                 "right_eef": [name for name in independent if name.startswith("rh_")],
             }
+            body = self.control_parts["locomotion"]
+            fingers = self.control_parts["left_eef"] + self.control_parts["right_eef"]
             self.joint_drive_props = JointDrivePropertiesCfg(
                 drive_type="force",
-                stiffness={
-                    "locomotion": 100.0,
-                    "left_eef": _HAND_STIFFNESS,
-                    "right_eef": _HAND_STIFFNESS,
-                },
-                damping={
-                    "locomotion": 4.0,
-                    "left_eef": _HAND_DAMPING,
-                    "right_eef": _HAND_DAMPING,
-                },
-                max_effort={
-                    **max_effort,
-                    "left_eef": _HAND_MAX_EFFORT,
-                    "right_eef": _HAND_MAX_EFFORT,
-                },
-                max_velocity={
-                    **max_velocity,
-                    "left_eef": _HAND_MAX_VELOCITY,
-                    "right_eef": _HAND_MAX_VELOCITY,
-                },
+                stiffness=dict.fromkeys(body, 100.0)
+                | dict.fromkeys(fingers, _HAND_STIFFNESS),
+                damping=dict.fromkeys(body, 4.0)
+                | dict.fromkeys(fingers, _HAND_DAMPING),
+                max_effort=dict.fromkeys(fingers, _HAND_MAX_EFFORT) | max_effort,
+                max_velocity=dict.fromkeys(fingers, _HAND_MAX_VELOCITY) | max_velocity,
                 armature={
                     joint.name: _FINGER_ARMATURE
                     for joint in joints
                     if joint.name.startswith(("lh_", "rh_"))
                 },
             )
-            initial_positions = {
-                "lh_finger12": _THUMB_FLEXION,
-                "rh_finger12": _THUMB_FLEXION,
-            }
+            self._set_hand_joint_defaults(joints, ("lh_finger12", "rh_finger12"))
         else:
             self.control_parts = {"locomotion": independent}
             self.joint_drive_props = JointDrivePropertiesCfg(
@@ -120,5 +104,4 @@ class RoboPartyRP1Cfg(_RoboPartyRobotCfg):
                 max_effort=max_effort,
                 max_velocity=max_velocity,
             )
-            initial_positions = {}
-        self._set_initial_joint_positions(joints, initial_positions)
+            self._set_initial_joint_positions(joints, {})

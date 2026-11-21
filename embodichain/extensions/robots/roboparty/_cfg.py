@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from math import inf, isfinite
+from numbers import Real
 from typing import Any, Literal, Self, cast
 import xml.etree.ElementTree as ET
 
@@ -53,6 +55,8 @@ class _Joint:
     effort_limit: float | None
     velocity_limit: float | None
     mimic_parent: str | None
+    lower_limit: float = -inf
+    upper_limit: float = inf
     mimic_multiplier: float = 1.0
     mimic_offset: float = 0.0
 
@@ -106,6 +110,9 @@ class _RoboPartyRobotCfg(RobotCfg):
         self.solver_cfg = {}
 
         path = _asset_file_path(self)
+        if self.source is not None:
+            path = get_data_path(path)
+            self.source.file_path = path
         if path.lower().endswith((".usd", ".usda", ".usdc", ".usdz")):
             return _read_usd_joints(path, self.source)
         return _read_urdf_joints(path)
@@ -126,6 +133,42 @@ class _RoboPartyRobotCfg(RobotCfg):
         self.init_qpos = list(positions.values())
         self.init_qpos_joint_names = list(positions)
 
+    def _set_hand_joint_defaults(
+        self, joints: list[_Joint], thumb_names: tuple[str, ...]
+    ) -> None:
+        """Constrain each thumb leader to the travel shared with its follower."""
+        limits = {}
+        initial_positions = {}
+        for leader in joints:
+            if leader.name not in thumb_names:
+                continue
+            lower, upper = leader.lower_limit, leader.upper_limit
+            for follower in joints:
+                if (
+                    follower.mimic_parent != leader.name
+                    or follower.mimic_multiplier == 0
+                ):
+                    continue
+                # Invert the affine mimic relation in the follower's own range.
+                follower_lower, follower_upper = sorted(
+                    (bound - follower.mimic_offset) / follower.mimic_multiplier
+                    for bound in (follower.lower_limit, follower.upper_limit)
+                )
+                lower = max(lower, follower_lower)
+                upper = min(upper, follower_upper)
+            if lower > upper:
+                raise ValueError(
+                    f"Thumb joint {leader.name!r} has no mimic-feasible range."
+                )
+            if (lower, upper) != (leader.lower_limit, leader.upper_limit) and (
+                isfinite(lower) and isfinite(upper)
+            ):
+                limits[leader.name] = [lower, upper]
+            initial_positions[leader.name] = min(max(_THUMB_FLEXION, lower), upper)
+
+        self.qpos_limits = limits or None
+        self._set_initial_joint_positions(joints, initial_positions)
+
 
 def _read_urdf_joints(path: str) -> list[_Joint]:
     joints = []
@@ -142,6 +185,8 @@ def _read_urdf_joints(path: str) -> list[_Joint]:
                 effort_limit=float(limits.get("effort", "0")),
                 velocity_limit=float(limits.get("velocity", "0")),
                 mimic_parent=relation.get("joint"),
+                lower_limit=float(limits.get("lower", "-inf")),
+                upper_limit=float(limits.get("upper", "inf")),
                 mimic_multiplier=float(relation.get("multiplier", "1")),
                 mimic_offset=float(relation.get("offset", "0")),
             )
@@ -163,6 +208,14 @@ def _read_usd_joints(path: str, source: UsdSourceCfg | None) -> list[_Joint]:
             effort_limit=joint.effort_limit,
             velocity_limit=joint.velocity_limit,
             mimic_parent=joint.mimic_parent,
+            lower_limit=(
+                float(joint.lower_limit)
+                if isinstance(joint.lower_limit, Real)
+                else -inf
+            ),
+            upper_limit=(
+                float(joint.upper_limit) if isinstance(joint.upper_limit, Real) else inf
+            ),
             mimic_multiplier=joint.mimic_multiplier,
             mimic_offset=joint.mimic_offset,
         )

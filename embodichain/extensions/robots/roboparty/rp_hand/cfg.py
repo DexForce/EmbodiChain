@@ -31,7 +31,6 @@ from .._cfg import (
     _HAND_MAX_EFFORT,
     _HAND_MAX_VELOCITY,
     _HAND_STIFFNESS,
-    _THUMB_FLEXION,
     _RoboPartyRobotCfg,
 )
 
@@ -66,9 +65,7 @@ class RoboPartyRPHandCfg(_RoboPartyRobotCfg):
             "eef": [joint.name for joint in joints if joint.mimic_parent is None]
         }
         prefix = "lh" if self.side == "left" else "rh"
-        self._set_initial_joint_positions(
-            joints, {f"{prefix}_finger12": _THUMB_FLEXION}
-        )
+        self._set_hand_joint_defaults(joints, (f"{prefix}_finger12",))
         self.joint_drive_props = JointDrivePropertiesCfg(
             drive_type="force",
             stiffness=_HAND_STIFFNESS,

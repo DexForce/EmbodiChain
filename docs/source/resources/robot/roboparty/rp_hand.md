@@ -39,17 +39,20 @@ robot = sim.add_robot(cfg=cfg)
 ```
 
 Use `fpath` for a compatible local URDF or USD. A structured `source` can
-select an individual articulation prim in a USD file. The preset reads
-joint names and mimic relations from the selected file and aligns its
-initial pose by joint name during binding and reset.
+select an individual articulation prim in a USD file. The preset resolves
+`source.file_path` through the asset registry and data root before reading the
+selected joint names and mimic relations. Binding and reset align the initial
+pose by joint name.
 
 ## Control and physical defaults
 
 The `eef` group accepts six joint position targets in radians. The source
 order is `finger11`, `finger12`, `finger21`, `finger31`, `finger41` and
 `finger51`, with prefix `lh_` or `rh_`. Five other joints follow the source
-mimic relations. The fixed palm starts 0.3 m above the ground. A small initial
-thumb flexion keeps its follower within the source limit.
+mimic relations. The preset limits `finger12` to approximately 0.0162 to
+1.2326 rad so its follower `finger13` can reach both endpoints within its
+authored travel. The fixed palm starts 0.3 m above the ground with the thumb
+leader at 0.02 rad.
 
 The simulation uses force PD drives with stiffness 3 N·m/rad and damping
 0.1 N·m·s/rad. Effort and speed are capped at 2 N·m and 5 rad/s. The preset
