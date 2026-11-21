@@ -7,6 +7,10 @@ Run ``embodichain --help`` to list commands or
 
 ---
 
+## MCP
+
+Use `embodichain mcp --session ID` to read configured robot joints from an existing DexSim World. See the [stdio connection guide](mcp.rst).
+
 ## Asset Download
 
 List and download simulation assets (robots, objects, scenes, etc.).

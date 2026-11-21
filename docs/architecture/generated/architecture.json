@@ -3,7 +3,7 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "bca6e91c0f7187cf037eb20c331b3a2764258737",
+  "revision": "2822f4d63fd75ed6f0f3a5b24a666120c5f3a9dc",
   "source_ref": "HEAD",
   "package_version": "0.3.3",
   "topic_index": "agent_context/MAP.yaml",
@@ -87,8 +87,8 @@
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/pose_generator.py",
           "symbol": "AntipodalGraspPoseGenerator",
-          "start_line": 284,
-          "end_line": 284,
+          "start_line": 301,
+          "end_line": 301,
           "excerpt": "class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):"
         }
       ],
@@ -145,8 +145,8 @@
         {
           "path": "embodichain/lab/sim/objects/articulation.py",
           "symbol": "Articulation",
-          "start_line": 739,
-          "end_line": 739,
+          "start_line": 742,
+          "end_line": 742,
           "excerpt": "class Articulation(BatchEntity):"
         }
       ],
@@ -1391,8 +1391,8 @@
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/_antipodal_backend.py",
           "symbol": "_AntipodalMeshBackend",
-          "start_line": 71,
-          "end_line": 71,
+          "start_line": 76,
+          "end_line": 76,
           "excerpt": "class _AntipodalMeshBackend:"
         }
       ],
@@ -1591,8 +1591,8 @@
         {
           "path": "embodichain/lab/task_program/integrations/catalog.py",
           "symbol": "TaskProgramIntegrationCatalog",
-          "start_line": 635,
-          "end_line": 635,
+          "start_line": 647,
+          "end_line": 647,
           "excerpt": "class TaskProgramIntegrationCatalog:"
         }
       ],
@@ -1690,6 +1690,59 @@
         }
       ],
       "details": "Managers organize task behavior around observations, actions, rewards, events, and dataset recording. Each manager invokes functors with its own contract, letting tasks compose behavior while sharing the environment reset and step lifecycle."
+    },
+    {
+      "id": "mcp",
+      "label": "EmbodiChain MCP",
+      "kind": "module",
+      "topic_ids": [
+        "robot-system"
+      ],
+      "summary": "Reads measured robot joint positions and velocities from an existing DexSim session over stdio.",
+      "boundaries": [
+        "The DexSim host owns the World and executes queries on the World owner thread."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/mcp/server.py",
+          "symbol": "serve",
+          "start_line": 38,
+          "end_line": 39,
+          "excerpt": "    with Session.connect(\n        session_id, directory=directory, client={\"kind\": \"embodichain-mcp\"}"
+        },
+        {
+          "path": "embodichain/mcp/tools/robot.py",
+          "symbol": "register_robot_tools.embodichain_get_robot_state",
+          "start_line": 48,
+          "end_line": 49,
+          "excerpt": "            return session.invoke(\n                \"embodichain.lab.sim.dexsim_session.robot_state\","
+        },
+        {
+          "path": "embodichain/lab/sim/dexsim_session/robot_state.py",
+          "symbol": "read_robot_state",
+          "start_line": 96,
+          "end_line": 97,
+          "excerpt": "    names, indices, units = _select_dofs(handle.joint_dof_layout, parts[control_part])\n    positions = np.asarray(handle.get_current_qpos()).reshape(-1)[indices]"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "guides/mcp",
+          "label": "Connect a stdio client",
+          "source_extension": ".rst"
+        },
+        {
+          "docname": "features/mcp/index",
+          "label": "EmbodiChain MCP tool contract",
+          "source_extension": ".rst"
+        },
+        {
+          "docname": "api_reference/embodichain/embodichain.mcp",
+          "label": "Python API",
+          "source_extension": ".rst"
+        }
+      ],
+      "details": "The CLI connects to an explicit DexSim Runtime session. The stdio server registers robot tools that invoke the EmbodiChain adapter in the World host. Native DexSim MCP clients can attach separately to the same session. The host resolves the live articulation and returns a detached measurement in control-part order."
     },
     {
       "id": "mllm",
@@ -3082,8 +3135,8 @@
         {
           "path": "embodichain/lab/task_program/integrations/simulation/environment.py",
           "symbol": "SimulationTaskProgramFactory",
-          "start_line": 731,
-          "end_line": 731,
+          "start_line": 747,
+          "end_line": 747,
           "excerpt": "class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):"
         }
       ],
@@ -3911,8 +3964,8 @@
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/pose_generator.py",
           "symbol": "AntipodalGraspPoseGenerator._backend",
-          "start_line": 463,
-          "end_line": 463,
+          "start_line": 480,
+          "end_line": 480,
           "excerpt": "        backend = _AntipodalMeshBackend("
         }
       ]
@@ -3947,8 +4000,8 @@
         {
           "path": "embodichain/lab/sim/objects/articulation.py",
           "symbol": "Articulation",
-          "start_line": 739,
-          "end_line": 739,
+          "start_line": 742,
+          "end_line": 742,
           "excerpt": "class Articulation(BatchEntity):"
         }
       ]
@@ -4087,8 +4140,8 @@
         {
           "path": "embodichain/lab/gym/envs/task_program/bridge.py",
           "symbol": "TaskProgramDemoBridge._segment_actions",
-          "start_line": 2036,
-          "end_line": 2036,
+          "start_line": 2038,
+          "end_line": 2038,
           "excerpt": "                        self._sink.pop(),"
         }
       ]
@@ -4105,8 +4158,8 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 172,
-          "end_line": 172,
+          "start_line": 177,
+          "end_line": 177,
           "excerpt": "        target=\"embodichain.toolkits.acd.cli:main\","
         }
       ]
@@ -4123,8 +4176,8 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 57,
-          "end_line": 57,
+          "start_line": 62,
+          "end_line": 62,
           "excerpt": "        target=\"embodichain.data.download:main\","
         }
       ]
@@ -4141,22 +4194,22 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 107,
-          "end_line": 107,
+          "start_line": 112,
+          "end_line": 112,
           "excerpt": "        target=\"embodichain.lab.scripts.run_task:cli\","
         },
         {
           "path": "embodichain/cli/main.py",
           "symbol": "_load_handler",
-          "start_line": 227,
-          "end_line": 229,
+          "start_line": 232,
+          "end_line": 234,
           "excerpt": "    module_name, attribute = target.split(\":\", maxsplit=1)\n    module = importlib.import_module(module_name)\n    return getattr(module, attribute)"
         },
         {
           "path": "embodichain/cli/main.py",
           "symbol": "main",
-          "start_line": 262,
-          "end_line": 263,
+          "start_line": 267,
+          "end_line": 268,
           "excerpt": "    handler = _load_handler(command.target)\n    handler(arguments[1:])"
         }
       ]
@@ -4173,9 +4226,34 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 167,
-          "end_line": 167,
+          "start_line": 172,
+          "end_line": 172,
           "excerpt": "        target=\"embodichain.lab.scripts.annotate_grasp:cli\","
+        }
+      ]
+    },
+    {
+      "id": "cli-calls-mcp",
+      "source": "cli",
+      "target": "mcp",
+      "relation": "calls",
+      "description": "Dispatch the mcp subcommand to the stdio MCP server.",
+      "scope": "Lazy command dispatch when the user selects embodichain mcp.",
+      "provenance": "source-reviewed",
+      "evidence": [
+        {
+          "path": "embodichain/cli/main.py",
+          "symbol": "<module>",
+          "start_line": 41,
+          "end_line": 42,
+          "excerpt": "        name=\"mcp\",\n        target=\"embodichain.cli.mcp:main\","
+        },
+        {
+          "path": "embodichain/cli/main.py",
+          "symbol": "main",
+          "start_line": 267,
+          "end_line": 268,
+          "excerpt": "    handler = _load_handler(command.target)\n    handler(arguments[1:])"
         }
       ]
     },
@@ -4209,8 +4287,8 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 162,
-          "end_line": 162,
+          "start_line": 167,
+          "end_line": 167,
           "excerpt": "        target=\"embodichain.learning.rl.policy_evaluation.cli:cli\","
         }
       ]
@@ -4227,8 +4305,8 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 72,
-          "end_line": 72,
+          "start_line": 77,
+          "end_line": 77,
           "excerpt": "        target=\"embodichain.gen_sim.scene_engine.cli.start:main\","
         }
       ]
@@ -4245,8 +4323,8 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 62,
-          "end_line": 62,
+          "start_line": 67,
+          "end_line": 67,
           "excerpt": "        target=\"embodichain.gen_sim.asset_engine.cli.start:main\","
         }
       ]
@@ -4263,22 +4341,22 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 157,
-          "end_line": 157,
+          "start_line": 162,
+          "end_line": 162,
           "excerpt": "        target=\"embodichain.learning.rl.train:cli\","
         },
         {
           "path": "embodichain/cli/main.py",
           "symbol": "_load_handler",
-          "start_line": 227,
-          "end_line": 229,
+          "start_line": 232,
+          "end_line": 234,
           "excerpt": "    module_name, attribute = target.split(\":\", maxsplit=1)\n    module = importlib.import_module(module_name)\n    return getattr(module, attribute)"
         },
         {
           "path": "embodichain/cli/main.py",
           "symbol": "main",
-          "start_line": 262,
-          "end_line": 263,
+          "start_line": 267,
+          "end_line": 268,
           "excerpt": "    handler = _load_handler(command.target)\n    handler(arguments[1:])"
         }
       ]
@@ -4295,8 +4373,8 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 187,
-          "end_line": 187,
+          "start_line": 192,
+          "end_line": 192,
           "excerpt": "        target=\"embodichain.lab.scripts.analyze_workspace:cli\","
         }
       ]
@@ -4604,8 +4682,8 @@
         {
           "path": "pyproject.toml",
           "symbol": "<document>",
-          "start_line": 101,
-          "end_line": 102,
+          "start_line": 102,
+          "end_line": 103,
           "excerpt": "[project.entry-points.\"embodichain.tasks\"]\nofficial_tasks = \"embodichain.extensions.tasks\""
         },
         {
@@ -4866,8 +4944,8 @@
         {
           "path": "embodichain/lab/task_program/integrations/simulation/environment.py",
           "symbol": "SimulationTaskProgramFactory.create_atomic_skill_engine",
-          "start_line": 1198,
-          "end_line": 1199,
+          "start_line": 1214,
+          "end_line": 1215,
           "excerpt": "        engine = AtomicSkillEngine(\n            motion_generator,"
         }
       ]
@@ -4884,8 +4962,8 @@
         {
           "path": "embodichain/lab/task_program/integrations/simulation/environment.py",
           "symbol": "SimulationTaskProgramFactory._create_motion_generator",
-          "start_line": 1399,
-          "end_line": 1400,
+          "start_line": 1419,
+          "end_line": 1420,
           "excerpt": "            generator = MotionGenerator(\n                MotionGenCfg(planner_cfg=planner_cfg), **selection_kwargs"
         }
       ]
@@ -4938,8 +5016,8 @@
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/_antipodal_backend.py",
           "symbol": "_AntipodalMeshBackend.__init__",
-          "start_line": 151,
-          "end_line": 152,
+          "start_line": 158,
+          "end_line": 159,
           "excerpt": "        if check_collision:\n            self._collision_checker = GripperCollisionChecker("
         }
       ]
@@ -4956,8 +5034,8 @@
         {
           "path": "embodichain/toolkits/graspkit/pg_grasp/_antipodal_backend.py",
           "symbol": "_AntipodalMeshBackend.__init__",
-          "start_line": 168,
-          "end_line": 168,
+          "start_line": 176,
+          "end_line": 176,
           "excerpt": "        self._antipodal_sampler = AntipodalSampler(cfg=sampler_cfg)"
         }
       ]
@@ -5083,8 +5161,8 @@
           "path": "embodichain/extensions/benchmarks/motion_generation/runner.py",
           "symbol": "BenchmarkRunner._create_simulation",
           "start_line": 276,
-          "end_line": 286,
-          "excerpt": "        sim = SimulationManager(\n            SimulationManagerCfg(\n                headless=self.headless,\n                sim_device=str(self.device),\n                num_envs=batch_size,\n                arena_space=2.0,\n                physics_cfg=DefaultPhysicsCfg(\n                    num_substeps=self.suite.protocol.physics_substeps\n                ),\n            )\n        )"
+          "end_line": 287,
+          "excerpt": "        sim = SimulationManager(\n            SimulationManagerCfg(\n                headless=self.headless,\n                sim_device=str(self.device),\n                num_envs=batch_size,\n                arena_space=2.0,\n                physics_cfg=DefaultPhysicsCfg(\n                    num_substeps=self.suite.protocol.physics_substeps\n                ),\n            ),\n            requires_native_renderer=not self.headless or self.video.enabled,\n        )"
         }
       ]
     },
@@ -8371,6 +8449,7 @@
       "description": "Module responsibilities and direct dependencies, from task entry points to motion execution.",
       "node_ids": [
         "cli",
+        "mcp",
         "env-launcher",
         "task-discovery",
         "tasks",
@@ -8476,6 +8555,7 @@
         "bridge-holds-executor",
         "env-inherits-base",
         "base-constructs-simulation",
+        "cli-calls-mcp",
         "cli-calls-env-launcher",
         "cli-calls-training-assembly",
         "launcher-calls-discovery",
@@ -8630,6 +8710,7 @@
           "label": "Entry points & environments",
           "node_ids": [
             "cli",
+            "mcp",
             "env-launcher",
             "task-discovery",
             "tasks",
