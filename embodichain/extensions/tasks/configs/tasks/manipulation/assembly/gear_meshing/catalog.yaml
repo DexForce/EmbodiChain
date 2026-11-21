@@ -10,10 +10,14 @@ tags:
 default_deployment: study_nominal
 deployments:
   study_nominal:
+    note: Development profile using one geometry per run. See the task README for robot and gripper assumptions.
     config: task.study.nominal.yaml
   fullrange_nominal:
+    note: Development profile using one geometry per run. See the task README for robot and gripper assumptions.
     config: task.fullrange.nominal.yaml
   study_reference:
+    note: Gated reference profile. Requires qualified robot assets and heterogeneous per-arena geometry.
     config: task.study.yaml
   fullrange_reference:
+    note: Gated reference profile. Requires qualified robot assets and heterogeneous per-arena geometry.
     config: task.fullrange.yaml

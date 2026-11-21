@@ -364,7 +364,16 @@ filtering and `list-task --export-html`. `--config-root PACKAGE=PATH` selects
 explicit config roots for static browsing without simulation imports; it cannot
 infer Python-only handwritten capabilities. Uncataloged tasks retain inferred
 records. Metadata must point to existing runnable configs and a valid default;
-capabilities remain deployment-specific. A catalog's optional validation report
+capabilities remain deployment-specific. An optional `group` inserts a browsing
+subdomain without changing config paths. A single-deployment catalog may use
+`variant_of` to publish its deployment under another primary task in the same
+package. Its original key selects that deployment in `show-task`. A deployment can also declare an `alias` for a
+previously inferred task key. Package-owned `configs/tasks/portfolio.yaml` assigns
+browsing purposes by logical key, with deployment overrides and featured
+selections. `list-task --purpose` and `--featured` use these selections.
+The default CLI keeps full discovery; HTML export selects featured deployments
+unless a category, purpose or `--all` was requested. Deployment `note` describes
+scope and prerequisites independently of the validation report. A catalog's optional validation report
 is provenance, not a replacement for measured runtime results.
 
 `objective: {component: objective.yaml}` is a deployment-owned, optional selector
