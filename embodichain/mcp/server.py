@@ -14,70 +14,28 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Serve EmbodiChain queries over stdio for an explicitly selected session."""
+"""Build and serve the stdio interface to a borrowed DexSim World."""
 
 from __future__ import annotations
 
-import argparse
-from collections.abc import Sequence
+from dexsim.runtime import Session
+from mcp.server import MCPServer
 
-from ._types import RobotState
+from .tools.robot import register_robot_tools
 
-__all__ = ["cli"]
+__all__ = ["create_server", "serve"]
 
 
-def cli(argv: Sequence[str] | None = None) -> None:
-    """Attach a stdio MCP server to an existing DexSim runtime session."""
-    parser = argparse.ArgumentParser(prog="embodichain mcp", description=__doc__)
-    parser.add_argument(
-        "--session", required=True, help="Existing DexSim Runtime session ID"
-    )
-    parser.add_argument(
-        "--session-directory", help="Optional DexSim discovery directory"
-    )
-    args = parser.parse_args(argv)
-    try:
-        from mcp.server import MCPServer
-        from mcp.server.mcpserver.exceptions import ToolError
-        from mcp.types import ToolAnnotations
-    except ImportError as exc:
-        parser.exit(
-            2, f"Install the MCP extra with pip install 'embodichain[mcp]': {exc}\n"
-        )
+def create_server(session: Session) -> MCPServer:
+    """Register the available domain tools using a caller-owned session."""
+    server = MCPServer("EmbodiChain")
+    register_robot_tools(server, session)
+    return server
 
-    from dexsim.runtime import Session
-    from dexsim.runtime.errors import DexSimRuntimeError
 
+def serve(session_id: str, *, directory: str | None = None) -> None:
+    """Connect to an existing session and release the connection when stdio closes."""
     with Session.connect(
-        args.session,
-        directory=args.session_directory,
-        client={"kind": "embodichain-mcp"},
+        session_id, directory=directory, client={"kind": "embodichain-mcp"}
     ) as session:
-        server = MCPServer("EmbodiChain")
-
-        @server.tool(
-            annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False)
-        )
-        def embodichain_get_robot_state(
-            object_ref: str,
-            robot_cfg: str,
-            control_part: str,
-            variant: str | None = None,
-        ) -> RobotState:
-            """Read measured qpos for a scene articulation in configured control-part order.
-
-            Supply the scene object path, a registered robot config ID, and a control
-            part such as arm. For the UR5 use robot_cfg=URRobot and variant=ur5.
-            """
-            try:
-                return session.invoke(
-                    "embodichain.lab.sim.dexsim_session",
-                    object_ref=object_ref,
-                    robot_cfg=robot_cfg,
-                    variant=variant,
-                    control_part=control_part,
-                )
-            except DexSimRuntimeError as exc:
-                raise ToolError(f"{exc.code}: {exc}") from exc
-
-        server.run(transport="stdio")
+        create_server(session).run(transport="stdio")

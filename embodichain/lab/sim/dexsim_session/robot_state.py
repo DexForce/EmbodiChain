@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from embodichain.mcp._types import RobotState
+from embodichain.lab.robot_state import RobotState
 from embodichain.robot_registry import resolve_robot_cfg
 from embodichain.utils.string import resolve_matching_names
 

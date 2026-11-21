@@ -14,23 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Wire schema shared by the stdio client adapter and World host."""
+"""Read robot state in a borrowed DexSim Runtime session."""
 
 from __future__ import annotations
 
-from typing_extensions import TypedDict
+from .robot_state import read_robot_state, run
 
-
-class RobotState(TypedDict):
-    """One detached measurement ordered by the configured control part."""
-
-    session_id: str
-    object_ref: str
-    topology_revision: int
-    control_part: str
-    joint_names: list[str]
-    dof_ids: list[int]
-    qpos: list[float]
-    units: list[str]
-    step_index: int | None
-    simulation_time_s: float | None
+__all__ = ["read_robot_state", "run"]

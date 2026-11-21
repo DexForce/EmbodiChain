@@ -586,20 +586,20 @@
       "evidence": [
         {
           "path": "embodichain/mcp/server.py",
-          "symbol": "cli",
-          "start_line": 29,
-          "end_line": 30,
-          "excerpt": "def cli(argv: Sequence[str] | None = None) -> None:\n    \"\"\"Attach a stdio MCP server to an existing DexSim runtime session.\"\"\""
+          "symbol": "serve",
+          "start_line": 38,
+          "end_line": 39,
+          "excerpt": "    with Session.connect(\n        session_id, directory=directory, client={\"kind\": \"embodichain-mcp\"}"
         },
         {
-          "path": "embodichain/mcp/server.py",
-          "symbol": "cli.embodichain_get_robot_state",
-          "start_line": 73,
-          "end_line": 74,
-          "excerpt": "                return session.invoke(\n                    \"embodichain.lab.sim.dexsim_session\","
+          "path": "embodichain/mcp/tools/robot.py",
+          "symbol": "register_robot_tools.embodichain_get_robot_state",
+          "start_line": 48,
+          "end_line": 49,
+          "excerpt": "            return session.invoke(\n                \"embodichain.lab.sim.dexsim_session.robot_state\","
         },
         {
-          "path": "embodichain/lab/sim/dexsim_session.py",
+          "path": "embodichain/lab/sim/dexsim_session/robot_state.py",
           "symbol": "read_robot_state",
           "start_line": 96,
           "end_line": 97,
@@ -608,11 +608,19 @@
       ],
       "documentation": [
         {
-          "docname": "api_reference/public_api",
-          "label": "EmbodiChain MCP API"
+          "docname": "guides/mcp",
+          "label": "Connect a stdio client"
+        },
+        {
+          "docname": "features/mcp/index",
+          "label": "EmbodiChain MCP tool contract"
+        },
+        {
+          "docname": "api_reference/embodichain/embodichain.mcp",
+          "label": "Python API"
         }
       ],
-      "details": "The CLI binds the MCP server to an explicit DexSim Runtime session. The robot-state tool calls a host-side adapter through Session.invoke. The adapter reads the active scene articulation and orders the measured positions by the selected EmbodiChain control part."
+      "details": "The CLI connects to an explicit DexSim Runtime session. The stdio server registers robot tools that invoke the EmbodiChain adapter in the World host. Native DexSim MCP clients can attach separately to the same session. The host resolves the live articulation and returns a detached measurement in control-part order."
     },
     {
       "id": "tasks",
@@ -4168,7 +4176,7 @@
           "symbol": "<module>",
           "start_line": 41,
           "end_line": 42,
-          "excerpt": "        name=\"mcp\",\n        target=\"embodichain.mcp.server:cli\","
+          "excerpt": "        name=\"mcp\",\n        target=\"embodichain.cli.mcp:main\","
         },
         {
           "path": "embodichain/cli/main.py",

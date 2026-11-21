@@ -20,15 +20,34 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 
+def test_host_imports_without_mcp_sdk() -> None:
+    """Direct Session.invoke users can install just the World host dependencies."""
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import sys
+sys.modules["mcp"] = None
+from embodichain.lab.robot_state import RobotState
+from embodichain.lab.sim.dexsim_session import read_robot_state, run
+assert "embodichain.mcp" not in sys.modules
+""",
+        ],
+        check=True,
+    )
+
+
 def test_scalar_layout_mapping() -> None:
     from dexsim.scene import JointDofLayout
-    from embodichain.lab.sim.dexsim_session import _select_dofs
+    from embodichain.lab.sim.dexsim_session.robot_state import _select_dofs
 
     layout = [
         JointDofLayout("base", 0, 6, "translation_rotation_vector"),
@@ -131,6 +150,14 @@ def test_attach_two_ur5_and_reconnect(tmp_path: Path, backend: str) -> None:
         initial = native("articulation.get_state", object_ref="ur5_b", joint_names=arm)
         assert initial["joint_position"] == pytest.approx(pose_b)
         assert initial["joint_target_position"] != pytest.approx(pose_b)
+        legacy = session.invoke(
+            "embodichain.lab.sim.dexsim_session",
+            object_ref="ur5_b",
+            robot_cfg="URRobot",
+            variant="ur5",
+            control_part="arm",
+        )
+        assert legacy["qpos"] == pytest.approx(initial["joint_position"])
         asyncio.run(read_b(initial["joint_position"]))
         # Change B on the host while the first stdio process is gone.
         pose_b[2] = 0.72

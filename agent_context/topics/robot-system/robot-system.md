@@ -33,8 +33,10 @@ and optionally `--session-directory DIR` for a custom discovery directory.
 `embodichain_get_robot_state` takes a finalized scene articulation path,
 registered robot config ID, optional variant and configured control part.
 For a bare UR5, use `robot_cfg=URRobot`, `variant=ur5` and `control_part=arm`.
-The CLI in `embodichain/mcp/server.py` connects to the existing host. The
-adapter in `embodichain/lab/sim/dexsim_session.py` resolves current DOF spans
+The CLI delegates session ownership to `embodichain/mcp/server.py`.
+Robot tools in `embodichain/mcp/tools/robot.py` use the shared measurement type
+in `embodichain/lab/robot_state.py`. The host adapter in
+`embodichain/lab/sim/dexsim_session/robot_state.py` resolves current DOF spans
 on each read and reports measured positions with their units, scene topology
 revision and available simulation clock. Disconnecting leaves the World running.
 
