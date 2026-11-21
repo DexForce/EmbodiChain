@@ -363,9 +363,13 @@ class OnlineDataEngineCfg:
     """
 
     group_min_draws: int | None = None
-    """Opt into one producer-width publication per manual refill. Reusing
-    occupied slots requires this many committed anchor draws per trajectory.
-    The default retains whole-buffer fills."""
+    """Minimum committed training anchors per trajectory before group recycling.
+
+    Set a positive count to publish one producer rollout per manual refill.
+    The CPU buffer must contain at least two whole groups of ``num_envs`` slots,
+    with provenance enabled and uncapped sampling. ``None`` uses whole-buffer
+    fills. Only successful exits from ``group_batch`` earn recycling credits.
+    """
 
 
 def _validate_recording_config(cfg: OnlineDataEngineCfg) -> None:
@@ -2263,7 +2267,9 @@ class OnlineDataEngine:
         context. Exceptions discard credits. Only one grouped update may be
         outstanding in the creating process. Anchor fields retain their names;
         actions and action_is_pad have an additional future-step axis. Padding
-        repeats the final valid action within each continuity span.
+        repeats the final valid action within each continuity span. Engine
+        statistics count delivered anchors as soon as the batch is copied.
+        Use :meth:`get_group_release` for the committed counts at recycling.
         """
         counts = self._require_groups()
         if (

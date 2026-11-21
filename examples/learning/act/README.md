@@ -6,7 +6,14 @@ normalization, loss, temporal ensemble, optimizer updates and native checkpoints
 The example invokes `lerobot.scripts.lerobot_train` directly. The shared
 EmbodiChain SL trainer remains available for the dynamics model workflows.
 
-The [single-layer grouped ODS study](GROUP_PUBLICATION.md) uses the core producer-width publication and optimizer credit interfaces for live visual training.
+For live training, the grouped ODS example runs collection and ACT updates on
+one GPU. It publishes 10 trajectories into a 20-slot shared buffer at a time
+and requires 192 committed draws per trajectory before recycling. Five seeds
+met the 300-second policy deadline and each scored at least 98/100 on the
+reserved PushCube scenes. [Run the grouped example](GROUP_PUBLICATION.md#reproduce)
+or inspect the [per-seed results](GROUPED_REPAIR.md#acceptance).
+
+The offline workflow below collects a dataset before training.
 
 ## Environment and control contract
 

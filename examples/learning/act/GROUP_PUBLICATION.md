@@ -23,46 +23,39 @@ uses the explicit optimizer context for credited training.
 The experiment logs release
 receipts and the actual physical evaluation panels alongside each checkpoint.
 
-The [core acceptance results](results/GROUPED_CORE.md) include the five reserved panels and the archived double-layer comparison.
-
 ## Reproduce
 
-Use the example's Python 3.12 environment, LeRobot 0.6.1, matching native
-DexSim runtime, Franka assets and cached ImageNet ResNet-18 weights. Each seed
-uses one GPU for its producer, learner, development panels and subsequent
-single-arena verification. Run with a new output directory per seed.
+Run the commands from the repository root using the [ACT environment](README.md#environment-and-control-contract).
+Each seed uses one physical GPU for the producer, learner and evaluation.
+Use a fresh output directory. Expert qualification can be reused when the task
+identity matches and its scenes are disjoint from the protocol.
 
 ```bash
-export CUDA_VISIBLE_DEVICES=4 EMBODICHAIN_SIM_EXIT_PROCESS=0
+export CUDA_VISIBLE_DEVICES=0 EMBODICHAIN_SIM_EXIT_PROCESS=0
 export CUBLAS_WORKSPACE_CONFIG=:4096:8 OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 OPENBLAS_NUM_THREADS=1
-export PYTHONPATH="$PWD:$PWD/extensions:$PWD/extensions/embodichain_tasks"
-python -m examples.learning.act.collect qualify --episodes 100 --seed-base 8100000 --output "$ACT_ROOT/qualification"
-for seed in 147101 147102 147103 147104 147105; do
-    xvfb-run -a python -m examples.learning.act.grouped --seed "$seed" \
-        --qualification "$ACT_ROOT/qualification/report.json" --output "$ACT_ROOT/$seed"
+export ACT_ROOT="$(mktemp -d)"
+export PROTOCOL="$PWD/examples/learning/act/grouped_elapsed_protocol.json"
+xvfb-run -a python -m examples.learning.act.collect qualify \
+    --episodes 100 --seed-base 8100000 --output "$ACT_ROOT/qualification"
+for seed in 207101 207102 207103 207104 207105; do
+    python -m examples.learning.act.timed_grouped --protocol "$PROTOCOL" --seed "$seed" \
+        --qualification "$ACT_ROOT/qualification/report.json" --output "$ACT_ROOT/$seed" || break
 done
+python -m examples.learning.act.audit_grouped --protocol "$PROTOCOL" --root "$ACT_ROOT"
 ```
 
-The protocol uses fresh learner seeds and fresh 50-scene development and
-100-scene verification panels. The image landmark features, compact native ACT,
-arena spacing, batch size, training budget and checkpoint schedule follow the
-previous isolated group experiment. Two consecutive development panels must
-each score at least 40/50 and return within 300 seconds. The timer seals the
-best eligible checkpoint by success, goal distance and earlier update. Only
-that checkpoint can be verified on the reserved panel. The all-seed gate
-requires at least 95/100 for each of five policies. The independent reserved
-rollouts are outside the training deadline.
+The clock starts before Xvfb. Two consecutive development checks must each
+score at least 40/50. A second score of 50/50 allows early submission.
+At 295 seconds the launcher’s training process locks the best eligible policy
+by success count, goal distance and earlier update. The decision must be
+published by 300 seconds. Each submitted policy then runs the same 100 reserved
+scenes in independent single arenas with full-rate RGB capture.
 
-Run the acceptance check after all seeds finish:
+The audit prints publication time, reserved score and the lowest draw count at
+release for each seed. It writes checkpoint fingerprints, development results
+and release receipts to `$ACT_ROOT/acceptance.json`. It exits successfully when
+all five policies meet the deadline and each reaches 95/100.
 
-```bash
-python -m examples.learning.act.audit_grouped --root "$ACT_ROOT"
-```
-
-It recounts the physical outcomes and consecutive development scores, checks
-native policy hashes, validates all release receipts and writes
-`acceptance.json`. An incomplete set, an audit issue or any seed missing its
-deadline or quality target produces a nonzero exit status.
-
-The [deadline follow-up](GROUPED_REPAIR.md) documents producer stratification,
-ACT query scheduling and independent cold-launch replications of the same gate.
+The [acceptance report](GROUPED_REPAIR.md#acceptance) records the passing run
+and both earlier repair cohorts. The [original core study](results/GROUPED_CORE.md)
+records the initial five-seed trial and the archived double-layer comparison.

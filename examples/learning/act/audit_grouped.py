@@ -196,6 +196,7 @@ def _audit(path: Path, spec: dict, seed: int) -> dict:
 
 
 def main() -> None:
+    """Write the audited evidence and print the gate for each training seed."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument(
@@ -225,6 +226,16 @@ def main() -> None:
     (args.root / "acceptance.json").write_text(
         json.dumps(result, indent=2, allow_nan=False) + "\n"
     )
+    print("seed    published_s  reserved  min_draws_at_release")
+    for row in rows:
+        published = row["published_seconds"]
+        score = row["reserved_successes"]
+        draws = row["minimum_at_release"]
+        seconds = f"{published:.3f}" if published is not None and row["chosen"] else "-"
+        reserved = f"{score}/{spec['test_scenes']}" if score is not None else "-"
+        print(
+            f"{row['seed']:<8}{seconds:>11}  {reserved:>8}  {draws if draws is not None else '-':>20}"
+        )
     print(f"Qualified {n}/{len(spec['seeds'])}; audit issues: {errors}")
     if not result["passed"]:
         raise SystemExit(1)

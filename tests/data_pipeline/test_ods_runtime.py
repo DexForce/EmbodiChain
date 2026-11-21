@@ -800,11 +800,10 @@ def test_generation_wait_drains_a_full_bounded_log_from_a_real_child(monkeypatch
 
 
 def test_grouped_controller_counts_producer_groups(clock, monkeypatch):
-    plan = _plan()
-    engine = _Engine(plan)
-    engine.cfg.refill_policy = "manual"
+    engine = _Engine(clock)
     engine.cfg.group_min_draws = 192
-    width = engine.resolved_gym_config["num_envs"]
+    width = 2
+    engine.cfg.gym_config["num_envs"] = width
     engine.status["successful_episodes"] = width
     ctl = ODSFlowController(
         engine, ODSFlowControllerCfg(max_generated_episodes=2 * width)
@@ -815,3 +814,13 @@ def test_grouped_controller_counts_producer_groups(clock, monkeypatch):
     assert ctl.request_refill() == 2
     engine.status.update(completed_generation=2, successful_episodes=2 * width)
     assert ctl.request_refill() is None
+
+
+def test_grouped_controller_accepts_implicit_single_environment(clock, monkeypatch):
+    engine = _Engine(clock)
+    engine.cfg.group_min_draws = 192
+    engine.cfg.gym_config = {}
+    monkeypatch.setattr(
+        engine, "try_refill_group", engine.request_refill, raising=False
+    )
+    assert ODSFlowController(engine).request_refill() == 2

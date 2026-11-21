@@ -112,7 +112,7 @@ class ODSFlowController:
         limit = self.cfg.max_generated_episodes
         self._grouped = getattr(engine.cfg, "group_min_draws", None) is not None
         self._publication_size = (
-            engine.resolved_gym_config["num_envs"]
+            engine.resolved_gym_config.get("num_envs", 1)
             if self._grouped
             else engine.buffer_size
         )

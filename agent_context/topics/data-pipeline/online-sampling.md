@@ -69,7 +69,9 @@ learner synchronizes successful optimizer work inside that context. Exceptions
 discard the pending credits. One creator-owned update can be outstanding.
 `try_refill_group` checks every credit count in the destination group and
 coalesces an outstanding request. `get_group_release` exposes the displaced
-episode IDs and their counts for audit. Rows left resident at shutdown can have
+episode IDs and their committed counts for audit. The engine statistic
+`sampled_chunks` counts delivered anchors, including a batch whose optimizer
+update subsequently raised. Rows left resident at shutdown can have
 fewer draws than the recycling floor. The ACT example owns the deadline and
 physical scoring. See the [grouped ACT study](../../../examples/learning/act/GROUP_PUBLICATION.md).
 

@@ -22,27 +22,22 @@ early coverage. They do not establish a single cause for every miss.
 
 ## Reproduction
 
-Use a fresh `ACT_ROOT`, a matching expert qualification, the runtime described in [the grouped example](GROUP_PUBLICATION.md), and one physical GPU per run. Each arm uses a single GPU throughout. The five seed blocks can share the host on separate cards.
+The [grouped example](GROUP_PUBLICATION.md#reproduce) includes the environment,
+expert qualification, cold launcher and audit command for the passing recipe.
+To reproduce an earlier cohort, use its protocol and corresponding training
+seeds with a fresh output root.
 
-```bash
-export CUDA_VISIBLE_DEVICES=4 EMBODICHAIN_SIM_EXIT_PROCESS=0
-export CUBLAS_WORKSPACE_CONFIG=:4096:8 OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 OPENBLAS_NUM_THREADS=1
-export PYTHONPATH="$PWD:$PWD/extensions:$PWD/extensions/embodichain_tasks"
-export PROTOCOL="$PWD/examples/learning/act/grouped_repair_protocol.json"
-for seed in 167101 167102 167103 167104 167105; do
-    python -m examples.learning.act.timed_grouped --seed "$seed" --protocol "$PROTOCOL" \
-        --qualification "$QUALIFICATION" --output "$ACT_ROOT/$seed"
-done
-python -m examples.learning.act.audit_grouped --root "$ACT_ROOT" --protocol "$PROTOCOL"
-```
-
-The audit checks returned development results and the lock receipt, recomputes physical outcomes, verifies native checkpoint fingerprints and checks each release ledger. All five runs must submit and pass. Post-selection test time is recorded separately from the training budget.
+| Protocol | Training seeds | Development scene IDs | Reserved scene IDs | Qualified |
+| --- | --- | --- | --- | ---: |
+| [Stratified demonstrations](grouped_repair_protocol.json) | 167101–167105 | 17310000–17310049 | 17410000–17410099 | 2/5 |
+| [Reduced backbone input](grouped_spatial_protocol.json) | 187101–187105 | 19310000–19310049 | 19410000–19410099 | 4/5 |
+| [Elapsed control input](grouped_elapsed_protocol.json) | 207101–207105 | 21310000–21310049 | 21410000–21410099 | 5/5 |
 
 ## Timing follow-up
 
 The 224-pixel, three-step query variant produced two late or ineligible development pairs in the first five-seed repair study. The follow-up keeps native 224×224 acquisition and computes colour landmarks before resizing. Area pooling supplies a 56×56 image to the ResNet while the measured joint positions, landmarks, transformer, release budget and evaluator task remain the same. Query blocks contain six consecutive native control targets and overlap on their original time grid. Full-rate RGB capture is retained in the reserved simulator. A second receipt hashes the decision file after its atomic write and records elapsed time at that point.
 
-The [follow-up protocol](grouped_spatial_protocol.json) specifies fresh seeds 187101–187105, development scenes 19310000–19310049 and reserved scenes 19410000–19410099. It uses scheduled updates 1400, 2050, 2450, 3000 and 4000. Use the same launcher and audit commands above with this protocol and a fresh output root.
+The [follow-up protocol](grouped_spatial_protocol.json) specifies fresh seeds 187101–187105, development scenes 19310000–19310049 and reserved scenes 19410000–19410099. It uses scheduled updates 1400, 2050, 2450, 3000 and 4000.
 
 ## Elapsed control input
 
