@@ -1,0 +1,69 @@
+# The DROID capture uses a Panda with a Robotiq 2F-85. The Panda asset uses the
+# unrotated flange as ee_link; the source attachment rotates 135 degrees about Z.
+embodiment_id: polaris_droid
+simulation:
+  class_type: Franka
+  arm_model: panda
+  uid: Droid
+  urdf_cfg:
+    fname: polaris_panda_robotiq85
+  init_qpos: [0, -0.6283185307179586, 0, -2.5132741228718345, 0, 1.8849555921538759, 0, 0, 0, 0, 0, 0,
+    0]
+  qpos_limits:
+    finger_joint: [0, 0.8]
+    left_inner_knuckle_joint: [0, 0.8]
+    left_inner_finger_joint: [-0.8, 0]
+    right_outer_knuckle_joint: [0, 0.8]
+    right_inner_knuckle_joint: [0, 0.8]
+    right_inner_finger_joint: [-0.8, 0]
+  root_props:
+    fixed_base: true
+    min_position_iters: 64
+    min_velocity_iters: 16
+  joint_drive_props:
+    stiffness:
+      .*finger_joint|.*knuckle_joint: 200.0
+    damping:
+      .*finger_joint|.*knuckle_joint: 5.0
+    max_effort:
+      .*finger_joint|.*knuckle_joint: 40.0
+  sensors:
+  - sensor_type: Camera
+    uid: wrist_camera
+    width: 640
+    height: 360
+    near: 0.01
+    enable_color: true
+    enable_depth: false
+    ground_plane_visible: false
+    intrinsics: [333.3333333333333, 333.3333333333333, 320, 180]
+    extrinsics:
+      parent: ee_link
+      pos: [-0.0275771645, 0.0714177849, -0.074]
+      quat: [-0.3826834324, 0.9238795325, 0.0, 0.0]
+sensor:
+- sensor_type: Camera
+  uid: external_camera
+  width: 640
+  height: 360
+  near: 0.01
+  enable_color: true
+  enable_depth: false
+  ground_plane_visible: false
+  intrinsics: [263.42291371994344, 256.18911758712045, 320, 180]
+  extrinsics:
+    eye: [-0.01, -0.33, 0.48]
+    target: [0.716, 0.122, -0.035]
+    up: [0.432, 0.2774, 0.8552]
+grippers:
+  eef:
+    class_type: RobotiqArg2F85
+    mode: mounted
+    motion_part: arm
+    control_part: eef
+    component_type: hand
+    transform:
+    - [-0.707106781, -0.707106781, 0.0, 0.0]
+    - [0.707106781, -0.707106781, 0.0, 0.0]
+    - [0.0, 0.0, 1.0, 0.0]
+    - [0.0, 0.0, 0.0, 1.0]

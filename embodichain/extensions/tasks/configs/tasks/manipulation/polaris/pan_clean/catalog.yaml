@@ -1,0 +1,13 @@
+task_key: polaris_pan_clean
+title: PolaRiS Pan Clean
+summary: Use the yellow sponge to scrub the blue handle frying pan
+tags:
+- polaris
+- real2sim
+- policy_evaluation
+default_deployment: droid
+deployments:
+  droid:
+    config: task.droid.yaml
+  expert:
+    config: task.expert.yaml

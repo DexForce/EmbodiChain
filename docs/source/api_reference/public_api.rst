@@ -333,6 +333,37 @@ evidence; collision reconstruction and metric-depth certification are separate.
    :members:
 
 
+PolaRiS DROID captures
+^^^^^^^^^^^^^^^^^^^^^^
+
+Each versioned scene includes its Gaussian background, textured object meshes,
+canonical initial conditions and an upstream provenance manifest. Resolve files
+through :func:`embodichain.data.get_data_path`, for example
+``get_data_path("PolarisDroidMoveLatteCup/initial_conditions.json")``.
+
+.. autosummary::
+   :nosignatures:
+
+   PolarisDroidBlockStackKitchen
+   PolarisDroidFoodBussing
+   PolarisDroidMoveLatteCup
+   PolarisDroidOrganizeTools
+   PolarisDroidPanClean
+   PolarisDroidTapeIntoContainer
+
+.. autoclass:: PolarisDroidBlockStackKitchen
+
+.. autoclass:: PolarisDroidFoodBussing
+
+.. autoclass:: PolarisDroidMoveLatteCup
+
+.. autoclass:: PolarisDroidOrganizeTools
+
+.. autoclass:: PolarisDroidPanClean
+
+.. autoclass:: PolarisDroidTapeIntoContainer
+
+
 embodichain.data.assets.solver_assets
 -------------------------------------
 
@@ -5292,6 +5323,26 @@ penetration and end-insertion acceptance.
 
    RouteTheCableEnv
    measure_route
+
+PolaRiS DROID manipulation environments
+---------------------------------------
+
+These registered Gym environments share a Franka Panda with a Robotiq 2F-85.
+Each environment evaluates its own physical criteria and returns per-arena
+progress and success in the step information.
+
+.. currentmodule:: embodichain.extensions.tasks.manipulation.polaris
+
+.. autosummary::
+   :nosignatures:
+
+   block_stack_kitchen.PolarisDroidBlockStackKitchenEnv
+   food_bussing.PolarisDroidFoodBussingEnv
+   move_latte_cup.PolarisDroidMoveLatteCupEnv
+   organize_tools.PolarisDroidOrganizeToolsEnv
+   pan_clean.PolarisDroidPanCleanEnv
+   tape_into_container.PolarisDroidTapeIntoContainerEnv
+
 
 embodichain.extensions.tasks.manipulation.push_cube
 ---------------------------------------------------

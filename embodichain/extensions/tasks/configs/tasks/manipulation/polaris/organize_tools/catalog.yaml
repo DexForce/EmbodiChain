@@ -1,0 +1,13 @@
+task_key: polaris_organize_tools
+title: PolaRiS Organize Tools
+summary: put the scissor into the large container
+tags:
+- polaris
+- real2sim
+- policy_evaluation
+default_deployment: droid
+deployments:
+  droid:
+    config: task.droid.yaml
+  expert:
+    config: task.expert.yaml
