@@ -166,6 +166,21 @@ def _assert_pose_equal(actual: SemanticPose, expected: SemanticPose) -> None:
     assert torch.allclose(actual.quaternion_xyzw, expected.quaternion_xyzw)
 
 
+def test_pick_without_a_tcp_target_preserves_existing_source_bindings() -> None:
+    from embodichain.lab.task_program.integrations.invocation_policy import (
+        task_program_fingerprint,
+    )
+
+    registry, _ = _scene_registry()
+    config = _program(InvokeCfg(call=PickCfg(object="cube")))
+    program = TaskProgramCompiler.from_scene_registry(registry).compile(config)
+    # Digest from the original declaration, before Pick.at was introduced.
+    assert (
+        task_program_fingerprint(program)
+        == "8ea064ecc615e661c2c0ebf714a32d37a68d760cd795b05d1841f757f524c54c"
+    )
+
+
 @pytest.mark.parametrize("instruction", [None, "Pick up the cube."])
 def test_compiled_program_owns_immutable_overall_instruction(
     instruction: str | None,

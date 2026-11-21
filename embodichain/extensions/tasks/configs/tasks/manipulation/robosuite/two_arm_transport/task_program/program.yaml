@@ -1,0 +1,75 @@
+program_id: robosuite_two_arm_transport
+instruction: Clear the destination bin and pass the hammer between the two arms into it.
+targets:
+  trash_grasp:
+    kind: scene_relative
+    entity: trash
+    frame: parent
+    position: [0, 0, 0.009]
+    quaternion_xyzw: [0.70710678, 0.70710678, 0, 0]
+  lid_rest:
+    kind: pose
+    position: [-0.18, -0.45, 0.81]
+    quaternion_xyzw: [0, 0, 0, 1]
+  trash_rest:
+    kind: pose
+    position: [0.20, 0.45, 0.836]
+    quaternion_xyzw: [0, 0, 0, 1]
+  hammer_grasp:
+    kind: scene_relative
+    entity: payload
+    frame: parent
+    position: [-0.008, 0, -0.018]
+    quaternion_xyzw: [0.5, 0.5, 0.5, 0.5]
+  hammer_release:
+    kind: pose
+    position: [-0.20, 0.45, 1.013]
+    quaternion_xyzw: [0, 0.70710678, 0, 0.70710678]
+  hammer_rest:
+    kind: pose
+    position: [-0.20, 0.45, 0.878]
+    quaternion_xyzw: [0, 0.70710678, 0, 0.70710678]
+program:
+- segment: pick_lid
+  steps:
+    pick: {object: lid, resources: {primary: left}}
+  validators:
+  - {kind: object_lifted, object: lid, minimum_lift: 0.06}
+- segment: remove_lid
+  steps:
+    place: {object: lid, at: lid_rest, resources: {primary: left}}
+- segment: pick_trash
+  steps:
+    pick: {object: trash, at: trash_grasp, resources: {primary: right}}
+  validators:
+  - {kind: object_lifted, object: trash, minimum_lift: 0.055}
+- segment: clear_destination
+  steps:
+    place: {object: trash, at: trash_rest, resources: {primary: right}}
+  validators:
+  - {kind: object_near_target, object: trash, target: trash_rest, position_tolerance: 0.052}
+- segment: pick_hammer
+  steps:
+    pick: {object: payload, at: hammer_grasp, resources: {primary: left}}
+  validators:
+  - {kind: object_lifted, object: payload, minimum_lift: 0.10}
+- segment: hand_over_hammer
+  steps:
+    hand_over:
+      object: payload
+      resources: {source: left, destination: right}
+- segment: stow_source_arm
+  steps:
+    registered:
+      call_id: simulation.park
+      arguments: {}
+      resources: {primary: left}
+- segment: deliver_hammer
+  steps:
+    place: {object: payload, at: hammer_release, resources: {primary: right}}
+  post:
+  - {kind: wait_stable, entity: payload, preset: hammer_in_target_bin}
+  - {kind: wait_stable, entity: trash, preset: trash_in_trash_bin}
+  validators:
+  - {kind: object_near_target, object: payload, target: hammer_rest, position_tolerance: 0.088}
+  - {kind: object_near_target, object: trash, target: trash_rest, position_tolerance: 0.052}

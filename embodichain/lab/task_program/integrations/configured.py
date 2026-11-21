@@ -1124,6 +1124,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 "rotate_upright",
                 "grasp_frame_to_eef",
                 "fixed_object_to_eef",
+                "fixed_receive_object_to_eef",
                 "max_approach_retract_z",
                 "cartesian_waypoint_count",
                 "cartesian_approach",
@@ -1762,6 +1763,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                     "retreat_distance",
                     "retreat_steps",
                     "receive_pick_object_part",
+                    "fixed_receive_object_to_eef",
                     "release_at_target",
                     "arm_selection",
                 }
@@ -1808,6 +1810,16 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 config["arm_selection"],
                 path=f"{path}.arm_selection",
             )
+        if "fixed_receive_object_to_eef" in config:
+            import torch
+
+            kwargs["fixed_receive_object_to_eef"] = torch.tensor(
+                _pose_matrix(
+                    config["fixed_receive_object_to_eef"],
+                    path=f"{path}.fixed_receive_object_to_eef",
+                ),
+                dtype=torch.float32,
+            ).reshape(4, 4)
         return HandOverOptions(**kwargs)
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "

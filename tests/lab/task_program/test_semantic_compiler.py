@@ -68,6 +68,7 @@ from embodichain.lab.task_program.semantics.calls import (
     RegisteredSemanticCall,
     SemanticCallDescriptor,
     SemanticPose,
+    SemanticRelativePose,
     builtin_semantic_call_catalog,
 )
 from embodichain.lab.task_program.compiler.lowering import (
@@ -1952,6 +1953,30 @@ def test_analysis_is_provider_free_and_propagates_object_target() -> None:
         drop.to_matrix(),
     )
     engine.resolve(grounded.invocation)
+
+
+@pytest.mark.parametrize("relative", [False, True])
+def test_pick_grounds_the_authored_tcp_target(relative: bool) -> None:
+    from embodichain.lab.sim.atomic_skills.goals import SceneEntityPose
+
+    registry, _ = _scene_registry()
+    compiler, _ = _compiler(registry)
+    offset = SemanticPose((0.01, 0.02, 0.03), (0.0, 0.0, 0.0, 1.0))
+    target = (
+        SemanticRelativePose("cube", (0.01, 0.02, 0.03), (0.0, 0.0, 0.0, 1.0))
+        if relative
+        else offset
+    )
+    workflow = compiler.analyze(
+        (Pick(object=SceneObjectRef("cube"), at=target),), workflow_id="pick"
+    )
+    goal = compiler.ground(workflow, 0, _context(registry)).invocation.goal
+    if relative:
+        assert isinstance(goal.grasp_xpos, SceneEntityPose)
+        assert goal.grasp_xpos.entity_id == "cube"
+        torch.testing.assert_close(goal.grasp_xpos.relative_pose, offset.to_matrix())
+    else:
+        torch.testing.assert_close(goal.grasp_xpos, offset.to_matrix())
 
 
 def test_pick_lookahead_reserves_the_opposite_handover_object_part() -> None:

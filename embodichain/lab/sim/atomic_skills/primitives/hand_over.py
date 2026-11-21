@@ -25,6 +25,7 @@ from typing import ClassVar, Literal
 
 import torch
 
+from embodichain.compute.geometry.rigid import validate_rigid_pose_batch
 from embodichain.utils import logger
 from embodichain.utils.math import pose_inv
 
@@ -127,6 +128,11 @@ class HandOverOptions(SkillOptions):
     receive_pick_object_part: Literal["center", "top", "bottom"] = "bottom"
     """Object end selected by the receiving gripper for an existing hold."""
 
+    fixed_receive_object_to_eef: torch.Tensor | None = field(
+        default=None, kw_only=True, metadata={"omit_none_from_provenance": True}
+    )
+    """Receiving TCP in the object frame for a transfer of an already-held object."""
+
     release_at_target: bool = True
     """Whether the receiving hand places and releases after the transfer.
 
@@ -168,6 +174,16 @@ class HandOverOptions(SkillOptions):
             )
         if type(self.release_at_target) is not bool:
             raise TypeError("release_at_target must be a bool.")
+        transform = self.fixed_receive_object_to_eef
+        if transform is not None:
+            if self.release_at_target:
+                raise ValueError(
+                    "A fixed receiving grasp requires a transfer-only HandOver."
+                )
+            if not isinstance(transform, torch.Tensor) or transform.shape != (4, 4):
+                raise ValueError("fixed_receive_object_to_eef must have shape (4, 4).")
+            validate_rigid_pose_batch(transform.unsqueeze(0), 1)
+            object.__setattr__(self, "fixed_receive_object_to_eef", transform.clone())
         if self.arm_selection not in ("nearest", "bound"):
             raise ValueError("arm_selection must be exactly 'nearest' or 'bound'.")
 
@@ -383,6 +399,13 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
                 return self._plan_existing_hold(
                     request, context, resources, source_held
                 )
+
+        if options.fixed_receive_object_to_eef is not None:
+            return self.failed_plan(
+                request,
+                context,
+                message="A fixed receiving grasp requires a verified Pick before HandOver.",
+            )
 
         object_pose = _resolve_object_pose(
             goal.semantics,
@@ -797,45 +820,60 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
             )
         )
 
-        affordance = goal.semantics.affordance
-        assert isinstance(affordance, AntipodalAffordance)
-        longest_axis = affordance.get_object_longest_axis(
-            exchange_pose,
-            max_points=self._SURFACE_POINT_COUNT,
-        )
-        receive_center_axis: torch.Tensor | None = None
-        if options.receive_pick_object_part != "center":
-            local_axis = exchange_pose.new_tensor([0.0, 0.0, 1.0])
-            receive_axis: torch.Tensor | None = torch.matmul(
-                exchange_pose[:, :3, :3], local_axis
+        if options.fixed_receive_object_to_eef is None:
+            affordance = goal.semantics.affordance
+            assert isinstance(affordance, AntipodalAffordance)
+            longest_axis = affordance.get_object_longest_axis(
+                exchange_pose,
+                max_points=self._SURFACE_POINT_COUNT,
             )
-            receive_positive = torch.full(
-                (self.num_envs,),
-                options.receive_pick_object_part == "top",
-                dtype=torch.bool,
-                device=self.device,
+            receive_center_axis: torch.Tensor | None = None
+            if options.receive_pick_object_part != "center":
+                local_axis = exchange_pose.new_tensor([0.0, 0.0, 1.0])
+                receive_axis: torch.Tensor | None = torch.matmul(
+                    exchange_pose[:, :3, :3], local_axis
+                )
+                receive_positive = torch.full(
+                    (self.num_envs,),
+                    options.receive_pick_object_part == "top",
+                    dtype=torch.bool,
+                    device=self.device,
+                )
+            else:
+                # Ask the grasp service for all collision-free candidates, then
+                # retain only candidates through the object's middle third.  The
+                # grasp-service axis selector can choose only one outer end, so it
+                # cannot represent a true center grasp by itself.
+                receive_axis = None
+                receive_center_axis = longest_axis
+                receive_positive = torch.ones(
+                    self.num_envs, dtype=torch.bool, device=self.device
+                )
+            destination_sample = self._resolve_grasp(
+                affordance,
+                exchange_pose,
+                approach_direction,
+                resources.second.hand.target_id,
+                obj_longest_axis=receive_axis,
+                is_positive_part=receive_positive,
+                center_axis=receive_center_axis,
+                context=context,
+                sample_key=(request.invocation_id or self.skill_id) + ":receive_grasp",
             )
         else:
-            # Ask the grasp service for all collision-free candidates, then
-            # retain only candidates through the object's middle third.  The
-            # grasp-service axis selector can choose only one outer end, so it
-            # cannot represent a true center grasp by itself.
-            receive_axis = None
-            receive_center_axis = longest_axis
-            receive_positive = torch.ones(
-                self.num_envs, dtype=torch.bool, device=self.device
+            poses = exchange_pose @ options.fixed_receive_object_to_eef.to(
+                exchange_pose
             )
-        destination_sample = self._resolve_grasp(
-            affordance,
-            exchange_pose,
-            approach_direction,
-            resources.second.hand.target_id,
-            obj_longest_axis=receive_axis,
-            is_positive_part=receive_positive,
-            center_axis=receive_center_axis,
-            context=context,
-            sample_key=(request.invocation_id or self.skill_id) + ":receive_grasp",
-        )
+            destination_sample = AffordanceSample(
+                success=eligible,
+                poses=poses,
+                metadata={
+                    "source": "fixed_object_to_eef",
+                    "pose_frame": "world",
+                    "reference_poses": exchange_pose.tolist(),
+                    "selected_poses": poses.tolist(),
+                },
+            )
         destination_grasp = destination_sample.poses
         if options.grasp_retract_distance:
             destination_grasp = translate_pose_world(

@@ -129,7 +129,7 @@ def semantic_planning_catalog(
             "pick",
             "pick_up",
             {"object": "entity"},
-            {"grasp": "affordance"},
+            {"grasp": "affordance", "at": "target_ref"},
             ["primary"],
             "acquire",
             ["grasp_affordance"],

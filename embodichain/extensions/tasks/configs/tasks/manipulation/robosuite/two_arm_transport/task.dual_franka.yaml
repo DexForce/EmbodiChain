@@ -1,0 +1,23 @@
+id: RobosuiteTwoArmTransportDualFranka-v1
+headless: true
+enable_sensor: true
+environment:
+  component: env.yaml
+embodiment:
+  component: ../../../../components/embodiments/dual_franka_robotiq140_opposed.yaml
+  camera_overrides:
+    cam_high:
+      extrinsics:
+        eye: [1.8, -0.4, 2.25]
+        target: [0, 0, 0.95]
+        up: [0, 0, 1]
+task_program:
+  program: task_program/program.yaml
+  integration: task_program/integration.yaml
+  execution_policy:
+    component: task_program/execution_policy.yaml
+    overrides:
+      motion:
+        sample_count: 80
+collection:
+  max_attempts: 1
