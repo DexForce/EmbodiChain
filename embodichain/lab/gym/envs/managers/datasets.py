@@ -2356,16 +2356,3 @@ class LeRobotRecorder(Functor):
                 if isinstance(value, torch.Tensor) and value.ndim == 0:
                     value = value.unsqueeze(0)
                 frame[f"{LeRobotKey.OBS_PREFIX.value}{key}.{sub_key}"] = value
-
-    def _update_dataset_info(self, updates: dict) -> bool:
-        """Update dataset metadata."""
-        if self.dataset is None:
-            logger.log_error("LeRobotDataset not initialized.")
-            return False
-
-        try:
-            self.dataset.meta.info.update(updates)
-            return True
-        except Exception as e:
-            logger.log_error(f"Failed to update dataset info: {e}")
-            return False

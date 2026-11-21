@@ -178,6 +178,9 @@ class CuroboAdapter(PlannerAdapter):
             collision_activation_distance=float(
                 values.get("collision_activation_distance", 0.01)
             ),
+            position_tolerance=values.get("position_tolerance", 0.005),
+            orientation_tolerance=values.get("orientation_tolerance", 0.05),
+            use_runtime_tcp=values.get("use_runtime_tcp", False),
             max_attempts=int(values.get("max_attempts", 5)),
             max_planning_time=values.get("max_planning_time"),
             cuda_device=values.get("cuda_device"),

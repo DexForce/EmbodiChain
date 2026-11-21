@@ -38,6 +38,10 @@ class _UnboundedRobot:
         self.joint_names = [f"joint_{index}" for index in range(dofs)]
         self.speed = speed
 
+    def get_qpos_limits(self, *, joint_ids, env_ids=None) -> torch.Tensor:
+        limits = torch.tensor([-torch.inf, torch.inf], dtype=torch.float64)
+        return limits.expand(256, len(joint_ids), 2)
+
     def get_qvel_limits(self, *, joint_ids: list[int]) -> torch.Tensor:
         return torch.full((256, len(joint_ids)), self.speed, dtype=torch.float64)
 
@@ -875,3 +879,64 @@ def test_stopped_waypoints_keep_waypoint_and_limit_gradients() -> None:
     assert all(
         bool(torch.isfinite(g).all()) and bool((g != 0).any()) for g in gradients
     )
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("stopped", [False, True])
+def test_planner_rejects_joint_bound_overshoot_and_retains_candidate(
+    stopped: bool,
+) -> None:
+    from embodichain.lab.sim.motion.planners.toppra_planner import (
+        ToppraPlanner,
+        ToppraPlannerCfg,
+        ToppraPlanOptions,
+    )
+    from embodichain.lab.sim.motion.planners.utils import PlanState
+
+    class BoundedRobot(_UnboundedRobot):
+        control_parts = {"arm": [0]}
+
+        def get_joint_ids(self, name):
+            assert name == "arm"
+            return [0]
+
+        def get_qpos_limits(self, *, joint_ids, env_ids=None):
+            # The request selects environments 2 then 0, with different bounds.
+            limits = torch.tensor([[[-1.0, 1.0]], [[-1.0, 0.5]], [[-2.0, 2.0]]])
+            rows = slice(None) if env_ids is None else list(env_ids)
+            return limits[rows][:, joint_ids]
+
+    planner = object.__new__(ToppraPlanner)
+    planner.robot = BoundedRobot()
+    planner.device = torch.device("cpu")
+    planner.cfg = ToppraPlannerCfg(robot_uid="unused")
+    planner._planning_env_ids = (2, 0)
+    # Every input knot is inside [-1, 1]. The interpolating cubic has an
+    # interior maximum above 1.1, so dynamic feasibility alone is insufficient.
+    knots = torch.tensor([0.0, 0.99, 0.98, 0.0]).view(1, 4, 1).expand(2, -1, -1)
+    result = planner.plan(
+        [PlanState.from_qpos(knots[:, index]) for index in range(4)],
+        ToppraPlanOptions(
+            control_part="arm",
+            constraints={"velocity": 1.0, "acceleration": 2.0},
+            sample_method=TrajectorySampleMethod.TIME,
+            sample_interval=0.02,
+            stop_at_waypoints=stopped,
+        ),
+    )
+    assert result.success.tolist() == [True, stopped]
+    assert result.positions[0].abs().max() < 2.0
+    if stopped:
+        assert result.positions[1].abs().max() <= 1.0
+        assert result.rejected_candidate is None
+    else:
+        candidate = result.rejected_candidate
+        assert candidate is not None
+        assert candidate.env_mask.tolist() == [False, True]
+        assert candidate.positions[1, :, 0].max() > 1.1
+        assert not candidate.positions.requires_grad
+        assert not result.positions[1].any()
+        assert not result.dt[1].any()
+        assert not result.velocities[1].any()
+        assert not result.accelerations[1].any()
+        torch.testing.assert_close(result.positions[0], candidate.positions[0])

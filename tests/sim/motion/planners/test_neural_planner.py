@@ -1072,6 +1072,7 @@ def test_neural_planner_reach_check_passes_xyzw_to_math(monkeypatch):
     planner._pos_eps = 1.0e-6
     planner._rot_eps = 1.0e-6
     planner._joint_eps = 1.0e-6
+    planner._policy_tcp_to_runtime_origin = torch.zeros(3)
 
     ee_quaternion = torch.tensor([[1.0, 2.0, 3.0, 4.0]], dtype=torch.float32)
     ee_quaternion = ee_quaternion / torch.linalg.vector_norm(
@@ -1107,6 +1108,55 @@ def test_neural_planner_reach_check_passes_xyzw_to_math(monkeypatch):
     assert reached.item()
     torch.testing.assert_close(captured["q1"], ee_quaternion)
     torch.testing.assert_close(captured["q2"], ee_quaternion)
+
+
+@pytest.mark.parametrize("runtime_error,expected", [(0.0104, False), (0.0096, True)])
+@pytest.mark.parametrize("tcp_rotation", [0.0, 0.3])
+def test_pose_arrival_checks_runtime_tcp_origin(
+    tmp_path, monkeypatch, runtime_error, expected, tcp_rotation
+):
+    """A rotated TCP offset must not move the task's 1 cm acceptance ball."""
+    from embodichain.utils.math import axis_angle_to_rotation_matrix
+
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+    offset = torch.eye(4)
+    offset[2, 3] = -0.01
+    offset[:3, :3] = axis_angle_to_rotation_matrix(
+        torch.tensor([tcp_rotation, 0.0, 0.0])
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=_create_fake_onnx_model(tmp_path),
+            control_part="main_arm",
+            runtime_tcp_from_policy_tcp=offset.tolist(),
+        )
+    )
+    current = torch.eye(4)[None]
+    current[0, 0, 3] = runtime_error
+    current[0, :3, :3] = axis_angle_to_rotation_matrix(
+        torch.tensor([0.0, -0.09 if expected else 0.09, 0.0])
+    )
+    pos, quat, joints, _, pm, rm, jm, _ = planner._parse_waypoints(
+        [PlanState.from_xpos(torch.eye(4)[None])]
+    )
+    reached = planner._is_active_reached(
+        torch.zeros(1, NUM_ARM_JOINTS),
+        planner._policy_pose_xyzw(current),
+        pos,
+        quat,
+        joints,
+        pm,
+        rm,
+        jm,
+        torch.zeros(1, dtype=torch.long),
+    )
+    assert reached.item() is expected
 
 
 def test_neural_planner_builds_joint_constraint_observation(tmp_path, monkeypatch):
@@ -1615,6 +1665,7 @@ def test_joint_reach_uses_inclusive_maximum_error(error, expected):
     planner.device = torch.device("cpu")
     planner._num_waypoints = 1
     planner._pos_eps, planner._rot_eps, planner._joint_eps = 0.01, 0.1, 0.01
+    planner._policy_tcp_to_runtime_origin = torch.zeros(3)
     q = torch.full((1, NUM_ARM_JOINTS), error)
     ee = torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]])
     pose_mask = torch.zeros(1, 1)
