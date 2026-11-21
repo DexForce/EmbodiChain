@@ -59,6 +59,14 @@ ROBOT_ASSETS = {
         "class_path": "embodichain.extensions.robots.pollen_robotics.microduck.assets:MicroDuckLocomotion",
         "category": "robot",
     },
+    "RoboPartyRPO": {
+        "class_path": "embodichain.extensions.robots.roboparty.rpo.assets:RoboPartyRPO",
+        "category": "robot",
+    },
+    "RoboPartyRP1": {
+        "class_path": "embodichain.extensions.robots.roboparty.rp1.assets:RoboPartyRP1",
+        "category": "robot",
+    },
     "AgilexPiperX": {
         "class_path": "embodichain.extensions.robots.agilex.piper_x.assets:AgilexPiperX",
         "category": "robot",
@@ -181,6 +189,10 @@ ROBOT_ASSETS = {
     },
     "WujiHand": {
         "class_path": "embodichain.extensions.robots.wuji.hand.assets:WujiHand",
+        "category": "eef",
+    },
+    "RoboPartyRPHand": {
+        "class_path": "embodichain.extensions.robots.roboparty.rp_hand.assets:RoboPartyRPHand",
         "category": "eef",
     },
     "SharpaWave": {

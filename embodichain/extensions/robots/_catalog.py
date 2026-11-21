@@ -30,6 +30,9 @@ _CONFIG_CLASSES = {
     "UnitreeH1_2": "embodichain.extensions.robots.unitree.h1_2:UnitreeH12Cfg",
     "ANYmalC": "embodichain.extensions.robots.anybotics.anymal_c:ANYmalCCfg",
     "MicroDuck": "embodichain.extensions.robots.pollen_robotics.microduck:MicroDuckCfg",
+    "RoboPartyRPO": "embodichain.extensions.robots.roboparty.rpo:RoboPartyRPOCfg",
+    "RoboPartyRP1": "embodichain.extensions.robots.roboparty.rp1:RoboPartyRP1Cfg",
+    "RoboPartyRPHand": "embodichain.extensions.robots.roboparty.rp_hand:RoboPartyRPHandCfg",
     "ARX5": "embodichain.extensions.robots.arx.arx5:ARX5Cfg",
     "AlohaMini": "embodichain.extensions.robots.alohamini.aloha_mini:AlohaMiniCfg",
     "TianjiMarvin": "embodichain.extensions.robots.tianji.marvin:TianjiMarvinCfg",
@@ -79,6 +82,9 @@ _DEFAULT_CONTROL_INFO = {
     "UnitreeGo2": {"dof": 12, "control_parts": {"locomotion": 12}},
     "UnitreeG1": {"dof": 29, "control_parts": {"locomotion": 29}},
     "UnitreeH1_2": {"dof": 27, "control_parts": {"locomotion": 27}},
+    "RoboPartyRPO": {"dof": 23, "control_parts": {"locomotion": 23}},
+    "RoboPartyRP1": {"dof": 28, "control_parts": {"locomotion": 28}},
+    "RoboPartyRPHand": {"dof": 6, "control_parts": {"eef": 6}},
     "ANYmalC": {"dof": 12, "control_parts": {"locomotion": 12}},
     "MicroDuck": {"dof": 14, "control_parts": {"locomotion": 14}},
     "ARX5": {"dof": 8, "control_parts": {"arm": 6, "eef": 2}},
@@ -134,7 +140,18 @@ _DEFAULT_CONTROL_INFO = {
     "WujiHand": {"dof": 20, "control_parts": {"eef": 20}},
 }
 
+_RP_HAND_MIMICS = {
+    side: {
+        f"{prefix}_finger{follower}": f"{prefix}_finger{leader}"
+        for follower, leader in ((13, 12), (22, 21), (32, 31), (42, 41), (52, 51))
+    }
+    for side, prefix in (("left", "lh"), ("right", "rh"))
+}
+
 _MIMIC_JOINTS = {
+    "RoboPartyRPO": {},
+    "RoboPartyRP1": {},
+    "RoboPartyRPHand": _RP_HAND_MIMICS["right"],
     "AgibotG2": {
         f"idx{offset+index}_gripper_{side}_{name}": f"idx{offset+1}_gripper_{side}_inner_joint1"
         for side, offset in (("l", 30), ("r", 70))
@@ -200,6 +217,9 @@ _CLASSIFICATION = {
     "UnitreeH1_2": ("unitree", "bipedal_humanoid", 2),
     "ANYmalC": ("anybotics", "quadruped", 0),
     "MicroDuck": ("pollen_robotics", "biped", 0),
+    "RoboPartyRPO": ("roboparty", "bipedal_humanoid", 2),
+    "RoboPartyRP1": ("roboparty", "bipedal_humanoid", 2),
+    "RoboPartyRPHand": ("roboparty", "dexterous_hand", 0),
     "ARX5": ("arx", "fixed_manipulator", 1),
     "AlohaMini": (None, "wheeled_manipulator", 2),
     "TianjiMarvin": ("tianji", "fixed_manipulator", 2),
@@ -379,6 +399,45 @@ ROBOT_CONFIGS["WujiHand"].update(
             "supports_dual_arm": False,
         }
         for side in ("left", "right")
+    },
+)
+
+ROBOT_CONFIGS["RoboPartyRP1"].update(
+    defaults={"model": "28dof"},
+    default_variant="28dof",
+    variants={
+        "28dof": {
+            **_DEFAULT_CONTROL_INFO["RoboPartyRP1"],
+            "defaults": {"model": "28dof"},
+        },
+        "24dof": {
+            "dof": 24,
+            "control_parts": {"locomotion": 24},
+            "defaults": {"model": "24dof"},
+        },
+        "hand": {
+            "dof": 40,
+            "control_parts": {"locomotion": 28, "left_eef": 6, "right_eef": 6},
+            "mimic_joints": {**_RP_HAND_MIMICS["left"], **_RP_HAND_MIMICS["right"]},
+            "defaults": {"model": "hand"},
+        },
+        "hand_fixed": {
+            **_DEFAULT_CONTROL_INFO["RoboPartyRP1"],
+            "defaults": {"model": "hand_fixed"},
+        },
+    },
+)
+
+ROBOT_CONFIGS["RoboPartyRPHand"].update(
+    defaults={"side": "right"},
+    default_variant="right",
+    variants={
+        side: {
+            **_DEFAULT_CONTROL_INFO["RoboPartyRPHand"],
+            "mimic_joints": mimics,
+            "defaults": {"side": side},
+        }
+        for side, mimics in _RP_HAND_MIMICS.items()
     },
 )
 

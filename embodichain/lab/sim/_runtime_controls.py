@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import numpy as np
@@ -200,8 +200,10 @@ class _InitialJointState:
         *,
         mimic_stabilizer: bool = False,
         has_permanent_attachment: bool = False,
+        joint_names: Sequence[str] | None = None,
     ) -> None:
         self.target = target
+        self._joint_names = None if joint_names is None else tuple(joint_names)
         self.positions = (
             None if positions is None else self.normalize_positions(positions)[None, :]
         )
@@ -229,7 +231,10 @@ class _InitialJointState:
             self._public_positions = source_positions
             return
         positions = map_source_qpos_to_state_order(
-            handle, torch.as_tensor(source_positions), is_spawn_bound=True
+            handle,
+            torch.as_tensor(source_positions),
+            is_spawn_bound=True,
+            joint_names=self._joint_names,
         )
         self._mimic_info = read_state_mimic_info(handle)
         if not self._mimic_stabilizer:

@@ -1,0 +1,137 @@
+{
+  "catalog_id": "RoboPartyRPHand",
+  "variant": "right",
+  "source_asset": "RoboPartyRPHand/rp_hand_right.urdf",
+  "source_urdf_sha256": "44bdec7159808d514c9d3076ed163e89817231bbe4ff999723ed5071a8cc4b13",
+  "source": {
+    "repository": "https://github.com/Roboparty/rp1_description",
+    "revision": "7b7d807e52cbec23f22f36444ed3129f082d76ca",
+    "archive_md5": "f2ebdac8c8978d2299be44b66f1558b2"
+  },
+  "image": "roboparty_rp_hand_right.png",
+  "image_sha256": "45316169cc324e582a07ffddefc6fe9db14957a7dc2c64e9437f138c7ee8abd5",
+  "camera": {
+    "width": 1600,
+    "height": 1080,
+    "intrinsics": [
+      2100.0,
+      2100.0,
+      800.0,
+      540.0
+    ],
+    "near": 0.005,
+    "far": 60.0,
+    "eye": [
+      0.45135094113220847,
+      -0.18153367173972762,
+      0.22581279475660232
+    ],
+    "target": [
+      0.004332855575301959,
+      0.029324759217465232,
+      0.09930667654399776
+    ],
+    "up": [
+      0.0,
+      0.0,
+      1.0
+    ]
+  },
+  "render_cfg": {
+    "renderer": "rt",
+    "spp": 1,
+    "denoising": {
+      "offscreen": "dlss"
+    },
+    "dlss": {
+      "dlss_quality": 2,
+      "exposure_compensation": 1.0
+    },
+    "tone_mapping_enabled": false,
+    "tone_mapping_exposure": 1.0
+  },
+  "scene": {
+    "ground_plane": false,
+    "emission_color": [
+      0.92,
+      0.95,
+      1.0
+    ],
+    "emission_intensity": 40.0,
+    "rect_lights": [
+      {
+        "name": "key",
+        "position": [
+          0.321559561751293,
+          -0.351347288193724,
+          0.7337600888959799
+        ],
+        "direction": [
+          -0.39405520311955033,
+          0.4728662437434604,
+          -0.7881104062391007
+        ],
+        "intensity": 90.0,
+        "size": 0.23792002963199332
+      },
+      {
+        "name": "fill",
+        "position": [
+          -0.4715072036886847,
+          -0.12928859387053032,
+          0.41653338271998885
+        ],
+        "direction": [
+          0.8017837257372732,
+          0.2672612419124244,
+          -0.5345224838248488
+        ],
+        "intensity": 50.0,
+        "size": 0.23792002963199332
+      },
+      {
+        "name": "rim",
+        "position": [
+          0.004332855575301959,
+          0.5051648184814519,
+          0.5751467358079844
+        ],
+        "direction": [
+          -0.0,
+          -0.7071067811865476,
+          -0.7071067811865476
+        ],
+        "intensity": 75.0,
+        "size": 0.23792002963199332
+      }
+    ]
+  },
+  "root_position": [
+    0.0,
+    0.0,
+    0.020005956648692518
+  ],
+  "root_rotation_degrees": [
+    0.0,
+    0.0,
+    90.0
+  ],
+  "joint_positions": {
+    "rh_finger11": 0.0,
+    "rh_finger21": 0.0,
+    "rh_finger31": 0.0,
+    "rh_finger41": 0.0,
+    "rh_finger51": 0.0,
+    "rh_finger12": 0.019999999552965164,
+    "rh_finger22": 0.03826500102877617,
+    "rh_finger32": 0.03594600036740303,
+    "rh_finger42": 0.04317000135779381,
+    "rh_finger52": 0.035218000411987305,
+    "rh_finger13": 0.003498000092804432
+  },
+  "warmup_frames": 48,
+  "physics_stepped": false,
+  "runtime": {
+    "dexsim": "0.6.0"
+  }
+}
