@@ -79,10 +79,11 @@ def _audit(path: Path, spec: dict, seed: int) -> dict:
             or d["mean_goal_distance"] != e["goal_distance"]
         ):
             raise ValueError("Development report disagrees with event")
+    cutoff = spec["deadline_seconds"] - spec.get("submission_margin_seconds", 0)
     candidates = [
         b
         for a, b in zip(events, events[1:])
-        if b["result_seconds"] <= spec["deadline_seconds"]
+        if b["result_seconds"] <= cutoff
         and min(a["successes"], b["successes"]) >= spec["dev_min_successes"]
     ]
     chosen = max(
@@ -90,11 +91,20 @@ def _audit(path: Path, spec: dict, seed: int) -> dict:
         key=lambda e: (e["successes"], -e["goal_distance"], -e["step"]),
         default=None,
     )
-    if _read(path / "deadline.json") != {
-        "budget_seconds": spec["deadline_seconds"],
-        "chosen": chosen,
-    }:
+    receipt = _read(path / "deadline.json")
+    if (
+        receipt["budget_seconds"] != spec["deadline_seconds"]
+        or receipt["chosen"] != chosen
+    ):
         raise ValueError("Locked policy disagrees with in-budget events")
+    if "submission_margin_seconds" in spec:
+        if (
+            receipt["selection_cutoff_seconds"] != cutoff
+            or not 0 <= receipt["locked_seconds"] <= spec["deadline_seconds"]
+        ):
+            raise ValueError("Submission receipt missed its physical deadline")
+        if chosen and receipt["locked_seconds"] < chosen["result_seconds"]:
+            raise ValueError("Submission receipt precedes the development result")
     score = None
     if chosen:
         if policy_fingerprint(path / chosen["checkpoint"]) != chosen["sha256"]:
@@ -130,6 +140,7 @@ def _audit(path: Path, spec: dict, seed: int) -> dict:
         seed=seed,
         qualified=qualified,
         reserved_successes=score,
+        locked_seconds=receipt.get("locked_seconds"),
         chosen=chosen,
         updates=supply["step"],
         first_update=supply["first_update"],

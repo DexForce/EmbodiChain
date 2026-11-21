@@ -94,12 +94,40 @@ class ACTInferencePolicy:
         self.postprocessor = postprocessor
         self.metadata = dict(metadata)
         self.image_key = self.metadata["image_key"]
+        self._query_period = metadata.get("query_period", 1)
+        self._block_ensemble = None
+        if self._query_period != 1:
+            from lerobot.policies.act.modeling_act import ACTTemporalEnsembler
+
+            horizon = policy.config.chunk_size
+            if (
+                type(self._query_period) is not int
+                or self._query_period < 1
+                or horizon % self._query_period
+                or policy.config.temporal_ensemble_coeff is None
+            ):
+                raise ValueError(
+                    "ACT query_period must divide the ensembled chunk length"
+                )
+            self._block_ensemble = ACTTemporalEnsembler(
+                policy.config.temporal_ensemble_coeff * self._query_period,
+                horizon // self._query_period,
+            )
         self.reset()
 
     def reset(self) -> None:
         """Forget action chunks and ensemble history at every environment reset."""
         self.policy.reset()
         self._batch_size: int | None = None
+        self._commands = None
+        self._next_command = 0
+        if self._block_ensemble is not None:
+            self._block_ensemble.reset()
+
+    @property
+    def needs_observation(self) -> bool:
+        """Whether the next control step queries a new measured RGB frame."""
+        return self._commands is None or self._next_command == self._query_period
 
     @torch.inference_mode()
     def evaluate_dataset(
@@ -173,7 +201,9 @@ class ACTInferencePolicy:
         return {"action_l1": total / count, "valid_action_elements": count}
 
     @torch.inference_mode()
-    def select_action(self, rgb: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
+    def select_action(
+        self, rgb: torch.Tensor | None, state: torch.Tensor
+    ) -> torch.Tensor:
         """Return a physical action after the official temporal ensemble.
 
         Args:
@@ -185,8 +215,20 @@ class ACTInferencePolicy:
         Returns:
             Finite commands ``[B, action_dim]`` on the policy device.
         """
+        if not self.needs_observation:
+            if state.shape != (
+                self._batch_size,
+                len(self.metadata["schema"]["observation"]["names"]),
+            ):
+                raise ValueError(
+                    "Reset the ACT temporal ensemble before changing batch size"
+                )
+            action = self._commands[:, self._next_command]
+            self._next_command += 1
+            return action
         if (
-            rgb.dtype != torch.uint8
+            rgb is None
+            or rgb.dtype != torch.uint8
             or rgb.ndim != 4
             or not rgb.shape[0]
             or rgb.shape[1] != 3
@@ -209,7 +251,21 @@ class ACTInferencePolicy:
         batch = self.preprocessor(
             {self.image_key: rgb.float().div(255), "observation.state": state.float()}
         )
-        action = self.postprocessor(self.policy.select_action(batch))
+        if self._block_ensemble is None:
+            action = self.postprocessor(self.policy.select_action(batch))
+        else:
+            # Group consecutive control targets into blocks. Ensembling across
+            # queries still combines only predictions for the same absolute step.
+            chunk = self.policy.predict_action_chunk(batch)
+            b, h, d = chunk.shape
+            block = self._block_ensemble.update(
+                chunk.reshape(b, h // self._query_period, d * self._query_period)
+            )
+            self._commands = self.postprocessor(block.reshape(b, self._query_period, d))
+            if not torch.isfinite(self._commands).all():
+                raise ValueError("Nonfinite ACT action block")
+            action = self._commands[:, 0]
+            self._next_command = 1
         expected = (rgb.shape[0], len(self.metadata["schema"]["action"]["names"]))
         if action.shape != expected or not torch.isfinite(action).all():
             raise ValueError("ACT produced non-finite or incompatible control commands")

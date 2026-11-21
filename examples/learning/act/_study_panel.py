@@ -87,9 +87,21 @@ def score(
                     obs["sensor"]["cam_high"]["color"][..., :3]
                     .permute(0, 3, 1, 2)
                     .contiguous()
+                    if model.needs_observation
+                    else None
                 )
                 action = model.select_action(rgb, obs["robot"]["qpos"]).clamp(low, high)
-            obs, _, terminated, truncated, info = env.step(action)
+            # Advance native physics and evaluate the task on every control
+            # step. Render only observations the policy will actually consume.
+            if model is not None and model.metadata.get("query_period", 1) > 1:
+                # The native task enforces max_episode_steps itself. Gym's
+                # TimeLimit wrapper does not forward per-step capture options.
+                obs, _, terminated, truncated, info = raw.step(
+                    action,
+                    capture_sensor_obs=(panel == "test" or model.needs_observation),
+                )
+            else:
+                obs, _, terminated, truncated, info = env.step(action)
             term = (
                 torch.as_tensor(terminated, device=device)
                 | torch.as_tensor(truncated, device=device)

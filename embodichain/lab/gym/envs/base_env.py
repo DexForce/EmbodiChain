@@ -787,10 +787,11 @@ class BaseEnv(gym.Env):
                 device=self.device,
             )
 
-        with self._profiler.section("sensor"):
-            sensor_obs = self._get_sensor_obs(**kwargs)
-        if len(sensor_obs.keys()) > 0:
-            obs["sensor"] = sensor_obs
+        if kwargs.get("capture_sensor_obs", True):
+            with self._profiler.section("sensor"):
+                sensor_obs = self._get_sensor_obs(**kwargs)
+            if len(sensor_obs.keys()) > 0:
+                obs["sensor"] = sensor_obs
 
         with self._profiler.section("extend"):
             obs = self._extend_obs(obs=obs, **kwargs)
@@ -1192,6 +1193,11 @@ class BaseEnv(gym.Env):
             time-limit bootstrapping; live observations contain reset states.
         """
 
+        if not kwargs.get("capture_sensor_obs", True) and (
+            getattr(self, "rollout_buffer", None) is not None
+            or getattr(self, "dataset_manager", None) is not None
+        ):
+            raise ValueError("Sensor capture cannot be skipped in a recording rollout")
         if recording_active_mask is not None:
             if (
                 not isinstance(recording_active_mask, torch.Tensor)

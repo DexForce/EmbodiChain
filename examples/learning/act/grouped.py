@@ -40,8 +40,43 @@ def seeded_expert(env: Any, **kwargs: Any) -> Any:
     spec = raw.cfg.extensions["act_study"]
     seed = getattr(raw, "_act_next_seed", spec["seed_base"])
     raw._act_next_seed = seed + raw.num_envs
-    for lane in range(raw.num_envs):
-        env.reset(seed=seed + lane, options={"save_data": False, "reset_ids": [lane]})
+    # The physical reset pipeline still positions the cube, its relative goal
+    # and the marker. Only the training producer narrows each lane's draw.
+    strata = list(range(10))
+    stratified = spec.get("stratified_resets", False)
+    if stratified:
+        if raw.num_envs != len(strata):
+            raise ValueError("The 3x3 plus uniform design requires ten producer lanes")
+        import copy
+
+        random.Random(seed).shuffle(strata)
+        manager = raw.event_manager
+        original = manager.get_functor_cfg("randomize_cube")
+        low, high = original.params["position_range"]
+    try:
+        for lane in range(raw.num_envs):
+            if stratified:
+                cell = strata[lane]
+                term = copy.copy(original)
+                term.params = original.params.copy()
+                bounds = [list(low), list(high)]
+                if cell < 9:
+                    for axis, rank in enumerate(divmod(cell, 3)):
+                        span = high[axis] - low[axis]
+                        # Include outer-edge starts in every small publication.
+                        center = low[axis] + span * (0.075 + 0.425 * rank)
+                        radius = span * 0.075
+                        bounds[0][axis] = center - radius
+                        bounds[1][axis] = center + radius
+                term.params["position_range"] = bounds
+                manager.set_functor_cfg("randomize_cube", term)
+            env.reset(
+                seed=seed + lane, options={"save_data": False, "reset_ids": [lane]}
+            )
+    finally:
+        if stratified:
+            manager.set_functor_cfg("randomize_cube", original)
+    xy = raw.sim.get_rigid_object("cube").get_local_pose()[:, :2].tolist()
     result = execute_demo_episode(env, **kwargs)
     with Path(spec["attempts"]).open("a") as stream:
         for lane, length in enumerate(result.lengths):
@@ -49,6 +84,8 @@ def seeded_expert(env: Any, **kwargs: Any) -> Any:
                 json.dumps(
                     {
                         "seed": seed + lane,
+                        "initial_cube_xy": xy[lane],
+                        "stratum": strata[lane] if stratified else None,
                         "accepted": bool(result.completed and result.all_success),
                         "steps": length,
                     }
@@ -66,6 +103,7 @@ def make_engine(
     lanes: int = 1,
     spacing: float | None = None,
     floor: int,
+    stratified_resets: bool = False,
 ) -> Any:
     """Start an explicit single-renderer producer with raw PushCube policy requests."""
     from embodichain.data_pipeline.engine.data import (
@@ -78,6 +116,7 @@ def make_engine(
     cfg["env"]["extensions"]["act_study"] = {
         "seed_base": seed,
         "attempts": str(path / "attempts.jsonl"),
+        "stratified_resets": stratified_resets,
     }
     return OnlineDataEngine(
         OnlineDataEngineCfg(
@@ -152,10 +191,15 @@ def _run(spec: dict, seed: int, out: Path, qual: Path, started: float) -> None:
             "protocol": spec,
             "gpu": os.environ["CUDA_VISIBLE_DEVICES"],
             "task_identity": task_identity(),
+            "clock_origin_monotonic": started,
             "source_hashes": {
                 str(p): hashlib.sha256(p.read_bytes()).hexdigest()
                 for p in [
                     Path(__file__),
+                    Path(__file__).with_name("_study_panel.py"),
+                    Path(__file__).parents[3]
+                    / "embodichain/extensions/models/policy/act/runtime.py",
+                    Path(__file__).parents[3] / "embodichain/lab/gym/envs/base_env.py",
                     Path(__file__).parents[3]
                     / "embodichain/data_pipeline/engine/data.py",
                 ]
@@ -168,6 +212,7 @@ def _run(spec: dict, seed: int, out: Path, qual: Path, started: float) -> None:
     torch.backends.cudnn.benchmark = False
     torch.backends.cuda.matmul.allow_tf32 = True
     deadline = spec["deadline_seconds"]
+    selection_cutoff = deadline - spec.get("submission_margin_seconds", 0)
     events = []
     guard = threading.Lock()
 
@@ -178,7 +223,7 @@ def _run(spec: dict, seed: int, out: Path, qual: Path, started: float) -> None:
             eligible = [
                 b
                 for a, b in zip(events, events[1:])
-                if b["result_seconds"] <= deadline
+                if b["result_seconds"] <= selection_cutoff
                 and min(a["successes"], b["successes"]) >= spec["dev_min_successes"]
             ]
             best = max(
@@ -186,9 +231,14 @@ def _run(spec: dict, seed: int, out: Path, qual: Path, started: float) -> None:
                 key=lambda e: (e["successes"], -e["goal_distance"], -e["step"]),
                 default=None,
             )
-            _write(out / "deadline.json", {"budget_seconds": deadline, "chosen": best})
+            receipt = {"budget_seconds": deadline, "chosen": best}
+            if "submission_margin_seconds" in spec:
+                receipt.update(
+                    selection_cutoff_seconds=selection_cutoff, locked_seconds=clock()
+                )
+            _write(out / "deadline.json", receipt)
 
-    timer = threading.Timer(max(0, deadline - clock()), seal)
+    timer = threading.Timer(max(0, selection_cutoff - clock()), seal)
     timer.daemon = True
     timer.start()
     with ExitStack() as cleanup:
@@ -204,6 +254,7 @@ def _run(spec: dict, seed: int, out: Path, qual: Path, started: float) -> None:
             lanes=width,
             spacing=spec["arena_spacing"],
             floor=spec["draw_floor"],
+            stratified_resets=spec.get("stratified_resets", False),
         )
         worker_cleanup = cleanup.enter_context(ExitStack())
         worker_cleanup.callback(engine.stop)
@@ -295,7 +346,7 @@ def _run(spec: dict, seed: int, out: Path, qual: Path, started: float) -> None:
         step = 0
         first = None
         for step_idx in range(1, spec["updates"] + 1):
-            if clock() >= deadline:
+            if clock() >= selection_cutoff:
                 break
             refill()
             with engine.group_batch(
@@ -339,10 +390,16 @@ def _run(spec: dict, seed: int, out: Path, qual: Path, started: float) -> None:
                 "smoke": False,
                 "policy_sha256": policy_fingerprint(ck),
                 "image_landmarks": True,
+                "query_period": spec.get("query_period", 1),
             }
             _write(ck / "embodichain_act.json", manifest)
             saved = clock()
-            result = panel.evaluate(ck, dev, "development", progress=refill)
+            result = panel.evaluate(
+                ck,
+                dev,
+                "development",
+                progress=refill if spec.get("refill_during_dev", True) else None,
+            )
             _write(out / f"dev_{step}.json", result)
             with guard:
                 events.append(
@@ -357,6 +414,14 @@ def _run(spec: dict, seed: int, out: Path, qual: Path, started: float) -> None:
                     )
                 )
             _write(out / "development.json", events)
+            if (
+                "submit_dev_successes" in spec
+                and len(events) >= 2
+                and events[-2]["successes"] >= spec["dev_min_successes"]
+                and result["successes"] >= spec["submit_dev_successes"]
+                and events[-1]["result_seconds"] <= selection_cutoff
+            ):
+                break
         timer.cancel()
         timer.join()
         seal()
@@ -399,6 +464,12 @@ def main() -> None:
     """Run one seed of the frozen, acquisition-inclusive grouped study."""
     started = time.monotonic()
     p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument(
+        "--clock-origin",
+        type=float,
+        default=None,
+        help="Earlier host monotonic timestamp supplied by the cold launcher",
+    )
     p.add_argument("--seed", required=True, type=int)
     p.add_argument("--output", required=True, type=Path)
     p.add_argument(
@@ -408,8 +479,15 @@ def main() -> None:
     )
     p.add_argument("--qualification", type=Path, required=True)
     args = p.parse_args()
+    spec = json.loads(args.protocol.read_bytes())
+    if args.clock_origin is not None:
+        if not 0 < args.clock_origin <= started:
+            p.error("clock origin must precede CLI entry")
+        started = args.clock_origin
+    elif spec.get("require_cold_launcher"):
+        p.error("Use the timed_grouped launcher for this protocol")
     _run(
-        json.loads(args.protocol.read_bytes()),
+        spec,
         args.seed,
         args.output,
         args.qualification,
