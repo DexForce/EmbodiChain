@@ -1,0 +1,8 @@
+task_key: calvin_drawer_storage
+title: CALVIN Drawer Storage
+summary: Open table D’s drawer, store the red block, release it and close the drawer.
+tags: [manipulation, drawer, task_program]
+default_deployment: franka
+deployments:
+  franka:
+    config: task.franka.yaml

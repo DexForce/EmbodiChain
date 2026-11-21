@@ -1,0 +1,14 @@
+id: RoboCasa365OpenMicrowave-Franka-v1
+environment:
+  component: env.yaml
+embodiment:
+  component: ../../../components/embodiments/franka_panda.yaml
+  camera_overrides:
+    cam_high:
+      extrinsics:
+        eye: [0.82, -1.22, 1.00]
+        target: [0.0, -0.12, 0.42]
+        up: [0, 0, 1]
+  overrides:
+    init_pos: [-0.2, -0.65, 0.38]
+    init_rot: [0, 0, 90]
