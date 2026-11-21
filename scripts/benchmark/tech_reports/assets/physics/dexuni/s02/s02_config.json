@@ -1,0 +1,340 @@
+{
+  "task": "S02",
+  "subtask": "S02",
+  "description": "Franka FR3 grips soft block A at mid height, squeezes its measured width into the 30-40 % band under a closed-loop rule shared by all platforms, lifts 120 mm, holds 2 s, carries it to the target area, lowers it to just above the table, opens, retreats and observes 2 s.",
+  "status": "pilot (not frozen)",
+  "units": "m, kg, s; Z up, X towards the worktop, Y to the robot's left",
+  "coupling": "two_way",
+  "joint_mode": "dynamic",
+  "platform_solvers": {
+    "dexsim": "DexUniSolverCfg(contact_mode='full', coupling='two_way'): MuJoCo owns the Franka; VBD owns the soft block and static shapes; per-vertex particle-shape contact",
+    "embodichain": "EmbodiChain SimulationManager, NewtonPhysicsCfg(solver='dexuni') with the same DexUni options as the DexSim script",
+    "isaaclab": "Newton CouplerProxy: MuJoCo-Warp entry owns the Franka; VBD entry owns the soft block and static shapes; every robot link proxied into VBD; per-vertex particle contact"
+  },
+  "robot": {
+    "urdf": "/home/oem/code/assets/franka_emika_panda/fr3_franka_hand.dexsim.urdf",
+    "urdf_sha256": "recorded in inputs/inputs_manifest.json",
+    "model_note": "Newton-assets FR3 arm + Franka Hand (franka_hand_white); same asset, drives and limits as S01-T",
+    "base_position": [
+      0.0,
+      0.0,
+      0.86
+    ],
+    "arm_joints": [
+      "fr3_joint1",
+      "fr3_joint2",
+      "fr3_joint3",
+      "fr3_joint4",
+      "fr3_joint5",
+      "fr3_joint6",
+      "fr3_joint7"
+    ],
+    "finger_joints": [
+      "fr3_finger_joint1",
+      "fr3_finger_joint2"
+    ],
+    "finger_mimic": "both finger joints are driven independently with identical targets on all platforms",
+    "tcp_body": "fr3_hand",
+    "tcp_offset": [
+      0.0,
+      0.0,
+      0.1034
+    ],
+    "tcp_rotation_xyzw": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "arm_kp": [
+      12000.0,
+      12000.0,
+      12000.0,
+      12000.0,
+      4000.0,
+      4000.0,
+      4000.0
+    ],
+    "arm_kd": [
+      400.0,
+      400.0,
+      400.0,
+      400.0,
+      120.0,
+      120.0,
+      120.0
+    ],
+    "arm_effort_limit": [
+      87.0,
+      87.0,
+      87.0,
+      87.0,
+      12.0,
+      12.0,
+      12.0
+    ],
+    "finger_kp": 2000.0,
+    "finger_kd": 50.0,
+    "finger_effort_limit": 100.0,
+    "finger_armature": 0.1,
+    "arm_armature": 0.1,
+    "gravity": "robot links do not feel gravity (DexSim gravity compensation 1.0 / IsaacLab disable_gravity)",
+    "seed_q": [
+      0.0,
+      -0.3,
+      0.0,
+      -2.2,
+      0.0,
+      1.95,
+      0.785
+    ],
+    "finger_initial_q": 0.039,
+    "finger_note": "fingers start open at q=0.039 (pad gap 78 mm around the 60 mm block plus 2 x 2 mm particle radius: 7 mm per side) and close along world Y during the squeeze phase"
+  },
+  "scene": {
+    "table_z": 0.86,
+    "table": {
+      "center": [
+        0.5,
+        0.0,
+        0.835
+      ],
+      "size": [
+        0.6,
+        1.0,
+        0.05
+      ]
+    },
+    "robot_stand": {
+      "center": [
+        0.0,
+        0.0,
+        0.4275
+      ],
+      "size": [
+        0.22,
+        0.22,
+        0.855
+      ]
+    },
+    "ground_z": 0.0
+  },
+  "soft_block": {
+    "size": [
+      0.06,
+      0.06,
+      0.06
+    ],
+    "center": [
+      0.43,
+      -0.12,
+      0.892
+    ],
+    "cells": [
+      12,
+      12,
+      12
+    ],
+    "tet_split": "Kuhn 6 tets per hexahedral cell (shared main diagonal)",
+    "density": 250.0,
+    "youngs_modulus": 30000.0,
+    "poisson_ratio": 0.35,
+    "k_damp": 0.001,
+    "particle_radius": 0.002,
+    "note": "plan soft block A: 60 mm cube, 54 g, centre (0.43,-0.12,h=0.03); the bottom nodes sit at z=0.862 (one particle radius above the table) so the block starts in contact without overlap"
+  },
+  "width_patches": {
+    "half_extent": [
+      0.005,
+      0.005
+    ],
+    "note": "block-local nodes on the -Y and +Y faces with |x| <= 5 mm and |z| <= 5 mm (3 x 3 nodes each, under the pad centres); width = distance between the two patch centroids. Compression = 1 - w / w0, w0 the mean width in measurement.reference_window. Node ids are fixed in inputs/s02_block_mesh.npz"
+  },
+  "grip": {
+    "tcp": [
+      0.43,
+      -0.12,
+      0.892
+    ],
+    "target_compression": 0.35,
+    "compression_band": [
+      0.3,
+      0.4
+    ],
+    "close_speed": 0.01,
+    "finger_min": 0.0,
+    "squeeze_timeout": 3.0,
+    "settle_duration": 0.5,
+    "finger_open": 0.039,
+    "release_duration": 0.5,
+    "note": "closed-loop squeeze: both finger targets move inward at close_speed (per finger) until the filtered width compression reaches target_compression, then freeze; if the finger target reaches finger_min or squeeze_timeout first, the actual compression is kept and reported (no drive or friction compensation)"
+  },
+  "path": {
+    "lift_height": 0.12,
+    "place_xy": [
+      0.57,
+      0.08
+    ],
+    "place_clearance": 0.005,
+    "retreat_height": 0.08,
+    "ik_step": 0.0005,
+    "note": "one TCP polyline in world frame, parameterised by arc length s: start = grip.tcp; lift +Z by lift_height; straight line to place_xy at the lifted height; lower to grip.tcp z + place_clearance (block bottom about 5 mm above the table if it did not sag); retreat +Z by retreat_height. Top-down orientation throughout. inputs/s02_ik_path.npz tabulates s -> 7 arm joints every ik_step (DexSim IK); each phase moves s between its waypoints with a quintic profile"
+  },
+  "target_area": {
+    "center": [
+      0.57,
+      0.08
+    ],
+    "size": [
+      0.14,
+      0.14
+    ],
+    "note": "x 0.50-0.64, y 0.01-0.15; the initial block projection (x 0.40-0.46, y -0.15 to -0.09) does not overlap it"
+  },
+  "solver": {
+    "dt": 0.016666666666666666,
+    "num_substeps": 10,
+    "vbd_iterations": 40,
+    "proxy_mass_scale": 4.0,
+    "proxy_relaxation": 0.5,
+    "coupling_iterations": 1,
+    "use_cuda_graph": true,
+    "coupling_mode": "staggered",
+    "vbd_friction_epsilon": 0.0001,
+    "vbd_rigid_contact_hard": false,
+    "mujoco_cone": "pyramidal",
+    "proxied_robot_links": "all",
+    "parity_note": "all coupling/VBD/MuJoCo options carried over explicitly from S01 (see ../PARITY_CHECKLIST.md)"
+  },
+  "contact": {
+    "friction": 0.6,
+    "friction_rule": "every shape and particle set uses mu=0.6 (plan default; no finger-pad override in S02: the squeeze needed for 30-40 % width compression gives a normal force far above the 0.53 N weight); all platforms blend particle-shape friction as the average",
+    "particle_contact_ke": 20000.0,
+    "particle_contact_kd": 10.0,
+    "shape_ke": 20000.0,
+    "shape_kd": 100.0,
+    "shape_gap": 0.002,
+    "shape_margin": 0.0,
+    "soft_contact_margin": 0.003,
+    "contact_model": "per-vertex particle-shape contact on all platforms (same as S01)"
+  },
+  "trajectory": {
+    "frame_rate": 60,
+    "settle_duration": 1.0,
+    "lift_duration": 2.0,
+    "hold_duration": 2.0,
+    "transport_duration": 3.0,
+    "lower_duration": 2.0,
+    "retreat_duration": 1.0,
+    "observe_duration": 2.0,
+    "width_filter_frames": 6,
+    "controller": "closed-loop rule implemented identically in every platform script (class PickPlaceController): settle (reference width); squeeze (closed loop on width); squeeze settle; lift; hold; transport; lower; release; retreat; observe"
+  },
+  "initial_states": {
+    "file": "inputs/s02_initial_states.npz",
+    "count": 10,
+    "seed": 20261022,
+    "rule": "s00 nominal; s01-s09 move the block by dx, dy ~ U(-2, 2) mm and yaw ~ U(-1.5, 1.5) deg about its centre; robot and path unchanged; the file stores the world-space initial node positions (= rest shape)",
+    "dx_dy_range": [
+      -0.002,
+      0.002
+    ],
+    "yaw_range_deg": [
+      -1.5,
+      1.5
+    ]
+  },
+  "variants": {
+    "nominal": {},
+    "substeps5": {
+      "solver.num_substeps": 5
+    },
+    "substeps20": {
+      "solver.num_substeps": 20
+    },
+    "direct": {
+      "solver.use_cuda_graph": false
+    }
+  },
+  "variants_note": "plan 3.3 (5/10/20 substep convergence) and 7.2 (CUDA Graph vs direct paired check); each variant is run on state s00; nominal = 10 substeps with CUDA Graph",
+  "measurement": {
+    "reference_window": [
+      0.8,
+      1.0
+    ],
+    "camera_rate_hz": 30,
+    "camera_resolution": [
+      1280,
+      960
+    ],
+    "camera_hfov_deg": 47.2,
+    "cameras": {
+      "oblique": {
+        "eye": [
+          1.3,
+          -0.78,
+          1.42
+        ],
+        "target": [
+          0.5,
+          -0.02,
+          0.96
+        ],
+        "up": [
+          0,
+          0,
+          1
+        ]
+      },
+      "front": {
+        "eye": [
+          1.45,
+          -0.02,
+          1.16
+        ],
+        "target": [
+          0.5,
+          -0.02,
+          0.97
+        ],
+        "up": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    "images": {
+      "outputs": [
+        "rgb",
+        "depth (planar distance to the image plane, m)",
+        "instance segmentation (common label ids)"
+      ],
+      "labels": {
+        "0": "background",
+        "1": "ground",
+        "2": "table",
+        "3": "robot_stand",
+        "4": "robot",
+        "5": "soft_block"
+      },
+      "full": "every 30 Hz frame: RGB video + depth/segmentation arrays (state s00 runs)",
+      "keyframes": "RGB/depth/segmentation at phase starts and episode end (perturbed states and variants), to bound data volume"
+    },
+    "depth_background": "no-hit pixels: DexSim/EmbodiChain return a very large value, Isaac Lab returns 0; raw values are stored, plots mask both",
+    "image_downsample": 2,
+    "resolution_note": "cameras render at 1280x960 for the HD comparison video; depth, segmentation and RGB keyframes are stored at 640x480 (every 2nd pixel) with the matching intrinsics",
+    "video_policy": "only one exported video per task: tools/analyze.py writes videos/s02_comparison.mp4 (2x2: columns EmbodiChain / Isaac Lab, rows oblique / front, HD, real-time frame-rate overlay)"
+  },
+  "acceptance": {
+    "lift_min_height": 0.08,
+    "hold_drop_max": 0.01,
+    "hold_drop_window": 1.0,
+    "place_check_delay": 2.0,
+    "place_center_error_max": 0.02,
+    "place_inside_fraction_min": 0.95,
+    "place_rest_height_max": 0.006,
+    "table_penetration_tolerance": 0.004,
+    "rules": "grasp: compression at squeeze end inside compression_band; lift: lowest node >= lift_min_height above the table during the whole hold; hold: node-centroid z drop over the last hold_drop_window of the hold <= hold_drop_max; transport: lowest node still >= lift_min_height at transport end; place: place_check_delay after the fingers are fully open, node-centroid XY within place_center_error_max of the target centre, >= 95 % of nodes inside the target rectangle and lowest node <= place_rest_height_max above the table (resting); all positions finite. Width recovery error |w_end / w0 - 1| is reported, not gated"
+  }
+}

@@ -1,7 +1,9 @@
 # Physics comparisons (P-series)
 
 Directory scaffold for [issue #679](https://github.com/DexForce/EmbodiChain/issues/679).
-No physics comparison implementation is added yet.
+The [DexUni suite](experiments/dexuni/README.md) runs S01-C/T with one fixed
+configuration and five independent repeats per platform. Native control
+implementations are retained; see its PLAN for comparison limits.
 
 - `experiments/`: experiment definitions, physical scenarios, solver/step
   matrices, quality protocols, and comparison orchestration.
@@ -16,5 +18,6 @@ execution validation. Unsupported conditions retain reasons instead of zero
 measurements. Each platform runs in its own process and Python environment.
 
 Production physics, environment components, and task validators retain their
-existing owners. Run artifacts belong in `outputs/benchmarks/`.
+existing owners. Current DexUni run artifacts belong in repository-relative
+`outputs/benchmarks/tech_reports/dexuni/`.
 See the [benchmark layout](../README.md#technical-report-comparison-layout).
