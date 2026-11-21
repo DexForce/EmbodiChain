@@ -194,7 +194,7 @@ def test_dynamic_replay_preserves_randomized_camera_pose(fake_restore, compositi
     env = _FakeEnv()
     pose = torch.zeros(1, 3)
     camera = Camera.__new__(Camera)
-    camera.cfg = SimpleNamespace(ground_plane_visible=True)
+    camera.cfg = SimpleNamespace(ground_plane_visible=True, sample_phase=None)
     camera._device = env.device
     camera._sample_metadata = {"valid": torch.ones(1, dtype=torch.bool)}
     camera.set_ground_plane_visibility = lambda *args: None
@@ -225,17 +225,25 @@ def test_dynamic_replay_preserves_randomized_camera_pose(fake_restore, compositi
     assert camera._sample_metadata["valid"].tolist() == [composition is None]
 
 
-def test_dynamic_replay_resamples_scheduled_stereo_before_seeding_rewards(monkeypatch):
+@pytest.mark.parametrize("sample_phase", ["render", "physics"])
+def test_dynamic_replay_resamples_scheduled_stereo_before_seeding_rewards(
+    monkeypatch, sample_phase
+):
     from embodichain.lab.sim import SimulationManager
     from embodichain.lab.sim.sensors import (
         BaseSensor,
+        SensorCfg,
         SensorContext,
+        SensorRegistration,
         StereoCamera,
         StereoCameraCfg,
+        register_sensor,
     )
+    from embodichain.lab.sim.sensors import registry
+    from embodichain.utils import configclass
 
     env = _FakeEnv()
-    scene = SimpleNamespace(disparity=2.0, boundary=0)
+    scene = SimpleNamespace(disparity=2.0, published_disparity=2.0, boundary=0)
     context = SensorContext(
         device=env.device,
         num_instances=1,
@@ -243,19 +251,14 @@ def test_dynamic_replay_resamples_scheduled_stereo_before_seeding_rewards(monkey
         state=SimpleNamespace(),
     )
 
+    @configclass
+    class SyntheticStereoCfg(StereoCameraCfg):
+        sensor_type: str = "ReplaySyntheticStereo"
+
     class SyntheticStereo(StereoCamera):
-        def __init__(self):
+        def __init__(self, cfg, *, context):
             self.randomized_pose = torch.zeros(1, 3)
-            BaseSensor.__init__(
-                self,
-                StereoCameraCfg(
-                    uid="stereo",
-                    sample_phase="render",
-                    sample_period=0.1,
-                    enable_disparity=True,
-                ),
-                context=context,
-            )
+            BaseSensor.__init__(self, cfg, context=context)
 
         def _build_sensor_from_config(self, cfg, device):
             self._data_buffer = TensorDict(
@@ -263,8 +266,8 @@ def test_dynamic_replay_resamples_scheduled_stereo_before_seeding_rewards(monkey
             )
 
         def update(self, **kwargs):
-            assert kwargs["fetch_only"]
-            self._data_buffer["disparity"].fill_(scene.disparity)
+            assert kwargs["fetch_only"] == (sample_phase == "render")
+            self._data_buffer["disparity"].fill_(scene.published_disparity)
 
         def set_ground_plane_visibility(self, *args):
             pass
@@ -272,14 +275,34 @@ def test_dynamic_replay_resamples_scheduled_stereo_before_seeding_rewards(monkey
         def _reset_pose(self, env_ids):
             self.randomized_pose.zero_()
 
-    camera = SyntheticStereo()
+    monkeypatch.setattr(registry, "_registrations", registry._registrations.copy())
+    register_sensor(
+        SensorRegistration("ReplaySyntheticStereo", SyntheticStereoCfg, SyntheticStereo)
+    )
+    cfg = SensorCfg.from_dict(
+        {
+            "sensor_type": "ReplaySyntheticStereo",
+            "uid": "stereo",
+            "sample_phase": sample_phase,
+            "sample_period": 0.1,
+            "enable_disparity": True,
+        }
+    )
+    camera = registry.get_sensor_registration(cfg.sensor_type).factory(
+        cfg, context=context
+    )
     env.sensors = {"stereo": camera}
-    env.sim._sampling_sensors = {"render": {"stereo": camera}}
-    env.sim.simulation_time = 0.0
-    env.sim.physics_step_index = 0
+    env.sim._sampling_sensors = {sample_phase: {"stereo": camera}}
+    env.sim.simulation_time = 0.01
+    env.sim.physics_step_index = 1
     seeds = []
 
+    env.sim.sync_render_state = lambda: setattr(
+        scene, "published_disparity", scene.disparity
+    )
+
     def capture():
+        env.sim.sync_render_state()
         scene.boundary += 1
         SimulationManager._sample_managed_sensors(
             env.sim, "render", scene.boundary, 0.01, rendered_camera_uids={camera.uid}
@@ -296,6 +319,8 @@ def test_dynamic_replay_resamples_scheduled_stereo_before_seeding_rewards(monkey
     def reset(**kwargs):
         camera.reset()
         camera.randomized_pose[:, 0] = 0.25
+        # A reset stabilization step acquires physics-sampled plugins first.
+        SimulationManager._sample_managed_sensors(env.sim, "physics", 1, 0.01)
         frame = capture()
         seed(frame, [0])
         return frame.policy, {}
@@ -321,8 +346,10 @@ def test_dynamic_replay_resamples_scheduled_stereo_before_seeding_rewards(monkey
     assert seeds == [(2.0, True), (8.0, True)]
     torch.testing.assert_close(camera.randomized_pose[:, 0], torch.tensor([0.25]))
     sample_id = camera.get_sample_metadata()["sample_id"].clone()
+    SimulationManager._sample_managed_sensors(env.sim, "physics", 1, 0.01)
     capture()
     torch.testing.assert_close(camera.get_sample_metadata()["sample_id"], sample_id)
+    assert env.sim.updates == []
 
 
 def test_dynamic_replay_seeds_shaping_from_restored_goal_observation(monkeypatch):

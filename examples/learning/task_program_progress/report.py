@@ -47,6 +47,22 @@ def main() -> None:
     supported = read("supported.json")
     floating = read("floating.json")
     empty = read("empty_grip.json")
+    for name, result in (
+        ("expert_grasp_place", expert),
+        ("supported", supported),
+        ("floating", floating),
+        ("empty_grip", empty),
+    ):
+        if (
+            result.get("passed") is not True
+            or result.get("valid_measurements") is not True
+        ):
+            raise ValueError(
+                f"Physical qualification failed for {name}: "
+                f"passed={result.get('passed')!r}, "
+                f"valid_measurements={result.get('valid_measurements')!r}. "
+                "Re-run qualification with valid measurements before reporting."
+            )
     policy = read("trained_policy.json")
     benchmark = read("benchmark.json")
     evaluations = sorted((output / "final_evaluation").rglob("evaluation.json"))
@@ -77,6 +93,9 @@ def main() -> None:
     saved_train = yaml.safe_load(
         (Path(policy["run"]) / "configs/train.yaml").read_text()
     )
+    training_seed = saved_train["trainer"]["seed"]
+    evaluation_seed = evaluation["inputs"]["seed"]
+    seed_relation = "相同" if training_seed == evaluation_seed else "不同"
     restored = re.search(
         r"Resumed step=(\d+), updates=(\d+)", (output / "resume.log").read_text()
     )
@@ -89,6 +108,8 @@ def main() -> None:
         "training_transitions": transitions,
         "ppo_updates": updates,
         "training_envs": saved_train["trainer"]["num_envs"],
+        "training_seed": training_seed,
+        "evaluation_seed": evaluation_seed,
         "run": policy["run"],
         "evaluation": metrics,
         "expert": {
@@ -97,6 +118,8 @@ def main() -> None:
             "executor_success": expert["expert_result"]["success"],
             "measured_pick_success": expert["measured_pick_success"],
             "measured_place_success": expert["measured_place_success"],
+            "passed": expert["passed"],
+            "valid_measurements": expert["valid_measurements"],
         },
         "fixtures": {
             r["case"]: {
@@ -106,6 +129,8 @@ def main() -> None:
                     "success_rows",
                     "success_rate",
                     "finite_rewards",
+                    "passed",
+                    "valid_measurements",
                 )
             }
             for r in (supported, floating, empty)
@@ -161,7 +186,7 @@ def main() -> None:
         f"| 相关回归测试 | {summary['tests_passed']} 通过 | 数值、配置、目标、生命周期、恢复和上下文 |",
         f"| PPO 短程训练 | {updates} 次更新 / {transitions} 条转移 | {summary['training_envs']} 环境，验证链路 |",
         f"| 保存与恢复 | step={transitions}、updates={updates} 恢复成功 | 包含优化器、折扣和目标/模板契约校验 |",
-        f"| 独立 PPO 评估 | {int(metrics['eval/success_rate']*metrics['eval/success_samples'])}/{int(metrics['eval/success_samples'])} 成功 | 评估 seed={evaluation['inputs']['seed']}，与训练 seed=7 分离 |",
+        f"| 独立 PPO 评估 | {int(metrics['eval/success_rate']*metrics['eval/success_samples'])}/{int(metrics['eval/success_samples'])} 成功 | 评估 seed={evaluation_seed}，与训练 seed={training_seed} {seed_relation} |",
         f"| 评估平均回报 / 长度 | {metrics['eval/avg_reward']:.6f} / {metrics['eval/avg_length']:.1f} | 短程策略尚未学会目标动作 |",
         f"| 成功率 Wilson 95% 区间 | [{metrics['eval/success_ci95_low']:.3f}, {metrics['eval/success_ci95_high']:.3f}] | 小样本，不是收敛实验 |",
         f"| 规划专家完整抓放 | {expert['steps']} 控制步，抓取={expert['measured_pick_success']}、放置={expert['measured_place_success']} | 1 个固定场景 episode，CPU 原生物理 |",

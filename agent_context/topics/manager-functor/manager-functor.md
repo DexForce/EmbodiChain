@@ -117,6 +117,8 @@ Replay invalidates camera samples while preserving randomized extrinsics;
 non-camera sensors still reset their state and history after restoration.
 Replay rearms camera sampling once before rendering the restored scene and seeding
 rewards, so an unchanged simulation timestamp cannot retain the old image.
+Physics-sampled camera plugins acquire explicitly at the restored boundary,
+without advancing dynamics; render-sampled cameras acquire during capture.
 Unavailable required measurements terminate affected rows and cannot erase a
 negative shaping boundary. True task termination and time truncation remain distinct.
 

@@ -302,6 +302,9 @@ Camera and stereo-camera poses retain the episode randomization applied by
 It rearms the scheduled camera acquisition before rendering the restored scene,
 so a render-period limit cannot reuse the reset image at the same simulation
 time. The new sample initializes rewards; subsequent reads resume normal cadence.
+Physics-sampled camera plugins acquire at the restored boundary before the
+observation, without advancing physics. Render-sampled cameras acquire through
+the normal observation capture.
 Other sensors retain their state/history reset before acquiring restored state.
 
 Measured physical goals bind fixed topology for the environment lifetime.
@@ -354,6 +357,10 @@ and requires valid measurements at every recorded step. Missing or invalid
 evidence cannot qualify a floating/empty-grip negative merely because it reports
 zero successes and finite failure penalties. Policy previews enforce any reported
 measurement-quality failures while leaving task success informational.
+The aggregate report rejects failed or incomplete physical qualification inputs
+before writing a success summary. Accepted summaries preserve `passed` and
+`valid_measurements`; training and evaluation seeds come from their saved
+configuration and evaluation artifact, with an explicit equality comparison.
 
 Physics-substep acquisition adds work. The recorded fixture timing includes
 rendering and scalar auditing and does not establish large-batch or GPU

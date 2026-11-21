@@ -180,6 +180,12 @@ Physical reports retain each step's per-row `invalid_measurement` flags and fail
 on invalid or missing measurements, even when a negative case reports zero
 successes and finite rewards. A legacy policy environment without those flags
 reports measurement validity as unknown; reported invalidity still fails.
+The aggregate `report` command requires explicit passing qualification and valid
+measurements for every physical input, including the expert. Failed or incomplete
+inputs stop reporting with a diagnostic error before a success summary is written.
+Accepted summaries retain `passed` and `valid_measurements`. Training/evaluation
+seeds are read from the saved train config and evaluation artifact; the report
+labels them as equal or different using those actual values.
 
 
 A complete planning-expert grasp/place trace can qualify the same measured
