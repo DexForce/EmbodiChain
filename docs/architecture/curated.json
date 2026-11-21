@@ -2428,10 +2428,10 @@
       "topic_ids": [
         "simulation-system"
       ],
-      "summary": "Wraps per-arena fixed constraints between two rigid objects.",
-      "details": "The manager creates native fixed constraints and stores their handles with references to both RigidObject endpoints. Inactive arenas retain empty handle slots, so indexing remains aligned with environment IDs.",
+      "summary": "Wraps per-arena fixed and spherical constraints between rigid endpoints.",
+      "details": "The manager stores native handles alongside references to rigid objects or articulations whose physical links form the endpoints. Inactive arenas retain empty handle slots, so indexing stays aligned with environment IDs.",
       "boundaries": [
-        "Currently a Default-backend resource; only fixed constraints are supported. This wrapper does not inherit BatchEntity."
+        "Default-backend resource. Compliant spherical drives depend on native SDK capabilities."
       ],
       "evidence": [
         {
@@ -5105,7 +5105,7 @@
       "source": "simulation-manager",
       "target": "rigid-constraints",
       "relation": "constructs",
-      "description": "Creates a fixed constraint wrapper for two registered rigid objects.",
+      "description": "Creates a fixed or spherical constraint for registered rigid-body endpoints.",
       "provenance": "source-reviewed",
       "scope": "Only when the selected backend supports native rigid constraints.",
       "evidence": [
@@ -5159,16 +5159,16 @@
       "source": "rigid-constraints",
       "target": "rigid-objects",
       "relation": "holds",
-      "description": "Keeps references to the rigid objects linked by the constraint.",
+      "description": "Keeps references to any rigid objects that serve as constraint endpoints.",
       "provenance": "source-reviewed",
-      "scope": "Two endpoints are assigned when SimulationManager creates the wrapper; native actors remain scene-owned.",
+      "scope": "SimulationManager assigns the endpoints at creation. The scene owns the native actors.",
       "evidence": [
         {
           "path": "embodichain/lab/sim/objects/constraint.py",
           "symbol": "RigidConstraint",
-          "start_line": 55,
-          "end_line": 55,
-          "excerpt": "    rigid_object_a: RigidObject | None = None"
+          "start_line": 56,
+          "end_line": 56,
+          "excerpt": "    rigid_object_a: RigidObject | Articulation | None = None"
         }
       ]
     },

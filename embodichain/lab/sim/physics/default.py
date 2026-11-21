@@ -37,20 +37,38 @@ class DefaultPhysicsBackend(PhysicsBackend):
     name = "default"
 
     # -- construction / world-config activation ------------------------- #
-    def configure_world(self, world_config, sim_config: "SimulationManagerCfg") -> None:
+    def configure_world(
+        self,
+        world_config: dexsim.WorldConfig,
+        sim_config: SimulationManagerCfg,
+    ) -> None:
+        """Submit native settings before World captures its physics scene.
+
+        Args:
+            world_config: Native world configuration to populate.
+            sim_config: Requested physics and GPU-capacity settings.
+        """
         cfg = sim_config.physics_cfg
         assert isinstance(cfg, DefaultPhysicsCfg)
+        if self._manager.device.type == "cuda" and cfg.enable_ccd:
+            raise ValueError(
+                "Default Direct GPU does not support enable_ccd: "
+                "PhysX rejects CCD with the Direct GPU API."
+            )
         world_config.length_tolerance = cfg.length_tolerance
         world_config.speed_tolerance = cfg.speed_tolerance
         if self._manager.device.type == "cuda":
             world_config.enable_gpu_sim = True
             world_config.direct_gpu_api = True
 
-    def activate(self, sim_config: "SimulationManagerCfg") -> None:
-        cfg = sim_config.physics_cfg
-        assert isinstance(cfg, DefaultPhysicsCfg)
+        # PxSceneDesc and initial GPU buffers are created inside World().
+        # Later mutable updates cannot switch its solver or creation capacities.
         dexsim.set_physics_config(**cfg.to_dexsim_args())
         dexsim.set_physics_gpu_memory_config(**cfg.gpu_memory.to_dict())
+
+    def activate(self, sim_config: SimulationManagerCfg) -> None:
+        """Keep the post-World hook; native creation settings are already set."""
+        del sim_config
 
     def prepare_spawn_runtime(self, result: "dexsim.scene.Scene") -> None:
         """Initialize device buffers for a committed CUDA topology."""

@@ -28,6 +28,59 @@ from embodichain.lab.sim.objects.robot import Robot
 pytestmark = pytest.mark.no_sim
 
 
+def _mimic_policy_articulation():
+    art = object.__new__(Articulation)
+    art._data = SimpleNamespace(is_newton_backend=False)
+    art._entities = [
+        SimpleNamespace(
+            supports_mimic_soft_velocity=Mock(return_value=True),
+            set_mimic_soft_velocity=Mock(return_value=True),
+        )
+        for _ in range(3)
+    ]
+    art._resolve_env_ids = Mock(return_value=torch.tensor([2, 0]))
+    return art
+
+
+def test_mimic_soft_velocity_selects_only_requested_rows():
+    art = _mimic_policy_articulation()
+    art.set_mimic_soft_velocity(True, env_ids=[2, 0])
+    for i in [2, 0]:
+        art._entities[i].set_mimic_soft_velocity.assert_called_once_with(True)
+    art._entities[1].set_mimic_soft_velocity.assert_not_called()
+    art._entities[2].supports_mimic_soft_velocity.return_value = False
+    art.set_mimic_soft_velocity(False, env_ids=[2, 0])
+    for i in [2, 0]:
+        assert art._entities[i].set_mimic_soft_velocity.call_args.args == (False,)
+
+
+def test_mimic_soft_velocity_preflights_capabilities_before_writes():
+    art = _mimic_policy_articulation()
+    art._entities[0].supports_mimic_soft_velocity.return_value = False
+    with pytest.raises(NotImplementedError, match="soft mimic velocity"):
+        art.set_mimic_soft_velocity(True)
+    for entity in art._entities:
+        entity.set_mimic_soft_velocity.assert_not_called()
+    art._entities[0].supports_mimic_soft_velocity.return_value = True
+    art._entities[0].set_mimic_soft_velocity = None
+    with pytest.raises(NotImplementedError, match="soft mimic velocity"):
+        art.set_mimic_soft_velocity(False)
+    art._entities[2].set_mimic_soft_velocity.assert_not_called()
+
+
+def test_mimic_soft_velocity_validates_type_backend_and_native_rejection():
+    art = _mimic_policy_articulation()
+    with pytest.raises(ValueError, match="boolean"):
+        art.set_mimic_soft_velocity(1)
+    art._data.is_newton_backend = True
+    with pytest.raises(NotImplementedError, match="Default"):
+        art.set_mimic_soft_velocity(True)
+    art._data.is_newton_backend = False
+    art._entities[2].set_mimic_soft_velocity.return_value = False
+    with pytest.raises(RuntimeError, match="soft mimic velocity"):
+        art.set_mimic_soft_velocity(True)
+
+
 @pytest.mark.parametrize("clamp_qpos", [True, False])
 @pytest.mark.parametrize("clamp_targets", [True, False])
 def test_combined_state_position_limits(clamp_targets: bool, clamp_qpos: bool) -> None:

@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import MISSING
-from typing import Literal
+from typing import Literal, Sequence
 
 import numpy as np
 
@@ -138,7 +138,7 @@ class LightCfg(ObjectBaseCfg):
 
 @configclass
 class RigidConstraintCfg:
-    """Configuration for a fixed constraint between two RigidObjects.
+    """Configuration for a rigid constraint between object or link endpoints.
 
     The constraint binds rigid_object_a's entity[i] to rigid_object_b's entity[i]
     within arena[i] (one constraint per arena).
@@ -146,8 +146,12 @@ class RigidConstraintCfg:
     Args:
         name: Base constraint name. Per-arena names are derived as ``f"{name}"``
             (single env) or ``f"{name}_{i}"`` (multi env).
-        rigid_object_a_uid: UID of the first RigidObject (must exist in the sim).
-        rigid_object_b_uid: UID of the second RigidObject (must exist in the sim).
+        rigid_object_a_uid: UID of the first object, or articulation when
+            ``articulation_link_a`` is provided.
+        rigid_object_b_uid: UID of the second object, or articulation when
+            ``articulation_link_b`` is provided.
+        articulation_link_a: Physical link name on the first articulation.
+        articulation_link_b: Physical link name on the second articulation.
         local_frame_a: 4x4 joint frame in object A's local coordinates.
             ``None`` -> identity (object A's origin). Accepts a single
             ``(4, 4)`` matrix (shared by all envs) or an ``(N, 4, 4)`` array
@@ -158,12 +162,13 @@ class RigidConstraintCfg:
             at their *current* relative pose (rather than pulling their origins
             together). An explicit ``(4, 4)`` or ``(N, 4, 4)`` value is used
             verbatim. Defaults to None.
-        constraint_type: Reserved for future typed constraints (prismatic,
-            revolute, spherical, d6). Only ``"fixed"`` is supported in v1.
+        constraint_type: ``fixed`` locks all relative motion; ``spherical``
+            connects the two joint-frame origins with free rotation. Spherical
+            constraints use the SDK's D6 rigid-body endpoint factory, including
+            in Direct GPU scenes.
 
     .. attention::
-        Both objects must be :class:`RigidObject` instances and must share the
-        same number of arenas.
+        Endpoints must share the same number of arenas and the Default backend.
     """
 
     name: str = MISSING
@@ -175,6 +180,12 @@ class RigidConstraintCfg:
     rigid_object_b_uid: str = MISSING
     """UID of the second RigidObject."""
 
+    articulation_link_a: str | None = None
+    """Physical link on the first endpoint, or None for a rigid object."""
+
+    articulation_link_b: str | None = None
+    """Physical link on the second endpoint, or None for a rigid object."""
+
     local_frame_a: np.ndarray | None = None
     """Local joint frame on object A. None -> identity (object A's origin)."""
 
@@ -182,5 +193,30 @@ class RigidConstraintCfg:
     """Local joint frame on object B. None -> ``inv(pose_B) @ pose_A`` per env
     (weld at the objects' current relative pose)."""
 
-    constraint_type: Literal["fixed"] = "fixed"
-    """Constraint type. Only ``"fixed"`` is supported in v1."""
+    constraint_type: Literal["fixed", "spherical"] = "fixed"
+    """Fixed attachment or point connection with free rotation."""
+
+    linear_drive_stiffness: float | None = None
+    """Optional positive D6 linear spring gain for a compliant point connection."""
+
+    linear_drive_damping: float | None = None
+    """Nonnegative D6 linear damping, required with linear_drive_stiffness."""
+
+    linear_drive_acceleration: bool = False
+    """Use native mass-normalized gains rather than N/m and N*s/m."""
+
+    linear_drive_velocity: Sequence[float] | None = None
+    """Optional compliant-point velocity target [m/s], with three components.
+
+    Describes endpoint B relative to A in A's joint frame. Requires the linear
+    spring/damping pair and SDK velocity-target support. ``None`` retains the
+    existing zero-target drive behavior.
+    """
+
+    linear_drive_point_anchors: bool = False
+    """Apply compliant-point moments at each endpoint's own joint origin.
+
+    Requires linear spring/damping gains and a matching Default GPU SDK.
+    ``False`` keeps ordinary D6 geometry, which uses endpoint B's joint origin
+    for both moments. Runtime gain updates retain the selected geometry.
+    """

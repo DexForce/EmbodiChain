@@ -1,0 +1,34 @@
+--- a/physx/source/gpuarticulation/src/CUDA/internalConstraints2.cu
++++ b/physx/source/gpuarticulation/src/CUDA/internalConstraints2.cu
+@@ -2587,6 +2587,11 @@
+ 		const PxReal offset = mimicJointData.mOffset[threadIndexInWarp];	
+ 		const PxReal naturalFrequency = mimicJointData.mNaturalFrequency[threadIndexInWarp];
+ 		const PxReal dampingRatio = mimicJointData.mDampingRatio[threadIndexInWarp];
++		// Optional per-articulation PGS policy, using an unused flag bit in
++		// the existing descriptor. Hard rows and the TGS path stay unchanged.
++		const bool softVelocity = !isTGS &&
++			(artiBlock.mFlags[threadIndexInWarp] & (1u << 3)) &&
++			naturalFrequency > 0.0f && dampingRatio > 0.0f;
+ 
+ 		//Get the joint offsets.  We'll use these to gather the joint dof positions and speeds.
+ 		const PxU32 jointOffsetA = artiLinks[linkA].mJointOffset[threadIndexInWarp];
+@@ -2620,7 +2625,7 @@
+ 				biasCoefficient, dt, recipDt, 
+ 				qA, qB, qADot, qBDot, 
+ 				gearRatio, offset, naturalFrequency, dampingRatio, mimicJointRecipEffectiveInertia, 
+-				isVelocityIteration,
++				isVelocityIteration && !softVelocity,
+ 				jointImpDofA, jointImpDofB, isTGS ? NULL : &accumulatedImpulse);
+ 			if (!isTGS) mimicJointData.mInternalData.accumulatedImpulse[threadIndexInWarp] = accumulatedImpulse;
+ 			jointImpulseA[dofA] = jointImpDofA;
+--- a/physx/source/physxgpu/src/PxgPhysXGpu.cpp
++++ b/physx/source/physxgpu/src/PxgPhysXGpu.cpp
+@@ -254,7 +254,7 @@
+ // It adds no fields or virtual methods to PhysX's existing public interfaces.
+ PX_C_EXPORT PX_PHYSX_GPU_API PxU32 PX_CALL_CONV PxGetDexSimGpuConstraintCapabilities()
+ {
+-	return 1u;
++	return 1u | 2u;
+ }
+ 
+ PxPhysXGpu* PxCreatePhysXGpu()

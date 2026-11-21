@@ -1,0 +1,383 @@
+{
+  "source_cases": 72,
+  "source_dense_acceleration_max_error": 6.286682385949659e-11,
+  "source_implicit_velocity_max_error": 3.0371246989266606e-12,
+  "link_bias": {
+    "position_error": 6.106226635438361e-16,
+    "velocity_error": 1.7208456881689926e-15,
+    "bias_error": 9.43689570931383e-16
+  },
+  "native": {
+    "native-none-base-v1.json": {
+      "pre_implicit_final_error": 5.577550419855193e-07,
+      "final_corrected_error": 5.274743155592176e-07,
+      "motion_final_difference": 5.7131052017211914e-05,
+      "position_error": 0.0006043003449645035
+    },
+    "native-point-discrete-v0.json": {
+      "pre_implicit_final_error": 0.021141365477295615,
+      "final_corrected_error": 0.021141365477296947,
+      "motion_final_difference": 5.9604644775390625e-05,
+      "position_error": 0.0006044214295677364
+    },
+    "native-point-discrete_bias-v0.json": {
+      "pre_implicit_final_error": 0.0028420249330618486,
+      "final_corrected_error": 0.0028421109562687397,
+      "motion_final_difference": 5.888938903808594e-05,
+      "position_error": 0.0006044214295677364
+    },
+    "native-point-point_exact-v0.json": {
+      "pre_implicit_final_error": 0.00012141736348375565,
+      "final_corrected_error": 0.0001214477237665712,
+      "motion_final_difference": 5.888938903808594e-05,
+      "position_error": 0.0006044214295677364
+    },
+    "native-mimic-base-v1.json": {
+      "pre_implicit_final_error": 0.03851561210318659,
+      "final_corrected_error": 0.038497229970056855,
+      "motion_final_difference": 0.03683924116194248,
+      "position_error": 0.0006043005627800468
+    },
+    "native-mimic-base-velocitymimic-v0.json": {
+      "pre_implicit_final_error": 5.599113815923928e-07,
+      "final_corrected_error": 5.270442776650341e-07,
+      "motion_final_difference": 5.733966827392578e-05,
+      "position_error": 0.0006043005627800468
+    },
+    "native-both-point_exact-velocitymimic-v0.json": {
+      "pre_implicit_final_error": 0.00012093207384311633,
+      "final_corrected_error": 0.00012095481910251449,
+      "motion_final_difference": 5.91278076171875e-05,
+      "position_error": 0.0006044230426138775
+    }
+  },
+  "benchmarks": {
+    "default-1": {
+      "mean_update_host_ms": 0.017694447189569473,
+      "completed_step_median_ms": 1.942670182324946,
+      "equilibrium_max_error_m": 7.450580596923828e-08
+    },
+    "point-1": {
+      "mean_update_host_ms": 0.021174628287553787,
+      "completed_step_median_ms": 1.9631930999457836,
+      "equilibrium_max_error_m": 7.450580596923828e-08
+    },
+    "default-25": {
+      "mean_update_host_ms": 0.18375719152390957,
+      "completed_step_median_ms": 2.1470700902864337,
+      "equilibrium_max_error_m": 4.104524850845337e-05
+    },
+    "point-25": {
+      "mean_update_host_ms": 0.17610207200050354,
+      "completed_step_median_ms": 2.137924190610647,
+      "equilibrium_max_error_m": 4.104524850845337e-05
+    }
+  },
+  "full50": {
+    "dexsim-point-anchor-default-baseline-source-replay": {
+      "success_count": 32,
+      "agreement": 48,
+      "source_only": [
+        5,
+        7
+      ],
+      "native_only": [],
+      "post_step_cube_median_p95_max_m": [
+        0.0030505417224045307,
+        0.04145623825548287,
+        0.07855468031330225
+      ],
+      "actions_and_nan_exact": true,
+      "elapsed_s": 93.48792774276808,
+      "report": "/root/sources/EmbodiChain/outputs/lewm/official-cube/evaluation/dexsim-point-anchor-default-baseline-source-replay/report.json",
+      "common_live_count": 977,
+      "common_live_median_p95_max_m": [
+        0.004165457536437725,
+        0.055351125857258154,
+        0.07855468031330225
+      ]
+    },
+    "dexsim-coupled-source-stage-source-replay": {
+      "success_count": 32,
+      "agreement": 46,
+      "source_only": [
+        7,
+        32,
+        34
+      ],
+      "native_only": [
+        41
+      ],
+      "post_step_cube_median_p95_max_m": [
+        0.004902671376172689,
+        0.08369467269880204,
+        0.2538087231421599
+      ],
+      "actions_and_nan_exact": true,
+      "elapsed_s": 269.34551845211536,
+      "report": "/root/sources/EmbodiChain/outputs/lewm/official-cube/evaluation/dexsim-coupled-source-stage-source-replay/report.json",
+      "common_live_count": 977,
+      "common_live_median_p95_max_m": [
+        0.0075104488002597355,
+        0.08736693399469096,
+        0.2538087231421599
+      ]
+    }
+  },
+  "task_candidate_accepted": false,
+  "physics_alignment_verified": false,
+  "utc": "2026-10-31T10:39:33.079406+00:00",
+  "native_engine_sha256": "57dcde3308c4c49d9aaccf93d0d2ee04dbb42b9c88b3019cf87a7cf545230f22",
+  "native_gpu_sha256": "d499a135a2e37a328f349ae39df9bf1c5d4d932c987862759e6c11d84c8b36db",
+  "sdk_regressions": 102,
+  "root_constraints": 48,
+  "root_related": 299,
+  "root_skip": 1,
+  "root_newton_deselected": 52,
+  "context_tests": 42,
+  "black_files": 1734,
+  "api_exports": 3285,
+  "default_full50_exact": {
+    "scope": "fresh 50-query paired source-action replay, default point-anchor flag off, new SDK and GPU versus prior accepted provider",
+    "arrays": {
+      "qpos": {
+        "exact": true,
+        "max_abs": 0.0
+      },
+      "qvel": {
+        "exact": true,
+        "max_abs": 0.0
+      },
+      "actions": {
+        "exact": true,
+        "max_abs": 0.0
+      },
+      "goals": {
+        "exact": true,
+        "max_abs": 0.0
+      }
+    }
+  },
+  "cube_velocity1_diagnostic": {
+    "scope": "same qualified coupled source adapter, robot velocity iterations0, cube velocity iterations1",
+    "height": 0.19222010672092438,
+    "mean_cube_error_m": 0.001194972407672676,
+    "max_cube_error_m": 0.003147938179446599,
+    "mean_force20_35_N": 51.177898863055226,
+    "peak_force_N": 108.72642595274438,
+    "trial": {
+      "substeps": 1125,
+      "max_point_residual_m": 0.0004529374823557721,
+      "max_mimic_velocity_force_Nm": 0.22853784347074485,
+      "max_native_motion_final_difference_rad_s": 0.2640823721885681
+    }
+  },
+  "parameter_export": {
+    "previous_fields_exact": true,
+    "added_fields": [
+      "dof_frictionloss",
+      "dof_invweight0",
+      "dof_solimp",
+      "dof_solref",
+      "jnt_dofadr",
+      "jnt_limited",
+      "jnt_margin",
+      "jnt_qposadr",
+      "jnt_range",
+      "jnt_solimp",
+      "jnt_solref",
+      "jnt_type"
+    ],
+    "added_geom_fields": [
+      "solmix",
+      "margin",
+      "gap"
+    ],
+    "joint_count": 15,
+    "jnt_solref_robot": [
+      [
+        0.02,
+        1.0
+      ],
+      [
+        0.02,
+        1.0
+      ],
+      [
+        0.02,
+        1.0
+      ],
+      [
+        0.02,
+        1.0
+      ],
+      [
+        0.02,
+        1.0
+      ],
+      [
+        0.02,
+        1.0
+      ],
+      [
+        0.005,
+        1.0
+      ],
+      [
+        0.005,
+        1.0
+      ],
+      [
+        0.02,
+        1.0
+      ],
+      [
+        0.005,
+        1.0
+      ],
+      [
+        0.005,
+        1.0
+      ],
+      [
+        0.005,
+        1.0
+      ],
+      [
+        0.02,
+        1.0
+      ],
+      [
+        0.005,
+        1.0
+      ]
+    ],
+    "jnt_solimp_robot": [
+      [
+        0.9,
+        0.95,
+        0.001,
+        0.5,
+        2.0
+      ],
+      [
+        0.9,
+        0.95,
+        0.001,
+        0.5,
+        2.0
+      ],
+      [
+        0.9,
+        0.95,
+        0.001,
+        0.5,
+        2.0
+      ],
+      [
+        0.9,
+        0.95,
+        0.001,
+        0.5,
+        2.0
+      ],
+      [
+        0.9,
+        0.95,
+        0.001,
+        0.5,
+        2.0
+      ],
+      [
+        0.9,
+        0.95,
+        0.001,
+        0.5,
+        2.0
+      ],
+      [
+        0.95,
+        0.99,
+        0.001,
+        0.5,
+        2.0
+      ],
+      [
+        0.95,
+        0.99,
+        0.001,
+        0.5,
+        2.0
+      ],
+      [
+        0.9,
+        0.95,
+        0.001,
+        0.5,
+        2.0
+      ],
+      [
+        0.95,
+        0.99,
+        0.001,
+        0.5,
+        2.0
+      ],
+      [
+        0.95,
+        0.99,
+        0.001,
+        0.5,
+        2.0
+      ],
+      [
+        0.95,
+        0.99,
+        0.001,
+        0.5,
+        2.0
+      ],
+      [
+        0.9,
+        0.95,
+        0.001,
+        0.5,
+        2.0
+      ],
+      [
+        0.95,
+        0.99,
+        0.001,
+        0.5,
+        2.0
+      ]
+    ],
+    "mimic_approx_inverse_weight": 397.6325562367748
+  },
+  "farbody_velocity_policy": {
+    "scope": "robot min velocity iterations0 with one distant, noncontacting dynamic cube requesting1; no contact or parameter change on robot",
+    "max_pre_implicit_velocity_error": 0.03855068928510006,
+    "max_motion_final_velocity_difference": 0.038553185760974884
+  },
+  "anchor_only_full50": {
+    "scope": "only authored point moment arms enabled; accepted controls/gains/mimic/iteration policy unchanged",
+    "successes": 35,
+    "agreement": 47,
+    "source_only": [
+      7
+    ],
+    "native_only": [
+      12,
+      41
+    ],
+    "post_step_cube_median_p95_max_m": [
+      0.003400315828282499,
+      0.05382643820835925,
+      0.12941718275266692
+    ],
+    "actions_nan_exact": true,
+    "elapsed_seconds": 92.07985500991344,
+    "report": "/root/sources/EmbodiChain/outputs/lewm/official-cube/evaluation/dexsim-point-anchor-only-point-source-replay/report.json"
+  },
+  "anchor_only_default_admission": false
+}

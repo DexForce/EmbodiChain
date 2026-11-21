@@ -61,6 +61,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+lewm = [
+  "transformers>=4.53,<4.54; python_version < '3.12'",
+  "transformers>=5.4,<5.6; python_version >= '3.12'",
+  "einops>=0.8,<0.9",
+  "hdf5plugin>=6.0,<7",
+]
 geometry = [
   # Optional mesh inputs for pure numerical geometry; no simulation/FCL backend.
   "trimesh>=4.9",

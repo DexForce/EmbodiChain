@@ -28,32 +28,31 @@ import torch
 if TYPE_CHECKING:
     from embodichain.lab.sim.cfg import RigidConstraintCfg
     from embodichain.lab.sim.objects.rigid_object import RigidObject
+    from embodichain.lab.sim.objects.articulation import Articulation
 
 __all__ = ["RigidConstraint"]
 
 
 @dataclass
 class RigidConstraint:
-    """Batch of fixed constraints linking two :class:`RigidObject` instances.
+    """Batch of fixed or spherical constraints between rigid endpoints.
 
-    Each entry binds ``rigid_object_a._entities[i]`` to
-    ``rigid_object_b._entities[i]`` within arena ``i`` via a dexsim
-    ``FixedConstraint``. The ``constraint_handles`` list has length
-    ``num_envs`` with ``None`` wherever the constraint is not active in that
-    arena, so arena index always equals list index.
+    Each entry holds the native handle linking two rigid bodies in one arena.
+    The configuration names the physical link for an articulation endpoint.
+    Inactive arenas hold an empty slot so handle indices match arena indices.
 
     Args:
         cfg: The constraint configuration.
         constraint_handles: Per-arena dexsim constraint handles (None where inactive).
-        rigid_object_a: The first RigidObject (None only until set at creation).
-        rigid_object_b: The second RigidObject (None only until set at creation).
+        rigid_object_a: The first endpoint object, assigned at creation.
+        rigid_object_b: The second endpoint object, assigned at creation.
         device: The torch device.
     """
 
     cfg: RigidConstraintCfg
     constraint_handles: list[Any] = field(default_factory=list)
-    rigid_object_a: RigidObject | None = None
-    rigid_object_b: RigidObject | None = None
+    rigid_object_a: RigidObject | Articulation | None = None
+    rigid_object_b: RigidObject | Articulation | None = None
     device: torch.device = field(default_factory=torch.device("cpu"))
 
     @property

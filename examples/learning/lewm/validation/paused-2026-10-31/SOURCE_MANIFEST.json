@@ -1,0 +1,233 @@
+{
+  "original_manifest": "/root/sources/EmbodiChain/outputs/lewm/official-cube/alignment/native-point-anchor-final-runtime.json",
+  "experiments": [
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/analyze_real14_coupled.py",
+      "source_sha256": "1a15b2db2fa4b956e82d3b9babe13be0b6dd540d2af10f17f5d41d2f6245a6d2",
+      "snapshot": "experiments/analyze_real14_coupled.py",
+      "snapshot_sha256": "3f259e250e82b5dee22ad76525cca56f71eb6b56cbe31aeb8bcac0531df82415"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/analyze_real14_coupled_bias.py",
+      "source_sha256": "e7e8033b4be52955137aa0cc4cbb4748ebfe92bd563bf8a82f9258766b6c50d9",
+      "snapshot": "experiments/analyze_real14_coupled_bias.py",
+      "snapshot_sha256": "e45c67d12a88f6664557af79019f53f3cb4bb7795deaaeb9f7125dcbd36e8671"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/characterize_implicit_pd.py",
+      "source_sha256": "73f352e20158e4987319e125c5dfaf0ce504d2126c4f6ae5206d149bff5918e7",
+      "snapshot": "experiments/characterize_implicit_pd.py",
+      "snapshot_sha256": "adf104a4686ce5e35e459a9fcf5566d1ea9b8f5138c8383e3f033e43f98cbdf5"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/characterize_normal_contacts.py",
+      "source_sha256": "b917730e3fa4fef907445c1b180c9f96751e1b1cd600a6839fcccc82a5f81fe9",
+      "snapshot": "experiments/characterize_normal_contacts.py",
+      "snapshot_sha256": "40aaea53b378ccae0d372ee0ada2e0f88dc68be725e441d0f57bcb59373c2ea7"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/cube_coupled_cube_velocity_trial.py",
+      "source_sha256": "4f415baea6217d674412bcb79c8a0d6189f3ecb9b8a320474aca5b8c729dd8e1",
+      "snapshot": "experiments/cube_coupled_cube_velocity_trial.py",
+      "snapshot_sha256": "621132a8a0cc2ed1975d0239841fe2847b7b37ce0bd63ed4917f61fdaaf46923"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/cube_coupled_source_trial.py",
+      "source_sha256": "72709e10f9100fcc15b65d19e202cd103e6b47b00b71cec676e734fc87dce5b2",
+      "snapshot": "experiments/cube_coupled_source_trial.py",
+      "snapshot_sha256": "5b257954804a6538e4e82a62acb3fe26e9d226aa334dc11ec84156db96ffdc32"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/cube_point_anchor_only_trial.py",
+      "source_sha256": "2f9c7e92c5b2d3fd6fb14e37a0373faeb78161a42a7af0f42f49dcf59d2b7ba5",
+      "snapshot": "experiments/cube_point_anchor_only_trial.py",
+      "snapshot_sha256": "72fca03418e095a0ed8363b096e116fdc19075e8890869979befddcd0bb2fc99"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/cube_point_impulse_trial.py",
+      "source_sha256": "c6e51bff33703f33c4905eb8fda277a8d15ed5156a7234af8744589bf7775ec5",
+      "snapshot": "experiments/cube_point_impulse_trial.py",
+      "snapshot_sha256": "df05ead220816417621fcb1d683bb0e626e5c62df4eae12ca7885c56117f6e83"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/cube_point_kinematics.py",
+      "source_sha256": "be82460d26d87b65d77caec7af6355cb1950bdb5d75816ea7cc1d8f84dd4a9a1",
+      "snapshot": "experiments/cube_point_kinematics.py",
+      "snapshot_sha256": "cbd1b5e699cf9c3bfc15737c0edb5931d1d21462c886869d70835aa3d8b4314e"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/point_rotating_analytic.py",
+      "source_sha256": "f40d2fe28912f946e730f47f4cf418e21606da0e2640841a161cf8157312fdcf",
+      "snapshot": "experiments/point_rotating_analytic.py",
+      "snapshot_sha256": "5d07b11bb5626271eb6a4e4fa6964206bbf5cae10f94f9c0f6db94892cfde7c8"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/point_rotating_debug.py",
+      "source_sha256": "567aa70e6c5d70323dd66b03c98306f6e294a35b11afd5d17331a6aa7e901ce4",
+      "snapshot": "experiments/point_rotating_debug.py",
+      "snapshot_sha256": "605963c58d005d89c0ced33c75190903bd073a75c4e1dc8dfeaeec132dad40af"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/point_rotating_jdot.py",
+      "source_sha256": "b04d28137dceb5ca05b15299cca8e2cc9d321821c4340bfdd44137950201a58b",
+      "snapshot": "experiments/point_rotating_jdot.py",
+      "snapshot_sha256": "c33f29b0df7adb9d56ae9213b01e8100e94d2a98c81f0a9e3b2d9a692195bf06"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/point_rotating_no_constraint.py",
+      "source_sha256": "355dabdcf5be3ce7ca488f7eab6a129d7951e883c9e0ef26bf3849864d15c692",
+      "snapshot": "experiments/point_rotating_no_constraint.py",
+      "snapshot_sha256": "408859e7341d0d9e143e1f3a7959923380c3b96a9725d314f56cbc1618b068fe"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/point_rotating_noncontact.py",
+      "source_sha256": "6715b69e1180d4321bbb93bad5d47f78666da92285088e58a5b34af29eb68184",
+      "snapshot": "experiments/point_rotating_noncontact.py",
+      "snapshot_sha256": "e69f1de6ae0553935ad448a194bddb7f93f3f0ed750ed67a7790c8bad6571c02"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/point_rotating_response.py",
+      "source_sha256": "21d5e0aa4274df6aae71629f4baa13fedd0631045a0dce9b60d84d6dc462472b",
+      "snapshot": "experiments/point_rotating_response.py",
+      "snapshot_sha256": "ae9170e1f8e4891ab5e8d9f3185bc735de4d1a792f5a13fe3a68d1d2169f5413"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/point_rotating_single.py",
+      "source_sha256": "2fc4ad15e30d32424063820086fa03a4322ac8aa056eff407fe3a8985870924a",
+      "snapshot": "experiments/point_rotating_single.py",
+      "snapshot_sha256": "12e8bb6bbaf0d9d41d4aa49e8f9bf362f819dd580d778041357b697213388db7"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/point_step_response.py",
+      "source_sha256": "47f9da037f3f56e107305cd1451ca139e11c3e04a4ab77417d1df8ece9cddc6f",
+      "snapshot": "experiments/point_step_response.py",
+      "snapshot_sha256": "d23ba47132be9fcc9e12b939c7c41e73ba180da128e2bf8164792354325d1ed7"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/point_step_response_target.py",
+      "source_sha256": "59ea1fcded82e6e2213e05659c3884933c4212c48f072d5ddd7626c7ce4b311e",
+      "snapshot": "experiments/point_step_response_target.py",
+      "snapshot_sha256": "aa3d25eeb21f4bb9ccc6ddf44dceda6328cb55ec356bd2f273d23e4a82f18e3a"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/point_time_response.py",
+      "source_sha256": "5e60db58a962d9871ae666a433c267a9201819a48ba90ed0a1eb4e53ec9ecece",
+      "snapshot": "experiments/point_time_response.py",
+      "snapshot_sha256": "bfc0474dee5c9a646aa413f132a8a34d74909c1871ddd9f77dfbeb4165abc960"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/probe_grasp_contact_capability_noop.py",
+      "source_sha256": "b89b193a9d154bb15f5a600f4362dbc3ce5ff33619fb7db76303e8344088c3fe",
+      "snapshot": "experiments/probe_grasp_contact_capability_noop.py",
+      "snapshot_sha256": "2352e9e6ff7f8fbfa30761f941ab381036e6b84c6533a74117ead05577e0bb0c"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/probe_grasp_coupled_cube_velocity_trial.py",
+      "source_sha256": "499cd35c86aa5d21d839ab0ced2a74fe3b5724d5d45421066c35e773db8c20c2",
+      "snapshot": "experiments/probe_grasp_coupled_cube_velocity_trial.py",
+      "snapshot_sha256": "43cdaadda27139761ad7b7faccd07838068915ea74d4d5d768a53239c46ea4bc"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/probe_grasp_coupled_source_trial.py",
+      "source_sha256": "6e5bc0f32236e9ab151adff6bdd216a779cfbf47d8e33a450e87a6d39590e20a",
+      "snapshot": "experiments/probe_grasp_coupled_source_trial.py",
+      "snapshot_sha256": "bcd160a11d2d2280cf9ae2d246f93828d51e230cdb8b404c9643fb55ecd8c173"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/probe_point_impulse_subset.py",
+      "source_sha256": "4cb5fe0bee7d9413e875184b8e0cfaa1081a558d23285e924642f136430557a0",
+      "snapshot": "experiments/probe_point_impulse_subset.py",
+      "snapshot_sha256": "f0924d66156d2deec492d0edda39f57c65db20227e2ad9bf4aac420beff7e30a"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/real14_coupled_farbody_velocity.py",
+      "source_sha256": "1110f43a730c1cafbc1cb14a9ddfeebf93a7ddb5907ac00c2eeadd81423ab617",
+      "snapshot": "experiments/real14_coupled_farbody_velocity.py",
+      "snapshot_sha256": "6e432dfbc0fdccf41fd9facb965c615a59f9cb61e91ea26412b75e518afa43d2"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/real14_coupled_impulse.py",
+      "source_sha256": "c13f1ee6fe60fe3768f4ac9a5cb27bcce643ed874ae2ca4660e112431cb6237a",
+      "snapshot": "experiments/real14_coupled_impulse.py",
+      "snapshot_sha256": "1601032bdbd5461849a8b3e0d27027de0fd7a8c60e293e9f95453455fa77eeb0"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/real14_coupled_impulse_bias.py",
+      "source_sha256": "21b8e3240cab5e52983b29ad037783c0519e0ff9709a9f4d6abc9789c6ef564f",
+      "snapshot": "experiments/real14_coupled_impulse_bias.py",
+      "snapshot_sha256": "f0fbfb3f4dec5a89a60af3e556d6d7fb6ed8e7f2e2679aa64d6471a5604d5152"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/real14_coupled_impulse_point.py",
+      "source_sha256": "f0d80e651dcd9c6cb07acc4c15128f9a7c3cf2d02ea11370d026f90a164e7331",
+      "snapshot": "experiments/real14_coupled_impulse_point.py",
+      "snapshot_sha256": "83d19a1c4e497d746e4b0c0862e0ec885d0377f2180ed0c5a58ca04c55fea1de"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/real14_coupled_impulse_velocity.py",
+      "source_sha256": "5bfe77a1e45a9e76ac2f6d689e8cd4a6e61009ecbdc26e451b08ce142649ee38",
+      "snapshot": "experiments/real14_coupled_impulse_velocity.py",
+      "snapshot_sha256": "1b94317c4aa087539046dda4b3a71e7e5c28fc66f6b454d324d60daec9d19c5c"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/real14_link_bias.py",
+      "source_sha256": "c4e013ffc3cc30e8622889872954921f190def3c92215675318f0ec1acd0b60b",
+      "snapshot": "experiments/real14_link_bias.py",
+      "snapshot_sha256": "a39ea58394573372851ecad5428748b040121e1f7751c617edf02af2f06c1956"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/run_coupled_source_eval.py",
+      "source_sha256": "32c0a59dc6c5d9e2859fd0fe43907171e2a771442b74bc197e748a07d83a8062",
+      "snapshot": "experiments/run_coupled_source_eval.py",
+      "snapshot_sha256": "b48cd9ced71798571dd41da9a3dfd7d002ba58f2be96a6e6e45c630e4ed7a479"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/run_point_anchor_benchmarks.py",
+      "source_sha256": "f7e0e7c1f5f893ab72bddfe4e1acc697587e522d93e1c81f999a5a0a0ba7c387",
+      "snapshot": "experiments/run_point_anchor_benchmarks.py",
+      "snapshot_sha256": "80956a1095d346dd23cfa9988e427866c3994161e8fc6a7c16d829c6a5fdbb81"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/run_point_anchor_default_eval.py",
+      "source_sha256": "6ee61fc1eb98f812e97006f0b68600fecbd936b6b2ce059b38ccf0b364e476af",
+      "snapshot": "experiments/run_point_anchor_default_eval.py",
+      "snapshot_sha256": "a95064f8e6b692918303bb86b738378cbae032d16fff63f5085de47278c2848a"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/run_point_anchor_only_eval.py",
+      "source_sha256": "0c96212020a0701cc25e0a70cd0030f360831e80671a0ba114dcd0dd5ff99ebb",
+      "snapshot": "experiments/run_point_anchor_only_eval.py",
+      "snapshot_sha256": "b5d3f0661e52ef6fb305360959c30210a4a706a1540a0c76fb19446b037254f2"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/run_point_impulse_eval.py",
+      "source_sha256": "2d73fa6105c8e81cfc7fe69b1bfffe4ddba76fceed1da7bb554e306d10c669a7",
+      "snapshot": "experiments/run_point_impulse_eval.py",
+      "snapshot_sha256": "9c9a1aaf3394e96826d90f56b90119501f2c909d5e94b54a6b8d69fdba162c57"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/run_real14_bias_oracles.py",
+      "source_sha256": "94d06a259c08a62541ac84b115ba95347f1aa8d75c00fa5c57d78c3de1c11d2e",
+      "snapshot": "experiments/run_real14_bias_oracles.py",
+      "snapshot_sha256": "1aa7e5048ddc59deab58040207bc92b5a9c998c49e41b9e0e737935c80fd9f20"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/run_real14_coupled_oracles.py",
+      "source_sha256": "8b1581e090188461fcdb55e683234bb933e129551e861acf317a5e40067348f9",
+      "snapshot": "experiments/run_real14_coupled_oracles.py",
+      "snapshot_sha256": "f5cabcae77964b3021cfdd828ba4b57aca96f58b98c13739a791bcc413a2ea18"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/run_real14_point_oracles.py",
+      "source_sha256": "c99038cc65a30dfde86b0823553d271f1f61354b7c256184a8718f051ba0cc2e",
+      "snapshot": "experiments/run_real14_point_oracles.py",
+      "snapshot_sha256": "a44302d9ec764999bc49ea0935c00893af36f2959a39c7828530b1d72afe92c6"
+    },
+    {
+      "source": "/root/sources/EmbodiChain/outputs/lewm/official-cube/reference/validate_real14_link_bias.py",
+      "source_sha256": "9d3bf5beb2fd215a03a99d81b51f7f77c81cbac46c6cef74dbd29fd316507880",
+      "snapshot": "experiments/validate_real14_link_bias.py",
+      "snapshot_sha256": "b3d003cba631eb637d0dc1520051c380aa84b30568b25a85c401b8778dfa87dd"
+    }
+  ]
+}

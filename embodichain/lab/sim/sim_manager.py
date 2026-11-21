@@ -22,6 +22,7 @@ from embodichain.lab.sim.objects.fluid import FluidObject
 
 import os
 import gc
+import math
 import sys
 import queue
 import struct
@@ -4224,7 +4225,7 @@ class SimulationManager:
         cfg: RigidConstraintCfg,
         env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> RigidConstraint:
-        """Create a fixed constraint between two rigid objects.
+        """Create a fixed attachment or spherical point connection.
 
         Constraints are native Default-backend resources owned by each Arena.
         Spawn owns the two actors; this method only borrows their native actor
@@ -4242,30 +4243,76 @@ class SimulationManager:
             raise NotImplementedError(
                 f"The {self.physics.name} backend does not support rigid constraints."
             )
-        if cfg.constraint_type != "fixed":
+        if cfg.constraint_type not in {"fixed", "spherical"}:
             logger.log_error(
                 f"Constraint '{cfg.name}' has unsupported type "
-                f"'{cfg.constraint_type}'. Only 'fixed' is supported."
+                f"'{cfg.constraint_type}'. Expected 'fixed' or 'spherical'."
             )
-        if cfg.rigid_object_a_uid not in self._rigid_objects:
-            logger.log_error(
-                f"RigidObject '{cfg.rigid_object_a_uid}' not found for constraint "
-                f"'{cfg.name}'. Available: {list(self._rigid_objects.keys())}."
+        use_linear_drive = (
+            cfg.linear_drive_stiffness is not None
+            or cfg.linear_drive_damping is not None
+        )
+        if use_linear_drive and (
+            cfg.constraint_type != "spherical"
+            or cfg.linear_drive_stiffness is None
+            or cfg.linear_drive_damping is None
+            or not math.isfinite(cfg.linear_drive_stiffness)
+            or not math.isfinite(cfg.linear_drive_damping)
+            or cfg.linear_drive_stiffness <= 0
+            or cfg.linear_drive_damping < 0
+            or type(cfg.linear_drive_acceleration) is not bool
+        ):
+            raise ValueError(
+                "compliant spherical constraints require finite positive stiffness and nonnegative damping"
             )
-        if cfg.rigid_object_b_uid not in self._rigid_objects:
-            logger.log_error(
-                f"RigidObject '{cfg.rigid_object_b_uid}' not found for constraint "
-                f"'{cfg.name}'. Available: {list(self._rigid_objects.keys())}."
+        if type(cfg.linear_drive_point_anchors) is not bool or (
+            cfg.linear_drive_point_anchors and not use_linear_drive
+        ):
+            raise ValueError(
+                "point anchors require a compliant point drive and a boolean selection"
             )
+        drive_velocity = None
+        if cfg.linear_drive_velocity is not None:
+            drive_velocity = np.asarray(cfg.linear_drive_velocity, dtype=np.float32)
+            if (
+                not use_linear_drive
+                or drive_velocity.shape != (3,)
+                or not np.isfinite(drive_velocity).all()
+            ):
+                raise ValueError(
+                    "linear drive velocity requires a compliant point and three finite components"
+                )
+
+        def resolve_endpoint(uid: str, link: str | None):
+            if link is None:
+                value = self._rigid_objects.get(uid)
+            else:
+                value = self._robots.get(uid) or self._articulations.get(uid)
+            if value is None:
+                logger.log_error(f"Constraint '{cfg.name}' endpoint '{uid}' not found.")
+            return value
+
         if cfg.name in self._constraints:
             logger.log_error(
                 f"Constraint '{cfg.name}' already exists. Remove it before recreating."
             )
 
-        rigid_object_a = self._rigid_objects[cfg.rigid_object_a_uid]
-        rigid_object_b = self._rigid_objects[cfg.rigid_object_b_uid]
+        rigid_object_a = resolve_endpoint(
+            cfg.rigid_object_a_uid, cfg.articulation_link_a
+        )
+        rigid_object_b = resolve_endpoint(
+            cfg.rigid_object_b_uid, cfg.articulation_link_b
+        )
         if hasattr(self, "_spawn_scene"):
             self.prepare()
+        for endpoint, link in (
+            (rigid_object_a, cfg.articulation_link_a),
+            (rigid_object_b, cfg.articulation_link_b),
+        ):
+            if link is not None and link not in endpoint.link_names:
+                raise ValueError(
+                    f"Constraint '{cfg.name}' physical link '{link}' not found."
+                )
 
         num_envs = self.num_envs
         if rigid_object_a.num_instances != num_envs:
@@ -4284,8 +4331,20 @@ class SimulationManager:
             cfg.local_frame_a, num_envs, target_env_ids, cfg.name
         )
         if cfg.local_frame_b is None:
-            pose_a = rigid_object_a.get_local_pose(to_matrix=True)
-            pose_b = rigid_object_b.get_local_pose(to_matrix=True)
+            pose_a = (
+                rigid_object_a.get_local_pose(to_matrix=True)
+                if cfg.articulation_link_a is None
+                else rigid_object_a.get_link_pose(
+                    cfg.articulation_link_a, to_matrix=True
+                )
+            )
+            pose_b = (
+                rigid_object_b.get_local_pose(to_matrix=True)
+                if cfg.articulation_link_b is None
+                else rigid_object_b.get_link_pose(
+                    cfg.articulation_link_b, to_matrix=True
+                )
+            )
             frame_b = (
                 torch.bmm(pose_inv(pose_b), pose_a).cpu().numpy().astype(np.float32)
             )
@@ -4296,14 +4355,36 @@ class SimulationManager:
             )
 
         handles: list = [None] * num_envs
+        body_endpoints = (
+            cfg.constraint_type == "spherical"
+            or cfg.articulation_link_a is not None
+            or cfg.articulation_link_b is not None
+        )
         try:
             for index, env_id in enumerate(target_env_ids):
-                actor_a = rigid_object_a._entities[env_id]
-                actor_b = rigid_object_b._entities[env_id]
-                if getattr(rigid_object_a, "is_spawn_bound", False) is True:
-                    actor_a = actor_a.native()
-                if getattr(rigid_object_b, "is_spawn_bound", False) is True:
-                    actor_b = actor_b.native()
+
+                def native_endpoint(entity, link):
+                    handle = entity._entities[env_id]
+                    if link is not None:
+                        try:
+                            from dexsim.spawn.adapters.dexsim_adapter import (
+                                rigid_constraint_endpoint,
+                            )
+                        except ImportError as error:
+                            raise NotImplementedError(
+                                "DexSim SDK lacks the articulation constraint endpoint adapter."
+                            ) from error
+                        return rigid_constraint_endpoint(handle, link)
+                    if getattr(entity, "is_spawn_bound", False) is True:
+                        handle = handle.native()
+                    return (
+                        handle.get_rigid_body()
+                        if body_endpoints and handle is not None
+                        else handle
+                    )
+
+                actor_a = native_endpoint(rigid_object_a, cfg.articulation_link_a)
+                actor_b = native_endpoint(rigid_object_b, cfg.articulation_link_b)
                 if actor_a is None or actor_b is None:
                     logger.log_error(
                         f"Constraint '{cfg.name}' references a released Spawn actor "
@@ -4312,7 +4393,37 @@ class SimulationManager:
 
                 arena = self.get_env(env_id)
                 name = cfg.name if num_envs <= 1 else f"{cfg.name}_{env_id}"
-                handle = arena.create_fixed_constraint(
+                point_anchor_setter = None
+                if cfg.linear_drive_point_anchors:
+                    supports_points = getattr(
+                        arena, "supports_d6_linear_drive_point_anchors", None
+                    )
+                    point_anchor_setter = getattr(
+                        arena, "set_d6_linear_drive_point_anchors", None
+                    )
+                    if (
+                        supports_points is None
+                        or point_anchor_setter is None
+                        or not supports_points()
+                    ):
+                        raise NotImplementedError(
+                            "point anchors require a matching Default GPU SDK"
+                        )
+                factory_name = (
+                    "create_d6_constraint_bodies"
+                    if cfg.constraint_type == "spherical"
+                    else (
+                        "create_fixed_constraint_bodies"
+                        if body_endpoints
+                        else "create_fixed_constraint"
+                    )
+                )
+                factory = getattr(arena, factory_name, None)
+                if factory is None:
+                    raise NotImplementedError(
+                        f"DexSim SDK does not expose {factory_name}; upgrade the SDK for this constraint."
+                    )
+                handle = factory(
                     name,
                     actor_a,
                     actor_b,
@@ -4324,6 +4435,48 @@ class SimulationManager:
                         f"Failed to create constraint '{name}' in arena {env_id}."
                     )
                 handles[env_id] = handle
+                if cfg.constraint_type == "spherical":
+                    from dexsim.engine import D6Axis
+                    from dexsim.types import MotionLimit
+
+                    for axis in (D6Axis.TWIST, D6Axis.SWING1, D6Axis.SWING2):
+                        if handle.set_motion(axis, MotionLimit.FREE) != 0:
+                            raise RuntimeError(
+                                f"Failed to free angular axis for '{name}'."
+                            )
+                    if use_linear_drive:
+                        configure = getattr(arena, "configure_d6_linear_drive", None)
+                        if configure is None:
+                            raise NotImplementedError(
+                                "DexSim SDK lacks compliant D6 linear drives"
+                            )
+                        if not configure(
+                            name,
+                            cfg.linear_drive_stiffness,
+                            cfg.linear_drive_damping,
+                            cfg.linear_drive_acceleration,
+                        ):
+                            raise RuntimeError(
+                                f"Failed to configure compliant point '{name}'"
+                            )
+                        if point_anchor_setter is not None and not point_anchor_setter(
+                            name, True
+                        ):
+                            raise RuntimeError(
+                                f"Failed to set point anchors for '{name}'"
+                            )
+                        if drive_velocity is not None:
+                            set_velocity = getattr(
+                                arena, "set_d6_linear_drive_velocity", None
+                            )
+                            if set_velocity is None:
+                                raise NotImplementedError(
+                                    "DexSim SDK lacks D6 linear velocity targets"
+                                )
+                            if not set_velocity(name, drive_velocity):
+                                raise RuntimeError(
+                                    f"Failed to set velocity target for '{name}'"
+                                )
         except Exception:
             RigidConstraint(
                 cfg=cfg,
@@ -4347,6 +4500,100 @@ class SimulationManager:
     def get_deformable_object_uid_list(self) -> List[str]:
         """Return all deformable object UIDs in declaration order."""
         return list(self._deformable_objects.keys())
+
+    def update_rigid_constraint_linear_drive(
+        self,
+        name: str,
+        stiffness: float | Sequence[float],
+        damping: float | Sequence[float],
+        velocity: Sequence[float] | Sequence[Sequence[float]] | None = None,
+        *,
+        acceleration: bool = False,
+        env_ids: Sequence[int] | None = None,
+    ) -> int:
+        """Update a compliant point drive between explicit physics steps.
+
+        Args:
+            name: Registered constraint batch name.
+            stiffness: Positive scalar or one gain per selected active arena.
+            damping: Nonnegative scalar or one gain per selected active arena.
+            velocity: Three components, or one three-component row per selected
+                arena, in m/s for endpoint B relative to A in A's joint frame.
+                ``None`` resets the target to zero.
+            acceleration: Use native effective-mass-normalized gains.
+            env_ids: Selected arenas; inactive handles are skipped.
+
+        Returns:
+            Number of updated constraint rows. Creation config remains unchanged.
+
+        Raises:
+            KeyError: Unknown registered constraint name.
+            ValueError: Invalid type, gains or target shape/value.
+            NotImplementedError: Missing native drive capability.
+            RuntimeError: Native rejection. Earlier accepted rows remain updated.
+        """
+        constraint = self.get_rigid_constraint(name)
+        if constraint is None:
+            raise KeyError(f"Constraint '{name}' not found")
+        if (
+            constraint.cfg.constraint_type != "spherical"
+            or constraint.cfg.linear_drive_stiffness is None
+        ):
+            raise ValueError(
+                "linear drive updates require a compliant point constraint"
+            )
+        ids = constraint._active_env_ids(env_ids)
+        if not ids:
+            return 0
+        try:
+            spring = np.broadcast_to(
+                np.asarray(stiffness, dtype=np.float32), (len(ids),)
+            )
+            damper = np.broadcast_to(np.asarray(damping, dtype=np.float32), (len(ids),))
+            target = (
+                None
+                if velocity is None
+                else np.broadcast_to(
+                    np.asarray(velocity, dtype=np.float32), (len(ids), 3)
+                )
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "drive parameters must broadcast over selected active arenas"
+            ) from exc
+        if (
+            not np.isfinite(spring).all()
+            or not np.isfinite(damper).all()
+            or (spring <= 0).any()
+            or (damper < 0).any()
+            or type(acceleration) is not bool
+            or (target is not None and not np.isfinite(target).all())
+        ):
+            raise ValueError(
+                "drive parameters require positive finite stiffness, nonnegative damping and finite velocity"
+            )
+        arenas = [self.get_env(i) for i in ids]
+        for arena in arenas:
+            if getattr(arena, "configure_d6_linear_drive", None) is None:
+                raise NotImplementedError("DexSim SDK lacks compliant D6 linear drives")
+            if (
+                target is not None
+                and getattr(arena, "set_d6_linear_drive_velocity", None) is None
+            ):
+                raise NotImplementedError("DexSim SDK lacks D6 linear velocity targets")
+        for row, (env_id, arena) in enumerate(zip(ids, arenas)):
+            native_name = constraint.get_name(env_id)
+            if not arena.configure_d6_linear_drive(
+                native_name, float(spring[row]), float(damper[row]), acceleration
+            ):
+                raise RuntimeError(f"Failed to update compliant point '{native_name}'")
+            if target is not None and not arena.set_d6_linear_drive_velocity(
+                native_name, target[row]
+            ):
+                raise RuntimeError(
+                    f"Failed to update velocity target for '{native_name}'"
+                )
+        return len(ids)
 
     def remove_rigid_constraint(
         self,
@@ -5506,6 +5753,12 @@ class SimulationManager:
         for group in tuple(getattr(self, "_marker_groups", {}).values()):
             group._detach_parent(uid)
         was_materialized = scene.builder.is_finalized
+        for name, constraint in list(getattr(self, "_constraints", {}).items()):
+            if uid in (
+                constraint.cfg.rigid_object_a_uid,
+                constraint.cfg.rigid_object_b_uid,
+            ):
+                self.remove_rigid_constraint(name)
         scene.remove(uid)
         visual = getattr(self, "_visual_objects", {}).get(uid)
         if visual is not None:

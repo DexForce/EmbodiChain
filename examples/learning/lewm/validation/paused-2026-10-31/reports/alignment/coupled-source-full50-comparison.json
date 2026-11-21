@@ -1,0 +1,51 @@
+{
+  "dexsim-point-anchor-default-baseline-source-replay": {
+    "success_count": 32,
+    "agreement": 48,
+    "source_only": [
+      5,
+      7
+    ],
+    "native_only": [],
+    "post_step_cube_median_p95_max_m": [
+      0.0030505417224045307,
+      0.04145623825548287,
+      0.07855468031330225
+    ],
+    "actions_and_nan_exact": true,
+    "elapsed_s": 93.48792774276808,
+    "report": "/root/sources/EmbodiChain/outputs/lewm/official-cube/evaluation/dexsim-point-anchor-default-baseline-source-replay/report.json",
+    "common_live_count": 977,
+    "common_live_median_p95_max_m": [
+      0.004165457536437725,
+      0.055351125857258154,
+      0.07855468031330225
+    ]
+  },
+  "dexsim-coupled-source-stage-source-replay": {
+    "success_count": 32,
+    "agreement": 46,
+    "source_only": [
+      7,
+      32,
+      34
+    ],
+    "native_only": [
+      41
+    ],
+    "post_step_cube_median_p95_max_m": [
+      0.004902671376172689,
+      0.08369467269880204,
+      0.2538087231421599
+    ],
+    "actions_and_nan_exact": true,
+    "elapsed_s": 269.34551845211536,
+    "report": "/root/sources/EmbodiChain/outputs/lewm/official-cube/evaluation/dexsim-coupled-source-stage-source-replay/report.json",
+    "common_live_count": 977,
+    "common_live_median_p95_max_m": [
+      0.0075104488002597355,
+      0.08736693399469096,
+      0.2538087231421599
+    ]
+  }
+}

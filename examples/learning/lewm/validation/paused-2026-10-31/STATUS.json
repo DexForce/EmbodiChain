@@ -1,0 +1,28 @@
+{
+  "goal_status": "paused",
+  "goal_complete": false,
+  "physical_alignment_verified": false,
+  "snapshot_utc": "2026-10-31T11:17:43.932270+00:00",
+  "last_validated_engine_sha256": "57dcde3308c4c49d9aaccf93d0d2ee04dbb42b9c88b3019cf87a7cf545230f22",
+  "last_validated_gpu_sha256": "d499a135a2e37a328f349ae39df9bf1c5d4d932c987862759e6c11d84c8b36db",
+  "validated_sdk_cases": 102,
+  "validated_root_related_cases": 299,
+  "latest_wip": "optional per-articulation PGS soft mimic velocity policy; C++/CUDA builds completed, post-build physical and full-task validation pending",
+  "wip_api_baseline": "4 SDK missing-API failures; 3 Root missing-method failures before implementation",
+  "local_sdk_worktree": "/root/sources/dexverse-lewm-constraints",
+  "sdk_remote_in_this_update": false,
+  "large_local_artifacts_not_in_git": "official archive/HDF5/checkpoints/third-party checkouts/environments/binaries: 186 GiB local resource tree",
+  "publication_target": "https://github.com/DexForce/EmbodiChain/pull/895",
+  "publish_checks": {
+    "root_focused_cases_passed": 129,
+    "black_version": "26.10.1",
+    "black_formatted_files": 1775,
+    "api_exports_documented": 3285,
+    "agent_context_map": "passed"
+  },
+  "staged_runtime_at_pause": {
+    "libengine.so": "65e4786af03483aa66dc9a7af531fdfc4da29e14ea6738bde315806bdf80fcac",
+    "libPhysXGpu_64.so": "978a4fdbb9c8657833ee4bf59b6e751e9946f3f344dc878e7764135377ceff54",
+    "qualified": false
+  }
+}

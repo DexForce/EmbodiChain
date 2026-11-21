@@ -258,6 +258,10 @@ class ArticulationData:
             dtype=torch.float32,
             device=self.device,
         )
+        self._body_link_acceleration: torch.Tensor | None = None
+        self._body_link_lin_acc: torch.Tensor | None = None
+        self._body_link_ang_acc: torch.Tensor | None = None
+        self._body_link_incoming_joint_force: torch.Tensor | None = None
 
         # Current link mass-property buffers use the public articulation link
         # ordering. Initialization snapshots are captured after backend
@@ -468,6 +472,71 @@ class ArticulationData:
             self._body_link_lin_vel,
             self._body_link_ang_vel,
         )
+
+    @property
+    def body_link_acceleration(self) -> torch.Tensor:
+        """Borrow world-frame COM linear/angular acceleration ``(N, L, 6)``.
+
+        Read after a completed physics step. Currently supported by Default
+        Direct GPU; other backends raise explicitly. Storage is allocated on
+        first access and reused, so clone values needed across later reads.
+        """
+        if self._body_link_acceleration is None:
+            shape = (self.num_instances, self.num_links)
+            self._body_link_acceleration = torch.empty(
+                (*shape, 6), dtype=torch.float32, device=self.device
+            )
+            self._body_link_lin_acc = torch.empty(
+                (*shape, 3), dtype=torch.float32, device=self.device
+            )
+            self._body_link_ang_acc = torch.empty(
+                (*shape, 3), dtype=torch.float32, device=self.device
+            )
+        assert (
+            self._body_link_lin_acc is not None and self._body_link_ang_acc is not None
+        )
+        return self.articulation_view.fetch_link_acceleration(
+            self._body_link_acceleration,
+            self._body_link_lin_acc,
+            self._body_link_ang_acc,
+        )
+
+    @property
+    def body_link_incoming_joint_force(self) -> torch.Tensor:
+        """Borrow incoming joint force/torque ``(N, L, 6)`` in child-joint axes.
+
+        This transmitted joint wrench is not a contact or external wrench.
+        The root is zero. Read after a completed physics step. Currently
+        Default Direct GPU only; other backends raise explicitly.
+        """
+        if self._body_link_incoming_joint_force is None:
+            self._body_link_incoming_joint_force = torch.empty(
+                (self.num_instances, self.num_links, 6),
+                dtype=torch.float32,
+                device=self.device,
+            )
+        return self.articulation_view.fetch_link_incoming_joint_force(
+            self._body_link_incoming_joint_force
+        )
+
+    @property
+    def body_link_incoming_joint_frames(self) -> torch.Tensor:
+        """Copy configured child-joint poses in link coordinates ``(N, L, 4, 4)``.
+
+        These frames locate the origins/axes of incoming joint wrenches. The
+        root uses identity. Values come from typed Scene descriptors and must
+        be queried again after changing configured joint frames.
+        """
+        frames = np.broadcast_to(
+            np.eye(4, dtype=np.float32), (self.num_instances, self.num_links, 4, 4)
+        ).copy()
+        columns = {name: index for index, name in enumerate(self.link_names)}
+        for row, entity in enumerate(self.entities):
+            for joint in entity.articulation_desc.joints:
+                column = columns.get(joint.child_link_name)
+                if column is not None:
+                    frames[row, column] = joint.target_pose
+        return torch.as_tensor(frames, dtype=torch.float32, device=self.device)
 
     def _entity_drive_properties(self, entity: object) -> tuple[object, ...]:
         """Read drive values without conflating backend target semantics."""
@@ -1578,7 +1647,8 @@ class Articulation(BatchEntity):
             filter_data (torch.Tensor): [N, 4] of int.
                 First element of each object is arena id.
                 If 2nd element is 0, the object will collision with all other objects in world.
-                3rd and 4th elements are not used currently.
+                The 3rd word is a category mask and the 4th excludes categories.
+                A category/exclusion intersection rejects that contact pair.
 
             env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used. Defaults to None.
         """
@@ -2002,6 +2072,8 @@ class Articulation(BatchEntity):
             ValueError: A supplied field has an incompatible shape.
             RuntimeError: The backend cannot write the selected state.
         """
+        if type(clamp_qpos) is not bool:
+            raise TypeError("clamp_qpos must be a bool")
         local_env_ids = self._resolve_env_ids(env_ids)
         local_joint_ids = self._resolve_joint_ids(joint_ids)
         fields: dict[str, torch.Tensor] = {}
@@ -2167,6 +2239,47 @@ class Articulation(BatchEntity):
             env_ids (Sequence[int] | None, optional): Environment indices. Defaults to all indices.
         """
         self.set_state(env_ids=env_ids, joint_ids=joint_ids, qf=qf)
+
+    def set_mimic_soft_velocity(
+        self,
+        enabled: bool,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Select finite mimic compliance through PGS velocity iterations.
+
+        Call between explicit physics steps after scene preparation. Positive
+        frequency/damping rows retain their spring bias and CFM term; hard rows
+        keep the legacy velocity projection. Creation configs are unchanged.
+
+        Args:
+            enabled: Select the optional policy, or restore the legacy hard pass.
+            env_ids: Environment rows; None selects every articulation.
+
+        Raises:
+            ValueError: The selection is not a boolean.
+            NotImplementedError: Newton, CPU, TGS or a missing native capability.
+            RuntimeError: Native rejection; earlier accepted rows remain updated.
+        """
+        if type(enabled) is not bool:
+            raise ValueError("soft mimic velocity selection must be boolean")
+        if self._data.is_newton_backend:
+            raise NotImplementedError(
+                "soft mimic velocity requires the Default backend"
+            )
+        selected = self._resolve_env_ids(env_ids).cpu().tolist()
+        setters = []
+        for index in selected:
+            entity = self._entities[index]
+            setter = getattr(entity, "set_mimic_soft_velocity", None)
+            supports = getattr(entity, "supports_mimic_soft_velocity", None)
+            if setter is None or (enabled and (supports is None or not supports())):
+                raise NotImplementedError(
+                    "soft mimic velocity requires a matching PGS GPU SDK"
+                )
+            setters.append(setter)
+        for setter in setters:
+            if not setter(enabled):
+                raise RuntimeError("failed to set soft mimic velocity")
 
     def get_qf(self) -> torch.Tensor:
         """Get the current generalized efforts (qf) of the articulation.

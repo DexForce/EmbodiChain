@@ -1,0 +1,23 @@
+{
+  "pad-contact-wrench-contact-capability-noop.json": {
+    "cube_height": 0.18915170431137085,
+    "max_cube_error_m": 0.0057640130258920915,
+    "mean_cube_error_m": 0.002527538535867717,
+    "pad_force20_35_mean_N": 47.82938873204615,
+    "pad_force_peak_N": 130.85709042729778,
+    "trial": null
+  },
+  "pad-contact-wrench-coupled-source-trial.json": {
+    "cube_height": 0.19291460514068604,
+    "max_cube_error_m": 0.005666900639966105,
+    "mean_cube_error_m": 0.0012692734293056596,
+    "pad_force20_35_mean_N": 49.90832060143957,
+    "pad_force_peak_N": 120.89919274935787,
+    "trial": {
+      "substeps": 1125,
+      "max_point_residual_m": 0.00046830023645937226,
+      "max_mimic_velocity_force_Nm": 0.33378167061677483,
+      "max_native_motion_final_difference_rad_s": 5.9604644775390625e-05
+    }
+  }
+}

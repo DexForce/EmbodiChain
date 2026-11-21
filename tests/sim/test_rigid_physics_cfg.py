@@ -75,3 +75,41 @@ def test_grouped_attrs_parse_for_rigid_and_articulation_configs() -> None:
 
     assert rigid.attrs.mass_props.mass == pytest.approx(2.0)
     assert articulation.attrs.material_props.static_friction == pytest.approx(0.8)
+
+
+def test_native_materials_round_trip_in_physics_and_named_link_configs() -> None:
+    physics = RigidBodyPhysicsCfg.from_dict(
+        {
+            "material_props": {
+                "backend": "default",
+                "dynamic_friction": 0.7,
+                "friction_combine_mode": "min",
+                "restitution_combine_mode": "max",
+                "compliant_contact_stiffness": 8000.0,
+                "compliant_contact_damping": 40.0,
+            }
+        }
+    )
+    assert isinstance(physics.material_props, sim_cfg.DefaultRigidBodyMaterialCfg)
+    encoded = physics.to_dict()
+    assert encoded["material_props"]["backend"] == "default"
+    assert RigidBodyPhysicsCfg.from_dict(encoded).to_dict() == encoded
+
+    cfg = ArticulationCfg.from_dict(
+        {
+            "link_attrs": {
+                "finger": {
+                    "link_names_expr": ["finger"],
+                    "collision_materials": {"pad": encoded["material_props"]},
+                }
+            }
+        }
+    )
+    restored = ArticulationCfg.from_dict(cfg.to_dict())
+    actual = restored.link_attrs["finger"].collision_materials["pad"]
+    assert isinstance(actual, sim_cfg.DefaultRigidBodyMaterialCfg)
+    assert actual.dynamic_friction == 0.7
+    assert actual.friction_combine_mode == "min"
+    assert actual.compliant_contact_stiffness == 8000.0
+    assert actual.compliant_contact_damping == 40.0
+    assert sim_cfg.LinkPhysicsOverrideCfg().collision_materials == {}

@@ -36,6 +36,7 @@ Use the following canonical packages for the current model directions:
 | Visual ACT | `embodichain.extensions.models.policy.act` | Official LeRobot ACT configuration, provenance and simulator inference. |
 | NeRD | `embodichain.extensions.models.dynamics.nerd` | Network/codec, shared SL, independent transition/geometry and learning-env consumers. |
 | Robot world model (RWM) | `embodichain.extensions.models.dynamics.rwm` | Implemented. |
+| LeWM visual latent dynamics | `embodichain.extensions.models.dynamics.lewm` | Image-conditioned dynamics, shared SL and CEM planning. |
 | RigidFormer | `embodichain.extensions.models.dynamics.rigidformer` | Native author architecture, official weights and shared-SL recipe. |
 | WorldParticle | `embodichain.extensions.models.dynamics.worldparticle` | Frozen particle transition; optional native deployment and operator qualification are separate. |
 

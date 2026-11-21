@@ -65,6 +65,7 @@ from .rigid import (
     NewtonCollisionPropertiesCfg,
     NewtonRigidBodyMaterialCfg,
     RigidBodyMaterialCfg,
+    DefaultRigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
 )
 from .rigid_object import RigidObjectCfg, RigidObjectGroupCfg
@@ -126,6 +127,7 @@ __all__ = [
     "DefaultCollisionPropertiesCfg",
     "NewtonCollisionPropertiesCfg",
     "RigidBodyMaterialCfg",
+    "DefaultRigidBodyMaterialCfg",
     "NewtonRigidBodyMaterialCfg",
     "RigidBodyPhysicsCfg",
     "ObjectBaseCfg",

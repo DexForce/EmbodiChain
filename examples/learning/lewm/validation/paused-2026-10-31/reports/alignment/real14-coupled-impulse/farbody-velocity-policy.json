@@ -1,0 +1,5 @@
+{
+  "scope": "robot min velocity iterations0 with one distant, noncontacting dynamic cube requesting1; no contact or parameter change on robot",
+  "max_pre_implicit_velocity_error": 0.03855068928510006,
+  "max_motion_final_velocity_difference": 0.038553185760974884
+}

@@ -16,7 +16,10 @@ topics:
     fixed-cadence playback, FluidObjectCfg, FluidSpawnCfg, FluidObject, sph_cfg, DFSPH, revolved_volume, fill_level,
     粒子采样, fluid, 流体, quaternion, xyzw, cable, CableObject, CableObjectCfg,
     CableObjectData, 线缆对象,
-    CompoundShapeCfg, ShapePartCfg, CylinderCfg, env_variants, enable_ground_plane, ground_plane_attrs]
+    CompoundShapeCfg, ShapePartCfg, CylinderCfg, env_variants, enable_ground_plane, ground_plane_attrs,
+    enable_tgs, DefaultRigidBodyMaterialCfg, compliant_contact_stiffness,
+    compliant_contact_damping, 柔顺接触, RigidConstraintCfg, linear_drive_velocity,
+    linear_drive_point_anchors, update_rigid_constraint_linear_drive]
   paths: [topics/simulation-system/simulation-system.md]
   source_of_truth:
   - embodichain/lab/sim/motion/__init__.py
@@ -749,4 +752,17 @@ topics:
     tests/gym/envs/tasks/test_motion_model.py, docs/source/features/neural_dynamics/rwm.md,
     docs/source/api_reference/rwm.rst]
   related_topics: [supervised-learning, learning-layers, neural-dynamics]
+  status: active
+
+- id: visual-world-model
+  title: Visual World Model
+  aliases: [visual world model, LeWM, LeWorldModel, 视觉世界模型, 图像世界模型]
+  keywords: [LeWMCfg, LeWMSequenceSource, LeWMObjective, LeWMCEMPlanner, build_lewm_trainer, preprocess_rgb]
+  paths: [topics/visual-world-model/visual-world-model.md]
+  source_of_truth:
+  - embodichain/extensions/models/dynamics/lewm/
+  - examples/learning/lewm/
+  - embodichain/extensions/tasks/manipulation/ogbench_cube.py
+  watch_paths: [tests/models/dynamics/lewm/, tests/gym/envs/tasks/test_ogbench_cube.py, docs/source/api_reference/lewm.rst]
+  related_topics: [supervised-learning, data-pipeline, robot-world-model, env-framework]
   status: active

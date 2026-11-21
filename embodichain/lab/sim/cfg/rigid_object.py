@@ -23,7 +23,7 @@ from dataclasses import MISSING, field
 import os
 import warnings
 import numpy as np
-from typing import Any, Dict, Literal
+from typing import Any, Dict, Literal, Sequence
 
 from dexsim.types import ActorType
 
@@ -96,6 +96,16 @@ class RigidObjectCfg(ObjectBaseCfg):
     """Geometry scale for procedural bodies or USD ``overlay`` mode.
 
     USD ``preserve`` mode retains its source scale."""
+
+    collision_filter_data: Sequence[int] | None = None
+    """Optional four-word Default collision filter authored before spawning.
+
+    This also supports static objects without runtime state buffers. The first
+    two words select Arena isolation; isolated replication replaces those words
+    with its own arena selection. The last two encode category/exclusion masks
+    and are preserved across replicas.
+    Newton does not consume these Default-native filter words.
+    """
 
     asset_physics_mode: AssetPhysicsMode = "preserve"
     """How a file-backed asset's physical properties are handled.
