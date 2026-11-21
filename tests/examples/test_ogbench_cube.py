@@ -27,7 +27,7 @@ import numpy as np
 import pytest
 import torch
 
-from embodichain.extensions.tasks.manipulation.ogbench_cube import (
+from examples.learning.lewm.cube._env import (
     OGBenchCubeCfg,
     OGBenchCubeEnv,
     _CubeController,
@@ -44,7 +44,7 @@ def test_dexuni_authors_connect_anchors_before_the_joint_equality(
     from dexsim.spawn import NewtonEqualityDesc
     from dexsim.spawn.adapters.newton_adapter import NewtonSpawnAdapter
 
-    from embodichain.extensions.tasks.manipulation._ogbench_cube_newton import (
+    from examples.learning.lewm.cube._newton import (
         _CubeNewtonSpawnAdapter,
     )
 

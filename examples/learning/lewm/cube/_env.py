@@ -38,7 +38,6 @@ import torch
 from tensordict import TensorDict
 
 from embodichain.lab.gym.envs import BaseEnv, EnvCfg
-from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.sim import SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     ArticulationRootPropertiesCfg,
@@ -176,9 +175,6 @@ class OGBenchCubeCfg(EnvCfg):
     seed: int = 42
 
 
-@register_env(
-    "OGBenchCubeDexUni-v0", max_episode_steps=100, supports_handwritten_demo=False
-)
 class OGBenchCubeEnv(BaseEnv):
     """Single cube with reference XYZ, yaw and gripper control on DexUni."""
 
@@ -319,7 +315,7 @@ class OGBenchCubeEnv(BaseEnv):
     def _prepare_scene(self, **kwargs: Any) -> None:
         from dexsim.spawn import NewtonEqualityDesc, NewtonSceneDesc
 
-        from ._ogbench_cube_newton import _CubeNewtonSpawnAdapter
+        from ._newton import _CubeNewtonSpawnAdapter
 
         geoms = self.contract["geoms"]
         static = {"floor", *(g["name"] for g in geoms if g["name"].startswith("wall_"))}

@@ -18,8 +18,8 @@ Its validation diagnostics compare fixed physical candidates; frozen-visual
 predictor ablations use the common SL trainer and source-bound latent caches.
 CEM sampling and sequence-selection options are recorded evaluation contracts.
 `official-eval-reference` uses the pinned original evaluator.
-`OGBenchCubeDexUni-v0` owns the DexUni CPU rigid-body scene and authors its
-gripper linkage before finalization.
+The Cube example constructs its DexUni CPU environment from `cube/_env.py`
+and authors the gripper linkage before finalization.
 `embodichain run-example learning/lewm/cube` prepares pinned public inputs,
 collects RGB, exports a validation-selected model and renders initial, goal and
 replanning observations through the native camera. The single-world CPU solver

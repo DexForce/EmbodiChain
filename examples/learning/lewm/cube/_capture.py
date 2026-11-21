@@ -72,7 +72,7 @@ def _init_pairs(
     with rank.get_lock():
         gpu_id = gpu_ids[rank.value % len(gpu_ids)]
         rank.value += 1
-    _env = _make_cube(resources.reference, 1, gpu_id).unwrapped
+    _env = _make_cube(resources.reference, 1, gpu_id)
     _source = h5py.File(resources.data, "r")
     _pair_root = root
     Finalize(None, _close_pairs, exitpriority=10)

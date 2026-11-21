@@ -35,14 +35,12 @@ import numpy as np
 import torch
 
 from dexsim.engine.newton_physics.backend_registry import get_newton_backend
-from embodichain.extensions.tasks.manipulation.ogbench_cube import (
-    _source_state_observation,
-)
 from embodichain.lab.sim import SimulationManager
 from .._official_eval import _native_state
 from .._official_native import _make_cube, _pixels, _NATIVE_RENDER
 
 from ._capture import _episode_splits
+from ._env import _source_state_observation
 from ._resources import _CubeResources
 
 _env = _source = _output = _solver = _oracle = None
@@ -63,7 +61,7 @@ def _setup(reference, source, output, ogbench, devices, worker_id):
     with worker_id.get_lock():
         index = worker_id.value
         worker_id.value += 1
-    _env = _make_cube(reference, 1, devices[index % len(devices)]).unwrapped
+    _env = _make_cube(reference, 1, devices[index % len(devices)])
     _source, _output = h5py.File(source, "r"), output
     _solver = get_newton_backend(_env.sim._world).mujoco_solver
     _pad = _solver.mj_model.body("arena_0_ur5e_robotiq_right_pad").id

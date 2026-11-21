@@ -2,8 +2,8 @@
 
 Prepare the pinned OGBench single-Cube resources, collect EmbodiChain camera
 observations, train LeWM, and evaluate the same 50 queries as the upstream
-example. The closed-loop rollout runs in the registered
-`OGBenchCubeDexUni-v0` environment.
+example. The closed-loop rollout constructs the example's DexUni environment
+from `_env.py`.
 
 Start with the [runtime setup](DEPLOYMENT.md). The [validation record](VALIDATION.md)
 gives measured success rates and the [task contract](../OFFICIAL_CUBE.md)

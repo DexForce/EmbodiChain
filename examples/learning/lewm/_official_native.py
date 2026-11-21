@@ -25,15 +25,14 @@ import time
 from typing import Any
 import xml.etree.ElementTree as ET
 
-import gymnasium as gym
 import h5py
 import numpy as np
 import torch
 
-from embodichain.extensions.tasks.manipulation.ogbench_cube import OGBenchCubeCfg
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.cfg import DenoisingCfg, RenderCfg
 
+from .cube._env import OGBenchCubeCfg, OGBenchCubeEnv
 from ._official_data import HDF5_SHA256
 from ._reference import _sha
 
@@ -108,7 +107,7 @@ def prepare_dexuni_reference(reference: Path, output: Path) -> dict[str, Any]:
 
 def _make_cube(
     reference: Path, num_envs: int, gpu_id: int, *, images: bool = True
-) -> gym.Env:
+) -> OGBenchCubeEnv:
     cfg = OGBenchCubeCfg(
         reference_root=str(reference), num_envs=num_envs, enable_images=images
     )
@@ -120,7 +119,7 @@ def _make_cube(
     cfg.sim_cfg.enable_entity_gizmo = False
     cfg.sim_cfg.robot_ik_gizmo = None
     cfg.sim_cfg.startup_summary = "off"
-    return gym.make("OGBenchCubeDexUni-v0", cfg=cfg)
+    return OGBenchCubeEnv(cfg)
 
 
 def _pixels(obs: Any) -> np.ndarray:
@@ -178,7 +177,7 @@ def _planner_weights(
 
 
 def _reset_at(
-    env: gym.Env, qpos: np.ndarray, qvel: np.ndarray, goal: np.ndarray
+    env: OGBenchCubeEnv, qpos: np.ndarray, qvel: np.ndarray, goal: np.ndarray
 ) -> tuple[Any, np.ndarray, np.ndarray]:
     from ._official_eval import _native_state
 
@@ -237,7 +236,7 @@ def evaluate_dexuni_cube(
     actions = np.full((budget, count, 5), np.nan, dtype=np.float32)
     plans = np.full((2, count, block_steps, 5), np.nan, dtype=np.float32)
     start = time.monotonic()
-    env = _make_cube(reference, 1, gpu_id).unwrapped
+    env = _make_cube(reference, 1, gpu_id)
     try:
         solver = env.sim.spawn_result.get_solver_diagnostics()
         if not solver or solver["solver_type"] != "dexuni" or solver["empty"]:

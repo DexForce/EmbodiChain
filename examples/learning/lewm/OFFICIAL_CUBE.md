@@ -7,7 +7,7 @@ in [VALIDATION.md](cube/VALIDATION.md).
 
 ## Scene and controller
 
-The `OGBenchCubeDexUni-v0` task uses the compiled UR5e and Robotiq 2F85
+The example's DexUni environment uses the compiled UR5e and Robotiq 2F85
 asset export and five-dimensional controller.
 
 | Boundary | Setting |

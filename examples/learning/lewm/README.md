@@ -9,7 +9,7 @@ offline training and planning from outside the simulator.
 
 The [Cube example](cube/README.md) prepares pinned inputs, renders native RGB,
 trains a validation-selected checkpoint and runs the official 50-query
-benchmark. It uses the registered `OGBenchCubeDexUni-v0` task on DexUni CPU
+benchmark. It constructs the Cube environment on DexUni CPU
 rigid-body physics with an EmbodiChain camera. Use the
 [deployment guide](cube/DEPLOYMENT.md) to set up the SDK and Python environment.
 
