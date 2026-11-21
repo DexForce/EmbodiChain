@@ -6,3 +6,5 @@ default_deployment: franka
 deployments:
   franka:
     config: task.franka.yaml
+  franka_policy:
+    config: task.policy.franka.yaml

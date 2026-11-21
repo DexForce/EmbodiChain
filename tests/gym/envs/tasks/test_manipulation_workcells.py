@@ -33,14 +33,14 @@ from embodichain.utils.utility import load_config
 
 
 @contextmanager
-def _workcell(name: str, num_envs: int):
-    import embodichain.extensions.tasks  # Register handwritten task environments.
+def _workcell(name: str, num_envs: int, deployment: str = "task.franka.yaml"):
+    import embodichain.extensions.tasks  # Register the workcells.
 
     source = (
         Path(__file__).resolve().parents[4]
         / "embodichain/extensions/tasks/configs/tasks/manipulation"
         / name
-        / "task.franka.yaml"
+        / deployment
     )
     payload = load_config(source)
     payload.update(
@@ -57,7 +57,9 @@ def _workcell(name: str, num_envs: int):
 
 
 def _check_microwave_door():
-    with _workcell("robocasa365_open_microwave", num_envs=2) as env:
+    with _workcell(
+        "robocasa365_open_microwave", num_envs=2, deployment="task.policy.franka.yaml"
+    ) as env:
         fixture = env.sim.get_articulation("microwave")
         joint = fixture.joint_names.index("microwave_right_group_1_microjoint")
         assert not env.is_task_success().any()
@@ -120,6 +122,54 @@ def _check_drawer_episode():
         assert result.completed and result.all_success, result.to_metadata()
 
 
+def _check_microwave_program_binding():
+    from dataclasses import replace
+
+    from embodichain.lab.gym.envs.task_program._final_acceptance import (
+        _measure_final_conditions,
+    )
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_registered_lowerer,
+    )
+
+    with _workcell("robocasa365_open_microwave", num_envs=2) as env:
+        source = (
+            Path(__file__).resolve().parents[4]
+            / "embodichain/extensions/tasks/configs/"
+            "tasks/manipulation/robocasa365_open_microwave/task_program/integration.yaml"
+        )
+        (spec,) = load_config(source)["runtime_services"][
+            "registered_semantic_lowerers"
+        ]
+        factory = _decode_registered_lowerer(
+            spec, path="registered_semantic_lowerers[0]"
+        )
+        fixture = env.sim.get_articulation("microwave")
+        link = "microwave_right_group_1_door"
+        box = factory._handle_shape(fixture, link)
+        torch.testing.assert_close(
+            2 * box.half_extents,
+            torch.tensor([0.029067, 0.021635, 0.284199]),
+            atol=1e-5,
+            rtol=0,
+        )
+        with pytest.raises(ValueError, match="found 0"):
+            replace(factory, handle_point=(1.0, 1.0, 1.0))._handle_shape(fixture, link)
+        with pytest.raises(ValueError, match="opening_direction"):
+            _decode_registered_lowerer(
+                dict(spec, opening_direction=0), path="registered_semantic_lowerers[0]"
+            )
+
+        joint = fixture.joint_names.index("microwave_right_group_1_microjoint")
+        fixture.set_qpos(
+            torch.deg2rad(torch.tensor([[-80.0], [-85.0]])),
+            joint_ids=[joint],
+            target=False,
+        )
+        observed = _measure_final_conditions(env, env._final_acceptance_rules)
+        assert observed.satisfied.tolist() == [False, True]
+
+
 def _check_microwave_episode():
     from embodichain.lab.gym.envs.demo import execute_demo_episode
 
@@ -127,6 +177,16 @@ def _check_microwave_episode():
         assert not env.is_task_success().any()
         result = execute_demo_episode(env)
         assert result.completed and result.all_success, result.to_metadata()
+        assert [segment.name for segment in result.segments] == ["open_door"]
+        (call,) = result.to_metadata()["segments"][0]["metadata"]["runtime"]["calls"]
+        assert call["semantic_id"] == "simulation.open_door"
+        assert call["skill_id"] == "open_door"
+        assert call["command_count"] > 0
+        fixture = env.sim.get_articulation("microwave")
+        joint = fixture.joint_names.index("microwave_right_group_1_microjoint")
+        lower, upper = fixture.get_qpos_limits()[0, joint]
+        opening = (upper - fixture.get_qpos()[0, joint]) / (upper - lower)
+        assert opening >= 0.9
         assert bool(env.is_task_success()[0])
 
 
@@ -137,6 +197,7 @@ def _check_microwave_episode():
     [
         "_check_microwave_door",
         "_check_drawer_storage",
+        "_check_microwave_program_binding",
         pytest.param("_check_drawer_episode", marks=pytest.mark.slow),
         pytest.param("_check_microwave_episode", marks=pytest.mark.slow),
     ],

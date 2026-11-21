@@ -5322,6 +5322,8 @@ embodichain.extensions.tasks.manipulation.robocasa365_open_microwave
 
 The fixture workcell exposes the original microwave hinge position, an arm and
 gripper action space, and a per-arena measurement of the opening fraction.
+The catalog also supplies an expert Task Program that binds the existing
+OpenDoor skill to the physical handle box and negative-opening hinge.
 
 .. currentmodule:: embodichain.extensions.tasks.manipulation.robocasa365_open_microwave
 

@@ -1,32 +1,22 @@
-environment_id: robocasa365_open_microwave
+id: RoboCasa365OpenMicrowave-Franka-v1
+scene:
+  component: scene.yaml
 physics: default
 max_episodes: 1
 max_episode_steps: 300
 num_envs: 1
 arena_space: 3.0
-simulation:
-  light:
-    direct:
-    - uid: workcell_light
-      light_type: sun
-      color: [1.0, 1.0, 1.0]
-      intensity: 3.0
-      direction: [-0.3, 0.5, -1.0]
-  articulation:
-  - uid: microwave
-    fpath: RoboCasa365Microwave048/Microwave048.usdc
-    init_pos: [0, 0, 0.64363]
-    root_props: {fixed_base: true}
-
-  background:
-  - uid: robot_pedestal
-    body_type: static
-    shape: {shape_type: Cube, size: [0.22, 0.22, 0.32]}
-    init_pos: [-0.10, -1.00, 0.16]
-  - uid: counter
-    body_type: static
-    shape: {shape_type: Cube, size: [0.80, 0.55, 0.40]}
-    init_pos: [0, 0, 0.2]
+embodiment:
+  component: ../../../components/embodiments/franka_panda.yaml
+  camera_overrides:
+    cam_high:
+      extrinsics:
+        eye: [0.82, -1.22, 1.00]
+        target: [0.0, -0.12, 0.42]
+        up: [0, 0, 1]
+  overrides:
+    init_pos: [-0.10, -1.00, 0.32]
+    init_rot: [0, 0, 93]
 env:
   task_instruction: Open the microwave door.
   sim_steps_per_control: 4

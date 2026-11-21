@@ -1,0 +1,19 @@
+policy_id: robocasa365_open_microwave_franka_trajectory_v1
+preset_id: trajectory
+requires: {embodiment_contract: single_arm_parallel_gripper}
+motion:
+  strategy: ik_interp
+  ik_seed_mode: sequential
+  interpolation_mode: fixed_grid
+  acceleration_limit: null
+  velocity_limit: null
+  sample_count: 292
+  dynamic_collision_mode: "off"
+tracking: {kind: timed}
+recovery:
+  max_replans: 0
+  max_action_retries: 0
+  action_timeout: 18
+workflow_recovery: {max_recovery_attempts: 0}
+runner: {minimum_cycle_time: 0, hold_on_completion: false, hold_during_effect_verification: false}
+effect_assurance: projected

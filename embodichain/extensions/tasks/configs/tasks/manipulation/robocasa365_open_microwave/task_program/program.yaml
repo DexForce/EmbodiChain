@@ -1,0 +1,13 @@
+program_id: robocasa365_open_microwave
+instruction: Open the microwave door.
+targets: {}
+program:
+  segment: open_door
+  instruction: Grasp the handle and pull the door open.
+  steps:
+    registered:
+      call_id: simulation.open_door
+      arguments: {object: door, state: open}
+  validators:
+  - kind: condition
+    ref: door_open
