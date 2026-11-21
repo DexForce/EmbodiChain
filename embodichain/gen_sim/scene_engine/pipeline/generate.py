@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.task_spec_input import (
-    load_task_entities,
+    load_task_spec_input,
 )
 from embodichain.gen_sim.services.compat import VisionClient
 from embodichain.gen_sim.services.compat import GeometryClient
@@ -76,8 +76,8 @@ def generate_scene_from_image(
     Args:
         image_path: Source tabletop image.
         output_root: Directory receiving intermediate and exported artifacts.
-        task_spec: Optional JSON whose entity IDs and articulation flags are
-            matched to the image's normally analyzed objects.
+        task_spec: Optional JSON whose instruction and entity references identify
+            segmented image objects and provide their IDs and articulation flags.
         scene_z_rotation_degrees: Final counterclockwise world-z rotation applied
             rigidly to the complete scene before export.
         scene_randomization: Optional grouped layout policy applied to the final
@@ -94,10 +94,10 @@ def generate_scene_from_image(
             raise ValueError("TaskSpec input requires an image.")
         if scene_randomization is not None:
             raise ValueError("TaskSpec input cannot be combined with randomization.")
-    task_entities = (
-        load_task_entities(Path(task_spec).expanduser().resolve())
+    task_input = (
+        load_task_spec_input(Path(task_spec).expanduser().resolve())
         if task_spec is not None
-        else ()
+        else None
     )
     resolved_output_root = Path(output_root).expanduser().resolve()
     resolved_output_root.mkdir(parents=True, exist_ok=True)
@@ -118,7 +118,7 @@ def generate_scene_from_image(
             output_root=resolved_output_root,
             vlm_client=vlm_client,
             image_segmentation_client=image_segmentation_client,
-            task_entities=task_entities,
+            task_input=task_input,
         )
     finally:
         image_segmentation_client.close()  # Close the session after scene understanding.

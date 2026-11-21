@@ -271,7 +271,7 @@ def test_task_spec_rejects_unsupported_cli_modes_before_generation(
 
 
 @pytest.mark.parametrize("has_task_spec", [False, True])
-def test_generate_forwards_task_entities_to_normal_understanding(
+def test_generate_forwards_task_input_to_normal_understanding(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, has_task_spec: bool
 ) -> None:
     task_spec = tmp_path / "task_spec.json"
@@ -279,6 +279,7 @@ def test_generate_forwards_task_entities_to_normal_understanding(
         json.dumps(
             {
                 "schema_version": "task_spec/v1",
+                "inputs": {"instruction": "Press the red button."},
                 "interpretation": {
                     "references": [
                         {
@@ -304,9 +305,14 @@ def test_generate_forwards_task_entities_to_normal_understanding(
         pass
 
     def understand(**kwargs):
+        task_input = kwargs["task_input"]
+        if has_task_spec:
+            assert task_input.instruction == "Press the red button."
+        else:
+            assert task_input is None
         assert [
             (entity.id, entity.description, entity.is_articulated)
-            for entity in kwargs["task_entities"]
+            for entity in (task_input.entities if task_input is not None else ())
         ] == ([("evidence_001", "red button", True)] if has_task_spec else [])
         raise UnderstandingComplete
 

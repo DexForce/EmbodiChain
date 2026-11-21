@@ -276,15 +276,42 @@ def render_numbered_mask_candidates(
     output_path: str | Path,
     mask_style: str = "fill",
     label_avoid_mask: Image.Image | None = None,
+    include_candidate_details: bool = False,
+    detail_image_path: str | Path | None = None,
 ) -> Path:
-    """Overlay numbered mask candidates on their source image.
-    Notice that:
-        - mask_style can be either "fill" or "outline".
-        - The label font and its background scale with the source image resolution.
-        - label_avoid_mask keeps labels outside known occluding regions.
+    """Render candidate numbers over an image, optionally with exact-pixel cards.
+
+    Args:
+        image_path: Source image used for the overview. It may have known assets
+            grayed out when choosing a table mask.
+        candidates: Masks and their selectable IDs. No candidate is removed or
+            renumbered by this renderer.
+        output_path: Destination PNG path.
+        mask_style: Either ``"fill"`` or ``"outline"`` for the overview.
+        label_avoid_mask: Regions to avoid when placing overview labels.
+        include_candidate_details: Append one independently labeled card per
+            mask. Included source pixels retain their RGB appearance; excluded
+            regions, including holes, are uniformly gray. Cards preserve nearby
+            context so missing visible parts remain apparent.
+        detail_image_path: Optional unmodified source for the detail cards. Its
+            dimensions must match the overview image. Defaults to ``image_path``.
+            Only used when ``include_candidate_details`` is true.
+
+    Returns:
+        Absolute path to the rendered image.
     """
     if mask_style not in {"fill", "outline"}:
         raise ValueError("mask_style must be 'fill' or 'outline'.")
+
+    if include_candidate_details:
+        return _render_mask_selection_sheet(
+            image_path=image_path,
+            detail_image_path=detail_image_path,
+            candidates=candidates,
+            output_path=output_path,
+            mask_style=mask_style,
+            label_avoid_mask=label_avoid_mask,
+        )
 
     image = Image.open(image_path).convert("RGBA")
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
@@ -365,6 +392,326 @@ def render_numbered_mask_candidates(
     resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
     Image.alpha_composite(image, overlay).convert("RGB").save(resolved_output_path)
     return resolved_output_path
+
+
+_SELECTION_COLORS = (
+    (239, 83, 80),
+    (66, 165, 245),
+    (102, 187, 106),
+    (255, 202, 40),
+    (171, 71, 188),
+    (38, 198, 218),
+)
+_SELECTION_GRAY = (200, 203, 208)
+
+
+def _render_mask_selection_sheet(
+    *,
+    image_path: str | Path,
+    detail_image_path: str | Path | None,
+    candidates: list[MaskCandidate],
+    output_path: str | Path,
+    mask_style: str,
+    label_avoid_mask: Image.Image | None,
+) -> Path:
+    """Keep all candidate IDs and show each exact included region separately."""
+    indices = [candidate.index for candidate in candidates]
+    if any(type(index) is not int or index < 1 for index in indices):
+        raise ValueError("Mask candidate IDs must be positive integers.")
+    if len(indices) != len(set(indices)):
+        raise ValueError("Mask candidate IDs must be unique.")
+    with Image.open(image_path) as loaded_image:
+        image = loaded_image.convert("RGB")
+    if detail_image_path is None:
+        detail_image = image
+    else:
+        with Image.open(detail_image_path) as loaded_image:
+            detail_image = loaded_image.convert("RGB")
+        _require_image_size(detail_image, image.size)
+
+    decoded_masks = []
+    for candidate in candidates:
+        mask = decode_rle_mask(candidate.mask_rle)
+        _require_image_size(mask, image.size)
+        if mask.getbbox() is None:
+            raise ValueError(
+                f"Image Segmentation Server candidate {candidate.index} has an empty mask."
+            )
+        decoded_masks.append((candidate, mask))
+
+    overview_width = min(960, image.width)
+    overview_size = (
+        overview_width,
+        max(1, round(image.height * overview_width / image.width)),
+    )
+    overview = image.resize(overview_size, Image.Resampling.LANCZOS).convert("RGBA")
+    overlay = Image.new("RGBA", overview_size, (0, 0, 0, 0))
+    overview_masks = []
+    for candidate, mask in decoded_masks:
+        visible_mask = mask.resize(overview_size, Image.Resampling.NEAREST)
+        if visible_mask.getbbox() is None:
+            # A tiny candidate may vanish in a thumbnail, but must remain
+            # selectable. Preserve a single display pixel at its source anchor.
+            anchor = _selection_mask_anchor(mask)
+            visible_mask.putpixel(
+                (
+                    min(
+                        overview_width - 1,
+                        round(anchor[0] * overview_width / image.width),
+                    ),
+                    min(
+                        overview_size[1] - 1,
+                        round(anchor[1] * overview_size[1] / image.height),
+                    ),
+                ),
+                255,
+            )
+        overview_masks.append((candidate, visible_mask))
+        color = _SELECTION_COLORS[(candidate.index - 1) % len(_SELECTION_COLORS)]
+        rendered_mask = (
+            visible_mask
+            if mask_style == "fill"
+            else _mask_outer_outline(visible_mask, overview_size)
+        )
+        overlay.alpha_composite(
+            Image.composite(
+                Image.new("RGBA", overview_size, (*color, 110)),
+                Image.new("RGBA", overview_size),
+                rendered_mask,
+            )
+        )
+    overview = Image.alpha_composite(overview, overlay).convert("RGB")
+
+    blocked = None
+    if label_avoid_mask is not None:
+        _require_image_size(label_avoid_mask, image.size)
+        blocked = label_avoid_mask.convert("L").resize(
+            overview_size, Image.Resampling.NEAREST
+        )
+    overview_draw = ImageDraw.Draw(overview)
+    label_font = _load_label_font_at_size(22)
+    occupied: list[tuple[int, int, int, int]] = []
+    for candidate, mask in overview_masks:
+        color = _SELECTION_COLORS[(candidate.index - 1) % len(_SELECTION_COLORS)]
+        anchor = _selection_mask_anchor(mask)
+        bounds = _selection_label_bounds(
+            image_size=overview_size,
+            anchor=anchor,
+            label=str(candidate.index),
+            font=label_font,
+            occupied=occupied,
+            blocked=blocked,
+        )
+        occupied.append(bounds)
+        center = ((bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2)
+        overview_draw.line((anchor, center), fill="white", width=5)
+        overview_draw.line((anchor, center), fill=color, width=3)
+        overview_draw.ellipse(
+            (anchor[0] - 3, anchor[1] - 3, anchor[0] + 3, anchor[1] + 3),
+            fill=color,
+            outline="white",
+        )
+        _draw_selection_label(
+            overview_draw, bounds, str(candidate.index), color, label_font
+        )
+
+    header_height, card_width, card_height = 64, 360, 224
+    columns = (
+        0
+        if not candidates
+        else 1 if len(candidates) <= 4 else 2 if len(candidates) <= 10 else 3
+    )
+    rows = math.ceil(len(candidates) / columns) if columns else 0
+    canvas = Image.new(
+        "RGB",
+        (
+            overview_width + columns * card_width,
+            header_height + max(overview_size[1], rows * card_height),
+        ),
+        (245, 246, 248),
+    )
+    canvas.paste(overview, (0, header_height))
+    draw = ImageDraw.Draw(canvas)
+    draw.text(
+        (12, 8),
+        "Candidate overview",
+        fill=(23, 33, 45),
+        font=_load_label_font_at_size(22),
+    )
+    if candidates:
+        draw.text(
+            (overview_width + 10, 8),
+            "Mask cards: RGB = included",
+            fill=(23, 33, 45),
+            font=_load_label_font_at_size(17),
+        )
+        draw.text(
+            (overview_width + 10, 32),
+            "Gray = excluded pixels",
+            fill=(23, 33, 45),
+            font=_load_label_font_at_size(17),
+        )
+    else:
+        draw.text(
+            (12, 36),
+            "No candidate masks returned.",
+            fill=(23, 33, 45),
+            font=_load_label_font_at_size(17),
+        )
+    for position, (candidate, mask) in enumerate(decoded_masks):
+        column, row = position % columns, position // columns
+        origin = (
+            overview_width + column * card_width,
+            header_height + row * card_height,
+        )
+        _draw_candidate_detail_card(
+            canvas=canvas,
+            image=detail_image,
+            mask=mask,
+            candidate_index=candidate.index,
+            origin=origin,
+            card_size=(card_width, card_height),
+        )
+
+    resolved_output_path = Path(output_path).expanduser().resolve()
+    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(resolved_output_path)
+    return resolved_output_path
+
+
+def _selection_mask_anchor(mask: Image.Image) -> tuple[int, int]:
+    """Find an included pixel near the mask bounds' center without filling holes."""
+    bounds = mask.getbbox()
+    assert bounds is not None
+    middle_x, middle_y = (bounds[0] + bounds[2]) // 2, (bounds[1] + bounds[3]) // 2
+    if mask.getpixel((middle_x, middle_y)):
+        return middle_x, middle_y
+    _, rows = mask.getprojection()
+    selected_y = min(
+        (y for y in range(bounds[1], bounds[3]) if rows[y]),
+        key=lambda y: abs(y - middle_y),
+    )
+    pixels = mask.crop((0, selected_y, mask.width, selected_y + 1)).tobytes()
+    selected_x = min(
+        (x for x in range(bounds[0], bounds[2]) if pixels[x]),
+        key=lambda x: abs(x - middle_x),
+    )
+    return selected_x, selected_y
+
+
+def _selection_label_bounds(
+    *,
+    image_size: tuple[int, int],
+    anchor: tuple[int, int],
+    label: str,
+    font: ImageFont.ImageFont,
+    occupied: list[tuple[int, int, int, int]],
+    blocked: Image.Image | None,
+) -> tuple[int, int, int, int]:
+    """Prefer nearby non-overlapping callouts over stacked labels on one object."""
+    text_bounds = font.getbbox(label)
+    width = min(image_size[0], text_bounds[2] - text_bounds[0] + 20)
+    height = min(image_size[1], text_bounds[3] - text_bounds[1] + 16)
+    offsets = (
+        (30, -36),
+        (-30 - width, -36),
+        (30, 12),
+        (-30 - width, 12),
+        (40, -80),
+        (-40 - width, -80),
+        (40, 60),
+        (-40 - width, 60),
+        (0, 0),
+    )
+    options = []
+    for x_offset, y_offset in offsets:
+        left = max(0, min(image_size[0] - width, anchor[0] + x_offset))
+        top = max(0, min(image_size[1] - height, anchor[1] + y_offset))
+        bounds = (left, top, left + width, top + height)
+        overlap = sum(
+            max(0, min(bounds[2], other[2]) - max(bounds[0], other[0]))
+            * max(0, min(bounds[3], other[3]) - max(bounds[1], other[1]))
+            for other in occupied
+        )
+        blocked_count = (
+            _foreground_pixel_count(blocked.crop(bounds)) if blocked is not None else 0
+        )
+        distance = abs(left + width / 2 - anchor[0]) + abs(top + height / 2 - anchor[1])
+        options.append(((overlap, blocked_count, distance), bounds))
+    return min(options, key=lambda option: option[0])[1]
+
+
+def _draw_selection_label(
+    draw: ImageDraw.ImageDraw,
+    bounds: tuple[int, int, int, int],
+    label: str,
+    color: tuple[int, int, int],
+    font: ImageFont.ImageFont,
+) -> None:
+    draw.rounded_rectangle(bounds, radius=4, fill=color, outline="white", width=2)
+    text_bounds = draw.textbbox((0, 0), label, font=font)
+    center_x, center_y = (bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2
+    draw.text(
+        (
+            center_x - (text_bounds[2] - text_bounds[0]) / 2 - text_bounds[0],
+            center_y - (text_bounds[3] - text_bounds[1]) / 2 - text_bounds[1],
+        ),
+        label,
+        fill=(23, 33, 45),
+        font=font,
+    )
+
+
+def _draw_candidate_detail_card(
+    *,
+    canvas: Image.Image,
+    image: Image.Image,
+    mask: Image.Image,
+    candidate_index: int,
+    origin: tuple[int, int],
+    card_size: tuple[int, int],
+) -> None:
+    """Composite after resizing so excluded holes retain an exact uniform gray."""
+    bounds = mask.getbbox()
+    assert bounds is not None
+    margin = max(16, round(max(bounds[2] - bounds[0], bounds[3] - bounds[1]) / 4))
+    crop_bounds = (
+        max(0, bounds[0] - margin),
+        max(0, bounds[1] - margin),
+        min(image.width, bounds[2] + margin),
+        min(image.height, bounds[3] + margin),
+    )
+    crop, crop_mask = image.crop(crop_bounds), mask.crop(crop_bounds)
+    available_size = (card_size[0] - 20, card_size[1] - 44)
+    scale = min(1.0, available_size[0] / crop.width, available_size[1] / crop.height)
+    detail_size = (
+        max(1, round(crop.width * scale)),
+        max(1, round(crop.height * scale)),
+    )
+    crop = crop.resize(detail_size, Image.Resampling.LANCZOS)
+    crop_mask = crop_mask.resize(detail_size, Image.Resampling.NEAREST)
+    detail = Image.composite(
+        crop, Image.new("RGB", detail_size, _SELECTION_GRAY), crop_mask
+    )
+    canvas.paste(
+        detail,
+        (
+            origin[0] + (card_size[0] - detail.width) // 2,
+            origin[1] + 36 + (available_size[1] - detail.height) // 2,
+        ),
+    )
+    draw = ImageDraw.Draw(canvas)
+    color = _SELECTION_COLORS[(candidate_index - 1) % len(_SELECTION_COLORS)]
+    draw.rectangle(
+        (origin[0] + 4, origin[1] + 4, origin[0] + 10, origin[1] + card_size[1] - 4),
+        fill=color,
+    )
+    draw.text(
+        (origin[0] + 18, origin[1] + 5),
+        f"Mask {candidate_index} | selected pixels",
+        font=_load_label_font_at_size(19),
+        fill=color,
+    )
 
 
 def render_asset_mask_id_overlay(

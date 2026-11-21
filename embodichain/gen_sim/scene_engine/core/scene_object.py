@@ -76,6 +76,17 @@ class SceneObject:
     support_contour_xy: list[list[float]] | None = None  # Outer support contour.
     support_optimization_rect_xy: list[list[float]] | None = None  # Safe XY rectangle.
     physics: ObjectPhysics | None = None  # Assigned when SimReady processing succeeds.
+    table_state: Literal["normal", "degraded"] | None = (
+        None  # Observed table completeness; unknown for legacy scenes.
+    )
+
+    def __post_init__(self) -> None:
+        """Keep observed table completeness separate from asset semantics."""
+        if self.table_state is not None:
+            if self.kind != "table":
+                raise ValueError("table_state is only valid for table objects.")
+            if self.table_state not in ("normal", "degraded"):
+                raise ValueError("table_state must be 'normal', 'degraded', or null.")
 
     def to_dict(self) -> dict[str, object]:
         """Serialize this object and its currently available pipeline artifacts."""
@@ -86,6 +97,7 @@ class SceneObject:
             "name": self.name,
             "description": self.description,
             "is_articulated": self.is_articulated,
+            "table_state": self.table_state,
             "mask_path": self.mask_path,
             "visible_rgba_path": self.visible_rgba_path,
             "simready_glb_path": self.simready_glb_path,

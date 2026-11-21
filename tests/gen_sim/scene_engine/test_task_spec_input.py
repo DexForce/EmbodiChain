@@ -24,7 +24,8 @@ import pytest
 
 from embodichain.gen_sim.scene_engine.task_spec_input import (
     TaskEntity,
-    load_task_entities,
+    TaskSpecInput,
+    load_task_spec_input,
 )
 
 
@@ -34,6 +35,7 @@ def _write_task_spec(tmp_path: Path, references: list[dict[str, Any]]) -> Path:
         json.dumps(
             {
                 "schema_version": "task_spec/v1",
+                "inputs": {"instruction": "Move the referenced objects."},
                 "interpretation": {"references": references},
             }
         ),
@@ -52,7 +54,7 @@ def test_projects_four_references_to_three_entities(tmp_path: Path) -> None:
     path = _write_task_spec(
         tmp_path,
         [
-            {"description": "Unused role description", "entities": [brown_block]},
+            {"description": "The block on the left", "entities": [brown_block]},
             {
                 "entities": [
                     {
@@ -71,10 +73,20 @@ def test_projects_four_references_to_three_entities(tmp_path: Path) -> None:
     )
     original_json = path.read_bytes()
 
-    assert load_task_entities(str(path)) == (
-        TaskEntity("evidence_002", "Brown wood-grain block", False),
-        TaskEntity("evidence_003", "Purple block", True),
-        TaskEntity("evidence_001", "Pale yellow block", False),
+    assert load_task_spec_input(str(path)) == TaskSpecInput(
+        instruction="Move the referenced objects.",
+        entities=(
+            TaskEntity(
+                "evidence_002",
+                "Brown wood-grain block",
+                False,
+                ("The block on the left",),
+            ),
+            TaskEntity("evidence_003", "Purple block", True),
+            TaskEntity(
+                "evidence_001", "Pale yellow block", False, ("Pale yellow block",)
+            ),
+        ),
     )
     assert path.read_bytes() == original_json
 
@@ -84,25 +96,35 @@ def test_combines_distinct_descriptions_for_one_entity(tmp_path: Path) -> None:
         tmp_path,
         [
             {
+                "description": reference,
                 "entities": [
                     {
                         "id": "drawer_01",
                         "description": description,
                         "is_articulated": True,
                     }
-                ]
+                ],
             }
-            for description in ("Brown cabinet", "Cabinet with a silver handle")
+            for description, reference in (
+                ("Brown cabinet", "Open the left cabinet"),
+                ("Cabinet with a silver handle", "Pull its handle"),
+                ("Brown cabinet", "Open the left cabinet"),
+            )
         ],
     )
 
-    assert load_task_entities(path) == (
-        TaskEntity("drawer_01", "Brown cabinet\nCabinet with a silver handle", True),
+    assert load_task_spec_input(path).entities == (
+        TaskEntity(
+            "drawer_01",
+            "Brown cabinet\nCabinet with a silver handle",
+            True,
+            ("Open the left cabinet", "Pull its handle"),
+        ),
     )
 
 
 def test_accepts_empty_references(tmp_path: Path) -> None:
-    assert load_task_entities(_write_task_spec(tmp_path, [])) == ()
+    assert load_task_spec_input(_write_task_spec(tmp_path, [])).entities == ()
 
 
 @pytest.mark.parametrize("flag", [None, 0, "true"])
@@ -115,7 +137,7 @@ def test_rejects_missing_or_non_boolean_articulation_flag(
     path = _write_task_spec(tmp_path, [{"entities": [entity]}])
 
     with pytest.raises(ValueError, match="is_articulated must be an explicit boolean"):
-        load_task_entities(path)
+        load_task_spec_input(path)
 
 
 def test_rejects_conflicting_articulation_flags(tmp_path: Path) -> None:
@@ -136,7 +158,7 @@ def test_rejects_conflicting_articulation_flags(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ValueError, match="Conflicting is_articulated"):
-        load_task_entities(path)
+        load_task_spec_input(path)
 
 
 @pytest.mark.parametrize("entity_id", ["", "../block", "nested/block", "a\\b", "table"])
@@ -157,16 +179,21 @@ def test_rejects_unsafe_or_reserved_entity_ids(tmp_path: Path, entity_id: str) -
     )
 
     with pytest.raises(ValueError, match="safe nonempty asset identifier"):
-        load_task_entities(path)
+        load_task_spec_input(path)
 
 
 @pytest.mark.parametrize(
     "document",
     [
         {"schema_version": "task_spec/v2", "interpretation": {"references": []}},
-        {"schema_version": "task_spec/v1", "interpretation": {"references": {}}},
         {
             "schema_version": "task_spec/v1",
+            "inputs": {"instruction": "Move the cup."},
+            "interpretation": {"references": {}},
+        },
+        {
+            "schema_version": "task_spec/v1",
+            "inputs": {"instruction": "Move the cup."},
             "interpretation": {"references": [{"entities": "invalid"}]},
         },
     ],
@@ -178,4 +205,59 @@ def test_rejects_invalid_consumed_document_structure(
     path.write_text(json.dumps(document), encoding="utf-8")
 
     with pytest.raises(ValueError):
-        load_task_entities(path)
+        load_task_spec_input(path)
+
+
+@pytest.mark.parametrize(
+    "inputs", [{}, {"instruction": None}, {"instruction": ""}, {"instruction": " "}]
+)
+def test_accepts_missing_or_blank_task_instruction(
+    tmp_path: Path, inputs: dict[str, Any]
+) -> None:
+    path = tmp_path / "task_spec.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "task_spec/v1",
+                "inputs": inputs,
+                "interpretation": {
+                    "references": [
+                        {
+                            "description": "The cup on the left",
+                            "entities": [
+                                {
+                                    "id": "cup_01",
+                                    "description": "Blue cup",
+                                    "is_articulated": False,
+                                }
+                            ],
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_task_spec_input(path) == TaskSpecInput(
+        instruction="",
+        entities=(TaskEntity("cup_01", "Blue cup", False, ("The cup on the left",)),),
+    )
+
+
+@pytest.mark.parametrize("inputs", [None, {"instruction": 1}])
+def test_rejects_invalid_instruction_structure(tmp_path: Path, inputs: object) -> None:
+    path = tmp_path / "task_spec.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "task_spec/v1",
+                "inputs": inputs,
+                "interpretation": {"references": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="TaskSpec.inputs"):
+        load_task_spec_input(path)

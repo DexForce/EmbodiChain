@@ -292,6 +292,11 @@ class SceneExporter:
             "name": scene_object.name,
             "description": scene_object.description,
             "is_articulated": scene_object.is_articulated,
+            **(
+                {"table_state": scene_object.table_state}
+                if scene_object.kind == "table"
+                else {}
+            ),
             "shape": {
                 "shape_type": "Mesh",
                 "fpath": asset_relative_path,

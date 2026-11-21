@@ -342,6 +342,7 @@ class SceneExportImporter:
             ),
             description=str(entry.get("description") or uid),
             is_articulated=is_articulated,
+            table_state=entry.get("table_state"),
             simready_glb_path=str(glb_path),
             rot=rot_y_up.tolist(),
             pos=pos_y_up.tolist(),

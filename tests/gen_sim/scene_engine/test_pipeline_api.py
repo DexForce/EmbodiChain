@@ -88,6 +88,7 @@ def _write_task_spec(root: Path) -> Path:
         json.dumps(
             {
                 "schema_version": "task_spec/v1",
+                "inputs": {"instruction": "Open the microwave door."},
                 "interpretation": {
                     "references": [
                         {
@@ -118,11 +119,17 @@ def test_analyze_image_persists_blueprint_and_artifact_hashes(
     image_path.write_bytes(b"image")
     scene, graph = _table_scene()
     task_spec = _write_task_spec(tmp_path) if with_task_spec else None
+    scene.table.table_state = "degraded"
 
     def fake_understand_scene(**kwargs):
+        task_input = kwargs["task_input"]
+        if with_task_spec:
+            assert task_input.instruction == "Open the microwave door."
+        else:
+            assert task_input is None
         assert [
             (entity.id, entity.description, entity.is_articulated)
-            for entity in kwargs["task_entities"]
+            for entity in (task_input.entities if task_input is not None else ())
         ] == (
             [("evidence_001", "A microwave with a hinged door.", True)]
             if with_task_spec
@@ -149,6 +156,7 @@ def test_analyze_image_persists_blueprint_and_artifact_hashes(
     assert document["schema_version"] == "embodichain.scene-blueprint/v2"
     assert document["blueprint_id"] == package.blueprint_id
     assert document["scene_graph"] == graph.to_dict()
+    assert document["scene"]["objects"][0]["table_state"] == "degraded"
     assert document["artifacts"][0]["path"].endswith("table-mask.png")
     assert len(document["artifacts"][0]["sha256"]) == 64
     if task_spec is not None:
@@ -203,6 +211,7 @@ def test_materialize_blueprint_does_not_mutate_audited_snapshot(
     monkeypatch,
 ) -> None:
     scene, graph = _table_scene()
+    scene.table.table_state = "normal"
     manifest_path = tmp_path / "scene_blueprint.json"
     manifest_path.write_text("audited blueprint\n", encoding="utf-8")
     image_path = tmp_path / "input.png"
@@ -250,6 +259,7 @@ def test_materialize_blueprint_does_not_mutate_audited_snapshot(
     )
 
     assert result.scene.objects[0].name == "materialized table"
+    assert result.scene.table.table_state == "normal"
     assert package.scene.to_dict() == original_scene
     assert package.scene_graph.to_dict() == original_graph
     assert manifest_path.read_text(encoding="utf-8") == audited_manifest

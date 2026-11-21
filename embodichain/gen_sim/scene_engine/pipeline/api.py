@@ -41,7 +41,7 @@ from embodichain.gen_sim.services.compat import ImageClient
 from embodichain.gen_sim.services.compat import SegmentationClient
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.task_spec_input import (
-    load_task_entities,
+    load_task_spec_input,
 )
 from embodichain.gen_sim.scene_engine.core.scene_edit_plan import SceneEditPlan
 from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraph
@@ -148,8 +148,9 @@ def analyze_image(
     Args:
         image_path: Source scene image.
         output_root: Directory receiving understanding artifacts and the blueprint.
-        task_spec: Optional TaskSpec JSON providing entity IDs and articulation
-            flags. The input file is audited with the image and mask artifacts.
+        task_spec: Optional TaskSpec JSON whose instruction and references identify
+            segmented objects and provide their IDs and articulation flags. The
+            input file is audited with the image and mask artifacts.
         vlm_client: Optional caller-owned scene-understanding client.
         image_segmentation_client: Optional caller-owned segmentation client.
 
@@ -161,8 +162,10 @@ def analyze_image(
     resolved_task_spec = (
         Path(task_spec).expanduser().resolve() if task_spec is not None else None
     )
-    task_entities = (
-        load_task_entities(resolved_task_spec) if resolved_task_spec is not None else ()
+    task_input = (
+        load_task_spec_input(resolved_task_spec)
+        if resolved_task_spec is not None
+        else None
     )
     resolved_image = Path(image_path).expanduser().resolve()
     resolved_output = Path(output_root).expanduser().resolve()
@@ -179,7 +182,7 @@ def analyze_image(
             output_root=resolved_output,
             vlm_client=effective_vlm,
             image_segmentation_client=segmentation,
-            task_entities=task_entities,
+            task_input=task_input,
         )
     finally:
         if owns_segmentation:

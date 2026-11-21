@@ -425,7 +425,10 @@ def test_external_color_buffer_never_creates_glb_only_proof(tmp_path):
         assert hashlib.sha256(path.read_bytes()).hexdigest() == original_hash
 
 
-def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> None:
+@pytest.mark.parametrize("table_state", [None, "normal", "degraded"])
+def test_scene_export_copies_meshes_and_converts_y_up_pose(
+    tmp_path: Path, table_state: str | None
+) -> None:
     table_glb = tmp_path / "table.glb"
     asset_glb = tmp_path / "cup.glb"
     table_glb.write_bytes(b"glTF-table")
@@ -443,6 +446,7 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
         physics=_physics("dynamic"),
     )
     asset.center_xy = [0.25, -0.5]
+    table.table_state = table_state  # type: ignore[assignment]
 
     scene = Scene(objects=[table, asset])
     export_path = SceneExporter(
@@ -451,6 +455,9 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
         output_root=tmp_path / "output",
     ).export()
     exported = json.loads(export_path.read_text(encoding="utf-8"))
+    assert exported["background"][0]["table_state"] == table_state
+    assert "table_state" not in exported["rigid_object"][0]
+    assert table.to_dict()["table_state"] == table_state
 
     assert (
         export_path.parent / "mesh_assets/table/table.glb"
@@ -493,6 +500,7 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
     assert imported_scene.assets[0].category == "asset"
     assert imported_scene.assets[0].name == "cup"
     assert imported_scene.assets[0].is_articulated is False
+    assert imported_scene.table.table_state == table_state
     assert imported_graph.to_dict() == _scene_graph(scene).to_dict()
 
 
@@ -649,6 +657,11 @@ def test_scene_export_read_preserves_source_files(
     """Read-only consumers may load an export without rewriting its snapshot."""
     scene_export = readable_scene_export / "scene_export"
     scene_json = scene_export / "scene.json"
+    config_path = scene_export / "scene_config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    # Exports predating observed table completeness have no table_state field.
+    config["background"][0].pop("table_state", None)
+    config_path.write_text(json.dumps(config), encoding="utf-8")
     if has_debug_snapshot:
         # Preserve even a non-canonical snapshot instead of regenerating it.
         scene_json.write_text('{"debug": "keep verbatim"}\n', encoding="utf-8")
@@ -665,6 +678,7 @@ def test_scene_export_read_preserves_source_files(
     ).read_scene_and_graph()
 
     assert [scene_object.id for scene_object in scene.objects] == ["table", "cup"]
+    assert scene.table.table_state is None
     assert np.allclose(scene.assets[0].pos, [1.0, 2.0, 3.0])
     assert graph.node_by_id()["cup"].parent_id == "table"
     assert {
@@ -672,6 +686,22 @@ def test_scene_export_read_preserves_source_files(
         for path in scene_export.rglob("*")
         if path.is_file()
     } == original_files
+
+
+@pytest.mark.parametrize(
+    ("section", "table_state"),
+    [("background", "partial"), ("rigid_object", "normal")],
+)
+def test_scene_export_read_rejects_invalid_table_state(
+    readable_scene_export: Path, section: str, table_state: str
+) -> None:
+    config_path = readable_scene_export / "scene_export" / "scene_config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config[section][0]["table_state"] = table_state
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="table_state"):
+        SceneExportImporter(output_root=readable_scene_export).read_scene_and_graph()
 
 
 def test_scene_export_read_rejects_mismatched_graph(
