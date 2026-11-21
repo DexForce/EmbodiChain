@@ -28,7 +28,7 @@ from embodichain.data.assets.solver_assets import download_neural_ik_checkpoint
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import MarkerCfg
 from embodichain.lab.sim.objects import Robot
-from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+from embodichain.extensions.benchmarks.motion_generation._atomic_fixtures import (
     _create_franka_native_hand_cfg,
 )
 from embodichain.lab.sim.motion.solvers import NeuralIKSolverCfg
@@ -132,7 +132,7 @@ def main() -> None:
     robot: Robot = sim.add_robot(cfg=cfg)
     sim.prepare()
 
-    sim.open_window()
+    sim.open_viewer()
 
     arm_name = "arm"
     device = robot.device
@@ -144,7 +144,7 @@ def main() -> None:
     )
     qpos = seed_qpos.unsqueeze(0).expand(num_envs, -1).clone()
     robot.set_qpos(qpos=qpos, joint_ids=robot.get_joint_ids(arm_name))
-    time.sleep(3.0)
+    sim.sleep(3.0)
 
     fk_xpos = robot.compute_fk(qpos=qpos, name=arm_name, to_matrix=True)
     print(f"fk_xpos shape: {tuple(fk_xpos.shape)}")

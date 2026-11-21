@@ -29,7 +29,7 @@ import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import MarkerCfg
 from embodichain.lab.sim.objects import Robot
-from embodichain_robots import DexforceW1Cfg
+from embodichain.extensions.robots import DexforceW1Cfg
 from embodichain.lab.visualization import (
     VisualizationCfg,
     add_viser_args_to_parser,
@@ -280,7 +280,7 @@ def main(
                 f"{torch.rad2deg(joint_step_changes.abs().max()).item():.3f} deg"
             )
 
-        sim.open_window()
+        sim.open_viewer()
         marker_stride = max(1, num_steps // 25)
         marker_indices = torch.arange(0, num_steps, marker_stride, device=sim.device)
         if marker_indices[-1] != num_steps - 1:

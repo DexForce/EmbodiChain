@@ -113,7 +113,7 @@ def test_training_timeout_terminates_worker_process(
 def _create_minimal_distributed_config():
     """Create a minimal train config for distributed testing."""
     config_path = Path(
-        "extensions/embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/grpo.json"
+        "embodichain/extensions/tasks/configs/tasks/classic_control/cart_pole/agents/grpo.json"
     )
     if not config_path.exists():
         pytest.skip(f"Config not found: {config_path}")

@@ -37,7 +37,7 @@ def _probe(source: str = "task_program") -> None:
     root = Path(__file__).resolve().parents[3]
     path = (
         root
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
     )
     if source == "task_program_newton":
         path = root / "examples/expansion/engine/task.newton.yaml"
@@ -338,13 +338,7 @@ def test_native_task_program_two_rows_one_world(source):
         cwd=root,
         env={
             **os.environ,
-            "PYTHONPATH": os.pathsep.join(
-                (
-                    str(root),
-                    str(root / "extensions"),
-                    str(root / "extensions/embodichain_tasks"),
-                )
-            ),
+            "PYTHONPATH": str(root),
             "EMBODICHAIN_SIM_EXIT_PROCESS": "0",
         },
         capture_output=True,

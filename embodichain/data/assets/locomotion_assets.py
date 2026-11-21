@@ -41,12 +41,12 @@ class HumanoidRun(_LocomotionAsset):
 from importlib import import_module
 
 _ASSET_EXPORTS = {
-    "UnitreeGo1Locomotion": "embodichain_robots.unitree.go1.assets",
-    "UnitreeGo2Locomotion": "embodichain_robots.unitree.go2.assets",
-    "UnitreeG1Locomotion": "embodichain_robots.unitree.g1.assets",
-    "UnitreeH1_2Locomotion": "embodichain_robots.unitree.h1_2.assets",
-    "ANYmalCLocomotion": "embodichain_robots.anybotics.anymal_c.assets",
-    "MicroDuckLocomotion": "embodichain_robots.pollen_robotics.microduck.assets",
+    "UnitreeGo1Locomotion": "embodichain.extensions.robots.unitree.go1.assets",
+    "UnitreeGo2Locomotion": "embodichain.extensions.robots.unitree.go2.assets",
+    "UnitreeG1Locomotion": "embodichain.extensions.robots.unitree.g1.assets",
+    "UnitreeH1_2Locomotion": "embodichain.extensions.robots.unitree.h1_2.assets",
+    "ANYmalCLocomotion": "embodichain.extensions.robots.anybotics.anymal_c.assets",
+    "MicroDuckLocomotion": "embodichain.extensions.robots.pollen_robotics.microduck.assets",
 }
 
 

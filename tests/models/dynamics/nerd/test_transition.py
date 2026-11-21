@@ -25,14 +25,14 @@ import sys
 import pytest
 import torch
 
-from embodichain_models.dynamics.nerd import (
+from embodichain.extensions.models.dynamics.nerd import (
     NeRDGeometry,
     NeRDModel,
     NeRDModelCfg,
     NeRDStateCodec,
     NeRDTransition,
 )
-from embodichain_models.dynamics.nerd.codec import reset_history
+from embodichain.extensions.models.dynamics.nerd.codec import reset_history
 
 
 def _transition(robot: str, batch: int = 2):
@@ -236,13 +236,13 @@ def test_model_layer_imports_without_native_backends():
     root = Path(__file__).resolve().parents[4]
     script = f"""
 import importlib.abc,sys
-sys.path[:0] = {[str(root), str(root / 'extensions/embodichain_models')]!r}
+sys.path[:0] = {[str(root), str(root / 'embodichain/extensions/models')]!r}
 class BlockNative(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
         if fullname.split('.')[0] in {{'newton','dexsim','warp'}} or fullname.startswith('embodichain.lab'):
             raise AssertionError(fullname)
 sys.meta_path.insert(0, BlockNative())
-from embodichain_models.dynamics.nerd import NeRDGeometry,NeRDState,NeRDTransition
+from embodichain.extensions.models.dynamics.nerd import NeRDGeometry,NeRDState,NeRDTransition
 """
     result = subprocess.run(
         [sys.executable, "-I", "-c", script], capture_output=True, text=True

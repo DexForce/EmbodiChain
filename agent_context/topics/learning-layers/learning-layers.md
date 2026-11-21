@@ -29,7 +29,7 @@ and configuration-driven MLP construction. `EmpiricalNormalizer.scale` exposes
 the configured additive or quadratic epsilon scale; clipping is optional.
 These shared components do not import
 RL, TensorDict or simulation. Concrete NeRD models, codecs and the shared-SL
-recipe live in the bundled `embodichain_models.dynamics.nerd` extension;
+recipe live in the bundled `embodichain.extensions.models.dynamics.nerd` extension;
 teacher collection, historical training and research belong to
 `examples/learning/nerd/`. See
 [neural dynamics](../neural-dynamics/neural-dynamics.md) for model, SL integration,

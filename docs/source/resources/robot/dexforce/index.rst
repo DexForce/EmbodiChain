@@ -2,7 +2,7 @@ DexForce
 ========
 
 Official DexForce robot configurations live in the
-``embodichain_robots.dexforce`` manufacturer namespace. W1 body releases and
+``embodichain.extensions.robots.dexforce`` manufacturer namespace. W1 body releases and
 end-effector options are documented together on the model page.
 
 .. list-table::

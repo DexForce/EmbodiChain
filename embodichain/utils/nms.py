@@ -17,6 +17,9 @@
 from __future__ import annotations
 
 import math
+from contextlib import contextmanager
+from contextvars import ContextVar
+from collections.abc import Iterator
 
 import numpy as np
 import torch
@@ -24,9 +27,35 @@ import torch
 from embodichain.utils import logger
 from embodichain.utils.math import quat_from_matrix
 
-__all__ = ["pose_nms", "pose_nms_indices"]
+__all__ = ["pose_nms", "pose_nms_indices", "pose_nms_scope"]
 
 _POSE_NMS_CHUNK_SIZE = 2048
+_POSE_NMS_SCOPE: ContextVar[int] = ContextVar(
+    "pose_nms_chunk_size", default=_POSE_NMS_CHUNK_SIZE
+)
+
+
+@contextmanager
+def pose_nms_scope(*, chunk_size: int | None = None) -> Iterator[int]:
+    """Select a task-local NMS memory budget without replacing any function.
+
+    Args:
+        chunk_size: Positive pairwise tile bound; None inherits the active scope
+            (2048 outside a scope). Explicit NMS call arguments take precedence.
+
+    Yields:
+        Active tile bound. Nested scopes restore their parent on success/failure;
+        threads and copied cooperative contexts retain their own selection.
+        Threshold arithmetic, candidate ordering and output values are unchanged.
+    """
+    size = _POSE_NMS_SCOPE.get() if chunk_size is None else chunk_size
+    if type(size) is not int or size < 1:
+        raise ValueError("NMS chunk_size must be a positive integer")
+    token = _POSE_NMS_SCOPE.set(size)
+    try:
+        yield size
+    finally:
+        _POSE_NMS_SCOPE.reset(token)
 
 
 def _poses_to_components(poses: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -219,7 +248,7 @@ def pose_nms_indices(
     angle_th: float = np.pi / 36,
     dist_th: float = 0.003,
     preserve_order: bool = False,
-    chunk_size: int = _POSE_NMS_CHUNK_SIZE,
+    chunk_size: int | None = None,
 ) -> torch.Tensor:
     """Return pose indices after removing poses that are too close.
 
@@ -237,7 +266,7 @@ def pose_nms_indices(
             ``False``, poses with fewer close neighbors are selected first.
             Defaults to ``False``.
         chunk_size: Maximum size of either dimension of a pairwise tile.
-            Defaults to 2048.
+            None uses the active pose_nms_scope, defaulting to 2048.
 
     Returns:
         Indices of selected poses. Shape is ``(M,)``, where ``M <= N``.
@@ -246,6 +275,7 @@ def pose_nms_indices(
         ValueError: If ``poses`` is not shaped as ``(N, 4, 4)``, is not on a
             CPU or CUDA device, or ``chunk_size`` is not positive.
     """
+    chunk_size = _POSE_NMS_SCOPE.get() if chunk_size is None else chunk_size
     if poses.ndim != 3 or poses.shape[-2:] != (4, 4):
         raise ValueError(f"Invalid input shape {poses.shape}, expected (N, 4, 4).")
     if poses.device.type not in {"cpu", "cuda"}:
@@ -316,7 +346,7 @@ def pose_nms(
     poses: torch.Tensor,
     angle_th: float = np.pi / 36,
     dist_th: float = 0.003,
-    chunk_size: int = _POSE_NMS_CHUNK_SIZE,
+    chunk_size: int | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Remove poses that are too close in translation and rotation.
 
@@ -325,7 +355,7 @@ def pose_nms(
         angle_th: Rotation threshold in radians. Defaults to pi / 36.
         dist_th: Translation threshold. Defaults to 0.003.
         chunk_size: Maximum size of either dimension of a pairwise tile.
-            Defaults to 2048.
+            None uses the active pose_nms_scope, defaulting to 2048.
 
     Returns:
         A tuple containing the filtered pose matrices in input order and their

@@ -261,3 +261,40 @@ def test_whole_body_metric_requires_pose_and_joint_acceptance() -> None:
     assert torch.allclose(
         evaluation.component_errors["joint_max_abs"], torch.tensor([0.01, 0.2])
     )
+
+
+def test_boundary_policy_snapshot_preserves_independent_terminal_contract():
+    from dataclasses import replace
+
+    original = replace(
+        TrackingPolicy.timed(settle_duration=0.4),
+        boundary_stop=True,
+        boundary_position_tolerance=0.002,
+        boundary_velocity_tolerance=0.01,
+        boundary_timeout=2.0,
+    )
+    owned = original.snapshot()
+    assert owned == original and owned is not original
+    assert owned.terminal is not original.terminal
+    assert owned.terminal.settle_duration == 0.4
+    with pytest.raises(TypeError):
+        replace(original, boundary_stop=1)
+    with pytest.raises(ValueError):
+        replace(original, boundary_timeout=float("nan"))
+
+
+def test_reference_prefix_preserves_endpoints_ownership_and_limits():
+    from embodichain.lab.sim.atomic_skills._reference_bridge import _reference_prefix
+
+    start = torch.tensor([[0.01, 0.2]])
+    goal = torch.tensor([[0.0, 0.3]])
+    prefix = _reference_prefix(start, goal, (0,), 0.04, torch.tensor([0.5, 0.0]), 0.5)
+    path = torch.cat((prefix, goal[:, None]), dim=1)
+    assert path[0, 0, 0] == start[0, 0]
+    assert torch.equal(path[0, :, 1], torch.full_like(path[0, :, 1], 0.3))
+    assert torch.equal(path[:, -1], goal)
+    velocity = torch.diff(path, dim=1) / 0.04
+    assert velocity.abs().max() <= 0.5
+    assert (torch.diff(velocity, dim=1) / 0.04).abs().max() <= 0.5
+    prefix.zero_()
+    assert start[0, 0] == 0.01 and goal[0, 1] == 0.3

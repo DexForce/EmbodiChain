@@ -12,7 +12,7 @@ including its floating base, standing pose and simulation PD drive defaults.
 
 ```python
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain_robots import MicroDuckCfg
+from embodichain.extensions.robots import MicroDuckCfg
 
 sim = SimulationManager(SimulationManagerCfg(headless=True, num_envs=1))
 cfg = MicroDuckCfg.from_dict({})
@@ -31,7 +31,7 @@ embodichain preview-robot --robot MicroDuck
 | --- | --- |
 | Catalog ID / UID | `MicroDuck` |
 | Configuration class | `MicroDuckCfg` |
-| Canonical module | `embodichain_robots.pollen_robotics.microduck` |
+| Canonical module | `embodichain.extensions.robots.pollen_robotics.microduck` |
 | Vendor | `pollen_robotics` |
 | Morphology | `biped` |
 | Arm count | 0 |

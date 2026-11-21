@@ -989,10 +989,9 @@ def _bind_deployment(
     if set(anchors) - declared_resources:
         raise ValueError("resource_anchors must name declared profile resources")
     holders: dict[str, str] = {}
-    # Placements may release above their resting pose. The place gate requires a
-    # released object to separate from the still-open gripper before retracting,
-    # which an object already resting on its support cannot do.
-    release_clearance = float(cfg.binding.get("release_clearance", 0.0))
+    # Open above the support to avoid wedging a finger against it. The landing
+    # validators below retain the original measured resting pose.
+    release_clearance = cfg.binding["release_clearance"]
     configured_services = runtime_services
     # Measured legacy geometry binds only the registered calls whose lowerer the
     # run configuration does not supply. A configured lowerer owns its targets,
@@ -1073,6 +1072,10 @@ def _bind_deployment(
         _register_call_options(
             options, monitors, call, cid, "pick" if skill == "pick_up" else skill, skill
         )
+        if cid == "place" and "release_settle_steps" not in options[key]:
+            # Allow actual opening before the unchanged release monitor starts.
+            # This physical duration is converted on the native control grid.
+            options[key].setdefault("release_settle_duration", 0.4)
         if cid == "hand_over":
             options[key].setdefault("release_at_target", False)
             options[key].setdefault("arm_selection", "bound")

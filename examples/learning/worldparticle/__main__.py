@@ -27,7 +27,7 @@ import numpy as np
 import yaml
 
 from ._demo_assets import PROFILES, add_boundary_visuals
-from embodichain_models.dynamics.worldparticle.data import load_sample
+from embodichain.extensions.models.dynamics.worldparticle.data import load_sample
 
 
 def _demo(default_scene="fancy_fluid") -> None:
@@ -137,7 +137,9 @@ def _demo(default_scene="fancy_fluid") -> None:
         os.environ.setdefault("SDL_VIDEODRIVER", "offscreen")
     import dexsim
     from dexsim.engine.newton_physics import NewtonCfg, ProviderNewtonSolverCfg
-    from embodichain_solvers.physics.worldparticle.provider import WorldParticleProvider
+    from embodichain.extensions.solvers.physics.worldparticle.provider import (
+        WorldParticleProvider,
+    )
     from dexsim.spawn import (
         SceneBuilder,
         FluidRenderMode,

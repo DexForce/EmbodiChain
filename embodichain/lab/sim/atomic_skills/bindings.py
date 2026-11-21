@@ -203,6 +203,24 @@ class JointPositionTarget(RuntimeEndpointTarget):
             raise ValueError("JointPositionTarget.joint_ids must be unique.")
         object.__setattr__(self, "joint_ids", joint_ids)
 
+    def snapshot(self) -> JointPositionTarget:
+        """Return an independently owned target.
+
+        Standard immutable fields are reconstructed and validated; subclasses
+        and extended scalar types retain generic deep-snapshot semantics.
+
+        Returns:
+            A new target of the same concrete type.
+        """
+        if (
+            type(self) is not JointPositionTarget
+            or type(self.control_part) is not str
+            or type(self.joint_ids) is not tuple
+            or any(type(joint) is not int for joint in self.joint_ids)
+        ):
+            return deepcopy(self)
+        return JointPositionTarget(self.control_part, self.joint_ids)
+
     @property
     def transport_id(self) -> str:
         """Return the built-in joint-position transport identifier."""

@@ -172,7 +172,7 @@ remain separate, preserving their existing samples and provenance.
 ## Versioned geometry sources
 
 The source archives are the official assets selected by
-the asset registry and `extensions/embodichain_robots/`, pinned here to dataset revision
+the asset registry and `embodichain/extensions/robots/`, pinned here to dataset revision
 `48317bd8733182f36d306cc2a7a60ae5e47ed2c9`. Their MD5 checksums were verified
 against the download registry. These presets
 describe those simulation assets; the CobotMagic V70 variant needs its own ID.
@@ -258,7 +258,7 @@ Collision meshes under `Collision/`:
 
 ### PikaGripper
 
-Source: `PikaGripper/PikaGripper.urdf`, registered by `embodichain_robots.agilex.pika.assets.PikaGripper`.
+Source: `PikaGripper/PikaGripper.urdf`, registered by `embodichain.extensions.robots.agilex.pika.assets.PikaGripper`.
 Archive MD5: `8a9d0779e7dbfa7bf5d4713175df014e`; URDF SHA-256:
 `cb99efefd74f26011c56d5afcf13839c13a5374160fecb02ac02ba9fa172d952`.
 

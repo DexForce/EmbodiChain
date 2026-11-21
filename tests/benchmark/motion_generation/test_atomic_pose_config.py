@@ -23,31 +23,31 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain_benchmarks.motion_generation.config import (
+from embodichain.extensions.benchmarks.motion_generation.config import (
     AtomicPoseRandomizationCfg,
     TrackCfg,
     load_suite,
     resolve_atomic_batch_sizes,
     resolve_atomic_pose_randomization,
 )
-from embodichain_benchmarks.motion_generation.scenarios.atomic_skill import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
 )
-from embodichain_benchmarks.motion_generation.scenarios._atomic_pose_sampling import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios._atomic_pose_sampling import (
     _pose_settings,
 )
-from embodichain_benchmarks.motion_generation.scenarios.atomic_case_utils import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_case_utils import (
     apply_target_rotation_randomization,
     randomization_parameters,
     randomized_vector_batch,
     seeded_jitter,
     workspace_shell_profile,
 )
-from embodichain_benchmarks.motion_generation.atomic_skill import (
+from embodichain.extensions.benchmarks.motion_generation.atomic_skill import (
     atomic_skill_provider_names,
     create_atomic_skill_provider,
 )
-from embodichain_benchmarks.motion_generation.scenarios.atomic_dual_arm_providers import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_dual_arm_providers import (
     _support_randomization_config,
 )
 
@@ -1285,7 +1285,7 @@ def test_resolve_articulation_grasp_broadcasts_one_local_candidate_over_batch(
     model_id: str | None,
 ) -> None:
     """Slide uses the mounted hand and screens one translated grasp pool."""
-    from embodichain_benchmarks.motion_generation import _atomic_fixtures
+    from embodichain.extensions.benchmarks.motion_generation import _atomic_fixtures
 
     batch_size = 4
     target_pose = torch.eye(4).repeat(batch_size, 1, 1)

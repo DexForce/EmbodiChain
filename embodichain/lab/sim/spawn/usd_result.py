@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import (
         Articulation,
+        CableObject,
         DeformableObject,
         RigidObject,
         Robot,
@@ -35,11 +36,15 @@ __all__ = ["UsdImportResult"]
 
 
 class UsdImportResult(
-    Mapping[str, "VisualObject | RigidObject | Articulation | Robot | DeformableObject"]
+    Mapping[
+        str,
+        "VisualObject | RigidObject | Articulation | Robot | DeformableObject | CableObject",
+    ]
 ):
     """Map source resource keys to stable, declared EmbodiChain facades.
 
-    Facades bind in place at ``SimulationManager.prepare()``. Resource maps
+    Facades, including imported cables, bind in place at
+    ``SimulationManager.prepare()``. Resource maps
     include native-only scene resources and constraints; their values are
     logical Spawn UIDs, not native handles or builder indices. A unique source
     keeps its prim path as the resource key. When a source prim produces several
@@ -51,7 +56,13 @@ class UsdImportResult(
     def __init__(
         self,
         assets: Mapping[
-            str, VisualObject | RigidObject | Articulation | Robot | DeformableObject
+            str,
+            VisualObject
+            | RigidObject
+            | Articulation
+            | Robot
+            | DeformableObject
+            | CableObject,
         ],
         *,
         resource_uids: Mapping[str, str],
@@ -83,7 +94,14 @@ class UsdImportResult(
 
     def __getitem__(
         self, source_path: str
-    ) -> VisualObject | RigidObject | Articulation | Robot | DeformableObject:
+    ) -> (
+        VisualObject
+        | RigidObject
+        | Articulation
+        | Robot
+        | DeformableObject
+        | CableObject
+    ):
         return self._assets[source_path]
 
     def __iter__(self) -> Iterator[str]:

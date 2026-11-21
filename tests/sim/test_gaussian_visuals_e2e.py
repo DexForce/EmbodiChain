@@ -24,6 +24,7 @@ import numpy as np
 import pytest
 import torch
 from dexsim.scene import Scene
+from dexsim.scene.objects import SpawnedRigidBody
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
@@ -635,8 +636,15 @@ def test_native_usd_gaussian_import_keeps_physics_and_capture(tmp_path, entry):
         sim.flush_cleanup_queue()
 
 
-def test_native_usd_gaussian_rejects_arena_replication_before_declaration(tmp_path):
-    """Keep the native singleton restriction visible before Spawn writes."""
+def test_native_usd_gaussian_requires_replication_capability_before_declaration(
+    tmp_path, monkeypatch
+):
+    """Old SDKs reject replication before changing the Spawn declaration."""
+    from dexsim.scene.objects import SpawnedRigidBody
+
+    monkeypatch.setattr(
+        SpawnedRigidBody, "get_gaussian_resource_ids", None, raising=False
+    )
     usd = _write_usd_splat(tmp_path)
     sim = SimulationManager(
         SimulationManagerCfg(
@@ -652,9 +660,9 @@ def test_native_usd_gaussian_rejects_arena_replication_before_declaration(tmp_pa
         )
     )
     try:
-        with pytest.raises(NotImplementedError, match="replicated across Arenas"):
+        with pytest.raises(NotImplementedError, match="qualified DexSim"):
             sim.add_usd("sample", str(usd))
-        with pytest.raises(NotImplementedError, match="replicated across Arenas"):
+        with pytest.raises(NotImplementedError, match="qualified DexSim"):
             sim.add_rigid_object(
                 RigidObjectCfg(
                     uid="body",
@@ -666,6 +674,89 @@ def test_native_usd_gaussian_rejects_arena_replication_before_declaration(tmp_pa
             for desc in sim._spawn_scene.builder.mesh_objects
         )
     finally:
+        sim.destroy(exit_process=False)
+        sim.flush_cleanup_queue()
+
+
+@pytest.mark.parametrize("entry", ["scene", "rigid", "visual"])
+@pytest.mark.skipif(
+    not callable(getattr(SpawnedRigidBody, "get_gaussian_resource_ids", None)),
+    reason="requires qualified native USD Gaussian companion replication",
+)
+def test_native_usd_gaussian_four_arena_capture_visibility_reset_and_removal(
+    tmp_path, entry
+):
+    """USD owners replicate through the SDK with shared resources and isolated RGB."""
+    usd = _write_usd_splat(tmp_path)
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            num_envs=4,
+            device="cpu",
+            enable_entity_gizmo=False,
+            startup_summary="off",
+            render_cfg=RenderCfg.for_gaussian(renderer="hybrid", spp=1),
+        )
+    )
+    asset = camera = None
+    try:
+        source = UsdSourceCfg(file_path=str(usd), source_prim_path="/Asset")
+        if entry == "scene":
+            asset = sim.add_usd("sample", str(usd))["/Asset"]
+        elif entry == "rigid":
+            asset = sim.add_rigid_object(RigidObjectCfg(uid="body", source=source))
+        else:
+            asset = sim.add_visual_object(VisualObjectCfg(uid="visual", source=source))
+        camera = sim.add_sensor(
+            CameraCfg(
+                uid="view",
+                width=64,
+                height=64,
+                intrinsics=(64, 64, 32, 32),
+                extrinsics=CameraCfg.ExtrinsicsCfg(
+                    eye=(0, -1.5, 0.8), target=(0, 0, 0.8)
+                ),
+            )
+        )
+        sim.prepare()
+        sim.enable_physics(False)
+        assert getattr(asset, "_visual_binding", None) is None
+        element = asset.get_visual_elements()[0]
+        assert element["source_prim_path"] == "/Asset/Visual"
+        assert (
+            len(element["resource_ids"]) == 4 and len(set(element["resource_ids"])) == 1
+        )
+
+        def capture(gaussian=True):
+            sim.render_camera_group([camera.group_id])
+            camera.update(fetch_only=True)
+            if gaussian:
+                assert camera.capture_metadata["status"]["camera_count"] == 4
+                assert tuple(camera.capture_metadata["env_ids"]) == (0, 1, 2, 3)
+            else:
+                assert camera.capture_metadata == {}
+            return camera.get_data()["color"].clone()
+
+        initial = capture()
+        assert initial.shape == (4, 64, 64, 4)
+        asset.set_visible(False, [1])
+        hidden = capture()
+        difference = (
+            (initial[..., :3].float() - hidden[..., :3].float()).abs().mean((1, 2, 3))
+        )
+        assert difference[1] > 1
+        assert torch.all(difference[[0, 2, 3]] < 2)
+        asset.reset([1])
+        restored = capture()
+        torch.testing.assert_close(initial, restored, atol=2, rtol=0)
+        assert sim.remove_asset(asset.uid)
+        removed = capture(gaussian=False)
+        assert torch.all(
+            (initial[..., :3].float() - removed[..., :3].float()).abs().mean((1, 2, 3))
+            > 1
+        )
+    finally:
+        asset = camera = None
         sim.destroy(exit_process=False)
         sim.flush_cleanup_queue()
 

@@ -226,7 +226,17 @@ def _numeric_geometry(
     if validate:
         table = policy["_table"]
         for i, box in enumerate(group_boxes):
-            if np.any(box[:, 0] < np.asarray(table)[0] - 1e-8) or np.any(
+            offsets = geometry.get("root_support_offsets", {}).get(
+                nodes[roots[i]]["uid"]
+            )
+            if offsets is not None:
+                if np.any(deltas[:, i] < np.asarray(offsets)[0] - 1e-8) or np.any(
+                    deltas[:, i] > np.asarray(offsets)[1] + 1e-8
+                ):
+                    raise ValueError(
+                        "Root displacement exceeds its supported contact patch."
+                    )
+            elif np.any(box[:, 0] < np.asarray(table)[0] - 1e-8) or np.any(
                 box[:, 1] > np.asarray(table)[1] + 1e-8
             ):
                 raise ValueError("Hierarchical group lies outside the table bounds.")

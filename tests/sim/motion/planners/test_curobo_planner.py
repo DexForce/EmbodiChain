@@ -233,6 +233,9 @@ def test_curobo_planner_cfg_defaults():
     assert cfg.log_level == "error"
     assert cfg.warmup_iterations == 1
     assert cfg.max_attempts == 5
+    assert cfg.position_tolerance == 0.005
+    assert cfg.orientation_tolerance == 0.05
+    assert cfg.use_runtime_tcp is False
     assert cfg.cuda_device is None
     assert cfg.use_cuda_graph is True
     assert cfg.cuda_graph_fallback is True
@@ -243,6 +246,13 @@ def test_curobo_planner_cfg_defaults():
     assert cfg.sim_base_to_curobo_base is None
     assert not hasattr(cfg, "robot_profiles")
     assert not hasattr(cfg.world, "world_config_path")
+
+
+@pytest.mark.parametrize("name", ["position_tolerance", "orientation_tolerance"])
+@pytest.mark.parametrize("value", [0.0, -0.01, float("nan"), float("inf"), True])
+def test_curobo_rejects_invalid_convergence_tolerance(name, value):
+    with pytest.raises(ValueError, match=name):
+        CuroboPlannerCfg(**{name: value})
 
 
 @pytest.mark.parametrize(
@@ -656,12 +666,25 @@ def test_curobo_planner_class_is_lazy_import_safe():
         "use_graph",
         "effective_algorithm",
         "expected_lanes",
+        "tolerances",
     ),
     [
-        (1, "rrt", True, True, "rrt", 8),
-        (2, "prm", False, False, "prm", None),
-        (17, "rrt", False, True, "rrt", 256),
-        (1, "rrt", True, False, "rrt", 8),
+        (1, "rrt", True, True, "rrt", 8, {}),
+        (2, "prm", False, False, "prm", None, {}),
+        (17, "rrt", False, True, "rrt", 256, {}),
+        (
+            1,
+            "rrt",
+            True,
+            False,
+            "rrt",
+            8,
+            {
+                "position_tolerance": 0.01,
+                "orientation_tolerance": 0.09995833854135666,
+                "use_runtime_tcp": True,
+            },
+        ),
     ],
 )
 def test_backend_forwards_fast_settings_and_disables_self_collision(
@@ -672,6 +695,7 @@ def test_backend_forwards_fast_settings_and_disables_self_collision(
     use_graph,
     effective_algorithm,
     expected_lanes,
+    tolerances,
 ):
     create_kwargs = {}
     cost_manager = SimpleNamespace(disable_self_collision=Mock())
@@ -710,6 +734,7 @@ def test_backend_forwards_fast_settings_and_disables_self_collision(
         graph_planner_algorithm=algorithm,
         enable_timeopt=enable_timeopt,
         interpolation_dt=0.01,
+        **tolerances,
     )
     planner._curobo_device = torch.device("cuda:0")
     planner._timeopt_gravity = lambda backend: (0.0, 0.0, 0.0)
@@ -723,11 +748,12 @@ def test_backend_forwards_fast_settings_and_disables_self_collision(
     )
     planner._validate_profile_joint_names = lambda *args: None
     planner._validate_base_link_name = lambda *args: None
-    planner._resolve_tool_frame = lambda *args: "tool"
+    planner._resolve_tool_frame = lambda profile, _planner: profile.tool_frame_name
     planner._load_runtime_robot_config = lambda path: {
         "robot_cfg": {
             "kinematics": {
                 "source": path,
+                "tool_frames": ["tool"],
                 "self_collision_buffer": {},
                 "self_collision_ignore": {},
             }
@@ -741,6 +767,13 @@ def test_backend_forwards_fast_settings_and_disables_self_collision(
         profile=_CuroboProfile(
             robot_config_path="robot.yml",
             sim_to_curobo_joint_names={"joint": "joint"},
+            tool_frame_name="tool",
+            tool_frame_to_tcp=[
+                [0.0, -1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.2],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
         ),
         sim_joint_names=["joint"],
         scene_model=None,
@@ -756,6 +789,12 @@ def test_backend_forwards_fast_settings_and_disables_self_collision(
     assert runtime.cuda_graphs is True
     assert create_kwargs["enable_timeopt"] is enable_timeopt
     assert create_kwargs["interpolation_dt"] == 0.01
+    assert create_kwargs["position_tolerance"] == tolerances.get(
+        "position_tolerance", 0.005
+    )
+    assert create_kwargs["orientation_tolerance"] == tolerances.get(
+        "orientation_tolerance", 0.05
+    )
     cost_manager.disable_self_collision.assert_called_once()
     if enable_timeopt:
         assert create_kwargs["robot"]["robot_cfg"]["load_dynamics"] is True
@@ -768,8 +807,28 @@ def test_backend_forwards_fast_settings_and_disables_self_collision(
             backend.planner.cfg.rrt_graph_planner_config.planner_config.max_batched_lanes
             == expected_lanes
         )
-    assert create_kwargs["robot"]["robot_cfg"]["kinematics"] == {
+    native_kinematics = create_kwargs["robot"]["robot_cfg"]["kinematics"]
+    if tolerances.get("use_runtime_tcp", False):
+        frame = "__embodichain_tcp_tool"
+        extra = native_kinematics.pop("extra_links")[frame]
+        assert extra["fixed_transform"] == pytest.approx(
+            [0.0, 0.0, 0.2, 2**-0.5, 0.0, 0.0, 2**-0.5]
+        )
+        assert extra["parent_link_name"] == "tool"
+        assert extra["joint_type"] == "FIXED"
+        assert extra["link_mass"] == 0.0 and extra["link_inertia"] == [0.0] * 6
+        assert backend.tool_frame == frame
+        assert backend.profile.tool_frame_to_tcp is None
+        goal = torch.eye(4)[None]
+        goal[:, 0, 3] = 0.5
+        # Native goals now refer to the TCP itself; do not apply its offset twice.
+        torch.testing.assert_close(planner._tcp_to_tool_pose(goal, backend), goal)
+    else:
+        frame = "tool"
+        assert backend.profile.tool_frame_to_tcp is not None
+    assert native_kinematics == {
         "source": "robot.yml",
+        "tool_frames": [frame],
         "self_collision_buffer": {},
         "self_collision_ignore": {},
     }
@@ -2250,7 +2309,7 @@ def _build_curobo_scene(sim_device: str = "cuda") -> tuple[object, object, objec
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg
     from embodichain.lab.sim.objects import RigidObjectCfg
-    from embodichain_robots import FrankaPandaCfg
+    from embodichain.extensions.robots import FrankaPandaCfg
     from embodichain.lab.sim.shapes import CubeCfg
 
     sim = SimulationManager(

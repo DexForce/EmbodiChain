@@ -41,7 +41,9 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import trimesh
 import roma  # For rotation matrix to quaternion conversion
-from embodichain_models.dynamics.rigidformer._native.data.scene_frames import load_frame
+from embodichain.extensions.models.dynamics.rigidformer._native.data.scene_frames import (
+    load_frame,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +121,7 @@ class Evaluator:
         self.trainer = trainer
         self.config = trainer.config
         # data.object_scale_file: the canonical frame-0 meshes read below must carry the same scale as the model inputs
-        from embodichain_models.dynamics.rigidformer._native.data.object_scale import (
+        from embodichain.extensions.models.dynamics.rigidformer._native.data.object_scale import (
             from_config as _object_scale_from_config,
         )
 
@@ -328,7 +330,7 @@ class Evaluator:
             split: 'val' or 'test'
             step_size: Step size for frame sampling (1, 2, 5, 10, etc.)
         """
-        from embodichain_models.dynamics.rigidformer._native.data.dataset import (
+        from embodichain.extensions.models.dynamics.rigidformer._native.data.dataset import (
             MultiObjectDynamics,
             make_collate_fn,
         )
@@ -413,7 +415,7 @@ class Evaluator:
         self, split: str, skip_step_size: int, eval_sequence_length: int
     ):
         """The cached evaluation dataset of a split at a step size (one sample per scene, warm-up frames only)."""
-        from embodichain_models.dynamics.rigidformer._native.data.dataset import (
+        from embodichain.extensions.models.dynamics.rigidformer._native.data.dataset import (
             MultiObjectDynamics,
         )
 
@@ -487,7 +489,7 @@ class Evaluator:
 
     def _eval_loader(self, eval_dataset, batch_size: int):
         """Evaluation DataLoader: scenes in dataset order, every scene on exactly one rank."""
-        from embodichain_models.dynamics.rigidformer._native.data.dataset import (
+        from embodichain.extensions.models.dynamics.rigidformer._native.data.dataset import (
             make_collate_fn,
         )
 

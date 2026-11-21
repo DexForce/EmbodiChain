@@ -109,7 +109,7 @@ _CUBE_RUNTIME_PRESET_ID = "trajectory"
 _REPOSITORY_ROOT = Path(__file__).parents[4]
 _CUBE_ENV_PATH = (
     _REPOSITORY_ROOT
-    / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
+    / "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place"
     / "task.ur5.yaml"
 )
 
@@ -1175,6 +1175,32 @@ def test_motion_modes_participate_in_sealed_registration_identity() -> None:
             acceleration_limit=None,
             velocity_limit=None,
         )
+    )
+    fixed_sequential_policy = replace(
+        policy,
+        interpolation_mode="fixed_grid",
+        ik_seed_mode="sequential",
+        acceleration_limit=None,
+        velocity_limit=None,
+    )
+    no_phases = registration_for(fixed_sequential_policy)
+    explicit_empty = registration_for(replace(fixed_sequential_policy, phase_paths={}))
+    joint_phase = registration_for(
+        replace(fixed_sequential_policy, phase_paths={"grasp": "joint"})
+    )
+    cartesian_phase = registration_for(
+        replace(fixed_sequential_policy, phase_paths={"grasp": "cartesian"})
+    )
+    assert no_phases.fingerprint == explicit_empty.fingerprint
+    assert (
+        len(
+            {
+                no_phases.fingerprint,
+                joint_phase.fingerprint,
+                cartesian_phase.fingerprint,
+            }
+        )
+        == 3
     )
     assert default.fingerprint == explicit_default.fingerprint
     assert len({default.fingerprint, sequential.fingerprint, fixed.fingerprint}) == 3

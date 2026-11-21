@@ -135,6 +135,7 @@ proposals. Hosts retain stepping, cache refresh and task-acceptance ownership.
    :nosignatures:
 
    SceneLayoutInput
+   SceneLayoutCondition
    PreparedSceneRandomization
    SceneRandomizationBatch
    SceneVariantApplicationResult
@@ -152,6 +153,22 @@ proposals. Hosts retain stepping, cache refresh and task-acceptance ownership.
    load_scene_variants
 
 .. autoclass:: SceneLayoutInput
+   :members:
+
+Conditional layout generation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``generate_scene_variants(..., conditions=SceneLayoutCondition(poses))`` fixes
+arena-space anchors while completing the rest of the layout through the same
+support and clearance checks. Group-root anchors currently restrict XY only;
+selected members retain their support-frame XY/yaw domain. Anchor every moving
+ancestor of an absolute member anchor. Conditions cannot change permissions,
+height, authored tilt, topology or physics. Invalid domains reject before sampling;
+geometric infeasibility consumes the bounded proposal budget without repair.
+The prepared source and original policy stay reusable and independently owned.
+Omitting conditions, or providing an empty condition, retains the legacy sequence.
+
+.. autoclass:: SceneLayoutCondition
    :members:
 
 .. autoclass:: PreparedSceneRandomization
@@ -192,3 +209,12 @@ proposals. Hosts retain stepping, cache refresh and task-acceptance ownership.
 .. autofunction:: save_scene_variants
 
 .. autofunction:: load_scene_variants
+
+Condition implementation module
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.lab.sim.scene.expansion.conditions
+
+.. autoclass:: SceneLayoutCondition
+   :members:
+   :no-index:

@@ -20,7 +20,7 @@ Run these commands from your own working directory:
 mkdir -p task-program-quickstart
 cd task-program-quickstart
 embodichain list-task --category manipulation
-embodichain show-task embodichain_tasks:repeated_pick_place
+embodichain show-task embodichain.extensions.tasks:repeated_pick_place
 ```
 
 Find `franka: TaskProgramRepeatedPickPlace-Franka-v1` in the detailed output.
@@ -50,7 +50,7 @@ See {doc}`/guides/run_task` for display and replay options.
 
 ```bash
 embodichain run-task \
-  --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml \
+  --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml \
   --physics default --num_envs 1 --max_episodes 1 --seed 7 \
   --headless --filter_dataset_saving
 ```
@@ -105,7 +105,7 @@ that data was saved.
 ## 3. Download and change the program
 
 Download the
-{download}`original program <../../../../extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task_program/program.yaml>`
+{download}`original program <../../../../embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task_program/program.yaml>`
 and save it as **`program.yaml`** in your working directory. Change:
 
 1. `program.repeat.count` from `3` to `2`.
@@ -123,7 +123,7 @@ Run your local file with the same deployment:
 
 ```bash
 embodichain run-task \
-  --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml \
+  --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml \
   --physics default --num_envs 1 --max_episodes 1 --seed 7 \
   --headless --filter_dataset_saving --task-program program.yaml
 ```
@@ -185,7 +185,7 @@ choose an explicit output directory:
 
 ```bash
 embodichain run-task \
-  --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml \
+  --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml \
   --physics default --num_envs 1 --max_episodes 1 --seed 7 \
   --headless --task-program program.yaml --dataset-dir "$PWD/datasets"
 ```

@@ -423,6 +423,7 @@ def _motion_policy_to_metadata(policy: MotionPolicy) -> dict[str, object]:
         "velocity_targets": policy.velocity_targets,
         "interpolation_mode": policy.interpolation_mode,
         "ik_seed_mode": policy.ik_seed_mode,
+        **({"phase_paths": dict(policy.phase_paths)} if policy.phase_paths else {}),
         "sample_count_retries": list(policy.sample_count_retries),
         "require_final_velocity": policy.require_final_velocity,
         "final_velocity_rejection": policy.final_velocity_rejection,
@@ -482,7 +483,7 @@ def _tracking_policy_to_metadata(policy: TrackingPolicy) -> dict[str, object]:
     """Serialize independent in-flight and terminal tracking contracts."""
     in_flight = policy.in_flight
     terminal = policy.terminal
-    return {
+    result = {
         "in_flight": (
             None
             if in_flight is None
@@ -510,6 +511,17 @@ def _tracking_policy_to_metadata(policy: TrackingPolicy) -> dict[str, object]:
             }
         ),
     }
+    if policy.boundary_stop:
+        result["boundary_stop"] = {
+            "position_tolerance": policy.boundary_position_tolerance,
+            "velocity_tolerance": policy.boundary_velocity_tolerance,
+            "timeout": policy.boundary_timeout,
+            "velocity_source": "control_boundary_position_difference",
+            "consecutive_observations": 2,
+        }
+    if policy.boundary_reference_bridge:
+        result["boundary_reference_bridge"] = True
+    return result
 
 
 def _tracking_sequence_to_metadata(

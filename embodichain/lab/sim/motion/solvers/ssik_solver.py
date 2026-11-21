@@ -353,6 +353,15 @@ class SSIKSolver(BaseSolver):
             provider.prepare_buffers(capacity)
 
     @property
+    def supports_sequential_batch_ik(self) -> bool:
+        """Whether the path hook enumerates the ordinary preceding-seed pool."""
+        return (
+            self.cfg.backend == "warp"
+            and self.family == "srs"
+            and self.cfg.srs_search == "seed_local"
+        )
+
+    @property
     def supports_continuous_batch_ik(self) -> bool:
         """Whether candidate generation and previous-frame selection are supported."""
         return True

@@ -20,7 +20,7 @@ import hashlib
 import json
 from pathlib import Path
 import numpy as np
-from embodichain_models.dynamics.rigidformer.data import MOViSequenceSource
+from embodichain.extensions.models.dynamics.rigidformer.data import MOViSequenceSource
 from ._rigidformer_fixtures import tiny_cfg
 
 

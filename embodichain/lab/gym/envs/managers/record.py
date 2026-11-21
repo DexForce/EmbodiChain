@@ -18,14 +18,13 @@ from __future__ import annotations
 
 import os
 import math
-import random
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from copy import deepcopy
 import json
 from pathlib import Path
 import tempfile
-from typing import TYPE_CHECKING, Literal, Union, List
+from typing import TYPE_CHECKING, Union
 
 import numpy as np
 import torch
@@ -103,44 +102,6 @@ class record_camera_data(Functor):
         """Raise when capture or commit is attempted after finalization."""
         if getattr(self, "_finalized", False):
             raise RuntimeError(f"{type(self).__name__} is already finalized")
-
-    def _draw_frames_into_one_image(self, frames: torch.Tensor) -> torch.Tensor:
-        """
-        Concatenate multiple frames into a single image with nearly square arrangement.
-
-        Args:
-            frames: Tensor with shape (B, H, W, 4) where B is batch size
-
-        Returns:
-            Single concatenated image tensor with shape (grid_h * H, grid_w * W, 4)
-        """
-        if frames.numel() == 0:
-            return frames
-
-        B, H, W, C = frames.shape
-
-        # Calculate grid dimensions for nearly square arrangement
-        grid_w = int(torch.ceil(torch.sqrt(torch.tensor(B, dtype=torch.float32))))
-        grid_h = int(torch.ceil(torch.tensor(B, dtype=torch.float32) / grid_w))
-
-        # Create empty grid to hold all frames
-        result = torch.zeros(
-            (grid_h * H, grid_w * W, C), dtype=frames.dtype, device=frames.device
-        )
-
-        # Fill the grid with frames
-        for i in range(B):
-            row = i // grid_w
-            col = i % grid_w
-
-            start_h = row * H
-            end_h = start_h + H
-            start_w = col * W
-            end_w = start_w + W
-
-            result[start_h:end_h, start_w:end_w] = frames[i]
-
-        return result
 
     def _normalize_env_ids(self, env_ids: torch.Tensor | list[int] | None) -> list[int]:
         if env_ids is None:

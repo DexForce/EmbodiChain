@@ -77,7 +77,7 @@ from embodichain.compute.trajectory import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
-from embodichain_robots.dexforce.w1.cfg import DexforceW1Cfg
+from embodichain.extensions.robots.dexforce.w1.cfg import DexforceW1Cfg
 
 
 def initialize_simulation(args) -> SimulationManager:
@@ -480,8 +480,8 @@ def main(args: argparse.Namespace | None = None) -> None:
     apply_random_xy_perturbation(caffe, max_perturbation=0.05, rng=rng)
     sim.update(step=1)
 
-    if not args.headless:
-        sim.open_window()
+    if not args.headless or getattr(args, "web", False):
+        sim.open_viewer()
 
     run_simulation(sim, robot, cup, caffe)
 

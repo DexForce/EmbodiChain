@@ -25,13 +25,12 @@ from typing import Any
 from embodichain.utils.config_paths import resolve_config_path
 
 TASK = resolve_config_path(
-    "extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/task.franka.visual.yaml",
+    "embodichain/extensions/tasks/configs/tasks/manipulation/push_cube/task.franka.visual.yaml",
     base_dir=Path(__file__).parent,
 ).resolve()
 CONFIG_ROOT = TASK.parents[3]
-TASK_PACKAGE = CONFIG_ROOT.parent / "embodichain_tasks"
-if not TASK_PACKAGE.is_dir():
-    TASK_PACKAGE = CONFIG_ROOT.parent
+TASK_PACKAGE = CONFIG_ROOT.parent
+# These keys identify task content in saved ACT datasets and checkpoints.
 IDENTITY_FILES = {
     "extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/task.franka.visual.yaml": TASK,
     "extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/env.visual.yaml": TASK.parent

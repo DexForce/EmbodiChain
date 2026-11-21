@@ -191,7 +191,7 @@ class RejectedMotionCandidate:
     Args:
         positions: Original candidate joint samples, shape ``(B, T, D)``.
         dt: Original arrival intervals, shape ``(B, T)``.
-        env_mask: Rows rejected by fixed-grid validation, shape ``(B,)``.
+        env_mask: Rows rejected by trajectory validation, shape ``(B,)``.
 
     These tensors are detached snapshots for audit and bounded retries. They are
     not an executable trajectory or a certificate of motion feasibility.

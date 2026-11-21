@@ -87,12 +87,12 @@ def _setup_viser_joint_control(
         return None
     controller.update()
     runtime.set_joint_control_provider(controller)
-    log_info("Viser articulation joint controls enabled.", color="green")
+    log_info("Browser articulation joint controls enabled.", color="green")
     return controller
 
 
 def _publish_loaded_assets(sim: SimulationManager, args: argparse.Namespace) -> None:
-    if getattr(args, "viser", False):
+    if getattr(args, "viser", False) or getattr(args, "web", False):
         sim.capture_visualization_safely(force=True)
 
 
@@ -124,6 +124,8 @@ def _run_preview_loop(
     if not interactive and max_steps is None:
         return
     completed = 0
+    web = getattr(getattr(sim, "sim_config", None), "web", False)
+    deadline = time.monotonic()
     try:
         while max_steps is None or completed < max_steps:
             changed = on_frame(sim) if on_frame is not None else False
@@ -147,7 +149,16 @@ def _run_preview_loop(
                 ):
                     pass
             completed += 1
-            if frame_interval:
+            if web:
+                # Interactive previews follow wall time rather than flooding
+                # the native main-thread queue with repeated pose-hold writes.
+                deadline += frame_interval or sim.sim_config.physics_dt
+                delay = deadline - time.monotonic()
+                if delay > 0:
+                    time.sleep(delay)
+                else:
+                    deadline = time.monotonic()
+            elif frame_interval:
                 time.sleep(frame_interval)
     except KeyboardInterrupt:
         pass

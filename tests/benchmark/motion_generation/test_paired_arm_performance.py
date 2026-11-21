@@ -27,14 +27,16 @@ import torch
 
 from embodichain.lab.sim.motion.motion_generator import MotionGenOptions
 from embodichain.lab.sim.motion.planners import PlanResult, PlanState
-from embodichain_benchmarks.motion_generation import _paired_arm_performance as paired
-from embodichain_benchmarks.motion_generation.config import (
+from embodichain.extensions.benchmarks.motion_generation import (
+    _paired_arm_performance as paired,
+)
+from embodichain.extensions.benchmarks.motion_generation.config import (
     PlannerSpecCfg,
     ProtocolCfg,
     SuiteCfg,
     TrackCfg,
 )
-from embodichain_benchmarks.motion_generation.models import (
+from embodichain.extensions.benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     PlannerMetadata,

@@ -1,0 +1,394 @@
+# embodichain.extensions.tasks
+
+Official task environments for [EmbodiChain](https://github.com/DexForce/EmbodiChain).
+
+This source tree contains the official task environments that used to live
+inside the core `embodichain` import package. It is bundled into the main
+`embodichain` wheel under `embodichain.extensions.tasks` and
+registered through the `embodichain.tasks` entry point. It has no independent
+distribution metadata or version.
+
+Tasks are organized by task family, optional subdomain, and task identity, not
+by solution method. Import-registered tasks keep their environment
+registration in a task-named Python module; simulator scene and MDP settings
+remain in JSON/YAML. Supported Task Program tasks may instead be entirely
+configuration-defined. Optional programs and policy configs live below the
+same task:
+
+```text
+embodichain/extensions/tasks/<category-path>/<task>.py
+configs/tasks/<category-path>/<task>/envs/default.yaml  # reusable default backend
+configs/tasks/<category-path>/<task>/envs/newton.yaml   # optional Newton backend
+configs/tasks/<category-path>/<task>/task.<embodiment>.yaml     # componentized runnable deployment
+configs/tasks/<category-path>/<task>/expansion/<profile>.yaml   # task-facing expansion override
+configs/tasks/<category-path>/<task>/task_program/program.yaml
+configs/tasks/<category-path>/<task>/task_program/integration.yaml
+configs/tasks/<category-path>/<task>/agents/<algorithm>.yaml
+configs/components/embodiments/<embodiment>.yaml
+configs/components/execution_policies/<policy>.yaml
+```
+
+The category path begins with a top-level task family and may include a
+subdomain: tableware tasks use `manipulation/tableware`, while general
+manipulation tasks can stay directly under `manipulation`. The Python entry
+stays flat beneath its owning category; the task-local configuration directory
+remains because it can own environment, Task Program, and policy artifacts.
+A simple import-registered task may keep all physical and manager values in its
+runnable `env.json` or `env.yaml`. A componentized task instead gives each pure
+physical environment variant an `environment_id` and places the runnable `id`
+plus component selections in `task.<embodiment>.yaml`.
+A Gym deployment of any kind may select reusable `environment.component` and
+`embodiment.component` files instead of repeating environment, robot, sensor,
+and scene fields. A physical-only embodiment may omit `skill_profile` when its
+deployments do not use Task Program. Standalone
+`scene.component` and inline Gym configs remain valid, but component-owned
+fields cannot also be declared inline in the same file.
+
+A configuration-defined Task Program environment uses explicit owners. The
+selected file under `envs/` owns episode/environment values and physical
+simulation entities, and contains no Task Program metadata. When a backend needs
+native solver/contact values, `envs/newton.yaml` owns those values while
+retaining the same scene geometry and control cadence. The integration's nested
+`scene_binding` maps canonical `entity_id` values to physical
+`simulation_uid` values and owns semantic types and affordances. A thin
+`task.<embodiment>.yaml` deployment selects named `default` and `newton`
+environment variants. Both select one reusable embodiment and all three Task
+Program components (`program`, `integration`, and `execution_policy`). The
+launcher selects the concrete backend from the same deployment with
+`--physics`; the selected environment file remains the owner of its backend
+fields.
+
+Execution policies accept either the original string path or a component
+selection with deployment-specific tuning:
+
+```yaml
+task_program:
+  program: task_program/program.yaml
+  integration: task_program/integration.yaml
+  execution_policy:
+    component: ../../../components/execution_policies/motion_gen_verified.yaml
+    overrides:
+      motion:
+        velocity_limit: 0.5
+        dynamic_collision_mode: 'off'
+```
+
+Overrides are limited to `motion.sample_count`, `motion.velocity_limit`,
+`motion.acceleration_limit`, `motion.dynamic_collision_mode`, `motion.ik_seed_mode`,
+`recovery.skill_timeout` and `recovery.goal_rotation_threshold`. They patch
+only the declared fields; all other base values are retained. The resolved
+values pass the normal policy decoders, including integer, finite-number and
+enum validation. Contracts, planner selection, tracking, runner and effect
+assurance stay in the base policy. The component path resolves from the
+deployment, just as a string reference does. Asset materialization writes the
+resolved policy into its standalone output.
+
+Omit overrides that repeat the selected policy's values. A string reference is
+sufficient when no tuning remains; for example, the Marvin repeated-pick/place
+deployment directly selects `sequential_ik_verified.yaml`.
+
+### Task Program transforms and resolved configuration
+
+Official integrations use `profile.skill_options`; the former `action_options`
+key remains accepted for existing configurations. Specifying both is an error.
+
+Integration transforms accept a compact position/orientation declaration:
+
+```yaml
+fixed_object_to_eef:
+  position: [0.0, 0.0, 0.05]
+  quaternion_xyzw: [1.0, 0.0, 0.0, 0.0]
+```
+
+Declare exactly one of `quaternion_xyzw` or a three-row `rotation_matrix`.
+Quaternions must be finite and nonzero and are normalized. A `rotation_matrix`
+retains its authored numbers without orthogonalization, allowing rounded legacy
+calibrations to keep their exact expanded transform and identity. Legacy flat
+16-number transforms remain supported; physical gripper geometry also retains
+its existing four-row matrix form. The shorthand preserves each field's frame:
+it does not change `object_target_frame` or convert parent/world coordinates.
+These forms describe calibration, not a guarantee of physical task success.
+
+Inspect the selected backend and composed parameters without starting simulation:
+
+```bash
+python .agents/skills/add-task-program/scripts/inspect_deployment.py \
+  embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.tianji_marvin.yaml \
+  --explain
+```
+
+Text output shows the physical backend, selected files, parameter values and
+their component/inline/deployment-override owners. Decoder-derived values are
+marked at their nearest authored owner. Built-in composite effect monitor
+defaults are expanded and marked as SDK defaults. Add `--json` for the
+`resolved_configuration` object, including typed runtime preset defaults.
+Provider-specific monitor defaults are not guessed. These are configuration
+facts; live effect measurements and acceptance still require execution.
+
+Task-facing trajectory expansion is an optional third owner. A runnable task
+can reference it without copying the robot or environment declaration:
+
+```yaml
+expansion:
+  config: expansion/<task-profile>.yaml
+```
+
+The referenced file contains `runtime`, `policy`, `overrides`, and optional
+`candidate_indices`. Its mappings are merged with any task-local expansion
+fields, and its runtime overlay is applied after the selected environment
+variant is expanded. This keeps expansion-specific batch size, recorder
+events, and augmentation policy beside the task while keeping physical scene
+ownership in `envs/`. `run-task` loads the referenced declaration;
+relative policy and resource paths inside it resolve from the expansion file.
+`--expansion-profile` and `--expansion-candidate-indices` remain
+command-line overrides.
+
+An embodiment owns the simulation robot and its sensor suite. Its optional
+`skill_profile` owns the logical resources, command presets, and
+embodiment-specific Task Program services. Loading a deployment checks that
+scene-binding targets exist in the physical scene, validates explicit
+scene/embodiment contracts, and registers the common `EmbodiedEnv`, so no
+Python task module is needed. Programs contain no concrete embodiment/profile
+IDs; changing the `embodiment.component` reference is sufficient when another
+embodiment satisfies the same contract. These files intentionally have no
+compatibility `version` field.
+
+Deployments may use `embodiment.camera_overrides` for scene-specific camera
+calibration without copying that suite:
+
+```yaml
+embodiment:
+  component: ../../../components/embodiments/franka_gs_dual_camera.yaml
+  camera_overrides:
+    cam_third:
+      intrinsics: [480, 480, 480, 270]
+      extrinsics:
+        eye: [0.85, -0.65, 0.85]
+        target: [0.3, 0, 0.38]
+        up: [0, 0, 1]
+```
+
+Only ordinary `Camera` UIDs explicitly declared in the component's `sensor`
+or `simulation.sensors` list are eligible. Unknown or duplicate UIDs fail.
+Only `intrinsics` and `extrinsics` are accepted; membership, type, parent,
+resolution and output flags remain with the component. Intrinsics contain four
+finite numbers with positive focal lengths. Extrinsics accept finite look-at
+vectors with nondegenerate direction/up, or position and a unit XYZW quaternion.
+Partial edits preserve the current representation's other fields. Switching
+between look-at and explicit pose requires a complete `eye`/`target` or
+`pos`/`quat`, clears stale fields and preserves parent. Sensor defaults owned
+only by a robot preset are not materialized by this selector.
+
+## Dual-arm task deployments
+
+The following tasks provide `dual_ur5_dh_pgi_140_80` and
+`tianji_marvin` catalog deployments:
+
+| Task under `configs/tasks/manipulation/` | Execution |
+| --- | --- |
+| `hand_over` | Verified two-arm Task Program |
+| `repeated_pick_place` | Verified Task Program using the left arm |
+| `tableware/pour_water` | Right-arm Task Program with measured segment checks |
+| `tableware/blocks_ranking_rgb` | Two-arm Task Program with measured lift/placement checks |
+| `tableware/stack_blocks_two` | Single-arm Task Program with measured lift/stack checks |
+| `tableware/blocks_ranking_size` | Environment and success checks |
+| `tableware/match_object_container` | Environment and success checks |
+| `tableware/place_object_drawer` | Environment and success checks |
+| `tableware/stack_cups` | Environment and success checks |
+
+Select the file named by the catalog deployment. Most use
+`task.<catalog-deployment>.yaml`; the shared-tabletop UR5 hand-over variant uses
+`task.dual_ur5.yaml` and the original `task.dual_ur5_dh_pgi_140_80.yaml` keeps its
+legacy scene and ID. Existing
+CobotMagic deployments, legacy baseline `env.json` paths, and single-arm UR5
+pick/place deployments remain available. The baseline JSON files select shared
+physical `env.yaml` components; adding a robot variant does not add an expert
+to an environment-only task. `ScoopIce-v1` remains retired.
+
+Both embodiments provide `cam_high`; Marvin additionally provides its two
+wrist RGB-D cameras. UR5 deployments have one camera, so downstream datasets
+must use the selected embodiment's sensor and action layout. Shared tableware
+observations normalize named end-effector control parts instead of fixed joint
+indices. Robot-specific installation poses live in deployment overrides.
+
+Programs and measured acceptance thresholds are shared across embodiments.
+Task integrations retain gripper-specific grasp transforms and arm selections, while the
+embodiments own open/grasp commands and grasp generators. The generic
+primary/secondary manipulator resources alias the right/left physical resource
+leaves; they do not introduce independent arms. Static preflight proves
+composition, not physical completion; use the task's measured validators when
+qualifying trajectories, seeds, or backend settings.
+
+Verified tabletop policies request explicit planning speed and acceleration
+budgets, still capped by robot joint limits. The tabletop verified policy uses
+a 0.5 rad/s speed budget with 0.5 rad/s² acceleration. Native trajectory timing is
+preserved. The legacy UR5 hand-over keeps its original policy. Verified actions
+allow 120 seconds, and the shared hand-over scene
+allows 3200 control steps for the full transfer and measured-effect gates.
+
+Example:
+
+```bash
+python -m embodichain run-task --gym_config \
+  embodichain/extensions/tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.dual_ur5_dh_pgi_140_80.yaml
+```
+
+## Migrating from the solution-first layout
+
+Gym IDs are unchanged, but direct module imports and repository-style config
+paths must use the task-first locations:
+
+| Previous owner | Task-first owner |
+| --- | --- |
+| `embodichain.extensions.tasks.rl.basic.<task>` | `embodichain.extensions.tasks.classic_control.<task>` |
+| `embodichain.extensions.tasks.rl.push_cube` | `embodichain.extensions.tasks.manipulation.push_cube` |
+| `embodichain.extensions.tasks.tableware.<task>` | `embodichain.extensions.tasks.manipulation.tableware.<task>` |
+| Task Program-specific Python task modules | No replacement module for supported config-defined examples; load `configs/tasks/manipulation/<task>/task.<embodiment>.yaml` |
+| `configs/tasks/tableware/<task>/` | `configs/tasks/manipulation/tableware/<task>/` |
+| `configs/gym/`, `configs/task_program/`, `configs/agents/rl/` | `configs/tasks/<category-path>/<task>/` |
+
+## Installation
+
+Install the main EmbodiChain distribution. It includes both the core and
+official task import packages:
+
+```bash
+cd EmbodiChain
+pip install -e .
+```
+
+The published wheel is installed with the same single-package command:
+
+```bash
+pip install embodichain
+```
+
+The `official_tasks` entry point in the `embodichain.tasks` group discovers
+the bundled task package. Paths beginning with `embodichain/extensions/tasks/configs/`
+resolve from the source checkout or installed wheel. Reinstall an existing
+editable checkout to refresh the entry points after upgrading.
+
+## Running a task
+
+Use the unified `embodichain` CLI shipped with EmbodiChain. It discovers all
+installed task packages and launches any registered environment; the task is
+selected by the `"id"` field of the gym config.
+
+```bash
+# Data expansion mode
+embodichain run-task --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml
+
+# Newton variant selected from the same deployment
+embodichain run-task --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml --physics newton
+
+# Preview mode
+embodichain run-task --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml --preview
+
+# Equivalent invocations
+python -m embodichain run-task --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
+python -m embodichain.lab.scripts.run_task --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
+
+# Newton variant selected from the same deployment
+python -m embodichain run-task --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml --physics newton
+```
+
+## How registration works
+
+Importing `embodichain.extensions.tasks` recursively imports every task module, which
+triggers its `@register_env` decorator and registers it in the gymnasium
+registry. Configuration-defined Task Program IDs are registered later by
+`config_to_cfg()` when their task deployment is loaded. Task listing discovers
+top-level JSON/YAML deployments by their non-empty `id` field rather than an
+`env*` filename prefix, so pure environment components are ignored. The
+unified CLI calls `discover_task_packages()` (from
+`embodichain.lab.gym.utils.registration`) at
+startup, which imports this package via its entry point. See the
+[task-package discovery utilities](../../lab/gym/utils/registration.py)
+and the [official task package initializer](__init__.py) for
+the implementation.
+
+## Extending with your own tasks
+
+External projects can ship their own task packages the same way. The easiest
+starting point is the
+[embodichain_task_template](https://github.com/DexForce/embodichain_task_template)
+repository -- fork it and replace the package with your own.
+
+To add a task environment:
+
+1. **Declare the entry point** in your package's `pyproject.toml` so the
+   unified CLI discovers it:
+   ```toml
+   [project.entry-points."embodichain.tasks"]
+   "your_package" = "your_package"
+   ```
+2. **Choose the registration path.** For custom Python behavior, implement
+   `<category-path>/<task>.py` as an `EmbodiedEnv` subclass and register it
+   there with `@register_env("YourTask-v1")`. Importing your package must reach
+   every task module so the decorator runs. A supported configuration-defined
+   Task Program may omit that module and register its ID when its runnable
+   config is loaded.
+3. **Write a runnable gym config** (`.json`/`.yaml`) with `id`. It may define
+   physical and manager values inline, or select reusable environment variants,
+   an embodiment, and optional Task Program components from
+   `task.<embodiment>.yaml`.
+4. **Install and run**:
+   ```bash
+   pip install -e .
+   embodichain run-task --gym_config path/to/your/gym_config.json
+   ```
+
+If your tasks need custom manager modules (observation/reward/event/action
+functors) or asset resolvers, register them from an `embodichain.init` hook
+(see `register_manager_modules()` in `embodichain.lab.gym.utils.gym_utils`).
+The template uses explicit package imports; `embodichain.extensions.tasks` uses the
+`import_packages()` helper for recursive import.
+
+## Using registered tasks with RLinf
+
+RLinf workers use the same installed task packages as the EmbodiChain CLI
+through the `embodichain.tasks` entry-point group. Install the package in the
+worker environment and point the adapter at a runnable Gym deployment. See the
+[RLinf integration guide](../../../docs/source/guides/rlinf.md) for the integration
+boundary and current compatibility notes.
+
+## Dual-arm qualification scope
+
+Local checks use the Default physics backend, one CPU simulation environment,
+and seed 0 with the configured reset randomization. The Task Program
+combinations use measured program checks. The eight baseline
+combinations were constructed, reset and stepped; they do not gain expert
+programs. PourWater uses Hybrid for its glTF asset loader. Other motion checks
+run headlessly without sensors; an additional Hybrid check verified the shared
+UR5 top camera at 960 by 540 pixels. These checks do not qualify every random
+seed, physics backend or sensor configuration.
+
+## Real-demonstration trajectory expansion
+
+`configs/tasks/manipulation/carton_stocking/task.panda.yaml` is a configured
+Panda/Robotiq Task Program with three fixed real-motion prototypes. It runs
+source refinement, protected trajectory/time variants and measured LeRobot
+collection through the standard `run-task` owner. Its catalog exposes one
+Panda deployment; the standard task requires no example-generated configuration.
+See the task README for assets, accepted geometry and the 78-candidate benchmark.
+
+### Task integration tuning
+
+An integration selector can use `{component, overrides}` as well as a path.
+The `blocks_ranking_rgb` deployments share `task_program/integration.yaml` and
+retain robot-specific tuning in their deployment selectors. Overrides accept
+`integration_id`, `requires.embodiment_contract`, and existing
+`profile.skill_options` entries. The allowed option fields are
+`pre_grasp_distance`, `lift_height`, `hand_interp_steps`, `grasp_settle_steps`,
+`fixed_object_to_eef`, `preserve_current_object_orientation`,
+`release_settle_steps`, `approach_along_grasp_axis`, `cartesian_lift`,
+and `cartesian_approach`.
+Motion overrides also accept the existing `ik_seed_mode` enum; incompatible
+strategy/seed selections still fail the normal motion decoder.
+Existing `profile.defaults` call/slot bindings may select a different declared
+resource; new defaults and slots are rejected.
+Arrays replace whole values. Scene bindings, scene contracts, runtime services,
+and skill kinds cannot be overridden. New resource defaults and slots cannot be
+introduced. Resolved values still pass ordinary decoding and embodiment/policy
+contract checks after composition. Paths owned by
+the integration remain relative to its component file.

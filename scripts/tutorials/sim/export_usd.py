@@ -66,7 +66,7 @@ from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 
-from embodichain_robots.dexforce.w1.cfg import DexforceW1Cfg
+from embodichain.extensions.robots.dexforce.w1.cfg import DexforceW1Cfg
 
 
 def initialize_simulation(args) -> SimulationManager:
@@ -279,8 +279,8 @@ def main(args: argparse.Namespace | None = None) -> None:
 
     logger.log_info("Scene exported successfully.")
 
-    if not args.headless:
-        sim.open_window()
+    if not args.headless or getattr(args, "web", False):
+        sim.open_viewer()
         logger.log_info("Press Ctrl+C to exit.")
         try:
             while True:

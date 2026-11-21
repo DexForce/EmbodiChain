@@ -1,7 +1,7 @@
 Robot world model
 =================
 
-``embodichain_models.dynamics.rwm`` predicts action-conditioned robot states
+``embodichain.extensions.models.dynamics.rwm`` predicts action-conditioned robot states
 using frame-local increments and FP32 integration. It owns the model, state
 representation, autoregressive objective, prediction state, replay and offline
 recipe. Shared optimizer updates and recovery use
@@ -12,10 +12,10 @@ Public entry points
 
 The named family lazily exports the model and its supervised integration.
 ``build_rwm_trainer`` retains its public symbol name at this canonical import
-path and at ``embodichain_models.dynamics.rwm.sl_recipe``. The family does not
+path and at ``embodichain.extensions.models.dynamics.rwm.sl_recipe``. The family does not
 initialize simulation or import example helpers.
 
-.. currentmodule:: embodichain_models.dynamics.rwm
+.. currentmodule:: embodichain.extensions.models.dynamics.rwm
 
 .. autosummary::
 
@@ -59,7 +59,7 @@ Increments use the current body frame and right-multiplied exponential rotation
 coordinates. The logarithm selects the shortest rotation; first-order derivatives
 away from its pi branch cut are supported.
 
-.. currentmodule:: embodichain_models.dynamics.rwm.robot_state
+.. currentmodule:: embodichain.extensions.models.dynamics.rwm.robot_state
 
 .. autosummary::
 
@@ -97,7 +97,7 @@ identity retains the fixed control period, action semantics and ordered joints.
 ``frozen_world_model`` freezes parameters and statistics while preserving
 state/action gradients through dependent rollout and backward work.
 
-.. currentmodule:: embodichain_models.dynamics.rwm.model
+.. currentmodule:: embodichain.extensions.models.dynamics.rwm.model
 
 .. autosummary::
 
@@ -130,7 +130,7 @@ Both models accept the canonical matrix-based state and preserve state/action
 input gradients when frozen. Geometry XML and the complete model configuration
 are included in checkpoint identity.
 
-.. currentmodule:: embodichain_models.dynamics.rwm.kinematic
+.. currentmodule:: embodichain.extensions.models.dynamics.rwm.kinematic
 
 .. autosummary::
 
@@ -162,7 +162,7 @@ state when beginning a new graph. The objective accepts feature weights and
 window adaptation excludes episode-crossing windows and optional false
 ``usable`` transition flags before constructing the prediction graph.
 
-.. currentmodule:: embodichain_models.dynamics.rwm.supervised
+.. currentmodule:: embodichain.extensions.models.dynamics.rwm.supervised
 
 .. autosummary::
 
@@ -174,7 +174,7 @@ window adaptation excludes episode-crossing windows and optional false
 
 .. autofunction:: replay_supervised_batch
 
-.. currentmodule:: embodichain_models.dynamics.rwm.predictor
+.. currentmodule:: embodichain.extensions.models.dynamics.rwm.predictor
 
 .. autosummary::
 
@@ -196,7 +196,7 @@ include ``history_complete``: reset padding is complete, while missing rows lost
 to ring overwrite are not. Version-1 snapshots remain loadable for layouts with
 no auxiliary fields.
 
-.. currentmodule:: embodichain_models.dynamics.rwm.replay
+.. currentmodule:: embodichain.extensions.models.dynamics.rwm.replay
 
 .. autosummary::
 
@@ -208,14 +208,14 @@ no auxiliary fields.
 Offline SL recipe
 -----------------
 
-Use ``embodichain_models.dynamics.rwm.sl_recipe:build_rwm_trainer`` as the factory
+Use ``embodichain.extensions.models.dynamics.rwm.sl_recipe:build_rwm_trainer`` as the factory
 for ``embodichain train-sl``. Tensor corpora declare their split, action semantics,
 control period and ordered joints. Normalization uses valid measured training
 transitions. The resulting common SL checkpoint preserves corpus identity,
 normalization, optimizer, RNG and the sampling cursor. The controlled fitting
 example runs through ``embodichain run-example learning/rwm``.
 
-.. currentmodule:: embodichain_models.dynamics.rwm.sl_recipe
+.. currentmodule:: embodichain.extensions.models.dynamics.rwm.sl_recipe
 
 .. autosummary::
 
@@ -230,7 +230,7 @@ The motion actor concatenates proprioceptive history with an encoded reference
 goal. Its scalar critic consumes separate privileged state features. Actor and
 critic normalizers are updated explicitly at their respective learning phases.
 
-.. automodule:: embodichain_models.policies.motion_tracking
+.. automodule:: embodichain.extensions.models.policies.motion_tracking
    :members:
 
 The tensor-only motion environment starts from measured replay states, clean
@@ -238,8 +238,8 @@ history and reference progress. It preserves action/state derivatives across a
 fixed horizon and reports invalid clip suffixes through validity masks. The
 workflow freezes model parameters until policy backpropagation completes.
 
-.. automodule:: embodichain_tasks.locomotion.tracking.motion_model
+.. automodule:: embodichain.extensions.tasks.locomotion.tracking.motion_model
    :members:
 
-.. automodule:: embodichain_tasks.locomotion.managers.events
+.. automodule:: embodichain.extensions.tasks.locomotion.managers.events
    :members:

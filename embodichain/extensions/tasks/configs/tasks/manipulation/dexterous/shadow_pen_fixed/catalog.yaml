@@ -1,0 +1,12 @@
+task_key: shadow_pen_fixed
+title: Shadow Hand Fixed-Target Pen Spin
+summary: Spin a pen in-hand to sampled target orientations with the 24-DOF Shadow
+  Hand.
+tags:
+- manipulation
+- dexterous
+- reinforcement_learning
+default_deployment: default
+deployments:
+  default:
+    config: env.yaml

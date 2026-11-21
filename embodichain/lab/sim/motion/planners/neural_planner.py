@@ -38,7 +38,11 @@ from embodichain.lab.sim.motion.planners.utils import (
     TrajectorySampleMethod,
 )
 from embodichain.utils import configclass, logger
-from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
+from embodichain.utils.math import (
+    matrix_from_quat,
+    quat_error_magnitude,
+    quat_from_matrix,
+)
 
 __all__ = [
     "NeuralPlanner",
@@ -372,7 +376,7 @@ class NeuralPlannerCfg(BasePlannerCfg):
     """Whether every Cartesian waypoint requires its orientation constraint."""
 
     pos_eps: float = 0.01
-    """Waypoint position threshold in metres."""
+    """Waypoint position threshold at the caller's runtime TCP, in metres."""
 
     rot_eps: float = 0.1
     """Waypoint rotation threshold in radians."""
@@ -564,6 +568,10 @@ class NeuralPlanner(BasePlanner):
         self._runtime_tcp_from_policy_tcp = self._as_transform(
             self.cfg.runtime_tcp_from_policy_tcp, "runtime_tcp_from_policy_tcp"
         )
+        tcp = self._runtime_tcp_from_policy_tcp
+        self._policy_tcp_to_runtime_origin = -(tcp[:3, :3].T @ tcp[:3, 3])
+        if not bool(self._policy_tcp_to_runtime_origin.any()):
+            self._policy_tcp_to_runtime_origin = None
         self._policy_frames_by_control_part = {
             part: self._as_transform(
                 value, f"policy_frame_from_world_by_control_part[{part!r}]"
@@ -1403,7 +1411,16 @@ class NeuralPlanner(BasePlanner):
         active_pos_mask = pos_mask[idx, active_idx_clamped] > 0.5
         active_rot_mask = rot_mask[idx, active_idx_clamped] > 0.5
         active_joint_mask = joint_mask[idx, active_idx_clamped] > 0.5
-        pos_dist = (ee_pose[:, :3] - active_pos).norm(dim=-1)
+        # Measure acceptance at the runtime TCP: orientation error displaces
+        # an offset policy origin. The common policy-base rotation preserves
+        # the error norm; policy observations remain unchanged.
+        tcp_origin = self._policy_tcp_to_runtime_origin
+        position_error = ee_pose[:, :3] - active_pos
+        if tcp_origin is not None:
+            position_error += (
+                matrix_from_quat(ee_pose[:, 3:7]) - matrix_from_quat(active_quat_xyzw)
+            ) @ tcp_origin
+        pos_dist = position_error.norm(dim=-1)
         # All planner poses are ``xyz + xyzw`` and ``quat_error_magnitude``
         # consumes xyzw.  Keeping the values in that convention avoids a
         # needless round trip through the native/external ``wxyz`` layout.

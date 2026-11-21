@@ -49,7 +49,7 @@ the solver configuration.
 import torch
 
 from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
-from embodichain_robots import AlohaMiniCfg
+from embodichain.extensions.robots import AlohaMiniCfg
 
 device = torch.device("cpu")  # Use torch.device("cuda") for CUDA execution.
 robot_cfg = AlohaMiniCfg.from_dict({"uid": "aloha_mini"})
@@ -356,7 +356,7 @@ from importlib.resources import files
 import torch
 
 from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
-from embodichain_robots import ARX5Cfg, FlexivRizon4SCfg
+from embodichain.extensions.robots import ARX5Cfg, FlexivRizon4SCfg
 
 robot_cfg = ARX5Cfg.from_dict({})
 artifact_name = "arx5.py"
@@ -365,7 +365,7 @@ artifact_name = "arx5.py"
 # artifact_name = "flexiv_rizon4s.py"
 
 previous = robot_cfg.solver_cfg["arm"]
-artifact = files("embodichain_robots").joinpath("_ssik_artifacts", artifact_name)
+artifact = files("embodichain.extensions.robots").joinpath("_ssik_artifacts", artifact_name)
 robot_cfg.solver_cfg["arm"] = SSIKSolverCfg(
     backend="reference",
     reference_artifact=str(artifact),

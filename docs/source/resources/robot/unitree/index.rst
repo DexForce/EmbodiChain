@@ -2,7 +2,7 @@ Unitree
 ========
 
 Robot configurations for Unitree live in the
-``embodichain_robots.unitree`` manufacturer namespace.
+``embodichain.extensions.robots.unitree`` manufacturer namespace.
 
 .. list-table::
    :class: robot-catalog

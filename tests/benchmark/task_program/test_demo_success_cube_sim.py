@@ -24,7 +24,7 @@ import sys
 
 import pytest
 
-from embodichain_tasks.configs import get_config_path
+from embodichain.extensions.tasks.configs import get_config_path
 from scripts.benchmark.task_program.demo_success import (
     aggregate_demo_success_trials,
     load_raw_trials,

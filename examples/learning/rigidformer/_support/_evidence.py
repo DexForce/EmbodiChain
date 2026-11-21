@@ -33,7 +33,7 @@ from .._prepare import sha256
 def evidence(checkpoint: Path, root: Path, backend: str) -> dict[str, Any]:
     """Describe the executed installation and the immutable experiment inputs."""
     import embodichain.learning.sl as sl
-    import embodichain_models.dynamics.rigidformer as family
+    import embodichain.extensions.models.dynamics.rigidformer as family
 
     dependencies = {}
     for package in (

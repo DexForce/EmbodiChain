@@ -32,6 +32,7 @@ from .contact import (
     ContactSensor,
     ContactSensorCfg,
     ArticulationContactFilterCfg,
+    ContactPermissionChecker,
 )
 from .contact_grid import ContactGrid, ContactGridCfg
 from .contact_resultant import ContactResultant, ContactResultantCfg

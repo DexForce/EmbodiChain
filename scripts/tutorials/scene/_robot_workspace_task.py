@@ -191,7 +191,7 @@ class _ObservedEnv(gym.Wrapper):
 
 def _task_config(display: Any) -> tuple[Any, Any]:
     path = resolve_config_path(
-        "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml",
+        "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml",
         base_dir=Path(__file__).parent,
     )
     cfg = config_to_cfg(load_config(path), source_path=path)

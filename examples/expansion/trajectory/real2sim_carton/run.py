@@ -162,17 +162,12 @@ def main() -> None:
     source = (args.source_dir or output / "source").resolve()
     environment = os.environ.copy()
     repository = Path(__file__).resolve().parents[4]
-    paths = [
-        repository,
-        repository / "extensions",
-        repository / "extensions/embodichain_tasks",
-    ]
     environment.update(
         EMBODICHAIN_SIM_EXIT_PROCESS="0",
         OMP_NUM_THREADS="1",
         OPENBLAS_NUM_THREADS="1",
         PYTHONPATH=os.pathsep.join(
-            [*(str(p) for p in paths), environment.get("PYTHONPATH", "")]
+            [str(repository), environment.get("PYTHONPATH", "")]
         ),
     )
     stages = []

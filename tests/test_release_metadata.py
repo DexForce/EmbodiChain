@@ -29,7 +29,7 @@ from setuptools.command.build_py import build_py
 
 import setup as package_setup
 from scripts.validate_wheel_metadata import WheelMetadataError, validate_wheel
-from setup import get_package_data, get_package_dir, get_packages
+from setup import get_package_data, get_packages
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _TEST_VERSION = "0.2.4"
@@ -91,58 +91,64 @@ def _write_test_wheel(tmp_path: Path, requirements: list[str]) -> Path:
 
 
 def test_official_tasks_share_core_distribution_metadata() -> None:
-    task_root = _REPOSITORY_ROOT / "extensions" / "embodichain_tasks"
+    task_root = _REPOSITORY_ROOT / "embodichain" / "extensions" / "tasks"
     metadata = _read_project_metadata()
     task_entry_points = metadata["project"]["entry-points"]["embodichain.tasks"]
 
     assert not (task_root / "VERSION").exists()
     assert not (task_root / "pyproject.toml").exists()
-    assert task_entry_points == {"embodichain_tasks": "embodichain_tasks"}
+    assert task_entry_points == {"official_tasks": "embodichain.extensions.tasks"}
 
 
 def test_package_discovery_includes_only_runtime_trees() -> None:
     packages = get_packages()
-    package_dir = get_package_dir()
-
     runtime_roots = {
         "embodichain",
-        "embodichain_tasks",
-        "embodichain_robots",
-        "embodichain_benchmarks",
-        "embodichain_models",
-        "embodichain_solvers",
-        "embodichain_sensors",
+        "embodichain.extensions",
+        "embodichain.extensions.tasks",
+        "embodichain.extensions.robots",
+        "embodichain.extensions.benchmarks",
+        "embodichain.extensions.models",
+        "embodichain.extensions.solvers",
+        "embodichain.extensions.sensors",
     }
     assert runtime_roots | {
-        "embodichain_tasks.configs",
-        "embodichain_robots.dexforce.w1",
+        "embodichain.extensions.tasks.configs",
+        "embodichain.extensions.robots.dexforce.w1",
     } <= set(packages)
-    assert "embodichain_tasks.manipulation.tableware" in packages
+    assert "embodichain.extensions.tasks.manipulation.tableware" in packages
     assert "embodichain.lab.gym.envs.managers.observations" in packages
-    assert "embodichain_solvers.physics.nerd" in packages
-    assert "embodichain_tasks.tableware" not in packages
-    assert all(package.partition(".")[0] in runtime_roots for package in packages)
-    assert package_dir == {
-        "embodichain_tasks": "extensions/embodichain_tasks/embodichain_tasks",
-        "embodichain_tasks.configs": "extensions/embodichain_tasks/configs",
-        "embodichain_robots": "extensions/embodichain_robots",
-        "embodichain_benchmarks": "extensions/embodichain_benchmarks",
-        "embodichain_models": "extensions/embodichain_models/embodichain_models",
-        "embodichain_solvers": "extensions/embodichain_solvers/embodichain_solvers",
-        "embodichain_sensors": "extensions/embodichain_sensors",
-    }
+    assert "embodichain.extensions.solvers.physics.nerd" in packages
+    assert "embodichain.extensions.tasks.tableware" not in packages
+    assert all(package.partition(".")[0] == "embodichain" for package in packages)
 
 
-@pytest.mark.parametrize("nested", [False, True])
+def test_dry_run_preserves_retired_extension_staging(tmp_path: Path) -> None:
+    stale_dir = tmp_path / "embodichain_tasks"
+    stale_dir.mkdir()
+    payload = stale_dir / "__init__.py"
+    payload.touch()
+    stale_link = tmp_path / "embodichain_models"
+    stale_link.symlink_to(stale_dir, target_is_directory=True)
+
+    distribution = Distribution()
+    distribution.dry_run = True
+    command = package_setup.BuildPy(distribution)
+    command.build_lib = str(tmp_path)
+    command.ensure_finalized()
+    command.run()
+
+    assert payload.is_file()
+    assert stale_link.is_symlink()
+
+
 def test_new_extension_package_and_resources_are_discovered(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, nested: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    extensions = tmp_path / "extensions"
-    project = extensions / "embodichain_example"
-    package = project / "embodichain_example" if nested else project
+    package = tmp_path / "embodichain" / "extensions" / "example"
     (package / "feature").mkdir(parents=True)
-    (package / "__init__.py").touch()
-    (package / "feature" / "__init__.py").touch()
+    for module in (package.parent.parent, package.parent, package, package / "feature"):
+        (module / "__init__.py").touch()
     resources = {
         "README.md": "Extension usage",
         "LICENSE": "Source license",
@@ -166,21 +172,15 @@ def test_new_extension_package_and_resources_are_discovered(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
     monkeypatch.setattr(package_setup, "THIS_DIR", tmp_path)
-    monkeypatch.setattr(package_setup, "EXTENSIONS_DIR", extensions)
-
-    assert {"embodichain_example", "embodichain_example.feature"} <= set(get_packages())
-    assert (
-        get_package_dir()["embodichain_example"]
-        == package.relative_to(tmp_path).as_posix()
-    )
+    monkeypatch.chdir(tmp_path)
+    packages = get_packages()
+    assert {
+        "embodichain.extensions.example",
+        "embodichain.extensions.example.feature",
+    } <= set(packages)
     distribution = Distribution(
         {
-            "packages": [
-                name
-                for name in get_packages()
-                if name.startswith("embodichain_example")
-            ],
-            "package_dir": {"embodichain_example": str(package)},
+            "packages": packages,
             "package_data": get_package_data(),
             "include_package_data": False,
             "script_name": str(tmp_path / "setup.py"),
@@ -190,29 +190,11 @@ def test_new_extension_package_and_resources_are_discovered(
     command.build_lib = str(tmp_path / "lib")
     command.ensure_finalized()
     command.run()
-    output = Path(command.build_lib) / "embodichain_example"
+    output = Path(command.build_lib) / package.relative_to(tmp_path)
     for relative, content in resources.items():
         assert (output / relative).read_text() == content
     for relative in excluded:
         assert not (output / relative).exists(), relative
-
-
-@pytest.mark.parametrize("layout", ["missing", "ambiguous", "invalid_name"])
-def test_invalid_extension_layout_is_rejected(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layout: str
-) -> None:
-    extensions = tmp_path / "extensions"
-    name = "embodichain_bad-name" if layout == "invalid_name" else "embodichain_example"
-    project = extensions / name
-    project.mkdir(parents=True)
-    if layout == "ambiguous":
-        (project / "__init__.py").touch()
-        (project / name).mkdir()
-        (project / name / "__init__.py").touch()
-    monkeypatch.setattr(package_setup, "EXTENSIONS_DIR", extensions)
-
-    with pytest.raises(ValueError, match="extension package name|package layout"):
-        get_packages()
 
 
 def test_project_metadata_has_no_direct_dependencies() -> None:

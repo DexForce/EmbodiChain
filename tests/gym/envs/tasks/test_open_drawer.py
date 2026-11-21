@@ -32,7 +32,7 @@ def _run_ur5_open_drawer_episode() -> None:
 
     task = (
         Path(__file__).resolve().parents[4]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/open_drawer"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/open_drawer"
     )
     source = task / "task.ur5.yaml"
     payload = load_config(source)

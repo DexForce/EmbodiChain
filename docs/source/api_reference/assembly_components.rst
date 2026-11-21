@@ -23,18 +23,18 @@ rejected to avoid conflicting robot commands.
 Preparation and saved resources
 -------------------------------
 
-.. currentmodule:: embodichain_tasks.manipulation.assembly.preparation
+.. currentmodule:: embodichain.extensions.tasks.manipulation.assembly.preparation
 
 .. autofunction:: prepare_assembly_scene
 
-.. currentmodule:: embodichain_tasks.manipulation.assembly.resources
+.. currentmodule:: embodichain.extensions.tasks.manipulation.assembly.resources
 
 .. autofunction:: export_assembly_resources
 
 Termination conditions
 ----------------------
 
-.. currentmodule:: embodichain_tasks.manipulation.assembly.functors
+.. currentmodule:: embodichain.extensions.tasks.manipulation.assembly.functors
 
 .. autofunction:: assembly_success
 
@@ -47,7 +47,7 @@ The task package owns proprioceptive feature construction, contact labels,
 selected-row grasp resets and assembly milestone rewards. Configuration binds
 these functors to the common environment managers.
 
-.. currentmodule:: embodichain_tasks.manipulation.assembly.functors
+.. currentmodule:: embodichain.extensions.tasks.manipulation.assembly.functors
 
 .. autoclass:: AssemblyProprioception
    :members:

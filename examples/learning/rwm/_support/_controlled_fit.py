@@ -35,9 +35,9 @@ import time
 
 import torch
 
-from embodichain_models.dynamics.rwm.robot_state import integrate_robot_state
+from embodichain.extensions.models.dynamics.rwm.robot_state import integrate_robot_state
 from embodichain.learning.sl import SupervisedBatch, SupervisedLearner
-from embodichain_models.dynamics.rwm import (
+from embodichain.extensions.models.dynamics.rwm import (
     RobotWorldModelObjective,
     build_rwm_trainer,
     RobotWorldModel,
@@ -98,7 +98,7 @@ def main() -> None:
             args.output / f"{split}.pt",
         )
     config = {
-        "factory": "embodichain_models.dynamics.rwm.sl_recipe:build_rwm_trainer",
+        "factory": "embodichain.extensions.models.dynamics.rwm.sl_recipe:build_rwm_trainer",
         "model": {
             "num_joints": 1,
             "action_dim": 1,
@@ -160,17 +160,17 @@ def main() -> None:
     repository = Path(__file__).resolve().parents[4]
     sources = {"examples/learning/rwm/_support/_controlled_fit.py": Path(__file__)}
     for name in (
-        "embodichain_models.dynamics.rwm.model",
-        "embodichain_models.dynamics.rwm.supervised",
-        "embodichain_models.dynamics.rwm.sl_recipe",
-        "embodichain_models.dynamics.rwm.robot_state",
+        "embodichain.extensions.models.dynamics.rwm.model",
+        "embodichain.extensions.models.dynamics.rwm.supervised",
+        "embodichain.extensions.models.dynamics.rwm.sl_recipe",
+        "embodichain.extensions.models.dynamics.rwm.robot_state",
         "embodichain.learning.sl.learner",
         "embodichain.learning.sl.trainer",
         "embodichain.learning.sl.sources",
     ):
         prefix = (
-            "extensions/embodichain_models/"
-            if name.startswith("embodichain_models.")
+            "embodichain/extensions/models/"
+            if name.startswith("embodichain.extensions.models.")
             else ""
         )
         sources[f"{prefix}{name.replace('.', '/')}.py"] = Path(

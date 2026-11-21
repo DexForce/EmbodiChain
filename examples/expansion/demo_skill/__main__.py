@@ -52,7 +52,7 @@ from embodichain.data_pipeline.real2sim import (
 )
 
 ROOT = Path(__file__).resolve().parents[3]
-TASK = ROOT / "extensions/embodichain_tasks/configs/tasks/manipulation/carton_stocking"
+TASK = ROOT / "embodichain/extensions/tasks/configs/tasks/manipulation/carton_stocking"
 DT = 1 / 30
 
 

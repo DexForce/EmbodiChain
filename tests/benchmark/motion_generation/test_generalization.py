@@ -23,13 +23,17 @@ from dataclasses import replace
 import pytest
 import torch
 
-from embodichain_benchmarks.motion_generation.aggregation import aggregate_results
-from embodichain_benchmarks.motion_generation.config import SuiteCfg
-from embodichain_benchmarks.motion_generation.contracts import EvaluationDomain
-from embodichain_benchmarks.motion_generation.generalization import (
+from embodichain.extensions.benchmarks.motion_generation.aggregation import (
+    aggregate_results,
+)
+from embodichain.extensions.benchmarks.motion_generation.config import SuiteCfg
+from embodichain.extensions.benchmarks.motion_generation.contracts import (
+    EvaluationDomain,
+)
+from embodichain.extensions.benchmarks.motion_generation.generalization import (
     aggregate_generalization,
 )
-from embodichain_benchmarks.motion_generation.models import (
+from embodichain.extensions.benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
@@ -679,7 +683,7 @@ def test_spatial_bucket_rates_count_missing_repeats_as_failures() -> None:
 
 
 def test_seed_cluster_uncertainty_is_deterministic_and_requires_independent_seeds():
-    from embodichain_benchmarks.motion_generation.metrics.stats import (
+    from embodichain.extensions.benchmarks.motion_generation.metrics.stats import (
         _seed_cluster_interval,
     )
 

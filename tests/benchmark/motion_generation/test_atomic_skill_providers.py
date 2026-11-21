@@ -41,35 +41,44 @@ from embodichain.lab.sim.atomic_skills.primitives._helpers import (
 from embodichain.lab.sim.motion.planners import MoveType, ToppraPlanOptions
 from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
-from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg, load_suite
-from embodichain_benchmarks.motion_generation.contracts import (
+from embodichain.extensions.benchmarks.motion_generation.config import (
+    PlannerSpecCfg,
+    load_suite,
+)
+from embodichain.extensions.benchmarks.motion_generation.contracts import (
     ReplayObservationTrace,
     ReplayObservationWindow,
 )
-from embodichain_benchmarks.motion_generation.models import (
+from embodichain.extensions.benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
 )
-from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
-from embodichain_benchmarks.motion_generation.planners.toppra import ToppraAdapter
-from embodichain_benchmarks.motion_generation.scenarios import (
+from embodichain.extensions.benchmarks.motion_generation.planners.base import (
+    PlannerContext,
+)
+from embodichain.extensions.benchmarks.motion_generation.planners.toppra import (
+    ToppraAdapter,
+)
+from embodichain.extensions.benchmarks.motion_generation.scenarios import (
     atomic_skill_providers as providers,
 )
-from embodichain_benchmarks.motion_generation.scenarios.atomic_skill import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
 )
-from embodichain_benchmarks.motion_generation.scenarios.atomic_grasps import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_grasps import (
     ActiveCaseGraspPoseGenerator,
 )
-from embodichain_benchmarks.motion_generation.contracts import ExecutionObservation
-from embodichain_benchmarks.motion_generation.scenarios.atomic_evaluation import (
+from embodichain.extensions.benchmarks.motion_generation.contracts import (
+    ExecutionObservation,
+)
+from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_evaluation import (
     signed_rotation_about_axis,
 )
-from embodichain_benchmarks.motion_generation.scenarios.atomic_policy import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_policy import (
     with_plan_options,
 )
-from embodichain_benchmarks.motion_generation.atomic_skill import (
+from embodichain.extensions.benchmarks.motion_generation.atomic_skill import (
     create_atomic_skill_provider,
 )
 
@@ -78,7 +87,7 @@ CPU = torch.device("cpu")
 
 @pytest.mark.parametrize("mount_yaw", [0.0, math.pi, 0.7])
 def test_radial_pre_pick_preserves_tool_tilt_in_the_mounted_base(mount_yaw):
-    from embodichain_benchmarks.motion_generation.scenarios.atomic_case_utils import (
+    from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_case_utils import (
         _pre_pick_pose,
     )
 
@@ -110,7 +119,7 @@ def test_radial_pre_pick_preserves_tool_tilt_in_the_mounted_base(mount_yaw):
 
 
 def test_pre_pick_default_keeps_world_orientation_and_validates_opt_in():
-    from embodichain_benchmarks.motion_generation.scenarios.atomic_case_utils import (
+    from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_case_utils import (
         _pre_pick_pose,
     )
 
@@ -136,8 +145,8 @@ def test_pre_pick_default_keeps_world_orientation_and_validates_opt_in():
 
 
 def test_empty_grasp_geometry_pool_is_a_typed_input_rejection(monkeypatch):
-    from embodichain_benchmarks.motion_generation import _atomic_fixtures
-    from embodichain_benchmarks.motion_generation.scenarios._case_qualification import (
+    from embodichain.extensions.benchmarks.motion_generation import _atomic_fixtures
+    from embodichain.extensions.benchmarks.motion_generation.scenarios._case_qualification import (
         _CaseQualificationError,
     )
 
@@ -292,12 +301,23 @@ def test_open_door_physical_evaluator_uses_hinge_and_release_windows() -> None:
 
 
 @pytest.mark.parametrize("sign", [1.0, -1.0])
-def test_pour_physical_evaluator_uses_object_pose_interval(sign: float) -> None:
+@pytest.mark.parametrize(
+    "pickup_offset, peak_angles, expected_errors",
+    [(0.0, (0.5, 0.2), (0.0, 0.3)), (0.09, (0.41, 0.68), (0.09, 0.18))],
+)
+def test_pour_physical_evaluator_uses_frozen_object_reference(
+    sign: float,
+    pickup_offset: float,
+    peak_angles: tuple[float, float],
+    expected_errors: tuple[float, float],
+) -> None:
     initial = torch.eye(4).repeat(2, 1, 1)
-    poses = torch.eye(4).repeat(3, 2, 1, 1)
+    initial[:, :3, :3] = axis_angle_to_rotation_matrix(torch.tensor([0.0, 0.4, 0.0]))
+    poses = initial.unsqueeze(0).repeat(3, 1, 1, 1)
     poses[:, :, 2, 3] = 0.1
-    poses[1, :, :3, :3] = axis_angle_to_rotation_matrix(
-        torch.tensor([[0.0, 0.0, 0.5 * sign], [0.0, 0.0, 0.2 * sign]])
+    poses[0, :, :3, :3] = initial[:, :3, :3] @ _rotation_z(sign * pickup_offset)
+    poses[1, :, :3, :3] = initial[:, :3, :3] @ axis_angle_to_rotation_matrix(
+        torch.tensor([[0.0, 0.0, angle * sign] for angle in peak_angles])
     )
     case = _case(
         "pour",
@@ -326,9 +346,10 @@ def test_pour_physical_evaluator_uses_object_pose_interval(sign: float) -> None:
     results = evaluator.evaluate(case, observation, _outcomes(2))
 
     assert [result.task_success for result in results] == [True, False]
-    assert results[0].stages[0].measurements[
-        "peak_signed_axis_angle_error_rad"
-    ] == pytest.approx(0.0, abs=1.0e-6)
+    assert [
+        result.stages[0].measurements["peak_signed_axis_angle_error_rad"]
+        for result in results
+    ] == pytest.approx(expected_errors, abs=1.0e-6)
 
 
 def test_pour_requires_terminal_lift_and_retention() -> None:
@@ -894,7 +915,7 @@ def test_grasp_screen_qualifies_original_targets_with_declared_arrival_region(
     use_arrival_region,
 ):
     """A bounded prismatic chain reaches 1.005 within 1 cm, but not 1.03."""
-    from embodichain_benchmarks.motion_generation.config import ProtocolCfg
+    from embodichain.extensions.benchmarks.motion_generation.config import ProtocolCfg
 
     def ik(*, pose, joint_seed, **kwargs):
         x = pose[:, 0, 3]
@@ -1294,10 +1315,12 @@ def test_replay_measures_hinge_at_segment_end_and_peak_object_rotation() -> None
         }
     )
     entity = Mock()
+    initial = torch.eye(4).unsqueeze(0)
+    initial[:, :3, :3] = _rotation_z(0.2)
 
     def object_pose(to_matrix: bool) -> torch.Tensor:
-        pose = torch.eye(4).unsqueeze(0)
-        pose[:, :3, :3] = _rotation_z(-0.1 * state["step"])
+        pose = initial.clone()
+        pose[:, :3, :3] = _rotation_z(0.2 - 0.1 * state["step"])
         return pose
 
     entity.get_local_pose.side_effect = object_pose
@@ -1315,6 +1338,7 @@ def test_replay_measures_hinge_at_segment_end_and_peak_object_rotation() -> None
     case = _case(
         "pour",
         1,
+        object_initial_pose=initial.tolist(),
         object_rotation_axis=[0.0, 0.0, 1.0],
         object_rotation_sign=-1.0,
     )
@@ -1323,9 +1347,9 @@ def test_replay_measures_hinge_at_segment_end_and_peak_object_rotation() -> None
         compiled, case, provider, collect_metrics=True
     )
 
-    # The reference is read after waypoint 0; waypoints 1 and 2 add two steps.
+    # Include the pickup rotation before the pour window in the frozen-frame tilt.
     assert metrics.object_rotation_peak_signed_rad.item() == pytest.approx(
-        -0.2, abs=1e-5
+        -0.3, abs=1e-5
     )
     assert metrics.replay_traces["pour_trace"].object_pose.shape == (3, 1, 4, 4)
 
@@ -1439,9 +1463,14 @@ def test_push_succeeds_when_contact_starts_during_planar_motion() -> None:
 
 
 def test_custom_gripper_provider_initializes_configured_commands(monkeypatch):
-    from embodichain_benchmarks.motion_generation import atomic_skill as registry
-    from embodichain_benchmarks.motion_generation.config import SuiteCfg, TrackCfg
-    from embodichain_benchmarks.motion_generation.scenarios.atomic_skill import (
+    from embodichain.extensions.benchmarks.motion_generation import (
+        atomic_skill as registry,
+    )
+    from embodichain.extensions.benchmarks.motion_generation.config import (
+        SuiteCfg,
+        TrackCfg,
+    )
+    from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_skill import (
         AtomicSkillScenario,
     )
 
@@ -1524,7 +1553,7 @@ def test_object_rotation_providers_screen_every_pose_row(
     """Freeze independently feasible row grasps and match their reference chains."""
     from types import MethodType
 
-    from embodichain_benchmarks.motion_generation import _atomic_fixtures
+    from embodichain.extensions.benchmarks.motion_generation import _atomic_fixtures
 
     from embodichain.lab.sim.objects.robot import Robot
 
@@ -1661,7 +1690,9 @@ def test_object_rotation_providers_screen_every_pose_row(
     }
     protocol = object()
     if cartesian:
-        from embodichain_benchmarks.motion_generation.scenarios import atomic_skill
+        from embodichain.extensions.benchmarks.motion_generation.scenarios import (
+            atomic_skill,
+        )
 
         def qualified_ik(robot, pose, seed, **kwargs):
             assert kwargs["protocol"] is protocol
@@ -1706,6 +1737,27 @@ def test_object_rotation_providers_screen_every_pose_row(
     torch.testing.assert_close(
         torch.stack([call[1] for call in references], dim=1), case.target_waypoints
     )
+    if skill_id == "pour":
+        engine = SimpleNamespace(
+            make_invocation=lambda skill, goal, **kwargs: SimpleNamespace(goal=goal)
+        )
+        invocation = create_atomic_skill_provider("pour").build_invocation(
+            SimpleNamespace(
+                robot=robot,
+                control_part="arm",
+                end_effector_part="eef",
+                require_engine=lambda: engine,
+            ),
+            case,
+            None,
+        )
+        initial_pose = torch.tensor(case.case_parameters["object_initial_pose"])
+        grasp_pose = torch.tensor(case.case_parameters["grasp_pose"])
+        object_to_eef = pose_inv(initial_pose) @ grasp_pose
+        torch.testing.assert_close(
+            invocation.goal.reference_object_pose @ object_to_eef,
+            case.target_waypoints[:, -1],
+        )
     for index, call in enumerate(references):
         torch.testing.assert_close(call[2], case.start_qpos + index * 0.01)
     generator_factory.assert_called_once_with(

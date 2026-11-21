@@ -66,7 +66,7 @@ from embodichain.lab.sim.material import VisualMaterialCfg
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
-from embodichain_robots import URRobotCfg
+from embodichain.extensions.robots import URRobotCfg
 
 
 def initialize_simulation(args):
@@ -561,8 +561,8 @@ def main(args: argparse.Namespace | None = None) -> None:
     ice_cubes = create_ice_cubes(sim)
     sim.prepare()
 
-    if not args.headless:
-        sim.open_window()
+    if not args.headless or getattr(args, "web", False):
+        sim.open_viewer()
 
     # Randomize ice positions
     seed = resolve_seed(args.seed)

@@ -64,6 +64,7 @@ def _measured_frame(env, snapshot, shapes):
         [state.qpos for state in entities[env.robot.uid]], dtype=torch.float32
     )
     return SimpleNamespace(
+        num_envs=env.num_envs,
         robot=SimpleNamespace(joint_names=env.robot.joint_names, get_qpos=lambda: qpos),
         sim=SimpleNamespace(
             get_rigid_object_uid_list=lambda: tuple(bodies),
@@ -106,7 +107,7 @@ class _MeasuredCollision:
         )
         self.results = {}
 
-    def prepare(self, snapshot=None):
+    def prepare(self, snapshot=None, *, env_ids=None):
         from embodichain.lab.task_program.integrations.simulation.feasibility_geometry import (
             collision_bodies_from_simulation,
         )
@@ -116,9 +117,17 @@ class _MeasuredCollision:
                 raise ValueError(
                     "cohort collision geometry differs; create a compatible world"
                 )
-        self.results.clear()
-        self.initial.clear()
-        self.terminal.clear()
+        ids = tuple(self.monitors) if env_ids is None else tuple(env_ids)
+        if (
+            not ids
+            or len(set(ids)) != len(ids)
+            or any(row not in self.monitors for row in ids)
+        ):
+            raise ValueError("prepare requires unique physical monitor rows")
+        for row in ids:
+            self.results.pop(row, None)
+            self.initial.pop(row, None)
+            self.terminal.pop(row, None)
         self.shapes = {
             uid: tuple(
                 self.env.sim.get_rigid_object(uid).get_collision_shapes(env_id=row)
@@ -131,25 +140,36 @@ class _MeasuredCollision:
             if snapshot is None
             else _measured_frame(self.env, snapshot, self.shapes)
         )
-        for row, monitor in self.monitors.items():
-            monitor.reset(measured)
-            self.initial[row] = all(
-                monitor.predicate(measured, c) for c in self.initial_conditions
-            ) and not all(monitor.predicate(measured, c) for c in monitor.final_checks)
+        for row in ids:
+            self.monitors[row].reset(measured)
+        with MeasuredTaskMonitor.batch_scope(
+            measured,
+            tuple(self.monitors.values()),
+            extra_conditions=self.initial_conditions,
+        ):
+            for row in ids:
+                monitor = self.monitors[row]
+                self.initial[row] = all(
+                    monitor.predicate(measured, c) for c in self.initial_conditions
+                ) and not all(
+                    monitor.predicate(measured, c) for c in monitor.final_checks
+                )
 
     def sample(self, ids, action, snapshot=None):
         env = self.env
         measured = (
             env if snapshot is None else _measured_frame(env, snapshot, self.shapes)
         )
+        poses = env.robot.body_data.body_link_pose
+        matrices = torch.eye(4, device=poses.device, dtype=poses.dtype).repeat(
+            env.num_envs, len(env.robot.link_names), 1, 1
+        )
+        matrices[..., :3, :3] = matrix_from_quat(poses[..., 3:])
+        matrices[..., :3, 3] = poses[..., :3]
+        matrices = matrices.detach().cpu().numpy()
         frames = {
-            f"{env.robot.uid}/{name}": env.robot.get_link_pose(
-                link_name=name, to_matrix=True
-            )
-            .detach()
-            .cpu()
-            .numpy()
-            for name in env.robot.link_names
+            f"{env.robot.uid}/{name}": matrices[:, index]
+            for index, name in enumerate(env.robot.link_names)
         }
         frames.update(
             {
@@ -161,20 +181,26 @@ class _MeasuredCollision:
                 for uid in env.sim.get_rigid_object_uid_list()
             }
         )
+        frames["default_plane"] = np.broadcast_to(np.eye(4), (env.num_envs, 4, 4))
+        with MeasuredTaskMonitor.batch_scope(measured, tuple(self.monitors.values())):
+            for row in ids:
+                self.monitors[row].observe(measured, action)
+                self.terminal[row] = self.monitors[row].validation(measured)
+        groups = {}
         for row in ids:
-            self.monitors[row].observe(measured, action)
-            self.terminal[row] = self.monitors[row].validation(measured)
             metadata = action.metadata["row_actions"][str(row)]
             phase = self.phase(env, SimpleNamespace(metadata=metadata), None)
-            row_frames = {key: value[row] for key, value in frames.items()}
-            row_frames["default_plane"] = np.eye(4)
-            report, _ = self.checker.check(
-                row_frames,
-                allowed_contacts=phase.allowed_contacts,
+            groups.setdefault(tuple(phase.allowed_contacts), []).append(row)
+        for allowed, rows in groups.items():
+            reports = self.checker.check_batch(
+                frames,
+                allowed_contacts=allowed,
                 moving_objects=self.moving,
+                env_ids=rows,
             )
-            if row not in self.results or report.status != "passed":
-                self.results[row] = report
+            for row, report in zip(rows, reports):
+                if row not in self.results or report.status != "passed":
+                    self.results[row] = report
 
     def close(self):
         self.checker.close()

@@ -94,9 +94,13 @@ def run_train(config: dict[str, Any]) -> dict[str, Any]:
         },
     )
     import torch
-    from embodichain_models.dynamics.nerd.codec import NeRDStateCodec
-    from embodichain_models.dynamics.nerd import NeRDModel, NeRDModelCfg, load_model
-    from embodichain_models.dynamics.nerd.data import (
+    from embodichain.extensions.models.dynamics.nerd.codec import NeRDStateCodec
+    from embodichain.extensions.models.dynamics.nerd import (
+        NeRDModel,
+        NeRDModelCfg,
+        load_model,
+    )
+    from embodichain.extensions.models.dynamics.nerd.data import (
         DynamicsWindowDataset,
         load_manifest,
     )
@@ -131,7 +135,9 @@ def run_train(config: dict[str, Any]) -> dict[str, Any]:
         ) != manifest.get("dt"):
             raise ValueError("Fine-tuning requires compatible codec and timestep")
     elif config.get("resume"):
-        from embodichain_models.dynamics.nerd.checkpoint import _model_from_state
+        from embodichain.extensions.models.dynamics.nerd.checkpoint import (
+            _model_from_state,
+        )
 
         saved = _load_training_checkpoint(config["resume"])
         # Keep the requested architecture/feature order for resume preflight,
@@ -206,9 +212,9 @@ def run_eval(config: dict[str, Any]) -> dict[str, Any]:
             "include_prefix",
         },
     )
-    from embodichain_models.dynamics.nerd.codec import NeRDStateCodec
-    from embodichain_models.dynamics.nerd import load_model
-    from embodichain_models.dynamics.nerd.data import DynamicsWindowDataset
+    from embodichain.extensions.models.dynamics.nerd.codec import NeRDStateCodec
+    from embodichain.extensions.models.dynamics.nerd import load_model
+    from embodichain.extensions.models.dynamics.nerd.data import DynamicsWindowDataset
     from ._trainer import evaluate_model
 
     device = config.get("device", "cpu")
@@ -251,9 +257,11 @@ def run_export(checkpoint: str | Path, output: str | Path) -> dict[str, Any]:
     import numpy as np
     import torch
 
-    from embodichain_models.dynamics.nerd import NeRDModelCfg, export_model
-    from embodichain_models.dynamics.nerd.checkpoint import _model_from_state
-    from embodichain_models.dynamics.nerd._numerics import _checkpoint_numerical_profile
+    from embodichain.extensions.models.dynamics.nerd import NeRDModelCfg, export_model
+    from embodichain.extensions.models.dynamics.nerd.checkpoint import _model_from_state
+    from embodichain.extensions.models.dynamics.nerd._numerics import (
+        _checkpoint_numerical_profile,
+    )
 
     # Generic SL records NumPy's MT19937 RNG state, unlike the historical
     # tensor-only NeRD checkpoint. Restrict loading to those known array types.

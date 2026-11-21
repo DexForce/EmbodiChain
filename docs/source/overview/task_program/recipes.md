@@ -118,7 +118,7 @@ These checks do not independently prove grasp contact or release.
 **Edit location:** the **execution-policy component selected by the deployment**,
 not the program YAML. The Quickstart policy uses these actual fields:
 
-```{literalinclude} ../../../../extensions/embodichain_tasks/configs/components/execution_policies/trajectory_open_loop.yaml
+```{literalinclude} ../../../../embodichain/extensions/tasks/configs/components/execution_policies/trajectory_open_loop.yaml
 :language: yaml
 ```
 

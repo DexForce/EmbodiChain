@@ -4,7 +4,7 @@
 完成 affordance 修正、空间重定向、轨迹与时间扩增，再执行仿真并记录 LeRobot 数据。
 所有正式候选均来自真实示范。
 
-官方任务定义位于 `embodichain_tasks/configs/tasks/manipulation/carton_stocking/`。
+官方任务定义位于 `embodichain/extensions/tasks/configs/tasks/manipulation/carton_stocking/`。
 场景、Task Program、来源绑定、执行策略和扩增配方均由官方任务维护；本目录提供来源
 重建、复现实验和展示入口。正式任务执行不依赖 example Python 模块。
 
@@ -12,7 +12,7 @@
 
 ```bash
 embodichain run-task \
-  --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/carton_stocking/task.panda.yaml \
+  --gym-config embodichain/extensions/tasks/configs/tasks/manipulation/carton_stocking/task.panda.yaml \
   --dataset-dir /tmp/carton-dataset
 ```
 

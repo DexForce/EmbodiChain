@@ -78,7 +78,7 @@ synchronously.
 
 ## Franka reference task
 
-`embodichain_tasks.special.franka_reach_apg.FrankaReachApgEnv` is the canonical
+`embodichain.extensions.tasks.special.franka_reach_apg.FrankaReachApgEnv` is the canonical
 example. Its path is:
 
     action → new_joint_q → newton.eval_fk → body_q → reward kernel → action.grad
@@ -107,7 +107,7 @@ APIs remain in `compute.kinematics` and `learning.layers`.
 - `embodichain/lab/gym/envs/differentiable_env.py`
 - `embodichain/lab/sim/cfg/simulation.py`
 - `embodichain/lab/sim/diff/`
-- `extensions/embodichain_tasks/embodichain_tasks/special/franka_reach_apg.py`
+- `embodichain/extensions/tasks/special/franka_reach_apg.py`
 
 ## Focused validation
 

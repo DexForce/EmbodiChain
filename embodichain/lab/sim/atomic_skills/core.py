@@ -34,6 +34,7 @@ from embodichain.compute.trajectory import differentiate_positions
 
 from .affordance import Affordance
 from .bindings import EndpointBinding, JointPositionTarget
+from .continuation import PlanContinuationResult
 from .effects import StateDelta
 from .goals import collect_scene_dependencies
 from .invocation import (
@@ -61,6 +62,8 @@ from .policies import (
 )
 from .requirements import GRASP_CAPABILITY, SkillBindingContract
 from .runtime_commands import (
+    _sequence_from_fresh_frames,
+    _frame_from_fresh_commands,
     EndpointCommand,
     JointPositionPayload,
     RuntimeCommandFrame,
@@ -1044,6 +1047,215 @@ class AtomicSkill(Generic[GoalT, OptionsT], ABC):
         if not preserve_failed_positions:
             timed = timed.hold_rows(success_mask, context.robot.qpos)
 
+        from ._expansion_phases import FREE_PHASES
+
+        already_bridged = diagnostics is not None and bool(
+            diagnostics.metadata.get("reference_bridge")
+        )
+        bridge_supported = (
+            next(iter(segment_lengths or {}), None)
+            in FREE_PHASES.get(request.skill_id, ())
+            and request.motion_policy.acceleration_limit is not None
+            # Position-only transports may expose zero feedforward velocity
+            # during motion. Do not apply this rest handoff to action recovery.
+            and request.recovery_policy.max_replans == 0
+            and request.recovery_policy.max_skill_retries == 0
+            and request.revision == 0
+            and bool(success_mask.any())
+            and not (
+                diagnostics is not None and diagnostics.backend == "external_nominal"
+            )
+        )
+        if (
+            request.tracking_policy.boundary_reference_bridge
+            and not already_bridged
+            and context.robot.command_qvel is not None
+        ):
+            motion_ids = tuple(
+                dict.fromkeys(
+                    i
+                    for e in request.binding.endpoints
+                    if e.endpoint_id == "motion"
+                    for i in e.joint_ids
+                )
+            )
+            if motion_ids and bool(
+                (
+                    context.robot.command_qvel[success_mask][:, list(motion_ids)].abs()
+                    > 1e-6
+                ).any()
+            ):
+                bridge_supported = False
+        if (
+            request.tracking_policy.boundary_reference_bridge
+            and not bridge_supported
+            and not already_bridged
+        ):
+            previous = diagnostics or PlannerDiagnostics(backend="reference_takeover")
+            diagnostics = replace(
+                previous,
+                metadata={
+                    **previous.metadata,
+                    "reference_bridge_unavailable": "unsupported_phase_source_or_boundary_conditions",
+                },
+            )
+        if (
+            request.tracking_policy.boundary_reference_bridge
+            and bridge_supported
+            and not (
+                diagnostics is not None and diagnostics.metadata.get("reference_bridge")
+            )
+        ):
+            from ._reference_bridge import _reference_prefix
+            from ._expansion_phases import FREE_PHASES
+
+            lengths = dict(segment_lengths or {})
+            first = next(iter(lengths), None)
+            if first not in FREE_PHASES.get(request.skill_id, ()):
+                raise ValueError(
+                    "Reference takeover requires an explicitly free first phase"
+                )
+            reference = context.robot.command_qpos
+            reference_velocity = context.robot.command_qvel
+            if reference is None or reference_velocity is None:
+                raise ValueError(
+                    "Reference takeover requires measured controller target snapshots"
+                )
+            ids = tuple(
+                dict.fromkeys(
+                    i
+                    for e in request.binding.endpoints
+                    if e.endpoint_id == "motion"
+                    for i in e.joint_ids
+                )
+            )
+            if not ids or bool(
+                (reference_velocity[success_mask][:, list(ids)].abs() > 1e-6).any()
+            ):
+                raise ValueError(
+                    "Reference takeover requires stationary motion targets"
+                )
+            dt = context.require_control_dt()
+            limits = (
+                self.robot.get_qvel_limits(env_ids=context.env_ids)[success_mask]
+                .amin(dim=0)
+                .to(timed.positions)
+            )
+            if request.motion_policy.velocity_limit is not None:
+                limits = limits.clamp(max=request.motion_policy.velocity_limit)
+            acceleration = request.motion_policy.acceleration_limit
+            if acceleration is None:
+                raise ValueError(
+                    "Reference takeover requires an explicit acceleration bound"
+                )
+            reference = torch.where(
+                success_mask[:, None], reference, timed.positions[:, 0]
+            )
+            prefix = _reference_prefix(
+                reference, timed.positions[:, 0], ids, dt, limits, acceleration
+            )
+            count = prefix.shape[1]
+            if count:
+                positions = torch.cat((prefix, timed.positions), dim=1)
+                times = torch.cat(
+                    (
+                        timed.dt.new_full((timed.batch_size, count), dt),
+                        timed.dt.clone(),
+                    ),
+                    dim=1,
+                )
+                times[:, 0] = 0
+                times[:, count] = dt
+                window = positions[:, : count + min(3, timed.waypoint_count), list(ids)]
+                window_dt = times[:, : window.shape[1]]
+                speed = torch.diff(window, dim=1) / window_dt[:, 1:, None]
+                accel = torch.diff(speed, dim=1) / window_dt[:, 2:, None]
+                joint_limits = self.robot.get_qpos_limits(
+                    joint_ids=list(ids), env_ids=context.env_ids
+                ).to(window)
+                if (
+                    joint_limits.shape != (timed.batch_size, len(ids), 2)
+                    or bool(torch.isnan(joint_limits).any())
+                    or bool((joint_limits[..., 0] > joint_limits[..., 1]).any())
+                ):
+                    raise ValueError(
+                        "Reference takeover requires valid ordered joint limits"
+                    )
+                if bool(
+                    (
+                        (window < joint_limits[:, None, :, 0] - 1e-6)
+                        | (window > joint_limits[:, None, :, 1] + 1e-6)
+                    )[success_mask].any()
+                ):
+                    raise ValueError("Reference takeover exceeds joint limits")
+                if bool(
+                    (
+                        speed[success_mask].abs() > limits[list(ids)][None, None] + 1e-5
+                    ).any()
+                ) or bool((accel[success_mask].abs() > acceleration + 1e-5).any()):
+                    raise ValueError(
+                        "Reference takeover seam exceeds velocity/acceleration bounds"
+                    )
+                original_velocity = timed.velocities
+                if original_velocity is None:
+                    original_velocity = differentiate_positions(
+                        timed.positions, timed.dt
+                    )
+                original_velocity = original_velocity.clone()
+                original_velocity[:, 0] = 0
+                original_velocity[:, -1] = 0
+                bridge_points = torch.cat((prefix, timed.positions[:, :1]), dim=1)
+                bridge_dt = times[:, : count + 1]
+                bridge_velocity = differentiate_positions(bridge_points, bridge_dt)
+                velocity = torch.cat(
+                    (bridge_velocity[:, :-1], original_velocity), dim=1
+                )
+                timed = TimedTrajectory.from_positions(
+                    positions, env_ids=timed.env_ids, dt=times, velocities=velocity
+                )
+                segment_lengths = dict(lengths)
+                segment_lengths[first] += count
+                if scene_dependency_monitor_until is not None:
+                    scene_dependency_monitor_until = {
+                        key: (value + count if value else 0)
+                        for key, value in scene_dependency_monitor_until.items()
+                    }
+                previous = diagnostics or PlannerDiagnostics(
+                    backend="reference_takeover"
+                )
+                diagnostics = replace(
+                    previous,
+                    metadata={
+                        **previous.metadata,
+                        "reference_bridge": {
+                            "prefix_samples": count,
+                            "control_dt": dt,
+                            "joint_ids": ids,
+                        },
+                        "source_collision_evidence": previous.metadata.get(
+                            "collision_evidence", "unverified"
+                        ),
+                        "collision_evidence": "unverified",
+                        "collision_scope": "not_checked",
+                    },
+                )
+
+            else:
+                previous = diagnostics or PlannerDiagnostics(
+                    backend="reference_takeover"
+                )
+                diagnostics = replace(
+                    previous,
+                    metadata={
+                        **previous.metadata,
+                        "reference_bridge": {
+                            "prefix_samples": 0,
+                            "control_dt": dt,
+                            "joint_ids": ids,
+                        },
+                    },
+                )
+
         # Composite skills may rebuild positions/timing after MotionGenerator.
         # Derive references only after that final composition, before lowering.
         velocities = timed.velocities
@@ -1061,6 +1273,40 @@ class AtomicSkill(Generic[GoalT, OptionsT], ABC):
             velocities[:, 1:] = velocities[:, 1:].masked_fill(stationary, 0.0)
             velocities[:, 0] = 0.0
             velocities[:, -1] = 0.0
+            if diagnostics is not None and diagnostics.metadata.get("reference_bridge"):
+                join = int(diagnostics.metadata["reference_bridge"]["prefix_samples"])
+                velocities[:, join] = 0.0
+                ids = list(diagnostics.metadata["reference_bridge"]["joint_ids"])
+                window_velocity = velocities[:, : join + 3, ids]
+                window_acceleration = (
+                    torch.diff(window_velocity, dim=1)
+                    / timed.dt[:, 1 : window_velocity.shape[1], None]
+                )
+                cap = self.robot.get_qvel_limits(
+                    joint_ids=ids, env_ids=context.env_ids
+                ).to(window_velocity)
+                if request.motion_policy.velocity_limit is not None:
+                    cap = cap.clamp(max=request.motion_policy.velocity_limit)
+                if not bool(torch.isfinite(cap[success_mask]).all()) or bool(
+                    (cap[success_mask] <= 0).any()
+                ):
+                    raise ValueError(
+                        "Reference takeover requires finite positive velocity bounds"
+                    )
+                if bool(
+                    (
+                        window_velocity[success_mask].abs()
+                        > cap[success_mask, None] + 1e-5
+                    ).any()
+                ) or bool(
+                    (
+                        window_acceleration[success_mask].abs()
+                        > request.motion_policy.acceleration_limit + 1e-5
+                    ).any()
+                ):
+                    raise ValueError(
+                        "Reference takeover command derivatives exceed motion bounds"
+                    )
         timed = replace(timed, velocities=velocities)
 
         commands = self._joint_command_sequence(
@@ -1358,8 +1604,8 @@ class AtomicSkill(Generic[GoalT, OptionsT], ABC):
                     EndpointCommand(target=target, payload=command.payload)
                 )
             frames.append(
-                RuntimeCommandFrame(
-                    commands=tuple(endpoint_commands),
+                _frame_from_fresh_commands(
+                    endpoint_commands,
                     active_mask=(
                         frame.active_mask
                         if active_mask is None
@@ -1369,7 +1615,7 @@ class AtomicSkill(Generic[GoalT, OptionsT], ABC):
                     hold_duration=frame.hold_duration,
                 )
             )
-        return TimedCommandSequence(frames=tuple(frames), env_ids=commands.env_ids)
+        return _sequence_from_fresh_frames(frames, commands.env_ids)
 
     def _joint_command_sequence(
         self,
@@ -1420,14 +1666,14 @@ class AtomicSkill(Generic[GoalT, OptionsT], ABC):
             # dispatching it, wait for the next arrival interval; the terminal
             # frame reuses its own interval as the action's settling window.
             frames.append(
-                RuntimeCommandFrame(
-                    commands=tuple(endpoint_commands),
+                _frame_from_fresh_commands(
+                    endpoint_commands,
                     active_mask=active_mask,
                     env_ids=trajectory.env_ids,
                     hold_duration=trajectory.dt[:, next_waypoint_index],
                 )
             )
-        return TimedCommandSequence(frames=tuple(frames), env_ids=trajectory.env_ids)
+        return _sequence_from_fresh_frames(frames, trajectory.env_ids)
 
     @staticmethod
     def _build_segments(
@@ -1513,6 +1759,37 @@ class AtomicSkill(Generic[GoalT, OptionsT], ABC):
             replannable=True,
             diagnostics=diagnostics,
         )
+
+    def continue_plan(
+        self,
+        request: ResolvedSkillRequest,
+        context: PlanningContext,
+        plan: SkillPlan,
+        active_mask: torch.Tensor,
+    ) -> PlanContinuationResult:
+        """Plan a later chunk without beginning another logical skill.
+
+        Args:
+            request: The unchanged resolved invocation.
+            context: Fresh observations with authoritative row identity and timing.
+            plan: Completed chunk and its owned continuation cursor.
+            active_mask: Eligible rows that executed the completed chunk.
+
+        Returns:
+            Physical row acceptance and an optional later plan.
+        """
+        raise ValueError(f"Skill {self.skill_id!r} does not support continuation.")
+
+    def on_plan_installed(
+        self, request: ResolvedSkillRequest, context: PlanningContext, plan: SkillPlan
+    ) -> None:
+        """Publish bookkeeping only after an execution plan was accepted.
+
+        Args:
+            request: The installed plan's resolved invocation.
+            context: Observations used for this plan.
+            plan: Validated plan after destination and lifecycle acceptance.
+        """
 
     @abstractmethod
     def _plan(

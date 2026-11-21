@@ -981,6 +981,14 @@ def test_execution_trace_records_only_consumed_actions_and_rejects_unknown_frame
     bridge._row_rejection = None
     bridge._row_hold = None
     bridge._pending_rejected_ids = ()
+    from types import SimpleNamespace
+
+    observed = []
+    bridge._validator_port = SimpleNamespace(
+        _observe_consumed_action=lambda action, runtime: observed.append(action)
+    )
+    bridge._runtime = object()
+    bridge._eligible_mask = None
     lifecycle = bridge_module._SegmentLifecycle()
     action = ControllerAction(
         torch.zeros(1, 1),
@@ -996,8 +1004,10 @@ def test_execution_trace_records_only_consumed_actions_and_rejects_unknown_frame
     pending = bridge._yield_and_advance(action, lifecycle)
     next(pending)
     assert bridge.execution_trace == ()
+    assert observed == []
     with pytest.raises(StopIteration):
         next(pending)
+    assert len(observed) == 1
     assert bridge.execution_trace == (
         {
             "step": 0,
@@ -1146,6 +1156,39 @@ def test_joint_encoder_emits_full_qpos_and_holds_inactive_rows() -> None:
     assert torch.equal(action[0, torch.tensor([1, 3])], torch.tensor([10.0, 30.0]))
     assert torch.equal(action[0, torch.tensor([0, 2, 4])], qpos[0, [0, 2, 4]])
     assert torch.equal(action[1], qpos[1])
+
+
+@pytest.mark.parametrize("mode", ["position", "position_velocity"])
+def test_joint_encoder_groups_destinations_without_aliasing_source(mode) -> None:
+    """A complete frame preserves independent destinations and inactive rows."""
+    qpos = torch.arange(BATCH_SIZE * ROBOT_DOF, dtype=torch.float32).reshape(
+        BATCH_SIZE, ROBOT_DOF
+    )
+    source = qpos.clone()
+    encoder = RuntimeCommandFrameEncoder(_QposProvider(qpos), joint_command_mode=mode)
+    first = _joint_frame(
+        duration=STEP_DT,
+        active_mask=torch.tensor([True, False]),
+        velocities=torch.tensor([[1.0, 3.0], [11.0, 13.0]]),
+    )
+    extra = EndpointCommand(
+        target=JointPositionTarget(control_part="second", joint_ids=(0,)),
+        payload=JointPositionPayload(
+            positions=torch.tensor([[90.0], [91.0]]),
+            velocities=torch.tensor([[9.0], [9.1]]),
+        ),
+    )
+    frame = replace(first, commands=(*first.commands, extra))
+    action = encoder.encode(frame)
+    positions = action if mode == "position" else action["qpos"]
+    assert torch.equal(positions[0], torch.tensor([90.0, 10.0, 2.0, 30.0, 4.0]))
+    assert torch.equal(positions[1], source[1])
+    if mode == "position_velocity":
+        assert torch.equal(action["qvel"][0], torch.tensor([9.0, 1.0, 0.0, 3.0, 0.0]))
+        assert torch.equal(action["qvel"][1], torch.zeros(ROBOT_DOF))
+    positions.zero_()
+    assert torch.equal(qpos, source)
+    assert torch.equal(extra.payload.positions, torch.tensor([[90.0], [91.0]]))
 
 
 def test_joint_encoder_holds_unaddressed_joints_at_controller_targets() -> None:

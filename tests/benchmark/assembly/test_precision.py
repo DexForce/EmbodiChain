@@ -40,7 +40,9 @@ def test_usd_precision_detects_changed_primitive_dimensions(tmp_path) -> None:
     # the portable exporter authors a stage, independent of collection order.
     pytest.importorskip("dexsim.kit.usd")
     from pxr import Usd, UsdGeom
-    from embodichain_benchmarks.assembly.precision import compare_usd_geometry
+    from embodichain.extensions.benchmarks.assembly.precision import (
+        compare_usd_geometry,
+    )
 
     asset = import_mjcf(SOURCE)
     path = asset.write_usd(tmp_path / "wrong_radius.usda")
@@ -60,7 +62,7 @@ def test_precision_host_matches_source_floor_and_disables_missing_floor(
     source_contact: bool,
 ) -> None:
     pytest.importorskip("mujoco")
-    from embodichain_benchmarks.assembly.precision import (
+    from embodichain.extensions.benchmarks.assembly.precision import (
         PrecisionRunCfg,
         _source_floor_attributes,
     )
@@ -93,7 +95,7 @@ def test_precision_host_matches_source_floor_and_disables_missing_floor(
 
 @pytest.mark.parametrize("backend", ["unknown", "fake"])
 def test_invalid_probe_backend_is_not_reported_as_skipped(backend) -> None:
-    from embodichain_benchmarks.assembly.precision import (
+    from embodichain.extensions.benchmarks.assembly.precision import (
         PrecisionRunCfg,
         run_passive_probe,
     )
@@ -107,7 +109,10 @@ def test_peg_drop_distinguishes_seating_from_rim_and_outside_falls(
     scale: float, bottom: float
 ) -> None:
     """A tiny penetration after the spawn gap must not become drop success."""
-    from embodichain_benchmarks.assembly.precision import PrecisionRunCfg, _score
+    from embodichain.extensions.benchmarks.assembly.precision import (
+        PrecisionRunCfg,
+        _score,
+    )
 
     # Pinned peg() defaults: 10 mm plate, 30 mm insertion section, 5 mm
     # spawn gap. The blind-hole bottom and all dimensions scale together.
@@ -179,7 +184,7 @@ def test_usd_comparison_registers_schemas_in_a_fresh_process(tmp_path: Path) -> 
 import json
 import sys
 from embodichain.toolkits.assembly import AssemblyAsset
-from embodichain_benchmarks.assembly.precision import compare_usd_geometry
+from embodichain.extensions.benchmarks.assembly.precision import compare_usd_geometry
 result = compare_usd_geometry(AssemblyAsset.load(sys.argv[1]), sys.argv[2])
 assert result['passed'], result
 print('FRESH_USD_COMPARISON_PASSED')
@@ -320,7 +325,9 @@ def test_many_pegs_scores_each_translated_cell_and_rejects_rim_or_floor_passage(
     None
 ):
     """Heterogeneous cells cannot use one global plate position or thickness."""
-    from embodichain_benchmarks.assembly._many_metrics import _score_many_pegs
+    from embodichain.extensions.benchmarks.assembly._many_metrics import (
+        _score_many_pegs,
+    )
 
     cells = [
         ([-0.3, 0.3, 0.005], 0.01, 0.03),
@@ -410,7 +417,7 @@ def test_many_pegs_scores_each_translated_cell_and_rejects_rim_or_floor_passage(
 def test_precision_solver_comparisons_reject_ignored_or_unsupported_settings(
     settings, message
 ) -> None:
-    from embodichain_benchmarks.assembly.precision import (
+    from embodichain.extensions.benchmarks.assembly.precision import (
         PrecisionRunCfg,
         run_passive_probe,
     )
@@ -434,7 +441,10 @@ def test_precision_reference_preserves_source_options_unless_explicitly_overridd
 ) -> None:
     """Unspecified calibration knobs must not rewrite the recorded source baseline."""
     mujoco = pytest.importorskip("mujoco")
-    from embodichain_benchmarks.assembly.precision import PrecisionRunCfg, _run_mujoco
+    from embodichain.extensions.benchmarks.assembly.precision import (
+        PrecisionRunCfg,
+        _run_mujoco,
+    )
 
     flag = "enable" if source_multiccd else "disable"
     source = SOURCE.replace(
@@ -462,7 +472,7 @@ def test_precision_reference_preserves_source_options_unless_explicitly_overridd
 def test_failed_precision_measurements_preserve_json_and_failure_reason(
     monkeypatch,
 ) -> None:
-    from embodichain_benchmarks.assembly import precision
+    from embodichain.extensions.benchmarks.assembly import precision
 
     # Real sub-micron meshes can fail backend cooking; the matrix must retain
     # that diagnostic instead of terminating without a result file.
@@ -497,7 +507,7 @@ def test_compiled_robot_tree_preserves_nonzero_joint_frame(tmp_path: Path) -> No
 
     mujoco = pytest.importorskip("mujoco")
     pk = pytest.importorskip("pytorch_kinematics")
-    from embodichain_benchmarks.assembly.robot_reference import _append_model
+    from embodichain.extensions.benchmarks.assembly.robot_reference import _append_model
 
     source = mujoco.MjModel.from_xml_string("""<mujoco><worldbody>
       <body name="base"><geom type="box" size=".1 .1 .1"/>
@@ -535,7 +545,7 @@ def test_compiled_robot_tree_preserves_nonzero_joint_frame(tmp_path: Path) -> No
 def test_newton_family_routes_the_full_source_or_explicit_mujoco_profile(
     family, override
 ):
-    from embodichain_benchmarks.assembly.precision import (
+    from embodichain.extensions.benchmarks.assembly.precision import (
         PrecisionRunCfg,
         _newton_solver_config,
     )
@@ -599,7 +609,7 @@ def test_dexuni_missing_or_mismatched_dispatch_cannot_masquerade_as_a_profile(
     active, features, error
 ):
     from types import SimpleNamespace
-    from embodichain_benchmarks.assembly.precision import (
+    from embodichain.extensions.benchmarks.assembly.precision import (
         PrecisionRunCfg,
         _native_solver_metadata,
     )
@@ -618,7 +628,7 @@ def test_dexuni_missing_or_mismatched_dispatch_cannot_masquerade_as_a_profile(
 
 def test_dexuni_metadata_reports_actual_dispatch_and_keeps_the_algorithm_separate():
     from types import SimpleNamespace
-    from embodichain_benchmarks.assembly.precision import (
+    from embodichain.extensions.benchmarks.assembly.precision import (
         PrecisionRunCfg,
         _native_solver_metadata,
     )
@@ -723,7 +733,10 @@ def test_matrix_keeps_families_failures_and_runtime_artifacts_separate(
     "scale,starts,advance", [(0.5, 1, 0.00075), (2.0, 1, 0.003), (2.0, 3, 0.009)]
 )
 def test_thread_lead_oracle_uses_physical_scaled_pitch(scale, starts, advance):
-    from embodichain_benchmarks.assembly.precision import PrecisionRunCfg, _score
+    from embodichain.extensions.benchmarks.assembly.precision import (
+        PrecisionRunCfg,
+        _score,
+    )
 
     asset = AssemblyAsset(
         config={"kind": "thread", "pitch": 0.0015, "scale": scale, "n_starts": starts}

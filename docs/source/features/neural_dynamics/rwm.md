@@ -6,7 +6,7 @@ RWM predicts a robot's next state from its current state, an action and optional
 physical context. Use it to fit measured transitions at a fixed control period
 or to differentiate a sequence of predictions with respect to states/actions.
 The model, predictor, transition replay and SL recipe are available in
-`embodichain_models.dynamics.rwm` and work on CPU or CUDA without a simulator.
+`embodichain.extensions.models.dynamics.rwm` and work on CPU or CUDA without a simulator.
 Its state-increment formulation is inspired by
 [SuperMimic](https://arxiv.org/abs/2610.28480); the implementation lineage is
 documented in [References](#references).
@@ -141,7 +141,7 @@ from pathlib import Path
 
 import torch
 
-from embodichain_models.dynamics.rwm import (
+from embodichain.extensions.models.dynamics.rwm import (
     RWMPredictor,
     build_rwm_trainer,
     frozen_world_model,
@@ -177,7 +177,7 @@ ring. For example, reuse the measured validation window above to demonstrate
 the data adapter:
 
 ```python
-from embodichain_models.dynamics.rwm import TransitionReplay, replay_supervised_batch
+from embodichain.extensions.models.dynamics.rwm import TransitionReplay, replay_supervised_batch
 
 replay = TransitionReplay(
     capacity=64,
@@ -272,6 +272,6 @@ in this guide; the paper also studies policy learning and humanoid control.
 - [RWM API](../../api_reference/rwm.rst): state transforms, model, predictor,
   replay, objective and trainer factory.
 - [Example and fitting protocol](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/rwm/README.md).
-- [Model implementation](https://github.com/DexForce/EmbodiChain/blob/main/extensions/embodichain_models/embodichain_models/dynamics/rwm/model.py):
+- [Model implementation](https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/models/dynamics/rwm/model.py):
   frame-local transition model and its upstream reference.
 - [All neural dynamics models](../neural_dynamics.md).

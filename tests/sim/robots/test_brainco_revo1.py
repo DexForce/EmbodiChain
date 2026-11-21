@@ -42,7 +42,7 @@ _PIP_OFFSETS = {
 @pytest.fixture
 def local_hands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
     """Use original synthetic URDFs with the shipped active/mimic naming contract."""
-    from embodichain_robots.brainco.revo1 import cfg as revo1
+    from embodichain.extensions.robots.brainco.revo1 import cfg as revo1
 
     paths = {}
     for side in ("left", "right"):
@@ -100,7 +100,7 @@ def test_revo1_standalone_preserves_native_control_contract(
     local_hands: dict[str, Path], side: str
 ) -> None:
     """Six native actuator names survive config decoding and JSON serialization."""
-    from embodichain_robots import BrainCoRevo1Cfg
+    from embodichain.extensions.robots import BrainCoRevo1Cfg
 
     original = resolve_robot_cfg("BrainCoRevo1", variant=side)
     cfg = BrainCoRevo1Cfg.from_dict(json.loads(json.dumps(original.to_dict())))
@@ -133,8 +133,8 @@ def test_revo1_defaults_overrides_and_instances_are_isolated(
     local_hands: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Caller overrides neither download the catalog asset nor mutate other configs."""
-    from embodichain_robots.brainco.revo1 import cfg as revo1
-    from embodichain_robots._catalog import ROBOT_CONFIGS
+    from embodichain.extensions.robots.brainco.revo1 import cfg as revo1
+    from embodichain.extensions.robots._catalog import ROBOT_CONFIGS
 
     assert "BrainCoRevo1" in list_robot_cfgs()
     metadata = ROBOT_CONFIGS["BrainCoRevo1"]
@@ -183,7 +183,7 @@ def test_revo1_defaults_overrides_and_instances_are_isolated(
 @pytest.mark.no_sim
 @pytest.mark.parametrize("side", ("LEFT", "both", "", None))
 def test_revo1_rejects_unknown_side(side: object) -> None:
-    from embodichain_robots import BrainCoRevo1Cfg
+    from embodichain.extensions.robots import BrainCoRevo1Cfg
 
     with pytest.raises((ValueError, TypeError), match="side"):
         BrainCoRevo1Cfg.from_dict({"side": side})
@@ -193,7 +193,7 @@ def test_revo1_rejects_unknown_side(side: object) -> None:
 @pytest.mark.parametrize("side", ("left", "right"))
 def test_w1_revo1_adapter_retains_names_frames_and_mount(side: str) -> None:
     """The shared model extraction preserves the established W1 assembly ABI."""
-    from embodichain_robots.dexforce.w1.hand_specs import get_w1_hand_spec
+    from embodichain.extensions.robots.dexforce.w1.hand_specs import get_w1_hand_spec
 
     spec = get_w1_hand_spec("BRAINCO_HAND", "v021").for_side(side)
     title = side.title()

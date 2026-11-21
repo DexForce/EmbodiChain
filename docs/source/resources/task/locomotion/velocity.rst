@@ -1,7 +1,7 @@
 Velocity-Tracking Tasks
 =======================
 
-These tasks live under ``embodichain_tasks/configs/tasks/locomotion/velocity``.
+These tasks live under ``embodichain/extensions/tasks/configs/tasks/locomotion/velocity``.
 Every task provides ``env.yaml`` for the default physics backend and
 ``env.newton.yaml`` for Newton, plus a matching PPO trainer configuration.
 
@@ -44,4 +44,4 @@ launcher to switch physics:
 .. code-block:: bash
 
    embodichain run-task \
-       --gym_config embodichain_tasks/configs/tasks/locomotion/velocity/go2_flat/env.newton.yaml
+       --gym_config embodichain/extensions/tasks/configs/tasks/locomotion/velocity/go2_flat/env.newton.yaml

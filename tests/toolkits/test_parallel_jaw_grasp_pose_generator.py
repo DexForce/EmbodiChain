@@ -77,8 +77,8 @@ import sys
 class BlockRuntime(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
         forbidden = (
-            'embodichain.lab', 'embodichain.gen_sim', 'embodichain_robots',
-            'embodichain_tasks', 'dexsim', 'fcl',
+            'embodichain.lab', 'embodichain.gen_sim', 'embodichain.extensions.robots',
+            'embodichain.extensions.tasks', 'dexsim', 'fcl',
             'embodichain.toolkits.graspkit.pg_grasp._antipodal_backend',
             'embodichain.toolkits.graspkit.pg_grasp.collision_checker',
         )

@@ -23,13 +23,13 @@ import pytest
 import torch
 from types import SimpleNamespace
 
-from embodichain_benchmarks.motion_generation.config import (
+from embodichain.extensions.benchmarks.motion_generation.config import (
     FreeSpaceTrackCfg,
 )
-from embodichain_benchmarks.motion_generation.metrics._constraints import (
+from embodichain.extensions.benchmarks.motion_generation.metrics._constraints import (
     match_constraints,
 )
-from embodichain_benchmarks.motion_generation.scenarios._free_space_sampling import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios._free_space_sampling import (
     _project_constraints,
 )
 
@@ -75,8 +75,12 @@ def test_masked_baseline_ik_ignores_unused_pose_components(modality):
 
 
 def _masked_adapter(kind, *, enabled=True):
-    from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
-    from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
+    from embodichain.extensions.benchmarks.motion_generation.config import (
+        PlannerSpecCfg,
+    )
+    from embodichain.extensions.benchmarks.motion_generation.planners.base import (
+        PlannerContext,
+    )
 
     robot = SimpleNamespace(
         compute_batch_fk=lambda *, qpos, **_: _coupled_fk(qpos),
@@ -101,8 +105,10 @@ def _masked_adapter(kind, *, enabled=True):
 @pytest.mark.parametrize("fail_joint", [False, True])
 def test_toppra_mixed_sequence_uses_requested_joint_payload_and_masked_ik(fail_joint):
     from embodichain.lab.sim.motion.planners import PlanResult
-    from embodichain_benchmarks.motion_generation.models import BenchmarkCase
-    from embodichain_benchmarks.motion_generation.planners.toppra import ToppraAdapter
+    from embodichain.extensions.benchmarks.motion_generation.models import BenchmarkCase
+    from embodichain.extensions.benchmarks.motion_generation.planners.toppra import (
+        ToppraAdapter,
+    )
 
     adapter = _masked_adapter(ToppraAdapter)
     adapter._motion_limits = {
@@ -206,12 +212,20 @@ def test_franka_masked_baseline_runtime(backend):
     """Actual FK, component IK/native TrajOpt, timing and independent scoring."""
     from dataclasses import replace
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-    from embodichain_robots import FrankaPandaCfg
-    from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
-    from embodichain_benchmarks.motion_generation.models import BenchmarkCase
-    from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
-    from embodichain_benchmarks.motion_generation.planners.toppra import ToppraAdapter
-    from embodichain_benchmarks.motion_generation.planners.curobo import CuroboAdapter
+    from embodichain.extensions.robots import FrankaPandaCfg
+    from embodichain.extensions.benchmarks.motion_generation.config import (
+        PlannerSpecCfg,
+    )
+    from embodichain.extensions.benchmarks.motion_generation.models import BenchmarkCase
+    from embodichain.extensions.benchmarks.motion_generation.planners.base import (
+        PlannerContext,
+    )
+    from embodichain.extensions.benchmarks.motion_generation.planners.toppra import (
+        ToppraAdapter,
+    )
+    from embodichain.extensions.benchmarks.motion_generation.planners.curobo import (
+        CuroboAdapter,
+    )
 
     sim = SimulationManager(
         SimulationManagerCfg(headless=True, sim_device="cuda", num_envs=1)
@@ -425,7 +439,7 @@ class _Robot:
 
 
 def test_projected_patterns_share_screened_cartesian_inputs():
-    from embodichain_benchmarks.motion_generation.models import BenchmarkCase
+    from embodichain.extensions.benchmarks.motion_generation.models import BenchmarkCase
 
     base = BenchmarkCase(
         "test",
@@ -491,8 +505,8 @@ def test_empty_trajectory_is_a_failed_semantic_match():
 def test_case_outcomes_preserve_native_samples_for_masked_and_common_inputs(
     validity: str, modalities: list[str], dtype: torch.dtype
 ) -> None:
-    from embodichain_benchmarks.motion_generation.models import BenchmarkCase
-    from embodichain_benchmarks.motion_generation.metrics.trajectory import (
+    from embodichain.extensions.benchmarks.motion_generation.models import BenchmarkCase
+    from embodichain.extensions.benchmarks.motion_generation.metrics.trajectory import (
         compute_case_outcomes,
     )
     from embodichain.lab.sim.motion.planners.utils import PlanResult
@@ -572,7 +586,7 @@ def test_case_outcomes_preserve_native_samples_for_masked_and_common_inputs(
 def test_equivalent_pattern_expansions_are_rejected_by_suite_loader(
     patterns: list[list[str]], count: int
 ) -> None:
-    from embodichain_benchmarks.motion_generation.config import (
+    from embodichain.extensions.benchmarks.motion_generation.config import (
         SuiteCfg,
         load_suite,
         suite_to_dict,

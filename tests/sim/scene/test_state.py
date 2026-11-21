@@ -175,7 +175,10 @@ def test_boundary_positions_round_trip_through_production_articulation_setter(
     articulation._resolve_env_ids = lambda ids: torch.tensor([0])
     articulation._resolve_joint_ids = lambda ids: torch.tensor([0])
     articulation._stabilize_newton_mimic_target_write = lambda *args, **kwargs: None
-    articulation._world = SimpleNamespace(update=lambda dt: None)
+    articulation._world = SimpleNamespace(
+        update=lambda dt: None,
+        get_physics_scene=lambda: SimpleNamespace(is_direct_gpu=lambda: False),
+    )
     articulation.body_data.is_newton_backend = False
     port_write = articulation.set_state
     articulation.body_data.articulation_view = SimpleNamespace(

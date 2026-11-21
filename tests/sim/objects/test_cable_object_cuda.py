@@ -226,6 +226,92 @@ class _CableObjectCUDAScenario:
         torch.testing.assert_close(reset[0], moved[0], rtol=0, atol=0)
         torch.testing.assert_close(reset[1], initial[1])
 
+    def test_usd_cable_state_selective_reset_and_viser(self, tmp_path: Path) -> None:
+        from embodichain.lab.visualization import SceneExporter, VisualizationCfg
+
+        path = tmp_path / "wire.usda"
+        path.write_text(
+            """#usda 1.0
+(
+    defaultPrim = "World"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+def Xform "World" {
+    def BasisCurves "Wire" (
+        prepend apiSchemas = ["PhysicsCurvesDeformableSimAPI"]
+    ) {
+        int[] curveVertexCounts = [3]
+        point3f[] points = [(0, 0, 0), (0.1, 0, 0), (0.3, 0, 0)]
+        uniform token type = "linear"
+        uniform token wrap = "nonperiodic"
+        float[] physics:thicknesses = [0.02]
+        token physics:thicknesses:elementType = "constant"
+        double3 xformOp:translate = (0.25, 0.5, 1)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+}
+""",
+            encoding="utf-8",
+        )
+        imported = self.sim.add_usd(
+            UsdImportCfg(name="wire", source=UsdSourceCfg(file_path=str(path)))
+        )
+        key = "/World/Wire"
+        cable = imported[key]
+        uid = imported.resource_uids[key]
+        assert self.sim.get_asset(uid) is self.sim.get_cable_object(uid) is cable
+        assert cable.num_instances == 2 and cable.data is None
+
+        self.sim.prepare()
+        initial = cable.data.default_segment_state_w
+        assert initial.shape == (2, 2, 13)
+        expected_centres = initial.new_tensor([[0.3, 0.5, 1], [0.45, 0.5, 1]])
+        torch.testing.assert_close(
+            initial[..., :3] - self.sim.arena_offsets[:, None, :],
+            expected_centres.expand(2, 2, 3),
+            atol=1e-6,
+            rtol=0,
+        )
+
+        self.sim.update(step=3, render_final_step=False)
+        moved = cable.data.segment_state_w
+        assert torch.all(moved[..., 2] < initial[..., 2])
+        self.sim.reset_objects_state(env_ids=[1])
+        reset = cable.data.segment_state_w
+        torch.testing.assert_close(reset[0], moved[0], rtol=0, atol=0)
+        torch.testing.assert_close(reset[1], initial[1], rtol=0, atol=0)
+
+        state = reset[[1]].clone()
+        state[..., 0] += 0.125
+        cable.write_segment_state_to_sim(state, env_ids=[1])
+        torch.testing.assert_close(
+            cable.data.segment_state_w[0], moved[0], rtol=0, atol=0
+        )
+        torch.testing.assert_close(cable.data.segment_state_w[[1]], state)
+
+        exporter = SceneExporter(
+            self.sim, VisualizationCfg(backend="viser", env_ids=[1])
+        )
+        manifest = exporter.build_manifest()
+        frame = exporter.capture(sim_step=3, sim_time=self.sim.simulation_time).frame
+        nodes = [node for node in manifest.nodes if node.kind == "cable_segment"]
+        assert len(nodes) == 2
+        geometries = {
+            geometry.geometry_id: geometry for geometry in manifest.geometries
+        }
+        for segment_index, node in enumerate(nodes):
+            assert node.env_id == 1
+            assert exporter.resolve_node_target(node.node_id) == (uid, "cable")
+            index = frame.node_ids.index(node.node_id)
+            pose = state[0, segment_index].cpu().numpy()
+            np.testing.assert_allclose(frame.positions[index], pose[:3], atol=1e-6)
+            np.testing.assert_allclose(frame.wxyz[index], pose[[6, 3, 4, 5]], atol=1e-6)
+            vertices = geometries[node.geometry_id].vertices
+            np.testing.assert_allclose(
+                np.ptp(vertices, axis=0), [0.02, 0.02, (0.12, 0.22)[segment_index]]
+            )
+
     def test_attached_articulation_expert_trajectory_repeats_after_reset(
         self, tmp_path: Path
     ) -> None:
@@ -449,6 +535,11 @@ class TestCableObjectCUDA:
     ) -> None:
         _assert_cable_case_in_subprocess(
             "test_imported_particles_survive_rejected_cable", volume_particle_usd.parent
+        )
+
+    def test_usd_cable_state_selective_reset_and_viser(self, tmp_path: Path) -> None:
+        _assert_cable_case_in_subprocess(
+            "test_usd_cable_state_selective_reset_and_viser", tmp_path
         )
 
     @pytest.mark.usefixtures("requires_dexuni_two_way")

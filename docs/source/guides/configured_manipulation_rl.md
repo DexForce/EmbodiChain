@@ -88,7 +88,7 @@ as task failure; the legacy `PushCubeRL` keeps its original falling-as-truncatio
 behavior. Existing task IDs and agent files are unchanged.
 
 ```bash
-embodichain train-rl --config extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/agents/ppo.configured_rl.yaml
+embodichain train-rl --config embodichain/extensions/tasks/configs/tasks/manipulation/push_cube/agents/ppo.configured_rl.yaml
 ```
 
 ## Recording and dynamic replay

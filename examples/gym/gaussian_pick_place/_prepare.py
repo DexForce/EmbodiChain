@@ -31,7 +31,7 @@ __all__ = ["HERE", "SCENES", "prepare", "digest", "write_json"]
 
 HERE = Path(__file__).resolve().parent
 TASK_CONFIG_ROOT = (
-    "extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place"
+    "embodichain/extensions/tasks/configs/tasks/manipulation/gaussian_pick_place"
 )
 SCENES = {
     "discoverse": {"title": "DISCOVERSE lab3"},
@@ -131,8 +131,9 @@ def prepare(
         if item["uid"] == "scan_background"
     )
     asset_reference = background["source"]["file_path"]
-    entry = Path(get_data_path(asset_reference))
-    asset_document = json.loads((entry.parent / "asset.json").read_text())
+    get_data_path(asset_reference)
+    asset_json = Path(get_data_path(asset_reference.split("/", 1)[0] + "/asset.json"))
+    asset_document = json.loads(asset_json.read_text())
     program = yaml.safe_load(
         (resolved / f"task_program/program.{scene}.yaml").read_text()
     )
@@ -177,7 +178,7 @@ def prepare(
             "reference": asset_reference,
             "asset_id": asset_document["asset_id"],
             "revision_id": asset_document["revision_id"],
-            "asset_json_sha256": digest(entry.parent / "asset.json"),
+            "asset_json_sha256": digest(asset_json),
         },
         "cameras": ["cam_third", "cam_wrist"],
         "python": sys.version,

@@ -32,8 +32,8 @@ from scipy.spatial.transform import Rotation
 import torch
 
 from embodichain.robot_registry import resolve_robot_cfg
-from embodichain_robots import AgibotG2Cfg
-from embodichain_robots.agibot.g2 import cfg as g2
+from embodichain.extensions.robots import AgibotG2Cfg
+from embodichain.extensions.robots.agibot.g2 import cfg as g2
 
 _URDF = Path(g2.__file__).with_name("g2.urdf")
 
@@ -41,7 +41,7 @@ _URDF = Path(g2.__file__).with_name("g2.urdf")
 @pytest.mark.no_sim
 def test_g2_native_joint_and_mimic_contract() -> None:
     """Catalog counts describe the actual source tree, excluding mimic followers."""
-    from embodichain_robots._catalog import ROBOT_CONFIGS
+    from embodichain.extensions.robots._catalog import ROBOT_CONFIGS
 
     cfg = resolve_robot_cfg("AgibotG2", overrides={"fpath": str(_URDF)})
     robot = ET.parse(_URDF)

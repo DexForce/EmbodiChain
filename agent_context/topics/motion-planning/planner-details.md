@@ -251,6 +251,11 @@ fixed-base assembly through `policy_frame_from_world_by_control_part`; every
 requested arm must have an entry. The selected transform applies to targets,
 rollout FK, and retimed arrival checks. Atomic task orchestration coordinates
 the arms; reusing the policy does not create a jointly trained dual-arm policy.
+Acceptance uses the caller's runtime TCP origin even when the actor observes
+an offset policy TCP. Undo the right-hand tool transform when measuring
+position error; orientation error can move the two origins differently.
+The same acceptance rule applies after retiming, without changing policy
+observations or configured tolerances.
 Target/FK quaternions follow the shared
 [simulation convention](../simulation-system/simulation-system.md); do not
 convert a value twice. Failed waypoint convergence retains native rollout
@@ -259,6 +264,10 @@ batched behavior in `test_neural_planner.py` and `test_neural_batched.py` under
 `tests/sim/motion/planners/`.
 
 ### cuRobo backend and import isolation
+
+Collision-model inspection uses the owning manager's `wait_for_input()` callback
+so temporary native actors remain visible in Web presentation while paused.
+The low-level YAML visualization helper accepts the callback explicitly.
 
 `curobo_planner.py::_require_curobo()` lazily imports the optional backend and
 restores the caller's Torch matmul precision and CUDA/cuDNN TF32 flags on success

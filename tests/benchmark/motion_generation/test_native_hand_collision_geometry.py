@@ -46,7 +46,7 @@ from embodichain.toolkits.graspkit.pg_grasp import (
     GripperCollisionCfg,
     GripperCollisionChecker,
 )
-from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+from embodichain.extensions.benchmarks.motion_generation._atomic_fixtures import (
     create_parallel_jaw_grasp_pose_generator,
 )
 
@@ -151,10 +151,10 @@ def test_native_open_hand_mesh_rejects_real_collision_without_false_palm_collisi
 def test_benchmark_mounted_hand_uses_bound_solver_tcp(
     model_id: str, expected_tcp_z: float, expected_offset: float
 ) -> None:
-    from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+    from embodichain.extensions.benchmarks.motion_generation._atomic_fixtures import (
         create_ur5_gripper_robot_cfg,
     )
-    from embodichain_benchmarks.motion_generation.scenarios.atomic_skill import (
+    from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_skill import (
         AtomicSkillScenario,
     )
 
@@ -162,12 +162,12 @@ def test_benchmark_mounted_hand_uses_bound_solver_tcp(
     if model_id == "dh_pgi_140_80":
         cfg = create_ur5_gripper_robot_cfg()
     else:
-        from embodichain_benchmarks.motion_generation import load_suite
-        from embodichain_benchmarks.motion_generation.registry import (
+        from embodichain.extensions.benchmarks.motion_generation import load_suite
+        from embodichain.extensions.benchmarks.motion_generation.registry import (
             create_robot_provider,
         )
 
-        import embodichain_benchmarks.motion_generation.robots.dual_arm
+        import embodichain.extensions.benchmarks.motion_generation.robots.dual_arm
 
         cfg = create_robot_provider(
             load_suite("atomic_dual_franka_robotiq_hand_over").robot

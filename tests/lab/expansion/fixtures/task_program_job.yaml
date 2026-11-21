@@ -1,0 +1,48 @@
+schema_version: 1
+engine:
+  workload_count: 2
+  batch_size: 1
+  episodes_per_operator: 1
+  max_attempts: 4
+  max_steps: 3000
+  max_wall_time_s: 240
+  settling_steps: 5
+  capture_media: false
+scene:
+  cube:
+    translation_m: [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]
+    yaw_rad: [0.0, 0.0]
+trajectory:
+  operators: [object_pose, joint_residual]
+  joint_offset_scale: 0.0001
+  via_count: 2
+  max_proposals: 8
+  minimum_joint_delta: 0.0000001
+  velocity_limit: 10.0
+  acceleration_limit: 100.0
+  nullspace_task_rows: [0, 1, 2]
+  nullspace_translation_tolerance_m: 0.001
+  nullspace_rotation_tolerance_rad: 0.01
+  free_phases:
+    pick_up: [approach]
+    place: [retract]
+validation:
+  initial_checks:
+    - {kind: pose_near, entity: cube, position: [-0.42, -0.08, 0.025], tolerance_m: 0.08}
+  final_checks: &final
+    - {kind: pose_near, entity: cube, position: [-0.4, 0.48, 0.025], tolerance_m: 0.04}
+    - {kind: joint_range, joint: gripper_finger1_joint_1, lower: -0.001, upper: 0.005}
+    - {kind: speed_below, entity: cube, linear_m_s: 0.03, angular_rad_s: 0.2}
+  events:
+    - event_id: lift
+      conditions:
+        - {kind: lifted, entity: cube, height_m: 0.05}
+    - event_id: placed_and_released
+      conditions: *final
+      consecutive_steps: 3
+  allowed_contacts:
+    - [cube, UR5/gripper_finger1_link_1]
+    - [cube, UR5/gripper_finger2_link_1]
+    - [cube, default_plane]
+  mounting_contacts:
+    - ['@root', default_plane]

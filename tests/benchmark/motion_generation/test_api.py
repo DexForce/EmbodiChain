@@ -26,7 +26,7 @@ from unittest.mock import Mock
 import pytest
 import torch
 import yaml
-from embodichain_benchmarks.motion_generation import (
+from embodichain.extensions.benchmarks.motion_generation import (
     BenchmarkCase,
     PlannerAdapter,
     PlannerSpecCfg,
@@ -34,16 +34,19 @@ from embodichain_benchmarks.motion_generation import (
     load_suite,
     run_benchmark,
 )
-from embodichain_benchmarks.motion_generation import runner as runner_module
-from embodichain_benchmarks.motion_generation.config import TrackCfg, suite_to_dict
-from embodichain_benchmarks.motion_generation.metrics.trajectory import (
+from embodichain.extensions.benchmarks.motion_generation import runner as runner_module
+from embodichain.extensions.benchmarks.motion_generation.config import (
+    TrackCfg,
+    suite_to_dict,
+)
+from embodichain.extensions.benchmarks.motion_generation.metrics.trajectory import (
     make_failure_outcomes,
 )
-from embodichain_benchmarks.motion_generation.registry import (
+from embodichain.extensions.benchmarks.motion_generation.registry import (
     planner_adapter_names,
     planner_configuration_features,
 )
-from embodichain_benchmarks.motion_generation.scenarios.base import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios.base import (
     ScenarioEvaluation,
     ScenarioProvider,
 )
@@ -329,7 +332,9 @@ def test_suite_with_no_enabled_planners_fails_before_simulation(fake_runtime) ->
 def test_framework_revision_is_independent_of_caller_directory(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from embodichain_benchmarks.motion_generation.artifacts import _git_commit
+    from embodichain.extensions.benchmarks.motion_generation.artifacts import (
+        _git_commit,
+    )
 
     framework_revision = _git_commit()
     assert framework_revision is not None
@@ -528,7 +533,9 @@ def test_frozen_manifest_rejects_changed_embodiment_before_simulation(
 def test_prepare_case_manifest_is_planner_independent_and_never_overwrites(
     fake_runtime, tmp_path, monkeypatch
 ):
-    from embodichain_benchmarks.motion_generation import prepare_case_manifest
+    from embodichain.extensions.benchmarks.motion_generation import (
+        prepare_case_manifest,
+    )
 
     suite = load_suite()
     monkeypatch.setattr(
@@ -574,7 +581,7 @@ def _spawned_fake_shard(job):
     from dataclasses import replace
     from unittest.mock import patch
 
-    from embodichain_benchmarks.motion_generation.parallel import _run_shard
+    from embodichain.extensions.benchmarks.motion_generation.parallel import _run_shard
 
     robot = Mock(uid="test_robot")
     provider = Mock(control_part="arm")
@@ -625,8 +632,11 @@ def test_parallel_quality_merges_full_population_and_preserves_inputs(
 ):
     from dataclasses import replace
 
-    from embodichain_benchmarks.motion_generation import parallel, prepare_case_manifest
-    from embodichain_benchmarks.motion_generation.models import TrialPhase
+    from embodichain.extensions.benchmarks.motion_generation import (
+        parallel,
+        prepare_case_manifest,
+    )
+    from embodichain.extensions.benchmarks.motion_generation.models import TrialPhase
 
     suite = load_suite()
     suite.protocol.warmup_trials = 0
@@ -793,9 +803,12 @@ def test_parallel_merges_initialized_and_unsupported_only_nmg_workers(
     from copy import deepcopy
     from dataclasses import replace
 
-    from embodichain_benchmarks.motion_generation import parallel, prepare_case_manifest
-    from embodichain_benchmarks.motion_generation.models import TrialPhase
-    from embodichain_benchmarks.motion_generation.planners.nmg_onnx import (
+    from embodichain.extensions.benchmarks.motion_generation import (
+        parallel,
+        prepare_case_manifest,
+    )
+    from embodichain.extensions.benchmarks.motion_generation.models import TrialPhase
+    from embodichain.extensions.benchmarks.motion_generation.planners.nmg_onnx import (
         NmgOnnxAdapter,
     )
 
@@ -892,8 +905,11 @@ def test_parallel_merges_initialized_and_unsupported_only_nmg_workers(
 def test_parallel_partition_preserves_shared_geometry_and_rejects_timing(
     fake_runtime, tmp_path, monkeypatch
 ):
-    from embodichain_benchmarks.motion_generation import parallel, prepare_case_manifest
-    from embodichain_benchmarks.motion_generation.config import stable_hash
+    from embodichain.extensions.benchmarks.motion_generation import (
+        parallel,
+        prepare_case_manifest,
+    )
+    from embodichain.extensions.benchmarks.motion_generation.config import stable_hash
 
     rows = [
         {
@@ -943,7 +959,9 @@ def test_parallel_partition_preserves_shared_geometry_and_rejects_timing(
 
 @pytest.mark.parametrize("devices", [[], ["cuda"], ["cuda:0", "cuda:0"], ["cuda:2"]])
 def test_quality_device_list_is_explicit_unique_and_available(monkeypatch, devices):
-    from embodichain_benchmarks.motion_generation import resolve_quality_devices
+    from embodichain.extensions.benchmarks.motion_generation import (
+        resolve_quality_devices,
+    )
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
@@ -957,7 +975,7 @@ def test_serial_quality_device_scope_restores_host_on_return_or_failure(
     monkeypatch, fails
 ):
     from contextlib import contextmanager
-    from embodichain_benchmarks.motion_generation import parallel
+    from embodichain.extensions.benchmarks.motion_generation import parallel
 
     events = []
 
@@ -1007,7 +1025,9 @@ def test_serial_quality_device_scope_restores_host_on_return_or_failure(
 def test_parallel_resolves_device_index_in_parent(
     monkeypatch, requested, expected, uses_current
 ):
-    from embodichain_benchmarks.motion_generation.parallel import _worker_device
+    from embodichain.extensions.benchmarks.motion_generation.parallel import (
+        _worker_device,
+    )
 
     current = Mock(return_value=5)
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
@@ -1024,7 +1044,9 @@ def test_preparation_progress_survives_interruption_and_rejects_mismatch(
     fake_runtime, tmp_path, monkeypatch, change
 ):
     """Interrupted preparation retains inputs but never publishes a partial corpus."""
-    from embodichain_benchmarks.motion_generation import prepare_case_manifest
+    from embodichain.extensions.benchmarks.motion_generation import (
+        prepare_case_manifest,
+    )
 
     suite = load_suite()
     output, progress = tmp_path / "frozen.json", tmp_path / "progress"

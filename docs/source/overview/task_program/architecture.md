@@ -83,7 +83,7 @@ configs are {class}`PickCfg`, {class}`PlaceCfg`, and {class}`HandOverCfg`;
 
 The complete official program (also used by the Quickstart):
 
-```{literalinclude} ../../../../extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task_program/program.yaml
+```{literalinclude} ../../../../embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task_program/program.yaml
 :language: yaml
 ```
 
@@ -218,7 +218,7 @@ profile:
 The abbreviated profile mappings above must be populated for the calls used by
 the program. See `envs/default.yaml`, `task.ur5.yaml`, and
 `task_program/integration.yaml` under
-`embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/` for the
+`embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/` for the
 complete reference composition.
 
 Scene affordances are authored as children of their owning entry in

@@ -452,14 +452,33 @@ class JointPositionGymTransportEncoder:
         active_mask: torch.Tensor,
     ) -> EnvAction:
         """Write addressed joints while holding every other qpos column."""
+        return self._encode_commands(
+            (command,), base_action=base_action, active_mask=active_mask
+        )
+
+    def _encode_commands(self, commands, *, base_action, active_mask):
+        """Own one output for a validated frame's built-in joint destinations."""
+        if not isinstance(base_action, (torch.Tensor, TensorDict)):
+            raise TypeError(
+                "The built-in joint-position encoder requires a tensor action or "
+                "a TensorDict containing qpos."
+            )
+        action = base_action.clone()
+        for command in commands:
+            self._write_command(command, action=action, active_mask=active_mask)
+        return action
+
+    @staticmethod
+    def _write_command(command, *, action, active_mask):
+        """Apply one command to an already-owned frame output."""
         if not isinstance(command.target, JointPositionTarget):
             raise TypeError("Joint-position transport requires JointPositionTarget.")
         if not isinstance(command.payload, JointPositionPayload):
             raise TypeError("Joint-position transport requires JointPositionPayload.")
-        if isinstance(base_action, torch.Tensor):
-            qpos = base_action
-        elif isinstance(base_action, TensorDict) and "qpos" in base_action:
-            qpos = base_action["qpos"]
+        if isinstance(action, torch.Tensor):
+            qpos = action
+        elif isinstance(action, TensorDict) and "qpos" in action:
+            qpos = action["qpos"]
         else:
             raise TypeError(
                 "The built-in joint-position encoder requires a tensor action or "
@@ -487,38 +506,34 @@ class JointPositionGymTransportEncoder:
         if not qpos.is_floating_point():
             raise TypeError("The full-qpos base action must be floating point.")
 
-        action_qpos = qpos.clone()
+        action_qpos = qpos
         columns = torch.tensor(joint_ids, dtype=torch.long, device=qpos.device)
         selected = action_qpos.index_select(1, columns)
         selected[active_mask] = positions[active_mask].to(dtype=action_qpos.dtype)
         action_qpos[:, columns] = selected
-        if isinstance(base_action, torch.Tensor):
-            return action_qpos
+        if isinstance(action, torch.Tensor):
+            return
 
         velocities = command.payload.velocities
         if velocities is None:
             raise ValueError(
                 "position_velocity joint commands require payload velocities."
             )
-        if "qvel" not in base_action:
+        if "qvel" not in action:
             raise TypeError(
                 "Position-velocity joint actions require qpos and qvel base targets."
             )
-        qvel = base_action["qvel"]
+        qvel = action["qvel"]
         if qvel.shape != qpos.shape or qvel.device != qpos.device:
             raise ValueError(
                 "Full qpos and qvel base targets must share shape and device."
             )
-        action_qvel = qvel.clone()
+        action_qvel = qvel
         selected_velocity = action_qvel.index_select(1, columns)
         selected_velocity[active_mask] = velocities[active_mask].to(
             dtype=action_qvel.dtype
         )
         action_qvel[:, columns] = selected_velocity
-        action = base_action.clone()
-        action["qpos"] = action_qpos
-        action["qvel"] = action_qvel
-        return action
 
     def hold(
         self,
@@ -532,6 +547,9 @@ class JointPositionGymTransportEncoder:
         if not all(isinstance(target, JointPositionTarget) for target in targets):
             raise TypeError("Joint-position hold received an incompatible target.")
         return base_action.clone()
+
+
+_BUILTIN_JOINT_ENCODE = JointPositionGymTransportEncoder.encode
 
 
 class RuntimeCommandFrameEncoder:
@@ -742,7 +760,17 @@ class RuntimeCommandFrameEncoder:
             self._validate_command_types(transport, command)
             by_transport.setdefault(command.transport_id, []).append(command)
         for transport_id, transport in self._transports.items():
-            for command in by_transport.get(transport_id, ()):
+            commands = by_transport.get(transport_id, ())
+            if (
+                len(commands) > 1
+                and type(transport) is JointPositionGymTransportEncoder
+                and getattr(transport.encode, "__func__", None) is _BUILTIN_JOINT_ENCODE
+            ):
+                action = transport._encode_commands(
+                    commands, base_action=action, active_mask=frame.active_mask
+                )
+                continue
+            for command in commands:
                 action = transport.encode(
                     command,
                     base_action=action,
@@ -1588,6 +1616,8 @@ class TaskProgramDemoBridge:
                     or recovery.max_skill_retries != 0
                     or preset.workflow_recovery_policy.max_recovery_attempts != 0
                     or tracking.in_flight is not None
+                    or tracking.boundary_stop
+                    or tracking.boundary_reference_bridge
                     or getattr(tracking.terminal, "settle_duration", None) != 0.0
                 ):
                     return None
@@ -1784,6 +1814,19 @@ class TaskProgramDemoBridge:
             self._record_consumed_action(action)
             self._clock.advance_after_env_step()
             lifecycle.pending_action = None
+        observer = getattr(
+            getattr(self, "_validator_port", None), "_observe_consumed_action", None
+        )
+        decision = None if observer is None else observer(action, runtime=self._runtime)
+        if decision is not None:
+            rejected, hold_qpos, reason = decision
+            if self._eligible_mask is not None:
+                rejected &= self._eligible_mask
+            if bool(rejected.any()):
+                hold = ControllerAction(self._sink.encode_post_policy_hold(hold_qpos))
+                self.request_row_rejection(
+                    tuple(self.env_ids[rejected].tolist()), hold, reason=reason
+                )
         process = getattr(self, "_process_rejection", None)
         if process is not None:
             self._process_rejection = None
@@ -2067,12 +2110,14 @@ class TaskProgramDemoBridge:
             reason: str,
             *,
             last_action_consumed: bool,
+            controller_hold: ControllerAction | None = None,
         ) -> Iterator[ControllerAction]:
             return self._abort_segment(
                 segment,
                 lifecycle,
                 reason=reason,
                 last_action_consumed=last_action_consumed,
+                controller_hold=controller_hold,
             )
 
         return abort
@@ -2084,12 +2129,28 @@ class TaskProgramDemoBridge:
         *,
         reason: str,
         last_action_consumed: bool,
+        controller_hold: ControllerAction | None = None,
     ) -> Iterator[ControllerAction]:
-        """Abort one segment, surfacing a safe hold only after controller activity."""
+        """Abort after activity, preferring runtime-proven controller holds.
+
+        A trusted controller owner may supply an explicit labelled hold when
+        the runtime became terminal before its final yielded motion was
+        consumed. Pending motion alone is never promoted to a safe stop.
+        """
         if type(reason) is not str or not reason:
             raise ValueError("abort reason must be a non-empty string.")
         if type(last_action_consumed) is not bool:
             raise TypeError("last_action_consumed must be a bool.")
+        if controller_hold is not None:
+            if not isinstance(controller_hold, ControllerAction):
+                raise TypeError("controller_hold must be a ControllerAction or None.")
+            if (
+                controller_hold.metadata.get("bridge_action_kind")
+                not in _SAFE_HOLD_ACTION_KINDS
+            ):
+                raise ValueError(
+                    "controller_hold requires an explicit safe-hold action kind."
+                )
         if lifecycle.abort_started:
             raise RuntimeError(
                 f"Segment {segment.segment_id!r} abort handshake already started."
@@ -2153,6 +2214,15 @@ class TaskProgramDemoBridge:
         safe_action = self._sink.drain_safe_stop_action(
             fallback=None if last_action_consumed else pending,
         )
+        if safe_action is None and controller_hold is not None:
+            # A controller owner can prove a hold even after a runtime has
+            # become terminal while its final motion is still unconsumed.
+            # Never treat that pending motion itself as a safe stop.
+            held = controller_hold.snapshot()
+            safe_action = ControllerAction(
+                held.value,
+                metadata={**held.metadata, "abort_hold_source": "controller_owner"},
+            )
         if safe_action is None:
             raise TaskProgramBridgeError(
                 f"Segment {segment.segment_id!r} stopped before exhaustion, but "

@@ -199,7 +199,7 @@ class _FluidOnlineRuntime:
         try:
             task = (
                 Path(__file__).resolve().parents[3]
-                / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
+                / "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
             )
             robot_cfg = config_to_cfg(load_config(task), source_path=task).robot
             robot = sim.add_robot(robot_cfg)
@@ -234,7 +234,7 @@ class _FluidOnlineRuntime:
 
         task = (
             Path(__file__).resolve().parents[3]
-            / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
+            / "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
         )
         discover_task_packages()
         declaration = load_config(task)
