@@ -1,0 +1,11 @@
+{
+  "runs": [
+    {
+      "id": "precision_baseline_freefall_dt001",
+      "case": "freefall",
+      "dt": 0.001,
+      "phase": "pilot",
+      "count": 1
+    }
+  ]
+}

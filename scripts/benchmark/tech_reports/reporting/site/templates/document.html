@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="breadcrumb"><a href="/">总览</a><span>/</span><a href="{{ item.url }}">{{ item.id }}</a><span>/</span>补充材料</div>
+<header class="page-header document-header"><div class="eyebrow">{{ item.id }} · 原始记录与补充分析</div><h1>{{ doc.title }}</h1><div class="page-meta"><a href="{{ item.url }}">← 返回实验报告</a><a href="{{ doc.download }}" download>下载 Markdown ↓</a></div></header>
+{% if doc.historical %}<aside class="issue-callout historical"><h2>历史阶段材料</h2><p>保留当时的结果、问题与评价口径。当前结论及已修复事项以<a href="{{ item.url }}">合并报告</a>为准。</p></aside>{% endif %}
+<div class="reading-layout"><article class="prose">{{ doc.body | safe }}</article><aside class="toc-panel"><details open><summary>本页目录</summary>{{ doc.toc | safe }}</details></aside></div>
+<p class="source-path">文档来源 <code>{{ doc.source }}</code></p>
+{% endblock %}

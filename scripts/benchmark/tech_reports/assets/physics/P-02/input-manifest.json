@@ -1,0 +1,44 @@
+[
+  {
+    "path": "protocol.json",
+    "bytes": 3059,
+    "sha256": "318da67abeb5983a1e06570ca9893ecd8abe45a7658b6d2a7360d545a19fbf81",
+    "source": "Authored/generated in simulation-report; no external assets",
+    "license": "Not separately assigned; resolve at publication"
+  },
+  {
+    "path": "initial-states.json",
+    "bytes": 11576,
+    "sha256": "99ca1cd9fd26fe1a2548806a4c954860af90a98c25997217c2f33bcc2275aa08",
+    "source": "Authored/generated in simulation-report; no external assets",
+    "license": "Not separately assigned; resolve at publication"
+  },
+  {
+    "path": "stack-limit.json",
+    "bytes": 19034,
+    "sha256": "61e56259060a52e6760bcb7c0bcd13984c15778811a71c3d5e9995e5b19a805d",
+    "source": "Authored/generated in simulation-report; no external assets",
+    "license": "Not separately assigned; resolve at publication"
+  },
+  {
+    "path": "stack-limit-initials.json",
+    "bytes": 137570,
+    "sha256": "c8e590f5a11ca6ca924e12953080e1e2f1fd5b17b14c7678fe4095b3bf98d717",
+    "source": "Authored/generated in simulation-report; no external assets",
+    "license": "Not separately assigned; resolve at publication"
+  },
+  {
+    "path": "stack-limit-10s-sleep.json",
+    "bytes": 18957,
+    "sha256": "a0866e107477e68ef8000724632a1373a282755f68236ab07cb5ce584b992221",
+    "source": "Authored/generated in simulation-report; no external assets",
+    "license": "Not separately assigned; resolve at publication"
+  },
+  {
+    "path": "stack-limit-native.json",
+    "bytes": 18993,
+    "sha256": "1be83d7d268181943246f05fc19b41ef15049ddd37310de6c112a1b0c4873bc7",
+    "source": "Authored/generated in simulation-report; no external assets",
+    "license": "Not separately assigned; resolve at publication"
+  }
+]

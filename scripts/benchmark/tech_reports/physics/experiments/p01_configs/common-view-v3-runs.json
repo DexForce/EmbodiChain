@@ -1,0 +1,26 @@
+[
+  {
+    "id": "common_view_v3_isaaclab_pgs_freefall_dt005_N1",
+    "platform": "isaaclab",
+    "solver": "PGS",
+    "case": "freefall"
+  },
+  {
+    "id": "common_view_v3_isaaclab_pgs_pendulum_dt005_N1",
+    "platform": "isaaclab",
+    "solver": "PGS",
+    "case": "pendulum"
+  },
+  {
+    "id": "common_view_v3_isaaclab_tgs_freefall_dt005_N1",
+    "platform": "isaaclab",
+    "solver": "TGS",
+    "case": "freefall"
+  },
+  {
+    "id": "common_view_v3_isaaclab_tgs_pendulum_dt005_N1",
+    "platform": "isaaclab",
+    "solver": "TGS",
+    "case": "pendulum"
+  }
+]

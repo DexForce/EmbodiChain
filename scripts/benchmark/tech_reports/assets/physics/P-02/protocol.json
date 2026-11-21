@@ -1,0 +1,165 @@
+{
+  "experiment": "P-02",
+  "revision": "main-v2",
+  "initial_states": "initial-states.json",
+  "seed": 20261022,
+  "units": "m kg s rad",
+  "num_envs": 1,
+  "gravity_m_s2": 9.81,
+  "mass_kg": 0.1,
+  "main_dt_s": 0.005,
+  "supplement_dt_s": 0.0025,
+  "slope_duration_s": 10,
+  "stack_settle_s": 2,
+  "stack_observation_s": 10,
+  "slope_size_m": [
+    12,
+    1,
+    0.1
+  ],
+  "slope_top_origin_m": [
+    0,
+    0,
+    4.5
+  ],
+  "slope_body_size_m": [
+    0.1,
+    0.1,
+    0.02
+  ],
+  "stack_cube_size_m": [
+    0.05,
+    0.05,
+    0.05
+  ],
+  "stack_support_size_m": [
+    3,
+    3,
+    0.1
+  ],
+  "stack_support_top_z_m": 0.2,
+  "initial_gap_m": 0.0001,
+  "contact_margin_m": 0,
+  "contact_gap_m": 0.001,
+  "restitution": 0,
+  "dexuni_options": {
+    "solver_type": "dexuni",
+    "joint_mode": "dynamic",
+    "contact_mode": "auto",
+    "coupling": "one_way",
+    "vbd_options": {
+      "iterations": 10,
+      "rigid_enable_sleep": false,
+      "rigid_body_contact_buffer_size": 256
+    },
+    "collision_options": {
+      "rigid_contact_max": 4096,
+      "verify_buffers": true
+    }
+  },
+  "physx": {
+    "solver": "TGS",
+    "position_iterations": 4,
+    "velocity_iterations": 1,
+    "sleep_threshold": 0,
+    "stabilization": false
+  },
+  "scenarios": [
+    {
+      "id": "slope_15_mu54",
+      "kind": "slope",
+      "angle_deg": 15,
+      "mu_static": 0.5,
+      "mu_dynamic": 0.4
+    },
+    {
+      "id": "slope_30_mu54",
+      "kind": "slope",
+      "angle_deg": 30,
+      "mu_static": 0.5,
+      "mu_dynamic": 0.4
+    },
+    {
+      "id": "slope_45_mu54",
+      "kind": "slope",
+      "angle_deg": 45,
+      "mu_static": 0.5,
+      "mu_dynamic": 0.4
+    },
+    {
+      "id": "slope_30_mu32",
+      "kind": "slope",
+      "angle_deg": 30,
+      "mu_static": 0.3,
+      "mu_dynamic": 0.2
+    },
+    {
+      "id": "slope_30_mu86",
+      "kind": "slope",
+      "angle_deg": 30,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.6
+    },
+    {
+      "id": "stack_01",
+      "kind": "stack",
+      "layers": 1,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_05",
+      "kind": "stack",
+      "layers": 5,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_10",
+      "kind": "stack",
+      "layers": 10,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    }
+  ],
+  "capture": {
+    "width": 1280,
+    "height": 720,
+    "intrinsics": [
+      1100,
+      1100,
+      640,
+      360
+    ],
+    "fps": 40,
+    "body_colors": [
+      [
+        0.05,
+        0.35,
+        0.66
+      ],
+      [
+        0.94,
+        0.55,
+        0.13
+      ],
+      [
+        0.08,
+        0.57,
+        0.4
+      ]
+    ],
+    "surface_color": [
+      0.5,
+      0.55,
+      0.61
+    ],
+    "background_color": [
+      0.9,
+      0.92,
+      0.94
+    ]
+  },
+  "frozen_after_pilot": "20261022_121044",
+  "execution_policy": "Multilayer primary statistics: a fresh process per initial state; original sequential-reset runs retained as reset-history study. Single-body cases include independent-replay controls."
+}

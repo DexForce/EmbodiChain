@@ -1,9 +1,9 @@
 # EmbodiChain report asset download design
 
-Status: design only. The dataset is initialized with documentation and an empty
-index. The interfaces in this document do not exist yet, and existing benchmark
-scripts retain their current behavior. The first real asset publication will
-provide the inputs needed to implement and validate those interfaces.
+The simulation report implements the pinned input resolver for its own
+launchers. The general benchmark asset CLI described below remains a
+proposal. See the [runtime inputs](README.md#runtime-inputs-for-this-report)
+for the current command and release.
 
 ## Goal and ownership
 
