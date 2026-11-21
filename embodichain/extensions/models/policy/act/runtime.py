@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import json
 from pathlib import Path
 from typing import Any, Mapping
@@ -102,6 +103,13 @@ class ACTInferencePolicy:
         self.metadata = dict(metadata)
         self.image_key = self.metadata["image_key"]
         self._query_period = metadata.get("query_period", 1)
+        self._elapsed_scale = self.metadata.get("elapsed_control_scale")
+        if self._elapsed_scale is not None and (
+            type(self._elapsed_scale) not in (int, float)
+            or not math.isfinite(self._elapsed_scale)
+            or self._elapsed_scale <= 0
+        ):
+            raise ValueError("ACT elapsed_control_scale must be finite and positive")
         self._block_ensemble = None
         if self._query_period != 1:
             from lerobot.policies.act.modeling_act import ACTTemporalEnsembler
@@ -126,6 +134,7 @@ class ACTInferencePolicy:
         """Forget action chunks and ensemble history at every environment reset."""
         self.policy.reset()
         self._batch_size: int | None = None
+        self._elapsed_controls = 0
         self._commands = None
         self._next_command = 0
         if self._block_ensemble is not None:
@@ -175,8 +184,6 @@ class ACTInferencePolicy:
         ):
             if list(dataset.features[key]["names"]) != declared["names"]:
                 raise ValueError("Validation feature order differs from training")
-        import math
-
         if not math.isclose(
             dataset.fps * schema["action"]["step_dt"], 1.0, abs_tol=1e-8
         ):
@@ -195,6 +202,14 @@ class ACTInferencePolicy:
             if self.metadata.get("image_landmarks"):
                 batch["observation.state"] = _image_state(
                     batch[self.image_key], batch["observation.state"]
+                )
+            if self._elapsed_scale is not None:
+                tick = (
+                    batch["frame_index"].to(batch["observation.state"]).reshape(-1, 1)
+                    / self._elapsed_scale
+                ).clamp(0, 1)
+                batch["observation.state"] = torch.cat(
+                    (batch["observation.state"], tick), -1
                 )
             batch[self.image_key] = _backbone_image(
                 batch[self.image_key],
@@ -218,7 +233,8 @@ class ACTInferencePolicy:
         """Return a physical action after the official temporal ensemble.
 
         Args:
-            rgb: Current uint8 RGB pixels, shaped ``[B, 3, H, W]``.
+            rgb: Current uint8 RGB pixels, shaped ``[B, 3, H, W]``. A cached
+                command accepts ``None`` when ``needs_observation`` is false.
             state: Current ordered joint state, shaped ``[B, state_dim]``.
                 All lanes start together. Reset ensemble history before
                 changing the batch size or starting the next panel.
@@ -236,6 +252,7 @@ class ACTInferencePolicy:
                 )
             action = self._commands[:, self._next_command]
             self._next_command += 1
+            self._elapsed_controls += 1
             return action
         if (
             rgb is None
@@ -259,6 +276,9 @@ class ACTInferencePolicy:
         self._batch_size = rgb.shape[0]
         if self.metadata.get("image_landmarks"):
             state = _image_state(rgb, state)
+        if self._elapsed_scale is not None:
+            tick = min(self._elapsed_controls / self._elapsed_scale, 1.0)
+            state = torch.cat((state, state.new_full((len(state), 1), tick)), -1)
         batch = self.preprocessor(
             {
                 self.image_key: _backbone_image(
@@ -286,6 +306,7 @@ class ACTInferencePolicy:
         expected = (rgb.shape[0], len(self.metadata["schema"]["action"]["names"]))
         if action.shape != expected or not torch.isfinite(action).all():
             raise ValueError("ACT produced non-finite or incompatible control commands")
+        self._elapsed_controls += 1
         return action
 
 

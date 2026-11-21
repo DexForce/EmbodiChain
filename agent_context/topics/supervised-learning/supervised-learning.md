@@ -43,7 +43,11 @@ operations remain in `compute`; source storage belongs to data adapters.
   weights and processors with a portable task/data manifest. The runtime uses
   the official temporal ensemble and resets it per episode. `examples/learning/act/`
   owns collection, training invocation, independent checkpoint selection and
-  physical evaluation. Historical custom ACT checkpoints require retraining.
+  physical evaluation. The grouped example can pool only the backbone image
+  and query in blocks of control steps. The native runtime ensembles overlapping
+  blocks at matching control times. Full-resolution landmarks and control cadence
+  are preserved. See the [grouped deadline study](../../../examples/learning/act/GROUPED_REPAIR.md).
+  Historical custom ACT checkpoints require retraining.
 
 
 Objectives own loss masks, normalization, integration and multi-step graph

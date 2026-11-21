@@ -69,3 +69,23 @@ def test_proprioception_selects_joints_without_adding_batch_dims(num_envs: int) 
                 proprioception[key], joint_values + env_offsets + offset
             )
         assert proprioception.batch_size == torch.Size([num_envs])
+
+
+def test_unconsumed_sensor_frame_is_optional_and_recorders_reject_omission():
+    env = BaseEnv.__new__(BaseEnv)
+    env._num_envs = 1
+    env.sim = SimpleNamespace(device=torch.device("cpu"))
+    env.active_joint_ids = [0]
+    env.robot = Mock()
+    env.robot.get_proprioception.return_value = TensorDict(
+        {"qpos": torch.ones(1, 1)}, batch_size=[1]
+    )
+    env._profiler = SimpleNamespace(section=lambda *_args, **_kw: nullcontext())
+    env._get_sensor_obs = Mock(return_value={"rgb": torch.ones(1, 3)})
+    obs = env.get_obs(capture_sensor_obs=False)
+    assert "sensor" not in obs and obs["robot", "qpos"].item() == 1
+    env._get_sensor_obs.assert_not_called()
+    assert "sensor" in env.get_obs()
+    env.rollout_buffer = object()
+    with pytest.raises(ValueError, match="recording rollout"):
+        env.step(torch.zeros(1, 1), capture_sensor_obs=False)

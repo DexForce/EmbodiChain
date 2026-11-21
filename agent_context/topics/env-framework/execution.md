@@ -6,6 +6,9 @@ Read this when the request needs these details. [Topic overview](env-framework.m
 
 - Owns: `SimulationManager`, `Robot`, sensors dict, action/observation spaces.
 - Implements the full `step()` / `reset()` loop (see Lifecycle below).
+  An unrecorded consumer that discards the next sensor observation can pass
+  `capture_sensor_obs=False` to the native step. Rollout and dataset recorders
+  require the default full sensor capture.
 - Defines hook points subclasses override:
   - `_setup_robot()` — load robot, set `single_action_space`. **Must** return `Robot`.
   - `_prepare_scene()` — add scene assets.

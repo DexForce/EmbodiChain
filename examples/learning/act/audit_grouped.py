@@ -116,9 +116,30 @@ def _audit(path: Path, spec: dict, seed: int) -> dict:
         ):
             raise ValueError("Committed deadline receipt differs or was late")
     score = None
+    manifest_hash = None
     if chosen:
         if policy_fingerprint(path / chosen["checkpoint"]) != chosen["sha256"]:
             raise ValueError("Native checkpoint fingerprint differs")
+        checkpoint = path / chosen["checkpoint"]
+        manifest_file = checkpoint / "embodichain_act.json"
+        manifest = _read(manifest_file)
+        image = _read(checkpoint / "config.json")["input_features"][
+            manifest["image_key"]
+        ]
+        side = spec.get("backbone_image_side", 224)
+        if (
+            manifest["task_identity"] != recipe["task_identity"]
+            or manifest["update"] != chosen["step"]
+            or manifest["policy_sha256"] != chosen["sha256"]
+            or manifest.get("query_period", 1) != spec.get("query_period", 1)
+            or image["shape"] != [3, side, side]
+            or manifest["selection"]["seeds"]
+            != list(range(spec["dev_base"], spec["dev_base"] + spec["dev_scenes"]))
+            or (manifest.get("elapsed_control_scale") is not None)
+            != spec.get("elapsed_control_input", False)
+        ):
+            raise ValueError("Deployed ACT manifest differs from the frozen recipe")
+        manifest_hash = hashlib.sha256(manifest_file.read_bytes()).hexdigest()
         score = _panel(
             path / "test.json", spec["test_base"], spec["test_scenes"], chosen["sha256"]
         )["successes"]
@@ -131,13 +152,17 @@ def _audit(path: Path, spec: dict, seed: int) -> dict:
         raise ValueError("Reported result differs from verified checkpoint")
     width, slots = spec["producer_envs"], spec["shared_slots"]
     counts = []
-    for generation, receipt in enumerate(supply["releases"], 2):
+    if supply["engine"]["sampled_chunks"] != supply["step"] * spec["batch_size"]:
+        raise ValueError(
+            "Committed sample count disagrees with completed optimizer batches"
+        )
+    for generation, release in enumerate(supply["releases"], 2):
         first = (generation - 1) * width - slots
         ids = list(range(first, first + width)) if first >= 0 else []
-        credits = receipt["committed_draws"]
+        credits = release["committed_draws"]
         if (
-            receipt["requested_generation"] != generation
-            or receipt["episode_ids"] != ids
+            release["requested_generation"] != generation
+            or release["episode_ids"] != ids
             or len(credits) != len(ids)
             or any(type(v) is not int or v < spec["draw_floor"] for v in credits)
         ):
@@ -153,6 +178,7 @@ def _audit(path: Path, spec: dict, seed: int) -> dict:
         locked_seconds=receipt.get("locked_seconds"),
         published_seconds=published,
         chosen=chosen,
+        chosen_manifest_sha256=manifest_hash,
         updates=supply["step"],
         first_update=supply["first_update"],
         sampled_chunks=supply["engine"]["sampled_chunks"],

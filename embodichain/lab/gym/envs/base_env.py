@@ -1184,6 +1184,9 @@ class BaseEnv(gym.Env):
                 default uses the host's demonstration mask. This allows an
                 explicit diagnostic settling tail without extending accepted
                 rollout or segment boundaries.
+            **kwargs: Pass ``capture_sensor_obs=False`` for an unrecorded control
+                step whose sensor observation will be discarded. The default
+                captures sensor observations on every step.
 
         Returns:
             Observation, reward, terminated, truncated, and an info mapping.

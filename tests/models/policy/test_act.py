@@ -253,3 +253,32 @@ def test_backbone_pooling_preserves_landmark_input():
     )
     torch.testing.assert_close(image, original)
     assert _backbone_image(image, (8, 8)) is image
+
+
+def test_elapsed_control_feature_counts_cached_commands_and_resets(
+    artifact, monkeypatch
+):
+    root, *_ = artifact
+    manifest = root / "embodichain_act.json"
+    meta = json.loads(manifest.read_text())
+    meta.update(query_period=3, elapsed_control_scale=4)
+    manifest.write_text(json.dumps(meta))
+    actor = load_act_policy(root)
+    seen = []
+    original_preprocess = actor.preprocessor
+
+    def preprocess(inputs):
+        joints_and_time = inputs["observation.state"]
+        seen.append(joints_and_time[:, -1].tolist())
+        return original_preprocess(
+            {**inputs, "observation.state": joints_and_time[:, :-1]}
+        )
+
+    monkeypatch.setattr(actor, "preprocessor", preprocess)
+    pixels = torch.zeros(2, 3, 32, 32, dtype=torch.uint8)
+    joints = torch.zeros(2, 2)
+    for _ in range(8):
+        actor.select_action(pixels if actor.needs_observation else None, joints)
+    actor.reset()
+    actor.select_action(pixels, joints)
+    assert seen == [[0, 0], [0.75, 0.75], [1, 1], [0, 0]]

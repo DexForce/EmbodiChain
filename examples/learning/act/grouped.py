@@ -297,6 +297,20 @@ def _run(spec: dict, seed: int, out: Path, qual: Path, started: float) -> None:
             stats["observation.state"][k] = torch.cat(
                 (stats["observation.state"][k], v)
             )
+        time_scale = None
+        if spec.get("elapsed_control_input", False):
+            time_scale = float(mask.sum(1).float().median().item())
+            t = (
+                torch.arange(mask.shape[1], dtype=torch.float32).expand_as(mask)[mask]
+                / time_scale
+            ).clamp_max(1)
+            for k, value in (
+                ("mean", t.mean()),
+                ("std", t.std(correction=0).clamp_min(0.05)),
+            ):
+                stats["observation.state"][k] = torch.cat(
+                    (stats["observation.state"][k], value.reshape(1))
+                )
         del initial, marks, data, rgb, images, z
         releases = []
         last_request = 1
@@ -327,6 +341,8 @@ def _run(spec: dict, seed: int, out: Path, qual: Path, started: float) -> None:
                 ],
             },
         }
+        if time_scale is not None:
+            feature_schema["observation"]["names"].append("elapsed_control_fraction")
         side = spec.get("backbone_image_side", 224)
         cfg = _act_config(feature_schema, IMAGE, (side, side, 3), "cuda:0", False)
         cfg.dim_model = 128
@@ -357,6 +373,9 @@ def _run(spec: dict, seed: int, out: Path, qual: Path, started: float) -> None:
             },
         )
         rng = torch.Generator().manual_seed(1000000 + seed)
+        fields = (
+            [RGB, QPOS, "ods_frame_index"] if time_scale is not None else [RGB, QPOS]
+        )
         step = 0
         first = None
         for step_idx in range(1, spec["updates"] + 1):
@@ -364,7 +383,7 @@ def _run(spec: dict, seed: int, out: Path, qual: Path, started: float) -> None:
                 break
             refill()
             with engine.group_batch(
-                batch, cfg.chunk_size, anchor_fields=[RGB, QPOS], generator=rng
+                batch, cfg.chunk_size, anchor_fields=fields, generator=rng
             ) as x:
                 rgb = (
                     x[RGB][..., :3]
@@ -378,6 +397,13 @@ def _run(spec: dict, seed: int, out: Path, qual: Path, started: float) -> None:
                     "action": x["actions"],
                     "action_is_pad": x["action_is_pad"],
                 }
+                if time_scale is not None:
+                    tick = (
+                        x["ods_frame_index"].to(rgb).reshape(-1, 1) / time_scale
+                    ).clamp_max(1)
+                    inputs["observation.state"] = torch.cat(
+                        (inputs["observation.state"], tick), -1
+                    )
                 update_policy(
                     meter, policy, pre(inputs), opt, opt_cfg.grad_clip_norm, ac
                 )
@@ -406,6 +432,8 @@ def _run(spec: dict, seed: int, out: Path, qual: Path, started: float) -> None:
                 "image_landmarks": True,
                 "query_period": spec.get("query_period", 1),
             }
+            if time_scale is not None:
+                manifest["elapsed_control_scale"] = time_scale
             _write(ck / "embodichain_act.json", manifest)
             admitted = engine.get_flow_status()["successful_episodes"]
             saved = clock()
