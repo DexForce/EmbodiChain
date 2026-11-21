@@ -45,4 +45,4 @@ embodichain run-task \
   --headless --seed 7 --max_episodes 1
 ```
 
-In the recorded seed-7 episode the Panda lifted the loose frame by step 266, seated and released it by step 704, and triggered the native success condition at step 951. The camera continued through jaw withdrawal and 4.5 seconds of settling. At the last frame the ring touched the bar halfway along its length and both fingers were open. This is one Newton GPU rollout. Contact dynamics can vary between runs, including with the same reset seed.
+In the recorded seed-7 episode the Panda lifted the loose frame by step 266, seated and released it by step 735, and triggered the native success condition at step 983. The camera continued through jaw withdrawal and 4.5 seconds of settling. At the last frame the ring touched the bar 30% of the way along its length and both fingers were open. This is one Newton GPU rollout. Contact dynamics can vary between runs, including with the same reset seed.
