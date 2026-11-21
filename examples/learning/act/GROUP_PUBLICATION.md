@@ -18,8 +18,12 @@ An empty destination may be filled immediately. A completed group with one
 under-sampled trajectory stays readable. A raised exception in an optimizer
 context discards that batch's credits. Repeating a request while the writer is
 active returns the pending generation. The bounded ledger stores one counter
-per physical slot and the last authorization. The experiment logs release
+per physical slot and the last authorization. Ordinary Dataset samples do not earn recycling credit. A grouped run
+uses the explicit optimizer context for credited training.
+The experiment logs release
 receipts and the actual physical evaluation panels alongside each checkpoint.
+
+The [core acceptance results](results/GROUPED_CORE.md) include the five reserved panels and the archived double-layer comparison.
 
 ## Reproduce
 

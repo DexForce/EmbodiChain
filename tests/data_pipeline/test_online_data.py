@@ -2795,3 +2795,88 @@ def test_group_configuration_preflight(options: dict) -> None:
     }
     with pytest.raises(ValueError, match="Grouped ODS"):
         OnlineDataEngine(OnlineDataEngineCfg(**cfg))
+
+
+def test_group_worker_first_readiness_and_rotation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each wake publishes exactly one group, including the first fill and wrap."""
+    import gymnasium as gym
+    from embodichain.lab.gym.envs import demo
+    from embodichain.lab.gym.utils import gym_utils, registration
+
+    context = mp.get_context("forkserver")
+    lock = context.Array("i", [0, 2])
+    ready, close = context.Event(), context.Event()
+    progress = engine_module._ProducerProgress(context)
+    cfg = OnlineDataEngineCfg(
+        gym_config={"id": "Fake-v1", "num_envs": 2},
+        buffer_size=4,
+        refill_policy="manual",
+        group_min_draws=192,
+        include_provenance=True,
+    )
+    sim_cfg = SimpleNamespace(
+        headless=True, render_cfg=SimpleNamespace(renderer=None), gpu_id=0
+    )
+    env = MagicMock()
+    monkeypatch.setattr(registration, "discover_task_packages", lambda: [])
+    monkeypatch.setattr(registration, "execute_init_hooks", lambda: [])
+    monkeypatch.setattr(
+        gym_utils,
+        "config_to_cfg",
+        lambda *a, **kw: SimpleNamespace(sim_cfg=sim_cfg, num_envs=2),
+    )
+    monkeypatch.setattr(gym_utils, "get_manager_modules", lambda: [])
+    monkeypatch.setattr(gym, "make", lambda *a, **kw: env)
+    buffer = TensorDict(
+        {"valid": torch.zeros(4, 2, dtype=torch.bool)}, batch_size=[4, 2]
+    )
+    for key in (
+        "ods_run_id",
+        "ods_episode_id",
+        "ods_generation",
+        "ods_frame_index",
+        "ods_accepted_at_ns",
+    ):
+        buffer[key] = torch.full((4, 2), -1, dtype=torch.long)
+    windows = []
+
+    def rollout(*args, **kwargs):
+        lo, hi = lock[:]
+        windows.append((lo, hi))
+        buffer["valid"][lo:hi] = True
+        return SimpleNamespace(completed=True, all_success=True)
+
+    monkeypatch.setattr(demo, "execute_demo_episode", rollout)
+    observed = []
+    fill = MagicMock()
+
+    def wake():
+        n = progress.values[1]
+        assert n <= 3
+        if n:
+            assert ready.is_set() and lock[:] == [-1, -1]
+            observed.append(buffer["ods_episode_id"][:, 0].tolist())
+        if n == 3:
+            close.set()
+
+    fill.wait.side_effect = wake
+    engine_module._run_sim_worker(
+        cfg,
+        buffer,
+        lock,
+        fill,
+        ready,
+        close,
+        context.Array("B", engine_module._ERROR_BUFFER_SIZE),
+        context.Value("i", 0),
+        context.Event(),
+        context.Value(
+            "i", engine_module._STATE_TO_CODE[OnlineDataEngineState.STARTING]
+        ),
+        [False],
+        progress=progress,
+    )
+    assert windows == [(0, 2), (2, 4), (0, 2)]
+    assert observed == [[0, 1, -1, -1], [0, 1, 2, 3], [4, 5, 2, 3]]

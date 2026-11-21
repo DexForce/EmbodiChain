@@ -1,0 +1,1634 @@
+{
+  "implementation_commit": "7989924cc86f329cf48f0f62733729444f3670f4",
+  "protocol": {
+    "episodes": 100,
+    "cache_episodes": 10,
+    "shared_slots": 20,
+    "batch_size": 32,
+    "updates": 4000,
+    "checkpoints": [
+      1050,
+      1500,
+      1850,
+      2600,
+      4000
+    ],
+    "producer_envs": 10,
+    "arena_spacing": 4.0,
+    "deadline_seconds": 300,
+    "dev_scenes": 50,
+    "test_scenes": 100,
+    "eval_envs": 25,
+    "verification_workers": 4,
+    "draw_floor": 192,
+    "required_reserved_successes": 95,
+    "study": "core-grouped-act-v1",
+    "seeds": [
+      147101,
+      147102,
+      147103,
+      147104,
+      147105
+    ],
+    "producer_seed_base": 15310000,
+    "dev_base": 15110000,
+    "test_base": 15210000,
+    "dev_min_successes": 40
+  },
+  "protocol_sha256": "4db0b6fb31af49433a9d3dd0698102c9c0bb8f2c27b44191ff0d1f42659be216",
+  "qualification": {
+    "source": "act_ods_20261121/qualification/report.json",
+    "successes": 100,
+    "attempts": 100
+  },
+  "study": {
+    "passed": false,
+    "qualified": 4,
+    "intended": 5,
+    "issues": [],
+    "protocol": {
+      "episodes": 100,
+      "cache_episodes": 10,
+      "shared_slots": 20,
+      "batch_size": 32,
+      "updates": 4000,
+      "checkpoints": [
+        1050,
+        1500,
+        1850,
+        2600,
+        4000
+      ],
+      "producer_envs": 10,
+      "arena_spacing": 4.0,
+      "deadline_seconds": 300,
+      "dev_scenes": 50,
+      "test_scenes": 100,
+      "eval_envs": 25,
+      "verification_workers": 4,
+      "draw_floor": 192,
+      "required_reserved_successes": 95,
+      "study": "core-grouped-act-v1",
+      "seeds": [
+        147101,
+        147102,
+        147103,
+        147104,
+        147105
+      ],
+      "producer_seed_base": 15310000,
+      "dev_base": 15110000,
+      "test_base": 15210000,
+      "dev_min_successes": 40
+    },
+    "protocol_sha256": "4db0b6fb31af49433a9d3dd0698102c9c0bb8f2c27b44191ff0d1f42659be216",
+    "runs": [
+      {
+        "seed": 147101,
+        "qualified": true,
+        "reserved_successes": 100,
+        "chosen": {
+          "step": 1850,
+          "checkpoint": "step_001850",
+          "sha256": "60699c0d232715e67977ab93f8095f24de562207621289b5e25414995df4987e",
+          "successes": 50,
+          "goal_distance": 0.09863588839769363,
+          "save_seconds": 223.20405547134578,
+          "result_seconds": 274.2693996168673
+        },
+        "updates": 2408,
+        "first_update": 34.968508834950626,
+        "sampled_chunks": 77056,
+        "successful_episodes": 90,
+        "authorized_episode_replacements": 80,
+        "minimum_at_release": 192,
+        "releases": [
+          {
+            "requested_generation": 2,
+            "episode_ids": [],
+            "committed_draws": []
+          },
+          {
+            "requested_generation": 3,
+            "episode_ids": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9
+            ],
+            "committed_draws": [
+              990,
+              1070,
+              1021,
+              1123,
+              1074,
+              1096,
+              975,
+              1075,
+              1041,
+              1127
+            ]
+          },
+          {
+            "requested_generation": 4,
+            "episode_ids": [
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19
+            ],
+            "committed_draws": [
+              1122,
+              1073,
+              1151,
+              1082,
+              1101,
+              1137,
+              1075,
+              1196,
+              1113,
+              1054
+            ]
+          },
+          {
+            "requested_generation": 5,
+            "episode_ids": [
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29
+            ],
+            "committed_draws": [
+              1167,
+              1222,
+              1211,
+              1197,
+              1187,
+              1198,
+              1225,
+              1159,
+              1143,
+              1195
+            ]
+          },
+          {
+            "requested_generation": 6,
+            "episode_ids": [
+              30,
+              31,
+              32,
+              33,
+              34,
+              35,
+              36,
+              37,
+              38,
+              39
+            ],
+            "committed_draws": [
+              222,
+              230,
+              208,
+              227,
+              215,
+              193,
+              211,
+              225,
+              211,
+              227
+            ]
+          },
+          {
+            "requested_generation": 7,
+            "episode_ids": [
+              40,
+              41,
+              42,
+              43,
+              44,
+              45,
+              46,
+              47,
+              48,
+              49
+            ],
+            "committed_draws": [
+              1227,
+              1287,
+              1224,
+              1204,
+              1161,
+              1252,
+              1195,
+              1207,
+              1220,
+              1254
+            ]
+          },
+          {
+            "requested_generation": 8,
+            "episode_ids": [
+              50,
+              51,
+              52,
+              53,
+              54,
+              55,
+              56,
+              57,
+              58,
+              59
+            ],
+            "committed_draws": [
+              215,
+              212,
+              192,
+              212,
+              196,
+              202,
+              228,
+              207,
+              225,
+              201
+            ]
+          },
+          {
+            "requested_generation": 9,
+            "episode_ids": [
+              60,
+              61,
+              62,
+              63,
+              64,
+              65,
+              66,
+              67,
+              68,
+              69
+            ],
+            "committed_draws": [
+              922,
+              879,
+              877,
+              872,
+              913,
+              921,
+              942,
+              905,
+              928,
+              951
+            ]
+          },
+          {
+            "requested_generation": 10,
+            "episode_ids": [
+              70,
+              71,
+              72,
+              73,
+              74,
+              75,
+              76,
+              77,
+              78,
+              79
+            ],
+            "committed_draws": [
+              206,
+              225,
+              230,
+              212,
+              227,
+              193,
+              237,
+              210,
+              208,
+              194
+            ]
+          }
+        ],
+        "development": [
+          {
+            "step": 1050,
+            "checkpoint": "step_001050",
+            "sha256": "31ff6f208b7157dbc6136527ba8fcc9d6b3536e0a1a056c90263f838a779f3b2",
+            "successes": 50,
+            "goal_distance": 0.09909413889050483,
+            "save_seconds": 85.41401554644108,
+            "result_seconds": 139.45511424168944
+          },
+          {
+            "step": 1500,
+            "checkpoint": "step_001500",
+            "sha256": "342adb3aac68d2e243b676faff5e6ea315b02826368cf52ce10198ae26a48f3a",
+            "successes": 50,
+            "goal_distance": 0.09896800875663757,
+            "save_seconds": 159.56718358024955,
+            "result_seconds": 206.86975008249283
+          },
+          {
+            "step": 1850,
+            "checkpoint": "step_001850",
+            "sha256": "60699c0d232715e67977ab93f8095f24de562207621289b5e25414995df4987e",
+            "successes": 50,
+            "goal_distance": 0.09863588839769363,
+            "save_seconds": 223.20405547134578,
+            "result_seconds": 274.2693996168673
+          }
+        ],
+        "source_hashes": {
+          "/root/sources/EmbodiChain-ods-group-publication/examples/learning/act/grouped.py": "e1a28c3ac19cca84c73333048ebf279ef2f71962546be5cbe73cc41ff2854837",
+          "/root/sources/EmbodiChain-ods-group-publication/embodichain/data_pipeline/engine/data.py": "a1f5a0c9395d0cb4406f5ec0f268b117ca8624fd0c67ce5746ff0595f600f131"
+        },
+        "artifact_sha256": {
+          "deadline.json": "c2a5b49d8502e7153158a5003e6f7e746cbdfb01d250b244f5f5a5952812df38",
+          "dev_1050.json": "d71935eff980d4ee62a79eea017800e4ed515caa2910bba41fa53d906dbaba6a",
+          "dev_1500.json": "73a540a9fde95afcf39703a00240618a6d0b07f3fb6368088c66e3e18be869e0",
+          "dev_1850.json": "7032ce592e40f9778b3047842580793f91ccc899bf741b21db70f02bc691cbce",
+          "development.json": "016249a185cf27c0bb2e5aa10d0e5580855c62308f6790cb14482fc6acdda56d",
+          "metrics.json": "1e149f8e3f6e37a37e614a06e1bb16298d9b9ef5cd666b7517d484eb51bd8683",
+          "recipe.json": "244ed114a56c5007078bd8c4f071c6e1715bd36105b5c06b5e90e0e1a8833e94",
+          "supply.json": "d65031bce2895dd16ceed420337830740508d5ead5851aa70a91d38a7363dcb3",
+          "test.json": "b56a0311f118cb0c0019f666304a9b5d3a3328afca5ebb972197036343d7c30f"
+        }
+      },
+      {
+        "seed": 147102,
+        "qualified": true,
+        "reserved_successes": 99,
+        "chosen": {
+          "step": 1500,
+          "checkpoint": "step_001500",
+          "sha256": "43b031ecce4f8bbd9dc9225a32d49d0f3beab4a54cd8f71c8c2d42ebfc08b367",
+          "successes": 50,
+          "goal_distance": 0.0987558464705944,
+          "save_seconds": 166.63558902218938,
+          "result_seconds": 220.75899586454034
+        },
+        "updates": 1919,
+        "first_update": 40.61209238599986,
+        "sampled_chunks": 61408,
+        "successful_episodes": 80,
+        "authorized_episode_replacements": 60,
+        "minimum_at_release": 192,
+        "releases": [
+          {
+            "requested_generation": 2,
+            "episode_ids": [],
+            "committed_draws": []
+          },
+          {
+            "requested_generation": 3,
+            "episode_ids": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9
+            ],
+            "committed_draws": [
+              1881,
+              1800,
+              1742,
+              1817,
+              1781,
+              1798,
+              1779,
+              1748,
+              1741,
+              1801
+            ]
+          },
+          {
+            "requested_generation": 4,
+            "episode_ids": [
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19
+            ],
+            "committed_draws": [
+              1582,
+              1566,
+              1573,
+              1619,
+              1578,
+              1537,
+              1582,
+              1550,
+              1585,
+              1540
+            ]
+          },
+          {
+            "requested_generation": 5,
+            "episode_ids": [
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29
+            ],
+            "committed_draws": [
+              240,
+              198,
+              222,
+              203,
+              215,
+              192,
+              211,
+              202,
+              203,
+              228
+            ]
+          },
+          {
+            "requested_generation": 6,
+            "episode_ids": [
+              30,
+              31,
+              32,
+              33,
+              34,
+              35,
+              36,
+              37,
+              38,
+              39
+            ],
+            "committed_draws": [
+              1205,
+              1210,
+              1208,
+              1206,
+              1191,
+              1222,
+              1257,
+              1299,
+              1316,
+              1172
+            ]
+          },
+          {
+            "requested_generation": 7,
+            "episode_ids": [
+              40,
+              41,
+              42,
+              43,
+              44,
+              45,
+              46,
+              47,
+              48,
+              49
+            ],
+            "committed_draws": [
+              219,
+              235,
+              201,
+              192,
+              243,
+              227,
+              231,
+              225,
+              220,
+              212
+            ]
+          },
+          {
+            "requested_generation": 8,
+            "episode_ids": [
+              50,
+              51,
+              52,
+              53,
+              54,
+              55,
+              56,
+              57,
+              58,
+              59
+            ],
+            "committed_draws": [
+              918,
+              916,
+              892,
+              957,
+              884,
+              904,
+              880,
+              855,
+              929,
+              860
+            ]
+          }
+        ],
+        "development": [
+          {
+            "step": 1050,
+            "checkpoint": "step_001050",
+            "sha256": "6b427b68b0746bb74a70acd8d7bf9a0d2dc49cac9e4858d9763c6b1ccc9a751a",
+            "successes": 43,
+            "goal_distance": 0.10292094826698303,
+            "save_seconds": 92.35841271840036,
+            "result_seconds": 146.42094817571342
+          },
+          {
+            "step": 1500,
+            "checkpoint": "step_001500",
+            "sha256": "43b031ecce4f8bbd9dc9225a32d49d0f3beab4a54cd8f71c8c2d42ebfc08b367",
+            "successes": 50,
+            "goal_distance": 0.0987558464705944,
+            "save_seconds": 166.63558902218938,
+            "result_seconds": 220.75899586454034
+          },
+          {
+            "step": 1850,
+            "checkpoint": "step_001850",
+            "sha256": "5a22166dfbf2dd9eb74055d632d4f57a5c20a0a80283bb4a99161b10379fd62d",
+            "successes": 50,
+            "goal_distance": 0.09894248530268669,
+            "save_seconds": 238.21822213567793,
+            "result_seconds": 296.3081725342199
+          }
+        ],
+        "source_hashes": {
+          "/root/sources/EmbodiChain-ods-group-publication/examples/learning/act/grouped.py": "e1a28c3ac19cca84c73333048ebf279ef2f71962546be5cbe73cc41ff2854837",
+          "/root/sources/EmbodiChain-ods-group-publication/embodichain/data_pipeline/engine/data.py": "a1f5a0c9395d0cb4406f5ec0f268b117ca8624fd0c67ce5746ff0595f600f131"
+        },
+        "artifact_sha256": {
+          "deadline.json": "c29c24524d9b5564b9703f8c92bd6fcb3774767757aca60c066232ea590632d8",
+          "dev_1050.json": "6d91e57ccb5d704894794544e034cebe28111660c879b0e749e98c4c1a39be10",
+          "dev_1500.json": "d433f3bdecb9ab0cb673925bb495bdf76c8453ed22167c49d80c521c769b7985",
+          "dev_1850.json": "7a272b0353f7f2c1a1ac5b53483a8e0d29058e9ae273e6dd8442a8270044daac",
+          "development.json": "49becf91d653603621a6ea033b424e96716a0a181c7f5d5c087a3a1056eaa6ca",
+          "metrics.json": "6370a3cb29273c3eab722604a105e99c76e141517406ea9b7dc203322441ea27",
+          "recipe.json": "ed9cf6a613738e792a9ea950ece85581eb3c2945ee9032d1d2a622d9adfd7f0f",
+          "supply.json": "cdce683ae730b52fb05389bec352699c89dc850e7b6fea8bbb08df1814614a17",
+          "test.json": "885bd7824ec934d1e1d5c86a3cbafe4dda26666a69dab28f85c014382c8934e3"
+        }
+      },
+      {
+        "seed": 147103,
+        "qualified": true,
+        "reserved_successes": 99,
+        "chosen": {
+          "step": 1500,
+          "checkpoint": "step_001500",
+          "sha256": "04fdb3b1287d0061e6112e17fb37bc8be89bde66195789bed6ea1d53e02ac2d2",
+          "successes": 50,
+          "goal_distance": 0.09869414255023003,
+          "save_seconds": 171.15396168548614,
+          "result_seconds": 222.60218094009906
+        },
+        "updates": 1850,
+        "first_update": 33.819950956851244,
+        "sampled_chunks": 59200,
+        "successful_episodes": 90,
+        "authorized_episode_replacements": 70,
+        "minimum_at_release": 192,
+        "releases": [
+          {
+            "requested_generation": 2,
+            "episode_ids": [],
+            "committed_draws": []
+          },
+          {
+            "requested_generation": 3,
+            "episode_ids": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9
+            ],
+            "committed_draws": [
+              1170,
+              1118,
+              1103,
+              1149,
+              1202,
+              1182,
+              1215,
+              1174,
+              1186,
+              1149
+            ]
+          },
+          {
+            "requested_generation": 4,
+            "episode_ids": [
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19
+            ],
+            "committed_draws": [
+              1852,
+              1839,
+              1757,
+              1794,
+              1837,
+              1777,
+              1749,
+              1779,
+              1762,
+              1806
+            ]
+          },
+          {
+            "requested_generation": 5,
+            "episode_ids": [
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29
+            ],
+            "committed_draws": [
+              413,
+              396,
+              384,
+              396,
+              432,
+              399,
+              412,
+              401,
+              381,
+              386
+            ]
+          },
+          {
+            "requested_generation": 6,
+            "episode_ids": [
+              30,
+              31,
+              32,
+              33,
+              34,
+              35,
+              36,
+              37,
+              38,
+              39
+            ],
+            "committed_draws": [
+              221,
+              208,
+              213,
+              199,
+              206,
+              225,
+              205,
+              211,
+              231,
+              195
+            ]
+          },
+          {
+            "requested_generation": 7,
+            "episode_ids": [
+              40,
+              41,
+              42,
+              43,
+              44,
+              45,
+              46,
+              47,
+              48,
+              49
+            ],
+            "committed_draws": [
+              1221,
+              1225,
+              1159,
+              1263,
+              1202,
+              1268,
+              1170,
+              1240,
+              1262,
+              1276
+            ]
+          },
+          {
+            "requested_generation": 8,
+            "episode_ids": [
+              50,
+              51,
+              52,
+              53,
+              54,
+              55,
+              56,
+              57,
+              58,
+              59
+            ],
+            "committed_draws": [
+              223,
+              249,
+              256,
+              251,
+              256,
+              241,
+              218,
+              192,
+              220,
+              247
+            ]
+          },
+          {
+            "requested_generation": 9,
+            "episode_ids": [
+              60,
+              61,
+              62,
+              63,
+              64,
+              65,
+              66,
+              67,
+              68,
+              69
+            ],
+            "committed_draws": [
+              870,
+              891,
+              869,
+              979,
+              851,
+              840,
+              944,
+              868,
+              886,
+              849
+            ]
+          }
+        ],
+        "development": [
+          {
+            "step": 1050,
+            "checkpoint": "step_001050",
+            "sha256": "43da686acd8f5416e66e061081db950a9f4c7323105d90ba0b6c02f738e1ea50",
+            "successes": 48,
+            "goal_distance": 0.10041109427809715,
+            "save_seconds": 81.55409678816795,
+            "result_seconds": 148.8553737271577
+          },
+          {
+            "step": 1500,
+            "checkpoint": "step_001500",
+            "sha256": "04fdb3b1287d0061e6112e17fb37bc8be89bde66195789bed6ea1d53e02ac2d2",
+            "successes": 50,
+            "goal_distance": 0.09869414255023003,
+            "save_seconds": 171.15396168548614,
+            "result_seconds": 222.60218094009906
+          },
+          {
+            "step": 1850,
+            "checkpoint": "step_001850",
+            "sha256": "6121c6794b6e5c6506fe99fe8b7273df1ea74af73595f84df52df034f9a878fb",
+            "successes": 47,
+            "goal_distance": 0.10318975239992141,
+            "save_seconds": 239.69742596242577,
+            "result_seconds": 301.68037076387554
+          }
+        ],
+        "source_hashes": {
+          "/root/sources/EmbodiChain-ods-group-publication/examples/learning/act/grouped.py": "e1a28c3ac19cca84c73333048ebf279ef2f71962546be5cbe73cc41ff2854837",
+          "/root/sources/EmbodiChain-ods-group-publication/embodichain/data_pipeline/engine/data.py": "a1f5a0c9395d0cb4406f5ec0f268b117ca8624fd0c67ce5746ff0595f600f131"
+        },
+        "artifact_sha256": {
+          "deadline.json": "0a8f1b40c0690a264505ce728df66932df2a08359d828e1a20cf4d3c37b1c4f9",
+          "dev_1050.json": "30c62073b50e832023dfec06694bade1894f5d0b35d52ac619436721c711219d",
+          "dev_1500.json": "8acf44639fd204ecbc4e7a9a1ab9c44933e9dd1a6005acafe3cc8700a46a4d90",
+          "dev_1850.json": "ba1e8725e4247c6d8c874e0f5cf22315461e31ed28bedef26bbba1e650b64a62",
+          "development.json": "35db4e8afe00bfaf538781e6eccec2ea1f3af40d5b3e55c9058ddb66fb6f3ff6",
+          "metrics.json": "b18d9fbdf77e0d4364a68c949e4db6f475690571f5fc30bd2b41eee39a38f638",
+          "recipe.json": "92be85db85c5211f5656eb98432c96f0ef0722bba4daeff7764d1ffc570b8383",
+          "supply.json": "214efad5875d5f95e1feacf59c6ff3c63091aa48bb679ad646995cbaf1640345",
+          "test.json": "652cc147e54679042cca2ae54dfa02409e93623168a7a356068b3ecf563148e5"
+        }
+      },
+      {
+        "seed": 147104,
+        "qualified": true,
+        "reserved_successes": 98,
+        "chosen": {
+          "step": 1850,
+          "checkpoint": "step_001850",
+          "sha256": "9c34a72050991bd624d8f62126164ab5fb91c9b9265a37433db8c9e720065f46",
+          "successes": 50,
+          "goal_distance": 0.09891741454601288,
+          "save_seconds": 254.05109758954495,
+          "result_seconds": 289.64630861766636
+        },
+        "updates": 2070,
+        "first_update": 41.698212997056544,
+        "sampled_chunks": 66240,
+        "successful_episodes": 90,
+        "authorized_episode_replacements": 80,
+        "minimum_at_release": 192,
+        "releases": [
+          {
+            "requested_generation": 2,
+            "episode_ids": [],
+            "committed_draws": []
+          },
+          {
+            "requested_generation": 3,
+            "episode_ids": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9
+            ],
+            "committed_draws": [
+              1484,
+              1483,
+              1547,
+              1500,
+              1462,
+              1502,
+              1558,
+              1469,
+              1450,
+              1489
+            ]
+          },
+          {
+            "requested_generation": 4,
+            "episode_ids": [
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19
+            ],
+            "committed_draws": [
+              1467,
+              1474,
+              1440,
+              1489,
+              1442,
+              1446,
+              1445,
+              1481,
+              1434,
+              1506
+            ]
+          },
+          {
+            "requested_generation": 5,
+            "episode_ids": [
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29
+            ],
+            "committed_draws": [
+              419,
+              442,
+              388,
+              425,
+              391,
+              366,
+              399,
+              405,
+              383,
+              414
+            ]
+          },
+          {
+            "requested_generation": 6,
+            "episode_ids": [
+              30,
+              31,
+              32,
+              33,
+              34,
+              35,
+              36,
+              37,
+              38,
+              39
+            ],
+            "committed_draws": [
+              254,
+              192,
+              221,
+              217,
+              207,
+              213,
+              204,
+              242,
+              228,
+              201
+            ]
+          },
+          {
+            "requested_generation": 7,
+            "episode_ids": [
+              40,
+              41,
+              42,
+              43,
+              44,
+              45,
+              46,
+              47,
+              48,
+              49
+            ],
+            "committed_draws": [
+              1181,
+              1145,
+              1263,
+              1193,
+              1181,
+              1259,
+              1281,
+              1252,
+              1205,
+              1261
+            ]
+          },
+          {
+            "requested_generation": 8,
+            "episode_ids": [
+              50,
+              51,
+              52,
+              53,
+              54,
+              55,
+              56,
+              57,
+              58,
+              59
+            ],
+            "committed_draws": [
+              224,
+              193,
+              232,
+              251,
+              223,
+              233,
+              203,
+              219,
+              239,
+              238
+            ]
+          },
+          {
+            "requested_generation": 9,
+            "episode_ids": [
+              60,
+              61,
+              62,
+              63,
+              64,
+              65,
+              66,
+              67,
+              68,
+              69
+            ],
+            "committed_draws": [
+              912,
+              878,
+              925,
+              915,
+              893,
+              889,
+              878,
+              874,
+              878,
+              903
+            ]
+          },
+          {
+            "requested_generation": 10,
+            "episode_ids": [
+              70,
+              71,
+              72,
+              73,
+              74,
+              75,
+              76,
+              77,
+              78,
+              79
+            ],
+            "committed_draws": [
+              232,
+              225,
+              244,
+              232,
+              238,
+              216,
+              217,
+              225,
+              210,
+              192
+            ]
+          }
+        ],
+        "development": [
+          {
+            "step": 1050,
+            "checkpoint": "step_001050",
+            "sha256": "2f7d3e3206c0ce722bbece88664cd7f313fe4393c75565f2cdb31ba12176cf10",
+            "successes": 50,
+            "goal_distance": 0.09895641282200814,
+            "save_seconds": 96.19006252847612,
+            "result_seconds": 154.61994864419103
+          },
+          {
+            "step": 1500,
+            "checkpoint": "step_001500",
+            "sha256": "c2692d568e0d29408fa8b955ce8e06eea12461cab28b919ea6795506ede27d46",
+            "successes": 49,
+            "goal_distance": 0.09920819163322449,
+            "save_seconds": 176.55001150723547,
+            "result_seconds": 238.01375862024724
+          },
+          {
+            "step": 1850,
+            "checkpoint": "step_001850",
+            "sha256": "9c34a72050991bd624d8f62126164ab5fb91c9b9265a37433db8c9e720065f46",
+            "successes": 50,
+            "goal_distance": 0.09891741454601288,
+            "save_seconds": 254.05109758954495,
+            "result_seconds": 289.64630861766636
+          }
+        ],
+        "source_hashes": {
+          "/root/sources/EmbodiChain-ods-group-publication/examples/learning/act/grouped.py": "e1a28c3ac19cca84c73333048ebf279ef2f71962546be5cbe73cc41ff2854837",
+          "/root/sources/EmbodiChain-ods-group-publication/embodichain/data_pipeline/engine/data.py": "a1f5a0c9395d0cb4406f5ec0f268b117ca8624fd0c67ce5746ff0595f600f131"
+        },
+        "artifact_sha256": {
+          "deadline.json": "ed9d4af5035e9053a6aa492aa6648d92452c1626b8a167b6d1761fffa10149dc",
+          "dev_1050.json": "48183c9b87c953dc09a59673a466f76eb43204e0d62552951c60d5be90421075",
+          "dev_1500.json": "f2de978adc0027cec1ae443bb788455b848d823a6ca98e9d66cbde419dadd4d7",
+          "dev_1850.json": "07beb7b3df195ecb84ebfae9a289c949467d263ba37cf975808f1b16f22e6bb8",
+          "development.json": "7bb457cd5cac4b6fff23a0b0a0db814be48c39fc1fe272534989278f323bae0d",
+          "metrics.json": "ad0f971620a74f9f5b00e767e1b7dbfb437201062870e58e26a2e0de4c486e46",
+          "recipe.json": "dc8ff0c2e2d406e759733a91e7351b271124359df1088a14ba5564a39be0fe76",
+          "supply.json": "e86371690f658f1eade9452aa145d2ff7319683ffd4ab3f45c50ed3f83c5c736",
+          "test.json": "eb558ed44ee22b8dd4b027552d3d8406f942e91b7043f923e8bf1b6386213069"
+        }
+      },
+      {
+        "seed": 147105,
+        "qualified": false,
+        "reserved_successes": 94,
+        "chosen": {
+          "step": 1500,
+          "checkpoint": "step_001500",
+          "sha256": "b5008f9cbab7c427b54a3c190a192fd917fe90733f5a3eb4889ec9e4b2c9dbb4",
+          "successes": 47,
+          "goal_distance": 0.10012552112340928,
+          "save_seconds": 196.8728157505393,
+          "result_seconds": 299.1237521553412
+        },
+        "updates": 1523,
+        "first_update": 31.77291532419622,
+        "sampled_chunks": 48736,
+        "successful_episodes": 70,
+        "authorized_episode_replacements": 50,
+        "minimum_at_release": 192,
+        "releases": [
+          {
+            "requested_generation": 2,
+            "episode_ids": [],
+            "committed_draws": []
+          },
+          {
+            "requested_generation": 3,
+            "episode_ids": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9
+            ],
+            "committed_draws": [
+              1170,
+              1144,
+              1150,
+              1125,
+              1164,
+              1128,
+              1123,
+              1115,
+              1150,
+              1091
+            ]
+          },
+          {
+            "requested_generation": 4,
+            "episode_ids": [
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19
+            ],
+            "committed_draws": [
+              1106,
+              1136,
+              1177,
+              1115,
+              1143,
+              1163,
+              1158,
+              1108,
+              1152,
+              1166
+            ]
+          },
+          {
+            "requested_generation": 5,
+            "episode_ids": [
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29
+            ],
+            "committed_draws": [
+              1087,
+              1071,
+              1032,
+              1073,
+              1164,
+              1067,
+              1075,
+              1111,
+              1122,
+              1014
+            ]
+          },
+          {
+            "requested_generation": 6,
+            "episode_ids": [
+              30,
+              31,
+              32,
+              33,
+              34,
+              35,
+              36,
+              37,
+              38,
+              39
+            ],
+            "committed_draws": [
+              201,
+              206,
+              192,
+              230,
+              242,
+              230,
+              229,
+              223,
+              239,
+              199
+            ]
+          },
+          {
+            "requested_generation": 7,
+            "episode_ids": [
+              40,
+              41,
+              42,
+              43,
+              44,
+              45,
+              46,
+              47,
+              48,
+              49
+            ],
+            "committed_draws": [
+              1167,
+              1222,
+              1186,
+              1225,
+              1227,
+              1238,
+              1210,
+              1239,
+              1220,
+              1275
+            ]
+          }
+        ],
+        "development": [
+          {
+            "step": 1050,
+            "checkpoint": "step_001050",
+            "sha256": "c22f2cbe5a4de65ccbbcb9956dcf9d6516d92fcf758e493923409e34f9748a70",
+            "successes": 50,
+            "goal_distance": 0.09872477129101753,
+            "save_seconds": 80.89326346293092,
+            "result_seconds": 169.60853255353868
+          },
+          {
+            "step": 1500,
+            "checkpoint": "step_001500",
+            "sha256": "b5008f9cbab7c427b54a3c190a192fd917fe90733f5a3eb4889ec9e4b2c9dbb4",
+            "successes": 47,
+            "goal_distance": 0.10012552112340928,
+            "save_seconds": 196.8728157505393,
+            "result_seconds": 299.1237521553412
+          }
+        ],
+        "source_hashes": {
+          "/root/sources/EmbodiChain-ods-group-publication/examples/learning/act/grouped.py": "e1a28c3ac19cca84c73333048ebf279ef2f71962546be5cbe73cc41ff2854837",
+          "/root/sources/EmbodiChain-ods-group-publication/embodichain/data_pipeline/engine/data.py": "a1f5a0c9395d0cb4406f5ec0f268b117ca8624fd0c67ce5746ff0595f600f131"
+        },
+        "artifact_sha256": {
+          "deadline.json": "ab856d6b273f63d8cf9b25d8ebd29a6e5b52753f80f028a1aababb4c5bace2bb",
+          "dev_1050.json": "303f5a5ad97dacb35050af74471a4ad5ab3031d9daf0d9f77a7631c3f87091cc",
+          "dev_1500.json": "1f9a7cec900433454bcc74ef796875077e209b39a6b36104ebd5f46faaa2b3ff",
+          "development.json": "fe37e2eadf02dfc94dde58e4588a8f2a91cb29e21a1e8180db0d0f87782177ff",
+          "metrics.json": "a2b79d17998c8f7d77d784c75b0720b220050428a52c862a94af12cc0ba28072",
+          "recipe.json": "f2c95d82c2d33231bf2dad138b1af721f65ff60a5be971a5ec5f90316fc60daf",
+          "supply.json": "9f696000a6ab5bbfb4a35b75d756c27d14cc2180b3b8f09acd3d70912ad4eaaf",
+          "test.json": "61c1efd3e2dd489e176943cc644007749a6bc752bd20223ef7394a27463b8c1a"
+        }
+      }
+    ]
+  },
+  "artifact_root": "/root/experiments/ods_core_group_p0",
+  "acceptance_sha256": "8090f9f0374207bfe6f6b3a4241928c8c62cbdcc2295391171210d39d441afae",
+  "precommit_integration": {
+    "gate": false,
+    "reserved": [
+      [
+        147101,
+        100
+      ],
+      [
+        147102,
+        100
+      ],
+      [
+        147103,
+        100
+      ],
+      [
+        147104,
+        94
+      ],
+      [
+        147105,
+        90
+      ]
+    ],
+    "raw_sha256": "1c5ee9aec3cec6bd64944cc184a21f155f8ca07654fe927bd261c84a63933691",
+    "scope": "Before sampled-chunk telemetry, continuity filtering and flow-controller ceiling fixes. Same scenes and seeds; not independent replication."
+  },
+  "historical_replay": {
+    "source": "/root/experiments/act_group10_release_v1/results.json",
+    "source_sha256": "0fa986b42228c714eaba9f0bb2771a5fd24bd406df12df6d659321584bb375c5",
+    "scope": "Recorded earlier experiment; different learner seeds and reset panels. No new Replay training.",
+    "single_pass": true,
+    "pairs": [
+      {
+        "seed": 137101,
+        "shared_exact_episodes": 80,
+        "direct_admitted": 80,
+        "replay_admitted": 80,
+        "independent_rerender_rgb_matches": 80
+      },
+      {
+        "seed": 137102,
+        "shared_exact_episodes": 60,
+        "direct_admitted": 80,
+        "replay_admitted": 60,
+        "independent_rerender_rgb_matches": 60
+      },
+      {
+        "seed": 137103,
+        "shared_exact_episodes": 80,
+        "direct_admitted": 90,
+        "replay_admitted": 80,
+        "independent_rerender_rgb_matches": 80
+      },
+      {
+        "seed": 137104,
+        "shared_exact_episodes": 70,
+        "direct_admitted": 90,
+        "replay_admitted": 70,
+        "independent_rerender_rgb_matches": 70
+      },
+      {
+        "seed": 137105,
+        "shared_exact_episodes": 60,
+        "direct_admitted": 80,
+        "replay_admitted": 60,
+        "independent_rerender_rgb_matches": 60
+      }
+    ],
+    "qualified": {
+      "online": 5,
+      "frozen": 5
+    },
+    "arms": [
+      {
+        "seed": 137101,
+        "mode": "online",
+        "reserved_successes": 100,
+        "first_update": 37.782548282295465,
+        "pss_train_gib": 11.226616859436035,
+        "shared_bytes": 1205748000,
+        "replay_bytes": 0,
+        "locked": {
+          "step": 1850,
+          "checkpoint": "step_001850",
+          "sha256": "e1c935ba651ebc3fffd00c3dfd03a0a328edcfc617cd61b0966627f87db4bb0c",
+          "save_seconds": 248.69891547318548,
+          "result_seconds": 290.9011820182204,
+          "success_rate": 1.0,
+          "goal_distance": 0.09888985812664032,
+          "published_episodes": 60
+        }
+      },
+      {
+        "seed": 137101,
+        "mode": "frozen",
+        "reserved_successes": 99,
+        "first_update": 38.03857149463147,
+        "pss_train_gib": 15.237421989440918,
+        "shared_bytes": 1205748000,
+        "replay_bytes": 4517880000,
+        "locked": {
+          "step": 1500,
+          "checkpoint": "step_001500",
+          "sha256": "b2af87e9f64bc981750543b07db233d07d7aff6505a24a84eeb0f41f3821462d",
+          "save_seconds": 157.0354160387069,
+          "result_seconds": 209.47397736273706,
+          "success_rate": 1.0,
+          "goal_distance": 0.09886771559715271,
+          "published_episodes": 40
+        }
+      },
+      {
+        "seed": 137102,
+        "mode": "online",
+        "reserved_successes": 100,
+        "first_update": 40.261177780106664,
+        "pss_train_gib": 11.248749732971191,
+        "shared_bytes": 1205748000,
+        "replay_bytes": 0,
+        "locked": {
+          "step": 1850,
+          "checkpoint": "step_001850",
+          "sha256": "1635e01193451632fd2c168c36c8abe307d3df11d70ce4d82d370cf9b96e04fa",
+          "save_seconds": 239.84359032660723,
+          "result_seconds": 292.7152363387868,
+          "success_rate": 1.0,
+          "goal_distance": 0.09887612223625183,
+          "published_episodes": 60
+        }
+      },
+      {
+        "seed": 137102,
+        "mode": "frozen",
+        "reserved_successes": 96,
+        "first_update": 31.390471428632736,
+        "pss_train_gib": 15.205196380615234,
+        "shared_bytes": 1205748000,
+        "replay_bytes": 4517880000,
+        "locked": {
+          "step": 1500,
+          "checkpoint": "step_001500",
+          "sha256": "e668c6324ffa8e3b4bf47ed3cfa1dce460bac9b1e6e5ac743cadb19b8714eab4",
+          "save_seconds": 172.66892855241895,
+          "result_seconds": 238.68600270152092,
+          "success_rate": 0.98,
+          "goal_distance": 0.10032274097204208,
+          "published_episodes": 40
+        }
+      },
+      {
+        "seed": 137103,
+        "mode": "online",
+        "reserved_successes": 99,
+        "first_update": 37.09221113566309,
+        "pss_train_gib": 11.232759475708008,
+        "shared_bytes": 1205748000,
+        "replay_bytes": 0,
+        "locked": {
+          "step": 1850,
+          "checkpoint": "step_001850",
+          "sha256": "07a7dae3fcb69270c0a510d8ce8a164d344dabda171bf1ad0c41c83801caa053",
+          "save_seconds": 232.54849709011614,
+          "result_seconds": 276.2450512526557,
+          "success_rate": 1.0,
+          "goal_distance": 0.09898153811693192,
+          "published_episodes": 70
+        }
+      },
+      {
+        "seed": 137103,
+        "mode": "frozen",
+        "reserved_successes": 100,
+        "first_update": 40.702234980650246,
+        "pss_train_gib": 15.320673942565918,
+        "shared_bytes": 1205748000,
+        "replay_bytes": 4517880000,
+        "locked": {
+          "step": 1850,
+          "checkpoint": "step_001850",
+          "sha256": "8f0feda72e023d36cd70f9972059bdafeb740330f1a50d080ab7bc56e5390b96",
+          "save_seconds": 209.72067223489285,
+          "result_seconds": 250.89987300615758,
+          "success_rate": 1.0,
+          "goal_distance": 0.09902864366769791,
+          "published_episodes": 60
+        }
+      },
+      {
+        "seed": 137104,
+        "mode": "online",
+        "reserved_successes": 100,
+        "first_update": 38.97418080922216,
+        "pss_train_gib": 11.222376823425293,
+        "shared_bytes": 1205748000,
+        "replay_bytes": 0,
+        "locked": {
+          "step": 1500,
+          "checkpoint": "step_001500",
+          "sha256": "6efdd04db7ed465c25144f229545a0fc2d07eeab7edf62c532b2469da7bf948a",
+          "save_seconds": 205.79671648610383,
+          "result_seconds": 254.53761532250792,
+          "success_rate": 1.0,
+          "goal_distance": 0.0990136581659317,
+          "published_episodes": 50
+        }
+      },
+      {
+        "seed": 137104,
+        "mode": "frozen",
+        "reserved_successes": 100,
+        "first_update": 39.31684413179755,
+        "pss_train_gib": 15.597566604614258,
+        "shared_bytes": 1205748000,
+        "replay_bytes": 4517880000,
+        "locked": {
+          "step": 1500,
+          "checkpoint": "step_001500",
+          "sha256": "7569930b6af239db41464df00c8a1bc8406c0694036eca1ac1665732a0e733df",
+          "save_seconds": 174.25515630561858,
+          "result_seconds": 222.01942896097898,
+          "success_rate": 1.0,
+          "goal_distance": 0.09899635016918182,
+          "published_episodes": 40
+        }
+      },
+      {
+        "seed": 137105,
+        "mode": "online",
+        "reserved_successes": 97,
+        "first_update": 44.25715021416545,
+        "pss_train_gib": 11.123013496398926,
+        "shared_bytes": 1205748000,
+        "replay_bytes": 0,
+        "locked": {
+          "step": 1500,
+          "checkpoint": "step_001500",
+          "sha256": "7dd365cf81eafadab6e680ccfb08e9c4047aba85207446120db6d79d9ba27a46",
+          "save_seconds": 174.51222452241927,
+          "result_seconds": 270.2081412728876,
+          "success_rate": 0.96,
+          "goal_distance": 0.09997485741972924,
+          "published_episodes": 40
+        }
+      },
+      {
+        "seed": 137105,
+        "mode": "frozen",
+        "reserved_successes": 100,
+        "first_update": 38.03574700187892,
+        "pss_train_gib": 15.760449409484863,
+        "shared_bytes": 1205748000,
+        "replay_bytes": 4517880000,
+        "locked": {
+          "step": 1850,
+          "checkpoint": "step_001850",
+          "sha256": "23e4ad50d1cac9739ec3c53f008231b3ea745d3c96b63c247bdb9222552c3cb7",
+          "save_seconds": 241.2464701225981,
+          "result_seconds": 285.54786010459065,
+          "success_rate": 1.0,
+          "goal_distance": 0.09882858067750931,
+          "published_episodes": 60
+        }
+      }
+    ]
+  },
+  "shell_to_selected_dev_file_seconds": {
+    "147101": 275.87227869033813,
+    "147102": 222.31467032432556,
+    "147103": 223.97471833229065,
+    "147104": 290.9927303791046,
+    "147105": 300.4250109195709
+  },
+  "validation": {
+    "focused_tests_passed": 340,
+    "context_tests_passed": 42,
+    "api_docs_exports": 5193,
+    "formatter": "black 26.10.1",
+    "integration_precommit_pass_count": 3,
+    "final_commit_pass_count": 4
+  }
+}
