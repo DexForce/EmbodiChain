@@ -667,14 +667,20 @@ class AtomicReplayRuntime:
             )
             if rotation_window is not None and waypoint_index == rotation_window[0]:
                 assert object_handle is not None and rotation_axis_local is not None
-                rotation_reference = (
-                    object_handle.entity.get_local_pose(to_matrix=True)[:, :3, :3]
-                    .to(device=trajectory.device, dtype=torch.float32)
-                    .clone()
-                )
+                rotation_reference = torch.as_tensor(
+                    case.case_parameters["object_initial_pose"],
+                    device=trajectory.device,
+                    dtype=torch.float32,
+                )[:, :3, :3]
                 rotation_axis_world = rotation_reference @ rotation_axis_local
-                rotation_peak = torch.zeros(
-                    case.batch_size, dtype=torch.float32, device=trajectory.device
+                current_rotation = object_handle.entity.get_local_pose(to_matrix=True)[
+                    :, :3, :3
+                ].to(device=trajectory.device, dtype=torch.float32)
+                rotation_peak = (
+                    signed_rotation_about_axis(
+                        rotation_reference, current_rotation, rotation_axis_world
+                    )
+                    * rotation_sign
                 )
             positions = trajectory[:, waypoint_index]
             self.robot.set_qpos(positions, target=True)

@@ -82,7 +82,7 @@ from .atomic_grasps import (
     parallel_jaw_sampler,
 )
 from ._atomic_pose_sampling import _pose_settings, randomized_scene_pose
-from ._atomic_reference import _qualified_reference_ik, _recover_reference_ik
+from ._atomic_reference import _qualified_reference_ik
 from ._case_qualification import _CaseQualificationError, _generate_qualified_case
 
 from .atomic_case_utils import (

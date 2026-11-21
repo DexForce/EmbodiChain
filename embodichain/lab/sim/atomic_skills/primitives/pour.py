@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar
 
 import torch
@@ -148,13 +148,28 @@ class PourGoal:
     Args:
         target: Receiving and source-mouth geometry. Omitting it retains the
             original signed rotation about the source's internal axis.
+        reference_object_pose: Optional authored upright object pose for
+            local-axis tilt and return, exclusive with ``target``.
+            Omission uses the held pose at the actual start joints.
     """
 
     target: PourTarget | None = None
 
+    reference_object_pose: PoseGoalValue | None = field(default=None, kw_only=True)
+
     def __post_init__(self) -> None:
         if self.target is not None and type(self.target) is not PourTarget:
             raise TypeError("target must be a PourTarget or None.")
+        if self.reference_object_pose is not None:
+            if self.target is not None:
+                raise ValueError(
+                    "A receiver target and reference_object_pose are exclusive."
+                )
+            validate_pose_goal(
+                self.reference_object_pose,
+                "reference_object_pose",
+                allow_waypoints=False,
+            )
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -302,6 +317,17 @@ class Pour(AtomicSkill[PourGoal, PourOptions]):
                 getattr(affordance, "mesh_vertices", None),
             )
 
+        reference_eef_pose = current_eef_pose
+        if goal.reference_object_pose is not None:
+            current_object_pose = resolve_pose_target(
+                resolve_pose_goal(
+                    goal.reference_object_pose, context, name="reference_object_pose"
+                ),
+                num_envs=context.batch_size,
+                device=self.device,
+            )
+            reference_eef_pose = torch.bmm(current_object_pose, object_to_eef)
+
         internal_axis = affordance.internal_axis.to(
             device=self.device,
             dtype=torch.float32,
@@ -318,14 +344,9 @@ class Pour(AtomicSkill[PourGoal, PourOptions]):
         )
         poured_eef_pose = torch.bmm(target_object_pose, object_to_eef)
 
-        # The object remains rigidly attached to the EEF throughout Pour.  The
-        # first target performs the requested rotation about the object's
-        # internal axis; the second target returns to the EEF pose observed by
-        # FK at start_qpos, which is exactly the inverse rotation by the same
-        # signed angle.  Supplying both targets in one call lets planners such
-        # as cuRobo chain the two collision-aware legs without another public
-        # MotionGenerator.generate invocation.
-        eef_targets = torch.stack([poured_eef_pose, current_eef_pose], dim=1)
+        # Anchor both goals without replacing the actual start joints, and
+        # let the backend chain tilt and return in one planning call.
+        eef_targets = torch.stack([poured_eef_pose, reference_eef_pose], dim=1)
 
         result = self.motion_generator.generate(
             build_pose_plan_states(eef_targets),

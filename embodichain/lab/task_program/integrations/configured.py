@@ -2445,6 +2445,9 @@ def _decode_grasp_generator(
                 "approach_deviation_angle",
                 "max_candidates",
                 "center_mode",
+                "angle_weight",
+                "center_weight",
+                "opening_weight",
                 "filter_ground_collision",
                 "force_refresh",
                 "point_spacing",
@@ -2511,6 +2514,26 @@ def _decode_grasp_generator(
     center_mode = config.get("center_mode")
     if "center_mode" in config and center_mode not in ("bounds", "centroid"):
         raise ValueError(f"{path}.center_mode must be 'bounds' or 'centroid'.")
+    from embodichain.toolkits.graspkit.pg_grasp._ranking import (
+        _DEFAULT_RANKING_WEIGHTS,
+        _normalized_ranking_weights,
+    )
+
+    weight_names = ("angle_weight", "center_weight", "opening_weight")
+    ranking_weights = {
+        name: _real(config[name], path=f"{path}.{name}", minimum=0)
+        for name in weight_names
+        if name in config
+    }
+    try:
+        _normalized_ranking_weights(
+            *(
+                ranking_weights.get(name, default)
+                for name, default in zip(weight_names, _DEFAULT_RANKING_WEIGHTS)
+            )
+        )
+    except ValueError as exc:
+        raise ValueError(f"{path}: {exc}") from exc
     return _AntipodalGraspPoseGeneratorFactory(
         model_id=defaults["model_id"],
         gripper_json=json.dumps(defaults, sort_keys=True, allow_nan=False),
@@ -2560,6 +2583,7 @@ def _decode_grasp_generator(
             else None
         ),
         center_mode=center_mode,
+        **ranking_weights,
         filter_ground_collision=(
             _boolean(
                 config["filter_ground_collision"],
@@ -3889,7 +3913,15 @@ def _decode_configured_task_program_integration(
                 key: value
                 for key, value in asdict(factory).items()
                 if not (
-                    key in {"approach_deviation_angle", "max_candidates", "center_mode"}
+                    key
+                    in {
+                        "approach_deviation_angle",
+                        "max_candidates",
+                        "center_mode",
+                        "angle_weight",
+                        "center_weight",
+                        "opening_weight",
+                    }
                     and value is None
                 )
             },

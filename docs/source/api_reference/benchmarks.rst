@@ -2,7 +2,8 @@ Motion generation benchmarks
 ============================
 
 The bundled ``embodichain.extensions.benchmarks.motion_generation`` extension evaluates
-Motion Planning and Atomic Skills suites from another Python project. The
+Motion Planning, Atomic Skills and Affordance Reaching suites from another
+Python project. The
 benchmark owns case generation, simulation, lifecycle timing, evaluation and
 artifact persistence. It consumes the simulation, planning and Atomic Skill
 APIs in ``embodichain`` and ships in the main wheel with the same version and
@@ -431,6 +432,7 @@ embodichain.extensions.benchmarks.motion_generation.scenarios
 
 .. autosummary::
 
+   AffordanceReachingScenario
    AtomicObjectHandle
    AtomicSkillCaseProvider
    AtomicSkillScenario
@@ -443,6 +445,18 @@ embodichain.extensions.benchmarks.motion_generation.scenarios
    register_atomic_skill_provider
    ScenarioEvaluation
    ScenarioProvider
+
+
+embodichain.extensions.benchmarks.motion_generation.scenarios.affordance_reaching
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Projects hash-bound Atomic task geometry into complete ordered reaching requests.
+The independent geometry verdict excludes hand actions and object dynamics;
+AxisAlign retains its frozen full-pose realization. Original Atomic evidence
+remains a separate protocol.
+
+.. automodule:: embodichain.extensions.benchmarks.motion_generation.scenarios.affordance_reaching
+   :members:
 
 
 embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_case_utils

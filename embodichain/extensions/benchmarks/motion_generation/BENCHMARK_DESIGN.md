@@ -218,9 +218,10 @@ this constraint-information gap must remain visible in result interpretation.
 
 ## 5. Scenario tracks and capability gates
 
-The implemented scenarios are `free_space` and `atomic_skill`. Free-space
-requires `batched` and `empty_world` capabilities, then checks EEF or joint
-support per case. Atomic Skills also check provider-specific requirements.
+The implemented scenarios are `free_space`, `atomic_skill` and
+`affordance_reaching`. Free-space requires `batched` and `empty_world`
+capabilities, then checks EEF or joint support per case. Atomic Skills also
+check provider-specific requirements.
 
 - `supported`: run the mandatory case normally.
 - `unsupported`: record the reason and exclude it from the success-rate
@@ -406,9 +407,8 @@ These are not current benchmark capabilities:
   comparison must expose information asymmetry when cuRobo receives obstacles
   and an NMG policy does not; equal-input obstacle comparison requires a policy
   that accepts the same constraints.
-- Latency-budget/Pareto sweeps, per-process isolation and
-  broader memory accounting. `max_planning_time` checked after a plan is not a
-  preemptive deadline.
+- Latency-budget/Pareto sweeps and broader memory accounting.
+  `max_planning_time` checked after a plan is not a preemptive deadline.
 - Multimodal top-k feasibility, diversity and sampling cost; paired physics/APG
   refinement with both quality gain and added cost reported.
 - Observation-driven recovery under moving targets, noise, disturbances and

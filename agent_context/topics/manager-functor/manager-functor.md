@@ -61,7 +61,7 @@ FunctorCfg(
 ```
 
 - `func` can be a **string** (resolved via `string_to_callable` at init) or a direct reference.
-- `params` values of type `SceneEntityCfg` are auto-resolved to joint/body indices when the sim starts.
+- `params` values of type `SceneEntityCfg` are resolved to joint/body indices during manager preparation, after scene initialization.
 - Subclass configs add fields such as `EventCfg.mode`, `EventCfg.interval_step`, `RewardCfg.weight`, and `ObservationCfg.name`. `ActionTermCfg` has no mode field and may declare a versioned semantic `contract` resolved by the current action implementation registry.
 
 ---
