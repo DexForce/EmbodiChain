@@ -1,13 +1,13 @@
 # Reusable online and offline training-data loading
 
-Status: the initial numeric source/loader API and local BC demo integration are implemented.
+Status: the initial numeric source/loader API is implemented.
 Updated 2026-10-19. Image/video sequence loading and out-of-core storage remain outside this implementation.
 
 For use and operation, start with the [ODS guide](../source/features/online_data.md),
 [architecture and data flow](../source/features/ods/architecture.md),
 [configuration and runtime verification](../source/features/ods/configuration.md).
 This document owns source/Dataset architecture and implementation boundaries; task parameters
-and historical run evidence remain with the demo.
+and run evidence belong to individual examples.
 
 ## Problem and acceptance criterion
 
@@ -16,12 +16,7 @@ resident sources. `OnlineDataSource`, `TensorDataSource` and `LeRobotDataSource`
 implement the public `BatchSource` contract. `OfflineDataset` remains a
 compatibility alias; `OnlineDataset` preserves its original chunk API and
 delegates its opt-in context iteration to the common Dataset.
-The [local ChunkBC demo](../../examples/ods/simple_bc_demo/README.md) consumes
-these sources and owns its feature transformation, writer, sidecar/content
-auditing and experimental accounting. Its task, model, trainer, checkpoint
-and evaluator live in `examples/ods/simple_bc_demo/`, outside the official task
-catalog. The public numeric reader also accepts standard LeRobot datasets
-without the demo sidecar
+The public numeric reader accepts standard LeRobot datasets
 through explicit schema and column mapping. Inspection/depth tools retain their
 separate ownership.
 
@@ -47,10 +42,8 @@ The components below are exported from that package.
 | Schema utilities | `validate_data_schema` and `data_schema_fingerprint` share semantic validation and persistable identity. |
 
 Pure window/mask calculations and canonical padding are shared between source
-adapters. Source ownership, synchronization and lifecycle remain separate. The
-public contract must not depend on Franka, a 51-feature layout or ChunkBC.
-Task features, absolute TCP-target construction, normalization fitting, noise,
-training and efficiency reporting remain with the local demo.
+adapters. Each source owns its synchronization and lifecycle. Learners own task
+features, target construction, normalization and efficiency reporting.
 
 ```mermaid
 flowchart LR
@@ -191,11 +184,6 @@ with deterministic CPU buffers; `test_lerobot_source.py` exercises the official
 SDK reader. Schema, quota, continuity, padding, ownership and failure contracts
 remain covered without importing the learning example.
 
-The showcase learner, private writer, training orchestration and reporting are
-validated through runnable experiments and retained evidence, without dedicated
-unit tests. The earlier full-chain batch/optimizer alignment harness is retained
-in Git history; its recorded results below remain historical evidence.
-
 Public source and SDK tests cover the following boundaries:
 
 1. Keep source snapshots frozen during paired comparisons; record exact
@@ -211,28 +199,6 @@ defined tolerances for nondeterministic device operations. Report corpus
 identity, selected frame IDs, schema, normalizer/model/RNG states and SDK
 version. Numerical parity is not evidence of a throughput improvement.
 
-### Historical PickPlace validation
-
-The earlier [recorded check](../../examples/ods/simple_bc_demo/docs/ODS_ALIGNMENT_VALIDATION.json)
-passed nine paired CPU cases and 146 related regression cases. A real expert
-producer also supplied two generations/four accepted episodes (1,330 valid
-frames); four paired batches/32 chunks and four optimizer updates matched
-exactly, including sampling RNG, loss, gradients and optimizer state. All eight
-observed owned processes exited. These checks validate the recorded numeric
-example revision, preceding public API extraction; they do not validate every
-batch of the previous pilot or rerun the relocated implementation.
-The record retains an earlier harness filename failure and the native shutdown
-warning; neither is silently removed from the evidence.
-
-The public API validation and subsequent SequenceDataset consolidation are
-recorded separately in
-[DATASET_LOADING_VALIDATION.json](../../examples/ods/simple_bc_demo/docs/DATASET_LOADING_VALIDATION.json).
-Its follow-up section distinguishes its CPU/SDK regression checks from
-the earlier physical producer experiments and implementation hashes. The record
-also retains pre-extraction golden outputs and later removal of dedicated
-example tests. Original paths/hashes remain unchanged in the relocated JSON;
-see the [evidence index](../../examples/ods/simple_bc_demo/docs/README.md).
-
 ## Delivery and performance gate
 
 1. Canonical padding, continuity rejection and paired tests are in place. Retain
@@ -242,9 +208,7 @@ see the [evidence index](../../examples/ods/simple_bc_demo/docs/README.md).
 3. The bounded LeRobot numeric adapter and common SequenceDataset are
    implemented. OfflineDataset is a compatibility alias; OnlineDataset context
    mode delegates to the common implementation. Old chunk APIs remain available.
-4. The showcase uses public sources; its duplicate resident sampler and SDK
-   loading loop are removed. It retains task hashes, writing and experiments.
-5. Qualify end-to-end overhead before repeating timed comparisons. Include B=1
+4. Qualify end-to-end overhead before repeating timed comparisons. Include B=1
    and B=256, F=1/64, C=32/256, loading/peak memory, lock-held sampling time and
    concurrent refill. Use equal payloads, instrumentation and workload settings;
    report per-batch and wall-clock costs separately. Disclose feature conversion
@@ -290,7 +254,7 @@ online = SequenceDataset(online_source, sequence, batch_size=64, max_batches=100
 ```
 
 A learner that explicitly schedules refill/waits can call the source's
-`sample_context()` directly, as the showcase does. Delivery quotas are local to
+`sample_context()` directly. Delivery quotas are local to
 one source/ledger, not a distributed global allowance across independent runs.
 The first offline wrapper reports source/quota errors immediately; max_batches
 is an explicit iteration bound rather than an inferred epoch size.

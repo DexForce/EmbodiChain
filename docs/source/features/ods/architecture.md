@@ -46,7 +46,7 @@ that requests targeted collection from the producer.
 | Numeric SDK loading | `datasets/lerobot.py`: `LeRobotDataSource`, explicit field mapping, bounded reads and a resident allocation limit. |
 | Iteration | `datasets/sequence_data.py`: `SequenceDataset`. `OfflineDataset` aliases it; `OnlineDataset` retains the existing chunk API and opt-in context iteration. |
 | Shared numerical sampling | `datasets/_sampling.py`: window indices, padding and quota-draw helpers used without combining source lifecycle/lock ownership. |
-| Application | `examples/ods/simple_bc_demo/`: local task/expert, feature definitions, model/loss, trainer, checkpoint/evaluator, writer, instrumentation and comparison. |
+| Application | `examples/learning/act/`: PushCube expert collection, grouped training, checkpoint selection and physical evaluation. |
 
 Schema validation cannot infer action meaning from a vector width. Observation
 timing, action semantics, order, step duration and any feature conversion must
@@ -101,9 +101,8 @@ training-efficiency advantage.
   The opt-in controller retries only these transient live errors up to its
   deadline while draining events and checking health. Worker/read failures
   propagate. Dataset iteration adds no hidden retry, refill or budget reset.
-- Model/optimizer/RNG recovery belongs to the application. The demo recreates a
-  live cache with a new run ID; exact replay-cache or protected offline-ledger
-  recovery is not implemented.
+- Model/optimizer/RNG recovery belongs to the application. Starting a new
+  engine creates a fresh live cache and run ID.
 
 See [configuration](configuration.md) for rate/cache formulas and runtime checks,
 and the [Dataset/source design](https://github.com/DexForce/EmbodiChain/blob/main/docs/architecture/dataset-loading-design.md)

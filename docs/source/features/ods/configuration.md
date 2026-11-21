@@ -6,9 +6,7 @@ The result is a static configuration plan. A consumer applies its cache and
 sampling settings, then can select `ODSFlowController` for explicit owner-side
 pacing/refill or provide its own scheduler.
 
-This method applies across tasks and learners. The [Franka integration](https://github.com/DexForce/EmbodiChain/blob/main/examples/ods/simple_bc_demo/docs/CONFIGURATION.md)
-provides a worked binding; its measurements and reuse bounds are provisional
-case evidence. See [ODS](../online_data.md) for engine and source ownership and
+This method applies across tasks and learners. See [ODS](../online_data.md) for engine and source ownership and
 [Verify the plan](#verify-the-plan) for checking the resulting behavior.
 
 ## Inputs and units
@@ -281,8 +279,7 @@ planner does not implement online adaptation or replenish exhausted identities.
 Failed optimization, transforms or prefetched data do not refund delivered
 chunks. Track optimizer-completed chunks separately. Live replacement retires
 unused credits; it cannot move them to another identity. A new live run creates
-new identities. Replaying existing identities requires restored usage accounting;
-the demo rejects protected offline resume without that state.
+new identities. Replaying existing identities requires restored usage accounting.
 
 The initial update count is a ceiling, not a convergence recommendation.
 After production stops, the host may consume only remaining quotas and must
@@ -309,9 +306,7 @@ still spends delivery quota.
 
 Measure the overhead of accounting and resource sampling in the complete
 consumer. Record task quality separately: rate matching and bounded reuse do
-not establish convergence or an efficiency advantage. The BC example's
-[comparison protocol](https://github.com/DexForce/EmbodiChain/blob/main/examples/ods/simple_bc_demo/docs/OFFLINE_PILOT.md)
-defines experiment arms, checkpoint evaluation and cold-start/data-ready costs.
+not establish convergence or an efficiency advantage. The [ACT PushCube study](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/act/GROUPED_REPAIR.md#acceptance) records publication time and reserved-scene success for each policy.
 
 ## Recalibration and diagnosis
 

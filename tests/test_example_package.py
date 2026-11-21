@@ -51,8 +51,8 @@ def test_distribution_preserves_the_ordinary_examples_tree(tmp_path: Path) -> No
         "sim/atomic_skill/moving_target_recovery.py",
         "sim/atomic_skill/pickup_rubiks_cube.py",
         "sim/motion/planners/curobo_planner.py",
-        "ods/simple_bc_demo/train.py",
-        "ods/simple_bc_demo/configs/task.yaml",
+        "learning/act/timed_grouped.py",
+        "learning/act/grouped_elapsed_protocol.json",
         "learning/differentiable_ik/learn_grasp_yaw.py",
         "expansion/asset_generalization/configs/pour_water/task.cobotmagic.yaml",
     ):

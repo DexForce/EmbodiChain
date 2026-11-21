@@ -11,7 +11,7 @@ Use the path of any Python script under this directory, with or without `.py`:
 ```bash
 embodichain run-example --list
 embodichain run-example sim/motion/planners/curobo_planner --help
-embodichain run-example ods/simple_bc_demo/train --help
+embodichain run-example learning/act/grouped --help
 embodichain run-example learning/nerd --help
 embodichain run-example learning/rwm --help
 embodichain run-example learning/rigidformer demo --help
@@ -33,7 +33,7 @@ them. Private files and `__init__.py` are omitted from the list.
 
 Examples keep their existing command-line options and dependency requirements.
 The launcher preserves the caller's working directory, so relative input and
-output arguments resolve there. Package imports such as `examples.ods...`,
+output arguments resolve there. Package imports such as `examples.learning.act`,
 relative imports, sibling imports, exit codes and Ctrl+C reach the selected script.
 
 Add new examples and their resources anywhere in this tree. There is no catalog,

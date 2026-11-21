@@ -31,7 +31,7 @@ ods/configuration
   cache/rate limits, consumer responsibilities and runtime verification.
 - [Dataset/source architecture](https://github.com/DexForce/EmbodiChain/blob/main/docs/architecture/dataset-loading-design.md):
   public schemas, source ownership and implementation boundaries.
-- [Simple BC demo](https://github.com/DexForce/EmbodiChain/blob/main/examples/ods/simple_bc_demo/README.md):
+- [ACT PushCube grouped training](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/act/GROUP_PUBLICATION.md):
   one task/model binding, runnable commands and retained experiment results.
 
 These guides own reusable ODS behavior. Task-specific parameters, checkpoint
@@ -343,8 +343,7 @@ for batch in loader:
 The LeRobot adapter uses official SDK numeric reads once, then samples resident
 CPU tensors. The resident allowance does not bound SDK caches, temporary staging,
 total process memory or native GPU allocations. Explicit mappings are required
-when recorded field names differ; standard numeric data does not require the
-BC demo sidecar. Image/video and out-of-core decoding are outside this backend.
+when recorded field names differ; standard numeric data can be loaded using its schema and column mapping. Image/video and out-of-core decoding are outside this backend.
 
 For live data, use `OnlineDataSource(engine, schema=schema,
 observation_transform=feature_fn)` with the same truthful feature/action contract.
@@ -475,15 +474,10 @@ A runnable example that wires everything together is provided in:
 
 - `examples/data_pipeline/online_dataset_demo.py`
 
-The local [Franka BC demo](https://github.com/DexForce/EmbodiChain/blob/main/examples/ods/simple_bc_demo/README.md)
-adds a complete learner, expert, checkpoint/evaluator and fixed-data controls:
+The [ACT PushCube example](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/act/GROUP_PUBLICATION.md) covers single-GPU training,
+producer-width publication and per-policy acceptance checks.
 
-```bash
-python -m examples.ods.simple_bc_demo.train --smoke --no-viewer --no-video
-```
-
-Its architecture bindings, task-specific throughput packet, artifacts and
-learning results belong to the example. The generic chunk example shows item
+The generic chunk example shows item
 mode, batch mode and dynamic chunk sizes. Run it with:
 
 ```bash
