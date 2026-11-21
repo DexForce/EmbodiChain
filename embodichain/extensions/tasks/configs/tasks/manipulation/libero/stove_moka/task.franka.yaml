@@ -1,0 +1,24 @@
+id: LiberoStoveMokaFranka-v1
+headless: true
+enable_sensor: true
+environment:
+  component: env.yaml
+embodiment:
+  component: ../../../../components/embodiments/franka_panda_cartesian.yaml
+  overrides:
+    init_pos: [-0.56, 0, 0.84]
+    init_qpos: [-0.13796, 0.41709, 0.72378, -2.09696, 2.74364, 3.9062, -1.52, 0.04, 0.04]
+  camera_overrides:
+    cam_high:
+      extrinsics:
+        eye: [1.22, -1.15, 1.72]
+        target: [-0.22, 0, 0.95]
+        up: [0, 0, 1]
+task_program:
+  program: task_program/program.yaml
+  integration: task_program/integration.yaml
+  execution_policy: task_program/execution_policy.yaml
+evaluation:
+  component: task_program/evaluation.yaml
+collection:
+  max_attempts: 1

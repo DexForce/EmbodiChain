@@ -48,6 +48,8 @@ from embodichain.lab.task_program.compiler.lowering import (
 from embodichain.lab.task_program.semantics import (
     BoundSemanticCall,
     RegisteredSemanticCall,
+    SceneArticulationRef,
+    SceneLinkRef,
     SceneRegistry,
 )
 from embodichain.lab.task_program.language.semantic_contracts import (
@@ -174,3 +176,56 @@ class _TwistLowererFactory(_ControlLowererFactory):
 class _OpenDoorLowererFactory(_ControlLowererFactory):
     call_id: ClassVar[str] = "simulation.open_door"
     target_descriptor: ClassVar[SkillDescriptor] = OpenDoor.descriptor()
+
+
+class _ArticulationTwistLowerer(_ControlLowerer):
+    call_id: ClassVar[str] = "simulation.twist"
+    target_descriptor: ClassVar[SkillDescriptor] = Twist.descriptor()
+
+
+@dataclass(frozen=True, slots=True)
+class _ArticulationKnobLowererFactory(RegisteredSemanticLowererFactory):
+    """Bind a Twist call to the observed link and its physical hinge axis."""
+
+    link_entity_id: str
+    joint_name: str
+    grasp_position: tuple[float, float, float]
+    approach_sign: int
+    grasp_roll: float
+    call_id: ClassVar[str] = "simulation.twist"
+    revision: ClassVar[str] = "1"
+    target_descriptor: ClassVar[SkillDescriptor] = Twist.descriptor()
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicSkillEngine,
+    ) -> RegisteredSemanticLowerer:
+        if engine.robot is not robot:
+            raise ValueError("Twist factory requires the engine's exact robot.")
+        link = scene_registry.lookup(self.link_entity_id, expected_type=SceneLinkRef)
+        parent = scene_registry.lookup(link.parent, expected_type=SceneArticulationRef)
+        native_name = parent.native_name or parent.ref.entity_id
+        articulation = simulation.get_articulation(native_name)
+        if articulation is None:
+            raise ValueError(f"Twist articulation {native_name!r} is missing.")
+        if not link.native_name:
+            raise ValueError(f"Twist link {self.link_entity_id!r} has no native name.")
+        hinge = OpenDoorAffordance.from_articulation(
+            articulation, link.native_name, hinge_joint_name=self.joint_name
+        )
+        affordance = TwistAffordance(
+            grasp_position=self.grasp_position,
+            axis_origin=hinge.axis_origin,
+            twist_axis=hinge.rotation_axis * self.approach_sign,
+            joint_name=hinge.joint_name,
+            joint_limits=hinge.joint_limits,
+            grasp_roll=self.grasp_roll,
+        )
+        semantics = ObjectSemantics(
+            entity_id=self.link_entity_id, affordance=affordance, geometry={}
+        )
+        return _ArticulationTwistLowerer(self.call_id, {self.link_entity_id: semantics})
