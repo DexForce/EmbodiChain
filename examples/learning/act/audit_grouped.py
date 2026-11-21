@@ -105,6 +105,16 @@ def _audit(path: Path, spec: dict, seed: int) -> dict:
             raise ValueError("Submission receipt missed its physical deadline")
         if chosen and receipt["locked_seconds"] < chosen["result_seconds"]:
             raise ValueError("Submission receipt precedes the development result")
+    published = None
+    if spec.get("publish_receipt"):
+        evidence = _read(path / "publication.json")
+        published = evidence["published_seconds"]
+        if (
+            not receipt["locked_seconds"] <= published <= spec["deadline_seconds"]
+            or evidence["decision_sha256"]
+            != hashlib.sha256((path / "deadline.json").read_bytes()).hexdigest()
+        ):
+            raise ValueError("Committed deadline receipt differs or was late")
     score = None
     if chosen:
         if policy_fingerprint(path / chosen["checkpoint"]) != chosen["sha256"]:
@@ -141,6 +151,7 @@ def _audit(path: Path, spec: dict, seed: int) -> dict:
         qualified=qualified,
         reserved_successes=score,
         locked_seconds=receipt.get("locked_seconds"),
+        published_seconds=published,
         chosen=chosen,
         updates=supply["step"],
         first_update=supply["first_update"],

@@ -160,7 +160,10 @@ def _run(spec: dict, seed: int, out: Path, qual: Path, started: float) -> None:
     from lerobot.utils.logging_utils import MetricsTracker, AverageMeter
     from lerobot.utils.constants import IMAGENET_STATS
     from embodichain.extensions.models.policy.act import policy_fingerprint
-    from embodichain.extensions.models.policy.act.runtime import _image_state
+    from embodichain.extensions.models.policy.act.runtime import (
+        _image_state,
+        _backbone_image,
+    )
     from embodichain.extensions.models.policy.act.training import _act_config
     from ._study_panel import Evaluator, IndependentEvaluators
 
@@ -237,6 +240,16 @@ def _run(spec: dict, seed: int, out: Path, qual: Path, started: float) -> None:
                     selection_cutoff_seconds=selection_cutoff, locked_seconds=clock()
                 )
             _write(out / "deadline.json", receipt)
+            if spec.get("publish_receipt"):
+                _write(
+                    out / "publication.json",
+                    {
+                        "published_seconds": clock(),
+                        "decision_sha256": hashlib.sha256(
+                            (out / "deadline.json").read_bytes()
+                        ).hexdigest(),
+                    },
+                )
 
     timer = threading.Timer(max(0, selection_cutoff - clock()), seal)
     timer.daemon = True
@@ -314,7 +327,8 @@ def _run(spec: dict, seed: int, out: Path, qual: Path, started: float) -> None:
                 ],
             },
         }
-        cfg = _act_config(feature_schema, IMAGE, (224, 224, 3), "cuda:0", False)
+        side = spec.get("backbone_image_side", 224)
+        cfg = _act_config(feature_schema, IMAGE, (side, side, 3), "cuda:0", False)
         cfg.dim_model = 128
         cfg.n_heads = 4
         cfg.dim_feedforward = 512
@@ -359,7 +373,7 @@ def _run(spec: dict, seed: int, out: Path, qual: Path, started: float) -> None:
                     .div_(255)
                 )
                 inputs = {
-                    IMAGE: rgb,
+                    IMAGE: _backbone_image(rgb, (side, side)),
                     "observation.state": _image_state(rgb, x[QPOS].cuda()),
                     "action": x["actions"],
                     "action_is_pad": x["action_is_pad"],
@@ -393,6 +407,7 @@ def _run(spec: dict, seed: int, out: Path, qual: Path, started: float) -> None:
                 "query_period": spec.get("query_period", 1),
             }
             _write(ck / "embodichain_act.json", manifest)
+            admitted = engine.get_flow_status()["successful_episodes"]
             saved = clock()
             result = panel.evaluate(
                 ck,
@@ -409,6 +424,7 @@ def _run(spec: dict, seed: int, out: Path, qual: Path, started: float) -> None:
                         sha256=result["policy_sha256"],
                         successes=result["successes"],
                         goal_distance=result["mean_goal_distance"],
+                        published_episodes=admitted,
                         save_seconds=saved,
                         result_seconds=clock(),
                     )

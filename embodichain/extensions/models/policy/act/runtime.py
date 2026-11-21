@@ -72,6 +72,13 @@ def _image_state(rgb: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
     return torch.cat((state.float(), u, v, (mass >= 3).float()), dim=-1)
 
 
+def _backbone_image(rgb: torch.Tensor, size: tuple[int, int]) -> torch.Tensor:
+    """Area-average native sensor pixels to the declared ACT visual shape."""
+    if rgb.shape[-2:] == size:
+        return rgb
+    return torch.nn.functional.interpolate(rgb, size=size, mode="area")
+
+
 class ACTInferencePolicy:
     """Run the upstream policy and its frozen processors on the simulation device.
 
@@ -189,6 +196,10 @@ class ACTInferencePolicy:
                 batch["observation.state"] = _image_state(
                     batch[self.image_key], batch["observation.state"]
                 )
+            batch[self.image_key] = _backbone_image(
+                batch[self.image_key],
+                tuple(self.policy.config.input_features[self.image_key].shape[-2:]),
+            )
             batch = self.preprocessor(batch)
             loss, _ = self.policy(batch)
             valid = int((~batch["action_is_pad"]).sum()) * len(
@@ -249,7 +260,13 @@ class ACTInferencePolicy:
         if self.metadata.get("image_landmarks"):
             state = _image_state(rgb, state)
         batch = self.preprocessor(
-            {self.image_key: rgb.float().div(255), "observation.state": state.float()}
+            {
+                self.image_key: _backbone_image(
+                    rgb.float().div(255),
+                    tuple(self.policy.config.input_features[self.image_key].shape[-2:]),
+                ),
+                "observation.state": state.float(),
+            }
         )
         if self._block_ensemble is None:
             action = self.postprocessor(self.policy.select_action(batch))

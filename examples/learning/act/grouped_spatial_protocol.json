@@ -1,0 +1,43 @@
+{
+  "episodes": 100,
+  "cache_episodes": 10,
+  "shared_slots": 20,
+  "batch_size": 32,
+  "updates": 4000,
+  "checkpoints": [
+    1400,
+    2050,
+    2450,
+    3000,
+    4000
+  ],
+  "producer_envs": 10,
+  "arena_spacing": 4.0,
+  "deadline_seconds": 300,
+  "dev_scenes": 50,
+  "test_scenes": 100,
+  "eval_envs": 25,
+  "verification_workers": 4,
+  "draw_floor": 192,
+  "required_reserved_successes": 95,
+  "study": "core-grouped-pushcube-spatial-v3",
+  "seeds": [
+    187101,
+    187102,
+    187103,
+    187104,
+    187105
+  ],
+  "producer_seed_base": 19510000,
+  "dev_base": 19310000,
+  "test_base": 19410000,
+  "dev_min_successes": 40,
+  "stratified_resets": true,
+  "refill_during_dev": false,
+  "query_period": 6,
+  "submit_dev_successes": 50,
+  "submission_margin_seconds": 5,
+  "require_cold_launcher": true,
+  "backbone_image_side": 56,
+  "publish_receipt": true
+}

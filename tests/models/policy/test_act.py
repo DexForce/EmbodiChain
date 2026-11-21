@@ -206,3 +206,50 @@ def test_rgb_landmarks_are_causal_scale_invariant_and_handle_missing_colors():
     )
     torch.testing.assert_close(packed[0, 13:], torch.ones(2))
     torch.testing.assert_close(packed[1, 9:], torch.zeros(6))
+
+
+def test_query_blocks_ensemble_matching_control_times(artifact, monkeypatch):
+    root, *_ = artifact
+    manifest = root / "embodichain_act.json"
+    meta = json.loads(manifest.read_text())
+    meta["query_period"] = 3
+    manifest.write_text(json.dumps(meta))
+    actor = load_act_policy(root)
+    observations = []
+
+    def predict(batch):
+        offset = 100 * len(observations)
+        observations.append(batch)
+        return (torch.arange(30, dtype=torch.float32) + offset)[None, :, None].expand(
+            1, 30, 2
+        )
+
+    monkeypatch.setattr(actor.policy, "predict_action_chunk", predict)
+    pixels = torch.zeros(1, 3, 32, 32, dtype=torch.uint8)
+    state = torch.zeros(1, 2)
+    weight = torch.exp(torch.tensor(-3 * actor.policy.config.temporal_ensemble_coeff))
+    for step in range(6):
+        assert actor.needs_observation == (step % 3 == 0)
+        actual = actor.select_action(pixels if actor.needs_observation else None, state)
+        prediction = (
+            step if step < 3 else (step + weight * (100 + step - 3)) / (1 + weight)
+        )
+        expected = actor.postprocessor(torch.full_like(actual, float(prediction)))
+        torch.testing.assert_close(actual, expected)
+    assert len(observations) == 2
+    actor.reset()
+    assert actor.needs_observation
+    with pytest.raises(ValueError, match="RGB"):
+        actor.select_action(None, state)
+
+
+def test_backbone_pooling_preserves_landmark_input():
+    from embodichain.extensions.models.policy.act.runtime import _backbone_image
+
+    image = torch.arange(64, dtype=torch.float32).reshape(1, 1, 8, 8).expand(2, 3, 8, 8)
+    original = image.clone()
+    torch.testing.assert_close(
+        _backbone_image(image, (2, 2)), torch.nn.functional.avg_pool2d(image, 4)
+    )
+    torch.testing.assert_close(image, original)
+    assert _backbone_image(image, (8, 8)) is image
