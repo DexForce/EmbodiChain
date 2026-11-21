@@ -1,0 +1,8 @@
+task_key: robosuite_tool_hang
+title: Tool Hang
+summary: Assemble the frame in its stand and release the wrench on its horizontal bar.
+tags: [manipulation, assembly, reinforcement_learning]
+default_deployment: panda
+deployments:
+  panda:
+    config: task.panda.yaml

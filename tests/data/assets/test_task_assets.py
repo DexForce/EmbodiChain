@@ -34,6 +34,7 @@ _HUB = "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main
 _ASSETS = (
     ("PourCupAssets", "f97857b639189be4daf717a873ab84cf"),
     ("PourCupDemoData", "8eb96cb756ac08efe403417f50ad2bf2"),
+    ("RobosuiteToolHangV1", "a3a3a263cb3346ef4be78caa88d35da3"),
 )
 
 
@@ -75,9 +76,16 @@ def test_task_archive_descriptor_uses_configured_source_and_locked_cache(
     asset, descriptor, root = calls[0]
     assert asset == name
     assert root == (override or default)
-    relative = f"task_assets/{name}.zip"
+    directory = "task_assets"
+    hub = _HUB
+    if name == "RobosuiteToolHangV1":
+        directory = "scene_assets/robosuite_tool_hang_v1"
+        revision = "256a4cb8f6b66db4f3e6722847725f6509aae48c"
+        hub = _HUB.replace("/main/", f"/{revision}/")
+        prefix = prefix.replace("/main/", f"/{revision}/")
+    relative = f"{directory}/{name}.zip"
     assert descriptor.urls == [f"{prefix}{relative}"] + (
-        [] if prefix == _HUB else [f"{_HUB}{relative}"]
+        [] if prefix == hub else [f"{hub}{relative}"]
     )
     assert descriptor.md5 == md5
 
