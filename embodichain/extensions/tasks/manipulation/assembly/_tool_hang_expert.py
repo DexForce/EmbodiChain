@@ -36,6 +36,8 @@ __all__: list[str] = []
 _UP = np.array([0.0, 0.0, 1.0])
 _GRIP = np.array([0.04375, 0.0, 0.068])
 _TIP = np.array([0.04375, 0.0, -0.13445])
+_BAR_END = np.array([-0.0475, 0.0, 0.08625])
+_ELBOW = np.array([0.04375, 0.0, 0.08625])
 
 
 def _limit(vector: np.ndarray, maximum: float) -> np.ndarray:
@@ -55,6 +57,7 @@ class ToolHangMotion:
         self.env = env
         self.robot = env.robot
         self.grip_effort = 12.0
+        self.cleared_crossbar = False
         self.position_bias = np.zeros(3)
         self.rotation_bias = np.eye(3)
 
@@ -72,6 +75,12 @@ class ToolHangMotion:
     def point(self, name: str, offset: np.ndarray) -> np.ndarray:
         pose = self.pose(name)
         return pose[:3, 3] + pose[:3, :3] @ offset
+
+    def bar(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return the free tip and the unit vector toward the elbow."""
+        tip = self.point("frame", _BAR_END)
+        along = self.point("frame", _ELBOW) - tip
+        return tip, along / np.linalg.norm(along)
 
     def _solve(
         self, xyz: np.ndarray, rotation: np.ndarray, seed: torch.Tensor
@@ -128,10 +137,12 @@ class ToolHangMotion:
         rate: float = 1.0,
         steps: int | None = None,
         settle: int = 5,
+        compensate: bool = True,
     ) -> Iterator[ControllerAction]:
         """Interpolate an IK target, then measure the residual for the next waypoint."""
         start = self.robot.get_qpos().clone()
-        xyz, rotation = xyz + self.position_bias, self.rotation_bias @ rotation
+        if compensate:
+            xyz, rotation = xyz + self.position_bias, self.rotation_bias @ rotation
         delta = self._solve(xyz, rotation, start[:, :7]) - start[:, :7]
         duration = steps or max(
             5, int(1.7 * delta.abs().max().item() / (rate * self.env.step_dt))
@@ -211,6 +222,49 @@ class ToolHangMotion:
             joints[:, :7] = self._solve(goal, rotation, joints[:, :7])
             yield self._command(joints, 0.0)
 
+    def _clear_bar(self) -> Iterator[ControllerAction]:
+        """Move both open pads to the palm side of the bar before lifting."""
+        for attempt in range(5):
+            tip, along = self.bar()
+            side = np.cross(_UP, along)
+            length = np.linalg.norm(side)
+            if length < 0.5:
+                return
+            side /= length
+            palm = self.robot.get_link_pose("fr3_hand")[0, :3].cpu().numpy()
+            if (palm - tip) @ side < 0:
+                side = -side
+            pads = [
+                self.robot.get_link_pose(name)[0, :3].cpu().numpy()
+                for name in ("fr3_leftpad", "fr3_rightpad")
+            ]
+            gap = min((pad - tip) @ side for pad in pads)
+            # Allow for the pad half-width and the wider sleeve at the elbow.
+            if gap >= 0.025:
+                self.cleared_crossbar = True
+                return
+            if attempt < 4:
+                hand = self.hand()
+                travel = min(0.022, 0.032 - gap)
+                # Step sideways within reach instead of extending an almost
+                # straight wrist. The palm can move toward the base along the
+                # bar without giving up clearance from its side.
+                base = self.robot.get_local_pose()[0, :3].cpu().numpy()
+                inward = np.sign((base - hand[:3, 3]) @ along)
+                target = hand[:3, 3] + travel * (side + 0.45 * inward * along)
+                target[2] = hand[2, 3]
+                try:
+                    yield from self.move(
+                        target,
+                        hand[:3, :3],
+                        0.04,
+                        rate=0.65,
+                        settle=6,
+                        compensate=False,
+                    )
+                except _UnreachableWaypoint:
+                    return
+
     def seat_frame(self) -> Iterator[ControllerAction]:
         """Center the measured rod tip between the walls and release the seated frame."""
         socket = self.point("stand", np.array([0, 0.045, 0]))
@@ -250,6 +304,10 @@ class ToolHangMotion:
                 rate=0.65,
                 settle=20,
             )
+
+        yield from self._clear_bar()
+        if not self.cleared_crossbar:
+            return
 
         # Clear the installed crossbar before changing from the horizontal
         # insertion grasp to the top-down wrench grasp. Interpolating those

@@ -283,9 +283,8 @@ class ToolHangExpertEnv(EmbodiedEnv):
             target_uid="frame",
             instruction="Guide the rod into the socket and release the frame.",
             actions=motion.seat_frame(),
-            validator=lambda: self.compute_task_state()[2][
-                "success.hanging.frame_assembled"
-            ],
+            validator=lambda: motion.cleared_crossbar
+            and self.compute_task_state()[2]["success.hanging.frame_assembled"],
         )
         from embodichain.extensions.tasks.manipulation.assembly._tool_hang_wrench import (
             hang_wrench,

@@ -38,8 +38,6 @@ __all__: list[str] = []
 
 _GRIP = np.array([-0.026, 0.0, 0.0])
 _HOLE = np.array([-0.0935328, 0.0, 0.0])
-_FREE_END = np.array([-0.0475, 0.0, 0.08625])
-_ELBOW = np.array([0.04375, 0.0, 0.08625])
 
 
 def _pick_wrench(motion: ToolHangMotion) -> Iterator[ControllerAction]:
@@ -78,16 +76,10 @@ def _place_site(
     yield from motion.move(xyz, rotation @ hand[:3, :3], 0.0, rate=1.5, settle=3)
 
 
-def _bar(motion: ToolHangMotion) -> tuple[np.ndarray, np.ndarray]:
-    tip = motion.point("frame", _FREE_END)
-    along = motion.point("frame", _ELBOW) - tip
-    return tip, along / np.linalg.norm(along)
-
-
 def _ring_target(
     motion: ToolHangMotion, x: float, height: float, lean: float, spin: float
 ) -> tuple[np.ndarray, np.ndarray]:
-    tip, along = _bar(motion)
+    tip, along = motion.bar()
     horizontal = along.copy()
     horizontal[2] = 0.0
     horizontal /= np.linalg.norm(horizontal)
@@ -123,7 +115,7 @@ def hang_wrench(motion: ToolHangMotion) -> Iterator[ControllerAction]:
     yield from _pick_wrench(motion)
     # Turn the long handle toward the open work area so its swing clears the
     # socket. Keep the chosen side as small forces rotate the loose frame.
-    _, axis = _bar(motion)
+    _, axis = motion.bar()
     spin = 40.0 if axis[0] >= 0.0 else -40.0
     above, orientation = _ring_target(motion, 0.004, 0.065, 62.0, spin)
     current = motion.pose("tool")[:3, :3]

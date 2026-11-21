@@ -45,6 +45,6 @@ embodichain run-task \
   --headless --seed 7 --max_episodes 1
 ```
 
-After inserting the frame, the Panda raises the open hand above the crossbar and crosses to the wrench side before turning the wrist for pickup. It tracks the measured bar end while guiding the large wrench ring over the retaining lip. The release sequence checks frame insertion, ring threading, ring–bar contact and insertion depth before commanding the fingers open. A settled hang can be checked by letting the open hand withdraw and observing the same contact conditions for a further 90 control steps (4.5 seconds).
+After inserting the frame, the Panda measures both open pads against the crossbar. If either pad is underneath the bar, it moves sideways at the current height until both pads clear the bar on the palm side. It then raises the open hand and crosses to the wrench side before turning the wrist for pickup. It tracks the measured bar end while guiding the large wrench ring over the retaining lip. The release sequence checks frame insertion, ring threading, ring–bar contact and insertion depth before commanding the fingers open. A settled hang can be checked by letting the open hand withdraw and observing the same contact conditions for a further 90 control steps (4.5 seconds).
 
 The public collector can reset and try again after an incomplete episode. When measuring first-attempt success, run each seed once and record both the native termination and the state after withdrawal.

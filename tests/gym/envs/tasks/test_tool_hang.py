@@ -157,13 +157,21 @@ def _exercise_hanging_scene() -> None:
 @pytest.mark.skipif(
     not torch.cuda.is_available(), reason="Newton MuJoCo-Warp needs CUDA"
 )
-@pytest.mark.parametrize("case", ["contact", "wrench_approach", "expert"])
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param(("contact",), id="contact"),
+        pytest.param(("wrench_approach", "7"), id="wrench_approach_collector"),
+        pytest.param(("wrench_approach", "13"), id="wrench_approach_single_reset"),
+        pytest.param(("expert",), id="expert"),
+    ],
+)
 def test_native_hanging_requires_both_stages_and_a_released_supported_ring(
-    case: str,
+    case: tuple[str, ...],
 ) -> None:
     """Use a fresh process so the deployment owns its NoRender world."""
     result = subprocess.run(
-        [sys.executable, str(Path(__file__).resolve()), case],
+        [sys.executable, str(Path(__file__).resolve()), *case],
         capture_output=True,
         text=True,
         timeout=300,
@@ -171,12 +179,16 @@ def test_native_hanging_requires_both_stages_and_a_released_supported_ring(
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def _check_wrench_approach(env) -> None:
+def _check_wrench_approach(env, seed: int) -> None:
     from embodichain.lab.gym.envs import execute_demo_episode
 
-    # Match the public collector's prepare and first batch resets with seed 7.
-    env.reset(options={"save_data": False})
-    env.reset()
+    if seed == 7:
+        # Match the public collector's prepare and first batch resets.
+        env.reset(options={"save_data": False})
+        env.reset()
+    else:
+        # This single reset leaves an open pad underneath the seated bar.
+        env.reset(seed=seed)
     reaching_for_wrench = False
     touched_wrench = False
 
@@ -204,7 +216,7 @@ def _check_wrench_approach(env) -> None:
     assert touched_wrench, "The gripper never reached the wrench."
 
 
-def _exercise_expert_episode(*, check_approach: bool = False) -> None:
+def _exercise_expert_episode(*, approach_seed: int | None = None) -> None:
     import gymnasium as gym
     import embodichain.extensions.tasks
     from embodichain.lab.gym.envs import execute_demo_episode
@@ -216,14 +228,14 @@ def _exercise_expert_episode(*, check_approach: bool = False) -> None:
         / "embodichain/extensions/tasks/configs/tasks/manipulation/assembly/tool_hang/task.expert.panda.yaml"
     )
     declaration = yaml.safe_load(path.read_text())
-    if check_approach:
-        declaration["seed"] = 7
+    if approach_seed == 7:
+        declaration["seed"] = approach_seed
     env = gym.make(
         declaration["id"], cfg=config_to_cfg(declaration, source_path=path)
     ).unwrapped
     try:
-        if check_approach:
-            _check_wrench_approach(env)
+        if approach_seed is not None:
+            _check_wrench_approach(env, approach_seed)
             return
         # A collection permits three attempts at an unassisted physical rollout.
         # GPU contacts may yield different outcomes from the same initial pose.
@@ -254,7 +266,9 @@ def _exercise_expert_episode(*, check_approach: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] in ("expert", "wrench_approach"):
-        _exercise_expert_episode(check_approach=sys.argv[1] == "wrench_approach")
+    if sys.argv[1:] and sys.argv[1] == "wrench_approach":
+        _exercise_expert_episode(approach_seed=int(sys.argv[2]))
+    elif sys.argv[1:] == ["expert"]:
+        _exercise_expert_episode()
     else:
         _exercise_hanging_scene()
