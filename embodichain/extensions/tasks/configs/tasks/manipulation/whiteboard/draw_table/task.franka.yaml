@@ -1,0 +1,19 @@
+id: WhiteboardDrawTableFranka-v1
+headless: true
+enable_sensor: true
+environment: {component: env.yaml}
+embodiment:
+  component: ../../../../components/embodiments/franka_panda.yaml
+  overrides:
+    init_pos: [0.0, 0.0, 0.63]
+    joint_drive_props:
+      stiffness: {"fr3_finger_joint[1-2]": 8000.0}
+      damping: {"fr3_finger_joint[1-2]": 95.0}
+    init_qpos: [0.2503, -1.0446, -0.1761, -2.5179, -0.4675, 2.6796, -1.2364, 0.007, 0.007]
+  camera_overrides:
+    cam_high:
+      extrinsics:
+        eye: [-1.32, -0.88, 1.84]
+        target: [0.43, 0.0, 1.26]
+        up: [0, 0, 1]
+collection: {max_attempts: 1}
