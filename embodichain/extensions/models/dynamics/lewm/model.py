@@ -141,7 +141,9 @@ class LeWM(nn.Module):
             from transformers import ViTConfig, ViTModel
         except ImportError as exc:
             raise ImportError(
-                "LeWM requires the 'lewm' extra: pip install embodichain[lewm]"
+                "LeWM requires Transformers. Install 'transformers>=4.53,<4.54' on "
+                "Python 3.11 or 'transformers>=5.4,<5.6' on Python 3.12 and newer. "
+                "For the Cube example, install examples/learning/lewm/cube/requirements.txt."
             ) from exc
         vit = ViTConfig(
             image_size=c.image_size,

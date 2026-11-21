@@ -11,12 +11,13 @@ installed SDK.
 
 From a checkout, set up a Python environment and follow the project's
 [package installation instructions](../../../../README.md). These commands
-show the pinned CUDA and additional Cube dependencies.
+install the pinned CUDA wheels, EmbodiChain with geometry support, and the
+Cube dependencies from the example's requirements file.
 
 ```bash
 python -m pip install --index-url https://download.pytorch.org/whl/cu128 \
   torch==2.11.0 torchvision==0.26.0
-python -m pip install -e '.[lewm,geometry]' --index-url https://pypi.org/simple \
+python -m pip install -e '.[geometry]' --index-url https://pypi.org/simple \
   --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
 python -m pip install -r examples/learning/lewm/cube/requirements.txt
 ```
