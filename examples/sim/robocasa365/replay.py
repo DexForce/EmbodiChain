@@ -45,6 +45,7 @@ from embodichain.lab.sim.sensors.contact.sensor import (
     ContactSensor,
     ContactSensorCfg,
 )
+from embodichain.lab.visualization import VisualizationCfg
 
 if __package__:
     from ._sources import _TASKS, _cached_episode
@@ -372,6 +373,7 @@ def _run_scene(directory: Path, source: Path) -> dict[str, Any]:
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
+            visualization=VisualizationCfg(backend="none"),
             device=_DEVICE,
             num_envs=1,
             enable_ground_plane=False,
