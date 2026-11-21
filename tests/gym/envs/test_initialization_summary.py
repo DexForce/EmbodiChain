@@ -122,6 +122,10 @@ def _make_summary_env(mode: str = "full") -> _SummaryEnv:
         _rigid_objects={"cube": object()},
         _rigid_object_groups={},
         _deformable_objects={},
+        _cable_objects={},
+        _fluid_objects={},
+        _visual_objects={},
+        _lights={},
         _sensors={},
         _default_plane=object(),
         _startup_summary_logged=False,
@@ -198,7 +202,6 @@ def test_summary_includes_shared_runtime_scene_and_task_metadata() -> None:
         assert value in rendered
     assert "render_fps" not in rendered
     assert "Pick up the red cube" not in rendered
-    assert "PhysX" not in rendered
     assert "Engine threads" not in rendered
     assert "Stepping" not in rendered
 
@@ -261,13 +264,16 @@ def test_summary_omits_metadata_section_for_render_fps_only() -> None:
 @pytest.mark.parametrize(
     "mode, expected_records", [("compact", 1), ("full", 1), ("off", 0)]
 )
+@pytest.mark.parametrize("web", [False, True])
 def test_summary_logs_once_and_consumes_simulation_summaries(
     monkeypatch: pytest.MonkeyPatch,
     mode: str,
     expected_records: int,
+    web: bool,
 ) -> None:
     """The ready Gym table must suppress duplicate core, scene, and Gym tables."""
     env = _make_summary_env(mode)
+    env.sim_cfg.web = web
     calls: list[tuple[object, dict[str, object]]] = []
 
     def capture(message: object, **kwargs: object) -> None:
@@ -284,6 +290,16 @@ def test_summary_logs_once_and_consumes_simulation_summaries(
         assert str(calls[0][0]).count("EmbodiChain · Functor Details") == 1
         assert env.sim._startup_summary_logged
         assert env.sim._scene_summary_logged
+    if web and expected_records:
+        summary = env.sim._web_initialization_summary
+        assert summary["title"] == "Environment initialized: _SummaryEnv"
+        assert ("Environment", "Sensors", "2 (front_camera, wrist_camera)") in summary[
+            "rows"
+        ]
+        assert any(section == "Managers" for section, _, _ in summary["rows"])
+        assert ("Scene", "State", "READY") in summary["rows"]
+    else:
+        assert not hasattr(env.sim, "_web_initialization_summary")
 
 
 def test_scene_setup_defers_simulation_summary_until_gym_is_ready(

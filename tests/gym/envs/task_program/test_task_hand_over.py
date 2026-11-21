@@ -41,7 +41,7 @@ from embodichain.lab.task_program.integrations._configured_composition import (
 from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     AntipodalAffordance,
     EntityState,
     HandOverOptions,
@@ -99,7 +99,7 @@ def _gym_config_path() -> Path:
     """Return the installed-source dual-UR5 Gym config path."""
     return (
         Path(__file__).parents[4]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/hand_over/"
         "task.dual_ur5_dh_pgi_140_80.yaml"
     )
 
@@ -133,12 +133,15 @@ def test_hand_over_registers_plain_embodied_env_from_config() -> None:
     cfg = _configured_env_cfg()
     spec = REGISTERED_ENVS[_ENV_ID]
 
-    from embodichain_tasks.manipulation import __all__
+    from embodichain.extensions.tasks.manipulation import __all__
 
     assert __all__ == []
-    assert importlib.util.find_spec("embodichain_tasks.manipulation.hand_over") is None
+    assert (
+        importlib.util.find_spec("embodichain.extensions.tasks.manipulation.hand_over")
+        is None
+    )
     assert spec.cls is EmbodiedEnv
-    assert spec.max_episode_steps == 1200
+    assert spec.max_episode_steps == 3600
     assert spec.task_program_registration is not None
     assert spec.task_program_adapter_factory is not None
     assert spec.task_program_adapter_factory.registration is (
@@ -157,7 +160,7 @@ def test_hand_over_gym_config_selects_packaged_program_without_contact_sensor() 
         "program": "task_program/program.yaml",
         "integration": "task_program/integration.yaml",
         "execution_policy": (
-            "../../../components/execution_policies/motion_gen_verified.yaml"
+            "../../../components/execution_policies/sequential_ik_verified.yaml"
         ),
     }
     assert payload["environment"] == {"component": "env.yaml"}
@@ -219,6 +222,9 @@ def test_hand_over_gym_config_builds_dual_ur5_pgi_scene() -> None:
     assert cfg.robot.solver_cfg["left_arm"].end_link_name == "left_ee_link"
     assert cfg.robot.solver_cfg["right_arm"].root_link_name == "right_base_link"
     assert cfg.robot.solver_cfg["right_arm"].end_link_name == "right_ee_link"
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+
+    prepare_robot_grippers(cfg.robot)
     assert cfg.robot.solver_cfg["right_arm"].tcp[2][3] == pytest.approx(0.155)
     assert list(cfg.robot.init_qpos) == pytest.approx(
         [
@@ -425,23 +431,23 @@ def test_hand_over_profile_binds_unified_left_to_right_transfer() -> None:
     }
     preset = binding.presets[0]
     assert preset.preset_id == "safe"
-    assert preset.motion_policy.strategy == "motion_gen"
-    assert preset.motion_policy.sample_count == 140
+    assert preset.motion_policy.strategy == "ik_interp"
+    assert preset.motion_policy.sample_count == 220
     assert preset.tracking_policy.in_flight is not None
     assert preset.tracking_policy.in_flight.metrics[0].tolerance == pytest.approx(1.0)
     assert preset.tracking_policy.terminal.metrics[0].tolerance == pytest.approx(1.0)
-    assert preset.recovery_policy.max_action_retries == 0
+    assert preset.recovery_policy.max_skill_retries == 0
     assert preset.recovery_policy.goal_rotation_threshold == pytest.approx(0.5)
     assert preset.workflow_recovery_policy.max_recovery_attempts == 2
     assert preset.runner_cfg.minimum_cycle_time == pytest.approx(0.04)
     assert preset.runner_cfg.hold_during_effect_verification is False
     assert preset.runner_cfg.hold_on_completion is False
     assert preset.effect_monitors["hand_over"].params["consecutive_samples"] == 10
-    hand_over_options = preset.action_option_templates["hand_over"]
+    hand_over_options = preset.skill_option_templates["hand_over"]
     assert type(hand_over_options) is HandOverOptions
     assert hand_over_options.pre_grasp_distance == pytest.approx(0.08)
     assert hand_over_options.lift_height == pytest.approx(0.08)
-    assert hand_over_options.hand_interp_steps == 10
+    assert hand_over_options.hand_interp_steps == 40
     assert dict(binding.grounding_providers) == {
         "hand_over": ConfiguredHandOverPoseProvider.provider_id,
     }

@@ -1,0 +1,11 @@
+program_id: slide_open_drawer
+instruction: Open the drawer.
+targets: {}
+program:
+  segment: open_drawer
+  instruction: Grasp the drawer handle and pull the drawer open.
+  steps:
+    registered:
+      call_id: simulation.articulation_link_slide
+      arguments:
+        handle: drawer_handle

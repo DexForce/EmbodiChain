@@ -28,16 +28,21 @@ import pytest
 import torch
 import yaml
 
-from embodichain_benchmarks.motion_generation.config import (
+from embodichain.extensions.benchmarks.motion_generation.config import (
     EmbodimentSpecCfg,
     RobotSpecCfg,
     SuiteCfg,
     load_suite,
     suite_to_dict,
 )
-from embodichain_benchmarks.motion_generation.embodiments import resolve_embodiment
-from embodichain_benchmarks.motion_generation.robots.base import EmbodimentRobotProvider
-from embodichain_benchmarks.motion_generation.runner import BenchmarkRunner
+from embodichain.extensions.benchmarks.motion_generation.embodiments import (
+    resolve_embodiment,
+)
+from embodichain.extensions.benchmarks.motion_generation.robots.base import (
+    EmbodimentRobotProvider,
+)
+from embodichain.extensions.benchmarks.motion_generation.runner import BenchmarkRunner
+from embodichain.extensions.benchmarks.motion_generation.video import VideoRecordCfg
 
 pytestmark = pytest.mark.no_sim
 
@@ -203,13 +208,36 @@ def test_multiple_resources_need_explicit_selection(component: Path) -> None:
     assert EmbodimentRobotProvider(resolved, "secondary").control_part == "custom_arm"
 
 
+@pytest.mark.parametrize(
+    "substeps,headless,video_enabled,requires_native_renderer",
+    [
+        (1, True, False, False),
+        (8, True, False, False),
+        (1, False, False, True),
+        (1, True, True, True),
+    ],
+)
 def test_runner_uses_component_robot_and_preserves_input_suite(
-    component: Path, monkeypatch
+    component: Path,
+    monkeypatch,
+    substeps: int,
+    headless: bool,
+    video_enabled: bool,
+    requires_native_renderer: bool,
 ) -> None:
-    from embodichain_benchmarks.motion_generation import runner as runner_module
+    from embodichain.extensions.benchmarks.motion_generation import (
+        runner as runner_module,
+    )
 
     suite = SuiteCfg.from_dict(_suite_data(str(component)))
-    runner = BenchmarkRunner(suite, suite.planners, device="cpu")
+    suite.protocol.physics_substeps = substeps
+    runner = BenchmarkRunner(
+        suite,
+        suite.planners,
+        device="cpu",
+        headless=headless,
+        video=VideoRecordCfg(enabled=video_enabled),
+    )
     factory = Mock()
     monkeypatch.setattr(runner_module, "SimulationManager", factory)
 
@@ -217,6 +245,13 @@ def test_runner_uses_component_robot_and_preserves_input_suite(
 
     assert sim is factory.return_value
     assert robot is sim.add_robot.return_value
+    sim_cfg = factory.call_args.args[0]
+    assert (
+        factory.call_args.kwargs["requires_native_renderer"] is requires_native_renderer
+    )
+    assert sim_cfg.physics_cfg.num_substeps == substeps
+    assert sim_cfg.physics_dt == 0.01
+    assert suite_to_dict(suite)["protocol"]["physics_substeps"] == substeps
     cfg = sim.add_robot.call_args.kwargs["cfg"]
     assert cfg.uid == "component_robot"
     assert runner.control_part == "custom_arm"
@@ -228,10 +263,20 @@ def test_runner_uses_component_robot_and_preserves_input_suite(
     assert SuiteCfg.from_dict(resolved).embodiment.component == str(component)
 
 
+@pytest.mark.parametrize("substeps", [0, True, 1.5])
+def test_invalid_physics_substeps_fail_before_runtime(
+    component: Path, substeps
+) -> None:
+    data = _suite_data(str(component))
+    data["protocol"]["physics_substeps"] = substeps
+    with pytest.raises(ValueError, match="physics_substeps"):
+        SuiteCfg.from_dict(data)
+
+
 def test_gripper_and_domain_overrides_cannot_change_component_commands(
     component: Path,
 ) -> None:
-    from embodichain_benchmarks.motion_generation.config import DomainCfg
+    from embodichain.extensions.benchmarks.motion_generation.config import DomainCfg
 
     suite = SuiteCfg.from_dict(_suite_data(str(component)))
     suite.tracks[0].config["gripper"] = {"control_part": "wrong"}
@@ -251,9 +296,17 @@ def test_gripper_and_domain_overrides_cannot_change_component_commands(
         runner.robot_provider.configure_track(runner.suite.evaluation_tracks()[0])
 
 
-def test_official_ur5_component_uses_robot_catalog(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("domain_id", ["nominal", "object_xy"])
+def test_official_ur5_component_uses_robot_catalog_and_binds_fingers(
+    monkeypatch,
+    tmp_path: Path,
+    domain_id: str,
+) -> None:
     from embodichain.lab.sim import cfg as cfg_module
-    from embodichain_robots.universal_robots import ur_robot
+    from embodichain.extensions.robots.universal_robots import ur_robot
+    from embodichain.extensions.benchmarks.motion_generation.scenarios._grasp_contacts import (
+        contact_configuration,
+    )
 
     def local_asset(path: str) -> str:
         target = tmp_path / path
@@ -263,20 +316,33 @@ def test_official_ur5_component_uses_robot_catalog(monkeypatch, tmp_path: Path) 
 
     monkeypatch.setattr(ur_robot, "get_data_path", local_asset)
     monkeypatch.setattr(cfg_module, "get_data_path", local_asset)
-    provider = EmbodimentRobotProvider(
-        _resolve(
-            Path(
-                "embodichain_tasks/configs/components/embodiments/ur5_dh_pgi_140_80.yaml"
-            )
-        )
-    )
+    suite = load_suite("atomic_ur5_embodiment")
+    runner = BenchmarkRunner(suite, suite.planners, device="cpu")
+    provider = runner.robot_provider
     cfg = provider.build_cfg()
+    track = next(
+        track
+        for track in runner.suite.evaluation_tracks()
+        if track.domain.id == domain_id
+    )
+    provider.configure_track(track)
 
     assert isinstance(cfg, ur_robot.URRobotCfg)
     assert len(cfg.control_parts["arm"]) == 6
     assert cfg.control_parts["eef"] == ["gripper_finger1_joint_1"]
-    assert cfg.solver_cfg["arm"].tcp[2][3] == pytest.approx(0.15)
+    # These mocked assets validate declarations; effective solver TCP requires
+    # the actual fixed chain, covered by the physical component/TCP test.
+    assert cfg.gripper_bindings["eef"]["defaults"]["default_root_from_tcp"][2][
+        3
+    ] == pytest.approx(0.15)
     assert provider.gripper_config["grasp_qpos"] == [0.024]
+    assert contact_configuration(track.config) == {
+        "eef": (("gripper_finger1_link_1", "gripper_finger2_link_1"), 0.005)
+    }
+    assert track.config["gripper"] == {
+        **provider.gripper_config,
+        "finger_links": ["gripper_finger1_link_1", "gripper_finger2_link_1"],
+    }
 
 
 @pytest.mark.parametrize("component_owned", [False, True])
@@ -290,13 +356,17 @@ def test_suite_validates_case_identity_before_planning_and_persistence(
     component_owned: bool,
     case_identity: str,
 ) -> None:
-    from embodichain_benchmarks.motion_generation import runner as runner_module
-    from embodichain_benchmarks.motion_generation.metrics.trajectory import (
+    from embodichain.extensions.benchmarks.motion_generation import (
+        runner as runner_module,
+    )
+    from embodichain.extensions.benchmarks.motion_generation.metrics.trajectory import (
         make_failure_outcomes,
     )
-    from embodichain_benchmarks.motion_generation.models import BenchmarkCase
-    from embodichain_benchmarks.motion_generation.planners.base import PlannerAdapter
-    from embodichain_benchmarks.motion_generation.scenarios.base import (
+    from embodichain.extensions.benchmarks.motion_generation.models import BenchmarkCase
+    from embodichain.extensions.benchmarks.motion_generation.planners.base import (
+        PlannerAdapter,
+    )
+    from embodichain.extensions.benchmarks.motion_generation.scenarios.base import (
         ScenarioEvaluation,
         ScenarioProvider,
     )
@@ -433,7 +503,7 @@ def test_suite_validates_case_identity_before_planning_and_persistence(
 
 
 def test_example_has_nominal_and_position_domains() -> None:
-    from embodichain_benchmarks.motion_generation.config import (
+    from embodichain.extensions.benchmarks.motion_generation.config import (
         resolve_atomic_batch_sizes,
     )
 
@@ -442,4 +512,4 @@ def test_example_has_nominal_and_position_domains() -> None:
     assert [track.domain.kind for track in tracks] == ["nominal", "robustness"]
     assert [resolve_atomic_batch_sizes(track) for track in tracks] == [[1], [2]]
     assert suite.planners[0].adapter == "curobo"
-    assert "gripper" not in suite.tracks[0].config
+    assert set(suite.tracks[0].config["gripper"]) == {"finger_links"}

@@ -67,7 +67,7 @@ def main() -> None:
             ),
             physics_dt=0.002,
             headless=True,
-            enable_default_plane=False,
+            enable_ground_plane=False,
             render_cfg=RenderCfg(renderer="no-render"),
             enable_entity_gizmo=False,
             robot_ik_gizmo=None,

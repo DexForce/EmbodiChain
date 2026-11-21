@@ -19,9 +19,13 @@ from __future__ import annotations
 from types import SimpleNamespace
 import pytest
 import torch
-from embodichain.lab.sim.sensors.contact_history import ContactHistory
-from embodichain_tasks.locomotion.velocity.contracts.anymal_c.config import load_config
-from embodichain_tasks.locomotion.velocity.contracts.anymal_c.mdp import _reward_terms
+from embodichain.lab.sim.sensors.contact.history import ContactHistory
+from embodichain.extensions.tasks.locomotion.velocity.contracts.anymal_c.config import (
+    load_config,
+)
+from embodichain.extensions.tasks.locomotion.velocity.contracts.anymal_c.mdp import (
+    _reward_terms,
+)
 
 
 def test_anymal_landing_reward_consumes_completed_flight_duration():

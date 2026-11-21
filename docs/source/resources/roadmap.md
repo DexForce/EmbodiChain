@@ -22,55 +22,31 @@ under the area it improves.
 
 | Status | Planned capability |
 | --- | --- |
-| 🚧 | Optimize batch rendering throughput and latency on graphics cards (e.g. RTX series) and compute cards (e.g. A series). |
-| 🔬 | Add 3DGS support for rendering and data generation. |
+| 📌 | Add deformation-aware 3DGS visuals for deformable objects, with batched simulation and reset support. ([#1199](https://github.com/DexForce/EmbodiChain/issues/1199)) |
 
 ### Physics
 
 | Status | Planned capability |
 | --- | --- |
-| 🔬 | Develop a next-generation physics backend with high-accuracy simulation, differentiable dynamics, and neural physical models for end-to-end AI integration. |
+| 🔬 | Advance high-accuracy simulation, differentiable dynamics, and neural physical models for end-to-end AI integration. |
 
 ### Sensors
 
 | Status | Planned capability |
 | --- | --- |
-| 📌 | Add more physical sensor models, such as force sensors, with runnable examples. |
-
-### Motion Generation
-
-| Status | Planned capability |
-| --- | --- |
-| 📌 | Add more advanced motion generation methods with examples. |
-| 🔬 | Add Neural Motion Generation methods. |
-
-### Robot Integration
-
-| Status | Planned capability |
-| --- | --- |
-| 📌 | Add support for more robot models, including LeRobot and Unitree H1/G1. |
+| 🚧 | Support third-party sensor packages with public lifecycle and sampling contracts, and add reference sensors such as encoders and IMUs. ([#835](https://github.com/DexForce/EmbodiChain/issues/835), [#1174](https://github.com/DexForce/EmbodiChain/issues/1174)) |
 
 ## Data Pipeline
 
 | Status | Planned capability |
 | --- | --- |
-| 📌 | Release a Real2Sim pipeline for automatic data generation and scaling from real-world seeding priors. |
-| 🚧 | Release a generative simulation system for automated expert trajectory, asset, and scene-layout generation. |
+| 🚧 | Enable agent-driven GenSim workflows for inspection, validation, execution, observation, and revision within a fixed budget. ([#1198](https://github.com/DexForce/EmbodiChain/issues/1198), [#1122](https://github.com/DexForce/EmbodiChain/issues/1122), [#716](https://github.com/DexForce/EmbodiChain/issues/716)) |
 
 ## Models and Training Infrastructure
 
 | Status | Planned capability |
 | --- | --- |
-| 🚧 | Release APG training infrastructure. |
-| 🚧 | Release motion-control training infrastructure. |
-
-## Embodied Tasks
-
-| Status | Planned capability |
-| --- | --- |
-| 🚧 | Add more benchmark tasks for EmbodiChain. |
-| 📌 | Add more tasks with reinforcement learning support. |
-| 🚧 | Add more environment tasks involving deformable objects that demonstrate the data generation pipeline. |
+| 🚧 | Provide configuration-driven world-model and APG policy training, with complete recovery, standard policy export, and independent physical evaluation. ([#1176](https://github.com/DexForce/EmbodiChain/issues/1176)) |
 
 ## Extending This Roadmap
 

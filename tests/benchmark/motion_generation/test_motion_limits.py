@@ -26,25 +26,37 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg, load_suite
-from embodichain_benchmarks.motion_generation.limits import (
+from embodichain.extensions.benchmarks.motion_generation.config import (
+    PlannerSpecCfg,
+    load_suite,
+)
+from embodichain.extensions.benchmarks.motion_generation.limits import (
     resolve_dynamic_limit,
     resolve_robot_velocity_limits,
     resolve_velocity_limits,
 )
-from embodichain_benchmarks.motion_generation.models import BenchmarkCase
-from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
-from embodichain_benchmarks.motion_generation.planners.curobo import CuroboAdapter
-from embodichain_benchmarks.motion_generation.planners.ik_interpolate import (
+from embodichain.extensions.benchmarks.motion_generation.models import BenchmarkCase
+from embodichain.extensions.benchmarks.motion_generation.planners.base import (
+    PlannerContext,
+)
+from embodichain.extensions.benchmarks.motion_generation.planners.curobo import (
+    CuroboAdapter,
+)
+from embodichain.extensions.benchmarks.motion_generation.planners.ik_interpolate import (
     IkInterpolateAdapter,
 )
-from embodichain_benchmarks.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
-from embodichain_benchmarks.motion_generation.planners.toppra import ToppraAdapter
+from embodichain.extensions.benchmarks.motion_generation.planners.nmg_onnx import (
+    NmgOnnxAdapter,
+)
+from embodichain.extensions.benchmarks.motion_generation.planners.toppra import (
+    ToppraAdapter,
+)
 
 
 def _robot() -> SimpleNamespace:
     """Provide reordered control joints and a speed-limited mimic follower."""
     caps = torch.tensor([[4.0, 3.0, 1.0], [2.0, 5.0, 0.6]])
+    position_limits = torch.tensor([[[-2.0, 2.0]] * 3]).repeat(2, 1, 1)
     return SimpleNamespace(
         uid="robot",
         device=torch.device("cpu"),
@@ -54,6 +66,9 @@ def _robot() -> SimpleNamespace:
         mimic_parents=[0],
         mimic_multipliers=[-2.0],
         get_joint_ids=lambda name: [1, 0],
+        get_qpos_limits=lambda *, joint_ids, env_ids=None: (
+            position_limits if env_ids is None else position_limits[env_ids]
+        )[:, joint_ids],
         get_qvel_limits=lambda *, name=None, joint_ids=None: caps[
             :, [1, 0] if name else joint_ids
         ],
@@ -132,6 +147,97 @@ def test_curobo_maps_control_order_to_active_joint_order() -> None:
     limits = _adapter(CuroboAdapter, velocity=2.0)._backend_motion_limits()
     assert limits["max_velocity"] == pytest.approx([0.3, 2.0])
     assert limits["max_acceleration"] == [6.0, 8.0]
+
+
+def test_curobo_dual_arm_budget_caps_both_kinematic_chains() -> None:
+    """A right-arm Atomic request must not inherit cuRobo's looser defaults."""
+    parts = {"left_arm": [0], "right_arm": [1]}
+    caps = torch.tensor([[0.15, 3.0]])
+    robot = SimpleNamespace(
+        cfg=SimpleNamespace(solver_cfg={part: object() for part in parts}),
+        joint_names=["left_joint", "right_joint"],
+        active_joint_ids=[0, 1],
+        mimic_ids=[],
+        mimic_parents=[],
+        mimic_multipliers=[],
+        get_joint_ids=lambda part: parts[part],
+        get_qvel_limits=lambda *, name=None, joint_ids=None: caps[
+            :, parts[name] if name else joint_ids
+        ],
+    )
+    adapter = CuroboAdapter(
+        PlannerSpecCfg(id="dual", adapter="curobo", role="primary_baseline"),
+        PlannerContext(
+            robot=robot,
+            control_part="left_arm",
+            device=torch.device("cpu"),
+            sample_interval=10,
+            joint_velocity_limit_rad_s=0.2,
+            joint_acceleration_limit_rad_s2=0.5,
+        ),
+    )
+    limits = adapter._backend_motion_limits()
+    assert limits["max_velocity"] == pytest.approx([0.15, 0.2])
+    assert limits["max_acceleration"] == [0.5, 0.5]
+
+
+def test_curobo_atomic_policy_preserves_prepared_backend_budget() -> None:
+    """Scenario defaults must not replace suite vectors or invalidate warmup."""
+    from embodichain.lab.sim.atomic_skills import (
+        SkillBinding,
+        SkillInvocation,
+        MotionPolicy,
+    )
+    from embodichain.lab.sim.motion.motion_generator import MotionGenerator
+    from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_policy import (
+        with_plan_options,
+    )
+
+    adapter = _adapter(CuroboAdapter, velocity=2.0)
+    invocation = SkillInvocation(
+        skill_id="hand_over",
+        goal=None,
+        binding=SkillBinding(owner_id="budget_test", endpoints={}),
+        motion_policy=MotionPolicy(strategy="motion_gen"),
+    )
+    updated = with_plan_options(invocation, adapter.atomic_plan_options())
+    motion_options = updated.motion_policy.to_motion_gen_options(
+        start_qpos=torch.zeros(1, 2),
+        control_part="arm",
+    )
+    generator = object.__new__(MotionGenerator)
+    generator.planner = SimpleNamespace(cfg=SimpleNamespace(planner_type="curobo"))
+    resolved = generator.resolve_plan_options(
+        motion_options.plan_opts,
+        sample_count=motion_options.sample_count,
+        velocity_limit=motion_options.velocity_limit,
+        acceleration_limit=motion_options.acceleration_limit,
+    )
+    # None tells CuroboPlanner.plan() to retain the exact configured vectors
+    # used in prepare_backend(), including separate locked-joint defaults.
+    assert resolved.max_velocity is None
+    assert resolved.max_acceleration is None
+    assert invocation.motion_policy.acceleration_limit == 0.5
+
+
+def test_curobo_benchmark_forwards_fast_settings(monkeypatch) -> None:
+    """A/B suite settings must reach the production planner configuration."""
+    from embodichain.extensions.benchmarks.motion_generation.planners import curobo
+
+    generator = Mock()
+    monkeypatch.setattr(curobo, "MotionGenerator", generator)
+    adapter = _adapter(
+        CuroboAdapter,
+        velocity=2.0,
+        config={
+            "graph_planner_algorithm": "prm",
+            "enable_timeopt": False,
+        },
+    )
+    adapter.build()
+    cfg = generator.call_args.args[0].planner_cfg
+    assert cfg.graph_planner_algorithm == "prm"
+    assert cfg.enable_timeopt is False
 
 
 def test_joint_interpolation_uses_frozen_targets_without_ik() -> None:
@@ -220,7 +326,7 @@ def test_explicit_zero_speed_cap_is_preserved_and_moving_path_fails() -> None:
 @pytest.mark.parametrize(
     "path",
     sorted(
-        Path("extensions/embodichain_benchmarks/motion_generation/suites").glob(
+        Path("embodichain/extensions/benchmarks/motion_generation/suites").glob(
             "*.yaml"
         )
     ),
@@ -244,7 +350,7 @@ def test_shipped_suites_share_explicit_timed_planning_budgets(path: Path) -> Non
 
 def test_atomic_migration_preserves_existing_toppra_budgets() -> None:
     """Moving budgets to protocol must not accelerate existing Atomic tasks."""
-    for path in Path("extensions/embodichain_benchmarks/motion_generation/suites").glob(
+    for path in Path("embodichain/extensions/benchmarks/motion_generation/suites").glob(
         "atomic*.yaml"
     ):
         suite = load_suite(path)
@@ -304,7 +410,11 @@ def test_toppra_joint_cases_preserve_frozen_configurations_without_ik(
     )
     result = adapter.plan(case)
     assert result.success.tolist() == [True]
-    torch.testing.assert_close(result.positions[:, 0], case.start_qpos)
-    torch.testing.assert_close(result.positions[:, -1], targets[:, -1])
-    distances = torch.cdist(targets, result.positions).amin(dim=-1)
+    assert result.positions.dtype == torch.float64
+    expected_targets = targets.to(torch.float64)
+    torch.testing.assert_close(
+        result.positions[:, 0], case.start_qpos.to(torch.float64)
+    )
+    torch.testing.assert_close(result.positions[:, -1], expected_targets[:, -1])
+    distances = torch.cdist(expected_targets, result.positions).amin(dim=-1)
     assert bool((distances < 0.01).all())

@@ -15,6 +15,8 @@
 # ----------------------------------------------------------------------------
 
 from __future__ import annotations
+from embodichain.lab.gym.utils.gym_utils import _init_raw_rollout
+from tensordict import TensorDict
 
 import hashlib
 from pathlib import Path
@@ -27,12 +29,15 @@ def test_component_snapshot_tracks_referenced_content(tmp_path: Path) -> None:
 
     (tmp_path / "task.yaml").write_text(
         "id: Test-v1\nenvironment: {component: env.yaml}\nobjective: {component: objective.yaml}\n"
+        "task_program:\n  execution_policy:\n    component: policy.yaml\n"
+        "    overrides: {motion: {sample_count: 60}}\n"
     )
     (tmp_path / "env.yaml").write_text("physics: default\n")
+    (tmp_path / "policy.yaml").write_text("policy_id: base\n")
     objective = tmp_path / "objective.yaml"
     objective.write_text("object_uid: cube\n")
     snapshot = _component_snapshot(tmp_path / "task.yaml")
-    assert set(snapshot) == {"task.yaml", "env.yaml", "objective.yaml"}
+    assert set(snapshot) == {"task.yaml", "env.yaml", "objective.yaml", "policy.yaml"}
     assert (
         snapshot["objective.yaml"]["sha256"]
         == hashlib.sha256(objective.read_bytes()).hexdigest()
@@ -266,6 +271,9 @@ def completed_runner(runner_case, monkeypatch):
     from embodichain.lab.gym.envs import EmbodiedEnv, demo
     from embodichain.lab.gym.envs.types import ControllerAction
     from embodichain.lab.gym.envs.expert_trajectory import build_expert_action_spec
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.managers.observation_types import ObservationFrame
+    from embodichain.lab.gym.envs.managers.observation_manager import ObservationManager
 
     case = runner_case
 
@@ -275,6 +283,7 @@ def completed_runner(runner_case, monkeypatch):
         _active_qpos_command = EmbodiedEnv._active_qpos_command
         _mask_controller_demo_action = EmbodiedEnv._mask_controller_demo_action
         _write_trajectory_step = EmbodiedEnv._write_trajectory_step
+        _record_initial_observation = EmbodiedEnv._record_initial_observation
         _write_episode_rollout_step = EmbodiedEnv._write_episode_rollout_step
         _hook_after_sim_step = EmbodiedEnv._hook_after_sim_step
         _update_episode_success_status = EmbodiedEnv._update_episode_success_status
@@ -323,6 +332,7 @@ def completed_runner(runner_case, monkeypatch):
             self._demo_no_auto_reset = False
             self._active_task_program_bridge = SimpleNamespace(program_completed=True)
             self._demo_active_segment_start_steps = torch.zeros(1, dtype=torch.long)
+            self.episode_context = EpisodeContext(1)
             self.reset_seeds = []
             self.closed_rollout_steps = None
             self.physical_objective = SimpleNamespace(
@@ -339,12 +349,38 @@ def completed_runner(runner_case, monkeypatch):
         def reset(self, *, seed=None, options=None):
             self.reset_seeds.append(seed)
             self.cfg.seed = 123
-            self._traj_steps = torch.zeros(1, dtype=torch.long)
+            self.episode_context._begin_episode([0])
+            self.episode_context._finish_initialization([0])
+            self.episode_context = self.episode_context
+            self.observation_manager = ObservationManager({}, self)
+            self._rollout_storage = TensorDict({}, batch_size=[1])
+            if self.observation_manager._env._rollout_storage is None:
+                self.observation_manager._env._rollout_storage = TensorDict(
+                    {},
+                    batch_size=[
+                        len(self.observation_manager._env.episode_context.episode_ids)
+                    ],
+                )
+            _init_raw_rollout(
+                self.observation_manager._env._rollout_storage,
+                self.observation_manager._env.episode_context,
+                **dict(
+                    fields={},
+                    actions=self._traj_buffer["actions"],
+                ),
+            )
+            self.observation_manager.bind_rollout_storage(
+                self.observation_manager._env._rollout_storage
+            )
+            self._traj_steps = self._rollout_storage["raw_steps"]
             self.rollout_steps = torch.zeros(1, dtype=torch.long)
             self._elapsed_steps = torch.zeros(1, dtype=torch.long)
             self._demo_steps = torch.zeros(1, dtype=torch.long)
             self._demo_active_mask = torch.ones(1, dtype=torch.bool)
             self.episode_success_status = torch.zeros(1, dtype=torch.bool)
+            EmbodiedEnv._record_initial_observation(
+                self, self._observation_frame(), [0]
+            )
             return {}, {}
 
         def get_obs(self):
@@ -353,17 +389,34 @@ def completed_runner(runner_case, monkeypatch):
         def get_info(self):
             return {}
 
-        def _seed_trajectory_states(self, env_ids):
-            pass
+        def _observation_frame(self):
+            return ObservationFrame(
+                {},
+                {},
+                self.episode_context.episode_ids,
+                int(self._elapsed_steps[0]),
+                episode_owner=self.episode_context,
+            )
+
+        def _capture_observation(self):
+            return self._observation_frame()
 
         def _seed_expert_observations(self, obs, env_ids):
             pass
 
-        def step(self, action):
+        def step(self, action, **kwargs):
             command = self._preprocess_action(action)
             self._elapsed_steps += 1
             done = torch.zeros(1, dtype=torch.bool)
-            self._hook_after_sim_step({}, command, torch.zeros(1), done, {})
+            self._hook_after_sim_step(
+                {},
+                command,
+                torch.zeros(1),
+                done,
+                {},
+                observation_frame=self._observation_frame(),
+                **kwargs,
+            )
             return {}, torch.zeros(1), done, done, {}
 
         def save_trajectory(self, path):
@@ -474,10 +527,10 @@ def test_tail_failure_restores_demo_recording_guards(completed_runner, monkeypat
     case = completed_runner
     original_step = case.env.step
 
-    def fail_tail(action):
+    def fail_tail(action, **kwargs):
         if int(case.env._elapsed_steps[0]) == 1:
             raise ValueError("settle failed")
-        return original_step(action)
+        return original_step(action, **kwargs)
 
     monkeypatch.setattr(case.env, "step", fail_tail)
     with pytest.raises(ValueError, match="settle failed"):

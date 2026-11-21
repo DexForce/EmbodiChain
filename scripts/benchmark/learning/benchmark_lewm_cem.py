@@ -28,7 +28,12 @@ import time
 
 import torch
 
-from embodichain_models.dynamics.lewm import LeWM, LeWMCfg, LeWMCEMCfg, LeWMCEMPlanner
+from embodichain.extensions.models.dynamics.lewm import (
+    LeWM,
+    LeWMCfg,
+    LeWMCEMCfg,
+    LeWMCEMPlanner,
+)
 
 
 def measure(

@@ -1,0 +1,917 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Place atomic skill implementation."""
+
+from __future__ import annotations
+
+from embodichain.lab.sim.atomic_skills.continuation import PlanContinuationResult
+from embodichain.lab.sim.atomic_skills.primitives.contact import (
+    ContactPlaceGoal,
+    _plan_contact_phase,
+    _continue_contact_phase,
+    _begin_contact_phase,
+)
+
+from dataclasses import dataclass, field
+import math
+from typing import ClassVar, Literal
+
+import torch
+
+from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
+
+from embodichain.lab.sim.atomic_skills.primitives._helpers import (
+    arm_qpos_from_state,
+    plan_named_arm_trajectory,
+    require_shared_task_state_key,
+    resolve_object_target,
+    split_joint_trajectory_at_pose,
+)
+from embodichain.lab.sim.atomic_skills.affordance import AssembleAffordance
+from embodichain.lab.sim.atomic_skills.affordance_sampling import AffordanceSample
+from embodichain.lab.sim.atomic_skills.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_skills.control import (
+    GRASP_COMMAND,
+    OPEN_COMMAND,
+    JointPositionCommand,
+)
+from embodichain.lab.sim.atomic_skills.core import AtomicSkill
+from embodichain.lab.sim.atomic_skills.effects import StateDelta
+from embodichain.lab.sim.atomic_skills.goals import (
+    PoseGoalValue,
+    SceneEntityPose,
+    resolve_pose_goal,
+    validate_pose_goal,
+)
+from embodichain.lab.sim.atomic_skills.invocation import (
+    SkillOptions,
+    ResolvedSkillRequest,
+)
+from embodichain.lab.sim.atomic_skills.nominal import NominalMotionSource
+from embodichain.lab.sim.atomic_skills.plans import (
+    SkillPlan,
+    PlannerDiagnostics,
+    TimedTrajectory,
+)
+from embodichain.lab.sim.atomic_skills.requirements import (
+    CARTESIAN_POSE_CAPABILITY,
+    FORWARD_KINEMATICS_CAPABILITY,
+    SkillBindingContract,
+)
+from embodichain.lab.sim.atomic_skills.state import PlanningContext
+from embodichain.lab.sim.atomic_skills.trajectory_ops import (
+    build_pose_plan_states,
+    interpolate_hand_qpos,
+    resolve_pose_target,
+    split_three_segments,
+)
+from embodichain.lab.sim.atomic_skills.primitives._binding_contracts import (
+    make_manipulation_slot,
+)
+
+TcpSymmetry = Literal["none", "z_roll_180"]
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class PlaceGoal:
+    """End-effector release-pose target used by :class:`Place`."""
+
+    xpos: PoseGoalValue
+    """Target end-effector release pose.
+
+    Accepts ``(4, 4)``, ``(num_envs, 4, 4)``, or
+    ``(num_envs, n_waypoint, 4, 4)``.
+    """
+
+    tcp_symmetry: TcpSymmetry = "none"
+    """Optional TCP-frame symmetry allowed by the placement semantics.
+
+    ``"none"`` preserves the pose exactly. ``"z_roll_180"`` lets placement
+    choose between the pose and its TCP z-roll 180 equivalent, which flips TCP
+    x/y while preserving TCP z and translation.
+    """
+
+    def __post_init__(self) -> None:
+        validate_pose_goal(self.xpos, "xpos", allow_waypoints=True)
+        if self.tcp_symmetry not in ("none", "z_roll_180"):
+            raise ValueError(
+                "tcp_symmetry must be one of 'none' or 'z_roll_180', "
+                f"but got {self.tcp_symmetry!r}"
+            )
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class AssembleGoal:
+    """Place a held assemble object onto a base object at a relative pose.
+
+    The base object pose is a late-bound :class:`SceneEntityPose`. The assemble
+    object's target pose is ``base_pose @ assemble_to_base_pose``. The held-object transform
+    (``object_to_eef``) is read from :class:`PlanningContext` for the place
+    control part, which a prior :class:`PickUp` populates.
+    """
+
+    affordance: AssembleAffordance
+    """Assembly affordance anchoring the assemble object to the base object."""
+
+    base_pose: SceneEntityPose
+    """Late-bound base-object pose used for snapshot-consistent planning."""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.affordance, AssembleAffordance):
+            raise TypeError("affordance must be an AssembleAffordance instance.")
+        if not isinstance(self.base_pose, SceneEntityPose):
+            raise TypeError("base_pose must be a SceneEntityPose.")
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class PlaceOptions(SkillOptions):
+    """Per-invocation placement behavior."""
+
+    hand_interp_steps: int = 5
+    """Number of waypoints for the gripper-open interpolation segment."""
+
+    release_settle_steps: int = 0
+    """Fully open hold frames before retracting the end-effector."""
+
+    release_settle_duration: float = field(default=0.0, kw_only=True)
+    """Minimum physical seconds to hold open in a newly planned native Place.
+
+    Rounded upward to control intervals and combined with release_settle_steps
+    using the larger hold. This is actuation time, not an acceptance tolerance.
+    External nominal sources retain their authored release timing unchanged.
+    """
+
+    lift_height: float = 0.1
+    """Height (m) to retract the end-effector after opening the gripper."""
+
+    max_approach_retract_z: float | None = None
+    """Optional maximum world-frame TCP z for approach and retract poses (m)."""
+
+    cartesian_waypoint_count: int = 1
+    """Number of fixed-orientation Cartesian keyframes per translation segment."""
+
+    cartesian_approach: bool = field(default=False, kw_only=True)
+    """Follow the approach with sampled Cartesian poses under joint motion limits.
+
+    Mutually exclusive with explicit ``MotionPolicy.phase_paths``.
+    """
+
+    preserve_current_object_orientation: bool = False
+    """Keep the held object's observed world orientation at the place target."""
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.release_settle_duration, bool)
+            or not isinstance(self.release_settle_duration, (int, float))
+            or not math.isfinite(self.release_settle_duration)
+            or self.release_settle_duration < 0
+        ):
+            raise ValueError("release_settle_duration must be finite and nonnegative.")
+        if type(self.cartesian_approach) is not bool:
+            raise TypeError("cartesian_approach must be boolean.")
+        if self.hand_interp_steps < 1:
+            raise ValueError("hand_interp_steps must be at least 1.")
+        if type(self.release_settle_steps) is not int or self.release_settle_steps < 0:
+            raise ValueError("release_settle_steps must be a non-negative integer.")
+        if self.lift_height < 0.0:
+            raise ValueError("lift_height must be non-negative.")
+        if self.cartesian_waypoint_count < 1:
+            raise ValueError("cartesian_waypoint_count must be at least 1.")
+        if type(self.preserve_current_object_orientation) is not bool:
+            raise TypeError("preserve_current_object_orientation must be a bool.")
+
+
+class Place(AtomicSkill[PlaceGoal | AssembleGoal | ContactPlaceGoal, PlaceOptions]):
+    """Lower the held object to a place pose, open the gripper, retract.
+
+    The :class:`PlaceGoal` may carry either a single waypoint
+    ``(num_envs, 4, 4)`` (or a broadcastable ``(4, 4)``) or a multi-waypoint
+    trajectory ``(num_envs, n_waypoint, 4, 4)``. In the multi-waypoint case the
+    approach segment visits every waypoint in order; approaching from above the
+    first waypoint, descending through each waypoint, then opening the gripper
+    at the final waypoint and retracting to above the last waypoint. Starting
+    joint positions are inherited from :class:`PlanningContext`.
+
+    An :class:`AssembleGoal` replaces the explicit EEF pose with an assembly
+    affordance: the place pose is derived from the base object's snapshot pose
+    and ``assemble_to_base_pose``, converted to an
+    EEF pose through the held object's ``object_to_eef`` (read from
+    :class:`PlanningContext`).
+    """
+
+    skill_id: ClassVar[str] = "place"
+    GoalType: ClassVar[type | tuple[type, ...]] = (
+        PlaceGoal,
+        AssembleGoal,
+        ContactPlaceGoal,
+    )
+    OptionsType: ClassVar[type] = PlaceOptions
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            make_manipulation_slot(
+                "primary",
+                motion_capabilities=frozenset(
+                    {
+                        CARTESIAN_POSE_CAPABILITY,
+                        FORWARD_KINEMATICS_CAPABILITY,
+                    }
+                ),
+                grasp_commands={
+                    OPEN_COMMAND: JointPositionCommand,
+                    GRASP_COMMAND: JointPositionCommand,
+                },
+            ),
+        ),
+    )
+
+    def continue_plan(
+        self,
+        request: ResolvedSkillRequest,
+        context: PlanningContext,
+        plan: SkillPlan,
+        active_mask: torch.Tensor,
+    ) -> PlanContinuationResult:
+        return _continue_contact_phase(self, request, context, plan, active_mask)
+
+    def on_plan_installed(
+        self, request: ResolvedSkillRequest, context: PlanningContext, plan: SkillPlan
+    ) -> None:
+        _begin_contact_phase(self, request, context, plan)
+
+    def _scene_dependencies(
+        self,
+        request: ResolvedSkillRequest[
+            PlaceGoal | AssembleGoal | ContactPlaceGoal, PlaceOptions
+        ],
+    ) -> tuple[str, ...]:
+        """Include an explicitly snapshot-grounded assembly base."""
+        dependencies = set(super()._scene_dependencies(request))
+        target = request.goal
+        if isinstance(target, AssembleGoal) and target.base_pose is not None:
+            dependencies.add(target.base_pose.entity_id)
+        return tuple(sorted(dependencies))
+
+    def _plan(
+        self,
+        request: ResolvedSkillRequest[
+            PlaceGoal | AssembleGoal | ContactPlaceGoal, PlaceOptions
+        ],
+        context: PlanningContext,
+    ) -> SkillPlan:
+        """Plan approach, release, and retract without committing detachment."""
+        if isinstance(request.goal, ContactPlaceGoal):
+            return _plan_contact_phase(self, request, context)
+        target = request.goal
+        options = request.skill_options
+        binding = request.binding
+        motion = binding.endpoint("primary", "motion")
+        grasp = binding.endpoint("primary", "grasp")
+        motion_target = motion.require_target(JointPositionTarget)
+        grasp_target = grasp.require_target(JointPositionTarget)
+        task_state_key = require_shared_task_state_key(
+            motion,
+            grasp,
+            participant="Place primary participant",
+        )
+        control_part = motion_target.control_part
+        arm_joint_ids = list(motion_target.joint_ids)
+        hand_joint_ids = list(grasp_target.joint_ids)
+        hand_open_qpos = grasp.joint_positions(
+            OPEN_COMMAND,
+            num_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        state = context
+        held_mask = context.task.held_object_mask(task_state_key)
+        exclusive_mask = context.task.exclusive_held_object_mask(task_state_key)
+        eligible = (
+            exclusive_mask
+            if isinstance(target, AssembleGoal)
+            else ~held_mask | exclusive_mask
+        )
+        place_xpos, affordance_sample = self._resolve_place_xpos(
+            target, state, task_state_key, request=request
+        )
+        if affordance_sample is not None:
+            eligible &= affordance_sample.success
+        if not eligible.any():
+            return self.failed_plan(
+                request,
+                context,
+                message="Held object is shared with another control part.",
+            )
+        if place_xpos.dim() == 3:
+            place_xpos = place_xpos.unsqueeze(1)
+
+        start_arm_qpos = arm_qpos_from_state(state, arm_joint_ids)
+        start_hand_qpos = state.last_qpos[:, hand_joint_ids]
+        if isinstance(target, PlaceGoal) and target.tcp_symmetry == "z_roll_180":
+            place_xpos = self._select_tcp_symmetric_place_variant(
+                place_xpos, start_arm_qpos, control_part
+            )
+        n_down, n_open, n_back = split_three_segments(
+            request.motion_policy.sample_count,
+            options.hand_interp_steps,
+            first_segment_name="approach",
+            third_segment_name="back",
+        )
+
+        approach_xpos = self._lifted_pose(place_xpos[:, 0], options)
+        retract_xpos = self._lifted_pose(place_xpos[:, -1], options)
+
+        start_xpos = self.robot.compute_fk(
+            qpos=start_arm_qpos,
+            name=control_part,
+            to_matrix=True,
+            **(
+                {"env_ids": self.planning_services.env_ids}
+                if self.planning_services.env_ids is not None
+                else {}
+            ),
+        )
+        down_xpos = torch.cat([approach_xpos.unsqueeze(1), place_xpos], dim=1)
+        if not options.cartesian_approach:
+            down_xpos = self._translation_keyframes(start_xpos, down_xpos, options)
+
+        back_xpos = self._translation_keyframes(
+            place_xpos[:, -1], retract_xpos.unsqueeze(1), options
+        )
+        motion_options = request.motion_policy.to_motion_gen_options(
+            start_qpos=start_arm_qpos,
+            control_part=control_part,
+            sample_count=n_down + n_back,
+            interpolation_dt=context.control_dt,
+        )
+        if request.motion_policy.strategy == "motion_gen":
+            # Keep the native combined path for the pose-based split. The
+            # motion generator resolves backend defaults when no explicit
+            # planner options were supplied.
+            motion_options.sample_count = None
+        if options.cartesian_approach:
+            if request.motion_policy.phase_paths:
+                raise ValueError(
+                    "cartesian_approach and phase_paths are mutually exclusive."
+                )
+            if request.motion_policy.strategy != "ik_interp":
+                raise ValueError("cartesian_approach requires strategy='ik_interp'.")
+            from embodichain.lab.sim.motion.ik import sample_cartesian_targets
+
+            required = build_pose_plan_states(down_xpos)
+            if request.motion_policy.interpolation_mode == "adaptive":
+                n_down = max(n_down, len(required) + 1)
+            if n_down - 1 < len(required):
+                raise ValueError(
+                    "Cartesian approach sampling needs one sample per target."
+                )
+            remaining = n_down - 1
+            current_qpos, current_xpos = start_arm_qpos, start_xpos
+            down_success = eligible.clone()
+            legs = []
+            for index, target_pose in enumerate(required):
+                target_pose = build_pose_plan_states(
+                    torch.where(
+                        down_success[:, None, None], target_pose.xpos, current_xpos
+                    )
+                )[0]
+                intervals = remaining // (len(required) - index)
+                sampled = sample_cartesian_targets(
+                    current_xpos, [target_pose], intervals + 1
+                )
+                leg_success, leg = plan_named_arm_trajectory(
+                    self.motion_generator,
+                    control_part,
+                    current_qpos,
+                    torch.stack([state.xpos for state in sampled], dim=1),
+                    intervals + 1,
+                    request.motion_policy,
+                    context.control_dt,
+                    active_mask=down_success,
+                    cartesian_linear=True,
+                )
+                down_success &= leg_success
+                # Retain both adjacent endpoints: the one-interval stop keeps
+                # independently qualified acceleration bounds valid at corners.
+                legs.append(leg)
+                if not bool(down_success.any()):
+                    break
+                current_qpos = leg[:, -1]
+                if index + 1 < len(required):
+                    current_xpos = self.robot.compute_fk(
+                        qpos=current_qpos,
+                        name=control_part,
+                        to_matrix=True,
+                        **(
+                            {"env_ids": self.planning_services.env_ids}
+                            if self.planning_services.env_ids is not None
+                            else {}
+                        ),
+                    )
+                remaining -= intervals
+            down_arm = torch.cat(legs, dim=1)
+            if bool(down_success.any()):
+                hold_xpos = self.robot.compute_fk(
+                    qpos=down_arm[:, -1],
+                    name=control_part,
+                    to_matrix=True,
+                    **(
+                        {"env_ids": self.planning_services.env_ids}
+                        if self.planning_services.env_ids is not None
+                        else {}
+                    ),
+                )
+                back_xpos = torch.where(
+                    down_success[:, None, None, None], back_xpos, hold_xpos[:, None]
+                )
+                back_success, back_arm = plan_named_arm_trajectory(
+                    self.motion_generator,
+                    control_part,
+                    down_arm[:, -1],
+                    back_xpos,
+                    n_back,
+                    request.motion_policy,
+                    context.control_dt,
+                    active_mask=down_success,
+                )
+            else:
+                back_success = down_success.clone()
+                back_arm = down_arm[:, -1:].expand(-1, n_back, -1).clone()
+            motion_success = down_success & back_success
+        else:
+            paths = request.motion_policy.phase_paths
+            if any(name in paths for name in ("pre_place", "place", "retreat")):
+                motion_options.waypoint_modes = (
+                    *(paths.get("pre_place", "joint"),)
+                    * options.cartesian_waypoint_count,
+                    *(paths.get("place", "joint"),)
+                    * (down_xpos.shape[1] - options.cartesian_waypoint_count),
+                    *(paths.get("retreat", "joint"),) * back_xpos.shape[1],
+                )
+            motion_result = self.motion_generator.generate(
+                build_pose_plan_states(torch.cat([down_xpos, back_xpos], dim=1)),
+                options=motion_options,
+            )
+            assert isinstance(motion_result.success, torch.Tensor)
+            assert motion_result.positions is not None
+            assert motion_result.dt is not None
+            down_arm, back_arm = split_joint_trajectory_at_pose(
+                motion_result.positions,
+                place_xpos[:, -1],
+                robot=self.robot,
+                control_part=control_part,
+                first_sample_count=n_down,
+                second_sample_count=n_back,
+                dt=motion_result.dt,
+                control_dt=context.control_dt,
+                arrival_indices=motion_result.waypoint_indices,
+                split_target_index=down_xpos.shape[1] - 1,
+                success=motion_result.success,
+                env_ids=self.planning_services.env_ids,
+            )
+            motion_success = motion_result.success
+        n_down = down_arm.shape[1]
+        n_back = back_arm.shape[1]
+        reach_arm_qpos = down_arm[:, -1, :]
+        success = motion_success & eligible
+
+        # A contact-blocked measured finger position does not retain the
+        # closing effort of its grasp target. Continue that target for held
+        # rows; free rows retain their observed hand state until release.
+        hand_grasp_qpos = grasp.joint_positions(
+            GRASP_COMMAND,
+            num_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        hold_hand_qpos = torch.where(
+            held_mask.unsqueeze(1), hand_grasp_qpos, start_hand_qpos
+        )
+        hand_open_path = interpolate_hand_qpos(
+            hold_hand_qpos, hand_open_qpos, n_waypoints=n_open
+        )
+
+        n_settle = max(
+            options.release_settle_steps,
+            math.ceil(options.release_settle_duration / context.require_control_dt()),
+        )
+        open_start = n_down
+        settle_start = open_start + n_open
+        back_start = settle_start + n_settle
+        full = torch.empty(
+            (self.num_envs, back_start + n_back, self.robot_dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        full[:, :, :] = state.last_qpos.unsqueeze(1)
+        full[:, :n_down, arm_joint_ids] = down_arm
+        full[:, :n_down, hand_joint_ids] = hold_hand_qpos.unsqueeze(1)
+        full[:, open_start:settle_start, arm_joint_ids] = reach_arm_qpos.unsqueeze(1)
+        full[:, open_start:settle_start, hand_joint_ids] = hand_open_path
+        if n_settle:
+            full[:, settle_start:back_start, arm_joint_ids] = reach_arm_qpos.unsqueeze(
+                1
+            )
+            full[:, settle_start:back_start, hand_joint_ids] = hand_open_qpos.unsqueeze(
+                1
+            )
+        full[:, back_start:, arm_joint_ids] = back_arm
+        full[:, back_start:, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
+
+        return self._assemble_place_plan(
+            request,
+            context,
+            success=success,
+            trajectory=TimedTrajectory.from_uniform_step(
+                full,
+                env_ids=context.env_ids,
+                step_dt=context.require_control_dt(),
+            ),
+            segment_lengths={
+                "approach": n_down,
+                "release": n_open + n_settle,
+                "retract": n_back,
+            },
+            affordance_sample=affordance_sample,
+            replannable=True,
+            provenance=None,
+        )
+
+    def _plan_from_nominal(
+        self,
+        request: ResolvedSkillRequest[
+            PlaceGoal | AssembleGoal | ContactPlaceGoal, PlaceOptions
+        ],
+        context: PlanningContext,
+        nominal_source: NominalMotionSource,
+    ) -> SkillPlan:
+        """Assemble external placement without replanning the source path."""
+        target = self.require_goal(request)
+        if isinstance(request.goal, ContactPlaceGoal):
+            raise ValueError("Observed contact paths cannot replay nominal motion.")
+        if not isinstance(target, PlaceGoal):
+            raise ValueError("external placement currently requires a direct PlaceGoal")
+        motion = self._validate_nominal_motion(
+            request,
+            context,
+            nominal_source,
+            segments=("approach", "release", "retract"),
+        )
+        if not motion.success.any():
+            return self.failed_plan(
+                request, context, message="External Place motion failed."
+            )
+        arm = request.binding.endpoint("primary", "motion")
+        hand = request.binding.endpoint("primary", "grasp")
+        endpoint = arm.require_target(JointPositionTarget)
+        hand_target = hand.require_target(JointPositionTarget)
+        key = require_shared_task_state_key(
+            arm, hand, participant="Place primary participant"
+        )
+        if (
+            context.get_held_object(key) is None
+            or not context.task.exclusive_held_object_mask(key).all()
+        ):
+            raise ValueError("external Place requires an exclusively held object")
+        place_xpos, sample = self._resolve_place_xpos(
+            target, context, key, request=request
+        )
+        if place_xpos.ndim == 4:
+            if place_xpos.shape[1] != 1:
+                raise ValueError(
+                    "external Place requires a single target pose; "
+                    "ordered waypoints are unsupported"
+                )
+            place_xpos = place_xpos[:, 0]
+        release_index = motion.segment_lengths["approach"]
+        self._validate_nominal_anchor(
+            motion.trajectory, index=release_index, endpoint=endpoint, target=place_xpos
+        )
+        final_qpos = motion.trajectory.positions[:, -1, list(endpoint.joint_ids)]
+        final_tcp = self.robot.compute_fk(
+            qpos=final_qpos,
+            name=endpoint.control_part,
+            to_matrix=True,
+            **(
+                {"env_ids": self.planning_services.env_ids}
+                if self.planning_services.env_ids is not None
+                else {}
+            ),
+        )
+        if (
+            not isinstance(final_tcp, torch.Tensor)
+            or final_tcp.shape != place_xpos.shape
+            or not bool(torch.isfinite(final_tcp).all())
+        ):
+            raise ValueError("external Place retract FK is unavailable")
+        # The prototype retains its lateral/orientation retreat relation, but
+        # must meet the same requested vertical clearance as native placement.
+        minimum_z = self._lifted_pose(place_xpos, request.skill_options)[:, 2, 3]
+        maximum_z = (
+            torch.full_like(minimum_z, float("inf"))
+            if request.skill_options.max_approach_retract_z is None
+            else torch.clamp_min(
+                torch.full_like(
+                    minimum_z, request.skill_options.max_approach_retract_z
+                ),
+                place_xpos[:, 2, 3],
+            )
+        )
+        if bool(
+            (
+                (final_tcp[:, 2, 3] < minimum_z - 0.002)
+                | (final_tcp[:, 2, 3] > maximum_z + 0.002)
+            ).any()
+        ):
+            raise ValueError(
+                "external Place does not satisfy requested retract clearance"
+            )
+        closed = hand.joint_positions(
+            GRASP_COMMAND,
+            num_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        opened = hand.joint_positions(
+            OPEN_COMMAND,
+            num_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        path = motion.trajectory.positions[:, :, list(hand_target.joint_ids)]
+        if not torch.allclose(
+            path[:, :release_index],
+            closed[:, None].expand_as(path[:, :release_index]),
+            atol=1e-5,
+            rtol=0,
+        ) or not torch.allclose(path[:, -1], opened, atol=1e-5, rtol=0):
+            raise ValueError(
+                "external Place must preserve grasp and finish with the open command"
+            )
+        return self._assemble_place_plan(
+            request,
+            context,
+            success=motion.success,
+            trajectory=motion.trajectory,
+            segment_lengths=dict(motion.segment_lengths),
+            affordance_sample=sample,
+            replannable=False,
+            provenance=motion.provenance(),
+        )
+
+    def _assemble_place_plan(
+        self,
+        request: ResolvedSkillRequest[
+            PlaceGoal | AssembleGoal | ContactPlaceGoal, PlaceOptions
+        ],
+        context: PlanningContext,
+        *,
+        success: torch.Tensor,
+        trajectory: TimedTrajectory,
+        segment_lengths: dict[str, int],
+        affordance_sample: AffordanceSample | None,
+        replannable: bool,
+        provenance: dict[str, object] | None,
+    ) -> SkillPlan:
+        """Assemble the release semantics shared by both motion sources."""
+        arm = request.binding.endpoint("primary", "motion")
+        hand = request.binding.endpoint("primary", "grasp")
+        task_state_key = require_shared_task_state_key(
+            arm, hand, participant="Place primary participant"
+        )
+        state = context
+        coordinated_updates = {
+            key: None for key in state.coordinated_held_objects if task_state_key in key
+        }
+        return self.build_plan(
+            request,
+            context,
+            success=success,
+            trajectory=trajectory,
+            replannable=replannable,
+            expected_effects=StateDelta(
+                held_object_updates={task_state_key: None},
+                coordinated_held_object_updates=coordinated_updates,
+            ),
+            diagnostics=PlannerDiagnostics(
+                backend=(
+                    self.planning_services.planner_name
+                    if provenance is None
+                    else "external_nominal"
+                ),
+                metadata=(
+                    provenance
+                    if provenance is not None
+                    else (
+                        {}
+                        if affordance_sample is None
+                        else {
+                            "affordance_sample": {
+                                "assembly": affordance_sample.metadata
+                            }
+                        }
+                    )
+                ),
+            ),
+            segment_lengths=segment_lengths,
+        )
+
+    def _resolve_place_xpos(
+        self,
+        target: PlaceGoal | AssembleGoal | ContactPlaceGoal,
+        state: PlanningContext,
+        task_state_key: str,
+        *,
+        request: ResolvedSkillRequest[
+            PlaceGoal | AssembleGoal | ContactPlaceGoal, PlaceOptions
+        ],
+    ) -> tuple[torch.Tensor, AffordanceSample | None]:
+        """Resolve the place EEF poses from a typed target.
+
+        Args:
+            target: Either an explicit EEF pose target or an assembly target.
+            state: World state carrying the held-object transform.
+            task_state_key: Task-state resource that owns the held object.
+            request: Resolved invocation used to derive the sampling key.
+
+        Returns:
+            Place EEF poses and the optional Affordance sample that produced
+            them. Direct placement poses have shape ``(num_envs, 4, 4)``;
+            via-point placement poses have shape
+            ``(num_envs, n_waypoint, 4, 4)``.
+        """
+        if isinstance(target, PlaceGoal):
+            return (
+                resolve_pose_target(
+                    resolve_pose_goal(target.xpos, state, name="xpos"),
+                    num_envs=self.num_envs,
+                    device=self.device,
+                ),
+                None,
+            )
+        return self._resolve_assemble_place_xpos(
+            target,
+            state,
+            task_state_key,
+            sample_key=(request.invocation_id or self.skill_id) + ":assembly",
+        )
+
+    def _resolve_assemble_place_xpos(
+        self,
+        target: AssembleGoal,
+        state: PlanningContext,
+        task_state_key: str,
+        *,
+        sample_key: str,
+    ) -> tuple[torch.Tensor, AffordanceSample]:
+        """Derive the place EEF pose from an assembly affordance.
+
+        The assemble object target pose is ``base_pose @ assemble_to_base_pose``;
+        the EEF pose is that target posed through the held object's
+        ``object_to_eef``.
+
+        Args:
+            target: Assembly target carrying the base/assemble affordance.
+            state: World state carrying the held-object transform.
+            task_state_key: Task-state resource that owns the held object.
+            sample_key: Stable identity for the assembly sampling stream.
+
+        Returns:
+            Sampled place EEF poses and their assembly sampling provenance.
+
+        Raises:
+            ValueError: If no held object or base-pose source is available.
+        """
+        held = state.get_held_object(task_state_key)
+        if held is None:
+            raise ValueError(
+                "Place with AssembleGoal requires an object held by task-state "
+                f"resource {task_state_key!r} (run PickUp first)."
+            )
+        affordance = target.affordance
+        base_pose = resolve_object_target(
+            resolve_pose_goal(
+                target.base_pose,
+                state,
+                name="base_pose",
+            ),
+            num_envs=self.num_envs,
+            device=self.device,
+            name="base_pose",
+        )
+        sample = affordance.sample_assemble_object_pose(
+            base_pose,
+            sampling=state.affordance_sampling,
+            env_ids=state.env_ids,
+            key=sample_key,
+        )
+        object_to_eef = resolve_object_target(
+            held.object_to_eef,
+            num_envs=self.num_envs,
+            device=self.device,
+            name="object_to_eef",
+        )
+        return torch.bmm(sample.poses, object_to_eef), sample
+
+    def _lifted_pose(
+        self, release_xpos: torch.Tensor, options: PlaceOptions
+    ) -> torch.Tensor:
+        """Build an above-release pose while respecting the optional TCP z cap."""
+        lifted_xpos = release_xpos.clone()
+        lifted_z = release_xpos[:, 2, 3] + options.lift_height
+        if options.max_approach_retract_z is not None:
+            max_z = torch.as_tensor(
+                options.max_approach_retract_z,
+                dtype=release_xpos.dtype,
+                device=release_xpos.device,
+            )
+            lifted_z = torch.maximum(
+                release_xpos[:, 2, 3],
+                torch.clamp_max(lifted_z, max_z),
+            )
+        lifted_xpos[:, 2, 3] = lifted_z
+        return lifted_xpos
+
+    def _translation_keyframes(
+        self,
+        start_xpos: torch.Tensor,
+        target_xpos: torch.Tensor,
+        options: PlaceOptions,
+    ) -> torch.Tensor:
+        """Interpolate translations while holding each segment's target rotation."""
+        count = options.cartesian_waypoint_count
+        if count == 1:
+            return target_xpos
+
+        segment_starts = torch.cat(
+            [start_xpos.unsqueeze(1), target_xpos[:, :-1]], dim=1
+        )
+        alpha = torch.linspace(
+            1.0 / count,
+            1.0,
+            count,
+            dtype=target_xpos.dtype,
+            device=self.device,
+        )
+        keyframes = target_xpos.unsqueeze(2).repeat(1, 1, count, 1, 1)
+        start_position = segment_starts[..., :3, 3].unsqueeze(2)
+        target_position = target_xpos[..., :3, 3].unsqueeze(2)
+        keyframes[..., :3, 3] = start_position + alpha[None, None, :, None] * (
+            target_position - start_position
+        )
+        return keyframes.flatten(1, 2)
+
+    def _select_tcp_symmetric_place_variant(
+        self,
+        place_xpos: torch.Tensor,
+        start_qpos: torch.Tensor,
+        control_part: str,
+    ) -> torch.Tensor:
+        """Choose the closest TCP z-roll variant for an opt-in place target."""
+        mirrored_place_xpos = place_xpos.clone()
+        mirrored_place_xpos[..., :3, 0] = -mirrored_place_xpos[..., :3, 0]
+        mirrored_place_xpos[..., :3, 1] = -mirrored_place_xpos[..., :3, 1]
+        place_variants = torch.stack([place_xpos, mirrored_place_xpos], dim=2)
+
+        start_xpos = self.robot.compute_fk(
+            qpos=start_qpos,
+            name=control_part,
+            to_matrix=True,
+            **(
+                {"env_ids": self.planning_services.env_ids}
+                if self.planning_services.env_ids is not None
+                else {}
+            ),
+        )
+        start_quat = quat_from_matrix(start_xpos[:, :3, :3])
+        first_waypoint_quat = quat_from_matrix(place_variants[:, 0, :, :3, :3])
+        start_quat = start_quat[:, None, :].expand_as(first_waypoint_quat)
+        rotation_error = quat_error_magnitude(
+            first_waypoint_quat.reshape(-1, 4),
+            start_quat.reshape(-1, 4),
+        ).reshape(self.num_envs, 2)
+        best_variant_idx = rotation_error.argmin(dim=1)
+
+        env_idx = torch.arange(self.num_envs, device=self.device)[:, None]
+        waypoint_idx = torch.arange(place_xpos.shape[1], device=self.device)[None, :]
+        return place_variants[
+            env_idx,
+            waypoint_idx,
+            best_variant_idx[:, None],
+        ]
+
+
+__all__ = ["AssembleGoal", "Place", "PlaceGoal", "ContactPlaceGoal", "PlaceOptions"]

@@ -27,7 +27,7 @@ import urllib.request
 import numpy as np
 import torch
 
-from embodichain_models.dynamics.lewm import LeWM, LeWMCfg, preprocess_rgb
+from embodichain.extensions.models.dynamics.lewm import LeWM, LeWMCfg, preprocess_rgb
 
 HF_REV = "22b330c28c27ead4bfd1888615af1340e3fe9052"
 SWM_REV = "21446f1ede6d5284e981bd7b47f432b994e6d812"

@@ -16,7 +16,7 @@ Choose the narrowest mode:
 |---|---|
 | Existing catalog already discovers the requested call | Change only the program/integration config; use `$add-task-program` |
 | Existing Atomic Skill should be exposed under a task/integration-owned call ID | Add a registered Semantic Call extension |
-| Required Atomic Skill does not exist | Invoke `$add-atomic-action` first |
+| Required Atomic Skill does not exist | Invoke `$add-atomic-skill` first |
 | The concept must become a stable universal language primitive like Pick/Place/HandOver | Add a built-in Semantic Call only when explicitly justified |
 
 Prefer a registered extension for new provider/task families. Do not add a new
@@ -71,6 +71,12 @@ The integration catalog must include one exact `SemanticCallDescriptor` whose:
 It must also own exactly one fingerprinted
 `RegisteredSemanticLowererFactory` for the same call ID and revision. The
 factory creates a fresh live lowerer for each adapter assembly.
+
+Factories may expose a provider-free immutable `argument_contract` using
+`language.semantic_contracts.SemanticCallContract`. It participates in the
+registration fingerprint and effective planning catalog; keep its parameter,
+reference and resource rules aligned with lowering. Opaque historical extensions
+remain loadable but cannot advertise a complete planning argument contract.
 
 ### 3. Keep lowering typed and narrow
 

@@ -81,6 +81,15 @@ class DefaultPhysicsBackend(PhysicsBackend):
         del result
         self._manager._world.update(0.0)
 
+    def _step(self, physics_dt: float) -> None:
+        """Refine native integration while preserving the manager step clock."""
+        cfg = self._manager.sim_config.physics_cfg
+        assert isinstance(cfg, DefaultPhysicsCfg)
+        substeps = cfg._substep_count()
+        native_dt = physics_dt / substeps
+        for _ in range(substeps):
+            self._manager._world.update(native_dt)
+
     # -- scene ---------------------------------------------------------- #
     def get_scene(self):
         """Return the Default backend's compatibility scene after Spawn is prepared."""

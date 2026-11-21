@@ -22,6 +22,21 @@ from embodichain.compute import trajectory
 from embodichain.lab.sim.utility import action_utils
 
 
-@pytest.mark.parametrize("name", trajectory.__all__)
+# This is the historical compatibility surface, not every future compute API.
+# Keep the names explicit so removing a legacy export cannot silently skip it.
+@pytest.mark.parametrize(
+    "name",
+    [
+        "differentiate_positions",
+        "resample_in_time",
+        "retime_to_control_grid",
+        "interpolate_with_distance",
+        "interpolate_minimum_jerk",
+        "interpolate_with_nums",
+        "resample_with_distance",
+        "sort_and_padding_key_frame",
+        "warp_trajectory_qpos",
+    ],
+)
 def test_legacy_trajectory_exports_are_compute_functions(name: str) -> None:
     assert getattr(action_utils, name) is getattr(trajectory, name)

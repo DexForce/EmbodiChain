@@ -1,7 +1,7 @@
 Official model library
 ======================
 
-The main ``embodichain`` distribution bundles ``embodichain_models`` with the
+The main ``embodichain`` distribution bundles ``embodichain.extensions.models`` with the
 same release version and dependencies. This package owns concrete model
 families, their physical representations, model-specific data adapters and
 supervised recipes. General MLPs and feature normalization remain in
@@ -16,13 +16,13 @@ generation and original-repository comparison runners belong to the
 NeRD public entry points
 -------------------------
 
-``embodichain_models.dynamics.nerd`` lazily exposes the causal network, its
+``embodichain.extensions.models.dynamics.nerd`` lazily exposes the causal network, its
 physical codec, portable checkpoints and shared-SL integration. Inputs are named
 history tensors; predictions are physical state-increment targets. Model
 evaluation retains input gradients. Frozen training statistics travel with the
 network as buffers.
 
-.. currentmodule:: embodichain_models.dynamics.nerd
+.. currentmodule:: embodichain.extensions.models.dynamics.nerd
 
 .. autosummary::
 
@@ -33,6 +33,9 @@ network as buffers.
    load_model
    convert_legacy_checkpoint
    NeRDStateCodec
+   NeRDGeometry
+   NeRDState
+   NeRDTransition
    NeRDObjective
    make_nerd_batch
    NeRDWindowSource
@@ -52,6 +55,12 @@ network as buffers.
 
 .. autoclass:: NeRDStateCodec
 
+.. autoclass:: NeRDGeometry
+
+.. autoclass:: NeRDState
+
+.. autoclass:: NeRDTransition
+
 .. autoclass:: NeRDObjective
 
 .. autofunction:: make_nerd_batch
@@ -59,6 +68,55 @@ network as buffers.
 .. autoclass:: NeRDWindowSource
 
 .. autofunction:: build_supervised_trainer
+
+Graph-connected rollout and contact geometry
+--------------------------------------------
+
+The rollout computes current-state FK and contact features before encoding,
+history advancement, prediction and decoding. The geometry owns only detached
+fixed parameters and receives a tensor FK callable; neither implementation
+imports a simulator. State and history are explicit and treated as immutable.
+Learning environments own reset and TBPTT boundaries. Offline supervised
+objectives may continue using measured contact features.
+
+.. currentmodule:: embodichain.extensions.models.dynamics.nerd.geometry
+
+.. autosummary::
+
+   NeRDGeometry
+
+.. currentmodule:: embodichain.extensions.models.dynamics.nerd.transition
+
+.. autosummary::
+
+   NeRDState
+   NeRDTransition
+
+Optional native NeRD deployment
+-------------------------------
+
+The :doc:`NeRD guide </features/neural_dynamics/nerd>` distinguishes measured
+window prediction, online rollout, learning-env training and native inference.
+Its native quickstart links model preparation with step/reset/close and records
+the verified physical domain and execution environment.
+
+The Provider maps native coordinates and controls into the same independent
+transition. It owns inference history and resource validation; SDK Scene owns
+publication, reset baselines and scheduling. The lightweight learning route
+does not construct this solver. Support remains limited to the recorded
+Cartpole/Ant physical domains, without general contact-force reports or
+external wrenches.
+
+.. currentmodule:: embodichain.extensions.solvers.physics.nerd.provider
+
+.. autosummary::
+
+   NeRDProvider
+   NeuralRobotDynamicSolver
+
+.. autoclass:: NeRDProvider
+
+.. autoclass:: NeuralRobotDynamicSolver
 
 Network and normalization
 --------------------------
@@ -69,7 +127,7 @@ position for each row. Causal attention preserves valid prefix outputs under
 right padding; the objective owns the padded loss mask. Feature conversion
 follows the network's floating dtype without detaching input gradients.
 
-.. currentmodule:: embodichain_models.dynamics.nerd.model
+.. currentmodule:: embodichain.extensions.models.dynamics.nerd.model
 
 .. autosummary::
 
@@ -94,7 +152,7 @@ floating precision and returns an evaluation-mode model. Legacy Python-object
 conversion requires explicit trust and accepts the supported official
 Transformer architecture.
 
-.. currentmodule:: embodichain_models.dynamics.nerd.checkpoint
+.. currentmodule:: embodichain.extensions.models.dynamics.nerd.checkpoint
 
 .. autosummary::
 
@@ -117,7 +175,7 @@ frame. Quaternion helpers use xyzw ordering. Contact features use fixed plane
 slots; history append and reset return new tensors while retaining gradients
 through unaffected values.
 
-.. currentmodule:: embodichain_models.dynamics.nerd.codec
+.. currentmodule:: embodichain.extensions.models.dynamics.nerd.codec
 
 .. autosummary::
 
@@ -153,7 +211,7 @@ and split boundaries; optional startup windows carry right-padding masks.
 Readers bound open shard handles and offer an explicitly budgeted resident
 cache. Operational generation progress is excluded from the data fingerprint.
 
-.. currentmodule:: embodichain_models.dynamics.nerd.data
+.. currentmodule:: embodichain.extensions.models.dynamics.nerd.data
 
 .. autosummary::
 
@@ -184,7 +242,7 @@ valid overlapping-window occurrence; artifacts bind the dataset fingerprint.
 The normalized MSE uses frozen target variance. Offline evaluation reports
 valid-position prediction and decoded state errors without selecting on test.
 
-.. currentmodule:: embodichain_models.dynamics.nerd.integration
+.. currentmodule:: embodichain.extensions.models.dynamics.nerd.integration
 
 .. autosummary::
 
@@ -215,7 +273,7 @@ The adapter preserves the raw reader's sampling contract when creating a
 state-increment loss and the number of valid positions used for aggregation.
 Computing the loss does not update normalization statistics.
 
-.. currentmodule:: embodichain_models.dynamics.nerd.supervised
+.. currentmodule:: embodichain.extensions.models.dynamics.nerd.supervised
 
 .. autosummary::
 
@@ -237,11 +295,11 @@ the common SL trainer. Its checkpoints use the SL format; historical NeRD
 training checkpoints remain owned by the showcase's historical trainer.
 
 Use the installable factory path
-``embodichain_models.dynamics.nerd.sl_recipe:build_supervised_trainer`` in an
+``embodichain.extensions.models.dynamics.nerd.sl_recipe:build_supervised_trainer`` in an
 ``embodichain train-sl`` configuration. It is available independently of the
 working directory and example-runner bootstrap.
 
-.. currentmodule:: embodichain_models.dynamics.nerd.sl_recipe
+.. currentmodule:: embodichain.extensions.models.dynamics.nerd.sl_recipe
 
 .. autosummary::
 
@@ -260,6 +318,37 @@ Other dynamics families
    :maxdepth: 2
 
    rwm
+
+
+WorldParticle independent transition
+------------------------------------
+
+WorldParticle predicts frozen world-space particle transitions. The model
+package owns authored features/topology, network loading and coordinate
+conversion. The optional native Provider belongs to the solver extension and
+uses the SDK particle inference adapter. Operator/runtime qualification is
+separate from discovery; main's Torch/SDK pins are unchanged.
+
+The :doc:`WorldParticle guide </features/neural_dynamics/worldparticle>` links
+the complete native quickstart, standalone call, NPZ/frame contract, operator
+installation/preflight and measured execution record. Frozen inference does not
+establish a learning-env or functional-gradient contract.
+
+.. autoclass:: embodichain.extensions.models.dynamics.worldparticle.WorldParticleModel
+   :noindex:
+
+.. autofunction:: embodichain.extensions.models.dynamics.worldparticle.load_model
+   :noindex:
+
+.. autoclass:: embodichain.extensions.models.dynamics.worldparticle.model.WorldParticleModel
+   :noindex:
+
+.. autofunction:: embodichain.extensions.models.dynamics.worldparticle.model.load_model
+   :noindex:
+
+.. autofunction:: embodichain.extensions.models.dynamics.worldparticle.data.load_sample
+
+.. autoclass:: embodichain.extensions.solvers.physics.worldparticle.provider.WorldParticleProvider
 
 
 LeWM visual dynamics

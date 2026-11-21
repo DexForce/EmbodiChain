@@ -60,7 +60,7 @@ from embodichain.lab.task_program.integrations.simulation.asset_pouring import (
 from embodichain.utils.config_paths import resolve_config_path
 
 CONFIGS = resolve_config_path(
-    "extensions/embodichain_tasks/configs", base_dir=Path(__file__).parent
+    "embodichain/extensions/tasks/configs", base_dir=Path(__file__).parent
 )
 TASK = Path(__file__).resolve().parent / "configs/pour_water"
 
@@ -77,7 +77,7 @@ def _prepare_catalogs(output: Path) -> tuple[Path, Path]:
     source = Path(get_data_path("PourWaterAssets/bottle.glb")).parent
     integration = _yaml(TASK / "task_program/integration.yaml")
     grasp = np.asarray(
-        integration["profile"]["action_options"]["pick"]["fixed_object_to_eef"]
+        integration["profile"]["skill_options"]["pick"]["fixed_object_to_eef"]
     ).reshape(4, 4)
     axis = integration["scene_binding"]["rigid_objects"][1]["affordances"][0][
         "internal_axis"
@@ -177,13 +177,17 @@ def _template(output: Path) -> Path:
             task["embodiment"]["component"], base_dir=source.parent
         ).resolve()
     )
-    policy = resolve_config_path(
-        task["task_program"]["execution_policy"], base_dir=source.parent
-    )
+    policy = task["task_program"]["execution_policy"]
+    if isinstance(policy, dict):
+        policy["component"] = str(
+            resolve_config_path(policy["component"], base_dir=source.parent).resolve()
+        )
+    else:
+        policy = str(resolve_config_path(policy, base_dir=source.parent).resolve())
     task["task_program"] = {
         "program": "program.yaml",
         "integration": "integration.yaml",
-        "execution_policy": str(policy.resolve()),
+        "execution_policy": policy,
     }
     for name, value in (
         ("task", task),

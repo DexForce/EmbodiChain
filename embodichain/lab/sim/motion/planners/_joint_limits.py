@@ -198,10 +198,13 @@ def _resolve_joint_constraints(
     dof: int,
     control_part: str | None = None,
     batch_size: int | None = None,
+    env_ids: tuple[int, ...] | None = None,
 ) -> dict[str, object]:
     """Resolve robot speed caps and planner-owned acceleration requests."""
     ids = _plan_joint_ids(robot, control_part, dof)
     limits = _joint_velocity_limits(robot)
+    if env_ids is not None:
+        limits = limits[list(env_ids)]
     if batch_size is not None and limits.shape[0] < batch_size:
         raise ValueError("Robot velocity limits do not cover the planning batch.")
     resolved = dict(constraints)

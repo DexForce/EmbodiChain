@@ -37,17 +37,15 @@ __all__ = ["RigidConstraint"]
 class RigidConstraint:
     """Batch of fixed or spherical constraints between rigid endpoints.
 
-    Each entry binds ``rigid_object_a._entities[i]`` to
-    ``rigid_object_b._entities[i]`` within arena ``i`` via a dexsim
-    ``FixedConstraint``. The ``constraint_handles`` list has length
-    ``num_envs`` with ``None`` wherever the constraint is not active in that
-    arena, so arena index always equals list index.
+    Each entry holds the native handle linking two rigid bodies in one arena.
+    The configuration names the physical link for an articulation endpoint.
+    Inactive arenas hold an empty slot so handle indices match arena indices.
 
     Args:
         cfg: The constraint configuration.
         constraint_handles: Per-arena dexsim constraint handles (None where inactive).
-        rigid_object_a: The first RigidObject (None only until set at creation).
-        rigid_object_b: The second RigidObject (None only until set at creation).
+        rigid_object_a: The first endpoint object, assigned at creation.
+        rigid_object_b: The second endpoint object, assigned at creation.
         device: The torch device.
     """
 

@@ -25,7 +25,7 @@ import math
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     SkillBindingContract,
     SkillDescriptor,
     SkillEndpointRequirement,

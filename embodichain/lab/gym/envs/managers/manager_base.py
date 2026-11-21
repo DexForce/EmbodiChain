@@ -144,12 +144,9 @@ class ManagerBase(ABC):
     def __init__(self, cfg: object, env: EmbodiedEnv):
         """Initialize the manager.
 
-        This function is responsible for parsing the configuration object and creating the functors.
-
-        If the simulation is not playing, the scene entities are not resolved immediately.
-        Instead, the resolution is deferred until the simulation starts. This is done to ensure
-        that the scene entities are resolved even if the manager is created after the simulation
-        has already started.
+        Copy the configuration, then prepare functors against the environment's
+        initialized scene. Scene entity resolution and class construction happen
+        during preparation; no simulation-start callback is registered.
 
         Args:
             cfg: The configuration object. If None, the manager is initialized without any functors.
@@ -278,36 +275,6 @@ class ManagerBase(ABC):
         raise NotImplementedError
 
     """
-    Internal callbacks.
-    """
-
-    def _resolve_functors_callback(self, event):
-        """Resolve configurations of functors once the simulation starts.
-
-        Please check the :meth:`_process_functor_cfg_at_play` method for more information.
-        """
-        # check if scene entities have been resolved
-        if self._is_scene_entities_resolved:
-            return
-        # check if config is dict already
-        if isinstance(self.cfg, dict):
-            cfg_items = self.cfg.items()
-        else:
-            cfg_items = self.cfg.__dict__.items()
-
-        # iterate over all the functors
-        for functor_name, functor_cfg in cfg_items:
-            # check for non config
-            if functor_cfg is None:
-                continue
-            # process attributes at runtime
-            # these properties are only resolvable once the simulation starts playing
-            self._process_functor_cfg_at_play(functor_name, functor_cfg)
-
-        # set the flag
-        self._is_scene_entities_resolved = True
-
-    """
     Internal functions.
     """
 
@@ -413,21 +380,15 @@ class ManagerBase(ABC):
                     f" and optional parameters: {args_with_defaults}, but received: {functor_params}."
                 )
 
-        # process attributes at runtime
-        # these properties are only resolvable once the simulation starts playing
+        # Resolve scene entities and construct class functors during preparation.
         self._process_functor_cfg_at_play(functor_name, functor_cfg)
 
     def _process_functor_cfg_at_play(self, functor_name: str, functor_cfg: FunctorCfg):
         """Process the functor configuration at runtime.
 
-        This function is called when the simulation starts playing. It is used to process the functor
-        configuration at runtime. This includes:
-
-        * Resolving the scene entity configuration for the functor.
-        * Initializing the functor if it is a class.
-
-        Since the above steps rely on dexsim to parse over the simulation scene, they are deferred
-        until the simulation starts playing.
+        Called synchronously by :meth:`_resolve_common_functor_cfg` after callable
+        validation. Resolve scene entities against the initialized environment,
+        then construct and bind class functors.
 
         Args:
             functor_name: The name of the functor.

@@ -28,8 +28,9 @@ import pytest
 import torch
 
 import embodichain.lab.gym.envs.base_env as base_env_module
-from embodichain.lab.gym.envs import BaseEnv
+from embodichain.lab.gym.envs import BaseEnv, EnvCfg, EmbodiedEnv
 from embodichain.lab.sim import SimulationManager
+from embodichain.lab.sim.physics import DefaultPhysicsBackend
 
 # This module calls one unbound manager method on registry stubs; no World is
 # constructed. Keep these reset-contract cases in the fast CPU CI lane.
@@ -48,7 +49,7 @@ class _ResetEnv(BaseEnv):
 
     def __init__(self, num_envs: int = 1) -> None:
         self.reset_events: list[str] = []
-        self.cfg = SimpleNamespace(seed=None)
+        self.cfg = EnvCfg(seed=None)
         self._num_envs = num_envs
         self.episode_context = EpisodeContext(num_envs)
         self.sim = SimpleNamespace(
@@ -178,12 +179,13 @@ def test_reset_keeps_sensor_uid_exclusions_out_of_physical_registries(
     sensor = MagicMock(uid="shared")
     manager_sensor = MagicMock(uid="manager_only")
     env.sensors = {"observation": sensor}
-    env.sim.physics = SimpleNamespace(name="default")
+    env.sim.physics = DefaultPhysicsBackend(env.sim)
     env.sim._robots = {"shared": robot}
     for registry in (
         "_articulations",
         "_rigid_objects",
         "_rigid_object_groups",
+        "_fluid_objects",
         "_deformable_objects",
         "_lights",
     ):
@@ -241,3 +243,69 @@ def test_explicit_zero_seed_is_reproducible():
     first.cfg.seed = second.cfg.seed = 0
     a, b = first.get_generator("commands"), second.get_generator("commands")
     assert torch.equal(torch.rand(8, generator=a), torch.rand(8, generator=b))
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+@pytest.mark.parametrize("info_owner", [BaseEnv, EmbodiedEnv])
+def test_episode_context_info_is_optional_without_changing_lifecycle(
+    enabled: bool, info_owner: type, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Opting out avoids snapshots while partial reset and provenance stay valid."""
+    env = _ResetEnv(num_envs=2)
+    assert env.cfg.episode_context_in_info is True
+    env.cfg.episode_context_in_info = enabled
+    env.compute_task_state = lambda **_: (
+        torch.zeros(2, dtype=torch.bool),
+        torch.zeros(2, dtype=torch.bool),
+        {},
+    )
+    env.get_info = lambda **kwargs: info_owner.get_info(env, **kwargs)
+    snapshot = MagicMock(wraps=env.episode_context.snapshot)
+    monkeypatch.setattr(env.episode_context, "snapshot", snapshot)
+    _, info = env.reset()
+    assert ("episode_context" in info) is enabled
+    assert snapshot.call_count == int(enabled)
+    # Recording remains eligible and can still request an owned snapshot.
+    assert env.episode_context.filter_recordable([0, 1]).tolist() == [0, 1]
+    saved = snapshot()
+    env.get_info()
+    _, partial_info = env.reset(options={"reset_ids": [1]})
+    assert ("episode_context" in partial_info) is enabled
+    assert snapshot.call_count == 1 + 3 * int(enabled)
+    assert [row["episode"] for row in saved] == [0, 0]
+    assert [row["episode"] for row in snapshot()] == [0, 1]
+    assert env.episode_context.filter_recordable([0, 1]).tolist() == [0, 1]
+
+
+@pytest.mark.parametrize("recording", [False, True])
+@pytest.mark.parametrize("read_order", [(0, 1), (1, 0)])
+def test_lazy_metadata_retains_each_rows_reset_seed(recording, read_order):
+    from types import MethodType
+    from embodichain.data_pipeline.recording import stable_config_hash
+
+    env = _ResetEnv(2)
+    env.cfg.events = env.cfg.observations = env.cfg.rewards = env.cfg.dataset = None
+    env.dataset_manager = object() if recording else None
+    env.rollout_buffer = env._traj_buffer = None
+    env._demo_episode_metadata = [{}, {}]
+    env._demo_metadata_initialized = False
+    env._demo_steps = torch.zeros(2, dtype=torch.long)
+    env._initialize_episode = MethodType(EmbodiedEnv._initialize_episode, env)
+    env._new_demo_episode_metadata = MagicMock(
+        wraps=MethodType(EmbodiedEnv._new_demo_episode_metadata, env)
+    )
+    env.reset(seed=12)
+    original_hash = stable_config_hash(env.cfg)
+    env.reset(seed=35, options={"reset_ids": [0]})
+    if not recording:
+        env._new_demo_episode_metadata.assert_not_called()
+    records = {i: EmbodiedEnv.get_demo_episode_metadata(env, i) for i in read_order}
+    assert [records[i]["seed"] for i in range(2)] == [35, 12]
+    assert records[1]["config_hash"] == original_hash
+    assert records[0]["config_hash"] == stable_config_hash(env.cfg)
+    assert records[0]["episode_uuid"] != records[1]["episode_uuid"]
+    old_uuid = records[1]["episode_uuid"]
+    env.reset(options={"reset_ids": [0]})
+    assert EmbodiedEnv.get_demo_episode_metadata(env, 1)["episode_uuid"] == old_uuid
+    records[1]["provenance"].clear()
+    assert EmbodiedEnv.get_demo_episode_metadata(env, 1)["provenance"]

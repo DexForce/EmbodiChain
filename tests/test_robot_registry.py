@@ -189,7 +189,7 @@ def test_variant_defaults_require_a_mapping(catalogs):
 def test_named_official_variant_selects_its_model(
     catalogs, local_robot_assets, name, variant, field
 ):
-    from embodichain_robots._catalog import ROBOT_CONFIGS
+    from embodichain.extensions.robots._catalog import ROBOT_CONFIGS
 
     catalogs.append(_entry("official", ROBOT_CONFIGS))
 
@@ -223,7 +223,7 @@ def test_resolver_rejects_unregistered_configuration_class_spelling(external_rob
     ],
 )
 def test_official_catalog_rejects_retired_selectors(catalogs, name):
-    from embodichain_robots._catalog import ROBOT_CONFIGS
+    from embodichain.extensions.robots._catalog import ROBOT_CONFIGS
 
     catalogs.append(_entry("official", ROBOT_CONFIGS))
 
@@ -306,15 +306,17 @@ def local_robot_assets(monkeypatch, tmp_path):
     for module_name in (
         "embodichain.data",
         "embodichain.lab.sim.cfg",
-        "embodichain_robots.arx.arx5.cfg",
-        "embodichain_robots.alohamini.aloha_mini.cfg",
-        "embodichain_robots.tianji.marvin.cfg",
-        "embodichain_robots.agilex.cobotmagic.cfg",
-        "embodichain_robots.franka.panda",
-        "embodichain_robots.flexiv.rizon4s.cfg",
-        "embodichain_robots.the_robot_studio.so101.cfg",
-        "embodichain_robots.universal_robots.ur_robot",
-        "embodichain_robots.dexforce.w1.utils",
+        "embodichain.extensions.robots.agibot.g1.cfg",
+        "embodichain.extensions.robots.arx.arx5.cfg",
+        "embodichain.extensions.robots.alohamini.aloha_mini.cfg",
+        "embodichain.extensions.robots.tianji.marvin.cfg",
+        "embodichain.extensions.robots.agibot.g2.cfg",
+        "embodichain.extensions.robots.agilex.cobotmagic.cfg",
+        "embodichain.extensions.robots.franka.cfg",
+        "embodichain.extensions.robots.flexiv.rizon4s.cfg",
+        "embodichain.extensions.robots.the_robot_studio.so101.cfg",
+        "embodichain.extensions.robots.universal_robots.ur_robot",
+        "embodichain.extensions.robots.dexforce.w1.utils",
     ):
         module = import_module(module_name)
         if hasattr(module, "get_data_path"):
@@ -324,6 +326,7 @@ def local_robot_assets(monkeypatch, tmp_path):
 @pytest.mark.parametrize(
     "name",
     [
+        "AgibotG1",
         "UnitreeGo1",
         "UnitreeGo2",
         "UnitreeG1",
@@ -334,6 +337,7 @@ def local_robot_assets(monkeypatch, tmp_path):
         "ARX5",
         "TianjiMarvin",
         "CobotMagic",
+        "AgibotG2",
         "DexforceW1",
         "FrankaPanda",
         "FlexivRizon4S",
@@ -352,7 +356,7 @@ def test_default_control_metadata_matches_robot_configuration(
     catalogs, local_robot_assets, name
 ):
     """Catalog summaries track real defaults without downloading robot assets."""
-    from embodichain_robots._catalog import ROBOT_CONFIGS
+    from embodichain.extensions.robots._catalog import ROBOT_CONFIGS
 
     catalogs.append(_entry("official", ROBOT_CONFIGS))
 
@@ -386,7 +390,7 @@ def test_locomotion_presets_preserve_standalone_drive_defaults(
     catalogs, local_robot_assets, name, joint, stiffness, effort, height
 ) -> None:
     """Standalone presets retain the previous official task's effective drives."""
-    from embodichain_robots._catalog import ROBOT_CONFIGS
+    from embodichain.extensions.robots._catalog import ROBOT_CONFIGS
 
     catalogs.append(_entry("official", ROBOT_CONFIGS))
     cfg = registry.resolve_robot_cfg(name)
@@ -454,7 +458,7 @@ def test_locomotion_overrides_are_isolated_and_roundtrip(
     """Caller rules lower without default overlaps and survive serialization."""
     from copy import deepcopy
     from embodichain.lab.sim.spawn.descriptors import _joint_property_matches
-    from embodichain_robots._catalog import ROBOT_CONFIGS
+    from embodichain.extensions.robots._catalog import ROBOT_CONFIGS
 
     catalogs.append(_entry("official", ROBOT_CONFIGS))
     overrides = {"joint_drive_props": {"stiffness": rules}, "control_parts": parts}
@@ -510,7 +514,7 @@ def test_locomotion_overrides_are_isolated_and_roundtrip(
 def test_locomotion_catalog_classifies_body_independently_of_arms(
     catalogs, name, vendor, morphology, arm_count
 ) -> None:
-    from embodichain_robots._catalog import ROBOT_CONFIGS
+    from embodichain.extensions.robots._catalog import ROBOT_CONFIGS
 
     catalogs.append(_entry("official", ROBOT_CONFIGS))
     spec = registry._robot_specs()[name]
@@ -522,8 +526,12 @@ def test_locomotion_catalog_classifies_body_independently_of_arms(
 
 
 def test_w1_variant_catalog_covers_body_and_independent_hand_registries():
-    from embodichain_robots._catalog import ROBOT_CONFIGS, _W1_HANDS, _W1_VERSIONS
-    from embodichain_robots.dexforce.w1.types import (
+    from embodichain.extensions.robots._catalog import (
+        ROBOT_CONFIGS,
+        _W1_HANDS,
+        _W1_VERSIONS,
+    )
+    from embodichain.extensions.robots.dexforce.w1.types import (
         DexforceW1Version,
         DexforceW1HandBrand,
     )
@@ -556,7 +564,7 @@ def test_w1_variant_catalog_covers_body_and_independent_hand_registries():
     + ["v030/bare"],
 )
 def test_w1_variant_metadata_matches_config(catalogs, local_robot_assets, variant):
-    from embodichain_robots._catalog import ROBOT_CONFIGS
+    from embodichain.extensions.robots._catalog import ROBOT_CONFIGS
 
     catalogs.append(_entry("official", ROBOT_CONFIGS))
     profile = ROBOT_CONFIGS["DexforceW1"]["variants"][variant]
@@ -699,3 +707,51 @@ def test_dual_arm_composes_external_robot_without_builtin_mapping(external_robot
     assert cfg.control_parts["dual_arm"] == ["left_joint", "right_joint"]
     assert restored.control_parts == cfg.control_parts
     assert restored.base_robot == cfg.base_robot
+
+
+def test_franka_family_profiles_use_one_implementation(catalogs, local_robot_assets):
+    from embodichain.extensions.robots._catalog import ROBOT_CONFIGS
+    from embodichain.extensions.robots import FrankaCfg, FrankaPandaCfg
+
+    catalogs.append(_entry("official", ROBOT_CONFIGS))
+    for variant in ("fr3", "panda"):
+        cfg = registry.resolve_robot_cfg("Franka", variant=variant)
+        assert type(cfg) is FrankaCfg
+        assert cfg.arm_model == variant
+        assert set(cfg.control_parts) == {"arm"}
+        assert len(cfg.control_parts["arm"]) == 7
+        assert not hasattr(cfg, "gripper")
+    legacy = registry.resolve_robot_cfg("FrankaPanda")
+    assert isinstance(legacy, FrankaPandaCfg)
+    assert legacy.robot_type == "panda" and legacy.arm_model == "fr3"
+    assert ROBOT_CONFIGS["FrankaPanda"]["supports_dual_arm"]
+    assert ROBOT_CONFIGS["FrankaPanda"]["variant_of"] == "Franka"
+
+
+def test_yam_catalog_resolves_offline_assets_and_independent_controls(
+    catalogs, tmp_path
+):
+    """The new preset participates in the shared catalog without downloads."""
+    from embodichain.extensions.robots import YamI2rtCfg
+    from embodichain.extensions.robots._catalog import ROBOT_CONFIGS
+
+    catalogs.append(_entry("official", ROBOT_CONFIGS))
+    urdf = tmp_path / "yam.urdf"
+    urdf.write_text('<robot name="fixture"/>')
+    assert "YamI2rt" in registry.list_robot_cfgs()
+    cfg = registry.resolve_robot_cfg("YamI2rt", {"fpath": str(urdf)})
+    assert isinstance(cfg, YamI2rtCfg)
+    assert cfg.fpath == cfg._pk_urdf_path == str(urdf)
+    spec = registry._robot_specs()["YamI2rt"]
+    controlled = {joint for joints in cfg.control_parts.values() for joint in joints}
+    assert spec["dof"] == len(controlled) == 16
+    assert spec["control_parts"] == {
+        part: len(joints) for part, joints in cfg.control_parts.items()
+    }
+    assert not spec["mimic_joints"]
+    assert not spec["supports_dual_arm"]
+    assert (spec["vendor"], spec["morphology"], spec["arm_count"]) == (
+        "i2rt",
+        "fixed_manipulator",
+        2,
+    )

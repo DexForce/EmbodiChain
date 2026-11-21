@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 import warp as wp
 
-from embodichain.lab.sim.sensors._warp.contact import scatter_contact_data
+from embodichain.lab.sim.sensors.contact._warp.scatter import scatter_contact_data
 from embodichain.utils.warp.kernels import scatter_contact_data as legacy_scatter
 
 

@@ -1,0 +1,17 @@
+profiles:
+  blue:
+    materials:
+      cube:
+        base_color:
+        - 0.15
+        - 0.45
+        - 0.95
+        roughness: 0.42
+  camera:
+    cameras:
+      cam_overhead:
+        focal_scale: 1.02
+        position_delta:
+        - 0.02
+        - 0.0
+        - 0.0

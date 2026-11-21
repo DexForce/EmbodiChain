@@ -281,12 +281,16 @@ class _RigidConstraintTestSim:
     """
 
     def __init__(self, num_envs=4, arenas=None):
+        from embodichain.lab.sim import SimulationManagerCfg
+
+        self.sim_config = SimulationManagerCfg()
         self._lights = {}
         self._sensors = {}
         self._robots = {}
         self._rigid_objects = {}
         self._rigid_object_groups = {}
         self._deformable_objects = {}
+        self._fluid_objects = {}
         self._articulations = {}
         self._constraints = {}
         self.device = torch.device("cpu")
@@ -631,6 +635,9 @@ def test_removing_endpoint_releases_constraints_before_spawn_removal():
 
         def __contains__(self, uid):
             return uid == "a"
+
+        def _require_removable(self, uid):
+            assert uid == "a"
 
         def remove(self, uid):
             assert uid == "a"

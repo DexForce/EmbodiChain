@@ -28,6 +28,9 @@ import torch
 from .actor_critic import ActorCritic
 from .actor_only import ActorOnly
 from .policy import Policy
+from .auxiliary import ContactPrediction
+from .temporal import TemporalActor, TemporalObservationNormalizer
+from embodichain.learning.models import build_mlp_from_cfg
 
 # In-module policy registry
 _POLICY_REGISTRY: Dict[str, Type[Policy]] = {}
@@ -113,6 +116,8 @@ def build_policy(
 
     Built-in MLP policies still resolve flattened `obs_dim` / `action_dim`, while
     custom policies may accept richer `obs_space` / `action_space` inputs.
+    Policies with ``from_config(config, *, obs_space, action_space, device)``
+    own configuration decoding and space validation.
     """
     name = policy_block["name"].lower()
     if name not in _POLICY_REGISTRY:
@@ -124,10 +129,6 @@ def build_policy(
     actor_obs_groups, critic_obs_groups = resolve_policy_obs_groups(policy_block)
 
     if name == "actor_critic":
-        if actor is None or critic is None:
-            raise ValueError(
-                "ActorCritic policy requires external 'actor' and 'critic' modules."
-            )
         obs_dim = _resolve_space_dim(obs_space, "obs_space")
         critic_obs_dim = (
             None
@@ -139,6 +140,44 @@ def build_policy(
                 "A distinct critic observation group requires critic_obs_space."
             )
         action_dim = _resolve_space_dim(action_space, "action_space")
+        if actor is None:
+            actor_cfg = policy_block.get("actor")
+            if actor_cfg is None:
+                raise ValueError(
+                    "ActorCritic policy requires external 'actor' and 'critic' modules or configured definitions."
+                )
+            actor = (
+                TemporalActor(actor_cfg["network_cfg"], action_dim)
+                if str(actor_cfg.get("type", "")).lower() == "temporal"
+                else build_mlp_from_cfg(actor_cfg, obs_dim, action_dim)
+            )
+        if isinstance(actor, TemporalActor) and actor.input_dim != obs_dim:
+            raise ValueError("Temporal actor input dimension does not match obs_dim.")
+        if critic is None:
+            critic_cfg = policy_block.get("critic")
+            if critic_cfg is None:
+                raise ValueError(
+                    "ActorCritic policy requires external 'actor' and 'critic' modules or configured definitions."
+                )
+            critic = build_mlp_from_cfg(critic_cfg, critic_obs_dim or obs_dim, 1)
+        declarations = policy_block.get("auxiliary_tasks", {})
+        if not isinstance(declarations, Mapping):
+            raise TypeError("policy.auxiliary_tasks must be a mapping.")
+        tasks = {}
+        for task_name, declaration in declarations.items():
+            if not isinstance(declaration, Mapping):
+                raise TypeError("Each auxiliary task must be a mapping.")
+            options = dict(declaration)
+            if str(options.pop("type", "")).lower() != "contact_prediction":
+                raise ValueError("Unknown auxiliary task type.")
+            feature = options.get("feature_key", "latent")
+            dimensions = getattr(actor, "feature_dims", {})
+            if feature not in dimensions:
+                raise ValueError(f"Actor does not declare feature {feature!r}.")
+            tasks[task_name] = ContactPrediction(
+                input_dim=dimensions[feature], **options
+            )
+        use_export_normalizer = isinstance(actor, TemporalActor)
         return policy_cls(
             obs_dim=obs_dim,
             action_dim=action_dim,
@@ -156,6 +195,19 @@ def build_policy(
             ),
             initial_action_std=float(policy_block.get("initial_action_std", 1.0)),
             action_std_range=tuple(policy_block.get("action_std_range", (1e-6, 1e6))),
+            auxiliary_tasks=tasks,
+            actor_normalizer=(
+                TemporalObservationNormalizer(obs_dim)
+                if use_export_normalizer
+                and policy_block.get("actor_obs_normalization", False)
+                else None
+            ),
+            critic_normalizer=(
+                TemporalObservationNormalizer(critic_obs_dim or obs_dim)
+                if use_export_normalizer
+                and policy_block.get("critic_obs_normalization", False)
+                else None
+            ),
         )
     elif name == "actor_only":
         if actor is None:
@@ -170,8 +222,24 @@ def build_policy(
             actor_obs_groups=actor_obs_groups,
         )
 
+    factory = getattr(policy_cls, "from_config", None)
+    if factory is not None:
+        return factory(
+            policy_block, obs_space=obs_space, action_space=action_space, device=device
+        )
+
     init_params = inspect.signature(policy_cls.__init__).parameters
+    raw_cfg = policy_block.get("cfg", {})
+    if not isinstance(raw_cfg, Mapping):
+        raise TypeError("policy.cfg must be a mapping.")
     build_kwargs: dict[str, object] = {"device": device}
+    if "cfg" in init_params and "cfg" in policy_block:
+        build_kwargs["cfg"] = dict(raw_cfg)
+    elif raw_cfg:
+        unknown = set(raw_cfg) - set(init_params)
+        if unknown:
+            raise TypeError(f"Unsupported policy.cfg fields: {sorted(unknown)}.")
+        build_kwargs.update(raw_cfg)
     if "obs_space" in init_params:
         build_kwargs["obs_space"] = obs_space
     elif "obs_dim" in init_params:
@@ -186,6 +254,24 @@ def build_policy(
         build_kwargs["actor"] = actor
     if "critic" in init_params and critic is not None:
         build_kwargs["critic"] = critic
+    if "critic_obs_dim" in init_params and critic_obs_space is not None:
+        build_kwargs["critic_obs_dim"] = _resolve_space_dim(
+            critic_obs_space, "critic_obs_space"
+        )
+    for key, value in (
+        ("actor_obs_groups", actor_obs_groups),
+        ("critic_obs_groups", critic_obs_groups),
+    ):
+        if key in init_params:
+            build_kwargs[key] = value
+    for key in (
+        "actor_obs_normalization",
+        "critic_obs_normalization",
+        "initial_action_std",
+        "action_std_range",
+    ):
+        if key in init_params and key in policy_block:
+            build_kwargs[key] = policy_block[key]
     return policy_cls(**build_kwargs)
 
 

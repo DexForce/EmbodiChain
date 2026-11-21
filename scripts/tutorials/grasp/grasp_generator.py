@@ -55,13 +55,14 @@ import numpy as np
 import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.utility.gripper_geometry import grasp_generator_parameters
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.compute.trajectory import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.lab.sim.motion.solvers import URSolverCfg
 from embodichain.data import get_data_path
-from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
+from examples.sim.atomic_skill.gripper_geometry import mounted_gripper_geometry
 from embodichain.utils import logger
 from embodichain.lab.sim.cfg import (
     RenderCfg,
@@ -244,8 +245,8 @@ if __name__ == "__main__":
     sim.prepare()
 
     # get mug grasp pose
-    if not args.headless:
-        sim.open_window()
+    if not args.headless or getattr(args, "web", False):
+        sim.open_viewer()
 
     # Annotate part of the mug to be grasped by following the instructions in the visualization window:
     # 1. View grasp object in browser (e.g http://localhost:11801)
@@ -255,20 +256,16 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # Construct one standalone generator. The same instance can also be passed
-    # to AtomicActionEngine(grasp_pose_generators={"hand": grasp_generator}).
+    # to AtomicSkillEngine(grasp_pose_generators={"hand": grasp_generator}).
+    gripper_data, collision_geometry = mounted_gripper_geometry(robot.cfg)
     grasp_generator = AntipodalGraspPoseGenerator(
-        ParallelJawGripperModelCfg(
-            model_id="tutorial_parallel_jaw",
-            min_opening_width=0.003,
-            max_opening_width=0.088,
-            finger_length=0.078,
-        ),
+        **grasp_generator_parameters(gripper_data),
+        collision_geometry=collision_geometry,
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
             sample_count=10_000,
             max_candidates=30,
         ),
         collision_cfg=ParallelJawGraspCollisionCfg(
-            point_sample_density=0.012,
             filter_ground_collision=True,
         ),
         annotation_cfg=GraspAnnotationCfg(
@@ -307,10 +304,10 @@ if __name__ == "__main__":
     logger.log_info(f"Get grasp pose cost time: {cost_time:.2f} seconds")
 
     grab_traj = get_grasp_traj(sim, robot, grasp_xpos)
-    input("Press Enter to start the grab mug demo...")
+    sim.wait_for_input("Press Enter to start the grab mug demo...")
     n_waypoint = grab_traj.shape[1]
     for i in range(n_waypoint):
         robot.set_qpos(grab_traj[:, i, :])
         sim.update(step=4)
         time.sleep(1e-2)
-    input("Press Enter to exit the simulation...")
+    sim.wait_for_input("Press Enter to exit the simulation...")

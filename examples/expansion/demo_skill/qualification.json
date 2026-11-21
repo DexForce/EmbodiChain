@@ -1,0 +1,262 @@
+{
+  "base_revision": "e40bb92ab02d1fb6506167849e0786abc38c4581",
+  "cases": [
+    {
+      "batch_size": 1,
+      "case": "whole",
+      "confirmed_physical_episodes": 1,
+      "episodes": [
+        {
+          "actions": 925,
+          "checks": [
+            {
+              "id": "preparation.source_configuration",
+              "status": "passed"
+            },
+            {
+              "id": "preparation.initial_state",
+              "status": "passed"
+            },
+            {
+              "id": "preparation.settling_steps",
+              "status": "passed"
+            },
+            {
+              "id": "physics_parameters",
+              "status": "passed"
+            },
+            {
+              "id": "task_success",
+              "status": "passed"
+            },
+            {
+              "id": "task.terminal",
+              "status": "passed"
+            },
+            {
+              "id": "task.events",
+              "status": "passed"
+            },
+            {
+              "id": "path_collision",
+              "status": "passed"
+            },
+            {
+              "id": "source.action_state_trace",
+              "status": "passed"
+            },
+            {
+              "id": "demo_skill.call.0",
+              "status": "passed"
+            }
+          ],
+          "commit_id": "commit_bd398ac08abb6b04f745751d22abbe739a838b3616bb0fdb7268f8b863d56da9",
+          "demo_skill_assets": {
+            "0": "cdc03a20a330b8a9056b09df4759ac1708e25afe83ead12697ffa0bb7a364dd3"
+          },
+          "episode_id": "episode_bd398ac08abb6b04f745751d22abbe739a838b3616bb0fdb7268f8b863d56da9",
+          "measured_states": 926,
+          "recipe_id": "5a6dba615c319420bafefc857df0135b7ca8650f094fbf4d34b4afefc64f50a9",
+          "sampled_mass_scale": {},
+          "source_episode_uuids": [
+            "c7cff9dc09e5d900e1438a307edac814631919c1833883a0d10823854c46a355"
+          ]
+        }
+      ]
+    },
+    {
+      "batch_size": 2,
+      "case": "mixed_mass_variation",
+      "confirmed_physical_episodes": 2,
+      "episodes": [
+        {
+          "actions": 929,
+          "checks": [
+            {
+              "id": "preparation.source_configuration",
+              "status": "passed"
+            },
+            {
+              "id": "preparation.initial_state",
+              "status": "passed"
+            },
+            {
+              "id": "preparation.settling_steps",
+              "status": "passed"
+            },
+            {
+              "id": "physics_parameters",
+              "status": "passed"
+            },
+            {
+              "id": "task_success",
+              "status": "passed"
+            },
+            {
+              "id": "task.terminal",
+              "status": "passed"
+            },
+            {
+              "id": "task.events",
+              "status": "passed"
+            },
+            {
+              "id": "path_collision",
+              "status": "passed"
+            },
+            {
+              "id": "source.action_state_trace",
+              "status": "passed"
+            },
+            {
+              "id": "demo_skill.call.1",
+              "status": "passed"
+            },
+            {
+              "id": "prototype.planned_geometry",
+              "status": "passed"
+            }
+          ],
+          "commit_id": "commit_8a3f010d9cfdf9d94de29495a68db75147cebd6282f8f8d4f46941ad5bac4566",
+          "demo_skill_assets": {
+            "1": "89de63eca53297da0732205d130bda627ca991b3556af1788f19575b381b75ce"
+          },
+          "episode_id": "episode_8a3f010d9cfdf9d94de29495a68db75147cebd6282f8f8d4f46941ad5bac4566",
+          "measured_states": 930,
+          "recipe_id": "51da2ed2a2abe514e570e78bdcdb4b526d2b76b2c338b26a7e76474d621bb85c",
+          "sampled_mass_scale": {
+            "carton": 0.9969994161571706
+          },
+          "source_episode_uuids": [
+            "c7cff9dc09e5d900e1438a307edac814631919c1833883a0d10823854c46a355"
+          ]
+        },
+        {
+          "actions": 929,
+          "checks": [
+            {
+              "id": "preparation.source_configuration",
+              "status": "passed"
+            },
+            {
+              "id": "preparation.initial_state",
+              "status": "passed"
+            },
+            {
+              "id": "preparation.settling_steps",
+              "status": "passed"
+            },
+            {
+              "id": "physics_parameters",
+              "status": "passed"
+            },
+            {
+              "id": "task_success",
+              "status": "passed"
+            },
+            {
+              "id": "task.terminal",
+              "status": "passed"
+            },
+            {
+              "id": "task.events",
+              "status": "passed"
+            },
+            {
+              "id": "path_collision",
+              "status": "passed"
+            },
+            {
+              "id": "source.action_state_trace",
+              "status": "passed"
+            },
+            {
+              "id": "demo_skill.call.1",
+              "status": "passed"
+            },
+            {
+              "id": "prototype.planned_geometry",
+              "status": "passed"
+            }
+          ],
+          "commit_id": "commit_bd1f6105444535e0813b549f97bcebd976944e8f1e982cb61f6fa2f4b9779683",
+          "demo_skill_assets": {
+            "1": "89de63eca53297da0732205d130bda627ca991b3556af1788f19575b381b75ce"
+          },
+          "episode_id": "episode_bd1f6105444535e0813b549f97bcebd976944e8f1e982cb61f6fa2f4b9779683",
+          "measured_states": 930,
+          "recipe_id": "20a170621bd9e4b04c54493ed9b2be9e119184f26758fc4e8457ac722deed2a0",
+          "sampled_mass_scale": {
+            "carton": 0.9953328395590665
+          },
+          "source_episode_uuids": [
+            "c7cff9dc09e5d900e1438a307edac814631919c1833883a0d10823854c46a355"
+          ]
+        }
+      ]
+    }
+  ],
+  "confirmed_physical_episodes": 3,
+  "context_review": {
+    "revised": [
+      "data-pipeline",
+      "atomic-actions",
+      "expansion-engine"
+    ],
+    "unchanged": {
+      "env-framework": "Component composition, backend ownership and Gym stepping/reset ownership are unchanged.",
+      "scene-services": "Existing physical geometry capture and measured scene APIs retain their contracts.",
+      "task-programs": "Existing registered-call, compiler and runtime ownership contracts remain accurate."
+    }
+  },
+  "evidence_root": "/tmp/demo-skill-carton-v18",
+  "not_qualified": [
+    "newton real-source execution",
+    "cross-robot transfer",
+    "geometry replacement",
+    "force-feedback control",
+    "ego or UMI input",
+    "native spatial/timing/visual full matrix"
+  ],
+  "portability_protocol": "Copied datasets to a new root, temporarily hid the complete producer job/assets/export root, and verified both datasets and embedded DemoSkill assets before restoring the producer root.",
+  "portable_exports": {
+    "mixed": {
+      "episodes": 2,
+      "errors": 0,
+      "frames": 1858,
+      "ok": true,
+      "verified_demo_skill_assets": [
+        "89de63eca53297da0732205d130bda627ca991b3556af1788f19575b381b75ce",
+        "89de63eca53297da0732205d130bda627ca991b3556af1788f19575b381b75ce"
+      ],
+      "warnings": 0
+    },
+    "whole": {
+      "episodes": 1,
+      "errors": 0,
+      "frames": 925,
+      "ok": true,
+      "verified_demo_skill_assets": [
+        "cdc03a20a330b8a9056b09df4759ac1708e25afe83ead12697ffa0bb7a364dd3"
+      ],
+      "warnings": 0
+    }
+  },
+  "schema": "demo-skill-qualification/v1",
+  "scope": {
+    "backend": "default",
+    "control_dt": 0.03333333333333333,
+    "mass_scale_range": [
+      0.99,
+      1.01
+    ],
+    "observation": "state only",
+    "physical_scene": "existing declared rigid carton/worktop proxy",
+    "physics_dt": 0.004166666666666667,
+    "rendering": "no-render",
+    "robot": "FrankaPandaRobotiq85",
+    "seed": 7
+  },
+  "source": "existing real2sim carton DROID episode RAIL+d027f2ae+2023-11-20-11h-50m-49s",
+  "validated_on": "2026-11-05"
+}

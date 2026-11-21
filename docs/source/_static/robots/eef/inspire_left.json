@@ -1,0 +1,125 @@
+{
+  "source_asset": "InspireHand/InspireLeftHand/InspireLeftHand.urdf",
+  "source_urdf": "/root/.cache/embodichain_data/extract/InspireHand/InspireLeftHand/InspireLeftHand.urdf",
+  "source_urdf_sha256": "64ae561a4c24e74a8749b083784e152362b5f4608ad2fc031e9a4cbf1148aace",
+  "image": "inspire_left.png",
+  "image_sha256": "7e64d9925a4353c0639abf37b739c22853926463e83072477e06fc26b8694ab8",
+  "render_cfg": {
+    "renderer": "rt",
+    "spp": 1,
+    "denoising": {
+      "offscreen": "dlss"
+    },
+    "dlss_quality": 2,
+    "tone_mapping_enabled": false
+  },
+  "camera": {
+    "eye": [
+      0.15648478388786313,
+      0.35840386942029,
+      0.2916456097364426
+    ],
+    "target": [
+      -0.10833576321601868,
+      -0.016758572310209274,
+      0.09303019940853119
+    ],
+    "up": [
+      0,
+      0,
+      1
+    ],
+    "intrinsics": [
+      2100,
+      2100,
+      800,
+      540
+    ],
+    "near": 0.005,
+    "far": 60,
+    "width": 1600,
+    "height": 1080
+  },
+  "bounds": {
+    "min": [
+      -0.21661388874053955,
+      -0.061102647334337234,
+      0.020000003278255463
+    ],
+    "max": [
+      -5.764389061369002e-05,
+      0.027585500851273537,
+      0.16606038808822632
+    ]
+  },
+  "physics_stepped": false,
+  "joint_positions": {
+    "L_index_MCP_joint": 0.09427852183580399,
+    "L_middle_MCP_joint": 0.10563871264457703,
+    "L_pinky_MCP_joint": 0.0826960951089859,
+    "L_ring_MCP_joint": 0.11572019755840302,
+    "L_thumb_MCP_joint1": 0.30000001192092896,
+    "L_index_DIP_joint": 0.06540311127901077,
+    "L_middle_DIP_joint": 0.07346506416797638,
+    "L_pinky_DIP_joint": 0.1032976359128952,
+    "L_ring_DIP_joint": 0.08066773414611816,
+    "L_thumb_MCP_joint2": 1.2999999523162842,
+    "L_thumb_PIP_joint": 0.0,
+    "L_thumb_DIP_joint": 0.0
+  },
+  "warmup_frames": 48,
+  "display_preprocessing": [],
+  "loaded_urdf_sha256": "64ae561a4c24e74a8749b083784e152362b5f4608ad2fc031e9a4cbf1148aace",
+  "configuration": "Source articulation at zero-coordinate display pose",
+  "material_overrides": [],
+  "root_position": [
+    0.0,
+    0.0,
+    0.12293195724487305
+  ],
+  "root_rotation_degrees": [
+    0,
+    -90,
+    0
+  ],
+  "emission_intensity": 80,
+  "emission_color": [
+    0.92,
+    0.95,
+    1.0
+  ],
+  "rect_lights": [
+    {
+      "name": "key",
+      "relative_to_bounds_center": [
+        1.0,
+        -1.2,
+        2.0
+      ],
+      "intensity": 180,
+      "size": 0.3310256838798523
+    },
+    {
+      "name": "fill",
+      "relative_to_bounds_center": [
+        -1.5,
+        -0.5,
+        1.0
+      ],
+      "intensity": 100,
+      "size": 0.3310256838798523
+    },
+    {
+      "name": "rim",
+      "relative_to_bounds_center": [
+        0.0,
+        1.5,
+        1.5
+      ],
+      "intensity": 150,
+      "size": 0.3310256838798523
+    }
+  ],
+  "description": "Source visual geometry and materials rendered by native OfflineRT with environment intensity 80 and three rectangular studio lights; no physics steps.",
+  "renderer_runtime": "DexSim native OfflineRT via Python 3.11, Torch 2.7.0+cu128; NVIDIA RTX PRO 5000 72GB Blackwell"
+}

@@ -11,7 +11,9 @@ python .agents/skills/add-task-program/scripts/inspect_deployment.py \
 ```
 
 Pass multiple deployments to check embodiment variants in one run. Add
-`--json` for machine-readable output.
+`--json --explain` for normalized declarations, authored paths, effective argument
+contracts, resource selections and source bindings. Demo Skill deployments
+require one environment and configured nominal sources require sequential flow.
 
 The inspector:
 
@@ -23,6 +25,16 @@ The inspector:
 6. runs catalog preflight and static Semantic Call lowering.
 
 It never constructs a live simulator or registers a Gym environment.
+
+### Resolved values and owners
+
+Use `--explain` for a readable backend/component summary and composed
+integration/policy parameters with their authored owners. Add `--json` for
+`resolved_configuration`, typed runtime preset defaults, and machine-readable
+source paths. The view distinguishes component values, inline/derived values,
+deployment overrides, and built-in composite monitor SDK defaults. Other
+monitor providers' defaults are not guessed. These values describe configuration,
+not live measurements or evidence of physical success.
 
 ## Focused test surfaces
 

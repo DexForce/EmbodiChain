@@ -34,6 +34,11 @@ from .apg import (
     complete_discounted_return,
     segmented_discounted_return,
 )
+from .apg_actor_critic import (
+    APGActorCritic,
+    APGActorCriticCfg,
+    differentiable_lambda_returns,
+)
 from .base import BaseAlgorithm, RolloutKind
 from .common import compute_gae
 from .grpo import GRPO, GRPOCfg
@@ -41,6 +46,7 @@ from .ppo import PPO, PPOCfg
 
 _ALGO_REGISTRY: Dict[str, Tuple[Type[Any], Type[Any]]] = {
     "apg": (APGCfg, APG),
+    "apg_actor_critic": (APGActorCriticCfg, APGActorCritic),
     "ppo": (PPOCfg, PPO),
     "grpo": (GRPOCfg, GRPO),
 }
@@ -53,8 +59,9 @@ def get_registered_algo_names() -> list[str]:
 def _normalize_algo_cfg_kwargs(cfg_kwargs: Dict[str, Any]) -> Dict[str, Any]:
     """Coerce nested optimizer/scheduler mappings from YAML/JSON."""
     normalized = dict(cfg_kwargs)
-    if "optimizer" in normalized:
-        normalized["optimizer"] = coerce_optimizer_cfg(normalized["optimizer"])
+    for name in ("optimizer", "critic_optimizer"):
+        if name in normalized:
+            normalized[name] = coerce_optimizer_cfg(normalized[name])
     if "lr_scheduler" in normalized:
         normalized["lr_scheduler"] = coerce_lr_scheduler_cfg(normalized["lr_scheduler"])
     return normalized
@@ -98,6 +105,9 @@ def build_algo(
 __all__ = [
     "BaseAlgorithm",
     "RolloutKind",
+    "APGActorCritic",
+    "APGActorCriticCfg",
+    "differentiable_lambda_returns",
     "APGCfg",
     "APG",
     "complete_discounted_return",

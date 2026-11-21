@@ -157,17 +157,19 @@ def ports(monkeypatch):
             events.append(("host", env.name, settle_steps))
 
         def __call__(self, variant):
-            assert variant.pose_changes == ()
-            return self.validator()
+            assert variant[0].pose_changes == ()
+            return {0: self.validator(0)}
 
     def execute(env, variant, *, prepare_scene, measured_validator, episode_index):
         events.append(("execute", env.name, episode_index))
-        initial = prepare_scene(variant)
-        measured = measured_validator() if initial.accepted else ValidationResult(())
+        initial = prepare_scene(variant)[0]
+        measured = measured_validator(0) if initial.accepted else ValidationResult(())
         accepted = initial.accepted and measured.accepted
-        return SimpleNamespace(
-            accepted=accepted, to_metadata=lambda: {"accepted": accepted}
-        )
+        return {
+            0: SimpleNamespace(
+                accepted=accepted, to_metadata=lambda: {"accepted": accepted}
+            )
+        }
 
     class ReplacementEvents:
         def __init__(self, terms, env):
@@ -197,7 +199,7 @@ def ports(monkeypatch):
 
     monkeypatch.setattr(module, "EventManager", ReplacementEvents)
     monkeypatch.setattr(module, "SimulationSceneExpansionHost", Host)
-    monkeypatch.setattr(module, "execute_scene_variant", execute)
+    monkeypatch.setattr(module, "execute_scene_variants", execute)
     monkeypatch.setattr(module, "_flush_cleanup", lambda: events.append(("flush",)))
     return SimpleNamespace(events=events, envs=envs, factory=factory)
 
@@ -310,7 +312,7 @@ def test_execution_error_remains_primary_when_close_also_fails(
         env.close_error = ValueError("close failed")
         return env
 
-    monkeypatch.setattr(module, "execute_scene_variant", execute)
+    monkeypatch.setattr(module, "execute_scene_variants", execute)
     with pytest.raises(RuntimeError) as caught:
         module.collect_asset_batches(
             [_artifact(tmp_path, "batch")],
@@ -624,7 +626,7 @@ def test_default_factory_applies_recording_flag_after_production_config_loading(
     repository = Path(__file__).resolve().parents[3]
     source = (
         repository
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
     )
     config = yaml.safe_load(source.read_text())
     config["id"] = "AssetFactoryRecordingFlagTest-v0"

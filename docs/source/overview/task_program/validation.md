@@ -14,7 +14,7 @@ all Task Program tasks, robots, seeds or physics backends.
 | CLI | `embodichain run-env`; `run-task` exists as an alias at this baseline |
 | Runtime | Python 3.11.14, Linux, DexSim `0.5.1rc1`, Warp `1.17.0`, Newton dependency `1.6.0` |
 | GPU | NVIDIA RTX PRO 5000 72 GB Blackwell; driver `580.126.20`; PyTorch `2.7.0+cu128`; one GPU selected with `CUDA_VISIBLE_DEVICES=1` |
-| Deployment | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml` |
+| Deployment | `embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml` |
 | Physics / execution | Default; `trajectory_open_loop.yaml`; `effect_assurance: projected` |
 | Selection | Seed 7, one environment, one episode, no expansion |
 | User directory | Empty directory outside the repository; installed package deployment plus local program overrides |
@@ -44,7 +44,7 @@ and launcher-guide links, not the tested program, deployment or physics policy.
 | Checked/save | Four segments, 188 frames, 7.52 s; two settling checks and two 3 cm position checks passed; one episode saved. |
 | Repeat checked/save with the ordinary CLI | One episode, 188 frames; both position/stability checks passed again without the capture harness. |
 | Dataset reader | `preview_lerobot_data` reads the episode, task/subtask language and four segment ranges; consistency check passes. |
-| Unknown object | `reference_validation_failed` at `$.program.body.items[0].steps.call.object`; exit 1 before environment construction. |
+| Unknown object | `reference_validation_failed` at `$.program.repeat.body[0].steps.pick.object`; exit 1 before environment construction. |
 | Unsupported field | `unknown_field` at `$.program.speed`; exit 1 before environment construction. |
 
 In the first checked run, the Place segments each took 54 steps including
@@ -73,7 +73,7 @@ simulator:
 
 ```bash
 python .agents/skills/add-task-program/scripts/inspect_deployment.py \
-  extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml \
+  embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml \
   --json
 ```
 

@@ -17,7 +17,8 @@ Scaffold a new functor following EmbodiChain's Functor/FunctorCfg pattern.
 
 | Functor Type | Config Class | Module File | Manager | Signature |
 |-------------|-------------|-------------|---------|-----------|
-| Observation | `ObservationCfg` (extends `FunctorCfg`) | `managers/observations.py` | `ObservationManager` | `(env, obs, entity_cfg, ...) -> Tensor` |
+| Observation | `ObservationCfg` (extends `FunctorCfg`) | `managers/observations/` | `ObservationManager` | `(env, obs, entity_cfg, ...) -> Tensor` |
+| Condition | `ConditionCfg` | `managers/conditions.py` | `TerminationManager` | `(env, ...) -> ConditionResult` |
 | Reward | `RewardCfg` (extends `FunctorCfg`) | `managers/rewards.py` | `RewardManager` | `(env, obs, action, info, ...) -> Tensor` |
 | Event | `EventCfg` (extends `FunctorCfg`) | `managers/events.py` | `EventManager` | `(env, env_ids, ...) -> None` |
 | Action | `ActionTermCfg` (extends `FunctorCfg`) | `managers/actions.py` | `ActionManager` | Varies |
@@ -94,7 +95,7 @@ Place the functor in the existing module for its type:
 
 | Type | File |
 |------|------|
-| Observation | `embodichain/lab/gym/envs/managers/observations.py` |
+| Observation | `embodichain/lab/gym/envs/managers/observations/` |
 | Reward | `embodichain/lab/gym/envs/managers/rewards.py` |
 | Event | `embodichain/lab/gym/envs/managers/events.py` |
 | Action | `embodichain/lab/gym/envs/managers/actions.py` |
@@ -115,10 +116,20 @@ Key rules:
 - For observation functors: add `shape` key to `FunctorCfg.extra` dict
 - For randomization functors: second arg is `env_ids: torch.Tensor | list[int]`
 - For reward functors: return shape must be `(num_envs,)`
+- For condition functors: return `ConditionResult` with owned boolean
+  `satisfied`/`valid` vectors and batch-aligned metric tensors on the environment
+  device. Bind entities with `SceneEntityCfg`, keep metric schemas stable, and
+  advance history only during `TerminationManager.compute()`; `reset(env_ids)` clears only
+  selected rows. Reuse measured predicates from `envs/objectives` when applicable.
+  Use a class functor when entity or parameter validation must run during binding,
+  before reset context exists. Keep that validation in its constructor; the
+  termination manager must not enumerate concrete condition implementations.
 
 ### 4. Update `__all__`
 
 Add the new functor to the module's `__all__` list. If no `__all__` exists, create one.
+For observation implementations, re-export the functor from the observation
+package so existing config-name resolution finds it.
 
 ### 5. Write a Test
 

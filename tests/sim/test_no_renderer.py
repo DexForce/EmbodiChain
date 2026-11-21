@@ -135,11 +135,15 @@ def _run_world(backend: str, urdf_path: str) -> None:
         assert not sim._world.is_window_initialized()
         assert not sim.has_native_renderer
         assert not sim._visual_materials
+        from embodichain.lab.sim.cfg import LightCfg
         from embodichain.lab.sim.sensors import CameraCfg
 
         with pytest.raises(RuntimeError, match="requires a native renderer"):
             sim.add_sensor(CameraCfg(uid="camera", width=32, height=32))
         assert not sim._sensors
+        with pytest.raises(RuntimeError, match="requires a native renderer"):
+            sim.add_light(LightCfg(uid="light"))
+        assert not sim.get_light_uid_list()
         print(f"{backend}: rigid state and renderer checks passed", flush=True)
 
         # Exercise the URDF source resolver against the selected DexSim build.

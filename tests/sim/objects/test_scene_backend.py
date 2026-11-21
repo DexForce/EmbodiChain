@@ -119,6 +119,7 @@ def test_scene_views_match_installed_dexsim_batch_surface() -> None:
         "fetch_link_pose",
         "fetch_link_linear_velocity",
         "fetch_link_angular_velocity",
+        "apply_link_com_local_pose",
         "compute_kinematics",
     }
     articulation_metadata = {
@@ -1356,3 +1357,266 @@ def test_root_velocity_view_rejects_shape_before_writing(
     assert batch.selections == []
     torch.testing.assert_close(batch.root_linear_velocity, linear_before)
     torch.testing.assert_close(batch.root_angular_velocity, angular_before)
+
+
+@pytest.mark.parametrize(
+    ("method", "batch_method", "width"),
+    [
+        ("apply_link_mass", "apply_link_mass", None),
+        ("apply_link_inertia", "apply_link_inertia_diagonal", 3),
+        ("apply_link_com_pose", "apply_link_com_local_pose", 7),
+    ],
+)
+def test_selected_link_property_writes_preserve_layout_and_errors(
+    method: str,
+    batch_method: str,
+    width: int | None,
+) -> None:
+    batch = _ArticulationBatch()
+    view = SceneArticulationView(_Scene("newton"), batch, torch.device("cpu"))
+    selected = Mock()
+    call = Mock(return_value=1)
+    setattr(batch if width == 7 else selected, batch_method, call)
+    batch.select = Mock(return_value=selected)
+    values = torch.arange(width or 1, dtype=torch.float32).reshape(
+        (1, 1) if width is None else (1, 1, width)
+    )
+    getattr(view, method)(values, [1], [0])
+    if width == 7:
+        batch.select.assert_not_called()
+        torch.testing.assert_close(call.call_args.kwargs["rows"], torch.tensor([1]))
+    else:
+        torch.testing.assert_close(batch.select.call_args.args[0], torch.tensor([1]))
+    expected = _batch_pose(values) if width == 7 else values
+    torch.testing.assert_close(call.call_args.args[0], expected)
+    assert call.call_args.kwargs["link_ids"] == [0]
+    call.return_value = -1
+    with pytest.raises(RuntimeError, match=batch_method):
+        getattr(view, method)(values, [1], [0])
+    batch.select.reset_mock()
+    getattr(view, method)(values[:0], [], [0])
+    batch.select.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "method", ["apply_link_mass", "apply_link_inertia", "apply_link_com_pose"]
+)
+def test_empty_link_property_selection_is_noop(method: str) -> None:
+    batch = _ArticulationBatch()
+    view = SceneArticulationView(_Scene("newton"), batch, torch.device("cpu"))
+    batch.select = Mock()
+    width = {
+        "apply_link_mass": (),
+        "apply_link_inertia": (3,),
+        "apply_link_com_pose": (7,),
+    }[method]
+    getattr(view, method)(torch.empty((1, 0) + width), [1], [])
+    batch.select.assert_not_called()
+
+
+def test_spawn_static_friction_uses_live_batch_and_selected_rows(monkeypatch):
+    from embodichain.lab.sim.objects import rigid_object as rigid_module
+    from embodichain.lab.sim.objects.rigid_object import RigidObject
+
+    values = torch.tensor([[0.3], [0.6], [0.9]])
+
+    class View:
+        def apply_friction(self, data, ids):
+            values[ids.long()] = data
+
+        def fetch_friction(self, out, ids):
+            out.copy_(values[ids.long()])
+
+    factory = Mock(return_value=View())
+    monkeypatch.setattr(SceneRigidBodyView, "from_entities", factory)
+    rigid = RigidObject.__new__(RigidObject)
+    rigid._spawn_result = SimpleNamespace(backend="newton")
+    rigid._entities = [object(), object(), object()]
+    rigid._data = None
+    rigid.device = torch.device("cpu")
+    rigid._all_indices = [0, 1, 2]
+    rigid.set_friction(torch.tensor([1.2, 0.4]), env_ids=[2, 0])
+    torch.testing.assert_close(rigid.get_friction(), torch.tensor([0.4, 0.6, 1.2]))
+    first = rigid.get_friction([0])
+    rigid.set_friction(torch.tensor([0.7]), env_ids=[0])
+    torch.testing.assert_close(first, torch.tensor([0.4]))
+    assert factory.call_count == 1
+
+    # Rebinding a facade after a topology rebuild replaces its native batch.
+    from embodichain.lab.sim.common import BatchEntity
+
+    class RebuiltScene:
+        world = object()
+        backend = "newton"
+
+    monkeypatch.setattr(rigid_module, "Scene", RebuiltScene)
+    monkeypatch.setattr(BatchEntity, "__init__", lambda *args, **kwargs: None)
+    rigid.cfg = SimpleNamespace(body_type="static")
+    rigid._declared_num_instances = 3
+    rigid._apply_spawn_visual_uv = Mock()
+    rigid._initialize_existing_visual_material = Mock()
+    rigid._apply_initial_state = Mock()
+    rebuilt = RebuiltScene()
+    rigid._initialize_spawn_bound(rebuilt)
+    rigid.get_friction([0])
+    assert factory.call_count == 2
+    assert factory.call_args.args[0] is rebuilt
+
+
+def test_scoped_link_reads_use_arena_local_rows_and_own_the_result() -> None:
+    import numpy as np
+    from scipy.spatial.transform import Rotation
+    from embodichain.lab.sim.objects.articulation import Articulation
+    from embodichain.lab.sim.objects.backends._numeric_observations import (
+        numeric_observation_scope,
+    )
+
+    roots = {}
+    handles = []
+    expected = []
+    for row in range(2):
+        root = np.eye(4, dtype=np.float32)
+        root[:3, :3] = Rotation.from_euler("z", 0.7 * row).as_matrix()
+        root[0, 3] = 2.0 * row
+        local = np.eye(4, dtype=np.float32)
+        local[:3, :3] = Rotation.from_euler("x", 0.2 + row).as_matrix()
+        local[1, 3] = 1.0 + row
+        roots[str(row)] = Mock()
+        roots[str(row)].get_root_node.return_value.get_world_pose.return_value = root
+        handles.append(
+            SimpleNamespace(
+                arena_name=str(row), get_link_pose=Mock(return_value=root @ local)
+            )
+        )
+        expected.append(torch.from_numpy(local))
+    scene = SimpleNamespace(get_arena=roots.__getitem__, topology_revision=0)
+    data = SimpleNamespace(
+        articulation_view=SimpleNamespace(batch=object(), scene=scene)
+    )
+    robot = SimpleNamespace(
+        body_data=data, _data=data, _entities=handles, link_names=["base"]
+    )
+    sim = SimpleNamespace(
+        physics_backend="default",
+        device=torch.device("cpu"),
+        physics_step_index=0,
+        get_rigid_object_uid_list=lambda: [],
+    )
+    with numeric_observation_scope(sim, robot):
+        rows = [1, 0, 1]
+        poses = Articulation.get_link_pose(robot, "base", env_ids=rows, to_matrix=True)
+        torch.testing.assert_close(poses, torch.stack([expected[i] for i in rows]))
+        poses.zero_()
+        observed = Articulation.get_link_pose(
+            robot, "base", env_ids=torch.tensor([1]), to_matrix=True
+        )
+        torch.testing.assert_close(observed[0], expected[1])
+        handles[1].get_link_pose.assert_called_once_with("base")
+        sim.physics_step_index += 1
+        handles[0].get_link_pose.return_value = np.eye(4, dtype=np.float32)
+        observed = Articulation.get_link_pose(
+            robot, "base", env_ids=[0], to_matrix=True
+        )
+        torch.testing.assert_close(observed[0], torch.eye(4))
+
+
+def test_numeric_boundary_owns_samples_and_invalidates_writes_and_revisions() -> None:
+    from contextvars import copy_context
+    from embodichain.lab.sim.objects.backends._numeric_observations import (
+        numeric_observation_scope,
+        shared_pose,
+    )
+    from embodichain.lab.sim.objects.backends.scene import _checked_batch_call
+
+    class Batch:
+        def __init__(self):
+            self.value = torch.ones(2, 3)
+            self.reads = 0
+
+        def fetch_joint_position(self, out):
+            self.reads += 1
+            out.copy_(self.value)
+            return 2
+
+        def apply_joint_position(self, value):
+            self.value.copy_(value)
+            return 2
+
+        def apply_failed(self):
+            self.value.fill_(9)
+            raise RuntimeError("partial native write")
+
+    batch = Batch()
+    sim = SimpleNamespace(
+        physics_backend="default",
+        device=torch.device("cpu"),
+        physics_step_index=0,
+        _spawn_scene=SimpleNamespace(topology_revision=0),
+        get_rigid_object_uid_list=lambda: (),
+    )
+    robot = SimpleNamespace(
+        _data=SimpleNamespace(
+            articulation_view=SimpleNamespace(batch=batch, scene=sim._spawn_scene)
+        )
+    )
+
+    def read():
+        out = torch.empty(2, 3)
+        assert _checked_batch_call(batch, "fetch_joint_position", out) == 2
+        return out
+
+    with numeric_observation_scope(sim, robot):
+        escaped = copy_context()
+        first = read()
+        first.fill_(77)
+        torch.testing.assert_close(copy_context().run(read), torch.ones(2, 3))
+        assert batch.reads == 1
+        derived_calls = []
+
+        def derive():
+            derived_calls.append(True)
+            return batch.value @ torch.eye(3) + 10
+
+        derived = shared_pose(batch, True, derive)
+        derived.fill_(88)
+        torch.testing.assert_close(
+            shared_pose(batch, True, derive), torch.full((2, 3), 11.0)
+        )
+        assert len(derived_calls) == 1
+        torch.testing.assert_close(
+            shared_pose(batch, False, lambda: batch.value.clone()), torch.ones(2, 3)
+        )
+        _checked_batch_call(batch, "apply_joint_position", torch.full((2, 3), 2.0))
+        torch.testing.assert_close(read(), torch.full((2, 3), 2.0))
+        assert batch.reads == 2
+        torch.testing.assert_close(
+            shared_pose(batch, True, derive), torch.full((2, 3), 12.0)
+        )
+        assert len(derived_calls) == 2
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            torch.testing.assert_close(
+                shared_pose(batch, True, derive),
+                torch.full((2, 3), 12.0, dtype=torch.bfloat16),
+            )
+        assert len(derived_calls) == 3
+        sim.physics_step_index += 1
+        batch.value.fill_(3)
+        assert read()[0, 0] == 3 and batch.reads == 3
+        sim._spawn_scene.topology_revision += 1
+        batch.value.fill_(4)
+        assert read()[0, 0] == 4 and batch.reads == 4
+        with pytest.raises(RuntimeError, match="partial native"):
+            _checked_batch_call(batch, "apply_failed")
+        assert read()[0, 0] == 9 and batch.reads == 5
+        with numeric_observation_scope(sim, robot):
+            _checked_batch_call(batch, "apply_joint_position", torch.full((2, 3), 6.0))
+            assert read()[0, 0] == 6
+        assert read()[0, 0] == 6 and batch.reads == 7
+    # Same physics tick, new boundary: reset/prepare writes are never reused.
+    batch.value.fill_(8)
+    with numeric_observation_scope(sim, robot):
+        assert read()[0, 0] == 8 and batch.reads == 8
+    batch.value.fill_(10)
+    assert escaped.run(read)[0, 0] == 10 and batch.reads == 9
+    batch.value.fill_(11)
+    assert escaped.run(read)[0, 0] == 11 and batch.reads == 10

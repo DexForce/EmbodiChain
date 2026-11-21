@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -301,3 +302,206 @@ def test_resource_selection_rejects_changes_before_running_any_case(
     assert result.ret == pytest.ExitCode.USAGE_ERROR
     result.stderr.fnmatch_lines(["*Resource-lane collection * after discovery*"])
     assert not (pytester.path / "executed").exists()
+
+
+@pytest.mark.parametrize("workers", [0, 2])
+def test_metrics_preserve_phase_results_across_processes(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, workers: int
+) -> None:
+    """Setup failures, skips and passes survive independent worker outputs."""
+    import os
+
+    root = Path(__file__).resolve().parents[2]
+    monkeypatch.setenv(
+        "PYTHONPATH", str(root) + os.pathsep + os.environ.get("PYTHONPATH", "")
+    )
+    pytester.makepyfile("""
+import pytest
+@pytest.fixture
+def broken(): raise RuntimeError('setup failed')
+def test_pass(): assert 2 + 2 == 4
+@pytest.mark.skip(reason='explicit skip')
+def test_skip(): pass
+def test_setup_error(broken): pass
+""")
+    pytester.makepyfile(
+        test_collection_skip="import pytest; pytest.skip('module unavailable', allow_module_level=True)"
+    )
+    directory = pytester.path / "metrics"
+    result = pytester.runpytest_subprocess(
+        "-p",
+        "scripts.ci.pytest_metrics",
+        f"--ci-metrics-dir={directory}",
+        "-n",
+        str(workers),
+        "-q",
+    )
+    result.assert_outcomes(passed=1, skipped=2, errors=1)
+    reports = [json.loads(path.read_text()) for path in directory.glob("*.json")]
+    assert {r["worker"] for r in reports} == (
+        {"main", "gw0", "gw1"} if workers else {"main"}
+    )
+    assert any(
+        "module unavailable" in row["reason"]
+        for report in reports
+        for row in report["collection_reports"]
+    )
+    phases = [phase for report in reports for phase in report["phases"]]
+    assert len({p["nodeid"] for p in phases}) == 3
+    assert any(p["phase"] == "setup" and p["outcome"] == "failed" for p in phases)
+    assert any(
+        p["outcome"] == "skipped" and "explicit skip" in p["reason"] for p in phases
+    )
+    assert sum(p["phase"] == "call" and p["outcome"] == "passed" for p in phases) == 1
+
+
+def test_duration_order_keeps_each_group_order_and_selection(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+
+    root = Path(__file__).resolve().parents[2]
+    monkeypatch.setenv(
+        "PYTHONPATH", str(root) + os.pathsep + os.environ.get("PYTHONPATH", "")
+    )
+    pytester.makeini("[pytest]\nmarkers = xdist_group(name): resource group\n")
+    pytester.makepyfile("""
+from pathlib import Path
+import pytest
+
+def record(name):
+    with Path('order').open('a') as stream: stream.write(name + '\\n')
+
+@pytest.mark.xdist_group(name='expensive')
+def test_first(): record('first')
+@pytest.mark.xdist_group(name='cheap')
+def test_middle(): record('middle')
+@pytest.mark.xdist_group(name='expensive')
+def test_last(): record('last')
+""")
+    history = pytester.path / "history"
+    history.mkdir()
+    (history / "worker.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "phases": [
+                    {"group": "expensive", "seconds": 3},
+                    {"group": "cheap", "seconds": 1},
+                ],
+            }
+        )
+    )
+    result = pytester.runpytest_subprocess(
+        "-p", "scripts.ci.pytest_metrics", f"--ci-duration-history={history}", "-q"
+    )
+    result.assert_outcomes(passed=3)
+    assert (pytester.path / "order").read_text().splitlines() == [
+        "first",
+        "last",
+        "middle",
+    ]
+
+
+def test_metrics_keep_evidence_when_native_process_aborts(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A native-style exit cannot erase selection and completed setup evidence."""
+    import os
+
+    root = Path(__file__).resolve().parents[2]
+    monkeypatch.setenv(
+        "PYTHONPATH", str(root) + os.pathsep + os.environ.get("PYTHONPATH", "")
+    )
+    pytester.makepyfile("import os\ndef test_crash(): os._exit(7)\n")
+    directory = pytester.path / "metrics"
+    result = pytester.runpytest_subprocess(
+        "-p", "scripts.ci.pytest_metrics", f"--ci-metrics-dir={directory}", "-q"
+    )
+    assert result.ret == 7
+    selections = [
+        json.loads(path.read_text())
+        for path in (directory / "collection").glob("*.json")
+    ]
+    assert sum(len(row["collection"]) for row in selections) == 1
+    phases = [
+        json.loads(line)
+        for path in directory.glob("*.jsonl")
+        for line in path.read_text().splitlines()
+    ]
+    assert any(p["phase"] == "setup" and p["outcome"] == "passed" for p in phases)
+
+
+@pytest.mark.skipif(
+    sys.version_info < (3, 12), reason="sys.last_exc is a Python 3.12 feature"
+)
+@pytest.mark.parametrize(
+    "resource_marker", ["requires_sim", "gpu"], ids=["scene-owner", "device-owner"]
+)
+@pytest.mark.parametrize("freeze_imports", [False, True])
+def test_failed_native_owner_is_released_before_next_case(
+    pytester: pytest.Pytester, resource_marker: str, freeze_imports: bool
+) -> None:
+    """Traceback retention must not pin a failed test's native owners indefinitely."""
+    source = Path(__file__).parents[1] / "conftest.py"
+    pytester.makeconftest(source.read_text() + """
+import gc, sys, types
+for name in ('embodichain', 'embodichain.lab', 'embodichain.lab.sim'):
+    module = types.ModuleType(name)
+    module.__path__ = []
+    sys.modules[name] = module
+module = types.ModuleType('embodichain.lab.sim.sim_manager')
+module.SimulationManager = types.SimpleNamespace(flush_cleanup_queue=gc.collect)
+sys.modules[module.__name__] = module
+def _initialize_sim_engine(renderer): pass
+""")
+    pytester.makeini(
+        "[pytest]\nmarkers = requires_sim: native lifecycle\n    xdist_group(name): resource group\n"
+    )
+    program = """
+import weakref
+import pytest
+references = []
+class NativeOwner: pass
+@pytest.fixture(autouse=True)
+def user_scene_finalizer():
+    import gc, os
+    if 'EXPECTED_INITIAL_FREEZE_COUNT' in os.environ:
+        assert gc.get_freeze_count() > int(os.environ['EXPECTED_INITIAL_FREEZE_COUNT'])
+    yield
+    import gc
+    gc.collect()
+    if references:
+        assert references[0]() is None
+@pytest.mark.requires_sim
+def test_failure():
+    owner = NativeOwner()
+    owner.cycle = owner
+    references.append(weakref.ref(owner))
+    raise RuntimeError('original failure remains a failure')
+@pytest.mark.requires_sim
+def test_next_case():
+    assert references[0]() is None
+"""
+    pytester.makepyfile(
+        program.replace("@pytest.mark.requires_sim", "@pytest.mark." + resource_marker)
+    )
+    if freeze_imports:
+        wrapper = Path(__file__).parents[2] / "scripts/ci/pytest_no_finalize.py"
+        driver = pytester.path / "frozen_driver.py"
+        driver.write_text(f"""
+import gc, importlib.util, os
+spec = importlib.util.spec_from_file_location('native_runner', {str(wrapper)!r})
+runner = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(runner)
+runner._NATIVE_IMPORTS = ()  # Isolate GC ownership from optional SDK dependencies.
+os.environ['EXPECTED_INITIAL_FREEZE_COUNT'] = str(gc.get_freeze_count())
+runner.main(['--freeze-native-imports', '-q', '--run-gpu'])
+""")
+        with pytest.MonkeyPatch.context() as environment:
+            environment.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+            result = pytester.run(sys.executable, str(driver), timeout=30)
+        assert "static import objects" in result.stdout.str()
+    else:
+        result = pytester.runpytest_subprocess("-q", "--run-gpu")
+    result.assert_outcomes(passed=1, failed=1)

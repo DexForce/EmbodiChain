@@ -1,0 +1,705 @@
+{
+  "source_commit": "05da44bd8f9c0fdace1a6c793d73d927daf10e72",
+  "source_sha256": {
+    "pick_contact.py": "d7a623ff387620ee73840fdf7883fa6decb402f55f037068632ba9a145c1ccd0",
+    "release_contact.py": "6c6d557eb575756d73cb187e8fa21dc6d1c5d7d4d00e3704887cda6c335be729",
+    "pick_native_scene.py": "9932d2b1f0216890c605e6346431166a274e6d8f63d1f05d2d31b8c17572991c"
+  },
+  "versions": {
+    "python-fcl": "0.7.0.11",
+    "numpy": "2.4.6",
+    "trimesh": "4.12.2"
+  },
+  "schema": "native_hand_f1_regression/v1",
+  "capture_method": {
+    "queries": "AST-extracted pinned query definitions; actual python-fcl distance calls; no GenSim import, provider or simulator. Timing and additive ownership metadata excluded from comparison.",
+    "capture": "Pinned AST builder with named analytic FK and SDK-shaped ports; actual FCL, no simulator or GenSim import. New API supplies the same observation instead of rereading it."
+  },
+  "comparison": "SHA-256 of canonical decision records; backend-distance diagnostics excluded exactly as before.",
+  "closing": [
+    {
+      "case": {
+        "id": "bilateral",
+        "revision": 1
+      },
+      "expected_valid": true,
+      "expected_reason": "nominal_bilateral_pad_rest_first",
+      "result_sha256": "5473e7a0ba25ed4ba0120f372f93b1977c3e40416f63e01b9f5d8cc78f7c3e3a",
+      "trace_sha256": "343e1f4a629669981f97cd3c5bd286713b490e5653b7157d29412e1de78897ca"
+    },
+    {
+      "case": {
+        "id": "halo_veto",
+        "revision": 2,
+        "body": "halo"
+      },
+      "expected_valid": false,
+      "expected_reason": "nonpad_contact_envelope_before_bilateral_pad_rest",
+      "result_sha256": "ac3fb2b8a891370e898763c91d4d438d1b29d4f2514f7d324341fbac1ec81e2f",
+      "trace_sha256": "1a2d6dff79ecfba31e79dbcac29aefac13e49564a9294fd6ec89ff5705370be4"
+    },
+    {
+      "case": {
+        "id": "halo_diagnostic",
+        "revision": 4,
+        "body": "halo"
+      },
+      "expected_valid": true,
+      "expected_reason": "nominal_bilateral_pad_rest_first",
+      "result_sha256": "eafe306d123efb45877d6d724a46ef147a20b54f05831c73527c66576c253eca",
+      "trace_sha256": "53aa35d988bc151786fb981595a320734833f1e1a56cc0a959a61373932501ac"
+    },
+    {
+      "case": {
+        "id": "body_first",
+        "revision": 4,
+        "body": "first"
+      },
+      "expected_valid": false,
+      "expected_reason": "nonpad_rest_before_bilateral_pad",
+      "result_sha256": "148e838e661e31c25172dc0170c2aa33da976d50722a3ce2d44d64526ca663d0",
+      "trace_sha256": "979468c7c23997188512b3f3fa04ac0508515c80085b8112203558a205b0d884"
+    },
+    {
+      "case": {
+        "id": "ambiguous_order",
+        "revision": 4,
+        "body": "ambiguous"
+      },
+      "expected_valid": false,
+      "expected_reason": "nonpad_and_pad_order_unresolved_at_sample",
+      "result_sha256": "746155da1a591eb19e64b1ec365aa2139d41104b282caab71bb9119cd33fe6e7",
+      "trace_sha256": "168b3c65ddb14741e3302d62352d28e3b06b950db5a0b08106b41d8c4212a8fb"
+    },
+    {
+      "case": {
+        "id": "opening_allowed_r4",
+        "revision": 4,
+        "stroke": "already_touching"
+      },
+      "expected_valid": true,
+      "expected_reason": "nominal_bilateral_pad_rest_first",
+      "result_sha256": "ac7e141c51e9a63c13380d81e93f2165a34242dfd8473b5ad538945ed7dd1a42",
+      "trace_sha256": "343e1f4a629669981f97cd3c5bd286713b490e5653b7157d29412e1de78897ca"
+    },
+    {
+      "case": {
+        "id": "opening_rejected_r5",
+        "revision": 5,
+        "stroke": "already_touching"
+      },
+      "expected_valid": false,
+      "expected_reason": "pad_rest_at_opening",
+      "result_sha256": "73dafd8b40da05549f15f9e71b042fa632031be084fea79ed2c6e7b8c44304ee",
+      "trace_sha256": "343e1f4a629669981f97cd3c5bd286713b490e5653b7157d29412e1de78897ca"
+    },
+    {
+      "case": {
+        "id": "contact_not_reached",
+        "revision": 6,
+        "stroke": "never_touching"
+      },
+      "expected_valid": false,
+      "expected_reason": "bilateral_pad_rest_not_reached",
+      "result_sha256": "6b65e09e5f98f05e44e656a9c377e549b2e2fc2990c6f6aa0678af63e6fba00b",
+      "trace_sha256": "8e3c155158fdfdc3d531b1d13f31e93165c5f1ef92eeb233bb047b58d1619402"
+    },
+    {
+      "case": {
+        "id": "depth_population",
+        "revision": 6
+      },
+      "expected_valid": true,
+      "expected_reason": "nominal_bilateral_pad_rest_first",
+      "result_sha256": "8e1827a683c76e6d773ace0d458ffd5bd05f79b0e4fe85ff1b66149118c90c29",
+      "trace_sha256": "343e1f4a629669981f97cd3c5bd286713b490e5653b7157d29412e1de78897ca"
+    },
+    {
+      "case": {
+        "id": "deferred_source",
+        "revision": 8
+      },
+      "expected_valid": true,
+      "expected_reason": "nominal_bilateral_pad_rest_first",
+      "result_sha256": "fa1d17caca4341e4e8672b42caf7488f185236a829611f4a90c5ca98e504f91e",
+      "trace_sha256": "343e1f4a629669981f97cd3c5bd286713b490e5653b7157d29412e1de78897ca"
+    },
+    {
+      "case": {
+        "id": "quality_level",
+        "revision": 9
+      },
+      "expected_valid": true,
+      "expected_reason": "nominal_bilateral_pad_rest_first",
+      "result_sha256": "08e6e840c9896105d0f773c311a9b56fb6d792ac8aac584d1aa10ee4bc6a8230",
+      "trace_sha256": "343e1f4a629669981f97cd3c5bd286713b490e5653b7157d29412e1de78897ca"
+    },
+    {
+      "case": {
+        "id": "quality_under_limit",
+        "revision": 9,
+        "angle": 1.9
+      },
+      "expected_valid": true,
+      "expected_reason": "nominal_bilateral_pad_rest_first",
+      "result_sha256": "08e6e840c9896105d0f773c311a9b56fb6d792ac8aac584d1aa10ee4bc6a8230",
+      "trace_sha256": "29eeb6f90d7488b514bd4df197814673e25a917302ba7c2139efdbc6ba7cfd46"
+    },
+    {
+      "case": {
+        "id": "quality_over_limit",
+        "revision": 9,
+        "angle": 2.1
+      },
+      "expected_valid": false,
+      "expected_reason": "native_pad_line_tilt_exceeds_limit",
+      "result_sha256": "10bb836228170c907c3c8201d2cedb28fe4ce5022a188fc0c00a8e747b14e57a",
+      "trace_sha256": "8e3c155158fdfdc3d531b1d13f31e93165c5f1ef92eeb233bb047b58d1619402"
+    },
+    {
+      "case": {
+        "id": "quality_gravity",
+        "revision": 9,
+        "gravity": [
+          1,
+          0,
+          0
+        ]
+      },
+      "expected_valid": false,
+      "expected_reason": "native_pad_line_tilt_exceeds_limit",
+      "result_sha256": "77f88ed5337a0eb67e25b524908397b4ed5c1455cf1971d2e8a88af1bf4eea2c",
+      "trace_sha256": "8e3c155158fdfdc3d531b1d13f31e93165c5f1ef92eeb233bb047b58d1619402"
+    },
+    {
+      "case": {
+        "id": "quality_actual_axis",
+        "revision": 9,
+        "axis": 1,
+        "angle": 20
+      },
+      "expected_valid": true,
+      "expected_reason": "nominal_bilateral_pad_rest_first",
+      "result_sha256": "08e6e840c9896105d0f773c311a9b56fb6d792ac8aac584d1aa10ee4bc6a8230",
+      "trace_sha256": "77347c2ff09cc03b476b13cd59df3fd357e5db6734acde09bf78323456a65839"
+    }
+  ],
+  "opening": [
+    {
+      "height": 0.05,
+      "expected_valid": true,
+      "expected_reason": "nominal_opening_rest_clear",
+      "result_sha256": "907312391e6959a12d1c9ee057f13ccbb91746e8df3780b2c907b5625645872a",
+      "trace_sha256": "d41d7429de049c494c88aa2b7d483802c148094add7cdd0f24271c3dd5b945ba",
+      "report_sha256": "a270eb7c9b85f0b275f4d4d1e91d4d48ad9f2e69ee0d741e9884006d8ff3eefd",
+      "repeated_sha256": "907312391e6959a12d1c9ee057f13ccbb91746e8df3780b2c907b5625645872a"
+    },
+    {
+      "height": 0.03,
+      "expected_valid": false,
+      "expected_reason": "hand_support_rest_envelope_overlap",
+      "result_sha256": "860cbec083f681cab876a54d22c5f5a0de35f3f9e6312f0fa42d6060efe14c15",
+      "trace_sha256": "ec4ac2fe6a6fdd4bc636aba247cabd9ceaa3e6bc43e786e8cd3ea87df51219ff",
+      "report_sha256": "ccf36cfd919c58963154cacc6c292d34f4c54de449b93ac5aaf3cad8124a823c",
+      "repeated_sha256": "860cbec083f681cab876a54d22c5f5a0de35f3f9e6312f0fa42d6060efe14c15"
+    }
+  ],
+  "scene": [
+    {
+      "height": 0.4,
+      "expected_valid": true,
+      "expected_reason": null,
+      "result_sha256": "19a723af89633c8aa9ce5e53f1d6c2c46d908b2f6b00c3a6616226ab1b6fef5c",
+      "trace_sha256": "c694893382608e6ea3c16ed146adf37f74f6024c271378d79aa161e1ef65cb62",
+      "repeated_sha256": "19a723af89633c8aa9ce5e53f1d6c2c46d908b2f6b00c3a6616226ab1b6fef5c"
+    },
+    {
+      "height": 0.0,
+      "expected_valid": false,
+      "expected_reason": null,
+      "result_sha256": "74cb851ca55613983d1db523a5a19d0284866852d14092b4ef5b3f1c820326f1",
+      "trace_sha256": "1d62d8e2398f111020f3c02578b3c16a513285282420aade98e8e4a9e004ba28",
+      "repeated_sha256": "74cb851ca55613983d1db523a5a19d0284866852d14092b4ef5b3f1c820326f1"
+    }
+  ],
+  "capture": {
+    "parts": [
+      {
+        "name": "hand_base",
+        "pad": false,
+        "rest_offset": 0.0002,
+        "contact_offset": 0.003,
+        "tcp_poses": {
+          "shape": [
+            65,
+            4,
+            4
+          ],
+          "sha256": "5a8e8a8ef0cf83e67209f8f7aa748743f816e0645a296305b0a822445d147905"
+        },
+        "meshes": [
+          {
+            "vertices": {
+              "shape": [
+                8,
+                3
+              ],
+              "sha256": "4e3004243a3962423a702be95f98c227562b8c684e903fd3f6d054ce79bbd08f"
+            },
+            "faces": {
+              "shape": [
+                12,
+                3
+              ],
+              "sha256": "45b42c3653d916570ed16014f8a91f585c5fc9a93c1467f279657354544c0aa7"
+            }
+          }
+        ]
+      },
+      {
+        "name": "negative_finger_pad",
+        "pad": true,
+        "rest_offset": 0.0002,
+        "contact_offset": 0.003,
+        "tcp_poses": {
+          "shape": [
+            65,
+            4,
+            4
+          ],
+          "sha256": "9eba868369cfa3986654b60041f3b8ac32ad3cacb94e3c225d439971d3b079b9"
+        },
+        "meshes": [
+          {
+            "vertices": {
+              "shape": [
+                8,
+                3
+              ],
+              "sha256": "4e3004243a3962423a702be95f98c227562b8c684e903fd3f6d054ce79bbd08f"
+            },
+            "faces": {
+              "shape": [
+                12,
+                3
+              ],
+              "sha256": "45b42c3653d916570ed16014f8a91f585c5fc9a93c1467f279657354544c0aa7"
+            }
+          }
+        ]
+      },
+      {
+        "name": "positive_finger_pad",
+        "pad": true,
+        "rest_offset": 0.0002,
+        "contact_offset": 0.003,
+        "tcp_poses": {
+          "shape": [
+            65,
+            4,
+            4
+          ],
+          "sha256": "f0f9ebf3bf97fbd551c6d83198d964a9b304d008231257ce598a7dc316a6c3c3"
+        },
+        "meshes": [
+          {
+            "vertices": {
+              "shape": [
+                8,
+                3
+              ],
+              "sha256": "4e3004243a3962423a702be95f98c227562b8c684e903fd3f6d054ce79bbd08f"
+            },
+            "faces": {
+              "shape": [
+                12,
+                3
+              ],
+              "sha256": "45b42c3653d916570ed16014f8a91f585c5fc9a93c1467f279657354544c0aa7"
+            }
+          }
+        ]
+      }
+    ],
+    "fk_calls": [
+      {
+        "names": [
+          "hand_base",
+          "negative_finger_pad",
+          "positive_finger_pad"
+        ],
+        "joint_names": [
+          "rail",
+          "finger_left",
+          "finger_right"
+        ],
+        "qpos": [
+          [
+            0.30000001192092896,
+            -0.10999999940395355,
+            0.10999999940395355
+          ]
+        ]
+      },
+      {
+        "names": [
+          "hand_base",
+          "negative_finger_pad",
+          "positive_finger_pad",
+          "mount"
+        ],
+        "joint_names": [
+          "rail",
+          "finger_left",
+          "finger_right"
+        ],
+        "qpos": [
+          [
+            0.30000001192092896,
+            -0.11999999731779099,
+            0.11999999731779099
+          ],
+          [
+            0.30000001192092896,
+            -0.11906249821186066,
+            0.11906249821186066
+          ],
+          [
+            0.30000001192092896,
+            -0.11812499910593033,
+            0.11812499910593033
+          ],
+          [
+            0.30000001192092896,
+            -0.1171875,
+            0.1171875
+          ],
+          [
+            0.30000001192092896,
+            -0.11625000089406967,
+            0.11625000089406967
+          ],
+          [
+            0.30000001192092896,
+            -0.11531249433755875,
+            0.11531249433755875
+          ],
+          [
+            0.30000001192092896,
+            -0.11437499523162842,
+            0.11437499523162842
+          ],
+          [
+            0.30000001192092896,
+            -0.11343749612569809,
+            0.11343749612569809
+          ],
+          [
+            0.30000001192092896,
+            -0.11249999701976776,
+            0.11249999701976776
+          ],
+          [
+            0.30000001192092896,
+            -0.11156249791383743,
+            0.11156249791383743
+          ],
+          [
+            0.30000001192092896,
+            -0.1106249988079071,
+            0.1106249988079071
+          ],
+          [
+            0.30000001192092896,
+            -0.10968749970197678,
+            0.10968749970197678
+          ],
+          [
+            0.30000001192092896,
+            -0.10875000059604645,
+            0.10875000059604645
+          ],
+          [
+            0.30000001192092896,
+            -0.10781249403953552,
+            0.10781249403953552
+          ],
+          [
+            0.30000001192092896,
+            -0.1068749949336052,
+            0.1068749949336052
+          ],
+          [
+            0.30000001192092896,
+            -0.10593749582767487,
+            0.10593749582767487
+          ],
+          [
+            0.30000001192092896,
+            -0.10499999672174454,
+            0.10499999672174454
+          ],
+          [
+            0.30000001192092896,
+            -0.10406249761581421,
+            0.10406249761581421
+          ],
+          [
+            0.30000001192092896,
+            -0.10312499850988388,
+            0.10312499850988388
+          ],
+          [
+            0.30000001192092896,
+            -0.10218749940395355,
+            0.10218749940395355
+          ],
+          [
+            0.30000001192092896,
+            -0.10125000029802322,
+            0.10125000029802322
+          ],
+          [
+            0.30000001192092896,
+            -0.1003125011920929,
+            0.1003125011920929
+          ],
+          [
+            0.30000001192092896,
+            -0.09937499463558197,
+            0.09937499463558197
+          ],
+          [
+            0.30000001192092896,
+            -0.09843749552965164,
+            0.09843749552965164
+          ],
+          [
+            0.30000001192092896,
+            -0.09749999642372131,
+            0.09749999642372131
+          ],
+          [
+            0.30000001192092896,
+            -0.09656249731779099,
+            0.09656249731779099
+          ],
+          [
+            0.30000001192092896,
+            -0.09562499821186066,
+            0.09562499821186066
+          ],
+          [
+            0.30000001192092896,
+            -0.09468749910593033,
+            0.09468749910593033
+          ],
+          [
+            0.30000001192092896,
+            -0.09375,
+            0.09375
+          ],
+          [
+            0.30000001192092896,
+            -0.09281250089406967,
+            0.09281250089406967
+          ],
+          [
+            0.30000001192092896,
+            -0.09187499433755875,
+            0.09187499433755875
+          ],
+          [
+            0.30000001192092896,
+            -0.09093749523162842,
+            0.09093749523162842
+          ],
+          [
+            0.30000001192092896,
+            -0.08999999612569809,
+            0.08999999612569809
+          ],
+          [
+            0.30000001192092896,
+            -0.08906249701976776,
+            0.08906249701976776
+          ],
+          [
+            0.30000001192092896,
+            -0.08812499791383743,
+            0.08812499791383743
+          ],
+          [
+            0.30000001192092896,
+            -0.0871874988079071,
+            0.0871874988079071
+          ],
+          [
+            0.30000001192092896,
+            -0.08624999970197678,
+            0.08624999970197678
+          ],
+          [
+            0.30000001192092896,
+            -0.08531250059604645,
+            0.08531250059604645
+          ],
+          [
+            0.30000001192092896,
+            -0.08437500149011612,
+            0.08437500149011612
+          ],
+          [
+            0.30000001192092896,
+            -0.0834374949336052,
+            0.0834374949336052
+          ],
+          [
+            0.30000001192092896,
+            -0.08249999582767487,
+            0.08249999582767487
+          ],
+          [
+            0.30000001192092896,
+            -0.08156249672174454,
+            0.08156249672174454
+          ],
+          [
+            0.30000001192092896,
+            -0.08062499761581421,
+            0.08062499761581421
+          ],
+          [
+            0.30000001192092896,
+            -0.07968749850988388,
+            0.07968749850988388
+          ],
+          [
+            0.30000001192092896,
+            -0.07874999940395355,
+            0.07874999940395355
+          ],
+          [
+            0.30000001192092896,
+            -0.07781250029802322,
+            0.07781250029802322
+          ],
+          [
+            0.30000001192092896,
+            -0.0768750011920929,
+            0.0768750011920929
+          ],
+          [
+            0.30000001192092896,
+            -0.07593749463558197,
+            0.07593749463558197
+          ],
+          [
+            0.30000001192092896,
+            -0.07499999552965164,
+            0.07499999552965164
+          ],
+          [
+            0.30000001192092896,
+            -0.07406249642372131,
+            0.07406249642372131
+          ],
+          [
+            0.30000001192092896,
+            -0.07312499731779099,
+            0.07312499731779099
+          ],
+          [
+            0.30000001192092896,
+            -0.07218749821186066,
+            0.07218749821186066
+          ],
+          [
+            0.30000001192092896,
+            -0.07124999910593033,
+            0.07124999910593033
+          ],
+          [
+            0.30000001192092896,
+            -0.0703125,
+            0.0703125
+          ],
+          [
+            0.30000001192092896,
+            -0.06937500089406967,
+            0.06937500089406967
+          ],
+          [
+            0.30000001192092896,
+            -0.06843750178813934,
+            0.06843750178813934
+          ],
+          [
+            0.30000001192092896,
+            -0.06749999523162842,
+            0.06749999523162842
+          ],
+          [
+            0.30000001192092896,
+            -0.06656249612569809,
+            0.06656249612569809
+          ],
+          [
+            0.30000001192092896,
+            -0.06562499701976776,
+            0.06562499701976776
+          ],
+          [
+            0.30000001192092896,
+            -0.06468749791383743,
+            0.06468749791383743
+          ],
+          [
+            0.30000001192092896,
+            -0.0637499988079071,
+            0.0637499988079071
+          ],
+          [
+            0.30000001192092896,
+            -0.06281249970197678,
+            0.06281249970197678
+          ],
+          [
+            0.30000001192092896,
+            -0.06187499687075615,
+            0.06187499687075615
+          ],
+          [
+            0.30000001192092896,
+            -0.06093749776482582,
+            0.06093749776482582
+          ],
+          [
+            0.30000001192092896,
+            -0.05999999865889549,
+            0.05999999865889549
+          ]
+        ]
+      }
+    ],
+    "source_state_reads": 1,
+    "identity": {
+      "object_id": "fixture_object",
+      "simulation_uid": "source",
+      "native_object_path": "/arena0/source",
+      "native_robot_path": "/arena0/robot",
+      "motion_part": "arm",
+      "hand_part": "grip",
+      "native_hand_links": [
+        "hand_base",
+        "negative_finger_pad",
+        "positive_finger_pad"
+      ],
+      "native_hand_shapes": 3,
+      "native_target_shapes": 1
+    },
+    "result_sha256": "3744a24dede6c7b0223ecf70c8a27bb8765c151672c3ca9b4560ca726f8f38a3",
+    "report_sha256": "5cc0571c0e892013407688b03ee2999a68ab462190cf0607f480b71928a86371",
+    "trace_sha256": "351b01e1011cae8a420e42d81a55253db8c171ac0a6c6b6c66670c614d305a85"
+  }
+}

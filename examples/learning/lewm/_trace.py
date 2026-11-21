@@ -224,7 +224,7 @@ def check_trace(
     export: str, path: str, device: str, max_plans: int = 10
 ) -> dict[str, Any]:
     """Recompute recorded visual histories and MPC actions from saved RNG states."""
-    from embodichain_models.dynamics.lewm import (
+    from embodichain.extensions.models.dynamics.lewm import (
         LeWMCEMCfg,
         LeWMCEMPlanner,
         load_lewm,

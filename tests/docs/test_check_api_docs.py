@@ -264,25 +264,23 @@ def test_main_writes_missing_json_to_stdout(
 
 
 @pytest.mark.parametrize(
-    "package,module,exports",
+    "module,exports",
     [
         (
-            "embodichain_benchmarks",
-            "embodichain_benchmarks.motion_generation",
+            "embodichain.extensions.benchmarks.motion_generation",
             {"run_benchmark", "PlannerAdapter"},
         ),
         (
-            "embodichain_models",
-            "embodichain_models.dynamics.nerd.model",
+            "embodichain.extensions.models.dynamics.nerd.model",
             {"NeRDModel", "NeRDModelCfg"},
+        ),
+        (
+            "embodichain.extensions.solvers.physics.nerd.provider",
+            {"NeRDProvider", "NeuralRobotDynamicSolver"},
         ),
     ],
 )
-def test_default_inventory_includes_bundled_extension_public_exports(
-    package, module, exports
-):
-    """Moving evaluation to an extension must not remove it from API coverage."""
-    roots = [root for root in _checker.DEFAULT_PACKAGE_ROOTS if root.module == package]
-    assert len(roots) == 1
-    modules = {module.name: module for module in discover_public_modules(roots)}
+def test_default_inventory_includes_bundled_extension_public_exports(module, exports):
+    """The main package inventory includes the official extension exports."""
+    modules = {item.name: item for item in discover_public_modules()}
     assert exports <= set(modules[module].exports)

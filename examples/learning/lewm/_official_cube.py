@@ -914,7 +914,7 @@ def _compare_cem(output: Path) -> dict[str, Any]:
     import torch
     from types import SimpleNamespace
     from stable_worldmodel.solver.cem import CEMSolver
-    from embodichain_models.dynamics.lewm import LeWMCEMCfg, LeWMCEMPlanner
+    from embodichain.extensions.models.dynamics.lewm import LeWMCEMCfg, LeWMCEMPlanner
 
     target = torch.linspace(-1.5, 1.5, 125).reshape(1, 1, 5, 25)
 

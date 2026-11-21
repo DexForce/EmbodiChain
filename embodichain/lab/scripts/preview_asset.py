@@ -200,7 +200,7 @@ def preview(
     print("Press `q` to quit the simulation.")
 
     while True:
-        txt = input().strip()
+        txt = sim.wait_for_input().strip()
 
         if txt == "q":
             break
@@ -214,7 +214,14 @@ def preview(
                 )
                 continue
 
-            embed()
+            if sim.sim_config.web:
+                import code
+
+                code.interact(
+                    local={"sim": sim, "assets": assets}, readfunc=sim.wait_for_input
+                )
+            else:
+                embed()
         elif txt.startswith("s"):
             parts = txt.split()
             n = int(parts[1]) if len(parts) > 1 else 10
@@ -272,10 +279,14 @@ def _run_preview_mode(
         return
 
     viser_enabled = bool(getattr(args, "viser", False))
-    if args.headless and not viser_enabled:
+    if args.headless and not viser_enabled and not getattr(args, "web", False):
         return
 
-    target = "Viser browser preview" if viser_enabled else "Simulation window"
+    target = (
+        "WebRTC browser preview"
+        if getattr(args, "web", False)
+        else "Viser browser preview" if viser_enabled else "Simulation window"
+    )
     log_info(f"{target} open. Press Ctrl+C to exit.", color="green")
     _preview._run_preview_loop(sim, joint_controller, interactive=True)
 

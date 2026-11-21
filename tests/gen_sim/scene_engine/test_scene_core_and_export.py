@@ -35,27 +35,22 @@ from embodichain.gen_sim.scene_engine.core.scene_object import (
     ObjectPhysics,
     SceneObject,
 )
-from embodichain.gen_sim.scene_engine.cli.preview import (
-    _add_articulations,
-    _setup_viser_joint_control,
-    preview_scene_export,
-)
+
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import SceneExporter
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (
     SceneExportImporter,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
+    _add_articulations,
+    _add_objects,
     _apply_runtime_textures_to_usd,
     _copy_runtime_texture,
     _externalize_glb_textures,
     _validate_uid,
     build_scene_usdz,
-    load_scene_usd_into_sim,
-    load_usd_stage_into_sim,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.usd_scene import (
     USD_SCENE_SCHEMA,
-    UsdSceneBinding,
     UsdSceneIndex,
 )
 from embodichain.lab.visualization import VisualizationCfg
@@ -154,6 +149,282 @@ def test_object_physics_rejects_invalid_values(
         )
 
 
+@pytest.mark.parametrize(
+    "appearance,expected",
+    [
+        ("red", "red"),
+        ("blue", "blue"),
+        ("mixed", None),
+        ("mesh_with_lines", None),
+        ("material", "red"),
+        ("material_masked_invisible", None),
+        ("material_masked_visible", "red"),
+        ("material_blended", None),
+        ("material_opaque_alpha", "red"),
+        ("material_mask_float_below_cutoff", None),
+        ("material_mask_float_at_cutoff", "red"),
+        ("material_mask_fully_opaque", "red"),
+        ("material_blend_float", None),
+        ("material_blend_fully_opaque", "red"),
+        ("material_opaque_float", "red"),
+        ("material_extension_mask", None),
+        ("material_extension_blend", None),
+        ("material_extension_opaque", None),
+        ("material_with_vertex_color", None),
+        ("textured", None),
+        ("textured_external", None),
+    ],
+)
+def test_scene_export_carries_measured_appearance(tmp_path, appearance, expected):
+    import hashlib
+    import trimesh
+    from PIL import Image
+
+    table_path = tmp_path / "table.glb"
+    table_path.write_bytes(b"glTF-table")
+    mesh = trimesh.creation.box()
+    if appearance.startswith("material") or appearance.startswith("textured"):
+        alpha, mode, cutoff = {
+            "material_masked_invisible": (250, "MASK", 0.99),
+            "material_masked_visible": (250, "MASK", 0.9),
+            "material_blended": (250, "BLEND", 0.5),
+            "material_opaque_alpha": (0, "OPAQUE", 0.5),
+        }.get(appearance, (255, "OPAQUE", 0.5))
+        material = trimesh.visual.material.PBRMaterial(
+            baseColorFactor=(
+                [255, 255, 255, alpha]
+                if appearance == "textured_external"
+                else [255, 0, 0, alpha]
+            ),
+            alphaMode=mode,
+            alphaCutoff=cutoff,
+            baseColorTexture=(
+                Image.new("RGB", (2, 2), "blue")
+                if appearance.startswith("textured")
+                else None
+            ),
+        )
+        mesh.visual = trimesh.visual.TextureVisuals(
+            uv=np.zeros((len(mesh.vertices), 2)), material=material
+        )
+        if appearance == "material_with_vertex_color":
+            # A red factor multiplied by blue COLOR_0 is black, not red.
+            mesh.visual.vertex_attributes["color"] = np.tile(
+                [0, 0, 255, 255], (len(mesh.vertices), 1)
+            ).astype(np.uint8)
+    else:
+        mesh.visual.vertex_colors = (
+            [0, 0, 255, 255] if appearance == "blue" else [255, 0, 0, 255]
+        )
+        if appearance == "mixed":
+            mesh.visual.vertex_colors[0] = [0, 0, 255, 255]
+    asset_path = tmp_path / "asset.glb"
+    if appearance == "mesh_with_lines":
+        mesh = trimesh.Scene(
+            [mesh, trimesh.load_path(np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]))]
+        )
+    mesh.export(asset_path)
+    if appearance in {
+        "material_mask_float_below_cutoff",
+        "material_mask_float_at_cutoff",
+        "material_mask_fully_opaque",
+        "material_blend_float",
+        "material_blend_fully_opaque",
+        "material_opaque_float",
+    }:
+        # Patch the authored GLB JSON, bypassing Trimesh's uint8 factor setter.
+        # Preserve the geometry/binary chunks to exercise the real exporter.
+        import struct
+
+        data = asset_path.read_bytes()
+        chunk_size = struct.unpack_from("<I", data, 12)[0]
+        document = json.loads(data[20 : 20 + chunk_size])
+        mode, alpha, cutoff = {
+            "material_mask_float_below_cutoff": ("MASK", 0.999, 1.0),
+            "material_mask_float_at_cutoff": ("MASK", 0.999, 0.999),
+            "material_mask_fully_opaque": ("MASK", 1.0, 1.0),
+            "material_blend_float": ("BLEND", 0.999, 0.5),
+            "material_blend_fully_opaque": ("BLEND", 1.0, 0.5),
+            "material_opaque_float": ("OPAQUE", 0.999, 0.5),
+        }[appearance]
+        material = document["materials"][0]
+        material.update(alphaMode=mode, alphaCutoff=cutoff)
+        material["pbrMetallicRoughness"]["baseColorFactor"][3] = alpha
+        header = json.dumps(document).encode("utf-8")
+        header += b" " * (-len(header) % 4)
+        binary = data[20 + chunk_size :]
+        asset_path.write_bytes(
+            struct.pack(
+                "<4sIIII",
+                b"glTF",
+                2,
+                20 + len(header) + len(binary),
+                len(header),
+                0x4E4F534A,
+            )
+            + header
+            + binary
+        )
+    if appearance == "textured_external":
+        import struct
+
+        data = asset_path.read_bytes()
+        size = struct.unpack_from("<I", data, 12)[0]
+        document = json.loads(data[20 : 20 + size])
+        document["images"][0] = {"uri": "blue.png"}
+        header = json.dumps(document).encode()
+        header += b" " * (-len(header) % 4)
+        binary = data[20 + size :]
+        asset_path.write_bytes(
+            struct.pack(
+                "<4sIIII",
+                b"glTF",
+                2,
+                20 + len(header) + len(binary),
+                len(header),
+                0x4E4F534A,
+            )
+            + header
+            + binary
+        )
+        Image.new("RGB", (2, 2), "blue").save(tmp_path / "blue.png")
+    if appearance.startswith("material_extension"):
+        import struct
+
+        data = asset_path.read_bytes()
+        size = struct.unpack_from("<I", data, 12)[0]
+        document = json.loads(data[20 : 20 + size])
+        mode, alpha = {
+            "material_extension_mask": ("MASK", 0.0),
+            "material_extension_blend": ("BLEND", 0.999),
+            "material_extension_opaque": ("OPAQUE", 1.0),
+        }[appearance]
+        document["materials"][0] = {
+            "alphaMode": mode,
+            "alphaCutoff": 0.5,
+            "extensions": {
+                "KHR_materials_pbrSpecularGlossiness": {
+                    "diffuseFactor": [1.0, 1.0, 1.0, alpha]
+                }
+            },
+        }
+        document["extensionsUsed"] = ["KHR_materials_pbrSpecularGlossiness"]
+        header = json.dumps(document).encode()
+        header += b" " * (-len(header) % 4)
+        binary = data[20 + size :]
+        asset_path.write_bytes(
+            struct.pack(
+                "<4sIIII",
+                b"glTF",
+                2,
+                20 + len(header) + len(binary),
+                len(header),
+                0x4E4F534A,
+            )
+            + header
+            + binary
+        )
+    table = _scene_object(
+        object_id="table",
+        kind="table",
+        glb_path=table_path,
+        physics=_physics("kinematic"),
+    )
+    asset = _scene_object(
+        object_id="asset",
+        kind="asset",
+        glb_path=asset_path,
+        physics=_physics("dynamic"),
+    )
+    asset.description = "red waterproof cube"
+    scene = Scene(objects=[table, asset])
+    path = SceneExporter(
+        scene=scene, scene_graph=_scene_graph(scene), output_root=tmp_path / "export"
+    ).export()
+    entry = json.loads(path.read_text())["rigid_object"][0]
+    if expected is None:
+        assert "properties" not in entry
+    else:
+        assert entry["properties"] == {"color": expected}
+        proof = entry["property_evidence"]["color"]
+        assert (
+            proof["sha256"]
+            == hashlib.sha256((path.parent / proof["source"]).read_bytes()).hexdigest()
+        )
+    if appearance == "textured_external":
+        deployed = path.parent / "mesh_assets/asset/asset.glb"
+        assert not deployed.with_name("blue.png").exists()
+        original = hashlib.sha256(deployed.read_bytes()).hexdigest()
+        Image.new("RGB", (2, 2), "blue").save(deployed.with_name("blue.png"))
+        assert (
+            trimesh.load_mesh(deployed, process=False).visual.material.baseColorTexture
+            is not None
+        )
+        assert SceneExporter._appearance_metadata(deployed) == {}
+        assert hashlib.sha256(deployed.read_bytes()).hexdigest() == original
+    assert "waterproof" not in entry.get("properties", {})
+
+
+def test_external_color_buffer_never_creates_glb_only_proof(tmp_path):
+    import hashlib
+    import struct
+    import trimesh
+
+    root = tmp_path / "export"
+    folder = root / "scene_export/mesh_assets/asset"
+    folder.mkdir(parents=True)
+    path = folder / "asset.glb"
+    mesh = trimesh.creation.box()
+    mesh.visual.vertex_colors = [255, 0, 0, 255]
+    data = mesh.export(file_type="glb")
+    size = struct.unpack_from("<I", data, 12)[0]
+    document = json.loads(data[20 : 20 + size])
+    binary = bytearray(data[28 + size :])
+    document["buffers"][0]["uri"] = "colors.bin"
+    header = json.dumps(document).encode()
+    header += b" " * (-len(header) % 4)
+    path.write_bytes(
+        struct.pack("<4sIIII", b"glTF", 2, 20 + len(header), len(header), 0x4E4F534A)
+        + header
+    )
+    buffer = folder / "colors.bin"
+    buffer.write_bytes(binary)
+    original_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+    asset = _scene_object(
+        object_id="asset", kind="asset", glb_path=path, physics=_physics("dynamic")
+    )
+    table_path = tmp_path / "table.glb"
+    table_path.write_bytes(b"glTF-table")
+    table = _scene_object(
+        object_id="table",
+        kind="table",
+        glb_path=table_path,
+        physics=_physics("kinematic"),
+    )
+    scene = Scene(objects=[table, asset])
+    exporter = SceneExporter(
+        scene=scene, scene_graph=_scene_graph(scene), output_root=root
+    )
+    for color in ([255, 0, 0, 255], [0, 0, 255, 255]):
+        index = document["meshes"][0]["primitives"][0]["attributes"]["COLOR_0"]
+        accessor = document["accessors"][index]
+        view = document["bufferViews"][accessor["bufferView"]]
+        start = view.get("byteOffset", 0) + accessor.get("byteOffset", 0)
+        for row in range(accessor["count"]):
+            offset = start + row * view.get("byteStride", 4)
+            binary[offset : offset + 4] = bytes(color)
+        buffer.write_bytes(binary)
+        loaded = trimesh.load_scene(path, process=False)
+        assert (
+            next(iter(loaded.geometry.values())).visual.vertex_colors[0].tolist()
+            == color
+        )
+        exported = json.loads(exporter.export().read_text())["rigid_object"][0]
+        assert "properties" not in exported
+        assert "property_evidence" not in exported
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == original_hash
+
+
 def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> None:
     table_glb = tmp_path / "table.glb"
     asset_glb = tmp_path / "cup.glb"
@@ -227,7 +498,18 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
 
 def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
+    from embodichain.gen_sim.scene_engine.pipeline.utils import scene_exporter
+
+    monkeypatch.setattr(
+        scene_exporter, "_articulation_root_bottom_z", lambda *args: -0.05
+    )
+    monkeypatch.setattr(
+        scene_exporter,
+        "measure_scene_object_z_up_world_aabb",
+        lambda **kwargs: [[0, 0, 0], [1, 1, 0.73]],
+    )
     table_glb = tmp_path / "table.glb"
     drawer_glb = tmp_path / "drawer.glb"
     drawer_usdc = tmp_path / "drawer.usdc"
@@ -264,6 +546,7 @@ def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
     assert articulation["proxy_glb_fpath"] == "mesh_assets/drawer/drawer.glb"
     assert articulation["body_scale"] == [1.25, 2.5, 3.75]
     assert articulation["proxy_body_scale"] == [1.0, 2.0, 3.0]
+    assert articulation["init_pos"][2] == pytest.approx(0.781)
     assert (export_path.parent / articulation["fpath"]).read_bytes() == b"USDC-drawer"
     assert (
         export_path.parent / articulation["proxy_glb_fpath"]
@@ -278,6 +561,57 @@ def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
         export_path.parent / "articulated_assets" / "drawer" / "drawer.usdc"
     )
     assert imported_drawer.articulated_usdc_scale == [1.25, 2.5, 3.75]
+    assert np.allclose(imported_drawer.pos, drawer.pos)
+    assert np.allclose(imported_drawer.rot, drawer.rot)
+
+
+@pytest.mark.parametrize("max_hulls", [1, 8])
+def test_preview_forwards_visacd_collision_policy(
+    tmp_path: Path, max_hulls: int
+) -> None:
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
+
+    class FakeSimulationManager:
+        def __init__(self) -> None:
+            self.configs: list[RigidObjectCfg] = []
+
+        def add_rigid_object(self, cfg: RigidObjectCfg) -> None:
+            self.configs.append(cfg)
+
+    (tmp_path / "mesh.glb").write_bytes(b"glTF")
+    sim = FakeSimulationManager()
+    _add_objects(
+        sim=sim,  # type: ignore[arg-type]
+        entries=[
+            {
+                "uid": "mesh",
+                "shape": {"shape_type": "Mesh", "fpath": "mesh.glb"},
+                "init_pos": [0.0, 0.0, 0.0],
+                "init_rot": [0.0, 0.0, 0.0],
+                "max_convex_hull_num": max_hulls,
+                "attrs": {
+                    "mass_props": {"mass": 0.25},
+                    "material_props": {"static_friction": 0.7, "dynamic_friction": 0.4},
+                },
+            }
+        ],
+        config_dir=tmp_path,
+        label="rigid_object",
+        force_static=True,
+    )
+
+    cfg = sim.configs[0]
+    assert cfg.body_type == "static"
+    assert cfg.attrs.mass_props.mass == pytest.approx(0.25)
+    assert cfg.attrs.material_props.static_friction == pytest.approx(0.7)
+    assert cfg.attrs.material_props.dynamic_friction == pytest.approx(0.4)
+    collision = cfg.shape.collision
+    assert collision.acd_method == ("visacd" if max_hulls > 1 else None)
+    descriptor, _ = rigid_desc_from_cfg(cfg)
+    if max_hulls > 1:
+        assert descriptor.collisions[0].decomp_algorithm == "visacd"
+        assert descriptor.collisions[0].decomp_max_hulls == max_hulls
 
 
 @pytest.fixture
@@ -396,163 +730,6 @@ def test_scene_export_importer_rejects_explicit_directory_outside_output_root(
         )
 
 
-def test_scene_usd_manifest_restores_only_declared_scene_resources(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    output_root = tmp_path / "output"
-    scene_usd_root = output_root / "scene_usd"
-    scene_usd_root.mkdir(parents=True)
-    (scene_usd_root / "scene.usda").write_text("#usda 1.0\n", encoding="utf-8")
-    manifest_objects = [
-        {
-            "uid": "table",
-            "kind": "rigid",
-            "body_type": "kinematic",
-            "runtime_name": "table_0",
-            "source_asset": "mesh_assets/table/table.glb",
-        },
-        {
-            "uid": "drawer",
-            "kind": "articulation",
-            "runtime_name": "drawer",
-            "source_asset": "articulated_assets/drawer/drawer.usdc",
-            "proxy_asset": "mesh_assets/drawer/drawer.glb",
-            "fix_base": True,
-        },
-    ]
-    (scene_usd_root / "scene_usd_manifest.json").write_text(
-        json.dumps(
-            {
-                "format": "embodichain.scene-usd/v1",
-                "scene_usd": "scene_usd/scene.usda",
-                "source_scene_export": "scene_export/scene_config.json",
-                "objects": manifest_objects,
-            }
-        ),
-        encoding="utf-8",
-    )
-    scene_export_root = output_root / "scene_export"
-    scene_export_root.mkdir()
-    (scene_export_root / "scene_config.json").write_text(
-        json.dumps(
-            {
-                "format": "embodichain.scene-export/v1",
-                "background": [],
-                "rigid_object": [],
-                "articulation": [
-                    {
-                        "uid": "drawer",
-                        "fpath": "articulated_assets/drawer/drawer.usdc",
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    drawer = object()
-    loaded: dict[str, object] = {}
-
-    def _load_legacy_scene_export(**kwargs: object) -> list[object]:
-        loaded.update(kwargs)
-        return [drawer]
-
-    monkeypatch.setattr(
-        "embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd.load_scene_export_into_sim",
-        _load_legacy_scene_export,
-    )
-
-    sim = object()
-    articulations = load_scene_usd_into_sim(  # type: ignore[arg-type]
-        sim=sim,
-        output_root=output_root,
-    )
-
-    assert loaded == {
-        "sim": sim,
-        "output_root": output_root,
-        "force_static_rigids": True,
-    }
-    assert articulations == [drawer]
-
-
-def test_scene_usd_preview_loads_packaged_runtime_assets(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    output_root = tmp_path / "output"
-    scene_usd_root = output_root / "scene_usd"
-    runtime_asset = scene_usd_root / "assets" / "table" / "model.gltf"
-    runtime_asset.parent.mkdir(parents=True)
-    runtime_asset.write_text("{}", encoding="utf-8")
-    articulation_asset = scene_usd_root / "assets" / "drawer" / "model.usdc"
-    articulation_asset.parent.mkdir(parents=True)
-    articulation_asset.write_bytes(b"USDC-drawer")
-    (scene_usd_root / "scene.usda").write_text("#usda 1.0\n", encoding="utf-8")
-    (scene_usd_root / "scene_usd_manifest.json").write_text(
-        json.dumps(
-            {
-                "format": "embodichain.scene-usd/v1",
-                "scene_usd": "scene_usd/scene.usda",
-                "source_scene_export": "scene_export/scene_config.json",
-                "objects": [
-                    {
-                        "uid": "table",
-                        "kind": "rigid",
-                        "body_type": "kinematic",
-                        "runtime_name": "table_0",
-                        "runtime_asset": "scene_usd/assets/table/model.gltf",
-                        "init_pos": [1.0, 2.0, 3.0],
-                        "init_rot": [10.0, 20.0, 30.0],
-                        "body_scale": [1.0, 2.0, 3.0],
-                        "max_convex_hull_num": 16,
-                    },
-                    {
-                        "uid": "drawer",
-                        "kind": "articulation",
-                        "runtime_name": "drawer",
-                        "runtime_asset": "scene_usd/assets/drawer/model.usdc",
-                        "init_pos": [4.0, 5.0, 6.0],
-                        "init_rot": [40.0, 50.0, 60.0],
-                        "body_scale": [1.5, 2.5, 3.5],
-                        "fix_base": True,
-                    },
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    class _SceneUsdSim:
-        def __init__(self) -> None:
-            self.rigid_cfg: object | None = None
-            self.articulation_cfg: object | None = None
-
-        def add_rigid_object(self, cfg: object) -> None:
-            self.rigid_cfg = cfg
-
-        def add_articulation(self, cfg: object) -> object:
-            self.articulation_cfg = cfg
-            return "drawer-resource"
-
-    monkeypatch.setattr(
-        "embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd._add_lights",
-        lambda _: None,
-    )
-
-    sim = _SceneUsdSim()
-    assert load_scene_usd_into_sim(sim=sim, output_root=output_root) == [  # type: ignore[arg-type]
-        "drawer-resource"
-    ]
-    assert sim.rigid_cfg.uid == "table"  # type: ignore[union-attr]
-    assert sim.rigid_cfg.shape.fpath == str(runtime_asset)  # type: ignore[union-attr]
-    assert sim.rigid_cfg.shape.collision.approximation == "convex_decomposition"  # type: ignore[union-attr]
-    assert sim.rigid_cfg.shape.collision.max_hulls == 16  # type: ignore[union-attr]
-    assert sim.rigid_cfg.init_pos == (1.0, 2.0, 3.0)  # type: ignore[union-attr]
-    assert sim.articulation_cfg.uid == "drawer"  # type: ignore[union-attr]
-    assert sim.articulation_cfg.fpath == str(articulation_asset)  # type: ignore[union-attr]
-    assert sim.articulation_cfg.init_pos == (4.0, 5.0, 6.0)  # type: ignore[union-attr]
-
-
 def test_scene_usd_overwrites_existing_runtime_texture(tmp_path: Path) -> None:
     scene_usd_root = tmp_path / "scene_usd"
     texture_root = scene_usd_root / "textures"
@@ -606,66 +783,6 @@ def test_usd_scene_index_reads_entity_metadata(tmp_path: Path) -> None:
     assert drawer.initial_qpos == (0.2, -0.4)
 
 
-def test_schema_v2_usd_preview_uses_direct_simulation_import(
-    tmp_path: Path,
-) -> None:
-    from pxr import Usd, UsdGeom
-
-    output_root = tmp_path / "output"
-    scene_usd_root = output_root / "scene_usd"
-    scene_usd_root.mkdir(parents=True)
-    scene_path = scene_usd_root / "scene.usda"
-    stage = Usd.Stage.CreateNew(str(scene_path))
-    world = UsdGeom.Xform.Define(stage, "/World").GetPrim()
-    world.SetCustomDataByKey("embodichain:scene_schema", USD_SCENE_SCHEMA)
-    entity = UsdGeom.Xform.Define(stage, "/World/Scene/Entities/drawer").GetPrim()
-    entity.SetCustomDataByKey("embodichain:uid", "drawer")
-    entity.SetCustomDataByKey("embodichain:kind", "articulation")
-    stage.GetRootLayer().Save()
-    (scene_usd_root / "scene_usd_manifest.json").write_text(
-        json.dumps(
-            {
-                "format": "embodichain.scene-usd/v1",
-                "scene_usd": "scene_usd/scene.usda",
-                "objects": [{"uid": "drawer", "kind": "articulation"}],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    drawer = object()
-
-    class _DirectUsdSim:
-        def __init__(self) -> None:
-            self.calls: list[dict[str, str]] = []
-
-        def add_usd(self, **kwargs: str) -> dict[str, object]:
-            self.calls.append(kwargs)
-            return {"/World/Scene/Entities/drawer": drawer}
-
-        def prepare(self) -> None:
-            return None
-
-        def get_articulation(self, _uid: str) -> None:
-            return None
-
-    sim = _DirectUsdSim()
-    assert load_scene_usd_into_sim(sim=sim, output_root=output_root) == [drawer]  # type: ignore[arg-type]
-    assert sim.calls == [{"name": "scene", "file_path": str(scene_path)}]
-
-    standalone_sim = _DirectUsdSim()
-    assert load_usd_stage_into_sim(  # type: ignore[arg-type]
-        sim=standalone_sim,
-        scene_usd_path=scene_path,
-    ) == [drawer]
-    assert standalone_sim.calls == [{"name": "scene", "file_path": str(scene_path)}]
-
-    binding_sim = _DirectUsdSim()
-    binding = UsdSceneBinding.load_into(binding_sim, scene_path)
-    assert binding.get("drawer").runtime is drawer
-    assert binding.scene_entity_cfg("drawer").uid == "drawer"
-
-
 def test_build_scene_usdz_creates_relocatable_single_file(tmp_path: Path) -> None:
     from pxr import Usd, UsdGeom
 
@@ -679,61 +796,6 @@ def test_build_scene_usdz_creates_relocatable_single_file(tmp_path: Path) -> Non
     assert package_path == tmp_path / "scene.usdz"
     assert package_path.is_file()
     assert Usd.Stage.Open(str(package_path)) is not None
-
-
-def test_preview_prepares_before_viser_joint_control(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    output_root = tmp_path / "output"
-    scene_export_root = output_root / "scene_export"
-    scene_export_root.mkdir(parents=True)
-    (scene_export_root / "scene_config.json").write_text("{}", encoding="utf-8")
-    events: list[str] = []
-
-    class FakeSimulationManager:
-        def __init__(self, _cfg: object) -> None:
-            self.sim_config = SimpleNamespace(
-                visualization=SimpleNamespace(backend="viser")
-            )
-
-        def prepare(self) -> None:
-            events.append("prepare")
-
-        def update(self, *, step: int) -> None:
-            events.append(f"update:{step}")
-            raise KeyboardInterrupt
-
-        def destroy(self, *, exit_process: bool) -> None:
-            events.append("destroy")
-
-        @staticmethod
-        def flush_cleanup_queue() -> None:
-            events.append("flush")
-
-    monkeypatch.setattr(
-        "embodichain.gen_sim.scene_engine.cli.preview.SimulationManager",
-        FakeSimulationManager,
-    )
-    monkeypatch.setattr(
-        "embodichain.gen_sim.scene_engine.cli.preview.load_scene_export_into_sim",
-        lambda **_: events.append("load") or [],
-    )
-    monkeypatch.setattr(
-        "embodichain.gen_sim.scene_engine.cli.preview._setup_viser_joint_control",
-        lambda **_: events.append("controller") or None,
-    )
-    monkeypatch.setattr(
-        "embodichain.gen_sim.scene_engine.cli.preview.SimulationManager.flush_cleanup_queue",
-        lambda: events.append("flush"),
-    )
-
-    preview_scene_export(
-        output_root=output_root,
-        headless=True,
-        visualization=VisualizationCfg(backend="viser"),
-    )
-
-    assert events == ["load", "prepare", "controller", "update:1", "destroy", "flush"]
 
 
 def test_scene_usd_externalizes_every_pbr_gltf_image(tmp_path: Path) -> None:
@@ -915,7 +977,13 @@ def test_scene_usd_binds_every_gltf_pbr_texture_channel(tmp_path: Path) -> None:
             assert original.getpixel((0, 1)) == BOTTOM_ROW_COLOR
 
 
-def test_preview_loads_exported_usdc_as_an_articulation(tmp_path: Path) -> None:
+def test_preview_loads_exported_usdc_as_an_articulation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from embodichain.gen_sim.scene_engine.pipeline.utils import scene_usd
+
+    monkeypatch.setattr(scene_usd, "_read_revolute_qpos_limits", lambda path: {})
+
     class FakeSimulationManager:
         def __init__(self) -> None:
             self.articulation_cfgs: list[object] = []
@@ -947,49 +1015,6 @@ def test_preview_loads_exported_usdc_as_an_articulation(tmp_path: Path) -> None:
     assert articulation_cfg.uid == "drawer"  # type: ignore[attr-defined]
     assert articulation_cfg.fpath == str(usdc_path)  # type: ignore[attr-defined]
     assert articulation_cfg.body_scale == (1.25, 2.5, 3.75)  # type: ignore[attr-defined]
-
-
-def test_preview_registers_exported_articulation_joint_controls(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class FakeRuntime:
-        def __init__(self) -> None:
-            self.provider: object | None = None
-
-        def set_joint_control_provider(self, provider: object) -> None:
-            self.provider = provider
-
-    class FakeSimulationManager:
-        def __init__(self) -> None:
-            self.visualization_runtime = FakeRuntime()
-
-    class FakeController:
-        def __init__(self, articulations: list[object], runtime: FakeRuntime) -> None:
-            self.articulations = articulations
-            self.runtime = runtime
-            self.has_controls = True
-            self.update_count = 0
-
-        def update(self) -> None:
-            self.update_count += 1
-
-    monkeypatch.setattr(
-        "embodichain.lab.scripts.preview_joint_control.ArticulationPreviewController",
-        FakeController,
-    )
-    articulation = object()
-    sim = FakeSimulationManager()
-
-    controller = _setup_viser_joint_control(
-        sim=sim,  # type: ignore[arg-type]
-        articulations=[articulation],  # type: ignore[list-item]
-        enabled=True,
-    )
-
-    assert controller is sim.visualization_runtime.provider
-    assert controller is not None
-    assert controller.articulations == [articulation]  # type: ignore[attr-defined]
-    assert controller.update_count == 1  # type: ignore[attr-defined]
 
 
 def test_scene_graph_importer_restores_node_pose_description() -> None:
@@ -1067,6 +1092,16 @@ def test_scene_export_overwrites_an_existing_scene_export(tmp_path: Path) -> Non
         output_root=output_root,
     ).export()
 
+    stale_delivery = [
+        output_root / "scene_package.zip",
+        output_root / "scene_usd" / "scene.usda",
+        output_root / "scene_usd" / "scene.usdz",
+        output_root / "scene_usd" / "scene_usd_manifest.json",
+    ]
+    for path in stale_delivery:
+        path.parent.mkdir(exist_ok=True)
+        path.write_bytes(b"previous scene")
+
     # The imported table mesh already occupies its final export location.
     exported_table_glb = (
         output_root / "scene_export" / "mesh_assets" / "table" / "table.glb"
@@ -1091,6 +1126,7 @@ def test_scene_export_overwrites_an_existing_scene_export(tmp_path: Path) -> Non
     ).export()
 
     scene_export_root = output_root / "scene_export"
+    assert not any(path.exists() for path in stale_delivery)
     assert exported_table_glb.read_bytes() == b"glTF-table"
     assert (
         scene_export_root / "mesh_assets" / "banana" / "banana.glb"
@@ -1144,131 +1180,40 @@ def test_scene_export_rejects_backslash_in_object_id(tmp_path: Path) -> None:
         ).export()
 
 
-@pytest.mark.parametrize("headless", [True, False])
-def test_preview_initial_display_does_not_integrate_physics(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, headless: bool
-) -> None:
-    from embodichain.gen_sim.scene_engine.cli import preview
+def test_preview_converted_limits_reach_resolved_descriptor(tmp_path, monkeypatch):
+    from dexsim.engine import JointType
+    from dexsim.spawn import ArticulationDesc, LinkDesc, JointDesc
+    from embodichain.gen_sim.scene_engine.pipeline.utils import scene_usd
+    from embodichain.lab.sim.spawn.descriptors import configure_articulation_desc
 
-    root = tmp_path / "export"
-    (root / "scene_export").mkdir(parents=True)
-    (root / "scene_export" / "scene_config.json").write_text("{}")
-    events: list[str] = []
-
-    class FakeSimulation:
-        def __init__(self, cfg: object) -> None:
-            self.sim_config = SimpleNamespace(
-                visualization=SimpleNamespace(backend="none")
-            )
-
-        def prepare(self) -> None:
-            events.append("prepare")
-
-        def sync_render_state(self) -> None:
-            events.append("publish")
-
-        def open_window(self) -> None:
-            assert events[-1] == "publish"
-            events.append("open")
-
-        def update(self, **kwargs: object) -> None:
-            assert "open" in events
-            events.append("explicit_preview_step")
-            raise KeyboardInterrupt
-
-        def destroy(self, **kwargs: object) -> None:
-            events.append("destroy")
-
-        @staticmethod
-        def flush_cleanup_queue() -> None:
-            events.append("flush")
-
-    monkeypatch.setattr(preview, "SimulationManager", FakeSimulation)
-    monkeypatch.setattr(preview, "load_scene_export_into_sim", lambda **_: [])
-    preview.preview_scene_export(output_root=root, headless=headless)
-
-    expected = ["prepare", "publish"]
-    if not headless:
-        expected += ["open", "explicit_preview_step"]
-    assert events == expected + ["destroy", "flush"]
-
-
-@pytest.mark.parametrize("backend", ["none", "viser"])
-def test_preview_pose_playback_renders_without_physics(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: str
-) -> None:
-    from embodichain.gen_sim.scene_engine.cli import preview
-
-    root = tmp_path / "export"
-    (root / "scene_export").mkdir(parents=True)
-    (root / "scene_export" / "scene_config.json").write_text("{}")
-    events: list[str] = []
-    callback_count = 0
-
-    class FakeSimulation:
-        def __init__(self, cfg: object) -> None:
-            self.sim_config = SimpleNamespace(
-                visualization=SimpleNamespace(backend=backend)
-            )
-
-        def prepare(self) -> None:
-            events.append("prepare")
-
-        def sync_render_state(self) -> None:
-            events.append("publish")
-
-        def open_window(self) -> None:
-            events.append("open")
-
-        @contextmanager
-        def render_frame(
-            self, *, force_visualization: bool, capture_camera_images: bool
-        ) -> Iterator[None]:
-            assert not capture_camera_images
-            events.append(f"render:{force_visualization}")
-            yield
-
-        def update(self, **kwargs: object) -> None:
-            pytest.fail("Pose playback must not integrate physics.")
-
-        def destroy(self, **kwargs: object) -> None:
-            events.append("destroy")
-
-        @staticmethod
-        def flush_cleanup_queue() -> None:
-            events.append("flush")
-
-    def on_frame(sim: object) -> bool:
-        nonlocal callback_count
-        assert isinstance(sim, FakeSimulation)
-        callback_count += 1
-        if callback_count == 3:
-            raise KeyboardInterrupt
-        events.append(f"callback:{callback_count}")
-        return callback_count == 2
-
-    monkeypatch.setattr(preview, "SimulationManager", FakeSimulation)
-    monkeypatch.setattr(
-        preview, "load_scene_export_into_sim", lambda **_: events.append("load") or []
-    )
-    monkeypatch.setattr(preview.time, "sleep", lambda _: None)
-    preview.preview_scene_export(
-        output_root=root,
-        headless=backend == "viser",
-        visualization=VisualizationCfg(backend=backend),
-        joint_control=False,
-        on_frame=on_frame,
-        advance_physics=False,
+    limits = {"hinge": [-0.25, 1.5]}
+    monkeypatch.setattr(scene_usd, "_read_revolute_qpos_limits", lambda path: limits)
+    descriptor = ArticulationDesc(
+        name="door",
+        links=[LinkDesc("base", "", np.eye(4)), LinkDesc("lid", "base", np.eye(4))],
+        joints=[JointDesc("hinge", "base", "lid", JointType.REVOLUTE)],
+        root_link_name="base",
     )
 
-    initial = ["load", "prepare"]
-    if backend == "none":
-        initial += ["publish", "open"]
-    assert events == initial + [
-        "callback:1",
-        "render:False",
-        "callback:2",
-        "render:True",
-        "destroy",
-        "flush",
-    ]
+    class Simulation:
+        def add_articulation(self, cfg):
+            assert cfg.asset_physics_mode == "overlay"
+            configure_articulation_desc(descriptor, cfg)
+            return descriptor
+
+    path = tmp_path / "door.usdc"
+    path.write_bytes(b"asset")
+    scene_usd._add_articulations(
+        sim=Simulation(),
+        entries=[
+            {
+                "uid": "door",
+                "fpath": "door.usdc",
+                "init_pos": [0, 0, 0],
+                "init_rot": [0, 0, 0],
+            }
+        ],
+        config_dir=tmp_path,
+    )
+    assert descriptor.joints[0].lower_limit == pytest.approx(-0.25)
+    assert descriptor.joints[0].upper_limit == pytest.approx(1.5)

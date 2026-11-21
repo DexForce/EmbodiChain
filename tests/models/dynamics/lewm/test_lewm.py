@@ -29,7 +29,7 @@ from torchvision.transforms import v2
 
 from embodichain.learning.sl import SupervisedBatch, SupervisedLearner
 from examples.learning.lewm._finetune import _LatentWindows, _RolloutObjective
-from embodichain_models.dynamics.lewm import (
+from embodichain.extensions.models.dynamics.lewm import (
     LeWM,
     LeWMCfg,
     LeWMCEMCfg,
@@ -58,6 +58,11 @@ def tiny_cfg() -> LeWMCfg:
         mlp_dim=48,
         dropout=0.0,
     )
+
+
+def tiny_model() -> LeWM:
+    pytest.importorskip("transformers")
+    return LeWM(tiny_cfg())
 
 
 def write_corpus(path, split: str, seed: int, steps: int = 5) -> None:
@@ -101,7 +106,7 @@ def test_preprocessing_matches_reference_transform() -> None:
 
 
 def test_rollout_pairs_the_current_frame_with_its_outgoing_action() -> None:
-    model = LeWM(tiny_cfg()).eval()
+    model = tiny_model().eval()
 
     def predict(self, embeddings, actions):
         addition = torch.nn.functional.pad(actions.cumsum(1), (0, 22))
@@ -119,7 +124,7 @@ def test_rollout_pairs_the_current_frame_with_its_outgoing_action() -> None:
 
 def test_target_encoder_keeps_gradient() -> None:
     torch.manual_seed(4)
-    model = LeWM(tiny_cfg()).train()
+    model = tiny_model().train()
     captured = []
 
     def capture(_module, _inputs, output):
@@ -204,6 +209,7 @@ def test_resident_windows_match_disk_and_own_their_results(tmp_path) -> None:
 def test_nonfinite_actions_and_cross_split_episode_leakage_are_rejected(
     tmp_path,
 ) -> None:
+    pytest.importorskip("transformers")
     train, validation = tmp_path / "train.h5", tmp_path / "validation.h5"
     write_corpus(train, "train", 10)
     write_corpus(validation, "validation", 10)
@@ -227,6 +233,7 @@ def test_nonfinite_actions_and_cross_split_episode_leakage_are_rejected(
 
 @pytest.mark.parametrize("action_block", [1, 3])
 def test_training_resume_and_export(tmp_path, action_block: int) -> None:
+    pytest.importorskip("transformers")
     train, validation = tmp_path / "train.h5", tmp_path / "validation.h5"
     write_corpus(train, "train", 10, steps=12)
     write_corpus(validation, "validation", 20, steps=12)
@@ -274,7 +281,7 @@ def test_cem_is_bounded_and_candidate_chunking_preserves_result(
     sampling_distribution: str, action_selection: str
 ) -> None:
     torch.manual_seed(3)
-    model = LeWM(tiny_cfg()).eval()
+    model = tiny_model().eval()
     for layer in model.predictor.transformer.layers:
         torch.nn.init.normal_(layer.adaLN_modulation[-1].weight, std=0.02)
     history = torch.randn(1, 3, 24)
@@ -326,7 +333,7 @@ def test_cem_is_bounded_and_candidate_chunking_preserves_result(
 def test_cem_training_moments_and_selected_sequence_cost(
     monkeypatch, selection: str, expected_action: list[float], expected_cost: float
 ) -> None:
-    model = LeWM(tiny_cfg()).eval()
+    model = tiny_model().eval()
     model.set_action_statistics(torch.tensor([0.4, -0.2]), torch.tensor([0.1, 0.05]))
 
     # A one-step additive oracle makes the known raw candidates and their costs
@@ -361,7 +368,7 @@ def test_cem_training_moments_and_selected_sequence_cost(
 def test_cem_official_normalized_search_preserves_mean_and_zero_variance(
     monkeypatch,
 ) -> None:
-    model = LeWM(tiny_cfg()).eval()
+    model = tiny_model().eval()
     model.set_action_statistics(torch.tensor([2.0, -0.2]), torch.tensor([0.5, 0.05]))
     sampled = []
 
@@ -405,7 +412,7 @@ def test_cem_official_normalized_search_preserves_mean_and_zero_variance(
 def test_cem_elite_deviation_controls_the_next_population(
     monkeypatch, correction: int, spread: float
 ) -> None:
-    model = LeWM(tiny_cfg()).eval()
+    model = tiny_model().eval()
     sampled = []
 
     def rollout(self, history, past, candidates):
@@ -454,7 +461,7 @@ def test_frozen_latent_windows_preserve_episode_and_outgoing_action_alignment() 
 
 def test_predictor_finetuning_keeps_visual_parameters_and_buffers_fixed() -> None:
     torch.manual_seed(4)
-    model = LeWM(tiny_cfg())
+    model = tiny_model()
     model.encoder.requires_grad_(False)
     model.projector.requires_grad_(False)
     frozen = {

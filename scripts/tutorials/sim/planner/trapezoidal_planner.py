@@ -51,7 +51,7 @@ from embodichain.lab.sim.motion.planners._cartesian_profiles import (
     plan_cartesian_path,
     compute_eef_trajectory,
 )
-from embodichain_robots import CobotMagicCfg
+from embodichain.extensions.robots import CobotMagicCfg
 from embodichain.lab.sim.cfg import MarkerCfg, physics_cfg_for_backend
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.utils.math import euler_xyz_from_quat
@@ -647,8 +647,8 @@ def main() -> None:
         robot = sim.add_robot(CobotMagicCfg.from_dict({"uid": "CobotMagic"}))
         if sim.is_use_gpu_physics:
             sim.init_gpu_physics()
-        if not args.headless:
-            sim.open_window()
+        if not args.headless or getattr(args, "web", False):
+            sim.open_viewer()
 
         control_part = "left_arm"
         joint_waypoints = build_demo_waypoints(robot, control_part)

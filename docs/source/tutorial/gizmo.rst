@@ -10,7 +10,7 @@ DexSim owns native entity and robot IK controllers; EmbodiChain keeps only the
 robot control-part adapter, Viser commands, and controller lifecycle management.
 
 For the cross-frontend capability summary, supported targets, lifecycle rules,
-and security boundary, see :doc:`/features/interaction/gizmo`.
+and security boundary, see :doc:`/overview/sim/visualization/gizmo`.
 
 The Code
 ~~~~~~~~

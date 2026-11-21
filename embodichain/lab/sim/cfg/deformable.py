@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import MISSING
+from dataclasses import MISSING, field
 from typing import Any
 from typing import Literal, Sequence
 
@@ -29,6 +29,7 @@ from embodichain.utils import configclass
 
 from ..shapes import MeshCfg
 from .asset import ObjectBaseCfg
+from .source import UsdSourceCfg, _usd_source_from_value
 
 __all__: list[str] = []
 
@@ -124,6 +125,15 @@ class VolumeDeformablePhysicsCfg:
     add_surface_edges: bool = True
     """Whether Newton creates surface bending-edge constraints."""
 
+    contact_material: Mapping[str, float] | None = None
+    """Optional DexUni object contact material, separate from element elasticity.
+
+    Keys are ``stiffness`` [N/m], ``damping`` [N s/m], and
+    ``dynamic_friction``. Omitted keys use the native material defaults.
+    Values must be finite, nonnegative float32 values. ``None`` preserves the
+    backend defaults; explicit materials require a supporting DexSim build.
+    """
+
     def __post_init__(self) -> None:
         if isinstance(self.surface_props, Mapping):
             self.surface_props = SurfaceElementPropertiesCfg(**self.surface_props)
@@ -147,6 +157,39 @@ class SurfaceDeformablePhysicsCfg:
 
     spring_kd: float | None = None
     """Spring damping; ``None`` uses the Newton default."""
+
+    contact_material: Mapping[str, float] | None = None
+    """Optional DexUni object contact material, separate from element elasticity.
+
+    Keys are ``stiffness`` [N/m], ``damping`` [N s/m], and
+    ``dynamic_friction``. Omitted keys use the native material defaults.
+    Values must be finite, nonnegative float32 values. ``None`` preserves the
+    backend defaults; explicit materials require a supporting DexSim build.
+    """
+
+    edge_rest_angle: float | None = None
+    """Constant signed rest dihedral angle [rad] for every bending edge.
+
+    ``None`` preserves angles inferred from the authored mesh. Set ``0.0``
+    for a garment that should relax toward a flat surface. This changes the
+    rest geometry independently of ``surface_props.edge_ke`` and requires
+    a DexSim build supporting the cloth ``edge_rest_angle`` parameter.
+    """
+
+    pneumatic: Mapping[str, Any] | None = None
+    """Optional DexUni closed-cavity pressure parameters for this surface.
+
+    Keys follow DexSim ``PneumaticPhysicsDesc``: ``mode`` (``isothermal``,
+    ``adiabatic``, ``target_volume`` or ``prescribed_gauge_pressure``),
+    ``reference_absolute_pressure`` and ``ambient_pressure`` [Pa],
+    ``heat_capacity_ratio``, ``target_volume`` [m³], ``volume_stiffness``,
+    ``bulk_damping``, ``min_volume_ratio``, ``max_absolute_pressure`` [Pa],
+    and ``prescribed_gauge_pressure`` [Pa]. Native validation owns their
+    defaults and pressure-law constraints. The authored surface must be
+    closed; native model construction validates cavity topology and solver
+    compatibility. ``None`` preserves ordinary cloth and supports older
+    wheels; an explicit block requires a supporting DexSim build.
+    """
 
     def __post_init__(self) -> None:
         if isinstance(self.surface_props, Mapping):
@@ -175,6 +218,9 @@ class DeformableObjectCfg(ObjectBaseCfg):
     shape: MeshCfg = MeshCfg()
     """Render and source-mesh configuration."""
 
+    source: UsdSourceCfg | None = field(default=None, kw_only=True)
+    """Optional authored USD particle-set source; source physics is retained."""
+
     particle_radius: float | None = None
     """Newton particle radius; ``None`` uses the active solver default."""
 
@@ -193,6 +239,7 @@ class DeformableObjectCfg(ObjectBaseCfg):
     """Whether Newton reports source-mesh quality validation warnings."""
 
     def __post_init__(self) -> None:
+        self.source = _usd_source_from_value(self.source)
         if isinstance(self.shape, Mapping):
             self.shape = _mesh_cfg_from_dict(self.shape)
         visual_shape = getattr(self, "visual_shape", None)
@@ -219,6 +266,11 @@ class DeformableObjectCfg(ObjectBaseCfg):
         )
         cfg.init_pos, cfg.init_rot = pose.init_pos, pose.init_rot
         cfg.init_local_pose = pose.init_local_pose
+        if cfg.source is not None and (
+            ("init_local_pose" in init_dict and init_dict["init_local_pose"] is None)
+            or not {"init_pos", "init_rot", "init_local_pose"}.intersection(init_dict)
+        ):
+            cfg.init_local_pose = None
         return cfg
 
 
@@ -229,7 +281,20 @@ class VolumeDeformableObjectCfg(DeformableObjectCfg):
     deformable_type: Literal["volume"] = "volume"
 
     meshing: VolumeDeformableMeshingCfg = VolumeDeformableMeshingCfg()
-    """Tetrahedral simulation-mesh voxelization attributes."""
+    """Tetrahedral simulation-mesh voxelization attributes.
+
+    Ignored when :attr:`tetrahedra` supplies an explicit simulation mesh.
+    """
+
+    tetrahedra: Sequence[Sequence[int]] | np.ndarray | None = None
+    """Explicit ``(M, 4)`` tetrahedra indexing ``shape.vertices``.
+
+    When set, :attr:`shape` must be array-backed: its vertices become the
+    simulation particles in the same order, so particle indices equal vertex
+    indices, and :attr:`meshing` is not used. ``shape.triangles`` may list the
+    boundary surface over those vertex indices; leave it ``None`` to derive
+    the surface from the tetrahedra. ``None`` voxelizes :attr:`shape` instead.
+    """
 
     attrs: VolumeDeformablePhysicsCfg = VolumeDeformablePhysicsCfg()
     """Newton volume-deformable physical attributes."""
@@ -240,6 +305,17 @@ class VolumeDeformableObjectCfg(DeformableObjectCfg):
             self.attrs = VolumeDeformablePhysicsCfg(**self.attrs)
         if isinstance(self.meshing, Mapping):
             self.meshing = VolumeDeformableMeshingCfg(**self.meshing)
+        if self.tetrahedra is not None:
+            raw = np.asarray(self.tetrahedra)
+            if raw.dtype.kind not in "iu":
+                raise TypeError("tetrahedra must contain integer indices.")
+            if raw.ndim != 2 or raw.shape[1:] != (4,) or len(raw) == 0:
+                raise ValueError("tetrahedra must have non-empty shape (M, 4).")
+            if np.any(raw < 0) or np.any(raw > np.iinfo(np.int32).max):
+                raise ValueError(
+                    "tetrahedra indices must be nonnegative and fit int32."
+                )
+            self.tetrahedra = raw.astype(np.int32)
 
 
 @configclass

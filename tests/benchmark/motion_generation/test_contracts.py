@@ -26,17 +26,17 @@ import pytest
 import torch
 import yaml
 
-from embodichain_benchmarks.motion_generation import contracts
-from embodichain_benchmarks.motion_generation.artifacts import (
+from embodichain.extensions.benchmarks.motion_generation import contracts
+from embodichain.extensions.benchmarks.motion_generation.artifacts import (
     TrialJsonlWriter,
     write_case_manifest,
 )
-from embodichain_benchmarks.motion_generation.config import (
+from embodichain.extensions.benchmarks.motion_generation.config import (
     SuiteCfg,
     load_suite,
     suite_to_dict,
 )
-from embodichain_benchmarks.motion_generation.models import (
+from embodichain.extensions.benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
@@ -120,7 +120,7 @@ def test_manifest_keeps_domain_and_is_independent_of_planner(tmp_path: Path) -> 
         domain=domain,
         track_group="pick",
         embodiment_id="franka_panda",
-        required_capabilities=frozenset({"atomic_action"}),
+        required_capabilities=frozenset({"atomic_skill"}),
     )
     path = write_case_manifest(
         tmp_path / "cases.json",
@@ -137,7 +137,7 @@ def test_manifest_keeps_domain_and_is_independent_of_planner(tmp_path: Path) -> 
     }
     assert payload["cases"][0]["track_group"] == "pick"
     assert payload["cases"][0]["embodiment_id"] == "franka_panda"
-    assert payload["cases"][0]["required_capabilities"] == ["atomic_action"]
+    assert payload["cases"][0]["required_capabilities"] == ["atomic_skill"]
     assert payload["planner_config_hashes"] == {"baseline": "abc"}
     assert payload["resolved_embodiment"]["id"] == "franka_panda"
     assert "planner_config_hash" not in payload["cases"][0]
@@ -356,7 +356,7 @@ def test_replay_observation_trace_requires_synchronized_batch_axes() -> None:
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_default_fixed_grasp_is_a_proper_rotation(dtype: torch.dtype) -> None:
-    from embodichain_benchmarks.motion_generation.scenarios.atomic_case_utils import (
+    from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_case_utils import (
         TOP_DOWN_ROTATION,
     )
 

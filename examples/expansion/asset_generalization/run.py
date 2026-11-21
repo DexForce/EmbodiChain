@@ -34,7 +34,7 @@ from embodichain.lab.gym.utils.registration import build_env
 from embodichain.lab.sim.motion.expansion import ValidationCheck, ValidationResult
 from embodichain.lab.sim.scene.expansion import SceneVariant
 from embodichain.lab.task_program.integrations.scene_expansion import (
-    execute_scene_variant,
+    execute_scene_variants,
 )
 from embodichain.lab.task_program.integrations.simulation.scene_expansion import (
     SimulationSceneExpansionHost,
@@ -74,13 +74,17 @@ def _template(root: Path, *, side: float, seed: int, batch_index: int) -> Path:
             task["embodiment"]["component"], base_dir=source.parent
         ).resolve()
     )
-    policy = resolve_config_path(
-        task["task_program"]["execution_policy"], base_dir=source.parent
-    )
+    policy = task["task_program"]["execution_policy"]
+    if isinstance(policy, dict):
+        policy["component"] = str(
+            resolve_config_path(policy["component"], base_dir=source.parent).resolve()
+        )
+    else:
+        policy = str(resolve_config_path(policy, base_dir=source.parent).resolve())
     task["task_program"] = {
         "program": "program.yaml",
         "integration": "integration.yaml",
-        "execution_policy": str(policy.resolve()),
+        "execution_policy": policy,
     }
     cube = next(
         obj for obj in environment["simulation"]["rigid_object"] if obj["uid"] == "cube"
@@ -110,6 +114,9 @@ def _template(root: Path, *, side: float, seed: int, batch_index: int) -> Path:
     support["object_target_pose"][11] = (
         platform["shape"]["size"][2] / 2 + side / 2 + 0.002
     )
+    from embodichain.lab.task_program.language.authoring import normalize_task_program
+
+    program = normalize_task_program(program).declaration
     for segment in program["program"]["items"]:
         for validator in segment.get("validators", []):
             if (
@@ -207,7 +214,7 @@ def _execute_batch(
     try:
         target.reset(seed=seed, options={"save_data": False})
         host = SimulationSceneExpansionHost(
-            target, initial_validator=lambda: _initial(target), settle_steps=60
+            target, initial_validator=lambda row: _initial(target), settle_steps=60
         )
         for episode_index in range(episodes):
             episode = {"episode_index": episode_index, "reset_submitted": False}
@@ -219,15 +226,20 @@ def _execute_batch(
                 pose_changes=(),
                 metadata=(("baseline", "primitive_cube_platform"),),
             )
-            result = execute_scene_variant(
+            result = execute_scene_variants(
                 env,
-                variant,
+                {0: variant},
                 prepare_scene=host,
-                measured_validator=lambda: _measured(target),
+                measured_validator=lambda row: _measured(target),
                 episode_index=episode_index,
-            )
+            )[0]
             episode["accepted"] = result.accepted
             episode["validation"] = result.to_metadata()
+            episode["capture_step"] = (
+                None
+                if result.execution is None
+                else result.execution.to_metadata()["length"]
+            )
             target._demo_episode_metadata[0]["primitive_variation"] = {
                 "task_id": config["id"],
                 "seed": seed,

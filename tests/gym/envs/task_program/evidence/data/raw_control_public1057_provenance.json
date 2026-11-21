@@ -1,0 +1,17 @@
+{
+  "producer_pr": 1057,
+  "producer_head": "0948a69f20e91d7442226cd41aee77c4c9b2f74f",
+  "source": "actual public ControlOperationRuntime/SimulationSegmentPolicyPort/SimulationControlObservationCollector APIs; source numeric tests provide native-shaped inputs",
+  "cases": [
+    "press",
+    "press_empty_initial",
+    "twist"
+  ],
+  "sha256_uncompressed": "5ab691e630bb37261f38c317fb2bf654ea9b29a1775502df89bdfed21c0d0f19",
+  "uncompressed_bytes": 1694810,
+  "compressed_bytes": 50047,
+  "native_sim_robot_construction": false,
+  "normative_or_task_engine_import": false,
+  "physical_qualification": false,
+  "twist_fixture_input": "opaque episode literal set to actual initialized native episode 0 before calling unchanged real producer; no returned facts modified"
+}

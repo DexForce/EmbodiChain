@@ -33,13 +33,17 @@ from .articulation import (
     ArticulationRootPropertiesCfg,
     JointDrivePropertiesCfg,
     LinkPhysicsOverrideCfg,
+    MimicComplianceCfg,
     NewtonJointDrivePropertiesCfg,
     _normalize_joint_target_mode,
     _raise_removed_articulation_cfg_fields,
     link_attrs_from_dict,
 )
 from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
+from .fluid import FluidObjectCfg, FluidSpawnCfg, FluidRenderCfg
 from .source import UsdSourceCfg
+from .cable import CableAttachmentCfg, CableObjectCfg, CablePhysicsCfg
+from .usd import UsdImportCfg
 from .deformable import (
     SurfaceElementPropertiesCfg,
     VolumeDeformableMeshingCfg,
@@ -66,6 +70,7 @@ from .rigid import (
 )
 from .rigid_object import RigidObjectCfg, RigidObjectGroupCfg
 from .visual_object import VisualObjectCfg
+from .visuals import GaussianSplatCfg, VisualElementCfg, GaussianRenderCfg
 from .scene import LightCfg, RigidConstraintCfg
 from .physics import (
     DefaultPhysicsCfg,
@@ -79,7 +84,7 @@ from .physics import (
 )
 from .rendering import DenoisingCfg, DenoisingMode, DLSSCfg, NRDCfg, RenderCfg
 from .urdf import URDFCfg
-from .viewer import MarkerCfg, WindowCameraPoseCfg, WindowRecordCfg
+from .viewer import MarkerCfg, WindowCameraPoseCfg, WindowCaptureCfg, WindowRecordCfg
 
 # The renderer selection code intentionally mutates this package-level value.
 DEFAULT_RENDERER: Literal["auto", "no-render", "hybrid", "fast-rt", "rt"] = "auto"
@@ -87,8 +92,12 @@ DEFAULT_RENDERER: Literal["auto", "no-render", "hybrid", "fast-rt", "rt"] = "aut
 # Robot imports are kept last because SolverCfg discovery imports simulation
 # modules that themselves rely on the public facade above.
 from .robot import RobotCfg, RobotPresetCfg  # noqa: E402
+from .gripper import ParallelJawGripperCfg  # noqa: E402
 
 __all__ = [
+    "FluidObjectCfg",
+    "FluidSpawnCfg",
+    "FluidRenderCfg",
     "DEFAULT_RENDERER",
     "AssetPhysicsMode",
     "DenoisingCfg",
@@ -106,6 +115,7 @@ __all__ = [
     "validate_physics_cfg",
     "MarkerCfg",
     "WindowRecordCfg",
+    "WindowCaptureCfg",
     "WindowCameraPoseCfg",
     "ShapeCfg",
     "MeshCfg",
@@ -122,9 +132,16 @@ __all__ = [
     "RigidBodyPhysicsCfg",
     "ObjectBaseCfg",
     "UsdSourceCfg",
+    "UsdImportCfg",
     "LightCfg",
     "RigidObjectCfg",
     "VisualObjectCfg",
+    "GaussianSplatCfg",
+    "VisualElementCfg",
+    "GaussianRenderCfg",
+    "CableObjectCfg",
+    "CablePhysicsCfg",
+    "CableAttachmentCfg",
     "DeformableObjectCfg",
     "VolumeDeformableObjectCfg",
     "SurfaceDeformableObjectCfg",
@@ -137,6 +154,7 @@ __all__ = [
     "VolumeDeformablePhysicsCfg",
     "SurfaceDeformablePhysicsCfg",
     "ArticulationRootPropertiesCfg",
+    "MimicComplianceCfg",
     "LinkPhysicsOverrideCfg",
     "link_attrs_from_dict",
     "JointDrivePropertiesCfg",
@@ -145,6 +163,7 @@ __all__ = [
     "URDFCfg",
     "RobotCfg",
     "RobotPresetCfg",
+    "ParallelJawGripperCfg",
     "RobotWorkspaceCfg",
     "get_data_path",
 ]

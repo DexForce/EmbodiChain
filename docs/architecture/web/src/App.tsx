@@ -21,7 +21,6 @@ import {
   MiniMap,
   Panel,
   useReactFlow,
-  useViewport,
   useStore,
   applyNodeChanges,
   type Node,
@@ -40,8 +39,6 @@ import {
   Menu,
   Moon,
   Network,
-  Plus,
-  Minus,
   RotateCcw,
   Search,
   SlidersHorizontal,
@@ -54,37 +51,9 @@ import { useDocumentTheme } from './useDocumentTheme';
 import { buildCanvas, layerColors, CARD_WIDTH, CARD_HEIGHT } from './graph';
 import { parseState, serializeState, selectGraph, relations } from './state';
 import type { ExplorerState, ArchitectureSnapshot } from './types';
+import { GraphViewportControls } from '@embodichain/graph-ui';
 const nodeTypes = { module: ArchitectureNode, layer: LayerNode };
 
-function CanvasTools() {
-  const flow = useReactFlow();
-  const { zoom } = useViewport();
-  return (
-    <div className="canvas-tools">
-      <button aria-label="Zoom out" onClick={() => flow.zoomOut({ duration: 180 })}>
-        <Minus size={16} />
-      </button>
-      <button
-        className="reading-size"
-        aria-label="Read at 100 percent"
-        title="Read at 100%"
-        onClick={() => flow.zoomTo(1, { duration: 180 })}
-      >
-        {Math.round(zoom * 100)}%
-      </button>
-      <button aria-label="Zoom in" onClick={() => flow.zoomIn({ duration: 180 })}>
-        <Plus size={16} />
-      </button>
-      <i />
-      <button
-        aria-label="Fit to view"
-        onClick={() => flow.fitView({ padding: 0.07, duration: 350 })}
-      >
-        <Maximize size={15} />
-      </button>
-    </div>
-  );
-}
 function ReadingViewport({
   layoutKey,
   nodeId,
@@ -205,7 +174,7 @@ function Explorer({ data }: { data: ArchitectureSnapshot }) {
     }
   };
   return (
-    <div className="app" data-theme={theme}>
+    <div className="app graph-ui" data-theme={theme}>
       <header className="app-header">
         <a
           className="brand"
@@ -562,7 +531,7 @@ function Explorer({ data }: { data: ArchitectureSnapshot }) {
                 focus={state.focus}
               />
               <Panel position="bottom-left">
-                <CanvasTools />
+                <GraphViewportControls />
               </Panel>
               <MiniMap
                 pannable

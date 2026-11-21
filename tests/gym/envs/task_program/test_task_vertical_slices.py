@@ -57,10 +57,10 @@ from embodichain.lab.gym.envs.task_program.bridge import (
     EnvironmentStepClock,
     RuntimeCommandFrameEncoder,
 )
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     Affordance,
     ArticulationAffordanceGeometry,
-    AtomicActionEngine,
+    AtomicSkillEngine,
     DynamicCollisionMode,
     EntityState,
     ObjectSemantics,
@@ -170,7 +170,7 @@ class _NeverObserveProvider:
 
 def _read_payload(relative_path: Path) -> dict[str, object]:
     """Load one packaged JSON/YAML example as inert data."""
-    path = _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs" / relative_path
+    path = _REPOSITORY_ROOT / "embodichain/extensions/tasks/configs" / relative_path
     if path.suffix == ".json":
         payload = json.loads(path.read_text(encoding="utf-8"))
     else:
@@ -181,7 +181,7 @@ def _read_payload(relative_path: Path) -> dict[str, object]:
 
 def _deployment(relative_path: Path):
     """Compose one packaged environment deployment."""
-    path = _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs" / relative_path
+    path = _REPOSITORY_ROOT / "embodichain/extensions/tasks/configs" / relative_path
     payload = _read_payload(relative_path)
     physical = _resolve_gym_components(payload, base_dir=path.parent)
     assert physical.embodiment_skill_profile is not None
@@ -235,7 +235,7 @@ def _configure_cube_environment():
     """Load the packaged config and register its declared integration."""
     path = (
         _REPOSITORY_ROOT
-        / "extensions/embodichain_tasks/configs"
+        / "embodichain/extensions/tasks/configs"
         / _REPEATED_CUBE_GYM_CONFIG
     )
     payload = _read_payload(_REPEATED_CUBE_GYM_CONFIG)
@@ -245,7 +245,7 @@ def _configure_cube_environment():
 
 def _configure_packaged_environment(relative_path: Path, *, physics: str | None = None):
     """Load one packaged deployment and its selected physical component."""
-    path = _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs" / relative_path
+    path = _REPOSITORY_ROOT / "embodichain/extensions/tasks/configs" / relative_path
     payload = _read_payload(relative_path)
     if physics is not None:
         payload = _resolve_environment_component(
@@ -280,15 +280,16 @@ def test_newton_contact_overlays_are_scoped_in_packaged_manipulation_configs() -
     assert cube_physics.num_substeps == 20
     assert cube_physics.collision_cfg is None
     assert cube_physics.solver_cfg == {
-        "solver_type": "mujoco_warp",
-        "solver": "newton",
-        "integrator": "implicitfast",
-        "iterations": 20,
-        "ls_iterations": 100,
-        "cone": "elliptic",
-        "impratio": 1000.0,
-        "use_mujoco_contacts": True,
-        "enable_multiccd": True,
+        "solver_type": "dexuni",
+        "mujoco_options": {
+            "solver": "newton",
+            "integrator": "implicitfast",
+            "iterations": 20,
+            "ls_iterations": 100,
+            "cone": "elliptic",
+            "impratio": 1000.0,
+            "enable_multiccd": True,
+        },
     }
     cube_collision = cube_cfg.rigid_object[0].attrs.collision_props
     assert isinstance(cube_collision, NewtonCollisionPropertiesCfg)
@@ -480,6 +481,9 @@ def test_cube_variant_extends_by_data_without_motion_generation_code() -> None:
             },
         )
     )
+    from embodichain.lab.task_program.language.authoring import normalize_task_program
+
+    payload = normalize_task_program(payload).declaration
     payload["program"]["count"] = 4
 
     config = _decode_deployed_program(
@@ -524,8 +528,21 @@ def test_open_drawer_program_compiles_to_registered_slide_call() -> None:
 
 def test_open_drawer_config_owns_registered_lowerer_factory() -> None:
     """The decoded registration owns call discovery and fresh live lowerers."""
-    registration = _drawer_integration().registration
+    integration = _drawer_integration()
+    registration = integration.registration
 
+    # The handle-only deployment also fingerprints the shared PickUp goal types
+    # and the interpolation step declared by its motion policies. The added
+    # contact-path goal types intentionally extend those descriptors; restoring
+    # the pre-continuation types independently reproduces the previous goldens.
+    assert (
+        registration.fingerprint
+        == "8c26f478773895d74399f6f50e7784625719062b20ce76dc3c3c94b8ac7a7005"
+    )
+    assert (
+        integration.integration_fingerprint
+        == "a40a3110b8db70c9ce1b4a1879dc41f12c0dd876dce09e1844f2dc01c4ebc8d7"
+    )
     assert tuple(registration.catalog.registered_semantic_lowerer_declarations) == (
         _OPEN_DRAWER_CALL_ID,
     )
@@ -568,7 +585,7 @@ def test_open_drawer_config_owns_registered_lowerer_factory() -> None:
         )
     )
     robot = object()
-    engine = AtomicActionEngine.__new__(AtomicActionEngine)
+    engine = AtomicSkillEngine.__new__(AtomicSkillEngine)
     engine._planning_services = SimpleNamespace(  # type: ignore[attr-defined]
         robot=robot,
         device=torch.device("cpu"),
@@ -693,7 +710,7 @@ def test_explicit_slide_axis_bypasses_sampling_with_non_unit_scale() -> None:
         )
     )
     robot = object()
-    engine = AtomicActionEngine.__new__(AtomicActionEngine)
+    engine = AtomicSkillEngine.__new__(AtomicSkillEngine)
     engine._planning_services = SimpleNamespace(  # type: ignore[attr-defined]
         robot=robot,
         device=torch.device("cpu"),
@@ -862,7 +879,7 @@ def test_example_profiles_execute_only_open_loop_trajectories(
     assert isinstance(preset.tracking_policy.terminal, TimedTerminalAcceptance)
     assert preset.tracking_policy.terminal.settle_duration == 0.0
     assert preset.recovery_policy.max_replans == 0
-    assert preset.recovery_policy.max_action_retries == 0
+    assert preset.recovery_policy.max_skill_retries == 0
     assert preset.workflow_recovery_policy.max_recovery_attempts == 0
     assert dict(preset.effect_monitors) == {}
     assert preset.runner_cfg.hold_on_completion is False
@@ -920,7 +937,7 @@ def test_example_gym_configs_keep_minimal_recording_configuration(
         "integration",
         "execution_policy",
     }
-    assert set(payload["embodiment"]) <= {"component", "overrides"}
+    assert set(payload["embodiment"]) <= {"component", "overrides", "camera_overrides"}
     assert "task_program" not in environment
     assert "version" not in payload
     assert "task_program_path" not in payload
@@ -967,3 +984,64 @@ def test_vertical_slice_payloads_expose_no_motion_layer_fields() -> None:
 
 
 __all__: list[str] = []
+
+
+def test_slide_joint_targets_are_intent_not_motion_options() -> None:
+    from embodichain.lab.task_program.integrations._configured_services import (
+        _ArticulationLinkSlideLowerer,
+    )
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_registered_lowerer,
+    )
+
+    factory = _decode_registered_lowerer(
+        {
+            "kind": "articulation_link_slide",
+            "articulation_id": "drawer",
+            "articulation_simulation_uid": "drawer",
+            "link_entity_id": "drawer_handle",
+            "joint_target": {"joint_name": "rail", "axis_sign": -1},
+        },
+        path="lowerer",
+    )
+    assert factory.joint_target == ("rail", -1)
+    semantics = ObjectSemantics(
+        label="handle",
+        entity_id="drawer_handle",
+        geometry={},
+        affordance=SlideAffordance(
+            mesh_vertices=torch.zeros(3, 3),
+            mesh_triangles=torch.tensor([[0, 1, 2]]),
+            joint_name="rail",
+            joint_limits=(0.0, 0.3),
+        ),
+    )
+    lowerer = _ArticulationLinkSlideLowerer(
+        semantics, "drawer_handle", joint_target=("drawer", "rail", -1)
+    )
+    options = SlideOptions()
+    for position in (0.18, 0.0):
+        goal = lowerer.lower(
+            RegisteredSemanticCall(
+                call_id=_OPEN_DRAWER_CALL_ID,
+                arguments={"handle": "drawer_handle", "position": position},
+            ),
+            context=None,
+            bound=None,
+            option_template=options,
+        ).goal
+        assert goal.joint_target.position == position
+        assert goal.joint_target.joint_name == "rail"
+    assert options.direction == "pull"
+    for value in [True, float("nan")]:
+        # Registered payload decoding may reject nonfinite values first.
+        with pytest.raises((TypeError, ValueError)):
+            lowerer.lower(
+                RegisteredSemanticCall(
+                    call_id=_OPEN_DRAWER_CALL_ID,
+                    arguments={"handle": "drawer_handle", "position": value},
+                ),
+                context=None,
+                bound=None,
+                option_template=options,
+            )

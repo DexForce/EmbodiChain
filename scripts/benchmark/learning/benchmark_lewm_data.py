@@ -30,7 +30,7 @@ from pathlib import Path
 import psutil
 import torch
 
-from embodichain_models.dynamics.lewm import LeWMSequenceSource
+from embodichain.extensions.models.dynamics.lewm import LeWMSequenceSource
 
 
 def run_all_benchmarks() -> None:

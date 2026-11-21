@@ -25,7 +25,7 @@ from pathlib import Path
 import h5py
 import torch
 
-from embodichain_models.dynamics.lewm import (
+from embodichain.extensions.models.dynamics.lewm import (
     LeWM,
     LeWMCfg,
     LeWMCEMCfg,
@@ -60,7 +60,7 @@ def _train(args: argparse.Namespace) -> dict:
     output.mkdir(parents=True, exist_ok=True)
     interval = min(args.interval, args.updates)
     config = {
-        "factory": "embodichain_models.dynamics.lewm.sl_recipe:build_lewm_trainer",
+        "factory": "embodichain.extensions.models.dynamics.lewm.sl_recipe:build_lewm_trainer",
         "model": {
             "action_dim": metadata["action_dim"] * args.action_block,
             "action_block": args.action_block,

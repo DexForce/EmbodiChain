@@ -291,6 +291,33 @@ class ArticulationViewBase(ABC):
         """Return backend articulation ids for the given environment ids."""
         ...
 
+    def apply_link_mass(
+        self,
+        values: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor,
+        link_ids: Sequence[int] | torch.Tensor,
+    ) -> None:
+        """Write masses for selected rows and public link columns."""
+        raise NotImplementedError("This view does not expose batch link writes.")
+
+    def apply_link_inertia(
+        self,
+        values: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor,
+        link_ids: Sequence[int] | torch.Tensor,
+    ) -> None:
+        """Write principal moments in the current applied COM frames."""
+        raise NotImplementedError("This view does not expose batch link writes.")
+
+    def apply_link_com_pose(
+        self,
+        values: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor,
+        link_ids: Sequence[int] | torch.Tensor,
+    ) -> None:
+        """Write selected COM poses in xyz + xyzw order."""
+        raise NotImplementedError("This view does not expose batch link writes.")
+
     def fetch_link_physical_properties(
         self,
         mass: torch.Tensor,

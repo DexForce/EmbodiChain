@@ -1,0 +1,1064 @@
+{
+  "dual_franka": {
+    "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+    "embodiment_sha256": "a91257e86ce239e1f5284f0eeefafc6a3a261ca1bca71b2606d06c40c4c40ee0",
+    "embodiment": {
+      "embodiment_id": "dual_franka_robotiq_arg2f_140",
+      "simulation": {
+        "uid": "DualFrankaPanda",
+        "urdf_cfg": {
+          "fname": "dual_franka_robotiq_arg2f_140",
+          "name_case": {
+            "joint": "original",
+            "link": "original"
+          },
+          "components": [
+            {
+              "component_type": "left_arm",
+              "urdf_path": "Franka/Panda/Panda.urdf",
+              "transform": [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  -1.25
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.3
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.4
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            {
+              "component_type": "left_hand",
+              "urdf_path": "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
+            },
+            {
+              "component_type": "right_arm",
+              "urdf_path": "Franka/Panda/Panda.urdf",
+              "transform": [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  -1.25
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  -0.3
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.4
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            {
+              "component_type": "right_hand",
+              "urdf_path": "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
+            }
+          ]
+        },
+        "init_pos": [
+          -0.7,
+          0.0,
+          0.21000000000000008
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          180.0
+        ],
+        "init_qpos": [
+          0.0,
+          0.0,
+          -0.569,
+          -0.569,
+          0.0,
+          0.0,
+          -2.81,
+          -2.81,
+          0.0,
+          0.0,
+          3.037,
+          3.037,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "joint_drive_props": {
+          "stiffness": {
+            "left_arm": 10000.0,
+            "right_arm": 10000.0,
+            "left_eef": 50.0,
+            "right_eef": 50.0
+          },
+          "damping": {
+            "left_arm": 1000.0,
+            "right_arm": 1000.0,
+            "left_eef": 5.0,
+            "right_eef": 5.0
+          },
+          "max_effort": {
+            "left_arm": 10000.0,
+            "right_arm": 10000.0,
+            "left_eef": 500.0,
+            "right_eef": 500.0
+          }
+        },
+        "control_parts": {
+          "left_arm": [
+            "left_fr3_joint1",
+            "left_fr3_joint2",
+            "left_fr3_joint3",
+            "left_fr3_joint4",
+            "left_fr3_joint5",
+            "left_fr3_joint6",
+            "left_fr3_joint7"
+          ],
+          "left_eef": [
+            "left_finger_joint",
+            "left_inner_knuckle_joint",
+            "left_inner_finger_joint",
+            "left_right_outer_knuckle_joint",
+            "left_right_inner_knuckle_joint",
+            "left_right_inner_finger_joint"
+          ],
+          "right_arm": [
+            "right_fr3_joint1",
+            "right_fr3_joint2",
+            "right_fr3_joint3",
+            "right_fr3_joint4",
+            "right_fr3_joint5",
+            "right_fr3_joint6",
+            "right_fr3_joint7"
+          ],
+          "right_eef": [
+            "right_finger_joint",
+            "right_left_inner_knuckle_joint",
+            "right_left_inner_finger_joint",
+            "right_outer_knuckle_joint",
+            "right_inner_knuckle_joint",
+            "right_inner_finger_joint"
+          ],
+          "dual_arm": [
+            "left_fr3_joint1",
+            "left_fr3_joint2",
+            "left_fr3_joint3",
+            "left_fr3_joint4",
+            "left_fr3_joint5",
+            "left_fr3_joint6",
+            "left_fr3_joint7",
+            "right_fr3_joint1",
+            "right_fr3_joint2",
+            "right_fr3_joint3",
+            "right_fr3_joint4",
+            "right_fr3_joint5",
+            "right_fr3_joint6",
+            "right_fr3_joint7"
+          ]
+        },
+        "solver_cfg": {
+          "left_arm": {
+            "class_type": "PytorchSolver",
+            "urdf_path": null,
+            "end_link_name": "left_fr3_link8",
+            "root_link_name": "left_base",
+            "tcp": [
+              [
+                0.0,
+                -1.0,
+                0.0,
+                0.0
+              ],
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0,
+                0.2
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ],
+            "num_samples": 15,
+            "pos_eps": 0.005
+          },
+          "right_arm": {
+            "class_type": "PytorchSolver",
+            "urdf_path": null,
+            "end_link_name": "right_fr3_link8",
+            "root_link_name": "right_base",
+            "tcp": [
+              [
+                0.0,
+                -1.0,
+                0.0,
+                0.0
+              ],
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0,
+                0.2
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ],
+            "num_samples": 15,
+            "pos_eps": 0.005
+          }
+        }
+      },
+      "sensor": [
+        {
+          "sensor_type": "Camera",
+          "uid": "cam_high",
+          "width": 960,
+          "height": 540,
+          "intrinsics": [
+            420,
+            420,
+            480,
+            270
+          ],
+          "extrinsics": {
+            "pos": [
+              0.4,
+              0.0,
+              2.2
+            ],
+            "eye": [
+              -0.6,
+              0.0,
+              1.8
+            ],
+            "target": [
+              0.0,
+              0.0,
+              0.75
+            ],
+            "up": [
+              1.0,
+              0.0,
+              0.0
+            ]
+          }
+        }
+      ],
+      "skill_profile": {
+        "contract_id": "dual_arm_parallel_gripper",
+        "profile_id": "dual_franka_robotiq_arg2f_140",
+        "resources": [
+          {
+            "resource_id": "left",
+            "endpoints": [
+              {
+                "endpoint_id": "motion",
+                "control_part": "left_arm",
+                "command_preset": "left_arm_postures",
+                "capabilities": [
+                  "kinematics.inverse",
+                  "kinematics.batch_inverse",
+                  "motion.cartesian_pose",
+                  "motion.joint_position",
+                  "kinematics.forward"
+                ]
+              },
+              {
+                "endpoint_id": "grasp",
+                "control_part": "left_eef",
+                "capabilities": [
+                  "interaction.grasp"
+                ],
+                "command_preset": "left_parallel_gripper"
+              }
+            ]
+          },
+          {
+            "resource_id": "right",
+            "endpoints": [
+              {
+                "endpoint_id": "motion",
+                "control_part": "right_arm",
+                "command_preset": "right_arm_postures",
+                "capabilities": [
+                  "kinematics.inverse",
+                  "kinematics.batch_inverse",
+                  "motion.cartesian_pose",
+                  "motion.joint_position",
+                  "kinematics.forward"
+                ]
+              },
+              {
+                "endpoint_id": "grasp",
+                "control_part": "right_eef",
+                "capabilities": [
+                  "interaction.grasp"
+                ],
+                "command_preset": "right_parallel_gripper"
+              }
+            ]
+          }
+        ],
+        "command_presets": [
+          {
+            "preset_id": "left_arm_postures",
+            "control_part": "left_arm",
+            "commands": {
+              "park": [
+                0.0,
+                -0.569,
+                0.0,
+                -2.81,
+                0.0,
+                3.037,
+                0.0
+              ]
+            }
+          },
+          {
+            "preset_id": "right_arm_postures",
+            "control_part": "right_arm",
+            "commands": {
+              "park": [
+                0.0,
+                -0.569,
+                0.0,
+                -2.81,
+                0.0,
+                3.037,
+                0.0
+              ]
+            }
+          },
+          {
+            "preset_id": "left_parallel_gripper",
+            "control_part": "left_eef",
+            "commands": {
+              "open": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              "grasp": [
+                0.7,
+                -0.7,
+                0.7,
+                -0.7,
+                -0.7,
+                0.7
+              ]
+            }
+          },
+          {
+            "preset_id": "right_parallel_gripper",
+            "control_part": "right_eef",
+            "commands": {
+              "open": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              "grasp": [
+                0.7,
+                -0.7,
+                0.7,
+                -0.7,
+                -0.7,
+                0.7
+              ]
+            }
+          }
+        ],
+        "runtime_services": {
+          "grasp_pose_generators": {
+            "left_eef": {
+              "kind": "antipodal_parallel_jaw",
+              "sample_count": 10000,
+              "approach_deviation_angle": 0.3490658503988659,
+              "approach_direction_samples": 4,
+              "max_candidates": 500,
+              "center_mode": "centroid",
+              "filter_ground_collision": false,
+              "model": {
+                "model_id": "robotiq_arg2f_140",
+                "min_opening_width": 0.002,
+                "max_opening_width": 0.128
+              },
+              "point_spacing": 0.012,
+              "root_from_tcp": [
+                [
+                  0.0,
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.2
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            "right_eef": {
+              "kind": "antipodal_parallel_jaw",
+              "sample_count": 10000,
+              "approach_deviation_angle": 0.3490658503988659,
+              "approach_direction_samples": 4,
+              "max_candidates": 500,
+              "center_mode": "centroid",
+              "filter_ground_collision": false,
+              "model": {
+                "model_id": "robotiq_arg2f_140",
+                "min_opening_width": 0.002,
+                "max_opening_width": 0.128
+              },
+              "point_spacing": 0.012,
+              "root_from_tcp": [
+                [
+                  0.0,
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.2
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            }
+          },
+          "control_part_evidence": {
+            "kind": "joint_position_constraint",
+            "control_parts": [
+              "left_eef",
+              "right_eef"
+            ],
+            "open_qpos": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "minimum_displacement": 0.05
+          }
+        }
+      }
+    }
+  },
+  "dual_ur10": {
+    "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+    "embodiment_sha256": "1c1f49b89095e9c55f468d5fdb5e94db8a21f004ea124684c213535c8115168f",
+    "embodiment": {
+      "embodiment_id": "dual_ur10_robotiq_arg2f_140",
+      "simulation": {
+        "uid": "DualUR10",
+        "urdf_cfg": {
+          "fname": "dual_ur10_robotiq_arg2f_140",
+          "name_case": {
+            "joint": "original",
+            "link": "original"
+          },
+          "components": [
+            {
+              "component_type": "left_arm",
+              "urdf_path": "UniversalRobots/UR10/UR10.urdf",
+              "transform": [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.3
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            {
+              "component_type": "left_hand",
+              "urdf_path": "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
+            },
+            {
+              "component_type": "right_arm",
+              "urdf_path": "UniversalRobots/UR10/UR10.urdf",
+              "transform": [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  -0.3
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            },
+            {
+              "component_type": "right_hand",
+              "urdf_path": "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
+            }
+          ]
+        },
+        "init_pos": [
+          0.55,
+          0.0,
+          0.6100000000000001
+        ],
+        "init_rot": [
+          0.0,
+          0.0,
+          180.0
+        ],
+        "init_qpos": [
+          3.141592653589793,
+          3.141592653589793,
+          -1.5707963267948966,
+          -1.5707963267948966,
+          1.5707963267948966,
+          1.5707963267948966,
+          -1.5707963267948966,
+          -1.5707963267948966,
+          1.5707963267948966,
+          1.5707963267948966,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "joint_drive_props": {
+          "stiffness": {
+            "left_arm": 10000.0,
+            "right_arm": 10000.0,
+            "left_eef": 50.0,
+            "right_eef": 50.0
+          },
+          "damping": {
+            "left_arm": 1000.0,
+            "right_arm": 1000.0,
+            "left_eef": 5.0,
+            "right_eef": 5.0
+          },
+          "max_effort": {
+            "left_arm": 330.0,
+            "right_arm": 330.0,
+            "left_eef": 500.0,
+            "right_eef": 500.0
+          }
+        },
+        "control_parts": {
+          "left_arm": [
+            "left_Joint1",
+            "left_Joint2",
+            "left_Joint3",
+            "left_Joint4",
+            "left_Joint5",
+            "left_Joint6"
+          ],
+          "left_eef": [
+            "left_finger_joint",
+            "left_inner_knuckle_joint",
+            "left_inner_finger_joint",
+            "left_right_outer_knuckle_joint",
+            "left_right_inner_knuckle_joint",
+            "left_right_inner_finger_joint"
+          ],
+          "right_arm": [
+            "right_Joint1",
+            "right_Joint2",
+            "right_Joint3",
+            "right_Joint4",
+            "right_Joint5",
+            "right_Joint6"
+          ],
+          "right_eef": [
+            "right_finger_joint",
+            "right_left_inner_knuckle_joint",
+            "right_left_inner_finger_joint",
+            "right_outer_knuckle_joint",
+            "right_inner_knuckle_joint",
+            "right_inner_finger_joint"
+          ],
+          "dual_arm": [
+            "left_Joint1",
+            "left_Joint2",
+            "left_Joint3",
+            "left_Joint4",
+            "left_Joint5",
+            "left_Joint6",
+            "right_Joint1",
+            "right_Joint2",
+            "right_Joint3",
+            "right_Joint4",
+            "right_Joint5",
+            "right_Joint6"
+          ]
+        },
+        "solver_cfg": {
+          "left_arm": {
+            "class_type": "URSolver",
+            "ur_type": "ur10",
+            "root_link_name": "left_base_link",
+            "end_link_name": "left_ee_link",
+            "tcp": [
+              [
+                0.0,
+                -1.0,
+                0.0,
+                0.0
+              ],
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0,
+                0.2
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          },
+          "right_arm": {
+            "class_type": "URSolver",
+            "ur_type": "ur10",
+            "root_link_name": "right_base_link",
+            "end_link_name": "right_ee_link",
+            "tcp": [
+              [
+                0.0,
+                -1.0,
+                0.0,
+                0.0
+              ],
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0,
+                0.2
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          }
+        }
+      },
+      "sensor": [
+        {
+          "sensor_type": "Camera",
+          "uid": "cam_high",
+          "width": 960,
+          "height": 540,
+          "intrinsics": [
+            420,
+            420,
+            480,
+            270
+          ],
+          "extrinsics": {
+            "pos": [
+              0.4,
+              0.0,
+              2.2
+            ],
+            "eye": [
+              -0.6,
+              0.0,
+              1.8
+            ],
+            "target": [
+              0.0,
+              0.0,
+              0.75
+            ],
+            "up": [
+              1.0,
+              0.0,
+              0.0
+            ]
+          }
+        }
+      ],
+      "skill_profile": {
+        "contract_id": "dual_arm_parallel_gripper",
+        "profile_id": "dual_ur10_robotiq_arg2f_140",
+        "resources": [
+          {
+            "resource_id": "left",
+            "endpoints": [
+              {
+                "endpoint_id": "motion",
+                "control_part": "left_arm",
+                "command_preset": "left_arm_postures",
+                "capabilities": [
+                  "kinematics.inverse",
+                  "kinematics.batch_inverse",
+                  "motion.cartesian_pose",
+                  "motion.joint_position",
+                  "kinematics.forward"
+                ]
+              },
+              {
+                "endpoint_id": "grasp",
+                "control_part": "left_eef",
+                "capabilities": [
+                  "interaction.grasp"
+                ],
+                "command_preset": "left_parallel_gripper"
+              }
+            ]
+          },
+          {
+            "resource_id": "right",
+            "endpoints": [
+              {
+                "endpoint_id": "motion",
+                "control_part": "right_arm",
+                "command_preset": "right_arm_postures",
+                "capabilities": [
+                  "kinematics.inverse",
+                  "kinematics.batch_inverse",
+                  "motion.cartesian_pose",
+                  "motion.joint_position",
+                  "kinematics.forward"
+                ]
+              },
+              {
+                "endpoint_id": "grasp",
+                "control_part": "right_eef",
+                "capabilities": [
+                  "interaction.grasp"
+                ],
+                "command_preset": "right_parallel_gripper"
+              }
+            ]
+          }
+        ],
+        "command_presets": [
+          {
+            "preset_id": "left_arm_postures",
+            "control_part": "left_arm",
+            "commands": {
+              "park": [
+                3.141592653589793,
+                -1.5707963267948966,
+                1.5707963267948966,
+                -1.5707963267948966,
+                1.5707963267948966,
+                0.0
+              ]
+            }
+          },
+          {
+            "preset_id": "right_arm_postures",
+            "control_part": "right_arm",
+            "commands": {
+              "park": [
+                3.141592653589793,
+                -1.5707963267948966,
+                1.5707963267948966,
+                -1.5707963267948966,
+                1.5707963267948966,
+                0.0
+              ]
+            }
+          },
+          {
+            "preset_id": "left_parallel_gripper",
+            "control_part": "left_eef",
+            "commands": {
+              "open": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              "grasp": [
+                0.7,
+                -0.7,
+                0.7,
+                -0.7,
+                -0.7,
+                0.7
+              ]
+            }
+          },
+          {
+            "preset_id": "right_parallel_gripper",
+            "control_part": "right_eef",
+            "commands": {
+              "open": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              "grasp": [
+                0.7,
+                -0.7,
+                0.7,
+                -0.7,
+                -0.7,
+                0.7
+              ]
+            }
+          }
+        ],
+        "runtime_services": {
+          "grasp_pose_generators": {
+            "left_eef": {
+              "kind": "antipodal_parallel_jaw",
+              "sample_count": 10000,
+              "approach_deviation_angle": 0.3490658503988659,
+              "approach_direction_samples": 4,
+              "max_candidates": 500,
+              "center_mode": "centroid",
+              "point_spacing": 0.012,
+              "root_from_tcp": [
+                [
+                  0.0,
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.2
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ],
+              "filter_ground_collision": false,
+              "model": {
+                "model_id": "robotiq_arg2f_140",
+                "min_opening_width": 0.002,
+                "max_opening_width": 0.128
+              }
+            },
+            "right_eef": {
+              "kind": "antipodal_parallel_jaw",
+              "sample_count": 10000,
+              "approach_deviation_angle": 0.3490658503988659,
+              "approach_direction_samples": 4,
+              "max_candidates": 500,
+              "center_mode": "centroid",
+              "point_spacing": 0.012,
+              "root_from_tcp": [
+                [
+                  0.0,
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.2
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ],
+              "filter_ground_collision": false,
+              "model": {
+                "model_id": "robotiq_arg2f_140",
+                "min_opening_width": 0.002,
+                "max_opening_width": 0.128
+              }
+            }
+          },
+          "control_part_evidence": {
+            "kind": "joint_position_constraint",
+            "control_parts": [
+              "left_eef",
+              "right_eef"
+            ],
+            "open_qpos": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "minimum_displacement": 0.05
+          }
+        }
+      }
+    }
+  }
+}

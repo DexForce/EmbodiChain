@@ -1,0 +1,627 @@
+{
+  "base_revision": "981894847a7f9929ced0e2d0b5b9fd2ef4241d35",
+  "implementation": "P0-P4 implemented; P5 configuration migration complete, physical qualification incomplete",
+  "automated_tests": {
+    "passed": 2099,
+    "skipped": 4,
+    "deselected": 28,
+    "selection": "Task Program, configured Gym integration, MLLM, package data, image planning, Demo Skill, API docs and project context; native GPU/slow markers excluded",
+    "supplemental": "Final targeted passes include 247 serialization/integration tests, 134 semantic state tests, 67 policy/transport tests and effective catalog parity cases."
+  },
+  "documentation": {
+    "api_exports_documented": 4703,
+    "api_exports_total": 4703,
+    "sphinx_dummy": "passed on clean temporary snapshot with pinned docs requirements; pre-existing warnings remain"
+  },
+  "migration": {
+    "program_variants": 14,
+    "deployments": 26,
+    "unchanged_compiled_identities": 26,
+    "cases": [
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/carton_stocking/task.panda.yaml",
+        "program_id": "real2sim_carton_stocking",
+        "before_fingerprint": "e81f095a599f8473ee3e724310273fe54b46f8c9bd978be50d9a3926a0667474",
+        "after_fingerprint": "e81f095a599f8473ee3e724310273fe54b46f8c9bd978be50d9a3926a0667474",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/task.dexforce_w1_030_pika.yaml",
+        "program_id": "tabletop_hand_over",
+        "before_fingerprint": "0d0d71dade0f57c0e8050177bf51921f388f393fa7889c1a6b8ad150aa42b1be",
+        "after_fingerprint": "0d0d71dade0f57c0e8050177bf51921f388f393fa7889c1a6b8ad150aa42b1be",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/task.dual_ur5.yaml",
+        "program_id": "tabletop_hand_over",
+        "before_fingerprint": "8f3dccc940775026e29a5617a9d2096dc1c96b0e58928c5662493b4e2067786d",
+        "after_fingerprint": "8f3dccc940775026e29a5617a9d2096dc1c96b0e58928c5662493b4e2067786d",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/task.dual_ur5_dh_pgi_140_80.yaml",
+        "program_id": "dual_ur5_hand_over",
+        "before_fingerprint": "6a003a01768251ee76d19a489760437f0f3f0c7ccbee780d1a511def7466c040",
+        "after_fingerprint": "6a003a01768251ee76d19a489760437f0f3f0c7ccbee780d1a511def7466c040",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/task.tianji_marvin.yaml",
+        "program_id": "tabletop_hand_over",
+        "before_fingerprint": "71a752de5960a8998f61a358b7621d1f2d1b451d1f4fc402943fa2c685b847fc",
+        "after_fingerprint": "71a752de5960a8998f61a358b7621d1f2d1b451d1f4fc402943fa2c685b847fc",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/open_drawer/task.franka.yaml",
+        "program_id": "slide_open_drawer",
+        "before_fingerprint": "6287fe8c9ce78321fc65fc038c37afcf42d54408b513bbaec466fde4b0ac0c2f",
+        "after_fingerprint": "6287fe8c9ce78321fc65fc038c37afcf42d54408b513bbaec466fde4b0ac0c2f",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml",
+        "program_id": "slide_open_drawer",
+        "before_fingerprint": "64d298c2875c031d588bb5b18da7c04230bc3974df018d5922362ebb4b0c6996",
+        "after_fingerprint": "64d298c2875c031d588bb5b18da7c04230bc3974df018d5922362ebb4b0c6996",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.dexforce_w1_030_pika.yaml",
+        "program_id": "repeated_tabletop_cube_pick_place",
+        "before_fingerprint": "b94a52df67875dab84f6930b2a4d25f3182210bac8a40fa768c63c2753552c25",
+        "after_fingerprint": "b94a52df67875dab84f6930b2a4d25f3182210bac8a40fa768c63c2753552c25",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.dual_ur5_dh_pgi_140_80.yaml",
+        "program_id": "repeated_tabletop_cube_pick_place",
+        "before_fingerprint": "77a17000598a53599930551f9d1701130b87051a82f0cffe9492d4ddb31291ab",
+        "after_fingerprint": "77a17000598a53599930551f9d1701130b87051a82f0cffe9492d4ddb31291ab",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml",
+        "program_id": "repeated_cube_pick_place",
+        "before_fingerprint": "197384b886780d6c95b741cc2ee604e6e8a3cf95cd7dae2008d941a97c8c47f7",
+        "after_fingerprint": "197384b886780d6c95b741cc2ee604e6e8a3cf95cd7dae2008d941a97c8c47f7",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.tianji_marvin.yaml",
+        "program_id": "repeated_tabletop_cube_pick_place",
+        "before_fingerprint": "fb6d28c649b48098ef0ca8ffedd427297609f999a4ebbff824e95fe8321b1f33",
+        "after_fingerprint": "fb6d28c649b48098ef0ca8ffedd427297609f999a4ebbff824e95fe8321b1f33",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.objective.yaml",
+        "program_id": "repeated_cube_pick_place",
+        "before_fingerprint": "4e2d249ecfc8fae3fa7e353ad81f9efc6d639b97ee24271732b809cb5049be7b",
+        "after_fingerprint": "4e2d249ecfc8fae3fa7e353ad81f9efc6d639b97ee24271732b809cb5049be7b",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml",
+        "program_id": "repeated_cube_pick_place",
+        "before_fingerprint": "4e2d249ecfc8fae3fa7e353ad81f9efc6d639b97ee24271732b809cb5049be7b",
+        "after_fingerprint": "4e2d249ecfc8fae3fa7e353ad81f9efc6d639b97ee24271732b809cb5049be7b",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/rubiks_cube_pick_place/task.ur5.yaml",
+        "program_id": "rubiks_cube_pick_place",
+        "before_fingerprint": "1aa02dea9dede73bc45667df553dc1fd5a40eb637123e13214669312d84dcc9b",
+        "after_fingerprint": "1aa02dea9dede73bc45667df553dc1fd5a40eb637123e13214669312d84dcc9b",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/blocks_ranking_rgb/task.cobotmagic.yaml",
+        "program_id": "rank_blocks_rgb",
+        "before_fingerprint": "eb30396ecce6a3b35765d9982b2abd2cf61338641e157547ac6bbc9a5440c261",
+        "after_fingerprint": "eb30396ecce6a3b35765d9982b2abd2cf61338641e157547ac6bbc9a5440c261",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/blocks_ranking_rgb/task.dexforce_w1_030_pika.yaml",
+        "program_id": "rank_blocks_rgb",
+        "before_fingerprint": "ac3997469f031fd14690a8026606339ec290fe00181aec3a4d0613374e4a3151",
+        "after_fingerprint": "ac3997469f031fd14690a8026606339ec290fe00181aec3a4d0613374e4a3151",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/blocks_ranking_rgb/task.dual_ur5_dh_pgi_140_80.yaml",
+        "program_id": "rank_blocks_rgb",
+        "before_fingerprint": "8aaaacc2952cf0bb889e1a3ce7ef65693068353c76330069e619476afdd266e5",
+        "after_fingerprint": "8aaaacc2952cf0bb889e1a3ce7ef65693068353c76330069e619476afdd266e5",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/blocks_ranking_rgb/task.tianji_marvin.yaml",
+        "program_id": "rank_blocks_rgb",
+        "before_fingerprint": "9cfb0df40a73d6909477c26345a14cb4bb8df50ab2e53daa9d43244f5e5fb31f",
+        "after_fingerprint": "9cfb0df40a73d6909477c26345a14cb4bb8df50ab2e53daa9d43244f5e5fb31f",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml",
+        "program_id": "pour_water_with_right_arm",
+        "before_fingerprint": "7d84c0ce95926c2d30f64013fda3a0745b674b6f82d7439ea1504cbaa53e0652",
+        "after_fingerprint": "7d84c0ce95926c2d30f64013fda3a0745b674b6f82d7439ea1504cbaa53e0652",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.dexforce_w1_030_pika.yaml",
+        "program_id": "pour_water_with_right_arm",
+        "before_fingerprint": "a0a40d80de72fec4f7e11aec093fe4fe6fdd92eac71808a4f9212359d79fab39",
+        "after_fingerprint": "a0a40d80de72fec4f7e11aec093fe4fe6fdd92eac71808a4f9212359d79fab39",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.dual_ur5_dh_pgi_140_80.yaml",
+        "program_id": "pour_water_with_right_arm",
+        "before_fingerprint": "93434448981d2537932fee28b9214ccd2c9b74ce1ba9fd6e67dad6282e1353cb",
+        "after_fingerprint": "93434448981d2537932fee28b9214ccd2c9b74ce1ba9fd6e67dad6282e1353cb",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.tianji_marvin.yaml",
+        "program_id": "pour_water_with_right_arm",
+        "before_fingerprint": "25082d0a4c82b87bc9026733e40571729dd46c34944adcf8ebe95257467b669c",
+        "after_fingerprint": "25082d0a4c82b87bc9026733e40571729dd46c34944adcf8ebe95257467b669c",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml",
+        "program_id": "stack_two_blocks",
+        "before_fingerprint": "8d07754ba65a32eebcbfc085179d6b53f7fb646521d9af0edd73b909c6c90a36",
+        "after_fingerprint": "8d07754ba65a32eebcbfc085179d6b53f7fb646521d9af0edd73b909c6c90a36",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.dexforce_w1_030_pika.yaml",
+        "program_id": "stack_two_blocks",
+        "before_fingerprint": "829dbde137aa42dbba33e4e02921d15468677dd276f54c570cb6f238d20c557d",
+        "after_fingerprint": "829dbde137aa42dbba33e4e02921d15468677dd276f54c570cb6f238d20c557d",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.dual_ur5_dh_pgi_140_80.yaml",
+        "program_id": "stack_two_blocks",
+        "before_fingerprint": "7f53bde725a1609b915ba2593068ce7e61458e3da53071243fccd3a508a3feae",
+        "after_fingerprint": "7f53bde725a1609b915ba2593068ce7e61458e3da53071243fccd3a508a3feae",
+        "same_calls": true
+      },
+      {
+        "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.tianji_marvin.yaml",
+        "program_id": "stack_two_blocks",
+        "before_fingerprint": "7cd91688fca42dd39e6155d2896aef5f46b5208e22040f1854f5e7b7605684aa",
+        "after_fingerprint": "7cd91688fca42dd39e6155d2896aef5f46b5208e22040f1854f5e7b7605684aa",
+        "same_calls": true
+      }
+    ]
+  },
+  "physical_validation": {
+    "native_pick_transport_hold": {
+      "success": [
+        true
+      ],
+      "duration_s": 2.0,
+      "elapsed_s": 2.0,
+      "observation_count": [
+        61
+      ],
+      "max_position_error_m": [
+        0.0012237904593348503
+      ],
+      "max_orientation_error_rad": [
+        0.0018269814318045974
+      ],
+      "attachment_verified_observations": [
+        61
+      ],
+      "seed": 7,
+      "source": "examples/expansion/demo_skill/present.py"
+    },
+    "mixed_demo_skill": {
+      "committed_episodes": 1,
+      "validated_accepted": 1,
+      "seed": 7,
+      "batch_size": 1
+    },
+    "whole_demo_skill": {
+      "committed_episodes": 1,
+      "validated_accepted": 1,
+      "seed": 7,
+      "batch_size": 1
+    },
+    "demo_acquisition_then_native_transport_hold": {
+      "status": "blocked",
+      "reason": "Installed DexSim ContactQuery lacks fetch_solver_report, required for measured terminal contact. No missing contact was counted as success.",
+      "regression_test": "test_demo_skill_can_publish_verified_attachment_without_pick_affordance"
+    },
+    "repeat_demo_skill": {
+      "status": "not_qualified",
+      "reason": "Automatic per-occurrence bindings passed unit tests; a stationary qpos smoke asset completed its first occurrence but its second entry was rejected by the existing external-motion continuity check. The input rule was not relaxed."
+    },
+    "newton_smoke": {
+      "status": "not_qualified",
+      "reason": "Emergency safe stop failed after a ZeroDivisionError during env.step; the same failure was reproduced using the baseline source tree."
+    }
+  },
+  "official_deployment_runs": [
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/carton_stocking/task.panda.yaml",
+      "returncode": 0,
+      "completed": true,
+      "success": [
+        true
+      ],
+      "seconds": 12.23,
+      "rerun_with_dataset_directory": true,
+      "qualification": "execution_succeeded; effect authority remains deployment-owned"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/task.dexforce_w1_030_pika.yaml",
+      "error": "timeout",
+      "seconds": 120,
+      "baseline_success": null,
+      "baseline_timeout": true,
+      "qualification": "timeout also reproduced on baseline"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/task.dual_ur5.yaml",
+      "returncode": 1,
+      "completed": false,
+      "success": [
+        false
+      ],
+      "seconds": 22.84,
+      "baseline_success": [
+        false
+      ],
+      "baseline_timeout": false,
+      "qualification": "runtime failure also reproduced on baseline"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/task.dual_ur5_dh_pgi_140_80.yaml",
+      "returncode": 1,
+      "completed": false,
+      "success": [
+        false
+      ],
+      "seconds": 51.31,
+      "baseline_success": [
+        false
+      ],
+      "baseline_timeout": false,
+      "qualification": "runtime failure also reproduced on baseline"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/task.tianji_marvin.yaml",
+      "returncode": 0,
+      "completed": true,
+      "success": [
+        true
+      ],
+      "seconds": 39.5,
+      "qualification": "execution_succeeded; effect authority remains deployment-owned"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/open_drawer/task.franka.yaml",
+      "returncode": 1,
+      "completed": false,
+      "success": [
+        false
+      ],
+      "seconds": 38.67,
+      "baseline_success": [
+        false
+      ],
+      "baseline_timeout": false,
+      "qualification": "runtime failure also reproduced on baseline"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml",
+      "returncode": 0,
+      "completed": true,
+      "success": [
+        true
+      ],
+      "seconds": 16.94,
+      "qualification": "execution_succeeded; effect authority remains deployment-owned"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.dexforce_w1_030_pika.yaml",
+      "returncode": 1,
+      "completed": false,
+      "success": [
+        false
+      ],
+      "seconds": 114.91,
+      "baseline_success": [
+        false
+      ],
+      "baseline_timeout": false,
+      "qualification": "runtime failure also reproduced on baseline"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.dual_ur5_dh_pgi_140_80.yaml",
+      "returncode": 0,
+      "completed": true,
+      "success": [
+        true
+      ],
+      "seconds": 26.33,
+      "qualification": "execution_succeeded; effect authority remains deployment-owned"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml",
+      "error": "timeout",
+      "seconds": 120,
+      "baseline_success": null,
+      "baseline_timeout": true,
+      "qualification": "timeout also reproduced on baseline"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.tianji_marvin.yaml",
+      "returncode": 1,
+      "completed": false,
+      "success": [
+        false
+      ],
+      "seconds": 25.96,
+      "baseline_success": [
+        false
+      ],
+      "baseline_timeout": false,
+      "qualification": "runtime failure also reproduced on baseline"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.objective.yaml",
+      "returncode": 0,
+      "completed": true,
+      "success": [
+        true
+      ],
+      "seconds": 19.89,
+      "baseline_success": [
+        true
+      ],
+      "baseline_timeout": false,
+      "qualification": "execution_succeeded; effect authority remains deployment-owned"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml",
+      "returncode": 1,
+      "completed": null,
+      "success": null,
+      "seconds": 11.93,
+      "qualification": "combined visual expansion not qualified with this one-row no-render smoke invocation"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/rubiks_cube_pick_place/task.ur5.yaml",
+      "returncode": 0,
+      "completed": true,
+      "success": [
+        true
+      ],
+      "seconds": 41.61,
+      "qualification": "execution_succeeded; effect authority remains deployment-owned"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/blocks_ranking_rgb/task.cobotmagic.yaml",
+      "returncode": 0,
+      "completed": true,
+      "success": [
+        true
+      ],
+      "seconds": 29.91,
+      "qualification": "execution_succeeded; effect authority remains deployment-owned"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/blocks_ranking_rgb/task.dexforce_w1_030_pika.yaml",
+      "returncode": 0,
+      "completed": true,
+      "success": [
+        true
+      ],
+      "seconds": 29.66,
+      "qualification": "execution_succeeded; effect authority remains deployment-owned"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/blocks_ranking_rgb/task.dual_ur5_dh_pgi_140_80.yaml",
+      "returncode": 0,
+      "completed": true,
+      "success": [
+        true
+      ],
+      "seconds": 20.94,
+      "qualification": "execution_succeeded; effect authority remains deployment-owned"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/blocks_ranking_rgb/task.tianji_marvin.yaml",
+      "returncode": 0,
+      "completed": true,
+      "success": [
+        true
+      ],
+      "seconds": 21.34,
+      "qualification": "execution_succeeded; effect authority remains deployment-owned"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml",
+      "returncode": 1,
+      "completed": false,
+      "success": [
+        false
+      ],
+      "seconds": 80.05,
+      "baseline_success": [
+        false
+      ],
+      "baseline_timeout": false,
+      "qualification": "runtime failure also reproduced on baseline"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.dexforce_w1_030_pika.yaml",
+      "returncode": 1,
+      "completed": false,
+      "success": [
+        false
+      ],
+      "seconds": 60.95,
+      "baseline_success": [
+        false
+      ],
+      "baseline_timeout": false,
+      "qualification": "runtime failure also reproduced on baseline"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.dual_ur5_dh_pgi_140_80.yaml",
+      "returncode": 1,
+      "completed": false,
+      "success": [
+        false
+      ],
+      "seconds": 54.44,
+      "baseline_success": [
+        false
+      ],
+      "baseline_timeout": false,
+      "qualification": "runtime failure also reproduced on baseline"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.tianji_marvin.yaml",
+      "returncode": 1,
+      "completed": false,
+      "success": [
+        false
+      ],
+      "seconds": 22.8,
+      "baseline_success": [
+        false
+      ],
+      "baseline_timeout": false,
+      "qualification": "runtime failure also reproduced on baseline"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml",
+      "returncode": 0,
+      "completed": true,
+      "success": [
+        true
+      ],
+      "seconds": 24.6,
+      "qualification": "execution_succeeded; effect authority remains deployment-owned"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.dexforce_w1_030_pika.yaml",
+      "returncode": 1,
+      "completed": false,
+      "success": [
+        false
+      ],
+      "seconds": 33.91,
+      "baseline_success": [
+        false
+      ],
+      "baseline_timeout": false,
+      "qualification": "runtime failure also reproduced on baseline"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.dual_ur5_dh_pgi_140_80.yaml",
+      "returncode": 0,
+      "completed": true,
+      "success": [
+        true
+      ],
+      "seconds": 17.54,
+      "qualification": "execution_succeeded; effect authority remains deployment-owned"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.tianji_marvin.yaml",
+      "returncode": 0,
+      "completed": true,
+      "success": [
+        true
+      ],
+      "seconds": 18.74,
+      "qualification": "execution_succeeded; effect authority remains deployment-owned"
+    }
+  ],
+  "diagnostics_measurement": {
+    "scope": "diagnostic formatting only, transfer-inclusive completed calls; excludes pose checks and evidence acquisition",
+    "torch": "2.7.0+cu128",
+    "gpu": "NVIDIA RTX PRO 5000 72GB Blackwell",
+    "python": "3.11.14",
+    "threads": 128,
+    "warmup": 5,
+    "repeats": 30,
+    "dtype": "bool",
+    "additional_storage": "3*B boolean tensor entries plus O(B) host diagnostics",
+    "results": [
+      {
+        "device": "cpu",
+        "batch_size": 1,
+        "scalar_median_ms": 0.0029096845537424088,
+        "batched_median_ms": 0.0067604705691337585
+      },
+      {
+        "device": "cpu",
+        "batch_size": 16,
+        "scalar_median_ms": 0.044498126953840256,
+        "batched_median_ms": 0.007621943950653076
+      },
+      {
+        "device": "cpu",
+        "batch_size": 256,
+        "scalar_median_ms": 0.610429560765624,
+        "batched_median_ms": 0.020055798813700676
+      },
+      {
+        "device": "cuda:0",
+        "batch_size": 1,
+        "scalar_median_ms": 0.02034613862633705,
+        "batched_median_ms": 0.03163423389196396
+      },
+      {
+        "device": "cuda:0",
+        "batch_size": 16,
+        "scalar_median_ms": 0.3397800028324127,
+        "batched_median_ms": 0.031608156859874725
+      },
+      {
+        "device": "cuda:0",
+        "batch_size": 256,
+        "scalar_median_ms": 4.717828007414937,
+        "batched_median_ms": 0.04399195313453674
+      }
+    ]
+  },
+  "context_review": {
+    "revised": [
+      "task-programs",
+      "data-pipeline"
+    ],
+    "no_update": {
+      "env-framework": "Gym retains its existing component/lifecycle ownership; Task Program details remain linked from their owner.",
+      "asset-generalization": "Only program normalization was added before existing adaptation; physical asset and evidence contracts are unchanged."
+    }
+  },
+  "acceptance": "P5 is not fully accepted. Resolve native contact API support and qualify repeat/remaining deployment outcomes before claiming full physical acceptance.",
+  "phases": {
+    "P0": "Implemented: shared immutable argument contracts, effective policy metadata and registered-call validation.",
+    "P1": "Implemented: typed transport, world/scene-relative targets and frozen target acceptance.",
+    "P2": "Implemented: named Demo Skills and automatic occurrence bindings; mixed and whole examples have confirmed receipts. Contact acquisition qualification remains blocked.",
+    "P3": "Implemented: bounded shorthand normalization, authored diagnostics, canonical serialization and explain output.",
+    "P4": "Implemented and measured: native present example held for 2 seconds with 61 verified observations.",
+    "P5": "Official configuration migration and static equivalence complete; full physical qualification is not accepted."
+  },
+  "compatibility_notes": [
+    "Legacy canonical serialization excludes authoring diagnostic metadata.",
+    "Legacy integration route target sampling remains unchanged; new task-owned relative targets freeze at grounding. Equivalence checks compare targets at the same observation and reuse the shared goal/effect construction.",
+    "Existing manual nominal-source fingerprints remain strict; automatic bindings apply only to named registrations."
+  ]
+}

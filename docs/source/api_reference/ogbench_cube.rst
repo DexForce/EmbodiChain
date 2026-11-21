@@ -8,7 +8,7 @@ official-reference example. It executes five-dimensional end-effector and grippe
 commands through the Default DexSim backend. The reference tools separately check
 kinematics, composite inertia, controller outputs and physical trajectories.
 
-.. currentmodule:: embodichain_tasks.manipulation.ogbench_cube
+.. currentmodule:: embodichain.extensions.tasks.manipulation.ogbench_cube
 
 .. autosummary::
 

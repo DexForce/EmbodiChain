@@ -34,6 +34,7 @@ import numpy as np
 import torch
 
 from .base import ArticulationViewBase, RigidBodyViewBase
+from ._numeric_observations import _ACTIVE
 
 if TYPE_CHECKING:
     from dexsim.scene import (
@@ -57,12 +58,20 @@ def _checked_batch_call(
     **kwargs: Any,
 ) -> Any:
     """Call one Scene batch operation and reject native failure statuses."""
+    reads = _ACTIVE.get()
+    key = None if reads is None else reads.key(batch, method_name, args, kwargs)
+    if key is not None and key in reads.values:
+        saved, status = reads.values[key]
+        args[0].copy_(saved)
+        return status
     status = getattr(batch, method_name)(*args, **kwargs)
     if isinstance(status, Integral) and status < 0:
         raise RuntimeError(
             f"DexSim Scene batch operation {method_name!r} failed with "
             f"status {status}."
         )
+    if key is not None:
+        reads.values[key] = (args[0].detach().clone(), status)
     return status
 
 
@@ -578,6 +587,61 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
     ) -> torch.Tensor:
         return self._articulation_ids[env_ids]
 
+    def _apply_link_property(
+        self,
+        method_name: str,
+        values: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor,
+        link_ids: Sequence[int] | torch.Tensor,
+    ) -> None:
+        """Forward selected property writes through the public Scene batch."""
+        rows = self._select_rows(env_ids)
+        if len(rows) and len(link_ids):
+            _checked_batch_call(
+                self.batch.select(rows), method_name, values, link_ids=link_ids
+            )
+
+    def apply_link_mass(
+        self,
+        values: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor,
+        link_ids: Sequence[int] | torch.Tensor,
+    ) -> None:
+        """Write masses with shape (selected environments, selected links)."""
+        self._apply_link_property("apply_link_mass", values, env_ids, link_ids)
+
+    def apply_link_inertia(
+        self,
+        values: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor,
+        link_ids: Sequence[int] | torch.Tensor,
+    ) -> None:
+        """Write three principal moments per selected environment and link."""
+        self._apply_link_property(
+            "apply_link_inertia_diagonal", values, env_ids, link_ids
+        )
+
+    def apply_link_com_pose(
+        self,
+        values: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor,
+        link_ids: Sequence[int] | torch.Tensor,
+    ) -> None:
+        """Write selected COM frames through the batch's row-update interface.
+
+        Inputs use ``xyz + xyzw`` in selection order. Passing rows directly
+        reuses the native batch binding and retains current principal moments.
+        """
+        rows = self._select_rows(env_ids)
+        if len(rows) and len(link_ids):
+            _checked_batch_call(
+                self.batch,
+                "apply_link_com_local_pose",
+                _batch_pose(values),
+                link_ids=link_ids,
+                rows=rows,
+            )
+
     def fetch_link_physical_properties(
         self,
         mass: torch.Tensor,
@@ -736,6 +800,10 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
     def apply_root_pose(
         self, pose: torch.Tensor, env_ids: Sequence[int] | torch.Tensor
     ) -> None:
+        if not self.is_newton_backend:
+            self.apply_state(env_ids, root_pose=pose)
+            return
+
         rows = self._select_rows(env_ids)
         batch_pose = _batch_pose(pose.to(self.device, torch.float32))
         expected_shape = (len(rows), 7)
@@ -744,7 +812,7 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
                 f"Expected selected data shape {expected_shape}, got "
                 f"{tuple(batch_pose.shape)}."
             )
-        if self.is_newton_backend and len(rows):
+        if len(rows):
             current_pose = torch.empty_like(batch_pose)
             self._fetch_rows(
                 "fetch_root_pose",
@@ -771,9 +839,6 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
             _checked_batch_call(
                 self.batch, "apply_state", rows=rows, root_pose=batch_pose
             )
-        if not self.is_newton_backend:
-            # Default root writes do not propagate descendant poses on CUDA.
-            self.compute_kinematics(rows)
 
     def apply_root_velocity(
         self, velocity: torch.Tensor, env_ids: Sequence[int] | torch.Tensor
@@ -963,8 +1028,9 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
             **fields,
         )
         if propagate_root:
-            # Default's native state writer propagates qpos/clear operations,
-            # but root-only writes need an explicit descendant update.
+            # Root-only Default writes need a descendant update. Reuse the
+            # written batch because the root writer has already waited for its
+            # GPU indices. DexSim rc2's kinematics call does not wait for them.
             _checked_batch_call(batch, "compute_kinematics")
 
     def apply_qpos(
@@ -1006,4 +1072,13 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
         rows = self._select_rows(env_ids)
         if not len(rows):
             return
-        _checked_batch_call(self.batch.select(rows), "compute_kinematics")
+        batch = self.batch.select(rows)
+        if (
+            batch is not self.batch
+            and not self.is_newton_backend
+            and self.device.type == "cuda"
+        ):
+            # A standalone selected update has no preceding native write to
+            # order the new selection's indices on the Torch producer stream.
+            torch.cuda.current_stream(self.device).synchronize()
+        _checked_batch_call(batch, "compute_kinematics")

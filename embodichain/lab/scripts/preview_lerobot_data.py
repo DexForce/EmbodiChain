@@ -447,6 +447,19 @@ def inspect_dataset(
         episodes=[episode_index],
     )
     samples = [dataset[index] for index in range(len(dataset))]
+    # LeRobot 0.6.1 returns the numeric feature but no longer resolves the
+    # legacy subtask table. Keep previewing the recorder's existing schema.
+    subtask_path = root / "meta" / "subtasks.parquet"
+    if any("subtask" not in sample for sample in samples) and subtask_path.is_file():
+        import pandas as pd
+
+        table = pd.read_parquet(subtask_path)
+        descriptions = dict(zip(table["subtask_index"].astype(int), table.index))
+        for sample in samples:
+            if "subtask" not in sample and "subtask_index" in sample:
+                index = int(_scalar(sample["subtask_index"]))
+                if index in descriptions:
+                    sample["subtask"] = str(descriptions[index])
     return build_episode_preview(
         dataset_root=root,
         info=info,

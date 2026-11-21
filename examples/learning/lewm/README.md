@@ -4,16 +4,15 @@ The current migration target is the official LeWM OGBench single-Cube task in
 EmbodiChain/DexSim, with the pinned MuJoCo task as the reference. The previous
 UR10 push-cube experiment remains available below as a diagnostic corpus.
 Its results do not establish alignment with the official task. Model code and the supervised
-factory are in `embodichain_models.dynamics.lewm`; collection, reference
+factory are in `embodichain.extensions.models.dynamics.lewm`; collection, reference
 comparison and simulator ownership remain here. Install the `lewm` extra.
 
-The migration is in progress. The verified official queries now run through both
-engines: MuJoCo succeeds on 34/50, native DexSim with the original planner on
-34/50 after correcting the source equality-compliance mapping, and the migrated
-model/planner on 32/50. The preceding named-pad checkpoint reached 33/50 and
-31/50. Equal aggregate success does not establish physical alignment. Contact and neural
-CEM arithmetic differences remain measurable. See [the alignment plan](OFFICIAL_CUBE.md)
-for the exact protocol, remaining work and acceptance evidence.
+The October 31 checkpoint records 34/50 successes in MuJoCo, 33/50 in native
+DexSim with the original planner, and 35/50 with the migrated planner. Replaying
+the frozen source actions in DexSim produced 32/50 successes and matched 48/50
+query outcomes. These are measurements for the archived provider. The
+[alignment plan](OFFICIAL_CUBE.md) tracks the remaining physical, rendering and
+planner checks.
 
 ```bash
 embodichain run-example learning/lewm official-reference --swm-root /path/to/pinned/stable-worldmodel --ogbench-root /path/to/pinned/ogbench --output outputs/lewm/official-cube/alignment --compare-cem
@@ -24,7 +23,10 @@ embodichain run-example learning/lewm official-kinematics --reference outputs/le
 Use a reference environment with `mujoco==3.11.0`, `dm_control==1.0.41`,
 `pygame==2.6.1` and `pymunk==7.2.0`, plus the ordinary LeWM dependencies.
 The pinned stable-worldmodel environment extra requires MuJoCo below 3.12.
-The reference tool verifies clean upstream revisions before importing them.
+Use the Python 3.11 profile with Transformers 4.53 for numerical reference
+comparisons. The Python 3.12 LeWM extra follows the current Transformers 5.x
+dependency profile. The reference tool verifies clean upstream revisions before
+importing them.
 It exports compiled mesh coordinates, inertias, the physical parameter sidecar,
 and 100 source poses; the native check imports these through `SimulationManager`.
 Explicit pre-build link overlays retain the source's small inertia tensors and

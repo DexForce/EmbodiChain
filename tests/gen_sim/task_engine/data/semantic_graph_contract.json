@@ -1,0 +1,476 @@
+{
+  "source_commit": "230f516bb4bf17b1a4e6ec1f10e4122c04f411a5",
+  "scope": "Fixed declarative E2 example; no generation model, simulator or physical qualification",
+  "graph": {
+    "schema_version": "semantic_task_graph/v1",
+    "task_id": "demo",
+    "instruction": "Validated multi-stage task",
+    "planner_route": "offline",
+    "integration_fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+    "targets": {
+      "step_01_upright_target": {
+        "kind": "cyclic_pose",
+        "values": [
+          {
+            "position": [
+              0.1,
+              -0.2,
+              0.85
+            ],
+            "quaternion_xyzw": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          }
+        ]
+      },
+      "step_01_upright_staging_target": {
+        "kind": "cyclic_pose",
+        "values": [
+          {
+            "position": [
+              0.1,
+              -0.2,
+              0.85
+            ],
+            "quaternion_xyzw": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          }
+        ]
+      }
+    },
+    "nodes": [
+      {
+        "id": "step_01__call_01",
+        "call": {
+          "kind": "registered",
+          "call_id": "simulation.pick",
+          "arguments": {
+            "object": "a",
+            "target": "step_01_upright_target"
+          },
+          "resources": {
+            "primary": "left"
+          }
+        },
+        "depends_on": [],
+        "task_instance_id": "step_01",
+        "task_type": "E2",
+        "role": "primary"
+      },
+      {
+        "id": "step_01__call_02",
+        "call": {
+          "kind": "registered",
+          "call_id": "gen_sim.align_held",
+          "arguments": {
+            "object": "a",
+            "target": "step_01_upright_staging_target",
+            "preserve_yaw": false
+          },
+          "resources": {
+            "primary": "left"
+          }
+        },
+        "depends_on": [
+          "step_01__call_01"
+        ],
+        "task_instance_id": "step_01",
+        "task_type": "E2",
+        "role": "primary"
+      },
+      {
+        "id": "step_01__call_03",
+        "call": {
+          "kind": "registered",
+          "call_id": "gen_sim.align_held",
+          "arguments": {
+            "object": "a",
+            "target": "step_01_upright_target",
+            "preserve_yaw": false
+          },
+          "resources": {
+            "primary": "left"
+          }
+        },
+        "depends_on": [
+          "step_01__call_02"
+        ],
+        "task_instance_id": "step_01",
+        "task_type": "E2",
+        "role": "primary"
+      },
+      {
+        "id": "step_01__call_04",
+        "call": {
+          "kind": "registered",
+          "call_id": "simulation.place_relative",
+          "arguments": {
+            "object": "a",
+            "reference": "table",
+            "relation": "on"
+          },
+          "resources": {
+            "primary": "left"
+          }
+        },
+        "depends_on": [
+          "step_01__call_03"
+        ],
+        "task_instance_id": "step_01",
+        "task_type": "E2",
+        "role": "primary"
+      },
+      {
+        "id": "step_01__call_05",
+        "call": {
+          "kind": "registered",
+          "call_id": "gen_sim.clear_released",
+          "arguments": {
+            "object": "a",
+            "target": "step_01_upright_staging_target"
+          },
+          "resources": {
+            "primary": "left"
+          }
+        },
+        "depends_on": [
+          "step_01__call_04"
+        ],
+        "task_instance_id": "step_01",
+        "task_type": "E2",
+        "role": "cleanup"
+      },
+      {
+        "id": "step_01__call_06",
+        "call": {
+          "kind": "registered",
+          "call_id": "simulation.park",
+          "arguments": {},
+          "resources": {
+            "primary": "left"
+          }
+        },
+        "depends_on": [
+          "step_01__call_05"
+        ],
+        "task_instance_id": "step_01",
+        "task_type": "E2",
+        "role": "cleanup"
+      }
+    ],
+    "task_groups": [
+      {
+        "id": "step_01",
+        "task_type": "E2",
+        "node_ids": [
+          "step_01__call_01",
+          "step_01__call_02",
+          "step_01__call_03",
+          "step_01__call_04",
+          "step_01__call_05",
+          "step_01__call_06"
+        ],
+        "depends_on": [],
+        "success": {
+          "kind": "semantic_task_term",
+          "step_id": "step_01",
+          "type": "object_upright"
+        }
+      }
+    ],
+    "success": {
+      "kind": "all_task_groups",
+      "source": {
+        "schema_version": "action_engine_success_spec_v1",
+        "task_id": "demo",
+        "op": "all",
+        "terms": [
+          {
+            "step_id": "step_01",
+            "type": "object_upright"
+          }
+        ]
+      }
+    }
+  },
+  "task_spec": {
+    "schema_version": "task_spec/v0.1",
+    "canonicalization_version": "task_spec_c14n/v1",
+    "roles": [
+      {
+        "id": "role_001",
+        "kind": "object",
+        "cardinality": "one",
+        "affordances": [
+          "graspable",
+          "orientable"
+        ],
+        "properties": {},
+        "source_structure": "rigid_object"
+      }
+    ],
+    "init": [],
+    "goal": [
+      {
+        "id": "goal_001",
+        "predicate": "object_upright",
+        "operator": "eq",
+        "expected": true,
+        "subject": "role_001",
+        "arguments": {
+          "orientation_goal": "upright",
+          "task_type": "E2"
+        }
+      }
+    ],
+    "invariants": [],
+    "temporal": [],
+    "milestones": [
+      {
+        "id": "step_01",
+        "achieve": [
+          {
+            "id": "milestone:step_01:0",
+            "predicate": "object_upright",
+            "operator": "eq",
+            "expected": true,
+            "subject": "role_001",
+            "arguments": {
+              "orientation_goal": "upright",
+              "task_type": "E2"
+            }
+          }
+        ]
+      }
+    ],
+    "requirements": [
+      {
+        "consumer": "asset",
+        "key": "role_001",
+        "value": {
+          "affordances": [
+            "graspable",
+            "orientable"
+          ],
+          "attributes": {},
+          "source_structure": "rigid_object"
+        }
+      },
+      {
+        "consumer": "expansion",
+        "key": "lineage_key",
+        "value": "task_spec.semantic_hash"
+      },
+      {
+        "consumer": "scene",
+        "key": "role_001",
+        "value": {
+          "initial_state": {},
+          "kind": "object"
+        }
+      },
+      {
+        "consumer": "task_program",
+        "key": "goal_predicates",
+        "value": [
+          "object_upright"
+        ]
+      }
+    ],
+    "task_id": "demo",
+    "instruction": "Validated multi-stage task",
+    "metadata": {
+      "candidate_id": "candidate_01",
+      "generator": "embodichain.gen_sim.task_engine",
+      "goal_sources": {
+        "goal_001": [
+          "step_01"
+        ]
+      },
+      "instruction_coverage": "validated_draft_only",
+      "legacy_semantic_hash": "9762a134766e9dd2e05d2299f6b496c62dbb72432edb5ff8942a84112a38f843",
+      "milestone_sources": {
+        "step_01": "step_01"
+      },
+      "role_references": {
+        "role_001": [
+          "step_01.object"
+        ]
+      },
+      "step_roles": {
+        "step_01": {
+          "object": "role_001"
+        }
+      },
+      "task_candidate_schema": "action_engine_task_draft_v1",
+      "terminal_goal_policy": "explicit_state_slots/v1"
+    },
+    "semantic_hash": "201837b265186a5ac06bf6ae5c4dfff2e4c56db838de85b735695f29979d705d"
+  },
+  "candidate": {
+    "candidate_id": "candidate_01",
+    "draft": {
+      "schema_version": "action_engine_task_draft_v1",
+      "task_id": "demo",
+      "instruction": "Validated multi-stage task",
+      "steps": [
+        {
+          "id": "step_01",
+          "task_type": "E2",
+          "object": {
+            "kind": "scene_ref",
+            "step_id": "",
+            "reference": "cans",
+            "quantifier": "one",
+            "count": 0
+          },
+          "target": {
+            "kind": "none",
+            "step_id": "",
+            "reference": "",
+            "quantifier": "one",
+            "count": 0
+          },
+          "relation": "none",
+          "required_arm": "auto",
+          "transfer_arm": "none",
+          "receive_arm": "none",
+          "orientation_goal": "upright",
+          "target_state": "none",
+          "target_setting": 0,
+          "layout": "none",
+          "axis": "none",
+          "direction": "none",
+          "terminal_behavior": "none",
+          "depends_on": []
+        }
+      ]
+    },
+    "scene_request": {
+      "schema_version": "action_engine_scene_request_v1",
+      "task_id": "demo",
+      "references": [
+        {
+          "reference_id": "step_01.object",
+          "step_id": "step_01",
+          "role": "object",
+          "reference": "cans",
+          "quantifier": "one",
+          "count": 0,
+          "source_structure": "rigid_object",
+          "affordances": [
+            "graspable",
+            "orientable"
+          ],
+          "initial_state": {},
+          "attributes": {}
+        }
+      ]
+    },
+    "success_spec": {
+      "schema_version": "action_engine_success_spec_v1",
+      "task_id": "demo",
+      "op": "all",
+      "terms": [
+        {
+          "step_id": "step_01",
+          "type": "object_upright"
+        }
+      ]
+    },
+    "semantic_hash": "9762a134766e9dd2e05d2299f6b496c62dbb72432edb5ff8942a84112a38f843",
+    "vote_count": 1,
+    "attempts": 1,
+    "normalizations": []
+  },
+  "role_bindings": {
+    "schema_version": "action_engine_role_bindings_v1",
+    "task_id": "demo",
+    "candidate_id": "candidate_01",
+    "reference_bindings": {
+      "step_01.object": [
+        "a"
+      ]
+    },
+    "role_bindings": {}
+  },
+  "lineage": {
+    "step_01": [
+      {
+        "group_id": "step_01",
+        "object_uid": "a",
+        "object_part_id": null
+      }
+    ]
+  },
+  "coverage": {
+    "status": "covered",
+    "issues": [],
+    "roles": {
+      "role_001": [
+        {
+          "uid": "a",
+          "part_id": null
+        }
+      ]
+    },
+    "goals": [
+      {
+        "id": "goal_001",
+        "predicate": {
+          "id": "goal_001",
+          "predicate": "object_upright",
+          "arguments": {
+            "orientation_goal": "upright",
+            "subject": "role_001",
+            "task_type": "E2"
+          },
+          "operator": "eq",
+          "expected": true,
+          "observation": null
+        },
+        "source_steps": [
+          "step_01"
+        ],
+        "groups": [
+          "step_01"
+        ],
+        "status": "declared"
+      }
+    ],
+    "milestones": [
+      {
+        "id": "step_01",
+        "source_step": "step_01",
+        "groups": [
+          "step_01"
+        ],
+        "members": [
+          {
+            "group_id": "step_01",
+            "object_uid": "a",
+            "object_part_id": null
+          }
+        ]
+      }
+    ],
+    "lineage": {
+      "step_01": [
+        {
+          "group_id": "step_01",
+          "object_uid": "a",
+          "object_part_id": null
+        }
+      ]
+    },
+    "runtime_evidence_status": "not_run",
+    "instruction_coverage": "validated_draft_only"
+  }
+}

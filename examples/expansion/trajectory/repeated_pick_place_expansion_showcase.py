@@ -55,7 +55,7 @@ from embodichain.lab.task_program.integrations import TaskProgramExpansionRecord
 from embodichain.utils.config_paths import resolve_config_path
 
 _TASK_ROOT = resolve_config_path(
-    "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place",
+    "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place",
     base_dir=Path(__file__).parent,
 )
 _DEFAULT_TASK_CONFIG = _TASK_ROOT / "task.ur5.yaml"

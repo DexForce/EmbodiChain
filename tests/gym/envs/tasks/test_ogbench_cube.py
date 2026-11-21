@@ -25,7 +25,7 @@ import numpy as np
 import pytest
 import torch
 
-from embodichain_tasks.manipulation.ogbench_cube import (
+from embodichain.extensions.tasks.manipulation.ogbench_cube import (
     OGBenchCubeCfg,
     OGBenchCubeEnv,
     _CubeController,
@@ -40,7 +40,9 @@ REFERENCE = json.loads((ROOT / "controller.json").read_text())
 
 @pytest.mark.parametrize("index", range(3))
 def test_point_compliance_preserves_source_force_units(index: int) -> None:
-    from embodichain_tasks.manipulation.ogbench_cube import _base_point_compliance
+    from embodichain.extensions.tasks.manipulation.ogbench_cube import (
+        _base_point_compliance,
+    )
 
     reference = json.loads((ROOT / "equality_point.json").read_text())["cases"][index]
     stiffness, damping = _base_point_compliance(

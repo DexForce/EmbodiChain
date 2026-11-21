@@ -24,7 +24,7 @@ from xml.etree import ElementTree as ET
 import numpy as np
 import pytest
 
-from embodichain_models.dynamics.lewm import LeWMCEMCfg
+from embodichain.extensions.models.dynamics.lewm import LeWMCEMCfg
 from examples.learning.lewm._official_cube import (
     _collapse_robot,
     _welded_body_exclusions,

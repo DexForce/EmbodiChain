@@ -25,15 +25,22 @@ from pathlib import Path
 import pytest
 import torch
 
-from embodichain_benchmarks.motion_generation.aggregation import aggregate_results
-from embodichain_benchmarks.motion_generation.artifacts import TrialJsonlWriter
-from embodichain_benchmarks.motion_generation.config import SuiteCfg, TrackCfg
-from embodichain_benchmarks.motion_generation.contracts import (
+from embodichain.extensions.benchmarks.motion_generation.aggregation import (
+    aggregate_results,
+)
+from embodichain.extensions.benchmarks.motion_generation.artifacts import (
+    TrialJsonlWriter,
+)
+from embodichain.extensions.benchmarks.motion_generation.config import (
+    SuiteCfg,
+    TrackCfg,
+)
+from embodichain.extensions.benchmarks.motion_generation.contracts import (
     PhysicalEvaluation,
     StageOutcome,
     validate_physical_evaluations,
 )
-from embodichain_benchmarks.motion_generation.evaluation import (
+from embodichain.extensions.benchmarks.motion_generation.evaluation import (
     STANDARD_VERSION,
     SKILL_CRITERIA,
     StageEvidence,
@@ -41,7 +48,7 @@ from embodichain_benchmarks.motion_generation.evaluation import (
     evaluate_skill_stages,
     validate_standard_evaluation,
 )
-from embodichain_benchmarks.motion_generation.models import (
+from embodichain.extensions.benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
@@ -50,7 +57,9 @@ from embodichain_benchmarks.motion_generation.models import (
     TrialRecord,
     with_physical_evaluation,
 )
-from embodichain_benchmarks.motion_generation.reporting import write_markdown_report
+from embodichain.extensions.benchmarks.motion_generation.reporting import (
+    write_markdown_report,
+)
 
 
 def _evidence(window: str, **measurements: float | bool) -> StageEvidence:
@@ -147,7 +156,7 @@ def _aggregates(
             AlgorithmRole.PRIMARY_BASELINE,
             "ik_interpolate",
             "abc",
-            frozenset({"atomic_action"}),
+            frozenset({"atomic_skill"}),
         )
     ]
     return aggregate_results(

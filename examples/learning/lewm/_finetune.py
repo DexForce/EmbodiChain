@@ -34,7 +34,11 @@ from embodichain.learning.sl import (
     SupervisedTrainer,
     SupervisedTrainerCfg,
 )
-from embodichain_models.dynamics.lewm import export_lewm, load_lewm, preprocess_rgb
+from embodichain.extensions.models.dynamics.lewm import (
+    export_lewm,
+    load_lewm,
+    preprocess_rgb,
+)
 
 
 def _sha256(path: Path) -> str:

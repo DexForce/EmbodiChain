@@ -20,15 +20,23 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass
+import math
+from numbers import Real
+import os
 from pathlib import Path
 
 from embodichain.utils.config_paths import resolve_config_path
 from embodichain.utils.utility import load_config
 
+from .composition import ResolvedGymComponents as _ResolvedGymComponents
+
 __all__: list[str] = []
 
 _EMBODIMENT_OVERRIDE_FIELDS = frozenset({"uid", "init_pos", "init_rot", "init_qpos"})
+# Bounded task calibration: replace existing named drive gains and hand commands.
+_EMBODIMENT_CALIBRATION_FIELDS = frozenset({"joint_drive_props", "grippers"})
+_DRIVE_GAIN_OVERRIDE_FIELDS = frozenset({"stiffness", "damping"})
+_GRIPPER_COMMAND_OVERRIDE_NAMES = frozenset({"open", "grasp"})
 _ENVIRONMENT_COMPONENT_FIELDS = frozenset(
     {
         "max_episodes",
@@ -38,6 +46,7 @@ _ENVIRONMENT_COMPONENT_FIELDS = frozenset(
         "arena_space",
         "physics",
         "physics_config",
+        "enable_ground_plane",
         "render_cfg",
         "visualization",
         "simulation",
@@ -60,19 +69,13 @@ _SCENE_SIMULATION_FIELDS = frozenset(
         "rigid_object",
         "rigid_object_group",
         "articulation",
+        "usd_scene",
+        "replay_surface",
+        "replay",
+        "cable_object",
+        "fluid_object",
     }
 )
-
-
-@dataclass(frozen=True, slots=True)
-class _ResolvedGymComponents:
-    """One Gym config after its reusable components are expanded."""
-
-    config: dict[str, object]
-    embodiment_selected: bool
-    scene_selected: bool
-    embodiment_skill_profile: dict[str, object] | None
-    scene_config: dict[str, object] | None
 
 
 def _mapping(
@@ -108,13 +111,19 @@ def _component_path(
     *,
     base_dir: Path,
     path: str,
+    sources: Mapping[Path, Mapping[str, object]] | None = None,
 ) -> Path:
     """Resolve one packaged or owner-relative YAML component path."""
     selected = _identifier(value, path=path)
-    component_path = resolve_config_path(selected, base_dir=base_dir).resolve()
+    if sources is not None:
+        component_path = Path(os.path.abspath(base_dir / selected))
+        if component_path not in sources:
+            raise ValueError(f"{path} is absent from the supplied component snapshot.")
+    else:
+        component_path = resolve_config_path(selected, base_dir=base_dir).resolve()
     if component_path.suffix.lower() not in {".yaml", ".yml"}:
         raise ValueError(f"{path} must be a YAML file: {component_path}.")
-    if not component_path.is_file():
+    if sources is None and not component_path.is_file():
         raise FileNotFoundError(f"{path} is not a file: {component_path}.")
     return component_path
 
@@ -135,9 +144,16 @@ def _owned_sequence(value: object, *, path: str) -> list[object]:
     return deepcopy(list(value))
 
 
-def _load_yaml_component(path: Path, *, field_name: str) -> dict[str, object]:
+def _load_yaml_component(
+    path: Path,
+    *,
+    field_name: str,
+    sources: Mapping[Path, Mapping[str, object]] | None = None,
+) -> dict[str, object]:
     """Load one YAML component mapping."""
-    return _owned_mapping(load_config(path), path=field_name)
+    return _owned_mapping(
+        load_config(path) if sources is None else sources[path], path=field_name
+    )
 
 
 def _resolve_local_resource_paths(value: object, *, base_dir: Path) -> None:
@@ -148,8 +164,24 @@ def _resolve_local_resource_paths(value: object, *, base_dir: Path) -> None:
     """
     if isinstance(value, dict):
         for key, child in value.items():
+            if key == "usd_scene" and isinstance(child, dict):
+                source = child.get("source")
+                if isinstance(source, dict) and isinstance(
+                    source.get("file_path"), str
+                ):
+                    selected = Path(source["file_path"]).expanduser()
+                    if not selected.is_absolute():
+                        selected = base_dir / selected
+                    source["file_path"] = str(selected.resolve())
+            if key == "fluid_object" and isinstance(child, list):
+                for fluid in child:
+                    spawn = fluid.get("spawn", {})
+                    path = spawn.get("file_path")
+                    if isinstance(path, str) and not Path(path).is_absolute():
+                        spawn["file_path"] = str((base_dir / path).resolve())
             if (
-                key in {"fpath", "urdf_path", "xml_path"}
+                key
+                in {"fpath", "urdf_path", "xml_path", "trajectory", "assembly_manifest"}
                 and isinstance(child, str)
                 and child.startswith(("./", "../"))
             ):
@@ -169,6 +201,7 @@ def _resolve_environment_component(
     *,
     base_dir: Path,
     selected_backend: str | None = None,
+    sources: Mapping[Path, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     """Expand one selected reusable physical environment component.
 
@@ -224,9 +257,12 @@ def _resolve_environment_component(
         component_value,
         base_dir=base_dir,
         path=component_path_name,
+        sources=sources,
     )
     component = _mapping(
-        _load_yaml_component(component_path, field_name="environment component"),
+        _load_yaml_component(
+            component_path, field_name="environment component", sources=sources
+        ),
         path="environment component",
         required=frozenset({"environment_id", "physics", "simulation", "env"}),
         optional=_ENVIRONMENT_COMPONENT_FIELDS - {"physics", "simulation", "env"},
@@ -278,28 +314,95 @@ def _resolve_environment_component(
     return resolved
 
 
+def _override_drive_gains(simulation: dict[str, object], value: object) -> None:
+    """Replace existing named drive gains with finite nonnegative values."""
+    gains = _mapping(
+        value,
+        path="embodiment.overrides.joint_drive_props",
+        required=frozenset(),
+        optional=_DRIVE_GAIN_OVERRIDE_FIELDS,
+    )
+    drives = simulation.get("joint_drive_props")
+    if isinstance(drives, Mapping):
+        # YAML aliases may share one mapping between gains; rebind owned copies.
+        drives = dict(drives)
+        simulation["joint_drive_props"] = drives
+    for field_name, entries in gains.items():
+        path = f"embodiment.overrides.joint_drive_props.{field_name}"
+        replacements = _owned_mapping(entries, path=path)
+        existing = drives.get(field_name) if isinstance(drives, dict) else None
+        if not isinstance(existing, Mapping) or not replacements:
+            raise ValueError(f"{path} must replace named entries of the component.")
+        existing = dict(existing)
+        drives[field_name] = existing
+        for name, gain in replacements.items():
+            if name not in existing:
+                raise ValueError(f"{path} names no existing entry {name!r}.")
+            if (
+                isinstance(gain, bool)
+                or not isinstance(gain, (int, float))
+                or not math.isfinite(gain)
+                or gain < 0
+            ):
+                raise ValueError(f"{path}.{name} must be finite and nonnegative.")
+            existing[name] = float(gain)
+
+
+def _override_gripper_commands(grippers: object, value: object) -> dict[str, object]:
+    """Return gripper declarations with replaced open or grasp commands."""
+    overrides = _owned_mapping(value, path="embodiment.overrides.grippers")
+    if not isinstance(grippers, Mapping):
+        raise ValueError("embodiment.overrides.grippers requires component grippers.")
+    declarations = _owned_mapping(grippers, path="embodiment component.grippers")
+    for instance, entry in overrides.items():
+        path = f"embodiment.overrides.grippers.{instance}"
+        if instance not in declarations:
+            raise ValueError(f"{path} names no existing gripper instance.")
+        commands = _mapping(
+            _mapping(entry, path=path, required=frozenset({"commands"}))["commands"],
+            path=f"{path}.commands",
+            required=frozenset(),
+            optional=_GRIPPER_COMMAND_OVERRIDE_NAMES,
+        )
+        if not commands:
+            raise ValueError(f"{path}.commands must replace open or grasp.")
+        declaration = declarations[instance]
+        if not isinstance(declaration, dict):
+            raise TypeError(
+                f"embodiment component.grippers.{instance} must be a mapping."
+            )
+        merged = dict(declaration.get("commands", {}))
+        merged.update(deepcopy(dict(commands)))
+        declaration["commands"] = merged
+    return declarations
+
+
 def _resolve_embodiment_component(
     value: object,
     *,
     base_dir: Path,
+    sources: Mapping[Path, Mapping[str, object]] | None = None,
 ) -> tuple[dict[str, object], list[object], dict[str, object] | None]:
     """Resolve robot, sensors, and an optional Task Program skill profile."""
     declaration = _mapping(
         value,
         path="embodiment",
         required=frozenset({"component"}),
-        optional=frozenset({"overrides"}),
+        optional=frozenset({"overrides", "camera_overrides"}),
     )
     component_path = _component_path(
         declaration["component"],
         base_dir=base_dir,
         path="embodiment.component",
+        sources=sources,
     )
     component = _mapping(
-        _load_yaml_component(component_path, field_name="embodiment component"),
+        _load_yaml_component(
+            component_path, field_name="embodiment component", sources=sources
+        ),
         path="embodiment component",
         required=frozenset({"embodiment_id", "simulation", "sensor"}),
-        optional=frozenset({"skill_profile"}),
+        optional=frozenset({"skill_profile", "grippers"}),
     )
     _identifier(component["embodiment_id"], path="embodiment component.embodiment_id")
     simulation = _owned_mapping(
@@ -314,9 +417,23 @@ def _resolve_embodiment_component(
         declaration.get("overrides", {}),
         path="embodiment.overrides",
         required=frozenset(),
-        optional=_EMBODIMENT_OVERRIDE_FIELDS,
+        optional=_EMBODIMENT_OVERRIDE_FIELDS | _EMBODIMENT_CALIBRATION_FIELDS,
     )
-    simulation.update(deepcopy(dict(overrides)))
+    simulation.update(
+        {
+            key: deepcopy(value)
+            for key, value in overrides.items()
+            if key in _EMBODIMENT_OVERRIDE_FIELDS
+        }
+    )
+    if "joint_drive_props" in overrides:
+        _override_drive_gains(simulation, overrides["joint_drive_props"])
+    grippers = component.get("grippers")
+    if "grippers" in overrides:
+        grippers = _override_gripper_commands(grippers, overrides["grippers"])
+    _apply_camera_overrides(
+        declaration.get("camera_overrides", {}), simulation=simulation, sensors=sensors
+    )
     _resolve_local_resource_paths(simulation, base_dir=component_path.parent)
     _resolve_local_resource_paths(sensors, base_dir=component_path.parent)
     skill_profile = None
@@ -325,13 +442,171 @@ def _resolve_embodiment_component(
             component["skill_profile"],
             path="embodiment component.skill_profile",
         )
+    # Presence, not value, selects expansion, so an explicit null is rejected.
+    if "grippers" in component:
+        from embodichain.lab.gym.utils._gripper_composition import _expand_grippers
+
+        # Expansion validates complete native-joint commands within hand limits.
+        _expand_grippers(simulation, skill_profile, grippers)
     return simulation, sensors, skill_profile
+
+
+def _camera_vector(value: object, *, size: int, path: str) -> tuple[float, ...]:
+    """Validate finite calibration numbers without coercing strings or booleans."""
+    if (
+        not isinstance(value, (list, tuple))
+        or len(value) != size
+        or any(
+            isinstance(item, bool)
+            or not isinstance(item, Real)
+            or not math.isfinite(item)
+            for item in value
+        )
+    ):
+        raise ValueError(f"{path} must contain {size} finite numbers.")
+    return tuple(float(item) for item in value)
+
+
+def _override_camera_calibration(
+    sensor: dict[str, object], patch: object, *, path: str
+) -> None:
+    """Apply closed calibration fields while retaining the camera's ownership."""
+    patch = _mapping(
+        patch,
+        path=path,
+        required=frozenset(),
+        optional=frozenset({"intrinsics", "extrinsics"}),
+    )
+    if not patch:
+        raise ValueError(f"{path} must override intrinsics or extrinsics.")
+    if "intrinsics" in patch:
+        intrinsics = _camera_vector(
+            patch["intrinsics"], size=4, path=f"{path}.intrinsics"
+        )
+        if min(intrinsics[:2]) <= 0:
+            raise ValueError(f"{path}.intrinsics focal lengths must be positive.")
+        sensor["intrinsics"] = deepcopy(patch["intrinsics"])
+    if "extrinsics" not in patch:
+        return
+
+    pose_fields = frozenset({"pos", "quat"})
+    look_at_fields = frozenset({"eye", "target", "up"})
+    authored = _mapping(
+        patch["extrinsics"],
+        path=f"{path}.extrinsics",
+        required=frozenset(),
+        optional=pose_fields | look_at_fields,
+    )
+    if not authored or (
+        pose_fields.intersection(authored) and look_at_fields.intersection(authored)
+    ):
+        raise ValueError(
+            f"{path}.extrinsics must use either pos/quat or eye/target/up."
+        )
+    effective = dict(
+        _mapping(
+            sensor.get("extrinsics", {}),
+            path=f"{path} base extrinsics",
+            required=frozenset(),
+            optional=pose_fields | look_at_fields | {"parent"},
+        )
+    )
+    use_look_at = bool(look_at_fields.intersection(authored))
+    was_look_at = effective.get("eye") is not None
+    if use_look_at != was_look_at:
+        required = {"eye", "target"} if use_look_at else {"pos", "quat"}
+        if not required.issubset(authored):
+            raise ValueError(
+                f"{path}.extrinsics changing representation requires {sorted(required)}."
+            )
+    for field in pose_fields if use_look_at else look_at_fields:
+        effective.pop(field, None)
+    effective.update(deepcopy(dict(authored)))
+    if use_look_at:
+        eye = _camera_vector(
+            effective.get("eye"), size=3, path=f"{path}.extrinsics.eye"
+        )
+        target = _camera_vector(
+            effective.get("target"), size=3, path=f"{path}.extrinsics.target"
+        )
+        up_value = effective.get("up")
+        if up_value is None and "up" not in authored:
+            up_value = (0, 0, 1)  # CameraCfg's nullable default.
+        up = _camera_vector(up_value, size=3, path=f"{path}.extrinsics.up")
+        direction = tuple(b - a for a, b in zip(eye, target))
+        length, up_length = math.hypot(*direction), math.hypot(*up)
+        if (
+            not math.isfinite(length)
+            or not math.isfinite(up_length)
+            or min(length, up_length) == 0
+        ):
+            raise ValueError(
+                f"{path}.extrinsics requires distinct eye/target and nonzero up."
+            )
+        forward = tuple(value / length for value in direction)
+        unit_up = tuple(value / up_length for value in up)
+        cross = (
+            forward[1] * unit_up[2] - forward[2] * unit_up[1],
+            forward[2] * unit_up[0] - forward[0] * unit_up[2],
+            forward[0] * unit_up[1] - forward[1] * unit_up[0],
+        )
+        if math.hypot(*cross) <= 1e-8:
+            raise ValueError(
+                f"{path}.extrinsics up must not be parallel to the viewing direction."
+            )
+    else:
+        _camera_vector(
+            effective.get("pos", (0, 0, 0)), size=3, path=f"{path}.extrinsics.pos"
+        )
+        quat = _camera_vector(
+            effective.get("quat", (0, 0, 0, 1)), size=4, path=f"{path}.extrinsics.quat"
+        )
+        if not math.isclose(math.hypot(*quat), 1.0, rel_tol=1e-6, abs_tol=1e-6):
+            raise ValueError(f"{path}.extrinsics.quat must be a unit XYZW quaternion.")
+    sensor["extrinsics"] = effective
+
+
+def _apply_camera_overrides(
+    value: object, *, simulation: dict[str, object], sensors: list[object]
+) -> None:
+    """Override explicitly declared ordinary cameras, preserving the sensor suite."""
+    if not isinstance(value, Mapping):
+        raise TypeError("embodiment.camera_overrides must be a UID-keyed mapping.")
+    if not value:
+        return
+    declared: dict[str, dict[str, object]] = {}
+    mounted = simulation.get("sensors", [])
+    if not isinstance(mounted, (list, tuple)):
+        raise TypeError("embodiment component.simulation.sensors must be a sequence.")
+    for sensor in [*sensors, *mounted]:
+        if not isinstance(sensor, dict):
+            raise TypeError("Embodiment sensor declarations must be mappings.")
+        uid = sensor.get("uid")
+        if uid is None:
+            continue
+        uid = _identifier(uid, path="embodiment sensor.uid")
+        if uid in declared:
+            raise ValueError(f"Duplicate sensor uid {uid!r} in embodiment component.")
+        declared[uid] = sensor
+    for uid, patch in value.items():
+        uid = _identifier(uid, path="embodiment.camera_overrides UID")
+        path = f"embodiment.camera_overrides.{uid}"
+        if uid not in declared:
+            raise ValueError(
+                f"{path} must name a camera explicitly declared in the component's "
+                "sensor or simulation.sensors list."
+            )
+        sensor = declared[uid]
+        if sensor.get("sensor_type") != "Camera":
+            raise ValueError(f"{path} targets an ordinary Camera declaration only.")
+        _override_camera_calibration(sensor, patch, path=path)
 
 
 def _resolve_scene_component(
     value: object,
     *,
     base_dir: Path,
+    sources: Mapping[Path, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     """Resolve physical scene simulation fields."""
     declaration = _mapping(
@@ -343,9 +618,12 @@ def _resolve_scene_component(
         declaration["component"],
         base_dir=base_dir,
         path="scene.component",
+        sources=sources,
     )
     component = _mapping(
-        _load_yaml_component(component_path, field_name="scene component"),
+        _load_yaml_component(
+            component_path, field_name="scene component", sources=sources
+        ),
         path="scene component",
         required=frozenset({"scene_id", "simulation"}),
     )
@@ -390,9 +668,11 @@ def _validate_scene_binding_targets(
     binding: Mapping[str, object],
     *,
     simulation: Mapping[str, object],
+    usd_scene_inventory: Mapping[str, object] | None = None,
 ) -> None:
     """Fail before runtime when semantic roots select absent native entities."""
     physical_ids = {
+        "cables": _physical_scene_uids(simulation, field_names=("cable_object",)),
         "rigid_objects": _physical_scene_uids(
             simulation,
             field_names=("background", "rigid_object"),
@@ -406,6 +686,23 @@ def _validate_scene_binding_targets(
             field_names=("articulation",),
         ),
     }
+    if "usd_scene" in simulation:
+        if usd_scene_inventory is None:
+            raise ValueError(
+                "USD scene binding validation requires its preflight inventory."
+            )
+        for binding_field, kind in (
+            ("cables", "cable"),
+            ("rigid_objects", "rigid_object"),
+            ("articulations", "articulation"),
+            ("rigidized_articulations", "articulation"),
+        ):
+            imported = {
+                usd_scene_inventory["resource_uids"][path]
+                for path, resource_kind in usd_scene_inventory["resource_types"].items()
+                if resource_kind == kind
+            }
+            physical_ids[binding_field] |= imported
     for binding_field, available in physical_ids.items():
         values = binding.get(binding_field, ())
         for index, value in enumerate(
@@ -429,16 +726,63 @@ def _validate_scene_binding_targets(
                     f"{simulation_uid!r}, which is not declared by the physical "
                     "environment."
                 )
+            if (
+                usd_scene_inventory is not None
+                and simulation_uid in usd_scene_inventory["resource_uids"].values()
+            ):
+                if simulation_uid not in usd_scene_inventory["explicit_uids"]:
+                    raise ValueError(
+                        f"Task-bound USD UID {simulation_uid!r} requires an explicit asset_cfgs UID."
+                    )
+
+    if usd_scene_inventory is not None:
+        articulation_ids = {
+            item["entity_id"]: item.get("simulation_uid", item["entity_id"])
+            for field in ("articulations", "rigidized_articulations")
+            for item in binding.get(field, ())
+        }
+        imported_links = {
+            usd_scene_inventory["resource_uids"][key]: usd_scene_inventory["links"][
+                path
+            ]
+            for key, path in usd_scene_inventory["resource_source_paths"].items()
+            if path in usd_scene_inventory["links"]
+        }
+        for item in binding.get("links", ()):
+            uid = articulation_ids.get(item["articulation_id"])
+            if (
+                uid in imported_links
+                and item["native_link_name"] not in imported_links[uid]
+            ):
+                raise ValueError(
+                    f"USD articulation {uid!r} has no native link {item['native_link_name']!r}."
+                )
 
 
 def _resolve_gym_components(
     config: Mapping[str, object],
     *,
     base_dir: str | Path,
+    component_sources: Mapping[str, Mapping[str, object]] | None = None,
 ) -> _ResolvedGymComponents:
     """Expand optional environment, embodiment, and scene selectors."""
     resolved = _owned_mapping(config, path="Gym config")
     selected_base_dir = Path(base_dir).expanduser()
+    sources = None
+    if component_sources is not None:
+        if not isinstance(component_sources, Mapping):
+            raise TypeError("component_sources must be a mapping or None.")
+        sources = {}
+        for name, declaration in component_sources.items():
+            selected = _identifier(name, path="component_sources key")
+            source_path = Path(os.path.abspath(selected_base_dir / selected))
+            if source_path in sources:
+                raise ValueError(
+                    "Component snapshot contains duplicate resolved paths."
+                )
+            sources[source_path] = _owned_mapping(
+                declaration, path=f"component_sources.{name}"
+            )
     _resolve_local_resource_paths(resolved, base_dir=selected_base_dir)
 
     if "task" in resolved:
@@ -451,6 +795,7 @@ def _resolve_gym_components(
         resolved = _resolve_environment_component(
             resolved,
             base_dir=selected_base_dir,
+            sources=sources,
         )
 
     embodiment_selected = "embodiment" in resolved
@@ -467,6 +812,7 @@ def _resolve_gym_components(
         robot, sensors, embodiment_skill_profile = _resolve_embodiment_component(
             resolved.pop("embodiment"),
             base_dir=selected_base_dir,
+            sources=sources,
         )
         resolved["robot"] = robot
         resolved["sensor"] = sensors
@@ -477,6 +823,7 @@ def _resolve_gym_components(
         scene_config = _resolve_scene_component(
             resolved.pop("scene"),
             base_dir=selected_base_dir,
+            sources=sources,
         )
         duplicate_fields = sorted(set(scene_config).intersection(resolved))
         if duplicate_fields:
@@ -494,6 +841,78 @@ def _resolve_gym_components(
             if field_name in resolved
         }
 
+    usd_scene_inventory = None
+    if scene_config is not None and "usd_scene" in scene_config:
+        from embodichain.lab.sim.cfg import UsdImportCfg
+        from embodichain.lab.sim.spawn._usd_scene import _inspect_usd_scene
+
+        reserved = set()
+        if resolved.get("enable_ground_plane", False):
+            reserved.add("default_plane")
+        for field in (
+            "background",
+            "rigid_object",
+            "articulation",
+            "visual_object",
+            "rigid_object_group",
+            "cable_object",
+            "fluid_object",
+        ):
+            for item in resolved.get(field, ()):
+                if item.get("uid"):
+                    reserved.add(item["uid"])
+                for member in item.get("rigid_objects", {}).values():
+                    if member.get("uid"):
+                        reserved.add(member["uid"])
+        robot = resolved.get("robot", {})
+        if robot:
+            from .gym_utils import _robot_cfg_from_dict
+            from embodichain.lab.sim.cfg import RobotPresetCfg
+            from embodichain.lab.sim.cfg.physics import physics_cfg_for_backend
+
+            selected_robot = _robot_cfg_from_dict(robot)
+            if isinstance(selected_robot, RobotPresetCfg):
+                physics = type(
+                    physics_cfg_for_backend(resolved.get("physics", "default"))
+                )(**resolved.get("physics_config", {}))
+                selected_robot = selected_robot.resolve(physics)
+            reserved.add(selected_robot.uid or "robot")
+            robot = selected_robot.to_dict()
+        sensors = (
+            (*resolved.get("sensor", ()), *robot.get("sensors", ()))
+            if resolved.get("enable_sensor", True)
+            else ()
+        )
+        for item in (*sensors, *resolved.get("light", {}).get("direct", ())):
+            if item.get("uid"):
+                reserved.add(item["uid"])
+        usd_scene_inventory = _inspect_usd_scene(
+            UsdImportCfg.from_dict(scene_config["usd_scene"]),
+            reserved_uids=tuple(reserved),
+            physics_backend=resolved.get("physics", "default"),
+            device=resolved.get("device"),
+            gravity=resolved.get("physics_config", {}).get("gravity", (0, 0, -9.81)),
+        )
+
+    evaluation = None
+    if "evaluation" in resolved:
+        if "task_program" not in resolved:
+            raise ValueError("evaluation.component requires a configured Task Program.")
+        selection = _mapping(
+            resolved.pop("evaluation"),
+            path="evaluation",
+            required=frozenset({"component"}),
+        )
+        path = _component_path(
+            selection["component"],
+            base_dir=selected_base_dir,
+            path="evaluation.component",
+            sources=sources,
+        )
+        evaluation = _load_yaml_component(
+            path, field_name="evaluation component", sources=sources
+        )
+
     return _ResolvedGymComponents(
         config=resolved,
         embodiment_selected=embodiment_selected,
@@ -502,4 +921,6 @@ def _resolve_gym_components(
         or scene_config is not None,
         embodiment_skill_profile=embodiment_skill_profile,
         scene_config=scene_config,
+        usd_scene_inventory=usd_scene_inventory,
+        evaluation=evaluation,
     )

@@ -1,0 +1,1437 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "spec": {
+    "schema_version": "task_spec/v0.1",
+    "canonicalization_version": "task_spec_c14n/v1",
+    "roles": [
+      {
+        "id": "role_001",
+        "kind": "object",
+        "cardinality": "count",
+        "affordances": ["graspable", "placeable"],
+        "properties": {},
+        "count": 2,
+        "source_structure": "rigid_object"
+      },
+      {
+        "id": "role_002",
+        "kind": "target",
+        "cardinality": "one",
+        "affordances": ["container"],
+        "properties": {},
+        "source_structure": "rigid_object"
+      }
+    ],
+    "init": [],
+    "goal": [
+      {
+        "id": "goal_001",
+        "predicate": "semantic_goal",
+        "operator": "eq",
+        "expected": true,
+        "subject": "role_001",
+        "reference": "role_002",
+        "relation": "inside",
+        "arguments": {"required_arm": "left_arm", "task_type": "E1"}
+      }
+    ],
+    "invariants": [],
+    "temporal": [],
+    "milestones": [
+      {
+        "id": "step_01",
+        "achieve": [
+          {
+            "id": "milestone:step_01:0",
+            "predicate": "semantic_goal",
+            "operator": "eq",
+            "expected": true,
+            "subject": "role_001",
+            "reference": "role_002",
+            "relation": "inside",
+            "arguments": {"required_arm": "left_arm", "task_type": "E1"}
+          }
+        ]
+      }
+    ],
+    "requirements": [
+      {
+        "consumer": "asset",
+        "key": "role_001",
+        "value": {
+          "affordances": ["graspable", "placeable"],
+          "attributes": {},
+          "source_structure": "rigid_object"
+        }
+      },
+      {
+        "consumer": "asset",
+        "key": "role_002",
+        "value": {"affordances": ["container"], "attributes": {}, "source_structure": "rigid_object"}
+      },
+      {"consumer": "embodiment", "key": "required_arms", "value": ["left_arm"]},
+      {"consumer": "expansion", "key": "lineage_key", "value": "task_spec.semantic_hash"},
+      {"consumer": "scene", "key": "role_001", "value": {"initial_state": {}, "kind": "object"}},
+      {"consumer": "scene", "key": "role_002", "value": {"initial_state": {}, "kind": "target"}},
+      {"consumer": "task_program", "key": "goal_predicates", "value": ["semantic_goal"]}
+    ],
+    "task_id": "inside_count",
+    "instruction": "Place two boxes inside region",
+    "metadata": {
+      "candidate_id": "candidate_01",
+      "generator": "embodichain.gen_sim.task_engine",
+      "goal_sources": {"goal_001": ["step_01"]},
+      "instruction_coverage": "validated_draft_only",
+      "legacy_semantic_hash": "95b28e104a33df38857c8c23cefd20724b2083cb8ef9e03815a0c211c745e29e",
+      "milestone_sources": {"step_01": "step_01"},
+      "role_references": {"role_001": ["step_01.object"], "role_002": ["step_01.target"]},
+      "step_roles": {"step_01": {"object": "role_001", "target": "role_002"}},
+      "task_candidate_schema": "action_engine_task_draft_v1",
+      "terminal_goal_policy": "explicit_state_slots/v1"
+    },
+    "semantic_hash": "f465c5ab792d6e559433b4d231675fda655e6f243d01bb09563bb01745028ede"
+  },
+  "program": {
+    "program_id": "gen_sim_inside_count",
+    "targets": {},
+    "program": {
+      "kind": "sequence",
+      "items": [
+        {
+          "kind": "segment",
+          "name": "step_01__01__call_01",
+          "steps": {
+            "kind": "invoke",
+            "call": {"kind": "pick", "object": "a", "resources": {"primary": "left"}}
+          }
+        },
+        {
+          "kind": "segment",
+          "name": "step_01__01__call_02",
+          "steps": {
+            "kind": "invoke",
+            "call": {
+              "kind": "place",
+              "object": "a",
+              "inside": "inside__region__a",
+              "resources": {"primary": "left"}
+            }
+          },
+          "post": [{"kind": "wait_stable", "entity": "a", "preset": "contained_rigid_object"}]
+        },
+        {
+          "kind": "segment",
+          "name": "step_01__01__call_03",
+          "steps": {
+            "kind": "invoke",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {"primary": "left"}
+            }
+          },
+          "post": [{"kind": "wait_stable", "entity": "a", "preset": "contained_rigid_object"}],
+          "validators": []
+        },
+        {
+          "kind": "segment",
+          "name": "step_01__call_01",
+          "steps": {
+            "kind": "invoke",
+            "call": {"kind": "pick", "object": "b", "resources": {"primary": "left"}}
+          }
+        },
+        {
+          "kind": "segment",
+          "name": "step_01__call_02",
+          "steps": {
+            "kind": "invoke",
+            "call": {
+              "kind": "place",
+              "object": "b",
+              "inside": "inside__region__b",
+              "resources": {"primary": "left"}
+            }
+          },
+          "post": [{"kind": "wait_stable", "entity": "b", "preset": "contained_rigid_object"}]
+        },
+        {
+          "kind": "segment",
+          "name": "step_01__call_03",
+          "steps": {
+            "kind": "invoke",
+            "call": {
+              "kind": "registered",
+              "call_id": "simulation.park",
+              "arguments": {},
+              "resources": {"primary": "left"}
+            }
+          },
+          "post": [{"kind": "wait_stable", "entity": "b", "preset": "contained_rigid_object"}],
+          "validators": []
+        }
+      ]
+    }
+  },
+  "graph": {
+    "nodes": [
+      {"id": "step_01__01__call_01", "call": {"kind": "pick"}},
+      {"id": "step_01__01__call_02", "call": {"kind": "place"}},
+      {"id": "step_01__01__call_03", "call": {"kind": "registered"}},
+      {"id": "step_01__call_01", "call": {"kind": "pick"}},
+      {"id": "step_01__call_02", "call": {"kind": "place"}},
+      {"id": "step_01__call_03", "call": {"kind": "registered"}}
+    ],
+    "task_groups": [
+      {
+        "id": "step_01__01",
+        "task_type": "E1",
+        "node_ids": ["step_01__01__call_01", "step_01__01__call_02", "step_01__01__call_03"],
+        "depends_on": [],
+        "success": {"kind": "semantic_task_term", "step_id": "step_01__01", "type": "semantic_goal"}
+      },
+      {
+        "id": "step_01",
+        "task_type": "E1",
+        "node_ids": ["step_01__call_01", "step_01__call_02", "step_01__call_03"],
+        "depends_on": ["step_01__01"],
+        "success": {"kind": "semantic_task_term", "step_id": "step_01", "type": "semantic_goal"}
+      }
+    ]
+  },
+  "validation": {
+    "coverage": {
+      "lineage": {
+        "step_01": [
+          {"group_id": "step_01__01", "object_uid": "a", "object_part_id": null},
+          {"group_id": "step_01", "object_uid": "b", "object_part_id": null}
+        ]
+      }
+    }
+  },
+  "constraints": {"presets": {}},
+  "cases": [
+    {
+      "name": "inside",
+      "final_measurements": {
+        "goal_001": {
+          "members": [
+            {
+              "group_id": "step_01__01",
+              "uid": "a",
+              "part_id": null,
+              "accepted": [true],
+              "measurements": {
+                "scope": "measured_planar_landing_region",
+                "object_pose": [
+                  [
+                    [1.0, 0.0, 0.0, -0.10000000149011612],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.04500000178813934],
+                    [0.0, 0.0, 0.0, 1.0]
+                  ]
+                ],
+                "reference_pose": [
+                  [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0]
+                  ]
+                ],
+                "full_footprint_inside": [true],
+                "support_gap_m": [2.7939677238464355e-09],
+                "footprint_area_m2": [0.006399999713897708],
+                "support_tolerance_m": 0.05,
+                "penetration_tolerance_m": 0.01,
+                "footprint_kind": "native_triangle_projection/v1",
+                "outside_floor_area_m2": [0.0],
+                "reference_has_raised_geometry": [false],
+                "reference_aabb_overlap": [true],
+                "reference_uid": "region",
+                "relation": "inside",
+                "released": [true]
+              },
+              "available": [true]
+            },
+            {
+              "group_id": "step_01",
+              "uid": "b",
+              "part_id": null,
+              "accepted": [true],
+              "measurements": {
+                "scope": "measured_planar_landing_region",
+                "object_pose": [
+                  [
+                    [1.0, 0.0, 0.0, 0.10000000149011612],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.04500000178813934],
+                    [0.0, 0.0, 0.0, 1.0]
+                  ]
+                ],
+                "reference_pose": [
+                  [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0]
+                  ]
+                ],
+                "full_footprint_inside": [true],
+                "support_gap_m": [2.7939677238464355e-09],
+                "footprint_area_m2": [0.006399999713897708],
+                "support_tolerance_m": 0.05,
+                "penetration_tolerance_m": 0.01,
+                "footprint_kind": "native_triangle_projection/v1",
+                "outside_floor_area_m2": [0.0],
+                "reference_has_raised_geometry": [false],
+                "reference_aabb_overlap": [true],
+                "reference_uid": "region",
+                "relation": "inside",
+                "released": [true]
+              },
+              "available": [true]
+            }
+          ],
+          "values": [true]
+        }
+      },
+      "recorded_measurements": {
+        "step_01__01": {
+          "group_id": "step_01__01",
+          "uid": "a",
+          "part_id": null,
+          "accepted": [true],
+          "measurements": {
+            "scope": "measured_planar_landing_region",
+            "object_pose": [
+              [
+                [1.0, 0.0, 0.0, -0.10000000149011612],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.04500000178813934],
+                [0.0, 0.0, 0.0, 1.0]
+              ]
+            ],
+            "reference_pose": [
+              [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0]
+              ]
+            ],
+            "full_footprint_inside": [true],
+            "support_gap_m": [2.7939677238464355e-09],
+            "footprint_area_m2": [0.006399999713897708],
+            "support_tolerance_m": 0.05,
+            "penetration_tolerance_m": 0.01,
+            "footprint_kind": "native_triangle_projection/v1",
+            "outside_floor_area_m2": [0.0],
+            "reference_has_raised_geometry": [false],
+            "reference_aabb_overlap": [true],
+            "reference_uid": "region",
+            "relation": "inside",
+            "released": [true],
+            "boundary_frames": [3]
+          },
+          "available": [true]
+        },
+        "step_01": {
+          "group_id": "step_01",
+          "uid": "b",
+          "part_id": null,
+          "accepted": [true],
+          "measurements": {
+            "scope": "measured_planar_landing_region",
+            "object_pose": [
+              [
+                [1.0, 0.0, 0.0, 0.10000000149011612],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.04500000178813934],
+                [0.0, 0.0, 0.0, 1.0]
+              ]
+            ],
+            "reference_pose": [
+              [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0]
+              ]
+            ],
+            "full_footprint_inside": [true],
+            "support_gap_m": [2.7939677238464355e-09],
+            "footprint_area_m2": [0.006399999713897708],
+            "support_tolerance_m": 0.05,
+            "penetration_tolerance_m": 0.01,
+            "footprint_kind": "native_triangle_projection/v1",
+            "outside_floor_area_m2": [0.0],
+            "reference_has_raised_geometry": [false],
+            "reference_aabb_overlap": [true],
+            "reference_uid": "region",
+            "relation": "inside",
+            "released": [true],
+            "boundary_frames": [6]
+          },
+          "available": [true]
+        }
+      },
+      "expected": {
+        "goal": ["satisfied"],
+        "milestones": ["satisfied"],
+        "status": "satisfied",
+        "certificate_ready": true
+      }
+    },
+    {
+      "name": "one_negative",
+      "final_measurements": {
+        "goal_001": {
+          "members": [
+            {
+              "group_id": "step_01__01",
+              "uid": "a",
+              "part_id": null,
+              "accepted": [true],
+              "measurements": {
+                "scope": "measured_planar_landing_region",
+                "object_pose": [
+                  [
+                    [1.0, 0.0, 0.0, -0.10000000149011612],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.04500000178813934],
+                    [0.0, 0.0, 0.0, 1.0]
+                  ]
+                ],
+                "reference_pose": [
+                  [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0]
+                  ]
+                ],
+                "full_footprint_inside": [true],
+                "support_gap_m": [2.7939677238464355e-09],
+                "footprint_area_m2": [0.006399999713897708],
+                "support_tolerance_m": 0.05,
+                "penetration_tolerance_m": 0.01,
+                "footprint_kind": "native_triangle_projection/v1",
+                "outside_floor_area_m2": [0.0],
+                "reference_has_raised_geometry": [false],
+                "reference_aabb_overlap": [true],
+                "reference_uid": "region",
+                "relation": "inside",
+                "released": [true]
+              },
+              "available": [true]
+            },
+            {
+              "group_id": "step_01",
+              "uid": "b",
+              "part_id": null,
+              "accepted": [false],
+              "measurements": {
+                "scope": "measured_planar_landing_region",
+                "object_pose": [
+                  [
+                    [1.0, 0.0, 0.0, 1.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.04500000178813934],
+                    [0.0, 0.0, 0.0, 1.0]
+                  ]
+                ],
+                "reference_pose": [
+                  [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0]
+                  ]
+                ],
+                "full_footprint_inside": [false],
+                "support_gap_m": [2.7939677238464355e-09],
+                "footprint_area_m2": [0.006399998521804839],
+                "support_tolerance_m": 0.05,
+                "penetration_tolerance_m": 0.01,
+                "footprint_kind": "native_triangle_projection/v1",
+                "outside_floor_area_m2": [0.006399998521804839],
+                "reference_has_raised_geometry": [false],
+                "reference_aabb_overlap": [false],
+                "reference_uid": "region",
+                "relation": "inside",
+                "released": [true]
+              },
+              "available": [true]
+            }
+          ],
+          "values": [false]
+        }
+      },
+      "recorded_measurements": {
+        "step_01__01": {
+          "group_id": "step_01__01",
+          "uid": "a",
+          "part_id": null,
+          "accepted": [true],
+          "measurements": {
+            "scope": "measured_planar_landing_region",
+            "object_pose": [
+              [
+                [1.0, 0.0, 0.0, -0.10000000149011612],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.04500000178813934],
+                [0.0, 0.0, 0.0, 1.0]
+              ]
+            ],
+            "reference_pose": [
+              [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0]
+              ]
+            ],
+            "full_footprint_inside": [true],
+            "support_gap_m": [2.7939677238464355e-09],
+            "footprint_area_m2": [0.006399999713897708],
+            "support_tolerance_m": 0.05,
+            "penetration_tolerance_m": 0.01,
+            "footprint_kind": "native_triangle_projection/v1",
+            "outside_floor_area_m2": [0.0],
+            "reference_has_raised_geometry": [false],
+            "reference_aabb_overlap": [true],
+            "reference_uid": "region",
+            "relation": "inside",
+            "released": [true],
+            "boundary_frames": [3]
+          },
+          "available": [true]
+        },
+        "step_01": {
+          "group_id": "step_01",
+          "uid": "b",
+          "part_id": null,
+          "accepted": [false],
+          "measurements": {
+            "scope": "measured_planar_landing_region",
+            "object_pose": [
+              [
+                [1.0, 0.0, 0.0, 1.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.04500000178813934],
+                [0.0, 0.0, 0.0, 1.0]
+              ]
+            ],
+            "reference_pose": [
+              [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0]
+              ]
+            ],
+            "full_footprint_inside": [false],
+            "support_gap_m": [2.7939677238464355e-09],
+            "footprint_area_m2": [0.006399998521804839],
+            "support_tolerance_m": 0.05,
+            "penetration_tolerance_m": 0.01,
+            "footprint_kind": "native_triangle_projection/v1",
+            "outside_floor_area_m2": [0.006399998521804839],
+            "reference_has_raised_geometry": [false],
+            "reference_aabb_overlap": [false],
+            "reference_uid": "region",
+            "relation": "inside",
+            "released": [true],
+            "boundary_frames": [6]
+          },
+          "available": [true]
+        }
+      },
+      "expected": {
+        "goal": ["failed"],
+        "milestones": ["unavailable"],
+        "status": "failed",
+        "certificate_ready": false
+      }
+    },
+    {
+      "name": "one_current_missing",
+      "final_measurements": {"goal_001": {"unavailable": ["Required native rigid object is not present."]}},
+      "recorded_measurements": {
+        "step_01__01": {
+          "group_id": "step_01__01",
+          "uid": "a",
+          "part_id": null,
+          "accepted": [true],
+          "measurements": {
+            "scope": "measured_planar_landing_region",
+            "object_pose": [
+              [
+                [1.0, 0.0, 0.0, -0.10000000149011612],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.04500000178813934],
+                [0.0, 0.0, 0.0, 1.0]
+              ]
+            ],
+            "reference_pose": [
+              [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0]
+              ]
+            ],
+            "full_footprint_inside": [true],
+            "support_gap_m": [2.7939677238464355e-09],
+            "footprint_area_m2": [0.006399999713897708],
+            "support_tolerance_m": 0.05,
+            "penetration_tolerance_m": 0.01,
+            "footprint_kind": "native_triangle_projection/v1",
+            "outside_floor_area_m2": [0.0],
+            "reference_has_raised_geometry": [false],
+            "reference_aabb_overlap": [true],
+            "reference_uid": "region",
+            "relation": "inside",
+            "released": [true],
+            "boundary_frames": [3]
+          },
+          "available": [true]
+        },
+        "step_01": {"unavailable": "Placement requires its exact bound native rigid object."}
+      },
+      "expected": {
+        "goal": ["unavailable"],
+        "milestones": ["unavailable"],
+        "status": "unavailable",
+        "certificate_ready": false
+      }
+    },
+    {
+      "name": "last_group_failed",
+      "runtime": {
+        "segments": [
+          {
+            "name": "step_01__01__call_01",
+            "active": [true],
+            "successes": [true],
+            "success": true,
+            "start_steps": [0],
+            "end_steps": [1],
+            "start_step": 0,
+            "end_step": 1,
+            "metadata": {
+              "program_segment_source_path": ["program", "items", 0],
+              "runtime": {
+                "env_ids": [0],
+                "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
+                "calls": []
+              }
+            }
+          },
+          {
+            "name": "step_01__01__call_02",
+            "active": [true],
+            "successes": [true],
+            "success": true,
+            "start_steps": [1],
+            "end_steps": [2],
+            "start_step": 1,
+            "end_step": 2,
+            "metadata": {
+              "program_segment_source_path": ["program", "items", 1],
+              "runtime": {
+                "env_ids": [0],
+                "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
+                "calls": [
+                  {
+                    "invocation_id": "count/step_01__01__call_02:0",
+                    "invocation_revision": 0,
+                    "status": "completed",
+                    "effects": [
+                      {
+                        "boundary": {"kind": "terminal"},
+                        "timestamp": 0.08,
+                        "observation_revision": 2,
+                        "effect_spec": {
+                          "effect_kind": "release",
+                          "invocation_id": "count/step_01__01__call_02:0",
+                          "invocation_revision": 0,
+                          "env_ids": [0],
+                          "state_expectations": [
+                            {
+                              "expectation_id": "source",
+                              "relation": "detached",
+                              "object_id": "a",
+                              "resource_id": "left"
+                            }
+                          ],
+                          "clauses": [
+                            {
+                              "clause_id": "source.constraint",
+                              "expectation_id": "source",
+                              "expected": false,
+                              "evidence_kind": "constraint"
+                            },
+                            {
+                              "clause_id": "source.pose",
+                              "expectation_id": "source",
+                              "expectation": "separated"
+                            }
+                          ]
+                        },
+                        "decision": {"success_mask": [true]},
+                        "evidence": {
+                          "source.constraint": {
+                            "values": [false],
+                            "valid_mask": [true],
+                            "env_ids": [0],
+                            "timestamp": 0.08,
+                            "observation_revision": 2
+                          },
+                          "source.pose": {
+                            "object_to_endpoint": [
+                              [
+                                [1.0, 0.0, 0.0, 0.0],
+                                [0.0, 1.0, 0.0, 0.0],
+                                [0.0, 0.0, 1.0, 0.0],
+                                [0.0, 0.0, 0.0, 1.0]
+                              ]
+                            ],
+                            "valid_mask": [true],
+                            "env_ids": [0],
+                            "timestamp": 0.08,
+                            "observation_revision": 2
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "name": "step_01__01__call_03",
+            "active": [true],
+            "successes": [true],
+            "success": true,
+            "start_steps": [2],
+            "end_steps": [3],
+            "start_step": 2,
+            "end_step": 3,
+            "metadata": {
+              "program_segment_source_path": ["program", "items", 2],
+              "runtime": {
+                "env_ids": [0],
+                "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
+                "calls": []
+              }
+            }
+          },
+          {
+            "name": "step_01__call_01",
+            "active": [true],
+            "successes": [false],
+            "success": false,
+            "start_steps": [3],
+            "end_steps": [4],
+            "start_step": 3,
+            "end_step": 4,
+            "metadata": {
+              "program_segment_source_path": ["program", "items", 3],
+              "runtime": {
+                "env_ids": [0],
+                "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
+                "calls": []
+              }
+            }
+          },
+          {
+            "name": "step_01__call_02",
+            "active": [true],
+            "successes": [false],
+            "success": false,
+            "start_steps": [4],
+            "end_steps": [5],
+            "start_step": 4,
+            "end_step": 5,
+            "metadata": {
+              "program_segment_source_path": ["program", "items", 4],
+              "runtime": {
+                "env_ids": [0],
+                "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
+                "calls": [
+                  {
+                    "invocation_id": "count/step_01__call_02:0",
+                    "invocation_revision": 0,
+                    "status": "completed",
+                    "effects": [
+                      {
+                        "boundary": {"kind": "terminal"},
+                        "timestamp": 0.2,
+                        "observation_revision": 2,
+                        "effect_spec": {
+                          "effect_kind": "release",
+                          "invocation_id": "count/step_01__call_02:0",
+                          "invocation_revision": 0,
+                          "env_ids": [0],
+                          "state_expectations": [
+                            {
+                              "expectation_id": "source",
+                              "relation": "detached",
+                              "object_id": "b",
+                              "resource_id": "left"
+                            }
+                          ],
+                          "clauses": [
+                            {
+                              "clause_id": "source.constraint",
+                              "expectation_id": "source",
+                              "expected": false,
+                              "evidence_kind": "constraint"
+                            },
+                            {
+                              "clause_id": "source.pose",
+                              "expectation_id": "source",
+                              "expectation": "separated"
+                            }
+                          ]
+                        },
+                        "decision": {"success_mask": [true]},
+                        "evidence": {
+                          "source.constraint": {
+                            "values": [false],
+                            "valid_mask": [true],
+                            "env_ids": [0],
+                            "timestamp": 0.2,
+                            "observation_revision": 2
+                          },
+                          "source.pose": {
+                            "object_to_endpoint": [
+                              [
+                                [1.0, 0.0, 0.0, 0.0],
+                                [0.0, 1.0, 0.0, 0.0],
+                                [0.0, 0.0, 1.0, 0.0],
+                                [0.0, 0.0, 0.0, 1.0]
+                              ]
+                            ],
+                            "valid_mask": [true],
+                            "env_ids": [0],
+                            "timestamp": 0.2,
+                            "observation_revision": 2
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "name": "step_01__call_03",
+            "active": [true],
+            "successes": [false],
+            "success": false,
+            "start_steps": [5],
+            "end_steps": [6],
+            "start_step": 5,
+            "end_step": 6,
+            "metadata": {
+              "program_segment_source_path": ["program", "items", 5],
+              "runtime": {
+                "env_ids": [0],
+                "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
+                "calls": []
+              }
+            }
+          }
+        ]
+      },
+      "final_measurements": {
+        "goal_001": {
+          "members": [
+            {
+              "group_id": "step_01__01",
+              "uid": "a",
+              "part_id": null,
+              "accepted": [true],
+              "measurements": {
+                "scope": "measured_planar_landing_region",
+                "object_pose": [
+                  [
+                    [1.0, 0.0, 0.0, -0.10000000149011612],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.04500000178813934],
+                    [0.0, 0.0, 0.0, 1.0]
+                  ]
+                ],
+                "reference_pose": [
+                  [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0]
+                  ]
+                ],
+                "full_footprint_inside": [true],
+                "support_gap_m": [2.7939677238464355e-09],
+                "footprint_area_m2": [0.006399999713897708],
+                "support_tolerance_m": 0.05,
+                "penetration_tolerance_m": 0.01,
+                "footprint_kind": "native_triangle_projection/v1",
+                "outside_floor_area_m2": [0.0],
+                "reference_has_raised_geometry": [false],
+                "reference_aabb_overlap": [true],
+                "reference_uid": "region",
+                "relation": "inside",
+                "released": [true]
+              },
+              "available": [true]
+            },
+            {
+              "group_id": "step_01",
+              "uid": "b",
+              "part_id": null,
+              "accepted": [true],
+              "measurements": {
+                "scope": "measured_planar_landing_region",
+                "object_pose": [
+                  [
+                    [1.0, 0.0, 0.0, 0.10000000149011612],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.04500000178813934],
+                    [0.0, 0.0, 0.0, 1.0]
+                  ]
+                ],
+                "reference_pose": [
+                  [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0]
+                  ]
+                ],
+                "full_footprint_inside": [true],
+                "support_gap_m": [2.7939677238464355e-09],
+                "footprint_area_m2": [0.006399999713897708],
+                "support_tolerance_m": 0.05,
+                "penetration_tolerance_m": 0.01,
+                "footprint_kind": "native_triangle_projection/v1",
+                "outside_floor_area_m2": [0.0],
+                "reference_has_raised_geometry": [false],
+                "reference_aabb_overlap": [true],
+                "reference_uid": "region",
+                "relation": "inside",
+                "released": [true]
+              },
+              "available": [true]
+            }
+          ],
+          "values": [true]
+        }
+      },
+      "recorded_measurements": {
+        "step_01__01": {
+          "group_id": "step_01__01",
+          "uid": "a",
+          "part_id": null,
+          "accepted": [true],
+          "measurements": {
+            "scope": "measured_planar_landing_region",
+            "object_pose": [
+              [
+                [1.0, 0.0, 0.0, -0.10000000149011612],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.04500000178813934],
+                [0.0, 0.0, 0.0, 1.0]
+              ]
+            ],
+            "reference_pose": [
+              [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0]
+              ]
+            ],
+            "full_footprint_inside": [true],
+            "support_gap_m": [2.7939677238464355e-09],
+            "footprint_area_m2": [0.006399999713897708],
+            "support_tolerance_m": 0.05,
+            "penetration_tolerance_m": 0.01,
+            "footprint_kind": "native_triangle_projection/v1",
+            "outside_floor_area_m2": [0.0],
+            "reference_has_raised_geometry": [false],
+            "reference_aabb_overlap": [true],
+            "reference_uid": "region",
+            "relation": "inside",
+            "released": [true],
+            "boundary_frames": [3]
+          },
+          "available": [true]
+        },
+        "step_01": {
+          "group_id": "step_01",
+          "uid": "b",
+          "part_id": null,
+          "accepted": [true],
+          "measurements": {
+            "scope": "measured_planar_landing_region",
+            "object_pose": [
+              [
+                [1.0, 0.0, 0.0, 0.10000000149011612],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.04500000178813934],
+                [0.0, 0.0, 0.0, 1.0]
+              ]
+            ],
+            "reference_pose": [
+              [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0]
+              ]
+            ],
+            "full_footprint_inside": [true],
+            "support_gap_m": [2.7939677238464355e-09],
+            "footprint_area_m2": [0.006399999713897708],
+            "support_tolerance_m": 0.05,
+            "penetration_tolerance_m": 0.01,
+            "footprint_kind": "native_triangle_projection/v1",
+            "outside_floor_area_m2": [0.0],
+            "reference_has_raised_geometry": [false],
+            "reference_aabb_overlap": [true],
+            "reference_uid": "region",
+            "relation": "inside",
+            "released": [true],
+            "boundary_frames": [6]
+          },
+          "available": [true]
+        }
+      },
+      "expected": {
+        "goal": ["satisfied"],
+        "milestones": ["unavailable"],
+        "status": "unavailable",
+        "certificate_ready": false
+      }
+    },
+    {
+      "name": "last_group_missing",
+      "runtime": {
+        "segments": [
+          {
+            "name": "step_01__01__call_01",
+            "active": [true],
+            "successes": [true],
+            "success": true,
+            "start_steps": [0],
+            "end_steps": [1],
+            "start_step": 0,
+            "end_step": 1,
+            "metadata": {
+              "program_segment_source_path": ["program", "items", 0],
+              "runtime": {
+                "env_ids": [0],
+                "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
+                "calls": []
+              }
+            }
+          },
+          {
+            "name": "step_01__01__call_02",
+            "active": [true],
+            "successes": [true],
+            "success": true,
+            "start_steps": [1],
+            "end_steps": [2],
+            "start_step": 1,
+            "end_step": 2,
+            "metadata": {
+              "program_segment_source_path": ["program", "items", 1],
+              "runtime": {
+                "env_ids": [0],
+                "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
+                "calls": [
+                  {
+                    "invocation_id": "count/step_01__01__call_02:0",
+                    "invocation_revision": 0,
+                    "status": "completed",
+                    "effects": [
+                      {
+                        "boundary": {"kind": "terminal"},
+                        "timestamp": 0.08,
+                        "observation_revision": 2,
+                        "effect_spec": {
+                          "effect_kind": "release",
+                          "invocation_id": "count/step_01__01__call_02:0",
+                          "invocation_revision": 0,
+                          "env_ids": [0],
+                          "state_expectations": [
+                            {
+                              "expectation_id": "source",
+                              "relation": "detached",
+                              "object_id": "a",
+                              "resource_id": "left"
+                            }
+                          ],
+                          "clauses": [
+                            {
+                              "clause_id": "source.constraint",
+                              "expectation_id": "source",
+                              "expected": false,
+                              "evidence_kind": "constraint"
+                            },
+                            {
+                              "clause_id": "source.pose",
+                              "expectation_id": "source",
+                              "expectation": "separated"
+                            }
+                          ]
+                        },
+                        "decision": {"success_mask": [true]},
+                        "evidence": {
+                          "source.constraint": {
+                            "values": [false],
+                            "valid_mask": [true],
+                            "env_ids": [0],
+                            "timestamp": 0.08,
+                            "observation_revision": 2
+                          },
+                          "source.pose": {
+                            "object_to_endpoint": [
+                              [
+                                [1.0, 0.0, 0.0, 0.0],
+                                [0.0, 1.0, 0.0, 0.0],
+                                [0.0, 0.0, 1.0, 0.0],
+                                [0.0, 0.0, 0.0, 1.0]
+                              ]
+                            ],
+                            "valid_mask": [true],
+                            "env_ids": [0],
+                            "timestamp": 0.08,
+                            "observation_revision": 2
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "name": "step_01__01__call_03",
+            "active": [true],
+            "successes": [true],
+            "success": true,
+            "start_steps": [2],
+            "end_steps": [3],
+            "start_step": 2,
+            "end_step": 3,
+            "metadata": {
+              "program_segment_source_path": ["program", "items", 2],
+              "runtime": {
+                "env_ids": [0],
+                "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
+                "calls": []
+              }
+            }
+          }
+        ]
+      },
+      "final_measurements": {"goal_001": {"unavailable": ["'step_01__call_02'"]}},
+      "recorded_measurements": {
+        "step_01__01": {
+          "group_id": "step_01__01",
+          "uid": "a",
+          "part_id": null,
+          "accepted": [true],
+          "measurements": {
+            "scope": "measured_planar_landing_region",
+            "object_pose": [
+              [
+                [1.0, 0.0, 0.0, -0.10000000149011612],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.04500000178813934],
+                [0.0, 0.0, 0.0, 1.0]
+              ]
+            ],
+            "reference_pose": [
+              [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0]
+              ]
+            ],
+            "full_footprint_inside": [true],
+            "support_gap_m": [2.7939677238464355e-09],
+            "footprint_area_m2": [0.006399999713897708],
+            "support_tolerance_m": 0.05,
+            "penetration_tolerance_m": 0.01,
+            "footprint_kind": "native_triangle_projection/v1",
+            "outside_floor_area_m2": [0.0],
+            "reference_has_raised_geometry": [false],
+            "reference_aabb_overlap": [true],
+            "reference_uid": "region",
+            "relation": "inside",
+            "released": [true],
+            "boundary_frames": [3]
+          },
+          "available": [true]
+        }
+      },
+      "expected": {
+        "goal": ["unavailable"],
+        "milestones": ["unavailable"],
+        "status": "unavailable",
+        "certificate_ready": false
+      }
+    }
+  ],
+  "runtime": {
+    "segments": [
+      {
+        "name": "step_01__01__call_01",
+        "active": [true],
+        "successes": [true],
+        "success": true,
+        "start_steps": [0],
+        "end_steps": [1],
+        "start_step": 0,
+        "end_step": 1,
+        "metadata": {
+          "program_segment_source_path": ["program", "items", 0],
+          "runtime": {
+            "env_ids": [0],
+            "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
+            "calls": []
+          }
+        }
+      },
+      {
+        "name": "step_01__01__call_02",
+        "active": [true],
+        "successes": [true],
+        "success": true,
+        "start_steps": [1],
+        "end_steps": [2],
+        "start_step": 1,
+        "end_step": 2,
+        "metadata": {
+          "program_segment_source_path": ["program", "items", 1],
+          "runtime": {
+            "env_ids": [0],
+            "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
+            "calls": [
+              {
+                "invocation_id": "count/step_01__01__call_02:0",
+                "invocation_revision": 0,
+                "status": "completed",
+                "effects": [
+                  {
+                    "boundary": {"kind": "terminal"},
+                    "timestamp": 0.08,
+                    "observation_revision": 2,
+                    "effect_spec": {
+                      "effect_kind": "release",
+                      "invocation_id": "count/step_01__01__call_02:0",
+                      "invocation_revision": 0,
+                      "env_ids": [0],
+                      "state_expectations": [
+                        {
+                          "expectation_id": "source",
+                          "relation": "detached",
+                          "object_id": "a",
+                          "resource_id": "left"
+                        }
+                      ],
+                      "clauses": [
+                        {
+                          "clause_id": "source.constraint",
+                          "expectation_id": "source",
+                          "expected": false,
+                          "evidence_kind": "constraint"
+                        },
+                        {
+                          "clause_id": "source.pose",
+                          "expectation_id": "source",
+                          "expectation": "separated"
+                        }
+                      ]
+                    },
+                    "decision": {"success_mask": [true]},
+                    "evidence": {
+                      "source.constraint": {
+                        "values": [false],
+                        "valid_mask": [true],
+                        "env_ids": [0],
+                        "timestamp": 0.08,
+                        "observation_revision": 2
+                      },
+                      "source.pose": {
+                        "object_to_endpoint": [
+                          [
+                            [1.0, 0.0, 0.0, 0.0],
+                            [0.0, 1.0, 0.0, 0.0],
+                            [0.0, 0.0, 1.0, 0.0],
+                            [0.0, 0.0, 0.0, 1.0]
+                          ]
+                        ],
+                        "valid_mask": [true],
+                        "env_ids": [0],
+                        "timestamp": 0.08,
+                        "observation_revision": 2
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "step_01__01__call_03",
+        "active": [true],
+        "successes": [true],
+        "success": true,
+        "start_steps": [2],
+        "end_steps": [3],
+        "start_step": 2,
+        "end_step": 3,
+        "metadata": {
+          "program_segment_source_path": ["program", "items", 2],
+          "runtime": {
+            "env_ids": [0],
+            "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
+            "calls": []
+          }
+        }
+      },
+      {
+        "name": "step_01__call_01",
+        "active": [true],
+        "successes": [true],
+        "success": true,
+        "start_steps": [3],
+        "end_steps": [4],
+        "start_step": 3,
+        "end_step": 4,
+        "metadata": {
+          "program_segment_source_path": ["program", "items", 3],
+          "runtime": {
+            "env_ids": [0],
+            "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
+            "calls": []
+          }
+        }
+      },
+      {
+        "name": "step_01__call_02",
+        "active": [true],
+        "successes": [true],
+        "success": true,
+        "start_steps": [4],
+        "end_steps": [5],
+        "start_step": 4,
+        "end_step": 5,
+        "metadata": {
+          "program_segment_source_path": ["program", "items", 4],
+          "runtime": {
+            "env_ids": [0],
+            "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
+            "calls": [
+              {
+                "invocation_id": "count/step_01__call_02:0",
+                "invocation_revision": 0,
+                "status": "completed",
+                "effects": [
+                  {
+                    "boundary": {"kind": "terminal"},
+                    "timestamp": 0.2,
+                    "observation_revision": 2,
+                    "effect_spec": {
+                      "effect_kind": "release",
+                      "invocation_id": "count/step_01__call_02:0",
+                      "invocation_revision": 0,
+                      "env_ids": [0],
+                      "state_expectations": [
+                        {
+                          "expectation_id": "source",
+                          "relation": "detached",
+                          "object_id": "b",
+                          "resource_id": "left"
+                        }
+                      ],
+                      "clauses": [
+                        {
+                          "clause_id": "source.constraint",
+                          "expectation_id": "source",
+                          "expected": false,
+                          "evidence_kind": "constraint"
+                        },
+                        {
+                          "clause_id": "source.pose",
+                          "expectation_id": "source",
+                          "expectation": "separated"
+                        }
+                      ]
+                    },
+                    "decision": {"success_mask": [true]},
+                    "evidence": {
+                      "source.constraint": {
+                        "values": [false],
+                        "valid_mask": [true],
+                        "env_ids": [0],
+                        "timestamp": 0.2,
+                        "observation_revision": 2
+                      },
+                      "source.pose": {
+                        "object_to_endpoint": [
+                          [
+                            [1.0, 0.0, 0.0, 0.0],
+                            [0.0, 1.0, 0.0, 0.0],
+                            [0.0, 0.0, 1.0, 0.0],
+                            [0.0, 0.0, 0.0, 1.0]
+                          ]
+                        ],
+                        "valid_mask": [true],
+                        "env_ids": [0],
+                        "timestamp": 0.2,
+                        "observation_revision": 2
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "step_01__call_03",
+        "active": [true],
+        "successes": [true],
+        "success": true,
+        "start_steps": [5],
+        "end_steps": [6],
+        "start_step": 5,
+        "end_step": 6,
+        "metadata": {
+          "program_segment_source_path": ["program", "items", 5],
+          "runtime": {
+            "env_ids": [0],
+            "task_state": {"batch_size": 1, "held_objects": [], "coordinated_held_objects": []},
+            "calls": []
+          }
+        }
+      }
+    ]
+  }
+}

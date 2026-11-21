@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+
 import argparse
 from copy import deepcopy
 from pathlib import Path
@@ -36,33 +37,271 @@ from embodichain.lab.gym.utils.gym_utils import (
     build_env_cfg_from_args,
     build_trajectory_buffer,
     config_to_cfg,
+    convert_observation_to_space,
     DEFAULT_MANAGER_MODULES,
     load_trajectory,
     merge_args_with_gym_config,
     init_rollout_buffer_from_config,
+    init_rollout_buffer_from_gym_space,
 )
-from embodichain_robots import URRobotCfg
+from embodichain.extensions.robots import URRobotCfg
 from embodichain.lab.sim.cfg import DefaultPhysicsCfg, NewtonPhysicsCfg
 from embodichain.lab.sim.sensors import CameraCfg
 from embodichain.utils.utility import load_config, save_config
+from embodichain.lab.gym.utils.composition import resolve_gym_components
 
 _REPOSITORY_ROOT = Path(__file__).parents[3]
 _CUBE_GYM_CONFIG_PATH = (
     _REPOSITORY_ROOT
-    / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+    / "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
 )
 _CUBE_TASK_PROGRAM_DIR = _CUBE_GYM_CONFIG_PATH.parent / "task_program"
 _CUBE_INTEGRATION_PATH = _CUBE_TASK_PROGRAM_DIR / "integration.yaml"
 _CUBE_ENVIRONMENT_PATH = _CUBE_GYM_CONFIG_PATH.parent / "envs/default.yaml"
-_COMPONENT_ROOT = _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs/components"
+_COMPONENT_ROOT = _REPOSITORY_ROOT / "embodichain/extensions/tasks/configs/components"
 _CUBE_POLICY_PATH = _COMPONENT_ROOT / "execution_policies/trajectory_open_loop.yaml"
 _CUBE_EMBODIMENT_PATH = _COMPONENT_ROOT / "embodiments/ur5_dh_pgi_140_80.yaml"
 _TABLEWARE_CONFIG_ROOT = (
     _REPOSITORY_ROOT
-    / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware"
+    / "embodichain/extensions/tasks/configs/tasks/manipulation/tableware"
 )
 CUBE_ROBOT_PROFILE_ID = "ur5_dh_pgi_140_80"
 CUBE_SCENE_REGISTRY_ID = "task_program_repeated_pick_place"
+
+
+@pytest.mark.parametrize(
+    "scene, resource",
+    [
+        ("office", "RoboSplatterOfficeGS/asset.usda"),
+        ("discoverse", "DiscoverseLab3GS/asset.usda"),
+        ("robosimgs", "RoboSimGSTabletopGS/asset.usda"),
+    ],
+)
+def test_gaussian_task_backgrounds_allow_replication_with_original_coordinates(
+    scene: str, resource: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Official tasks retain authored USD placement for native replication."""
+    from embodichain.data import get_data_path
+
+    source = tmp_path / "asset.usda"
+    source.write_text('#usda 1.0\ndef Xform "Asset" { def Xform "Visual" {} }\n')
+
+    def resolve(reference: str, *args, **kwargs) -> str:
+        if reference == resource:
+            return str(source)
+        return get_data_path(reference, *args, **kwargs)
+
+    monkeypatch.setattr("embodichain.data.get_data_path", resolve)
+    path = (
+        _REPOSITORY_ROOT
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/gaussian_pick_place"
+        / f"task.{scene}.yaml"
+    )
+    raw = load_config(path)
+    raw["num_envs"] = 4
+    cfg = config_to_cfg(raw, source_path=path)
+    background = next(
+        item for item in cfg.visual_object if item.uid == "scan_background"
+    )
+    assert cfg.num_envs == 4
+    assert background.source.file_path == str(source)
+    assert background.source.source_prim_path == "/Asset/Visual"
+    assert background.source_pose_mode == "preserve"
+    assert tuple(background.init_rot) == (0, 0, 0)
+    assert background.visuals is None
+    assert cfg.sim_cfg.render_cfg.gaussian.apply_display_srgb is False
+
+
+@pytest.fixture
+def camera_component(tmp_path: Path) -> tuple[dict, dict]:
+    """An embodiment with independently calibrated world and mounted cameras."""
+    component = {
+        "embodiment_id": "camera_calibration",
+        "simulation": {
+            "uid": "TestRobot",
+            "sensors": [
+                {
+                    "sensor_type": "Camera",
+                    "uid": "wrist",
+                    "intrinsics": [430, 430, 480, 270],
+                    "extrinsics": {
+                        "parent": "hand",
+                        "pos": [0.1, 0, 0.065],
+                        "quat": [0, 0, 0, 1],
+                    },
+                }
+            ],
+        },
+        "sensor": [
+            {
+                "sensor_type": "Camera",
+                "uid": "third",
+                "width": 960,
+                "height": 540,
+                "intrinsics": [700, 700, 480, 270],
+                "extrinsics": {"eye": [1, -2, 3], "target": [0, 0, 0], "up": None},
+                "enable_color": True,
+                "enable_depth": False,
+            }
+        ],
+    }
+    config = {
+        "id": "EmbodiedEnv-v1",
+        "physics": "default",
+        "env": {},
+        "embodiment": {"component": "embodiment.yaml"},
+    }
+    save_config(tmp_path / "embodiment.yaml", component)
+    return config, component
+
+
+@pytest.mark.parametrize("snapshot", [False, True])
+def test_camera_overrides_preserve_mounts_and_do_not_mutate_components(
+    camera_component: tuple[dict, dict],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    snapshot: bool,
+) -> None:
+    """File and file-free composition preserve untargeted fields and later loads."""
+    config, component = camera_component
+    config["embodiment"]["camera_overrides"] = {
+        "third": {
+            "intrinsics": [480, 480, 480, 270],
+            "extrinsics": {"eye": [-1, -2, 3]},
+        },
+        "wrist": {"extrinsics": {"pos": [0.2, 0, 0.065]}},
+    }
+    original_config, original_component = deepcopy(config), deepcopy(component)
+    sources = {"embodiment.yaml": component} if snapshot else None
+    if snapshot:
+        from embodichain.lab.gym.utils import _component_composition
+
+        def forbidden(*args, **kwargs):
+            raise AssertionError("Snapshot composition reopened a component")
+
+        monkeypatch.setattr(_component_composition, "load_config", forbidden)
+        monkeypatch.setattr(_component_composition, "resolve_config_path", forbidden)
+    resolved = resolve_gym_components(
+        config, base_dir=tmp_path, component_sources=sources
+    )
+    third = resolved.config["sensor"][0]
+    wrist = resolved.config["robot"]["sensors"][0]
+    expected_third = deepcopy(component["sensor"][0])
+    expected_third["intrinsics"] = [480, 480, 480, 270]
+    expected_third["extrinsics"]["eye"] = [-1, -2, 3]
+    expected_wrist = deepcopy(component["simulation"]["sensors"][0])
+    expected_wrist["extrinsics"]["pos"] = [0.2, 0, 0.065]
+    assert third == expected_third
+    assert wrist == expected_wrist
+    cfg = config_to_cfg(
+        config, source_path=tmp_path / "task.yaml", component_sources=sources
+    )
+    assert cfg.sensor[0].extrinsics.eye == [-1, -2, 3]
+    assert cfg.robot.sensors[0].extrinsics.parent == "hand"
+    assert cfg.robot.sensors[0].extrinsics.quat == [0, 0, 0, 1]
+    assert config == original_config
+    assert component == original_component
+    third["extrinsics"]["eye"][0] = 999
+    plain = deepcopy(config)
+    plain["embodiment"].pop("camera_overrides")
+    reloaded = resolve_gym_components(
+        plain, base_dir=tmp_path, component_sources=sources
+    )
+    assert reloaded.config["sensor"] == component["sensor"]
+    assert reloaded.config["robot"]["sensors"] == component["simulation"]["sensors"]
+
+
+@pytest.mark.parametrize(
+    ("uid", "extrinsics", "expected"),
+    [
+        (
+            "third",
+            {"pos": [1, 2, 3], "quat": [0, 0, 0, 1]},
+            {"pos": [1, 2, 3], "quat": [0, 0, 0, 1]},
+        ),
+        (
+            "wrist",
+            {"eye": [0, 0, 0], "target": [0, 1, 0]},
+            {"parent": "hand", "eye": [0, 0, 0], "target": [0, 1, 0]},
+        ),
+    ],
+)
+def test_camera_override_switches_complete_pose_representation(
+    camera_component: tuple[dict, dict],
+    tmp_path: Path,
+    uid: str,
+    extrinsics: dict,
+    expected: dict,
+) -> None:
+    """A complete alternative pose clears stale fields and retains mount identity."""
+    config, _ = camera_component
+    config["embodiment"]["camera_overrides"] = {uid: {"extrinsics": extrinsics}}
+    resolved = resolve_gym_components(config, base_dir=tmp_path).config
+    sensors = {
+        s["uid"]: s for s in [*resolved["sensor"], *resolved["robot"]["sensors"]]
+    }
+    assert sensors[uid]["extrinsics"] == expected
+
+
+@pytest.mark.parametrize(
+    ("patch", "match"),
+    [
+        ([], "UID-keyed mapping"),
+        ({"unknown": {"intrinsics": [480, 480, 480, 270]}}, "explicitly declared"),
+        ({3: {"intrinsics": [480, 480, 480, 270]}}, "UID.*string"),
+        ({"third": {}}, "must override"),
+        ({"third": {"width": 800}}, "unsupported fields"),
+        ({"third": {"enable_depth": True}}, "unsupported fields"),
+        ({"third": {"intrinsics": [480, 480, 480]}}, "4 finite numbers"),
+        ({"third": {"intrinsics": [True, 480, 480, 270]}}, "4 finite numbers"),
+        ({"third": {"intrinsics": [float("nan"), 480, 480, 270]}}, "4 finite numbers"),
+        ({"third": {"intrinsics": [480, 0, 480, 270]}}, "focal lengths"),
+        ({"wrist": {"extrinsics": {"parent": "other_hand"}}}, "unsupported fields"),
+        (
+            {"third": {"extrinsics": {"pos": [0, 0, 0], "eye": [1, 0, 0]}}},
+            "either pos/quat",
+        ),
+        ({"third": {"extrinsics": {"pos": [0, 0, 0]}}}, "changing representation"),
+        ({"third": {"extrinsics": {"target": [1, -2, 3]}}}, "distinct eye/target"),
+        ({"third": {"extrinsics": {"up": [0, 0, 0]}}}, "nonzero up"),
+        ({"third": {"extrinsics": {"up": None}}}, "3 finite numbers"),
+        ({"third": {"extrinsics": {"up": [-1, 2, -3]}}}, "parallel"),
+        ({"third": {"extrinsics": {"eye": [0, 0, float("inf")]}}}, "finite numbers"),
+        ({"wrist": {"extrinsics": {"quat": [0, 0, 0, 2]}}}, "unit XYZW"),
+        ({"wrist": {"extrinsics": {"pos": [1, 2]}}}, "3 finite numbers"),
+    ],
+)
+def test_camera_overrides_reject_invalid_calibration_before_world(
+    camera_component: tuple[dict, dict], tmp_path: Path, patch: object, match: str
+) -> None:
+    """Closed calibration overrides cannot change sensor identity or emit invalid poses."""
+    config, _ = camera_component
+    config["embodiment"]["camera_overrides"] = patch
+    with pytest.raises((TypeError, ValueError), match=match):
+        resolve_gym_components(config, base_dir=tmp_path)
+
+
+@pytest.mark.parametrize(
+    "invalid_target", ["duplicate", "ContactSensor", "StereoCamera"]
+)
+def test_camera_overrides_reject_ambiguous_or_non_camera_targets(
+    camera_component: tuple[dict, dict], tmp_path: Path, invalid_target: str
+) -> None:
+    """UID lookup covers both declared lists and accepts ordinary cameras only."""
+    config, component = camera_component
+    config["embodiment"]["camera_overrides"] = {
+        "third": {"intrinsics": [480, 480, 480, 270]}
+    }
+    if invalid_target == "duplicate":
+        component["simulation"]["sensors"][0]["uid"] = "third"
+        match = "Duplicate sensor uid"
+    else:
+        component["sensor"][0]["sensor_type"] = invalid_target
+        match = "ordinary Camera"
+    with pytest.raises(ValueError, match=match):
+        resolve_gym_components(
+            config, base_dir=tmp_path, component_sources={"embodiment.yaml": component}
+        )
 
 
 def test_env_launcher_args_include_physics():
@@ -225,7 +464,7 @@ def test_config_to_cfg_rejects_conflicting_action_declarations() -> None:
         config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
 
 
-@pytest.mark.parametrize("backend", (None, True, "physx", " newton"))
+@pytest.mark.parametrize("backend", (None, True, "Default", " newton"))
 def test_config_to_cfg_rejects_invalid_physics_backend(backend: object) -> None:
     """Only the two exact public backend names are accepted."""
     config = {
@@ -242,7 +481,7 @@ def test_config_to_cfg_rejects_invalid_physics_backend(backend: object) -> None:
 @pytest.mark.parametrize(
     ("backend", "physics_config", "field_name"),
     (
-        ("default", {"num_substeps": 2}, "num_substeps"),
+        ("default", {"requires_grad": True}, "requires_grad"),
         ("newton", {"enable_ccd": True}, "enable_ccd"),
     ),
 )
@@ -270,7 +509,7 @@ def test_config_to_cfg_rejects_other_backend_physics_fields(
 @pytest.mark.parametrize(
     ("backend", "physics_config", "config_type"),
     (
-        ("default", {"enable_ccd": True}, DefaultPhysicsCfg),
+        ("default", {"enable_ccd": True, "num_substeps": 2}, DefaultPhysicsCfg),
         ("newton", {"num_substeps": 2}, NewtonPhysicsCfg),
     ),
 )
@@ -291,6 +530,8 @@ def test_config_to_cfg_builds_declared_physics_config(
     cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
 
     assert type(cfg.sim_cfg.physics_cfg) is config_type
+    for name, value in physics_config.items():
+        assert getattr(cfg.sim_cfg.physics_cfg, name) == value
 
 
 @pytest.mark.parametrize(
@@ -328,6 +569,38 @@ def test_config_to_cfg_applies_explicit_cpu_to_newton() -> None:
     cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
 
     assert cfg.sim_cfg.device == "cpu"
+
+
+def test_expert_rollout_payloads_use_validity_and_preserve_rgbd_dtypes() -> None:
+    """Only written frames are valid, including after episode row reuse."""
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+
+    observation = TensorDict(
+        {
+            "rgb": torch.arange(96, dtype=torch.uint8).reshape(2, 3, 4, 4),
+            "depth": torch.full((2, 3, 4), 0.375, dtype=torch.float32),
+        },
+        batch_size=[2],
+    )
+    buffer = init_rollout_buffer_from_gym_space(
+        convert_observation_to_space(observation),
+        gymnasium.spaces.Box(-1, 1, shape=(2, 1), dtype=np.float32),
+        max_episode_steps=4,
+        num_envs=2,
+    )
+    assert buffer.batch_size == torch.Size([2, 4])
+    assert not buffer["valid"].any()
+    assert (buffer["episode_step"] == -1).all()
+    buffer["obs"][:, 0] = observation
+    buffer["valid"][:, 0] = True
+    torch.testing.assert_close(buffer["obs", "rgb"][:, 0], observation["rgb"])
+    torch.testing.assert_close(buffer["obs", "depth"][:, 0], observation["depth"])
+
+    env = SimpleNamespace(rollout_buffer=buffer)
+    EmbodiedEnv._clear_expert_rollout_rows(env, torch.tensor([0]))
+    assert not buffer["valid"][0].any()
+    assert buffer["valid"][1].tolist() == [True, False, False, False]
+    torch.testing.assert_close(buffer["obs", "depth"][1, 0], observation["depth"][1])
 
 
 class TestInitRolloutBufferFromConfig:
@@ -384,12 +657,12 @@ class TestInitRolloutBufferFromConfig:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            "embodichain_robots.agilex.cobotmagic.cfg.get_data_path",
+            "embodichain.extensions.robots.agilex.cobotmagic.cfg.get_data_path",
             lambda value: value,
         )
         config = {
             "embodiment": {
-                "component": "extensions/embodichain_tasks/configs/components/embodiments/cobotmagic.yaml"
+                "component": "embodichain/extensions/tasks/configs/components/embodiments/cobotmagic.yaml"
             },
             "env": {},
         }
@@ -836,6 +1109,24 @@ def test_viser_launcher_flag_implies_headless_viser_commands():
     assert merged_config["headless"] is True
     assert merged_config["visualization"]["backend"] == "viser"
     assert merged_config["visualization"]["allow_commands"] is True
+
+
+@pytest.mark.parametrize("allow_commands", [False, True])
+def test_viser_launcher_preserves_explicit_command_policy(allow_commands):
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser)
+    config = {
+        "id": "Dummy-v0",
+        "physics": "default",
+        "visualization": {"allow_commands": allow_commands},
+    }
+    original = deepcopy(config)
+
+    merged = merge_args_with_gym_config(parser.parse_args(["--viser"]), config)
+
+    assert merged["visualization"]["backend"] == "viser"
+    assert merged["visualization"]["allow_commands"] is allow_commands
+    assert config == original
 
 
 def test_sensor_and_extra_obs_together():
@@ -1452,6 +1743,7 @@ class TestConfigToCfgFromFile:
         environment = load_config(environment_path)
         environment["physics"] = "newton"
         environment["physics_config"] = {"num_substeps": 2}
+        environment["enable_ground_plane"] = False
         save_config(environment_path, environment)
 
         cfg = config_to_cfg(
@@ -1462,6 +1754,23 @@ class TestConfigToCfgFromFile:
 
         assert isinstance(cfg.sim_cfg.physics_cfg, NewtonPhysicsCfg)
         assert cfg.sim_cfg.physics_cfg.num_substeps == 2
+        assert cfg.sim_cfg.enable_ground_plane is False
+
+    def test_environment_component_owns_ground_declaration(self, tmp_path) -> None:
+        """A deployment cannot re-enable physical ground owned by its component."""
+        self._write_deployment(tmp_path)
+        environment_path = tmp_path / "env.yaml"
+        environment = load_config(environment_path)
+        environment["enable_ground_plane"] = False
+        save_config(environment_path, environment)
+        config = self._environment_component_gym_config()
+        config["enable_ground_plane"] = True
+        with pytest.raises(ValueError, match="environment.component"):
+            config_to_cfg(
+                config,
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "task.ur5.yaml",
+            )
 
     @pytest.mark.parametrize(
         ("field_name", "value"),
@@ -1609,7 +1918,7 @@ class TestConfigToCfgFromFile:
         self,
         task_name: str,
     ) -> None:
-        """CobotMagic task solutions share one exact physical component."""
+        """CobotMagic task solutions reuse one component with bounded placement tuning."""
         filename = (
             "task.cobotmagic.yaml"
             if task_name in {"blocks_ranking_rgb", "stack_blocks_two"}
@@ -1618,9 +1927,13 @@ class TestConfigToCfgFromFile:
         config_path = _TABLEWARE_CONFIG_ROOT / task_name / filename
         config = load_config(config_path)
 
-        assert config["embodiment"] == {
-            "component": "../../../../components/embodiments/cobotmagic.yaml"
-        }
+        assert (
+            config["embodiment"]["component"]
+            == "../../../../components/embodiments/cobotmagic.yaml"
+        )
+        assert config["embodiment"].get("overrides", {}) == (
+            {"init_pos": [0.0, 0.3, 0.9]} if task_name == "stack_blocks_two" else {}
+        )
         assert "robot" not in config
         assert "sensor" not in config
 
@@ -1631,6 +1944,8 @@ class TestConfigToCfgFromFile:
         )
 
         assert cfg.robot.uid == "CobotMagic"
+        if task_name == "stack_blocks_two":
+            assert cfg.robot.init_pos == pytest.approx([0.0, 0.3, 0.9])
         assert [sensor.uid for sensor in cfg.sensor] == ["cam_high"]
         assert [sensor.uid for sensor in [*cfg.sensor, *cfg.robot.sensors]] == [
             "cam_high",
@@ -2206,6 +2521,7 @@ class TestConfigToCfgFromFile:
                 "renderer": "rt",
                 "spp": 4,
                 "tone_mapping_enabled": True,
+                "tone_mapping_type": "aces",
                 "tone_mapping_exposure": 1.25,
                 "denoising": {
                     "window": "optix",
@@ -2214,6 +2530,9 @@ class TestConfigToCfgFromFile:
                 "dlss": {
                     "dlss_quality": 1,
                     "tiled_enabled": False,
+                    "tiled_gutter_pixels": 0,
+                    "tiled_overscan_pixels": 0,
+                    "frame_time_delta_ms": 1000 / 240,
                 },
                 "nrd": {
                     "max_accumulated_frame_num": 24,
@@ -2282,6 +2601,7 @@ class TestConfigToCfgFromFile:
         assert cfg.sim_cfg.render_cfg.renderer == "rt"
         assert cfg.sim_cfg.render_cfg.spp == 4
         assert cfg.sim_cfg.render_cfg.tone_mapping_enabled is True
+        assert cfg.sim_cfg.render_cfg.tone_mapping_type == "aces"
         assert cfg.sim_cfg.render_cfg.tone_mapping_exposure == 1.25
         from embodichain.lab.sim import DenoisingCfg, DLSSCfg, NRDCfg
         import dexsim
@@ -2301,6 +2621,13 @@ class TestConfigToCfgFromFile:
         )
         assert world_config.dlss_config.dlss_quality == 1
         assert world_config.dlss_config.tiled_enabled is False
+        assert world_config.dlss_config.tiled_gutter_pixels == 0
+        assert getattr(world_config.dlss_config, "tiled_overscan_pixels", 0) == 0
+        assert world_config.dlss_config.frame_time_delta_ms == pytest.approx(1000 / 240)
+        assert (
+            world_config.postprocess_config.tone_mapping_type
+            == dexsim.types.ToneMappingType.ACES
+        )
         assert world_config.nrd_config.max_accumulated_frame_num == 24
         assert world_config.nrd_config.taa_min_current_weight == pytest.approx(0.125)
         assert cfg.sim_cfg.visualization.backend == "viser"
@@ -2552,6 +2879,24 @@ def test_build_trajectory_buffer_uids_filter():
     assert "ball" not in buf["states"]["rigid_objects"].keys()
 
 
+@pytest.mark.parametrize("uids", [None, ["wire"], ["other"]])
+def test_cable_trajectory_buffer_preserves_topology_and_uid_selection(uids):
+    env = _stub_env()
+    env.sim._cable_objects = {
+        "wire": SimpleNamespace(data=SimpleNamespace(num_segments=3)),
+        "other": SimpleNamespace(data=SimpleNamespace(num_segments=5)),
+    }
+    buffer = build_trajectory_buffer(
+        env, max_steps=4, num_envs=2, device="cpu", uids=uids
+    )
+    cables = buffer["states", "cables"]
+    assert set(cables.keys()) == set(uids or env.sim._cable_objects)
+    for uid in cables.keys():
+        state = cables[uid, "segment_state_w"]
+        assert state.shape == (2, 4, env.sim._cable_objects[uid].data.num_segments, 13)
+        assert state.dtype == torch.float32
+
+
 def test_load_trajectory_validates_and_returns_dict(tmp_path):
     data = {
         "states": TensorDict({"a": torch.zeros(1, 4)}, batch_size=[1, 4]),
@@ -2608,6 +2953,58 @@ def test_launcher_omissions_preserve_runtime_configuration() -> None:
     assert merge_args_with_gym_config(args, config) == config
 
 
+def test_configured_real2sim_profile_resolves_from_task_before_dataset_override(
+    tmp_path, monkeypatch
+) -> None:
+    """The launch selector survives parsing without becoming an EnvCfg field."""
+    path = tmp_path / "deployment/task.yaml"
+    path.parent.mkdir()
+    save_config(
+        path,
+        {
+            "id": "ConfiguredSource-v0",
+            "physics": "default",
+            "real2sim": {"profile": "profiles/collection.yaml"},
+            "env": {"dataset": {}},
+        },
+    )
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+    args = parser.parse_args(["--gym-config", str(path)])
+    args.expansion_dataset_dir = str(tmp_path / "data")
+    observed = {}
+
+    def parse(config, **kwargs):
+        observed.update(config)
+        return SimpleNamespace()
+
+    monkeypatch.setattr("embodichain.lab.gym.utils.gym_utils.config_to_cfg", parse)
+    monkeypatch.chdir(tmp_path)
+    _, resolved, _ = build_env_cfg_from_args(args)
+    assert resolved["real2sim"]["profile"] == str(
+        path.parent / "profiles/collection.yaml"
+    )
+    assert resolved["env"]["dataset"] == {}
+    assert "real2sim" not in observed
+
+
+@pytest.mark.parametrize(
+    "binding",
+    [None, {}, {"profile": ""}, {"profile": "a.yaml", "provider": "arbitrary"}],
+)
+def test_configured_real2sim_rejects_invalid_launch_selection(
+    tmp_path, binding
+) -> None:
+    path = tmp_path / "task.yaml"
+    save_config(
+        path, {"id": "InvalidSource-v0", "physics": "default", "real2sim": binding}
+    )
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+    with pytest.raises(ValueError, match="real2sim"):
+        build_env_cfg_from_args(parser.parse_args(["--gym-config", str(path)]))
+
+
 def test_launcher_explicit_runtime_overrides_win() -> None:
     parser = argparse.ArgumentParser()
     add_env_launcher_args_to_parser(parser, require_gym_config=True)
@@ -2641,6 +3038,199 @@ def test_launcher_can_explicitly_disable_configured_headless() -> None:
     args = parser.parse_args(["--gym_config", "task.yaml", "--no-headless"])
     merged = merge_args_with_gym_config(args, {"physics": "default", "headless": True})
     assert merged["headless"] is False
+
+
+@pytest.mark.parametrize("suffix", ["yaml", "json"])
+def test_gym_config_loads_gaussian_preset_and_single_visual(tmp_path, suffix):
+    from embodichain.lab.sim.cfg import GaussianSplatCfg
+
+    resource = tmp_path / "scan.ply"
+    resource.write_text("fixture")
+    config = {
+        "id": "EmbodiedEnv-v1",
+        "physics": "default",
+        "env": {},
+        "robot": {"uid": "robot"},
+        "render_cfg": {"preset": "gaussian", "spp": 4},
+        "visual_object": [
+            {
+                "uid": "room",
+                "visuals": {"type": "gaussian_splat", "file_path": str(resource)},
+            }
+        ],
+    }
+    path = tmp_path / f"gaussian.{suffix}"
+    save_config(path, config)
+    cfg = config_to_cfg(load_config(path), manager_modules=DEFAULT_MANAGER_MODULES)
+    assert cfg.sim_cfg.render_cfg.renderer == "hybrid"
+    assert cfg.sim_cfg.render_cfg.gaussian.enabled is True
+    assert cfg.sim_cfg.render_cfg.denoising.offscreen == "optix"
+    assert cfg.sim_cfg.render_cfg.spp == 4
+    element = cfg.visual_object[0].visuals[0]
+    assert element.id == "appearance"
+    assert isinstance(element.representation, GaussianSplatCfg)
+    assert element.representation.file_path == str(resource)
+    config["renderer"] = "fast-rt"
+    overridden = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+    assert overridden.sim_cfg.render_cfg.renderer == "fast-rt"
+    assert cfg.sim_cfg.render_cfg.renderer == "hybrid"
+
+
+@pytest.mark.parametrize(
+    "collection", ["background", "rigid_object", "rigid_object_group"]
+)
+def test_mesh_asset_paths_resolve_collision_and_visual_geometry(
+    collection: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Separate render meshes use the same asset resolver as collision meshes."""
+    paths = {
+        "TaskMeshes/collision.obj": str(tmp_path / "collision.obj"),
+        "TaskMeshes/visual.glb": str(tmp_path / "visual.glb"),
+    }
+    monkeypatch.setattr("embodichain.data.get_data_path", paths.__getitem__)
+    obj = {
+        "uid": "cup",
+        "shape": {"shape_type": "Mesh", "fpath": "TaskMeshes/collision.obj"},
+        "visual_shape": {"shape_type": "Mesh", "fpath": "TaskMeshes/visual.glb"},
+    }
+    entries = [obj]
+    if collection == "rigid_object_group":
+        entries = [{"uid": "cups", "rigid_objects": {"cup": obj}}]
+    cfg = config_to_cfg(
+        {
+            "id": "EmbodiedEnv-v1",
+            "physics": "default",
+            "env": {},
+            "robot": {"uid": "robot"},
+            collection: entries,
+        },
+        manager_modules=DEFAULT_MANAGER_MODULES,
+    )
+    parsed = getattr(cfg, collection)[0]
+    if collection == "rigid_object_group":
+        parsed = parsed.rigid_objects["cup"]
+    assert parsed.shape.fpath == paths["TaskMeshes/collision.obj"]
+    assert parsed.visual_shape is None
+    assert parsed.visuals[0].representation.fpath == paths["TaskMeshes/visual.glb"]
+
+
+@pytest.mark.parametrize(
+    "collection", ["background", "rigid_object", "rigid_object_group"]
+)
+@pytest.mark.parametrize("variant", [False, True])
+def test_nested_physical_mesh_paths_resolve_from_data_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, collection: str, variant: bool
+) -> None:
+    from embodichain.data import constants
+
+    root = tmp_path / "data"
+    path = root / "meshes" / "piece.obj"
+    path.parent.mkdir(parents=True)
+    path.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+    monkeypatch.setattr(constants, "EMBODICHAIN_DEFAULT_DATA_ROOT", str(root))
+    compound = {
+        "shape_type": "Compound",
+        "parts": [
+            {
+                "shape": {
+                    "shape_type": "Mesh",
+                    "fpath": "meshes/piece.obj",
+                    "collision": {"approximation": "convex_hull"},
+                }
+            }
+        ],
+    }
+    body_type = "static" if collection == "background" else "dynamic"
+    obj = {"uid": "piece", "body_type": body_type, "shape": compound}
+    if variant:
+        obj = {
+            "uid": "piece",
+            "body_type": body_type,
+            "shape": {"shape_type": "Cube"},
+            "env_variants": {"1": {"body_type": body_type, "shape": compound}},
+        }
+    boundary = {
+        "shape_type": "Mesh",
+        "fpath": "meshes/piece.obj",
+        "collision": {"approximation": "sdf", "force_sdf": False},
+    }
+    obj["particle_collision_shape"] = deepcopy(boundary)
+    if body_type == "dynamic":
+        obj["attrs"] = {"mass_props": {"mass": 1.0, "inertia": np.eye(3).tolist()}}
+    if variant:
+        obj["env_variants"]["1"]["particle_collision_shape"] = deepcopy(boundary)
+        if body_type == "dynamic":
+            obj["env_variants"]["1"]["attrs"] = deepcopy(obj["attrs"])
+    entries = (
+        [{"uid": "group", "rigid_objects": {"piece": obj}}]
+        if collection == "rigid_object_group"
+        else [obj]
+    )
+    cfg = config_to_cfg(
+        {
+            "id": "EmbodiedEnv-v1",
+            "physics": "newton",
+            "env": {},
+            "robot": {"uid": "robot"},
+            collection: entries,
+        },
+        manager_modules=DEFAULT_MANAGER_MODULES,
+    )
+    parsed = getattr(cfg, collection)[0]
+    if collection == "rigid_object_group":
+        parsed = parsed.rigid_objects["piece"]
+    from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
+
+    descriptor, _ = rigid_desc_from_cfg(parsed, newton_solver_type="dexuni")
+    assert descriptor.collisions[-1].file_path == str(path)
+    if variant:
+        parsed = parsed.env_variants[1]
+        descriptor = descriptor.env_variants[1]
+    assert parsed.shape.parts[0].shape.fpath == str(path)
+    assert parsed.particle_collision_shape.fpath == str(path)
+    assert descriptor.collisions[-1].file_path == str(path)
+
+
+@pytest.mark.parametrize("owner", ["inline", "environment", "scene"])
+def test_fluid_point_files_resolve_from_declaration_owner(
+    owner: str, tmp_path: Path
+) -> None:
+    physical_dir = tmp_path / "physical"
+    physical_dir.mkdir()
+    points = np.array([[0.0, 0.0, 0.0], [0.02, 0.0, 0.0]], dtype=np.float32)
+    np.savez(physical_dir / "water.npz", positions=points)
+    fluid = {"uid": "water", "spawn": {"kind": "points", "file_path": "water.npz"}}
+    config = {
+        "id": "EmbodiedEnv-v1",
+        "physics": "newton",
+        "env": {},
+        "robot": {"uid": "robot"},
+    }
+    source_path = tmp_path / "task.yaml"
+    if owner == "inline":
+        config["fluid_object"] = [fluid]
+        source_path = physical_dir / "task.yaml"
+    else:
+        component = {"simulation": {"fluid_object": [fluid]}}
+        if owner == "environment":
+            component.update(environment_id="fluid_test", physics="newton", env={})
+            del config["physics"], config["env"]
+        else:
+            component["scene_id"] = "fluid_test"
+        save_config(physical_dir / "component.yaml", component)
+        config[owner] = {"component": "physical/component.yaml"}
+
+    cfg = config_to_cfg(
+        config, manager_modules=DEFAULT_MANAGER_MODULES, source_path=source_path
+    )
+
+    spawn = cfg.fluid_object[0].spawn
+    assert spawn.file_path == str(physical_dir / "water.npz")
+    np.testing.assert_array_equal(spawn.sample(0.01), points)
+    assert fluid["spawn"]["file_path"] == "water.npz"
 
 
 def test_config_to_cfg_loads_render_only_objects():
@@ -2692,3 +3282,151 @@ def test_config_to_cfg_resolves_usd_source_files(monkeypatch, tmp_path):
         assert isinstance(asset.source, UsdSourceCfg)
         assert asset.source.file_path == str(tmp_path / "scene.usda")
         assert asset.source.source_prim_path == "/World/Asset"
+
+
+def test_checkpoint_resource_paths_resolve_from_config_owner(tmp_path, monkeypatch):
+    """Prepared robot and manifest paths survive a change of working directory."""
+    from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
+
+    owner = tmp_path / "run" / "configs"
+    resources = owner / "resources"
+    resources.mkdir(parents=True)
+    (resources / "robot.urdf").write_text('<robot name="frozen"/>')
+    (resources / "part.json").write_text("{}")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    raw = {
+        "id": "FrozenAssembly-v1",
+        "physics": "newton",
+        "robot": {"fpath": "./resources/robot.urdf"},
+        "env": {"extensions": {"physical_asset": {"fpath": "./resources/part.json"}}},
+    }
+    resolved = _resolve_gym_components(raw, base_dir=owner).config
+    assert resolved["robot"]["fpath"] == str(resources / "robot.urdf")
+    assert resolved["env"]["extensions"]["physical_asset"]["fpath"] == str(
+        resources / "part.json"
+    )
+    assert raw["robot"]["fpath"] == "./resources/robot.urdf"
+
+
+@pytest.mark.parametrize("field", ["scene_preparation", "resource_export"])
+def test_configured_rl_rejects_changed_preparation_or_export(field):
+    from copy import deepcopy
+    from gymnasium.envs.registration import registry
+    from embodichain.lab.gym.utils.gym_utils import _register_configured_rl
+    from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
+
+    name = f"ConfigOperationIdentity-{field}-v0"
+    config = {
+        "id": name,
+        "physics": "newton",
+        "rl_task": {},
+        "env": {field: {"func": "fixture:prepare", "params": {"variant": 1}}},
+    }
+    try:
+        _register_configured_rl(config, 10)
+        changed = deepcopy(config)
+        changed["env"][field]["params"]["variant"] = 2
+        with pytest.raises(ValueError, match="different declaration"):
+            _register_configured_rl(changed, 10)
+    finally:
+        REGISTERED_ENVS.pop(name, None)
+        registry.pop(name, None)
+
+
+def test_recording_only_observation_does_not_expand_policy_rollout_schema():
+    config = {
+        "sensor": [],
+        "env": {
+            "observations": {
+                "pose": {
+                    "mode": "add",
+                    "name": "private_pose",
+                    "consumers": ["recording"],
+                    "extra": {"shape": [7]},
+                },
+            }
+        },
+    }
+    buffer = init_rollout_buffer_from_config(
+        config=config, max_episode_steps=2, batch_size=1, state_dim=3, device="cpu"
+    )
+    assert "private_pose" not in buffer["obs"]
+
+
+@pytest.mark.parametrize(
+    "consumers",
+    [["recording"], "recording", ["evidence"], ["unknown"], ["policy", "policy"]],
+)
+def test_configured_observation_consumers_decode_and_validate(consumers):
+    config = {
+        "id": "RawObservation-v1",
+        "physics": "default",
+        "robot": {"uid": "robot"},
+        "env": {
+            "observations": {
+                "pose": {
+                    "func": "get_entity_state",
+                    "mode": "add",
+                    "name": "cube_pose",
+                    "consumers": consumers,
+                    "params": {"entity_cfg": {"uid": "cube"}},
+                    "extra": {"shape": [7]},
+                },
+            }
+        },
+    }
+    if consumers == ["recording"]:
+        cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+        assert cfg.observations.pose.consumers == ("recording",)
+        assert cfg.observations.pose.extra == {"shape": [7]}
+        assert cfg.observations.pose.params["entity_cfg"].uid == "cube"
+    else:
+        with pytest.raises(ValueError, match="Invalid observation consumers"):
+            config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+
+@pytest.mark.parametrize("selection", ["cli", "web", "backend"])
+def test_web_launcher_preserves_file_view_settings_and_applies_overrides(selection):
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser)
+    arguments = ["--web-port", "8766", "--web-fps", "24"]
+    if selection == "cli":
+        arguments.append("--web")
+    args = parser.parse_args(arguments)
+    config = {
+        "id": "Dummy-v0",
+        "physics": "default",
+        "visualization": {
+            "web": {"width": 640, "height": 360, "fps": 10},
+        },
+    }
+    if selection == "web":
+        config["web"] = True
+    elif selection == "backend":
+        config["visualization"]["backend"] = "dexsim-web"
+    merged = merge_args_with_gym_config(args, config)
+    if selection == "cli":
+        assert merged["headless"]
+        assert merged["visualization"]["backend"] == "dexsim-web"
+        assert merged["visualization"]["allow_commands"] is False
+    assert merged["visualization"]["web"] == {
+        "width": 640,
+        "height": 360,
+        "fps": 24,
+        "port": 8766,
+    }
+    assert "port" not in config["visualization"]["web"]
+    assert config["visualization"]["web"]["fps"] == 10
+
+
+def test_viser_cli_selection_overrides_authored_web_mode():
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser)
+    args = parser.parse_args(["--viser"])
+    merged = merge_args_with_gym_config(
+        args, {"id": "Dummy-v0", "physics": "default", "web": True}
+    )
+    assert merged["web"] is False
+    assert merged["visualization"]["backend"] == "viser"

@@ -78,7 +78,7 @@ synchronously.
 
 ## Franka reference task
 
-`embodichain_tasks.special.franka_reach_apg.FrankaReachApgEnv` is the canonical
+`embodichain.extensions.tasks.special.franka_reach_apg.FrankaReachApgEnv` is the canonical
 example. Its path is:
 
     action → new_joint_q → newton.eval_fk → body_q → reward kernel → action.grad
@@ -93,12 +93,21 @@ The public differentiable package exposes no solver stepper, trajectory, or
 gradient-rollout API. Add those capabilities as a separate future design when
 Newton dynamics are ready for end-to-end validation.
 
+Model-based training is a separate consumer of the existing
+`DifferentiableEnvProtocol` and shared collector/trainer, including RWM and the
+NeRD lightweight reference factories. It does not add a dynamics mode to this
+Warp environment or route model prediction through SimulationManager. The
+private `sim.diff._newton_fk` adapter supplies first-order q/qd gradients for
+finalized Newton models using independently owned Warp storage. It preserves
+native layout/COM conventions and does not step physics; reusable tensor FK/IK
+APIs remain in `compute.kinematics` and `learning.layers`.
+
 ## Source of truth
 
 - `embodichain/lab/gym/envs/differentiable_env.py`
 - `embodichain/lab/sim/cfg/simulation.py`
 - `embodichain/lab/sim/diff/`
-- `extensions/embodichain_tasks/embodichain_tasks/special/franka_reach_apg.py`
+- `embodichain/extensions/tasks/special/franka_reach_apg.py`
 
 ## Focused validation
 

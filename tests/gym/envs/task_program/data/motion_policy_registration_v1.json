@@ -1,0 +1,5 @@
+{
+  "source_commit": "d2251d2303112f767c016c7c88be40637791f785",
+  "fixture": "tests/gym/envs/task_program/test_catalog.py::_registration",
+  "fingerprint": "822af811ce51fcf57bd1ebdfcc62bb337c8b2da1c77dbfade5799699aef34082"
+}

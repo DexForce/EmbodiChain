@@ -15,13 +15,14 @@
 # ----------------------------------------------------------------------------
 
 from __future__ import annotations
+from embodichain.lab.gym.utils.gym_utils import _init_raw_rollout
+from tensordict import TensorDict
 
 from types import SimpleNamespace
 
 import gymnasium as gym
 import pytest
 import torch
-from tensordict import TensorDict
 
 from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.gym.envs.types import ControllerAction
@@ -315,6 +316,43 @@ def test_restoring_initial_replay_state_does_not_credit_physical_dwell():
     assert env.physical_objective.snapshot_row(0)["success"] is False
 
 
+def _enable_action_recording(env, actions):
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.managers.observation_manager import ObservationManager
+    from embodichain.lab.gym.envs.managers.observation_types import ObservationFrame
+
+    context = EpisodeContext(env.num_envs)
+    context._begin_episode(list(range(env.num_envs)))
+    context._finish_initialization(list(range(env.num_envs)))
+    env.episode_context = context
+    env.observation_manager = ObservationManager({}, env)
+    env.observation_manager._env._rollout_storage = getattr(
+        env.observation_manager._env, "_rollout_storage", None
+    )
+    if env.observation_manager._env._rollout_storage is None:
+        env.observation_manager._env._rollout_storage = TensorDict(
+            {},
+            batch_size=[len(env.observation_manager._env.episode_context.episode_ids)],
+        )
+    _init_raw_rollout(
+        env.observation_manager._env._rollout_storage,
+        env.observation_manager._env.episode_context,
+        **dict(fields={}, actions=actions),
+    )
+    env.observation_manager.bind_rollout_storage(
+        env.observation_manager._env._rollout_storage
+    )
+    env._traj_steps = env._rollout_storage["raw_steps"]
+
+    def frame():
+        return ObservationFrame(
+            None, {}, context.episode_ids, env.step_count, episode_owner=context
+        )
+
+    EmbodiedEnv._record_initial_observation(env, frame(), list(range(env.num_envs)))
+    return frame
+
+
 @pytest.mark.parametrize("mode", ["position", "position_velocity"])
 def test_expert_replay_can_record_decoded_controller_targets(mode):
     from embodichain.lab.gym.envs.expert_trajectory import build_expert_action_spec
@@ -327,12 +365,11 @@ def test_expert_replay_can_record_decoded_controller_targets(mode):
     env._traj_buffer = TensorDict(
         {"actions": torch.zeros_like(trajectory["actions"])}, batch_size=[1, 2]
     )
-    env._traj_steps = torch.zeros(1, dtype=torch.long)
-    env._seed_trajectory_states = lambda ids: None
+    frame = _enable_action_recording(env, env._traj_buffer["actions"])
     replay = ReplayWrapper(env, trajectory)
     for _ in range(2):
         replay.step(None)
-        EmbodiedEnv._write_trajectory_step(env)
+        EmbodiedEnv._write_trajectory_step(env, frame())
     assert env._traj_steps.tolist() == [2]
     torch.testing.assert_close(env._traj_buffer["actions"], trajectory["actions"])
 
@@ -340,12 +377,233 @@ def test_expert_replay_can_record_decoded_controller_targets(mode):
 def test_policy_recording_preserves_raw_delta_before_controller_transform():
     env = _ReplayEnv()
     env._traj_buffer = TensorDict({"actions": torch.zeros(1, 1, 2)}, batch_size=[1, 1])
-    env._traj_steps = torch.zeros(1, dtype=torch.long)
+    frame = _enable_action_recording(env, env._traj_buffer["actions"])
     env._trajectory_action_kind = "policy"
-    env._seed_trajectory_states = lambda ids: None
     env.step(torch.tensor([[1.0, 2.0]]))
-    EmbodiedEnv._write_trajectory_step(env)
+    EmbodiedEnv._write_trajectory_step(env, frame())
     torch.testing.assert_close(env.action_manager.action, torch.tensor([[11.0, 12.0]]))
     torch.testing.assert_close(
         env._traj_buffer["actions"][0, 0], torch.tensor([11.0, 12.0])
     )
+
+
+class _TaskReplayEnv(_ReplayEnv):
+    """Replay protocol with a virtual target independent of physical state."""
+
+    def __init__(self, num_envs=1):
+        super().__init__(num_envs)
+        self.goal_pose = torch.zeros(num_envs, 3)
+        self.termination_manager = object()
+        self.sim = SimpleNamespace(enable_physics=lambda value: None)
+        self.restored = False
+
+    def reset(self, *, seed=None, options=None):
+        self.goal_pose.fill_(99)
+        return {}, {}
+
+    def restore_task_initial_state(self, state):
+        self.goal_pose.copy_(torch.tensor(state["targets"]["goal_pose"]))
+        self.restored = True
+
+    def get_obs(self):
+        return {"goal": self.goal_pose.clone()}
+
+    def get_info(self):
+        return {"restored": self.restored}
+
+
+def test_dynamic_replay_restores_virtual_goal_before_first_observation(monkeypatch):
+    monkeypatch.setattr(
+        "embodichain.lab.gym.envs.wrapper.replay.restore_trajectory_state",
+        lambda *args: None,
+    )
+    trajectory = _trajectory(kind="raw_policy")
+    trajectory["meta"]["demo_episodes"] = [
+        {
+            "task_initial_state": {
+                "schema_version": 1,
+                "targets": {"goal_pose": [[1.0, 2.0, 3.0]]},
+            }
+        }
+    ]
+    env = _TaskReplayEnv()
+    replay = ReplayWrapper(env, trajectory)
+    obs, info = replay.reset()
+    torch.testing.assert_close(obs["goal"], torch.tensor([[1.0, 2.0, 3.0]]))
+    assert info["restored"] is True
+    with pytest.raises(ValueError, match="reset_ids"):
+        replay.reset(options={"reset_ids": [0]})
+
+
+def test_dynamic_task_replay_requires_recorded_context():
+    with pytest.raises(ValueError, match="task_initial_state"):
+        ReplayWrapper(_TaskReplayEnv(), _trajectory(kind="raw_policy"))
+
+
+def test_dynamic_replay_ignores_inactive_rl_restore_method():
+    env = _TaskReplayEnv()
+    env.termination_manager = None
+    replay = ReplayWrapper(env, _trajectory(kind="raw_policy"))
+    assert replay._task_outcome_replay is False
+
+
+def test_kinematic_task_replay_does_not_claim_measured_goal_acceptance():
+    replay = ReplayWrapper(
+        _TaskReplayEnv(), _trajectory(kind="raw_policy"), mode="kinematic"
+    )
+    assert replay._task_outcome_replay is False
+
+
+def test_replay_reset_reseeds_raw_history_after_restoring_source_state():
+    from itertools import count
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.managers.observation_types import (
+        ObservationDescriptor,
+        ObservationSample,
+        ObservationFrame,
+    )
+    from embodichain.lab.gym.envs.managers.observation_manager import ObservationManager
+
+    env = _ReplayEnv()
+    context = EpisodeContext(1)
+    context._begin_episode([0])
+    context._finish_initialization([0])
+    state = torch.zeros(1, 3)
+    env.robot.get_qpos = lambda: state
+    env.robot.set_qpos = lambda values, target: state.copy_(values)
+    env.robot.set_local_pose = lambda values: None
+    env.sim = SimpleNamespace(enable_physics=lambda enabled: None)
+    env.episode_context = context
+    env.observation_manager = ObservationManager({}, env)
+    env.observation_manager._env._rollout_storage = getattr(
+        env.observation_manager._env, "_rollout_storage", None
+    )
+    if env.observation_manager._env._rollout_storage is None:
+        env.observation_manager._env._rollout_storage = TensorDict(
+            {},
+            batch_size=[len(env.observation_manager._env.episode_context.episode_ids)],
+        )
+    _init_raw_rollout(
+        env.observation_manager._env._rollout_storage,
+        env.observation_manager._env.episode_context,
+        **dict(fields={}, actions=torch.zeros(1, 2, 2)),
+    )
+    env.observation_manager.bind_rollout_storage(
+        env.observation_manager._env._rollout_storage
+    )
+    descriptor = ObservationDescriptor(
+        "robot", "qpos", "joint", "joint_order", ("joint_units",), (3,), torch.float32
+    )
+    revisions = count()
+
+    def capture():
+        sample = ObservationSample(
+            descriptor, state.clone(), torch.ones(1, dtype=torch.bool), (None,)
+        )
+        return ObservationFrame(
+            {"qpos": state.clone()},
+            {"qpos": sample},
+            context.episode_ids,
+            next(revisions),
+            episode_owner=context,
+        )
+
+    env._capture_observation = capture
+    env._record_initial_observation = (
+        lambda frame, ids: EmbodiedEnv._record_initial_observation(env, frame, ids)
+    )
+    EmbodiedEnv._record_initial_observation(env, capture(), [0])
+    trajectory = _trajectory()
+    trajectory["states"] = TensorDict(
+        {
+            "robot": {
+                "root_pose": torch.zeros(1, 2, 7),
+                "qpos": torch.tensor([[[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]]),
+            }
+        },
+        batch_size=[1, 2],
+    )
+    obs, _ = ReplayWrapper(env, trajectory).reset()
+    snapshot = env.observation_manager.read_history(
+        [0], fields=["qpos"], episode_ids=[0]
+    )
+    torch.testing.assert_close(snapshot.values["qpos"], torch.tensor([[7.0, 8.0, 9.0]]))
+    torch.testing.assert_close(obs["qpos"], torch.tensor([[7.0, 8.0, 9.0]]))
+
+
+@pytest.mark.parametrize("completed", [False, True])
+@pytest.mark.parametrize("record_policy", [False, True])
+def test_expert_opt_in_uses_policy_controller_with_full_joint_target(
+    completed: bool,
+    record_policy: bool,
+) -> None:
+    """Converted expert targets keep measured holds on completed demo rows."""
+    from types import MethodType
+    from unittest.mock import MagicMock
+
+    from embodichain.lab.gym.envs.expert_trajectory import ExpertTrajectoryCfg
+    from embodichain.lab.gym.envs.managers import (
+        ActionManager,
+        ActionTermCfg,
+        ParallelGripperAction,
+    )
+
+    env = _ReplayEnv(num_envs=2)
+    env._explicit_policy_rollout = record_policy
+    env._record_raw_actions = record_policy
+    env._raw_action_history = [[], []]
+    env._validate_policy_rollout_action = MethodType(
+        EmbodiedEnv._validate_policy_rollout_action, env
+    )
+    if record_policy:
+        env._traj_buffer = {}
+        env._trajectory_action_kind = "policy"
+    env._demo_no_auto_reset = True
+    env._demo_active_mask = torch.tensor([not completed, True])
+    env._mask_controller_demo_action = MethodType(
+        EmbodiedEnv._mask_controller_demo_action, env
+    )
+    env.cfg = SimpleNamespace(
+        expert_trajectory=ExpertTrajectoryCfg(use_action_manager=True)
+    )
+    measured = torch.tensor([[0.0, 0.015, 0.025], [0.0, 0.01, 0.02]])
+    env.robot.get_qpos = lambda: measured
+    env.robot.get_joint_ids = lambda part, **kwargs: [1, 2]
+    env.robot.body_data = SimpleNamespace(
+        qpos_limits=torch.tensor([[[-1.0, 1.0], [0.0, 0.04], [0.0, 0.04]]])
+    )
+    env.robot.set_qpos = MagicMock()
+    env.action_manager = ActionManager(
+        {
+            "gripper": ActionTermCfg(
+                func=ParallelGripperAction,
+                params={
+                    "part_name": "hand",
+                    "command_mode": "binary",
+                    "open_command": {"elbow": 0.04, "wrist": 0.04},
+                    "close_command": {"elbow": 0.0, "wrist": 0.0},
+                },
+            )
+        },
+        env,
+    )
+    requested = torch.full((2, 2), 0.04)
+    prepared = env._preprocess_action(ControllerAction(requested))
+    applied = env._step_action(prepared)
+    expected = requested.clone()
+    if completed:
+        expected[0] = measured[0, 1:]
+    torch.testing.assert_close(env.robot.set_qpos.call_args.kwargs["qpos"], expected)
+    torch.testing.assert_close(prepared.value, expected)
+    assert env._step_uses_action_manager
+    if record_policy:
+        labels = env.action_manager.action.clone()
+        assert labels.shape == (2, 1)
+        torch.testing.assert_close(applied, labels)
+        torch.testing.assert_close(env._last_action_trace.requested, labels)
+        torch.testing.assert_close(env._traj_raw_action, labels)
+        torch.testing.assert_close(env._raw_action_history[1][0], labels[1])
+        if completed:
+            assert env._raw_action_history[0] == []
+        env.action_manager.action.zero_()
+        torch.testing.assert_close(env._traj_raw_action, labels)

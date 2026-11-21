@@ -30,6 +30,7 @@ import math
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -41,9 +42,11 @@ from embodichain.lab.sim.motion.planners import CuroboPlannerCfg, PlanState
 from embodichain.lab.sim.motion.planners.curobo import curobo_yaml
 from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
     CuroboPlanOptions,
+    CuroboPoseConstraintCfg,
     CuroboPlanner,
     CuroboPlannerCfg as CuroboPlannerCfgDirect,
     CuroboWorldCfg,
+    _CuroboBackend,
     _CuroboProfile,
     _configure_curobo_logging,
     _matrix_to_position_quaternion,
@@ -141,11 +144,13 @@ def test_missing_curobo_is_actionable(monkeypatch):
     "failure_module",
     [
         None,
+        "curobo.trajectory_timeopt",
         "curobo.motion_planner",
         "curobo.batch_motion_planner",
         "curobo.collision_checking",
         "curobo.types",
         "curobo.scene",
+        "curobo._src.runtime",
     ],
 )
 def test_curobo_import_preserves_caller_precision(
@@ -167,6 +172,7 @@ def test_curobo_import_preserves_caller_precision(
                 "Pose",
                 "GoalToolPose",
                 "DeviceCfg",
+                "ToolPoseCriteria",
                 "Scene",
             )
         }
@@ -228,6 +234,9 @@ def test_curobo_planner_cfg_defaults():
     assert cfg.log_level == "error"
     assert cfg.warmup_iterations == 1
     assert cfg.max_attempts == 5
+    assert cfg.position_tolerance == 0.005
+    assert cfg.orientation_tolerance == 0.05
+    assert cfg.use_runtime_tcp is False
     assert cfg.cuda_device is None
     assert cfg.use_cuda_graph is True
     assert cfg.cuda_graph_fallback is True
@@ -238,6 +247,13 @@ def test_curobo_planner_cfg_defaults():
     assert cfg.sim_base_to_curobo_base is None
     assert not hasattr(cfg, "robot_profiles")
     assert not hasattr(cfg.world, "world_config_path")
+
+
+@pytest.mark.parametrize("name", ["position_tolerance", "orientation_tolerance"])
+@pytest.mark.parametrize("value", [0.0, -0.01, float("nan"), float("inf"), True])
+def test_curobo_rejects_invalid_convergence_tolerance(name, value):
+    with pytest.raises(ValueError, match=name):
+        CuroboPlannerCfg(**{name: value})
 
 
 @pytest.mark.parametrize(
@@ -264,6 +280,7 @@ def test_cspace_planning_uses_direct_seed_before_graph_seed(
     )
     planner.device = torch.device("cpu")
     planner._curobo_device = torch.device("cpu")
+    planner._bindings = SimpleNamespace(Runtime=SimpleNamespace(cuda_graphs=True))
     monkeypatch.setattr(torch.cuda, "device", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(
         planner,
@@ -325,6 +342,7 @@ def test_pose_planning_uses_direct_seed_before_graph_seed(
     )
     planner.device = torch.device("cpu")
     planner._curobo_device = torch.device("cpu")
+    planner._bindings = SimpleNamespace(Runtime=SimpleNamespace(cuda_graphs=True))
     monkeypatch.setattr(torch.cuda, "device", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(
         planner,
@@ -360,6 +378,468 @@ def test_pose_planning_uses_direct_seed_before_graph_seed(
             "enable_graph_attempt": 1,
         }
     ]
+
+
+def test_partial_pose_native_costs_reset_and_unused_targets_are_sanitized(monkeypatch):
+    """Mixed Cartesian semantics reach cuRobo without hidden pose completion."""
+    criteria_calls, goals = [], []
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = SimpleNamespace(max_attempts=1, max_planning_time=None)
+    planner.device = planner._curobo_device = torch.device("cpu")
+    planner._bindings = SimpleNamespace(
+        ToolPoseCriteria=lambda **values: values,
+        DeviceCfg=lambda **values: values,
+        Runtime=SimpleNamespace(cuda_graphs=True),
+    )
+    backend = SimpleNamespace(
+        planner=SimpleNamespace(
+            update_tool_pose_criteria=lambda values: criteria_calls.append(
+                values["tcp"]
+            ),
+            plan_pose=lambda *_args, **_kwargs: None,
+        ),
+        tool_frame="tcp",
+        profile=SimpleNamespace(tool_frame_to_tcp=None),
+        tool_to_frame_matrix=None,
+        use_cuda_graph=False,
+    )
+    monkeypatch.setattr(torch.cuda, "device", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(planner, "_to_curobo_joint_state", lambda *_: object())
+    monkeypatch.setattr(
+        planner, "_to_curobo_pose_goal", lambda pose, *_: goals.append(pose.clone())
+    )
+    position, orientation, full = (torch.eye(4)[None].clone() for _ in range(3))
+    position[:, :3, :3] = torch.nan
+    position[:, 0, 3] = 0.4
+    orientation[:, :3, 3] = torch.nan
+    planner._plan_segments(
+        [PlanState.from_xpos(pose) for pose in (position, orientation, full)],
+        torch.zeros(1, 7),
+        {MoveType.EEF_MOVE: backend},
+        CuroboPlanOptions(waypoint_modalities=["position", "orientation", "pose"]),
+    )
+    assert [item["terminal_pose_axes_weight_factor"] for item in criteria_calls] == [
+        [1, 1, 1, 0, 0, 0],
+        [0, 0, 0, 1, 1, 1],
+        [1] * 6,
+    ]
+    assert all(
+        item["non_terminal_pose_axes_weight_factor"] == [0] * 6
+        for item in criteria_calls
+    )
+    assert all(bool(torch.isfinite(pose).all()) for pose in goals)
+    assert float(goals[0][0, 0, 3]) == pytest.approx(0.4)
+    torch.testing.assert_close(goals[1][0, :3, 3], torch.zeros(3))
+
+
+def test_position_only_rejects_translated_tool_origin():
+    planner = object.__new__(CuroboPlanner)
+    planner._curobo_device = torch.device("cpu")
+    transform = torch.eye(4)
+    transform[2, 3] = 0.1
+    backend = SimpleNamespace(tool_to_frame_matrix=transform)
+    with pytest.raises(ValueError, match="coincident tool/TCP"):
+        planner._set_pose_modality(backend, "position")
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"direction": (0, 0, 0)},
+        {"direction": (0, math.nan, 1)},
+        {"rotation_axis": (0, 0, 0)},
+        {"non_terminal_scale": 0},
+    ],
+)
+def test_linear_motion_factory_rejects_undefined_directions(values):
+    with pytest.raises(ValueError):
+        CuroboPoseConstraintCfg.linear_motion(**values)
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"path_position_projector": [[1, 0], [0, 1]]},
+        {"path_rotation_projector": [[1, 1, 0], [0, 1, 0], [0, 0, 0]]},
+        {"path_position_projector": [[2, 0, 0], [0, 0, 0], [0, 0, 0]]},
+        {"path_position_projector": [[math.nan, 0, 0], [0, 0, 0], [0, 0, 0]]},
+        {"frame": "world"},
+        {"rotation_scale": 0},
+        {"position_tolerance": -0.1},
+        {"orientation_tolerance": math.pi + 0.1},
+    ],
+)
+def test_pose_path_constraint_rejects_invalid_projectors_and_bounds(values):
+    with pytest.raises(ValueError):
+        CuroboPoseConstraintCfg(**values)
+
+
+def test_pose_path_constraint_rejects_oblique_idempotent_projector():
+    with pytest.raises(ValueError, match="symmetric"):
+        CuroboPoseConstraintCfg(
+            path_rotation_projector=((1, 1, 0), (0, 0, 0), (0, 0, 0))
+        )
+
+
+def test_pose_constraint_factory_returns_serializable_projectors():
+    cfg = CuroboPoseConstraintCfg.linear_motion(
+        direction=(2, 0, 0), rotation_axis=(0, 0, 3)
+    )
+    assert cfg.path_position_projector == (
+        (0.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+        (0.0, 0.0, 1.0),
+    )
+    assert cfg.path_rotation_projector == (
+        (1.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+        (0.0, 0.0, 0.0),
+    )
+    # A JSON round trip contains only data, including nested list projectors.
+    import json
+
+    restored = CuroboPoseConstraintCfg(**json.loads(json.dumps(cfg.to_dict())))
+    assert restored.to_dict() == cfg.to_dict()
+
+
+def test_robot_profile_embeds_tcp_once_and_keys_calibration(tmp_path, monkeypatch):
+    """Different TCP calibrations cannot reuse one generated native tool frame."""
+    source = tmp_path / "robot.urdf"
+    source.write_text(_NO_MIMIC_URDF)
+    offset = torch.eye(4)
+    offset[2, 3] = 0.2
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(robot_uid="robot")
+    planner.cfg.auto_gen.cache_dir = str(tmp_path / "cache")
+    planner._curobo_device = torch.device("cpu")
+    planner.robot = SimpleNamespace(
+        cfg=SimpleNamespace(fpath=str(source)),
+        _solvers={
+            "arm": SimpleNamespace(
+                end_link_name="link1", root_link_name="base", tcp_xpos=offset
+            )
+        },
+    )
+    monkeypatch.setattr(planner, "_resolve_sim_joint_names", lambda _: ["joint1"])
+    monkeypatch.setattr(
+        "embodichain.lab.sim.motion.planners.curobo.curobo_planner._curobo_joint_limits",
+        lambda *args, **kwargs: {"max_velocity": [1.0], "max_acceleration": [15.0]},
+    )
+
+    def generate(robot, control_part, output_path, **kwargs):
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            yaml.safe_dump({"robot_cfg": {"kinematics": {"base_link": "base"}}})
+        )
+        path.with_suffix(".motion.urdf").write_text(_NO_MIMIC_URDF)
+        return output_path
+
+    exporter = Mock(side_effect=generate)
+    monkeypatch.setattr(curobo_yaml, "generate_curobo_robot_yaml", exporter)
+    first = planner._materialize_profile("arm")
+    repeated = planner._materialize_profile("arm")
+    assert exporter.call_count == 1
+    assert first.robot_config_path == repeated.robot_config_path
+    assert first.tool_frame_name == "embodichain_tcp"
+    assert first.tool_frame_to_tcp is None
+    assert exporter.call_args.kwargs["tool_frame_to_tcp"] == offset.tolist()
+    backend = SimpleNamespace(profile=first, tool_to_frame_matrix=None)
+    goal = torch.eye(4)[None]
+    torch.testing.assert_close(planner._tcp_to_tool_pose(goal, backend), goal)
+    offset[2, 3] = 0.3
+    changed = planner._materialize_profile("arm")
+    assert exporter.call_count == 2
+    assert changed.robot_config_path != first.robot_config_path
+
+
+def test_pose_path_constraints_require_matching_full_pose_native_segments():
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = SimpleNamespace(preserve_plan_samples=True)
+    pose = PlanState.from_xpos(torch.eye(4)[None])
+    constraint = CuroboPoseConstraintCfg.linear_motion()
+    options = CuroboPlanOptions(path_constraints=[None, constraint])
+    with pytest.raises(ValueError, match="target count"):
+        planner._validate_path_constraints([pose], options)
+    options.path_constraints = [constraint]
+    with pytest.raises(ValueError, match="full-pose"):
+        planner._validate_path_constraints(
+            [PlanState.from_qpos(torch.zeros(1, 7))], options
+        )
+    options.waypoint_modalities = ["position"]
+    with pytest.raises(ValueError, match="full-pose"):
+        planner._validate_path_constraints([pose], options)
+    options.waypoint_modalities = None
+    planner.cfg.preserve_plan_samples = False
+    with pytest.raises(ValueError, match="preserve_plan_samples"):
+        planner._validate_path_constraints([pose], options)
+
+
+def _pose_test_bindings():
+    """Use plain native-criteria stand-ins; no optional cuRobo import or GPU."""
+    return SimpleNamespace(
+        ToolPoseCriteria=lambda **values: SimpleNamespace(values=values),
+        DeviceCfg=lambda **values: values,
+    )
+
+
+@pytest.mark.parametrize("raise_inside", [False, True])
+def test_pose_path_cost_is_scoped_and_transforms_both_tcp_projectors(raise_inside):
+    active = {}
+    planner = object.__new__(CuroboPlanner)
+    planner._curobo_device = torch.device("cpu")
+    planner._bindings = _pose_test_bindings()
+    tool_to_tcp = torch.eye(4)
+    # A 45-degree tool/TCP calibration exposes the sign of off-diagonal terms.
+    c = math.sqrt(0.5)
+    tool_to_tcp[:3, :3] = torch.tensor([[c, -c, 0.0], [c, c, 0.0], [0.0, 0.0, 1.0]])
+    tool_to_tcp[2, 3] = 0.1
+    backend = SimpleNamespace(
+        tool_frame="tool",
+        profile=SimpleNamespace(tool_frame_to_tcp=tool_to_tcp.tolist()),
+        planner=SimpleNamespace(update_tool_pose_criteria=active.update),
+    )
+    constraint = CuroboPoseConstraintCfg.linear_motion(
+        direction=(2, 0, 0), rotation_axis=(2, 0, 0)
+    )
+    try:
+        with planner._pose_constraint_scope(backend, constraint):
+            expected = torch.tensor(
+                [[0.5, -0.5, 0.0], [-0.5, 0.5, 0.0], [0.0, 0.0, 1.0]]
+            )
+            for name in ("path_position_projector", "path_rotation_projector"):
+                torch.testing.assert_close(active["tool"].values[name], expected)
+            assert active["tool"].values["enforce_path_tolerance"]
+            if raise_inside:
+                raise RuntimeError("native planning failed")
+    except RuntimeError:
+        assert raise_inside
+    assert active["tool"].values["non_terminal_pose_axes_weight_factor"] == [0.0] * 6
+    constraint.position_scale = 2.0
+    constraint.rotation_scale = 3.0
+    constraint.position_tolerance = 0.01
+    with planner._pose_constraint_scope(backend, constraint):
+        assert active["tool"].values["path_position_axis_scale"] == [2.0] * 3
+        assert active["tool"].values["path_rotation_axis_scale"] == [3.0] * 3
+        assert active["tool"].values["path_tolerance"] == pytest.approx(
+            [0.01 * 2.0, 2.0 * math.sin(0.05 / 2.0) * 3.0]
+        )
+
+
+@pytest.mark.parametrize(
+    ("mode", "angle", "tolerance"),
+    [
+        ("line_position", 0.2, 0.05),
+        ("line_rotation", 0.2, 0.05),
+        ("line_rotation", 1e-4, 1e-5),
+        ("plane", 0.6, 0.05),
+        ("orientation_only", 0.2, 0.05),
+        ("free_yaw", 0.6, 0.05),
+        ("free_yaw", math.pi, 0.05),
+        ("distinct_goals", 0.6, 0.05),
+    ],
+)
+def test_pose_path_validation_checks_selected_tcp_components(
+    monkeypatch, mode, angle, tolerance
+):
+    planner = object.__new__(CuroboPlanner)
+    planner._curobo_device = torch.device("cpu")
+    planner._bindings = _pose_test_bindings()
+    tool_to_tcp = torch.eye(4)
+    tool_to_tcp[2, 3] = 0.1
+    tcp = torch.eye(4).expand(2, 3, -1, -1).clone()
+    tcp[:, :, 0, 3] = torch.tensor([0.0, 0.05, 0.1])
+    goal = torch.eye(4).expand(2, -1, -1).clone()
+    goal[:, 0, 3] = 0.1
+    cfg = CuroboPoseConstraintCfg.linear_motion(
+        direction=(1, 0, 0), orientation_tolerance=tolerance
+    )
+    expected = [True, False]
+    yaw = torch.tensor(
+        [
+            [math.cos(angle), -math.sin(angle), 0.0],
+            [math.sin(angle), math.cos(angle), 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    if mode == "line_position":
+        tcp[1, 1, 1, 3] = 0.02
+    elif mode == "plane":
+        cfg = CuroboPoseConstraintCfg(
+            path_position_projector=((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 1.0))
+        )
+        tcp[:, :, :3, :3] = yaw
+        tcp[1, 1, 2, 3] = 0.02
+    elif mode == "orientation_only":
+        cfg = CuroboPoseConstraintCfg(
+            path_rotation_projector=((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+        )
+        tcp[:, :, 1, 3] = 0.4  # Position is intentionally unconstrained.
+        tcp[1, 1, :3, :3] = yaw
+    elif mode == "free_yaw":
+        cfg = CuroboPoseConstraintCfg.linear_motion(
+            direction=(1, 0, 0), rotation_axis=(0, 0, 1)
+        )
+        # Small tilt combined with arbitrary free yaw must retain the same
+        # acceptance bound, including near pi where the SO(3) log mixes them.
+        for row, tilt in enumerate((0.9 * tolerance, 1.1 * tolerance)):
+            roll = torch.tensor(
+                [
+                    [1.0, 0.0, 0.0],
+                    [0.0, math.cos(tilt), -math.sin(tilt)],
+                    [0.0, math.sin(tilt), math.cos(tilt)],
+                ]
+            )
+            tcp[row, 1, :3, :3] = yaw @ roll
+    elif mode == "distinct_goals":
+        other_frame = torch.eye(4)
+        other_frame[:3, :3] = yaw
+        other_frame[:3, 3] = torch.tensor([0.2, 0.4, 0.1])
+        tcp[1] = other_frame @ tcp[1]
+        goal[1] = other_frame @ goal[1]
+        expected = [True, True]
+    else:
+        tcp[1, 1, :3, :3] = yaw
+    tools = tcp @ torch.linalg.inv(tool_to_tcp)
+    backend = SimpleNamespace(
+        tool_frame="tool",
+        profile=SimpleNamespace(tool_frame_to_tcp=tool_to_tcp.tolist()),
+        planner=SimpleNamespace(
+            compute_kinematics=lambda _: SimpleNamespace(
+                tool_poses=SimpleNamespace(
+                    get_link_pose=lambda _: SimpleNamespace(
+                        get_matrix=lambda: tools.reshape(-1, 4, 4)
+                    )
+                )
+            )
+        ),
+    )
+    monkeypatch.setattr(planner, "_to_curobo_joint_state", lambda *args: object())
+    monkeypatch.setattr(
+        planner, "_sim_world_to_curobo_base_pose", lambda pose, *_: pose
+    )
+    valid = planner._pose_path_validity(torch.zeros(2, 3, 7), goal, backend, cfg, None)
+    assert valid.tolist() == expected
+
+
+def test_pose_path_postcheck_rejects_native_success_per_environment(monkeypatch):
+    """A successful native solve still fails rows whose calibrated TCP drifts."""
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(robot_uid="robot", preserve_plan_samples=True)
+    planner.device = planner._curobo_device = torch.device("cpu")
+    planner._bindings = _pose_test_bindings()
+    planner._bindings.Runtime = SimpleNamespace(cuda_graphs=False)
+    monkeypatch.setattr(torch.cuda, "device", lambda *_: nullcontext())
+    monkeypatch.setattr(planner, "_to_curobo_joint_state", lambda joints, _: joints)
+    monkeypatch.setattr(planner, "_to_curobo_pose_goal", lambda *args: object())
+    monkeypatch.setattr(
+        planner, "_sim_world_to_curobo_base_pose", lambda pose, *_: pose
+    )
+    start = torch.zeros(2, 7)
+    start[1] = 0.2
+    positions = start[:, None, :].repeat(1, 3, 1)
+    positions[:, :, 0] += torch.tensor([0.0, 0.1, 0.2])
+    native_success = torch.ones(2, dtype=torch.bool)
+    monkeypatch.setattr(
+        planner,
+        "_extract_segment",
+        lambda *_: (
+            native_success.clone(),
+            positions.clone(),
+            torch.full((2, 3), 0.1),
+            None,
+            None,
+        ),
+    )
+    offset = torch.eye(4)
+    offset[2, 3] = 0.2
+    goal = torch.eye(4).repeat(2, 1, 1)
+    goal[:, 2, 3] = 0.2
+    tools = torch.eye(4).repeat(2, 3, 1, 1)
+    # The native tool origin stays exactly on the line for both rows. Only
+    # row one's tilted long TCP leaves the tube, despite native success.
+    tilt = 0.045
+    tools[1, 1, :3, :3] = torch.tensor(
+        [
+            [math.cos(tilt), 0.0, math.sin(tilt)],
+            [0.0, 1.0, 0.0],
+            [-math.sin(tilt), 0.0, math.cos(tilt)],
+        ]
+    )
+    backend = SimpleNamespace(
+        tool_frame="tool",
+        profile=SimpleNamespace(tool_frame_to_tcp=offset.tolist()),
+        use_cuda_graph=False,
+        planner=SimpleNamespace(
+            plan_pose=lambda *args, **kwargs: object(),
+            update_tool_pose_criteria=lambda values: None,
+            compute_kinematics=lambda _: SimpleNamespace(
+                tool_poses=SimpleNamespace(
+                    get_link_pose=lambda _: SimpleNamespace(
+                        get_matrix=lambda: tools.reshape(-1, 4, 4)
+                    )
+                )
+            ),
+        ),
+    )
+    result = planner._plan_segments(
+        [PlanState.from_xpos(goal)],
+        start,
+        {MoveType.EEF_MOVE: backend},
+        CuroboPlanOptions(path_constraints=[CuroboPoseConstraintCfg.linear_motion()]),
+    )
+    assert native_success.tolist() == [True, True]
+    assert result.success.tolist() == [True, False]
+    torch.testing.assert_close(result.positions[0], positions[0])
+    torch.testing.assert_close(
+        result.positions[1], start[1].expand_as(result.positions[1])
+    )
+
+
+@pytest.mark.parametrize("component", ["position", "rotation"])
+def test_pose_projection_uses_configured_error_frame(monkeypatch, component):
+    planner = object.__new__(CuroboPlanner)
+    planner._curobo_device = torch.device("cpu")
+    planner._bindings = _pose_test_bindings()
+    goal = torch.eye(4)[None]
+    c = math.sqrt(0.5)
+    goal[0, :3, :3] = torch.tensor([[c, -c, 0.0], [c, c, 0.0], [0.0, 0.0, 1.0]])
+    tcp = goal[:, None].clone()
+    x_projector = ((1.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
+    if component == "position":
+        tcp[0, 0, :3, 3] = torch.tensor([c, -c, 0.0]) * 0.02
+        values = {"path_position_projector": x_projector}
+    else:
+        a = 0.2
+        base_roll = matrix_from_quat(
+            torch.tensor(
+                [c * math.sin(a / 2), -c * math.sin(a / 2), 0.0, math.cos(a / 2)]
+            )
+        )
+        tcp[0, 0, :3, :3] = base_roll @ goal[0, :3, :3]
+        values = {"path_rotation_projector": x_projector}
+    backend = SimpleNamespace(
+        tool_frame="tool",
+        profile=SimpleNamespace(tool_frame_to_tcp=None),
+        planner=SimpleNamespace(
+            compute_kinematics=lambda _: SimpleNamespace(
+                tool_poses=SimpleNamespace(
+                    get_link_pose=lambda _: SimpleNamespace(
+                        get_matrix=lambda: tcp.reshape(-1, 4, 4)
+                    )
+                )
+            )
+        ),
+    )
+    monkeypatch.setattr(planner, "_to_curobo_joint_state", lambda *args: object())
+    monkeypatch.setattr(
+        planner, "_sim_world_to_curobo_base_pose", lambda pose, *_: pose
+    )
+    for frame, expected in (("goal", True), ("base", False)):
+        cfg = CuroboPoseConstraintCfg(frame=frame, **values)
+        assert planner._pose_path_validity(
+            torch.zeros(1, 1, 7), goal, backend, cfg, None
+        ).tolist() == [expected]
 
 
 def test_extract_segment_uses_curobo_exclusive_last_tstep(monkeypatch):
@@ -579,15 +1059,68 @@ def test_curobo_planner_class_is_lazy_import_safe():
     assert "curobo" not in sys.modules
 
 
-def test_backend_disables_curobo_self_collision(monkeypatch):
+@pytest.mark.parametrize(
+    (
+        "batch_size",
+        "algorithm",
+        "enable_timeopt",
+        "use_graph",
+        "effective_algorithm",
+        "expected_lanes",
+        "tolerances",
+    ),
+    [
+        (1, "rrt", True, True, "rrt", 8, {}),
+        (2, "prm", False, False, "prm", None, {}),
+        (17, "rrt", False, True, "rrt", 256, {}),
+        (
+            1,
+            "rrt",
+            True,
+            False,
+            "rrt",
+            8,
+            {
+                "position_tolerance": 0.01,
+                "orientation_tolerance": 0.09995833854135666,
+                "use_runtime_tcp": True,
+            },
+        ),
+    ],
+)
+def test_backend_forwards_fast_settings_and_disables_self_collision(
+    monkeypatch,
+    batch_size,
+    algorithm,
+    enable_timeopt,
+    use_graph,
+    effective_algorithm,
+    expected_lanes,
+    tolerances,
+):
     create_kwargs = {}
+    cost_manager = SimpleNamespace(disable_self_collision=Mock())
+    graph_rollout = SimpleNamespace(get_cost_manager_configs=lambda: [cost_manager])
 
     class FakeMotionPlannerCfg:
         @staticmethod
         def create(**kwargs):
             create_kwargs.update(kwargs)
+            assert runtime.cuda_graphs is use_graph
             return SimpleNamespace(
-                trajopt_solver_config=SimpleNamespace(interpolation_dt=None)
+                trajopt_solver_config=SimpleNamespace(
+                    interpolation_dt=None,
+                    num_seeds=8,
+                    robot_config=SimpleNamespace(
+                        dynamics=SimpleNamespace(gravity=None)
+                    ),
+                ),
+                **{
+                    f"{effective_algorithm}_graph_planner_config": SimpleNamespace(
+                        resources_config=SimpleNamespace(rollout_config=graph_rollout),
+                        planner_config=SimpleNamespace(max_batched_lanes=128),
+                    )
+                },
             )
 
     class FakeMotionPlanner:
@@ -597,13 +1130,18 @@ def test_backend_disables_curobo_self_collision(monkeypatch):
             self.cfg = cfg
 
     planner = CuroboPlanner.__new__(CuroboPlanner)
-    planner.cfg = SimpleNamespace(
-        world=SimpleNamespace(multi_env=False),
-        collision_activation_distance=0.01,
-        interpolation_dt=0.025,
+    planner.cfg = CuroboPlannerCfg(
+        robot_uid="robot",
+        graph_planner_algorithm=algorithm,
+        enable_timeopt=enable_timeopt,
+        interpolation_dt=0.01,
+        **tolerances,
     )
     planner._curobo_device = torch.device("cuda:0")
+    planner._timeopt_gravity = lambda backend: (0.0, 0.0, 0.0)
+    runtime = SimpleNamespace(cuda_graphs=True)
     planner._bindings = SimpleNamespace(
+        Runtime=runtime,
         MotionPlannerCfg=FakeMotionPlannerCfg,
         DeviceCfg=lambda device: device,
         MotionPlanner=FakeMotionPlanner,
@@ -611,11 +1149,12 @@ def test_backend_disables_curobo_self_collision(monkeypatch):
     )
     planner._validate_profile_joint_names = lambda *args: None
     planner._validate_base_link_name = lambda *args: None
-    planner._resolve_tool_frame = lambda *args: "tool"
+    planner._resolve_tool_frame = lambda profile, _planner: profile.tool_frame_name
     planner._load_runtime_robot_config = lambda path: {
         "robot_cfg": {
             "kinematics": {
                 "source": path,
+                "tool_frames": ["tool"],
                 "self_collision_buffer": {},
                 "self_collision_ignore": {},
             }
@@ -623,22 +1162,74 @@ def test_backend_disables_curobo_self_collision(monkeypatch):
     }
     monkeypatch.setattr(torch.cuda, "device", lambda device: nullcontext())
 
-    planner._build_backend(
+    backend = planner._build_backend(
         control_part="arm",
-        batch_size=1,
+        batch_size=batch_size,
         profile=_CuroboProfile(
             robot_config_path="robot.yml",
             sim_to_curobo_joint_names={"joint": "joint"},
+            tool_frame_name="tool",
+            tool_frame_to_tcp=[
+                [0.0, -1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.2],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
         ),
         sim_joint_names=["joint"],
         scene_model=None,
-        use_cuda_graph=False,
+        use_cuda_graph=use_graph,
         planning_mode=MoveType.EEF_MOVE,
     )
 
     assert create_kwargs["self_collision_check"] is False
-    assert create_kwargs["robot"]["robot_cfg"]["kinematics"] == {
+    assert create_kwargs["max_batch_size"] == batch_size
+    assert create_kwargs["graph_planner_algorithm"] == effective_algorithm
+    assert backend.graph_planner_algorithm == effective_algorithm
+    assert create_kwargs["use_cuda_graph"] is use_graph
+    assert runtime.cuda_graphs is True
+    assert create_kwargs["enable_timeopt"] is enable_timeopt
+    assert create_kwargs["interpolation_dt"] == 0.01
+    assert create_kwargs["position_tolerance"] == tolerances.get(
+        "position_tolerance", 0.005
+    )
+    assert create_kwargs["orientation_tolerance"] == tolerances.get(
+        "orientation_tolerance", 0.05
+    )
+    cost_manager.disable_self_collision.assert_called_once()
+    if enable_timeopt:
+        assert create_kwargs["robot"]["robot_cfg"]["load_dynamics"] is True
+        assert (
+            backend.planner.cfg.trajopt_solver_config.robot_config.dynamics.gravity
+            == [0.0, 0.0, 0.0]
+        )
+    if expected_lanes is not None:
+        assert (
+            backend.planner.cfg.rrt_graph_planner_config.planner_config.max_batched_lanes
+            == expected_lanes
+        )
+    native_kinematics = create_kwargs["robot"]["robot_cfg"]["kinematics"]
+    if tolerances.get("use_runtime_tcp", False):
+        frame = "__embodichain_tcp_tool"
+        extra = native_kinematics.pop("extra_links")[frame]
+        assert extra["fixed_transform"] == pytest.approx(
+            [0.0, 0.0, 0.2, 2**-0.5, 0.0, 0.0, 2**-0.5]
+        )
+        assert extra["parent_link_name"] == "tool"
+        assert extra["joint_type"] == "FIXED"
+        assert extra["link_mass"] == 0.0 and extra["link_inertia"] == [0.0] * 6
+        assert backend.tool_frame == frame
+        assert backend.profile.tool_frame_to_tcp is None
+        goal = torch.eye(4)[None]
+        goal[:, 0, 3] = 0.5
+        # Native goals now refer to the TCP itself; do not apply its offset twice.
+        torch.testing.assert_close(planner._tcp_to_tool_pose(goal, backend), goal)
+    else:
+        frame = "tool"
+        assert backend.profile.tool_frame_to_tcp is not None
+    assert native_kinematics == {
         "source": "robot.yml",
+        "tool_frames": [frame],
         "self_collision_buffer": {},
         "self_collision_ignore": {},
     }
@@ -660,6 +1251,144 @@ def test_multi_env_scene_model_clones_scene_dictionaries_independently():
     assert copies[0] is not copies[1]
     copies[0]["voxel"]["block"]["feature_tensor"].zero_()
     assert torch.all(copies[1]["voxel"]["block"]["feature_tensor"] == 1.0)
+
+
+@pytest.mark.parametrize(
+    ("world_gravity", "tilted", "observed", "expected"),
+    [
+        ([0, 0, -9.81], False, False, [0, 0, -9.81]),
+        ([0, 0, 0], True, False, [0, 0, 0]),
+        ([0, 0, -9.81], True, False, [9.81, 0, 0]),
+        ([0, 0, -9.81], True, True, [9.81, 0, 0]),
+    ],
+)
+def test_timeopt_gravity_uses_physics_and_the_planning_frame(
+    monkeypatch, world_gravity, tilted, observed, expected
+):
+    from embodichain.lab.sim import SimulationManager
+
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(robot_uid="robot", sim_instance_id=3)
+    planner._curobo_device = torch.device("cpu")
+    world_to_base = torch.eye(4)[None]
+    if tilted:
+        # Inverse of a +90 degree world rotation about Y.
+        world_to_base[0, :3, :3] = torch.tensor(
+            [[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]
+        )
+    pose = torch.linalg.inv(world_to_base)
+    planner.robot = SimpleNamespace(get_link_pose=Mock(return_value=pose))
+    if observed:
+        planner._query_snapshot = SimpleNamespace(
+            full_qpos=torch.zeros(1, 1),
+            world_to_base=world_to_base,
+        )
+        planner.robot.get_link_pose.side_effect = AssertionError("live pose reread")
+    manager = SimpleNamespace(
+        sim_config=SimpleNamespace(physics_cfg=SimpleNamespace(gravity=world_gravity))
+    )
+    getter = Mock(return_value=manager)
+    monkeypatch.setattr(SimulationManager, "get_instance", getter)
+    backend = _CuroboBackend(
+        planner=None,
+        control_part="arm",
+        sim_joint_names=["joint"],
+        tool_frame="tool",
+        profile=_CuroboProfile(
+            "robot.yml", {"joint": "joint"}, sim_base_link_name="base"
+        ),
+        batch_size=1,
+        use_cuda_graph=False,
+        planning_mode=MoveType.JOINT_MOVE,
+    )
+    assert planner._timeopt_gravity(backend) == pytest.approx(expected)
+    getter.assert_called_once_with(3)
+
+    # A single native solver cannot use contradictory per-row gravity.
+    if tilted:
+        planner._query_snapshot = SimpleNamespace(
+            full_qpos=torch.zeros(2, 1),
+            world_to_base=torch.cat([world_to_base, torch.eye(4)[None]]),
+        )
+        backend.batch_size = 2
+        if world_gravity == [0, 0, 0]:
+            assert planner._timeopt_gravity(backend) == (0.0, 0.0, 0.0)
+        else:
+            with pytest.raises(ValueError, match="entire batch"):
+                planner._timeopt_gravity(backend)
+
+
+@pytest.mark.parametrize(("batch_size", "seeds", "lanes"), [(1, 4, 4), (8, 2, 16)])
+def test_warmup_covers_rrt_seed_lanes_and_graph_seed_fitting(
+    monkeypatch, batch_size, seeds, lanes
+):
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(robot_uid="robot")
+    planner._curobo_device = torch.device("cpu")
+    planner._synchronize_device = Mock()
+    planner._bindings = SimpleNamespace(
+        Runtime=SimpleNamespace(cuda_graphs=True),
+        JointState=SimpleNamespace(
+            from_position=lambda position, **kwargs: SimpleNamespace(
+                position=position,
+                clone=lambda: SimpleNamespace(position=position.clone()),
+            )
+        ),
+    )
+    native = SimpleNamespace(
+        default_joint_state=SimpleNamespace(position=torch.zeros(1)),
+        joint_names=["joint"],
+        ik_solver=SimpleNamespace(config=SimpleNamespace(exit_early=True)),
+        trajopt_solver=SimpleNamespace(config=SimpleNamespace(num_seeds=seeds)),
+        plan_cspace=Mock(),
+        reset_seed=Mock(),
+        graph_planner=Mock(),
+        graph_seed_fitter=Mock(),
+    )
+    backend = SimpleNamespace(
+        planner=native,
+        batch_size=batch_size,
+        use_cuda_graph=True,
+        planning_mode=MoveType.JOINT_MOVE,
+        graph_planner_algorithm="rrt",
+    )
+    monkeypatch.setattr(torch.cuda, "device", lambda *args: nullcontext())
+    planner._warmup_backend(backend)
+    native.graph_planner.warmup.assert_called_once_with(
+        num_warmup_iterations=1, max_batch_size=lanes
+    )
+    native.graph_seed_fitter.warmup.assert_called_once_with()
+    assert native.ik_solver.config.exit_early is True
+
+
+@pytest.mark.parametrize("change", ["gravity", "tcp"])
+def test_changing_frame_inputs_rebuilds_a_cached_backend(change):
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(robot_uid="robot")
+    offset = torch.eye(4)
+    planner.robot = SimpleNamespace(
+        cfg=SimpleNamespace(fpath="robot.urdf"),
+        _solvers={"arm": SimpleNamespace(tcp_xpos=offset)},
+    )
+    planner._robot_yaml_cache_key = Mock(side_effect=lambda *args: repr(args[-1]))
+    planner._timeopt_gravity = Mock(return_value=(0.0, 0.0, 0.0))
+    cached = SimpleNamespace(
+        planner=Mock(),
+        motion_limits_key=repr(offset.tolist()),
+        gravity=(0.0, 0.0, 0.0),
+    )
+    key = ("arm", 1, False, MoveType.EEF_MOVE)
+    planner._backend_cache = {key: cached}
+    assert planner._get_backend("arm", 1) is cached
+    if change == "gravity":
+        planner._timeopt_gravity.return_value = (0.0, 0.0, -9.81)
+    else:
+        offset[2, 3] = 0.2
+    planner._materialize_profile = Mock(side_effect=RuntimeError("rebuild"))
+    with pytest.raises(RuntimeError, match="rebuild"):
+        planner._get_backend("arm", 1)
+    cached.planner.close.assert_called_once()
+    assert key not in planner._backend_cache
 
 
 def test_runtime_robot_config_adds_only_curobo_compatibility_placeholders(tmp_path):
@@ -690,7 +1419,8 @@ def test_runtime_robot_config_adds_only_curobo_compatibility_placeholders(tmp_pa
     assert "self_collision_ignore" not in persisted["robot_cfg"]["kinematics"]
 
 
-def test_disable_self_collision_reaches_all_curobo_rollouts():
+@pytest.mark.parametrize("algorithm", ["prm", "rrt"])
+def test_disable_self_collision_reaches_all_curobo_rollouts(algorithm):
     class FakeCostCfg:
         def __init__(self):
             self.disable_calls = 0
@@ -723,7 +1453,11 @@ def test_disable_self_collision_reaches_all_curobo_rollouts():
                 optimizer_rollout_configs=[trajopt_optimizer],
             )
         ),
-        graph_planner_config=SimpleNamespace(rollout_config=graph_rollout),
+        **{
+            f"{algorithm}_graph_planner_config": SimpleNamespace(
+                resources_config=SimpleNamespace(rollout_config=graph_rollout)
+            )
+        },
     )
 
     CuroboPlanner._disable_curobo_self_collision_rollouts(planner_cfg)
@@ -781,6 +1515,41 @@ def test_graph_capture_mode_rejects_unknown_value():
     with pytest.raises(ValueError, match="capture_error_mode"):
         with _torch_cuda_graph_capture_mode("unsafe"):
             pass
+
+
+def test_lazy_planning_capture_is_coordinated_and_released_on_error(monkeypatch):
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(robot_uid="robot")
+    planner._curobo_device = torch.device("cpu")
+    planner._synchronize_device = Mock()
+    planner._bindings = SimpleNamespace(Runtime=SimpleNamespace(cuda_graphs=True))
+    coordinator = Mock()
+    coordinator.acquire_for_capture.return_value = True
+    monkeypatch.setattr(
+        "embodichain.lab.sim.motion.planners.curobo.curobo_planner._get_capture_coordinator",
+        lambda: coordinator,
+    )
+    with pytest.raises(RuntimeError, match="native planning error"):
+        with planner._planning_capture_scope(SimpleNamespace(use_cuda_graph=True)):
+            coordinator.acquire_for_capture.assert_called_once()
+            coordinator.release_for_capture.assert_not_called()
+            raise RuntimeError("native planning error")
+    coordinator.release_for_capture.assert_called_once()
+    assert planner._synchronize_device.call_count == 2
+
+
+@pytest.mark.parametrize(
+    ("previous", "enabled"), [(True, False), (True, True), (False, True)]
+)
+def test_native_graph_mode_restores_runtime_flags_on_failure(previous, enabled):
+    planner = object.__new__(CuroboPlanner)
+    runtime = SimpleNamespace(cuda_graphs=previous)
+    planner._bindings = SimpleNamespace(Runtime=runtime)
+    with pytest.raises(RuntimeError, match="native error"):
+        with planner._native_graph_mode(enabled):
+            assert runtime.cuda_graphs is (previous and enabled)
+            raise RuntimeError("native error")
+    assert runtime.cuda_graphs is previous
 
 
 # Robot YAML generation
@@ -1580,6 +2349,41 @@ def test_world_scene_cache_key_includes_registry_id():
     assert registry_key != renamed_key
 
 
+def test_curobo_rejects_different_variant_geometry_before_cloning_worlds():
+    shapes = [
+        [
+            CollisionShapeDesc(
+                name="shape",
+                shape_type=RigidBodyShape.BOX,
+                local_pose=torch.eye(4),
+                half_extents=torch.full((3,), size),
+            )
+        ]
+        for size in (0.1, 1.0)
+    ]
+    obj = SimpleNamespace(
+        uid="variant",
+        cfg=SimpleNamespace(env_variants={1: object()}),
+        num_instances=2,
+        get_collision_shapes=lambda env_id=0, **kwargs: shapes[env_id],
+        get_local_pose=lambda **kwargs: torch.eye(4).repeat(2, 1, 1),
+    )
+    planner = object.__new__(CuroboPlanner)
+    world = CuroboWorldCfg(rigid_objects=[obj], multi_env=True)
+    with pytest.raises(ValueError, match="different collision geometry"):
+        planner._world_scene_cache_key(world)
+
+    shapes[1] = [
+        CollisionShapeDesc(
+            name="shape",
+            shape_type=RigidBodyShape.BOX,
+            local_pose=torch.eye(4),
+            half_extents=torch.full((3,), 0.1),
+        )
+    ]
+    assert planner._world_scene_cache_key(world)
+
+
 def test_dynamic_update_uses_registry_id_in_curobo_backend():
     rigid_object = _FakeRigidObject(
         "legacy_uid",
@@ -1914,7 +2718,7 @@ def _build_curobo_scene(sim_device: str = "cuda") -> tuple[object, object, objec
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg
     from embodichain.lab.sim.objects import RigidObjectCfg
-    from embodichain_robots import FrankaPandaCfg
+    from embodichain.extensions.robots import FrankaPandaCfg
     from embodichain.lab.sim.shapes import CubeCfg
 
     sim = SimulationManager(
@@ -1962,8 +2766,8 @@ def _make_curobo_engine(
     *,
     use_cuda_graph: bool = False,
 ) -> object:
-    from embodichain.lab.sim.atomic_actions import (
-        AtomicActionEngine,
+    from embodichain.lab.sim.atomic_skills import (
+        AtomicSkillEngine,
     )
     from embodichain.lab.sim.motion.motion_generator import (
         MotionGenCfg,
@@ -1979,7 +2783,7 @@ def _make_curobo_engine(
             )
         )
     )
-    engine = AtomicActionEngine(motion_generator)
+    engine = AtomicSkillEngine(motion_generator)
     return engine
 
 
@@ -1987,8 +2791,8 @@ def _make_curobo_engine(
 @pytest.mark.slow
 def test_curobo_reuses_non_graph_backend():
     from embodichain.lab.sim import SimulationManager
-    from embodichain.lab.sim.atomic_actions import (
-        ActionInvocation,
+    from embodichain.lab.sim.atomic_skills import (
+        SkillInvocation,
         EndEffectorPoseGoal,
         MotionPolicy,
     )
@@ -2005,7 +2809,7 @@ def test_curobo_reuses_non_graph_backend():
 
         result = engine.compile(
             (
-                ActionInvocation(
+                SkillInvocation(
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=target),
                     binding,
@@ -2025,7 +2829,7 @@ def test_curobo_reuses_non_graph_backend():
 
         result = engine.compile(
             (
-                ActionInvocation(
+                SkillInvocation(
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=target),
                     binding,
@@ -2046,8 +2850,8 @@ def test_curobo_reuses_non_graph_backend():
 @pytest.mark.slow
 def test_curobo_uses_accelerator_with_cpu_physics():
     from embodichain.lab.sim import SimulationManager
-    from embodichain.lab.sim.atomic_actions import (
-        ActionInvocation,
+    from embodichain.lab.sim.atomic_skills import (
+        SkillInvocation,
         EndEffectorPoseGoal,
         MotionPolicy,
     )
@@ -2064,7 +2868,7 @@ def test_curobo_uses_accelerator_with_cpu_physics():
 
         result = engine.compile(
             (
-                ActionInvocation(
+                SkillInvocation(
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=target),
                     binding,

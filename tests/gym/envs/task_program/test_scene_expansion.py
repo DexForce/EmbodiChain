@@ -47,13 +47,13 @@ from embodichain.lab.gym.envs.task_program.bridge import (
 )
 from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.gym.envs.wrapper.no_fail import NoFailWrapper
-from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
-from embodichain.lab.sim.atomic_actions.runtime_commands import (
+from embodichain.lab.sim.atomic_skills.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_skills.runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
     RuntimeCommandFrame,
 )
-from embodichain.lab.sim.atomic_actions.state import (
+from embodichain.lab.sim.atomic_skills.state import (
     PlanningContext,
     RobotObservation,
     SceneSnapshot,
@@ -71,7 +71,7 @@ from embodichain.lab.task_program import (
 from embodichain.lab.task_program.integrations.scene_expansion import (
     ScenePreparationResult,
     SceneVariantEpisodeResult,
-    execute_scene_variant,
+    execute_scene_variants,
 )
 from embodichain.lab.task_program.runtime.results import (
     SemanticExecutionResult,
@@ -272,18 +272,142 @@ class _CandidateEnv(EmbodiedEnv):
         self._active_task_program_bridge = None
 
 
+class _BatchCandidateEnv(_CandidateEnv):
+    """Use the same recording ports with four independent physical rows."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._num_envs = 4
+        for name, value in tuple(vars(self).items()):
+            if isinstance(value, torch.Tensor) and value.shape == (1,):
+                setattr(self, name, value.repeat(4))
+        self._demo_episode_metadata = [
+            self._new_demo_episode_metadata(row) for row in range(4)
+        ]
+        self.episode_context = EpisodeContext(4)
+        self.episode_context._begin_episode(range(4))
+        self.episode_context._finish_initialization(range(4))
+        self.positions = torch.zeros(4)
+        self.runtime_mask = torch.ones(4, dtype=torch.bool)
+
+    def create_task_program_bridge(self, program: CompiledTaskProgram) -> _Bridge:
+        bridge = _Bridge(runtime_passes=True)
+        bridge.completion_mask = self.runtime_mask.clone()
+
+        def segments() -> Iterator[DemoSegment]:
+            yield DemoSegment(
+                actions=(ControllerAction(torch.full((4, 1), _GOAL_X)),),
+                name="move-cube",
+                target_uid="cube",
+                validator=lambda: bridge.completion_mask,
+                failure_policy="row_independent",
+            )
+            bridge.program_completed = True
+
+        bridge.iter_segments = segments
+        return bridge
+
+    def step(self, action: ControllerAction) -> tuple[Any, ...]:
+        assert self._demo_no_auto_reset
+        active = self._demo_active_mask
+        self.positions[active] = action.value[active, 0]
+        self._demo_steps[active] += 1
+        self.rollout_steps[active] += 1
+        self._traj_steps[active] += 1
+        return (
+            None,
+            torch.zeros(4),
+            torch.zeros(4, dtype=torch.bool),
+            torch.zeros(4, dtype=torch.bool),
+            {},
+        )
+
+
+@pytest.mark.parametrize("failure", ["initial", "program", "measured"])
+def test_batch_acceptance_and_delayed_persistence_are_row_local(failure: str) -> None:
+    env = _BatchCandidateEnv()
+    if failure == "program":
+        env.runtime_mask[3] = False
+    measured_rows = []
+
+    def prepare(variants):
+        env.persist_via_reset(env_ids=tuple(variants), save_data=False)
+        return {
+            row: ScenePreparationResult(
+                f"state-{row}",
+                _checks("failed" if row == 3 and failure == "initial" else "passed"),
+            )
+            for row in variants
+        }
+
+    def measured(row: int) -> ValidationResult:
+        measured_rows.append(row)
+        return _checks("failed" if row == 3 and failure == "measured" else "passed")
+
+    results = execute_scene_variants(
+        env,
+        {3: _variant(), 1: replace(_variant(), ordinal=1)},
+        prepare_scene=prepare,
+        measured_validator=measured,
+    )
+    assert tuple(results) == (3, 1)
+    assert results[1].accepted and not results[3].accepted
+    assert results[1].program_success
+    assert (results[3].execution is None) == (failure == "initial")
+    assert measured_rows == ([1] if failure == "initial" else [3, 1])
+    torch.testing.assert_close(env.positions[[0, 2]], torch.zeros(2))
+    assert env.episode_context.filter_recordable([3, 1]).tolist() == [1]
+    env.persist_via_reset(env_ids=[3, 1], save_data=True)
+    assert len(env.dataset_manager.saved) == 1
+    saved = env.dataset_manager.saved[0]
+    assert (
+        saved["episode_context"]["sources"]["scene_expansion/task_program"]["metadata"][
+            "env_id"
+        ]
+        == 1
+    )
+
+
+def test_nested_scene_attempt_cannot_take_another_row_of_the_same_world() -> None:
+    env = _BatchCandidateEnv()
+
+    def prepare(variants):
+        with pytest.raises(RuntimeError, match="owns this World"):
+            execute_scene_variants(
+                env,
+                {0: _variant()},
+                prepare_scene=lambda rows: pytest.fail(
+                    "nested preparation must not run"
+                ),
+                measured_validator=lambda row: _checks(),
+            )
+        env.persist_via_reset(env_ids=tuple(variants), save_data=False)
+        return {row: ScenePreparationResult("initial", _checks()) for row in variants}
+
+    results = execute_scene_variants(
+        env,
+        {3: _variant()},
+        prepare_scene=prepare,
+        measured_validator=lambda row: _checks(),
+    )
+    assert results[3].accepted
+    assert not env._scene_expansion_active and not env._demo_no_auto_reset
+
+
 def test_fixed_candidate_uses_fresh_bridge_and_actual_recording_metadata() -> None:
     env = _CandidateEnv()
     variant = _variant()
 
-    result = execute_scene_variant(
+    result = execute_scene_variants(
         env,
-        variant,
-        prepare_scene=env.prepare,
-        measured_validator=env.measure,
+        {0: variant},
+        prepare_scene=lambda variants: {
+            row: env.prepare(variant) for row, variant in variants.items()
+        },
+        measured_validator=lambda row: env.measure(),
         episode_index=3,
         attempt_id=2,
-    )
+    )[0]
 
     assert result.accepted
     assert result.execution.length == 1
@@ -319,15 +443,17 @@ def test_physical_failure_blocks_all_later_reset_persistence(mode: str) -> None:
     env = _CandidateEnv()
     env.physics_moves = False
 
-    result = execute_scene_variant(
+    result = execute_scene_variants(
         env,
-        _variant(),
-        prepare_scene=env.prepare,
-        measured_validator=env.measure,
+        {0: _variant()},
+        prepare_scene=lambda variants: {
+            row: env.prepare(variant) for row, variant in variants.items()
+        },
+        measured_validator=lambda row: env.measure(),
         execution_cfg=DemoExecutionCfg(
             mode=mode, save_failed_fragments=(mode == "segment_fragments")
         ),
-    )
+    )[0]
 
     assert result.execution.all_success
     assert result.execution.completed
@@ -354,12 +480,14 @@ def test_invalid_initial_scene_prevents_program_execution(status: str) -> None:
     def must_not_measure() -> ValidationResult:
         raise AssertionError("an invalid initial scene must not execute")
 
-    result = execute_scene_variant(
+    result = execute_scene_variants(
         env,
-        _variant(),
-        prepare_scene=prepare,
-        measured_validator=must_not_measure,
-    )
+        {0: _variant()},
+        prepare_scene=lambda variants: {
+            row: prepare(variant) for row, variant in variants.items()
+        },
+        measured_validator=lambda row: must_not_measure(),
+    )[0]
 
     assert not result.accepted
     assert result.execution is None
@@ -377,12 +505,14 @@ def test_missing_measured_evidence_cannot_accept_program_success(
     measured: ValidationResult,
 ) -> None:
     env = _CandidateEnv()
-    result = execute_scene_variant(
+    result = execute_scene_variants(
         env,
-        _variant(),
-        prepare_scene=env.prepare,
-        measured_validator=lambda: measured,
-    )
+        {0: _variant()},
+        prepare_scene=lambda variants: {
+            row: env.prepare(variant) for row, variant in variants.items()
+        },
+        measured_validator=lambda row: measured,
+    )[0]
 
     assert result.execution.all_success
     assert not result.accepted
@@ -397,12 +527,14 @@ def test_validator_rejects_arbitrary_truthy_values_and_blocks_saving(
     env = _CandidateEnv()
 
     with pytest.raises(TypeError, match="measured_validator must return"):
-        execute_scene_variant(
+        execute_scene_variants(
             env,
-            _variant(),
-            prepare_scene=env.prepare,
-            measured_validator=lambda: value,
-        )
+            {0: _variant()},
+            prepare_scene=lambda variants: {
+                row: env.prepare(variant) for row, variant in variants.items()
+            },
+            measured_validator=lambda row: value,
+        )[0]
 
     assert (
         env.get_demo_episode_metadata(0)["episode_context"]["sources"][
@@ -423,12 +555,14 @@ def test_measurement_exception_marks_completed_program_ineligible_for_saving() -
         raise RuntimeError("physical evidence unavailable")
 
     with pytest.raises(RuntimeError, match="physical evidence unavailable"):
-        execute_scene_variant(
+        execute_scene_variants(
             env,
-            _variant(),
-            prepare_scene=env.prepare,
-            measured_validator=fail_measurement,
-        )
+            {0: _variant()},
+            prepare_scene=lambda variants: {
+                row: env.prepare(variant) for row, variant in variants.items()
+            },
+            measured_validator=lambda row: fail_measurement(),
+        )[0]
 
     assert env.is_task_success().tolist() == [True]
     assert (
@@ -450,12 +584,14 @@ def test_preparation_failure_does_not_leave_the_previous_episode_saveable() -> N
         raise RuntimeError("scene restore failed")
 
     with pytest.raises(RuntimeError, match="scene restore failed"):
-        execute_scene_variant(
+        execute_scene_variants(
             env,
-            _variant(),
-            prepare_scene=fail_preparation,
-            measured_validator=env.measure,
-        )
+            {0: _variant()},
+            prepare_scene=lambda variants: {
+                row: fail_preparation(variant) for row, variant in variants.items()
+            },
+            measured_validator=lambda row: env.measure(),
+        )[0]
 
     env.persist_via_reset()
     assert env.dataset_manager.saved == []
@@ -466,12 +602,14 @@ def test_successful_measurements_cannot_override_program_failure() -> None:
     env = _CandidateEnv()
     env.runtime_passes = False
 
-    result = execute_scene_variant(
+    result = execute_scene_variants(
         env,
-        _variant(),
-        prepare_scene=env.prepare,
-        measured_validator=env.measure,
-    )
+        {0: _variant()},
+        prepare_scene=lambda variants: {
+            row: env.prepare(variant) for row, variant in variants.items()
+        },
+        measured_validator=lambda row: env.measure(),
+    )[0]
 
     assert result.measured_validation.accepted
     assert not result.execution.all_success
@@ -485,12 +623,14 @@ def test_execution_error_fails_closed_after_begin_recording_replaced_metadata() 
     env.fail_step = True
 
     with pytest.raises(RuntimeError, match="emergency safe-stop attempt") as error:
-        execute_scene_variant(
+        execute_scene_variants(
             env,
-            _variant(),
-            prepare_scene=env.prepare,
-            measured_validator=env.measure,
-        )
+            {0: _variant()},
+            prepare_scene=lambda variants: {
+                row: env.prepare(variant) for row, variant in variants.items()
+            },
+            measured_validator=lambda row: env.measure(),
+        )[0]
 
     assert str(error.value.__cause__) == "physics port failed"
     assert (
@@ -504,34 +644,62 @@ def test_execution_error_fails_closed_after_begin_recording_replaced_metadata() 
     assert env.camera_recorder.saved == 0
 
 
-def test_batch_and_legacy_expert_inputs_fail_before_scene_preparation() -> None:
+def test_invalid_rows_and_legacy_expert_inputs_fail_before_scene_preparation() -> None:
     env = _CandidateEnv()
-    env._num_envs = 2
-    with pytest.raises(ValueError, match="B=1"):
-        execute_scene_variant(
-            env, _variant(), prepare_scene=env.prepare, measured_validator=env.measure
-        )
+    with pytest.raises(ValueError, match="environment rows"):
+        execute_scene_variants(
+            env,
+            {1: _variant()},
+            prepare_scene=lambda variants: {
+                row: env.prepare(variant) for row, variant in variants.items()
+            },
+            measured_validator=lambda row: env.measure(),
+        )[0]
 
     env._num_envs = 1
     env.cfg.task_program = None
     with pytest.raises(TypeError, match="requires a Task Program"):
-        execute_scene_variant(
-            env, _variant(), prepare_scene=env.prepare, measured_validator=env.measure
-        )
+        execute_scene_variants(
+            env,
+            {0: _variant()},
+            prepare_scene=lambda variants: {
+                row: env.prepare(variant) for row, variant in variants.items()
+            },
+            measured_validator=lambda row: env.measure(),
+        )[0]
     assert env.bridge_initial_positions == []
+
+
+def test_conflicting_episode_expansion_owners_fail_before_scene_preparation() -> None:
+    env = _CandidateEnv()
+    prepare = Mock(side_effect=env.prepare)
+    with pytest.raises(ValueError, match="only one expansion owner"):
+        execute_scene_variants(
+            env,
+            {0: _variant()},
+            prepare_scene=lambda variants: {
+                row: prepare(variant) for row, variant in variants.items()
+            },
+            measured_validator=lambda row: env.measure(),
+            expansion_profile=object(),
+            plan_transform_factory=object(),
+        )[0]
+    prepare.assert_not_called()
 
 
 def test_episode_program_override_uses_the_same_task_program_path() -> None:
     env = _CandidateEnv()
     env.cfg.task_program = None
 
-    result = execute_scene_variant(
+    result = execute_scene_variants(
         env,
-        _variant(),
-        prepare_scene=env.prepare,
-        measured_validator=env.measure,
+        {0: _variant()},
+        prepare_scene=lambda variants: {
+            row: env.prepare(variant) for row, variant in variants.items()
+        },
+        measured_validator=lambda row: env.measure(),
         task_program=_program(),
-    )
+    )[0]
 
     assert result.accepted
     assert len(env.bridge_initial_positions) == 1
@@ -552,21 +720,25 @@ def test_normal_demo_recording_is_unchanged_without_scene_expansion() -> None:
 def test_rejected_scene_does_not_poison_the_next_fresh_attempt() -> None:
     env = _CandidateEnv()
     env.physics_moves = False
-    rejected = execute_scene_variant(
+    rejected = execute_scene_variants(
         env,
-        _variant(),
-        prepare_scene=env.prepare,
-        measured_validator=env.measure,
-    )
+        {0: _variant()},
+        prepare_scene=lambda variants: {
+            row: env.prepare(variant) for row, variant in variants.items()
+        },
+        measured_validator=lambda row: env.measure(),
+    )[0]
     env.persist_via_reset()
     env.physics_moves = True
-    accepted = execute_scene_variant(
+    accepted = execute_scene_variants(
         env,
-        _variant(),
-        prepare_scene=env.prepare,
-        measured_validator=env.measure,
+        {0: _variant()},
+        prepare_scene=lambda variants: {
+            row: env.prepare(variant) for row, variant in variants.items()
+        },
+        measured_validator=lambda row: env.measure(),
         attempt_id=1,
-    )
+    )[0]
     env.persist_via_reset()
 
     assert not rejected.accepted
@@ -586,12 +758,15 @@ def test_preparation_callback_requires_an_explicit_validation_contract() -> None
     env = _CandidateEnv()
 
     with pytest.raises(TypeError, match="prepare_scene must return"):
-        execute_scene_variant(
+        execute_scene_variants(
             env,
-            _variant(),
-            prepare_scene=lambda variant: True,
-            measured_validator=env.measure,
-        )
+            {0: _variant()},
+            prepare_scene=lambda variants: {
+                row: (lambda variant: True)(variant)
+                for row, variant in variants.items()
+            },
+            measured_validator=lambda row: env.measure(),
+        )[0]
 
     assert env.bridge_initial_positions == []
     env.persist_via_reset(commit_env_ids=[0])
@@ -621,12 +796,14 @@ class _LegacySegmentOverrideEnv(_CandidateEnv):
 def test_scene_execution_cannot_be_replaced_by_a_legacy_segment_override() -> None:
     env = _LegacySegmentOverrideEnv()
 
-    result = execute_scene_variant(
+    result = execute_scene_variants(
         env,
-        _variant(),
-        prepare_scene=env.prepare,
-        measured_validator=env.measure,
-    )
+        {0: _variant()},
+        prepare_scene=lambda variants: {
+            row: env.prepare(variant) for row, variant in variants.items()
+        },
+        measured_validator=lambda row: env.measure(),
+    )[0]
 
     assert result.accepted
     assert env.legacy_calls == 0
@@ -689,12 +866,15 @@ def test_preparation_metadata_owns_and_freezes_nested_provenance() -> None:
         prepared.metadata["nested"]["ids"] = ()
 
     env = _CandidateEnv()
-    result = execute_scene_variant(
+    result = execute_scene_variants(
         env,
-        _variant(),
-        prepare_scene=lambda variant: prepared,
-        measured_validator=env.measure,
-    )
+        {0: _variant()},
+        prepare_scene=lambda variants: {
+            row: (lambda variant: prepared)(variant)
+            for row, variant in variants.items()
+        },
+        measured_validator=lambda row: env.measure(),
+    )[0]
     exported = result.to_metadata()
     exported["preparation"]["nested"]["ids"][0] = "mutated-export"
     assert prepared.metadata["nested"]["ids"] == ("snapshot-v1",)
@@ -851,12 +1031,14 @@ def test_early_gym_success_cannot_accept_an_unfinished_canonical_program(
     env = _RealBridgeEnv(
         terminal_success=True, terminal_action_kind=terminal_action_kind
     )
-    result = execute_scene_variant(
+    result = execute_scene_variants(
         NoFailWrapper(env) if wrapped else env,
-        _variant(),
-        prepare_scene=env.prepare,
-        measured_validator=env.measure,
-    )
+        {0: _variant()},
+        prepare_scene=lambda variants: {
+            row: env.prepare(variant) for row, variant in variants.items()
+        },
+        measured_validator=lambda row: env.measure(),
+    )[0]
 
     assert result.execution.completed and result.execution.all_success
     assert not env._active_task_program_bridge.program_completed
@@ -877,9 +1059,14 @@ def test_early_gym_success_cannot_accept_an_unfinished_canonical_program(
 
 def test_normal_canonical_completion_includes_post_policy_and_validation() -> None:
     env = _RealBridgeEnv(terminal_success=False)
-    result = execute_scene_variant(
-        env, _variant(), prepare_scene=env.prepare, measured_validator=env.measure
-    )
+    result = execute_scene_variants(
+        env,
+        {0: _variant()},
+        prepare_scene=lambda variants: {
+            row: env.prepare(variant) for row, variant in variants.items()
+        },
+        measured_validator=lambda row: env.measure(),
+    )[0]
 
     assert result.accepted
     assert result.program_completed
@@ -907,12 +1094,14 @@ def test_no_fail_wrapper_cannot_override_a_completed_bridge_rejection(
 
     monkeypatch.setattr(bridge, "iter_segments", segments)
     monkeypatch.setattr(env, "create_task_program_bridge", lambda program: bridge)
-    result = execute_scene_variant(
+    result = execute_scene_variants(
         NoFailWrapper(env),
-        _variant(),
-        prepare_scene=env.prepare,
-        measured_validator=env.measure,
-    )
+        {0: _variant()},
+        prepare_scene=lambda variants: {
+            row: env.prepare(variant) for row, variant in variants.items()
+        },
+        measured_validator=lambda row: env.measure(),
+    )[0]
 
     assert result.execution.completed and result.execution.all_success
     assert not result.accepted
@@ -990,9 +1179,14 @@ def test_preparation_settling_cannot_auto_reset_and_commit_unverified_data() -> 
         env.step(ControllerAction(value=torch.zeros(1, 1)))
         return ScenePreparationResult(prepared.initial_state_id, _checks("failed"))
 
-    result = execute_scene_variant(
-        env, _variant(), prepare_scene=prepare, measured_validator=env.measure
-    )
+    result = execute_scene_variants(
+        env,
+        {0: _variant()},
+        prepare_scene=lambda variants: {
+            row: prepare(variant) for row, variant in variants.items()
+        },
+        measured_validator=lambda row: env.measure(),
+    )[0]
 
     assert not result.accepted
     assert result.execution is None
@@ -1023,9 +1217,14 @@ def test_explicit_reset_inside_an_attempt_cannot_commit_pending_data(
             env.reset(options={"commit_env_ids": [0]})
         return _checks()
 
-    result = execute_scene_variant(
-        env, _variant(), prepare_scene=prepare, measured_validator=measure
-    )
+    result = execute_scene_variants(
+        env,
+        {0: _variant()},
+        prepare_scene=lambda variants: {
+            row: prepare(variant) for row, variant in variants.items()
+        },
+        measured_validator=lambda row: measure(),
+    )[0]
 
     assert result.accepted
     assert env.dataset_manager.saved == []
@@ -1039,9 +1238,14 @@ def test_rejected_buffers_remain_blocked_after_ordinary_demo_replaces_metadata(
 ) -> None:
     env = _CandidateEnv()
     env.physics_moves = False
-    rejected = execute_scene_variant(
-        env, _variant(), prepare_scene=env.prepare, measured_validator=env.measure
-    )
+    rejected = execute_scene_variants(
+        env,
+        {0: _variant()},
+        prepare_scene=lambda variants: {
+            row: env.prepare(variant) for row, variant in variants.items()
+        },
+        measured_validator=lambda row: env.measure(),
+    )[0]
     assert not rejected.accepted
 
     env.physics_moves = True
@@ -1061,9 +1265,14 @@ def test_a_later_scene_can_save_only_after_rejected_buffers_are_reset(
 ) -> None:
     env = _CandidateEnv()
     env.physics_moves = False
-    execute_scene_variant(
-        env, _variant(), prepare_scene=env.prepare, measured_validator=env.measure
-    )
+    execute_scene_variants(
+        env,
+        {0: _variant()},
+        prepare_scene=lambda variants: {
+            row: env.prepare(variant) for row, variant in variants.items()
+        },
+        measured_validator=lambda row: env.measure(),
+    )[0]
     env.physics_moves = True
     prepare = (
         env.prepare
@@ -1071,13 +1280,15 @@ def test_a_later_scene_can_save_only_after_rejected_buffers_are_reset(
         else lambda variant: ScenePreparationResult("same-recording", _checks())
     )
 
-    accepted = execute_scene_variant(
+    accepted = execute_scene_variants(
         env,
-        _variant(),
-        prepare_scene=prepare,
-        measured_validator=env.measure,
+        {0: _variant()},
+        prepare_scene=lambda variants: {
+            row: prepare(variant) for row, variant in variants.items()
+        },
+        measured_validator=lambda row: env.measure(),
         attempt_id=1,
-    )
+    )[0]
     assert accepted.accepted
     env.persist_via_reset(commit_env_ids=[0])
 
@@ -1089,9 +1300,14 @@ def test_a_later_scene_can_save_only_after_rejected_buffers_are_reset(
 def test_empty_reset_cannot_clear_rejected_buffer_eligibility() -> None:
     env = _CandidateEnv()
     env.physics_moves = False
-    execute_scene_variant(
-        env, _variant(), prepare_scene=env.prepare, measured_validator=env.measure
-    )
+    execute_scene_variants(
+        env,
+        {0: _variant()},
+        prepare_scene=lambda variants: {
+            row: env.prepare(variant) for row, variant in variants.items()
+        },
+        measured_validator=lambda row: env.measure(),
+    )[0]
     env.persist_via_reset(env_ids=[], save_data=False)
     env.physics_moves = True
     execute_demo_episode(env)
@@ -1110,9 +1326,14 @@ def test_empty_reset_during_preparation_does_not_reject_a_fresh_recording() -> N
         env.object_x = variant.pose_changes[0].arena_pose[0][3]
         return ScenePreparationResult("fresh-recording", _checks())
 
-    result = execute_scene_variant(
-        env, _variant(), prepare_scene=prepare, measured_validator=env.measure
-    )
+    result = execute_scene_variants(
+        env,
+        {0: _variant()},
+        prepare_scene=lambda variants: {
+            row: prepare(variant) for row, variant in variants.items()
+        },
+        measured_validator=lambda row: env.measure(),
+    )[0]
     assert result.accepted
     env.persist_via_reset()
 
@@ -1126,9 +1347,14 @@ def test_failed_discard_preserves_rejection_after_metadata_is_replaced(
 ) -> None:
     env = _CandidateEnv()
     env.physics_moves = False
-    execute_scene_variant(
-        env, _variant(), prepare_scene=env.prepare, measured_validator=env.measure
-    )
+    execute_scene_variants(
+        env,
+        {0: _variant()},
+        prepare_scene=lambda variants: {
+            row: env.prepare(variant) for row, variant in variants.items()
+        },
+        measured_validator=lambda row: env.measure(),
+    )[0]
     with monkeypatch.context() as patch:
         patch.setattr(
             env.camera_recorder,
@@ -1175,14 +1401,24 @@ def test_attempt_flags_restore_after_success_and_each_error_boundary(
         return env.measure()
 
     if failure_phase is None:
-        assert execute_scene_variant(
-            env, _variant(), prepare_scene=prepare, measured_validator=measure
-        ).accepted
+        assert execute_scene_variants(
+            env,
+            {0: _variant()},
+            prepare_scene=lambda variants: {
+                row: prepare(variant) for row, variant in variants.items()
+            },
+            measured_validator=lambda row: measure(),
+        )[0].accepted
     else:
         with pytest.raises(RuntimeError):
-            execute_scene_variant(
-                env, _variant(), prepare_scene=prepare, measured_validator=measure
-            )
+            execute_scene_variants(
+                env,
+                {0: _variant()},
+                prepare_scene=lambda variants: {
+                    row: prepare(variant) for row, variant in variants.items()
+                },
+                measured_validator=lambda row: measure(),
+            )[0]
         assert bool(env.episode_context.snapshot()[0]["rejections"])
 
     assert env._demo_no_auto_reset is previous_no_auto_reset
@@ -1196,9 +1432,14 @@ def test_measurement_interrupt_restores_flags_and_keeps_buffers_ineligible() -> 
         raise KeyboardInterrupt
 
     with pytest.raises(KeyboardInterrupt):
-        execute_scene_variant(
-            env, _variant(), prepare_scene=env.prepare, measured_validator=interrupt
-        )
+        execute_scene_variants(
+            env,
+            {0: _variant()},
+            prepare_scene=lambda variants: {
+                row: env.prepare(variant) for row, variant in variants.items()
+            },
+            measured_validator=lambda row: interrupt(),
+        )[0]
 
     assert not env._demo_no_auto_reset
     assert not env.episode_context.snapshot()[0]["pending_sources"]
@@ -1218,6 +1459,7 @@ def _successful_demo() -> DemoEpisodeResult:
         terminated=(False,),
         truncated=(False,),
         terminal_reason="success",
+        completed_by_env=(True,),
     )
 
 
@@ -1227,6 +1469,7 @@ def test_result_requires_owned_canonical_program_completion_proof() -> None:
         ScenePreparationResult("settled-v1", _checks()),
         _successful_demo(),
         _checks(),
+        env_id=0,
     )
     assert not result.accepted
     assert not result.program_success
@@ -1262,6 +1505,7 @@ def test_result_rejects_malformed_program_completion_proof(
             _successful_demo(),
             _checks(),
             **proof,
+            env_id=0,
         )
 
 
@@ -1270,13 +1514,15 @@ def test_scene_program_override_preserves_selected_language_snapshot() -> None:
     env.cfg.task_program.instruction = "Static task"
     selected = _program()
     selected.instruction = "Selected scene task"
-    result = execute_scene_variant(
+    result = execute_scene_variants(
         env,
-        _variant(),
-        prepare_scene=env.prepare,
-        measured_validator=env.measure,
+        {0: _variant()},
+        prepare_scene=lambda variants: {
+            row: env.prepare(variant) for row, variant in variants.items()
+        },
+        measured_validator=lambda row: env.measure(),
         task_program=selected,
-    )
+    )[0]
     assert result.accepted
     assert result.execution.instruction == "Selected scene task"
     assert result.execution.instruction_source == "task_program"
@@ -1286,9 +1532,14 @@ def test_scene_program_override_preserves_selected_language_snapshot() -> None:
 
 def test_layout_preparation_failure_blocks_even_explicit_recording_commit() -> None:
     env = _CandidateEnv()
-    result = execute_scene_variant(
-        env, _variant(), prepare_scene=env.prepare, measured_validator=env.measure
-    )
+    result = execute_scene_variants(
+        env,
+        {0: _variant()},
+        prepare_scene=lambda variants: {
+            row: env.prepare(variant) for row, variant in variants.items()
+        },
+        measured_validator=lambda row: env.measure(),
+    )[0]
     assert result.accepted
     with env.episode_context.check("layout", [0]) as finish:
         finish(accepted=False)

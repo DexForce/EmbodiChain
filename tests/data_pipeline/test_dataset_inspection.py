@@ -724,7 +724,7 @@ def test_filters_accept_real_row_local_runtime_and_measured_objective_schema(
             "kind": "skill_result",
             "env_ids": [3, 7],
             "events": [
-                {"kind": "action_retry", "env_mask": [False, index == 1]},
+                {"kind": "skill_retry", "env_mask": [False, index == 1]},
                 {"kind": "replanned", "env_mask": [False, index == 1]},
                 {"kind": "replanned", "env_mask": [True, False]},
             ],

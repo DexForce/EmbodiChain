@@ -1,6 +1,6 @@
 # Visual world model
 
-`embodichain_models.dynamics.lewm` owns the image encoder, action-conditioned
+`embodichain.extensions.models.dynamics.lewm` owns the image encoder, action-conditioned
 latent predictor, SIGReg objective, HDF5 window source, weights-only export and
 CEM planning. It has no simulator dependency. The installable
 `build_lewm_trainer` factory uses common `learning.sl` orchestration and

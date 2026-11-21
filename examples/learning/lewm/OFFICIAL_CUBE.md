@@ -5,6 +5,12 @@ preserves reports, diagnostics and remaining work. The latest optional soft-mimi
 velocity implementation is WIP: builds completed, post-build physical validation
 is pending. Earlier passing counts do not qualify that latest implementation.
 
+The main branch uses the released DexSim 0.6.0 SDK. Native Cube evaluation
+requires a matching isolated build with per-shape contact material overrides
+and post-overlay contact replay. Rebuild the checkpoint's provider changes on
+the current SDK baseline before qualifying native results with this checkout.
+The frozen results below record the October 31 runtime and assets.
+
 The requested destination is EmbodiChain/DexSim. MuJoCo supplies the reference
 task, assets, controls and measured trajectories. Completion requires the physical
 task and the official evaluation protocol; robot loading, numerical model agreement

@@ -351,7 +351,7 @@ class NewtonPlanarReachEnv:
         """No-op; Warp/Newton resources are released with the Python object."""
 
     def _build_model(self) -> tuple[Any, wp.array]:
-        template = newton.ModelBuilder(gravity=0.0, up_axis=newton.Axis.Y)
+        template = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0), up_axis=newton.Axis.Y)
         first_link = template.add_link(label="planar_first_link")
         template.add_shape_sphere(first_link, radius=0.01)
         second_link = template.add_link(label="planar_end_link")
@@ -388,7 +388,7 @@ class NewtonPlanarReachEnv:
         )
         template.add_articulation([first_joint, second_joint])
 
-        builder = newton.ModelBuilder(gravity=0.0, up_axis=newton.Axis.Y)
+        builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0), up_axis=newton.Axis.Y)
         builder.replicate(
             template,
             world_count=self.num_envs,

@@ -12,7 +12,7 @@ including its floating base, standing pose and simulation PD drive defaults.
 
 ```python
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain_robots import UnitreeGo1Cfg
+from embodichain.extensions.robots import UnitreeGo1Cfg
 
 sim = SimulationManager(SimulationManagerCfg(headless=True, num_envs=1))
 cfg = UnitreeGo1Cfg.from_dict({})
@@ -31,7 +31,7 @@ embodichain preview-robot --robot UnitreeGo1
 | --- | --- |
 | Catalog ID / UID | `UnitreeGo1` |
 | Configuration class | `UnitreeGo1Cfg` |
-| Canonical module | `embodichain_robots.unitree.go1` |
+| Canonical module | `embodichain.extensions.robots.unitree.go1` |
 | Vendor | `unitree` |
 | Morphology | `quadruped` |
 | Arm count | 0 |

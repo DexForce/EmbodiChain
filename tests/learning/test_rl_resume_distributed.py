@@ -21,6 +21,7 @@ import json
 import random
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -34,12 +35,26 @@ from embodichain.learning.rl.policy_evaluation.manifest import (
     write_run_manifest,
 )
 from embodichain.learning.rl.utils.trainer import Trainer
-from embodichain.learning.rl.train import _save_final_checkpoint
-from embodichain_tasks.classic_control.point_mass import PointMassEnv
+from embodichain.learning.rl.train import _configure_checkpoints, _save_final_checkpoint
+from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+from embodichain.extensions.tasks.classic_control.point_mass import PointMassEnv
 
 
 def _components(rank: int, directory: Path, mode: str) -> Trainer:
     env = PointMassEnv(num_envs=4, max_episode_steps=4)
+    env.level = rank + 2
+    env.get_training_state = lambda: {"rank": rank, "level": env.level}
+
+    def validate(state):
+        if state["rank"] != rank:
+            raise ValueError("Environment state belongs to another rank")
+
+    def load(state):
+        validate(state)
+        env.level = state["level"]
+
+    env.validate_training_state = validate
+    env.load_training_state = load
     policy = ActorCritic(
         14,
         2,
@@ -114,6 +129,27 @@ def _worker(rank: int, group_file: str, directory: str) -> None:
     )
     directory = Path(directory)
     try:
+
+        def fail_export(*args, **kwargs):
+            raise OSError("task resource export failed")
+
+        environment = SimpleNamespace(
+            cfg=SimpleNamespace(resource_export=FunctorCfg(func=fail_export))
+        )
+        failed_trainer = SimpleNamespace(rank=rank, distributed=True, env=environment)
+        with pytest.raises(
+            RuntimeError, match="rank 0: OSError: task resource export failed"
+        ):
+            _configure_checkpoints(
+                failed_trainer,
+                {"policy": {}, "trainer": {}},
+                "train.yaml",
+                directory / "failed-export",
+                gym_config="gym.yaml",
+                gym_data={"id": "fixture", "env": {}},
+            )
+        # The following complete train/save/resume cases also prove the process
+        # group stays usable after both ranks receive the packaging failure.
         for mode in ("ppo_fixed", "ppo_adaptive", "grpo"):
             random.seed(3 + rank)
             np.random.seed(3 + rank)
@@ -142,7 +178,9 @@ def _worker(rank: int, group_file: str, directory: str) -> None:
                 else None
             )
             restored = _components(rank, directory / f"{mode}_resumed", mode)
+            restored.env.level = -1
             restored.load_checkpoint(path)
+            assert restored.env.level == rank + 2
             assert restored.best_eval_value == trainer.best_eval_value
             assert restored.best_checkpoint_path is None
             actual_rng = random.random(), np.random.rand(), torch.rand(3)
@@ -172,6 +210,10 @@ def _worker(rank: int, group_file: str, directory: str) -> None:
                     assert Path(restored.best_checkpoint_path).is_file()
                 payload = torch.load(path, weights_only=True)
                 assert len(payload["rng_by_rank"]) == 2
+                assert payload["environment_state_by_rank"] == [
+                    {"rank": 0, "level": 2},
+                    {"rank": 1, "level": 3},
+                ]
                 if mode != "grpo":
                     assert not torch.equal(
                         payload["normalizer_by_rank"][0]["actor_obs_normalizer.mean"],

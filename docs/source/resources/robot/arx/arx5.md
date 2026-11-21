@@ -1,7 +1,7 @@
 # ARX5 X5A
 
-`embodichain_robots.ARX5Cfg` configures the bundled `ARX5/X5A.urdf` asset.
-Its implementation lives in `extensions/embodichain_robots/arx/arx5/cfg.py`, and the
+`embodichain.extensions.robots.ARX5Cfg` configures the bundled `ARX5/X5A.urdf` asset.
+Its implementation lives in `embodichain/extensions/robots/arx/arx5/cfg.py`, and the
 bundled robot catalog registers it as `ARX5`. The package exports the class
 lazily; listing the catalog does not load the asset or simulation runtime.
 
@@ -41,7 +41,7 @@ There are eight independent controlled joints. `init_qpos` follows source
 order: the six arm joints, then the two fingers.
 
 ```python
-from embodichain_robots import ARX5Cfg
+from embodichain.extensions.robots import ARX5Cfg
 
 cfg = ARX5Cfg.from_dict({})
 robot = sim.add_robot(cfg=cfg)
@@ -132,8 +132,8 @@ self-collision setting, adds a 50 mm table and scene-specific IK branch limits,
 and executes the same PickUp → Place invocation code used for UR5 and Franka:
 
 ```bash
-python scripts/tutorials/atomic_action/embodiment_switching.py --task pick_place --robot arx5
+python scripts/tutorials/atomic_skill/embodiment_switching.py --task pick_place --robot arx5
 ```
 
 The tutorial selector is lowercase `arx5`; the robot catalog ID is `ARX5`.
-Its scene calibration lives in `examples/sim/atomic_action/embodiments.py`.
+Its scene calibration lives in `examples/sim/atomic_skill/embodiments.py`.

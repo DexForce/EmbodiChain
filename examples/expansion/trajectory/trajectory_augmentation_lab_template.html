@@ -1,0 +1,814 @@
+<!--
+  Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+  Licensed under the Apache License, Version 2.0.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trajectory Augmentation Lab · EmbodiChain</title>
+  <script>
+    // Use the same stored mode as the documentation, including when opened directly.
+    (() => {
+      let mode = "auto";
+      try { mode = localStorage.getItem("mode") || "auto"; } catch (_) {}
+      if (!["auto", "light", "dark"].includes(mode)) mode = "auto";
+      document.documentElement.dataset.mode = mode;
+      document.documentElement.dataset.theme = mode === "auto"
+        ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+        : mode;
+    })();
+  </script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #fff;
+      --panel: #fff;
+      --surface: #f3f4f5;
+      --canvas: #f8fafc;
+      --border: #d1d5da;
+      --border-strong: #aab6c5;
+      --muted: #52647a;
+      --text: #222832;
+      --heading: #222832;
+      --blue: #176de8;
+      --blue-emphasis: #0b58c1;
+      --blue-soft: #edf4ff;
+      --blue-border: #b8d4fa;
+      --button-text: #fff;
+      --gold: #a35e0a;
+      --red: #b63c4d;
+      --green: #18764c;
+      --code: #005f77;
+      --metric-bg: rgba(255, 255, 255, .94);
+    }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #121212;
+      --panel: #171a1f;
+      --surface: #29313d;
+      --canvas: #1b2028;
+      --border: #48566b;
+      --border-strong: #687a91;
+      --muted: #a6b1c0;
+      --text: #ced6dd;
+      --heading: #f0f2f4;
+      --blue: #528fe4;
+      --blue-emphasis: #a4c9ff;
+      --blue-soft: #263c58;
+      --blue-border: #41658d;
+      --button-text: #101c2d;
+      --gold: #e6ad5a;
+      --red: #ff8794;
+      --green: #70c995;
+      --code: #76c9db;
+      --metric-bg: rgba(23, 26, 31, .94);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue",
+        Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+      font-size: 15px;
+      line-height: 1.55;
+    }
+    button, input, select { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .app { max-width: 1480px; margin: 0 auto; padding: 0 32px 40px; }
+    .topbar {
+      min-height: 62px; display: flex; align-items: center; justify-content: space-between;
+      gap: 20px; border-bottom: 1px solid var(--border);
+    }
+    .breadcrumbs { color: var(--muted); font-size: 14px; }
+    .breadcrumbs strong { color: var(--heading); font-weight: 600; }
+    .breadcrumbs span { margin: 0 6px; color: var(--border-strong); }
+    .theme-control { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+    .theme-control select {
+      color: var(--text); background: var(--panel); border: 1px solid var(--border);
+      border-radius: 4px; padding: 5px 8px;
+    }
+    .header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-top: 28px; }
+    h1 { margin: 0; color: var(--heading); font-size: 36px; font-weight: 400; line-height: 1.2; }
+    .subtitle { margin: 9px 0 0; color: var(--muted); }
+    .scope {
+      border: 1px solid var(--border); border-left: 3px solid var(--blue); border-radius: 4px;
+      background: var(--surface); padding: 10px 13px; max-width: 470px; color: var(--text);
+      font-size: 13px; line-height: 1.55;
+    }
+    .scope strong { color: var(--heading); }
+    .scope span { margin-left: 4px; }
+    .tabs {
+      display: flex; gap: 7px; overflow-x: auto; padding: 24px 0 16px; scrollbar-width: thin;
+    }
+    .tab, .view-button, .seed-button, .phase-button, .play-button {
+      border: 1px solid var(--border); background: var(--panel); border-radius: 4px;
+      cursor: pointer; transition: border-color .15s, background .15s, color .15s;
+    }
+    .tab { white-space: nowrap; padding: 8px 12px; color: var(--muted); }
+    .tab:hover, .view-button:hover, .seed-button:hover, .phase-button:hover { border-color: var(--blue); color: var(--blue); }
+    .tab.active { color: var(--blue-emphasis); background: var(--blue-soft); border-color: var(--blue-border); font-weight: 600; }
+    .main-grid { display: grid; grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); gap: 18px; }
+    .panel { border: 1px solid var(--border); background: var(--panel); border-radius: 6px; }
+    .sidebar { padding: 20px; display: flex; flex-direction: column; gap: 20px; }
+    .method-title { display: flex; align-items: center; gap: 9px; margin: 0 0 8px; color: var(--heading); font-size: 21px; font-weight: 600; }
+    .badge {
+      display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 4px;
+      background: var(--blue-soft); border: 1px solid var(--blue-border);
+      color: var(--blue-emphasis); font-size: 11px; font-weight: 600;
+    }
+    .equation { color: var(--muted); line-height: 1.6; }
+    .section-label { margin-bottom: 8px; color: var(--heading); font-size: 13px; font-weight: 600; }
+    .control-block { border-top: 1px solid var(--border); padding-top: 18px; }
+    .slider-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px; }
+    .strength-value { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+    input[type="range"] { width: 100%; accent-color: var(--blue); cursor: pointer; }
+    .seed-row { display: flex; align-items: center; gap: 9px; margin-top: 13px; }
+    .seed-box {
+      flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+      padding: 7px 10px; color: var(--muted);
+    }
+    .seed-box span { float: right; color: var(--heading); font-variant-numeric: tabular-nums; }
+    .seed-button { padding: 7px 10px; }
+    .explain { color: var(--text); line-height: 1.6; margin: 0; }
+    .implementation {
+      display: block; margin-top: 10px; padding: 9px 10px; border-radius: 4px;
+      color: var(--code); background: var(--surface); border: 1px solid var(--border);
+      font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere;
+    }
+    .guarantee { border-left: 3px solid var(--gold); padding-left: 10px; color: var(--text); line-height: 1.55; }
+    .visual { overflow: hidden; }
+    .visual-head {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 13px 16px; border-bottom: 1px solid var(--border);
+    }
+    .legend { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; color: var(--muted); font-size: 12px; }
+    .legend-item { display: flex; align-items: center; gap: 7px; }
+    .line { width: 22px; height: 0; border-top: 2px solid var(--blue); }
+    .line.reference { border-color: var(--muted); border-top-style: dashed; }
+    .diamond { width: 8px; height: 8px; border: 1.5px solid var(--muted); transform: rotate(45deg); }
+    .object-swatch { width: 9px; height: 9px; border-radius: 50%; background: var(--gold); }
+    .target-swatch { width: 11px; height: 8px; border: 1.5px solid var(--green); border-radius: 50%; }
+    .view-toggle { display: flex; gap: 5px; }
+    .view-button { padding: 6px 10px; color: var(--muted); font-size: 13px; }
+    .view-button.active { color: var(--blue-emphasis); background: var(--blue-soft); border-color: var(--blue-border); }
+    .canvas-wrap { position: relative; height: 540px; background: var(--canvas); }
+    canvas { display: block; width: 100%; height: 100%; }
+    canvas.orbitable { cursor: grab; touch-action: none; }
+    canvas.orbitable.dragging { cursor: grabbing; }
+    .chart-caption {
+      position: absolute; top: 13px; left: 16px; color: var(--muted); font-size: 11px;
+      pointer-events: none;
+    }
+    .metrics {
+      position: absolute; right: 13px; top: 13px; display: grid; grid-template-columns: repeat(2, minmax(115px, 1fr));
+      gap: 7px; max-width: 360px; pointer-events: none;
+    }
+    .metric { background: var(--metric-bg); border: 1px solid var(--border); border-radius: 4px; padding: 7px 9px; }
+    .metric-label { color: var(--muted); font-size: 10px; }
+    .metric-value { margin-top: 2px; color: var(--heading); font-size: 12px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .timeline-area { padding: 14px 16px 16px; border-top: 1px solid var(--border); }
+    .phases { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 13px; }
+    .phase-button { padding: 5px 9px; color: var(--muted); font-size: 12px; }
+    .phase-button.active { background: var(--blue-soft); color: var(--blue-emphasis); border-color: var(--blue-border); }
+    .phase-button.contact { color: var(--gold); }
+    .phase-button.bridge { color: var(--red); border-style: dashed; }
+    .transport { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; }
+    .play-button { min-width: 58px; padding: 7px 12px; background: var(--blue); color: var(--button-text); border-color: var(--blue); font-weight: 600; }
+    .time-readout { min-width: 86px; text-align: right; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+    .footnote { margin-top: 14px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+    @media (max-width: 900px) {
+      .header { flex-wrap: wrap; }
+      .scope { max-width: none; }
+      .main-grid { grid-template-columns: 1fr; }
+      .visual { grid-row: 1; }
+    }
+    @media (max-width: 600px) {
+      .app { padding: 0 16px 24px; }
+      .breadcrumbs { font-size: 12px; }
+      h1 { font-size: 29px; }
+      .canvas-wrap { height: auto; }
+      canvas { height: 390px; }
+      .chart-caption { max-width: calc(100% - 32px); }
+      .metrics {
+        position: static; grid-template-columns: repeat(2, minmax(0, 1fr));
+        max-width: none; padding: 10px; border-top: 1px solid var(--border);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="topbar">
+      <div class="breadcrumbs"><strong>EmbodiChain</strong><span aria-hidden="true">/</span>Trajectory augmentation</div>
+      <label class="theme-control" for="theme-select">Theme
+        <select id="theme-select" aria-label="Color theme">
+          <option value="auto">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+    </div>
+    <header class="header">
+      <div>
+        <h1 id="title"></h1>
+        <p class="subtitle" id="subtitle"></p>
+      </div>
+      <div class="scope">
+        <div><strong>Varies:</strong><span id="scope-included"></span></div>
+        <div class="excluded"><strong>Keeps fixed:</strong><span id="scope-excluded"></span></div>
+      </div>
+    </header>
+
+    <nav class="tabs" id="tabs" aria-label="Trajectory augmentation methods"></nav>
+
+    <main class="main-grid">
+      <aside class="panel sidebar">
+        <section>
+          <h2 class="method-title"><span id="method-label"></span><span class="badge" id="method-badge"></span></h2>
+          <div class="equation" id="method-equation"></div>
+        </section>
+
+        <section class="control-block">
+          <div class="slider-head">
+            <span>Variation</span>
+            <span class="strength-value" id="strength-value"></span>
+          </div>
+          <input id="strength" type="range" min="0" max="2" step="1" value="1" aria-label="Variation strength">
+          <div class="seed-row">
+            <div class="seed-box">Seed <span id="seed-value">7</span></div>
+            <button class="seed-button" id="seed-button">New variant</button>
+          </div>
+        </section>
+
+        <section class="control-block">
+          <div class="section-label">What changes</div>
+          <p class="explain" id="method-principle"></p>
+          <code class="implementation" id="method-implementation"></code>
+        </section>
+
+        <section class="control-block">
+          <div class="section-label">Validity boundary</div>
+          <div class="guarantee" id="method-guarantee"></div>
+          <div class="footnote">EmbodiChain's Python APIs generated every candidate. The browser only visualizes the results.</div>
+        </section>
+      </aside>
+
+      <section class="panel visual">
+        <div class="visual-head">
+          <div class="legend">
+            <span class="legend-item"><i class="line reference"></i>Reference</span>
+            <span class="legend-item"><i class="line"></i>Variant</span>
+            <span class="legend-item"><i class="diamond"></i>Phase boundary</span>
+            <span class="legend-item"><i class="object-swatch"></i>Object</span>
+            <span class="legend-item"><i class="target-swatch"></i>Target</span>
+          </div>
+          <div class="view-toggle">
+            <button class="view-button active" data-view="path">EEF Path</button>
+            <button class="view-button" data-view="joint">Joint Positions</button>
+          </div>
+        </div>
+        <div class="canvas-wrap">
+          <canvas id="plot"></canvas>
+          <div class="chart-caption" id="chart-caption"></div>
+          <div class="metrics" id="metrics"></div>
+        </div>
+        <div class="timeline-area">
+          <div class="phases" id="phases"></div>
+          <div class="transport">
+            <button class="play-button" id="play-button">Play</button>
+            <input id="timeline" type="range" min="0" max="1000" value="330" step="1" aria-label="Trajectory playback position">
+            <div class="time-readout" id="time-readout"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    "use strict";
+    const DATA = __TRAJECTORY_AUGMENTATION_DATA__;
+    const state = { method: "joint_residual", strength: 1, seed: 7, view: "path", progress: 0.33, playing: false };
+    const camera = { yaw: -0.72, pitch: 0.36, distance: 1.85, dragging: false, x: 0, y: 0 };
+    const phaseNames = { approach: "Approach", grasp: "Grasp", transport: "Transport", release: "Release", retreat: "Retreat" };
+    const metricNames = {
+      duration_s: "Duration", sample_count: "Samples", tool_path_ratio: "Path length / reference",
+      minimum_manipulability: "Min. manipulability", joint_range_fraction: "Joint range used",
+      via_points_per_free_phase: "Via points / free phase", constrained_task_rows: "Constrained task rows",
+      target_band: "Target band", reached_band: "Reached band", matched: "Target matched",
+      proposals_scored: "Candidates scored", translation_bound_m: "Translation bound",
+      maximum_ik_error_m: "Max. IK error", duration_scale: "Duration scale",
+      timing_profile: "Timing profile", cone_angle_deg: "Cone angle", fixed_contact_error_m: "Fixed-contact error",
+      requires_replanning: "Replan required", bank_size: "Segment bank", bridge_count: "Bridges",
+      selected_sources: "Source order"
+    };
+    const palettes = {
+      light: {
+        blue: "#176de8", reference: "#788493", grid: "#dce3ea", groundAxis: "#b3c0ce", text: "#52647a",
+        boundary: "#485b70", contact: "#a35e0a", bridge: "#b63c4d", green: "#18764c", background: "#f8fafc",
+        labelBackground: "rgba(255,255,255,.92)", referenceRobot: "rgba(92,108,128,.55)",
+        pickFaces: ["rgba(222,229,236,.96)", "rgba(207,217,227,.96)", "rgba(192,204,216,.96)"], pickStroke: "#95a5b7",
+        placeFaces: ["rgba(221,238,228,.96)", "rgba(202,228,213,.96)", "rgba(185,216,200,.96)"], placeStroke: "#7bae91",
+        robotOutline: "#708297", robotBody: ["#f1f4f7", "#dce3eb"], jointRim: "#53677e", joint: "#3471bd",
+        jointStroke: "#dcecff", gripperOutline: "#687c91", gripper: "#f3f5f7", tcp: "#fff",
+        cursor: "rgba(48,64,84,.7)", contactFill: "rgba(196,126,28,.10)", bridgeFill: "rgba(190,60,75,.10)",
+        axes: ["#c54349", "#25845d", "#176de8"],
+        joints: ["#176de8", "#0d8090", "#9145af", "#a56200", "#198250", "#c14258", "#6053ba"]
+      },
+      dark: {
+        blue: "#528fe4", reference: "#a0aab8", grid: "#343e4b", groundAxis: "#59677a", text: "#a6b1c0",
+        boundary: "#e4eaf2", contact: "#e6ad5a", bridge: "#ff8794", green: "#70c995", background: "#1b2028",
+        labelBackground: "rgba(18,18,18,.9)", referenceRobot: "rgba(170,182,198,.52)",
+        pickFaces: ["rgba(67,78,93,.92)", "rgba(53,63,76,.92)", "rgba(43,52,64,.92)"], pickStroke: "#718096",
+        placeFaces: ["rgba(49,82,67,.9)", "rgba(40,68,56,.9)", "rgba(33,57,47,.9)"], placeStroke: "#58876e",
+        robotOutline: "#354251", robotBody: ["#e4e9ee", "#cfd7df"], jointRim: "#222b35", joint: "#3869ad",
+        jointStroke: "#91bdff", gripperOutline: "#293544", gripper: "#dce3e9", tcp: "#d9e8ff",
+        cursor: "rgba(255,255,255,.7)", contactFill: "rgba(230,173,90,.10)", bridgeFill: "rgba(255,135,148,.12)",
+        axes: ["#ff7a83", "#70c995", "#79aaff"],
+        joints: ["#528fe4", "#5bd6de", "#d88cf0", "#f0b35a", "#70c995", "#ff8794", "#a3b8ff"]
+      }
+    };
+    let colors = palettes[document.documentElement.dataset.theme];
+    const systemTheme = window.matchMedia("(prefers-color-scheme: dark)");
+    const canvas = document.getElementById("plot");
+    const context = canvas.getContext("2d");
+    let lastFrame = performance.now();
+
+    function setTheme(mode, persist = true) {
+      if (!["auto", "light", "dark"].includes(mode)) mode = "auto";
+      const theme = mode === "auto" ? (systemTheme.matches ? "dark" : "light") : mode;
+      document.documentElement.dataset.mode = mode;
+      document.documentElement.dataset.theme = theme;
+      document.getElementById("theme-select").value = mode;
+      colors = palettes[theme];
+      if (persist) {
+        try { localStorage.setItem("mode", mode); localStorage.setItem("theme", theme); } catch (_) {}
+      }
+      draw();
+    }
+
+    function method() { return DATA.methods[state.method]; }
+    function candidate() { return method().variants[state.strength][state.seed]; }
+    function duration(record) { return record.time[record.time.length - 1]; }
+    function sampleIndex(record, progress) {
+      const target = progress * duration(record);
+      let low = 0, high = record.time.length - 1;
+      while (low < high) {
+        const middle = Math.floor((low + high) / 2);
+        if (record.time[middle] < target) low = middle + 1; else high = middle;
+      }
+      if (low > 0 && Math.abs(record.time[low - 1] - target) < Math.abs(record.time[low] - target)) return low - 1;
+      return low;
+    }
+    function identity4() {
+      return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+    }
+    function multiply4(a, b) {
+      const result = new Array(16).fill(0);
+      for (let row = 0; row < 4; row += 1) {
+        for (let column = 0; column < 4; column += 1) {
+          for (let index = 0; index < 4; index += 1) result[row * 4 + column] += a[row * 4 + index] * b[index * 4 + column];
+        }
+      }
+      return result;
+    }
+    function originTransform(xyz, rpy) {
+      const [roll, pitch, yaw] = rpy;
+      const cr = Math.cos(roll), sr = Math.sin(roll), cp = Math.cos(pitch), sp = Math.sin(pitch), cy = Math.cos(yaw), sy = Math.sin(yaw);
+      return [
+        cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr, xyz[0],
+        sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr, xyz[1],
+        -sp, cp * sr, cp * cr, xyz[2],
+        0, 0, 0, 1
+      ];
+    }
+    function axisRotation(axis, angle) {
+      const length = Math.hypot(...axis), x = axis[0] / length, y = axis[1] / length, z = axis[2] / length;
+      const cosine = Math.cos(angle), sine = Math.sin(angle), complement = 1 - cosine;
+      return [
+        cosine + x * x * complement, x * y * complement - z * sine, x * z * complement + y * sine, 0,
+        y * x * complement + z * sine, cosine + y * y * complement, y * z * complement - x * sine, 0,
+        z * x * complement - y * sine, z * y * complement + x * sine, cosine + z * z * complement, 0,
+        0, 0, 0, 1
+      ];
+    }
+    function transformPoint(transform, point) {
+      return [
+        transform[0] * point[0] + transform[1] * point[1] + transform[2] * point[2] + transform[3],
+        transform[4] * point[0] + transform[5] * point[1] + transform[6] * point[2] + transform[7],
+        transform[8] * point[0] + transform[9] * point[1] + transform[10] * point[2] + transform[11]
+      ];
+    }
+    function transformVector(transform, vector) {
+      return [
+        transform[0] * vector[0] + transform[1] * vector[1] + transform[2] * vector[2],
+        transform[4] * vector[0] + transform[5] * vector[1] + transform[6] * vector[2],
+        transform[8] * vector[0] + transform[9] * vector[1] + transform[10] * vector[2]
+      ];
+    }
+    function add3(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
+    function scale3(value, scale) { return [value[0] * scale, value[1] * scale, value[2] * scale]; }
+    function dot3(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+    function cross3(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+    function normalize3(value) {
+      const length = Math.max(1e-9, Math.hypot(...value));
+      return value.map(component => component / length);
+    }
+    function frankaPose(q) {
+      let transform = identity4(), activeIndex = 0;
+      const points = [[0, 0, 0]], joints = [];
+      DATA.robot.kinematic_joints.forEach(joint => {
+        transform = multiply4(transform, originTransform(joint.xyz, joint.rpy));
+        if (joint.type === "revolute") {
+          joints.push(transformPoint(transform, [0, 0, 0]));
+          transform = multiply4(transform, axisRotation(joint.axis, q[activeIndex]));
+          activeIndex += 1;
+        }
+        const point = transformPoint(transform, [0, 0, 0]);
+        const previous = points[points.length - 1];
+        if (Math.hypot(point[0] - previous[0], point[1] - previous[1], point[2] - previous[2]) > 1e-5) points.push(point);
+      });
+      return { points, joints, tcp: transformPoint(transform, [0, 0, 0]), transform };
+    }
+    function resizeCanvas() {
+      const bounds = canvas.getBoundingClientRect();
+      const ratio = Math.max(1, window.devicePixelRatio || 1);
+      const width = Math.round(bounds.width * ratio), height = Math.round(bounds.height * ratio);
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width; canvas.height = height;
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      }
+      draw();
+    }
+    function clear(width, height) {
+      context.clearRect(0, 0, width, height);
+      context.fillStyle = colors.background;
+      context.fillRect(0, 0, width, height);
+    }
+    function polyline(points, project, color, width, dash = []) {
+      if (!points.length) return;
+      context.beginPath();
+      points.forEach((point, index) => {
+        const [x, y] = project(point);
+        if (index === 0) context.moveTo(x, y); else context.lineTo(x, y);
+      });
+      context.strokeStyle = color; context.lineWidth = width; context.setLineDash(dash); context.stroke(); context.setLineDash([]);
+    }
+    function diamond(point, project, color) {
+      const [x, y] = project(point), radius = 5;
+      context.beginPath(); context.moveTo(x, y - radius); context.lineTo(x + radius, y);
+      context.lineTo(x, y + radius); context.lineTo(x - radius, y); context.closePath();
+      context.fillStyle = colors.background; context.fill(); context.strokeStyle = color; context.lineWidth = 1.5; context.stroke();
+    }
+    function extent(values) {
+      let minimum = Infinity, maximum = -Infinity;
+      values.forEach(value => { minimum = Math.min(minimum, value); maximum = Math.max(maximum, value); });
+      return [minimum, maximum];
+    }
+    function drawGrid(project, xTicks, yTicks, xLabel, yLabel, bounds) {
+      context.font = "11px ui-sans-serif, system-ui"; context.lineWidth = 1;
+      xTicks.forEach(value => {
+        const [x] = project([value, bounds.yMin]);
+        context.strokeStyle = colors.grid; context.beginPath(); context.moveTo(x, bounds.top); context.lineTo(x, bounds.bottom); context.stroke();
+        context.fillStyle = colors.text; context.textAlign = "center"; context.fillText(value.toFixed(1), x, bounds.bottom + 19);
+      });
+      yTicks.forEach(value => {
+        const [, y] = project([bounds.xMin, value]);
+        context.strokeStyle = colors.grid; context.beginPath(); context.moveTo(bounds.left, y); context.lineTo(bounds.right, y); context.stroke();
+        context.fillStyle = colors.text; context.textAlign = "right"; context.fillText(value.toFixed(1), bounds.left - 8, y + 4);
+      });
+      context.fillStyle = colors.text; context.textAlign = "right"; context.fillText(xLabel, bounds.right, bounds.bottom + 35);
+      context.save(); context.translate(16, bounds.top); context.rotate(-Math.PI / 2); context.textAlign = "right"; context.fillText(yLabel, 0, 0); context.restore();
+    }
+    function niceTicks(minimum, maximum, count = 5) {
+      const span = Math.max(maximum - minimum, 1e-6), raw = span / count;
+      const power = Math.pow(10, Math.floor(Math.log10(raw)));
+      const normalized = raw / power;
+      const step = (normalized < 1.5 ? 1 : normalized < 3.5 ? 2 : normalized < 7.5 ? 5 : 10) * power;
+      const start = Math.ceil(minimum / step) * step, ticks = [];
+      for (let value = start; value <= maximum + step * .1; value += step) ticks.push(value);
+      return ticks;
+    }
+    function cameraProjection(width, height) {
+      const target = [0, 0, .43], horizontal = camera.distance * Math.cos(camera.pitch);
+      const position = [
+        target[0] + horizontal * Math.cos(camera.yaw),
+        target[1] + horizontal * Math.sin(camera.yaw),
+        target[2] + camera.distance * Math.sin(camera.pitch)
+      ];
+      const forward = normalize3([target[0] - position[0], target[1] - position[1], target[2] - position[2]]);
+      const right = normalize3(cross3(forward, [0, 0, 1]));
+      const up = normalize3(cross3(right, forward));
+      const focalLength = Math.min(width, height) * (width < 500 ? 1 : 1.28);
+      return point => {
+        const relative = [point[0] - position[0], point[1] - position[1], point[2] - position[2]];
+        const depth = Math.max(.1, dot3(relative, forward));
+        return [width * .52 + dot3(relative, right) / depth * focalLength, height * .55 - dot3(relative, up) / depth * focalLength, depth];
+      };
+    }
+    function drawGround(project) {
+      const extent = .65, step = .13;
+      for (let index = -5; index <= 5; index += 1) {
+        const value = index * step;
+        polyline([[-extent, value, 0], [extent, value, 0]], project, index === 0 ? colors.groundAxis : colors.grid, index === 0 ? 1.2 : 1);
+        polyline([[value, -extent, 0], [value, extent, 0]], project, index === 0 ? colors.groundAxis : colors.grid, index === 0 ? 1.2 : 1);
+      }
+      const axes = [
+        { point: [.19, 0, 0], color: colors.axes[0], label: "X" },
+        { point: [0, .19, 0], color: colors.axes[1], label: "Y" },
+        { point: [0, 0, .19], color: colors.axes[2], label: "Z" }
+      ];
+      axes.forEach(axis => {
+        polyline([[0, 0, 0], axis.point], project, axis.color, 2);
+        const [x, y] = project(axis.point);
+        context.fillStyle = axis.color; context.font = "10px ui-sans-serif, system-ui"; context.textAlign = "center"; context.fillText(axis.label, x, y - 5);
+      });
+    }
+    function translationTransform(center) {
+      const transform = identity4();
+      transform[3] = center[0]; transform[7] = center[1]; transform[11] = center[2];
+      return transform;
+    }
+    function drawBox(transform, size, project, fills, stroke) {
+      const [halfX, halfY, halfZ] = size.map(value => value / 2);
+      const local = [
+        [-halfX, -halfY, -halfZ], [halfX, -halfY, -halfZ],
+        [halfX, halfY, -halfZ], [-halfX, halfY, -halfZ],
+        [-halfX, -halfY, halfZ], [halfX, -halfY, halfZ],
+        [halfX, halfY, halfZ], [-halfX, halfY, halfZ]
+      ];
+      const points = local.map(point => transformPoint(transform, point));
+      const faces = [[0, 1, 2, 3], [4, 7, 6, 5], [0, 4, 5, 1], [1, 5, 6, 2], [2, 6, 7, 3], [3, 7, 4, 0]];
+      faces.map((face, index) => ({
+        face, index, depth: face.reduce((sum, corner) => sum + project(points[corner])[2], 0) / face.length
+      })).sort((a, b) => b.depth - a.depth).forEach(({ face, index }) => {
+        context.beginPath();
+        face.forEach((corner, pointIndex) => {
+          const [x, y] = project(points[corner]);
+          if (pointIndex === 0) context.moveTo(x, y); else context.lineTo(x, y);
+        });
+        context.closePath(); context.fillStyle = fills[index % fills.length]; context.fill();
+        context.strokeStyle = stroke; context.lineWidth = 1; context.stroke();
+      });
+    }
+    function drawRing(center, radius, project, color, dash = []) {
+      const points = [];
+      for (let index = 0; index <= 40; index += 1) {
+        const angle = index / 40 * Math.PI * 2;
+        points.push([center[0] + radius * Math.cos(angle), center[1] + radius * Math.sin(angle), center[2]]);
+      }
+      polyline(points, project, color, 2.2, dash);
+    }
+    function drawTaskLabel(label, point, project, color) {
+      const [x, y] = project(point);
+      context.font = "700 10px ui-sans-serif, system-ui"; context.textAlign = "center";
+      context.fillStyle = colors.labelBackground; context.fillRect(x - 25, y + 22, 50, 17);
+      context.fillStyle = color; context.fillText(label, x, y + 34);
+    }
+    function drawTaskContext(project) {
+      const object = DATA.task.object, offset = object.tcp_offset_m;
+      const pickCenter = transformPoint(object.pick_transform, offset);
+      const placeCenter = transformPoint(object.place_transform, offset);
+      const pickTop = Math.max(.08, pickCenter[2] - object.radius_m);
+      const placeTop = Math.max(.08, placeCenter[2] - object.radius_m);
+      drawBox(translationTransform([pickCenter[0], pickCenter[1], pickTop / 2]), [.21, .21, pickTop], project,
+        colors.pickFaces, colors.pickStroke);
+      drawBox(translationTransform([placeCenter[0], placeCenter[1], placeTop / 2]), [.21, .21, placeTop], project,
+        colors.placeFaces, colors.placeStroke);
+      drawRing([pickCenter[0], pickCenter[1], pickTop + .003], .071, project, colors.contact, [4, 4]);
+      drawRing([placeCenter[0], placeCenter[1], placeTop + .003], .075, project, colors.green);
+      return {
+        pickCenter, placeCenter,
+        pickLabel: [pickCenter[0], pickCenter[1], pickTop + .003],
+        placeLabel: [placeCenter[0], placeCenter[1], placeTop + .003]
+      };
+    }
+    function currentObjectCenter(record, index, pose, taskContext) {
+      const grasp = record.phases.find(phase => phase.label === "grasp");
+      const release = record.phases.find(phase => phase.label === "release");
+      if (!grasp || !release || index < grasp.stop - 1) return taskContext.pickCenter;
+      if (index < release.start) return transformPoint(pose.transform, DATA.task.object.tcp_offset_m);
+      return taskContext.placeCenter;
+    }
+    function drawTaskObject(center, project) {
+      const radius = DATA.task.object.radius_m, [x, y] = project(center);
+      const axes = [[radius, 0, 0], [0, radius, 0], [0, 0, radius]];
+      const projectedRadius = Math.max(...axes.map(axis => {
+        const [edgeX, edgeY] = project(add3(center, axis));
+        return Math.hypot(edgeX - x, edgeY - y);
+      }), 5);
+      const gradient = context.createRadialGradient(x - projectedRadius * .28, y - projectedRadius * .32, 1, x, y, projectedRadius);
+      gradient.addColorStop(0, "#fff0c2"); gradient.addColorStop(.35, "#f0b35a"); gradient.addColorStop(1, "#9a5724");
+      context.beginPath(); context.arc(x, y, projectedRadius, 0, Math.PI * 2);
+      context.fillStyle = gradient; context.fill(); context.strokeStyle = "#ffd58b"; context.lineWidth = 1.5; context.stroke();
+    }
+    function drawRobot(pose, project, reference = false) {
+      const projectedLinks = pose.points.slice(1).map((point, index) => {
+        const start = pose.points[index], startProjected = project(start), stopProjected = project(point);
+        return { start, point, depth: (startProjected[2] + stopProjected[2]) / 2 };
+      }).sort((a, b) => b.depth - a.depth);
+      if (reference) {
+        projectedLinks.forEach(link => polyline([link.start, link.point], project, colors.referenceRobot, 4, [5, 5]));
+        return;
+      }
+      const [baseX, baseY] = project([0, 0, 0]);
+      context.beginPath(); context.ellipse(baseX, baseY + 4, 22, 10, 0, 0, Math.PI * 2);
+      context.fillStyle = colors.robotOutline; context.fill(); context.strokeStyle = colors.jointStroke; context.lineWidth = 1.5; context.stroke();
+      projectedLinks.forEach(link => polyline([link.start, link.point], project, colors.robotOutline, 17));
+      projectedLinks.forEach((link, index) => polyline([link.start, link.point], project, colors.robotBody[index % 2], 10));
+      pose.joints.forEach((point, index) => {
+        const [x, y] = project(point), radius = index === 6 ? 6 : 7;
+        context.beginPath(); context.arc(x, y, radius + 2, 0, Math.PI * 2); context.fillStyle = colors.jointRim; context.fill();
+        context.beginPath(); context.arc(x, y, radius, 0, Math.PI * 2); context.fillStyle = colors.joint; context.strokeStyle = colors.jointStroke; context.lineWidth = 1.5; context.fill(); context.stroke();
+      });
+      const toolX = normalize3(transformVector(pose.transform, [1, 0, 0]));
+      const toolZ = normalize3(transformVector(pose.transform, [0, 0, 1]));
+      const palm = add3(pose.tcp, scale3(toolZ, -.07));
+      const left = add3(palm, scale3(toolX, .045)), right = add3(palm, scale3(toolX, -.045));
+      const leftTip = add3(left, scale3(toolZ, .105)), rightTip = add3(right, scale3(toolZ, .105));
+      polyline([left, right], project, colors.gripperOutline, 10);
+      polyline([left, right], project, colors.gripper, 6);
+      [[left, leftTip], [right, rightTip]].forEach(finger => {
+        polyline(finger, project, colors.gripperOutline, 9); polyline(finger, project, colors.gripper, 5);
+      });
+      const [tcpX, tcpY] = project(pose.tcp);
+      context.beginPath(); context.arc(tcpX, tcpY, 4, 0, Math.PI * 2); context.fillStyle = colors.tcp; context.fill(); context.strokeStyle = colors.blue; context.lineWidth = 2; context.stroke();
+    }
+    function drawPath(width, height) {
+      const reference = DATA.reference, variant = candidate(), project = cameraProjection(width, height);
+      drawGround(project);
+      const taskContext = drawTaskContext(project);
+      polyline(reference.tool, project, colors.reference, 1.7, [6, 5]);
+      polyline(variant.tool, project, colors.blue, 2.8);
+      variant.phases.forEach(phase => diamond(variant.tool[phase.stop - 1], project, phase.kind === "bridge" ? colors.bridge : colors.boundary));
+      const referenceIndex = sampleIndex(reference, state.progress), variantIndex = sampleIndex(variant, state.progress);
+      const variantPose = frankaPose(variant.q[variantIndex]);
+      drawRobot(frankaPose(reference.q[referenceIndex]), project, true);
+      drawTaskObject(currentObjectCenter(variant, variantIndex, variantPose, taskContext), project);
+      drawRobot(variantPose, project);
+      drawTaskLabel("PICK", taskContext.pickLabel, project, colors.contact);
+      drawTaskLabel("PLACE", taskContext.placeLabel, project, colors.green);
+    }
+    function drawJoints(width, height) {
+      const reference = DATA.reference, variant = candidate();
+      const left = 62, right = width - 24, top = 28, bottom = height - 48;
+      const maxTime = Math.max(duration(reference), duration(variant));
+      const values = reference.q.flat().concat(variant.q.flat()); let [qMin, qMax] = extent(values);
+      const margin = Math.max(.12, (qMax - qMin) * .12); qMin -= margin; qMax += margin;
+      const project = point => [left + point[0] / maxTime * (right - left), bottom - (point[1] - qMin) / (qMax - qMin) * (bottom - top)];
+      const bounds = { left, right, top, bottom, xMin: 0, yMin: qMin };
+      drawGrid(project, niceTicks(0, maxTime), niceTicks(qMin, qMax), "time / s", "q / rad", bounds);
+      variant.phases.forEach(phase => {
+        if (phase.kind !== "contact" && phase.kind !== "bridge") return;
+        const start = variant.time[phase.start], stop = variant.time[phase.stop - 1];
+        const [x0] = project([start, qMin]), [x1] = project([stop, qMin]);
+        context.fillStyle = phase.kind === "bridge" ? colors.bridgeFill : colors.contactFill;
+        context.fillRect(x0, top, Math.max(1, x1 - x0), bottom - top);
+      });
+      const jointColors = colors.joints;
+      for (let joint = 0; joint < DATA.robot.dof; joint += 1) {
+        polyline(reference.q.map((q, index) => [reference.time[index], q[joint]]), project, jointColors[joint] + "88", 1.4, [5, 4]);
+        polyline(variant.q.map((q, index) => [variant.time[index], q[joint]]), project, jointColors[joint], 2.2);
+      }
+      const cursorTime = state.progress * duration(variant), [cursorX] = project([cursorTime, qMin]);
+      context.strokeStyle = colors.cursor; context.lineWidth = 1; context.beginPath(); context.moveTo(cursorX, top); context.lineTo(cursorX, bottom); context.stroke();
+      context.font = "11px ui-sans-serif, system-ui";
+      DATA.robot.joint_names.forEach((name, index) => {
+        context.fillStyle = jointColors[index]; context.textAlign = "left"; context.fillText(`J${index + 1}`, left + index * 38, top + 12);
+      });
+    }
+    function draw() {
+      const ratio = Math.max(1, window.devicePixelRatio || 1);
+      const width = canvas.width / ratio, height = canvas.height / ratio;
+      if (!width || !height) return;
+      clear(width, height);
+      if (state.view === "path") drawPath(width, height); else drawJoints(width, height);
+    }
+    function formatMetric(key, value) {
+      if (Array.isArray(value)) return value.join(" → ");
+      if (typeof value === "boolean") return value ? "Yes" : "No";
+      if (typeof value === "number") {
+        if (key.endsWith("_m")) return `${value} m`;
+        if (key.endsWith("_s")) return `${value.toFixed(2)} s`;
+        if (key === "tool_path_ratio" || key === "duration_scale") return `${value.toFixed(2)}×`;
+        if (key === "joint_range_fraction") return `${(value * 100).toFixed(0)}%`;
+        if (key === "maximum_ik_error_m" || key === "fixed_contact_error_m") return value.toExponential(2) + " m";
+        return Number.isInteger(value) ? String(value) : String(value);
+      }
+      return String(value).replaceAll("_", "-");
+    }
+    function updateMetrics() {
+      const entries = Object.entries(candidate().metrics);
+      document.getElementById("metrics").innerHTML = entries.slice(0, 6).map(([key, value]) =>
+        `<div class="metric"><div class="metric-label">${metricNames[key] || key}</div><div class="metric-value" title="${formatMetric(key, value)}">${formatMetric(key, value)}</div></div>`
+      ).join("");
+    }
+    function updatePhases() {
+      const variant = candidate(), currentIndex = sampleIndex(variant, state.progress);
+      const container = document.getElementById("phases"); container.innerHTML = "";
+      variant.phases.forEach(phase => {
+        const button = document.createElement("button");
+        button.className = `phase-button ${phase.kind}` + (currentIndex >= phase.start && currentIndex < phase.stop ? " active" : "");
+        const source = phase.source && phase.source !== "reference" && phase.source !== "stitched" ? ` · ${phase.source}` : "";
+        button.textContent = `${phaseNames[phase.label] || (phase.kind === "bridge" ? "Bridge" : phase.label)}${source}`;
+        button.onclick = () => { state.progress = variant.time[phase.start] / duration(variant); syncProgress(); };
+        container.appendChild(button);
+      });
+    }
+    function syncProgress() {
+      document.getElementById("timeline").value = Math.round(state.progress * 1000);
+      const variant = candidate(), current = state.progress * duration(variant);
+      document.getElementById("time-readout").textContent = `${current.toFixed(2)} / ${duration(variant).toFixed(2)} s`;
+      updatePhases(); draw();
+    }
+    function updateMethod() {
+      const value = method();
+      document.querySelectorAll(".tab").forEach(button => button.classList.toggle("active", button.dataset.method === state.method));
+      document.getElementById("method-label").textContent = value.label;
+      document.getElementById("method-badge").textContent = value.badge;
+      document.getElementById("method-equation").textContent = value.equation;
+      document.getElementById("method-principle").textContent = value.principle;
+      document.getElementById("method-implementation").textContent = value.implementation;
+      document.getElementById("method-guarantee").textContent = value.guarantee;
+      document.getElementById("strength-value").textContent = value.strength_labels[state.strength];
+      document.getElementById("chart-caption").textContent = state.view === "path" ? "Pick and place · 3D EEF path and Franka pose · drag to orbit · scroll to zoom" : "Reference vs. variant joint positions · dashed / solid";
+      canvas.classList.toggle("orbitable", state.view === "path");
+      updateMetrics(); syncProgress();
+    }
+    function initialize() {
+      const themeSelect = document.getElementById("theme-select");
+      themeSelect.value = document.documentElement.dataset.mode;
+      themeSelect.onchange = event => setTheme(event.target.value);
+      systemTheme.addEventListener("change", () => {
+        if (document.documentElement.dataset.mode === "auto") setTheme("auto");
+      });
+      window.addEventListener("storage", event => {
+        if (event.key === "mode" || event.key === null) setTheme(event.newValue || "auto", false);
+      });
+      document.getElementById("title").textContent = DATA.title;
+      document.getElementById("subtitle").textContent = DATA.subtitle;
+      document.getElementById("scope-included").textContent = DATA.scope.included;
+      document.getElementById("scope-excluded").textContent = DATA.scope.excluded;
+      const tabs = document.getElementById("tabs");
+      Object.entries(DATA.methods).forEach(([key, value]) => {
+        const button = document.createElement("button"); button.className = "tab"; button.dataset.method = key;
+        button.textContent = value.label;
+        button.onclick = () => { state.method = key; state.progress = .33; updateMethod(); };
+        tabs.appendChild(button);
+      });
+      document.getElementById("strength").oninput = event => { state.strength = Number(event.target.value); updateMethod(); };
+      document.getElementById("seed-button").onclick = () => {
+        state.seed = (state.seed * 5 + 3) % DATA.seed_count;
+        document.getElementById("seed-value").textContent = state.seed; updateMethod();
+      };
+      document.getElementById("timeline").oninput = event => { state.progress = Number(event.target.value) / 1000; syncProgress(); };
+      document.getElementById("play-button").onclick = () => {
+        state.playing = !state.playing; document.getElementById("play-button").textContent = state.playing ? "Pause" : "Play";
+      };
+      document.querySelectorAll(".view-button").forEach(button => button.onclick = () => {
+        state.view = button.dataset.view;
+        document.querySelectorAll(".view-button").forEach(item => item.classList.toggle("active", item === button));
+        updateMethod();
+      });
+      canvas.addEventListener("pointerdown", event => {
+        if (state.view !== "path") return;
+        camera.dragging = true; camera.x = event.clientX; camera.y = event.clientY;
+        canvas.classList.add("dragging"); canvas.setPointerCapture(event.pointerId);
+      });
+      canvas.addEventListener("pointermove", event => {
+        if (!camera.dragging) return;
+        camera.yaw -= (event.clientX - camera.x) * .008;
+        camera.pitch = Math.max(-.08, Math.min(1.18, camera.pitch + (event.clientY - camera.y) * .006));
+        camera.x = event.clientX; camera.y = event.clientY; draw();
+      });
+      const endOrbit = event => {
+        if (!camera.dragging) return;
+        camera.dragging = false; canvas.classList.remove("dragging");
+        if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+      };
+      canvas.addEventListener("pointerup", endOrbit);
+      canvas.addEventListener("pointercancel", endOrbit);
+      canvas.addEventListener("wheel", event => {
+        if (state.view !== "path") return;
+        event.preventDefault(); camera.distance = Math.max(1.15, Math.min(3.2, camera.distance * Math.exp(event.deltaY * .001))); draw();
+      }, { passive: false });
+      new ResizeObserver(resizeCanvas).observe(canvas.parentElement);
+      updateMethod(); resizeCanvas();
+      requestAnimationFrame(animate);
+    }
+    function animate(timestamp) {
+      const elapsed = Math.min(.1, (timestamp - lastFrame) / 1000); lastFrame = timestamp;
+      if (state.playing) {
+        state.progress += elapsed / Math.max(2.5, duration(candidate()));
+        if (state.progress >= 1) state.progress = 0;
+        syncProgress();
+      }
+      requestAnimationFrame(animate);
+    }
+    initialize();
+  </script>
+</body>
+</html>

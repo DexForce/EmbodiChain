@@ -17,7 +17,7 @@ needs a different local entry hint.
 
 | Skill | Canonical path | Purpose |
 | --- | --- | --- |
-| `/add-atomic-action` | `.agents/skills/add-atomic-action/SKILL.md` | Scaffold simulation atomic actions. |
+| `/add-atomic-skill` | `.agents/skills/add-atomic-skill/SKILL.md` | Scaffold simulation atomic skills. |
 | `/add-task-env` | `.agents/skills/add-task-env/SKILL.md` | Scaffold `EmbodiedEnv` task environments. |
 | `/add-functor` | `.agents/skills/add-functor/SKILL.md` | Add observation, reward, event, action, dataset, or randomization functors. |
 | `/add-test` | `.agents/skills/add-test/SKILL.md` | Write tests following project conventions. |

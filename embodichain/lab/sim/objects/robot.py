@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from embodichain.lab.sim.motion._budget import _planning_call
+
 import torch
 import numpy as np
 
@@ -593,6 +595,8 @@ class Robot(Articulation):
         env_ids: Sequence[int] | None = None,
         target: bool = True,
         name: str | None = None,
+        *,
+        clamp_target_qpos: bool = True,
     ) -> None:
         """Set the joint positions (qpos) or target positions for the articulation.
 
@@ -602,6 +606,9 @@ class Robot(Articulation):
             env_ids (Sequence[int] | None): Environment indices to apply the positions. Defaults to all environments.
             target (bool): If True, sets target positions for simulation. If False, updates current positions directly.
             name (str | None): The name of the control part to set the qpos for. If None, the default part is used.
+            clamp_target_qpos: Clip position targets to joint limits. False
+                preserves out-of-range PD targets; direct position writes
+                remain clipped.
 
         Raises:
             ValueError: If the length of `env_ids` does not match the length of `qpos`.
@@ -612,6 +619,7 @@ class Robot(Articulation):
                 joint_ids=joint_ids,
                 env_ids=env_ids,
                 target=target,
+                clamp_target_qpos=clamp_target_qpos,
             )
         else:
             if not self.control_parts or name not in self.control_parts:
@@ -627,6 +635,7 @@ class Robot(Articulation):
                 joint_ids=part_joint_ids,
                 env_ids=env_ids,
                 target=target,
+                clamp_target_qpos=clamp_target_qpos,
             )
 
     def get_qpos(self, name: str | None = None, target: bool = False) -> torch.Tensor:
@@ -862,6 +871,7 @@ class Robot(Articulation):
             quat = quat_from_matrix(result_matrix[:, :3, :3])
             return torch.cat((pos, quat), dim=-1)
 
+    @_planning_call("ik")
     def compute_ik(
         self,
         pose: torch.Tensor | np.ndarray,
@@ -1007,6 +1017,7 @@ class Robot(Articulation):
             result = result.reshape(len(local_env_ids), n_batch, 7)
             return result
 
+    @_planning_call("ik", batched=True)
     def compute_batch_ik(
         self,
         pose: torch.Tensor | np.ndarray,
@@ -1217,87 +1228,6 @@ class Robot(Articulation):
             drive_type=drive_type,
             joint_ids=joint_ids,
             env_ids=env_ids,
-            target_mode=target_mode,
-        )
-
-    def _set_default_joint_drive(self) -> None:
-        """Set default joint drive parameters based on the configuration."""
-        import numbers
-        from embodichain.utils.string import resolve_matching_names_values
-
-        joint_property_targets = [
-            ("damping", self.default_joint_damping),
-            ("stiffness", self.default_joint_stiffness),
-            ("max_effort", self.default_joint_max_effort),
-            ("max_velocity", self.default_joint_max_velocity),
-            ("friction", self.default_joint_friction),
-            ("armature", self.default_joint_armature),
-        ]
-
-        for prop_name, default_array in joint_property_targets:
-            value = getattr(self.cfg.joint_drive_props, prop_name, None)
-            if value is None:
-                continue
-            if isinstance(value, numbers.Number):
-                default_array[:] = value
-            else:
-                try:
-                    control_part_dict = {}
-                    value_copy = value.copy()
-                    if self.control_parts:
-                        # Extract control part and map the corresponding joint names
-                        for key in value.keys():
-                            if key in self.control_parts:
-                                control_part_dict[key] = value_copy.pop(key)
-
-                    indices, _, values = resolve_matching_names_values(
-                        value_copy, self.joint_names
-                    )
-
-                    if self.control_parts:
-                        # Add control part joints to indices and values
-                        for part_name, part_value in control_part_dict.items():
-                            part_joint_names = self.control_parts[part_name]
-                            (
-                                part_indices,
-                                _,
-                                part_values,
-                            ) = resolve_matching_names_values(
-                                {jn: part_value for jn in part_joint_names},
-                                self.joint_names,
-                            )
-                            indices.extend(part_indices)
-                            values.extend(part_values)
-
-                    default_array[:, indices] = torch.as_tensor(
-                        values, dtype=torch.float32, device=self.device
-                    )
-                except Exception as e:
-                    logger.log_error(f"Failed to set {prop_name}: {e}")
-
-        joint_drive_props = self.cfg.joint_drive_props
-        if isinstance(joint_drive_props, dict):
-            drive_type = joint_drive_props.get("drive_type")
-            target_mode = joint_drive_props.get("target_mode")
-        else:
-            drive_type = getattr(joint_drive_props, "drive_type", None)
-            target_mode = getattr(joint_drive_props, "target_mode", None)
-        if isinstance(target_mode, dict):
-            logger.log_warning(
-                "Per-joint target_mode mappings require a Spawn-bound robot; "
-                "the retained raw-robot path preserves its current target modes."
-            )
-            target_mode = None
-
-        # Apply drive parameters to all articulations in the batch
-        self.set_joint_drive(
-            stiffness=self.default_joint_stiffness,
-            damping=self.default_joint_damping,
-            max_effort=self.default_joint_max_effort,
-            max_velocity=self.default_joint_max_velocity,
-            friction=self.default_joint_friction,
-            armature=self.default_joint_armature,
-            drive_type=drive_type,
             target_mode=target_mode,
         )
 

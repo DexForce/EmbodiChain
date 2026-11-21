@@ -39,7 +39,15 @@ from embodichain.learning.rl.train import (
     train_from_config,
 )
 from embodichain.learning.rl.utils.trainer import Trainer
-from embodichain_tasks.classic_control.point_mass import PointMassEnv
+from embodichain.extensions.tasks.classic_control.point_mass import PointMassEnv
+
+
+def _export_prepared_policy_resource(env, config, config_dir):
+    """Configured exporter fixture using the initialized policy environment."""
+    assert env.cfg.task_program_execution == "policy"
+    (config_dir / "prepared-resource.bin").write_bytes(env.prepared_resource)
+    env.export_calls += 1
+    return config
 
 
 def _trainer(
@@ -89,6 +97,94 @@ def _assert_state_equal(first, second) -> None:
             _assert_state_equal(a, b)
     else:
         assert first == second
+
+
+def _attach_curriculum(trainer: Trainer, level: int) -> None:
+    """Expose rank-local task state on the existing lightweight environment."""
+    env = trainer.env
+    env.levels = torch.full((env.num_envs,), level, dtype=torch.long)
+
+    def validate(state):
+        if state["levels"].shape != env.levels.shape:
+            raise ValueError("Curriculum instance count differs")
+
+    def load(state):
+        validate(state)
+        env.levels.copy_(state["levels"])
+
+    env.get_training_state = lambda: {"levels": env.levels.clone()}
+    env.validate_training_state = validate
+    env.load_training_state = load
+
+
+def test_v2_restores_environment_state_before_reset(tmp_path, monkeypatch):
+    source = _trainer(tmp_path / "source")
+    _attach_curriculum(source, 3)
+    source.train(16)
+    path = source.save_checkpoint()
+    payload = torch.load(path, weights_only=True)
+    assert payload["schema_version"] == 2
+    assert len(payload["environment_state_by_rank"]) == 1
+    restored = _trainer(tmp_path / "restored")
+    _attach_curriculum(restored, 0)
+    reset = restored.collector._reset_env
+
+    def check_reset():
+        torch.testing.assert_close(restored.env.levels, source.env.levels)
+        return reset()
+
+    monkeypatch.setattr(restored.collector, "_reset_env", check_reset)
+    restored.load_checkpoint(path)
+    _assert_state_equal(source.policy.state_dict(), restored.policy.state_dict())
+    _assert_state_equal(source.algorithm.state_dict(), restored.algorithm.state_dict())
+    restored.train(32)
+    assert restored.num_updates == 2
+    again = torch.load(restored.save_checkpoint(), weights_only=True)
+    assert again["schema_version"] == 2
+    _assert_state_equal(
+        payload["environment_state_by_rank"], again["environment_state_by_rank"]
+    )
+
+
+@pytest.mark.parametrize("defect", ["rank_count", "instance_count", "loader"])
+def test_environment_state_rejected_before_learning_state_changes(tmp_path, defect):
+    source = _trainer(tmp_path / "source")
+    _attach_curriculum(source, 3)
+    source.train(16)
+    payload = torch.load(source.save_checkpoint(), weights_only=True)
+    restored = _trainer(tmp_path / "restored")
+    _attach_curriculum(restored, 0)
+    if defect == "rank_count":
+        payload["environment_state_by_rank"] = []
+    elif defect == "instance_count":
+        payload["environment_state_by_rank"][0]["levels"] = torch.zeros(3)
+    else:
+        del restored.env.load_training_state
+    path = tmp_path / "invalid.pt"
+    torch.save(payload, path)
+    policy = deepcopy(restored.policy.state_dict())
+    optimizer = deepcopy(restored.algorithm.state_dict())
+    with pytest.raises(ValueError, match="[Ee]nvironment|[Cc]urriculum"):
+        restored.load_checkpoint(path)
+    _assert_state_equal(policy, restored.policy.state_dict())
+    _assert_state_equal(optimizer, restored.algorithm.state_dict())
+    assert restored.num_updates == 0
+    assert not restored.env.levels.any()
+
+
+def test_older_v2_reports_missing_environment_state(tmp_path):
+    source = _trainer(tmp_path / "source")
+    source.train(16)
+    payload = torch.load(source.save_checkpoint(), weights_only=True)
+    payload.pop("environment_state_by_rank")
+    path = tmp_path / "older-v2.pt"
+    torch.save(payload, path)
+    restored = _trainer(tmp_path / "restored")
+    _attach_curriculum(restored, 0)
+    with pytest.warns(UserWarning, match="environment training state"):
+        restored.load_checkpoint(path)
+    assert restored.num_updates == 1
+    _assert_state_equal(source.policy.state_dict(), restored.policy.state_dict())
 
 
 @pytest.mark.parametrize("algorithm", ["ppo", "grpo"])
@@ -219,6 +315,25 @@ def test_pending_scheduler_restart_survives_checkpoint_round_trip(
     _assert_state_equal(direct.policy.state_dict(), again.policy.state_dict())
 
 
+def test_schema_v2_ppo_without_optional_auxiliary_coefficient_restores(
+    tmp_path,
+) -> None:
+    trainer = _trainer(tmp_path / "first")
+    trainer.train(16)
+    payload = torch.load(trainer.save_checkpoint(), weights_only=True)
+    assert payload["schema_version"] == 2
+    payload["metadata"]["algorithm_config"].pop("auxiliary_coef")
+    path = tmp_path / "without-coefficient.pt"
+    torch.save(payload, path)
+    restored = _trainer(tmp_path / "restored")
+    restored.load_checkpoint(path)
+    _assert_state_equal(trainer.policy.state_dict(), restored.policy.state_dict())
+    _assert_state_equal(trainer.algorithm.state_dict(), restored.algorithm.state_dict())
+    assert restored.global_step == trainer.global_step == 16
+    restored.train(32)
+    assert restored.global_step == 32
+
+
 def test_checkpoint_without_pending_restart_field_restores(tmp_path):
     trainer = _trainer(
         tmp_path / "first", scheduler=dict(name="linear", kwargs=dict(total_iters=4))
@@ -241,6 +356,10 @@ def test_checkpoint_without_pending_restart_field_restores(tmp_path):
         (lambda c: c.update(schema_version=999), "schema version"),
         (lambda c: c.pop("rng_by_rank"), "required fields"),
         (lambda c: c["metadata"].update(environment="different"), "environment"),
+        (
+            lambda c: c["metadata"]["algorithm_config"].update(auxiliary_coef=0.5),
+            "auxiliary_coef",
+        ),
         (lambda c: c.update(world_size=2), "world_size"),
         (lambda c: c.update(restart_schedule="false"), "restart_schedule"),
         (
@@ -265,29 +384,19 @@ def test_invalid_checkpoint_fails_before_policy_changes(tmp_path, mutation, matc
     _assert_state_equal(initial, restored.policy.state_dict())
 
 
-def test_legacy_ppo_loads_available_state_and_grpo_requires_reference(tmp_path):
+@pytest.mark.parametrize("version", [None, 1])
+def test_old_checkpoint_schemas_are_rejected_before_mutation(tmp_path, version):
     trainer = _trainer(tmp_path / "ppo")
     trainer.train(16)
     checkpoint = torch.load(trainer.save_checkpoint(), weights_only=True)
-    for field in (
-        "schema_version",
-        "metadata",
-        "rng_by_rank",
-        "normalizer_by_rank",
-        "world_size",
-        "best_checkpoint",
-    ):
-        checkpoint.pop(field)
-    path = tmp_path / "legacy.pt"
+    checkpoint["schema_version"] = version
+    path = tmp_path / "unsupported.pt"
     torch.save(checkpoint, path)
     restored = _trainer(tmp_path / "restored")
-    with pytest.warns(UserWarning, match="Legacy checkpoint"):
+    before = deepcopy(restored.policy.state_dict())
+    with pytest.raises(ValueError, match="Unsupported checkpoint schema"):
         restored.load_checkpoint(path)
-    restored.train(32)
-    assert restored.num_updates == 2
-    grpo = _trainer(tmp_path / "grpo", "grpo")
-    with pytest.raises(ValueError, match="ref_policy"):
-        grpo.load_checkpoint(path)
+    _assert_state_equal(before, restored.policy.state_dict())
 
 
 def _config(name: str) -> dict:
@@ -688,30 +797,6 @@ def test_cli_rejects_invalid_resume_arguments(args):
         parse_args(["--config", "train.yaml", *args])
 
 
-def test_legacy_manifest_rejects_changed_algorithm_config(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    config = _config("ppo")
-    config_path = tmp_path / "train.json"
-    config_path.write_text(json.dumps(config))
-    first = train_from_config(str(config_path))
-    path = Path(first["latest_checkpoint_path"])
-    payload = torch.load(path, weights_only=True)
-    for field in (
-        "schema_version",
-        "metadata",
-        "rng_by_rank",
-        "normalizer_by_rank",
-        "world_size",
-        "best_checkpoint",
-    ):
-        payload.pop(field)
-    torch.save(payload, path)
-    config["algorithm"]["cfg"]["gamma"] = 0.5
-    config_path.write_text(json.dumps(config))
-    with pytest.raises(ValueError, match="legacy checkpoint configuration"):
-        train_from_config(str(config_path), resume=path)
-
-
 def test_scheduler_validation_does_not_mutate_policy(tmp_path):
     trainer = _trainer(
         tmp_path, scheduler=dict(name="linear", kwargs=dict(total_iters=4))
@@ -813,3 +898,260 @@ def test_cli_flushes_cleanup_and_propagates_resume_error(monkeypatch):
     with pytest.raises(ValueError, match="incompatible resume"):
         training.cli(["--config", "train.json", "--resume", "source.pt"])
     assert calls == ["cleanup"]
+
+
+def test_componentized_gym_snapshot_reloads_after_source_components_are_removed(
+    tmp_path, monkeypatch
+):
+    from embodichain.lab.gym.utils.gym_utils import (
+        config_to_cfg,
+        DEFAULT_MANAGER_MODULES,
+    )
+
+    source = tmp_path / "source"
+    source.mkdir()
+    robot_file = source / "robot.urdf"
+    robot_file.write_text("""<robot name="snapshot">
+      <link name="base"/><link name="first"/><link name="second"/>
+      <joint name="joint_0" type="revolute"><parent link="base"/>
+        <child link="first"/><limit lower="-1" upper="1" effort="1" velocity="1"/></joint>
+      <joint name="joint_1" type="revolute"><parent link="first"/>
+        <child link="second"/><limit lower="-1" upper="1" effort="1" velocity="1"/></joint>
+    </robot>""")
+    environment = source / "environment.yaml"
+    environment.write_text(
+        yaml.safe_dump(
+            {
+                "environment_id": "snapshot",
+                "physics": "default",
+                "simulation": {},
+                "env": {
+                    "actions": {
+                        "first": {
+                            "func": "RelativeJointPositionAction",
+                            "params": {"joint_names": ["joint_0"]},
+                        },
+                        "second": {
+                            "func": "RelativeJointPositionAction",
+                            "params": {"joint_names": ["joint_1"]},
+                        },
+                    }
+                },
+                "max_episode_steps": 17,
+            }
+        )
+    )
+    embodiment = source / "embodiment.yaml"
+    embodiment.write_text(
+        yaml.safe_dump(
+            {
+                "embodiment_id": "snapshot",
+                "simulation": {
+                    "uid": "SnapshotRobot",
+                    "fpath": "./robot.urdf",
+                },
+                "sensor": [],
+            }
+        )
+    )
+    deployment = source / "task.yaml"
+    gym_data = {
+        "id": "EmbodiedEnv-v1",
+        "environment": {"component": "environment.yaml"},
+        "embodiment": {"component": "embodiment.yaml"},
+    }
+    deployment.write_text(yaml.safe_dump(gym_data))
+    run = tmp_path / "run"
+    run.mkdir()
+    trainer = _trainer(run / "checkpoints")
+    _configure_checkpoints(
+        trainer,
+        _config("ppo"),
+        source / "train.yaml",
+        run,
+        gym_config=deployment,
+        gym_data=gym_data,
+    )
+    trainer.train(16)
+    checkpoint = trainer.save_checkpoint()
+    environment.unlink()
+    embodiment.unlink()
+    deployment.unlink()
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    monkeypatch.chdir(unrelated)
+    snapshot = RunManifest.load(run).configs["gym"]
+    frozen = yaml.safe_load(snapshot.read_text())
+    assert "environment" not in frozen and "embodiment" not in frozen
+    cfg = config_to_cfg(
+        frozen, manager_modules=DEFAULT_MANAGER_MODULES, source_path=snapshot
+    )
+    assert cfg.max_episode_steps == 17
+    assert cfg.robot.uid == "SnapshotRobot"
+    assert cfg.robot.fpath == str(robot_file.resolve())
+    assert gym_data["environment"]["component"] == "environment.yaml"
+    restored = _trainer(tmp_path / "restored" / "checkpoints")
+    _configure_checkpoints(
+        restored,
+        _config("ppo"),
+        "train.yaml",
+        tmp_path / "restored",
+        gym_config=snapshot,
+        gym_data=frozen,
+    )
+    restored.load_checkpoint(checkpoint)
+    assert restored.global_step == 16
+    assert restored._checkpoint_context["gym"] == gym_data
+    restored.train(32)
+    assert restored.global_step == 32
+    assert restored.num_updates == 2
+
+    changed = deepcopy(frozen)
+    changed["max_episode_steps"] += 1
+    reordered = deepcopy(frozen)
+    assert list(reordered["env"]["actions"]) == ["first", "second"]
+    reordered["env"]["actions"] = dict(reversed(reordered["env"]["actions"].items()))
+    for name, candidate in (("parameter", changed), ("action_order", reordered)):
+        incompatible = _trainer(tmp_path / name / "checkpoints")
+        _configure_checkpoints(
+            incompatible,
+            _config("ppo"),
+            "train.yaml",
+            tmp_path / name,
+            gym_config=snapshot,
+            gym_data=candidate,
+        )
+        before = deepcopy(incompatible.policy.state_dict())
+        with pytest.raises(ValueError, match="Incompatible checkpoint configuration"):
+            incompatible.load_checkpoint(checkpoint)
+        _assert_state_equal(before, incompatible.policy.state_dict())
+
+
+def test_gym_snapshot_export_hook_runs_on_unwrapped_environment(tmp_path):
+    from types import SimpleNamespace
+
+    class AssetEnvironment:
+        def export(self, env, frozen_config, config_dir):
+            artifact = config_dir / "physical-asset.json"
+            artifact.write_text('{"version": 4}')
+            frozen_config.setdefault("env", {}).setdefault("extensions", {})[
+                "physical_asset"
+            ] = {"fpath": "./physical-asset.json"}
+            return frozen_config
+
+    gym_data = {"id": "test", "env": {}}
+    from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+    environment = AssetEnvironment()
+    environment.cfg = SimpleNamespace(
+        resource_export=FunctorCfg(func=environment.export)
+    )
+    trainer = SimpleNamespace(rank=0, env=SimpleNamespace(unwrapped=environment))
+    checkpoint = tmp_path / "checkpoint.pt"
+    checkpoint.write_bytes(b"snapshot fixture")
+    _configure_checkpoints(
+        trainer,
+        _config("ppo"),
+        "train.yaml",
+        tmp_path,
+        gym_config="gym.yaml",
+        gym_data=gym_data,
+    )
+    trainer._checkpoint_callback(
+        {"latest_checkpoint_path": str(checkpoint), "best_checkpoint_path": None}
+    )
+    manifest = RunManifest.load(tmp_path)
+    frozen = yaml.safe_load(manifest.configs["gym"].read_text())
+    reference = frozen["env"]["extensions"]["physical_asset"]["fpath"]
+    artifact = manifest.configs["gym"].parent / reference
+    assert json.loads(artifact.read_text()) == {"version": 4}
+    assert gym_data == {"id": "test", "env": {}}
+    assert trainer._checkpoint_context["gym"] == gym_data
+
+
+@pytest.mark.parametrize("algorithm,expected_value_calls", [("ppo", 2), ("grpo", 1)])
+def test_trainer_requests_timeout_bootstrap_only_when_algorithm_consumes_it(
+    tmp_path, monkeypatch, algorithm, expected_value_calls
+):
+    from unittest.mock import Mock
+
+    trainer = _trainer(tmp_path, algorithm=algorithm)
+    get_value = Mock(wraps=trainer.policy.get_value)
+    monkeypatch.setattr(trainer.policy, "get_value", get_value)
+    rollout = trainer.collector.collect(4, trainer.buffer.start_rollout())
+    assert get_value.call_count == expected_value_calls
+    assert torch.isfinite(rollout["timeout_value"]).any().item() == (algorithm == "ppo")
+
+
+@pytest.mark.parametrize("inline", [False, True])
+@pytest.mark.parametrize("export_resources", [False, True])
+def test_saved_policy_task_program_reloads_from_unrelated_directory(
+    tmp_path, monkeypatch, inline, export_resources
+):
+    from types import SimpleNamespace
+    from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+    from embodichain.utils.config_paths import resolve_config_path
+
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.policy.cobotmagic.yaml"
+    )
+    raw = yaml.safe_load(source.read_text())
+    if export_resources:
+        environment_file = resolve_config_path(
+            raw["environment"]["component"], base_dir=source.parent
+        )
+        component = yaml.safe_load(environment_file.read_text())
+        component.setdefault("env", {})["resource_export"] = {
+            "func": f"{__name__}:_export_prepared_policy_resource"
+        }
+        selected = tmp_path / "environment.yaml"
+        selected.write_text(yaml.safe_dump(component))
+        raw["environment"]["component"] = str(selected)
+    if inline:
+        for field in ("program", "integration", "execution_policy"):
+            selected = raw["task_program"][field]
+            selected = selected["component"] if isinstance(selected, dict) else selected
+            path = resolve_config_path(selected, base_dir=source.parent)
+            raw["task_program"][field] = {"inline": yaml.safe_load(path.read_text())}
+    original = deepcopy(raw)
+    expected = config_to_cfg(raw, source_path=source, _register_env=False)
+    run = tmp_path / "run"
+    run.mkdir()
+    checkpoint = run / "checkpoint.pt"
+    checkpoint.write_bytes(b"snapshot fixture")
+    environment = SimpleNamespace(
+        cfg=expected, prepared_resource=b"generated policy asset", export_calls=0
+    )
+    trainer = SimpleNamespace(rank=0, env=environment)
+    _configure_checkpoints(
+        trainer,
+        _config("ppo"),
+        source.parent / "train.yaml",
+        run,
+        gym_config=source,
+        gym_data=raw,
+    )
+    trainer._checkpoint_callback(
+        {"latest_checkpoint_path": str(checkpoint), "best_checkpoint_path": None}
+    )
+    snapshot = RunManifest.load(run).configs["gym"]
+    if export_resources:
+        assert environment.export_calls == 1
+        assert (
+            snapshot.parent / "prepared-resource.bin"
+        ).read_bytes() == environment.prepared_resource
+        assert expected.resource_export is not None
+    # A same-named invalid component must not shadow the original owner.
+    (snapshot.parent / "env.policy.yaml").write_text("invalid: component")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    frozen = yaml.safe_load(snapshot.read_text())
+    actual = config_to_cfg(frozen, source_path=snapshot, _register_env=False)
+    assert actual.task_program_execution == "policy"
+    assert actual.task_program_action_owners == expected.task_program_action_owners
+    assert actual.task_program.program_id == expected.task_program.program_id
+    assert actual.robot.uid == expected.robot.uid
+    assert "embodiment" in frozen
+    assert raw == original

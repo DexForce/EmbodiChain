@@ -1,0 +1,39 @@
+program_id: repeated_cube_pick_place
+instruction: Move the cube between the two target positions three times.
+targets:
+  drop_pose:
+    kind: cyclic_pose
+    values:
+    - position:
+      - -0.4
+      - 0.48
+      - 0.1
+      quaternion_xyzw:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    - position:
+      - -0.42
+      - -0.08
+      - 0.1
+      quaternion_xyzw:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+program:
+  repeat:
+    count: 3
+    body:
+    - segment: pick_cube
+      instruction: Grasp and lift the cube.
+      steps:
+        pick:
+          object: cube
+    - segment: place_cube
+      instruction: Place the cube at the next target position and release it.
+      steps:
+        place:
+          object: cube
+          at: drop_pose

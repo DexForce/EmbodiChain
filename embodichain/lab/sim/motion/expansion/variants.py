@@ -556,6 +556,7 @@ def _apply_variant_once(
             joint_limits=joint_limits,
             normalized_scale=spatial.joint_offset_scale,
             generator=generator,
+            joint_samples=spatial.joint_samples,
         )
     elif variant.spatial_operator == "via_points":
         result = via_points(
@@ -564,6 +565,8 @@ def _apply_variant_once(
             via_count=spatial.via_count,
             normalized_scale=spatial.joint_offset_scale,
             generator=generator,
+            joint_samples=spatial.joint_samples,
+            knot_samples=spatial.knot_samples,
         )
     elif variant.spatial_operator == "nullspace_residual":
         if target is not None:

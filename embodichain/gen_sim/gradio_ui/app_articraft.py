@@ -24,6 +24,9 @@ artifacts are kept under ``ARTICRAFT_OUTPUT_ROOT``.
 
 from __future__ import annotations
 
+from embodichain.gen_sim.services.runtime import GenSimServices
+from embodichain.gen_sim.services.compat import ArticulationJobsFacade
+
 import html
 import json
 import os
@@ -769,13 +772,17 @@ def _start_remote_viser_preview(session_id: str, artifact: Path) -> str:
     return _articulation_viser_iframe(artifact.parent.name, port)
 
 
-def _articulation_server_client() -> ArticulationServerClient:
+def _articulation_server_client(
+    *, services: GenSimServices | None = None
+) -> ArticulationJobsFacade:
     """Build a client from the shared Gradio deployment settings."""
-    return ArticulationServerClient(
+
+    return ArticulationJobsFacade(
         ARTICULATION_SERVER_BASE_URL,
         timeout_seconds=_server_positive_float(
             "ARTICULATION_SERVER_TIMEOUT_S", ARTICULATION_SERVER_TIMEOUT_S
         ),
+        services=services,
     )
 
 
@@ -819,7 +826,13 @@ def _configure_selected_articulation_provider(provider: str) -> str:
 
     try:
         output_root = _server_output_root()
-        health = _articulation_server_client().health()
+        client = _articulation_server_client()
+        try:
+            health = client.health()
+        finally:
+            close = getattr(client, "close", None)
+            if close is not None:
+                close()
         output_root.mkdir(parents=True, exist_ok=True)
     except (ArticulationServerError, OSError, ValueError) as exc:
         detail = redact_sensitive_text(str(exc))
@@ -836,7 +849,7 @@ def _configure_selected_articulation_provider(provider: str) -> str:
         )
     return (
         "**Remote Articulation server is ready.**\n\n"
-        f"- Endpoint: `{ARTICULATION_SERVER_BASE_URL}`\n"
+        f"- Endpoint: `{getattr(client, 'display_name', ARTICULATION_SERVER_BASE_URL)}`\n"
         f"- Local output: `{output_root}`"
     )
 
@@ -911,134 +924,145 @@ def _generate_server_articulation_asset(
         )
         return
 
-    if not _register_server_task(session_id, token, client, request_id):
-        return
-    log_lines = [
-        f"Server: {ARTICULATION_SERVER_BASE_URL}",
-        f"Request: {request_id}",
-    ]
-    yield (
-        None,
-        "",
-        "**Remote server accepted the Articulation request.**",
-        "\n".join(log_lines),
-        "",
-    )
+    try:
+        if not _register_server_task(session_id, token, client, request_id):
+            return
+        log_lines = [
+            f"Server: {getattr(client, 'display_name', ARTICULATION_SERVER_BASE_URL)}",
+            f"Request: {request_id}",
+        ]
+        yield (
+            None,
+            "",
+            "**Remote server accepted the Articulation request.**",
+            "\n".join(log_lines),
+            "",
+        )
 
-    task_timeout_seconds, poll_interval_seconds = _server_polling_settings()
-    deadline = time.monotonic() + task_timeout_seconds
-    previous_line = ""
-    while True:
+        task_timeout_seconds, poll_interval_seconds = _server_polling_settings()
+        deadline = time.monotonic() + task_timeout_seconds
+        previous_line = ""
+        while True:
+            if not _articraft_runs.is_active(session_id, token):
+                return
+            if time.monotonic() >= deadline:
+                cancellation_error = _cancel_server_task(session_id)
+                if cancellation_error:
+                    _append_server_log(
+                        log_lines, f"Cancellation warning: {cancellation_error}"
+                    )
+                yield (
+                    None,
+                    "",
+                    "**Remote Articulation request timed out and cancellation was requested.**\n\n"
+                    f"- Request: `{request_id}`\n"
+                    "- The request was not retried with Local Codex.",
+                    "\n".join(log_lines[-300:]),
+                    "",
+                )
+                return
+            try:
+                task = client.status(request_id)
+            except (ArticulationServerError, OSError, ValueError) as exc:
+                cancellation_error = _cancel_server_task(session_id)
+                detail = redact_sensitive_text(str(exc))
+                if cancellation_error:
+                    _append_server_log(
+                        log_lines, f"Cancellation warning: {cancellation_error}"
+                    )
+                yield (
+                    None,
+                    "",
+                    "**Remote Articulation status check failed.**\n\n"
+                    f"- {detail}\n"
+                    "- The request was not retried with Local Codex.",
+                    "\n".join(log_lines[-300:]),
+                    "",
+                )
+                return
+
+            status_line = _server_task_line(task)
+            if status_line != previous_line:
+                _append_server_log(log_lines, status_line)
+                previous_line = status_line
+            status = task.get("status")
+            if status in _SERVER_TERMINAL_STATUSES:
+                _finish_server_task(session_id, token, request_id)
+                break
+            yield (
+                None,
+                "",
+                f"**Remote server is generating the Articulation.**\n\n- {status_line}",
+                "\n".join(log_lines[-300:]),
+                "",
+            )
+            remaining_seconds = max(0.0, deadline - time.monotonic())
+            time.sleep(min(poll_interval_seconds, remaining_seconds))
+
         if not _articraft_runs.is_active(session_id, token):
             return
-        if time.monotonic() >= deadline:
-            cancellation_error = _cancel_server_task(session_id)
-            if cancellation_error:
-                _append_server_log(
-                    log_lines, f"Cancellation warning: {cancellation_error}"
-                )
+        if status != "succeeded":
+            detail = _server_task_error(task)
             yield (
                 None,
                 "",
-                "**Remote Articulation request timed out and cancellation was requested.**\n\n"
-                f"- Request: `{request_id}`\n"
+                f"**Remote Articulation request {status}.**\n\n- {detail}\n"
                 "- The request was not retried with Local Codex.",
                 "\n".join(log_lines[-300:]),
                 "",
             )
             return
+
+        output_dir = output_root / request_id
         try:
-            task = client.status(request_id)
+            artifact = client.download(request_id, "usdc", output_dir / "model.usdc")
         except (ArticulationServerError, OSError, ValueError) as exc:
-            cancellation_error = _cancel_server_task(session_id)
             detail = redact_sensitive_text(str(exc))
-            if cancellation_error:
-                _append_server_log(
-                    log_lines, f"Cancellation warning: {cancellation_error}"
-                )
             yield (
                 None,
-                "",
-                "**Remote Articulation status check failed.**\n\n"
-                f"- {detail}\n"
-                "- The request was not retried with Local Codex.",
+                output_dir.as_posix(),
+                "**Remote Articulation completed, but its USDC could not be downloaded.**\n\n"
+                f"- {detail}",
                 "\n".join(log_lines[-300:]),
                 "",
             )
             return
 
-        status_line = _server_task_line(task)
-        if status_line != previous_line:
-            _append_server_log(log_lines, status_line)
-            previous_line = status_line
-        status = task.get("status")
-        if status in _SERVER_TERMINAL_STATUSES:
-            _finish_server_task(session_id, token, request_id)
-            break
-        yield (
-            None,
-            "",
-            f"**Remote server is generating the Articulation.**\n\n- {status_line}",
-            "\n".join(log_lines[-300:]),
-            "",
+        if not _articraft_runs.is_active(session_id, token):
+            return
+        status = (
+            "**Remote Articulation generation completed.**\n\n"
+            f"- Request: `{request_id}`\n"
+            f"- EmbodiChain USDC: `{artifact}`"
         )
-        remaining_seconds = max(0.0, deadline - time.monotonic())
-        time.sleep(min(poll_interval_seconds, remaining_seconds))
+        preview_html = _articraft_result_preview(output_dir, artifact)
+        try:
+            preview_html = _start_remote_viser_preview(session_id, artifact)
+            status += "\n- Interactive Viser preview: ready"
+        except (OSError, RuntimeError) as exc:
+            detail = redact_sensitive_text(str(exc))
+            status += f"\n- Interactive preview could not start: `{detail}`"
 
-    if not _articraft_runs.is_active(session_id, token):
-        return
-    if status != "succeeded":
-        detail = _server_task_error(task)
+        if not _articraft_runs.is_active(session_id, token):
+            _articraft_viewers.reset(session_id, force=True)
+            return
         yield (
-            None,
-            "",
-            f"**Remote Articulation request {status}.**\n\n- {detail}\n"
-            "- The request was not retried with Local Codex.",
-            "\n".join(log_lines[-300:]),
-            "",
-        )
-        return
-
-    output_dir = output_root / request_id
-    try:
-        artifact = client.download(request_id, "usdc", output_dir / "model.usdc")
-    except (ArticulationServerError, OSError, ValueError) as exc:
-        detail = redact_sensitive_text(str(exc))
-        yield (
-            None,
+            artifact.as_posix(),
             output_dir.as_posix(),
-            "**Remote Articulation completed, but its USDC could not be downloaded.**\n\n"
-            f"- {detail}",
+            status,
             "\n".join(log_lines[-300:]),
-            "",
+            preview_html,
         )
-        return
 
-    if not _articraft_runs.is_active(session_id, token):
-        return
-    status = (
-        "**Remote Articulation generation completed.**\n\n"
-        f"- Request: `{request_id}`\n"
-        f"- EmbodiChain USDC: `{artifact}`"
-    )
-    preview_html = _articraft_result_preview(output_dir, artifact)
-    try:
-        preview_html = _start_remote_viser_preview(session_id, artifact)
-        status += "\n- Interactive Viser preview: ready"
-    except (OSError, RuntimeError) as exc:
-        detail = redact_sensitive_text(str(exc))
-        status += f"\n- Interactive preview could not start: `{detail}`"
-
-    if not _articraft_runs.is_active(session_id, token):
-        _articraft_viewers.reset(session_id, force=True)
-        return
-    yield (
-        artifact.as_posix(),
-        output_dir.as_posix(),
-        status,
-        "\n".join(log_lines[-300:]),
-        preview_html,
-    )
+    finally:
+        # A failed cancellation leaves the client owned by the reset/retry path.
+        with _server_tasks_lock:
+            active = _server_tasks.get(session_id)
+            retained = active is not None and active[1] is client
+        if not retained:
+            close = getattr(client, "close", None)
+            if close is not None:
+                close()
 
 
 def generate_articraft_asset(

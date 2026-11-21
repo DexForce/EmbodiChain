@@ -30,10 +30,12 @@ database_agent_prompt_dir = os.path.join(database_dir, "agent_prompt")
 database_demo_dir = os.path.join(database_dir, "demostration")
 
 from .dataset import *
+from .resources import snapshot_urdf_resources
 from .default_materials import list_default_materials, get_default_material_info
 
 __all__ = [
     "assets",
+    "snapshot_urdf_resources",
     "EMBODICHAIN_DEFAULT_DATABASE_ROOT",
     "database_dir",
     "database_2d_dir",

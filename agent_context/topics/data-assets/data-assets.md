@@ -10,11 +10,13 @@ Online sampling and demonstration persistence belong to
 
 | Request | Owner |
 |---|---|
+| Prepared URDF resource snapshots | `embodichain/data/resources.py`: `snapshot_urdf_resources()` |
 | Asset path lookup | `embodichain/data/dataset.py`: `get_data_path()`, `get_data_class()` |
 | Cache roots / mirror prefix | `embodichain/data/constants.py` |
 | Locked download and ZIP integrity | `embodichain/data/dataset.py`: `EmbodiChainDataset`, `_dataset_download_lock()` |
 | Shared class discovery | `embodichain/data/_asset_registry.py`: core modules and `embodichain.assets` catalogs |
-| Robot-owned asset definitions | `extensions/embodichain_robots/_asset_catalog.py` → vendor/model `assets.py` |
+| Robot-owned asset definitions | `embodichain/extensions/robots/_asset_catalog.py` → vendor/model `assets.py` |
+| YAM source conversion and reproducible archive | `scripts/tools/prepare_yam_i2rt_assets.py` → [source and published assets](../../../docs/source/resources/robot/i2rt/yam.md#published-assets-and-offline-use) |
 | CLI list/download | `embodichain/data/download.py`: `get_registry()`, `download_asset()` |
 | Default material catalog / provenance | `embodichain/_material_catalog.py` → `embodichain/data/default_materials.py`; `embodichain/data/default_materials.json` |
 | Default material archive | `embodichain/data/assets/materials.py`: `DefaultMaterials` |
@@ -42,6 +44,14 @@ Lookup does not verify the final nested file. Check the shared index and install
 entry points for missing IDs. Explicit loaded modules remain available through
 `extra_modules` after registered IDs; package re-exports do not register assets.
 
+Prepared robot snapshots copy an existing URDF parent tree into a caller-owned
+standalone directory, retaining relative OBJ/MTL/texture references. An explicit
+provenance root contributes its manifest and model license/notice files without
+robot-name rules. Self-snapshots are idempotent; nested source destinations are
+rejected before copying. Task adapters own configuration path rewriting and
+assembly-specific fidelity; the shared filesystem helper does not import Gym,
+simulation or task packages.
+
 ## Download and registry boundaries
 
 `EmbodiChainDataset` locks `<data_root>/download/.locks/<prefix>.lock` around
@@ -49,6 +59,17 @@ both ZIP integrity repair and the Open3D constructor's download/extraction.
 Keep the lock outside the directory repair may delete. POSIX uses `flock`;
 Windows uses a polled byte lock. Direct Open3D subclasses do not automatically
 receive the project's locking/repair behavior.
+
+For `hf-mirror.com/datasets/DexForceAI/embodichain_data/` descriptors, the shared
+dataset base appends the matching official `huggingface.co` URL after the
+declared sources. Open3D tries it when an earlier download or checksum check
+fails, retaining the descriptor's revision, digest and extraction subdirectory.
+Custom hosts and other repositories are unchanged; failure of every source
+still raises a download error.
+
+The `task` category registers `PourCupAssets` runtime meshes and
+`PourCupDemoData` historical recordings through `assets/task_assets.py`.
+Both use the shared download cache and class-prefixed paths.
 
 The CLI honors an asset class's optional `cache_prefix` when checking readiness
 and ensuring extraction; otherwise the class name is the cache entry.
@@ -61,11 +82,21 @@ the public `CATEGORY_MODULES` mapping remains a single-module compatibility view
 Catalogs are cached for the process lifetime; refresh editable metadata and restart
 after changing entry points.
 
-Migrated robot assets live in `embodichain_robots`, alongside each model or at
+Migrated robot assets live in `embodichain.extensions.robots`, alongside each model or at
 vendor level for shared archives. The legacy `robot_assets`, `w1_assets`,
 `so101_assets` and migrated `locomotion_assets` names forward to the same class objects.
 Discovery excludes these imported aliases so IDs register once. Keep class names,
 asset IDs, URLs, digests and cache prefixes stable across ownership moves.
+EEF asset classes live in vendor/model `assets.py` modules
+in `embodichain.extensions.robots`, registered once under category `eef` by the same
+catalog. Their former `embodichain.data.assets.eef_assets` module and aggregate
+class exports are removed; use the canonical modules or `get_data_class()`.
+String asset IDs and archive/cache paths remain unchanged. Pika belongs to
+`agilex.pika`; WheelTec's `fa2f` namespace records an asset identifier, not a
+verified manufacturer SKU. Each owner README is packaged with the wheel and
+separates manufacturer/model evidence from archive authorship, known edits
+and asset licensing. Missing provenance remains explicit, and Python source
+licenses do not establish URDF/mesh licensing.
 The six catalog locomotion models register their model-owned archives through
 the robot asset catalog. `HumanoidRun` and remaining core robot datasets still
 use the core category table, which excludes private helpers. Locomotion archives
@@ -77,13 +108,39 @@ and exits nonzero if any requested asset failed.
 `_ensure_extract()` copies non-ZIP downloads into the extract tree
 when needed. Solver/planner checkpoint download helpers can have separate paths.
 
-`SO101FollowerAssets` in `embodichain_robots.the_robot_studio.so101.assets` also belongs to the robot CLI
+`SO101FollowerAssets` in `embodichain.extensions.robots.the_robot_studio.so101.assets` also belongs to the robot CLI
 category. It resolves a pinned official URDF and individual STL/reference files,
 verifies every SHA256, and repairs dependencies under the shared dataset lock.
 Keep its source revision and complete file checksums together when updating it.
 
 ZIP bundles must include directory entries before nested files for Open3D
 extraction. Validate new bundles through `get_data_path()` with an empty cache.
+
+Captured Gaussian backgrounds register as `RoboSplatterOfficeGS`,
+`DiscoverseLab3GS` and `RoboSimGSTabletopGS` in `assets/scene_assets.py`.
+Each resolves `asset.usda` from an immutable Hub snapshot and a versioned cache.
+The metre/Z-up entry references original or separately decoded PLY data; the
+package includes an AssetRevision inventory, source hashes and licensing
+evidence. These are visual-only scenes and supply no enclosing collision box.
+`scripts/tools/prepare_gaussian_scene_assets.py` owns explicit offline packaging;
+normal runtime consumers download the completed archive. Package admission and
+native RGB evidence do not certify metric Gaussian depth or industrial readiness.
+Official Task Program deployments live under
+`embodichain/extensions/tasks/configs/tasks/manipulation/gaussian_pick_place/`.
+`examples/gym/gaussian_pick_place/` consumes those definitions for RGB recording,
+video export and offline acceptance; it does not own another task configuration.
+
+`Franka` also materializes `Panda/Fr3HandV1.urdf` from the pinned integrated
+hand subtree, retaining source names and relative mesh paths. Bare FR3 arms
+resolve the existing `Panda/Panda.urdf`; embodiments mount the derived hand
+explicitly. Source and derived digests are recorded together.
+
+`FrankaPandaArm` is a separate pinned original-Panda asset in
+`embodichain.extensions.robots.franka.assets`; `FrankaV4` remains the historical FR3 asset.
+The original-Panda derivative normalizes only authored rounded right angles,
+checks the upstream URDF digest and writes derivation evidence under the shared
+dataset lock. Its identity must stay distinct from the FR3 archive; see the
+[vendor provenance](../../../embodichain/extensions/robots/franka/README.md).
 
 `UniversalRobots` selects the V4 archive with corrected UR3/UR3e material
 colors. Its versioned `UniversalRobotsV4` cache directory changes source paths
@@ -98,6 +155,23 @@ support caches, layouts and previews belong to a separate caller-owned workspace
 The registered descriptor respects the configured host and falls back to the
 official Hugging Face dataset. The scene tutorial downloads by asset reference
 by default and accepts local exports through `--source`.
+
+`Real2SimCarton` resolves the immutable `demo/real2sim_carton/real2sim_carton_v1.zip`
+into the revision-specific `Real2SimCartonV1` cache. It includes one original
+DROID record, manual annotations, measured/synthetic motion inputs and estimated
+box proxies. The class verifies the archive, trusted manifest and extracted
+file hashes. Original/derived measured resources retain CC BY 4.0; independent
+synthetic resources are Apache-2.0. The example copies raw files into its own
+workspace and requalifies the live model; collections and receipts are not part
+of this shared input cache. Distribution hashes live in the example's
+`resources.lock.json`, while `source.lock.json` preserves original upstream URLs.
+
+The official `carton_stocking` task consumes only the fixed measured inputs.
+`data._references` resolves closed `{asset, path}` references through registered
+asset initialization, rejects root escapes and preserves owner-relative string
+paths. Prototype/evidence consumers still verify their own content hashes.
+The carton asset URLs pin the recorded distribution commit. Catalog browsing
+reads declarations without initializing these resources.
 
 ## Default material resources
 
@@ -134,8 +208,23 @@ rejects paths resolving outside its RUN, including default HF blob symlinks.
 The CLI records repository provenance and writes reports outside the model
 cache. Robot references still use `get_data_path()` and its existing asset cache.
 Task packages must already be installed; downloading weights does not register
-new environment implementations. Test the Hub boundary with fake downloads and
-validate a real selected-model download separately.
+new environment implementations. The index's `task_package` accepts a qualified
+module name. Published official policy indexes declaring `embodichain_tasks`
+resolve their requirement to `embodichain.extensions.tasks`. Test the Hub
+boundary with fake downloads and validate a real selected-model download separately.
+
+## Qualified cloth replay inputs
+
+`scripts/tools/prepare_cloth_fold_assets.py` installs the pinned M02 input bundle
+into the normal data root. It uses the shared download lock, verifies archive
+and task-owned URDF/mesh SHA-256 values, includes URDF-relative visual and
+collision dependencies, and rejects conflicting local files. Each input is copied
+to a same-directory temporary file, verified and atomically published without
+overwriting an existing file, so interrupted copies remain retryable. The packaged
+cloth task retains its qualified replay stream and 15 mm final centroid rules.
+The installer also supports an explicit custom root; launch with that same
+`EMBODICHAIN_DATA_ROOT`. It does not change the global root or substitute the
+generic W1 archive for the qualified robot.
 
 ## Failure diagnosis and change sites
 
@@ -159,3 +248,19 @@ changes, exercise absolute, existing-relative and class-prefixed paths plus
 missing/bare prefixes and a custom data root. For CLI changes, cover category
 visibility and failure exit behavior. Use fake download backends for these
 contracts; separately validate actual network downloads when asset content changes.
+
+`FlexivRizon4SMenagerie` is a source-file bundle rather than an archive:
+`embodichain/extensions/robots/flexiv/rizon4s/rizon4s_sources.json` pins individual Git blob identities and
+licenses. The owning asset class verifies each downloaded file before publishing
+the source cache, preserving prepared model directories during automatic repair
+under the same lock used by preparation. Historical URDF preparation and
+model-fidelity metadata are owned by
+`embodichain.extensions.benchmarks.assembly.robot_reference`, not the dataset resolver or a
+combined arm/gripper catalog preset.
+
+The five classes in `assets/rl_assets.py` use the same archive cache. The
+`official_rl` entry point registers four robot entries and the `G1RoughTerrains`
+scene entry through the shared `embodichain.assets` catalog. CLI discovery and
+`get_data_class()` resolve the same class identities. The G1 Rough asset does not replace
+`UnitreeG1Locomotion`; their joint counts and provenance differ. Publication
+status is external to code registration and must be verified before release.

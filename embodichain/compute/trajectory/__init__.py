@@ -21,12 +21,16 @@ as optional path samples. Warping applies keyframe offsets to a trajectory."""
 
 from __future__ import annotations
 
+from .toppra import retime_joint_paths
+from .stability import PositionRangeMonitor
+from .floating import resample_floating_trajectory
 from .interpolation import (
     interpolate_minimum_jerk,
     interpolate_with_distance,
     interpolate_with_nums,
 )
 from .resampling import resample_with_distance
+from .refinement import PoseRefinementResult, refine_pose_trajectory
 from .timing import (
     differentiate_positions,
     resample_in_time,
@@ -35,6 +39,9 @@ from .timing import (
 from .warping import sort_and_padding_key_frame, warp_trajectory_qpos
 
 __all__ = [
+    "retime_joint_paths",
+    "PositionRangeMonitor",
+    "resample_floating_trajectory",
     "differentiate_positions",
     "resample_in_time",
     "retime_to_control_grid",
@@ -44,4 +51,6 @@ __all__ = [
     "resample_with_distance",
     "sort_and_padding_key_frame",
     "warp_trajectory_qpos",
+    "PoseRefinementResult",
+    "refine_pose_trajectory",
 ]

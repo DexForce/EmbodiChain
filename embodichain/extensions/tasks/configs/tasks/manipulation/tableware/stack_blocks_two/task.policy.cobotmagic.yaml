@@ -1,0 +1,22 @@
+id: StackBlocksTwoPolicy-v1
+environment:
+  component: env.policy.yaml
+evaluation:
+  component: task_program/evaluation.measured.yaml
+task_program:
+  program: task_program/program.measured.yaml
+  integration: task_program/integration.yaml
+  execution: policy
+  action_owners:
+    primary_manipulator: policy
+    secondary_manipulator: policy
+  execution_policy:
+    component: ../../../../components/execution_policies/trajectory_open_loop.yaml
+embodiment:
+  component: ../../../../components/embodiments/cobotmagic.yaml
+rl_task:
+  success:
+    stages:
+      func: program_stage_condition
+      params:
+        state: achieved

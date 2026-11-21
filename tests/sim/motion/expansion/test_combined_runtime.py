@@ -42,7 +42,7 @@ from embodichain.lab.scripts.run_task import _create_parser, _resolve_expansion_
 _ROOT = Path(__file__).parents[4]
 _TASK_ROOT = (
     _ROOT
-    / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
+    / "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place"
 )
 
 
@@ -108,10 +108,8 @@ def test_visual_registry_applies_global_sun_once_for_all_rows() -> None:
         def reset(self) -> None:
             self.reset_count += 1
 
-        def set_color(self, color) -> None:
+        def apply_state(self, *, color, intensity) -> None:
             self.color = color
-
-        def set_intensity(self, intensity) -> None:
             self.intensity = intensity
 
     class Sim:

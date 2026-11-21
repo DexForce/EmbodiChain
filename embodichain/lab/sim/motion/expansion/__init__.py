@@ -103,6 +103,8 @@ from .source import (
     SourceContext,
     TemplateSourceAdapter,
 )
+from .real2sim import Real2SimSourceAdapter
+from .mapped_timing import MappedRetimeResult, retime_with_time_map
 from .stitching import (
     MinimumJerkBridgePlanner,
     SegmentCompatibility,
@@ -127,6 +129,9 @@ from .task_space import (
 )
 
 __all__ = [
+    "Real2SimSourceAdapter",
+    "MappedRetimeResult",
+    "retime_with_time_map",
     "SPATIAL_METHODS",
     "CandidateIdentity",
     "CandidateRecipe",

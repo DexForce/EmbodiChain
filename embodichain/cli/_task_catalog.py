@@ -30,6 +30,8 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from embodichain.utils.config_paths import resolve_config_path
+
 try:
     from importlib.resources.abc import Traversable
 except ModuleNotFoundError:
@@ -39,6 +41,7 @@ _TASK_PROGRAM = "Expert Demo: Task Program"
 _HANDWRITTEN_DEMO = "Expert Demo: Handwritten Trajectory"
 _RL = "RL"
 _CAPABILITY_ORDER = (_TASK_PROGRAM, _HANDWRITTEN_DEMO, _RL)
+_OFFICIAL_TASK_PACKAGE = "embodichain.extensions.tasks"
 
 
 @dataclass
@@ -95,16 +98,6 @@ def _task_config_roots(
     roots: list[Traversable] = []
     visited_packages: set[str] = set()
     for task_package in task_package_modules:
-        if task_package == "embodichain_tasks":
-            # Editable imports can point at a different checkout after task
-            # discovery. Mirror resolve_config_path's co-located precedence.
-            colocated = (
-                Path(__file__).resolve().parents[2]
-                / "extensions/embodichain_tasks/configs/tasks"
-            )
-            if colocated.is_dir():
-                roots.append(colocated)
-                continue
         config_packages = (
             f"{task_package}.configs",
             f"{task_package.partition('.')[0]}.configs",
@@ -216,6 +209,7 @@ class _Deployment:
     agent_refs: tuple[str, ...] = ()
     validation_resource: Traversable | None = None
     validation: Mapping[str, Any] | None = None
+    requires_dataset_dir: bool = False
 
     @property
     def command(self) -> str | None:
@@ -223,7 +217,10 @@ class _Deployment:
             return None
         path = _local_path(self.resource)
         reference = str(path) if path is not None else self.config_ref
-        return f"embodichain run-task --gym_config {shlex.quote(reference)}"
+        command = f"embodichain run-task --gym_config {shlex.quote(reference)}"
+        if self.requires_dataset_dir:
+            command += " --dataset-dir ./datasets"
+        return command
 
 
 @dataclass
@@ -312,10 +309,10 @@ def _backend(config: Mapping[str, Any], resource: Traversable) -> str | None:
     if isinstance(environment, Mapping) and isinstance(
         environment.get("component"), str
     ):
-        # Components are normally siblings or ancestors. Path resources support
-        # this without importing simulator-dependent configuration decoders.
         if isinstance(resource, Path):
-            component = resource.parent / environment["component"]
+            component = resolve_config_path(
+                environment["component"], base_dir=resource.parent
+            )
             if not component.is_file():
                 raise ValueError(f"Missing environment component: {component}")
             return _load_mapping(component).get("physics")
@@ -323,8 +320,8 @@ def _backend(config: Mapping[str, Any], resource: Traversable) -> str | None:
 
 
 def _reference(package: str, task_path: tuple[str, ...], name: str) -> str:
-    prefix = ("extensions", package) if package == "embodichain_tasks" else (package,)
-    return "/".join((*prefix, "configs", "tasks", *task_path, name))
+    prefix = package.replace(".", "/") if package == _OFFICIAL_TASK_PACKAGE else package
+    return "/".join((prefix, "configs", "tasks", *task_path, name))
 
 
 def _agent_matches(
@@ -349,9 +346,6 @@ def _agent_matches(
         return (
             deployment_path is not None and reference_path.resolve() == deployment_path
         )
-    # Missing repository-style references resolve through packaged resources.
-    if reference.startswith("embodichain_tasks/configs/"):
-        reference = f"extensions/{reference}"
     return reference == deployment.config_ref
 
 
@@ -459,7 +453,9 @@ def _load_catalog(roots: Mapping[str, Traversable]) -> list[_Task]:
                         resource,
                         _backend(config, resource),
                         _config_embodiment_names(config),
-                        {_TASK_PROGRAM} if "task_program" in config else set(),
+                        ({_TASK_PROGRAM} if "task_program" in config else set())
+                        | ({_RL} if "rl_task" in config else set()),
+                        requires_dataset_dir="real2sim" in config,
                     )
                 )
                 if metadata and "validation" in metadata["deployments"][name]:
@@ -549,7 +545,7 @@ def _config_environment_entries(
     return _catalog_entries(
         _load_catalog(
             {
-                "embodichain_tasks" if index == 0 else f"package_{index}": root
+                _OFFICIAL_TASK_PACKAGE if index == 0 else f"package_{index}": root
                 for index, root in enumerate(config_roots)
             }
         )
@@ -588,7 +584,11 @@ def _augment_runtime(tasks: list[_Task], task_packages: Sequence[str]) -> None:
             or spec.task_program_adapter_factory is not None
         ):
             capabilities.add(_TASK_PROGRAM)
-        elif _implements_handwritten_demo(spec.cls):
+        elif (
+            spec.supports_handwritten_demo
+            if getattr(spec, "supports_handwritten_demo", None) is not None
+            else _implements_handwritten_demo(spec.cls)
+        ):
             capabilities.add(_HANDWRITTEN_DEMO)
         if spec.supports_rl:
             capabilities.add(_RL)

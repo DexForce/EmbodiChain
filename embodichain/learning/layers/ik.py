@@ -30,7 +30,7 @@ from embodichain.compute.kinematics import (
     DifferentiableIKResult,
     solve_dls_ik,
 )
-from .kinematics import KinematicsLayer
+from .fk import DifferentiableFKLayer
 
 __all__ = ["DifferentiableIKLayer"]
 
@@ -39,7 +39,7 @@ class DifferentiableIKLayer(nn.Module):
     """Compose fixed-step DLS with a differentiable kinematics module.
 
     Args:
-        kinematics: Model owning geometry, TCP and physical limit buffers.
+        kinematics: FK layer owning geometry, TCP and physical limit buffers.
         cfg: Numerical settings, copied at construction.
 
     Note:
@@ -48,7 +48,7 @@ class DifferentiableIKLayer(nn.Module):
     """
 
     def __init__(
-        self, kinematics: KinematicsLayer, cfg: DifferentiableIKCfg | None = None
+        self, kinematics: DifferentiableFKLayer, cfg: DifferentiableIKCfg | None = None
     ) -> None:
         super().__init__()
         self.kinematics = kinematics

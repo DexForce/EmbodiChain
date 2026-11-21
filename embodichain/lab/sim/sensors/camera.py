@@ -17,18 +17,27 @@
 from __future__ import annotations
 
 import dexsim
+import operator
+import weakref
+import numpy as np
 import torch
 import dexsim.render as dr
 
-from functools import cached_property
-from typing import TYPE_CHECKING, List, Literal, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, List, Literal, Sequence, Tuple
 
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
+from embodichain.lab.visualization.markers._native import _MARKER_RENDER_CATEGORY
+from embodichain.lab.sim._render_selection import (
+    _normalize_render_rows,
+    _select_render_values,
+)
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, look_at_to_pose
 from embodichain.utils import logger, configclass
 
 if TYPE_CHECKING:
+    from dexsim.scene import CameraBatch, Scene, SpawnedCamera, SpawnedCameraGroup
     from embodichain.lab.sim.sim_manager import SimulationManager
+    from ._camera_group_pool import _CameraGroupLease
 
 __all__ = ["Camera", "CameraCfg"]
 
@@ -71,6 +80,9 @@ class CameraCfg(SensorCfg):
     visualization_role: Literal["sensor", "record"] = "sensor"
     """Role used to group this camera in live visualization previews."""
 
+    include_visual_overlays: bool = False
+    """Include native visual overlays and scene-lit markers in captured images."""
+
     # Camera parameters
     width: int = 640
     height: int = 480
@@ -86,6 +98,14 @@ class CameraCfg(SensorCfg):
     enable_mask: bool = False
     enable_normal: bool = False
     enable_position: bool = False
+
+    ground_plane_visible: bool = True
+    """Include the shared default ground in this camera (both stereo eyes).
+
+    The manager's global ground visibility remains a master switch. Hiding
+    the ground requires DexSim camera render-category support; collision
+    geometry and ground embedded in scanned assets are unaffected.
+    """
 
     fx: float = intrinsics[0]
     fy: float = intrinsics[1]
@@ -150,40 +170,101 @@ class Camera(BaseSensor):
         *,
         owner: SimulationManager,
     ) -> None:
+        import weakref
+
+        self._owner = weakref.ref(owner)
         owner._require_native_renderer("Native cameras")
+        if not isinstance(config.ground_plane_visible, bool):
+            raise ValueError("ground_plane_visible must be a bool")
+        if not config.ground_plane_visible:
+            owner._require_ground_plane_filtering()
+        self._owner_ref = self._owner
+        self._ground_plane_visibility = [True] * owner.num_envs
+        self._capture_metadata: dict[str, object] | None = None
+        self._capture_sequence = 0
+        self._pending_capture_metadata: dict[str, object] | None = None
         self._world = owner.get_world()
+        self._scene: Scene = owner._spawn_scene.builder.result
+        self._arena_names = owner._spawn_scene.arena_names
         self._arenas = [owner.get_env(i) for i in range(owner.num_envs)]
         if len(self._arenas) == 0:
             raise ValueError("Camera requires at least one materialized Arena.")
         self._camera_names: list[tuple[dexsim.environment.Arena, str]] = []
+        self._camera_handles: tuple[SpawnedCamera, ...] = ()
+        self._camera_batch: CameraBatch | None = None
+        self._batch_revision = -1
+        self._camera_group = None
+        self._camera_groups: tuple[SpawnedCameraGroup, ...] = ()
+        self._frame_buffers: tuple[Any, ...] = ()
+        self._camera_lease: _CameraGroupLease | None = None
         self._is_attached = False
         self._is_destroyed = False
-        super().__init__(config, device, num_instances=len(self._arenas))
-        self.reset()
+        try:
+            super().__init__(config, device, num_instances=len(self._arenas))
+            self.reset()
+        except Exception:
+            self.destroy()
+            raise
+
+    @property
+    def _batch(self) -> CameraBatch:
+        """Refresh the weak native selection after a physical topology change."""
+        if self._is_destroyed:
+            raise RuntimeError("Camera has been destroyed.")
+        revision = self._scene.topology_revision
+        if self._camera_batch is None or self._batch_revision != revision:
+            self._camera_batch = self._scene.create_camera_batch(self._camera_handles)
+            self._batch_revision = revision
+        return self._camera_batch
+
+    def _create_camera_views(
+        self, config: CameraCfg, intrinsics: Sequence[Sequence[float]]
+    ) -> None:
+        """Create all eyes together in the already prepared, Scene-owned Arenas."""
+        from dexsim.spawn import CameraDesc
+
+        total_views = self.num_instances * len(intrinsics)
+        owner = self._owner_ref()
+        if owner is None:
+            raise RuntimeError("Camera owner is unavailable.")
+        lease = owner._camera_group_pool.acquire(config, total_views, self._scene)
+        self._camera_lease = lease
+        self._camera_groups = lease.groups
+        self._camera_group = lease.groups[0]
+        self._frame_buffers = tuple(group.native for group in lease.groups)
+        descriptors = []
+        for eye, values in enumerate(intrinsics):
+            matrix = np.eye(3, dtype=np.float32)
+            matrix[0, 0], matrix[1, 1], matrix[0, 2], matrix[1, 2] = values
+            for i in range(self.num_instances):
+                suffix = (
+                    "" if len(intrinsics) == 1 else ("_left" if eye == 0 else "_right")
+                )
+                descriptors.append(
+                    CameraDesc(
+                        name=f"{config.uid}{suffix}_view{i + 1}",
+                        width=config.width,
+                        height=config.height,
+                        intrinsic=matrix,
+                        near=config.near,
+                        far=config.far,
+                        view_flags=config.get_view_attrib(),
+                    )
+                )
+        self._camera_handles = self._scene.add_cameras(
+            descriptors,
+            arena_names=list(self._arena_names) * len(intrinsics),
+            camera_groups=lease.camera_groups,
+        )
+        self._frame_buffer = self._frame_buffers[0]
 
     def _build_sensor_from_config(
         self, config: CameraCfg, device: torch.device
     ) -> None:
-        self._frame_buffer = self._world.create_camera_group(
-            [config.width, config.height], self.num_instances, True
-        )
+        self._create_camera_views(config, (config.intrinsics,))
+        self._entities = [handle.native for handle in self._camera_handles]
 
-        view_attrib = config.get_view_attrib()
-        for i, arena in enumerate(self._arenas):
-            view_name = f"{config.uid}_view{i + 1}"
-            view = arena.create_camera(
-                view_name,
-                config.width,
-                config.height,
-                True,
-                view_attrib,
-                self._frame_buffer,
-            )
-            view.set_intrinsic(config.intrinsics)
-            view.set_near(config.near)
-            view.set_far(config.far)
-            self._entities[i] = view
-            self._camera_names.append((arena, view_name))
+        self._configure_visual_overlays(self._entities, config.include_visual_overlays)
 
         # Define a mapping of data types to their respective shapes and dtypes
         buffer_specs = {
@@ -220,14 +301,160 @@ class Camera(BaseSensor):
 
         self.cfg: CameraCfg = config
 
-    @cached_property
+    def _configure_visual_overlays(
+        self, views: Sequence[dr.CameraView], include: bool
+    ) -> None:
+        if include:
+            for frame_buffer in self._frame_buffers:
+                frame_buffer.set_visual_overlay_enabled(True)
+        else:
+            for view in views:
+                view.set_excluded_render_categories(_MARKER_RENDER_CATEGORY)
+
+    def set_ground_plane_visibility(
+        self, visible: bool, env_ids: Sequence[int] | None = None
+    ) -> None:
+        """Include or exclude the shared ground for selected camera instances.
+
+        This changes every image output, shadow and reflection consistently.
+        It preserves collisions and other cameras. ``reset`` restores the
+        configured policy; topology reattachment preserves the current policy.
+        Marker filtering retains the configured ``include_visual_overlays`` policy.
+
+        Args:
+            visible: Whether this camera permits rendering the default ground.
+            env_ids: Environment indices, or all instances when omitted.
+
+        Raises:
+            ValueError: The flag or environment indices are invalid.
+            RuntimeError: The camera is destroyed or the SDK lacks filtering.
+        """
+        if self._is_destroyed:
+            raise RuntimeError("Camera is destroyed")
+        if not isinstance(visible, bool):
+            raise ValueError("visible must be a bool")
+        if isinstance(env_ids, torch.Tensor):
+            if env_ids.ndim != 1:
+                raise ValueError("env_ids must be one-dimensional")
+            # One host transfer for a selected reset, rather than one .item()
+            # synchronization per environment when the indices are on CUDA.
+            env_ids = env_ids.detach().cpu().tolist()
+        if env_ids is not None and any(isinstance(index, bool) for index in env_ids):
+            raise ValueError("env_ids must contain integers, not a boolean mask")
+        try:
+            ids = (
+                list(range(self.num_instances))
+                if env_ids is None
+                else [operator.index(index) for index in env_ids]
+            )
+        except TypeError as error:
+            raise ValueError("env_ids must contain integers") from error
+        if any(index < 0 or index >= self.num_instances for index in ids):
+            raise ValueError("env_ids contains an out-of-range environment")
+        if len(set(ids)) != len(ids):
+            raise ValueError("env_ids must not contain duplicates")
+        changed = [
+            index for index in ids if self._ground_plane_visibility[index] != visible
+        ]
+        if not changed:
+            return
+        owner = self._owner_ref()
+        if owner is None:
+            raise RuntimeError("Camera owner is unavailable")
+        owner._require_ground_plane_filtering()
+        excluded = 0 if visible else owner._GROUND_RENDER_CATEGORY
+        if not self.cfg.include_visual_overlays:
+            excluded |= _MARKER_RENDER_CATEGORY
+        self._capture_metadata = None
+        for index in changed:
+            self._entities[index].set_excluded_render_categories(excluded)
+            self._ground_plane_visibility[index] = visible
+
+    def get_capture_metadata(self) -> dict[str, object] | None:
+        """Return a copy of metadata for the last successful image update.
+
+        ``ground_plane_visible`` records the effective per-environment policy,
+        including the global switch; it does not assert floor pixel coverage.
+        Metadata is unavailable before acquisition or after a policy change.
+        """
+        from copy import deepcopy
+
+        if (
+            self._capture_metadata is None
+            or self._capture_metadata.get("valid") is False
+        ):
+            return None
+        return deepcopy(self._capture_metadata)
+
+    def _snapshot_render_metadata(self) -> None:
+        owner = self._owner_ref()
+        global_visible = owner is not None and owner._spawn_default_plane_visibility
+        self._capture_sequence += 1
+        self._pending_capture_metadata = {
+            "capture_sequence": self._capture_sequence,
+            "camera_uid": self.cfg.uid,
+            "ground_plane_visible": tuple(
+                visible and global_visible for visible in self._ground_plane_visibility
+            ),
+        }
+
+    @property
     def group_id(self) -> int:
-        """Get the camera group ID in the dexsim world.
+        """Get the camera group ID when this sensor owns one native group.
 
         Returns:
             int: The camera group ID.
         """
-        return self._frame_buffer.get_group_id()
+        if len(self._camera_groups) != 1:
+            raise RuntimeError("This camera has multiple groups; use group_ids.")
+        return self._camera_groups[0].get_group_id()
+
+    @property
+    def group_ids(self) -> tuple[int, ...]:
+        """Return native group IDs in view order."""
+        return tuple(group.get_group_id() for group in self._camera_groups)
+
+    def _read_groups(
+        self, getter_name: str, dtype: torch.dtype | None = None
+    ) -> torch.Tensor:
+        """Read only this camera's slots from shared native targets."""
+        outputs = []
+        if self._camera_lease is None:
+            raise RuntimeError("Camera has no live group allocation.")
+        for segment in self._camera_lease.slices:
+            tensor = getattr(segment.group.native, getter_name)()[
+                segment.slot_start : segment.slot_start + segment.count
+            ]
+            if self.device.type == "cpu" and tensor.device.type == "cuda":
+                if dtype is not None:
+                    tensor = tensor.to(dtype=dtype)
+                output = torch.empty(
+                    tensor.shape, dtype=tensor.dtype, device="cpu", pin_memory=True
+                )
+                output.copy_(tensor, non_blocking=False)
+            else:
+                output = (
+                    tensor.to(self.device)
+                    if dtype is None
+                    else tensor.to(self.device, dtype)
+                )
+            outputs.append(output)
+        return outputs[0] if len(outputs) == 1 else torch.cat(outputs, dim=0)
+
+    def _apply_camera_groups(self) -> None:
+        """Capture shared groups and publish every affected camera's metadata."""
+        owner = self._owner_ref()
+        if owner is None or self._camera_lease is None:
+            raise RuntimeError("Camera owner is unavailable.")
+        pool = owner._camera_group_pool
+        if pool.is_shared(self._camera_lease):
+            owner.render_camera_group(
+                list(pool.group_ids_for_bucket(self._camera_lease))
+            )
+        else:
+            for group in self._camera_groups:
+                group.apply_ordered()
+            self._snapshot_render_metadata()
 
     @property
     def is_attached(self) -> bool:
@@ -238,7 +465,7 @@ class Camera(BaseSensor):
         """
         return self._is_attached
 
-    def update(self, **kwargs) -> None:
+    def update(self, **kwargs: Any) -> None:
         """Update the sensor data.
 
         The supported data types are:
@@ -251,37 +478,87 @@ class Camera(BaseSensor):
         Args:
             **kwargs: Additional keyword arguments for sensor update.
         """
+        self._capture_metadata = None
         fetch_only = kwargs.get("fetch_only", False)
+        owner = self._owner_ref()
+        gaussian = (
+            getattr(getattr(owner, "_spawn_scene", None), "has_gaussians", False)
+            is True
+        )
+        if gaussian:
+            owner._validate_gaussian_camera(self.cfg)
         if not fetch_only:
-            self._frame_buffer.apply()
+            self._pending_capture_metadata = None
+            if gaussian:
+                owner._invalidate_gaussian_captures(self.group_id)
+                owner._ensure_render_state()
+                self._frame_buffer.apply_ordered()
+                owner._capture_gaussian_status(self.group_id, camera=self)
+                self._snapshot_render_metadata()
+            else:
+                self._apply_camera_groups()
+        if gaussian:
+            from copy import deepcopy
+
+            capture = getattr(owner, "_gaussian_captures", {}).get(self.group_id)
+            if capture is None:
+                raise RuntimeError(
+                    "No completed Gaussian capture for this camera group."
+                )
         self.cfg: CameraCfg
 
         if self.cfg.enable_color:
-            self._data_buffer["color"] = self._frame_buffer.get_rgb_gpu_buffer().to(
-                self.device
-            )
+            self._data_buffer["color"] = self._read_groups("get_rgb_gpu_buffer")
 
         if self.cfg.enable_depth:
-            self._data_buffer["depth"] = self._frame_buffer.get_depth_gpu_buffer().to(
-                self.device
-            )
+            self._data_buffer["depth"] = self._read_groups("get_depth_gpu_buffer")
 
         if self.cfg.enable_mask:
-            self._data_buffer[
-                "mask"
-            ] = self._frame_buffer.get_visible_mask_gpu_buffer().to(
-                self.device, torch.int32
+            self._data_buffer["mask"] = self._read_groups(
+                "get_visible_mask_gpu_buffer", torch.int32
             )
 
         if self.cfg.enable_normal:
-            self._data_buffer["normal"] = self._frame_buffer.get_normal_gpu_buffer().to(
-                self.device
-            )[..., :3]
+            self._data_buffer["normal"] = self._read_groups("get_normal_gpu_buffer")[
+                ..., :3
+            ]
 
         if self.cfg.enable_position:
-            self._data_buffer["position"] = (
-                self._frame_buffer.get_position_gpu_buffer().to(self.device)[..., :3]
-            )
+            self._data_buffer["position"] = self._read_groups(
+                "get_position_gpu_buffer"
+            )[..., :3]
+        if gaussian:
+            self._capture_metadata = deepcopy(capture)
+            self._capture_metadata.update(self._pending_capture_metadata or {})
+            self._capture_metadata["valid"] = True
+        else:
+            self._capture_metadata = self._pending_capture_metadata
+
+    @property
+    def capture_metadata(self) -> dict[str, object]:
+        """Return owned Gaussian capture status, calibration and output semantics.
+
+        Empty for ordinary captures. A failed Gaussian update marks the capture
+        invalid and raises without publishing valid capture metadata.
+        Poses are arena-local OpenGL transforms in metres. Renderer identity is
+        effective; offscreen denoising records the configured mode because the
+        SDK has no per-group mode query. Image-buffer ownership is unchanged.
+
+        Returns:
+            An independent metadata snapshot, or an empty mapping for Mesh captures.
+        """
+        from copy import deepcopy
+
+        capture = getattr(self, "_capture_metadata", None)
+        if capture is None:
+            owner_ref = getattr(self, "_owner_ref", getattr(self, "_owner", None))
+            owner = owner_ref() if owner_ref is not None else None
+            if getattr(getattr(owner, "_spawn_scene", None), "has_gaussians", False):
+                return {"valid": False}
+            return {}
+        if "status" not in capture and capture.get("valid") is not False:
+            return {}
+        return deepcopy(capture)
 
     def _detach_from_parent_nodes(self) -> None:
         """Retain camera views while their Spawn-owned parents are rebuilt."""
@@ -312,7 +589,7 @@ class Camera(BaseSensor):
             entity.attach_node(parent)
         # Extrinsics are expressed in the parent frame. Reapply them after
         # reparenting because the camera was initially reset in Arena space.
-        self.reset()
+        self._reset_pose()
         self._is_attached = True
 
     def set_local_pose(
@@ -397,23 +674,32 @@ class Camera(BaseSensor):
         """Remove render cameras before releasing their World-owned group."""
         if self._is_destroyed:
             return
+        self._camera_batch = None
+        if self._camera_handles:
+            self._scene.remove_cameras(self._camera_handles)
+            self._camera_handles = ()
+        if hasattr(self, "_data_buffer"):
+            self._data_buffer.clear()
+        if hasattr(self, "_data_buffer_stereo"):
+            self._data_buffer_stereo.clear()
+        self._frame_buffer = None
+        if self._camera_lease is not None:
+            owner = self._owner_ref()
+            if owner is not None:
+                owner._camera_group_pool.release(self._camera_lease)
+            self._camera_lease = None
+        self._camera_groups = ()
+        self._camera_group = None
+        self._frame_buffers = ()
         self._is_destroyed = True
-        for arena, camera_name in self._camera_names:
-            try:
-                arena.remove_camera(camera_name)
-            except Exception as error:
-                logger.log_warning(
-                    f"Failed to remove camera {camera_name!r}: {error!r}"
-                )
+        self._capture_metadata = None
         self._entities = []
         self._camera_names = []
-        # DexSim currently has no public remove_camera_group API. The group is
-        # World-owned; dropping this borrowed facade after removing all views
-        # is the narrowest safe lifetime boundary available to EmbodiChain.
         self._frame_buffer = None
         self._is_attached = False
         self._arenas = []
         self._world = None
+        self._scene = None
 
     def look_at(
         self,
@@ -444,51 +730,40 @@ class Camera(BaseSensor):
     def set_intrinsics(
         self,
         intrinsics: torch.Tensor,
-        env_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> None:
         """
-        Set the camera intrinsics for both left and right cameras.
+        Set intrinsics for the selected camera instances in one native batch.
 
         Args:
             intrinsics (torch.Tensor): The intrinsics for the left camera with shape (4,) / (3, 3) or (N, 4) / (N, 3, 3).
             env_ids (Sequence[int] | None): The environment ids to set the intrinsics. If None, set for all environments.
         """
-        ids = env_ids if env_ids is not None else range(self.num_instances)
-
-        if intrinsics.dim() == 2 and intrinsics.shape[1] == 3:
-            intrinsics = intrinsics.unsqueeze(0).repeat(len(ids), 1, 1)
-
-        if intrinsics.dim() == 1:
-            intrinsics = intrinsics.unsqueeze(0).repeat(len(ids), 1)
-
-        if len(ids) != intrinsics.shape[0]:
-            logger.log_error(
-                f"Invalid intrinsics shape {intrinsics.shape} for {len(ids)} environments."
-            )
-
-        for i, env_id in enumerate(ids):
-            entity = self._entities[env_id]
-            if intrinsics.shape[1] == 3:
-                entity.set_intrinsic(intrinsics[i].cpu().numpy())
-            else:
-                entity.set_intrinsic(intrinsics[i].cpu().tolist())
+        rows, offsets = _normalize_render_rows(env_ids, self.num_instances)
+        broadcast_ndim = 2 if intrinsics.shape[-2:] == (3, 3) else 1
+        self._batch.apply_intrinsics(
+            _select_render_values(intrinsics, offsets, broadcast_ndim), rows=rows
+        )
 
     def get_intrinsics(self) -> torch.Tensor:
         """
-        Get the camera intrinsics for both left and right cameras.
+        Read owned camera intrinsic matrices in environment order.
 
         Returns:
             torch.Tensor: The intrinsics for the left camera with shape (N, 3, 3).
         """
-        intrinsics = []
-        for entity in self._entities:
-            intrinsics.append(
-                torch.as_tensor(entity.get_intrinsic(), dtype=torch.float32)
-            )
-
-        return torch.stack(intrinsics, dim=0).to(self.device)
+        return torch.as_tensor(
+            self._batch.fetch_intrinsics(matrix=True, device=str(self.device)),
+            dtype=torch.float32,
+            device=self.device,
+        )
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        """Restore configured extrinsics and ground visibility for selected views."""
+        self.set_ground_plane_visibility(self.cfg.ground_plane_visible, env_ids)
+        self._reset_pose(env_ids)
+
+    def _reset_pose(self, env_ids: Sequence[int] | None = None) -> None:
         self.cfg: CameraCfg
         ids = (
             None

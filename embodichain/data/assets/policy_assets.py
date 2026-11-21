@@ -136,7 +136,18 @@ def _validate_model(index: object, model_id: str) -> None:
     if not isinstance(entry, dict) or entry.get("format") != "embodichain-rl-run-v1":
         raise ValueError(f"Unsupported pretrained policy format for {model_id!r}")
     task_package = entry.get("task_package")
-    if not isinstance(task_package, str) or not task_package.isidentifier():
+    if not isinstance(task_package, str) or not all(
+        part.isidentifier() for part in task_package.split(".")
+    ):
         raise ValueError("Pretrained policy must declare its task package")
-    if importlib.util.find_spec(task_package) is None:
+    # Published policy indexes refer to the original task package identifier.
+    if task_package == "embodichain_tasks":
+        task_package = "embodichain.extensions.tasks"
+    try:
+        spec = importlib.util.find_spec(task_package)
+    except ModuleNotFoundError as error:
+        if not error.name or not (task_package + ".").startswith(error.name + "."):
+            raise
+        spec = None
+    if spec is None:
         raise ImportError(f"Install the {task_package!r} task package for {model_id!r}")

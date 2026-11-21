@@ -29,7 +29,7 @@ import h5py
 import numpy as np
 import torch
 
-from embodichain_models.dynamics.lewm import (
+from embodichain.extensions.models.dynamics.lewm import (
     LeWMCEMCfg,
     LeWMCEMPlanner,
     load_lewm,

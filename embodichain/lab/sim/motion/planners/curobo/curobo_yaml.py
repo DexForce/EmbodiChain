@@ -31,7 +31,7 @@ before being voxelized into an ESDF grid.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 import xml.etree.ElementTree as ET
@@ -55,6 +55,7 @@ from embodichain.utils.math import (
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import RigidObject, Robot
+    from embodichain.lab.sim.scene.collision_sources import CollisionObjectSnapshot
 
 __all__ = [
     "generate_curobo_robot_yaml",
@@ -67,6 +68,7 @@ __all__ = [
 
 _ROBOT_MAX_CONVEX_HULL_NUM = 2
 _DEFAULT_CUROBO_ACCELERATION = 15.0
+_TCP_LINK = "embodichain_tcp"
 
 
 def _curobo_joint_limits(
@@ -116,8 +118,12 @@ def _write_velocity_limited_urdf(
 
 
 def _named_rigid_objects(
-    rigid_objects: Sequence[RigidObject] | Mapping[str, RigidObject] | None,
-) -> list[tuple[str, RigidObject]]:
+    rigid_objects: (
+        Sequence[RigidObject]
+        | Mapping[str, RigidObject | CollisionObjectSnapshot]
+        | None
+    ),
+) -> list[tuple[str, RigidObject | CollisionObjectSnapshot]]:
     """Return canonical obstacle names paired with their live objects."""
     if isinstance(rigid_objects, Mapping):
         return list(rigid_objects.items())
@@ -161,6 +167,7 @@ def generate_curobo_robot_yaml(
     output_path: str,
     *,
     tool_frame: str | None = None,
+    tool_frame_to_tcp: list[list[float]] | None = None,
     urdf_path: str | None = None,
     num_spheres: int | None = None,
     sphere_density: float = 1.0,
@@ -193,6 +200,9 @@ def generate_curobo_robot_yaml(
             effective velocity caps without modifying the source asset.
         tool_frame: cuRobo tool frame (a URDF link name) to plan to. If ``None``,
             defaults to the last link of the control part.
+        tool_frame_to_tcp: Optional fixed 4x4 transform from ``tool_frame`` to
+            the runtime TCP. Adds a massless fixed TCP frame to the generated
+            model and selects it as the native tool, including for path costs.
         urdf_path: URDF to generate the cuRobo model from. If ``None`` (default),
             uses ``robot.cfg.fpath`` -- the *assembled* URDF that includes every
             mounted component (arm + gripper). Pass this explicitly when the
@@ -224,7 +234,8 @@ def generate_curobo_robot_yaml(
         ImportError: If DexSim or Open3D is not installed.
         RuntimeError: If CUDA is unavailable or no spheres could be fitted.
         ValueError: If a controlled joint has a zero velocity cap, which cuRobo
-            cannot represent, or the output URDF would overwrite the source.
+            cannot represent, the output URDF would overwrite the source,
+            or a TCP transform is invalid or its reserved link already exists.
     """
     import os
 
@@ -352,6 +363,28 @@ def generate_curobo_robot_yaml(
             )
         tool_frame = part_links[-1]
 
+    extra_links = {}
+    if tool_frame_to_tcp is not None:
+        if _TCP_LINK in (robot.get_link_names() or []):
+            raise ValueError(
+                "The reserved cuRobo TCP link already exists in the robot."
+            )
+        transform = torch.as_tensor(
+            tool_frame_to_tcp, dtype=torch.float32, device="cpu"
+        )
+        if transform.shape != (4, 4) or not bool(torch.isfinite(transform).all()):
+            raise ValueError("tool_frame_to_tcp must be a finite 4x4 transform.")
+        extra_links[_TCP_LINK] = {
+            "link_name": _TCP_LINK,
+            "joint_name": f"{_TCP_LINK}_joint",
+            "joint_type": "FIXED",
+            "parent_link_name": tool_frame,
+            "fixed_transform": _pose_matrix_to_list(transform),
+            "link_mass": 0.0,
+            "link_inertia": [0.0] * 6,
+        }
+        tool_frame = _TCP_LINK
+
     # 6. Encode absolute speeds in a cache-owned URDF; leave scales at one.
     motion_urdf_path = _write_velocity_limited_urdf(
         urdf_path,
@@ -379,6 +412,8 @@ def generate_curobo_robot_yaml(
             }
         }
     }
+    if extra_links:
+        data["robot_cfg"]["kinematics"]["extra_links"] = extra_links
 
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     with open(output_path, "w") as yaml_file:
@@ -605,7 +640,9 @@ def _validate_forced_representation(
 
 
 def generate_curobo_world_scene(
-    rigid_objects: Sequence[RigidObject] | Mapping[str, RigidObject],
+    rigid_objects: (
+        Sequence[RigidObject] | Mapping[str, RigidObject | CollisionObjectSnapshot]
+    ),
     *,
     env_id: int = 0,
     representation: str = "auto",
@@ -626,7 +663,8 @@ def generate_curobo_world_scene(
     supported.
 
     Args:
-        rigid_objects: Live obstacles whose physical shapes define the world.
+        rigid_objects: Live obstacles or explicit collision snapshots defining the world.
+            Snapshot provenance does not imply native-cooked geometry.
             Mapping keys are authoritative obstacle IDs. A sequence derives
             each ID from the object's ``uid`` (or ``obstacle_<index>``).
         env_id: Environment row used for geometry and initial poses.
@@ -1128,7 +1166,9 @@ def _world_collision_sphere_data(world_scene: Any) -> tuple[torch.Tensor, torch.
 
 
 def visualize_curobo_world_collision_model(
-    rigid_objects: Sequence[RigidObject] | Mapping[str, RigidObject],
+    rigid_objects: (
+        Sequence[RigidObject] | Mapping[str, RigidObject | CollisionObjectSnapshot]
+    ),
     world_scene: Any,
     env_id: int = 0,
     *,
@@ -1180,9 +1220,15 @@ def visualize_curobo_world_collision_model(
 def visualize_curobo_collision_models(
     robot: Robot,
     robot_yaml_path: str,
-    rigid_objects: Sequence[RigidObject] | Mapping[str, RigidObject] | None = None,
+    rigid_objects: (
+        Sequence[RigidObject]
+        | Mapping[str, RigidObject | CollisionObjectSnapshot]
+        | None
+    ) = None,
     world_scene: Any | None = None,
     env_id: int = 0,
+    *,
+    wait_for_input: Callable[[str], str] | None = None,
 ) -> None:
     """Show robot and world collision models in DexSim until Enter is pressed.
 
@@ -1199,6 +1245,7 @@ def visualize_curobo_collision_models(
         rigid_objects: Optional live world obstacles represented by ``world_scene``.
         world_scene: Optional tensor-backed scene or cuRobo ``Scene`` instance.
         env_id: Simulator environment instance to visualize.
+        wait_for_input: Optional viewport-aware terminal wait callback.
     """
     import dexsim
     import yaml
@@ -1269,7 +1316,7 @@ def visualize_curobo_collision_models(
         if not visualization_actors:
             raise ValueError("The cuRobo caches contain no collision geometry.")
 
-        input(
+        (input if wait_for_input is None else wait_for_input)(
             f"Showing {sphere_count} cuRobo collision spheres in "
             "DexSim. Press Enter to remove them and continue..."
         )

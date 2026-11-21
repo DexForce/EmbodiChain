@@ -27,7 +27,7 @@ import h5py
 import numpy as np
 import torch
 
-from embodichain_models.dynamics.lewm import load_lewm, preprocess_rgb
+from embodichain.extensions.models.dynamics.lewm import load_lewm, preprocess_rgb
 
 from ._evaluation import _check_contract
 from ._sim import close_env, frame, goal_image, make_env, render_contract, reset

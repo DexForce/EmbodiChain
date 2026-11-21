@@ -14,8 +14,18 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""URDF builder utilities for assembling multi-component robot models (``URDFAssemblyManager``)."""
+"""URDF assembly with its implementation loaded on first use."""
 
-from .urdf_assembly_manager import URDFAssemblyManager
+from __future__ import annotations
+
+from typing import Any
 
 __all__ = ["URDFAssemblyManager"]
+
+
+def __getattr__(name: str) -> Any:
+    if name != "URDFAssemblyManager":
+        raise AttributeError(name)
+    from .urdf_assembly_manager import URDFAssemblyManager
+
+    return URDFAssemblyManager

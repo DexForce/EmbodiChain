@@ -29,8 +29,8 @@ from typing import ClassVar, TypeAlias
 
 import torch
 
-from embodichain.lab.sim.atomic_actions.verification import EffectVerificationRequest
-from embodichain.lab.sim.atomic_actions.state import (
+from embodichain.lab.sim.atomic_skills.verification import EffectVerificationRequest
+from embodichain.lab.sim.atomic_skills.state import (
     ArticulationJointState,
     HeldObjectState,
 )
@@ -263,7 +263,7 @@ class SemanticEffectKind(str, Enum):
 
 
 class SymbolicStateDomain(str, Enum):
-    """Typed mapping domains owned by :class:`~atomic_actions.TaskState`."""
+    """Typed mapping domains owned by :class:`~atomic_skills.TaskState`."""
 
     HELD_OBJECT = "held_object"
     COORDINATED_HELD_OBJECT = "coordinated_held_object"

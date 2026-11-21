@@ -23,11 +23,12 @@ from dataclasses import replace
 import pytest
 import torch
 
-from embodichain_benchmarks.motion_generation.config import SuiteCfg
-from embodichain_benchmarks.motion_generation.scenarios.free_space import (
+from embodichain.extensions.benchmarks.motion_generation.config import SuiteCfg
+from embodichain.extensions.benchmarks.motion_generation.scenarios.free_space import (
     FreeSpaceScenario,
+    _start_qpos_for_bin,
 )
-from embodichain_benchmarks.motion_generation.metrics.trajectory import (
+from embodichain.extensions.benchmarks.motion_generation.metrics.trajectory import (
     compute_case_outcomes,
 )
 from embodichain.lab.sim.motion.planners.utils import PlanResult
@@ -66,6 +67,34 @@ class CartesianRobot:
         return torch.ones(pose.shape[0], dtype=torch.bool), solved
 
 
+@pytest.mark.parametrize(
+    "start_bin", ["nominal", "random_reachable", "near_limit", "near_singularity"]
+)
+def test_piper_start_bins_keep_six_joint_identity_and_source_limits(start_bin):
+    # Authored CobotMagic/PiPER V100 arm limits, in policy joint order.
+    limits = torch.tensor(
+        [
+            [-2.618, 2.618],
+            [0.0, 3.14],
+            [-2.967, 0.0],
+            [-1.745, 1.745],
+            [-1.22, 1.22],
+            [-2.0944, 2.0944],
+        ]
+    )
+    first = _start_qpos_for_bin(
+        start_bin, limits, torch.Generator().manual_seed(11), "piper"
+    )
+    second = _start_qpos_for_bin(
+        start_bin, limits, torch.Generator().manual_seed(11), "piper"
+    )
+    torch.testing.assert_close(first, second, rtol=0, atol=0)
+    assert first.shape == (6,)
+    assert ((first > limits[:, 0]) & (first < limits[:, 1])).all()
+    with pytest.raises(ValueError, match="expects 6 joints"):
+        _start_qpos_for_bin(start_bin, limits[:5], torch.Generator(), "piper")
+
+
 def suite_for_sampling(**overrides):
     config = {
         "sampling_method": "cartesian",
@@ -94,8 +123,11 @@ def generate(suite):
     return FreeSpaceScenario().generate_cases(suite, track, CartesianRobot(), "arm", 4)
 
 
-def test_cartesian_population_is_seeded_and_goal_modalities_share_evidence():
-    suite = suite_for_sampling()
+@pytest.mark.parametrize("proposal_batch_size", [1, 4])
+def test_cartesian_population_is_seeded_and_goal_modalities_share_evidence(
+    proposal_batch_size,
+):
+    suite = suite_for_sampling(screening_proposal_batch_size=proposal_batch_size)
     torch.manual_seed(731)
     before = torch.random.get_rng_state().clone()
     first = generate(suite)
@@ -199,10 +231,13 @@ def test_homogeneous_and_heterogeneous_batches_are_explicit():
             assert case.case_parameters["unique_input_rows"] == 4
 
 
-def test_conditioning_and_joint_margin_are_measured():
+@pytest.mark.parametrize("near_limit_sampling", ["all_joints", "single_joint"])
+def test_conditioning_and_joint_margin_are_measured(near_limit_sampling):
     cases = generate(
         suite_for_sampling(
-            start_state_bins=["near_limit", "near_singularity"], seeds=[11]
+            start_state_bins=["near_limit", "near_singularity"],
+            seeds=[11],
+            near_limit_sampling=near_limit_sampling,
         )
     )
     for case in cases:
@@ -213,6 +248,92 @@ def test_conditioning_and_joint_margin_are_measured():
         assert all(0 <= value <= 0.5 for value in params["joint_margin_fraction"])
         if case.start_state_bin == "near_limit":
             assert max(params["joint_margin_fraction"]) <= 0.04
+            margin = torch.minimum(case.start_qpos + 6.0, 6.0 - case.start_qpos) / 12.0
+            count = 1 if near_limit_sampling == "single_joint" else 7
+            assert ((margin <= 0.04).sum(-1) == count).all()
+            if count == 1:
+                assert (margin[margin > 0.04] >= 0.1).all()
+
+
+@pytest.mark.parametrize(
+    "chunk_size,batch_mode",
+    [
+        (1, "heterogeneous"),
+        (3, "heterogeneous"),
+        (4, "heterogeneous"),
+        (4, "homogeneous"),
+    ],
+)
+def test_proposal_chunks_preserve_first_complete_input_and_arena_rows(
+    monkeypatch, chunk_size, batch_mode
+):
+    from embodichain.extensions.benchmarks.motion_generation.config import (
+        FreeSpaceTrackCfg,
+    )
+    from embodichain.extensions.benchmarks.motion_generation.scenarios import (
+        _free_space_sampling,
+    )
+    from embodichain.extensions.benchmarks.motion_generation.scenarios._free_space_proposals import (
+        _sample_request_batched,
+    )
+
+    class ArenaRobot(CartesianRobot):
+        def get_qpos_limits(self, name):
+            limits = super().get_qpos_limits(name).expand(2, -1, -1).clone()
+            limits[:, 0] = torch.tensor([[0.0, 1.0], [0.0, 2.0]])
+            return limits
+
+        def compute_fk(self, qpos, name, to_matrix, env_ids=None):
+            assert qpos.shape[0] == 2
+            pose = super().compute_fk(qpos, name, to_matrix)
+            pose[1, ..., 1, 3] += 10.0
+            return pose
+
+    robot = ArenaRobot()
+    proposal = 0
+
+    def propose(start_pose, count, *args):
+        nonlocal proposal
+        proposal += 1
+        qpos = torch.zeros(2, count, 7)
+        qpos[:, 0, 0] = 0.1  # Every first endpoint is reachable.
+        for row, first_valid in enumerate(
+            [3, 3] if batch_mode == "homogeneous" else [3, 5]
+        ):
+            qpos[row, 1, 0] = -2.0 if proposal < first_valid else proposal * 0.1
+        return robot.compute_batch_fk(qpos, "arm", True)
+
+    monkeypatch.setattr(_free_space_sampling, "_target_path", propose)
+    starts = torch.zeros(2, 7)
+    targets, references, attempts = _sample_request_batched(
+        robot,
+        "arm",
+        starts,
+        FreeSpaceTrackCfg(
+            max_generation_attempts=5,
+            screening_proposal_batch_size=chunk_size,
+            screening_iterations=12,
+        ),
+        11,
+        2,
+        "direct",
+        "translation",
+        "near",
+        batch_mode,
+        suite_for_sampling(),
+    )
+    expected_attempts = [3, 3] if batch_mode == "homogeneous" else [3, 5]
+    assert attempts == expected_attempts
+    assert proposal == 5  # Partial final chunk must respect the exact allowance.
+    torch.testing.assert_close(
+        targets[:, -1, 0, 3], torch.tensor(expected_attempts) * 0.1
+    )
+    position, rotation = pose_error(
+        robot.compute_batch_fk(references, "arm", True), targets
+    )
+    assert (position.norm(dim=-1) <= 0.001).all()
+    assert (rotation.norm(dim=-1) <= 0.01).all()
+    torch.testing.assert_close(starts, torch.zeros(2, 7))
 
 
 def test_unreachable_generation_is_bounded_and_does_not_shrink_population(monkeypatch):
@@ -264,7 +385,11 @@ def test_trajectory_at_goal_cannot_skip_requested_start():
         {"distance_bins": ["unknown"]},
         {"motion_components": []},
         {"max_generation_attempts": 0},
+        {"screening_proposal_batch_size": True},
+        {"screening_proposal_batch_size": 129},
+        {"screening_proposal_batch_size": 2, "reachability_solver": "robot_ik"},
         {"singularity_candidates": True},
+        {"near_limit_sampling": "implicit"},
         {"jacobian_position_scale_m": float("nan")},
     ],
 )
@@ -319,14 +444,16 @@ def test_reference_rotation_is_valid_under_strict_angular_threshold():
 
 
 def test_workload_tables_preserve_modality_batch_semantics_and_uncertainty():
-    from embodichain_benchmarks.motion_generation.aggregation import aggregate_results
-    from embodichain_benchmarks.motion_generation.models import (
+    from embodichain.extensions.benchmarks.motion_generation.aggregation import (
+        aggregate_results,
+    )
+    from embodichain.extensions.benchmarks.motion_generation.models import (
         AlgorithmRole,
         PlannerMetadata,
         TrialPhase,
         TrialRecord,
     )
-    from embodichain_benchmarks.motion_generation.metrics.trajectory import (
+    from embodichain.extensions.benchmarks.motion_generation.metrics.trajectory import (
         make_failure_outcomes,
     )
 
@@ -432,15 +559,29 @@ def test_default_screening_is_independent_of_configured_robot_ik(monkeypatch):
     )
 
 
+@pytest.mark.parametrize("proposal_batch_size", [1, 4])
 def test_fk_only_screening_rejects_unreachable_targets_with_a_bounded_budget(
     monkeypatch,
+    proposal_batch_size,
 ):
     def fixed_fk(self, qpos, name, to_matrix, env_ids=None):
         return torch.eye(4).expand(*qpos.shape[:-1], 4, 4).clone()
 
     monkeypatch.setattr(CartesianRobot, "compute_fk", fixed_fk)
-    with pytest.raises(ValueError, match="invalid_case.*after 2 attempts"):
-        generate(suite_for_sampling(max_generation_attempts=2, screening_iterations=2))
+    with pytest.raises(ValueError, match="invalid_case.*after 2 attempts") as raised:
+        generate(
+            suite_for_sampling(
+                max_generation_attempts=2,
+                screening_iterations=2,
+                screening_proposal_batch_size=proposal_batch_size,
+            )
+        )
+    if proposal_batch_size > 1:
+        evidence = raised.value.qualification_diagnostics
+        assert evidence["unqualified_rows"] == [0, 1, 2, 3]
+        assert evidence["max_generation_attempts"] == 2
+        assert evidence["num_waypoints"] == 3
+        assert len(evidence["start_qpos"]) == 4
 
 
 @pytest.mark.parametrize("reach", [0.4, 1.6])
@@ -515,7 +656,7 @@ def test_reference_path_deviation_is_diagnostic_for_cartesian_waypoint_layouts(
 
 
 def test_polyline_deviation_handles_long_degenerate_and_noncontiguous_inputs():
-    from embodichain_benchmarks.motion_generation.metrics.trajectory import (
+    from embodichain.extensions.benchmarks.motion_generation.metrics.trajectory import (
         _reference_path_deviation,
     )
 
@@ -532,7 +673,7 @@ def test_polyline_deviation_handles_long_degenerate_and_noncontiguous_inputs():
 
 
 def test_compact_screening_preserves_arena_frames_and_per_environment_limits():
-    from embodichain_benchmarks.motion_generation.scenarios._free_space_sampling import (
+    from embodichain.extensions.benchmarks.motion_generation.scenarios._free_space_sampling import (
         _RowKinematics,
         _screen_path,
     )
@@ -569,7 +710,7 @@ def test_compact_screening_preserves_arena_frames_and_per_environment_limits():
 
 
 def test_screening_can_select_a_finite_restart_when_another_candidate_is_nonfinite():
-    from embodichain_benchmarks.motion_generation.scenarios._free_space_sampling import (
+    from embodichain.extensions.benchmarks.motion_generation.scenarios._free_space_sampling import (
         _reference_ik,
     )
 

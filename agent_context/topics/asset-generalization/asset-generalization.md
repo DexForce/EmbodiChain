@@ -50,8 +50,20 @@ not establish reachable grasps, settled state or measured task success.
 `integrations/asset_materialization.py` reads integration-owned
 `asset_requirements`, verifies prepared content and emits standalone deployment
 artifacts. It preserves logical entity IDs and derives new Gym/integration
-identities. Explicit `./` or `../` resource paths resolve from the component
+identities. Integration component selections and their bounded overrides use the
+same declaration selector as normal configured loading. Reading role requirements
+does not resolve runtime manifests. Exported registry references retain their
+`{asset, path}` declarations for resolution against the destination cache;
+component-relative service manifests resolve from their owner and are stored
+relative to the exported integration, so the export and referenced tree can move
+together. Service manifests that are absolute after home expansion remain anchored
+to the authored external library when the export moves alone; their authored
+spelling, including `~/...`, is preserved. Explicit `./` or `../`
+resource paths resolve from the component
 that declares them; bare paths retain dataset registry semantics.
+Execution-policy selections use the same configured resolver as normal task
+loading. Materialization writes the resolved policy to `policy.yaml`, retaining
+deployment overrides when the artifact is relocated.
 
 Physical scene and physics-backend ownership are unchanged. Upright normalized
 mesh replacement supports one visual/collision resource and explicit relative

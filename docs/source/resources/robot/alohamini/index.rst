@@ -2,7 +2,7 @@ AlohaMini
 =========
 
 The AlohaMini community project uses the
-``embodichain_robots.alohamini`` namespace. Its manufacturer is currently
+``embodichain.extensions.robots.alohamini`` namespace. Its manufacturer is currently
 unknown in the robot catalog.
 
 .. list-table::

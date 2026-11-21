@@ -1,0 +1,186 @@
+{
+  "source_asset": "WujiHand/right.urdf",
+  "source_urdf_sha256": "a325d7912996bb7afd33274ffe1ebeee7f4e12f46a0684fed15898df0ebd7e53",
+  "image": "wuji_hand_right.png",
+  "image_sha256": "3d72a7642037256d215b95255cbe79eb989db3e88f62ef690d8c26a8c7c0884e",
+  "render_cfg": {
+    "renderer": "rt",
+    "spp": 1,
+    "denoising": {
+      "window": "dlss",
+      "offscreen": "dlss"
+    },
+    "dlss": {
+      "dlss_quality": 2,
+      "upsample_ratio": null,
+      "render_width": 0,
+      "render_height": 0,
+      "target_width": 0,
+      "target_height": 0,
+      "tiled_enabled": true,
+      "exposure_compensation": 1.0
+    },
+    "nrd": {
+      "max_indirect_bounces": 1,
+      "denoising_range": 500000.0,
+      "disocclusion_threshold": 0.01,
+      "disocclusion_threshold_alternate": 0.05,
+      "disocclusion_threshold_mix_enabled": true,
+      "history_confidence_enabled": true,
+      "history_confidence_probe_stride": 5,
+      "history_confidence_sigma_scale": 2.0,
+      "history_confidence_sensitivity": 1.0,
+      "max_accumulated_frame_num": 30,
+      "max_fast_accumulated_frame_num": 6,
+      "history_fix_frame_num": 3,
+      "diffuse_prepass_blur_radius": 30.0,
+      "specular_prepass_blur_radius": 50.0,
+      "anti_firefly_enabled": false,
+      "sh_mode_enabled": false,
+      "validation_enabled": false,
+      "max_stabilized_frame_num": 63,
+      "min_blur_radius": 1.0,
+      "max_blur_radius": 30.0,
+      "antilag_luminance_sigma_scale": 2.0,
+      "antilag_luminance_sensitivity": 3.0,
+      "taa_min_current_weight": 0.0625,
+      "taa_sigma_scale": 2.0,
+      "taa_depth_rejection_enabled": true,
+      "taa_tone_mapping_enabled": false
+    },
+    "tone_mapping_enabled": false,
+    "tone_mapping_exposure": 1.0,
+    "min_bounces": 4,
+    "max_bounces": 8
+  },
+  "camera": {
+    "eye": [
+      0.5416677426713719,
+      -0.22431009118457712,
+      0.27717913236479336
+    ],
+    "target": [
+      -0.0035520179419901363,
+      0.03286904118021627,
+      0.12287165294591734
+    ],
+    "up": [
+      0,
+      0,
+      1
+    ],
+    "intrinsics": [
+      2100,
+      2100,
+      800,
+      540
+    ],
+    "near": 0.005,
+    "far": 60,
+    "width": 1600,
+    "height": 1080
+  },
+  "bounds": {
+    "min": [
+      -0.02959858969220036,
+      -0.06147009560276549,
+      0.02
+    ],
+    "max": [
+      0.02249455380822009,
+      0.12720817796319803,
+      0.2257433058918347
+    ]
+  },
+  "physics_stepped": false,
+  "joint_positions": {
+    "right_finger1_joint1": 0.05,
+    "right_finger1_joint2": 0.0,
+    "right_finger1_joint3": 0.0,
+    "right_finger1_joint4": 0.0,
+    "right_finger2_joint1": 0.0,
+    "right_finger2_joint2": 0.0,
+    "right_finger2_joint3": 0.0,
+    "right_finger2_joint4": 0.0,
+    "right_finger3_joint1": 0.0,
+    "right_finger3_joint2": 0.0,
+    "right_finger3_joint3": 0.0,
+    "right_finger3_joint4": 0.0,
+    "right_finger4_joint1": 0.0,
+    "right_finger4_joint2": 0.0,
+    "right_finger4_joint3": 0.0,
+    "right_finger4_joint4": 0.0,
+    "right_finger5_joint1": 0.0,
+    "right_finger5_joint2": 0.0,
+    "right_finger5_joint3": 0.0,
+    "right_finger5_joint4": 0.0
+  },
+  "root_position": [
+    0.0,
+    0.0,
+    0.029000008925795556
+  ],
+  "root_rotation_degrees": [
+    0,
+    0,
+    0
+  ],
+  "warmup_frames": 48,
+  "emission_intensity": 40,
+  "emission_color": [
+    0.92,
+    0.95,
+    1.0
+  ],
+  "rect_lights": [
+    {
+      "name": "key",
+      "position": [
+        0.4079345938416793,
+        -0.460914892960187,
+        0.9458448765132561
+      ],
+      "direction": [
+        -0.3940552031195503,
+        0.4728662437434603,
+        -0.7881104062391006
+      ],
+      "intensity": 90.0,
+      "size": 0.30861495883775203
+    },
+    {
+      "name": "fill",
+      "position": [
+        -0.6207819356174942,
+        -0.17287426471161843,
+        0.5343582647295868
+      ],
+      "direction": [
+        0.8017837257372731,
+        0.2672612419124244,
+        -0.5345224838248489
+      ],
+      "intensity": 50.0,
+      "size": 0.30861495883775203
+    },
+    {
+      "name": "rim",
+      "position": [
+        -0.0035520179419901363,
+        0.6500989588557203,
+        0.7401015706214213
+      ],
+      "direction": [
+        0.0,
+        -0.7071067811865476,
+        -0.7071067811865476
+      ],
+      "intensity": 75.0,
+      "size": 0.30861495883775203
+    }
+  ],
+  "material_overrides": [],
+  "display_preprocessing": [],
+  "renderer_runtime": "DexSim 0.5.1rc1 native OfflineRT; RTX 4090; Vulkan",
+  "description": "Published source visual geometry/materials at the preset initial joint pose. No physics steps or mesh/material replacements."
+}

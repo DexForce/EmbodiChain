@@ -1,0 +1,794 @@
+{
+  "dataset_revision": "569f1860815d256ad87f53f31e19a71363c8afb9",
+  "basis": "Hand-authored instruction obligations; not inferred from model plans. These checks supplement manual semantic review, not physical qualification.",
+  "cases": {
+    "task1171": [
+      {
+        "label": "扶正",
+        "quote_fragments": [
+          "扶正"
+        ],
+        "call_alternatives": [
+          "simulation.axis_align"
+        ]
+      },
+      {
+        "label": "罐头入盘",
+        "quote_fragments": [
+          "放入托盘"
+        ],
+        "call_alternatives": [
+          "place"
+        ]
+      },
+      {
+        "label": "瓶子入盘",
+        "quote_fragments": [
+          "塑料瓶"
+        ],
+        "call_alternatives": [
+          "place"
+        ]
+      },
+      {
+        "label": "纸杯杯垫",
+        "quote_fragments": [
+          "纸杯"
+        ],
+        "call_alternatives": [
+          "place",
+          "simulation.place_relative"
+        ]
+      }
+    ],
+    "task1172": [
+      {
+        "label": "开抽屉",
+        "quote_fragments": [
+          "打开抽屉"
+        ],
+        "call_alternatives": [
+          "simulation.articulation_link_slide"
+        ]
+      },
+      {
+        "label": "苹果入盘",
+        "quote_fragments": [
+          "取出里面的苹果放入抽屉左侧的果盘"
+        ],
+        "call_alternatives": [
+          "place"
+        ]
+      },
+      {
+        "label": "橙子入盘",
+        "quote_fragments": [
+          "橙子"
+        ],
+        "call_alternatives": [
+          "place"
+        ]
+      },
+      {
+        "label": "关抽屉",
+        "quote_fragments": [
+          "关闭抽屉"
+        ],
+        "call_alternatives": [
+          "simulation.articulation_link_slide"
+        ]
+      }
+    ],
+    "task1173": [
+      {
+        "label": "杯子上垫",
+        "quote_fragments": [
+          "蓝色塑料杯"
+        ],
+        "call_alternatives": [
+          "place",
+          "simulation.place_relative"
+        ]
+      },
+      {
+        "label": "倾倒",
+        "quote_fragments": [
+          "倾倒"
+        ],
+        "call_alternatives": [
+          "simulation.pour"
+        ]
+      },
+      {
+        "label": "原位恢复",
+        "quote_fragments": [
+          "原位"
+        ],
+        "call_alternatives": [
+          "place",
+          "simulation.place_relative"
+        ]
+      },
+      {
+        "label": "按铃",
+        "quote_fragments": [
+          "服务铃"
+        ],
+        "call_alternatives": [
+          "simulation.press"
+        ]
+      }
+    ],
+    "task1174": [
+      {
+        "label": "杯子接杯垫",
+        "quote_fragments": [
+          "接杯垫"
+        ],
+        "call_alternatives": [
+          "place",
+          "simulation.place_relative"
+        ]
+      },
+      {
+        "label": "蓝色按钮",
+        "quote_fragments": [
+          "蓝色按钮"
+        ],
+        "call_alternatives": [
+          "simulation.press"
+        ]
+      },
+      {
+        "label": "杯子入服务盘",
+        "quote_fragments": [
+          "服务托盘"
+        ],
+        "call_alternatives": [
+          "place"
+        ]
+      }
+    ],
+    "task1175": [
+      {
+        "label": "开上层抽屉",
+        "quote_fragments": [
+          "打开上层抽屉"
+        ],
+        "call_alternatives": [
+          "simulation.articulation_link_slide"
+        ]
+      },
+      {
+        "label": "罐头放置",
+        "quote_fragments": [
+          "罐头"
+        ],
+        "call_alternatives": [
+          "place"
+        ]
+      },
+      {
+        "label": "瓶子放置",
+        "quote_fragments": [
+          "塑料瓶"
+        ],
+        "call_alternatives": [
+          "place"
+        ]
+      },
+      {
+        "label": "关同一抽屉",
+        "quote_fragments": [
+          "关闭同一抽屉"
+        ],
+        "call_alternatives": [
+          "simulation.articulation_link_slide"
+        ]
+      }
+    ],
+    "task1176": [
+      {
+        "label": "打开",
+        "quote_fragments": [
+          "打开收纳抽屉"
+        ],
+        "call_alternatives": [
+          "simulation.articulation_link_slide"
+        ]
+      },
+      {
+        "label": "木块魔方",
+        "quote_fragments": [
+          "木块",
+          "魔方"
+        ],
+        "call_alternatives": [
+          "place"
+        ]
+      },
+      {
+        "label": "关闭",
+        "quote_fragments": [
+          "关闭抽屉"
+        ],
+        "call_alternatives": [
+          "simulation.articulation_link_slide"
+        ]
+      },
+      {
+        "label": "完成按钮",
+        "quote_fragments": [
+          "确认按钮"
+        ],
+        "call_alternatives": [
+          "simulation.press"
+        ]
+      }
+    ],
+    "task1177": [
+      {
+        "label": "粗转",
+        "quote_fragments": [
+          "粗转"
+        ],
+        "call_alternatives": [
+          "simulation.twist"
+        ]
+      },
+      {
+        "label": "拉出",
+        "quote_fragments": [
+          "拉出"
+        ],
+        "call_alternatives": [
+          "simulation.articulation_link_slide"
+        ]
+      },
+      {
+        "label": "餐碗上垫",
+        "quote_fragments": [
+          "耐热垫"
+        ],
+        "call_alternatives": [
+          "place",
+          "simulation.place_relative"
+        ]
+      },
+      {
+        "label": "推回",
+        "quote_fragments": [
+          "推回"
+        ],
+        "call_alternatives": [
+          "simulation.articulation_link_slide"
+        ]
+      }
+    ],
+    "task1178": [
+      {
+        "label": "杯子杯垫",
+        "quote_fragments": [
+          "蓝色塑料杯"
+        ],
+        "call_alternatives": [
+          "place",
+          "simulation.place_relative"
+        ]
+      },
+      {
+        "label": "瓶子瓶垫",
+        "quote_fragments": [
+          "塑料瓶"
+        ],
+        "call_alternatives": [
+          "place",
+          "simulation.place_relative"
+        ]
+      },
+      {
+        "label": "双臂搬盘放下",
+        "quote_fragments": [
+          "双臂"
+        ],
+        "call_alternatives": [
+          "simulation.coordinated_transport"
+        ]
+      }
+    ],
+    "task1179": [
+      {
+        "label": "碗纸杯入盘",
+        "quote_fragments": [
+          "碗和纸杯"
+        ],
+        "call_alternatives": [
+          "place"
+        ]
+      },
+      {
+        "label": "朝碗倾倒",
+        "quote_fragments": [
+          "倾倒"
+        ],
+        "call_alternatives": [
+          "simulation.pour"
+        ]
+      },
+      {
+        "label": "恢复原位",
+        "quote_fragments": [
+          "原位"
+        ],
+        "call_alternatives": [
+          "place",
+          "simulation.place_relative"
+        ]
+      }
+    ],
+    "task1180": [
+      {
+        "label": "清空空间",
+        "quote_fragments": [
+          "杯垫"
+        ],
+        "call_alternatives": [
+          "place",
+          "simulation.place_relative"
+        ]
+      },
+      {
+        "label": "打开抽屉",
+        "quote_fragments": [
+          "打开餐具抽屉"
+        ],
+        "call_alternatives": [
+          "simulation.articulation_link_slide"
+        ]
+      },
+      {
+        "label": "木勺入抽屉",
+        "quote_fragments": [
+          "木勺"
+        ],
+        "call_alternatives": [
+          "place"
+        ]
+      },
+      {
+        "label": "关闭",
+        "quote_fragments": [
+          "关闭抽屉"
+        ],
+        "call_alternatives": [
+          "simulation.articulation_link_slide"
+        ]
+      }
+    ],
+    "task1181": [
+      {
+        "label": "纸杯服务垫",
+        "quote_fragments": [
+          "棕色空纸杯"
+        ],
+        "call_alternatives": [
+          "place",
+          "simulation.place_relative"
+        ]
+      },
+      {
+        "label": "瓶子交接",
+        "quote_fragments": [
+          "蓝色瓶子"
+        ],
+        "call_alternatives": [
+          "hand_over"
+        ]
+      },
+      {
+        "label": "瓶子释放",
+        "quote_fragments": [
+          "瓶垫"
+        ],
+        "call_alternatives": [
+          "place",
+          "simulation.place_relative"
+        ]
+      },
+      {
+        "label": "木勺交接",
+        "quote_fragments": [
+          "木勺"
+        ],
+        "call_alternatives": [
+          "hand_over"
+        ]
+      },
+      {
+        "label": "木勺释放",
+        "quote_fragments": [
+          "餐具垫"
+        ],
+        "call_alternatives": [
+          "place",
+          "simulation.place_relative"
+        ]
+      }
+    ],
+    "task1182": [
+      {
+        "label": "量杯倾倒",
+        "quote_fragments": [
+          "倾倒"
+        ],
+        "call_alternatives": [
+          "simulation.pour"
+        ]
+      },
+      {
+        "label": "量杯还原释放",
+        "quote_fragments": [
+          "原位"
+        ],
+        "call_alternatives": [
+          "place",
+          "simulation.place_relative"
+        ]
+      },
+      {
+        "label": "搬碗入盘",
+        "quote_fragments": [
+          "白色碗放入"
+        ],
+        "call_alternatives": [
+          "place"
+        ]
+      },
+      {
+        "label": "量杯再上垫",
+        "quote_fragments": [
+          "再次拿起量杯，将量杯放到托盘旁的杯垫上后松开"
+        ],
+        "call_alternatives": [
+          "place",
+          "simulation.place_relative"
+        ]
+      }
+    ],
+    "task1183": [
+      {
+        "label": "碗勺备料",
+        "quote_fragments": [
+          "白色碗和木勺"
+        ],
+        "call_alternatives": [
+          "place",
+          "simulation.place_relative"
+        ]
+      },
+      {
+        "label": "粗转旋钮",
+        "quote_fragments": [
+          "粗转"
+        ],
+        "call_alternatives": [
+          "simulation.twist"
+        ]
+      },
+      {
+        "label": "启动",
+        "quote_fragments": [
+          "启动按钮"
+        ],
+        "call_alternatives": [
+          "simulation.press"
+        ]
+      }
+    ],
+    "task1184": [
+      {
+        "label": "停止",
+        "quote_fragments": [
+          "停止按钮"
+        ],
+        "call_alternatives": [
+          "simulation.press"
+        ]
+      },
+      {
+        "label": "粗转",
+        "quote_fragments": [
+          "粗转"
+        ],
+        "call_alternatives": [
+          "simulation.twist"
+        ]
+      },
+      {
+        "label": "瓶杯归盘",
+        "quote_fragments": [
+          "蓝色瓶子和杯子"
+        ],
+        "call_alternatives": [
+          "place"
+        ]
+      }
+    ],
+    "task1185": [
+      {
+        "label": "拉出",
+        "quote_fragments": [
+          "拉出烤箱托盘"
+        ],
+        "call_alternatives": [
+          "simulation.articulation_link_slide"
+        ]
+      },
+      {
+        "label": "餐碗入盘",
+        "quote_fragments": [
+          "餐碗"
+        ],
+        "call_alternatives": [
+          "place"
+        ]
+      },
+      {
+        "label": "杯子碗右侧",
+        "quote_fragments": [
+          "右侧"
+        ],
+        "call_alternatives": [
+          "simulation.place_relative"
+        ]
+      },
+      {
+        "label": "推回空盘",
+        "quote_fragments": [
+          "推回"
+        ],
+        "call_alternatives": [
+          "simulation.articulation_link_slide"
+        ]
+      }
+    ],
+    "task1186": [
+      {
+        "label": "苹果交接",
+        "quote_fragments": [
+          "苹果"
+        ],
+        "call_alternatives": [
+          "hand_over"
+        ]
+      },
+      {
+        "label": "橙子交接",
+        "quote_fragments": [
+          "橙子"
+        ],
+        "call_alternatives": [
+          "hand_over"
+        ]
+      },
+      {
+        "label": "装水果盘双臂搬运",
+        "quote_fragments": [
+          "双臂"
+        ],
+        "call_alternatives": [
+          "simulation.coordinated_transport"
+        ]
+      }
+    ],
+    "task1187": [
+      {
+        "label": "杯子上垫",
+        "quote_fragments": [
+          "圆形杯垫"
+        ],
+        "call_alternatives": [
+          "place",
+          "simulation.place_relative"
+        ]
+      },
+      {
+        "label": "水壶倾倒",
+        "quote_fragments": [
+          "倾倒"
+        ],
+        "call_alternatives": [
+          "simulation.pour"
+        ]
+      },
+      {
+        "label": "水壶恢复",
+        "quote_fragments": [
+          "原位"
+        ],
+        "call_alternatives": [
+          "place",
+          "simulation.place_relative"
+        ]
+      },
+      {
+        "label": "杯子入盘",
+        "quote_fragments": [
+          "移入服务托盘"
+        ],
+        "call_alternatives": [
+          "place"
+        ]
+      }
+    ],
+    "task1188": [
+      {
+        "label": "杯子备料垫",
+        "quote_fragments": [
+          "备料垫"
+        ],
+        "call_alternatives": [
+          "place",
+          "simulation.place_relative"
+        ]
+      },
+      {
+        "label": "瓶子倾倒",
+        "quote_fragments": [
+          "倾倒"
+        ],
+        "call_alternatives": [
+          "simulation.pour"
+        ]
+      },
+      {
+        "label": "瓶子还原",
+        "quote_fragments": [
+          "原位"
+        ],
+        "call_alternatives": [
+          "place",
+          "simulation.place_relative"
+        ]
+      },
+      {
+        "label": "瓶子收盘",
+        "quote_fragments": [
+          "木质服务托盘"
+        ],
+        "call_alternatives": [
+          "place",
+          "simulation.place_relative"
+        ]
+      },
+      {
+        "label": "杯子交接",
+        "quote_fragments": [
+          "递给右臂"
+        ],
+        "call_alternatives": [
+          "hand_over"
+        ]
+      },
+      {
+        "label": "杯子右侧垫",
+        "quote_fragments": [
+          "右侧服务垫"
+        ],
+        "call_alternatives": [
+          "place",
+          "simulation.place_relative"
+        ]
+      }
+    ],
+    "task1189": [
+      {
+        "label": "扶正",
+        "quote_fragments": [
+          "扶正"
+        ],
+        "call_alternatives": [
+          "simulation.axis_align"
+        ]
+      },
+      {
+        "label": "独立接杯垫",
+        "quote_fragments": [
+          "独立的接杯垫"
+        ],
+        "call_alternatives": [
+          "place",
+          "simulation.place_relative"
+        ]
+      },
+      {
+        "label": "启动",
+        "quote_fragments": [
+          "启动按钮"
+        ],
+        "call_alternatives": [
+          "simulation.press"
+        ]
+      },
+      {
+        "label": "同杯归盘",
+        "quote_fragments": [
+          "服务托盘"
+        ],
+        "call_alternatives": [
+          "place"
+        ]
+      }
+    ],
+    "task1190": [
+      {
+        "label": "木块归盘",
+        "quote_fragments": [
+          "木块"
+        ],
+        "call_alternatives": [
+          "place"
+        ]
+      },
+      {
+        "label": "开右抽屉",
+        "quote_fragments": [
+          "打开右侧抽屉"
+        ],
+        "call_alternatives": [
+          "simulation.articulation_link_slide"
+        ]
+      },
+      {
+        "label": "瓶子交接",
+        "quote_fragments": [
+          "递给右臂"
+        ],
+        "call_alternatives": [
+          "hand_over"
+        ]
+      },
+      {
+        "label": "瓶子进抽屉",
+        "quote_fragments": [
+          "放入该抽屉"
+        ],
+        "call_alternatives": [
+          "place"
+        ]
+      },
+      {
+        "label": "关闭同抽屉",
+        "quote_fragments": [
+          "关闭同一抽屉"
+        ],
+        "call_alternatives": [
+          "simulation.articulation_link_slide"
+        ]
+      }
+    ]
+  },
+  "image_sha256": {
+    "task1171.png": "58d1bb5403c3306a26cd771ee2576ef6c168a7931fc44d4d52b2699759c49946",
+    "task1172.png": "ae70608e355a9080ebf435a5a416ec312c99366e325f2105cf21df688d50930d",
+    "task1173.png": "edcc9f889ccf085022ee2d8dd5e4f98b5246586245e97258f2d4a7362763f661",
+    "task1174.png": "f996a3e1e66febad6d6fc380968e3e9aa65da69517d97003adf3910eb8574663",
+    "task1175.png": "bbca400c42b4cf781cc3760962cd7d50560a20438c2207ad03765a9f8cafc769",
+    "task1176.png": "762c5dd172b58bce7d0c9f27e0e072653023abba1d0ecbab50181d7c983502bf",
+    "task1177.png": "bc31cff944e80bca5e6ecebf92cd05ff069dc1814b23d46f358f82a14c3c8074",
+    "task1178.png": "2c00c9669f57413e9a8e1df464e831000d14fb096d2ddb1c86b29de5e8653338",
+    "task1179.png": "9eaa888434a96b54e039088cbaac3c59658f9a7172bc6d5761e12946786d5cae",
+    "task1180.png": "dba2e98946c0df7f3382c1fb6ed7596cce30609318d8f0d44c79decc853565a2",
+    "task1181.png": "9206269ddc0ab03c3423750286a943f7a0f0089996d3f48cd7e4d22dd40be2e5",
+    "task1182.png": "9af07f847ed7c477da86cc2c1bc3dbbce9d6070891e81a84c18d91f03ee06214",
+    "task1183.png": "5ad61314a5760429ef9ec93f313b3ac89c3562af8ec78e7561d8c953e5e2a1b4",
+    "task1184.png": "5573c6017570d7ab62d7ef900f9b9a32da998091d2f7b4cd475dc6430619f3b2",
+    "task1185.png": "eb1631bc824706f8bffc0385417c0196b0b5d39700ddf0f320fcf9063a651d5f",
+    "task1186.png": "25416a5fdc9cd7de1e3d2bd824c66c7905752e9a99085783ee7f9cf55c6da9ff",
+    "task1187.png": "f5d33e66d04a464c7f8f3f27a47a646166a8915a693264e2662eb634410ec0b0",
+    "task1188.png": "5bfc25a186cbc16c8e03d3e337f23ab496d493b0e17aab3688a0c7893933f182",
+    "task1189.png": "faed342d2cb690b80f52b5b88bd62b113559e7df1d264953686c042a0077037f",
+    "task1190.png": "18c04017cd68cbbd75e5eeb1f9fb517b539410708005058e1c1c09849df7319b"
+  },
+  "descriptions_sha256": "132c6bafac0944c333b6612b54562ef5aeeed7a417ed0db5e9988e199cd2c590"
+}

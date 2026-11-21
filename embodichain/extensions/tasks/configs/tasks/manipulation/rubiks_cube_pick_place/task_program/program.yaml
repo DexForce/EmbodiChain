@@ -1,0 +1,39 @@
+program_id: rubiks_cube_pick_place
+instruction: Move the Rubik's cube between the two target positions three times.
+targets:
+  drop_pose:
+    kind: cyclic_pose
+    values:
+    - position:
+      - -0.4
+      - 0.48
+      - 0.1
+      quaternion_xyzw:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    - position:
+      - -0.42
+      - -0.08
+      - 0.1
+      quaternion_xyzw:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+program:
+  repeat:
+    count: 3
+    body:
+    - segment: pick_rubiks_cube
+      instruction: Grasp and lift the Rubik's cube.
+      steps:
+        pick:
+          object: rubiks_cube
+    - segment: place_rubiks_cube
+      instruction: Place the Rubik's cube at the next target position and release it.
+      steps:
+        place:
+          object: rubiks_cube
+          at: drop_pose

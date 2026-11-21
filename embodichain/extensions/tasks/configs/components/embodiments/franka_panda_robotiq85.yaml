@@ -1,0 +1,325 @@
+# Explicit calibrated Panda + Robotiq assembly.
+embodiment_id: franka_panda_robotiq85
+simulation:
+  class_type: Franka
+  arm_model: panda
+  uid: FrankaPandaRobotiq85
+  urdf_cfg:
+    fname: panda_robotiq85_c1b75df16cfc
+  init_qpos:
+  - 0.0
+  - -0.569
+  - 0.0
+  - -2.81
+  - 0.0
+  - 3.037
+  - 0.741
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  qpos_limits:
+    finger_joint:
+    - 0.0
+    - 0.8
+    left_inner_knuckle_joint:
+    - 0.0
+    - 0.8
+    left_inner_finger_joint:
+    - -0.8
+    - 0.0
+    right_outer_knuckle_joint:
+    - 0.0
+    - 0.8
+    right_inner_knuckle_joint:
+    - 0.0
+    - 0.8
+    right_inner_finger_joint:
+    - -0.8
+    - 0.0
+  root_props:
+    fixed_base: true
+    min_position_iters: 64
+    min_velocity_iters: 16
+  joint_drive_props:
+    stiffness:
+      .*finger_joint|.*knuckle_joint: 200.0
+    damping:
+      .*finger_joint|.*knuckle_joint: 5.0
+    max_effort:
+      .*finger_joint|.*knuckle_joint: 0.25
+    max_velocity:
+      .*finger_joint|.*knuckle_joint: 2.0
+  link_attrs:
+    left_outer_knuckle:
+      link_names_expr:
+      - left_outer_knuckle
+      attrs:
+        mass_props:
+          mass: 0.00853198276973456
+          com_position:
+          - -0.000200000000003065
+          - 0.0199435877845359
+          - 0.0292245259211331
+          inertia:
+          - - 2.89328108496468e-06
+            - -1.57935047237396e-19
+            - -1.93980378593255e-19
+          - - -1.57935047237396e-19
+            - 1.86719750325683e-06
+            - -1.21858577871575e-06
+          - - -1.93980378593255e-19
+            - -1.21858577871575e-06
+            - 1.2190523890725e-06
+    right_outer_knuckle:
+      link_names_expr:
+      - right_outer_knuckle
+      attrs:
+        mass_props:
+          mass: 0.00853198276973456
+          com_position:
+          - -0.000200000000003065
+          - 0.0199435877845359
+          - 0.0292245259211331
+          inertia:
+          - - 2.89328108496468e-06
+            - -1.57935047237396e-19
+            - -1.93980378593255e-19
+          - - -1.57935047237396e-19
+            - 1.86719750325683e-06
+            - -1.21858577871575e-06
+          - - -1.93980378593255e-19
+            - -1.21858577871575e-06
+            - 1.2190523890725e-06
+    left_outer_finger:
+      link_names_expr:
+      - left_outer_finger
+      attrs:
+        mass_props:
+          mass: 0.022614240507152
+          com_position:
+          - 0.00030115855001899
+          - 0.0373907951953854
+          - -0.0208027427000385
+          inertia:
+          - - 1.52518312458173e-05
+            - 9.76583423954399e-10
+            - -5.43838577022588e-10
+          - - 9.76583423954399e-10
+            - 6.17694243867776e-06
+            - 6.78636130740228e-06
+          - - -5.43838577022588e-10
+            - 6.78636130740228e-06
+            - 1.16494917907219e-05
+    right_outer_finger:
+      link_names_expr:
+      - right_outer_finger
+      attrs:
+        mass_props:
+          mass: 0.022614240507152
+          com_position:
+          - 0.00030115855001899
+          - 0.0373907951953854
+          - -0.0208027427000385
+          inertia:
+          - - 1.52518312458173e-05
+            - 9.76583423954399e-10
+            - -5.43838577022588e-10
+          - - 9.76583423954399e-10
+            - 6.17694243867776e-06
+            - 6.78636130740228e-06
+          - - -5.43838577022588e-10
+            - 6.78636130740228e-06
+            - 1.16494917907219e-05
+    left_inner_knuckle:
+      link_names_expr:
+      - left_inner_knuckle
+      attrs:
+        mass_props:
+          mass: 0.0271177346495152
+          com_position:
+          - 0.000123011831763771
+          - 0.0507850843201817
+          - 0.00103968640075166
+          inertia:
+          - - 2.61910379223783e-05
+            - -2.43616858946493e-07
+            - -6.37789906117122e-09
+          - - -2.43616858946493e-07
+            - 2.8270243746167e-06
+            - -5.37200748039765e-07
+          - - -6.37789906117122e-09
+            - -5.37200748039765e-07
+            - 2.83695868220296e-05
+    right_inner_knuckle:
+      link_names_expr:
+      - right_inner_knuckle
+      attrs:
+        mass_props:
+          mass: 0.0271177346495152
+          com_position:
+          - 0.000123011831763771
+          - 0.0507850843201817
+          - 0.00103968640075166
+          inertia:
+          - - 2.61910379223783e-05
+            - -2.43616858946493e-07
+            - -6.37789906117122e-09
+          - - -2.43616858946493e-07
+            - 2.8270243746167e-06
+            - -5.37200748039765e-07
+          - - -6.37789906117122e-09
+            - -5.37200748039765e-07
+            - 2.83695868220296e-05
+    left_inner_finger:
+      link_names_expr:
+      - left_inner_finger
+      attrs:
+        mass_props:
+          mass: 0.0104003125914103
+          com_position:
+          - 0.000299999999999317
+          - 0.0160078233491243
+          - -0.0136945669206257
+          inertia:
+          - - 2.71909453810971e-06
+            - 1.35402465472579e-21
+            - -7.1817349065268e-22
+          - - 1.35402465472579e-21
+            - 7.69100314106116e-07
+            - 6.74715432769696e-07
+          - - -7.1817349065268e-22
+            - 6.74715432769696e-07
+            - 2.30315190420171e-06
+    right_inner_finger:
+      link_names_expr:
+      - right_inner_finger
+      attrs:
+        mass_props:
+          mass: 0.0104003125914103
+          com_position:
+          - 0.000299999999999317
+          - 0.0160078233491243
+          - -0.0136945669206257
+          inertia:
+          - - 2.71909453810971e-06
+            - 1.35402465472579e-21
+            - -7.1817349065268e-22
+          - - 1.35402465472579e-21
+            - 7.69100314106116e-07
+            - 6.74715432769696e-07
+          - - -7.1817349065268e-22
+            - 6.74715432769696e-07
+            - 2.30315190420171e-06
+    left_inner_finger_pad:
+      link_names_expr:
+      - left_inner_finger_pad
+      attrs:
+        mass_props:
+          mass: 0.005
+          com_position:
+          - 0.0
+          - 0.0
+          - 0.0
+          inertia:
+          - - 6.027385416666666e-07
+            - 0.0
+            - 0.0
+          - - 0.0
+            - 7.876041666666667e-07
+            - 0.0
+          - - 0.0
+            - 0.0
+            - 2.1846770833333334e-07
+    right_inner_finger_pad:
+      link_names_expr:
+      - right_inner_finger_pad
+      attrs:
+        mass_props:
+          mass: 0.005
+          com_position:
+          - 0.0
+          - 0.0
+          - 0.0
+          inertia:
+          - - 6.027385416666666e-07
+            - 0.0
+            - 0.0
+          - - 0.0
+            - 7.876041666666667e-07
+            - 0.0
+          - - 0.0
+            - 0.0
+            - 2.1846770833333334e-07
+    base_link:
+    arm_base_link:
+      link_names_expr:
+      - arm_base_link
+      attrs:
+        mass_props:
+          mass: 0.629769
+          com_position:
+          - -0.041018
+          - -0.00014
+          - 0.049974
+          inertia:
+          - - 0.00315
+            - 8.2904e-07
+            - 0.00015
+          - - 8.2904e-07
+            - 0.00388
+            - 8.2299e-06
+          - - 0.00015
+            - 8.2299e-06
+            - 0.004285
+sensor: []
+skill_profile:
+  contract_id: single_arm_parallel_gripper
+  profile_id: franka_panda_robotiq85
+  resources:
+  - resource_id: primary_manipulator
+    endpoints:
+    - endpoint_id: motion
+      control_part: arm
+      capabilities:
+      - kinematics.batch_inverse
+      - motion.cartesian_pose
+      - motion.joint_position
+      - kinematics.forward
+    - endpoint_id: grasp
+      control_part: eef
+      capabilities:
+      - interaction.grasp
+      command_preset: parallel_jaw_commands
+      gripper: eef
+  command_presets: []
+  runtime_services:
+    grasp_pose_generators:
+      eef:
+        kind: antipodal_parallel_jaw
+grippers:
+  eef:
+    class_type: RobotiqArg2F85
+    mode: mounted
+    motion_part: arm
+    control_part: eef
+    component_type: hand
+    transform:
+    - - 1.0
+      - -0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.018
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0

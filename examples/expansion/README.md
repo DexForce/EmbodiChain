@@ -8,16 +8,20 @@ provide runnable entry points, local configurations and inspectable outputs.
 | --- | --- | --- |
 | [asset_catalog](asset_catalog/README.md) | Asset-package annotations, explicit/directory Providers and verified snapshots | Provider usage and catalog format |
 | [asset_generalization](asset_generalization/README.md) | Semantic asset matching, deployment materialization, batch collection and measured acceptance | `run.py` for Cube primitives; `pour_water.py` for bottle/cup replacement |
-| [trajectory](trajectory/README.md) | Pure-trajectory deformation/stitching, configured schedules and physical variants | `pure_trajectory_augmentation_showcase.py`, `repeated_pick_place_expansion_combined.py`, `repeated_pick_place_expansion_showcase.py`, `task_environment_augmentation_showcase.py` |
+| [trajectory](trajectory/README.md) | Interactive pure-trajectory laboratory, deformation/stitching, configured schedules and physical variants | `trajectory_augmentation_visualizer.py`, `pure_trajectory_augmentation_showcase.py`, `repeated_pick_place_expansion_combined.py`, `repeated_pick_place_expansion_showcase.py`, `task_environment_augmentation_showcase.py` |
 
 Asset-generalization Task Programs and physical environments live in
 `asset_generalization/configs/`. These are example-local configurations, not
-additional tasks installed into `embodichain_tasks`. They reuse the SDK's robot
+additional tasks installed into `embodichain.extensions.tasks`. They reuse the SDK's robot
 embodiments, policies and asset registry.
 
 Run from the repository root with compatible SDK dependencies:
 
 ```bash
+# Build the self-contained interactive trajectory augmentation laboratory.
+python examples/expansion/trajectory/trajectory_augmentation_visualizer.py \
+  --output /tmp/embodichain-trajectory-lab/index.html
+
 # Render pure-trajectory deformation and multi-demo stitching on CPU.
 python examples/expansion/trajectory/pure_trajectory_augmentation_showcase.py \
   --output-dir /tmp/embodichain-pure-trajectory
@@ -61,3 +65,40 @@ failures stop collection because the backend does not provide rollback.
 
 The primitive Cube baseline remains a separate, direct-configuration example.
 Its primitive shapes do not require asset catalogs.
+
+- [DemoSkill](demo_skill/README.md): task-specific real-demonstration assets, mixed/whole Task Program calls and qualified offline expansion.
+
+## Scene construction, layout solving and augmentation
+
+The [scene-layout example](scene_layout.py) incrementally constructs a table,
+two containers, a red keep-out marker and six colored parts from `SceneFragment`
+and namespaced `compose` calls. Its authored input deliberately has overlapping
+parts, keep-out intrusions and an out-of-bounds part.
+
+```bash
+embodichain run-example expansion/scene_layout --output /tmp/scene-layout
+```
+
+Use an empty output directory and a compatible Default/Hybrid environment with
+Pillow and imageio/ffmpeg. A headless machine uses SDL's dummy video driver.
+There are no model-service calls, robot motions or task-environment requirements.
+
+The example calls the shared `solve_layout` to repair the authored layout,
+then calls `generate(recipe, seed=..., ordinal=...)` with one seed and three logical
+ordinals to produce distinct variants under the same assets and constraints.
+`apply_changes` and `apply_scene_variants` publish the actual poses without
+advancing physics. Finally, the entire World settles under gravity and every
+layout is checked again from measured poses/AABBs using `check_layout`.
+
+Constraints use fixed-orientation XY/AABB proxies, a 40 mm clearance, a 0.1 mm
+geometry tolerance, complete footprint bounds, the keep-out rectangle and explicit
+relations (A left of B, B left of C, D behind E). Fixed table/container/marker poses are checked
+separately. Convergence and support-height checks qualify the native settled state.
+These checks do not establish robot reachability, exact mesh collision freedom,
+or task success.
+
+Open `index.html` for the native before/after comparison, the four-layout gallery
+and `preview.mp4`. The video includes actual incremental construction, instantaneous
+layout applications and real gravity settling; inspection holds do not advance
+physics. `report.json` retains measured constraint counts and coordinates;
+`plans.json` retains the solver inputs/results and candidate identities.

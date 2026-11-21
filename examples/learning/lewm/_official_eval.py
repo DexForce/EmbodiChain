@@ -65,15 +65,15 @@ def _native_runtime_identity(reference: Path) -> dict[str, Any]:
         reference / "robot/robot.urdf",
     ]
     for module_name in (
-        "embodichain_tasks.manipulation.ogbench_cube",
+        "embodichain.extensions.tasks.manipulation.ogbench_cube",
         "embodichain.lab.sim.spawn.source",
         "embodichain.lab.sim.spawn.descriptors",
         "embodichain.lab.sim.physics.default",
         "embodichain.lab.sim.cfg.physics",
         "embodichain.lab.sim.objects.articulation",
         "embodichain.lab.sim.objects.backends.scene",
-        "embodichain_models.dynamics.lewm.model",
-        "embodichain_models.dynamics.lewm.planner",
+        "embodichain.extensions.models.dynamics.lewm.model",
+        "embodichain.extensions.models.dynamics.lewm.planner",
     ):
         module_spec = importlib.util.find_spec(module_name)
         if module_spec is not None and module_spec.origin is not None:
@@ -370,7 +370,7 @@ def _native_worker(
     import traceback
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import DefaultPhysicsCfg, RenderCfg
-    from embodichain_tasks.manipulation.ogbench_cube import (
+    from embodichain.extensions.tasks.manipulation.ogbench_cube import (
         OGBenchCubeEnv,
         OGBenchCubeCfg,
     )
@@ -393,7 +393,7 @@ def _native_worker(
                     gpu_id=torch.device(device).index,
                     headless=True,
                     physics_dt=0.002,
-                    enable_default_plane=False,
+                    enable_ground_plane=False,
                     render_cfg=RenderCfg(renderer="auto" if images else "no-render"),
                     enable_entity_gizmo=False,
                     robot_ik_gizmo=None,
@@ -487,7 +487,7 @@ def evaluate_dexsim(
     """
     import multiprocessing
     from PIL import Image
-    from embodichain_models.dynamics.lewm import (
+    from embodichain.extensions.models.dynamics.lewm import (
         LeWM,
         LeWMCfg,
         LeWMCEMCfg,

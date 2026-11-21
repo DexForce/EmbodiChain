@@ -1,0 +1,48 @@
+{
+  "package": "three",
+  "version": "0.172.0",
+  "files": [
+    {
+      "path": "three.module.min.js",
+      "url": "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.module.min.js",
+      "sha256": "7700815c10cddde77e717bc9186f3f9b0fa64034c76622efc5f895459d2c305e",
+      "size": 339437,
+      "license": "MIT"
+    },
+    {
+      "path": "OrbitControls.js",
+      "url": "https://cdn.jsdelivr.net/npm/three@0.172.0/examples/jsm/controls/OrbitControls.js",
+      "sha256": "64088a1d7b040c980f61de9a5de74daa21b282eaabb853ed1d52dafa62ec0418",
+      "size": 32471,
+      "license": "MIT"
+    },
+    {
+      "path": "GLTFLoader.js",
+      "url": "https://cdn.jsdelivr.net/npm/three@0.172.0/examples/jsm/loaders/GLTFLoader.js",
+      "sha256": "89c18243091559a7c18e4f009612792ce603aa76338cc20587d83135fcdfc1a9",
+      "size": 110608,
+      "license": "MIT"
+    },
+    {
+      "path": "BufferGeometryUtils.js",
+      "url": "https://cdn.jsdelivr.net/npm/three@0.172.0/examples/jsm/utils/BufferGeometryUtils.js",
+      "sha256": "1b9e1a6732b23adf87aea2cc430f6bc7eab7deacc7c195c2f51f53e06f4293e6",
+      "size": 31778,
+      "license": "MIT"
+    },
+    {
+      "path": "LICENSE.three",
+      "url": "https://cdn.jsdelivr.net/npm/three@0.172.0/LICENSE",
+      "sha256": "4c40a1ef62450b857c3b2aaf294936304cd552d965fbcd9d32d4c5bcf4ba4454",
+      "size": 1081,
+      "license": "MIT"
+    },
+    {
+      "path": "three.core.min.js",
+      "url": "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.core.min.js",
+      "sha256": "85c74c0fe8f35a348282bc1b2c099aa1e29a0ebf453c9df1c5ba68ea7d6d43f5",
+      "size": 366322,
+      "license": "MIT"
+    }
+  ]
+}

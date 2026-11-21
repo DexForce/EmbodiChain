@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import MISSING
+from typing import Any, Literal
 
 from embodichain.utils import configclass
 
@@ -45,6 +46,21 @@ class UsdSourceCfg:
     asset type. This is not a destination path, regex or parent/link binding.
     """
 
+    root_prim_path: str | None = None
+    """Absolute subtree to parse; omission uses the source default prim/stage."""
+
+    prim_path: str | None = None
+    """Compatibility spelling of :attr:`root_prim_path`."""
+
+    variants: dict[str, dict[str, str]] | None = None
+    """Variant selections keyed by absolute source prim path."""
+
+    namespace: str | None = None
+    """Legacy singleton namespace; scene namespace belongs to UsdImportCfg."""
+
+    pose_mode: Literal["auto", "config", "preserve", "offset"] = "auto"
+    """Legacy singleton placement; prefer the containing asset's source_pose_mode."""
+
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> UsdSourceCfg:
         """Decode a source mapping, rejecting unknown source options.
@@ -55,10 +71,97 @@ class UsdSourceCfg:
         Returns:
             Source configuration; call ``validate()`` after assembly.
         """
-        unknown = set(data) - {"file_path", "source_prim_path"}
+        unknown = set(data) - {
+            "file_path",
+            "source_prim_path",
+            "root_prim_path",
+            "prim_path",
+            "variants",
+            "namespace",
+            "pose_mode",
+        }
         if unknown:
             raise ValueError(f"Unknown UsdSourceCfg fields: {sorted(unknown)}.")
         return cls(**data)
+
+    def parse_kwargs(self) -> dict[str, Any]:
+        """Return source selection options accepted by DexSim.
+
+        Returns:
+            Configured parser options.
+        """
+        if self.pose_mode not in {"auto", "config", "preserve", "offset"}:
+            raise ValueError(f"Unsupported USD pose_mode {self.pose_mode!r}.")
+        if self.root_prim_path is not None and self.prim_path is not None:
+            raise ValueError("Specify root_prim_path or legacy prim_path, not both.")
+        root = (
+            self.root_prim_path if self.root_prim_path is not None else self.prim_path
+        )
+        if root is not None:
+            _validate_prim_path(root, allow_root=True, field_name="root_prim_path")
+        if self.namespace is not None and (
+            not isinstance(self.namespace, str)
+            or not self.namespace
+            or "/" in self.namespace
+        ):
+            raise ValueError("USD namespace must be non-empty and cannot contain '/'.")
+        if self.variants is not None:
+            if not isinstance(self.variants, Mapping):
+                raise ValueError(
+                    "USD variants require absolute prim paths and mappings."
+                )
+            for path, choices in self.variants.items():
+                if (
+                    not isinstance(path, str)
+                    or not path.startswith("/")
+                    or not isinstance(choices, Mapping)
+                ):
+                    raise ValueError(
+                        "USD variants require absolute prim paths and mappings."
+                    )
+                if any(
+                    not isinstance(name, str) or not isinstance(choice, str)
+                    for name, choice in choices.items()
+                ):
+                    raise ValueError(
+                        "USD variant-set names and choices must be strings."
+                    )
+        options = {
+            name: getattr(self, name)
+            for name in ("variants", "namespace")
+            if getattr(self, name) is not None
+        }
+        if root is not None:
+            options["prim_path"] = root
+        return options
+
+    def validate_source(self) -> None:
+        """Validate one fully assembled source without opening its stage."""
+        self.validate()
+        path = self.file_path
+        if not isinstance(path, str) or not path.strip():
+            raise ValueError("UsdSourceCfg.file_path must be a non-empty string.")
+        if not path.lower().endswith((".usd", ".usda", ".usdc", ".usdz")):
+            raise ValueError("UsdSourceCfg.file_path requires a USD source file.")
+        if self.source_prim_path is not None:
+            _validate_prim_path(
+                self.source_prim_path, allow_root=False, field_name="source_prim_path"
+            )
+        self.parse_kwargs()
+
+
+def _validate_prim_path(value: object, *, allow_root: bool, field_name: str) -> None:
+    from pxr import Sdf
+
+    if not isinstance(value, str) or not Sdf.Path.IsValidPathString(value):
+        raise ValueError(f"{field_name} must be an absolute USD prim path.")
+    path = Sdf.Path(value)
+    if (
+        not path.IsAbsolutePath()
+        or path.ContainsPrimVariantSelection()
+        or not (path.IsPrimPath() or (allow_root and path == Sdf.Path.absoluteRootPath))
+    ):
+        raise ValueError(f"{field_name} must be an absolute USD prim path.")
 
 
 def _usd_source_from_value(value: object) -> UsdSourceCfg | None:
@@ -87,32 +190,19 @@ def _asset_file_path(cfg: object) -> str | None:
         else getattr(cfg, "fpath", None)
     )
     if source is None:
-        if hasattr(cfg, "shape") and shape is None:
+        if (
+            hasattr(cfg, "shape")
+            and shape is None
+            and getattr(cfg, "visuals", None) is None
+        ):
             raise ValueError("Mesh objects require either shape or source.")
         return legacy_path
     if not isinstance(source, UsdSourceCfg):
         raise TypeError("source must be a UsdSourceCfg.")
     if shape is not None or legacy_path is not None:
         raise ValueError("source cannot be combined with shape or fpath.")
-    source.validate()
+    source.validate_source()
     path = source.file_path
-    if not isinstance(path, str) or not path.strip():
-        raise ValueError("UsdSourceCfg.file_path must be a non-empty string.")
-    if not path.lower().endswith((".usd", ".usda", ".usdc", ".usdz")):
-        raise ValueError("UsdSourceCfg.file_path requires a USD source file.")
-    selector = source.source_prim_path
-    if selector is not None:
-        from pxr import Sdf
-
-        if not isinstance(selector, str) or not Sdf.Path.IsValidPathString(selector):
-            raise ValueError("source_prim_path must be an absolute USD prim path.")
-        prim_path = Sdf.Path(selector)
-        if (
-            not prim_path.IsAbsolutePath()
-            or not prim_path.IsPrimPath()
-            or prim_path.ContainsPrimVariantSelection()
-        ):
-            raise ValueError("source_prim_path must be an absolute USD prim path.")
     return path
 
 

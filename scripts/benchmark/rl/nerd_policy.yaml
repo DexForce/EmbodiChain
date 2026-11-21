@@ -1,0 +1,18 @@
+# Freeze this recipe before running the seed matrix; no per-seed tuning.
+seeds: [0, 1, 2]
+robots: [cartpole, ant]
+algorithms: [apg, ppo]
+num_envs: 64
+horizon: 16
+updates: 512
+checkpoints: 8
+eval_episodes: 32
+eval_seed: 10000
+cpu_threads: 2
+warmup_updates: 2
+learning_rate: 0.00025
+gamma: 0.99
+max_grad_norm: 0.5
+initial_log_std: -2.0
+ppo_epochs: 4
+ppo_minibatches: 4

@@ -1,0 +1,47 @@
+integration_id: workspace_pose_pick_place_v1
+program_id: workspace_pose_pick_place
+requires:
+  scene_contract: workspace_pose_pick_place_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: workspace_pose_pick_place_scene_v1
+  registry_id: task_program_workspace_pose_pick_place
+  rigid_objects:
+  - entity_id: cube
+    dynamics: dynamic
+    semantic_type: cube
+    affordances:
+    - entity_id: cube_grasp
+      kind: antipodal_grasp
+  - entity_id: goal
+    dynamics: static
+    semantic_type: placement_reference
+profile:
+  defaults:
+    pick_up:
+      primary: primary_manipulator
+    place:
+      primary: primary_manipulator
+  skill_options:
+    pick:
+      kind: pick_up
+      fixed_object_to_eef:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - -1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - -1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    place:
+      kind: place
+  effect_monitors: {}

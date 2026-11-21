@@ -61,8 +61,8 @@ def test_create_scene_configures_newton_grasp_material_only_for_newton(
             return drawer
 
     monkeypatch.setattr(
-        tutorial.FrankaPandaCfg,
-        "from_dict",
+        tutorial,
+        "_create_franka_native_hand_cfg",
         lambda _config: SimpleNamespace(
             joint_drive_props=SimpleNamespace(damping={}),
             link_attrs=None,
@@ -115,7 +115,7 @@ def test_create_scene_configures_newton_grasp_material_only_for_newton(
         assert drawer_cfg.link_attrs is None
 
 
-def test_tutorial_newton_physics_cfg_uses_shared_mujoco_warp_profile() -> None:
+def test_tutorial_newton_physics_cfg_uses_shared_dexuni_profile() -> None:
     tutorial = _load_tutorial_module()
 
     cfg = tutorial._tutorial_physics_cfg("newton")
@@ -123,15 +123,16 @@ def test_tutorial_newton_physics_cfg_uses_shared_mujoco_warp_profile() -> None:
     assert cfg.num_substeps == 20
     assert cfg.collision_cfg is None
     assert cfg.solver_cfg == {
-        "solver_type": "mujoco_warp",
-        "solver": "newton",
-        "integrator": "implicitfast",
-        "iterations": 20,
-        "ls_iterations": 100,
-        "cone": "elliptic",
-        "impratio": 1_000.0,
-        "use_mujoco_contacts": True,
-        "enable_multiccd": True,
+        "solver_type": "dexuni",
+        "mujoco_options": {
+            "solver": "newton",
+            "integrator": "implicitfast",
+            "iterations": 20,
+            "ls_iterations": 100,
+            "cone": "elliptic",
+            "impratio": 1_000.0,
+            "enable_multiccd": True,
+        },
     }
 
 
@@ -168,8 +169,8 @@ def test_main_opens_native_window_after_spawn_prepare(
             if prepare_fails:
                 raise RuntimeError("prepare failed")
 
-        def open_window(self) -> None:
-            events.append("open_window")
+        def open_viewer(self) -> None:
+            events.append("open_viewer")
 
         def update(self, *, step: int) -> None:
             pass
@@ -211,6 +212,6 @@ def test_main_opens_native_window_after_spawn_prepare(
         assert events == ["create_scene", "prepare", "destroy"]
     else:
         tutorial.main()
-        assert events == ["create_scene", "prepare", "open_window", "destroy"]
+        assert events == ["create_scene", "prepare", "open_viewer", "destroy"]
     assert captured_cfg["headless"] is True
     assert captured_cfg["seed"] == 17

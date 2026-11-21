@@ -2,7 +2,7 @@ Tianji
 ======
 
 Official Tianji robot configurations live in the
-``embodichain_robots.tianji`` manufacturer namespace.
+``embodichain.extensions.robots.tianji`` manufacturer namespace.
 
 .. list-table::
    :class: robot-catalog
@@ -21,3 +21,4 @@ Official Tianji robot configurations live in the
    :hidden:
 
    marvin
+   marvin_gripper

@@ -77,15 +77,18 @@ def test_generate_and_edit_trigger_one_post_export_randomization(
     tmp_path, monkeypatch
 ) -> None:
     from embodichain.gen_sim.scene_engine.cli import start
+    from embodichain.gen_sim.scene_engine.pipeline import generate, edit
     import embodichain.gen_sim.scene_engine.randomization.adapter as adapter
 
     events = []
     image = tmp_path / "input.png"
     image.write_bytes(b"placeholder")
     monkeypatch.setattr(
-        start, "generate_scene_from_image", lambda **kwargs: events.append("generate")
+        generate,
+        "generate_scene_from_image",
+        lambda **kwargs: events.append("generate"),
     )
-    monkeypatch.setattr(start, "edit_scene", lambda **kwargs: events.append("edit"))
+    monkeypatch.setattr(edit, "edit_scene", lambda **kwargs: events.append("edit"))
     monkeypatch.setattr(
         adapter, "randomize_scene_export", lambda *args: events.append("randomize")
     )

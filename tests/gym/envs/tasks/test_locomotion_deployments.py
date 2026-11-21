@@ -105,7 +105,7 @@ def test_packaged_deployment_and_agent_config_agree(
 ) -> None:
     """Real config decoding must work without smoke-script backend overrides."""
     monkeypatch.setattr(sim_cfg, "get_data_path", lambda value: value)
-    directory = Path("extensions/embodichain_tasks/configs/tasks") / task
+    directory = Path("embodichain/extensions/tasks/configs/tasks") / task
     suffix = "" if backend == "default" else ".newton"
     path = directory / f"env{suffix}.yaml"
     raw = load_config(str(path))
@@ -116,7 +116,7 @@ def test_packaged_deployment_and_agent_config_agree(
         raw,
         source_path=path,
         manager_modules=[
-            f"embodichain_tasks.locomotion.managers.{module}"
+            f"embodichain.extensions.tasks.locomotion.managers.{module}"
             for module in ("observations", "rewards")
         ],
     )
@@ -132,6 +132,12 @@ def test_packaged_deployment_and_agent_config_agree(
         "no-render",
     }
     if task.startswith("locomotion/"):
+        from embodichain.lab.gym.envs.managers.observations import (
+            velocity_locomotion_observation,
+        )
+
+        assert cfg.observations.policy.func is velocity_locomotion_observation
+        assert cfg.observations.critic.func is velocity_locomotion_observation
         assert "renderer" not in raw
         assert "renderer" not in raw.get("render_cfg", {})
         assert "renderer" not in agent["trainer"]
@@ -150,6 +156,25 @@ def test_packaged_deployment_and_agent_config_agree(
             * agent["trainer"]["buffer_size"]
             // algorithm["num_mini_batches"]
         )
+        if backend == "newton":
+            solver = cfg.sim_cfg.physics_cfg.to_dexsim_cfg(gpu_id=0).solver_cfg
+            assert solver.solver_type == "dexuni"
+            assert solver.joint_mode == "dynamic"
+            assert solver.contact_mode == "auto"
+            # Match the MuJoCo Warp settings used by the locomotion training runs.
+            assert solver.mujoco_options == {
+                "njmax": 1024,
+                "nconmax": 256,
+                "iterations": 20,
+                "ls_iterations": 50,
+                "integrator": "implicitfast",
+                "separate_worlds": True,
+                "tolerance": 1.0e-8,
+                "cone": "pyramidal",
+                "impratio": 1.0,
+                "ls_parallel": False,
+                "use_mujoco_cpu": False,
+            }
     else:
         assert agent["trainer"]["renderer"] == cfg.sim_cfg.render_cfg.renderer
     assert Path(agent["trainer"]["gym_config"]).resolve() == path.resolve()
@@ -376,9 +401,9 @@ def _verify_native_no_render(task: str, backend: str) -> dict[str, object]:
     runtime = env = sim = observation = None
     try:
         importlib.import_module(
-            f"embodichain_tasks.locomotion.velocity.{task.rsplit('/', 1)[-1]}"
+            f"embodichain.extensions.tasks.locomotion.velocity.{task.rsplit('/', 1)[-1]}"
         )
-        directory = Path("extensions/embodichain_tasks/configs/tasks") / task
+        directory = Path("embodichain/extensions/tasks/configs/tasks") / task
         suffix = "" if backend == "default" else ".newton"
         agent_path = directory / f"agents/ppo{suffix}.yaml"
         agent = load_config(agent_path)
@@ -476,6 +501,15 @@ def _verify_no_render_backend(
     startup_started: float | None = None,
 ) -> int:
     """Reuse process startup while retaining fresh topology and per-case results."""
+    from embodichain.lab.gym.utils.registration import (
+        discover_task_packages,
+        execute_init_hooks,
+    )
+
+    # Use the CLI bootstrap so editable namespace packages execute their manager
+    # registration before the first deployment is decoded.
+    discover_task_packages()
+    execute_init_hooks()
     results: list[dict[str, object]] = []
     for index, task in enumerate(tasks):
         # A native stall must retain the original per-deployment time budget.

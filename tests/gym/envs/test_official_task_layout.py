@@ -32,15 +32,15 @@ from embodichain.lab.gym.utils.registration import (
 from embodichain.lab.sim.cfg import physics_cfg_for_backend
 from embodichain.learning.rl.env import get_registered_learning_env_names
 from embodichain.utils.utility import load_config
-from embodichain_tasks.classic_control.point_mass import PointMassEnv
+from embodichain.extensions.tasks.classic_control.point_mass import PointMassEnv
 
 EXPECTED_IMPORT_REGISTERED_TASK_MODULES = {
-    "BlocksRankingSize-v1": "embodichain_tasks.manipulation.tableware.blocks_ranking_size",
-    "CartPoleRL": "embodichain_tasks.classic_control.cart_pole",
-    "MatchObjectContainer-v1": "embodichain_tasks.manipulation.tableware.match_object_container",
-    "PlaceObjectDrawer-v1": "embodichain_tasks.manipulation.tableware.place_object_drawer",
-    "PushCubeRL": "embodichain_tasks.manipulation.push_cube",
-    "StackCups-v1": "embodichain_tasks.manipulation.tableware.stack_cups",
+    "BlocksRankingSize-v1": "embodichain.extensions.tasks.manipulation.tableware.blocks_ranking_size",
+    "CartPoleRL": "embodichain.extensions.tasks.classic_control.cart_pole",
+    "MatchObjectContainer-v1": "embodichain.extensions.tasks.manipulation.tableware.match_object_container",
+    "PlaceObjectDrawer-v1": "embodichain.extensions.tasks.manipulation.tableware.place_object_drawer",
+    "PushCubeRL": "embodichain.extensions.tasks.manipulation.push_cube",
+    "StackCups-v1": "embodichain.extensions.tasks.manipulation.tableware.stack_cups",
 }
 REMOVED_AGENT_ENV_IDS = {"PourWaterAgent-v3", "RearrangementAgent-v3"}
 CONFIG_DEFINED_TASK_PROGRAM_TASKS = {
@@ -57,12 +57,13 @@ TABLEWARE_CONFIG_TASKS = {
     "blocks_ranking_size",
     "match_object_container",
     "place_object_drawer",
+    "pour_cup",
     "pour_water",
     "stack_blocks_two",
     "stack_cups",
 }
 TASK_CONFIG_ROOT = (
-    Path(__file__).resolve().parents[3] / "extensions/embodichain_tasks/configs/tasks"
+    Path(__file__).resolve().parents[3] / "embodichain/extensions/tasks/configs/tasks"
 )
 
 
@@ -175,7 +176,10 @@ def test_point_mass_registration_uses_classic_control_task_module() -> None:
     discover_task_packages()
 
     assert "pointmassrl" in get_registered_learning_env_names()
-    assert PointMassEnv.__module__ == "embodichain_tasks.classic_control.point_mass"
+    assert (
+        PointMassEnv.__module__
+        == "embodichain.extensions.tasks.classic_control.point_mass"
+    )
 
 
 def test_simulator_rl_tasks_declare_rl_capability() -> None:
@@ -195,8 +199,11 @@ def test_legacy_tableware_agent_envs_are_not_registered() -> None:
     discover_task_packages()
 
     assert REMOVED_AGENT_ENV_IDS.isdisjoint(REGISTERED_ENVS)
-    assert find_spec("embodichain_tasks.tableware") is None
-    assert find_spec("embodichain_tasks.manipulation.tableware.base_agent_env") is None
+    assert find_spec("embodichain.extensions.tasks.tableware") is None
+    assert (
+        find_spec("embodichain.extensions.tasks.manipulation.tableware.base_agent_env")
+        is None
+    )
 
 
 def test_tableware_configs_are_nested_under_manipulation() -> None:
@@ -212,7 +219,7 @@ def test_tableware_configs_are_nested_under_manipulation() -> None:
 def test_config_defined_task_programs_do_not_need_python_task_modules() -> None:
     """Pure Task Programs keep their runtime and workflow in task-local config."""
     for task_name in CONFIG_DEFINED_TASK_PROGRAM_TASKS:
-        module_name = f"embodichain_tasks.manipulation.tableware.{task_name}"
+        module_name = f"embodichain.extensions.tasks.manipulation.tableware.{task_name}"
         config_root = TASK_CONFIG_ROOT / "manipulation/tableware" / task_name
 
         assert find_spec(module_name) is None

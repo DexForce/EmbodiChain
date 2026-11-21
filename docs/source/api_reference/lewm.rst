@@ -11,33 +11,33 @@ the model configuration, action statistics and caller-provided data contract.
 Public package
 --------------
 
-.. automodule:: embodichain_models.dynamics.lewm
+.. automodule:: embodichain.extensions.models.dynamics.lewm
    :members:
    :imported-members:
 
 Implementation modules
 ----------------------
 
-.. automodule:: embodichain_models.dynamics.lewm.model
+.. automodule:: embodichain.extensions.models.dynamics.lewm.model
    :members:
    :no-index:
 
-.. automodule:: embodichain_models.dynamics.lewm.data
+.. automodule:: embodichain.extensions.models.dynamics.lewm.data
    :members:
    :no-index:
 
-.. automodule:: embodichain_models.dynamics.lewm.supervised
+.. automodule:: embodichain.extensions.models.dynamics.lewm.supervised
    :members:
    :no-index:
 
-.. automodule:: embodichain_models.dynamics.lewm.sl_recipe
+.. automodule:: embodichain.extensions.models.dynamics.lewm.sl_recipe
    :members:
    :no-index:
 
-.. automodule:: embodichain_models.dynamics.lewm.planner
+.. automodule:: embodichain.extensions.models.dynamics.lewm.planner
    :members:
    :no-index:
 
-.. automodule:: embodichain_models.dynamics.lewm.checkpoint
+.. automodule:: embodichain.extensions.models.dynamics.lewm.checkpoint
    :members:
    :no-index:

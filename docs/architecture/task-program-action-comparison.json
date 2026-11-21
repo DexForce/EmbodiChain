@@ -1,0 +1,1654 @@
+{
+  "atol": 1e-06,
+  "rtol": 0,
+  "seed": 7,
+  "device": "cpu",
+  "threads": 1,
+  "scope": "Native reference action generation with augmentation disabled and one episode/attempt; includes numeric goals, trajectories, timing, command and effect snapshots. Non-data objects captured by type name only.",
+  "cases": [
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/carton_stocking/task.panda.yaml",
+      "baseline_plans": 3,
+      "head_plans": 3,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 3,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "goal": {
+          "tensor_count": 4,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "success": {
+          "tensor_count": 3,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 3111,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "effects": {
+          "tensor_count": 4,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "trajectory": {
+          "tensor_count": 9,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        }
+      },
+      "status": "equal",
+      "successful_plans": 3
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/task.dexforce_w1_030_pika.yaml",
+      "baseline_plans": 2,
+      "head_plans": 2,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 2,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "goal": {
+          "tensor_count": 6,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "success": {
+          "tensor_count": 2,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 9561,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "effects": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "trajectory": {
+          "tensor_count": 6,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        }
+      },
+      "status": "equal",
+      "successful_plans": 1
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/task.dual_ur5.yaml",
+      "status": "no paired plans yet"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/task.dual_ur5_dh_pgi_140_80.yaml",
+      "baseline_plans": 1,
+      "head_plans": 1,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 1,
+          "max_abs_difference": 3.9081200498003454e-09,
+          "differences": [],
+          "equal": true
+        },
+        "goal": {
+          "tensor_count": 3,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "success": {
+          "tensor_count": 1,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 10055,
+          "max_abs_difference": 2.9802322387695312e-08,
+          "differences": [],
+          "equal": true
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "effects": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "trajectory": {
+          "tensor_count": 3,
+          "max_abs_difference": 2.9802322387695312e-08,
+          "differences": [],
+          "equal": true
+        }
+      },
+      "status": "equal",
+      "successful_plans": 1
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/task.tianji_marvin.yaml",
+      "baseline_plans": 1,
+      "head_plans": 1,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 1,
+          "max_abs_difference": 2.384185791015625e-07,
+          "differences": [],
+          "equal": true
+        },
+        "goal": {
+          "tensor_count": 3,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "success": {
+          "tensor_count": 1,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 13432,
+          "max_abs_difference": 5.9604644775390625e-06,
+          "differences": [
+            "commands[0].frames[2].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[4].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[5].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[6].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[8].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[9].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[10].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[11].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[12].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[14].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[15].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[16].commands[0].payload.velocities: tensor values"
+          ],
+          "equal": false
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "effects": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "trajectory": {
+          "tensor_count": 3,
+          "max_abs_difference": 5.9604644775390625e-06,
+          "differences": [
+            "trajectory[0].positions: tensor values",
+            "trajectory[0].velocities: tensor values"
+          ],
+          "equal": false
+        }
+      },
+      "status": "different",
+      "successful_plans": 1
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/open_drawer/task.franka.yaml",
+      "baseline_plans": 1,
+      "head_plans": 1,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 1,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "goal": {
+          "tensor_count": 8,
+          "max_abs_difference": 0.6000017523765564,
+          "differences": [
+            "goal[0].semantics.geometry.target_link_point_cloud: tensor values",
+            "goal[0].semantics.geometry.articulation_point_cloud: tensor values",
+            "goal[0].semantics.geometry.non_target_articulation_point_cloud: tensor values"
+          ],
+          "equal": false
+        },
+        "success": {
+          "tensor_count": 1,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 1,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "effects": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "trajectory": {
+          "tensor_count": 3,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        }
+      },
+      "status": "different",
+      "successful_plans": 0
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml",
+      "baseline_plans": 1,
+      "head_plans": 1,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 1,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "goal": {
+          "tensor_count": 8,
+          "max_abs_difference": 0.6000017523765564,
+          "differences": [
+            "goal[0].semantics.geometry.target_link_point_cloud: tensor values",
+            "goal[0].semantics.geometry.articulation_point_cloud: tensor values",
+            "goal[0].semantics.geometry.non_target_articulation_point_cloud: tensor values"
+          ],
+          "equal": false
+        },
+        "success": {
+          "tensor_count": 1,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 2052,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "effects": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "trajectory": {
+          "tensor_count": 3,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        }
+      },
+      "status": "different",
+      "successful_plans": 1
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.dexforce_w1_030_pika.yaml",
+      "baseline_plans": 1,
+      "head_plans": 1,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 1,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "goal": {
+          "tensor_count": 2,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "success": {
+          "tensor_count": 1,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 1639,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "effects": {
+          "tensor_count": 4,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "trajectory": {
+          "tensor_count": 3,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        }
+      },
+      "status": "equal",
+      "successful_plans": 1
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.dual_ur5_dh_pgi_140_80.yaml",
+      "baseline_plans": 6,
+      "head_plans": 6,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 6,
+          "max_abs_difference": 0.019458770751953125,
+          "differences": [
+            "input_qpos[1]: tensor values",
+            "input_qpos[2]: tensor values",
+            "input_qpos[3]: tensor values",
+            "input_qpos[4]: tensor values",
+            "input_qpos[5]: tensor values"
+          ],
+          "equal": false
+        },
+        "goal": {
+          "tensor_count": 9,
+          "max_abs_difference": 0.02166253700852394,
+          "differences": [
+            "goal[1].xpos: tensor values",
+            "goal[3].xpos: tensor values",
+            "goal[5].xpos: tensor values"
+          ],
+          "equal": false
+        },
+        "success": {
+          "tensor_count": 6,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 5326,
+          "max_abs_difference": 0.02192831039428711,
+          "differences": [
+            "commands[1].frames[1].commands[0].payload.positions: tensor values",
+            "commands[1].frames[1].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[2].commands[0].payload.positions: tensor values",
+            "commands[1].frames[2].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[3].commands[0].payload.positions: tensor values",
+            "commands[1].frames[3].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[4].commands[0].payload.positions: tensor values",
+            "commands[1].frames[4].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[5].commands[0].payload.positions: tensor values",
+            "commands[1].frames[5].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[6].commands[0].payload.positions: tensor values",
+            "commands[1].frames[6].commands[0].payload.velocities: tensor values"
+          ],
+          "equal": false
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [
+            "segments[3][0].stop: value",
+            "segments[3][1].start: value",
+            "segments[3][1].stop: value",
+            "segments[3][2].start: value",
+            "segments[3][2].stop: value",
+            "segments[4][2].stop: value"
+          ],
+          "equal": false
+        },
+        "effects": {
+          "tensor_count": 12,
+          "max_abs_difference": 0.02166321501135826,
+          "differences": [
+            "effects[2].held_object_updates.left.grasp_xpos: tensor values",
+            "effects[4].held_object_updates.left.grasp_xpos: tensor values"
+          ],
+          "equal": false
+        },
+        "trajectory": {
+          "tensor_count": 18,
+          "max_abs_difference": 0.02192831039428711,
+          "differences": [
+            "trajectory[1].positions: tensor values",
+            "trajectory[1].velocities: tensor values",
+            "trajectory[2].positions: tensor values",
+            "trajectory[2].velocities: tensor values",
+            "trajectory[3].positions: shape/dtype",
+            "trajectory[3].velocities: shape/dtype",
+            "trajectory[3].dt: shape/dtype",
+            "trajectory[4].positions: shape/dtype",
+            "trajectory[4].velocities: shape/dtype",
+            "trajectory[4].dt: shape/dtype",
+            "trajectory[5].positions: tensor values",
+            "trajectory[5].velocities: tensor values"
+          ],
+          "equal": false
+        }
+      },
+      "status": "different",
+      "successful_plans": 6
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml",
+      "baseline_plans": 4,
+      "head_plans": 4,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 4,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "goal": {
+          "tensor_count": 6,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "success": {
+          "tensor_count": 4,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 5016,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "effects": {
+          "tensor_count": 8,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "trajectory": {
+          "tensor_count": 12,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        }
+      },
+      "status": "equal",
+      "successful_plans": 4
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.tianji_marvin.yaml",
+      "baseline_plans": 1,
+      "head_plans": 1,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 1,
+          "max_abs_difference": 5.849415174452588e-09,
+          "differences": [],
+          "equal": true
+        },
+        "goal": {
+          "tensor_count": 2,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "success": {
+          "tensor_count": 1,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 2381,
+          "max_abs_difference": 2.9802322387695312e-06,
+          "differences": [
+            "commands[0].frames[1].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[3].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[4].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[6].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[7].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[8].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[9].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[10].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[11].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[13].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[14].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[15].commands[0].payload.velocities: tensor values"
+          ],
+          "equal": false
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "effects": {
+          "tensor_count": 4,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "trajectory": {
+          "tensor_count": 3,
+          "max_abs_difference": 2.9802322387695312e-06,
+          "differences": [
+            "trajectory[0].positions: tensor values",
+            "trajectory[0].velocities: tensor values"
+          ],
+          "equal": false
+        }
+      },
+      "status": "different",
+      "successful_plans": 1
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.objective.yaml",
+      "status": "no paired plans yet"
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml",
+      "baseline_plans": 6,
+      "head_plans": 6,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 6,
+          "max_abs_difference": 0.00010353326797485352,
+          "differences": [
+            "input_qpos[2]: tensor values",
+            "input_qpos[3]: tensor values",
+            "input_qpos[4]: tensor values",
+            "input_qpos[5]: tensor values"
+          ],
+          "equal": false
+        },
+        "goal": {
+          "tensor_count": 9,
+          "max_abs_difference": 1.0192394256591797e-05,
+          "differences": [
+            "goal[1].xpos: tensor values",
+            "goal[3].xpos: tensor values",
+            "goal[5].xpos: tensor values"
+          ],
+          "equal": false
+        },
+        "success": {
+          "tensor_count": 6,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 7279,
+          "max_abs_difference": 0.15000000596046448,
+          "differences": [
+            "commands[1].frames[6].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[8].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[10].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[12].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[13].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[14].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[15].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[16].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[18].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[19].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[20].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[21].commands[0].payload.velocities: tensor values"
+          ],
+          "equal": false
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [
+            "segments[3][0].stop: value",
+            "segments[3][1].start: value",
+            "segments[3][1].stop: value",
+            "segments[3][2].start: value"
+          ],
+          "equal": false
+        },
+        "effects": {
+          "tensor_count": 12,
+          "max_abs_difference": 0.0001049041748046875,
+          "differences": [
+            "effects[2].held_object_updates.primary_manipulator.grasp_xpos: tensor values",
+            "effects[4].held_object_updates.primary_manipulator.grasp_xpos: tensor values"
+          ],
+          "equal": false
+        },
+        "trajectory": {
+          "tensor_count": 18,
+          "max_abs_difference": 0.15000000596046448,
+          "differences": [
+            "trajectory[1].positions: tensor values",
+            "trajectory[1].velocities: tensor values",
+            "trajectory[2].positions: tensor values",
+            "trajectory[2].velocities: tensor values",
+            "trajectory[3].positions: tensor values",
+            "trajectory[3].velocities: tensor values",
+            "trajectory[4].positions: tensor values",
+            "trajectory[4].velocities: tensor values",
+            "trajectory[5].positions: tensor values",
+            "trajectory[5].velocities: tensor values"
+          ],
+          "equal": false
+        }
+      },
+      "status": "different",
+      "successful_plans": 6
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/rubiks_cube_pick_place/task.ur5.yaml",
+      "baseline_plans": 6,
+      "head_plans": 6,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 6,
+          "max_abs_difference": 0.03542959690093994,
+          "differences": [
+            "input_qpos[1]: tensor values",
+            "input_qpos[2]: tensor values",
+            "input_qpos[3]: tensor values",
+            "input_qpos[4]: tensor values",
+            "input_qpos[5]: tensor values"
+          ],
+          "equal": false
+        },
+        "goal": {
+          "tensor_count": 9,
+          "max_abs_difference": 0.007562547922134399,
+          "differences": [
+            "goal[1].xpos: tensor values",
+            "goal[3].xpos: tensor values",
+            "goal[5].xpos: tensor values"
+          ],
+          "equal": false
+        },
+        "success": {
+          "tensor_count": 6,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 2589,
+          "max_abs_difference": 0.009147055447101593,
+          "differences": [
+            "commands[1].frames: length",
+            "commands[2].frames: length",
+            "commands[3].frames: length",
+            "commands[4].frames: length",
+            "commands[5].frames[0].commands[0].payload.positions: tensor values",
+            "commands[5].frames[1].commands[0].payload.positions: tensor values",
+            "commands[5].frames[1].commands[0].payload.velocities: tensor values",
+            "commands[5].frames[2].commands[0].payload.positions: tensor values",
+            "commands[5].frames[2].commands[0].payload.velocities: tensor values",
+            "commands[5].frames[3].commands[0].payload.positions: tensor values",
+            "commands[5].frames[3].commands[0].payload.velocities: tensor values",
+            "commands[5].frames[4].commands[0].payload.positions: tensor values"
+          ],
+          "equal": false
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [
+            "segments[1][0].stop: value",
+            "segments[1][1].start: value",
+            "segments[1][1].stop: value",
+            "segments[1][2].start: value",
+            "segments[1][2].stop: value",
+            "segments[2][0].stop: value",
+            "segments[2][1].start: value",
+            "segments[2][1].stop: value",
+            "segments[2][2].start: value",
+            "segments[2][2].stop: value",
+            "segments[3][0].stop: value",
+            "segments[3][1].start: value"
+          ],
+          "equal": false
+        },
+        "effects": {
+          "tensor_count": 12,
+          "max_abs_difference": 0.015391319990158081,
+          "differences": [
+            "effects[2].held_object_updates.primary_manipulator.object_to_eef: tensor values",
+            "effects[2].held_object_updates.primary_manipulator.grasp_xpos: tensor values",
+            "effects[4].held_object_updates.primary_manipulator.object_to_eef: tensor values",
+            "effects[4].held_object_updates.primary_manipulator.grasp_xpos: tensor values"
+          ],
+          "equal": false
+        },
+        "trajectory": {
+          "tensor_count": 18,
+          "max_abs_difference": 0.009147055447101593,
+          "differences": [
+            "trajectory[1].positions: shape/dtype",
+            "trajectory[1].velocities: shape/dtype",
+            "trajectory[1].dt: shape/dtype",
+            "trajectory[2].positions: shape/dtype",
+            "trajectory[2].velocities: shape/dtype",
+            "trajectory[2].dt: shape/dtype",
+            "trajectory[3].positions: shape/dtype",
+            "trajectory[3].velocities: shape/dtype",
+            "trajectory[3].dt: shape/dtype",
+            "trajectory[4].positions: shape/dtype",
+            "trajectory[4].velocities: shape/dtype",
+            "trajectory[4].dt: shape/dtype"
+          ],
+          "equal": false
+        }
+      },
+      "status": "different",
+      "successful_plans": 6
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/blocks_ranking_rgb/task.cobotmagic.yaml",
+      "baseline_plans": 4,
+      "head_plans": 4,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 4,
+          "max_abs_difference": 0.0014966726303100586,
+          "differences": [
+            "input_qpos[1]: tensor values",
+            "input_qpos[2]: tensor values",
+            "input_qpos[3]: tensor values"
+          ],
+          "equal": false
+        },
+        "goal": {
+          "tensor_count": 8,
+          "max_abs_difference": 0.033744990825653076,
+          "differences": [
+            "goal[1].xpos.relative_pose: tensor values",
+            "goal[1].xpos.world_orientation: tensor values",
+            "goal[3].xpos.relative_pose: tensor values",
+            "goal[3].xpos.world_orientation: tensor values"
+          ],
+          "equal": false
+        },
+        "success": {
+          "tensor_count": 4,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 8411,
+          "max_abs_difference": 0.13888892531394958,
+          "differences": [
+            "commands[0].frames[19].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[20].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[23].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[25].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[26].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[27].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[28].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[32].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[33].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[34].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[40].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[42].commands[0].payload.velocities: tensor values"
+          ],
+          "equal": false
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [
+            "segments[0][0].stop: value",
+            "segments[0][1].start: value",
+            "segments[0][1].stop: value",
+            "segments[0][2].start: value",
+            "segments[2][0].stop: value",
+            "segments[2][1].start: value",
+            "segments[2][1].stop: value",
+            "segments[2][2].start: value",
+            "segments[3][0].stop: value",
+            "segments[3][1].start: value",
+            "segments[3][1].stop: value",
+            "segments[3][2].start: value"
+          ],
+          "equal": false
+        },
+        "effects": {
+          "tensor_count": 8,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "trajectory": {
+          "tensor_count": 12,
+          "max_abs_difference": 0.13888892531394958,
+          "differences": [
+            "trajectory[0].positions: tensor values",
+            "trajectory[0].velocities: tensor values",
+            "trajectory[1].positions: tensor values",
+            "trajectory[1].velocities: tensor values",
+            "trajectory[2].positions: tensor values",
+            "trajectory[2].velocities: tensor values",
+            "trajectory[3].positions: tensor values",
+            "trajectory[3].velocities: tensor values"
+          ],
+          "equal": false
+        }
+      },
+      "status": "different",
+      "successful_plans": 4
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/blocks_ranking_rgb/task.dexforce_w1_030_pika.yaml",
+      "baseline_plans": 4,
+      "head_plans": 4,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 4,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "goal": {
+          "tensor_count": 8,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "success": {
+          "tensor_count": 4,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 7151,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "effects": {
+          "tensor_count": 8,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "trajectory": {
+          "tensor_count": 12,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        }
+      },
+      "status": "equal",
+      "successful_plans": 4
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/blocks_ranking_rgb/task.dual_ur5_dh_pgi_140_80.yaml",
+      "baseline_plans": 4,
+      "head_plans": 4,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 4,
+          "max_abs_difference": 0.0002859830856323242,
+          "differences": [
+            "input_qpos[1]: tensor values",
+            "input_qpos[2]: tensor values",
+            "input_qpos[3]: tensor values"
+          ],
+          "equal": false
+        },
+        "goal": {
+          "tensor_count": 8,
+          "max_abs_difference": 0.0035599805414676666,
+          "differences": [
+            "goal[1].xpos.relative_pose: tensor values",
+            "goal[1].xpos.world_orientation: tensor values",
+            "goal[3].xpos.relative_pose: tensor values",
+            "goal[3].xpos.world_orientation: tensor values"
+          ],
+          "equal": false
+        },
+        "success": {
+          "tensor_count": 4,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 6339,
+          "max_abs_difference": 0.0002859830856323242,
+          "differences": [
+            "commands[1].frames[0].commands[0].payload.positions: tensor values",
+            "commands[1].frames[1].commands[0].payload.positions: tensor values",
+            "commands[1].frames[1].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[2].commands[0].payload.positions: tensor values",
+            "commands[1].frames[2].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[3].commands[0].payload.positions: tensor values",
+            "commands[1].frames[3].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[4].commands[0].payload.positions: tensor values",
+            "commands[1].frames[4].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[5].commands[0].payload.positions: tensor values",
+            "commands[1].frames[5].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[6].commands[0].payload.positions: tensor values"
+          ],
+          "equal": false
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "effects": {
+          "tensor_count": 8,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "trajectory": {
+          "tensor_count": 12,
+          "max_abs_difference": 0.0002859830856323242,
+          "differences": [
+            "trajectory[1].positions: tensor values",
+            "trajectory[1].velocities: tensor values",
+            "trajectory[2].positions: tensor values",
+            "trajectory[3].positions: tensor values",
+            "trajectory[3].velocities: tensor values"
+          ],
+          "equal": false
+        }
+      },
+      "status": "different",
+      "successful_plans": 4
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/blocks_ranking_rgb/task.tianji_marvin.yaml",
+      "baseline_plans": 4,
+      "head_plans": 4,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 4,
+          "max_abs_difference": 0.0008098483085632324,
+          "differences": [
+            "input_qpos[1]: tensor values",
+            "input_qpos[2]: tensor values",
+            "input_qpos[3]: tensor values"
+          ],
+          "equal": false
+        },
+        "goal": {
+          "tensor_count": 8,
+          "max_abs_difference": 0.019507214426994324,
+          "differences": [
+            "goal[1].xpos.relative_pose: tensor values",
+            "goal[1].xpos.world_orientation: tensor values",
+            "goal[3].xpos.relative_pose: tensor values",
+            "goal[3].xpos.world_orientation: tensor values"
+          ],
+          "equal": false
+        },
+        "success": {
+          "tensor_count": 4,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 6745,
+          "max_abs_difference": 0.03205128014087677,
+          "differences": [
+            "commands[0].frames[15].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[17].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[18].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[20].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[21].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[22].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[23].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[24].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[25].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[26].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[27].commands[0].payload.velocities: tensor values",
+            "commands[0].frames[28].commands[0].payload.velocities: tensor values"
+          ],
+          "equal": false
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [
+            "segments[1][0].stop: value",
+            "segments[1][1].start: value",
+            "segments[1][1].stop: value",
+            "segments[1][2].start: value",
+            "segments[3][0].stop: value",
+            "segments[3][1].start: value",
+            "segments[3][1].stop: value",
+            "segments[3][2].start: value"
+          ],
+          "equal": false
+        },
+        "effects": {
+          "tensor_count": 8,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "trajectory": {
+          "tensor_count": 12,
+          "max_abs_difference": 0.03205128014087677,
+          "differences": [
+            "trajectory[0].velocities: tensor values",
+            "trajectory[1].positions: tensor values",
+            "trajectory[1].velocities: tensor values",
+            "trajectory[2].positions: tensor values",
+            "trajectory[2].velocities: tensor values",
+            "trajectory[3].positions: tensor values",
+            "trajectory[3].velocities: tensor values"
+          ],
+          "equal": false
+        }
+      },
+      "status": "different",
+      "successful_plans": 4
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml",
+      "baseline_plans": 1,
+      "head_plans": 1,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 1,
+          "max_abs_difference": 7.450580596923828e-09,
+          "differences": [],
+          "equal": true
+        },
+        "goal": {
+          "tensor_count": 3,
+          "max_abs_difference": 0.05543896555900574,
+          "differences": [
+            "goal[0].semantics.affordance.mesh_vertices: tensor values"
+          ],
+          "equal": false
+        },
+        "success": {
+          "tensor_count": 1,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 1828,
+          "max_abs_difference": 7.450580596923828e-09,
+          "differences": [],
+          "equal": true
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "effects": {
+          "tensor_count": 5,
+          "max_abs_difference": 0.05543896555900574,
+          "differences": [
+            "effects[0].held_object_updates.primary_manipulator.semantics.affordance.mesh_vertices: tensor values"
+          ],
+          "equal": false
+        },
+        "trajectory": {
+          "tensor_count": 3,
+          "max_abs_difference": 7.450580596923828e-09,
+          "differences": [],
+          "equal": true
+        }
+      },
+      "status": "different",
+      "successful_plans": 0
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.dexforce_w1_030_pika.yaml",
+      "baseline_plans": 1,
+      "head_plans": 1,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 1,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "goal": {
+          "tensor_count": 2,
+          "max_abs_difference": 0.15477202832698822,
+          "differences": [
+            "goal[0].semantics.affordance.mesh_vertices: tensor values",
+            "goal[0].semantics.affordance.mesh_triangles: tensor values"
+          ],
+          "equal": false
+        },
+        "success": {
+          "tensor_count": 1,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 1681,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "effects": {
+          "tensor_count": 4,
+          "max_abs_difference": 0.15477202832698822,
+          "differences": [
+            "effects[0].held_object_updates.right.semantics.affordance.mesh_vertices: tensor values",
+            "effects[0].held_object_updates.right.semantics.affordance.mesh_triangles: tensor values"
+          ],
+          "equal": false
+        },
+        "trajectory": {
+          "tensor_count": 3,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        }
+      },
+      "status": "different",
+      "successful_plans": 0
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.dual_ur5_dh_pgi_140_80.yaml",
+      "baseline_plans": 1,
+      "head_plans": 1,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 1,
+          "max_abs_difference": 9.28294241475669e-09,
+          "differences": [],
+          "equal": true
+        },
+        "goal": {
+          "tensor_count": 3,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "success": {
+          "tensor_count": 1,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 1828,
+          "max_abs_difference": 9.197265171678737e-11,
+          "differences": [],
+          "equal": true
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "effects": {
+          "tensor_count": 5,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "trajectory": {
+          "tensor_count": 3,
+          "max_abs_difference": 9.28294241475669e-09,
+          "differences": [],
+          "equal": true
+        }
+      },
+      "status": "equal",
+      "successful_plans": 0
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.tianji_marvin.yaml",
+      "baseline_plans": 1,
+      "head_plans": 1,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 1,
+          "max_abs_difference": 9.996483640861697e-09,
+          "differences": [],
+          "equal": true
+        },
+        "goal": {
+          "tensor_count": 3,
+          "max_abs_difference": 0.15564844012260437,
+          "differences": [
+            "goal[0].semantics.affordance.mesh_vertices: tensor values",
+            "goal[0].semantics.affordance.mesh_triangles: tensor values"
+          ],
+          "equal": false
+        },
+        "success": {
+          "tensor_count": 1,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 1828,
+          "max_abs_difference": 9.996483640861697e-09,
+          "differences": [],
+          "equal": true
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "effects": {
+          "tensor_count": 5,
+          "max_abs_difference": 0.15564844012260437,
+          "differences": [
+            "effects[0].held_object_updates.right.semantics.affordance.mesh_vertices: tensor values",
+            "effects[0].held_object_updates.right.semantics.affordance.mesh_triangles: tensor values"
+          ],
+          "equal": false
+        },
+        "trajectory": {
+          "tensor_count": 3,
+          "max_abs_difference": 9.996483640861697e-09,
+          "differences": [],
+          "equal": true
+        }
+      },
+      "status": "different",
+      "successful_plans": 0
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml",
+      "baseline_plans": 1,
+      "head_plans": 1,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 1,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "goal": {
+          "tensor_count": 2,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "success": {
+          "tensor_count": 1,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 953,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "effects": {
+          "tensor_count": 4,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "trajectory": {
+          "tensor_count": 3,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        }
+      },
+      "status": "equal",
+      "successful_plans": 0
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.dexforce_w1_030_pika.yaml",
+      "baseline_plans": 1,
+      "head_plans": 1,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 1,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "goal": {
+          "tensor_count": 2,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "success": {
+          "tensor_count": 1,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 1562,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "effects": {
+          "tensor_count": 4,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "trajectory": {
+          "tensor_count": 3,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        }
+      },
+      "status": "equal",
+      "successful_plans": 1
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.dual_ur5_dh_pgi_140_80.yaml",
+      "baseline_plans": 2,
+      "head_plans": 2,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 2,
+          "max_abs_difference": 5.245208740234375e-06,
+          "differences": [
+            "input_qpos[1]: tensor values"
+          ],
+          "equal": false
+        },
+        "goal": {
+          "tensor_count": 4,
+          "max_abs_difference": 0.0022265175357460976,
+          "differences": [
+            "goal[1].xpos.relative_pose: tensor values",
+            "goal[1].xpos.world_orientation: tensor values"
+          ],
+          "equal": false
+        },
+        "success": {
+          "tensor_count": 2,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "commands": {
+          "tensor_count": 2788,
+          "max_abs_difference": 0.0001659393310546875,
+          "differences": [
+            "commands[1].frames[0].commands[0].payload.positions: tensor values",
+            "commands[1].frames[1].commands[0].payload.positions: tensor values",
+            "commands[1].frames[1].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[2].commands[0].payload.positions: tensor values",
+            "commands[1].frames[2].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[3].commands[0].payload.positions: tensor values",
+            "commands[1].frames[3].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[4].commands[0].payload.positions: tensor values",
+            "commands[1].frames[4].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[5].commands[0].payload.positions: tensor values",
+            "commands[1].frames[5].commands[0].payload.velocities: tensor values",
+            "commands[1].frames[6].commands[0].payload.positions: tensor values"
+          ],
+          "equal": false
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "effects": {
+          "tensor_count": 4,
+          "max_abs_difference": 0.0,
+          "differences": [],
+          "equal": true
+        },
+        "trajectory": {
+          "tensor_count": 6,
+          "max_abs_difference": 0.0001659393310546875,
+          "differences": [
+            "trajectory[1].positions: tensor values",
+            "trajectory[1].velocities: tensor values"
+          ],
+          "equal": false
+        }
+      },
+      "status": "different",
+      "successful_plans": 2
+    },
+    {
+      "deployment": "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.tianji_marvin.yaml",
+      "baseline_plans": 2,
+      "head_plans": 1,
+      "groups": {
+        "input_qpos": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [
+            "input_qpos: length"
+          ],
+          "equal": false
+        },
+        "goal": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [
+            "goal: length"
+          ],
+          "equal": false
+        },
+        "success": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [
+            "success: length"
+          ],
+          "equal": false
+        },
+        "commands": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [
+            "commands: length"
+          ],
+          "equal": false
+        },
+        "segments": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [
+            "segments: length"
+          ],
+          "equal": false
+        },
+        "effects": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [
+            "effects: length"
+          ],
+          "equal": false
+        },
+        "trajectory": {
+          "tensor_count": 0,
+          "max_abs_difference": 0.0,
+          "differences": [
+            "trajectory: length"
+          ],
+          "equal": false
+        }
+      },
+      "status": "different",
+      "successful_plans": 2
+    }
+  ],
+  "base_revision": "981894847a7f9929ced0e2d0b5b9fd2ef4241d35",
+  "head_revision": "027d836959224e2b066146bb61b6af0b2613507f",
+  "summary": {
+    "deployments": 26,
+    "paired_generated_plans": 24,
+    "equal_action_snapshots": 11,
+    "conclusion": "Controlled same-input replay shows no action generation change for six Pick/Place calls; whole-deployment end-to-end equivalence is NOT established."
+  },
+  "controlled_replay": {
+    "deployment": "repeated_pick_place/task.ur5.yaml",
+    "calls": 6,
+    "method": "Persist baseline PlanningContext values; ground and plan against those inputs using the current compiler and engine. No commands dispatched by the replay.",
+    "results": {
+      "goal": {
+        "tensor_count": 9,
+        "max_abs_difference": 0.0,
+        "differences": []
+      },
+      "success": {
+        "tensor_count": 6,
+        "max_abs_difference": 0.0,
+        "differences": []
+      },
+      "commands": {
+        "tensor_count": 7279,
+        "max_abs_difference": 0.0,
+        "differences": []
+      },
+      "segments": {
+        "tensor_count": 0,
+        "max_abs_difference": 0.0,
+        "differences": []
+      },
+      "effects": {
+        "tensor_count": 12,
+        "max_abs_difference": 0.0,
+        "differences": []
+      },
+      "trajectory": {
+        "tensor_count": 18,
+        "max_abs_difference": 0.0,
+        "differences": []
+      }
+    }
+  },
+  "baseline_repeatability_control": {
+    "tensor_count": 18,
+    "max_abs_difference": 0.15000000596046448,
+    "differences": [
+      "trajectory[1].positions: tensor values",
+      "trajectory[1].velocities: tensor values",
+      "trajectory[2].positions: tensor values",
+      "trajectory[2].velocities: tensor values",
+      "trajectory[3].positions: tensor values",
+      "trajectory[3].velocities: tensor values",
+      "trajectory[4].positions: tensor values",
+      "trajectory[4].velocities: tensor values",
+      "trajectory[5].positions: tensor values",
+      "trajectory[5].velocities: tensor values"
+    ]
+  },
+  "limitations": [
+    "Independent simulations do not guarantee identical scene/contact observations or geometry samples even with the same seed.",
+    "Some runs fail before returning a SkillPlan or time out; these are not positive action-generation equivalence evidence.",
+    "The one-row reference sweep disables collection augmentation. It does not qualify all expansion recipes.",
+    "Some numeric snapshots differ; a same-version repeat also differs. Further investigation is required before claiming all differences are harmless.",
+    "Snapshots contain complete trajectory and command tensor values; non-data objects are represented by type name only."
+  ],
+  "motion_implementation_delta": []
+}

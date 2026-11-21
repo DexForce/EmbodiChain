@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import field
 from typing import Dict, Literal
 
 import numpy as np
@@ -59,6 +60,15 @@ class ObjectBaseCfg:
     init_local_pose: np.ndarray | None = None
     """4x4 transformation matrix of the root in local frame. If specified, it will override init_pos and init_rot."""
 
+    source_pose_mode: Literal["auto", "config", "preserve", "offset"] = field(
+        default="auto", kw_only=True
+    )
+    """USD input placement: retain an unset pose, replace, preserve, or offset it.
+
+    Imported facades use ``"config"`` with their resolved ``init_local_pose``
+    so reusing the returned configuration preserves its effective placement.
+    """
+
     @classmethod
     def from_dict(cls, init_dict: Dict[str, str | float | tuple]) -> ObjectBaseCfg:
         """Initialize the configuration from a dictionary."""
@@ -69,9 +79,13 @@ class ObjectBaseCfg:
         for key, value in init_dict.items():
             if hasattr(cfg, key):
                 attr = getattr(cfg, key)
-                if key == "source":
+                if key == "visuals":
+                    from .visuals import _visual_elements
+
+                    cfg.visuals = _visual_elements(value)
+                elif key == "source":
                     setattr(cfg, key, _usd_source_from_value(value))
-                elif key == "shape" and isinstance(value, Mapping):
+                elif key in {"shape", "semantic_shape"} and isinstance(value, Mapping):
                     from ..shapes import ShapeCfg
 
                     setattr(cfg, key, ShapeCfg.from_dict(dict(value)))
@@ -109,4 +123,26 @@ class ObjectBaseCfg:
             cfg.init_pos = tuple(T[:3, 3])
             cfg.init_rot = tuple(R.from_matrix(T[:3, :3]).as_euler("xyz", degrees=True))
 
+        source = getattr(cfg, "source", None)
+        path = (
+            getattr(source, "file_path", None)
+            if source is not None
+            else getattr(
+                getattr(cfg, "shape", None), "fpath", getattr(cfg, "fpath", None)
+            )
+        )
+        if (
+            path is not None
+            and str(path).lower().endswith((".usd", ".usda", ".usdc", ".usdz"))
+            and (
+                (
+                    "init_local_pose" in init_dict
+                    and init_dict["init_local_pose"] is None
+                )
+                or not {"init_pos", "init_rot", "init_local_pose"}.intersection(
+                    init_dict
+                )
+            )
+        ):
+            cfg.init_local_pose = None
         return cfg

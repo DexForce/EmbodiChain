@@ -140,8 +140,8 @@ Example paths in the repository:
 
 | Use case | JSON example | YAML example |
 |---|---|---|
-| Runnable Gym deployment | `embodichain_tasks/configs/tasks/manipulation/push_cube/env.json` | `embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml` |
-| RL training | `embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.json` | `embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml` |
+| Runnable Gym deployment | `embodichain/extensions/tasks/configs/tasks/manipulation/push_cube/env.json` | `embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml` |
+| RL training | `embodichain/extensions/tasks/configs/tasks/classic_control/cart_pole/agents/ppo.json` | `embodichain/extensions/tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml` |
 
 When a training config references a gym config (via `trainer.gym_config`), the nested path may also use any supported extension.
 
@@ -295,12 +295,14 @@ physics_config:
   gravity: [0.0, 0.0, -9.81]
   num_substeps: 10
   solver_cfg:
-    solver_type: mujoco_warp
+    solver_type: dexuni
+    contact_mode: auto
   use_cuda_graph: true
 ```
 
-Omit `solver_cfg` to let Newton's AutoSolver select from the complete scene at
-`prepare()`. For componentized tasks, place these backend declarations in
+Omit `solver_cfg` to retain the same DexUni defaults: scene-based ownership
+selection at `prepare()` and `contact_mode="auto"`. For componentized tasks,
+place these backend declarations in
 `envs/default.yaml` and `envs/newton.yaml`, then point the
 deployment's `environment.default` and `environment.newton` entries at those
 files. Do not repeat `physics` or `physics_config` in the deployment. Keep the
@@ -326,7 +328,7 @@ uses this step-synchronized mode by default when neither the configuration nor
 
 Keep `viser_server.host` on loopback for remote workers and use SSH port
 forwarding unless the service is behind an authenticated gateway. See
-[Browser visualization with Viser](../overview/sim/viser_visualization.md) for
+[Browser visualization with Viser](../overview/sim/visualization/viser.md) for
 the full schema, supported scene content, and deformable-object behavior.
 
 ### Reusable Physical Environments and Runnable Deployments
@@ -425,7 +427,7 @@ it validates.
 
 Use `class_type` to select a registered `RobotCfg` subclass through
 `embodichain.robot_registry`. Official concrete presets live in
-`embodichain_robots`; generic dual-arm composition remains in the core.
+`embodichain.extensions.robots`; generic dual-arm composition remains in the core.
 Run `embodichain list-robot` to discover IDs and control summaries.
 Subclass-specific fields remain in the robot configuration and are passed to
 its `from_dict()` method. For example, this selects the canonical UR preset
@@ -502,7 +504,7 @@ trainer:
   device: cuda:0
   iterations: 500
   buffer_size: 1024
-  gym_config: embodichain_tasks/configs/tasks/classic_control/cart_pole/env.yaml
+  gym_config: embodichain/extensions/tasks/configs/tasks/classic_control/cart_pole/env.yaml
 policy:
   name: actor_critic
   actor:
@@ -546,7 +548,7 @@ This is automatically converted to a `SceneEntityCfg` object at runtime.
 
 ## Tips
 
-1. **Start from an existing config.** Copy a task config from `embodichain_tasks/configs/tasks/<domain>/<task>/`, then modify it for your task.
+1. **Start from an existing config.** Copy a task config from `embodichain/extensions/tasks/configs/tasks/<domain>/<task>/`, then modify it for your task.
 2. **Use Python configs for development.** They provide IDE auto-completion and type checking.
 3. **Use JSON or YAML configs for experiments.** YAML is often easier to read for nested structures; JSON remains fully supported.
 4. **Validate configs early.** Run your environment with a short episode count to catch config errors before long training runs.
@@ -563,6 +565,6 @@ This is automatically converted to a `SceneEntityCfg` object at runtime.
 
 - [Custom Functors Guide](custom_functors.md) — How to write observation, reward, event, and action functors
 - [Embodied Environments](../overview/gym/env.md) — Full environment configuration reference
-- [Browser Visualization](../overview/sim/viser_visualization.md) — Viser configuration and runtime behavior
+- [Browser Visualization](../overview/sim/visualization/viser.md) — Viser configuration and runtime behavior
 - [Tutorial: Modular Environment](../tutorial/modular_env.rst) — Complete example using config-driven setup
 - [Tutorial: RL Training](../tutorial/rl.rst) — RL training configuration walkthrough

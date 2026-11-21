@@ -1,0 +1,156 @@
+{
+  "author_revision": "160fe0852c51cffae7b7440452b58d0b49db6df6",
+  "base": "7cc143dd0c6160a3a5b726bb5c9b9982d86492e5",
+  "external_artifact_root": "/root/outputs/rigidformer-official-20261027",
+  "full_budget_retraining": "not performed",
+  "full_published_benchmark": "not performed",
+  "qualification": "integration-and-numerical-parity",
+  "reports": {
+    "author_flash": {
+      "all_recorded_max_abs_errors": 0.0,
+      "artifact": "post-review-flash/summary.json",
+      "checkpoint_origin": "official-release",
+      "checkpoint_sha256": "ffb0efc6904b5a63504a5005bb6c4df2e79e8de20641dc205885593747fcf7d9",
+      "model_source_commit": "acb01d18e28832557dbd4bff39ede7b6d12bb02f",
+      "nccl_runtime": [
+        2,
+        26,
+        2
+      ],
+      "previous_artifact": "installed-final-flash/summary.json",
+      "previous_sha256": "bc33e89c7f29431a679007b7dd567aae26eac9494f56cd5a80c881a4e0a049ee",
+      "seed": 42,
+      "sha256": "4e037cfb591fc73f9a47fd42d2927a7c9246583a78723b029edc54de99f4c2ed",
+      "updates": 3
+    },
+    "fixed_weight_evaluation": {
+      "artifact": "installed-final-evaluation/summary.json",
+      "dataset": "movi_sphere",
+      "num_frames": 480,
+      "num_scenes": 2,
+      "scope": "debug-subset",
+      "sha256": "9151c178adf3193c7752253505b7205d60c5668f43bc71ad368572db47364267",
+      "split": "test",
+      "step_sizes": [
+        1,
+        5,
+        10
+      ]
+    },
+    "full_architecture_recovery": {
+      "artifact": "post-review-recovery/summary.json",
+      "compared_exactly": [
+        "learner",
+        "training_states",
+        "sampler",
+        "rng"
+      ],
+      "exported_tensors": {
+        "ema": 485,
+        "raw": 485
+      },
+      "model_source_commit": "acb01d18e28832557dbd4bff39ede7b6d12bb02f",
+      "previous_artifact": "installed-final-recovery/summary.json",
+      "previous_sha256": "6619a190694b2a4e8bfb954a6ee4fa6c17703b0bd77f081d0398184aede3ddf7",
+      "sha256": "2daad678a5b633615a871db5b2a610bae55819650779a00567dee10273a4545b",
+      "stop_after": 2,
+      "updates": 4
+    },
+    "index_benchmark": {
+      "artifact": "qualified-index.json",
+      "sha256": "4b07998f2222853c8e789aaa849235067f0740bf7eeb83b62a0caf912436e5e5"
+    },
+    "two_rank_nccl": {
+      "artifact": "post-review-two-rank/test_nccl_weighted_syncbn_and_0/summary.json",
+      "backend": "nccl",
+      "compared": [
+        "model",
+        "optimizer",
+        "EMA",
+        "schedule",
+        "rank RNG",
+        "rank source cursor",
+        "rank buffers"
+      ],
+      "epochs": 3,
+      "loaded_nccl_version": 22907,
+      "model_source_commit": "acb01d18e28832557dbd4bff39ede7b6d12bb02f",
+      "previous_artifact": "final-gpu-tests/test_nccl_weighted_syncbn_and_0/summary.json",
+      "previous_sha256": "cbabbf2e951fa12a86baf2fc9ba60dcbcebbf2e3058731a69db43abfb1e36e36",
+      "recovery": "exact",
+      "sha256": "cbabbf2e951fa12a86baf2fc9ba60dcbcebbf2e3058731a69db43abfb1e36e36",
+      "split_after": 3,
+      "sync_batch_norm": true,
+      "updates": 6,
+      "warmup_epochs": 2,
+      "weighted_update": {
+        "global_loss": 0.11964317858219146,
+        "state_max_abs": 1.7881393432617188e-07,
+        "valid_objects_by_rank": [
+          3,
+          2
+        ]
+      },
+      "world_size": 2
+    },
+    "wheel_layers": [
+      {
+        "artifact": "layer1/validation/summary.json",
+        "sha256": "34bbe578633b63aea2d311c5e4c38eb59a1ff451645b9b157be59924ed3df79b"
+      },
+      {
+        "artifact": "layer2/validation/summary.json",
+        "sha256": "c82784c3c951ded351356fc389791951f4d79bf0779cbcf21b14e7153b861b4c"
+      },
+      {
+        "artifact": "layer3-final/verification/summary.json",
+        "sha256": "c2ceedab8d04ecaaf654e96e9f675f377e0a26f0d53625870131a3213e96e7bf"
+      }
+    ]
+  },
+  "runtime": {
+    "cuda": "12.8",
+    "dependencies": {
+      "einops": "0.8.2",
+      "flash-attn": "2.8.3",
+      "numpy": "2.4.6",
+      "pyarrow": "24.0.0",
+      "roma": "1.5.4",
+      "torch": "2.7.0+cu128",
+      "trimesh": "4.12.2"
+    },
+    "gpu": "NVIDIA RTX PRO 5000 72GB Blackwell",
+    "loaded_nccl": [
+      2,
+      29,
+      7
+    ],
+    "nccl_architecture": "sm_120",
+    "nccl_library_sha256": "37ee50973f269610cfaae10760037cbaf13f7fd92762e3ccca80c9d2d075a97b",
+    "nccl_source_commit": "b91894bd5b190c874d98a017f93f5daa515b65d0",
+    "nccl_transport_settings": {
+      "NCCL_IB_DISABLE": "1",
+      "NCCL_P2P_DISABLE": "1"
+    },
+    "python": "3.11.14"
+  },
+  "validation": {
+    "api_exports": "3284/3284",
+    "context": "passed",
+    "cpu_log": {
+      "artifact": "final-cpu.log",
+      "sha256": "3d4c334b19fd38021ab54af3248d4350b3299f2d14c3aa74adb21e23c897e6e4"
+    },
+    "cpu_tests": 149,
+    "focused_sphinx": "passed",
+    "gpu_log": {
+      "artifact": "final-gpu.log",
+      "sha256": "6e94ed43b02c14495e39a6d054d7474dd7c025f8d2e9c232443a5f70da02aab2"
+    },
+    "gpu_tests": 6,
+    "post_review_cpu_tests": 86,
+    "post_review_gpu_tests": 3,
+    "post_review_note": "Flash comparison, full-model recovery and two-rank NCCL were rerun after the model review fixes; other indexed reports retain their original source hashes.",
+    "test_basis": "Initial full behavioral run and per-layer checks; post-review model fixes were checked separately."
+  }
+}

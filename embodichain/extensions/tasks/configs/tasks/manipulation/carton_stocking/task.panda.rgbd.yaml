@@ -1,0 +1,16 @@
+# Ordinary camera-enabled expert; source-backed collection remains in task.panda.yaml.
+id: CartonStockingPandaRGBD-v1
+environment:
+  component: env.yaml
+embodiment:
+  component: ../../../components/embodiments/franka_panda_robotiq85_rgbd.yaml
+task_program:
+  program: task_program/program.yaml
+  integration: task_program/integration.ordinary.yaml
+  execution_policy: ../../../components/execution_policies/real2sim_verified.yaml
+headless: true
+renderer: fast-rt
+enable_sensor: true
+collection:
+  target_episodes: 1
+  max_attempts: 1
