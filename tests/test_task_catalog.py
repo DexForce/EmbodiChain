@@ -401,6 +401,16 @@ def test_official_portfolio_keeps_deployment_purposes_and_evidence_separate() ->
     assert all(
         d.purpose in catalog._PURPOSES for task in tasks for d in task.deployments
     )
+    pour = catalog._select_task(tasks, "pour_water")
+    assert pour.default_deployment == "franka_fluid"
+    assert {d.env_id for d in pour.deployments} == {
+        "PourCup-Franka-Fluid-v1",
+        "PourWater-v1",
+        "PourWater-TianjiMarvin-v1",
+        "PourWater-DualUR5-v1",
+        "PourWater-DexforceW1V030Pika-v1",
+    }
+    assert catalog._select_task(tasks, "pour_cup").qualified_key == pour.qualified_key
     research = catalog._portfolio_view(tasks, "research", False)
     stack = catalog._select_task(research, "stack_blocks_two")
     assert [d.env_id for d in stack.deployments] == ["StackBlocksTwoPolicy-v1"]

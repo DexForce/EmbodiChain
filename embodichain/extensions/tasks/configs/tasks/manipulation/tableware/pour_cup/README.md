@@ -1,8 +1,12 @@
 # Franka 在线倒水
 
+此部署是统一任务 `pour_water` 的默认入口 `franka_fluid`。旧目录键 `pour_cup` 及 Gym ID `PourCup-Franka-Fluid-v1` 仍然可用。
+
 倒水任务在同一个 World 中通过 DexUni 推进 Franka、动态杯子和 DFSPH 水体。机器人
 使用关节驱动和真实接触抓起杯子，将水倒入接水碗，再放回杯子。耦合方向为刚体到
 流体；水不会反作用于机器人或杯子。初始水体按杯内体积采样，不依赖预录粒子或轨迹。
+
+在 RTX 5090、seed 0、单环境的 FastRT 复核中，最终接水 171.22 mL，杯子放回误差 1.80 mm，回合成功。相同种子的 NoRender 运行中接水 245.72 mL，但杯子偏离放回点 135.08 mm，回合失败。复现本部署时请保留配置指定的 FastRT。
 
 ## 依赖
 

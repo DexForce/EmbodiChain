@@ -54,8 +54,8 @@ def _run_episode(variant: str, seed: int) -> dict[str, Any]:
     payload.update(
         num_envs=1,
         headless=True,
-        renderer="hybrid",
-        device="cpu",
+        renderer="no-render" if variant == "cobotmagic" else "hybrid",
+        device="cuda:0" if variant == "cobotmagic" else "cpu",
         enable_sensor=False,
         seed=seed,
     )
@@ -122,15 +122,18 @@ def _run_episode(variant: str, seed: int) -> dict[str, Any]:
         )
         pouring = np.stack(poses[segment["start_step"] : segment["end_step"]])
         if variant == "cobotmagic":
-            contract = segment["metadata"]["segment_contract"]
-            liquid_transfer = next(
-                item
-                for item in contract["outcomes"]
-                if item["ref"] == "liquid_transfer"
-            )
-            assert liquid_transfer["status"] == ["unavailable"]
-            assert liquid_transfer["required"] is False
-            assert contract["accepted_mask"] == [True]
+            volume = cfg.observations.received_volume
+            received_m3 = volume.func(env, {}, **volume.params)
+            assert received_m3[0, 0].item() >= 0.00005
+            # Counterfactual terminal state: preserve robot, object poses and
+            # completed program, relocate only the water outside the receiver.
+            water = env.sim.get_fluid_object("water")
+            spill = water.data.particle_state_w.clone()
+            spill[..., 0] = env.sim.arena_offsets[:, None, 0] + 2.0
+            water.write_particle_state_to_sim(spill)
+            assert volume.func(env, {}, **volume.params)[0, 0].item() == 0.0
+            assert not env.is_task_success()[0].item()
+
         errors = np.linalg.norm(pouring[:, :3, 3] - target, axis=-1)
         tilts = np.degrees(np.arccos(np.clip(pouring[:, 2, 2], -1.0, 1.0)))
         return {
@@ -204,7 +207,7 @@ def test_pour_keeps_bottle_grasped_tilts_and_returns(
         cwd=_REPOSITORY_ROOT,
         capture_output=True,
         text=True,
-        timeout=180,
+        timeout=1800 if variant == "cobotmagic" else 180,
         check=False,
     )
     assert process.returncode == 0, process.stdout + process.stderr

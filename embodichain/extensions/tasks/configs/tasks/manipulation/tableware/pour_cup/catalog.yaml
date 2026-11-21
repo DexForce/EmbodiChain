@@ -1,8 +1,10 @@
 task_key: pour_cup
+variant_of: pour_water
 title: Pour into a Bowl
 summary: Lift and tilt a cup, collect at least 50 mL of simulated fluid in the bowl, then return the cup.
 tags: [manipulation, fluid, task_program]
 default_deployment: franka_fluid
 deployments:
   franka_fluid:
+    validation: validation/franka_fluid.json
     config: task.franka.fluid.yaml

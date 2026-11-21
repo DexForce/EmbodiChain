@@ -420,10 +420,6 @@ def _load_catalog(roots: Mapping[str, Traversable]) -> list[_Task]:
                         (name, _relative_resource(directory, declaration.get("config")))
                     )
                 default = _text(metadata["default_deployment"], "default_deployment")
-                if default not in declarations:
-                    raise ValueError(
-                        "default_deployment must name a declared deployment"
-                    )
             else:
                 default = None
                 selected = [(resource.name, resource) for resource in resources]
@@ -558,7 +554,11 @@ def _load_catalog(roots: Mapping[str, Traversable]) -> list[_Task]:
     primary = {(task.package, task.key.casefold()): task for task in tasks}
     for variant, parent_key in variants:
         parent = primary.get((variant.package, parent_key.casefold()))
-        if parent is None or len(variant.deployments) != 1:
+        if (
+            parent is None
+            or len(variant.deployments) != 1
+            or variant.default_deployment != variant.deployments[0].name
+        ):
             raise ValueError(
                 f"{variant.qualified_key} must extend a primary task with one deployment"
             )
@@ -570,6 +570,11 @@ def _load_catalog(roots: Mapping[str, Traversable]) -> list[_Task]:
         parent.deployments.append(deployment)
         parent.aliases.update(variant.aliases)
         parent.aliases[variant.key.casefold()] = deployment
+    for task in tasks:
+        if task.default_deployment and task.default_deployment not in {
+            d.name for d in task.deployments
+        }:
+            raise ValueError("default_deployment must name a declared deployment")
     for package, root in roots.items():
         portfolio = root.joinpath("portfolio.yaml")
         if portfolio.is_file():

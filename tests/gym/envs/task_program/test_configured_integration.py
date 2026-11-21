@@ -792,16 +792,18 @@ def test_pour_water_integration_declares_live_transport_and_axis_aware_pour() ->
     assert options["pick"].fixed_object_to_eef == pytest.approx(
         torch.tensor(
             (
-                (-0.0530918874, 0.4963395894, 0.8665033579, 0.0358702540),
+                (-0.0530918874, 0.4963395894, 0.8665033579, 0.035870254),
                 (-0.0525476672, -0.8679134846, 0.4939277470, 0.0204655528),
-                (0.9972059727, -0.0193091929, 0.0721606836, 0.0321167707),
+                (0.9972059727, -0.0193091929, 0.0721606836, -0.010),
                 (0.0, 0.0, 0.0, 1.0),
             )
         ),
     )
     assert type(options["simulation.move_held_object"]) is MoveHeldObjectOptions
     assert type(options["simulation.pour"]) is PourOptions
-    assert options["simulation.pour"].rotate_angle == pytest.approx(-torch.pi / 3)
+    assert options["simulation.pour"].rotate_angle == pytest.approx(
+        -105 * torch.pi / 180
+    )
     assert type(options["place"]) is PlaceOptions
     assert options["place"].hand_interp_steps == 44
     assert options["place"].release_settle_steps == 60
@@ -867,13 +869,11 @@ def test_pour_water_mouth_alignment_and_measured_checkpoints() -> None:
         + torch.linalg.cross(axis, mouth) * torch.sin(theta)
         + axis * torch.dot(axis, mouth) * (1 - torch.cos(theta))
     )
-    torch.testing.assert_close(
-        (relative[:3, 3] + rotated)[:2],
-        torch.zeros(2, dtype=torch.float64),
-        atol=1e-7,
-        rtol=0,
-    )
-    assert float(relative[2, 3] + rotated[2]) >= 0.21
+    mouth_target = relative[:3, 3] + rotated
+    # Leave room for the stream to travel from the lip into the cup.
+    assert float(torch.dot(mouth_target[:2], rotated[:2])) < 0
+    assert 0.01 < float(mouth_target[:2].norm()) < 0.04
+    assert 0.045 < float(mouth_target[2]) < 0.095
     assert predicate["displacement"] == pytest.approx(relative[:3, 3].tolist())
     condition = segments[1].validators[0].spec
     qualified_cup = torch.tensor([[0.75, 0.1, 0.921, 0.0, 0.0, 0.5**0.5, 0.5**0.5]])
@@ -2894,7 +2894,7 @@ def test_configured_motion_budgets_reject_invalid_values(
         ("open_drawer", "default"),
         ("open_drawer", "newton"),
         ("hand_over", "default"),
-        ("pour_water", "default"),
+        ("pour_water", "newton"),
     ],
 )
 def test_segmented_examples_preserve_overall_and_segment_instructions(
@@ -2909,7 +2909,7 @@ def test_segmented_examples_preserve_overall_and_segment_instructions(
         else _config_path(task_name)
     )
     config = load_config(path)
-    if backend == "newton":
+    if backend in config["environment"]:
         config["environment"] = {"component": config["environment"][backend]}
     config["id"] = _TEST_ENV_ID
     registered_test_ids.append(_TEST_ENV_ID)

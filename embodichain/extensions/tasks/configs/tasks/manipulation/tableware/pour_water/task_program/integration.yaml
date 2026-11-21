@@ -34,10 +34,14 @@ profile:
   skill_options:
     pick:
       kind: pick_up
+      # Approach sideways so the wide palm clears the bottle neck.
+      cartesian_lift: true
+      approach_along_grasp_axis: true
+      pre_grasp_distance: 0.08
       hand_interp_steps: 44
       grasp_settle_steps: 100
       fixed_object_to_eef:
-        position: [0.035870254, 0.0204655528, 0.0321167707]
+        position: [0.035870254, 0.0204655528, -0.010]
         rotation_matrix:
         - [-0.0530918874, 0.4963395894, 0.8665033579]
         - [-0.0525476672, -0.8679134846, 0.493927747]
@@ -46,7 +50,10 @@ profile:
       kind: move_held_object
     simulation.pour:
       kind: pour
-      rotate_angle: -1.0471975511965976
+      rotate_angle: -1.8325957145940461
+      rotation_duration: 2.5
+      # The narrow neck continues discharging after reaching maximum tilt.
+      dwell_duration: 8.0
     place:
       kind: place
       hand_interp_steps: 44
@@ -60,7 +67,7 @@ runtime_services:
       target_id: cup_pour_pose
       reference_entity_id: cup
       relative_pose:
-        position: [0.027645135849048517, -0.053564902897726294, 0.18]
+        position: [0.040, -0.085, 0.080]
         quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
     - kind: pour
       object_id: bottle

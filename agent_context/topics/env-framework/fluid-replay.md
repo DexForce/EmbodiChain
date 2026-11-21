@@ -33,6 +33,8 @@ to a receiver-relative pour pose through the existing MoveHeldObject lowerer,
 then pours and returns it. The standalone Sim example uses the same physical
 component and relative pour target with freshly planned Atomic Action targets.
 
+The official `pour_water` catalog groups this Franka deployment and the CobotMagic bottle deployment. Both select receiver-local fluid-volume final acceptance. CobotMagic additionally restricts the measured volume to a tapered inner profile. Other bottle deployments retain their rigid-body motion criteria.
+
 Program completion and physical qualification are separate. The deployment's
 `collection.qualification` declares generic `object_motion` bounds and named
 numeric observation bounds. `demo.DemoQualification` tracks motion extrema on

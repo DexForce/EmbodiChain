@@ -20,14 +20,13 @@ shadow_pen_continuous: {purpose: training}
 drawer_storage: {purpose: showcase, featured: [ur5]}
 gaussian_pick_place: {purpose: showcase, featured: [office]}
 route_the_cable: {purpose: showcase, featured: [yam]}
-pour_cup: {purpose: showcase, featured: [franka_fluid]}
 cloth_fold: {purpose: showcase}
 carton_stocking: {purpose: showcase}
 open_drawer: {purpose: showcase}
 hand_over: {purpose: showcase}
 repeated_pick_place: {purpose: showcase}
 blocks_ranking_rgb: {purpose: showcase}
-pour_water: {purpose: showcase}
+pour_water: {purpose: showcase, featured: [franka_fluid]}
 stack_blocks_two:
   purpose: showcase
   overrides: {policy_cobotmagic: research}

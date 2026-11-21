@@ -142,6 +142,8 @@ inline `robot`, `sensor`, and scene fields continue to parse unchanged.
 An embodiment selector permits robot installation `overrides` (`uid`,
 `init_pos`, `init_rot`, `init_qpos`), bounded robot calibration in the same
 mapping, and a separate `camera_overrides` mapping keyed by camera UID.
+Newton embodiments can opt into follower-drive stabilization for existing mimic joints through
+`root_props.newton_mimic_stabilizer`.
 Calibration may replace finite, nonnegative `joint_drive_props.stiffness` or
 `damping` values for entries the component already names, and a declared
 hand's `grippers.<instance>.commands.open` or `grasp` with positions for every

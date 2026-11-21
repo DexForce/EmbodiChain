@@ -1,0 +1,57 @@
+{
+  "status": "measured",
+  "deployment": "cobotmagic",
+  "seed": 0,
+  "device": "NVIDIA GeForce RTX 5090",
+  "engine": "dexsim-engine 0.6.0",
+  "renderer": "no-render",
+  "minimum_received_ml": 50,
+  "results": [
+    {
+      "case": "nominal",
+      "action_source": "Task Program expert",
+      "execution_outcome": {
+        "status": "success",
+        "control_steps": 3669,
+        "segments_passed": 4
+      },
+      "physical_outcome": {
+        "success": true,
+        "final_received_ml": 58.671
+      },
+      "dwell_seconds": 8,
+      "aim_offset_x_m": 0.0
+    },
+    {
+      "case": "short_dwell",
+      "action_source": "Task Program expert",
+      "execution_outcome": {
+        "status": "task_incomplete",
+        "control_steps": 3268,
+        "segments_passed": 4
+      },
+      "physical_outcome": {
+        "success": false,
+        "final_received_ml": 48.9206
+      },
+      "dwell_seconds": 4,
+      "aim_offset_x_m": 0.0
+    },
+    {
+      "case": "miss",
+      "action_source": "Task Program expert",
+      "execution_outcome": {
+        "status": "task_incomplete",
+        "control_steps": 3368,
+        "segments_passed": 4
+      },
+      "physical_outcome": {
+        "success": false,
+        "final_received_ml": 0.0
+      },
+      "dwell_seconds": 4,
+      "aim_offset_x_m": -0.12
+    }
+  ],
+  "summary": "Seed 0: received 58.67 mL on target. A 120 mm off-target trial completed four segments with 0 mL and failed acceptance."
+}
