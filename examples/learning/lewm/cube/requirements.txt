@@ -5,7 +5,7 @@ mujoco-warp==3.15.0
 newton==1.7.0
 warp-lang==1.17.0
 transformers==4.53.3; python_version < "3.12"
-transformers==5.5.4; python_version >= "3.12"
+transformers==5.17.0; python_version >= "3.12"
 einops==0.8.2
 numpy==2.2.6
 scipy==1.17.1; python_version < "3.12"

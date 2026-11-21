@@ -28,6 +28,47 @@ from ._architecture import ARPredictor, Embedder, MLP
 
 __all__ = ["LeWMCfg", "LeWM", "preprocess_rgb"]
 
+_VIT_LAYER_RENAMES = {
+    "attention.attention.query": "attention.q_proj",
+    "attention.attention.key": "attention.k_proj",
+    "attention.attention.value": "attention.v_proj",
+    "attention.output.dense": "attention.o_proj",
+    "intermediate.dense": "mlp.fc1",
+    "output.dense": "mlp.fc2",
+    "layernorm_before": "layernorm_before",
+    "layernorm_after": "layernorm_after",
+}
+
+
+def _remap_vit_layer_keys(
+    module: nn.Module,
+    state_dict: dict[str, torch.Tensor],
+    prefix: str,
+    _local_metadata: dict[str, object],
+    _strict: bool,
+    _missing_keys: list[str],
+    _unexpected_keys: list[str],
+    _error_msgs: list[str],
+) -> None:
+    """Match checkpoint keys to the receiving Transformers ViT layout."""
+    source_layers, target_layers = f"{prefix}encoder.layer.", f"{prefix}layers."
+    renames = _VIT_LAYER_RENAMES
+    if not hasattr(module, "layers"):
+        source_layers, target_layers = target_layers, source_layers
+        renames = {new: old for old, new in renames.items()}
+    for key in tuple(state_dict):
+        if not key.startswith(source_layers):
+            continue
+        layer, _, parameter = key[len(source_layers) :].partition(".")
+        component, _, name = parameter.rpartition(".")
+        target_component = renames.get(component)
+        if target_component is None:
+            continue
+        target = f"{target_layers}{layer}.{target_component}.{name}"
+        # Keep conflicting aliases visible to PyTorch's strict key validation.
+        if target not in state_dict:
+            state_dict[target] = state_dict.pop(key)
+
 
 @configclass
 class LeWMCfg:
@@ -142,7 +183,7 @@ class LeWM(nn.Module):
         except ImportError as exc:
             raise ImportError(
                 "LeWM requires Transformers. Install 'transformers>=4.53,<4.54' on "
-                "Python 3.11 or 'transformers>=5.4,<5.6' on Python 3.12 and newer. "
+                "Python 3.11 or 'transformers==5.17.0' on Python 3.12 and newer. "
                 "For the Cube example, install examples/learning/lewm/cube/requirements.txt."
             ) from exc
         vit = ViTConfig(
@@ -154,6 +195,7 @@ class LeWM(nn.Module):
             intermediate_size=4 * c.embed_dim,
         )
         self.encoder = ViTModel(vit, add_pooling_layer=False, use_mask_token=False)
+        self.encoder.register_load_state_dict_pre_hook(_remap_vit_layer_keys)
         self.predictor = ARPredictor(
             num_frames=c.history_size,
             depth=c.predictor_depth,
