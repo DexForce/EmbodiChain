@@ -120,6 +120,16 @@ def _check_drawer_episode():
         assert result.completed and result.all_success, result.to_metadata()
 
 
+def _check_microwave_episode():
+    from embodichain.lab.gym.envs.demo import execute_demo_episode
+
+    with _workcell("robocasa365_open_microwave", num_envs=1) as env:
+        assert not env.is_task_success().any()
+        result = execute_demo_episode(env)
+        assert result.completed and result.all_success, result.to_metadata()
+        assert bool(env.is_task_success()[0])
+
+
 @pytest.mark.requires_sim
 @pytest.mark.subprocess_sim
 @pytest.mark.parametrize(
@@ -128,6 +138,7 @@ def _check_drawer_episode():
         "_check_microwave_door",
         "_check_drawer_storage",
         pytest.param("_check_drawer_episode", marks=pytest.mark.slow),
+        pytest.param("_check_microwave_episode", marks=pytest.mark.slow),
     ],
 )
 def test_native_workcell(check):

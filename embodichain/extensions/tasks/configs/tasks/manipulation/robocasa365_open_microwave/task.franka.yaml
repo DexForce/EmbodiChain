@@ -10,5 +10,5 @@ embodiment:
         target: [0.0, -0.12, 0.42]
         up: [0, 0, 1]
   overrides:
-    init_pos: [-0.2, -0.65, 0.38]
-    init_rot: [0, 0, 90]
+    init_pos: [-0.10, -1.00, 0.32]
+    init_rot: [0, 0, 93]
