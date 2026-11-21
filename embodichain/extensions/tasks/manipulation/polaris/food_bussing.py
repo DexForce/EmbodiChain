@@ -24,7 +24,15 @@ from embodichain.lab.gym.utils.registration import register_env
 __all__ = ["PolarisDroidFoodBussingEnv"]
 
 
-@register_env("PolarisDroidFoodBussing-v1", max_episode_steps=450)
+@register_env(
+    "PolarisDroidFoodBussingExpert-v1",
+    max_episode_steps=450,
+    supports_handwritten_demo=True,
+    expert_initial_condition=0,
+)
+@register_env(
+    "PolarisDroidFoodBussing-v1", max_episode_steps=450, supports_handwritten_demo=False
+)
 class PolarisDroidFoodBussingEnv(PolarisDroidEnv):
     """Evaluate the food bussing rubric."""
 

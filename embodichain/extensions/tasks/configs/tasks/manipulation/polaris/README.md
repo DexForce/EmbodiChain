@@ -7,7 +7,7 @@ The six catalog entries run independently. Each pairs a real captured Gaussian b
 | [polaris_move_latte_cup](move_latte_cup/README.md) | Place the latte cup on the cutting board. |
 | [polaris_block_stack_kitchen](block_stack_kitchen/README.md) | Place both cubes in the green tray, then stack the green cube over the wood cube. |
 | [polaris_food_bussing](food_bussing/README.md) | Place both the ice cream and the grapes in the yellow bowl. |
-| [polaris_pan_clean](pan_clean/README.md) | Release the sponge over the frying pan. |
+| [polaris_pan_clean](pan_clean/README.md) | Scrub the frying pan with the sponge and release it in the pan. |
 | [polaris_organize_tools](organize_tools/README.md) | Place the scissors in the large container. |
 | [polaris_tape_into_container](tape_into_container/README.md) | Place the tape in the container. |
 
@@ -37,6 +37,18 @@ try:
 finally:
     env.close()
 ```
+
+## Running the handwritten expert
+
+Each catalog entry also offers an `expert` deployment. It uses the same physical scene, DROID robot, controller, 450-step limit and evaluator as the `droid` deployment. Its default reset selects published initial condition 0. To run one autonomous episode of Pan Clean from a checkout:
+
+```bash
+embodichain run-task --gym-config embodichain/extensions/tasks/configs/tasks/manipulation/polaris/pan_clean/task.expert.yaml --headless --seed 42 --max_episodes 1
+```
+
+Use another scene folder from the table to run its expert. In Python, load the scene's `task.expert.yaml` as above, then call `env.reset(seed=42)` followed by `execute_demo_episode(env)` from `embodichain.lab.gym.envs`. The result includes the step count, segment outcomes and task success.
+
+The expert reads simulator object geometry and gripper pose, solves Panda inverse kinematics, and sends the same eight joint-position and gripper commands available to a policy. Grasp, lift, transport and release use simulated finger contact. The per-scene grasp and placement coordinates live under `env.extensions.expert` in the scene configuration. Pan Clean includes an outward and a return scrubbing stroke before release.
 
 ## Scoring and physical scope
 

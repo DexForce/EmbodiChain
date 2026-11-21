@@ -24,7 +24,17 @@ from embodichain.lab.gym.utils.registration import register_env
 __all__ = ["PolarisDroidTapeIntoContainerEnv"]
 
 
-@register_env("PolarisDroidTapeIntoContainer-v1", max_episode_steps=450)
+@register_env(
+    "PolarisDroidTapeIntoContainerExpert-v1",
+    max_episode_steps=450,
+    supports_handwritten_demo=True,
+    expert_initial_condition=0,
+)
+@register_env(
+    "PolarisDroidTapeIntoContainer-v1",
+    max_episode_steps=450,
+    supports_handwritten_demo=False,
+)
 class PolarisDroidTapeIntoContainerEnv(PolarisDroidEnv):
     """Evaluate the tape into container rubric."""
 

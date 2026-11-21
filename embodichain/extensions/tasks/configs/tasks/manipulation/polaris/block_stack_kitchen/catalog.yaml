@@ -9,3 +9,5 @@ default_deployment: droid
 deployments:
   droid:
     config: task.droid.yaml
+  expert:
+    config: task.expert.yaml

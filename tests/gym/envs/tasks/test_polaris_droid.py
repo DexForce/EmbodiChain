@@ -27,6 +27,7 @@ from embodichain.extensions.tasks.manipulation.polaris._env import (
     PLACEMENTS,
     PolarisRubric,
 )
+from embodichain.lab.gym.envs import execute_demo_episode
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
 
@@ -51,6 +52,15 @@ def test_official_deployment_composes_and_registers(scene):
         name for obj, target, _ in PLACEMENTS[scene] for name in (obj, target)
     }
     assert cfg.target_control_frequency == 15
+    expert = yaml.safe_load(
+        (folder / manifest["deployments"]["expert"]["config"]).read_text()
+    )
+    spec = REGISTERED_ENVS[expert["id"]]
+    assert spec.supports_handwritten_demo
+    assert spec.cls is REGISTERED_ENVS[deployment["id"]].cls
+    assert spec.default_kwargs["expert_initial_condition"] == 0
+    for grasp in cfg.extensions["expert"]:
+        assert {grasp["object"], grasp["target"]} <= names
 
 
 def test_single_object_order_release_and_partial_reset():
@@ -153,3 +163,29 @@ def test_move_latte_cup_physical_score_and_partial_reset():
         assert not target.is_task_success().any()
     finally:
         target.close(exit_process=False)
+
+
+@pytest.mark.slow
+@pytest.mark.requires_sim
+@pytest.mark.gpu
+def test_pan_clean_expert_scrubs_and_releases_sponge():
+    """Run the real gripper through both scrubbing strokes before native success."""
+    path = ROOT / "pan_clean/task.expert.yaml"
+    deployment = yaml.safe_load(path.read_text())
+    cfg = config_to_cfg(deployment, source_path=path)
+    cfg.init_rollout_buffer = False
+    env = gym.make(deployment["id"], cfg=cfg)
+    try:
+        env.reset(seed=42)
+        target = env.unwrapped
+        assert not target.is_task_success().any()
+        result = execute_demo_episode(env)
+        assert result.completed and result.all_success
+        assert not any(result.truncated)
+        names = [segment.name for segment in result.segments]
+        assert names.index("sponge_lift") < names.index("sponge_scrub_out")
+        assert names.index("sponge_scrub_out") < names.index("sponge_scrub_back")
+        assert names.index("sponge_scrub_back") < names.index("sponge_release")
+        assert target.rubric.reached[0].all()
+    finally:
+        env.unwrapped.close(exit_process=False)
