@@ -166,7 +166,10 @@ def _geometry() -> tuple[torch.Tensor, torch.Tensor]:
 
 
 def _generator(
-    *, force_refresh: bool = False, alignment_angle: float | None = None
+    *,
+    force_refresh: bool = False,
+    alignment_angle: float | None = None,
+    weights: tuple[float, float, float] = (0.5, 0.5, 0.0),
 ) -> AntipodalGraspPoseGenerator:
     return AntipodalGraspPoseGenerator(
         model_id="concrete_test_eef",
@@ -176,6 +179,9 @@ def _generator(
             torch.zeros((1, 3)), {"grasp_from_tcp": torch.eye(4).tolist()}
         ),
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
+            angle_weight=weights[0],
+            center_weight=weights[1],
+            opening_weight=weights[2],
             sample_count=321,
             max_candidates=7,
             approach_alignment_angle=alignment_angle,
@@ -218,6 +224,36 @@ def test_generator_rejects_invalid_opening_bounds(
                 torch.zeros(1, 3), {"grasp_from_tcp": torch.eye(4).tolist()}
             ),
         )
+
+
+@pytest.mark.parametrize(
+    "weights",
+    [
+        {"angle_weight": -1},
+        {"center_weight": float("nan")},
+        {"opening_weight": float("inf")},
+        {"angle_weight": True},
+        {"opening_weight": "1"},
+        {"angle_weight": 0, "center_weight": 0, "opening_weight": 0},
+    ],
+)
+def test_ranking_configuration_rejects_invalid_weights(
+    weights: dict[str, object],
+) -> None:
+    with pytest.raises((TypeError, ValueError), match="weight"):
+        AntipodalGraspPoseGeneratorCfg(**weights)
+
+
+def test_ranking_configuration_round_trip_retains_relative_weights() -> None:
+    cfg = AntipodalGraspPoseGeneratorCfg(
+        angle_weight=2.0, center_weight=3.0, opening_weight=5.0
+    )
+    restored = AntipodalGraspPoseGeneratorCfg(**cfg.to_dict())
+    assert (restored.angle_weight, restored.center_weight, restored.opening_weight) == (
+        2.0,
+        3.0,
+        5.0,
+    )
 
 
 def test_package_exposes_only_the_unified_generator_api() -> None:
@@ -325,7 +361,8 @@ def test_direct_best_grasp_configures_and_reuses_private_mesh_backend(
     alignment_angle,
 ) -> None:
     vertices, triangles = _geometry()
-    generator = _generator(alignment_angle=alignment_angle)
+    weights = (0.25, 0.5, 0.25)
+    generator = _generator(alignment_angle=alignment_angle, weights=weights)
     object_poses = torch.eye(4).repeat(2, 1, 1)
 
     success, grasp_poses, opening_widths = generator.get_best_grasp_poses(
@@ -353,6 +390,7 @@ def test_direct_best_grasp_configures_and_reuses_private_mesh_backend(
     assert sampler_cfg.max_length == 0.12
     assert sampler_cfg.center_mode == "bounds"
     assert configured.options["max_candidates"] == 7
+    assert configured.options["ranking_weights"] == weights
     assert configured.options["approach_alignment_angle"] == alignment_angle
     assert configured.options["filter_ground_collision"] is False
     assert collision_cfg.max_decomposition_hulls == 5

@@ -591,7 +591,9 @@ materialization owns selection and emits a new bound deployment before ordinary
 compilation. See [asset generalization](../asset-generalization/asset-generalization.md)
 for supported adaptations, provenance and integrity boundaries.
 
-Embodiment grasp services may explicitly select `approach_deviation_angle`,
-`max_candidates` and `center_mode` (`bounds` or `centroid`). Omitted fields
-retain toolkit defaults and the prior integration fingerprint. These numerical
-search declarations do not change contact/effect evidence requirements.
+Embodiment grasp services may explicitly select search and ranking policy;
+the fields and scoring semantics are owned by the
+[GraspKit guide](../../../embodichain/toolkits/graspkit/README.md#ranking-preferences).
+Omitted fields retain toolkit defaults and the prior integration fingerprint.
+Declared ranking weights participate in service identity and do not change
+opening eligibility or contact/effect evidence requirements.

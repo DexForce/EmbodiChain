@@ -1756,6 +1756,9 @@ def test_grasp_generator_resolves_named_model_and_library_defaults() -> None:
     assert factory.max_opening_width == pytest.approx(0.1)
     assert factory.sample_count is None
     assert factory.approach_direction_samples is None
+    assert factory.angle_weight is None
+    assert factory.center_weight is None
+    assert factory.opening_weight is None
     assert factory.point_spacing == pytest.approx(0.012)
     assert factory.root_from_tcp is None
     assert factory.filter_ground_collision is None
@@ -1775,6 +1778,9 @@ def test_grasp_generator_factory_defers_to_toolkit_policy_defaults() -> None:
 
     assert generator.algorithm_cfg.sample_count == 20_000
     assert generator.algorithm_cfg.approach_direction_samples == 4
+    assert generator.algorithm_cfg.angle_weight == 0.5
+    assert generator.algorithm_cfg.center_weight == 0.5
+    assert generator.algorithm_cfg.opening_weight == 0.0
     assert generator.collision_geometry.provenance["point_spacing_m"] == pytest.approx(
         0.012
     )
@@ -1814,6 +1820,9 @@ def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch)
             "approach_deviation_angle": 0.3490658503988659,
             "max_candidates": 500,
             "center_mode": "centroid",
+            "angle_weight": 2.0,
+            "center_weight": 3.0,
+            "opening_weight": 5.0,
             "root_from_contact_frame": contact,
         },
         path="generator",
@@ -1822,6 +1831,9 @@ def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch)
     assert generator.algorithm_cfg.approach_deviation_angle == 0.3490658503988659
     assert generator.algorithm_cfg.max_candidates == 500
     assert generator.algorithm_cfg.center_mode == "centroid"
+    assert generator.algorithm_cfg.angle_weight == 2.0
+    assert generator.algorithm_cfg.center_weight == 3.0
+    assert generator.algorithm_cfg.opening_weight == 5.0
 
     assert geometry_values["root_from_contact_frame"] == contact
 
@@ -1834,6 +1846,11 @@ def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch)
         {"max_candidates": 0},
         {"max_candidates": True},
         {"center_mode": "guessed"},
+        {"angle_weight": -0.1},
+        {"center_weight": float("inf")},
+        {"opening_weight": float("nan")},
+        {"opening_weight": True},
+        {"angle_weight": 0, "center_weight": 0},
         {"root_from_contact_frame": [[0.0] * 4 for _ in range(4)]},
     ],
 )
@@ -1847,6 +1864,32 @@ def test_grasp_search_declarations_reject_invalid_values_before_construction(val
             },
             path="generator",
         )
+
+
+def test_task_grasp_ranking_overrides_change_service_identity() -> None:
+    path = _config_path("hand_over")
+    config = _gym_config("hand_over")
+    physical = _physical_components(path, config)
+    original = load_configured_task_program_deployment(
+        task_program=config["task_program"],
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=path.parent,
+    )
+    _, declaration, _ = _resolve_task_program_components(
+        config["task_program"], base_dir=path.parent
+    )
+    declaration.setdefault("runtime_services", {})["grasp_pose_generator_overrides"] = {
+        "left_eef": {"angle_weight": 0.25, "center_weight": 0.5, "opening_weight": 0.25}
+    }
+    tuned = load_configured_task_program_deployment(
+        task_program={**config["task_program"], "integration": {"inline": declaration}},
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=path.parent,
+    )
+    assert (
+        tuned.integration.integration_fingerprint
+        != original.integration.integration_fingerprint
+    )
 
 
 @pytest.mark.parametrize(

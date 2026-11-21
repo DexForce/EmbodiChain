@@ -46,6 +46,41 @@ mesh-path mappings when a registered archive requires them. The loader records
 URDF/mesh hashes, resolved joint transforms and the sampled geometry. It does
 not construct a robot or simulator.
 
+## Ranking preferences
+
+`AntipodalGraspPoseGeneratorCfg` exposes relative `angle_weight`,
+`center_weight` and `opening_weight` values. Defaults are `0.5`, `0.5` and
+`0.0`: closing axes closer to perpendicular to the requested approach and
+contact midpoints closer to the selected mesh center receive lower costs.
+Opening width has no default preference. A positive `opening_weight` rewards
+larger legal openings; `(0.25, 0.5, 0.25)` restores the previous scoring policy.
+
+```python
+from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGeneratorCfg
+
+algorithm_cfg = AntipodalGraspPoseGeneratorCfg(
+    angle_weight=0.5,
+    center_weight=0.5,
+    opening_weight=0.0,
+)
+```
+
+Weights must be finite, nonnegative and not all zero. Scoring normalizes their
+sum while configuration snapshots retain the original values. Angle cost uses
+deviation divided by pi/2; center cost uses distance divided by the farthest
+surviving candidate's distance, with an epsilon guard for centered candidates.
+Equal weights therefore specify coefficients, not equal physical tolerances.
+Ranking does not relax opening limits, angle eligibility or collision checks.
+Ordinary candidates and unqualified center proposals share this scoring policy.
+
+Configured Task Program grasp services accept the same three scalar fields
+alongside `center_mode` and `max_candidates`. These are algorithm settings,
+independent of the selected hand's physical description.
+
+Disk annotations contain contact pairs, not ranking costs. Changing weights
+does not require deleting `antipodal_cache_*.npy`; construct a generator with
+the desired algorithm configuration and reuse the annotations.
+
 ## Frames and collision scope
 
 Sampling, candidate ranking and collision checks use a canonical contact frame:

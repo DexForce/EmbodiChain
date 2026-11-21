@@ -360,6 +360,9 @@ class _AntipodalGraspPoseGeneratorFactory:
     approach_deviation_angle: float | None = None
     max_candidates: int | None = None
     center_mode: str | None = None
+    angle_weight: float | None = None
+    center_weight: float | None = None
+    opening_weight: float | None = None
     filter_ground_collision: bool | None = None
     force_refresh: bool | None = None
 
@@ -429,7 +432,14 @@ class _AntipodalGraspPoseGeneratorFactory:
             algorithm_kwargs["approach_direction_samples"] = (
                 self.approach_direction_samples
             )
-        for name in ("approach_deviation_angle", "max_candidates", "center_mode"):
+        for name in (
+            "approach_deviation_angle",
+            "max_candidates",
+            "center_mode",
+            "angle_weight",
+            "center_weight",
+            "opening_weight",
+        ):
             value = getattr(self, name)
             if value is not None:
                 algorithm_kwargs[name] = value

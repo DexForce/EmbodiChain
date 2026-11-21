@@ -49,6 +49,11 @@ from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
 )
 from embodichain.utils.math import get_pc_center_box
 from .fixed_geometry import FixedGripperCollisionGeometry
+from ._ranking import (
+    _DEFAULT_RANKING_WEIGHTS,
+    _grasp_costs,
+    _normalized_ranking_weights,
+)
 
 GRASP_ANNOTATOR_CACHE_DIR = (
     Path.home() / ".cache" / "embodichain" / "grasp_annotator_cache"
@@ -98,6 +103,7 @@ class _AntipodalMeshBackend:
         closing_geometry: SampledHandGeometry | None = None,
         closing_ground_height_m: float | None = None,
         closing_ground_clearance_m: float = 0.0,
+        ranking_weights: tuple[float, float, float] = _DEFAULT_RANKING_WEIGHTS,
     ) -> None:
         """Initialize the private backend for one target-local mesh.
 
@@ -110,6 +116,7 @@ class _AntipodalMeshBackend:
             max_deviation_angle: Maximum approach-axis deviation in radians.
             approach_direction_samples: Number of approach variants per pair.
             max_candidates: Maximum number of ranked candidates to retain.
+            ranking_weights: Relative angle, center and larger-opening weights.
             check_collision: Construct and use the fixed-hand checker; false
                 serves explicit unqualified proposal queries only.
             prepared: Same-generator backend whose immutable mesh/annotation
@@ -161,6 +168,7 @@ class _AntipodalMeshBackend:
         self._approach_alignment_angle = approach_alignment_angle
         self._approach_direction_samples = approach_direction_samples
         self._max_candidates = max_candidates
+        self._ranking_weights = _normalized_ranking_weights(*ranking_weights)
         self._interactive_annotation = interactive_annotation
         self._viser_port = viser_port
         self._use_largest_connected_component = use_largest_connected_component
@@ -934,18 +942,14 @@ class _AntipodalMeshBackend:
             geometry.widths,
             geometry.centers,
         )
-        valid_grasp_x = F.normalize(valid_grasp_poses[:, :3, 0], dim=-1)
-
-        cos_angle = torch.clamp(
-            (valid_grasp_x * approach_direction).sum(dim=-1), -1.0, 1.0
+        total_cost = _grasp_costs(
+            valid_grasp_poses,
+            valid_open_lengths,
+            valid_centers,
+            approach_direction,
+            mesh_center,
+            self._ranking_weights,
         )
-        positive_angle = torch.abs(torch.acos(cos_angle))
-        angle_cost = torch.abs(positive_angle - 0.5 * torch.pi) / (0.5 * torch.pi)
-        center_distance = torch.norm(valid_centers - mesh_center, dim=-1)
-        center_cost = center_distance / center_distance.max().clamp_min(
-            torch.finfo(center_distance.dtype).eps
-        )
-        total_cost = 0.5 * angle_cost + 0.5 * center_cost
 
         n_valid = valid_grasp_poses.shape[0]
         if n_valid == 0:
