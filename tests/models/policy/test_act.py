@@ -110,6 +110,25 @@ def test_native_reload_matches_upstream_processors_and_reset(artifact):
     torch.testing.assert_close(loaded.select_action(rgb, state), expected)
     assert loaded.select_action(rgb, state).device.type == "cpu"
 
+    # Independent lanes keep separate action histories in the native ensemble.
+    states = torch.cat((state, state + 1))
+    expected_lanes = []
+    for lane in states:
+        loaded.reset()
+        loaded.select_action(rgb, lane[None])
+        expected_lanes.append(loaded.select_action(rgb, (lane + 0.1)[None]))
+    loaded.reset()
+    pixels = rgb.expand(2, -1, -1, -1)
+    loaded.select_action(pixels, states)
+    with pytest.raises(ValueError, match="Reset the ACT temporal ensemble"):
+        loaded.select_action(rgb, state)
+    torch.testing.assert_close(
+        loaded.select_action(pixels, states + 0.1),
+        torch.cat(expected_lanes),
+        atol=1e-5,
+        rtol=1e-5,
+    )
+
 
 def test_artifact_mutation_and_legacy_checkpoints_are_rejected(
     artifact, tmp_path: Path
@@ -132,7 +151,18 @@ def test_validation_uses_frozen_stats_and_valid_element_weighting(artifact, act_
     with torch.no_grad():
         loaded.policy.model.action_head.weight.zero_()
         loaded.policy.model.action_head.bias.zero_()
+    processor = loaded.preprocessor
+    seen_pixels = []
+
+    def capture_pixels(batch):
+        seen_pixels.extend(batch[loaded.image_key][:, 0, 0, 0].tolist())
+        return processor(batch)
+
+    loaded.preprocessor = capture_pixels
     report = loaded.evaluate_dataset(data, batch_size=2)
+    assert sorted(seen_pixels) == pytest.approx(
+        [v / 255 for v in (0, 1, 2, 10, 11, 12)]
+    )
     # Two length-three episodes yield 12 valid future frames, each with two
     # action elements. Frozen mean=[1,2], std=[2,3] gives total absolute error 10.
     assert report["valid_action_elements"] == 24
@@ -159,3 +189,20 @@ def test_portable_policy_manifest_prevents_train_and_selection_seed_overlap(arti
             _validate_policy_identity(loaded.metadata, root, panel="test", seeds=[seed])
     _validate_policy_identity(loaded.metadata, root, panel="test", seeds=[400000])
     _validate_policy_identity(loaded.metadata, root, panel="overfit", seeds=[100000])
+
+
+def test_rgb_landmarks_are_causal_scale_invariant_and_handle_missing_colors():
+    from embodichain.extensions.models.policy.act.runtime import _image_state
+
+    rgb = torch.zeros(2, 3, 8, 8, dtype=torch.uint8)
+    rgb[0, 0, :4, :4] = 220
+    rgb[0, 1, 4:, 4:] = 220
+    state = torch.randn(2, 9)
+    packed = _image_state(rgb, state)
+    torch.testing.assert_close(packed, _image_state(rgb.float() / 255, state))
+    torch.testing.assert_close(packed[:, :9], state)
+    torch.testing.assert_close(
+        packed[0, 9:13], torch.tensor([-2 / 3, 2 / 3, -2 / 3, 2 / 3])
+    )
+    torch.testing.assert_close(packed[0, 13:], torch.ones(2))
+    torch.testing.assert_close(packed[1, 9:], torch.zeros(6))

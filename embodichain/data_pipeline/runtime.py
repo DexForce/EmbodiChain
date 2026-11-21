@@ -110,7 +110,13 @@ class ODSFlowController:
         if engine.cfg.refill_policy != "manual":
             raise ValueError("ODSFlowController requires manual refill")
         limit = self.cfg.max_generated_episodes
-        if limit is not None and limit < engine.buffer_size:
+        self._grouped = getattr(engine.cfg, "group_min_draws", None) is not None
+        self._publication_size = (
+            engine.resolved_gym_config["num_envs"]
+            if self._grouped
+            else engine.buffer_size
+        )
+        if limit is not None and limit < self._publication_size:
             raise ValueError(
                 "Production limit cannot be smaller than the initial cache"
             )
@@ -197,14 +203,15 @@ class ODSFlowController:
         limit = self.cfg.max_generated_episodes
         return (
             limit is None
-            or state["successful_episodes"] + self.engine.buffer_size <= limit
+            or state["successful_episodes"] + self._publication_size <= limit
         )
 
     def request_refill(self) -> int | None:
         """Request or coalesce a fill within the accepted-episode ceiling.
 
         Returns:
-            Pending or newly requested generation, or None if no whole cache fits.
+            Pending or newly requested generation, or None if the next publication
+            exceeds the ceiling or its destination has insufficient draw credit.
         """
         self.poll()
         state = self.engine.get_flow_status()
@@ -214,7 +221,13 @@ class ODSFlowController:
         if not self._room(state):
             return None
         started = time.monotonic()
-        generation = self.engine.request_refill()
+        generation = (
+            self.engine.try_refill_group()
+            if self._grouped
+            else self.engine.request_refill()
+        )
+        if generation is None:
+            return None
         if generation != self._last_refill:
             self._last_refill = generation
             if self._on_refill is not None:

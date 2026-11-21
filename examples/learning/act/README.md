@@ -6,6 +6,8 @@ normalization, loss, temporal ensemble, optimizer updates and native checkpoints
 The example invokes `lerobot.scripts.lerobot_train` directly. The shared
 EmbodiChain SL trainer remains available for the dynamics model workflows.
 
+The [single-layer grouped ODS study](GROUP_PUBLICATION.md) uses the core producer-width publication and optimizer credit interfaces for live visual training.
+
 ## Environment and control contract
 
 Use Python 3.12 with `lerobot[training]==0.6.1`, DexSim 0.5.1rc1 and the native

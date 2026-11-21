@@ -54,6 +54,25 @@
    so DataLoader can collate; batch mode re-samples a dynamic chunk per yield. Multi-worker
    readers sample shared memory independently.
 
+## Group publication and optimizer credits
+
+An owner can select producer-width publication by setting `group_min_draws`
+on a manual, uncapped CPU engine with provenance and at least two complete
+groups. Each request advances the write range by one group; READY follows the
+first group's publication. The default whole-buffer lifecycle remains the
+contract for configs that omit this option.
+
+Use `snapshot_group` for owned calibration fields and `group_batch` for
+anchor observations and a masked future action window. Successful exit from
+the sampling context credits one draw per anchor to its resident slot. The
+learner synchronizes successful optimizer work inside that context. Exceptions
+discard the pending credits. One creator-owned update can be outstanding.
+`try_refill_group` checks every credit count in the destination group and
+coalesces an outstanding request. `get_group_release` exposes the displaced
+episode IDs and their counts for audit. Rows left resident at shutdown can have
+fewer draws than the recycling floor. The ACT example owns the deadline and
+physical scoring. See the [grouped ACT study](../../../examples/learning/act/GROUP_PUBLICATION.md).
+
 ## Environment sources and episode execution
 
 `OnlineDataEngineCfg.gym_config_path` selects a source-owned JSON/YAML declaration

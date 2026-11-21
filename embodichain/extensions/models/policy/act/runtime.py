@@ -50,6 +50,28 @@ def policy_fingerprint(path: str | Path) -> str:
     return digest.hexdigest()
 
 
+def _image_state(rgb: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
+    """Append image-plane centroids and visibility for the red cube and green target."""
+    red, green, blue = rgb[:, :, ::2, ::2].float().unbind(1)
+    # Relative chroma makes the masks independent of uint8 versus unit-range scaling.
+    mask = torch.stack(
+        (
+            (red > 1.6 * green) & (red > 1.6 * blue),
+            (green > 1.4 * red) & (green > 1.4 * blue),
+        ),
+        1,
+    ).float()
+    h, w = mask.shape[-2:]
+    mass = mask.sum((-2, -1))
+    u = (mask.sum(-2) * torch.linspace(-1, 1, w, device=rgb.device)).sum(
+        -1
+    ) / mass.clamp_min(1)
+    v = (mask.sum(-1) * torch.linspace(-1, 1, h, device=rgb.device)).sum(
+        -1
+    ) / mass.clamp_min(1)
+    return torch.cat((state.float(), u, v, (mass >= 3).float()), dim=-1)
+
+
 class ACTInferencePolicy:
     """Run the upstream policy and its frozen processors on the simulation device.
 
@@ -77,6 +99,7 @@ class ACTInferencePolicy:
     def reset(self) -> None:
         """Forget action chunks and ensemble history at every environment reset."""
         self.policy.reset()
+        self._batch_size: int | None = None
 
     @torch.inference_mode()
     def evaluate_dataset(
@@ -130,7 +153,14 @@ class ACTInferencePolicy:
         for batch in DataLoader(
             Subset(dataset, indices), batch_size=batch_size, num_workers=0
         ):
-            batch[self.image_key] = batch[self.image_key].float().div(255)
+            # Embedded PNG features can already be floats in [0,1] even with
+            # return_uint8=True. Match the upstream trainer's dtype contract.
+            if batch[self.image_key].dtype == torch.uint8:
+                batch[self.image_key] = batch[self.image_key].float().div(255)
+            if self.metadata.get("image_landmarks"):
+                batch["observation.state"] = _image_state(
+                    batch[self.image_key], batch["observation.state"]
+                )
             batch = self.preprocessor(batch)
             loss, _ = self.policy(batch)
             valid = int((~batch["action_is_pad"]).sum()) * len(
@@ -147,19 +177,40 @@ class ACTInferencePolicy:
         """Return a physical action after the official temporal ensemble.
 
         Args:
-            rgb: Current uint8 RGB pixels, shaped ``[1, 3, H, W]``.
-            state: Current ordered joint state, shaped ``[1, state_dim]``.
+            rgb: Current uint8 RGB pixels, shaped ``[B, 3, H, W]``.
+            state: Current ordered joint state, shaped ``[B, state_dim]``.
+                All lanes start together. Reset ensemble history before
+                changing the batch size or starting the next panel.
 
         Returns:
-            Finite commands ``[1, action_dim]`` on the policy device.
+            Finite commands ``[B, action_dim]`` on the policy device.
         """
-        if rgb.dtype != torch.uint8 or rgb.ndim != 4 or rgb.shape[0] != 1:
-            raise ValueError("ACT rollout expects one uint8 BCHW RGB observation")
+        if (
+            rgb.dtype != torch.uint8
+            or rgb.ndim != 4
+            or not rgb.shape[0]
+            or rgb.shape[1] != 3
+        ):
+            raise ValueError("ACT rollout expects a nonempty uint8 BCHW RGB batch")
+        if state.shape != (
+            rgb.shape[0],
+            len(self.metadata["schema"]["observation"]["names"]),
+        ):
+            raise ValueError(
+                "ACT joint state must match the RGB batch and the ordered state schema"
+            )
+        if self._batch_size is not None and self._batch_size != rgb.shape[0]:
+            raise ValueError(
+                "Reset the ACT temporal ensemble before changing batch size"
+            )
+        self._batch_size = rgb.shape[0]
+        if self.metadata.get("image_landmarks"):
+            state = _image_state(rgb, state)
         batch = self.preprocessor(
             {self.image_key: rgb.float().div(255), "observation.state": state.float()}
         )
         action = self.postprocessor(self.policy.select_action(batch))
-        expected = (1, len(self.metadata["schema"]["action"]["names"]))
+        expected = (rgb.shape[0], len(self.metadata["schema"]["action"]["names"]))
         if action.shape != expected or not torch.isfinite(action).all():
             raise ValueError("ACT produced non-finite or incompatible control commands")
         return action
@@ -177,7 +228,8 @@ def load_act_policy(
             and frozen data statistics, for the untrained baseline.
 
     Returns:
-        Stateful single-environment inference adapter. Call reset after env.reset.
+        Stateful inference adapter for synchronously reset lanes. Call reset
+        after env.reset.
 
     Raises:
         ValueError: If the directory is a historical custom ACT artifact or its
