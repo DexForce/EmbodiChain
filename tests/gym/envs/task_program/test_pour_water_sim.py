@@ -111,6 +111,25 @@ def _run_episode(variant: str, seed: int) -> dict[str, Any]:
                 .numpy()
                 .copy()
             )
+            if variant == "cobotmagic" and len(poses) == round(1.0 / env.step_dt):
+                # The seed-0 bottle is still upright and stationary at one second.
+                # A particle outside its bounding cylinder has escaped before pouring.
+                water = env.sim.get_fluid_object("water")
+                points = (
+                    (water.data.particle_pos_w[0] - env.sim.arena_offsets[0])
+                    .cpu()
+                    .numpy()
+                )
+                pose = poses[-1]
+                local = (points - pose[:3, 3]) @ pose[:3, :3]
+                inside = (
+                    (np.linalg.norm(local[:, :2], axis=1) <= 0.0295)
+                    & (local[:, 2] >= -0.0865)
+                    & (local[:, 2] <= 0.0705)
+                )
+                assert (
+                    inside.all()
+                ), f"{np.count_nonzero(~inside)} particles outside upright bottle"
             return result
 
         env.step = tracked_step

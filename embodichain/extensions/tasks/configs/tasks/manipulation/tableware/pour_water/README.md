@@ -24,7 +24,13 @@ inactive rows still hold their measured positions.
 
 Single-arena, seed-0 runs used DexSim 0.6.0, CUDA on an RTX 5090, NoRender,
 100 Hz controls and 1.5 mm particle spacing. The received volume is measured
-after release and settling. Each row below completed all four motion segments.
+after release and settling. The current CobotMagic scene fills the bottle using
+its inner profile and advances the fluid every 0.833 ms. The
+[containment report](validation/cobotmagic.json) records the upright particle
+count outside the bottle and the final received volume.
+
+The following trials used the earlier fill and 2.5 ms fluid step. Each
+completed all four motion segments.
 
 | Aim relative to nominal | Tilt dwell | Final received volume | Episode accepted |
 | --- | --- | --- | --- |
@@ -32,7 +38,8 @@ after release and settling. Each row below completed all four motion segments.
 | Nominal | 4 s | 48.92 mL | No |
 | X offset −120 mm | 4 s | 0.00 mL | No |
 
-To reproduce the paired four-second trials, set the pour option `dwell_duration`
+To reproduce those historical trials, use the scene from commit `e296c3a01`
+and set the pour option `dwell_duration`
 to 4. For the miss, subtract 0.12 m from the X component of the
 `cup_pour_pose` lowerer's receiver-relative position. Keep the final volume
 rule, cup, and bottle return targets fixed. The paired runs isolate the aim

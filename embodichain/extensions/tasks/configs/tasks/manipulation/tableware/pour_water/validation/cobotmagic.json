@@ -53,5 +53,21 @@
       "aim_offset_x_m": -0.12
     }
   ],
-  "summary": "Seed 0: received 58.67 mL on target. A 120 mm off-target trial completed four segments with 0 mL and failed acceptance."
+  "summary": "CobotMagic seed 0 with the revised fill and fluid substeps received 63.59 mL. The nominal, short-dwell and miss entries in results were recorded with the earlier fill and time step.",
+  "containment_run": {
+    "scope": "CobotMagic, one arena, seed 0, NoRender; containment sampled each 0.01 s control interval on the PR deployment.",
+    "source_environment_sha256": "28f4943067d851b11110bd6d0bec68491c2e0b2c65e948d098429899a6115a9b",
+    "initial_particles": 56813,
+    "upright_outside_after_one_second": 0,
+    "previous_upright_outside_after_one_second": 45,
+    "maximum_outside_bounding_cylinder_first_1200_control_steps": 0,
+    "particles_seen_outside_side_or_base_without_prior_mouth_crossing": 0,
+    "side_and_base_tolerance_m": 0.0005,
+    "mouth_plane_z_m": 0.07,
+    "mouth_crossing_radius_m": 0.0125,
+    "control_steps": 3669,
+    "final_received_ml": 63.588377088308334,
+    "minimum_received_ml": 50,
+    "success": true
+  }
 }
