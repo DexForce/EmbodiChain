@@ -331,21 +331,23 @@ class ReplayWrapper(gym.Wrapper):
             from embodichain.lab.sim.sensors.base_sensor import BaseSensor
             from embodichain.lab.sim.sensors.camera import Camera
 
-            physics_cameras = []
+            restored_state_sensors = []
             for sensor in getattr(self.env, "sensors", {}).values():
                 is_camera = isinstance(sensor, Camera)
                 if not is_camera:
                     sensor.reset(env_ids=env_ids)
                 if isinstance(sensor, BaseSensor):
-                    sensor._invalidate_samples(env_ids, resample=is_camera)
-                    if is_camera and sensor.cfg.sample_phase == "physics":
-                        physics_cameras.append(sensor)
-            if physics_cameras:
-                # These plugins render during acquisition; publish restored
-                # state once without advancing dynamics before capturing them.
+                    sensor._invalidate_samples(env_ids, resample=True)
+                    if (
+                        sensor.cfg.sample_phase == "physics"
+                        and sensor.supports_restored_state_sampling
+                    ):
+                        restored_state_sensors.append(sensor)
+            if restored_state_sensors:
                 sim = self.env.sim
-                sim.sync_render_state()
-                for sensor in physics_cameras:
+                if any(isinstance(sensor, Camera) for sensor in restored_state_sensors):
+                    sim.sync_render_state()
+                for sensor in restored_state_sensors:
                     sensor._sample(
                         sim.physics_step_index,
                         sim.simulation_time,

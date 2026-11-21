@@ -306,6 +306,11 @@ Physics-sampled camera plugins acquire at the restored boundary before the
 observation, without advancing physics. Render-sampled cameras acquire through
 the normal observation capture.
 Other sensors retain their state/history reset before acquiring restored state.
+`BaseSensor.supports_restored_state_sampling` also enables immediate joint-encoder
+and frame-transform acquisition. Plugins must explicitly opt in to this
+zero-duration operation. Solver/history-dependent sensors stay invalid until a
+real physics step; all scheduled clocks are rearmed after restoration, so an old
+period cannot postpone that first valid sample. No synthetic interval is added.
 
 Measured physical goals bind fixed topology for the environment lifetime.
 `replace_assets_from_group` rejects preflight when such goals are present;

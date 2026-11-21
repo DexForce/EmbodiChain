@@ -352,6 +352,112 @@ def test_dynamic_replay_resamples_scheduled_stereo_before_seeding_rewards(
     assert env.sim.updates == []
 
 
+def test_dynamic_replay_acquires_restored_state_without_fabricating_step_samples(
+    monkeypatch,
+):
+    from embodichain.lab.sim import SimulationManager
+    from embodichain.lab.sim.sensors import (
+        FrameTransform,
+        FrameTransformCfg,
+        JointEncoder,
+        JointEncoderCfg,
+        SensorContext,
+    )
+
+    env = _FakeEnv()
+    qpos, qvel = torch.tensor([[2.0, 3.0]]), torch.tensor([[0.1, 0.2]])
+    pose = torch.tensor([[2.0, 0, 0, 0, 0, 0, 1]])
+    context = SensorContext(
+        device=env.device,
+        num_instances=1,
+        clock=SimpleNamespace(),
+        state=SimpleNamespace(
+            get_joint_names=lambda uid: ("joint0", "joint1"),
+            get_joint_state=lambda uid: {"qpos": qpos, "qvel": qvel},
+            get_frame_state=lambda *args: {"pose": pose},
+        ),
+    )
+
+    class StepBoundEncoder(JointEncoder):
+        @property
+        def supports_restored_state_sampling(self):
+            return False
+
+        def update(self, **kwargs):
+            if kwargs["sample_dt"] <= 0:
+                raise ValueError("This sensor requires a completed physics step.")
+            super().update(**kwargs)
+
+    encoder = JointEncoder(
+        JointEncoderCfg(uid="encoder", asset_uid="robot", sample_period=1.0),
+        context=context,
+    )
+    frame_sensor = FrameTransform(
+        FrameTransformCfg(uid="frame", target_uid="robot", sample_period=1.0),
+        context=context,
+    )
+    stepped = StepBoundEncoder(
+        JointEncoderCfg(uid="stepped", asset_uid="robot", sample_period=1.0),
+        context=context,
+    )
+    env.sensors = {s.uid: s for s in (encoder, frame_sensor, stepped)}
+    for sensor in env.sensors.values():
+        sensor._bind(0, None)
+    env.sim._sampling_sensors = {"physics": env.sensors}
+    env.sim.simulation_time, env.sim.physics_step_index = 0.01, 1
+    seeds = []
+
+    def capture():
+        return SimpleNamespace(
+            policy={
+                "qpos": encoder.get_data()["qpos"].clone(),
+                "qvel": encoder.get_data()["qvel"].clone(),
+                "position": frame_sensor.get_data()["transform"][:, :3, 3].clone(),
+            }
+        )
+
+    def seed(frame, ids):
+        seeds.append(frame.policy["qpos"].clone())
+
+    def reset(**kwargs):
+        for sensor in env.sensors.values():
+            sensor.reset()
+        SimulationManager._sample_managed_sensors(env.sim, "physics", 1, 0.01)
+        frame = capture()
+        seed(frame, [0])
+        return frame.policy, {}
+
+    def restore(*args):
+        qpos.copy_(torch.tensor([[8.0, 9.0]]))
+        qvel.copy_(torch.tensor([[0.5, 0.6]]))
+        pose[:, 0] = 8.0
+
+    env.reset, env._capture_observation = reset, capture
+    env.cfg.rl_task = SimpleNamespace(reward_composition={"discount": 0.9})
+    env.reward_manager = SimpleNamespace(
+        reset=lambda **kw: None, initialize_observation=seed
+    )
+    monkeypatch.setattr(replay_module, "restore_trajectory_state", restore)
+    observation, _ = ReplayWrapper(env, _trajectory(), mode="dynamic").reset()
+    torch.testing.assert_close(observation["qpos"], torch.tensor([[8.0, 9.0]]))
+    torch.testing.assert_close(observation["qvel"], torch.tensor([[0.5, 0.6]]))
+    torch.testing.assert_close(observation["position"], torch.tensor([[8.0, 0, 0]]))
+    torch.testing.assert_close(seeds[0], torch.tensor([[2.0, 3.0]]))
+    torch.testing.assert_close(seeds[1], observation["qpos"])
+    assert encoder.get_sample_metadata()["valid"].tolist() == [True]
+    assert frame_sensor.get_sample_metadata()["valid"].tolist() == [True]
+    assert stepped.get_sample_metadata()["valid"].tolist() == [False]
+    assert env.sim.updates == []
+    sample_id = encoder.get_sample_metadata()["sample_id"].clone()
+    # Step-bound sensors acquire at the first real step, without waiting for
+    # the period from the pre-restore sample. Snapshot cadence remains intact.
+    env.sim.simulation_time, env.sim.physics_step_index = 0.02, 2
+    SimulationManager._sample_managed_sensors(env.sim, "physics", 2, 0.01)
+    assert stepped.get_sample_metadata()["valid"].tolist() == [True]
+    torch.testing.assert_close(stepped.get_data()["qpos"], observation["qpos"])
+    torch.testing.assert_close(encoder.get_sample_metadata()["sample_id"], sample_id)
+
+
 def test_dynamic_replay_seeds_shaping_from_restored_goal_observation(monkeypatch):
     from embodichain.lab.gym.envs.managers.cfg import ObservationCfg
     from embodichain.lab.gym.envs.managers.skill_objective import (

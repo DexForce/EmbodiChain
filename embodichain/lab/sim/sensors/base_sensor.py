@@ -546,6 +546,19 @@ class BaseSensor(BatchEntity):
         return super().reset(env_ids)
 
     @property
+    def supports_restored_state_sampling(self) -> bool:
+        """Whether acquisition can read restored state without a physics step.
+
+        Opt in only when ``update(sample_dt=0.0, ...)`` reads the current scene,
+        without relying on solver outputs or an elapsed measurement interval.
+        Other sensors remain invalid until a completed sampling boundary.
+
+        Returns:
+            False unless a sensor explicitly supports immediate acquisition.
+        """
+        return False
+
+    @property
     def requires_substep_update(self) -> bool:
         """Whether the environment must sample this sensor each physics substep."""
         return False

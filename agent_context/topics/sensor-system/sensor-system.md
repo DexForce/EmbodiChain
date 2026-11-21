@@ -101,6 +101,13 @@ sampling. A camera advances only after its own groups render. A failed
 acquisition invalidates the current output and leaves the boundary retryable.
 Legacy Gym-driven camera and contact acquisition keeps its existing ordering.
 
+`BaseSensor.supports_restored_state_sampling` declares whether a zero-duration
+acquisition can read a restored scene without stepping physics. Cameras, joint
+encoders and frame transforms opt in. Plugins may opt in only when their update
+reads current state without solver outputs or interval history. Replay rearms
+all scheduled clocks, acquires supported physics-phase sensors immediately and
+keeps other measurements invalid until the first completed sampling boundary.
+
 Default and Newton frame state includes the current body-local center-of-mass
 offset as `linear_velocity_offset` for moving rigid bodies and articulation
 links. PVA and IMU transport the reported linear velocity to the configured

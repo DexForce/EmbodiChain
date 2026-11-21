@@ -116,6 +116,15 @@ class JointEncoder(_ReadOnlySensor):
         context: Explicit runtime state services.
     """
 
+    @property
+    def supports_restored_state_sampling(self) -> bool:
+        """Allow immediate reads of restored joint positions and velocities.
+
+        Returns:
+            True; joint-state acquisition does not require an elapsed interval.
+        """
+        return True
+
     def __init__(self, config: JointEncoderCfg, *, context: SensorContext) -> None:
         super().__init__(config, context=context)
 
@@ -176,6 +185,15 @@ class FrameTransform(_ReadOnlySensor):
         config: Source and target identities with optional local offsets.
         context: Explicit runtime state services.
     """
+
+    @property
+    def supports_restored_state_sampling(self) -> bool:
+        """Allow immediate reads of restored frame transforms.
+
+        Returns:
+            True; current transforms do not require an elapsed interval.
+        """
+        return True
 
     def __init__(self, config: FrameTransformCfg, *, context: SensorContext) -> None:
         super().__init__(config, context=context)
