@@ -32,19 +32,19 @@ from dexsim.engine.newton_physics.runtime_control import (
 __all__: list[str] = []
 
 
-class _DexUniFluidJointOwnership(GraphRuntimeControl):
-    """Assign the complete finalized joint topology to the fluid rigid solver."""
+class _DexUniAllJointOwnership(GraphRuntimeControl):
+    """Assign the complete finalized joint topology to DexUni's MuJoCo branch."""
 
     def __init__(self) -> None:
         self._assigned: tuple[int, ...] | None = None
 
     def initialize_model(self, model: Any, result: Any) -> None:
-        """Select all joints before DexUni constructs its coupled solver."""
+        """Select all joints before DexUni constructs its solver."""
         from dexsim.engine.newton_physics.backend_registry import get_newton_backend
 
         backend = get_newton_backend(result.world)
         if backend is None or backend.solver_type != "dexuni":
-            raise RuntimeError("Fluid joint ownership requires a DexUni backend.")
+            raise RuntimeError("All-joint ownership requires a DexUni backend.")
         cfg = backend.cfg.solver_cfg
         if (
             cfg.mujoco_articulations is not None
@@ -52,7 +52,7 @@ class _DexUniFluidJointOwnership(GraphRuntimeControl):
             or (cfg.mujoco_joints is not None and cfg.mujoco_joints != self._assigned)
         ):
             raise RuntimeError(
-                "Fluid joint ownership conflicts with an explicit selector."
+                "All-joint ownership conflicts with an explicit selector."
             )
         self._assigned = tuple(range(model.joint_count))
         cfg.mujoco_joints = self._assigned
