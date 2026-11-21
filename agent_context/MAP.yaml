@@ -765,6 +765,6 @@ topics:
   source_of_truth:
   - embodichain/extensions/models/dynamics/lewm/
   - examples/learning/lewm/
-  watch_paths: [tests/models/dynamics/lewm/, tests/examples/test_ogbench_cube.py, docs/source/api_reference/lewm.rst]
+  watch_paths: [docs/source/api_reference/lewm.rst]
   related_topics: [supervised-learning, data-pipeline, robot-world-model, env-framework]
   status: active

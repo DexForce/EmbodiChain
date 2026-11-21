@@ -72,4 +72,4 @@ observed latents remain comparable. Diagnostic geometry is never a policy input.
 The example keeps reference weights and simulator datasets outside the wheel.
 Upstream numerical equivalence, held-out latent error and paired physical
 success are different validation claims; see its README for commands and
-resource revisions. Focused model tests live in `tests/models/dynamics/lewm/`.
+resource revisions.
