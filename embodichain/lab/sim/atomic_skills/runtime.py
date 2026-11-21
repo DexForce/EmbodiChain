@@ -25,6 +25,7 @@ import time
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 from uuid import uuid4
+from weakref import WeakValueDictionary
 
 import numpy as np
 import torch
@@ -58,6 +59,7 @@ from .tracking import (
 )
 
 if TYPE_CHECKING:
+    from .primitives.contact import ContactPhaseSource
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.sim_manager import SimulationManager
     from embodichain.lab.sim.motion.motion_generator import MotionGenerator
@@ -105,6 +107,9 @@ class SkillPlanningServices:
             hand_geometry_cfgs: Explicit Lab hand settings by grasp target ID;
                 copied independently without capturing geometry or reading state.
         """
+        self._contact_sources: WeakValueDictionary[str, ContactPhaseSource] = (
+            WeakValueDictionary()
+        )
         self._motion_generator = motion_generator
         self._robot: Robot = motion_generator.robot
         self._device = resolve_runtime_device(motion_generator.device)
@@ -134,6 +139,49 @@ class SkillPlanningServices:
         self._hand_geometry_cfgs = self._snapshot_hand_geometry_cfgs(
             {} if hand_geometry_cfgs is None else hand_geometry_cfgs
         )
+
+    def register_contact_source(
+        self, source_id: str, source: "ContactPhaseSource"
+    ) -> None:
+        """Bind an episode-owned weak contact observation source.
+
+        Args:
+            source_id: Nonempty identifier local to this engine.
+            source: Observation adapter; its episode host retains a strong reference.
+
+        Raises:
+            ValueError: The identifier is already bound to another live source.
+        """
+        from .primitives.contact import ContactPhaseSource
+
+        if not isinstance(source_id, str) or not source_id:
+            raise ValueError("Contact source IDs must be nonempty strings.")
+
+        if not isinstance(source, ContactPhaseSource):
+            raise TypeError("Invalid contact phase source.")
+        previous = self._contact_sources.get(source_id)
+        if previous is not None and previous is not source:
+            raise ValueError("Contact source IDs cannot be rebound while live.")
+        self._contact_sources[source_id] = source
+
+    def contact_source(self, source_id: str) -> "ContactPhaseSource":
+        """Resolve a still-live source from this exact engine's registry.
+
+        Args:
+            source_id: Identifier registered by the episode's composition root.
+
+        Returns:
+            Live observation adapter owned by that episode.
+
+        Raises:
+            ValueError: The source expired or was not registered on this engine.
+        """
+        try:
+            return self._contact_sources[source_id]
+        except KeyError as error:
+            raise ValueError(
+                "Contact source is expired or belongs to another engine."
+            ) from error
 
     @property
     def motion_generator(self) -> MotionGenerator:

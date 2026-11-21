@@ -27,6 +27,7 @@ import torch.nn.functional as F
 from embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler import AntipodalSampler
 from embodichain.utils.math import get_pc_center_box
 from embodichain.utils.nms import pose_nms
+from ._ranking import _grasp_costs, _normalized_ranking_weights
 
 if TYPE_CHECKING:
     from .pose_generator import (
@@ -80,13 +81,16 @@ def _row(
     center = (
         get_pc_center_box(mesh) if algorithm.center_mode == "bounds" else mesh.mean(0)
     )
-    axis = F.normalize(poses[:, :3, 0], dim=-1)
-    angle = torch.acos((axis * direction).sum(-1).clamp(-1, 1)).abs()
-    angle_cost = (angle - 0.5 * torch.pi).abs() / (0.5 * torch.pi)
-    distance = torch.norm(centers - center, dim=-1)
-    center_cost = distance / distance.max()
-    length_cost = 1 - widths / widths.max()
-    costs = 0.25 * angle_cost + 0.25 * length_cost + 0.5 * center_cost
+    costs = _grasp_costs(
+        poses,
+        widths,
+        centers,
+        direction,
+        center,
+        _normalized_ranking_weights(
+            algorithm.angle_weight, algorithm.center_weight, algorithm.opening_weight
+        ),
+    )
     # The caller applies its configured cap only after final-TCP qualification.
     return poses, costs
 

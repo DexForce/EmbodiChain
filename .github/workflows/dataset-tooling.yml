@@ -14,7 +14,7 @@ on:
       - 'tests/data_pipeline/**'
       - 'tests/test_lerobot_compatibility.py'
       - 'tests/models/policy/**'
-      - 'extensions/embodichain_models/embodichain_models/policy/act/**'
+      - 'embodichain/extensions/models/policy/act/**'
       - 'examples/learning/act/**'
       - 'tests/gym/envs/managers/**'
       - 'embodichain/lab/scripts/preview_lerobot_data.py'

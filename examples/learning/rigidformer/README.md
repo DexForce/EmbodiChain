@@ -6,7 +6,7 @@ for working principles, input/output layout and a PyTorch prediction example.
 This showcase integrates the author's RigidFormer implementation at
 `160fe0852c51cffae7b7440452b58d0b49db6df6` from
 [Frank-ZY-Dou/Dynamics-Modeling](https://github.com/Frank-ZY-Dou/Dynamics-Modeling/tree/160fe0852c51cffae7b7440452b58d0b49db6df6/RigidFormer).
-The model lives at `embodichain_models.dynamics.rigidformer` and trains through
+The model lives at `embodichain.extensions.models.dynamics.rigidformer` and trains through
 the common SL trainer. The community `rigidformer` package is not a runtime dependency.
 
 ## Setup and ownership

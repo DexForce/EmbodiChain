@@ -1726,7 +1726,7 @@ def test_hybrid_cli_compiles_pick_place_and_rejects_hinge(
     root = Path(__file__).resolve().parents[3]
     deployment = (
         root
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml"
     )
     instruction = "把第二块积木放在第一块积木顶面"
     from embodichain.gen_sim.task_engine import _image_run

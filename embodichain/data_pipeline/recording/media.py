@@ -65,7 +65,10 @@ def _atomic_json(path: Path, value: object) -> None:
     handle, temporary = tempfile.mkstemp(dir=path.parent, prefix=".pending-")
     try:
         with os.fdopen(handle, "w") as stream:
-            json.dump(value, stream, allow_nan=False, sort_keys=True)
+            # The C encoder returns one owned string instead of issuing a
+            # Python write for every metadata leaf. Keep the durable publish
+            # boundary and finite-value rejection unchanged.
+            stream.write(json.dumps(value, allow_nan=False, sort_keys=True))
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)

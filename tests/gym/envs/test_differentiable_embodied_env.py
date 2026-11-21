@@ -452,7 +452,7 @@ def test_terminal_reset_respects_tape_lifetime(
 
 def _import_franka_env():
     """Import the Franka APG environment after resolving task packages."""
-    from embodichain_tasks.special.franka_reach_apg import FrankaReachApgEnv
+    from embodichain.extensions.tasks.special.franka_reach_apg import FrankaReachApgEnv
 
     return FrankaReachApgEnv
 
@@ -461,7 +461,7 @@ def test_franka_kinematics_build_snapshots_live_primal_before_bridge(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Franka detaches taped FK inputs before the parent opens a tape."""
-    from embodichain_tasks.special import franka_reach_apg
+    from embodichain.extensions.tasks.special import franka_reach_apg
 
     env = object.__new__(franka_reach_apg.FrankaReachApgEnv)
     live_joint_q = object()
@@ -501,7 +501,7 @@ def test_franka_action_kernel_reads_snapshot_instead_of_live_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The recorded action kernel never captures mutable manager state."""
-    from embodichain_tasks.special import franka_reach_apg
+    from embodichain.extensions.tasks.special import franka_reach_apg
 
     env = object.__new__(franka_reach_apg.FrankaReachApgEnv)
     snapshot_joint_q = object()
@@ -539,7 +539,7 @@ def test_franka_snapshot_keeps_gradient_after_live_state_mutation_and_matches_fd
     tmp_path,
 ) -> None:
     """Detached FK input survives live writes before backward under strict mode."""
-    from embodichain_tasks.special import franka_reach_apg
+    from embodichain.extensions.tasks.special import franka_reach_apg
 
     env = object.__new__(franka_reach_apg.FrankaReachApgEnv)
     device = "cpu"

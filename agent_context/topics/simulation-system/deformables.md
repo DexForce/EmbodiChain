@@ -108,8 +108,14 @@ Focused coverage: `tests/sim/test_deformable_cfg.py`,
 `CableObjectCfg` and `CableObject(BatchEntity)` are independent of particle-set
 deformables. `SimulationManager.add_cable_object()` lowers through
 `spawn/descriptors.py` into `CableDesc`, declares in the existing `SpawnScene`,
-and binds the same facade in place during `prepare()`. Backend capabilities
-reject Default, CPU, other Newton solvers and gradient mode; use DexUni on CUDA.
+and binds the same facade in place during `prepare()`. `add_usd(UsdImportCfg)`
+also returns a `CableObject` per imported cable under its source resource key,
+with the same UID lookup, segment state and reset as a procedural declaration.
+Cable geometry, placement and visuals come from the parsed `CableDesc`.
+A sparse `asset_cfgs` entry keyed by the simulation curve prim can override
+the UID, `fixed_segments`, `collision_filter_span` and individual `attrs` physics and
+contact fields before declaration. Omitted fields retain the parsed values.
+Cable declarations require DexUni on CUDA with gradient mode disabled.
 With this backend, an arena containing a cable cannot also contain fluid,
 cloth or soft-body particles: cable episode reset does not support those
 particles. Spawn checks the native cable and particle descriptors for direct

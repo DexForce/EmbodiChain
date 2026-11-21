@@ -74,6 +74,10 @@ def inputs(*, ground=False):
 
 def test_unqualified_center_proposals_preserve_source_order_costs_and_rng():
     generator, args, calls = inputs()
+    # The frozen source used the legacy larger-opening preference.
+    generator._algorithm_cfg.angle_weight = 0.25
+    generator._algorithm_cfg.center_weight = 0.5
+    generator._algorithm_cfg.opening_weight = 0.25
     torch.manual_seed(55)
     result = unqualified_center_proposals(generator, **args)
     reference = json.loads(
@@ -87,6 +91,26 @@ def test_unqualified_center_proposals_preserve_source_order_costs_and_rng():
     )
     assert len(calls) == 1
     assert len(result[0][0]) > generator.algorithm_cfg.max_candidates
+
+
+@pytest.mark.parametrize(
+    ("angle_weight", "opening_weight", "expected_costs"),
+    [(1.0, 0.0, [0.0, 0.0, 0.0]), (0.0, 1.0, [0.0, 1 / 3, 1 / 6])],
+)
+def test_unqualified_proposals_apply_configured_ranking(
+    angle_weight: float, opening_weight: float, expected_costs: list[float]
+) -> None:
+    generator, args, _ = inputs()
+    generator._algorithm_cfg = AntipodalGraspPoseGeneratorCfg(
+        approach_direction_samples=1,
+        angle_weight=angle_weight,
+        center_weight=0.0,
+        opening_weight=opening_weight,
+    )
+    for _, costs in unqualified_center_proposals(generator, **args):
+        torch.testing.assert_close(
+            costs, torch.tensor(expected_costs), atol=1e-6, rtol=1e-5
+        )
 
 
 def test_unqualified_proposals_cannot_bypass_required_ground_contract():

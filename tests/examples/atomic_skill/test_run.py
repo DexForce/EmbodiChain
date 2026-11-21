@@ -44,8 +44,8 @@ from examples.sim.atomic_skill.support import (
 )
 from embodichain.lab.sim.atomic_skills import TimedTrajectory
 from embodichain.lab.sim.cfg import RobotCfg
-from embodichain_benchmarks.motion_generation import _atomic_fixtures
-from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+from embodichain.extensions.benchmarks.motion_generation import _atomic_fixtures
+from embodichain.extensions.benchmarks.motion_generation._atomic_fixtures import (
     _create_franka_native_hand_cfg,
 )
 from embodichain.utils.string import resolve_matching_names

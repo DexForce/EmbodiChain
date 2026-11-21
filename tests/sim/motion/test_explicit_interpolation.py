@@ -77,6 +77,7 @@ def _generator(tmp_path, *, batch=1, speed=1.0, failure=None):
         get_qpos_limits=lambda **kwargs: torch.tensor([[[-1.0, 1.0]]]).expand(
             batch, -1, -1
         ),
+        get_solver=lambda name=None: None,
         compute_ik=solve,
     )
     return generator, seeds

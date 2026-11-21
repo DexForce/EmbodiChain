@@ -13,7 +13,7 @@
 | Six-axis parent reaction at a child link | `embodichain/lab/sim/sensors/joint_wrench.py` |
 | Collision/visual ray provider, terrain scan, geometric LiDAR and ray depth | `embodichain/lab/sim/sensors/ray.py` |
 | Curved pad geometry and indentation depth | `embodichain/lab/sim/sensors/tactile_indentation.py` |
-| Official VLP-16 preset | `extensions/embodichain_sensors/vlp16.py` and the `embodichain.sensors` entry point |
+| Official VLP-16 preset | `embodichain/extensions/sensors/vlp16.py` and the `embodichain.sensors` entry point |
 | Image configuration, data flags, extrinsics | `embodichain/lab/sim/sensors/camera.py` → `CameraCfg`, `Camera` |
 | UID-scoped deployment calibration | `embodichain/lab/gym/utils/_component_composition.py`; [configuration ownership](../env-framework/configuration.md#reusable-gym-deployment-components) |
 | Two-eye transforms and attachment | `embodichain/lab/sim/sensors/stereo.py` → `StereoCameraCfg`, `StereoCamera` |
@@ -227,6 +227,15 @@ Read [contact lifecycle and capabilities](lifecycle.md#contact-queries) before
 changing filtering, force assumptions, topology handling or actor metadata.
 Geometry-only contacts and multiple backend-emitted rows per actor pair are
 valid; sensor adaptation does not synthesize a common contact manifold.
+
+`ContactPermissionChecker` consumes complete native samples with explicit
+actor/frame permissions, returning owned per-row device summaries. It does not
+choose the host's sampling frequency or relax unavailable-impulse/loss gates.
+Eager checks wait for the latest sensor sample on their CUDA stream without
+refreshing contacts or advancing histories.
+Global static actors retain their explicit row memberships. Rebind after query
+topology changes. Default CUDA dynamics use Direct GPU reporting; its static
+actor identity limitations remain explicit admission constraints.
 
 The contact scatter kernel remains sensor-owned because its columns, IDs and
 quota are integration contracts. Generic image tiling belongs to

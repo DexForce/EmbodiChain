@@ -33,6 +33,10 @@ __all__ = [
 ]
 
 
+_POSITION_EQUIVALENCE_M = 1.0e-4
+_ROTATION_EQUIVALENCE_FROBENIUS = 1.0e-3
+
+
 @dataclass(frozen=True, slots=True)
 class AffordanceSamplingContext:
     """Immutable identity for reproducible parallel Affordance sampling.
@@ -44,6 +48,9 @@ class AffordanceSamplingContext:
         attempt_id: Explicit resampling attempt identity.
         branch_override: Optional logical branch selected independently of the
             physical environment row.
+        preferred_local_poses: Previously accepted reference-relative poses by
+            sampling key, stored as immutable row-major matrices. A match must
+            be a distinct non-nominal candidate in the current valid set.
     """
 
     count: int = 1
@@ -52,6 +59,7 @@ class AffordanceSamplingContext:
     attempt_id: int = 0
     branch_override: int | None = None
     branch_overrides: tuple[int, ...] | None = None
+    preferred_local_poses: tuple[tuple[str, tuple[float, ...]], ...] = ()
 
     def __post_init__(self) -> None:
         if type(self.count) is not int or self.count < 1:
@@ -77,6 +85,22 @@ class AffordanceSamplingContext:
                 raise ValueError(
                     "branch_override and branch_overrides are mutually exclusive"
                 )
+        if self.preferred_local_poses:
+            poses = {}
+            for key, values in self.preferred_local_poses:
+                pose = tuple(values)
+                if (
+                    not isinstance(key, str)
+                    or not key
+                    or key in poses
+                    or len(pose) != 16
+                    or not all(map(math.isfinite, pose))
+                ):
+                    raise ValueError(
+                        "preferred_local_poses requires unique keys and finite 4x4 matrices"
+                    )
+                poses[key] = pose
+            object.__setattr__(self, "preferred_local_poses", tuple(poses.items()))
 
     @property
     def enabled(self) -> bool:
@@ -168,7 +192,7 @@ class AffordanceSamplingContext:
             values[row] = lower + (upper - lower) * float(groups[group][branch - 1])
         return values
 
-    def metadata(self) -> dict[str, int | None]:
+    def metadata(self) -> dict[str, object]:
         """Return JSON-compatible sampling provenance."""
         return {
             "count": self.count,
@@ -177,6 +201,11 @@ class AffordanceSamplingContext:
             "attempt_id": self.attempt_id,
             "branch_override": self.branch_override,
             "branch_overrides": self.branch_overrides,
+            **(
+                {"preferred_local_poses": self.preferred_local_poses}
+                if self.preferred_local_poses
+                else {}
+            ),
         }
 
 
@@ -343,6 +372,12 @@ def _sample_pose_candidates(
     success = eligible.any(dim=1)
     unique_counts: list[int] = []
     reused: list[bool] = []
+    preferred = (
+        dict(sampling.preferred_local_poses).get(key)
+        if sampling is not None and reference_poses is not None
+        else None
+    )
+    matched = [False] * len(env_ids) if preferred is not None else []
 
     for row, env_id in enumerate(env_ids.cpu().tolist()):
         indices = torch.argsort(masked_costs[row], stable=True)
@@ -391,7 +426,8 @@ def _sample_pose_candidates(
                 rotation - rotation[last], dim=1
             )
             available &= ~(
-                (position_distance <= 1.0e-4) & (rotation_distance <= 1.0e-3)
+                (position_distance <= _POSITION_EQUIVALENCE_M)
+                & (rotation_distance <= _ROTATION_EQUIVALENCE_FROBENIUS)
             )
             nearest = torch.minimum(
                 nearest, position_distance / scale + rotation_distance
@@ -401,7 +437,25 @@ def _sample_pose_candidates(
             priority = nearest * (0.75 + 0.25 * jitter)
             order.append(int(priority.masked_fill(~available, -torch.inf).argmax()))
         branch = sampling.branch_for(env_id, row_index=row)
-        selected[row] = indices[order[branch % len(order)]]
+        choice = order[branch % len(order)]
+        if preferred is not None and 0 < branch < len(order):
+            prior = position.new_tensor(preferred).reshape(4, 4)
+            alternatives = order[1:]
+            delta_p = torch.linalg.vector_norm(
+                position[alternatives] - prior[:3, 3], dim=1
+            )
+            delta_r = torch.linalg.vector_norm(
+                rotation[alternatives] - prior[:3, :3].reshape(9), dim=1
+            )
+            # The same equivalence tolerances distinguish candidates above.
+            equivalent = (delta_p <= _POSITION_EQUIVALENCE_M) & (
+                delta_r <= _ROTATION_EQUIVALENCE_FROBENIUS
+            )
+            if equivalent.any():
+                error = (delta_p / scale + delta_r).masked_fill(~equivalent, torch.inf)
+                choice = alternatives[int(error.argmin())]
+                matched[row] = True
+        selected[row] = indices[choice]
         unique_counts.append(len(order))
         reused.append(branch >= len(order))
 
@@ -422,6 +476,11 @@ def _sample_pose_candidates(
             "valid_candidate_counts": eligible.sum(1).cpu().tolist(),
             "unique_candidate_counts": unique_counts,
             "reused": reused,
+            **(
+                {"matched_preferred_local_pose": matched}
+                if preferred is not None
+                else {}
+            ),
         },
     )
 

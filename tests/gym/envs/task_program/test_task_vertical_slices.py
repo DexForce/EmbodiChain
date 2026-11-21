@@ -170,7 +170,7 @@ class _NeverObserveProvider:
 
 def _read_payload(relative_path: Path) -> dict[str, object]:
     """Load one packaged JSON/YAML example as inert data."""
-    path = _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs" / relative_path
+    path = _REPOSITORY_ROOT / "embodichain/extensions/tasks/configs" / relative_path
     if path.suffix == ".json":
         payload = json.loads(path.read_text(encoding="utf-8"))
     else:
@@ -181,7 +181,7 @@ def _read_payload(relative_path: Path) -> dict[str, object]:
 
 def _deployment(relative_path: Path):
     """Compose one packaged environment deployment."""
-    path = _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs" / relative_path
+    path = _REPOSITORY_ROOT / "embodichain/extensions/tasks/configs" / relative_path
     payload = _read_payload(relative_path)
     physical = _resolve_gym_components(payload, base_dir=path.parent)
     assert physical.embodiment_skill_profile is not None
@@ -235,7 +235,7 @@ def _configure_cube_environment():
     """Load the packaged config and register its declared integration."""
     path = (
         _REPOSITORY_ROOT
-        / "extensions/embodichain_tasks/configs"
+        / "embodichain/extensions/tasks/configs"
         / _REPEATED_CUBE_GYM_CONFIG
     )
     payload = _read_payload(_REPEATED_CUBE_GYM_CONFIG)
@@ -245,7 +245,7 @@ def _configure_cube_environment():
 
 def _configure_packaged_environment(relative_path: Path, *, physics: str | None = None):
     """Load one packaged deployment and its selected physical component."""
-    path = _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs" / relative_path
+    path = _REPOSITORY_ROOT / "embodichain/extensions/tasks/configs" / relative_path
     payload = _read_payload(relative_path)
     if physics is not None:
         payload = _resolve_environment_component(
@@ -531,14 +531,17 @@ def test_open_drawer_config_owns_registered_lowerer_factory() -> None:
     integration = _drawer_integration()
     registration = integration.registration
 
-    # The joint-target extension must preserve the shipped handle-only deployment.
+    # The handle-only deployment also fingerprints the shared PickUp goal types
+    # and the interpolation step declared by its motion policies. The added
+    # contact-path goal types intentionally extend those descriptors; restoring
+    # the pre-continuation types independently reproduces the previous goldens.
     assert (
         registration.fingerprint
-        == "c8767354951735e47897e046ba35bc26b8e8f47433915174655d4c5247ec2a88"
+        == "8c26f478773895d74399f6f50e7784625719062b20ce76dc3c3c94b8ac7a7005"
     )
     assert (
         integration.integration_fingerprint
-        == "aede0eed53368155b3d58bf288188079f9278fd883e342197ee38c101123b7da"
+        == "a40a3110b8db70c9ce1b4a1879dc41f12c0dd876dce09e1844f2dc01c4ebc8d7"
     )
     assert tuple(registration.catalog.registered_semantic_lowerer_declarations) == (
         _OPEN_DRAWER_CALL_ID,

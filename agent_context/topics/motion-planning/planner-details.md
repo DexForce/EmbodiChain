@@ -92,6 +92,28 @@ facade independently of the selected planner backend.
 
 ## Backend-specific boundaries
 
+### cuRobo pose path criteria
+
+`CuroboPlanOptions.path_constraints` assigns data-only `CuroboPoseConstraintCfg`
+values to target-arrival segments. Position and rotation projectors select
+independent residual subspaces; zero disables a component. `linear_motion()`
+is a convenience factory returning that same configuration. The target TCP
+(`goal`) or native planning `base` frame is shared by both projectors. Endpoint
+semantics remain waypoint-owned; no duplicate terminal or device fields are
+exposed. Whole segments, including starts, are checked; activation windows and
+monotonic progress are not implied.
+
+Generated profiles add a massless fixed TCP tool frame from solver calibration,
+so native costs and postvalidation act at the same point, including translated
+offsets. Calibration participates in YAML and backend cache identity. One compiler scales
+native tolerance thresholds with the uniform residual scales; angular bounds
+use the equivalent quaternion-vector threshold. Scoped native updates restore
+baseline criteria even on exceptions. Bounded device FK validates TCP displacement
+and projected quaternion angular error with physical meter/radian bounds,
+rejecting rows through the usual start hold. Preserved native samples are required; consumers
+must revalidate resampled paths. Adding another pose restriction uses projector
+data rather than another geometry-specific lifecycle or configuration subclass.
+
 ### TOPPRA
 
 `toppra_planner.py` uses Warp on CPU and CUDA. Numerical ownership is in
@@ -251,6 +273,11 @@ fixed-base assembly through `policy_frame_from_world_by_control_part`; every
 requested arm must have an entry. The selected transform applies to targets,
 rollout FK, and retimed arrival checks. Atomic task orchestration coordinates
 the arms; reusing the policy does not create a jointly trained dual-arm policy.
+Acceptance uses the caller's runtime TCP origin even when the actor observes
+an offset policy TCP. Undo the right-hand tool transform when measuring
+position error; orientation error can move the two origins differently.
+The same acceptance rule applies after retiming, without changing policy
+observations or configured tolerances.
 Target/FK quaternions follow the shared
 [simulation convention](../simulation-system/simulation-system.md); do not
 convert a value twice. Failed waypoint convergence retains native rollout

@@ -43,16 +43,7 @@ runpy.run_module('embodichain', run_name='__main__')
 def _source_environment(root: Path) -> dict[str, str]:
     """Keep bundled extensions in the same checkout as the tested core."""
     env = dict(os.environ)
-    sources = (
-        root,
-        root / "extensions",
-        root / "extensions/embodichain_tasks",
-        root / "extensions/embodichain_benchmarks",
-        root / "extensions/embodichain_models",
-    )
-    env["PYTHONPATH"] = (
-        os.pathsep.join(map(str, sources)) + os.pathsep + env.get("PYTHONPATH", "")
-    )
+    env["PYTHONPATH"] = os.pathsep.join((str(root), env.get("PYTHONPATH", "")))
     env["EMBODICHAIN_SIM_EXIT_PROCESS"] = "0"
     return env
 

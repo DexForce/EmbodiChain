@@ -27,7 +27,7 @@ from embodichain.lab.sim.motion.motion_generator import MotionGenerator
 
 def segment_fixture(case):
     calls = []
-    robot = NS(device=torch.device("cpu"))
+    robot = NS(device=torch.device("cpu"), get_solver=lambda name=None: None)
 
     def fk(qpos, **kwargs):
         result = torch.eye(4).expand(qpos.shape[0], 4, 4).clone()

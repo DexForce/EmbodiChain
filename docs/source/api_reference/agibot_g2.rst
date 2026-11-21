@@ -13,7 +13,7 @@ application configuration.
 Public configuration
 --------------------
 
-.. currentmodule:: embodichain_robots
+.. currentmodule:: embodichain.extensions.robots
 
 .. autosummary::
 
@@ -26,7 +26,7 @@ Public configuration
 Model namespace
 ---------------
 
-.. currentmodule:: embodichain_robots.agibot.g2
+.. currentmodule:: embodichain.extensions.robots.agibot.g2
 
 .. autosummary::
 
@@ -38,7 +38,7 @@ Model namespace
 Configuration implementation
 ----------------------------
 
-.. currentmodule:: embodichain_robots.agibot.g2.cfg
+.. currentmodule:: embodichain.extensions.robots.agibot.g2.cfg
 
 .. autosummary::
 
@@ -50,7 +50,7 @@ Configuration implementation
 Official asset cache
 --------------------
 
-.. currentmodule:: embodichain_robots.agibot.g2.assets
+.. currentmodule:: embodichain.extensions.robots.agibot.g2.assets
 
 .. autosummary::
 

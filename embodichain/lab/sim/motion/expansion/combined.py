@@ -193,7 +193,7 @@ class _SceneRandomizationCfg:
     reference_family_count: int = 4
     profile: str = "cube_initial_pose"
     profile_file: str = (
-        "extensions/embodichain_tasks/configs/components/randomization_profiles/"
+        "embodichain/extensions/tasks/configs/components/randomization_profiles/"
         "cube_initial_pose.yaml"
     )
     change_scope: str = "cube_initial_pose_only"
@@ -236,8 +236,16 @@ class _SpatialCfg:
     joint_offset_scale: float = 0.05
     dedup_tolerance: float | None = None
     via_count: int = 1
+    joint_samples: dict[str, float] = {}
+    knot_samples: tuple[float, ...] = ()
 
     def __post_init__(self) -> None:
+        from ._samples import validate_samples
+
+        self.joint_samples, self.knot_samples = validate_samples(
+            self.joint_samples, self.knot_samples, self.via_count
+        )
+
         self.operators = _strings(self.operators, "trajectory.spatial.operators")
         if any(item not in ("joint_residual", "via_points") for item in self.operators):
             raise ValueError(
@@ -289,7 +297,7 @@ class _TrajectoryCfg:
 class _VisualCfg:
     enabled: bool = True
     profile_file: str = (
-        "extensions/embodichain_tasks/configs/components/randomization_profiles/rgb_visual.yaml"
+        "embodichain/extensions/tasks/configs/components/randomization_profiles/rgb_visual.yaml"
     )
     profiles: tuple[str, ...] = (
         "rgb_canonical",
@@ -520,6 +528,8 @@ class CombinedExpansionProfile:
                 "enabled",
                 "operators",
                 "joint_offset_scale",
+                "joint_samples",
+                "knot_samples",
                 "dedup_tolerance",
                 "via_count",
             },

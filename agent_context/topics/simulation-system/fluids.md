@@ -112,4 +112,4 @@ belong to [fluid Gym integration](../env-framework/fluid-replay.md).
 The robot demonstrations, task assets, Gym declarations, observations, recording,
 Task Program runner and replay belong to the pouring task layer. See
 [fluid Gym integration](../env-framework/fluid-replay.md) and the task's
-`extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/README.md`.
+`embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_cup/README.md`.

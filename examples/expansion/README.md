@@ -12,7 +12,7 @@ provide runnable entry points, local configurations and inspectable outputs.
 
 Asset-generalization Task Programs and physical environments live in
 `asset_generalization/configs/`. These are example-local configurations, not
-additional tasks installed into `embodichain_tasks`. They reuse the SDK's robot
+additional tasks installed into `embodichain.extensions.tasks`. They reuse the SDK's robot
 embodiments, policies and asset registry.
 
 Run from the repository root with compatible SDK dependencies:

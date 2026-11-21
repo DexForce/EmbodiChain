@@ -93,8 +93,16 @@ class _SpatialCfg:
     method: tuple[str, ...] = ("joint_residual",)
     joint_offset_scale: float = 0.05
     via_count: int = 1
+    joint_samples: dict[str, float] = {}
+    knot_samples: tuple[float, ...] = ()
 
     def __post_init__(self) -> None:
+        from ._samples import validate_samples
+
+        self.joint_samples, self.knot_samples = validate_samples(
+            self.joint_samples, self.knot_samples, self.via_count
+        )
+
         _boolean(self.enabled, "spatial.enabled")
         methods = (self.method,) if isinstance(self.method, str) else tuple(self.method)
         if not methods:

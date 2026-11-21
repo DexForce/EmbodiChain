@@ -55,9 +55,13 @@ def prepare_comparison(config: dict[str, Any]) -> Path:
     """
     import numpy as np
     import torch
-    from embodichain_models.dynamics.nerd.codec import NeRDStateCodec
-    from embodichain_models.dynamics.nerd.data import DynamicsWindowDataset
-    from embodichain_models.dynamics.nerd import NeRDModel, NeRDModelCfg, export_model
+    from embodichain.extensions.models.dynamics.nerd.codec import NeRDStateCodec
+    from embodichain.extensions.models.dynamics.nerd.data import DynamicsWindowDataset
+    from embodichain.extensions.models.dynamics.nerd import (
+        NeRDModel,
+        NeRDModelCfg,
+        export_model,
+    )
     from ._trainer import (
         DynamicsTrainCfg,
         compute_statistics,
@@ -306,7 +310,7 @@ def run_candidate(
 ) -> dict[str, Any]:
     """Execute the migrated trainer on the same frozen run specification."""
     import torch
-    from embodichain_models.dynamics.nerd.data import (
+    from embodichain.extensions.models.dynamics.nerd.data import (
         load_manifest,
         dataset_fingerprint,
     )
@@ -442,7 +446,7 @@ def run_comparison(
         source_root = Path(__file__).resolve().parents[4]
         if (source_root / "pyproject.toml").is_file():
             pythonpaths.extend(
-                (str(source_root / "extensions/embodichain_models"), str(source_root))
+                (str(source_root / "embodichain/extensions/models"), str(source_root))
             )
         if environment.get("PYTHONPATH"):
             pythonpaths.append(environment["PYTHONPATH"])

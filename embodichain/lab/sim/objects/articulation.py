@@ -101,6 +101,9 @@ from embodichain.lab.sim.objects.backends.controls import (
     set_physical_visible,
 )
 from embodichain.lab.sim.objects.backends.base import ArticulationViewBase
+from embodichain.lab.sim.objects.backends._numeric_observations import (
+    scoped_link_matrices,
+)
 from embodichain.lab.sim.objects.backends.newton import (
     _configure_newton_mimic_compliance,
     _stabilize_newton_mimic_target_write,
@@ -1753,6 +1756,10 @@ class Articulation(BatchEntity):
             )
 
         link_idx = self.link_names.index(link_name)
+        if to_matrix:
+            selected = scoped_link_matrices(self, link_name, local_env_ids)
+            if selected is not None:
+                return selected
         link_pose = self.body_data.body_link_pose[local_env_ids, link_idx, :]
 
         if to_matrix:
@@ -2054,8 +2061,8 @@ class Articulation(BatchEntity):
                 )
         if (
             (root_pose is not None or qpos is not None)
-            and self.device.type == "cpu"
             and not self._data.is_newton_backend
+            and not self._world.get_physics_scene().is_direct_gpu()
         ):
             # Direct root/joint writes update native kinematics, but CPU link
             # transforms are published by World.update. Do not advance physics

@@ -17,7 +17,7 @@ lazy so lightweight APG imports do not initialize the simulator-backed Trainer.
 | Differentiable collection/training | `embodichain/learning/rl/differentiable_trainer.py`, `collector/` |
 | Completed-episode evaluation | `embodichain/learning/rl/evaluation.py` |
 | Checkpoint, manifest and policy Viewer | `embodichain/learning/rl/checkpoint.py`, `policy_evaluation/` |
-| Official deployment/agent settings | `extensions/embodichain_tasks/configs/tasks/<domain>/<task>/agents/` |
+| Official deployment/agent settings | `embodichain/extensions/tasks/configs/tasks/<domain>/<task>/agents/` |
 
 The module training entry remains a compatibility path. Concrete settings come
 from the selected config/classes, not example recipes. [Training details](training.md)
@@ -211,3 +211,20 @@ Use `tests/learning/` for routing, algorithms, buffers, gradients and checkpoint
 contracts; run native/distributed suites only for those resource boundaries.
 Missing names point to registries/discovery, disappearing gradients to early
 detachment, and reset/terminal issues to the selected environment protocol.
+
+## Rough terrain and dexterous manipulation tasks
+
+`locomotion/velocity/g1_rough.py` registers the 37-action G1 task (`UnitreeG1RoughRL-v1`).
+Its terrain curriculum comes from `G1RoughTerrains` and its robot comes from
+`UnitreeG1Rough`, independently of the 29-joint G1 flat archive. Its catalog
+exposes a single `default` deployment (`env.yaml` + `agents/ppo.yaml`) running
+`physics: newton` with `solver_type: dexuni` and Newton heightfield contacts.
+
+`manipulation/dexterous/` registers five USD-native `EmbodiedEnv` tasks
+(`ShadowPenFixedRL-v1`, `ShadowPenContinuousRL-v1`, `LeapCubeFaceTurnRL-v1`,
+`LeapCubeReorientRL-v1`, `LeapCubeRotateZAxisRL-v1`) backed by
+`DexterousManipulationEnv`. Runtime scene loading uses `SimulationManager.add_usd()`
+and public `Robot`/`Articulation`/`RigidObject` facades with zero MJCF dependency;
+each task catalog exposes a single `default` deployment (`env.yaml` +
+`agents/ppo.yaml`) running `physics: newton` with `solver_type: dexuni` (GPU
+MJWarp CUDA).

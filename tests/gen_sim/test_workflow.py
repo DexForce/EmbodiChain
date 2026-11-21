@@ -235,7 +235,7 @@ def run_cfg(tmp_path: Path) -> _RunCfg:
                 "embodiment": {
                     "component": str(
                         _ROOT
-                        / "extensions/embodichain_tasks/configs/components/embodiments/franka_panda.yaml"
+                        / "embodichain/extensions/tasks/configs/components/embodiments/franka_panda.yaml"
                     )
                 },
                 "max_episode_steps": 1000,
@@ -245,7 +245,7 @@ def run_cfg(tmp_path: Path) -> _RunCfg:
     policy = yaml.safe_load(
         (
             _ROOT
-            / "extensions/embodichain_tasks/configs/components/execution_policies/motion_gen_verified.yaml"
+            / "embodichain/extensions/tasks/configs/components/execution_policies/motion_gen_verified.yaml"
         ).read_text()
     )
     policy["requires"]["embodiment_contract"] = "single_arm_parallel_gripper"
@@ -258,6 +258,19 @@ def run_cfg(tmp_path: Path) -> _RunCfg:
         runtime=runtime,
         execution_policy=policy_path,
     )
+
+
+@pytest.mark.parametrize(
+    "binding,expected",
+    [({}, 0.02), ({"profile": {}}, 0.02), ({"release_clearance": 0.0}, 0.0)],
+)
+def test_release_clearance_default_preserves_explicit_contact_placement(
+    run_cfg, binding, expected
+):
+    original = json.loads(json.dumps(binding))
+    cfg = _RunCfg(**{**run_cfg.to_dict(), "binding": binding})
+    assert cfg.binding["release_clearance"] == expected
+    assert binding == original
 
 
 @pytest.mark.parametrize("success", [True, False])
@@ -275,7 +288,7 @@ def test_workflow_generates_binds_and_preserves_actual_execution_verdict(
         run_cfg.instruction += " \n"
         run_cfg.task_id = " gensim_task "
 
-    # Releasing above the resting pose is opt-in; cover both settings.
+    # Exercise raised release and an explicit zero-clearance contact placement.
     clearance = 0.03 if success else 0.0
     run_cfg = _RunCfg(
         **{
@@ -1113,8 +1126,12 @@ def _node(node_id: str, call: dict, depends_on: list[str], **semantic) -> dict:
 
 
 @pytest.mark.parametrize("configured", [False, True])
+@pytest.mark.parametrize("clearance", [0.0, 0.02])
 def test_relative_placement_validators_follow_the_selected_lowerer(
-    run_cfg: _RunCfg, monkeypatch: pytest.MonkeyPatch, configured: bool
+    run_cfg: _RunCfg,
+    monkeypatch: pytest.MonkeyPatch,
+    configured: bool,
+    clearance: float,
 ) -> None:
     instruction = "Put the cube right of the table"
     semantic = dict(
@@ -1159,7 +1176,7 @@ def test_relative_placement_validators_follow_the_selected_lowerer(
         **{
             **run_cfg.to_dict(),
             "instruction": instruction,
-            "binding": {"runtime_services": services},
+            "binding": {"runtime_services": services, "release_clearance": clearance},
         }
     )
 
@@ -1177,7 +1194,13 @@ def test_relative_placement_validators_follow_the_selected_lowerer(
         assert validators == []
     else:
         (validator,) = validators
-        assert lowerer["routes"][0]["world_displacement"] == validator["displacement"]
+        # The route is the release pose; acceptance still measures the resting
+        # landing pose. Explicit zero clearance retains contact placement.
+        landing = validator["displacement"]
+        release = lowerer["routes"][0]["world_displacement"]
+        assert release[:2] == landing[:2]
+        assert landing[2] == pytest.approx(0.005)
+        assert release[2] == pytest.approx(0.005 + clearance)
 
 
 @pytest.mark.parametrize("lift_height_m", [None, 0.10])
@@ -2021,7 +2044,7 @@ def _dual_runtime(run_cfg):
     runtime["embodiment"] = {
         "component": str(
             _ROOT
-            / "extensions/embodichain_tasks/configs/components/embodiments/dual_franka_robotiq_arg2f_140_handover.yaml"
+            / "embodichain/extensions/tasks/configs/components/embodiments/dual_franka_robotiq_arg2f_140_handover.yaml"
         )
     }
     run_cfg.runtime.write_text(yaml.safe_dump(runtime))
@@ -2062,7 +2085,7 @@ def test_legacy_configured_coordinated_target_survives_binding(run_cfg, monkeypa
     route = dict(
         object_id="source", target_id="tray_target", world_displacement=[0.1, 0.0, 0.0]
     )
-    run_cfg.binding = {
+    binding = {
         "runtime_services": {
             "registered_semantic_lowerers": [
                 dict(kind="coordinated_transport", routes=[route])
@@ -2076,6 +2099,7 @@ def test_legacy_configured_coordinated_target_survives_binding(run_cfg, monkeypa
             }
         },
     }
+    run_cfg = _RunCfg(**{**run_cfg.to_dict(), "binding": binding})
     run_cfg.output.mkdir()
     with _services(step=step, plan=proposed) as services:
         task = plan_image_task(

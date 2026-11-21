@@ -27,7 +27,7 @@ from ._rigidformer_fixtures import tiny_cfg, geometry_batch
 
 def test_import_does_not_require_community_model_or_simulator():
     code = """import sys
-from embodichain_models.dynamics.rigidformer import RigidFormerCfg
+from embodichain.extensions.models.dynamics.rigidformer import RigidFormerCfg
 assert 'rigidformer' not in sys.modules
 assert 'flash_attn' not in sys.modules
 assert not any(n.startswith('embodichain.lab.sim') for n in sys.modules)
@@ -41,7 +41,7 @@ def test_cpu_only_model_construction_and_checkpoint_import(tmp_path):
     code = """import importlib.util
 import sys
 import torch
-from embodichain_models.dynamics.rigidformer import RigidFormerModel, load_rigidformer_checkpoint
+from embodichain.extensions.models.dynamics.rigidformer import RigidFormerModel, load_rigidformer_checkpoint
 
 assert not torch.cuda.is_available()
 spec = importlib.util.spec_from_file_location('fixtures', sys.argv[2])
@@ -77,8 +77,11 @@ else:
 
 def test_rope_pairing_is_owned_by_each_model():
     pytest.importorskip("roma")
-    from embodichain_models.dynamics.rigidformer import RigidFormerCfg, RigidFormerModel
-    from embodichain_models.dynamics.rigidformer._native.models.physformer_rope import (
+    from embodichain.extensions.models.dynamics.rigidformer import (
+        RigidFormerCfg,
+        RigidFormerModel,
+    )
+    from embodichain.extensions.models.dynamics.rigidformer._native.models.physformer_rope import (
         PhysFormerRoPE,
     )
 
@@ -100,7 +103,7 @@ def test_rope_pairing_is_owned_by_each_model():
 @pytest.mark.gpu
 def test_native_forward_checkpoint_and_rollout_with_variable_objects(tmp_path):
     pytest.importorskip("roma")
-    from embodichain_models.dynamics.rigidformer import (
+    from embodichain.extensions.models.dynamics.rigidformer import (
         RigidFormerModel,
         load_rigidformer_checkpoint,
     )
@@ -152,7 +155,7 @@ def test_native_forward_checkpoint_and_rollout_with_variable_objects(tmp_path):
 @pytest.mark.gpu
 def test_native_packed_points_ignore_finite_padding_above_128():
     pytest.importorskip("roma")
-    from embodichain_models.dynamics.rigidformer import RigidFormerModel
+    from embodichain.extensions.models.dynamics.rigidformer import RigidFormerModel
 
     model = RigidFormerModel(tiny_cfg()).cuda().eval()
     batch = geometry_batch("cuda", points=160)

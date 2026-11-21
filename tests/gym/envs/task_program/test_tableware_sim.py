@@ -131,7 +131,7 @@ def _run_real_sim_episode(
     discover_task_packages()
     source = (
         _REPOSITORY_ROOT
-        / "extensions/embodichain_tasks/configs/tasks/manipulation"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation"
         / (
             task_name
             if task_name in {"hand_over", "repeated_pick_place", "carton_stocking"}

@@ -232,3 +232,64 @@ def test_authored_collision_box_preserves_physical_pad_dimensions(
     assert geometry.provenance["parts"][0]["geometry_kind"] == "urdf_box"
     assert geometry.provenance["parts"][0]["mesh_path"] is None
     assert len(geometry.provenance["files_sha256"]) == 1
+
+
+@pytest.mark.gpu
+def test_native_cpu_chunks_keep_all_samples_and_owned_results_across_streams() -> None:
+    import warp as wp
+
+    wp.init()
+    from types import SimpleNamespace
+    from embodichain.toolkits.graspkit.pg_grasp.collision_checker import (
+        ConvexCollisionChecker,
+    )
+
+    convex = object.__new__(ConvexCollisionChecker)
+    convex.device = torch.device("cpu")
+    normals = torch.cat((torch.eye(3), -torch.eye(3)))
+    convex.plane_equations = {
+        "plane_equations": torch.cat((normals, torch.full((6, 1), -0.1)), dim=1)[None],
+        "plane_equation_counts": torch.tensor([6], dtype=torch.int32),
+    }
+    checker = object.__new__(GripperCollisionChecker)
+    checker.device = torch.device("cpu")
+    checker._checker = convex
+    checker.obj_mesh_verts = torch.zeros(1, 3, dtype=torch.float64)
+    x = torch.linspace(-0.3, 0.3, 1025)
+    checker.surface_points = torch.stack((x, x.flip(0), x * 0.5), dim=-1)
+    poses = torch.eye(4).repeat(258, 1, 1)[::2]
+    poses[:, 0, 3] = torch.linspace(0, 0.5, len(poses))
+    stream = torch.cuda.Stream()
+    for ground in (False, True):
+        for threshold in (0.0, -0.02, 0.02):
+            checker._checker = SimpleNamespace(
+                query_batch_points=convex.query_batch_points
+            )
+            expected = checker.query(
+                torch.eye(4),
+                poses,
+                collision_threshold=threshold,
+                is_filter_ground_collision=ground,
+            )
+            checker._checker = convex
+            with torch.cuda.stream(stream):
+                actual = checker.query(
+                    torch.eye(4),
+                    poses,
+                    collision_threshold=threshold,
+                    is_filter_ground_collision=ground,
+                )
+            for value, reference in zip(actual, expected):
+                assert value.device.type == "cpu"
+                torch.testing.assert_close(value, reference, rtol=0, atol=0)
+    # Each query observes new geometry, and later scratch reuse cannot alter
+    # already returned results. Expand the box to encompass a distant pose.
+    old = checker.query(torch.eye(4), poses, is_filter_ground_collision=False)
+    saved = tuple(value.clone() for value in old)
+    convex.plane_equations["plane_equations"][..., 3] = -1.0
+    changed = checker.query(torch.eye(4), poses, is_filter_ground_collision=False)
+    assert changed[0].all() and not old[0].all()
+    for value, reference in zip(old, saved):
+        torch.testing.assert_close(value, reference, rtol=0, atol=0)
+    empty = checker.query(torch.eye(4), poses[:0], is_filter_ground_collision=False)
+    assert empty[0].numel() == empty[1].numel() == 0

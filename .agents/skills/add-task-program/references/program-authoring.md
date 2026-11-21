@@ -11,7 +11,7 @@ programmatic composition, reuse in code, or a typed tutorial/test.
 Serialized programs belong at:
 
 ```text
-extensions/embodichain_tasks/configs/tasks/<category_path>/<task_name>/task_program/program.yaml
+embodichain/extensions/tasks/configs/tasks/<category_path>/<task_name>/task_program/program.yaml
 ```
 
 The public Python API is `embodichain.lab.task_program`. A provider-independent

@@ -672,6 +672,7 @@ def _validate_scene_binding_targets(
 ) -> None:
     """Fail before runtime when semantic roots select absent native entities."""
     physical_ids = {
+        "cables": _physical_scene_uids(simulation, field_names=("cable_object",)),
         "rigid_objects": _physical_scene_uids(
             simulation,
             field_names=("background", "rigid_object"),
@@ -691,6 +692,7 @@ def _validate_scene_binding_targets(
                 "USD scene binding validation requires its preflight inventory."
             )
         for binding_field, kind in (
+            ("cables", "cable"),
             ("rigid_objects", "rigid_object"),
             ("articulations", "articulation"),
             ("rigidized_articulations", "articulation"),

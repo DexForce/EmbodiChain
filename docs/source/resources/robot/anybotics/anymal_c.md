@@ -12,7 +12,7 @@ including its floating base, standing pose and simulation PD drive defaults.
 
 ```python
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain_robots import ANYmalCCfg
+from embodichain.extensions.robots import ANYmalCCfg
 
 sim = SimulationManager(SimulationManagerCfg(headless=True, num_envs=1))
 cfg = ANYmalCCfg.from_dict({})
@@ -31,7 +31,7 @@ embodichain preview-robot --robot ANYmalC
 | --- | --- |
 | Catalog ID / UID | `ANYmalC` |
 | Configuration class | `ANYmalCCfg` |
-| Canonical module | `embodichain_robots.anybotics.anymal_c` |
+| Canonical module | `embodichain.extensions.robots.anybotics.anymal_c` |
 | Vendor | `anybotics` |
 | Morphology | `quadruped` |
 | Arm count | 0 |

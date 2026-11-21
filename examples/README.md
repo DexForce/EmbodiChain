@@ -50,7 +50,7 @@ The [NeRD showcase](learning/nerd/README.md) prepares pinned external resources,
 trains through the shared SL recipe, exports models and evaluates saved
 transitions. Its private support code owns teacher collection, historical
 training and reference experiments. Reusable models and codecs are installed
-as `embodichain_models`; downloaded datasets, weights and raw reference assets
+as `embodichain.extensions.models`; downloaded datasets, weights and raw reference assets
 are stored outside the repository and wheel.
 
 The [SL data-source example](learning/sl_data_source/README.md) connects resident
@@ -64,7 +64,7 @@ held-out targets, with frozen inference for interactive target edits.
 
 The [RWM fitting example](learning/rwm/README.md) qualifies controlled supervised
 state-transition fitting and state/action gradients. Its generated recipes use
-the installable `embodichain_models.dynamics.rwm` model family and shared SL
+the installable `embodichain.extensions.models.dynamics.rwm` model family and shared SL
 trainer; its corpus generation and acceptance helpers remain private to the example.
 
 The [Sharpa in-hand example](learning/sharpa_inhand/README.md) trains cylinder
@@ -90,6 +90,10 @@ The [Atomic Skill example catalog](sim/atomic_skill/README.md) owns all per-skil
 coordinated-manipulation and recovery demonstrations. The two source-checkout
 walkthroughs under `scripts/tutorials/atomic_skill/` teach single-arm and dual-arm
 API composition; they reuse the canonical example setup.
+
+The RoboCasa365 example tracks recorded PandaOmron joint trajectories across
+six fixed episodes and checks their outcomes in live simulation.
+[RoboCasa365 physical replay](sim/robocasa365/README.md)
 
 The [scene and robot feasibility preview](expansion/scene_robot_feasibility/README.md)
 compares an authored installation with task-conditioned joint layout/deployment

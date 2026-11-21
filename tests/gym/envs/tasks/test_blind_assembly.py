@@ -26,18 +26,25 @@ from scipy.spatial.transform import Rotation
 import pytest
 import torch
 
-from embodichain_tasks.manipulation.assembly._state import (
+from embodichain.extensions.tasks.manipulation.assembly._state import (
     AssemblyState,
     update_assembly,
 )
-from embodichain_tasks.manipulation.assembly._config import AssemblyCfg, assembly_cfg
-from embodichain_tasks.manipulation.assembly.preparation import (
+from embodichain.extensions.tasks.manipulation.assembly._config import (
+    AssemblyCfg,
+    assembly_cfg,
+)
+from embodichain.extensions.tasks.manipulation.assembly.preparation import (
     AssemblyScene,
     prepare_assembly_scene,
 )
-from embodichain_tasks.manipulation.assembly._control import EncoderGravityCompensation
-from embodichain_tasks.manipulation.assembly.resources import export_assembly_resources
-from embodichain_tasks.manipulation.assembly.functors import (
+from embodichain.extensions.tasks.manipulation.assembly._control import (
+    EncoderGravityCompensation,
+)
+from embodichain.extensions.tasks.manipulation.assembly.resources import (
+    export_assembly_resources,
+)
+from embodichain.extensions.tasks.manipulation.assembly.functors import (
     _proprioceptive_frame,
 )
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg, register_manager_modules
@@ -69,7 +76,7 @@ def _state_fixture() -> AssemblyState:
 
 
 def test_configured_interval_advances_once_and_condition_reads_do_not_advance():
-    from embodichain_tasks.manipulation.assembly.functors import (
+    from embodichain.extensions.tasks.manipulation.assembly.functors import (
         assembly_success,
         assembly_failure,
     )
@@ -93,7 +100,7 @@ def test_configured_interval_advances_once_and_condition_reads_do_not_advance():
 
 
 def test_assembly_action_preserves_warmup_history_and_encoder_relative_targets():
-    from embodichain_tasks.manipulation.assembly._control import (
+    from embodichain.extensions.tasks.manipulation.assembly._control import (
         AssemblyJointPositionAction,
     )
 
@@ -149,7 +156,9 @@ def _task_state(state):
 def test_grasp_reset_uses_source_mimic_relations_without_joint_name_assumptions() -> (
     None
 ):
-    from embodichain_tasks.manipulation.assembly.functors import _grasp_joint_reset
+    from embodichain.extensions.tasks.manipulation.assembly.functors import (
+        _grasp_joint_reset,
+    )
 
     robot = SimpleNamespace(
         get_joint_ids=lambda **kwargs: [7],
@@ -167,7 +176,7 @@ def test_grasp_reset_uses_source_mimic_relations_without_joint_name_assumptions(
 
 _CONFIG_ROOT = (
     Path(__file__).resolve().parents[4]
-    / "extensions/embodichain_tasks/configs/tasks/manipulation/assembly"
+    / "embodichain/extensions/tasks/configs/tasks/manipulation/assembly"
 )
 
 
@@ -199,13 +208,15 @@ def test_nominal_task_uses_production_component_loader(
     urdf.parent.mkdir(parents=True)
     urdf.write_text('<robot name="test"><link name="base"/></robot>')
     monkeypatch.setattr(constants, "EMBODICHAIN_DEFAULT_DATA_ROOT", str(tmp_path))
-    register_manager_modules(["embodichain_tasks.manipulation.assembly.functors"])
+    register_manager_modules(
+        ["embodichain.extensions.tasks.manipulation.assembly.functors"]
+    )
     path = _CONFIG_ROOT / task / f"task.{profile}.nominal.yaml"
     declaration = load_config(str(path))
     cfg = config_to_cfg(declaration, source_path=path)
     from embodichain.lab.gym.utils.registration import get_env_spec
     from embodichain.lab.gym.envs import EmbodiedEnv
-    from embodichain_tasks.manipulation.assembly._control import (
+    from embodichain.extensions.tasks.manipulation.assembly._control import (
         AssemblyJointPositionAction,
     )
 
@@ -214,7 +225,7 @@ def test_nominal_task_uses_production_component_loader(
     assert cfg.events.initialize_assembly.mode == "startup"
     assert cfg.events.update_assembly.interval_step == 1
     assert cfg.rl_task.success["assembly"].func.__name__ == "assembly_success"
-    from embodichain_tasks.manipulation.assembly.functors import (
+    from embodichain.extensions.tasks.manipulation.assembly.functors import (
         AssemblyProprioception,
         assembly_contact_labels,
         assembly_privileged_state,
@@ -260,7 +271,9 @@ def test_task_assets_keep_real_mating_constraints(
     kind: str, moving: str, anchor: str
 ) -> None:
     pytest.importorskip("mjfit")
-    from embodichain_tasks.manipulation.assembly.assets import build_task_assembly
+    from embodichain.extensions.tasks.manipulation.assembly.assets import (
+        build_task_assembly,
+    )
 
     asset = build_task_assembly(kind)
     bodies = {b.name: b for b in asset.bodies}
@@ -387,7 +400,7 @@ def test_assembly_requires_contacts_and_explicit_conditions_before_generation(
 ):
     from embodichain.lab.gym.envs import EmbodiedEnvCfg
     from embodichain.lab.gym.envs.managers.cfg import RLTaskCfg
-    from embodichain_tasks.manipulation.assembly import preparation
+    from embodichain.extensions.tasks.manipulation.assembly import preparation
 
     cfg = EmbodiedEnvCfg()
     cfg.extensions = {"assembly": _assembly_options()}
@@ -537,7 +550,7 @@ def _analytic_mating_state(
 def test_partial_reset_recomputes_selected_assembly_geometry(
     monkeypatch, kind: str
 ) -> None:
-    from embodichain_tasks.manipulation.assembly import _state as module
+    from embodichain.extensions.tasks.manipulation.assembly import _state as module
 
     env, one_part = _analytic_mating_state(kind)
     if kind == "gear":
@@ -696,8 +709,12 @@ def test_peg_seats_on_the_generated_fixture_floor(
     scale: float, center: bool | None
 ) -> None:
     pytest.importorskip("mjfit")
-    from embodichain_tasks.manipulation.assembly.assets import build_task_assembly
-    from embodichain_tasks.manipulation.assembly.preparation import _body_vertices
+    from embodichain.extensions.tasks.manipulation.assembly.assets import (
+        build_task_assembly,
+    )
+    from embodichain.extensions.tasks.manipulation.assembly.preparation import (
+        _body_vertices,
+    )
 
     parameters = {"scale": scale}
     if center is not None:
@@ -770,7 +787,7 @@ def test_encoder_gravity_feedforward_matches_mujoco_bias(
     mujoco = pytest.importorskip("mujoco")
     pytest.importorskip("pytorch_kinematics")
     import xml.etree.ElementTree as ET
-    from embodichain_benchmarks.assembly.robot_reference import _append_model
+    from embodichain.extensions.benchmarks.assembly.robot_reference import _append_model
 
     model = ET.Element("mujoco")
     world = ET.SubElement(model, "worldbody")
@@ -827,7 +844,9 @@ def test_encoder_gravity_feedforward_matches_mujoco_bias(
 def test_manager_history_selective_reset_does_not_repeat_other_rows(
     monkeypatch,
 ) -> None:
-    from embodichain_tasks.manipulation.assembly.functors import AssemblyProprioception
+    from embodichain.extensions.tasks.manipulation.assembly.functors import (
+        AssemblyProprioception,
+    )
     from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
 
     frame = torch.zeros((2, 33))
@@ -841,7 +860,9 @@ def test_manager_history_selective_reset_does_not_repeat_other_rows(
         refresh_assembly_state=lambda: None,
         proprioceptive_frame=lambda: frame.clone(),
     )
-    from embodichain_tasks.manipulation.assembly import functors as observations
+    from embodichain.extensions.tasks.manipulation.assembly import (
+        functors as observations,
+    )
 
     env.assembly_state = SimpleNamespace(
         scene=SimpleNamespace(assembly_kind="peg"),
@@ -976,8 +997,8 @@ def test_default_asset_composition_keeps_materials_joint_names_and_arm_tcp(
 ) -> None:
     import importlib
     import xml.etree.ElementTree as ET
-    from embodichain_robots import FlexivRizon4SCfg
-    from embodichain_tasks.manipulation.assembly.functors import (
+    from embodichain.extensions.robots import FlexivRizon4SCfg
+    from embodichain.extensions.tasks.manipulation.assembly.functors import (
         _assembly_kinematic_chain,
     )
     from embodichain.robot_registry import list_robot_cfgs
@@ -1035,11 +1056,15 @@ def test_default_asset_composition_keeps_materials_joint_names_and_arm_tcp(
     monkeypatch.setattr(
         cfg_module, "get_data_path", lambda path: assets.get(path, path)
     )
-    arm_module = importlib.import_module("embodichain_robots.flexiv.rizon4s.cfg")
+    arm_module = importlib.import_module(
+        "embodichain.extensions.robots.flexiv.rizon4s.cfg"
+    )
     monkeypatch.setattr(
         arm_module, "get_data_path", lambda path: assets.get(path, path)
     )
-    register_manager_modules(["embodichain_tasks.manipulation.assembly.functors"])
+    register_manager_modules(
+        ["embodichain.extensions.tasks.manipulation.assembly.functors"]
+    )
     path = _CONFIG_ROOT / "peg_insertion/task.study.default_assets.yaml"
     config = load_config(str(path))
     import yaml
@@ -1122,7 +1147,9 @@ def test_exact_robot_dynamics_gate_belongs_to_task_environment(tmp_path: Path) -
 
 def test_peg_task_floor_is_plate_attached_and_preserves_free_part() -> None:
     pytest.importorskip("mjfit")
-    from embodichain_tasks.manipulation.assembly.assets import build_task_assembly
+    from embodichain.extensions.tasks.manipulation.assembly.assets import (
+        build_task_assembly,
+    )
 
     closed = build_task_assembly("peg")
     opened = build_task_assembly("peg", {"bottom_thickness": 0})
@@ -1163,7 +1190,9 @@ def test_elevated_peg_task_seats_on_local_floor_not_global_ground() -> None:
     mujoco = pytest.importorskip("mujoco")
     pytest.importorskip("mjfit")
     import xml.etree.ElementTree as ET
-    from embodichain_tasks.manipulation.assembly.assets import build_task_assembly
+    from embodichain.extensions.tasks.manipulation.assembly.assets import (
+        build_task_assembly,
+    )
 
     asset = build_task_assembly("peg")
     model_xml = ET.fromstring(asset.source_mjcf)
@@ -1199,7 +1228,7 @@ def test_elevated_peg_task_seats_on_local_floor_not_global_ground() -> None:
 def test_preparation_preserves_explicit_managers_and_custom_conditions(
     monkeypatch, tmp_path
 ):
-    from embodichain_tasks.manipulation.assembly import preparation
+    from embodichain.extensions.tasks.manipulation.assembly import preparation
     from embodichain.lab.gym.envs import EmbodiedEnvCfg
     from embodichain.lab.gym.envs.managers.cfg import (
         ActionTermCfg,
@@ -1275,7 +1304,7 @@ def test_proprioception_respects_configured_arm_and_action_names_with_four_joint
 
 
 def test_configured_milestone_weights_and_hold_duration_are_effective():
-    from embodichain_tasks.manipulation.assembly.functors import (
+    from embodichain.extensions.tasks.manipulation.assembly.functors import (
         assembly_milestone_reward,
     )
 
@@ -1298,7 +1327,7 @@ def test_reset_preparation_precedes_first_privileged_state_and_contact_labels(
     from contextlib import nullcontext
     from embodichain.lab.gym.envs.base_env import BaseEnv
     from embodichain.lab.gym.envs.episode_context import EpisodeContext
-    from embodichain_tasks.manipulation.assembly import functors
+    from embodichain.extensions.tasks.manipulation.assembly import functors
 
     state, part = _analytic_mating_state()
     _task_state(state)

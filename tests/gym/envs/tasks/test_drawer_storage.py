@@ -37,7 +37,7 @@ from embodichain.utils.utility import load_config
 
 _CONFIG = (
     Path(__file__).resolve().parents[4]
-    / "extensions/embodichain_tasks/configs/tasks/manipulation/drawer_storage"
+    / "embodichain/extensions/tasks/configs/tasks/manipulation/drawer_storage"
 )
 
 
@@ -234,7 +234,7 @@ def _run_franka_contact_episode() -> None:
 
     source = (
         Path(__file__).resolve().parents[4]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/drawer_storage/task.franka.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/drawer_storage/task.franka.yaml"
     )
     payload = load_config(source)
     payload.update(

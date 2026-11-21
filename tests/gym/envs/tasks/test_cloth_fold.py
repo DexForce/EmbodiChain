@@ -35,7 +35,7 @@ import numpy as np
 @pytest.mark.parametrize("config_first", (True, False))
 def test_cloth_fold_registration_order(tmp_path: Path, config_first: bool) -> None:
     package = (
-        Path(__file__).resolve().parents[4] / "extensions/embodichain_tasks/configs"
+        Path(__file__).resolve().parents[4] / "embodichain/extensions/tasks/configs"
     )
     config = package / "tasks/manipulation/cloth_fold/task.w1.yaml"
     script = """

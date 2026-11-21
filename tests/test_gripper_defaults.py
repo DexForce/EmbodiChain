@@ -641,7 +641,7 @@ def test_native_drive_mapping_and_optional_resource_corrections(tmp_path, monkey
         _decode_grasp_generator,
     )
     from embodichain.robot_registry import resolve_robot_cfg
-    import embodichain_robots.dh_robotics.pgi_140_80._gripper_defaults as provider
+    import embodichain.extensions.robots.dh_robotics.pgi_140_80._gripper_defaults as provider
 
     original = provider.get_gripper_defaults()
     original["joint_drive_props"]["stiffness"] = {
@@ -729,7 +729,7 @@ def test_generic_dual_bound_hands_preserve_source_order_limit_overrides(tmp_path
 def test_generator_capabilities_are_explicit_and_do_not_grant_undeclared_endpoints(
     tmp_path, monkeypatch, supported
 ):
-    import embodichain_robots.dh_robotics.pgi_140_80._gripper_defaults as provider
+    import embodichain.extensions.robots.dh_robotics.pgi_140_80._gripper_defaults as provider
 
     values = provider.get_gripper_defaults()
     values["grasp_generators"] = supported
@@ -808,7 +808,7 @@ def test_w1_pika_partial_prefixes_match_assembled_hand_names():
 
     source = (
         Path(__file__).resolve().parents[1]
-        / "extensions/embodichain_tasks/configs/components/embodiments/dexforce_w1_030_pika.yaml"
+        / "embodichain/extensions/tasks/configs/components/embodiments/dexforce_w1_030_pika.yaml"
     )
     declaration = yaml.safe_load(source.read_text())
     declaration["simulation"]["urdf_cfg"]["component_prefix"] = [

@@ -165,17 +165,17 @@ not by Task Program or Gym.
 ## Find a configured deployment
 
 Use `embodichain list-task` and the task-local `catalog.yaml` / runnable YAML
-under `extensions/embodichain_tasks/configs/tasks/` for current IDs, embodiments
+under `embodichain/extensions/tasks/configs/tasks/` for current IDs, embodiments
 and available deployments. The catalog implementation is
 `embodichain/cli/_task_catalog.py`; this overview does not maintain a second
 inventory of IDs or backend-specific defaults.
 
 For a minimal projected workflow, start with
-[repeated pick/place](../../../extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/README.md).
+[repeated pick/place](../../../embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/README.md).
 For measured handover, inspect the selected deployment and execution policy in
-`extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/`.
+`embodichain/extensions/tasks/configs/tasks/manipulation/hand_over/`.
 For fixed real-motion source binding and qualified expansion, use
-`extensions/embodichain_tasks/configs/tasks/manipulation/carton_stocking/task.panda.yaml`.
+`embodichain/extensions/tasks/configs/tasks/manipulation/carton_stocking/task.panda.yaml`.
 It selects three real-source prototypes through verified asset references and
 the existing Real2Sim recorder owner; the example rebuilds sources from the same templates.
 Assurance belongs to that policy, not the task name or backend. Read the

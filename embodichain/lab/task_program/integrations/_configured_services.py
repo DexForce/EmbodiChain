@@ -360,10 +360,15 @@ class _AntipodalGraspPoseGeneratorFactory:
     approach_deviation_angle: float | None = None
     max_candidates: int | None = None
     center_mode: str | None = None
+    angle_weight: float | None = None
+    center_weight: float | None = None
+    opening_weight: float | None = None
     filter_ground_collision: bool | None = None
     force_refresh: bool | None = None
 
-    def validate_binding(self, robot: object, target_id: str) -> None:
+    def validate_binding(
+        self, robot: object, target_id: str, *, contact_frame_override: object = None
+    ) -> None:
         """Reject a static service snapshot bound to different physical hardware."""
         import json
 
@@ -381,7 +386,17 @@ class _AntipodalGraspPoseGeneratorFactory:
         expected_binding = {
             key: value for key, value in declaration.items() if key != "instance"
         }
-        if json.dumps(selected["declaration"], sort_keys=True) != json.dumps(
+        actual_binding = dict(selected["declaration"])
+        if contact_frame_override is not None:
+            # Explicit workload-local sampling frames change the proposal
+            # convention, never the installed TCP, mesh or joint commands.
+            if json.dumps(contact_frame_override, sort_keys=True) != json.dumps(
+                expected.get("root_from_contact_frame"), sort_keys=True
+            ):
+                raise ValueError("Contact frame must match the declared grasp service.")
+            expected_binding.pop("root_from_contact_frame", None)
+            actual_binding.pop("root_from_contact_frame", None)
+        if json.dumps(actual_binding, sort_keys=True) != json.dumps(
             expected_binding, sort_keys=True
         ):
             raise ValueError(
@@ -396,11 +411,19 @@ class _AntipodalGraspPoseGeneratorFactory:
                 )
 
         def physical_model(values):
-            return {
+            result = {
                 key: value
                 for key, value in values.items()
                 if key not in {"min_opening_width", "max_opening_width"}
             }
+            if contact_frame_override is not None:
+                result.pop("root_from_contact_frame", None)
+                result["binding"] = {
+                    key: value
+                    for key, value in result.get("binding", {}).items()
+                    if key != "root_from_contact_frame"
+                }
+            return result
 
         if json.dumps(physical_model(actual), sort_keys=True) != json.dumps(
             physical_model(expected), sort_keys=True
@@ -429,7 +452,14 @@ class _AntipodalGraspPoseGeneratorFactory:
             algorithm_kwargs["approach_direction_samples"] = (
                 self.approach_direction_samples
             )
-        for name in ("approach_deviation_angle", "max_candidates", "center_mode"):
+        for name in (
+            "approach_deviation_angle",
+            "max_candidates",
+            "center_mode",
+            "angle_weight",
+            "center_weight",
+            "opening_weight",
+        ):
             value = getattr(self, name)
             if value is not None:
                 algorithm_kwargs[name] = value

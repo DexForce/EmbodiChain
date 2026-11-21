@@ -1,7 +1,7 @@
 # Robot System
 
 Generic configuration/runtime belongs to `lab/sim`; concrete presets, asset
-identity and calibrated defaults belong to `embodichain_robots`.
+identity and calibrated defaults belong to `embodichain.extensions.robots`.
 
 ## Find the owner
 
@@ -12,16 +12,16 @@ identity and calibrated defaults belong to `embodichain_robots`.
 | Pure parallel-jaw defaults, mounted/existing bindings and standalone hand configs | `embodichain/robot_registry.py` → `resolve_gripper_defaults`; `embodichain/lab/gym/utils/_gripper_composition.py`; `embodichain/lab/sim/cfg/gripper.py` |
 | Explicit hand geometry capture and lazy paired grasp ownership | `embodichain/lab/sim/utility/grasp_geometry.py` |
 | Config decoding, construction hooks, backend alternatives | `embodichain/lab/sim/cfg/robot.py` → `RobotCfg`, `RobotPresetCfg` |
-| Available robot configs and variants | `extensions/embodichain_robots/_catalog.py`; `extensions/embodichain_robots/__init__.py` owns lazy exports |
-| YAM dual-arm defaults and source-aligned FK/IK | `extensions/embodichain_robots/i2rt/yam/cfg.py` → [model and asset usage](../../../docs/source/resources/robot/i2rt/yam.md) |
-| Locomotion assets, standing poses, drives and reference frames | `extensions/embodichain_robots/locomotion_profiles.py` reads each vendor/model's `profile.json`; model packages own `cfg.py` and `assets.py` |
+| Available robot configs and variants | `embodichain/extensions/robots/_catalog.py`; `embodichain/extensions/robots/__init__.py` owns lazy exports |
+| YAM dual-arm defaults and source-aligned FK/IK | `embodichain/extensions/robots/i2rt/yam/cfg.py` → [model and asset usage](../../../docs/source/resources/robot/i2rt/yam.md) |
+| Locomotion assets, standing poses, drives and reference frames | `embodichain/extensions/robots/locomotion_profiles.py` reads each vendor/model's `profile.json`; model packages own `cfg.py` and `assets.py` |
 | Shared Gym/CLI/dual-arm selection | `embodichain/robot_registry.py` → `list_robot_cfgs`, `resolve_robot_cfg` |
 | Robot listing CLI | `embodichain/cli/list_robot.py` → `embodichain list-robot` |
 | Generic robot preview and standalone RobotCfg files | `embodichain/lab/scripts/preview_robot.py` → `embodichain preview-robot` |
-| Bare Franka arm selection and explicit tool assembly | `extensions/embodichain_robots/franka/cfg.py`, `panda.py` → [catalog contracts](catalogs.md) |
-| W1 variants and serialization | `extensions/embodichain_robots/dexforce/w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
-| Independent Revo1 hand or shared hand asset names | `extensions/embodichain_robots/brainco/revo1/` → `cfg.py`, `_specs.py` |
-| AgiBot G1 preset and pinned GenieSim USD | `extensions/embodichain_robots/agibot/g1/` → `cfg.py`, `assets.py` |
+| Bare Franka arm selection and explicit tool assembly | `embodichain/extensions/robots/franka/cfg.py`, `panda.py` → [catalog contracts](catalogs.md) |
+| W1 variants and serialization | `embodichain/extensions/robots/dexforce/w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
+| Independent Revo1 hand or shared hand asset names | `embodichain/extensions/robots/brainco/revo1/` → `cfg.py`, `_specs.py` |
+| AgiBot G1 preset and pinned GenieSim USD | `embodichain/extensions/robots/agibot/g1/` → `cfg.py`, `assets.py` |
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
 | Shared articulation state and drive properties | `embodichain/lab/sim/objects/articulation.py`, `embodichain/lab/sim/cfg/articulation.py` |
 
@@ -32,8 +32,10 @@ and dual-arm construction. It imports only the selected preset; see
 [catalog contracts](catalogs.md) for IDs, variants, pure hand descriptions and
 locomotion profiles. Display classification does not grant runtime capabilities.
 
-`AgibotG1` selects the original GenieSim G1_120s USD and driven joints, with one
-driver per gripper part. The [USD import contract](../simulation-system/simulation-system.md#ownership)
+`AgibotG1` selects the GenieSim G1_120s USD with enabled gripper, wrist camera
+mount and arm colliders and body and shoulder geometry from the official G1
+OmniPicker variant. The source gripper drivers and disabled self-collision are preserved.
+The [USD import contract](../simulation-system/simulation-system.md#ownership)
 owns closed-loop constraints and backend support. Robot preview resolves local
 `source.file_path` USD and sensor URDF paths relative to the config file before
 World creation; inline sensor definitions and data IDs stay unchanged.

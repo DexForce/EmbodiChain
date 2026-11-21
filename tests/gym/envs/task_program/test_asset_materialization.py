@@ -50,7 +50,7 @@ from embodichain.lab.task_program.semantics.asset_requirements import (
 )
 
 ROOT = Path(__file__).resolve().parents[4]
-CONFIGS = ROOT / "extensions/embodichain_tasks/configs"
+CONFIGS = ROOT / "embodichain/extensions/tasks/configs"
 TASK = CONFIGS / "tasks/manipulation/repeated_pick_place"
 
 
@@ -583,6 +583,8 @@ def test_manifest_inventory_and_provenance_are_validated_without_optional_digest
 def test_packaged_asset_id_is_not_shadowed_during_bundling(
     deployment, tmp_path, monkeypatch
 ):
+    from embodichain.data import get_data_path
+
     source, requirements, resolved = deployment
     shadow = source.parent / "Dataset"
     shadow.mkdir()
@@ -591,7 +593,10 @@ def test_packaged_asset_id_is_not_shadowed_during_bundling(
     (data_root / "Dataset").mkdir(parents=True)
     shutil.copy2(resolved.assets["source"].visual_path, data_root / "Dataset/mesh.obj")
     monkeypatch.setattr(
-        "embodichain.data.constants.EMBODICHAIN_DEFAULT_DATA_ROOT", str(data_root)
+        "embodichain.data.get_data_path",
+        lambda path: (
+            str(data_root / path) if path == "Dataset/mesh.obj" else get_data_path(path)
+        ),
     )
     env_path = source.parent / "env.yaml"
     env = yaml.safe_load(env_path.read_text())

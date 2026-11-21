@@ -15,7 +15,7 @@ Online sampling and demonstration persistence belong to
 | Cache roots / mirror prefix | `embodichain/data/constants.py` |
 | Locked download and ZIP integrity | `embodichain/data/dataset.py`: `EmbodiChainDataset`, `_dataset_download_lock()` |
 | Shared class discovery | `embodichain/data/_asset_registry.py`: core modules and `embodichain.assets` catalogs |
-| Robot-owned asset definitions | `extensions/embodichain_robots/_asset_catalog.py` → vendor/model `assets.py` |
+| Robot-owned asset definitions | `embodichain/extensions/robots/_asset_catalog.py` → vendor/model `assets.py` |
 | YAM source conversion and reproducible archive | `scripts/tools/prepare_yam_i2rt_assets.py` → [source and published assets](../../../docs/source/resources/robot/i2rt/yam.md#published-assets-and-offline-use) |
 | CLI list/download | `embodichain/data/download.py`: `get_registry()`, `download_asset()` |
 | Default material catalog / provenance | `embodichain/_material_catalog.py` → `embodichain/data/default_materials.py`; `embodichain/data/default_materials.json` |
@@ -82,13 +82,13 @@ the public `CATEGORY_MODULES` mapping remains a single-module compatibility view
 Catalogs are cached for the process lifetime; refresh editable metadata and restart
 after changing entry points.
 
-Migrated robot assets live in `embodichain_robots`, alongside each model or at
+Migrated robot assets live in `embodichain.extensions.robots`, alongside each model or at
 vendor level for shared archives. The legacy `robot_assets`, `w1_assets`,
 `so101_assets` and migrated `locomotion_assets` names forward to the same class objects.
 Discovery excludes these imported aliases so IDs register once. Keep class names,
 asset IDs, URLs, digests and cache prefixes stable across ownership moves.
 EEF asset classes live in vendor/model `assets.py` modules
-in `embodichain_robots`, registered once under category `eef` by the same
+in `embodichain.extensions.robots`, registered once under category `eef` by the same
 catalog. Their former `embodichain.data.assets.eef_assets` module and aggregate
 class exports are removed; use the canonical modules or `get_data_class()`.
 String asset IDs and archive/cache paths remain unchanged. Pika belongs to
@@ -108,7 +108,7 @@ and exits nonzero if any requested asset failed.
 `_ensure_extract()` copies non-ZIP downloads into the extract tree
 when needed. Solver/planner checkpoint download helpers can have separate paths.
 
-`SO101FollowerAssets` in `embodichain_robots.the_robot_studio.so101.assets` also belongs to the robot CLI
+`SO101FollowerAssets` in `embodichain.extensions.robots.the_robot_studio.so101.assets` also belongs to the robot CLI
 category. It resolves a pinned official URDF and individual STL/reference files,
 verifies every SHA256, and repairs dependencies under the shared dataset lock.
 Keep its source revision and complete file checksums together when updating it.
@@ -126,7 +126,7 @@ evidence. These are visual-only scenes and supply no enclosing collision box.
 normal runtime consumers download the completed archive. Package admission and
 native RGB evidence do not certify metric Gaussian depth or industrial readiness.
 Official Task Program deployments live under
-`extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/`.
+`embodichain/extensions/tasks/configs/tasks/manipulation/gaussian_pick_place/`.
 `examples/gym/gaussian_pick_place/` consumes those definitions for RGB recording,
 video export and offline acceptance; it does not own another task configuration.
 
@@ -136,11 +136,11 @@ resolve the existing `Panda/Panda.urdf`; embodiments mount the derived hand
 explicitly. Source and derived digests are recorded together.
 
 `FrankaPandaArm` is a separate pinned original-Panda asset in
-`embodichain_robots.franka.assets`; `FrankaV4` remains the historical FR3 asset.
+`embodichain.extensions.robots.franka.assets`; `FrankaV4` remains the historical FR3 asset.
 The original-Panda derivative normalizes only authored rounded right angles,
 checks the upstream URDF digest and writes derivation evidence under the shared
 dataset lock. Its identity must stay distinct from the FR3 archive; see the
-[vendor provenance](../../../extensions/embodichain_robots/franka/README.md).
+[vendor provenance](../../../embodichain/extensions/robots/franka/README.md).
 
 `UniversalRobots` selects the V4 archive with corrected UR3/UR3e material
 colors. Its versioned `UniversalRobotsV4` cache directory changes source paths
@@ -208,8 +208,10 @@ rejects paths resolving outside its RUN, including default HF blob symlinks.
 The CLI records repository provenance and writes reports outside the model
 cache. Robot references still use `get_data_path()` and its existing asset cache.
 Task packages must already be installed; downloading weights does not register
-new environment implementations. Test the Hub boundary with fake downloads and
-validate a real selected-model download separately.
+new environment implementations. The index's `task_package` accepts a qualified
+module name. Published official policy indexes declaring `embodichain_tasks`
+resolve their requirement to `embodichain.extensions.tasks`. Test the Hub
+boundary with fake downloads and validate a real selected-model download separately.
 
 ## Qualified cloth replay inputs
 
@@ -248,10 +250,17 @@ visibility and failure exit behavior. Use fake download backends for these
 contracts; separately validate actual network downloads when asset content changes.
 
 `FlexivRizon4SMenagerie` is a source-file bundle rather than an archive:
-`embodichain_robots/flexiv/rizon4s/rizon4s_sources.json` pins individual Git blob identities and
+`embodichain/extensions/robots/flexiv/rizon4s/rizon4s_sources.json` pins individual Git blob identities and
 licenses. The owning asset class verifies each downloaded file before publishing
 the source cache, preserving prepared model directories during automatic repair
 under the same lock used by preparation. Historical URDF preparation and
 model-fidelity metadata are owned by
-`embodichain_benchmarks.assembly.robot_reference`, not the dataset resolver or a
+`embodichain.extensions.benchmarks.assembly.robot_reference`, not the dataset resolver or a
 combined arm/gripper catalog preset.
+
+The five classes in `assets/rl_assets.py` use the same archive cache. The
+`official_rl` entry point registers four robot entries and the `G1RoughTerrains`
+scene entry through the shared `embodichain.assets` catalog. CLI discovery and
+`get_data_class()` resolve the same class identities. The G1 Rough asset does not replace
+`UnitreeG1Locomotion`; their joint counts and provenance differ. Publication
+status is external to code registration and must be verified before release.

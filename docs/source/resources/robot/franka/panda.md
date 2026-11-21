@@ -13,7 +13,7 @@ See [Franka configuration](cfg.md) for arm selection, assembly and migration.
 ## Bare compatibility constructor
 
 ```python
-from embodichain_robots import FrankaPandaCfg
+from embodichain.extensions.robots import FrankaPandaCfg
 
 cfg = FrankaPandaCfg.from_dict({"robot_type": "panda"})
 robot = sim.add_robot(cfg=cfg)
@@ -47,7 +47,7 @@ For standalone construction, load that component through the public catalog:
 ```python
 from embodichain.robot_registry import resolve_robot_cfg
 from embodichain.utils.utility import load_config
-from embodichain_tasks.configs import get_config_path
+from embodichain.extensions.tasks.configs import get_config_path
 
 fields = load_config(get_config_path("components/embodiments/franka_panda.yaml"))[
     "simulation"
@@ -62,7 +62,7 @@ belong to the component, while `FrankaPandaCfg` remains the bare-arm
 compatibility selector.
 
 ```{eval-rst}
-.. py:class:: embodichain_robots.franka.panda.FrankaPandaCfg
+.. py:class:: embodichain.extensions.robots.franka.panda.FrankaPandaCfg
 
    Legacy FR3 arm selector. The inherited ``from_dict()`` and
    ``build_pk_serial_chain()`` use the bare seven-joint arm and flange TCP.

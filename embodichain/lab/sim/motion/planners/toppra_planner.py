@@ -36,8 +36,14 @@ from .base_planner import (
     PlanOptions,
     _infer_batch_size,
 )
-from ._joint_limits import _resolve_joint_constraints
-from .utils import MoveType, TrajectorySampleMethod, PlanState, PlanResult
+from ._joint_limits import _plan_joint_ids, _resolve_joint_constraints
+from .utils import (
+    MoveType,
+    TrajectorySampleMethod,
+    PlanState,
+    PlanResult,
+    RejectedMotionCandidate,
+)
 
 __all__ = [
     "ToppraPlanner",
@@ -296,7 +302,9 @@ class ToppraPlanner(BasePlanner):
     """Rest-to-rest joint-path timing with differentiable CPU/CUDA Warp kernels.
 
     Uniform not-a-knot cubic geometry is timed under conservative interval
-    bounds. Results preserve the planner's float32 output contract.
+    bounds. Illegal input knots or returned joint samples are rejected, with
+    the candidate retained for diagnosis; this does not certify continuous
+    position bounds. Results preserve double-precision samples.
     """
 
     supported_move_types = frozenset({MoveType.JOINT_MOVE})
@@ -390,4 +398,36 @@ class ToppraPlanner(BasePlanner):
                 )
         except (ValueError, FloatingPointError, OverflowError):
             return _failed_result(b, dofs, self.device, torch.float64)
-        return PlanResult(**result)
+
+        # Dynamic feasibility alone does not bound cubic position overshoot.
+        positions = result["positions"]
+        limits = self.robot.get_qpos_limits(
+            joint_ids=_plan_joint_ids(self.robot, options.control_part, dofs),
+            env_ids=getattr(self, "_planning_env_ids", None),
+        ).to(positions)
+        if limits.ndim != 3 or limits.shape[0] < b or limits.shape[1:] != (dofs, 2):
+            raise ValueError("Robot position limits must cover the planning batch.")
+        lower, upper = limits[:b].unbind(-1)
+        # Allow only rounding at the authored waypoint precision.
+        tolerance = 8 * torch.finfo(waypoints_tensor.dtype).eps
+
+        def in_bounds(values: torch.Tensor) -> torch.Tensor:
+            return (
+                torch.isfinite(values)
+                & (values >= lower[:, None] - tolerance)
+                & (values <= upper[:, None] + tolerance)
+            ).all(dim=(1, 2))
+
+        valid = in_bounds(positions) & in_bounds(waypoints_tensor)
+        rejected = result["success"] & ~valid
+        candidate = None
+        if bool(rejected.any()):
+            candidate = RejectedMotionCandidate(positions, result["dt"], rejected)
+            held = waypoints_tensor[:, :1].to(positions).expand_as(positions)
+            result["positions"] = torch.where(rejected[:, None, None], held, positions)
+            for name in ("velocities", "accelerations", "dt"):
+                values = result[name]
+                mask = rejected.reshape(b, *([1] * (values.ndim - 1)))
+                result[name] = torch.where(mask, torch.zeros_like(values), values)
+        result["success"] = result["success"] & valid
+        return PlanResult(**result, rejected_candidate=candidate)

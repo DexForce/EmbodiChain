@@ -247,11 +247,13 @@ completion can retry the staged publication before another camera read.
 USD visual Xforms may reference an external Gaussian PLY through DexSim's
 native parser. This produces a Gaussian render on its original USD rigid or
 visual owner, with USD collision and mass left independent. EmbodiChain binds
-that source through `add_usd()` or `UsdSourceCfg` in one Arena with Default
-physics and Hybrid rendering. Native USD Gaussian renders cannot currently be
-replicated across Arenas or replaced by the explicit `visuals` list; reject
-those requests before Spawn mutation. The standalone `GaussianSplatCfg` path
-continues to support multi-Arena companions and per-instance randomization.
+that source through `add_usd()` or `UsdSourceCfg` with Default physics and Hybrid
+rendering. Qualified DexSim builds clone the parent and its Gaussian companions
+across Arenas, share immutable resources and retain independent transforms and
+visibility. EmbodiChain checks the public `get_gaussian_resource_ids()` capability
+before multi-Arena declaration; older SDKs retain singleton support. Native USD
+Gaussian appearance cannot be replaced by an explicit `visuals` list. The
+standalone `GaussianSplatCfg` path retains its per-instance randomization API.
 NoRender omits the USD Gaussian render resource but keeps its authored physics
 and collision descriptions, including replicated bodies. Type queries retain
 the authored visual reference without allocating Gaussian points.
@@ -276,6 +278,9 @@ is invalidated at preparation entry and published only after full success.
 Gym defers manager output and emits one combined summary at initialization
 completion. `startup_summary` controls verbosity; `dexsim_startup_info` controls
 native startup information independently of Newton Warp-log suppression.
+Scene asset counts use manager-registered UIDs across the scene. Both modes
+show sensor details. Full mode also lists object UIDs and shows each registered
+direct light's UID, type, and scope.
 Warnings/errors remain visible. Device names reuse existing Warp metadata;
 diagnostics must not initialize PyTorch CUDA. Requested/resolved Newton solver
 and graph status are separate; pending must never be reported as captured.

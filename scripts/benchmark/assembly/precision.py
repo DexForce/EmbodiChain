@@ -35,7 +35,7 @@ import sys
 import tempfile
 
 from embodichain.toolkits.assembly import AssemblyAsset, build_assembly
-from embodichain_benchmarks.assembly.precision import (
+from embodichain.extensions.benchmarks.assembly.precision import (
     PrecisionRunCfg,
     compare_usd_geometry,
     run_passive_probe,
@@ -464,7 +464,7 @@ def main() -> None:
         if probe == "passive":
             result = run_passive_probe(asset, cfg)
         else:
-            from embodichain_benchmarks.assembly.probes import (
+            from embodichain.extensions.benchmarks.assembly.probes import (
                 ConstrainedProbeCfg,
                 run_native_probe,
                 run_reference_probe,

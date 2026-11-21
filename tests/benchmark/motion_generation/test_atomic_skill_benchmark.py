@@ -21,8 +21,10 @@ from __future__ import annotations
 import numpy as np
 import xml.etree.ElementTree as ET
 from embodichain.lab.sim.cfg import RobotCfg
-from embodichain_robots import FrankaPandaCfg
-from embodichain_benchmarks.motion_generation._atomic_fixtures import _FrankaPgiCfg
+from embodichain.extensions.robots import FrankaPandaCfg
+from embodichain.extensions.benchmarks.motion_generation._atomic_fixtures import (
+    _FrankaPgiCfg,
+)
 
 import argparse
 import json
@@ -46,17 +48,21 @@ from embodichain.lab.sim.atomic_skills.plans import CompiledTrajectory, TimedTra
 from embodichain.lab.sim.motion.planners import ToppraPlanOptions
 from embodichain.lab.sim.motion.planners.utils import PlanResult
 from embodichain.utils.math import axis_angle_to_rotation_matrix
-from embodichain_benchmarks.motion_generation.aggregation import aggregate_results
-from embodichain_benchmarks.motion_generation.artifacts import (
+from embodichain.extensions.benchmarks.motion_generation.aggregation import (
+    aggregate_results,
+)
+from embodichain.extensions.benchmarks.motion_generation.artifacts import (
     TrialJsonlWriter,
     write_case_manifest,
 )
-from embodichain_benchmarks.motion_generation.config import load_suite
-from embodichain_benchmarks.motion_generation.contracts import ReplayObservationTrace
-from embodichain_benchmarks.motion_generation.metrics.trajectory import (
+from embodichain.extensions.benchmarks.motion_generation.config import load_suite
+from embodichain.extensions.benchmarks.motion_generation.contracts import (
+    ReplayObservationTrace,
+)
+from embodichain.extensions.benchmarks.motion_generation.metrics.trajectory import (
     compute_case_outcomes,
 )
-from embodichain_benchmarks.motion_generation.models import (
+from embodichain.extensions.benchmarks.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
@@ -64,21 +70,27 @@ from embodichain_benchmarks.motion_generation.models import (
     TrialPhase,
     TrialRecord,
 )
-from embodichain_benchmarks.motion_generation.registry import create_robot_provider
-from embodichain_benchmarks.motion_generation.runner import BenchmarkRunner
-from embodichain_benchmarks.motion_generation import robots as _robots  # noqa: F401
-from embodichain_benchmarks.motion_generation.scenarios.atomic_objects import (
+from embodichain.extensions.benchmarks.motion_generation.registry import (
+    create_robot_provider,
+)
+from embodichain.extensions.benchmarks.motion_generation.runner import BenchmarkRunner
+from embodichain.extensions.benchmarks.motion_generation import (
+    robots as _robots,
+)  # noqa: F401
+from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_objects import (
     atomic_object_kind_names,
     create_atomic_object,
 )
-from embodichain_benchmarks.motion_generation.scenarios.atomic_skill import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
 )
-from embodichain_benchmarks.motion_generation.scenarios.atomic_replay import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_replay import (
     AtomicReplayRuntime,
 )
-from embodichain_benchmarks.motion_generation.contracts import ExecutionObservation
-from embodichain_benchmarks.motion_generation.scenarios.atomic_case_utils import (
+from embodichain.extensions.benchmarks.motion_generation.contracts import (
+    ExecutionObservation,
+)
+from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_case_utils import (
     atomic_case_id,
     canonical_case_qpos,
     case_generation_seed,
@@ -86,19 +98,21 @@ from embodichain_benchmarks.motion_generation.scenarios.atomic_case_utils import
     seeded_jitter,
     snapshot_case_qpos,
 )
-from embodichain_benchmarks.motion_generation.scenarios.atomic_policy import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_policy import (
     benchmark_motion_attribution,
     benchmark_motion_policy_strategy,
 )
-from embodichain_benchmarks.motion_generation.atomic_skill import (
+from embodichain.extensions.benchmarks.motion_generation.atomic_skill import (
     atomic_skill_provider_names,
     create_atomic_skill_provider,
 )
-from embodichain_benchmarks.motion_generation.scenarios.base import ScenarioProvider
-from embodichain_benchmarks.motion_generation.scenarios.free_space import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios.base import (
+    ScenarioProvider,
+)
+from embodichain.extensions.benchmarks.motion_generation.scenarios.free_space import (
     FreeSpaceScenario,
 )
-from embodichain_benchmarks.motion_generation.video import (
+from embodichain.extensions.benchmarks.motion_generation.video import (
     VideoRecordCfg,
     build_video_path,
     record_with_window,
@@ -327,7 +341,9 @@ def test_move_end_effector_provider_uses_settled_tcp_standard_evidence() -> None
     results = evaluator.evaluate(case, observation, outcomes)
 
     assert [result.task_success for result in results] == [True, False]
-    from embodichain_benchmarks.motion_generation.evaluation import STANDARD_VERSION
+    from embodichain.extensions.benchmarks.motion_generation.evaluation import (
+        STANDARD_VERSION,
+    )
 
     assert results[0].protocol_version == STANDARD_VERSION
     assert results[0].stages[0].evidence_source == (
@@ -2382,8 +2398,10 @@ def test_physical_evaluator_dispatch_preserves_row_results_and_execution_gates(
     expected_failure: str | None,
 ) -> None:
     """Row-local physical evidence preserves rejected plans' failure causes."""
-    from embodichain_benchmarks.motion_generation import contracts
-    from embodichain_benchmarks.motion_generation.scenarios import atomic_skill
+    from embodichain.extensions.benchmarks.motion_generation import contracts
+    from embodichain.extensions.benchmarks.motion_generation.scenarios import (
+        atomic_skill,
+    )
 
     case = replace(
         _atomic_case(), batch_size=2, target_waypoints=torch.eye(4).repeat(2, 1, 1, 1)
@@ -2494,8 +2512,10 @@ def test_runner_freezes_domain_manifest_before_each_planner(
     monkeypatch, tmp_path
 ) -> None:
     """The same case population and provenance reach all candidate records."""
-    from embodichain_benchmarks.motion_generation import runner as runner_module
-    from embodichain_benchmarks.motion_generation.config import DomainCfg
+    from embodichain.extensions.benchmarks.motion_generation import (
+        runner as runner_module,
+    )
+    from embodichain.extensions.benchmarks.motion_generation.config import DomainCfg
 
     suite = load_suite("atomic_franka_robotiq_smoke")
     suite.tracks = [suite.enabled_tracks()[0]]
@@ -2866,7 +2886,7 @@ def test_nonfinite_press_joint_evidence_does_not_count_as_contact_failure(
 
 
 def test_compiled_replay_clock_preserves_intervals_and_zero_time_boundaries():
-    from embodichain_benchmarks.motion_generation.scenarios.atomic_replay import (
+    from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_replay import (
         _PhysicsReplaySettings,
     )
 
@@ -2944,7 +2964,7 @@ def test_compiled_replay_uses_scheduled_ticks_for_completion_time():
 
 
 def test_compiled_clock_synchronizes_unequal_row_intervals():
-    from embodichain_benchmarks.motion_generation.scenarios.atomic_replay import (
+    from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_replay import (
         _PhysicsReplaySettings,
     )
 
@@ -3015,7 +3035,7 @@ def test_loaded_cases_bind_atomic_providers_without_regeneration(monkeypatch):
     provider = Mock()
     factory = Mock(return_value=provider)
     monkeypatch.setattr(
-        "embodichain_benchmarks.motion_generation.scenarios.atomic_skill.create_atomic_skill_provider",
+        "embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_skill.create_atomic_skill_provider",
         factory,
     )
     monkeypatch.setattr(scenario, "restore_base_robot", Mock())
@@ -3031,7 +3051,7 @@ def test_loaded_cases_bind_atomic_providers_without_regeneration(monkeypatch):
 @pytest.mark.parametrize("control_part", [None, "right_arm"])
 def test_atomic_reference_ik_recovery_preserves_rows_and_original_targets(control_part):
     """An IK success near a probe must still satisfy the original arrival ball."""
-    from embodichain_benchmarks.motion_generation.config import ProtocolCfg
+    from embodichain.extensions.benchmarks.motion_generation.config import ProtocolCfg
 
     batch = 3
     targets = torch.eye(4).repeat(batch, 1, 1)
@@ -3096,7 +3116,7 @@ def test_atomic_reference_ik_recovery_preserves_rows_and_original_targets(contro
 
 @pytest.mark.parametrize("failure", ["joint_bounds", "nonfinite", "unreachable"])
 def test_atomic_reference_ik_recovery_keeps_unqualified_rows_failed(failure):
-    from embodichain_benchmarks.motion_generation.config import ProtocolCfg
+    from embodichain.extensions.benchmarks.motion_generation.config import ProtocolCfg
 
     robot = Mock()
     calls = 0
@@ -3121,7 +3141,7 @@ def test_atomic_reference_ik_recovery_keeps_unqualified_rows_failed(failure):
 
 
 def test_atomic_reference_exact_success_retains_existing_path_without_probes():
-    from embodichain_benchmarks.motion_generation.config import ProtocolCfg
+    from embodichain.extensions.benchmarks.motion_generation.config import ProtocolCfg
 
     robot = Mock()
     robot.compute_ik.return_value = (torch.tensor([True]), torch.tensor([[0.123456]]))
@@ -3143,8 +3163,8 @@ def test_atomic_reference_exact_success_retains_existing_path_without_probes():
 
 @pytest.mark.parametrize("failure", ["wrong_fk", "joint_bounds", "nonfinite"])
 def test_atomic_reference_rejects_false_positive_exact_ik(failure):
-    from embodichain_benchmarks.motion_generation.config import ProtocolCfg
-    from embodichain_benchmarks.motion_generation.scenarios._case_qualification import (
+    from embodichain.extensions.benchmarks.motion_generation.config import ProtocolCfg
+    from embodichain.extensions.benchmarks.motion_generation.scenarios._case_qualification import (
         _CaseQualificationError,
     )
 
@@ -3165,8 +3185,8 @@ def test_atomic_reference_rejects_false_positive_exact_ik(failure):
 
 
 def test_atomic_generation_retries_whole_batches_with_reproducible_inputs(monkeypatch):
-    from embodichain_benchmarks.motion_generation.config import TrackCfg
-    from embodichain_benchmarks.motion_generation.scenarios._case_qualification import (
+    from embodichain.extensions.benchmarks.motion_generation.config import TrackCfg
+    from embodichain.extensions.benchmarks.motion_generation.scenarios._case_qualification import (
         _CaseQualificationError,
     )
 
@@ -3224,7 +3244,7 @@ def test_atomic_generation_retries_whole_batches_with_reproducible_inputs(monkey
         clean = True
 
     monkeypatch.setattr(
-        "embodichain_benchmarks.motion_generation.scenarios.atomic_skill.create_atomic_skill_provider",
+        "embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_skill.create_atomic_skill_provider",
         factory,
     )
     before_rng = torch.random.get_rng_state().clone()
@@ -3253,7 +3273,7 @@ def test_atomic_generation_retries_whole_batches_with_reproducible_inputs(monkey
 
 @pytest.mark.parametrize("max_attempts", [1, 3])
 def test_input_qualification_exhaustion_retains_evidence(max_attempts):
-    from embodichain_benchmarks.motion_generation.scenarios._case_qualification import (
+    from embodichain.extensions.benchmarks.motion_generation.scenarios._case_qualification import (
         _CaseQualificationError,
         _generate_qualified_case,
     )
@@ -3283,7 +3303,7 @@ def test_input_qualification_exhaustion_retains_evidence(max_attempts):
 
 
 def test_input_qualification_propagates_backend_errors_without_retry():
-    from embodichain_benchmarks.motion_generation.scenarios._case_qualification import (
+    from embodichain.extensions.benchmarks.motion_generation.scenarios._case_qualification import (
         _generate_qualified_case,
     )
 
@@ -3304,7 +3324,10 @@ def test_input_qualification_propagates_backend_errors_without_retry():
 
 
 def test_nominal_case_cannot_enable_input_resampling():
-    from embodichain_benchmarks.motion_generation.config import DomainCfg, TrackCfg
+    from embodichain.extensions.benchmarks.motion_generation.config import (
+        DomainCfg,
+        TrackCfg,
+    )
 
     scenario = AtomicSkillScenario()
     robot = SimpleNamespace(device=torch.device("cpu"))
@@ -3344,8 +3367,8 @@ class _TargetReferenceRobot:
 def test_held_target_candidates_freeze_successful_rows_and_keep_original_inputs(
     monkeypatch,
 ):
-    from embodichain_benchmarks.motion_generation.config import ProtocolCfg
-    from embodichain_benchmarks.motion_generation.scenarios import (
+    from embodichain.extensions.benchmarks.motion_generation.config import ProtocolCfg
+    from embodichain.extensions.benchmarks.motion_generation.scenarios import (
         _atomic_targets as targets,
     )
 
@@ -3393,8 +3416,8 @@ def test_held_target_candidates_freeze_successful_rows_and_keep_original_inputs(
 
 @pytest.mark.parametrize("incorrect_fk", [False, True])
 def test_held_target_candidate_exhaustion_is_an_error(monkeypatch, incorrect_fk):
-    from embodichain_benchmarks.motion_generation.config import ProtocolCfg
-    from embodichain_benchmarks.motion_generation.scenarios import (
+    from embodichain.extensions.benchmarks.motion_generation.config import ProtocolCfg
+    from embodichain.extensions.benchmarks.motion_generation.scenarios import (
         _atomic_targets as targets,
     )
 
@@ -3426,8 +3449,8 @@ def test_held_target_candidate_exhaustion_is_an_error(monkeypatch, incorrect_fk)
 
 
 def test_reference_recovery_maps_nested_environment_ids():
-    from embodichain_benchmarks.motion_generation.config import ProtocolCfg
-    from embodichain_benchmarks.motion_generation.scenarios._atomic_reference import (
+    from embodichain.extensions.benchmarks.motion_generation.config import ProtocolCfg
+    from embodichain.extensions.benchmarks.motion_generation.scenarios._atomic_reference import (
         _recover_reference_ik,
     )
 
@@ -3452,7 +3475,7 @@ def test_reference_recovery_maps_nested_environment_ids():
 
 @pytest.mark.parametrize("count", [0, 33, True])
 def test_held_target_candidate_count_bounds_precede_sampling(count):
-    from embodichain_benchmarks.motion_generation.scenarios._atomic_targets import (
+    from embodichain.extensions.benchmarks.motion_generation.scenarios._atomic_targets import (
         _held_target_reference,
     )
 
@@ -3589,9 +3612,13 @@ def test_atomic_preparation_resumes_cases_without_renumbering_random_streams(
     monkeypatch, tmp_path
 ):
     """A failed later case cannot discard or regenerate an accepted earlier case."""
-    from embodichain_benchmarks.motion_generation import runner as runner_module
-    from embodichain_benchmarks.motion_generation import prepare_case_manifest
-    from embodichain_benchmarks.motion_generation.config import TrackCfg
+    from embodichain.extensions.benchmarks.motion_generation import (
+        runner as runner_module,
+    )
+    from embodichain.extensions.benchmarks.motion_generation import (
+        prepare_case_manifest,
+    )
+    from embodichain.extensions.benchmarks.motion_generation.config import TrackCfg
 
     suite = load_suite("atomic_franka_robotiq_smoke")
     suite.tracks = [
@@ -3650,7 +3677,7 @@ def test_atomic_preparation_resumes_cases_without_renumbering_random_streams(
     monkeypatch.setattr(AtomicSkillScenario, "configure_runtime", configured)
     monkeypatch.setattr(AtomicSkillScenario, "restore_base_robot", lambda *args: None)
     monkeypatch.setattr(
-        "embodichain_benchmarks.motion_generation.scenarios.atomic_skill.create_atomic_skill_provider",
+        "embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_skill.create_atomic_skill_provider",
         Provider,
     )
     output, progress = tmp_path / "resumed.json", tmp_path / "progress"

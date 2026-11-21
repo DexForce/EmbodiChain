@@ -65,6 +65,12 @@ normative TaskSpec certification remain distinct. See the
 [command guide](../../../embodichain/gen_sim/README.md) and provider-free
 [scripted reproduction](../../../examples/gensim/scripted_pick_place/README.md).
 
+Automatic placements default to 0.02 m release clearance above their measured
+resting target and a 0.4 s open-command hold on the native control grid. Explicit
+clearance/Place timing declarations keep their ownership. Opening, terminal
+separation, resting-position and stability evidence are unchanged; clearance
+and actuation time are planning behavior, not weaker acceptance thresholds.
+
 `_run_image.py` owns the optional head-frame preprocessing handoff. A verified
 `input_camera` declaration pins the raw head frame by hash. Task Engine and
 scene generation consume a single effective image. Task Plan reuse copies the

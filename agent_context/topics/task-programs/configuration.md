@@ -131,7 +131,7 @@ three typed selections: `environment.component`,
 `embodiment.component`. The reusable `env.yaml` owns only
 embodiment-independent Gym values and physical simulation entities. All
 ordinary deployment component paths resolve from `task.<embodiment>.yaml`.
-Official `extensions/embodichain_tasks/configs/` references for program, integration and
+Official `embodichain/extensions/tasks/configs/` references for program, integration and
 execution policy use the imported SDK's packaged configs. The shared
 [Gym component path contract](../env-framework/configuration.md#reusable-gym-deployment-components)
 defines the owner-directory and CWD-shadow behavior.
@@ -245,7 +245,7 @@ normal policy decoders. Contracts, planner selection, tracking and effect
 assurance remain component-owned. Paths in either form resolve from the runnable
 deployment. Reuse the base policy and declare tuning in the selector instead of
 copying a policy for each robot or sampling rate; the supported fields and
-example are in the [task package usage](../../../extensions/embodichain_tasks/README.md).
+example are in the [task package usage](../../../embodichain/extensions/tasks/README.md).
 
 Configured `motion` policies accept optional finite, strictly positive
 `velocity_limit` and `acceleration_limit` values. Configured Pour action options
@@ -253,6 +253,15 @@ accept a finite, non-negative `dwell_duration`; unknown timing keys still fail
 the closed-field decoder. Omitting `velocity_limit` preserves the Robot's
 ordered per-joint speed caps; an explicit scalar request is intersected with
 those caps rather than replacing them.
+
+Configured motion accepts `interpolate_position_step` for native Cartesian
+sampling. `MoveEndEffectorOptions.preserve_cartesian_samples` retains authored
+Cartesian samples; `MoveJointsOptions.preserve_samples` consumes explicitly
+sampled joint commands at the host cadence using `ik_interp`. The joint speed
+check includes the step from the observed posture to the first command and every
+subsequent step. Each row must satisfy the effective per-joint limits.
+Registration fingerprints include shared skill goal types and declared motion
+policies, even when a deployment uses their defaults.
 
 Configured motion also accepts explicit `interpolation_mode` and `ik_seed_mode`.
 `fixed_grid` requires `acceleration_limit: null` and no scalar speed override;
@@ -267,6 +276,24 @@ preparation and pouring path from the held transform. Keep these geometry
 declarations in the integration and timing in the execution policy, rather
 than placing a precomputed bottle world pose in the program. Omitting `target`
 retains the original internal-axis pouring behavior.
+
+`scene_binding.cables` declares material-state native identities without rigid
+object semantics or root-pose providers. The allowlisted
+`runtime_services.cable_material` binds those identities to measured material
+coordinates and closed target declarations. Declared contact operations lower
+to `PickUp(ContactPickUpGoal)` and `Place(ContactPlaceGoal)`; bounded observed
+continuations keep feedback phases inside the same invocation. The program
+owns operation ordering. Compatibility move/joint/check adapters retain their
+explicit configured call contracts. Registered grounding receives eligible rows
+through `PlanningContext.planning_mask`, before shared duration reductions.
+The bridge captures contact references only after an
+acknowledged close frame and checks material slip after every consumed action.
+Measured cable conditions reject individual eligible rows. Healthy rows continue
+to the next stage.
+References are fresh per bridge, guarded by its episode scope, and mapped from
+selected robot rows to native cable arenas. Evaluation consumes qualified
+`cables/<uid>/<measurement>` channels, including strict endpoint geometry and
+episode slip. Keep routing acceptance in the deployment's named evaluation rules.
 
 The configured lowerer allowlist also exposes profile-owned Park, AxisAlign,
 relative Place and coordinated transport. Their declarations in
@@ -591,7 +618,9 @@ materialization owns selection and emits a new bound deployment before ordinary
 compilation. See [asset generalization](../asset-generalization/asset-generalization.md)
 for supported adaptations, provenance and integrity boundaries.
 
-Embodiment grasp services may explicitly select `approach_deviation_angle`,
-`max_candidates` and `center_mode` (`bounds` or `centroid`). Omitted fields
-retain toolkit defaults and the prior integration fingerprint. These numerical
-search declarations do not change contact/effect evidence requirements.
+Embodiment grasp services may explicitly select search and ranking policy;
+the fields and scoring semantics are owned by the
+[GraspKit guide](../../../embodichain/toolkits/graspkit/README.md#ranking-preferences).
+Omitted fields retain toolkit defaults and the prior integration fingerprint.
+Declared ranking weights participate in service identity and do not change
+opening eligibility or contact/effect evidence requirements.

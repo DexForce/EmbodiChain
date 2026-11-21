@@ -30,19 +30,22 @@ import torch
 from torch import Tensor
 
 from embodichain.utils import configclass
-from embodichain_models.dynamics.nerd.data import DynamicsWindowDataset
+from embodichain.extensions.models.dynamics.nerd.data import DynamicsWindowDataset
 from embodichain.learning.sl import SupervisedLearner
 from embodichain.learning.sl._artifacts import _RunArtifacts
-from embodichain_models.dynamics.nerd.supervised import NeRDObjective, make_nerd_batch
+from embodichain.extensions.models.dynamics.nerd.supervised import (
+    NeRDObjective,
+    make_nerd_batch,
+)
 from ._sample_order import _CheckpointedOrder, _OfficialShuffleOrder, _open_order
-from embodichain_models.dynamics.nerd._numerics import (
+from embodichain.extensions.models.dynamics.nerd._numerics import (
     _attention_context,
     _checkpoint_numerical_profile,
     _clip_grad_norm_,
     _validate_numerical_profile,
 )
 
-from embodichain_models.dynamics.nerd.integration import (
+from embodichain.extensions.models.dynamics.nerd.integration import (
     _PREPROCESSING_EXECUTION,
     encode_batch,
     normalized_mse,

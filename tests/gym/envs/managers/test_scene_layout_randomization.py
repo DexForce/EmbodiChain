@@ -239,7 +239,7 @@ def test_yaml_event_decodes_through_production_environment_loader(tmp_path) -> N
     root = Path(__file__).resolve().parents[4]
     task = (
         root
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
     )
     component = task.parent / "envs/default.yaml"
     physical = yaml.safe_load(component.read_text())

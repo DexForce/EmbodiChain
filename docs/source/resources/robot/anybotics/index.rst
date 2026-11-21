@@ -2,7 +2,7 @@ ANYbotics
 =========
 
 Robot configurations for ANYbotics live in the
-``embodichain_robots.anybotics`` manufacturer namespace.
+``embodichain.extensions.robots.anybotics`` manufacturer namespace.
 
 .. list-table::
    :class: robot-catalog

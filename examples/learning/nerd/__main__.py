@@ -224,7 +224,9 @@ def main(argv: Sequence[str] | None = None) -> None:
                     raise ValueError(
                         "Conversion manifest requires codec mapping and dt"
                     )
-                from embodichain_models.dynamics.nerd import convert_legacy_checkpoint
+                from embodichain.extensions.models.dynamics.nerd import (
+                    convert_legacy_checkpoint,
+                )
 
                 convert_legacy_checkpoint(
                     checkpoint, output, manifest, trust_pickle=args.trust_pickle

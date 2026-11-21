@@ -31,6 +31,7 @@ from embodichain.lab.sim.motion.planners.utils import (
     normalize_success_mask,
 )
 
+from .continuation import PlanContinuation
 from .effects import StateDelta
 from .policies import RecoveryPolicy
 from .runtime_commands import TimedCommandSequence
@@ -636,7 +637,28 @@ class SkillPlan:
     discard it or commit only to an independently owned preview cursor.
     """
 
+    continuation: PlanContinuation | None = field(default=None, kw_only=True)
+    """Next observed chunk in the same invocation and recovery scope."""
+
     def __post_init__(self) -> None:
+        if self.continuation is not None:
+            cursor = self.continuation
+            if not isinstance(cursor, PlanContinuation):
+                raise TypeError("continuation must implement PlanContinuation.")
+            if (
+                type(cursor.position) is not int
+                or type(cursor.limit) is not int
+                or not 0 < cursor.position <= cursor.limit <= 256
+            ):
+                raise ValueError("Continuation progress must be positive and bounded.")
+            if not cursor.phase_name or not isinstance(cursor.phase_name, str):
+                raise ValueError("Continuation phases require audit names.")
+            if (
+                not self.expected_effects.is_empty
+                or self.effect_verification is not None
+            ):
+                raise ValueError("Intermediate chunks cannot commit terminal effects.")
+            object.__setattr__(self, "continuation", cursor.snapshot())
         if not isinstance(self.skill_id, str) or not self.skill_id:
             raise ValueError("SkillPlan.skill_id must be non-empty.")
         outcome = self.planning_recovery_outcome
@@ -1048,6 +1070,7 @@ class SkillPlan:
         """
         return SkillPlan(
             skill_id=self.skill_id,
+            continuation=self.continuation,
             plan_success=self.plan_success,
             commands=self.commands,
             recovery_policy=self.recovery_policy,

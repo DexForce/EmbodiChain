@@ -82,7 +82,7 @@ def _workflow(output: Path, source: Path, demonstration: bool) -> Path:
                 # in the bundled extension package, rather than extensions/.
                 from importlib.resources import files
 
-                resource = Path(str(files("embodichain_tasks.configs"))) / (
+                resource = Path(str(files("embodichain.extensions.tasks.configs"))) / (
                     "tasks/manipulation/repeated_pick_place/task.ur5.yaml"
                 )
             if not resource.is_file():

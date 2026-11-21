@@ -29,17 +29,20 @@ import random
 import numpy as np
 import torch
 from .._prepare import sha256, WEIGHT_SHA256
-from embodichain_models.dynamics.rigidformer import (
+from embodichain.extensions.models.dynamics.rigidformer import (
     load_rigidformer_checkpoint,
     RIGIDFORMER_REVISION,
 )
-from embodichain_models.dynamics.rigidformer.data import MOViSequenceSource
-from embodichain_models.dynamics.rigidformer.supervised import (
+from embodichain.extensions.models.dynamics.rigidformer.data import MOViSequenceSource
+from embodichain.extensions.models.dynamics.rigidformer.supervised import (
     RigidFormerObjective,
     rigidformer_batch,
 )
-from embodichain_models.dynamics.rigidformer.sl_recipe import _optimizer, _EpochSchedule
-from embodichain_models.dynamics.rigidformer.ema import RigidFormerEMA
+from embodichain.extensions.models.dynamics.rigidformer.sl_recipe import (
+    _optimizer,
+    _EpochSchedule,
+)
+from embodichain.extensions.models.dynamics.rigidformer.ema import RigidFormerEMA
 from embodichain.learning.sl import SupervisedLearner
 from ._evidence import evidence
 
@@ -96,7 +99,7 @@ def compare(args: argparse.Namespace) -> None:
     }
     try:
         manifest = json.loads(
-            files("embodichain_models.dynamics.rigidformer")
+            files("embodichain.extensions.models.dynamics.rigidformer")
             .joinpath("REFERENCE_SOURCES.json")
             .read_text()
         )
@@ -210,7 +213,7 @@ def compare(args: argparse.Namespace) -> None:
             _optimizer_state(native_optimizer, native),
             _optimizer_state(reference_trainer.optimizer, reference),
         )
-        from embodichain_models.dynamics.rigidformer._native.data.gpu_augmentation import (
+        from embodichain.extensions.models.dynamics.rigidformer._native.data.gpu_augmentation import (
             GPUAugmentation,
         )
 

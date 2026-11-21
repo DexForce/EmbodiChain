@@ -98,6 +98,19 @@ class GymFrameCollector:
                 spools[row] = spool
         self.records, self.spools = records, spools
 
+    def add(self, assignments: dict) -> None:
+        """Capture newly settled rows without replacing live measured buffers."""
+        if set(assignments) & self.records.keys():
+            raise ValueError("cannot replace a live measured row")
+        initial = GymFrameCollector(self.context, assignments)
+        self.records.update(initial.records)
+        self.spools.update(initial.spools)
+
+    def discard(self, row: int) -> None:
+        """Release a row after evidence assembly and persistence confirmation."""
+        self.records.pop(row)
+        self.spools.pop(row, None)
+
     def observe(self, ids, action, observation) -> None:
         ctx = self.context
         cfg, env, view, collision, timings = (
@@ -147,30 +160,26 @@ class GymFrameCollector:
         timings["sampled_validation"] = (
             timings.get("sampled_validation", 0.0) + time.monotonic() - stamp
         )
+        value = (
+            {"qpos": action.value}
+            if isinstance(action.value, torch.Tensor)
+            else action.value
+        )
+
+        def active_command(name):
+            data = value[name]
+            if data.shape[-1] == env.robot.dof:
+                data = data[:, list(env.active_joint_ids)]
+            elif data.shape[-1] != len(env.active_joint_ids):
+                raise ValueError("submitted command joint layout differs")
+            return data
+
+        commands = active_command("qpos")
+        if env.expert_action_spec.joint_command_mode == "position_velocity":
+            commands = torch.cat((commands, active_command("qvel")), dim=-1)
+        commands = commands.detach().cpu()
         for row in ids:
             record = records[row]
-            value = (
-                {"qpos": action.value}
-                if isinstance(action.value, torch.Tensor)
-                else action.value
-            )
-
-            def active_command(name):
-                data = value[name][row]
-                if data.shape[-1] == env.robot.dof:
-                    data = data[list(env.active_joint_ids)]
-                elif data.shape[-1] != len(env.active_joint_ids):
-                    raise ValueError("submitted command joint layout differs")
-                return data.detach().cpu()
-
-            command = active_command("qpos")
-            if env.expert_action_spec.joint_command_mode == "position_velocity":
-                command = torch.cat(
-                    (
-                        command,
-                        active_command("qvel"),
-                    )
-                )
             entity_states = {entity.uid: entity for entity in frame_state.batches[row]}
             for (uid, field), values in record["scene"].items():
                 values.append(
@@ -179,7 +188,7 @@ class GymFrameCollector:
                         dtype=torch.float32,
                     )
                 )
-            record["actions"].append(command.clone())
+            record["actions"].append(commands[row].clone())
             record["qpos"].append(measured_qpos[row].clone())
             record["qvel"].append(measured_qvel[row].clone())
             record["qf"].append(measured_qf[row].clone())

@@ -32,38 +32,49 @@ import pytest
 import torch
 import numpy as np
 
-from embodichain_benchmarks.motion_generation.scenarios._atomic_pose_sampling import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios._atomic_pose_sampling import (
     apply_task_frame_randomization,
 )
 
 from embodichain.lab.sim.motion.planners import PlanState
 from embodichain.toolkits.graspkit import ParallelJawGraspPoseGenerator
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
-from embodichain_benchmarks.motion_generation.config import (
+from embodichain.extensions.benchmarks.motion_generation.config import (
     AtomicPoseRandomizationCfg,
     load_suite,
 )
-from embodichain_benchmarks.motion_generation.contracts import (
+from embodichain.extensions.benchmarks.motion_generation.contracts import (
     ReplayObservationTrace,
     ReplayObservationWindow,
 )
-from embodichain_benchmarks.motion_generation.models import BenchmarkCase, CaseOutcome
-from embodichain_benchmarks.motion_generation import robots as _robots  # noqa: F401
-from embodichain_benchmarks.motion_generation.registry import create_robot_provider
-from embodichain_benchmarks.motion_generation.scenarios import (
+from embodichain.extensions.benchmarks.motion_generation.models import (
+    BenchmarkCase,
+    CaseOutcome,
+)
+from embodichain.extensions.benchmarks.motion_generation import (
+    robots as _robots,
+)  # noqa: F401
+from embodichain.extensions.benchmarks.motion_generation.registry import (
+    create_robot_provider,
+)
+from embodichain.extensions.benchmarks.motion_generation.scenarios import (
     atomic_dual_arm_providers as dual,
 )
-from embodichain_benchmarks.motion_generation.scenarios import atomic_case_utils
-from embodichain_benchmarks.motion_generation.scenarios import atomic_skill
-from embodichain_benchmarks.motion_generation.scenarios.atomic_skill import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios import (
+    atomic_case_utils,
+)
+from embodichain.extensions.benchmarks.motion_generation.scenarios import atomic_skill
+from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
 )
-from embodichain_benchmarks.motion_generation.scenarios.atomic_grasps import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_grasps import (
     ActiveCaseGraspPoseGenerator,
     CaseSampleCountGraspPoseGenerator,
 )
-from embodichain_benchmarks.motion_generation.contracts import ExecutionObservation
-from embodichain_benchmarks.motion_generation.atomic_skill import (
+from embodichain.extensions.benchmarks.motion_generation.contracts import (
+    ExecutionObservation,
+)
+from embodichain.extensions.benchmarks.motion_generation.atomic_skill import (
     create_atomic_skill_provider,
 )
 
@@ -1676,7 +1687,7 @@ def test_franka_dual_suites_use_authored_robotiq_linkage_and_finger_contacts(
 def test_native_panda_dual_provider_preserves_real_fingers_and_stock_tcp(tmp_path):
     """Check actual assembled geometry/kinematics, including the native mimic."""
     from embodichain.utils.string import resolve_matching_names
-    from embodichain_robots import FrankaPandaCfg
+    from embodichain.extensions.robots import FrankaPandaCfg
 
     suite = load_suite("atomic_dual_franka_robotiq_hand_over")
     values = {
@@ -1804,7 +1815,7 @@ def test_native_panda_dual_rejects_incompatible_arm_or_tool_override(
 def test_native_grasp_sampling_maps_closing_axis_once_before_frozen_replay(monkeypatch):
     """Every sampler API preserves metadata and native replay retains the pose."""
 
-    from embodichain_benchmarks.motion_generation import _atomic_fixtures
+    from embodichain.extensions.benchmarks.motion_generation import _atomic_fixtures
 
     canonical = _pose(0.2, 0.3, 0.4).unsqueeze(0)
     canonical[:, :3, :3] = axis_angle_to_rotation_matrix(torch.tensor([0.2, -0.1, 0.3]))

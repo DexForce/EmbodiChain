@@ -616,3 +616,97 @@ def test_approach_cone_rejects_malformed_inputs() -> None:
             polar_angles=torch.tensor([0.0]),
             azimuth_angles=torch.tensor([0.0]),
         )
+
+
+@pytest.mark.parametrize("fraction, expected", [(-1.0, 0.05), (0.0, 0.25), (1.0, 0.45)])
+def test_explicit_residual_draws_reach_bounds_and_preserve_protected_rows(
+    fraction, expected
+):
+    source = template()
+    result = joint_residual(
+        source,
+        joint_limits=torch.tensor([[-1.0, 1.0], [-1.0, 1.0]]),
+        normalized_scale=0.1,
+        generator=torch.Generator().manual_seed(17),
+        joint_samples={"arm": fraction},
+    )
+    assert float(result.positions[1, 0]) == pytest.approx(expected, abs=1e-6)
+    torch.testing.assert_close(
+        result.positions[[0, 2, 3, 4, 5]], source.positions[[0, 2, 3, 4, 5]]
+    )
+    torch.testing.assert_close(result.positions[:, 1], source.positions[:, 1])
+    torch.testing.assert_close(source.positions, template().positions)
+
+
+def test_explicit_draws_do_not_bypass_joint_limits_and_require_named_controls():
+    limits = torch.tensor([[-1.0, 1.0], [-1.0, 1.0]])
+    with pytest.raises(ProposalRejected):
+        joint_residual(
+            template(),
+            joint_limits=limits,
+            normalized_scale=1.0,
+            generator=torch.Generator(),
+            joint_samples={"arm": 1.0},
+        )
+    for samples in (
+        {"missing": 0.0},
+        {"arm": float("nan")},
+        {"arm": True},
+        {"arm": 1.1},
+        [],
+    ):
+        with pytest.raises(ValueError):
+            joint_residual(
+                template(),
+                joint_limits=limits,
+                normalized_scale=0.1,
+                generator=torch.Generator(),
+                joint_samples=samples,
+            )
+
+
+def test_explicit_via_knots_and_configured_payload_are_owned():
+    from embodichain.lab.sim.motion.expansion.cfg import TrajectoryAugmentationCfg
+
+    source = template()
+    source = replace(
+        source,
+        allowed_operators=("via_points",),
+        phases=(
+            replace(source.phases[0], allowed_operators=("via_points",)),
+            source.phases[1],
+        ),
+    )
+    samples = {"arm": -1.0}
+    cfg = TrajectoryAugmentationCfg.from_mapping(
+        {
+            "factors": {
+                "spatial": {
+                    "enabled": True,
+                    "method": ["via_points"],
+                    "joint_samples": samples,
+                    "knot_samples": [1.0],
+                }
+            }
+        }
+    )
+    samples["arm"] = 1.0
+    result = via_points(
+        source,
+        joint_limits=torch.tensor([[-1.0, 1.0], [-1.0, 1.0]]),
+        via_count=1,
+        normalized_scale=0.1,
+        generator=torch.Generator(),
+        joint_samples=cfg.factors.spatial.joint_samples,
+        knot_samples=cfg.factors.spatial.knot_samples,
+    )
+    assert float(result.positions[1, 0]) == pytest.approx(0.05, abs=1e-6)
+
+
+def test_explicit_sample_mapping_rejects_nonfinite_config_values():
+    from embodichain.lab.sim.motion.expansion.cfg import TrajectoryAugmentationCfg
+
+    with pytest.raises(ValueError, match="finite"):
+        TrajectoryAugmentationCfg.from_mapping(
+            {"factors": {"spatial": {"joint_samples": {"arm": float("nan")}}}}
+        )

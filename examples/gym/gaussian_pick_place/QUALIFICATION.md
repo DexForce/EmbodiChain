@@ -175,7 +175,7 @@ scene at one seed, not a multi-seed stability qualification.
 ## Task-extension migration qualification — 2026-11-16
 
 The three deployments now belong to the official `gaussian_pick_place` task
-under `embodichain_tasks`; embodiment and execution-policy components belong to
+under `embodichain.extensions.tasks`; embodiment and execution-policy components belong to
 the shared component directories. No task Python subclass was introduced.
 Examples retain capture, portable snapshot preparation, video export and
 offline/negative acceptance. All 14 pre-migration resolved YAML declarations
@@ -307,6 +307,72 @@ runtime-qualified `FrankaPanda/fr3_hand` parent with the authored `fr3_hand`.
 Correcting that audit assertion changed no production code or configuration;
 both subsequent six-episode batches passed. These remain seed-42 regression
 checks, rather than a multi-seed reliability claim or metric GS-depth audit.
+
+## Native USD multi-arena qualification
+
+Dependency: [DexSim MR !1628](http://192.168.3.16/Engine/dexverse/-/merge_requests/1628)
+provides native companion cloning, owner visibility and the resource-ID query.
+The submitted SDK commit is `abed3d05b`; its final formatting correction preserves
+the qualified Python AST. An SDK build containing that implementation is required
+for the four-arena path.
+
+The current official deployments again reference the packages' `asset.usda`
+visual subtrees with `source_pose_mode: preserve`. Office's rotation is authored
+only in USD. No explicit `GaussianSplatCfg` replacement is used in these runs.
+
+DexSim's candidate Python Spawn/Scene implementation clones each actor's
+Gaussian companions through the existing native Arena cloning API, binds them
+to the owning handle and cleans new records/cameras/lights before parents when
+birth fails. Immutable resource IDs are exposed by the public
+`SpawnedRigidBody.get_gaussian_resource_ids()` query. Owner visibility includes
+its Gaussians; EmbodiChain restores selected native-Gaussian visibility on reset.
+The existing qualified C++/CUDA artifact was unchanged. These results require
+the candidate SDK patch; unpatched SDKs retain singleton support and reject
+multi-arena USD rendering before declaration.
+
+Final seed-42 runs used four arenas, Default/CPU physics, Hybrid/8 spp, OptiX,
+960x540 RGB, 25 Hz control and `apply_display_srgb=False`:
+
+| Scene | Accepted rows | Actions per row | Frames per camera | RGB images |
+| --- | ---: | ---: | ---: | ---: |
+| Office | 4/4 | 284 | 285 | 2,280 |
+| DISCOVERSE lab3 | 4/4 | 284 | 285 | 2,280 |
+| RoboSimGS tabletop | 4/4 | 284 | 285 | 2,280 |
+
+All 12 measured Pick/Place rows passed. Minimum lift was 0.129421 m and maximum
+final position error was 7.271 mm. All 6,840 RGB images and 24 encoded camera
+videos passed the existing boundary and decoded-video/raw-RGB audits; maximum
+per-frame mean absolute compression error remained below 1.640 uint8 levels.
+Every capture names USD prim `/Asset/Visual` and has one resource identity shared
+by its four rows. Hiding arena 1 changed only its two views; all pixel differences
+in arenas 0, 2 and 3 were exactly zero. Captured cube poses matched all native
+trajectory rows exactly, including terminal states.
+
+The final SDK regression has 68 passing cases, covering both supported thread
+modes, prepared/finalized/incremental creation, native transforms, shared
+resource identities, visibility, deletion and failure cleanup. The longest
+recorded test call was under 10 seconds. EmbodiChain's candidate-SDK native USD
+matrix passed 11 cases; an unpatched SDK separately passed five singleton and
+early-rejection compatibility cases. New feature success cases skip on older
+SDKs, while the negative capability test remains enabled. Fast configuration
+tests stub GS resources with local paths and make no archive requests.
+
+Affected regressions completed in separate process groups: 497 passed and eight
+opt-in/resource cases skipped across 505 collected cases, including a fresh
+installed-wheel check. An earlier combined invocation received SIGTERM during
+the wheel check and is recorded as incomplete, not a passing result. The wheel
+case passed independently, and all other groups have complete XML receipts.
+
+The existing registered `spawn_load_dexsim_64` scenario passed on both the base
+SDK and candidate in serial runs with identical settings. The single samples
+measured 48.04 ms and 45.23 ms for finalization of 129 objects in 65 arenas.
+These shared-host smoke measurements are not a statistical speedup claim.
+
+See the [native USD measured summary](evidence/usd_parallel_qualification.json)
+and [four-arena RGB preview](evidence/usd_parallel_rgb_preview.png). Full frozen
+candidate recordings are retained in `outputs/usd-gaussian-parallel-validation/`.
+This is a seed-42 four-arena qualification, not a multi-seed stability or metric
+Gaussian-depth qualification.
 
 ## Limits
 

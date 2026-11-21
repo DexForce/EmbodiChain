@@ -35,7 +35,7 @@ from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from copy import deepcopy
 from dataclasses import dataclass, fields
 import math
-from weakref import ReferenceType, ref
+from weakref import ReferenceType, ref, proxy
 from types import MappingProxyType
 from typing import Literal, Protocol, TYPE_CHECKING
 
@@ -517,6 +517,8 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         owner_token: Factory identity used to reject mixed runtime components.
         runtime_scope_guard: Optional host epoch/lifetime validator. It must read
             no robot/sensor state and must not advance simulation.
+        capture_command_targets: Capture owned controller targets for profiles
+            declaring reference-conditioned handoffs; otherwise avoid those reads.
         capture_root_pose: Capture the robot's arena-local root transform in
             each observation. The default leaves ``RobotObservation.root_pose``
             unset and performs no root-pose query.
@@ -534,12 +536,15 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         owner_token: object,
         runtime_scope_guard: Callable[[], None] | None = None,
         capture_root_pose: bool = False,
+        capture_command_targets: bool = False,
         hold_qpos_source: Literal["observed", "drive_target"] = "observed",
     ) -> None:
         if type(scene_provider) is not SharedTickSceneProvider:
             raise TypeError("scene_provider must be exactly SharedTickSceneProvider.")
         if type(clock) is not EnvironmentStepClock:
             raise TypeError("clock must be exactly EnvironmentStepClock.")
+        if type(capture_command_targets) is not bool:
+            raise TypeError("capture_command_targets must be a bool")
         if type(capture_root_pose) is not bool:
             raise TypeError("capture_root_pose must be a bool.")
         if hold_qpos_source not in ("observed", "drive_target"):
@@ -576,6 +581,7 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         self._owner_token = owner_token
         self._validate_scope = validate_scope
         self._capture_root_pose = capture_root_pose
+        self._capture_command_targets = capture_command_targets
         self._hold_qpos_source = hold_qpos_source
         super().__init__(self._capture)
 
@@ -708,6 +714,16 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         context = PlanningContext(
             robot=RobotObservation(
                 timestamp=timestamp,
+                command_qpos=(
+                    self._robot.get_qpos(target=True).index_select(0, self._env_ids)
+                    if self._capture_command_targets
+                    else None
+                ),
+                command_qvel=(
+                    self._robot.get_qvel(target=True).index_select(0, self._env_ids)
+                    if self._capture_command_targets
+                    else None
+                ),
                 qpos=qpos.index_select(0, self._env_ids),
                 qvel=qvel.index_select(0, self._env_ids),
                 qeffort=(
@@ -916,7 +932,13 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         Non-support factories retain their existing independent assembly behavior.
         """
         self._owner_token.require_open()
-        if self._support_registry is None or self._runtime_bridge_ref is None:
+        has_cable = any(
+            factory.call_id.startswith("simulation.cable_")
+            for factory in self._registration.registered_semantic_lowerer_factories
+        )
+        if (
+            self._support_registry is None and not has_cable
+        ) or self._runtime_bridge_ref is None:
             return
         previous = self._runtime_bridge_ref()
         if previous is not None and not previous.execution_finished:
@@ -939,7 +961,10 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             raise ValueError(
                 "The runtime bridge must use this factory's assembled clock."
             )
-        if self._support_registry is not None:
+        cable = getattr(self, "_pending_cable_runtime", None)
+        if cable is not None:
+            bridge.post_policy_port._cable_runtime = cable
+        if self._support_registry is not None or cable is not None:
             self._runtime_bridge_ref = ref(bridge)
 
     def close_runtime_resources(self) -> None:
@@ -1115,7 +1140,8 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         engine: AtomicSkillEngine,
     ) -> tuple[RegisteredSemanticLowerer, ...]:
         """Create fresh registration-owned lowerers for this runtime assembly."""
-        return self._registration.create_registered_semantic_lowerers(
+        self.validate_runtime_bridge_creation()
+        lowerers = self._registration.create_registered_semantic_lowerers(
             environment=(
                 self._environment_ref() if self._environment_ref is not None else None
             ),
@@ -1124,6 +1150,30 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             scene_registry=scene_registry,
             engine=engine,
         )
+
+        from .cable import _CableLowerer, _CableRuntime
+
+        cable_lowerers = tuple(
+            value for value in lowerers if isinstance(value, _CableLowerer)
+        )
+        self._pending_cable_runtime = None
+        if cable_lowerers:
+            cfg = cable_lowerers[0].cfg
+            if any(value.cfg != cfg for value in cable_lowerers):
+                raise ValueError(
+                    "One bridge must use one consistent cable service declaration."
+                )
+            session = cable_lowerers[0].runtime
+            if session is None or not torch.equal(session.env_ids, self._env_ids):
+                raise ValueError(
+                    "Cable service rows must match this factory's explicit selection."
+                )
+            for lowerer in cable_lowerers:
+                # Registration remembers lowerer identities; it must not retain
+                # every episode's live cable service through that history.
+                lowerer.runtime = proxy(session)
+            self._pending_cable_runtime = session
+        return lowerers
 
     def create_scene_registry(self) -> SceneRegistry:
         """Build one fresh authoritative registry from the task registration."""
@@ -1210,6 +1260,11 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             require_open=self._owner_token.require_open,
             runtime_scope_guard=runtime_scope_guard,
         )
+        cable = getattr(self, "_pending_cable_runtime", None)
+        if cable is not None:
+            cable._scope_guard = _runtime_scope_validator(
+                self._owner_token.require_open, runtime_scope_guard
+            )
         self._segment_policy_port.bind_clock(clock)
         self._support_clock = clock
         return SimulationPlanningObservationProvider(
@@ -1220,7 +1275,13 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             owner_token=self._owner_token,
             runtime_scope_guard=runtime_scope_guard,
             capture_root_pose=self._capture_root_pose,
-            hold_qpos_source=self._hold_qpos_source,
+            capture_command_targets=any(
+                preset.tracking_policy.boundary_reference_bridge
+                for preset in self._registration.catalog.robot_profile.presets.values()
+            ),
+            hold_qpos_source=(
+                "drive_target" if cable is not None else self._hold_qpos_source
+            ),
         )
 
     def create_effect_evidence_providers(
@@ -1529,16 +1590,44 @@ class SimulationTaskProgramAdapterFactory:
     def create_adapter(
         self,
         environment: object,
+        *,
+        grasp_contact_frames: Mapping[str, object] | None = None,
     ) -> TaskProgramEnvironmentAdapter:
-        """Create fresh grasp services and bind the initialized environment."""
+        """Create fresh grasp services and bind the initialized environment.
+
+        Args:
+            environment: Sole owner of the actual robot and physical World.
+            grasp_contact_frames: Explicit per-control-part sampling conventions
+                matching this factory's declared grasp services. Only these
+                contact frames may differ from the installed binding; TCP,
+                physical meshes, joint commands and all other calibration stay
+                strictly checked. The live robot configuration is never mutated.
+
+        Returns:
+            Fresh adapter with independent grasp and execution services.
+        """
         from embodichain.toolkits.graspkit import GraspPoseGenerator
 
         self._registration.assert_unchanged()
+        frames = dict(grasp_contact_frames or {})
+        if set(frames) - self._grasp_pose_generator_factories.keys():
+            raise ValueError("Contact frame overrides require declared grasp services.")
         generators: dict[str, GraspPoseGenerator] = {}
         for target_id, factory in self._grasp_pose_generator_factories.items():
             validator = getattr(factory, "validate_binding", None)
             if validator is not None:
-                validator(environment.robot, target_id)
+                if target_id in frames:
+                    validator(
+                        environment.robot,
+                        target_id,
+                        contact_frame_override=frames[target_id],
+                    )
+                else:
+                    validator(environment.robot, target_id)
+            elif target_id in frames:
+                raise ValueError(
+                    "Grasp service cannot validate a contact frame override."
+                )
             generator = factory()
             if not isinstance(generator, GraspPoseGenerator):
                 raise TypeError(

@@ -44,7 +44,7 @@ from embodichain.lab.gym.utils.gym_utils import (
     init_rollout_buffer_from_config,
     init_rollout_buffer_from_gym_space,
 )
-from embodichain_robots import URRobotCfg
+from embodichain.extensions.robots import URRobotCfg
 from embodichain.lab.sim.cfg import DefaultPhysicsCfg, NewtonPhysicsCfg
 from embodichain.lab.sim.sensors import CameraCfg
 from embodichain.utils.utility import load_config, save_config
@@ -53,20 +53,63 @@ from embodichain.lab.gym.utils.composition import resolve_gym_components
 _REPOSITORY_ROOT = Path(__file__).parents[3]
 _CUBE_GYM_CONFIG_PATH = (
     _REPOSITORY_ROOT
-    / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+    / "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
 )
 _CUBE_TASK_PROGRAM_DIR = _CUBE_GYM_CONFIG_PATH.parent / "task_program"
 _CUBE_INTEGRATION_PATH = _CUBE_TASK_PROGRAM_DIR / "integration.yaml"
 _CUBE_ENVIRONMENT_PATH = _CUBE_GYM_CONFIG_PATH.parent / "envs/default.yaml"
-_COMPONENT_ROOT = _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs/components"
+_COMPONENT_ROOT = _REPOSITORY_ROOT / "embodichain/extensions/tasks/configs/components"
 _CUBE_POLICY_PATH = _COMPONENT_ROOT / "execution_policies/trajectory_open_loop.yaml"
 _CUBE_EMBODIMENT_PATH = _COMPONENT_ROOT / "embodiments/ur5_dh_pgi_140_80.yaml"
 _TABLEWARE_CONFIG_ROOT = (
     _REPOSITORY_ROOT
-    / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware"
+    / "embodichain/extensions/tasks/configs/tasks/manipulation/tableware"
 )
 CUBE_ROBOT_PROFILE_ID = "ur5_dh_pgi_140_80"
 CUBE_SCENE_REGISTRY_ID = "task_program_repeated_pick_place"
+
+
+@pytest.mark.parametrize(
+    "scene, resource",
+    [
+        ("office", "RoboSplatterOfficeGS/asset.usda"),
+        ("discoverse", "DiscoverseLab3GS/asset.usda"),
+        ("robosimgs", "RoboSimGSTabletopGS/asset.usda"),
+    ],
+)
+def test_gaussian_task_backgrounds_allow_replication_with_original_coordinates(
+    scene: str, resource: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Official tasks retain authored USD placement for native replication."""
+    from embodichain.data import get_data_path
+
+    source = tmp_path / "asset.usda"
+    source.write_text('#usda 1.0\ndef Xform "Asset" { def Xform "Visual" {} }\n')
+
+    def resolve(reference: str, *args, **kwargs) -> str:
+        if reference == resource:
+            return str(source)
+        return get_data_path(reference, *args, **kwargs)
+
+    monkeypatch.setattr("embodichain.data.get_data_path", resolve)
+    path = (
+        _REPOSITORY_ROOT
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/gaussian_pick_place"
+        / f"task.{scene}.yaml"
+    )
+    raw = load_config(path)
+    raw["num_envs"] = 4
+    cfg = config_to_cfg(raw, source_path=path)
+    background = next(
+        item for item in cfg.visual_object if item.uid == "scan_background"
+    )
+    assert cfg.num_envs == 4
+    assert background.source.file_path == str(source)
+    assert background.source.source_prim_path == "/Asset/Visual"
+    assert background.source_pose_mode == "preserve"
+    assert tuple(background.init_rot) == (0, 0, 0)
+    assert background.visuals is None
+    assert cfg.sim_cfg.render_cfg.gaussian.apply_display_srgb is False
 
 
 @pytest.fixture
@@ -614,12 +657,12 @@ class TestInitRolloutBufferFromConfig:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            "embodichain_robots.agilex.cobotmagic.cfg.get_data_path",
+            "embodichain.extensions.robots.agilex.cobotmagic.cfg.get_data_path",
             lambda value: value,
         )
         config = {
             "embodiment": {
-                "component": "extensions/embodichain_tasks/configs/components/embodiments/cobotmagic.yaml"
+                "component": "embodichain/extensions/tasks/configs/components/embodiments/cobotmagic.yaml"
             },
             "env": {},
         }

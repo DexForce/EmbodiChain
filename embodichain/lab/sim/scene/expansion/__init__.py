@@ -27,10 +27,12 @@ from typing import Any
 
 from .cfg import SceneExpansionCfg
 from .contracts import ScenePoseChange, SceneVariant
+from .conditions import SceneLayoutCondition
 from .source import FixedSceneCandidateSource
 
 __all__ = [
     "SceneExpansionCfg",
+    "SceneLayoutCondition",
     "ScenePoseChange",
     "SceneVariant",
     "FixedSceneCandidateSource",

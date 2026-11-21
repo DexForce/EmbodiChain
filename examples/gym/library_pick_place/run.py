@@ -96,7 +96,7 @@ def _prepare(args: argparse.Namespace, directory: Path) -> tuple[object, dict]:
     )
     _write_yaml(resolved / "env.yaml", environment)
 
-    sdk = "extensions/embodichain_tasks/configs/components/"
+    sdk = "embodichain/extensions/tasks/configs/components/"
     embodiment_path = resolve_config_path(
         sdk + "embodiments/dual_ur5_dh_pgi_140_80.yaml"
     )

@@ -2,7 +2,7 @@ ARX
 ===
 
 Official ARX robot configurations live in the
-``embodichain_robots.arx`` manufacturer namespace.
+``embodichain.extensions.robots.arx`` manufacturer namespace.
 
 .. list-table::
    :class: robot-catalog

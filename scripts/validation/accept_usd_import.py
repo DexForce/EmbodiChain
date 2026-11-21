@@ -169,7 +169,10 @@ def _accept_case(case: dict[str, Any], output: Path) -> dict[str, Any]:
                     "An imported entity was lost or a source path is duplicated."
                 )
             expected_assets = (
-                len(raw.mesh_objects) + len(raw.articulations) + len(raw.particle_sets)
+                len(raw.mesh_objects)
+                + len(raw.articulations)
+                + len(raw.particle_sets)
+                + len(raw.cables)
             )
             record["resources"] = dict(imported.resource_uids)
             record["resource_source_paths"] = dict(imported.resource_source_paths)
@@ -286,6 +289,12 @@ def _accept_case(case: dict[str, Any], output: Path) -> dict[str, Any]:
                         )
                 elif type(asset).__name__ in ("Articulation", "Robot"):
                     value = asset.get_qpos()
+                elif type(asset).__name__ == "CableObject":
+                    value = asset.data.segment_state_w
+                    if value.numel() == 0:
+                        raise AssertionError(
+                            f"Cable {asset.uid} has no simulation segments."
+                        )
                 else:
                     value = asset.get_local_pose()
                 if not torch.isfinite(value).all():
