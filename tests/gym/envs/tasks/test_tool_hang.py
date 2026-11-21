@@ -195,7 +195,7 @@ def _check_wrench_approach(env, seed: int) -> None:
     def segments():
         nonlocal reaching_for_wrench
         for segment in env.create_demo_segments():
-            reaching_for_wrench = segment.name == "hang_wrench"
+            reaching_for_wrench = segment.name in {"approach_wrench", "pick_wrench"}
             yield segment
 
     def observe(_active, _action, _observation):
@@ -251,10 +251,28 @@ def _exercise_expert_episode(*, approach_seed: int | None = None) -> None:
         assert result.success == (True,) and result.terminated == (True,), attempts
         assert result.truncated == (False,)
         assert [segment.name for segment in result.segments] == [
-            "lift_frame",
+            "approach_frame",
+            "pick_frame",
+            "orient_frame",
             "seat_frame",
-            "hang_wrench",
+            "clear_frame",
+            "approach_wrench",
+            "pick_wrench",
+            "thread_wrench",
+            "release_wrench",
         ]
+        for index, object_id, skill in (
+            (0, "frame", "move_end_effector"),
+            (1, "frame", "pick_up"),
+            (5, "tool", "move_end_effector"),
+            (6, "tool", "pick_up"),
+        ):
+            metadata = result.segments[index].metadata
+            assert metadata["task_program_id"] == f"tool_hang_pick_{object_id}"
+            assert any(
+                event["kind"] == "skill_completed" and event["skill_id"] == skill
+                for event in metadata["runtime"]["events"]
+            )
         _, _, metrics = env.compute_task_state()
         assert metrics["success.hanging.frame_assembled"].item()
         assert metrics["success.hanging.hole_threaded"].item()

@@ -650,6 +650,21 @@ def test_scene_binding_builds_existing_registry_contracts() -> None:
     )
 
 
+def test_fixed_link_articulation_has_pose_and_no_active_joints() -> None:
+    simulation = _Simulation()
+    simulation.articulation.joint_names = ()
+    simulation.articulation.qpos = torch.empty((_BATCH_SIZE, 0))
+    registry = SimulationSceneBinding(
+        registry_id="fixed_links",
+        articulations=(SimulationArticulationBinding("frame", "native_drawer"),),
+    ).build(simulation)
+    snapshot = registry.make_scene_provider().snapshot(
+        timestamp=0.0, env_ids=torch.arange(_BATCH_SIZE)
+    )
+    assert torch.equal(snapshot.entities["frame"].pose, simulation.articulation.pose)
+    assert not snapshot.articulation_joints
+
+
 def test_scene_manifest_uses_live_float32_pose_precision() -> None:
     """Static preflight and live registry agree for decimal placement poses."""
     binding = _scene_binding()

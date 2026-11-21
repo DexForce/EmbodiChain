@@ -45,6 +45,8 @@ embodichain run-task \
   --headless --seed 7 --max_episodes 1
 ```
 
+Two authored Task Programs run on this same robot in the same episode. [Frame pickup](task_program/pick_frame.yaml) and [wrench pickup](task_program/pick_tool.yaml) each compile an open-hand approach to `MoveEndEffector` and a grasp to `PickUp`. The grasp resolves its TCP from the current object pose. After commanding an 18 mm lift, the program checks at least 9 mm of measured object rise and positive, opposed impulses on both physical finger pads. The remaining demonstration segments orient the frame, seat it, clear the frame, thread the wrench and release it. Their feedback comes from the rod, socket, pads and ring during execution.
+
 After inserting the frame, the Panda measures both open pads against the crossbar. If either pad is underneath the bar, it moves sideways at the current height until both pads clear the bar on the palm side. It then raises the open hand and crosses to the wrench side before turning the wrist for pickup. It tracks the measured bar end while guiding the large wrench ring over the retaining lip. The release sequence checks frame insertion, ring threading, ring–bar contact and insertion depth before commanding the fingers open. A settled hang can be checked by letting the open hand withdraw and observing the same contact conditions for a further 90 control steps (4.5 seconds).
 
 The public collector can reset and try again after an incomplete episode. When measuring first-attempt success, run each seed once and record both the native termination and the state after withdrawal.

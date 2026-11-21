@@ -267,15 +267,24 @@ class ToolHangExpertEnv(EmbodiedEnv):
 
     def create_demo_segments(self, **kwargs: Any) -> Iterator[DemoSegment]:
         """Plan each stage against the physical result of the preceding one."""
+        from embodichain.extensions.tasks.manipulation.assembly._tool_hang_pickup import (
+            pickup_segments,
+        )
         from embodichain.extensions.tasks.manipulation.assembly._tool_hang_expert import (
             ToolHangMotion,
         )
+        from embodichain.extensions.tasks.manipulation.assembly._tool_hang_wrench import (
+            release_wrench,
+            ring_on_bar,
+            thread_wrench,
+        )
 
         motion = ToolHangMotion(self)
+        yield from pickup_segments(self, "frame")
         yield DemoSegment(
-            name="lift_frame",
+            name="orient_frame",
             target_uid="frame",
-            instruction="Grasp the frame and raise its rod over the stand.",
+            instruction="Raise the frame and turn its rod down over the stand.",
             actions=motion.lift_frame(),
         )
         yield DemoSegment(
@@ -283,16 +292,29 @@ class ToolHangExpertEnv(EmbodiedEnv):
             target_uid="frame",
             instruction="Guide the rod into the socket and release the frame.",
             actions=motion.seat_frame(),
+            validator=lambda: self.compute_task_state()[2][
+                "success.hanging.frame_assembled"
+            ],
+        )
+        yield DemoSegment(
+            name="clear_frame",
+            target_uid="frame",
+            instruction="Clear the open fingers and pass above the seated frame.",
+            actions=motion.clear_frame(),
             validator=lambda: motion.cleared_crossbar
             and self.compute_task_state()[2]["success.hanging.frame_assembled"],
         )
-        from embodichain.extensions.tasks.manipulation.assembly._tool_hang_wrench import (
-            hang_wrench,
-        )
-
+        yield from pickup_segments(self, "tool")
         yield DemoSegment(
-            name="hang_wrench",
+            name="thread_wrench",
             target_uid="tool",
-            instruction="Pick up the wrench, thread its large ring over the hook and release it.",
-            actions=hang_wrench(motion),
+            instruction="Place the large ring over the bar and measure insertion and contact.",
+            actions=thread_wrench(motion),
+            validator=lambda: ring_on_bar(motion),
+        )
+        yield DemoSegment(
+            name="release_wrench",
+            target_uid="tool",
+            instruction="Open the fingers and withdraw from the hanging wrench.",
+            actions=release_wrench(motion),
         )

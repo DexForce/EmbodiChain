@@ -159,26 +159,26 @@ class ToolHangMotion:
         residual = Rotation.from_matrix(rotation @ result[:3, :3].T).as_rotvec()
         self.rotation_bias = Rotation.from_rotvec(_limit(residual, 0.07)).as_matrix()
 
-    def _grasp_frame(self) -> Iterator[ControllerAction]:
-        yield from self.hold(0.04, 4)
-        closing = -self.pose("frame")[:3, 0].copy()
+    def lift_grasped(
+        self, name: str, grip: np.ndarray, closing_axis: np.ndarray
+    ) -> Iterator[ControllerAction]:
+        """Raise a contact-qualified grip to carrying height and watch for slip."""
+        closing = closing_axis.copy()
         closing[2] = 0.0
         closing /= np.linalg.norm(closing)
-        top_down = np.column_stack((np.cross(closing, -_UP), closing, -_UP))
-        yield from self.move(self.point("frame", _GRIP) + 0.07 * _UP, top_down, 0.04)
-        yield from self.move(
-            self.point("frame", _GRIP) - 0.003 * _UP, top_down, 0.04, rate=0.45
-        )
-        yield from self.hold(0.0, 16)
+        down = np.column_stack((np.cross(closing, -_UP), closing, -_UP))
+        site_z = self.point(name, grip)[2]
+        self.position_bias = np.zeros(3)
+        self.rotation_bias = np.eye(3)
         start = self.hand()[:3, 3].copy()
-        for rise in (0.018, 0.060, 0.14):
-            yield from self.move(start + rise * _UP, top_down, 0.0, rate=0.55)
-            if self.point("frame", _GRIP)[2] < start[2] + 0.5 * rise:
-                raise RuntimeError("The frame did not rise with the fingers.")
+        for rise in (0.042, 0.122):
+            yield from self.move(start + rise * _UP, down, 0.0, rate=0.55)
+            if self.point(name, grip)[2] < site_z + 0.5 * rise - 0.009:
+                raise RuntimeError(f"The Panda lost {name!r} during lift.")
 
     def lift_frame(self) -> Iterator[ControllerAction]:
         """Raise the frame, turn its rod down and carry it to the socket."""
-        yield from self._grasp_frame()
+        yield from self.lift_grasped("frame", _GRIP, -self.pose("frame")[:3, 0])
         hand = self.hand()
         elevated = hand[:3, 3].copy()
         elevated[2] = 1.08
@@ -305,6 +305,9 @@ class ToolHangMotion:
                 settle=20,
             )
 
+    def clear_frame(self) -> Iterator[ControllerAction]:
+        """Clear both open pads before crossing to the wrench side of the stand."""
+        socket = self.point("stand", np.array([0, 0.045, 0]))
         yield from self._clear_bar()
         if not self.cleared_crossbar:
             return

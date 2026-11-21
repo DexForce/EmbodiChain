@@ -55,3 +55,14 @@ sensor:
     link_name_list: [tool, large_ring]
   - articulation_uid: FrankaPanda
     link_name_list: [fr3_hand, fr3_leftfinger, fr3_rightfinger, fr3_leftpad, fr3_rightpad]
+- sensor_type: ContactSensor
+  uid: grasp_contacts
+  filter_need_both_actor: true
+  max_contacts_per_env: 64
+  articulation_cfg_list:
+  - articulation_uid: frame
+    link_name_list: [frame]
+  - articulation_uid: tool
+    link_name_list: [tool]
+  - articulation_uid: FrankaPanda
+    link_name_list: [fr3_leftpad, fr3_rightpad]

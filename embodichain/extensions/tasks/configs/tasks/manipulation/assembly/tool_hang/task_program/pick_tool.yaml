@@ -1,0 +1,18 @@
+program_id: tool_hang_pick_tool
+instruction: Pick up the wrench with the Panda.
+targets: {}
+program:
+  kind: sequence
+  items:
+    - kind: segment
+      name: approach_wrench
+      instruction: Move the open hand above the wrench grip.
+      steps:
+        kind: invoke
+        call: {kind: registered, call_id: tool_hang.approach_grip, arguments: {object: tool}}
+    - kind: segment
+      name: pick_wrench
+      instruction: Pinch and lift the wrench between both pads.
+      steps:
+        kind: invoke
+        call: {kind: registered, call_id: tool_hang.pick, arguments: {object: tool}}
