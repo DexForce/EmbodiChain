@@ -1,7 +1,7 @@
 :orphan:
 
 Official OGBench single-Cube task
-===============================
+=================================
 
 The task consumes the audited assets and physical contract exported by the LeWM
 official-reference example. It executes five-dimensional end-effector and gripper

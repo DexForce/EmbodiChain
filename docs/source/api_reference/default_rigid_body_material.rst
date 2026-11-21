@@ -1,7 +1,7 @@
 :orphan:
 
 Default rigid contact materials
-==============================
+===============================
 
 .. autoclass:: embodichain.lab.sim.cfg.rigid.DefaultRigidBodyMaterialCfg
    :members:
