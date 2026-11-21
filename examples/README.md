@@ -91,6 +91,10 @@ coordinated-manipulation and recovery demonstrations. The two source-checkout
 walkthroughs under `scripts/tutorials/atomic_skill/` teach single-arm and dual-arm
 API composition; they reuse the canonical example setup.
 
+The RoboCasa365 example tracks recorded PandaOmron joint trajectories across
+six fixed episodes and checks their outcomes in live simulation.
+[RoboCasa365 physical replay](sim/robocasa365/README.md)
+
 The [scene and robot feasibility preview](expansion/scene_robot_feasibility/README.md)
 compares an authored installation with task-conditioned joint layout/deployment
 search in an offline 3D viewer. It replays measured successful episodes, exposes
