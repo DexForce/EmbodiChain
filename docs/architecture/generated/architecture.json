@@ -3,7 +3,7 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "9905685bf9da98a6ac10ae61289e3ce5d35b921f",
+  "revision": "2822f4d63fd75ed6f0f3a5b24a666120c5f3a9dc",
   "source_ref": "HEAD",
   "package_version": "0.3.3",
   "topic_index": "agent_context/MAP.yaml",
@@ -1698,7 +1698,7 @@
       "topic_ids": [
         "robot-system"
       ],
-      "summary": "Reads measured robot joint positions from an existing DexSim session over stdio.",
+      "summary": "Reads measured robot joint positions and velocities from an existing DexSim session over stdio.",
       "boundaries": [
         "The DexSim host owns the World and executes queries on the World owner thread."
       ],
