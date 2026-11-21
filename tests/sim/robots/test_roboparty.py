@@ -335,15 +335,25 @@ def test_rp_hand_loads_a_local_usd_source(
         SimulationManager.flush_cleanup_queue()
 
 
+@pytest.mark.no_sim
+def test_rp_hand_accepts_an_explicit_thumb_limit_rule(right_hand_urdf: Path) -> None:
+    """A regex selecting the thumb replaces its exact preset rule."""
+    limits = {"rh_finger1[2]": [0.1, 0.5]}
+    cfg = resolve_robot_cfg(
+        "RoboPartyRPHand", {"fpath": str(right_hand_urdf), "qpos_limits": limits}
+    )
+    assert cfg.qpos_limits == limits
+
+
 @pytest.mark.requires_sim
 @pytest.mark.parametrize(
     "physics,explicit_override_backend",
     [("default", False), ("newton", False), ("newton", True)],
 )
-def test_rp_hand_reset_by_name_preserves_partial_drive_limits(
+def test_rp_hand_reset_by_name_preserves_partial_joint_limits(
     right_hand_urdf: Path, physics: str, explicit_override_backend: bool
 ) -> None:
-    """Reset restores the named thumb pose and all untouched speed limits."""
+    """Keep untouched joint limits and restore the named thumb pose."""
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import physics_cfg_for_backend
 
@@ -351,7 +361,12 @@ def test_rp_hand_reset_by_name_preserves_partial_drive_limits(
     if explicit_override_backend:
         drive["backend"] = "newton"
     cfg = resolve_robot_cfg(
-        "RoboPartyRPHand", {"fpath": str(right_hand_urdf), "joint_drive_props": drive}
+        "RoboPartyRPHand",
+        {
+            "fpath": str(right_hand_urdf),
+            "joint_drive_props": drive,
+            "qpos_limits": {"rh_finger11": [0.1, 0.4]},
+        },
     )
     sim = SimulationManager(
         SimulationManagerCfg(
@@ -377,8 +392,12 @@ def test_rp_hand_reset_by_name_preserves_partial_drive_limits(
             expected = multiplier * qpos[f"rh_finger{leader}"] + offset
             assert qpos[f"rh_finger{follower}"] == pytest.approx(expected, abs=1e-6)
 
-        thumb = names.index("rh_finger12")
-        limits = robot.get_qpos_limits(joint_ids=[thumb])[0, 0].tolist()
+        other_thumb_joint, thumb = (
+            names.index(name) for name in ("rh_finger11", "rh_finger12")
+        )
+        actual_limits = robot.get_qpos_limits(joint_ids=[other_thumb_joint, thumb])[0]
+        assert actual_limits[0].tolist() == pytest.approx([0.1, 0.4])
+        limits = actual_limits[1].tolist()
         assert limits == pytest.approx(_THUMB_COMMAND_RANGE)
         for command, limit in zip((0.0, _THUMB_SOURCE_LIMIT), limits, strict=True):
             robot.set_qpos(torch.tensor([[command]]), joint_ids=[thumb])

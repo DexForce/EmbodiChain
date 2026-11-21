@@ -22,6 +22,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from math import inf, isfinite
 from numbers import Real
+from re import fullmatch
 from typing import Any, Literal, Self, cast
 import xml.etree.ElementTree as ET
 
@@ -90,6 +91,16 @@ class _RoboPartyRobotCfg(RobotCfg):
                 if isinstance(defaults, dict) and isinstance(value, dict):
                     rules[field] = {**defaults, **value}
             overrides["joint_drive_props"] = rules
+
+        limits = overrides.get("qpos_limits")
+        if isinstance(limits, dict) and isinstance(cfg.qpos_limits, dict):
+            untouched = {
+                name: bounds
+                for name, bounds in cfg.qpos_limits.items()
+                if not any(fullmatch(pattern, name) for pattern in limits)
+            }
+            overrides["qpos_limits"] = untouched | limits
+
         # The joint reader already selected and resolved these file fields.
         overrides.pop("fpath", None)
         overrides.pop("source", None)

@@ -51,8 +51,9 @@ order is `finger11`, `finger12`, `finger21`, `finger31`, `finger41` and
 `finger51`, with prefix `lh_` or `rh_`. Five other joints follow the source
 mimic relations. The preset limits `finger12` to approximately 0.0162 to
 1.2326 rad so its follower `finger13` can reach both endpoints within its
-authored travel. The fixed palm starts 0.3 m above the ground with the thumb
-leader at 0.02 rad.
+authored travel. Named `qpos_limits` overrides apply only to the joints they
+match. The fixed palm starts 0.3 m above the ground with the thumb leader at
+0.02 rad.
 
 The simulation uses force PD drives with stiffness 3 N·m/rad and damping
 0.1 N·m·s/rad. Effort and speed are capped at 2 N·m and 5 rad/s. The preset
