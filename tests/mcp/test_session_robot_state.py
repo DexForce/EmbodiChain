@@ -68,7 +68,9 @@ def test_scalar_layout_mapping() -> None:
 
 @pytest.mark.gpu
 @pytest.mark.parametrize("backend", ["dexsim", "newton"])
-def test_attach_two_ur5_and_reconnect(tmp_path: Path, backend: str) -> None:
+def test_attach_two_ur5_and_reconnect(
+    tmp_path: Path, backend: str, caplog: pytest.LogCaptureFixture
+) -> None:
     pytest.importorskip("mcp.server.mcpserver")
     import mcp
     from dexsim.runtime import Session
@@ -171,5 +173,6 @@ def test_attach_two_ur5_and_reconnect(tmp_path: Path, backend: str) -> None:
         final = native("articulation.get_state", object_ref="ur5_a", joint_names=arm)
         assert final["step_index"] == initial["step_index"]
         assert final["joint_position"] == pytest.approx(pose_a)
+        assert "Failed to parse JSONRPC message from server" not in caplog.text
     finally:
         session.shutdown()
