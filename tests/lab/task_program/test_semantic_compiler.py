@@ -2080,6 +2080,50 @@ def test_pick_lookahead_uses_downstream_place_orientation_policy() -> None:
     torch.testing.assert_close(downstream[:, :3, :3], object_pose[:, :3, :3])
 
 
+@pytest.mark.parametrize(
+    ("screen", "max_approach_retract_z", "heights"),
+    [
+        (False, None, [0.3]),
+        # The pose above the target comes first, as Place visits it first.
+        (True, None, [0.4, 0.3]),
+        # A capped approach height is not an object-space clearance.
+        (True, 1.0, [0.3]),
+    ],
+)
+def test_pick_lookahead_screens_the_downstream_place_approach_on_request(
+    screen: bool, max_approach_retract_z: float | None, heights: list[float]
+) -> None:
+    registry, _ = _scene_registry()
+    templates = _skill_option_templates()
+    templates["pick"] = PickUpOptions(screen_downstream_approach=screen)
+    templates["place"] = PlaceOptions(
+        lift_height=0.1, max_approach_retract_z=max_approach_retract_z
+    )
+    compiler, _ = _compiler(
+        registry,
+        profile=_profile(
+            preset=_preset("safe", skill_option_templates=templates),
+        ),
+    )
+    workflow = compiler.analyze(
+        (
+            Pick(object=SceneObjectRef("cube")),
+            Place(
+                object=SceneObjectRef("cube"),
+                at=SemanticPose((0.4, 0.2, 0.3), (0.0, 0.0, 0.0, 1.0)),
+            ),
+        )
+    )
+
+    options = compiler.ground(workflow, 0, _context(registry)).invocation.skill_options
+
+    assert type(options) is PickUpOptions
+    assert [
+        float(pose[..., 2, 3].reshape(-1)[0])
+        for pose in options.downstream_object_target_poses
+    ] == pytest.approx(heights)
+
+
 def test_grounded_safe_invocation_requires_registered_dynamic_collision() -> None:
     registry, _ = _scene_registry(dynamic_collision=True)
     profile = _profile(

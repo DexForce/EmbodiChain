@@ -1127,6 +1127,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 "max_approach_retract_z",
                 "cartesian_waypoint_count",
                 "cartesian_approach",
+                "screen_downstream_approach",
                 "preserve_current_object_orientation",
                 "direction",
                 "approach_distance",
@@ -1184,6 +1185,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                             "approach_along_grasp_axis",
                             "initial_lift_height",
                             "cartesian_lift",
+                            "screen_downstream_approach",
                         )
                         if kind == "pick_up"
                         else ()
@@ -1196,6 +1198,11 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
         if "cartesian_lift" in config:
             kwargs["cartesian_lift"] = _boolean(
                 config["cartesian_lift"], path=f"{path}.cartesian_lift"
+            )
+        if "screen_downstream_approach" in config:
+            kwargs["screen_downstream_approach"] = _boolean(
+                config["screen_downstream_approach"],
+                path=f"{path}.screen_downstream_approach",
             )
         if "approach_along_grasp_axis" in config:
             kwargs["approach_along_grasp_axis"] = _boolean(

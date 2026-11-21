@@ -1314,6 +1314,15 @@ def test_relative_place_uses_fresh_reference_pose_and_verified_grasp() -> None:
         torch.tensor((0.18, 0.0, 0.02)),
     )
     assert lookahead[0].preserve_current_object_orientation
+    assert lookahead[0].approach_clearance == options.lift_height
+    from embodichain.lab.task_program.compiler.lowering import _raised_pose_goal
+
+    raised = _raised_pose_goal(lookahead[0].pose, lookahead[0].approach_clearance)
+    assert type(raised) is SceneEntityPose and raised.entity_id == "notebook"
+    torch.testing.assert_close(
+        raised.world_displacement,
+        torch.tensor((0.18, 0.0, 0.02 + options.lift_height)),
+    )
 
 
 def test_relative_place_rejects_unmigrated_local_service_kind() -> None:

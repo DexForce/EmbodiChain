@@ -23,6 +23,7 @@ from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from enum import Enum
+import math
 from types import MappingProxyType
 from typing import ClassVar, TypeVar
 from uuid import uuid4
@@ -237,11 +238,15 @@ class SemanticObjectTarget:
     an explicitly installed typed/versioned grounder. Orientation preservation
     records the downstream placement policy so pickup feasibility checks use
     the same object target that placement will eventually lower.
+    ``approach_clearance`` is the world-z distance above the target from which
+    the downstream call approaches it; a pickup that screens downstream
+    approaches also requires that raised pose to be reachable.
     """
 
     pose: SemanticPose | SemanticRelativePose | SceneEntityPose | None = None
     relation: SemanticRelationTarget | None = None
     preserve_current_object_orientation: bool = False
+    approach_clearance: float = 0.0
 
     def __post_init__(self) -> None:
         selected = sum(value is not None for value in (self.pose, self.relation))
@@ -264,6 +269,29 @@ class SemanticObjectTarget:
             raise TypeError("relation must be exactly SemanticRelationTarget or None.")
         if type(self.preserve_current_object_orientation) is not bool:
             raise TypeError("preserve_current_object_orientation must be a bool.")
+        if (
+            isinstance(self.approach_clearance, bool)
+            or not isinstance(self.approach_clearance, (int, float))
+            or not math.isfinite(self.approach_clearance)
+            or self.approach_clearance < 0.0
+        ):
+            raise ValueError("approach_clearance must be finite and non-negative.")
+
+
+def _raised_pose_goal(target: PoseGoalValue, height: float) -> PoseGoalValue:
+    """Return a pose goal translated by ``height`` along world z.
+
+    A late-bound scene pose stays late-bound: the offset is added to its world
+    displacement.
+    """
+    if isinstance(target, torch.Tensor):
+        raised = target.clone()
+        raised[..., 2, 3] += height
+        return raised
+    offset = torch.tensor([0.0, 0.0, height], dtype=torch.float32)
+    if target.world_displacement is not None:
+        offset = target.world_displacement + offset.to(target.world_displacement)
+    return replace(target, world_displacement=offset)
 
 
 @dataclass(frozen=True, slots=True)
@@ -2000,6 +2028,7 @@ class SemanticCallCompiler:
                         preserve_current_object_orientation=(
                             place_options.preserve_current_object_orientation
                         ),
+                        approach_clearance=place_options.approach_clearance,
                     )
                 )
                 break
@@ -2059,6 +2088,15 @@ class SemanticCallCompiler:
                     grounded_target,
                     object_id=call.object.entity_id,
                     context=context,
+                )
+            if (
+                option_template.screen_downstream_approach
+                and target.approach_clearance > 0.0
+            ):
+                # The downstream call reaches the target through the pose
+                # above it, so that pose is visited, and screened, first.
+                downstream_targets.append(
+                    _raised_pose_goal(grounded_target, target.approach_clearance)
                 )
             downstream_targets.append(grounded_target)
         return SemanticLowering(

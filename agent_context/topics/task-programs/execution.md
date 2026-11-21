@@ -216,6 +216,10 @@ symbolic state only when it declares no effect contract. Declaring a held
 effect or phase does not certify physical attachment or weaken the selected
 assurance; verified acquisition still requires its measured monitor. A release
 or transfer target contributes to pickup look-ahead and then ends that chain.
+A look-ahead target also records the world-z `approach_clearance` from which
+Place reaches it (its `lift_height`, unless `max_approach_retract_z` caps it).
+A pickup whose options set `screen_downstream_approach` screens that raised
+pose before the target; by default only the target is screened.
 
 ## MLLM boundary
 
