@@ -573,6 +573,48 @@
       "details": "The unified embodichain command resolves a requested subcommand and loads its handler lazily. Use the CLI reference to find launch options for environments, training, assets, and other tools; task behavior stays in the handler-owned subsystem."
     },
     {
+      "id": "mcp",
+      "label": "EmbodiChain MCP",
+      "kind": "module",
+      "topic_ids": [
+        "robot-system"
+      ],
+      "summary": "Reads measured robot joint positions from an existing DexSim session over stdio.",
+      "boundaries": [
+        "The DexSim host owns the World and executes queries on the World owner thread."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/mcp/server.py",
+          "symbol": "cli",
+          "start_line": 29,
+          "end_line": 30,
+          "excerpt": "def cli(argv: Sequence[str] | None = None) -> None:\n    \"\"\"Attach a stdio MCP server to an existing DexSim runtime session.\"\"\""
+        },
+        {
+          "path": "embodichain/mcp/server.py",
+          "symbol": "cli.embodichain_get_robot_state",
+          "start_line": 73,
+          "end_line": 74,
+          "excerpt": "                return session.invoke(\n                    \"embodichain.lab.sim.dexsim_session\","
+        },
+        {
+          "path": "embodichain/lab/sim/dexsim_session.py",
+          "symbol": "read_robot_state",
+          "start_line": 96,
+          "end_line": 97,
+          "excerpt": "    names, indices, units = _select_dofs(handle.joint_dof_layout, parts[control_part])\n    positions = np.asarray(handle.get_current_qpos()).reshape(-1)[indices]"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/public_api",
+          "label": "EmbodiChain MCP API"
+        }
+      ],
+      "details": "The CLI binds the MCP server to an explicit DexSim Runtime session. The robot-state tool calls a host-side adapter through Session.invoke. The adapter reads the active scene articulation and orders the measured positions by the selected EmbodiChain control part."
+    },
+    {
       "id": "tasks",
       "label": "Official tasks",
       "kind": "module",
@@ -4113,6 +4155,31 @@
       ]
     },
     {
+      "id": "cli-calls-mcp",
+      "source": "cli",
+      "target": "mcp",
+      "relation": "calls",
+      "description": "Dispatch the mcp subcommand to the stdio MCP server.",
+      "scope": "Lazy command dispatch when the user selects embodichain mcp.",
+      "provenance": "source-reviewed",
+      "evidence": [
+        {
+          "path": "embodichain/cli/main.py",
+          "symbol": "<module>",
+          "start_line": 41,
+          "end_line": 42,
+          "excerpt": "        name=\"mcp\",\n        target=\"embodichain.mcp.server:cli\","
+        },
+        {
+          "path": "embodichain/cli/main.py",
+          "symbol": "main",
+          "start_line": 267,
+          "end_line": 268,
+          "excerpt": "    handler = _load_handler(command.target)\n    handler(arguments[1:])"
+        }
+      ]
+    },
+    {
       "id": "cli-calls-env-launcher",
       "source": "cli",
       "target": "env-launcher",
@@ -6029,6 +6096,7 @@
       "description": "Module responsibilities and direct dependencies, from task entry points to motion execution.",
       "node_ids": [
         "cli",
+        "mcp",
         "env-launcher",
         "task-discovery",
         "tasks",
@@ -6134,6 +6202,7 @@
         "bridge-holds-executor",
         "env-inherits-base",
         "base-constructs-simulation",
+        "cli-calls-mcp",
         "cli-calls-env-launcher",
         "cli-calls-training-assembly",
         "launcher-calls-discovery",
@@ -6217,6 +6286,7 @@
           "label": "Entry points & environments",
           "node_ids": [
             "cli",
+            "mcp",
             "env-launcher",
             "task-discovery",
             "tasks",
