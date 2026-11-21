@@ -7,15 +7,43 @@ simulation operations. EmbodiChain MCP adds robot configuration and
 control-part semantics. Both servers can connect independently to the same
 Runtime session. EmbodiChain MCP needs only that session for its queries.
 
-A stdio tool call follows this path:
+The diagram follows a joint-state request through either server. Each server
+connects using the same session ID and selects a host-side handler
+through ``Session.invoke()``.
 
-.. code-block:: text
+.. mermaid::
 
-   MCP client → EmbodiChain MCP server → DexSim Runtime Session.invoke
-              → EmbodiChain host adapter → articulation in the current scene
+   flowchart TB
+       client["MCP client process"]
+       subgraph ec["EmbodiChain MCP server process"]
+           ecTool["embodichain_get_robot_state"]
+       end
+       subgraph ds["DexSim MCP server process"]
+           dsTool["dexsim_get_articulation_state"]
+       end
+       subgraph host["DexSim Runtime host process"]
+           queue["Shared Runtime Session<br/>command queue"]
+           subgraph owner["World owner thread"]
+               ecRead["EmbodiChain host adapter<br/>Resolve control part and DOF order"]
+               dsRead["DexSim native handler<br/>Resolve requested joints or DOF IDs"]
+               joints["World / current scene / articulation<br/>get_current_qpos()"]
+           end
+       end
 
-The host resolves the articulation on each request. The stdio connection
-can close and reopen during the lifetime of one World.
+       client -->|stdio| ecTool
+       client -->|stdio| dsTool
+       ecTool -->|Session.invoke| queue
+       dsTool -->|Session.invoke| queue
+       queue --> ecRead
+       queue --> dsRead
+       ecRead --> joints
+       dsRead --> joints
+
+The owner thread dispatches each request to its selected handler. For the
+same articulation, both handlers read the same measured joint positions.
+EmbodiChain returns them in configured control-part order. Each result goes
+back through the requesting server; closing its stdio connection leaves the
+World running.
 See :doc:`../../guides/mcp` for installation and a working client, or the
 :doc:`architecture overview <../../overview/architecture/index>` for the project map.
 
