@@ -14,25 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Detached measurements of robot control parts."""
+"""Lightweight observation contracts shared by laboratory consumers."""
 
 from __future__ import annotations
 
-from typing_extensions import TypedDict
-
-__all__ = ["RobotState"]
-
-
-class RobotState(TypedDict):
-    """One detached measurement ordered by the configured control part."""
-
-    session_id: str
-    object_ref: str
-    topology_revision: int
-    control_part: str
-    joint_names: list[str]
-    dof_ids: list[int]
-    qpos: list[float]
-    units: list[str]
-    step_index: int | None
-    simulation_time_s: float | None
+__all__: list[str] = []

@@ -23,6 +23,7 @@ import sys
 import subprocess
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
@@ -36,7 +37,7 @@ def test_host_imports_without_mcp_sdk() -> None:
             """
 import sys
 sys.modules["mcp"] = None
-from embodichain.lab.robot_state import RobotState
+from embodichain.lab.observations.joints import ControlPartJointState, SessionJointState
 from embodichain.lab.sim.dexsim_session import read_robot_state, run
 assert "embodichain.mcp" not in sys.modules
 """,
@@ -47,6 +48,7 @@ assert "embodichain.mcp" not in sys.modules
 
 def test_scalar_layout_mapping() -> None:
     from dexsim.scene import JointDofLayout
+    from embodichain.lab.sim.dexsim_session import read_robot_state
     from embodichain.lab.sim.dexsim_session.robot_state import _select_dofs
 
     layout = [
@@ -55,11 +57,22 @@ def test_scalar_layout_mapping() -> None:
         JointDofLayout("slide", 7, 1, "translation"),
         JointDofLayout("joint1", 8, 1, "angle"),
     ]
-    assert _select_dofs(layout, ["slide", "joint1", "joint2"]) == (
-        ["slide", "joint1", "joint2"],
-        [7, 8, 6],
-        ["m", "rad", "rad"],
+    handle = Mock(path="test_robot", joint_dof_layout=layout)
+    handle.get_current_qpos.return_value = [0] * 6 + [0.1, 0.2, 0.3]
+    handle.get_current_qvel.return_value = [0] * 6 + [-1, -2, -3]
+    scene = Mock(backend="dexsim", topology_revision=4)
+    scene.get_articulation.return_value = handle
+    state = read_robot_state(
+        Mock(session_id="test_session", scene=scene),
+        object_ref="test_robot",
+        robot_cfg=Mock(control_parts={"group": ["slide", "joint1", "joint2"]}),
+        control_part="group",
     )
+    assert state["joint_names"] == ["slide", "joint1", "joint2"]
+    assert state["dof_ids"] == [7, 8, 6]
+    assert state["units"] == ["m", "rad", "rad"]
+    assert state["qpos"] == [0.2, 0.3, 0.1]
+    assert state["qvel"] == [-2, -3, -1]
     assert _select_dofs(layout, ["joint.*"])[1] == [6, 8]
     for invalid in (["joint3"], ["joint.*", "joint2"], ["base"]):
         with pytest.raises(ValueError):
@@ -90,10 +103,13 @@ def test_attach_two_ur5_and_reconnect(
     pose_a = [0.1, -0.2, 0.3, -0.4, 0.5, -0.6]
     pose_b = [-0.6, 0.5, -0.4, 0.3, -0.2, 0.1]
 
+    vel_a = [0.11, -0.12, 0.13, -0.14, 0.15, -0.16]
+    vel_b = [-0.21, 0.22, -0.23, 0.24, -0.25, 0.26]
+
     def native(method: str, **params: Any) -> dict[str, Any]:
         return session.invoke("dexsim.kit.mcp.dispatch", method=method, params=params)
 
-    async def read_b(expected: list[float]) -> None:
+    async def read_b(expected: dict[str, Any]) -> None:
         parameters = mcp.StdioServerParameters(
             command=sys.executable,
             args=[
@@ -111,7 +127,7 @@ def test_attach_two_ur5_and_reconnect(
             assert [tool.name for tool in catalog] == ["embodichain_get_robot_state"]
             tool = catalog[0]
             assert tool.annotations.read_only_hint
-            assert tool.output_schema is not None
+            assert "qvel" in tool.output_schema["required"]
             args = dict(
                 robot_cfg="URRobot",
                 variant="ur5",
@@ -128,7 +144,12 @@ def test_attach_two_ur5_and_reconnect(
                 assert state["session_id"] == session.session_id
                 assert state["joint_names"] == arm
                 assert state["units"] == ["rad"] * 6
-                assert state["qpos"] == pytest.approx(expected, abs=1e-6)
+                assert state["qpos"] == pytest.approx(
+                    expected["joint_position"], abs=1e-6
+                )
+                assert state["qvel"] == pytest.approx(
+                    expected["joint_velocity"], abs=1e-6
+                )
                 assert state["step_index"] == initial["step_index"]
                 assert state["simulation_time_s"] == initial["simulation_time"]
 
@@ -142,15 +163,21 @@ def test_attach_two_ur5_and_reconnect(
                 fixed_base=True,
             )
         native("scene.finalize")
-        for name, pose in (("ur5_a", pose_a), ("ur5_b", pose_b)):
+        for name, pose, velocity in (
+            ("ur5_a", pose_a, vel_a),
+            ("ur5_b", pose_b, vel_b),
+        ):
             native(
                 "articulation.set_state",
                 object_ref=name,
                 joint_names=arm,
                 joint_position=pose,
+                joint_velocity=velocity,
             )
         initial = native("articulation.get_state", object_ref="ur5_b", joint_names=arm)
         assert initial["joint_position"] == pytest.approx(pose_b)
+        assert initial["joint_velocity"] == pytest.approx(vel_b)
+        assert initial["joint_target_velocity"] != pytest.approx(vel_b)
         assert initial["joint_target_position"] != pytest.approx(pose_b)
         legacy = session.invoke(
             "embodichain.lab.sim.dexsim_session",
@@ -160,18 +187,28 @@ def test_attach_two_ur5_and_reconnect(
             control_part="arm",
         )
         assert legacy["qpos"] == pytest.approx(initial["joint_position"])
-        asyncio.run(read_b(initial["joint_position"]))
+        assert legacy["qvel"] == pytest.approx(initial["joint_velocity"])
+        asyncio.run(read_b(initial))
         # Change B on the host while the first stdio process is gone.
         pose_b[2] = 0.72
+        vel_b[2] = 0.37
         native(
             "articulation.set_state",
             object_ref="ur5_b",
             joint_names=arm,
             joint_position=pose_b,
+            joint_velocity=vel_b,
         )
-        asyncio.run(read_b(pose_b))
+        updated = native("articulation.get_state", object_ref="ur5_b", joint_names=arm)
+        assert updated["joint_position"] == pytest.approx(pose_b)
+        assert updated["joint_velocity"] == pytest.approx(vel_b)
+        asyncio.run(read_b(updated))
+        after = native("articulation.get_state", object_ref="ur5_b", joint_names=arm)
+        for signal in ("joint_position", "joint_velocity"):
+            assert after[signal] == pytest.approx(updated[signal])
         final = native("articulation.get_state", object_ref="ur5_a", joint_names=arm)
         assert final["step_index"] == initial["step_index"]
+        assert final["joint_velocity"] == pytest.approx(vel_a)
         assert final["joint_position"] == pytest.approx(pose_a)
         assert "Failed to parse JSONRPC message from server" not in caplog.text
     finally:

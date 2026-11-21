@@ -579,7 +579,7 @@
       "topic_ids": [
         "robot-system"
       ],
-      "summary": "Reads measured robot joint positions from an existing DexSim session over stdio.",
+      "summary": "Reads measured robot joint positions and velocities from an existing DexSim session over stdio.",
       "boundaries": [
         "The DexSim host owns the World and executes queries on the World owner thread."
       ],

@@ -35,9 +35,9 @@ registered robot config ID, optional variant and configured control part.
 For a bare UR5, use `robot_cfg=URRobot`, `variant=ur5` and `control_part=arm`.
 The CLI delegates session ownership to `embodichain/mcp/server.py`.
 Robot tools in `embodichain/mcp/tools/robot.py` use the shared measurement type
-in `embodichain/lab/robot_state.py`. The host adapter in
+in `embodichain/lab/observations/joints.py`. The host adapter in
 `embodichain/lab/sim/dexsim_session/robot_state.py` resolves current DOF spans
-on each read and reports measured positions with their units, scene topology
+on each read and reports measured positions and velocities with aligned joint names and units, scene topology
 revision and available simulation clock. Disconnecting leaves the World running.
 
 ## Configuration resolution

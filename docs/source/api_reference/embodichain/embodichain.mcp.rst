@@ -24,7 +24,14 @@ The command-line adapter is :func:`embodichain.cli.mcp.main`.
 Host measurements
 -----------------
 
-.. autoclass:: embodichain.lab.robot_state.RobotState
+A control-part observation contains aligned joint names, measured positions,
+measured velocities, and position units. A DexSim Session result adds object
+identity, topology-specific DOF indices, and the available clock to those
+same fields.
+
+.. autoclass:: embodichain.lab.observations.joints.ControlPartJointState
+
+.. autoclass:: embodichain.lab.observations.joints.SessionJointState
 
 .. currentmodule:: embodichain.lab.sim.dexsim_session.robot_state
 

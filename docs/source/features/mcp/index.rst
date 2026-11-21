@@ -26,7 +26,7 @@ through ``Session.invoke()``.
            subgraph owner["World owner thread"]
                ecRead["EmbodiChain host adapter<br/>Resolve control part and DOF order"]
                dsRead["DexSim native handler<br/>Resolve requested joints or DOF IDs"]
-               joints["World / current scene / articulation<br/>get_current_qpos()"]
+               joints["World / current scene / articulation<br/>get_current_qpos() and get_current_qvel()"]
            end
        end
 
@@ -40,7 +40,7 @@ through ``Session.invoke()``.
        dsRead --> joints
 
 The owner thread dispatches each request to its selected handler. For the
-same articulation, both handlers read the same measured joint positions.
+same articulation, both handlers read measured joint positions and velocities.
 EmbodiChain returns them in configured control-part order. Each result goes
 back through the requesting server; closing its stdio connection leaves the
 World running.
@@ -52,7 +52,7 @@ Robot state
 
 ``embodichain_get_robot_state`` returns one measurement without stepping the
 World or changing drive targets. This tool supports scalar angular and linear
-joint positions on the DexSim backend and Newton MuJoCo-Warp.
+joint positions and velocities on the DexSim backend and Newton MuJoCo-Warp.
 
 .. code-block:: json
 
@@ -64,23 +64,27 @@ variant. ``control_part`` supplies the configured joint selectors and their
 order. These checks establish that the selected joints can be read.
 
 Example structured result from the two-UR5 test with the released DexSim 0.6.0
-wheel on Newton MuJoCo-Warp (positions rounded):
+wheel on Newton MuJoCo-Warp (measurements rounded):
 
 .. code-block:: json
 
    {
-     "session_id": "dsws_8ffba19b8ff348adb0050345f77eed45",
+     "session_id": "dsws_f02e5024064f4059a9ec76d117cc7519",
      "object_ref": "ur5_b", "topology_revision": 0, "control_part": "arm",
      "joint_names": ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
      "dof_ids": [0, 1, 2, 3, 4, 5],
      "qpos": [-0.60, 0.50, -0.40, 0.30, -0.20, 0.10],
+     "qvel": [-0.21, 0.22, -0.23, 0.24, -0.25, 0.26],
      "units": ["rad", "rad", "rad", "rad", "rad", "rad"],
      "step_index": 0, "simulation_time_s": 0.0
    }
 
-At each array index, ``joint_names``, ``dof_ids``, ``qpos`` and ``units``
+At each array index, ``joint_names``, ``dof_ids``, ``qpos``, ``qvel`` and ``units``
 describe the same joint. DOF IDs are public state-buffer offsets and can be
-nonconsecutive. Revolute joints use radians and prismatic joints use metres.
+nonconsecutive. The host reads current position and velocity in one call on the
+World owner thread, without advancing physics between reads. For an angular
+joint, ``units[i]`` is ``rad`` and velocity is in rad/s; for a prismatic joint
+it is ``m`` and velocity is in m/s. An unavailable measurement fails the call.
 The topology revision identifies the scene layout. The native DexSim backend
 returns JSON null for both clock fields.
 

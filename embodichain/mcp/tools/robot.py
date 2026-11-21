@@ -24,7 +24,7 @@ from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from embodichain.lab.robot_state import RobotState
+from embodichain.lab.observations.joints import SessionJointState
 
 __all__: list[str] = []
 
@@ -38,8 +38,8 @@ def register_robot_tools(server: MCPServer, session: Session) -> None:
         robot_cfg: str,
         control_part: str,
         variant: str | None = None,
-    ) -> RobotState:
-        """Read measured qpos for a scene articulation in configured control-part order.
+    ) -> SessionJointState:
+        """Read measured qpos and qvel for a scene articulation in configured control-part order.
 
         Supply the scene object path, a registered robot config ID, and a control
         part such as arm. For the UR5 use robot_cfg=URRobot and variant=ur5.

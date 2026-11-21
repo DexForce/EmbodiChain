@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from embodichain.lab.robot_state import RobotState
+from embodichain.lab.observations.joints import SessionJointState
 from embodichain.robot_registry import resolve_robot_cfg
 from embodichain.utils.string import resolve_matching_names
 
@@ -66,8 +66,8 @@ def read_robot_state(
     object_ref: str,
     robot_cfg: RobotCfg,
     control_part: str,
-) -> RobotState:
-    """Read measured scalar joint positions on the existing World's owner thread.
+) -> SessionJointState:
+    """Read measured scalar joint positions and velocities on the existing World's owner thread.
 
     Args:
         context: Borrowed DexSim host context supplied by Session.invoke.
@@ -76,7 +76,7 @@ def read_robot_state(
         control_part: Configured group whose selectors specify output order.
 
     Returns:
-        Current joint positions in radians or metres and their public DOF indices.
+        Current joint positions, velocities and their public DOF indices.
         Clock fields are null on backends without a public simulation clock.
     """
     scene = context.scene
@@ -99,7 +99,12 @@ def read_robot_state(
         raise ValueError(
             f"Non-finite measured positions for {object_ref!r}/{control_part}"
         )
-    return RobotState(
+    velocities = np.asarray(handle.get_current_qvel()).reshape(-1)[indices]
+    if not np.isfinite(velocities).all():
+        raise ValueError(
+            f"Non-finite measured velocities for {object_ref!r}/{control_part}"
+        )
+    return SessionJointState(
         session_id=context.session_id,
         object_ref=handle.path,
         topology_revision=scene.topology_revision,
@@ -107,6 +112,7 @@ def read_robot_state(
         joint_names=names,
         dof_ids=indices,
         qpos=positions.tolist(),
+        qvel=velocities.tolist(),
         units=units,
         step_index=scene.get_simulation_step() if scene.backend == "newton" else None,
         simulation_time_s=(
@@ -122,7 +128,7 @@ def run(
     robot_cfg: str,
     control_part: str,
     variant: str | None = None,
-) -> RobotState:
+) -> SessionJointState:
     """DexSim Session.invoke entry point for a registered robot ID and variant."""
     cfg = resolve_robot_cfg(robot_cfg, variant=variant)
     return read_robot_state(

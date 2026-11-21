@@ -74,7 +74,7 @@ stdio server and handles the MCP handshake and tool discovery:
 
 Rerun the example to reconnect. Exiting the client closes its server process;
 the host retains the World. A robot moved by the host between reads will
-return its latest measured positions.
+return its latest measured positions and velocities.
 
 For another stdio client, set its executable to ``embodichain`` and its arguments
 to ``mcp --session <ID>``. If you launch that command directly, it waits for
