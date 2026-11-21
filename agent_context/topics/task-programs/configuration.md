@@ -476,6 +476,10 @@ catalog, receives `object_or_link` instead.
 
 ## Named evaluation rules
 
+Use `corner_containment_in_object` to check object-local points against a
+region in another rigid object's measured frame. Asymmetric points can check
+which face leads when placing an object at an oriented target.
+
 ### Segment acceptance contracts
 
 Use an explicit segment when an outcome can be described and verified at a

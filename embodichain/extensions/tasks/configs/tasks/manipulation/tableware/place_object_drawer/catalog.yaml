@@ -15,3 +15,6 @@ deployments:
     config: task.tianji_marvin.yaml
   dexforce_w1_030_pika:
     config: task.dexforce_w1_030_pika.yaml
+  dexuni:
+    config: task.ur5.dexuni.yaml
+    note: Starts with an open drawer configured for native DexUni CPU contacts. The UR5 expert places the duck on the liner and pushes the drawer closed.

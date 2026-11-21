@@ -14,3 +14,6 @@ deployments:
     config: task.panda.yaml
   panda_rgbd:
     config: task.panda.rgbd.yaml
+  dexuni:
+    config: task.ur5.dexuni.yaml
+    note: Uses a UR5 with DH PGI-140-80 and measures the settled carton position and front alignment.

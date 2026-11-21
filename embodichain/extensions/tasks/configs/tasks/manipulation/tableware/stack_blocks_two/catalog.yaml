@@ -20,3 +20,6 @@ deployments:
   policy_cobotmagic:
     note: Policy-owned actions with measured stage rewards. Training performance has not been qualified here.
     config: task.policy.cobotmagic.yaml
+  dexuni:
+    config: task.ur5.dexuni.yaml
+    note: UR5 with DH PGI-140-80 and native DexUni rigid contacts. The program measures the lift, alignment and stability of the two-block stack.

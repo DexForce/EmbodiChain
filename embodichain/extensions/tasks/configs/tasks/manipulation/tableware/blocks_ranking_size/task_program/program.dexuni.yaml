@@ -1,0 +1,112 @@
+program_id: blocks_ranking_size_reference
+instruction: Arrange the blocks from largest to smallest with the medium block in
+  the middle.
+targets:
+  block_1_drop:
+    kind: scene_relative
+    entity: block_2
+    frame: parent
+    position:
+    - -0.09
+    - 0.0
+    - 0.045
+    quaternion_xyzw:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+  block_3_drop:
+    kind: scene_relative
+    entity: block_2
+    frame: parent
+    position:
+    - 0.09
+    - 0.0
+    - 0.04
+    quaternion_xyzw:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+program:
+- segment: pick_block_1
+  instruction: Lift the large block.
+  steps:
+    pick:
+      object: block_1
+      grasp: block_1_grasp
+      resources:
+        primary: primary_manipulator
+  validators:
+  - kind: object_lifted
+    object: block_1
+    minimum_lift: 0.035
+- segment: place_block_1
+  instruction: Place the large block at its target.
+  steps:
+    place:
+      object: block_1
+      at: block_1_drop
+      resources:
+        primary: primary_manipulator
+  post:
+  - kind: wait_stable
+    entity: block_1
+  validators:
+  - kind: object_relative_position
+    object: block_1
+    reference: block_2
+    position_offset:
+    - -0.09
+    - 0.0
+    - 0.0
+    position_tolerance:
+    - 0.02
+    - 0.024
+    - null
+- segment: pick_block_3
+  instruction: Lift the small block.
+  steps:
+    pick:
+      object: block_3
+      grasp: block_3_grasp
+      resources:
+        primary: primary_manipulator
+  validators:
+  - kind: object_lifted
+    object: block_3
+    minimum_lift: 0.035
+- segment: place_block_3
+  instruction: Place the small block at its target.
+  steps:
+    place:
+      object: block_3
+      at: block_3_drop
+      resources:
+        primary: primary_manipulator
+  post:
+  - kind: wait_stable
+    entity: block_3
+  validators:
+  - kind: object_relative_position
+    object: block_3
+    reference: block_2
+    position_offset:
+    - 0.09
+    - 0.0
+    - 0.0
+    position_tolerance:
+    - 0.02
+    - 0.024
+    - null
+  - kind: object_relative_position
+    object: block_1
+    reference: block_2
+    position_offset:
+    - -0.09
+    - 0.0
+    - 0.0
+    position_tolerance:
+    - 0.02
+    - 0.024
+    - null

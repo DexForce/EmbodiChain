@@ -206,6 +206,12 @@ class _VisualBinding:
     def has_gaussians(self) -> bool:
         return any(element.gaussian for element in self.elements)
 
+    def _uses_finalized_scene(self, element: _Element) -> bool:
+        return (
+            element.gaussian
+            and getattr(self.spawn.builder, "backend", None) == "newton"
+        )
+
     def declare(self) -> None:
         handles = self.spawn.handles(self.owner.uid)
         if handles and any(link is not None for link in self.groups):
@@ -224,6 +230,8 @@ class _VisualBinding:
         added = []
         try:
             for element in self.elements:
+                if self._uses_finalized_scene(element):
+                    continue
                 method = (
                     self.spawn.builder.add_gaussian_splat
                     if element.gaussian
@@ -245,12 +253,45 @@ class _VisualBinding:
         self.gaussian_batch = None
         self.handles.clear()
         for element in reversed(self.elements):
+            if self._uses_finalized_scene(element):
+                scene = self.spawn.builder.result
+                if scene is not None:
+                    for arena in self.spawn.arena_names:
+                        path = f"{arena}/{element.name}"
+                        if path in scene.handles:
+                            scene.remove_gaussian_splat(path)
+                continue
             method = (
                 self.spawn.builder.remove_gaussian_splat
                 if element.gaussian
                 else self.spawn.builder.remove_object
             )
             method(element.name)
+
+    def _materialize_scene_gaussians(self, scene: Any) -> None:
+        """Bind render-only splats through the finalized Newton scene."""
+        added = []
+        try:
+            for element in self.elements:
+                if not self._uses_finalized_scene(element):
+                    continue
+                source = None
+                for arena in self.spawn.arena_names:
+                    handle = scene.handles.get(f"{arena}/{element.name}")
+                    if handle is None:
+                        if source is None:
+                            handle = scene.add_gaussian_splat(element.descriptor, arena)
+                        else:
+                            handle = scene.clone_gaussian_splat(
+                                source.path, element.name, arena
+                            )
+                        added.append(handle.path)
+                    if source is None:
+                        source = handle
+        except Exception:
+            for path in reversed(added):
+                scene.remove_gaussian_splat(path)
+            raise
 
     def bind(self, scene: Any) -> None:
         from ..objects._mesh_utils import get_combined_vertices, get_combined_triangles
@@ -295,6 +336,7 @@ class _VisualBinding:
         for handle in owner._entities:
             for link in self.groups:
                 scene.clear_visual_meshes(handle.path, link_name=link)
+        self._materialize_scene_gaussians(scene)
         self.handles = [
             tuple(
                 scene.handles[f"{arena}/{e.name}"] for arena in self.spawn.arena_names

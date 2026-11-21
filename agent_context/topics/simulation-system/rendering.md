@@ -254,6 +254,10 @@ visibility. EmbodiChain checks the public `get_gaussian_resource_ids()` capabili
 before multi-Arena declaration; older SDKs retain singleton support. Native USD
 Gaussian appearance cannot be replaced by an explicit `visuals` list. The
 standalone `GaussianSplatCfg` path retains its per-instance randomization API.
+A render-only `VisualObjectCfg` can use explicit Gaussian elements with
+Newton physics. Spawn borrows the finalized Scene to create and replicate
+the render handles, independently of Newton's physics model. Gaussian
+replacements on physical objects still require Default.
 NoRender omits the USD Gaussian render resource but keeps its authored physics
 and collision descriptions, including replicated bodies. Type queries retain
 the authored visual reference without allocating Gaussian points.

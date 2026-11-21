@@ -84,6 +84,37 @@ def test_registered_predicate_boolean_and_missing_evidence():
     assert result["progress"].status.tolist() == [Status.UNAVAILABLE] * 2
 
 
+def test_corner_containment_in_object_measures_the_directional_front() -> None:
+    graph = builtin_predicates().compile(
+        EvaluationSpec(
+            {
+                "front_aligned": PredicateSpec(
+                    "corner_containment_in_object",
+                    {"pose": "carton", "frame": "worktop"},
+                    {
+                        "corners": [[0.05, 0.0, 0.0]],
+                        "lower": [0.04, -0.01, -0.01],
+                        "upper": [0.06, 0.01, 0.01],
+                    },
+                )
+            },
+            ("front_aligned",),
+        ),
+        field_kinds={"carton": "object_frame", "worktop": "object_frame"},
+    )
+    half_turn_component = 2**-0.5
+    aligned = [0.0, 0.0, 0.0, 0.0, 0.0, half_turn_component, half_turn_component]
+    reversed_front = [*aligned[:5], -half_turn_component, half_turn_component]
+    result = graph.evaluate(
+        {
+            "carton": torch.tensor([aligned, reversed_front]),
+            "worktop": torch.tensor([aligned, aligned]),
+        },
+        batch_size=2,
+    )
+    assert result["front_aligned"].status.tolist() == [Status.SATISFIED, Status.FAILED]
+
+
 def test_shared_segment_sessions_preserve_selection_qualification_and_names():
     from embodichain.lab.evaluation.observations import _combine_selections
 

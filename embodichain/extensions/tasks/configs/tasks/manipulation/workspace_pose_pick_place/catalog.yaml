@@ -12,3 +12,5 @@ deployments:
   scene_first_acceptance:
     alias: scene_first
     config: acceptance/scene_first/task.yaml
+  dexuni:
+    config: task.ur5.dexuni.yaml

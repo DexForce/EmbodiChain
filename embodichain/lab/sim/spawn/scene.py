@@ -324,9 +324,13 @@ class SpawnScene:
             from dexsim.scene import Scene
 
             if self._material_resources.renderer != "no-render":
-                if self.builder.backend != "dexsim" and file_elements is None:
+                if (
+                    self.builder.backend != "dexsim"
+                    and kind != "visual_object"
+                    and file_elements is None
+                ):
                     raise NotImplementedError(
-                        "Explicit visual composition currently requires the Default backend."
+                        "Explicit visual composition on physics objects requires the Default backend."
                     )
                 if not hasattr(Scene, "clear_visual_meshes"):
                     raise RuntimeError(

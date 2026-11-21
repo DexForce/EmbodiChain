@@ -29,6 +29,26 @@ embodichain list-task --all --export-html task-inventory.html
 
 The CLI lists all discovered tasks when called without flags. The default HTML gallery features starting deployments. Purpose describes the intended workflow. Training recipes and expert demonstrations have separate evidence requirements; checkpoint performance belongs to the evaluated deployment and conditions.
 
+## DexUni task deployments
+
+Select the `dexuni` entry in `embodichain show-task <key>`. Each entry points
+to a deployment that owns or selects a Newton environment with an explicit
+DexUni solver. CartPole, Humanoid Run and PushCube have PPO configurations.
+Assembly PPO recipes are listed under `dexuni_nominal`. The `dexuni` assembly
+deployments use the Rizon4S with a Robotiq 2F85 for reference rollouts.
+
+Use `--preview` with the listed run command to inspect a scene. Launch a task
+with an expert to execute its measured demonstration. For PushCube, select
+`franka_visual_dexuni`. The assembly examples document the peg policy and the
+geometry-informed gear and nut controllers. Install the pinned MJFit provider
+to generate assembly assets. The nominal PPO variants additionally use the
+prepared public Rizon4S parallel-jaw assets.
+
+```bash
+python -m pip install 'mjfit @ git+https://github.com/younghyopark/mjfit.git@5833f465896e1e06bc4be4f003be847f5183a4db'
+python -m embodichain.extensions.benchmarks.assembly.robot_reference --gripper-model parallel_jaw
+```
+
 ## Pick and place
 
 Run `embodichain list-task --category manipulation/pick_place` to browse

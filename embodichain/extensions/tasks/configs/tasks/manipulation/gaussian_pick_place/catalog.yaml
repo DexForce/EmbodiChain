@@ -1,7 +1,7 @@
 task_key: gaussian_pick_place
 group: pick_place
 title: Pick and Place in Captured Gaussian Scenes
-summary: Physically pick and place a cube in three visual-only 3DGS backgrounds with third-person and wrist RGB cameras.
+summary: Physically pick and place a cube in scenes with captured 3D Gaussian backgrounds.
 tags:
 - pick_place
 - single_arm
@@ -19,3 +19,6 @@ deployments:
   robosimgs:
     validation: validation/robosimgs.json
     config: task.robosimgs.yaml
+  dexuni:
+    note: Uses a UR5 with DH PGI-140-80, native DexUni rigid contacts and the original Office Gaussian capture.
+    config: task.office.dexuni.yaml

@@ -55,6 +55,17 @@ class _PushCubeCfg:
 
 
 @register_env(
+    "PushCubeRL-DexUni-v1",
+    max_episode_steps=50,
+    supports_rl=True,
+    supports_handwritten_demo=False,
+)
+@register_env(
+    "PushCube-Franka-Visual-DexUni-v1",
+    max_episode_steps=300,
+    supports_handwritten_demo=True,
+)
+@register_env(
     "PushCube-Franka-Visual-v1", max_episode_steps=300, supports_handwritten_demo=True
 )
 @register_env(

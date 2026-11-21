@@ -125,10 +125,12 @@ def test_pick_place_catalog_groups_tasks_and_preserves_deployment_lookups() -> N
         "office": "FrankaGSPickPlace-Office-v1",
         "discoverse": "FrankaGSPickPlace-Discoverse-v1",
         "robosimgs": "FrankaGSPickPlace-Robosimgs-v1",
+        "dexuni": "TaskProgramOfficeUR5-DexUni-v1",
     }
     assert all(
         deployment.capabilities == {catalog._TASK_PROGRAM}
-        and deployment.physics == "default"
+        and deployment.physics
+        == ("newton" if deployment.name == "dexuni" else "default")
         for deployment in task.deployments
     )
 
@@ -392,6 +394,60 @@ def test_official_catalogs_resolve_real_deployments() -> None:
                 assert deployment.resource.is_file()
 
 
+def test_official_dexuni_deployments_resolve_to_the_selected_solver() -> None:
+    root = (
+        Path(__file__).resolve().parents[1]
+        / "embodichain/extensions/tasks/configs/tasks"
+    )
+    tasks = catalog._load_catalog({"embodichain.extensions.tasks": root})
+    ppo_tasks = {
+        "cart_pole",
+        "humanoid",
+        "push_cube",
+        "peg_insertion",
+        "gear_meshing",
+        "nut_threading",
+    }
+    expected = ppo_tasks | {
+        "carton_stocking",
+        "drawer_storage",
+        "gaussian_pick_place",
+        "hand_over",
+        "workspace_pose_pick_place",
+        "blocks_ranking_rgb",
+        "blocks_ranking_size",
+        "match_object_container",
+        "place_object_drawer",
+        "stack_blocks_two",
+        "stack_cups",
+    }
+    seen = set()
+    for task in tasks:
+        if task.key not in expected:
+            continue
+        (dexuni,) = [d for d in task.deployments if d.name == "dexuni"]
+        assert dexuni.physics == "newton"
+        assert dexuni.env_id.endswith("-DexUni-v1")
+        assert all(
+            d.env_id != dexuni.env_id for d in task.deployments if d.name != "dexuni"
+        )
+        deployment = catalog._load_mapping(dexuni.resource)
+        if "environment" in deployment:
+            deployment = catalog._load_mapping(
+                dexuni.resource.parent / deployment["environment"]["component"]
+            )
+        assert deployment["physics_config"]["solver_cfg"]["solver_type"] == "dexuni"
+        if task.key in ppo_tasks:
+            training = next(
+                (d for d in task.deployments if d.name == "dexuni_nominal"), dexuni
+            )
+            assert training.physics == "newton"
+            (agent,) = training.agent_refs
+            assert Path(agent).name.endswith((".dexuni.yaml", ".dexuni.json"))
+        seen.add(task.key)
+    assert seen == expected
+
+
 def test_official_portfolio_keeps_deployment_purposes_and_evidence_separate() -> None:
     root = (
         Path(__file__).resolve().parents[1]
@@ -575,7 +631,7 @@ def test_carton_source_and_ordinary_rgbd_deployments_without_loading_assets(
     )
     assert task.default_deployment == "panda"
     deployments = {deployment.name: deployment for deployment in task.deployments}
-    assert set(deployments) == {"panda", "panda_rgbd"}
+    assert set(deployments) == {"panda", "panda_rgbd", "dexuni"}
     assert deployments["panda"].env_id == "CartonStockingPanda-v1"
     assert deployments["panda"].capabilities == {catalog._TASK_PROGRAM}
     assert deployments["panda"].requires_dataset_dir

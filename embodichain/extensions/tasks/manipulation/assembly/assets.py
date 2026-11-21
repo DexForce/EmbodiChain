@@ -24,6 +24,7 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 from scipy.spatial import ConvexHull
+from scipy.spatial.transform import Rotation
 
 from embodichain.toolkits.assembly.adapter import (
     load_mjfit,
@@ -53,6 +54,8 @@ def _add_ring(
         copied.set("mesh", meshes[copied.attrib["mesh"]])
         copied.set("class", "mjfit_collision")
         copied.set("pos", f"0 0 {z:.17g}")
+        copied.set("group", "0")
+        copied.set("rgba", "0.65 0.72 0.82 1")
         body.append(copied)
 
 
@@ -81,6 +84,9 @@ def _gear_asset(config: dict[str, Any], seed: int) -> AssemblyAsset:
     for geom in list(body.findall("geom")):
         if geom.attrib.get("name") in {"gear_b_col_0", "gear_b_visual", "gear_b_hub"}:
             body.remove(geom)
+        else:
+            geom.set("group", "0")
+            geom.set("rgba", "0.65 0.72 0.82 1")
     body.remove(body.find("joint"))
     ET.SubElement(body, "freejoint", name="held_gear_free")
     for name, outer, thickness, z in (
@@ -161,6 +167,25 @@ def _gear_asset(config: dict[str, Any], seed: int) -> AssemblyAsset:
     return asset
 
 
+def _bake_bolt_orientation(bolt: ET.Element) -> None:
+    """Keep the source's upward-facing threaded tip in the reset frame."""
+    rotation = Rotation.from_quat(
+        np.roll(np.fromstring(bolt.attrib.pop("quat"), sep=" "), -1)
+    )
+    for geom in bolt.findall("geom"):
+        position = np.fromstring(geom.get("pos", "0 0 0"), sep=" ")
+        orientation = Rotation.from_quat(
+            np.roll(np.fromstring(geom.get("quat", "1 0 0 0"), sep=" "), -1)
+        )
+        geom.set("pos", " ".join(f"{x:.17g}" for x in rotation.apply(position)))
+        geom.set(
+            "quat",
+            " ".join(
+                f"{x:.17g}" for x in np.roll((rotation * orientation).as_quat(), 1)
+            ),
+        )
+
+
 def build_task_assembly(
     kind: Literal["peg", "gear", "nut"],
     config: Mapping[str, Any] | None = None,
@@ -193,13 +218,20 @@ def build_task_assembly(
         )
         return asset
     if kind == "nut":
+        thread_tip_up = parameters.pop("thread_tip_up", False)
+        if type(thread_tip_up) is not bool:
+            raise ValueError("Assembly thread_tip_up must be a boolean.")
         cfg = {**assembly_defaults("assets")["nut"]["generator"], **parameters}
+        if thread_tip_up:
+            cfg["driven"] = "nut"
         source = build_assembly(cfg, seed=seed)
         model = ET.fromstring(source.source_mjcf)
         for name, free in (("bolt", False), ("nut", True)):
             body = model.find(f"./worldbody/body[@name='{name}']")
             if body is None:
                 raise ValueError(f"Pinned mjfit thread output has no {name}.")
+            if name == "bolt" and thread_tip_up:
+                _bake_bolt_orientation(body)
             for joint in list(body):
                 if joint.tag in {"joint", "freejoint"}:
                     body.remove(joint)
@@ -211,6 +243,8 @@ def build_task_assembly(
             seed=seed,
             generator_revision=source.generator_revision,
         )
+        if thread_tip_up:
+            result.config["thread_tip_up"] = True
         result.generator_version = source.generator_version
         return result
     raise ValueError(f"Unknown held assembly kind: {kind!r}")

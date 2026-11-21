@@ -24,3 +24,9 @@ deployments:
   fullrange_reference:
     note: Gated reference profile. Requires qualified robot assets and heterogeneous per-arena geometry.
     config: task.fullrange.yaml
+  dexuni:
+    config: task.study.default_assets.dexuni.yaml
+    note: Evaluates the published peg policy using the Rizon4S and Robotiq2F85 with native DexUni rigid contacts.
+  dexuni_nominal:
+    config: task.study.nominal.dexuni.yaml
+    note: Nominal single-geometry study profile for PPO experiments.

@@ -3518,9 +3518,9 @@ class SimulationManager:
             raise RuntimeError(
                 "Gaussian visuals require a qualified DexSim Spawn/Scene integration build."
             )
-        if self.physics.name != "default":
+        if self.physics.name != "default" and not isinstance(cfg, VisualObjectCfg):
             raise NotImplementedError(
-                "Gaussian visuals currently require physics='default'."
+                "Gaussian replacements on physics objects require physics='default'."
             )
         if getattr(self, "_window_record_state", None) is not None:
             raise NotImplementedError(
