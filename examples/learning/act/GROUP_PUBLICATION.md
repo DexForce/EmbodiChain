@@ -63,3 +63,6 @@ It recounts the physical outcomes and consecutive development scores, checks
 native policy hashes, validates all release receipts and writes
 `acceptance.json`. An incomplete set, an audit issue or any seed missing its
 deadline or quality target produces a nonzero exit status.
+
+The [deadline follow-up](GROUPED_REPAIR.md) documents producer stratification,
+ACT query scheduling and independent cold-launch replications of the same gate.
