@@ -54,7 +54,7 @@ A configuration-defined Task Program deployment conventionally uses
 
 ```bash
 embodichain run-task \
-    --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml
+    --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml
 ```
 
 At startup, `run-task`:
@@ -210,7 +210,7 @@ created by `record_camera_data` under **Record cameras** from configured
 observation sensors under **Sensor cameras**.
 Limit the published batch with `--viser-env-ids`, and tune scene, image, or
 soft-body publication rates with the corresponding `--viser-*-fps` options. See
-{doc}`/overview/sim/viser_visualization` for browser controls and remote-access
+{doc}`/overview/sim/visualization/viser` for browser controls and remote-access
 details.
 
 ## Run and record
@@ -335,7 +335,7 @@ complete examples, resolution rules, and reading both levels in training.
 #### Run the built-in three-cycle example
 
 The shipped
-`embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml`
+`embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml`
 deployment combines a reusable physical environment with a UR5 parallel-gripper
 embodiment to pick up and place the same cube three times. Each cycle has a
 grasp segment and a placement segment, giving six lazy segments. Later calls
@@ -343,7 +343,7 @@ are grounded against the scene state left by earlier calls.
 
 ```bash
 embodichain run-task \
-    --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
+    --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
     --headless \
     --device cuda \
     --max_episodes 1

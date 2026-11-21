@@ -18,7 +18,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from embodichain.lab.visualization import VisualizationCfg
+
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -97,6 +102,7 @@ def _build_learning_environment(
     *,
     device: torch.device,
     num_envs: int,
+    resources: Mapping[str, Any] | None = None,
 ) -> tuple[str, Any]:
     """Build the lightweight Environment declared by a training config."""
     env_block = config["trainer"]["learning_env"]
@@ -106,6 +112,13 @@ def _build_learning_environment(
     else:
         env_name = env_block["name"]
         env_config = dict(env_block.get("cfg", {}))
+    if resources is not None:
+        duplicate = env_config.keys() & resources.keys()
+        if duplicate:
+            raise ValueError(
+                f"Learning environment config and resources overlap: {sorted(duplicate)}"
+            )
+        env_config.update(resources)
     return str(env_name), build_learning_env(
         str(env_name),
         num_envs=num_envs,
@@ -144,12 +157,26 @@ def build_learning_policy_runtime(
     *,
     device: torch.device,
     num_envs: int,
+    resources: Mapping[str, Any] | None = None,
 ) -> PolicyRuntime:
-    """Build a lightweight Environment and its configured Policy."""
+    """Build a configured learning Environment and Policy.
+
+    Args:
+        config: Training configuration with trainer and policy blocks.
+        device: Device shared by the environment and policy.
+        num_envs: Learning rollout batch size.
+        resources: Workflow-owned objects injected into the environment factory,
+            such as a trained model and replay start provider. Keys must not
+            overlap the environment configuration. Objects are shared by reference.
+
+    Returns:
+        Environment and policy constructed through their registries.
+    """
     env_name, env = _build_learning_environment(
         config,
         device=device,
         num_envs=num_envs,
+        resources=resources,
     )
     try:
         policy = _build_learning_policy(config["policy"], env, device)
@@ -183,6 +210,7 @@ def _build_gym_environment(
     simulation_device: torch.device,
     num_envs: int | None,
     headless: bool,
+    visualization: VisualizationCfg | None = None,
     renderer: str | None,
     gpu_id: int,
     seed: int | None = None,
@@ -197,7 +225,9 @@ def _build_gym_environment(
         base_dir=config_dir,
     )
     gym_config = load_config(gym_config_path)
-    env_cfg = config_to_cfg(gym_config, manager_modules=get_manager_modules())
+    env_cfg = config_to_cfg(
+        gym_config, manager_modules=get_manager_modules(), source_path=gym_config_path
+    )
     if num_envs is not None:
         env_cfg.num_envs = int(num_envs)
     if seed is not None:
@@ -208,6 +238,9 @@ def _build_gym_environment(
     env_cfg.sim_cfg.headless = headless
     if renderer is not None:
         env_cfg.sim_cfg.render_cfg = RenderCfg(renderer=renderer)
+    if visualization is not None:
+        env_cfg.sim_cfg.visualization = visualization
+        env_cfg.sim_cfg.__post_init__()
     env_cfg.sim_cfg.gpu_id = (
         simulation_device.index
         if simulation_device.type == "cuda" and simulation_device.index is not None
@@ -243,6 +276,7 @@ def build_gym_policy_runtime(
     device: torch.device,
     num_envs: int | None,
     headless: bool,
+    visualization: VisualizationCfg | None = None,
     renderer: str | None,
     gpu_id: int,
     seed: int | None = None,
@@ -258,6 +292,7 @@ def build_gym_policy_runtime(
         device: Policy tensor device.
         num_envs: Optional override for the number of environments.
         headless: Whether to suppress the native window.
+        visualization: Optional browser presentation override applied before World creation.
         renderer: Explicit renderer override; None preserves the task's render
             configuration, including demand-based auto selection.
         gpu_id: Renderer GPU index when the simulation device has no CUDA index.
@@ -276,6 +311,7 @@ def build_gym_policy_runtime(
         simulation_device=simulation_device or device,
         num_envs=num_envs,
         headless=headless,
+        **({"visualization": visualization} if visualization is not None else {}),
         renderer=renderer,
         gpu_id=gpu_id,
         seed=seed,
@@ -360,8 +396,6 @@ def _build_gym_policy(
             actor_observation_dim,
             env.action_space,
             device,
-            actor=build_mlp_from_cfg(actor_cfg, actor_observation_dim, action_dim),
-            critic=build_mlp_from_cfg(critic_cfg, critic_observation_dim, 1),
             critic_obs_space=(
                 critic_observation_dim if uses_separate_critic_obs else None
             ),
@@ -382,6 +416,7 @@ def _build_gym_policy(
         env.observation_space,
         env.action_space,
         device,
+        critic_obs_space=(critic_observation_dim if uses_separate_critic_obs else None),
     )
 
 
@@ -415,12 +450,12 @@ def _build_learning_policy(
         device,
         actor=(
             build_mlp_from_cfg(actor_cfg, actor_observation_dim, action_dim)
-            if actor_cfg is not None
+            if actor_cfg is not None and policy_block["name"].lower() != "actor_critic"
             else None
         ),
         critic=(
             build_mlp_from_cfg(critic_cfg, critic_observation_dim, 1)
-            if critic_cfg is not None
+            if critic_cfg is not None and policy_block["name"].lower() != "actor_critic"
             else None
         ),
         critic_obs_space=(critic_observation_dim if uses_separate_critic_obs else None),

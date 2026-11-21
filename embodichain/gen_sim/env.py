@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from pathlib import Path
 from typing import MutableMapping
 
@@ -73,19 +74,27 @@ def load_gen_sim_env(env: MutableMapping[str, str] | None = None) -> Path | None
     if env_path is None or not env_path.is_file():
         return None
 
+    for key, value in _iter_env_file(env_path, strict=True):
+        target_env.setdefault(key, value)
+    return env_path
+
+
+def _iter_env_file(path: Path, *, strict: bool = False) -> Iterator[tuple[str, str]]:
+    """Parse ordered dotenv entries while retaining each caller's duplicate policy."""
     for line_number, raw_line in enumerate(
-        env_path.read_text(encoding="utf-8").splitlines(), start=1
+        path.read_text(encoding="utf-8").splitlines(), start=1
     ):
+        if not strict and "=" not in raw_line:
+            continue
         parsed = _parse_env_line(raw_line)
         if parsed is None:
             continue
         key, value = parsed
         if not key.isidentifier():
             raise ValueError(
-                f"Invalid environment variable name at {env_path}:{line_number}: {key!r}"
+                f"Invalid environment variable name at {path}:{line_number}: {key!r}"
             )
-        target_env.setdefault(key, value)
-    return env_path
+        yield key, value
 
 
 def _parse_env_line(line: str) -> tuple[str, str] | None:

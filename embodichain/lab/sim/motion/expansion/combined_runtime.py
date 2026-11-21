@@ -231,13 +231,11 @@ class VisualProfileRegistry:
                     raise ValueError(
                         "global_sun requires a global sun light named 'main_light'"
                     )
-                sun.set_color(
-                    torch.tensor(global_operation["color"], dtype=torch.float32)
-                )
-                sun.set_intensity(
-                    torch.tensor(
+                sun.apply_state(
+                    color=torch.tensor(global_operation["color"], dtype=torch.float32),
+                    intensity=torch.tensor(
                         float(global_operation["intensity"]), dtype=torch.float32
-                    )
+                    ),
                 )
             for profile_id, env_ids in grouped.items():
                 application = resolved[profile_id]
@@ -297,16 +295,13 @@ class VisualProfileRegistry:
                             operation.get("color", [1.0, 1.0, 1.0]),
                             dtype=torch.float32,
                         ).repeat(len(env_ids), 1)
-                        light.set_color(color, env_ids=ids)
-                        light.set_intensity(
-                            torch.full(
+                        light.apply_state(
+                            color=color,
+                            intensity=torch.full(
                                 (len(env_ids),),
                                 float(operation.get("intensity", 8.0)),
                             ),
-                            env_ids=ids,
-                        )
-                        light.set_direction(
-                            torch.tensor(
+                            direction=torch.tensor(
                                 operation.get("direction", [0.0, 0.0, -1.0]),
                                 dtype=torch.float32,
                             ).repeat(len(env_ids), 1),

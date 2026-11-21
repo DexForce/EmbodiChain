@@ -1,0 +1,25 @@
+{
+  "source_revision": "c4952cf401ee5e1861ba92f9dde87732050d9383",
+  "source_example": "examples/expansion/scene_layout.py",
+  "source_example_sha256": "7e3ae8686e99a3f4ccb6ddee250bb039e2757f037a230fa819af23e7db373600",
+  "seed": 7,
+  "physics": "default",
+  "renderer": "hybrid offscreen",
+  "generated_date": "2026-11-15",
+  "capture": "Native camera RGB and measured arena-local poses; no model service.",
+  "sha256": {
+    "comparison.png": "4489a7d9e756f5c8dfd0c968bb8106791f4caa0f0400abfc5eef3fec7e9be5fc",
+    "validated_variants.png": "29e619a21014555f4b39a823aabd34f7942591062b9413d1351011de36f33322",
+    "preview.mp4": "3c0d41e9dae8c419b22691b45a02738e89da4bd2109cce086cf0bc1f15f4bc96",
+    "report.json": "89c70252fcf4c71ecd588ca801177cab704271a65db71a07b2254afea8309aff",
+    "plans.json": "7eca9a1ac6313dad455ddf2ae9a6aacf4d007961d9542f5d19039595a017ddf5",
+    "preview.gif": "4d1e35afdff5a60c9df7f342b374aee62893521eb79de7ce53f38108cb4e2646"
+  },
+  "derived_preview": {
+    "source": "preview.mp4",
+    "path": "preview.gif",
+    "width_px": 800,
+    "fps": 6,
+    "purpose": "Reduced-resolution animation preview; measurements use report.json and plans.json."
+  }
+}

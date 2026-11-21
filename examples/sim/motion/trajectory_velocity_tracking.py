@@ -212,7 +212,7 @@ from embodichain.compute.trajectory import differentiate_positions
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RenderCfg, physics_cfg_for_backend
 from embodichain.lab.sim.objects import Robot
-from embodichain_robots import FrankaPandaCfg
+from embodichain.extensions.robots import FrankaPandaCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 
 
@@ -396,10 +396,9 @@ def main(args: argparse.Namespace | None = None) -> None:
         robot: Robot = sim.add_robot(
             FrankaPandaCfg.from_dict({"uid": "tracking_franka"})
         )
-        if sim.is_use_gpu_physics:
-            sim.init_gpu_physics()
-        if not args.headless:
-            sim.open_window()
+        sim.prepare()
+        if not args.headless or getattr(args, "web", False):
+            sim.open_viewer()
         common_initial_qpos = robot.get_qpos().clone()
         trials = {
             "qpos_only_zero_qvel": _run_trial(

@@ -178,7 +178,7 @@ The browser supports rigid objects and groups, robot and articulation links,
 cloth, soft bodies, camera frustums, low-frequency RGB preview, overlays, and a
 1 m ground grid. For configuration, performance behavior, deformable-object
 limitations, remote access, and troubleshooting, see
-{doc}`viser_visualization`.
+{doc}`visualization/viser`.
 
 ## Native point-cloud visualization
 
@@ -205,7 +205,7 @@ point_cloud = sim.visualize_point_cloud(
 
 The returned native point-cloud handle can be queried or modified with the
 DexSim point-cloud API. This method targets the native window; use the
-browser-overlay APIs documented in {doc}`viser_visualization` for Viser.
+browser-overlay APIs documented in {doc}`visualization/viser` for Viser.
 See {doc}`/tutorial/point_cloud_visualization` for a runnable color-and-position
 verification example.
 
@@ -314,5 +314,5 @@ For more methods and details, see the {doc}`SimulationManager API </api_referenc
 ### Related Documentation
 
 - {doc}`Basic scene creation </tutorial/create_scene>`
-- {doc}`Interactive Gizmos </features/interaction/gizmo>`
-- {doc}`Viser browser visualization <viser_visualization>`
+- {doc}`Interactive Gizmos </overview/sim/visualization/gizmo>`
+- {doc}`Viser browser visualization <visualization/viser>`

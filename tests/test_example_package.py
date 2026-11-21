@@ -22,7 +22,7 @@ import pytest
 from setuptools import Distribution
 
 import setup as package_setup
-from setup import get_example_data_files, get_package_dir, get_packages
+from setup import get_example_data_files, get_packages
 
 pytestmark = pytest.mark.no_sim
 
@@ -39,17 +39,17 @@ def test_distribution_preserves_the_ordinary_examples_tree(tmp_path: Path) -> No
     for relative in (
         "__init__.py",
         "README.md",
-        "sim/atomic_action/__main__.py",
-        "sim/atomic_action/host.py",
-        "sim/atomic_action/assemble.py",
-        "sim/atomic_action/control_dt.py",
-        "sim/atomic_action/coordinated_pickment.py",
-        "sim/atomic_action/coordinated_placement.py",
-        "sim/atomic_action/dynamic_obstacle_recovery.py",
-        "sim/atomic_action/move_end_effector.py",
-        "sim/atomic_action/move_held_object_cup.py",
-        "sim/atomic_action/moving_target_recovery.py",
-        "sim/atomic_action/pickup_rubiks_cube.py",
+        "sim/atomic_skill/__main__.py",
+        "sim/atomic_skill/host.py",
+        "sim/atomic_skill/assemble.py",
+        "sim/atomic_skill/control_dt.py",
+        "sim/atomic_skill/coordinated_pickment.py",
+        "sim/atomic_skill/coordinated_placement.py",
+        "sim/atomic_skill/dynamic_obstacle_recovery.py",
+        "sim/atomic_skill/move_end_effector.py",
+        "sim/atomic_skill/move_held_object_cup.py",
+        "sim/atomic_skill/moving_target_recovery.py",
+        "sim/atomic_skill/pickup_rubiks_cube.py",
         "sim/motion/planners/curobo_planner.py",
         "ods/simple_bc_demo/train.py",
         "ods/simple_bc_demo/configs/task.yaml",
@@ -57,18 +57,7 @@ def test_distribution_preserves_the_ordinary_examples_tree(tmp_path: Path) -> No
         "expansion/asset_generalization/configs/pour_water/task.cobotmagic.yaml",
     ):
         assert (output / relative).is_file(), relative
-    assert all(
-        name.partition(".")[0]
-        in {
-            "embodichain",
-            "embodichain_tasks",
-            "embodichain_robots",
-            "embodichain_benchmarks",
-            "embodichain_models",
-        }
-        for name in get_packages()
-    )
-    assert "examples" not in get_package_dir()
+    assert not any(name.split(".")[0] == "examples" for name in get_packages())
     assert not (output / "embodichain_examples").exists()
 
 

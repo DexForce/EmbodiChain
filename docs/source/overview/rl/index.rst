@@ -70,7 +70,7 @@ Example
 
 .. code-block:: bash
 
-    embodichain train-rl --config embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml
+    embodichain train-rl --config embodichain/extensions/tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml
 
 For more details, please refer to the source code and API documentation of each submodule.
 
@@ -88,6 +88,7 @@ See also
     train_script.md
     multi_gpu.md
     locomotion.md
+    dexterous.md
 
 See Also
 --------
@@ -97,3 +98,5 @@ See Also
 - :doc:`/overview/gym/env` — EmbodiedEnv configuration and Action Manager
 - :doc:`/features/online_data` — Online data streaming pipeline
 - :doc:`/resources/task/index` — Available RL task environments
+
+For external training, see :doc:`/guides/rlinf`. The :doc:`/guides/training_frameworks` comparison also covers LeRobot imitation learning and native SL.

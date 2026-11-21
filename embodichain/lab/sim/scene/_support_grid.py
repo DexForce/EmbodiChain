@@ -24,45 +24,12 @@ from __future__ import annotations
 
 import numpy as np
 import shapely
-from shapely.geometry import Polygon, MultiPolygon, mapping, shape
+from shapely.geometry import Polygon, MultiPolygon, mapping
 from shapely.ops import unary_union
 
+from embodichain.lab._scene_config.policy import _read_support_polygon
+
 __all__: list[str] = []
-
-
-def _read_support_polygon(value: object) -> Polygon | MultiPolygon:
-    """Decode finite XY GeoJSON before accessing any scene assets."""
-    if not isinstance(value, dict) or value.get("type") not in (
-        "Polygon",
-        "MultiPolygon",
-    ):
-        raise ValueError(
-            "Support polygon must be a GeoJSON Polygon or MultiPolygon mapping."
-        )
-    try:
-        polygon = shape(value)
-    except (
-        AttributeError,
-        KeyError,
-        IndexError,
-        TypeError,
-        ValueError,
-        OverflowError,
-        shapely.errors.GEOSException,
-    ) as exc:
-        raise ValueError("Support polygon has invalid GeoJSON coordinates.") from exc
-    if (
-        not isinstance(polygon, (Polygon, MultiPolygon))
-        or polygon.is_empty
-        or polygon.has_z
-        or not np.isfinite(shapely.get_coordinates(polygon)).all()
-        or not polygon.is_valid
-        or polygon.area <= 0
-    ):
-        raise ValueError(
-            "Support polygon must contain a valid nonempty finite XY area."
-        )
-    return polygon
 
 
 def _plane_region(

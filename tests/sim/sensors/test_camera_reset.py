@@ -74,6 +74,8 @@ def test_reset_preserves_batch_dimension_and_unselected_views(
     camera.device = torch.device("cpu")
     camera._entities = [_View() for _ in range(3)]
     camera._num_instances = len(camera._entities)
+    camera._is_destroyed = False
+    camera._ground_plane_visibility = [camera.cfg.ground_plane_visible] * 3
     camera.reset(env_ids)
 
     expected = camera.cfg.extrinsics.transformation.clone()

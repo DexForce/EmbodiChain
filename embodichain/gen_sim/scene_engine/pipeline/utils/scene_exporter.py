@@ -17,9 +17,13 @@
 
 from __future__ import annotations
 
+__all__: list[str] = []
+
 import json
+import hashlib
 from pathlib import Path
 import shutil
+import struct
 import time
 
 import numpy as np
@@ -29,6 +33,12 @@ from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraph
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.utils.logger import log_info
+from embodichain.gen_sim.asset_engine.utils.articulated_usdc_utils import (
+    _articulation_root_bottom_z,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_utils import (
+    measure_scene_object_z_up_world_aabb,
+)
 
 _Y_UP_TO_Z_UP_ROTATION = np.array(
     [
@@ -84,6 +94,15 @@ class SceneExporter:
         self.scene_graph.validate()
         if set(self.scene_graph.node_by_id()) != set(object_ids):
             raise ValueError("Scene graph nodes must match exported scene object ids.")
+
+        # A failed replacement must not leave an earlier scene's delivery usable.
+        for delivery in (
+            self.output_root / "scene_package.zip",
+            self.output_root / "scene_usd" / "scene.usda",
+            self.output_root / "scene_usd" / "scene_usd_manifest.json",
+            self.output_root / "scene_usd" / "scene.usdz",
+        ):
+            delivery.unlink(missing_ok=True)
 
         exported_entries = {
             scene_object.id: self._copy_scene_object_to_assets(
@@ -240,8 +259,8 @@ class SceneExporter:
             else:
                 asset_root.unlink()
 
-    @staticmethod
     def _scene_object_config(
+        self,
         *,
         scene_object: SceneObject,
         asset_relative_path: str,
@@ -267,6 +286,7 @@ class SceneExporter:
         )
 
         return {
+            **self._appearance_metadata(self.export_root / asset_relative_path),
             "uid": scene_object.id,
             "category": scene_object.category,
             "name": scene_object.name,
@@ -292,13 +312,174 @@ class SceneExporter:
         }
 
     @staticmethod
+    def _opaque_glb_materials(path: Path) -> bool:
+        """Accept only self-contained core-material GLBs before color quantization."""
+        try:
+            with path.open("rb") as stream:
+                magic, version, length, size, kind = struct.unpack(
+                    "<4sIIII", stream.read(20)
+                )
+                if (
+                    magic != b"glTF"
+                    or version != 2
+                    or kind != 0x4E4F534A
+                    or length != path.stat().st_size
+                    or size > length - 20
+                ):
+                    return False
+                document = json.loads(stream.read(size))
+            # The proof hashes only this GLB. Relative/remote buffers can change
+            # rendered colors without changing that digest.
+            if any(
+                "uri" in buffer and not buffer["uri"].startswith("data:")
+                for buffer in document.get("buffers", [])
+            ):
+                return False
+            materials = document.get("materials", [])
+            for mesh in document.get("meshes", []):
+                for primitive in mesh["primitives"]:
+                    material = (
+                        materials[primitive["material"]]
+                        if "material" in primitive
+                        else {}
+                    )
+                    # Extensions may replace the core alpha/color source (e.g.
+                    # pbrSpecularGlossiness.diffuseFactor). Do not certify their
+                    # appearance until an extension-specific reader owns it.
+                    if material.get("extensions"):
+                        return False
+                    # Missing images may disappear from Trimesh's loaded material.
+                    # Authored texture use is ineligible even if decoding failed.
+                    if "baseColorTexture" in material.get("pbrMetallicRoughness", {}):
+                        return False
+                    mode = material.get("alphaMode", "OPAQUE")
+                    if mode == "OPAQUE":
+                        continue
+                    # Non-opaque vertex alpha needs its own accessor decoder.
+                    if "COLOR_0" in primitive.get("attributes", {}):
+                        return False
+                    alpha = material.get("pbrMetallicRoughness", {}).get(
+                        "baseColorFactor", [1, 1, 1, 1]
+                    )[3]
+                    if (
+                        isinstance(alpha, bool)
+                        or not isinstance(alpha, (int, float))
+                        or not np.isfinite(alpha)
+                        or not 0 <= alpha <= 1
+                    ):
+                        return False
+                    if mode == "MASK":
+                        cutoff = material.get("alphaCutoff", 0.5)
+                        if (
+                            isinstance(cutoff, bool)
+                            or not isinstance(cutoff, (int, float))
+                            or not np.isfinite(cutoff)
+                            or not 0 <= cutoff <= 1
+                            or alpha < cutoff
+                        ):
+                            return False
+                    elif mode != "BLEND" or alpha != 1:
+                        return False
+            return True
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            KeyError,
+            IndexError,
+            AttributeError,
+            struct.error,
+        ):
+            return False
+
+    @staticmethod
+    def _appearance_metadata(path: Path) -> dict[str, object]:
+        """Measure only uniform opaque palette colors in the exported GLB.
+
+        Descriptions, default material colors, textures, combined material/vertex
+        channels and mixed appearance cannot certify a named color through this
+        conservative adapter.
+        """
+        import trimesh
+
+        palette = {
+            "red": (255, 0, 0),
+            "green": (0, 255, 0),
+            "blue": (0, 0, 255),
+            "white": (255, 255, 255),
+            "black": (0, 0, 0),
+            "yellow": (255, 255, 0),
+        }
+        if not SceneExporter._opaque_glb_materials(path):
+            return {}
+        try:
+            scene = trimesh.load_scene(path, process=False)
+        except (OSError, ValueError, TypeError, NotImplementedError):
+            return {}
+        measured = []
+        for mesh in scene.geometry.values():
+            if not isinstance(mesh, trimesh.Trimesh):
+                return {}
+            visual = mesh.visual
+            material = getattr(visual, "material", None)
+            if visual.kind == "vertex":
+                colors = np.asarray(visual.vertex_colors)
+            elif visual.kind == "face":
+                colors = np.asarray(visual.face_colors)
+            elif visual.kind == "texture":
+                material = visual.material
+                if (
+                    getattr(material, "baseColorTexture", None) is not None
+                    or getattr(material, "image", None) is not None
+                    # glTF multiplies COLOR_0 by the material factor. The
+                    # single-channel palette adapter cannot qualify both.
+                    or visual.vertex_attributes.get("color") is not None
+                ):
+                    return {}
+                color = getattr(material, "baseColorFactor", None)
+                if color is None:
+                    return {}
+                colors = np.asarray(color).reshape(1, -1)
+            else:
+                return {}
+            if (
+                colors.ndim != 2
+                or colors.shape[1] not in {3, 4}
+                or not len(colors)
+                or not np.isfinite(colors).all()
+            ):
+                return {}
+            labels = [
+                name
+                for name, rgb in palette.items()
+                if (np.abs(colors[:, :3].astype(float) - rgb) <= 32).all()
+            ]
+            if len(labels) != 1:
+                return {}
+            measured.append(labels[0])
+        if not measured or len(set(measured)) != 1:
+            return {}
+        color = measured[0]
+        return {
+            "properties": {"color": color},
+            "property_evidence": {
+                "color": {
+                    "value": color,
+                    "method": "uniform_opaque_srgb_palette/v1",
+                    "source": path.relative_to(path.parents[2]).as_posix(),
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                }
+            },
+        }
+
     def _articulation_config(
+        self,
         *,
         scene_object: SceneObject,
         articulated_relative_path: str,
         proxy_glb_relative_path: str,
     ) -> dict[str, object]:
-        """Build one y-up USDC articulation config from an optimized scene asset."""
+        """Place native root collision geometry on the proxy's support surface."""
         pos_y_up = SceneExporter._scene_vector(scene_object, "pos")
         rot_y_up = SceneExporter._scene_vector(scene_object, "rot")
         proxy_scale_y_up = SceneExporter._scene_vector(scene_object, "scale")
@@ -309,6 +490,33 @@ class SceneExporter:
             _Y_UP_TO_Z_UP_ROTATION @ rotation_y_up @ _Y_UP_TO_Z_UP_ROTATION.T
         )
         rot_z_up = Rotation.from_matrix(rotation_z_up).as_euler("XYZ", degrees=True)
+        proxy_pos_z_up = pos_z_up.copy()
+        parent_id = self.scene_graph.node_by_id()[scene_object.id].parent_id
+        parent = next(o for o in self.scene.objects if o.id == parent_id)
+        if parent.kind == "table" and parent.support_surface_z is not None:
+            # Table support metadata is measured in canonical z-up coordinates.
+            parent_rot = Rotation.from_euler(
+                "xyz", parent.rot, degrees=True
+            ).as_matrix()
+            parent_rot = _Y_UP_TO_Z_UP_ROTATION @ parent_rot @ _Y_UP_TO_Z_UP_ROTATION.T
+            if not np.allclose(parent_rot[2], [0, 0, 1], atol=1e-5):
+                raise ValueError(
+                    "Articulation height placement requires a horizontal table."
+                )
+            support_z = parent.support_surface_z * self._scene_vector(parent, "scale")[
+                1
+            ] + float((_Y_UP_TO_Z_UP_ROTATION @ np.asarray(parent.pos))[2])
+        else:
+            support_z = measure_scene_object_z_up_world_aabb(scene_object=parent)[1][2]
+        pos_z_up[2] = (
+            support_z
+            + 0.001
+            - _articulation_root_bottom_z(
+                scene_object.articulated_usdc_path,
+                articulated_scale_y_up,
+                rot_z_up.tolist(),
+            )
+        )
         return {
             "uid": scene_object.id,
             "category": scene_object.category,
@@ -318,8 +526,9 @@ class SceneExporter:
             "fpath": articulated_relative_path,
             # The proxy stays in the export so scene edit can keep using GLB AABBs.
             "proxy_glb_fpath": proxy_glb_relative_path,
-            # Both y-up assets load with their bottom on z-up's XY plane.
+            # Runtime root and editable proxy have distinct placement origins.
             "init_pos": pos_z_up.tolist(),
+            "proxy_init_pos": proxy_pos_z_up.tolist(),
             "init_rot": rot_z_up.tolist(),
             "body_scale": articulated_scale_y_up,
             "proxy_body_scale": proxy_scale_y_up,

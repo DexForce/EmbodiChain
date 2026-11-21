@@ -18,10 +18,14 @@
 
 from __future__ import annotations
 
+from .conditions import ConditionResult, evaluate_near_target, evaluate_below_height
 from .config import GoalRegionCfg, OrderedPlacementObjectiveCfg
 from .ordered_placement import MeasuredRigidObjectState, OrderedPlacementObjective
 
 __all__ = [
+    "ConditionResult",
+    "evaluate_near_target",
+    "evaluate_below_height",
     "GoalRegionCfg",
     "OrderedPlacementObjectiveCfg",
     "MeasuredRigidObjectState",

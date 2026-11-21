@@ -66,7 +66,7 @@ The shared-framework plan prioritizes R-04 and G-03. The imported local report
 suite retains its own L/P experiment IDs and current completion states. Remaining
 empty directories use `.gitkeep`; no measurements are invented for pending items.
 
-Existing `../motion_generation/`, `../atomic_action/`, `../rl/`,
+Existing `../motion_generation/`, `../atomic_skill/`, `../rl/`,
 `../task_program/`, [offscreen rendering](../rendering/README.md), and other
 benchmarks keep their entry points and outputs. Reuse their domain
 execution and adapt legacy results as the shared framework is implemented.

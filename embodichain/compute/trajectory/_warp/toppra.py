@@ -43,6 +43,7 @@ def _prepare(
     grid_size: int,
     single_precision: int,
     duplicate_tolerance: wp.float64,
+    preserve_waypoints: int,
 ):
     row = wp.tid()
     count = int(0)
@@ -66,6 +67,9 @@ def _prepare(
                     valid = 0
                 if count == 0:
                     different = 1
+                elif preserve_waypoints != 0:
+                    if value != clean[row, count - 1, j]:
+                        different = 1
                 elif single_precision != 0:
                     # Match the legacy subtraction and threshold rounding before
                     # the numerical solve is promoted to double precision.
@@ -87,7 +91,7 @@ def _prepare(
                 count += 1
                 last_kept = i
     last_index = path_count - 1
-    if last_kept != last_index:
+    if last_kept != last_index and preserve_waypoints == 0:
         kept[row, count] = last_index
         for j in range(points.shape[2]):
             clean[row, count, j] = points[row, last_index, j]
@@ -783,3 +787,200 @@ for _output_dtype in (wp.float32, wp.float64):
             "dt": wp.array2d(dtype=_output_dtype),
         },
     )
+
+
+@wp.func
+def _pchip_slope(
+    points: wp.array3d(dtype=wp.float64), row: int, joint: int, i: int, n: int
+):
+    scale = wp.float64(n - 1)
+    if n == 2:
+        return (points[row, 1, joint] - points[row, 0, joint]) * scale
+    if i == 0 or i == n - 1:
+        first, middle, last = int(0), int(1), int(2)
+        if i == n - 1:
+            first, middle, last = n - 1, n - 2, n - 3
+        d0 = (points[row, middle, joint] - points[row, first, joint]) * scale
+        d1 = (points[row, last, joint] - points[row, middle, joint]) * scale
+        value = (wp.float64(3.0) * d0 - d1) / wp.float64(2.0)
+        if (value > wp.float64(0.0)) != (d0 > wp.float64(0.0)):
+            value = wp.float64(0.0)
+        elif wp.abs(value) > wp.float64(3.0) * wp.abs(d0):
+            value = wp.float64(3.0) * d0
+        if i == n - 1:
+            value = -value
+        return value
+    left = (points[row, i, joint] - points[row, i - 1, joint]) * scale
+    right = (points[row, i + 1, joint] - points[row, i, joint]) * scale
+    value = wp.float64(0.0)
+    if (left > wp.float64(0.0) and right > wp.float64(0.0)) or (
+        left < wp.float64(0.0) and right < wp.float64(0.0)
+    ):
+        value = wp.float64(2.0) / (wp.float64(1.0) / left + wp.float64(1.0) / right)
+    return value
+
+
+@wp.kernel
+def _pchip(
+    points: wp.array3d(dtype=wp.float64),
+    counts: wp.array(dtype=int),
+    success: wp.array(dtype=int),
+    coefficients: wp.array4d(dtype=wp.float64),
+):
+    # Uniform-knot PCHIP (Fritsch-Butland): each coordinate remains between
+    # adjacent input coordinates. Its C1 joins can have bounded acceleration
+    # jumps; _constraints bounds both one-sided limits on segment-aligned cells.
+    row, segment, joint = wp.tid()
+    n = counts[row]
+    if success[row] == 0 or segment >= n - 1:
+        return
+    h = wp.float64(1.0) / wp.float64(n - 1)
+    left = _pchip_slope(points, row, joint, segment, n)
+    right = _pchip_slope(points, row, joint, segment + 1, n)
+    secant = (points[row, segment + 1, joint] - points[row, segment, joint]) / h
+    coefficients[row, segment, joint, 0] = points[row, segment, joint]
+    coefficients[row, segment, joint, 1] = left
+    coefficients[row, segment, joint, 2] = (
+        wp.float64(3.0) * secant - wp.float64(2.0) * left - right
+    ) / h
+    coefficients[row, segment, joint, 3] = (left + right - wp.float64(2.0) * secant) / (
+        h * h
+    )
+
+
+@wp.kernel(enable_backward=False)
+def _preserved_sample_counts(
+    counts: wp.array(dtype=int),
+    intervals: wp.array(dtype=int),
+    times: wp.array2d(dtype=wp.float64),
+    durations: wp.array(dtype=wp.float64),
+    success: wp.array(dtype=int),
+    offsets: wp.array2d(dtype=int),
+    sample_counts: wp.array(dtype=int),
+    quantity: int,
+    sample_dt: wp.float64,
+):
+    row = wp.tid()
+    n = counts[row]
+    sample_counts[row] = 2
+    if success[row] == 0 or n == 1:
+        return
+    if quantity > 0 and quantity < n:
+        success[row] = 0
+        return
+    subdivisions = intervals[row] // (n - 1)
+    previous_extra = int(0)
+    total = wp.float64(0.0)
+    for segment in range(n - 1):
+        end_time = times[row, (segment + 1) * subdivisions]
+        if quantity > 0:
+            extra = int(wp.floor(wp.float64(quantity - n) * end_time / durations[row]))
+            if segment == n - 2:
+                extra = quantity - n
+            edges = wp.float64(1 + extra - previous_extra)
+            previous_extra = extra
+        else:
+            duration = end_time - times[row, segment * subdivisions]
+            edges = wp.max(wp.float64(1.0), wp.ceil(duration / sample_dt))
+        total += edges
+        if total > wp.float64(2147483646.0):
+            sample_counts[row] = 0
+            return
+        offsets[row, segment + 1] = int(total)
+    sample_counts[row] = int(total) + 1
+
+
+@wp.func
+def _blend(a: wp.float64, b: wp.float64, u: wp.float64):
+    return a + (b - a) * u
+
+
+@wp.func
+def _preserved_segment(offsets: wp.array2d(dtype=int), row: int, n: int, sample: int):
+    lo, hi = int(0), n - 1
+    while lo + 1 < hi:
+        mid = (lo + hi) // 2
+        if offsets[row, mid] <= sample:
+            lo = mid
+        else:
+            hi = mid
+    return wp.min(lo, n - 2)
+
+
+@wp.kernel
+def _sample_preserved(
+    points: wp.array3d(dtype=wp.float64),
+    coefficients: wp.array4d(dtype=wp.float64),
+    counts: wp.array(dtype=int),
+    intervals: wp.array(dtype=int),
+    success: wp.array(dtype=int),
+    x: wp.array2d(dtype=wp.float64),
+    times: wp.array2d(dtype=wp.float64),
+    durations: wp.array(dtype=wp.float64),
+    sample_counts: wp.array(dtype=int),
+    offsets: wp.array2d(dtype=int),
+    positions: wp.array3d(dtype=wp.float64),
+    velocities: wp.array3d(dtype=wp.float64),
+    accelerations: wp.array3d(dtype=wp.float64),
+    dt: wp.array2d(dtype=wp.float64),
+):
+    row, sample, joint = wp.tid()
+    if success[row] == 0:
+        return
+    n, valid = counts[row], sample_counts[row]
+    if sample >= valid or n == 1:
+        positions[row, sample, joint] = points[row, n - 1, joint]
+        return
+    segment = _preserved_segment(offsets, row, n, sample)
+    subdivisions = intervals[row] // (n - 1)
+    begin = times[row, segment * subdivisions]
+    end = times[row, (segment + 1) * subdivisions]
+    edges = offsets[row, segment + 1] - offsets[row, segment]
+    step = (end - begin) / wp.float64(edges)
+    local = sample - offsets[row, segment]
+    query = begin + step * wp.float64(local)
+    if joint == 0 and sample > 0:
+        value = step
+        if local == 0:
+            previous_begin = times[row, (segment - 1) * subdivisions]
+            previous_edges = offsets[row, segment] - offsets[row, segment - 1]
+            value = (begin - previous_begin) / wp.float64(previous_edges)
+        dt[row, sample] = value
+    total = intervals[row]
+    i = _sample_interval(times, row, total, query)
+    elapsed = query - times[row, i]
+    accel = (x[row, i + 1] - x[row, i]) * wp.float64(total) / wp.float64(2.0)
+    initial = _speed(x[row, i])
+    speed = wp.max(wp.float64(0.0), initial + accel * elapsed)
+    h = wp.float64(1.0) / wp.float64(n - 1)
+    s = (
+        wp.float64(i) / wp.float64(total)
+        + initial * elapsed
+        + wp.float64(0.5) * accel * elapsed * elapsed
+    )
+    delta = wp.clamp(s - wp.float64(segment) * h, wp.float64(0.0), h)
+    cb, cc, cd = (
+        coefficients[row, segment, joint, 1],
+        coefficients[row, segment, joint, 2],
+        coefficients[row, segment, joint, 3],
+    )
+    first = cb + delta * (wp.float64(2.0) * cc + wp.float64(3.0) * delta * cd)
+    second = wp.float64(2.0) * cc + wp.float64(6.0) * delta * cd
+    # Evaluate the same polynomial in Bernstein form. Its control points lie
+    # in the endpoint box; de Casteljau avoids cancellation near a position cap.
+    left, right = points[row, segment, joint], points[row, segment + 1, joint]
+    end_slope = _pchip_slope(points, row, joint, segment + 1, n)
+    b1, b2 = left + h * cb / wp.float64(3.0), right - h * end_slope / wp.float64(3.0)
+    u = delta / h
+    p0, p1, p2 = _blend(left, b1, u), _blend(b1, b2, u), _blend(b2, right, u)
+    position = _blend(_blend(p0, p1, u), _blend(p1, p2, u), u)
+    if local == 0:
+        position = left
+    elif sample == valid - 1:
+        position = right
+    positions[row, sample, joint] = position
+    velocity_value = first * speed
+    if sample == 0 or sample == valid - 1:
+        velocity_value = wp.float64(0.0)
+    velocities[row, sample, joint] = velocity_value
+    accelerations[row, sample, joint] = second * speed * speed + first * accel

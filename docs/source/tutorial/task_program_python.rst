@@ -11,7 +11,7 @@ environment, robot asset, or YAML file is required.
 
 The result is a compiled semantic workflow, not robot commands. Continue with
 :doc:`modular_env` and :doc:`task_program` when you are ready to bind the same
-kind of program to a simulation environment. Use :doc:`atomic_actions` instead
+kind of program to a simulation environment. Use :doc:`atomic_skills` instead
 when application code should directly plan or execute individual Atomic Skills.
 
 What you will build
@@ -164,4 +164,4 @@ Next steps
   embodiment, scene, and execution-policy components.
 - :doc:`/overview/task_program/index` — study the full language, semantic, and
   integration architecture.
-- :doc:`atomic_actions` — directly construct and execute typed Atomic Skills.
+- :doc:`atomic_skills` — directly construct and execute typed Atomic Skills.

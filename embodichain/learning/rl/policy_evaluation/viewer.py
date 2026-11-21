@@ -38,6 +38,7 @@ from dexsim.kit.motion_policy.controls import KeyboardControls, print_controls
 from dexsim.kit.motion_policy.types import EnvironmentStep
 
 from embodichain.learning.rl.evaluation import (
+    _terminal_episode_outcome,
     convert_policy_action_for_env,
     infer_policy_action,
 )
@@ -67,7 +68,7 @@ class NativeViewerResult:
     control_steps: int
     effective_duration: float
     requested_duration: float | None
-    episodes: tuple[Mapping[str, float | int | bool | str], ...]
+    episodes: tuple[Mapping[str, Any], ...]
     metrics: Mapping[str, float]
 
 
@@ -127,7 +128,7 @@ class EmbodiChainTaskEnvironment:
         self.env = env
         self._base_env = getattr(env, "unwrapped", env)
         world = self._world()
-        if world is None or not world.is_window_initialized():
+        if world is None or not self._base_env.sim.is_viewer_open:
             raise ValueError(
                 "Viewer evaluation requires an initialized simulator window"
             )
@@ -140,7 +141,7 @@ class EmbodiChainTaskEnvironment:
         self._frame: EvaluationFrame | None = None
         self._episode_return = 0.0
         self._episode_length = 0
-        self._episodes: list[dict[str, float | int | bool | str]] = []
+        self._episodes: list[dict[str, Any]] = []
         self._reported_metrics: dict[str, float] = {}
         self._closed = False
         self._policy_context = _policy_context_from_env(self._base_env)
@@ -169,7 +170,7 @@ class EmbodiChainTaskEnvironment:
     def viewer_is_open(self) -> bool:
         """Return whether the original task Viewer remains open."""
         world = self._world()
-        return bool(world is not None and world.is_window_initialized())
+        return bool(world is not None and self._base_env.sim.is_viewer_open)
 
     @property
     def current_frame(self) -> EvaluationFrame:
@@ -179,7 +180,7 @@ class EmbodiChainTaskEnvironment:
         return self._frame
 
     @property
-    def episodes(self) -> tuple[Mapping[str, float | int | bool | str], ...]:
+    def episodes(self) -> tuple[Mapping[str, Any], ...]:
         """Return completed episode summaries."""
         return tuple(self._episodes)
 
@@ -187,7 +188,7 @@ class EmbodiChainTaskEnvironment:
         """Apply the evaluation title to the task Viewer."""
         from dexsim.types import InputKey
 
-        window = self._world().get_windows()
+        window = self._base_env.sim.viewer
         window.set_window_title(title)
         cfg = getattr(self._base_env, "policy_viewer_camera_cfg", None)
         if cfg is not None:
@@ -226,11 +227,12 @@ class EmbodiChainTaskEnvironment:
     def poll(self) -> str | None:
         """Report when the native Viewer is closed or Escape is pressed."""
         world = self._world()
-        if world is None or not world.is_window_initialized():
+        if world is None or not self._base_env.sim.is_viewer_open:
             return "viewer closed"
         from dexsim.types import InputKey
 
-        native = world.get_windows().native()
+        self._base_env.sim.poll_viewer()
+        native = self._base_env.sim.viewer.native()
         if self._keyboard is not None:
             self._keyboard.poll(
                 native, self._command, tracking_toggle=self._camera is not None
@@ -277,16 +279,17 @@ class EmbodiChainTaskEnvironment:
         metrics = _step_metrics(info, reward_value)
         self._reported_metrics.update(metrics)
         if reason is not None:
-            success = _info_bool(info, "success")
-            self._episodes.append(
-                {
-                    "index": len(self._episodes),
-                    "reason": reason,
-                    "reward": self._episode_return,
-                    "length": self._episode_length,
-                    "success": success,
-                }
-            )
+            episode: dict[str, Any] = {
+                "index": len(self._episodes),
+                "reason": reason,
+                "reward": self._episode_return,
+                "length": self._episode_length,
+                "success": _info_bool(info, "success"),
+            }
+            outcome = _terminal_episode_outcome(info, 0)
+            if outcome is not None:
+                episode["episode_outcome"] = outcome
+            self._episodes.append(episode)
         remaining = self._policy_context.policy_dt - (time.perf_counter() - started)
         if remaining > 0.0:
             time.sleep(remaining)

@@ -26,6 +26,15 @@ import warp as wp
 from embodichain.utils.nms import pose_nms, pose_nms_indices
 
 
+@pytest.fixture(autouse=True)
+def _select_test_device(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep CPU cases on CPU; explicit GPU cases retain real CUDA discovery."""
+    if request.node.get_closest_marker("gpu") is None:
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+
 def _pose(
     x: float = 0.0, yaw: float = 0.0, dtype: torch.dtype = torch.float32
 ) -> torch.Tensor:
@@ -206,34 +215,27 @@ def _clustered_poses(n: int, seed: int, device: str = "cpu") -> torch.Tensor:
     return poses.to(device)
 
 
-def test_pose_nms_chunk_boundaries_smoke() -> None:
-    """Cover representative tile boundaries without the exhaustive matrix."""
-    poses = _clustered_poses(64, seed=0)
-    for preserve_order in (True, False):
-        expected = _reference_pose_nms_indices(
-            poses,
-            angle_th=np.pi / 36,
-            dist_th=0.003,
-            preserve_order=preserve_order,
-        )
-        for chunk_size in (1, 7, 2048):
-            got = pose_nms_indices(
-                poses,
-                angle_th=np.pi / 36,
-                dist_th=0.003,
-                preserve_order=preserve_order,
-                chunk_size=chunk_size,
-            )
-            assert got.tolist() == expected
+@pytest.mark.parametrize("preserve_order", [True, False])
+@pytest.mark.slow
+def test_pose_nms_large_partial_tiles_match_reference(preserve_order: bool) -> None:
+    """Keep large-input coverage of multirow reference blocks and partial tiles."""
+    # 400 / 128 leaves a partial tile; the memory bound uses 40-row blocks.
+    poses = _clustered_poses(400, seed=0)
+    expected = _reference_pose_nms_indices(
+        poses, angle_th=np.pi / 36, dist_th=0.003, preserve_order=preserve_order
+    )
+    got = pose_nms_indices(poses, preserve_order=preserve_order, chunk_size=128)
+    assert got.tolist() == expected
 
 
 @pytest.mark.parametrize("preserve_order", [True, False])
 @pytest.mark.parametrize("chunk_size", [1, 7, 128, 2048])
 @pytest.mark.parametrize("seed", [0, 1, 2])
-@pytest.mark.slow
-def test_pose_nms_matches_reference_semantics(preserve_order, chunk_size, seed):
-    """Blocked batched implementation must match the literal reference."""
-    poses = _clustered_poses(400, seed)
+def test_pose_nms_matches_reference_semantics(
+    preserve_order: bool, chunk_size: int, seed: int
+) -> None:
+    """Exercise the full seed/order/tile matrix on the actual CPU path."""
+    poses = _clustered_poses(64, seed)
     expected = _reference_pose_nms_indices(
         poses, angle_th=np.pi / 36, dist_th=0.003, preserve_order=preserve_order
     )

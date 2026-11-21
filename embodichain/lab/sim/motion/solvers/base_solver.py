@@ -207,6 +207,8 @@ class BaseSolver(metaclass=ABCMeta):
         self.tcp_xpos = np.eye(4)
 
         self.pk_serial_chain = kwargs.get("pk_serial_chain", None)
+        if self.pk_serial_chain is not None:
+            self.compiled_fk = self.pk_serial_chain.forward_kinematics_tensor
         if self.pk_serial_chain is None:
             self.pk_serial_chain = create_pk_serial_chain(
                 urdf_path=self.urdf_path,
@@ -530,6 +532,16 @@ class BaseSolver(metaclass=ABCMeta):
         return self.tcp_xpos
 
     @property
+    def supports_sequential_batch_ik(self) -> bool:
+        """Whether continuous batching uses each preceding point-query seed.
+
+        This stronger contract also preserves seed-dependent candidate search.
+        Merely supporting continuous selection from a fixed candidate pool is
+        insufficient. Solvers opt in only when their path hook implements it.
+        """
+        return False
+
+    @property
     def supports_continuous_batch_ik(self) -> bool:
         """Whether all-candidate IK and temporally continuous selection are supported.
 
@@ -695,9 +707,15 @@ class BaseSolver(metaclass=ABCMeta):
 
         # Ensure locations is a tensor if provided
         if locations is not None:
+            from pytorch_kinematics import Transform3d
+
             locations = torch.as_tensor(
                 locations, dtype=torch.float32, device=self.device
             )
+            # PK 0.10 constructs a CPU Transform3d for raw offset tensors.
+            # Supply its declared device instead of mixing CPU homogeneous
+            # padding with CUDA offsets inside the dependency.
+            locations = Transform3d(pos=locations, dtype=qpos.dtype, device=qpos.device)
 
         # Compute the Jacobian using the kinematics chain
         J = self.pk_serial_chain.jacobian(th=qpos, locations=locations)

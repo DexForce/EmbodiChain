@@ -47,6 +47,13 @@ bodies.
 Light
 -----
 
+Lights are owned by the existing Scene, including creation before physical
+finalization. Setters use native camera/light property batches;
+``Light.apply_state`` combines fields into one validated publication. Local-pose
+writes retain their translation-only meaning. CPU and CUDA inputs are accepted,
+but the SDK may stage them on the host. Falloff remains a legacy compatibility
+field without an effective native batch consumer.
+
 .. autoclass:: Light
     :members:
     :inherited-members:
@@ -57,6 +64,16 @@ Light
     :inherited-members:
     :show-inheritance:
     :exclude-members: __init__, copy, replace, to_dict, validate
+
+The implementation module also exports the same class:
+
+.. currentmodule:: embodichain.lab.sim.objects.light
+
+.. autosummary::
+
+    Light
+
+.. currentmodule:: embodichain.lab.sim.objects
 
 Visual Object
 -------------
@@ -351,6 +368,22 @@ Collision, control, and lifecycle adapters
 
 .. autofunction:: collision_shapes_from_entity
 
+Strict physical snapshots additionally preserve float64 cooked convex/box meshes
+and the original body rest/contact offsets. The host supplies the resolved source
+address. Disabled collision yields empty geometry, which does not establish
+clearance. This path does not fall back to authored descriptors or widen the
+ordinary collision descriptor API's supported shapes.
+
+.. autosummary::
+
+    PhysicalCollisionGeometry
+    capture_physical_collision_geometry
+
+.. autoclass:: PhysicalCollisionGeometry
+   :members:
+
+.. autofunction:: capture_physical_collision_geometry
+
 .. currentmodule:: embodichain.lab.sim.objects.backends.controls
 
 .. autosummary::
@@ -542,3 +575,61 @@ Deformable implementation import paths
 .. autosummary::
 
     VolumeDeformableObject
+
+Cable objects
+-------------
+
+``CableObject`` derives from ``BatchEntity`` and retains one public
+``SpawnedCable`` handle per environment. Declare it through
+``SimulationManager.add_cable_object()`` and call ``prepare()`` before accessing
+``data`` or external loads. ``CableObjectData.segment_state_w`` returns one
+coherent ``(environments, segments, 13)`` snapshot in
+``[xyz, xyzw, world COM linear velocity, world angular velocity]`` order.
+Positions already include environment origins. Returned tensors are independent
+snapshots; ``default_segment_state_w`` is immutable engine creation state, not a
+solver-history checkpoint.
+
+Current operations include ``set_force()``, ``set_torque()`` and
+``clear_wrenches()`` for selected environments. Loads follow DexSim's one-outer-step
+lifetime. ``write_segment_state_to_sim()`` accepts selected environment rows in
+the same state layout. This teleport writes both engine buffers and clears
+history for each owning world, including other cables, while preserving targets
+and pending loads. ``CableObject.reset()`` restores its creation state and clears
+its loads; it preserves other bodies and targets.
+
+Use ``SimulationManager.reset_objects_state()`` for complete cable episodes.
+It restores all physical assets, targets, loads and supported runtime controls in
+selected Arenas through one ``Scene.reset_arenas()`` call. Physical asset
+exclusions are rejected before mutation. Global time is preserved. Reset covers
+state, not runtime property or topology edits. Existing contact queries require
+another update after reset or teleport. A cable has no single rigid root pose;
+individual removal and finalized-scene physical topology changes remain unsupported.
+
+.. currentmodule:: embodichain.lab.sim.objects.cable
+
+.. autosummary::
+
+    CableObject
+    CableObjectData
+
+.. autoclass:: CableObject
+    :members:
+    :show-inheritance:
+
+.. autoclass:: CableObjectData
+    :members:
+
+Cable implementation import paths
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.lab.sim.objects.cable.cable
+
+.. autosummary::
+
+    CableObject
+
+.. currentmodule:: embodichain.lab.sim.objects.cable.data
+
+.. autosummary::
+
+    CableObjectData

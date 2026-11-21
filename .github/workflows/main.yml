@@ -66,7 +66,6 @@ jobs:
             docs:
               - 'docs/**'
               - 'embodichain/**'
-              - 'extensions/**'
               - 'examples/**'
               - 'README.md'
               - 'pyproject.toml'
@@ -97,7 +96,7 @@ jobs:
       - name: Install planner dependencies
         shell: bash
         run: |
-          python -m pip install --disable-pip-version-check pytest
+          python -m pip install --disable-pip-version-check pytest pytest-xdist
           python -m pip install --disable-pip-version-check pyyaml || \
             echo 'PyYAML is unavailable; the manifest-only fallback remains enabled.'
       - name: Validate impact analyzer
@@ -236,7 +235,7 @@ jobs:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DISABLE_REQUIRE: 1
     container: &container_template
-      image: 192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v3-py311
+      image: 192.168.3.13:5000/dexsdk:ubuntu22.04-cuda12.8.0-h5ffmpeg-v4-py311-py312
       volumes:
         - "/cache:/cache"
         - "/usr/share/vulkan/icd.d:/usr/share/vulkan/icd.d"
@@ -267,6 +266,15 @@ jobs:
           key: docs-full-site-${{ github.repository }}-${{ github.run_id }}
           restore-keys: |
             docs-full-site-${{ github.repository }}-
+
+      - name: Install wget for published docs merge
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          if ! command -v wget >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y --no-install-recommends wget
+          fi
 
       # Tag-scoped caches are invisible on main; merge live Pages so releases survive.
       - name: Merge versions from live GitHub Pages
@@ -349,6 +357,9 @@ jobs:
       NVIDIA_DISABLE_REQUIRE: 1
       HF_ENDPOINT: https://hf-mirror.com
       PIP_CACHE_DIR: /cache/pip
+      PYTHONFAULTHANDLER: "1"
+      SDL_VIDEODRIVER: dummy
+      XDG_RUNTIME_DIR: /tmp/embodichain-ci-runtime
       NEEDS_GENSIM: ${{ needs.test_plan.outputs.needs_gensim }}
       NEEDS_CUROBO: ${{ needs.test_plan.outputs.needs_curobo }}
     container: *container_template
@@ -387,7 +398,7 @@ jobs:
             --extra-index-url https://download.blender.org/pypi/
           if [[ "${NEEDS_CUROBO}" == "true" ]]; then
             pip install \
-              "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0" \
+              "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.9.0" \
               --index-url https://pypi.org/simple \
               --extra-index-url http://pyp.open3dv.site:2345/simple/ \
               --trusted-host pyp.open3dv.site \
@@ -400,11 +411,20 @@ jobs:
         run: |
           python -c "import matplotlib, numpy, open3d, requests, scipy, shapely, trimesh; from PIL import Image; import embodichain.gen_sim.scene_engine.pipeline.generate"
 
+      - name: Restore CPU duration hints
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .pytest-duration-history
+          key: pytest-cpu-${{ runner.os }}-py311-${{ hashFiles('pyproject.toml', 'tests/conftest.py') }}-${{ github.run_id }}
+          restore-keys: |
+            pytest-cpu-${{ runner.os }}-py311-${{ hashFiles('pyproject.toml', 'tests/conftest.py') }}-
+
       - name: Run selected tests
         shell: bash -l {0}
         run: |
           source activate py311
           set -euo pipefail
+          install -d -m 0700 "$XDG_RUNTIME_DIR"
           # Login shells may use a different Git config from actions/checkout.
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git -C "$GITHUB_WORKSPACE" rev-parse \
@@ -412,16 +432,47 @@ jobs:
           # The image's login profile can reset the PATH set by setup-node.
           export PATH="${CI_NODE_BIN_DIR}:${PATH}"
           node --version
+          history_args=()
+          if [[ -f .pytest-duration-history/history.json ]]; then
+            history_args=(--cpu-duration-history "${GITHUB_WORKSPACE}/.pytest-duration-history")
+          fi
           # Run GPU processes before the long DexSim lane.  Native Vulkan/CUDA
           # teardown can briefly retain allocations after the sim subprocess;
           # this order prevents the GPU lane from inheriting that pressure.
           python scripts/ci/run_test_plan.py \
             --plan test-plan.json \
             --repo-root "${GITHUB_WORKSPACE}" \
+            --cpu-workers "${EMBODICHAIN_CPU_TEST_WORKERS:-8}" \
+            --metrics-dir "${GITHUB_WORKSPACE}/test-phase-metrics" \
+            "${history_args[@]}" \
+            --no-finalize-resource-lanes \
+            --freeze-native-imports \
             --lane fast \
             --lane distributed \
             --lane gpu \
             --lane sim
+
+      - name: Update CPU duration hints
+        run: >-
+          python scripts/ci/duration_history.py --metrics test-phase-metrics
+          --history .pytest-duration-history/history.json
+
+      - name: Upload test phase metrics
+        if: always()
+        # Diagnostic uploads must not turn passing tests into a failed test gate.
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-phase-metrics
+          path: test-phase-metrics/
+          if-no-files-found: ignore
+
+      - name: Save CPU duration hints
+        if: success() && hashFiles('.pytest-duration-history/history.json') != ''
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .pytest-duration-history
+          key: pytest-cpu-${{ runner.os }}-py311-${{ hashFiles('pyproject.toml', 'tests/conftest.py') }}-${{ github.run_id }}
 
   test_docs:
     name: Documentation tests
@@ -564,16 +615,20 @@ jobs:
           dist_info = f"embodichain-{version}.dist-info/"
           required = {
               "embodichain/VERSION",
-              "embodichain/gen_sim/simready_pipeline/configs/gen_config.json",
-              "embodichain_tasks/__init__.py",
-              "embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml",
-              "embodichain_robots/__init__.py",
-              "embodichain_robots/_catalog.py",
-              "embodichain_models/__init__.py",
-              "embodichain_robots/_asset_catalog.py",
+              "embodichain/gen_sim/asset_engine/configs/gen_config.json",
+              "embodichain/extensions/__init__.py",
+              "embodichain/extensions/benchmarks/__init__.py",
+              "embodichain/extensions/solvers/__init__.py",
+              "embodichain/extensions/sensors/__init__.py",
+              "embodichain/extensions/tasks/__init__.py",
+              "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml",
+              "embodichain/extensions/robots/__init__.py",
+              "embodichain/extensions/robots/_catalog.py",
+              "embodichain/extensions/models/__init__.py",
+              "embodichain/extensions/robots/_asset_catalog.py",
               "embodichain/data/_asset_registry.py",
-              "embodichain_robots/franka/assets.py",
-              "embodichain_robots/dexforce/w1/assets.py",
+              "embodichain/extensions/robots/franka/assets.py",
+              "embodichain/extensions/robots/dexforce/w1/assets.py",
           }
           with ZipFile(wheels[0]) as wheel:
               members = set(wheel.namelist())
@@ -589,14 +644,14 @@ jobs:
                   )
 
           source_task_configs = {
-              path.relative_to("extensions").as_posix()
-              for path in Path("extensions/embodichain_tasks/configs").rglob("*")
+              path.as_posix()
+              for path in Path("embodichain/extensions/tasks/configs").rglob("*")
               if path.suffix in {".json", ".yaml", ".yml"}
           }
           wheel_task_configs = {
               member
               for member in members
-              if member.startswith("embodichain_tasks/configs/")
+              if member.startswith("embodichain/extensions/tasks/configs/")
               and member.endswith((".json", ".yaml", ".yml"))
           }
           unexpected = sorted(
@@ -605,10 +660,6 @@ jobs:
               if not member.startswith(
                   (
                       "embodichain/",
-                      "embodichain_tasks/",
-                      "embodichain_robots/",
-                      "embodichain_benchmarks/",
-                      "embodichain_models/",
                       f"embodichain-{version}.data/data/share/embodichain/examples/",
                       dist_info,
                   )
@@ -618,7 +669,7 @@ jobs:
           )
           missing = sorted(required - members)
           retired_robot_modules = {
-              f"embodichain_robots/{name}.py"
+              f"embodichain/extensions/robots/{name}.py"
               for name in (
                   "arx5", "aloha_mini", "cobotmagic", "franka_panda",
                   "flexiv_rizon4s", "tianji_marvin", "ur_robot", "so101",
@@ -627,24 +678,26 @@ jobs:
           stale_robot_modules = sorted(
               member for member in members
               if member in retired_robot_modules
-              or member.startswith("embodichain_robots/dexforce_w1/")
+              or member.startswith("embodichain/extensions/robots/dexforce_w1/")
           )
           missing_task_configs = sorted(source_task_configs - wheel_task_configs)
           unexpected_task_configs = sorted(wheel_task_configs - source_task_configs)
-          task_entry_point = "embodichain_tasks = embodichain_tasks"
+          task_entry_point = entry_point_config.get(
+              "embodichain.tasks", "official_tasks", fallback=None
+          ) == "embodichain.extensions.tasks"
           robot_entry_point = entry_point_config.get(
               "embodichain.robots", "official", fallback=None
-          ) == "embodichain_robots._catalog:ROBOT_CONFIGS"
+          ) == "embodichain.extensions.robots._catalog:ROBOT_CONFIGS"
           asset_entry_point = entry_point_config.get(
               "embodichain.assets", "official_robots", fallback=None
-          ) == "embodichain_robots._asset_catalog:ROBOT_ASSETS"
+          ) == "embodichain.extensions.robots._asset_catalog:ROBOT_ASSETS"
           if (
               unexpected
               or missing
               or stale_robot_modules
               or missing_task_configs
               or unexpected_task_configs
-              or task_entry_point not in entry_points
+              or not task_entry_point
               or not robot_entry_point
               or not asset_entry_point
           ):
@@ -654,7 +707,7 @@ jobs:
                   f"stale_robot_modules={stale_robot_modules}, "
                   f"missing_task_configs={missing_task_configs}, "
                   f"unexpected_task_configs={unexpected_task_configs}, "
-                  f"task_entry_point={task_entry_point in entry_points}, "
+                  f"task_entry_point={task_entry_point}, "
                   f"robot_entry_point={robot_entry_point}, "
                   f"asset_entry_point={asset_entry_point}"
               )

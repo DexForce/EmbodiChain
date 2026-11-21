@@ -1,0 +1,12 @@
+task_key: leap_cube_face_turn
+title: LEAP Hand Cube Face Turn
+summary: Turn the top articulated layer of a Rubik-style cube to discrete 90-degree
+  targets with the 16-DOF LEAP Hand.
+tags:
+- manipulation
+- dexterous
+- reinforcement_learning
+default_deployment: default
+deployments:
+  default:
+    config: env.yaml

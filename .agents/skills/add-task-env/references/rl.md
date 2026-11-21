@@ -13,14 +13,24 @@ decision is which environment boundary the prompt requires.
 | Differentiable dynamics or APG | Differentiable lightweight env | `trainer.learning_env` |
 
 Do not use a simulator Gym config for APG. Differentiable algorithms require a
-`DifferentiableVecEnv` and are rejected on the simulator path.
+`DifferentiableEnvProtocol` and are rejected on the simulator path.
 
 ## Simulator Gym RL
 
-Use the normal task-first simulator layout and a flat task module that owns
-`@register_env`. The subclass may stay thin when manager configuration owns
-all task behavior, but the unique simulator task ID still needs import-time
-registration.
+Use the normal task-first simulator layout. A manipulation deployment with a
+root `rl_task` mapping dynamically registers `EmbodiedEnv` and enables its
+optional `TerminationManager`; no task Python module is needed. Reuse existing
+action/observation/reward/event managers; declare
+measured success, failure and optional truncation condition functors. The ID
+must be free or match an identical configuration-owned declaration.
+
+Virtual target poses are reset-owned and recorded for single-environment dynamic
+replay. Combine `rl_task` and `task_program` only in explicit `task_program.execution: policy` mode with complete policy resource ownership; expert execution remains exclusive. See the policy-stage subset and reward/termination bindings in the configuration contract. See the owning
+[configuration contract](../../../../agent_context/topics/env-framework/configuration.md#configuration-owned-manipulation-rl)
+and [user guide](../../../../docs/source/guides/configured_manipulation_rl.md).
+
+For tasks requiring custom environment behavior, keep a flat task module with
+import-owned `@register_env` registration instead.
 
 Register a Python-owned simulator task with explicit RL capability:
 
@@ -46,7 +56,7 @@ Select it from the training config with:
 
 ```yaml
 trainer:
-  gym_config: extensions/embodichain_tasks/configs/tasks/<category_path>/<task_name>/<deployment>.yaml
+  gym_config: embodichain/extensions/tasks/configs/tasks/<category_path>/<task_name>/<deployment>.yaml
 ```
 
 Simulator environments use standard rollouts. PPO and GRPO are current
@@ -57,11 +67,11 @@ standard examples.
 Keep the task entry point flat:
 
 ```text
-extensions/embodichain_tasks/embodichain_tasks/<category_path>/<task_name>.py
+embodichain/extensions/tasks/<category_path>/<task_name>.py
 ```
 
 Register the factory with `@register_learning_env` and implement the
-`LearningVecEnv` structural contract:
+`LearningEnvProtocol` structural contract:
 
 - `num_envs`, `device`, `single_observation_space`, and
   `single_action_space`;
@@ -71,7 +81,7 @@ Register the factory with `@register_learning_env` and implement the
 - `close()`.
 
 For APG or another differentiable algorithm, implement
-`DifferentiableVecEnv.detach_state()` as the truncated-backpropagation
+`DifferentiableEnvProtocol.detach_state()` as the truncated-backpropagation
 boundary. It must detach dynamic state without resetting or resampling the
 task.
 

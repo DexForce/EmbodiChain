@@ -26,6 +26,7 @@ import torch
 from embodichain.compute.geometry import (
     aabb_containment_violation,
     aabb_overlap_depth,
+    aabb_separation,
     group_height_offset,
     transform_aabbs,
     triangle_geometry,
@@ -67,6 +68,23 @@ def test_overlap_broadcasts_independent_batches_and_pairs(device, dtype):
         dtype=dtype,
     )
     torch.testing.assert_close(actual, expected)
+
+
+def test_separation_broadcasts_touching_overlap_and_invalid_boxes(device, dtype):
+    origin = torch.tensor([[0.0, 0.0], [1.0, 1.0]], dtype=dtype, device=device)
+    others = torch.tensor(
+        [
+            [[1.0, 0.0], [2.0, 1.0]],  # touching
+            [[0.5, 0.5], [1.5, 1.5]],  # overlapping
+            [[4.0, 5.0], [5.0, 6.0]],  # 3-4-5 separation
+            [[float("nan"), 0.0], [1.0, 1.0]],
+        ],
+        dtype=dtype,
+        device=device,
+    )
+    actual = aabb_separation(origin, others)
+    torch.testing.assert_close(actual[:3], origin.new_tensor([0.0, 0.0, 5.0]))
+    assert torch.isnan(actual[-1])
     assert actual.device == device and actual.dtype == dtype
 
 

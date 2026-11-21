@@ -1,0 +1,103 @@
+# 400 Hz contact integration, 25 Hz controller clock; hardware gains remain unchanged.
+environment_id: repeated_pick_place_dual_franka_robotiq140
+physics: default
+max_episodes: 1
+max_episode_steps: 9000
+num_envs: 1
+arena_space: 3.0
+physics_config:
+  enable_ccd: true
+  physics_dt: 0.0025
+simulation:
+  light:
+    direct:
+    - uid: main_light
+      light_type: sun
+      color:
+      - 0.8
+      - 0.8
+      - 0.8
+      intensity: 5.0
+      direction:
+      - 0.0
+      - 0.0
+      - -1.0
+  background:
+  - uid: support_surface
+    shape:
+      shape_type: Cube
+      size:
+      - 0.6
+      - 1.0
+      - 0.04
+    body_type: static
+    init_pos:
+    - 0
+    - 0
+    - 0.73
+    attrs:
+      material_props:
+        static_friction: 0.95
+        dynamic_friction: 0.9
+  - uid: left_robot_support
+    shape:
+      shape_type: Cube
+      size:
+      - 0.22
+      - 0.22
+      - 0.722894
+    body_type: static
+    init_pos:
+    - 0.55
+    - -0.3
+    - 0.361447
+  - uid: right_robot_support
+    shape:
+      shape_type: Cube
+      size:
+      - 0.22
+      - 0.22
+      - 0.722894
+    body_type: static
+    init_pos:
+    - 0.55
+    - 0.3
+    - 0.361447
+  rigid_object:
+  - uid: cube
+    shape:
+      shape_type: Cube
+      size:
+      - 0.05
+      - 0.05
+      - 0.05
+    body_type: dynamic
+    init_pos:
+    - 0
+    - -0.15
+    - 0.775
+    attrs:
+      mass_props:
+        mass: 0.05
+      rigid_props:
+        linear_damping: 0.2
+        angular_damping: 0.2
+      material_props:
+        static_friction: 0.99
+        dynamic_friction: 0.97
+  rigid_object_group: []
+  articulation: []
+env:
+  sim_steps_per_control: 16
+  events:
+    settle_cube_on_reset:
+      func: wait_for_dynamic_objects_to_settle
+      mode: reset
+      params:
+        entity_cfgs:
+        - uid: cube
+        min_steps: 10
+        max_steps: 120
+        timeout_behavior: raise
+  expert_trajectory:
+    joint_command_mode: position_velocity

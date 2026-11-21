@@ -1,0 +1,297 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+"""Source-bound E8 collision inputs, scaled once into their rigid-link frames."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import math
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+from embodichain.lab.sim.spawn.source_geometry import (
+    LinkMesh,
+    UsdSourceSnapshot,
+    read_usd_source,
+)
+from .revolute_inputs import RevoluteControlBinding
+from .control_semantics import resolve_twist_semantics
+
+__all__ = ["TwistGeometry", "load_twist_geometry"]
+
+
+@dataclass(frozen=True, slots=True)
+class TwistGeometry:
+    """Keep the declared grip and each body's collider inputs distinct."""
+
+    grip: LinkMesh
+    target_collisions: tuple[LinkMesh, ...]
+    parent_collisions: tuple[LinkMesh, ...]
+    source_sha256: str
+    scale: float
+    target_body_path: str
+    parent_body_path: str
+    articulation_collisions: tuple[LinkMesh, ...]
+
+    def __post_init__(self) -> None:
+        for name in (
+            "target_collisions",
+            "parent_collisions",
+            "articulation_collisions",
+        ):
+            object.__setattr__(self, name, tuple(getattr(self, name)))
+
+
+def _owner(prim: Any) -> Any:
+    from pxr import UsdPhysics
+
+    current = prim
+    while current and not current.IsPseudoRoot():
+        if current.HasAPI(UsdPhysics.RigidBodyAPI):
+            return current
+        current = current.GetParent()
+    return None
+
+
+def _triangles(
+    vertices: np.ndarray, counts: np.ndarray, indices: np.ndarray
+) -> np.ndarray:
+    # Basic polygon arrays were validated by the shared source reader.
+    faces: list[tuple[int, int, int]] = []
+    offset = 0
+    for count in counts:
+        polygon = indices[offset : offset + count]
+        points = vertices[polygon]
+        if len(np.unique(polygon)) != count:
+            raise ValueError("E8 collision polygon repeats a vertex.")
+        edges = np.roll(points, -1, axis=0) - points
+        turns = np.cross(edges, np.roll(edges, -1, axis=0))
+        normal = turns[np.argmax(np.linalg.norm(turns, axis=1))]
+        norm = np.linalg.norm(normal)
+        if norm == 0.0:
+            raise ValueError("E8 collision polygon is degenerate.")
+        normal /= norm
+        tolerance = 1e-8 * max(float(np.ptp(points, axis=0).max()), 1e-12)
+        if (
+            np.abs((points - points[0]) @ normal).max() > tolerance
+            or (turns @ normal < -(tolerance**2)).any()
+        ):
+            raise ValueError("E8 collision polygon must be planar and convex.")
+        # Match the E6 fan for convex authored polygons; concave inputs fail closed.
+        faces.extend(
+            (int(polygon[0]), int(polygon[i]), int(polygon[i + 1]))
+            for i in range(1, count - 1)
+        )
+        offset += int(count)
+    result = np.asarray(faces, dtype=np.int64)
+    triangle_points = vertices[result]
+    if (
+        np.linalg.norm(
+            np.cross(
+                triangle_points[:, 1] - triangle_points[:, 0],
+                triangle_points[:, 2] - triangle_points[:, 0],
+            ),
+            axis=1,
+        )
+        == 0.0
+    ).any():
+        raise ValueError("E8 collision triangulation contains a degenerate triangle.")
+    return result
+
+
+def _uniform_transform(transform: np.ndarray, *, rigid: bool) -> None:
+    if (
+        transform.shape != (4, 4)
+        or not np.isfinite(transform).all()
+        or not np.allclose(transform[3], (0.0, 0.0, 0.0, 1.0), atol=1e-8)
+    ):
+        raise ValueError("E8 collision geometry has an invalid transform.")
+    linear = transform[:3, :3]
+    gram = linear.T @ linear
+    scale_squared = float(np.trace(gram) / 3.0)
+    if (
+        scale_squared <= 0.0
+        or np.linalg.det(linear) <= 0.0
+        or not np.allclose(gram, np.eye(3) * scale_squared, atol=1e-10, rtol=1e-6)
+        or (rigid and not math.isclose(scale_squared, 1.0, rel_tol=1e-6))
+    ):
+        raise ValueError(
+            "E8 requires unscaled rigid frames and positive uniform mesh scales."
+        )
+
+
+def _mesh(
+    source: UsdSourceSnapshot, prim: Any, body: Any, cache: Any, scale: float
+) -> LinkMesh:
+    from pxr import UsdGeom, UsdPhysics
+
+    mesh = UsdGeom.Mesh(prim)
+    if mesh.GetHoleIndicesAttr().Get():
+        raise ValueError("E8 collision mesh holes require explicit qualified topology.")
+    vertices, counts, indices = source.mesh_arrays(str(prim.GetPath()))
+    faces = _triangles(vertices, counts, indices)
+    body_pose = np.asarray(cache.GetLocalToWorldTransform(body), dtype=float).T
+    _uniform_transform(body_pose, rigid=True)
+    transform = (
+        np.linalg.inv(body_pose)
+        @ np.asarray(cache.GetLocalToWorldTransform(prim), dtype=float).T
+    )
+    _uniform_transform(transform, rigid=False)
+    # Mesh xforms include authored translations; deployment scale affects both.
+    vertices = (vertices @ transform[:3, :3].T + transform[:3, 3]) * scale
+    if not np.isfinite(vertices).all():
+        raise ValueError("E8 scaled collision vertices must remain finite.")
+    approximation = str(UsdPhysics.MeshCollisionAPI(prim).GetApproximationAttr().Get())
+    return LinkMesh(
+        str(prim.GetPath()), str(body.GetPath()), vertices, faces, approximation
+    )
+
+
+def load_twist_geometry(
+    path: str | Path | UsdSourceSnapshot, binding: RevoluteControlBinding
+) -> TwistGeometry:
+    """Read qualified collider inputs in separate native rigid-link frames.
+
+    The declared grip is never replaced by a union of cap, shaft or pointer.
+    Vertices already include ``binding.scale``; consumers apply only each
+    owning link's observed rigid pose, not another asset-scale multiplication.
+    ``approximation`` retains USD cooking semantics, so these triangles alone
+    do not certify backend convex decomposition or continuous path clearance.
+
+    Args:
+        path: Source asset matching the binding identity.
+        binding: Explicit calibrated physical control binding.
+
+    Returns:
+        Separate scaled collider inputs for grip, target, parent and articulation.
+    """
+    from pxr import UsdGeom, UsdPhysics
+
+    source = read_usd_source(path)
+    digest = source.source_sha256
+    if digest != binding.source_sha256:
+        raise ValueError("E8 collision source does not match its audited binding.")
+    if (
+        type(binding.scale) not in (int, float)
+        or not math.isfinite(binding.scale)
+        or binding.scale <= 0.0
+    ):
+        raise ValueError("E8 collision deployment scale must be finite and positive.")
+    semantics = resolve_twist_semantics(source)
+    if (
+        semantics.source_sha256 != digest
+        or semantics.semantics_sha256 != binding.calibration_sha256
+    ):
+        raise ValueError("E8 collision semantics do not match its audited binding.")
+    stage = source.stage
+    joint_prim = stage.GetPrimAtPath(semantics.joint_path)
+    joints = [
+        prim
+        for prim in stage.Traverse()
+        if prim.GetName() == binding.joint and prim.IsA(UsdPhysics.Joint)
+    ]
+    if (
+        not joint_prim
+        or joint_prim.GetName() != binding.joint
+        or not joint_prim.IsA(UsdPhysics.RevoluteJoint)
+        or len(joints) != 1
+    ):
+        raise ValueError("E8 collision source requires one declared revolute joint.")
+    joint = UsdPhysics.RevoluteJoint(joint_prim)
+    parent_paths, target_paths = (
+        joint.GetBody0Rel().GetTargets(),
+        joint.GetBody1Rel().GetTargets(),
+    )
+    if (
+        len(parent_paths) != 1
+        or len(target_paths) != 1
+        or joint.GetJointEnabledAttr().Get() is not True
+    ):
+        raise ValueError("E8 collision source requires one enabled parent/child joint.")
+    parent, target = (
+        stage.GetPrimAtPath(parent_paths[0]),
+        stage.GetPrimAtPath(target_paths[0]),
+    )
+    for body, name in ((parent, binding.parent), (target, binding.link)):
+        if (
+            not body
+            or body.GetName() != name
+            or not body.HasAPI(UsdPhysics.RigidBodyAPI)
+            or UsdPhysics.RigidBodyAPI(body).GetRigidBodyEnabledAttr().Get() is not True
+            or sum(
+                prim.GetName() == name and prim.HasAPI(UsdPhysics.RigidBodyAPI)
+                for prim in stage.Traverse()
+            )
+            != 1
+        ):
+            raise ValueError("E8 collision ownership does not match its bound link.")
+    roots = [
+        prim
+        for prim in stage.Traverse()
+        if prim.HasAPI(UsdPhysics.ArticulationRootAPI)
+        and parent.GetPath().HasPrefix(prim.GetPath())
+        and target.GetPath().HasPrefix(prim.GetPath())
+    ]
+    if len(roots) != 1 or parent == target:
+        raise ValueError("E8 collision source requires one bound articulation root.")
+    root_path = roots[0].GetPath()
+    cache = UsdGeom.XformCache()
+    groups: dict[str, list[LinkMesh]] = {
+        str(target.GetPath()): [],
+        str(parent.GetPath()): [],
+    }
+    grip: LinkMesh | None = None
+    articulation_meshes: list[LinkMesh] = []
+    for prim in stage.Traverse():
+        owner = _owner(prim)
+        if owner is None or not owner.GetPath().HasPrefix(root_path):
+            continue
+        selected = str(prim.GetPath()) == semantics.grip_path
+        collision = (
+            prim.HasAPI(UsdPhysics.CollisionAPI)
+            and UsdPhysics.CollisionAPI(prim).GetCollisionEnabledAttr().Get() is True
+        )
+        if selected and (owner != target or not collision):
+            raise ValueError("E8 declared grip must be an enabled target collider.")
+        if not collision:
+            continue
+        if not prim.IsA(UsdGeom.Mesh):
+            raise ValueError("E8 collision source has an unsupported collider type.")
+        value = _mesh(source, prim, owner, cache, float(binding.scale))
+        articulation_meshes.append(value)
+        if owner in (parent, target):
+            groups[str(owner.GetPath())].append(value)
+        if selected:
+            if grip is not None:
+                raise ValueError("E8 declared grip collider must be unambiguous.")
+            grip = value
+    target_meshes = tuple(groups[str(target.GetPath())])
+    parent_meshes = tuple(groups[str(parent.GetPath())])
+    if grip is None or not target_meshes or not parent_meshes:
+        raise ValueError("E8 requires grip, target and parent collision meshes.")
+    semantics.assert_current(source)
+    return TwistGeometry(
+        grip,
+        target_meshes,
+        parent_meshes,
+        digest,
+        float(binding.scale),
+        str(target.GetPath()),
+        str(parent.GetPath()),
+        tuple(articulation_meshes),
+    )

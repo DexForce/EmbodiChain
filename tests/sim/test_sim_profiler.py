@@ -33,10 +33,11 @@ class _WorldUpdateProbe:
 
     def __init__(self) -> None:
         self.update_calls = 0
+        self.intervals: list[float] = []
 
     def update(self, physics_dt: float) -> None:
-        del physics_dt
         self.update_calls += 1
+        self.intervals.append(physics_dt)
 
 
 def _make_sim_update_probe(profiler: Profiler) -> SimulationManager:
@@ -63,20 +64,38 @@ def _make_sim_update_probe(profiler: Profiler) -> SimulationManager:
     return sim
 
 
-def test_standalone_sim_update_is_profile_root() -> None:
+@pytest.mark.parametrize("substeps", [1, 4])
+def test_standalone_sim_update_is_profile_root(substeps: int) -> None:
     profiler = Profiler(
         ProfilerCfg(enable_time=True, warmup_steps=0), torch.device("cpu")
     )
     sim = _make_sim_update_probe(profiler)
+    sim.sim_config.physics_cfg.num_substeps = substeps
+    observed_intervals: list[float] = []
 
-    sim.update(step=2)
+    sim.update(step=2, after_substep=observed_intervals.append)
 
-    assert sim._world.update_calls == 2
+    assert sim._world.update_calls == 2 * substeps
+    assert sum(sim._world.intervals) == pytest.approx(0.02)
+    assert max(sim._world.intervals) == pytest.approx(0.01 if substeps == 1 else 0.0025)
+    assert sim.simulation_time == pytest.approx(0.02)
+    assert observed_intervals == [0.01, 0.01]
     assert "sim_update" in profiler._stats
     assert "sim_update.gpu_physics_check" in profiler._stats
     assert "sim_update.physics_steps" in profiler._stats
     assert profiler._stats["sim_update.physics_steps.gizmo_update"].n == 2
     assert profiler._stats["sim_update.physics_steps.world_update"].n == 2
+
+
+def test_invalid_mutable_substeps_fail_before_physics_advances() -> None:
+    sim = _make_sim_update_probe(Profiler(ProfilerCfg(), torch.device("cpu")))
+    sim.sim_config.physics_cfg.num_substeps = 0
+
+    with pytest.raises(ValueError, match="num_substeps"):
+        sim.update(step=1)
+
+    assert sim.simulation_time == 0.0
+    assert sim._world.update_calls == 0
 
 
 def test_sim_update_composes_with_env_profile_hierarchy() -> None:

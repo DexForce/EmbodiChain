@@ -1,0 +1,122 @@
+{
+  "source_asset": "BrainCoHandRevo1/BrainCoLeftHand/BrainCoLeftHand.urdf",
+  "source_urdf": "/root/.cache/embodichain_data/extract/BrainCoHandRevo1/BrainCoLeftHand/BrainCoLeftHand.urdf",
+  "source_urdf_sha256": "36adf09d3f483f7b28c4b4003df6554be67560ff9c37f5d320459f416aed23c9",
+  "image": "brainco_revo1_left.png",
+  "image_sha256": "bf5ffbf509f08260e08417f5eae49deb8851176229b64df89dfa84938221f070",
+  "render_cfg": {
+    "renderer": "rt",
+    "spp": 1,
+    "denoising": {
+      "offscreen": "dlss"
+    },
+    "dlss_quality": 2,
+    "tone_mapping_enabled": false
+  },
+  "camera": {
+    "eye": [
+      0.2547314958274364,
+      0.47414974063634874,
+      0.2898090916872025
+    ],
+    "target": [
+      -0.004628617316484451,
+      0.10672291368246078,
+      0.09528900682926178
+    ],
+    "up": [
+      0,
+      0,
+      1
+    ],
+    "intrinsics": [
+      2100,
+      2100,
+      800,
+      540
+    ],
+    "near": 0.005,
+    "far": 60,
+    "width": 1600,
+    "height": 1080
+  },
+  "bounds": {
+    "min": [
+      -0.039114899933338165,
+      -9.932615618879481e-09,
+      0.019999995827674866
+    ],
+    "max": [
+      0.029857665300369263,
+      0.21344584226608276,
+      0.1705780029296875
+    ]
+  },
+  "physics_stepped": false,
+  "joint_positions": {
+    "LEFT_HAND_INDEX": 0.0,
+    "LEFT_HAND_MIDDLE": 0.0,
+    "LEFT_HAND_PINKY": 0.0,
+    "LEFT_HAND_RING": 0.0,
+    "LEFT_HAND_THUMB2": 0.0,
+    "LEFT_INDEX_PIP": 0.0,
+    "LEFT_MIDDLE_PIP": 0.0,
+    "LEFT_PINKY_PIP": 0.0,
+    "LEFT_RING_PIP": 0.0,
+    "LEFT_HAND_THUMB1": 0.0
+  },
+  "warmup_frames": 48,
+  "configuration": "BrainCoRevo1 preset with presentation root transform",
+  "material_overrides": [],
+  "root_position": [
+    -2.0489096641540527e-08,
+    -8.381903171539307e-09,
+    0.12548938393592834
+  ],
+  "root_rotation_degrees": [
+    0,
+    -90,
+    0
+  ],
+  "emission_intensity": 80,
+  "emission_color": [
+    0.92,
+    0.95,
+    1.0
+  ],
+  "rect_lights": [
+    {
+      "name": "key",
+      "relative_to_bounds_center": [
+        1.0,
+        -1.2,
+        2.0
+      ],
+      "intensity": 180,
+      "size": 0.32420014142990117
+    },
+    {
+      "name": "fill",
+      "relative_to_bounds_center": [
+        -1.5,
+        -0.5,
+        1.0
+      ],
+      "intensity": 100,
+      "size": 0.32420014142990117
+    },
+    {
+      "name": "rim",
+      "relative_to_bounds_center": [
+        0.0,
+        1.5,
+        1.5
+      ],
+      "intensity": 150,
+      "size": 0.32420014142990117
+    }
+  ],
+  "description": "Source visual geometry and materials rendered by native OfflineRT with environment intensity 80 and three rectangular studio lights; no physics steps.",
+  "display_preprocessing": [],
+  "renderer_runtime": "DexSim native OfflineRT via Python 3.11, Torch 2.7.0+cu128; NVIDIA RTX PRO 5000 72GB Blackwell"
+}

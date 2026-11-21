@@ -115,7 +115,7 @@ class _Model:
 
 
 def _load_model(name: str) -> _Model:
-    from embodichain_robots import (
+    from embodichain.extensions.robots import (
         AlohaMiniCfg,
         ARX5Cfg,
         FlexivRizon4SCfg,
@@ -1019,7 +1019,7 @@ def _versions() -> dict[str, Any]:
         bool(status.stdout.strip()) if status.returncode == 0 else None
     )
     result["preset_modules"] = {}
-    from embodichain_robots import (
+    from embodichain.extensions.robots import (
         AlohaMiniCfg,
         ARX5Cfg,
         FlexivRizon4SCfg,

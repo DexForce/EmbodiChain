@@ -37,7 +37,7 @@ Choose a solver
 Analytical solvers require matching robot geometry. Numerical solvers support
 more general chains but depend on seed quality and convergence settings.
 For differentiable training and task-parameter optimization, use the standalone
-:doc:`Torch IK layer </overview/learning/differentiable_ik>`.
+:doc:`differentiable FK / IK layers </overview/learning/differentiable_kinematics>`.
 
 .. _motion-solver-conventions:
 

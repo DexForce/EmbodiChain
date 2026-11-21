@@ -39,7 +39,7 @@ from embodichain.lab.task_program.integrations import (
     SimulationTaskProgramAdapterFactory,
 )
 from embodichain.lab.task_program.integrations.scene_expansion import (
-    execute_scene_variant,
+    execute_scene_variants,
 )
 from embodichain.lab.task_program.integrations.simulation.scene_expansion import (
     SimulationSceneExpansionHost,
@@ -191,7 +191,7 @@ class _ObservedEnv(gym.Wrapper):
 
 def _task_config(display: Any) -> tuple[Any, Any]:
     path = resolve_config_path(
-        "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml",
+        "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml",
         base_dir=Path(__file__).parent,
     )
     cfg = config_to_cfg(load_config(path), source_path=path)
@@ -295,7 +295,7 @@ def _run_task(output: Path, seed: int, count: int, display: Any) -> dict[str, An
 
         host = SimulationSceneExpansionHost(
             env,
-            initial_validator=initial_validator,
+            initial_validator=lambda row: initial_validator(),
             settling=_settling_cfg(),
         )
         rows = []
@@ -303,14 +303,14 @@ def _run_task(output: Path, seed: int, count: int, display: Any) -> dict[str, An
         current_index = count
         current_seed = None
         evidence.reset()
-        negative = execute_scene_variant(
+        negative = execute_scene_variants(
             observed,
-            _negative(seed, count),
+            {0: _negative(seed, count)},
             prepare_scene=host,
-            measured_validator=evidence.validation,
+            measured_validator=lambda row: evidence.validation(),
             episode_index=current_index,
             attempt_id=current_index,
-        )
+        )[0]
         negative_steps = evidence.steps
         if negative.accepted or negative.execution is not None or negative_steps:
             raise RuntimeError("Red start was executed despite failed IK")
@@ -319,15 +319,15 @@ def _run_task(output: Path, seed: int, count: int, display: Any) -> dict[str, An
             current_index = candidate.variant.ordinal
             current_seed = candidate.joint_seed
             evidence.reset()
-            result = execute_scene_variant(
+            result = execute_scene_variants(
                 observed,
-                candidate.variant,
+                {0: candidate.variant},
                 prepare_scene=host,
-                measured_validator=evidence.validation,
+                measured_validator=lambda row: evidence.validation(),
                 episode_index=current_index,
                 attempt_id=current_index,
-            )
-            snapshot = host.initial_state
+            )[0]
+            snapshot = host.initial_states[0]
             row = {
                 "variant_id": candidate.variant.variant_id,
                 "cache_index": candidate.cache_index,
@@ -379,7 +379,7 @@ def _run_task(output: Path, seed: int, count: int, display: Any) -> dict[str, An
                 row["trajectory"] = str(trajectory.relative_to(output))
             if evidence.steps:
                 display.frame(env.sim, f"candidate_{current_index}_result", force=True)
-            restored = host.restore_initial_state(snapshot)
+            restored = host.restore_initial_states({0: snapshot})[0]
             row["restoration"] = {
                 "initial_state_id": restored.initial_state_id,
                 "restored_from_initial_state_id": restored.metadata[

@@ -13,12 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Newton-backed kinematic environment for analytic policy gradient.
+"""Simulation environment entry point for analytic policy gradient.
 
-Wraps a task-defined Newton kinematics callback in a Warp tape and bridges
+The current implementation wraps a task-defined Newton kinematics callback
+in a Warp tape and bridges
 autograd into PyTorch via :class:`embodichain.lab.sim.diff.NewtonStepFunc`.
-The environment deliberately does not advance the configured Newton solver;
-differentiable dynamics are outside the current public contract.
+Supported operations are task-defined differentiable kinematics, observations
+and rewards. Physics-solver stepping and contact dynamics require a separate
+differentiable provider.
 
 Usage:
 
@@ -44,7 +46,11 @@ __all__ = ["DifferentiableEnv"]
 
 
 class DifferentiableEnv(EmbodiedEnv):
-    """Newton-only environment with an APG-ready kinematic :meth:`step`.
+    """Simulation base with an APG-ready :meth:`step`.
+
+    The current provider requires ``NewtonPhysicsCfg(requires_grad=True)`` and
+    implements differentiable kinematics. Configuration is checked before the
+    simulation is constructed.
 
     Subclasses implement :meth:`_apply_action_kernel`,
     :meth:`_make_kinematic_step_fn`, and :meth:`_read_outputs`. The action,

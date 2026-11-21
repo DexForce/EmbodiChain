@@ -285,8 +285,19 @@ def test_fixed_output_cannot_overwrite_configuration(tmp_path: Path) -> None:
         load_randomization_config(config_path, output_root=tmp_path)
 
 
+@pytest.mark.parametrize(
+    "command,workspace_flag",
+    [
+        (["scene-randomization"], "--output_root"),
+        (["gensim", "scene", "expand"], "--scene"),
+    ],
+)
 def test_unified_cli_passes_workspace_config_and_rebuild_and_reports_result(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    command: list[str],
+    workspace_flag: str,
 ) -> None:
     from embodichain.cli.main import main
 
@@ -327,8 +338,8 @@ def test_unified_cli_passes_workspace_config_and_rebuild_and_reports_result(
 
     main(
         [
-            "scene-randomization",
-            "--output_root",
+            *command,
+            workspace_flag,
             str(output_root),
             "--config",
             str(config_path),

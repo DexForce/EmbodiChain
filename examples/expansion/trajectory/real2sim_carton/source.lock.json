@@ -1,0 +1,74 @@
+{
+  "source_prefix": "robotics/droid_raw/1.0.1/RAIL/success/2023-11-20/Mon_Nov_20_11:50:49_2023/",
+  "files": [
+    {
+      "path": "metadata_RAIL+d027f2ae+2023-11-20-11h-50m-49s.json",
+      "url": "https://storage.googleapis.com/gresearch/robotics/droid_raw/1.0.1/RAIL/success/2023-11-20/Mon_Nov_20_11%3A50%3A49_2023/metadata_RAIL%2Bd027f2ae%2B2023-11-20-11h-50m-49s.json",
+      "sha256": "9ff8eca25d386c616dc8b867ad19d381c7f9d1e4fdbf79bae483a99e451730db",
+      "size": 1781
+    },
+    {
+      "path": "recordings/MP4/13062452.mp4",
+      "url": "https://storage.googleapis.com/gresearch/robotics/droid_raw/1.0.1/RAIL/success/2023-11-20/Mon_Nov_20_11%3A50%3A49_2023/recordings/MP4/13062452.mp4",
+      "sha256": "8c152d42595445fbee3ff941120db92b9292a81311a8fcc02ee32cf375c2597d",
+      "size": 5611495
+    },
+    {
+      "path": "recordings/MP4/20521388.mp4",
+      "url": "https://storage.googleapis.com/gresearch/robotics/droid_raw/1.0.1/RAIL/success/2023-11-20/Mon_Nov_20_11%3A50%3A49_2023/recordings/MP4/20521388.mp4",
+      "sha256": "6047446289384b145fbf6d3a96cb333650d6e5c0dc5f2e679722febec40bde6e",
+      "size": 3611058
+    },
+    {
+      "path": "recordings/MP4/24259877.mp4",
+      "url": "https://storage.googleapis.com/gresearch/robotics/droid_raw/1.0.1/RAIL/success/2023-11-20/Mon_Nov_20_11%3A50%3A49_2023/recordings/MP4/24259877.mp4",
+      "sha256": "fb88f54f91c34bc3892c1dc47e68a05aff2636284f60e65597d81f5124e5f7b2",
+      "size": 4661967
+    },
+    {
+      "path": "trajectory.h5",
+      "url": "https://storage.googleapis.com/gresearch/robotics/droid_raw/1.0.1/RAIL/success/2023-11-20/Mon_Nov_20_11%3A50%3A49_2023/trajectory.h5",
+      "sha256": "c9ec0a39223a6f1f6e07ea90de8058a7689362799db1dc425db4acef89af0ad0",
+      "size": 753344
+    }
+  ],
+  "schema": "real2sim-carton-source-lock/v1",
+  "source_id": "RAIL+d027f2ae+2023-11-20-11h-50m-49s",
+  "origin": "measured",
+  "license": "CC BY 4.0",
+  "dataset_url": "https://droid-dataset.github.io/droid/the-droid-dataset.html",
+  "calibration_repository": "https://huggingface.co/KarlP/droid",
+  "calibration_revision": "bcb840c3b496533e0adf548a54b51f2f00057837",
+  "annotations": [
+    {
+      "path": "box_registration.json",
+      "sha256": "001bbb615f4d9b35154b084c297c6a94ab2331024ceab7ad1ab044026d38a485",
+      "size": 1630
+    },
+    {
+      "path": "cam2cam_extrinsics.selected.json",
+      "sha256": "76ffc4bac607f6df2cc36fd56b106a8e0984dfccf9231a31a2eec77b45b30f84",
+      "size": 1651
+    },
+    {
+      "path": "camera1_registration.json",
+      "sha256": "db900375b48969992af08669036f8fce672d3f50b459270f1af3d34973b4ca58",
+      "size": 1523
+    },
+    {
+      "path": "camera_serials.selected.json",
+      "sha256": "f1098583821e64a082e9dad5b6ecd118a6b9bf20640dcf7990026e3c4ccee0e6",
+      "size": 303
+    },
+    {
+      "path": "intrinsics.selected.json",
+      "sha256": "13eb6f001064dbab9a5cf71c242d4d0ca181871aa3c59e96e697d4d1918aebbe",
+      "size": 1361
+    },
+    {
+      "path": "staples.json",
+      "sha256": "2918a772adbb07cb792b8f9c81b9f07d9e63be7388d30ecef269ef922dfd3eb8",
+      "size": 3661
+    }
+  ]
+}

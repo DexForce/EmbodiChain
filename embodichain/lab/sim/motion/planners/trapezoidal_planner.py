@@ -888,6 +888,7 @@ class TrapezoidalPlanner(BasePlanner):
             control_part=options.control_part,
             dof=waypoints.shape[-1],
             batch_size=waypoints.shape[0],
+            env_ids=getattr(self, "_planning_env_ids", None),
         )
         velocity = resolved.constraints["velocity"]
         frozen = velocity == 0

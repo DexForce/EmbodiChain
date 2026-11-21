@@ -2,7 +2,7 @@ Pollen Robotics
 ===============
 
 Robot configurations for Pollen Robotics live in the
-``embodichain_robots.pollen_robotics`` manufacturer namespace.
+``embodichain.extensions.robots.pollen_robotics`` manufacturer namespace.
 
 .. list-table::
    :class: robot-catalog

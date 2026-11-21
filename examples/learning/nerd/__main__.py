@@ -91,6 +91,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     prepare.add_argument("--resource-root", type=Path)
     prepare.add_argument("--assets-only", action="store_true")
     prepare.add_argument("--local-files-only", action="store_true")
+    policy = subparsers.add_parser(
+        "train-policy", help="Train through the lightweight NeRD learning environment."
+    )
+    policy.add_argument("--config", type=Path, required=True)
     for name, help_text in (
         ("generate", "Generate committed teacher trajectory shards."),
         ("train", "Train, fine-tune or resume a NeRD model."),
@@ -181,6 +185,13 @@ def main(argv: Sequence[str] | None = None) -> None:
             else _resource_root()
         )
         os.environ["EMBODICHAIN_NERD_RESOURCE_ROOT"] = str(resource_root)
+        if args.operation == "train-policy":
+            from ._support import _ant_env, _cartpole_env
+            from embodichain.learning.rl.train import train_from_config
+
+            result = train_from_config(str(args.config.expanduser().resolve()))
+            print(json.dumps(result, indent=2, allow_nan=False))
+            return
         if args.operation == "prepare":
             from ._resources import prepare_resources
 
@@ -213,7 +224,9 @@ def main(argv: Sequence[str] | None = None) -> None:
                     raise ValueError(
                         "Conversion manifest requires codec mapping and dt"
                     )
-                from embodichain_models.dynamics.nerd import convert_legacy_checkpoint
+                from embodichain.extensions.models.dynamics.nerd import (
+                    convert_legacy_checkpoint,
+                )
 
                 convert_legacy_checkpoint(
                     checkpoint, output, manifest, trust_pickle=args.trust_pickle

@@ -48,7 +48,7 @@ The arm-only configuration has 14 control DOFs.
 
 ```python
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain_robots import TianjiMarvinCfg
+from embodichain.extensions.robots import TianjiMarvinCfg
 
 config = SimulationManagerCfg(headless=False, device="cpu", num_envs=1)
 sim = SimulationManager(config)
@@ -121,7 +121,7 @@ source end-link poses, override both arm TCP transforms with identity matrices:
 
 ```python
 import numpy as np
-from embodichain_robots import TianjiMarvinCfg
+from embodichain.extensions.robots import TianjiMarvinCfg
 
 cfg = TianjiMarvinCfg.from_dict(
     {
@@ -139,8 +139,8 @@ cfg = TianjiMarvinCfg.from_dict(
 Run the preview and FK/IK smoke check in the project environment:
 
 ```bash
-conda run -n embodichain python -m embodichain_robots.tianji.marvin.cfg --headless
-conda run -n embodichain python -m embodichain_robots.tianji.marvin.cfg --headless --no-with-gripper
+conda run -n embodichain python -m embodichain.extensions.robots.tianji.marvin.cfg --headless
+conda run -n embodichain python -m embodichain.extensions.robots.tianji.marvin.cfg --headless --no-with-gripper
 ```
 
 Omit `--headless` to open the simulation window and an interactive session.

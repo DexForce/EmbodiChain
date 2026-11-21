@@ -137,6 +137,7 @@ def test_release_tag_preserves_distribution_build() -> None:
 def test_dataset_tools_can_still_run_manually() -> None:
     assert _eligible_jobs("dataset-tooling.yml", "workflow_dispatch") == {
         "offline-tools",
+        "lerobot-sdk",
         "lerobot-export",
     }
 
@@ -293,6 +294,7 @@ def test_test_job_restores_git_access_before_running_selected_tests(
         GIT_CONFIG_NOSYSTEM="1",
         GITHUB_WORKSPACE=str(repository),
         CI_NODE_BIN_DIR="",
+        XDG_RUNTIME_DIR=str(tmp_path / "xdg-runtime"),
     )
     for args in (
         ["init", "-q"],
@@ -338,12 +340,58 @@ def test_test_job_restores_git_access_before_running_selected_tests(
     )
 
 
+def test_gpu_test_job_prepares_headless_sdl_runtime() -> None:
+    job = _load_workflow("main.yml")["jobs"]["test"]
+    assert job["env"]["SDL_VIDEODRIVER"] == "dummy"
+    assert job["env"]["XDG_RUNTIME_DIR"] == "/tmp/embodichain-ci-runtime"
+    selected = next(
+        step for step in job["steps"] if step.get("name") == "Run selected tests"
+    )
+    assert 'install -d -m 0700 "$XDG_RUNTIME_DIR"' in selected["run"]
+
+
+@pytest.mark.parametrize("test_result", ["success", "failure"])
+def test_metrics_upload_is_optional_but_test_failures_still_block(
+    test_result: str,
+) -> None:
+    jobs = _load_workflow("main.yml")["jobs"]
+    steps = jobs["test"]["steps"]
+    upload = next(
+        step for step in steps if step.get("name") == "Upload test phase metrics"
+    )
+    assert upload["if"] == "always()"
+    assert upload["continue-on-error"] == "true"
+    selected = next(step for step in steps if step.get("name") == "Run selected tests")
+    assert selected.get("continue-on-error", "false") == "false"
+    assert jobs["test"].get("continue-on-error", "false") == "false"
+    gate = jobs["test_gate"]["steps"][0]
+    assert gate["env"]["TEST_RESULT"] == "${{ needs.test.result }}"
+    result = subprocess.run(
+        ["bash", "-c", gate["run"]],
+        env={
+            **os.environ,
+            "LINT_RESULT": "success",
+            "PLAN_RESULT": "success",
+            "DOCS_RESULT": "success",
+            "DOCS_NEEDED": "true",
+            "TESTS_NEEDED": "true",
+            "TEST_RESULT": test_result,
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == (0 if test_result == "success" else 1)
+
+
 @pytest.mark.parametrize(
     "invalid_contents",
     [
         None,
         "missing_robots",
         "missing_models",
+        "missing_sensors",
+        "missing_solvers",
         "missing_entry_point",
         "wrong_entry_point_group",
         "missing_asset_entry_point",
@@ -363,21 +411,19 @@ def test_release_guard_validates_bundled_runtime_packages(
     script = guard["run"].split("python - <<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
     version = "0.1.0"
     (tmp_path / "VERSION").write_text(version)
-    task_config = (
-        "embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml"
-    )
-    source = tmp_path / "extensions" / task_config
+    task_config = "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml"
+    source = tmp_path / task_config
     source.parent.mkdir(parents=True)
     source.write_text("physics: default\n")
     entry_points = (
-        "[embodichain.tasks]\nembodichain_tasks = embodichain_tasks\n\n"
-        "[embodichain.robots]\nofficial = embodichain_robots._catalog:ROBOT_CONFIGS\n"
+        "[embodichain.tasks]\nofficial_tasks = embodichain.extensions.tasks\n\n"
+        "[embodichain.robots]\nofficial = embodichain.extensions.robots._catalog:ROBOT_CONFIGS\n"
         "\n[embodichain.assets]\n"
-        "official_robots = embodichain_robots._asset_catalog:ROBOT_ASSETS\n"
+        "official_robots = embodichain.extensions.robots._asset_catalog:ROBOT_ASSETS\n"
     )
     if invalid_contents == "missing_entry_point":
         entry_points = entry_points.replace(
-            "[embodichain.robots]\nofficial = embodichain_robots._catalog:ROBOT_CONFIGS\n",
+            "[embodichain.robots]\nofficial = embodichain.extensions.robots._catalog:ROBOT_CONFIGS\n",
             "",
         )
     elif invalid_contents == "wrong_entry_point_group":
@@ -386,17 +432,20 @@ def test_release_guard_validates_bundled_runtime_packages(
         entry_points = entry_points.split("[embodichain.assets]", 1)[0]
     members = {
         "embodichain/VERSION": version,
-        "embodichain/gen_sim/simready_pipeline/configs/gen_config.json": "{}",
-        "embodichain_tasks/__init__.py": "",
+        "embodichain/gen_sim/asset_engine/configs/gen_config.json": "{}",
+        "embodichain/extensions/__init__.py": "",
+        "embodichain/extensions/solvers/__init__.py": "",
+        "embodichain/extensions/sensors/__init__.py": "",
+        "embodichain/extensions/tasks/__init__.py": "",
         task_config: source.read_text(),
-        "embodichain_robots/__init__.py": "",
-        "embodichain_robots/_catalog.py": "ROBOT_CONFIGS = {}\n",
-        "embodichain_robots/_asset_catalog.py": "ROBOT_ASSETS = {}\n",
+        "embodichain/extensions/robots/__init__.py": "",
+        "embodichain/extensions/robots/_catalog.py": "ROBOT_CONFIGS = {}\n",
+        "embodichain/extensions/robots/_asset_catalog.py": "ROBOT_ASSETS = {}\n",
         "embodichain/data/_asset_registry.py": "",
-        "embodichain_robots/franka/assets.py": "",
-        "embodichain_robots/dexforce/w1/assets.py": "",
-        "embodichain_benchmarks/__init__.py": "",
-        "embodichain_models/__init__.py": "",
+        "embodichain/extensions/robots/franka/assets.py": "",
+        "embodichain/extensions/robots/dexforce/w1/assets.py": "",
+        "embodichain/extensions/benchmarks/__init__.py": "",
+        "embodichain/extensions/models/__init__.py": "",
         f"embodichain-{version}.data/data/share/embodichain/examples/__init__.py": "",
         f"embodichain-{version}.dist-info/METADATA": f"Version: {version}\n",
         f"embodichain-{version}.dist-info/entry_points.txt": entry_points,
@@ -405,20 +454,29 @@ def test_release_guard_validates_bundled_runtime_packages(
         members = {
             path: data
             for path, data in members.items()
-            if not path.startswith("embodichain_robots/")
+            if not path.startswith("embodichain/extensions/robots/")
         }
     elif invalid_contents == "missing_models":
         members = {
             path: data
             for path, data in members.items()
-            if not path.startswith("embodichain_models/")
+            if not path.startswith("embodichain/extensions/models/")
+        }
+    elif invalid_contents in {"missing_sensors", "missing_solvers"}:
+        prefix = (
+            "embodichain/extensions/" + invalid_contents.removeprefix("missing_") + "/"
+        )
+        members = {
+            path: data for path, data in members.items() if not path.startswith(prefix)
         }
     elif invalid_contents == "retired_robot_module":
-        members["embodichain_robots/franka_panda.py"] = ""
+        members["embodichain/extensions/robots/franka_panda.py"] = ""
     elif invalid_contents == "foreign_package":
         members["foreign/__init__.py"] = ""
     elif invalid_contents == "bytecode":
-        members["embodichain_robots/__pycache__/_catalog.cpython-311.pyc"] = ""
+        members[
+            "embodichain/extensions/robots/__pycache__/_catalog.cpython-311.pyc"
+        ] = ""
     dist = tmp_path / "dist"
     dist.mkdir()
     with ZipFile(dist / f"embodichain-{version}-py3-none-any.whl", "w") as wheel:

@@ -52,6 +52,7 @@ def _retime_toppra_stopped(
             acceleration,
             sample_dt=sample_dt,
             grid_size=grid_size,
+            output_dtype=torch.float64,
         )
         for index in range(waypoints.shape[1] - 1)
     ]
@@ -60,7 +61,7 @@ def _retime_toppra_stopped(
     count = max(2, int(total_edges.max().item()) + 1)
     batch, _, dofs = waypoints.shape
     merged = {
-        name: waypoints.new_zeros(batch, count, dofs)
+        name: parts[0][name].new_zeros(batch, count, dofs)
         for name in ("positions", "velocities", "accelerations")
     }
     offset = torch.zeros_like(total_edges)
@@ -92,7 +93,7 @@ def _retime_toppra_stopped(
         merged[name] = torch.where(success[:, None, None], merged[name], 0)
     dt = torch.where(
         (samples > 0) & (samples <= total_edges[:, None]) & success[:, None],
-        waypoints.new_tensor(sample_dt),
-        waypoints.new_tensor(0),
+        merged["positions"].new_tensor(sample_dt),
+        merged["positions"].new_tensor(0),
     )
     return {"success": success, **merged, "dt": dt}

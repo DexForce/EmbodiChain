@@ -43,6 +43,14 @@ Variable-horizon APG transition budgets use the actual update count to check
 an explicit restored LR horizon.
 Legacy standard/APG-v1 files restore available fields and report missing metadata
 or RNG. `checkpoint.py` owns shared validation and atomic persistence.
+Optional environment training state uses the same v2 file and is collected per
+rank. Environments implement `get_training_state`, side-effect-free
+`validate_training_state`, and `load_training_state`; validation runs before
+learning state changes, and restoration precedes the fresh episode reset.
+Missing state in older files produces a warning for environments with these
+hooks. G1 Rough uses them for terrain assignments and its task generator,
+requiring the original terrain map and per-rank environment count. Its first
+reset preserves the restored assignments; physical episodes still restart.
 Configuration snapshots are frozen from loaded data on the first save; later
 saves update the run manifest without rewriting those snapshots. Final saves
 reuse the current update's periodic or best checkpoint. Subsequent saves and final
@@ -63,6 +71,13 @@ the first done, applies the rollout's objective scale, and averages
 never shortens a scheduled horizon to satisfy `total_timesteps`; without an
 explicit timestep budget, CLI `iterations` maps to an exact optimizer-update
 budget.
+
+Programmatic `APG.accumulate_complete_rollout()` also accepts a graph-connected
+`terminal_value` per environment. It contributes with the full-horizon discount
+only to rows without a hard termination or truncation. The caller owns value
+fitting, freezing estimator parameters while retaining state gradients, and any
+soft survival multiplier. The common trainer does not fit a value function
+automatically.
 
 Complete mode can clamp actions to the environment space and install a
 per-environment action-adjoint norm hook. Non-finite adjoint rows are zeroed;
@@ -89,6 +104,10 @@ device per local rank, wraps the policy in
 keeps logging, evaluation, and checkpoint ownership on rank zero.
 Because action evaluation calls the underlying policy, algorithms explicitly
 average gradients before clipping and stepping; adaptive PPO uses global KL.
+GRPO removes post-terminal transitions before shuffling when
+`truncate_at_first_done` is enabled. Distributed GRPO weights losses and metrics
+by valid transition counts and keeps all ranks in the same optimizer steps;
+a rank with an empty local tail still joins gradient reduction for other ranks.
 All ranks participate in checkpoint operations and error synchronization.
 Resume requires the same world size and restores each rank's RNG and local
 normalization statistics alongside common policy/optimizer state.
@@ -99,10 +118,10 @@ currently support this distributed path.
 
 | Example | Environment path | Config location |
 |---------|------------------|-----------------|
-| CartPole | registered simulator Gym env | `extensions/embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/` |
-| PushCube | registered simulator Gym env | `extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/agents/` |
-| PointMass PPO | registered lightweight env, standard rollout | `extensions/embodichain_tasks/configs/tasks/classic_control/point_mass/agents/ppo.yaml` |
-| PointMass APG | differentiable lightweight env | `extensions/embodichain_tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml` |
+| CartPole | registered simulator Gym env | `embodichain/extensions/tasks/configs/tasks/classic_control/cart_pole/agents/` |
+| PushCube | registered simulator Gym env | `embodichain/extensions/tasks/configs/tasks/manipulation/push_cube/agents/` |
+| PointMass PPO | registered lightweight env, standard rollout | `embodichain/extensions/tasks/configs/tasks/classic_control/point_mass/agents/ppo.yaml` |
+| PointMass APG | differentiable lightweight env | `embodichain/extensions/tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml` |
 | Newton planar reach | experimental differentiable FK reference | `embodichain/learning/rl/experimental/newton/` |
 
 `PointMassRL` is the reference environment for comparing standard and
@@ -120,25 +139,66 @@ example is an experimental gradient reference, not a general simulator task.
 
 ### Add a Policy
 
-1. Implement the `Policy` contract under `models/`.
-2. Register it in `models/__init__.py`.
+1. Implement the `Policy` contract under `policies/`.
+2. Register it with `register_policy` from `embodichain.learning.rl.policies`.
 3. Ensure its outputs satisfy every intended algorithm.
 4. Provide graph-preserving sampling if used with differentiable rollouts.
 
 ### Add a Lightweight Environment
 
-1. Implement `LearningVecEnv`, or `DifferentiableVecEnv` for APG.
+1. Implement `LearningEnvProtocol`, or `DifferentiableEnvProtocol` for APG.
 2. Register the factory with `@register_learning_env`.
 3. Ensure finished rows auto-reset while returning terminal reward/done with
    the next initial observation.
 4. For variable complete APG rollouts, implement
-   `ScheduledDifferentiableVecEnv` and return the full non-truncated horizon.
+   `ScheduledDifferentiableEnvProtocol` and return the full non-truncated horizon.
 5. Expose `observation_normalize_mask` when semantic dimensions must remain
    raw during normalization.
 6. Add an official config under
-   `extensions/embodichain_tasks/configs/tasks/<domain>/<task>/agents/` when it is a
+   `embodichain/extensions/tasks/configs/tasks/<domain>/<task>/agents/` when it is a
    bundled task.
 
 Use `add-task-env` for simulator-backed task environments and
 `manager-functor` for their observation, reward, event, and action
 components.
+
+## Actor-critic gradients
+
+APG Actor-Critic retains derivatives through critic inputs while freezing critic
+parameters/statistics during actor collection and backward. Terminal-value
+gradients, detached lambda-return regression and a separate critic optimizer
+have disjoint parameter groups. Task-data masks stay detached.
+
+Optional `update_critic_normalization` runs after actor backward and before
+lambda targets; default leaves statistics unchanged. Weighted current states
+and valid bootstrap successors contribute, while complete-rollout post-terminal
+suffixes do not. Critic minibatches contain only positive-weight samples. An
+empty valid set leaves parameters and optimizer momentum unchanged. Evaluate
+with the frozen training normalizer.
+
+## Experimental host replay
+
+`learning/rl/experimental/_host_replay.py` owns a private synchronous transport
+boundary around CPU replay storage. The wrapped sampler retains window, mask
+and history rules; only transition/sample transfers move data. Returned device
+samples own storage independently of subsequent host writes, with dtypes
+preserved and gradients detached. Host sampling uses CPU RNG; it does not
+preserve a prior CUDA sampling stream.
+
+Its private ring-checkpoint helpers borrow CPU tensors for synchronous saving
+and validate capacity, fields, dtypes and cursor metadata before restoring owned
+storage. The caller serializes writers, pairs replay with model/RNG receipts,
+and closes sampler sequences across simulator restarts. Restoring replay alone
+does not restore the physical trajectory or justify exact-resume claims.
+
+The Sharpa example's `_native_checkpoint.py` owns synchronous file persistence,
+model/replay pairing checks and resume provenance; `native_full.py` owns the
+fresh simulator and collection schedule. A resumed run uses saved learning
+settings and rejects changed physical sources or adapter snapshots.
+
+The Sharpa native `reference_host` example retains full learning batches and
+capacity, constructs only a small unused GPU replay during learner setup, then
+uses the host store. PyTorch's nonreentrant checkpoint wrapper recomputes only
+the world-model MLP, preserving state-dict keys and optimizer parameter identity.
+It is an eager, single-threaded research path; it does not add distributed
+training or asynchronous shared-buffer ownership.

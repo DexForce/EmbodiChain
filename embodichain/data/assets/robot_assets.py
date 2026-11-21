@@ -38,6 +38,7 @@ __all__ = [
     "UniversalRobots",
     "Rokae",
     "Franka",
+    "FrankaPandaArm",
     "Agile",
     "Hans",
     "Aubo",
@@ -446,13 +447,14 @@ class CartPole(EmbodiChainDataset):
 from importlib import import_module
 
 _ASSET_EXPORTS = {
-    "CobotMagicArm": "embodichain_robots.agilex.cobotmagic.assets",
-    "ARX5": "embodichain_robots.arx.arx5.assets",
-    "AlohaMini": "embodichain_robots.alohamini.aloha_mini.assets",
-    "TianjiMarvin": "embodichain_robots.tianji.marvin.assets",
-    "FlexivRizon4S": "embodichain_robots.flexiv.rizon4s.assets",
-    "Franka": "embodichain_robots.franka.assets",
-    "UniversalRobots": "embodichain_robots.universal_robots.assets",
+    "CobotMagicArm": "embodichain.extensions.robots.agilex.cobotmagic.assets",
+    "ARX5": "embodichain.extensions.robots.arx.arx5.assets",
+    "AlohaMini": "embodichain.extensions.robots.alohamini.aloha_mini.assets",
+    "TianjiMarvin": "embodichain.extensions.robots.tianji.marvin.assets",
+    "FlexivRizon4S": "embodichain.extensions.robots.flexiv.rizon4s.assets",
+    "Franka": "embodichain.extensions.robots.franka.assets",
+    "FrankaPandaArm": "embodichain.extensions.robots.franka.assets",
+    "UniversalRobots": "embodichain.extensions.robots.universal_robots.assets",
 }
 
 

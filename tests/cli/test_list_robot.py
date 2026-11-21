@@ -91,8 +91,8 @@ def test_list_robot_dispatch_reads_installed_catalogs(
     monkeypatch.setenv("COLUMNS", str(terminal_width))
     catalogs.append(
         metadata.EntryPoint(
-            name="embodichain_robots",
-            value="embodichain_robots._catalog:ROBOT_CONFIGS",
+            name="embodichain.extensions.robots",
+            value="embodichain.extensions.robots._catalog:ROBOT_CONFIGS",
             group="embodichain.robots",
         )
     )
@@ -102,18 +102,32 @@ def test_list_robot_dispatch_reads_installed_catalogs(
     output = capsys.readouterr().out
     assert output.startswith("╭")
     assert output.rstrip().endswith("╯")
-    assert "EmbodiChain · Robot Catalog · 16 robots" in output
     assert "Robot ID" in output
     assert "Config Class" not in output
     assert "Variants" in output
     assert "Mimic" in output and "Joints" in output
     assert "Control" in output and "DOF" in output and "Parts" in output
     expected_ids = {
+        "AgibotG2",
+        "AgibotG1",
+        "YamI2rt",
+        "FrankaPandaHand",
+        "DHPGI14080",
+        "CobotMagicV100Gripper",
+        "PikaGripper",
+        "TianjiMarvinGripper",
+        "RobotiqArg2F85",
+        "RobotiqArg2F140",
+        "BrainCoRevo1",
+        "SharpaWave",
+        "WujiHand",
         "ARX5",
         "AlohaMini",
         "TianjiMarvin",
         "DexforceW1",
         "CobotMagic",
+        "AgilexPiperX",
+        "Franka",
         "FrankaPanda",
         "FlexivRizon4S",
         "SO101Follower",
@@ -132,8 +146,21 @@ def test_list_robot_dispatch_reads_installed_catalogs(
         "ur10",
         "ur10e",
     }
-    for robot_id in expected_ids - {"ur3", "ur3e", "ur5", "ur5e", "ur10", "ur10e"}:
-        assert re.search(rf"│\s*{re.escape(robot_id)}\s*│", output)
+    assert f"EmbodiChain · Robot Catalog · {len(expected_ids) - 7} robots" in output
+    for robot_id in expected_ids - {
+        "ur3",
+        "ur3e",
+        "ur5",
+        "ur5e",
+        "ur10",
+        "ur10e",
+        "FrankaPanda",
+    }:
+        # Narrow terminals wrap long model IDs within the first column.
+        id_column = "".join(re.findall(r"^│([^│]*)│", output, re.MULTILINE)).replace(
+            " ", ""
+        )
+        assert robot_id in id_column
     assert set(registry.list_robot_cfgs()) == expected_ids
     for alias in (
         "aloha_mini",
@@ -148,8 +175,10 @@ def test_list_robot_dispatch_reads_installed_catalogs(
     assert output.count("│ URRobot") == 1
     for model in ("ur3", "ur3e", "ur5", "ur5e", "ur10", "ur10e"):
         assert model in output
-    assert "eef (1+1m)" in output
-    assert "fr3_finger_joint2" in _column_text(output, 5)
+    assert "arm (7)" in _column_text(output, 4)
+    assert "fr3_finger_joint2" in _column_text(
+        output, 5
+    )  # The standalone hand owns this mimic.
 
 
 @pytest.mark.parametrize("terminal_width", [80, 120])
@@ -194,7 +223,7 @@ class RejectRuntimeImports(importlib.abc.MetaPathFinder):
             fullname == "torch"
             or fullname.startswith("embodichain.lab")
             or fullname.startswith("embodichain.data")
-            or (fullname.startswith("embodichain_robots.") and fullname != "embodichain_robots._catalog")
+            or (fullname.startswith("embodichain.extensions.robots.") and fullname != "embodichain.extensions.robots._catalog")
         ):
             raise AssertionError("Listing imported runtime module: " + fullname)
 
@@ -202,8 +231,8 @@ sys.meta_path.insert(0, RejectRuntimeImports())
 from embodichain import robot_registry as registry
 registry.metadata.entry_points = lambda **_: [
     metadata.EntryPoint(
-        name="embodichain_robots",
-        value="embodichain_robots._catalog:ROBOT_CONFIGS",
+        name="embodichain.extensions.robots",
+        value="embodichain.extensions.robots._catalog:ROBOT_CONFIGS",
         group="embodichain.robots",
     )
 ]
@@ -219,7 +248,9 @@ main(["list-robot"])
         check=True,
     )
 
-    assert "16 robots" in result.stdout
+    assert "SharpaWave" in result.stdout
+    assert "WujiHand" in result.stdout
+    assert "AgilexPiperX" in result.stdout
     assert result.stderr == ""
 
 
@@ -279,7 +310,7 @@ def test_dual_arm_variant_rows_use_each_base_dof(catalogs: list[Any]) -> None:
     catalogs.append(
         metadata.EntryPoint(
             name="official",
-            value="embodichain_robots._catalog:ROBOT_CONFIGS",
+            value="embodichain.extensions.robots._catalog:ROBOT_CONFIGS",
             group="embodichain.robots",
         )
     )
@@ -290,9 +321,9 @@ def test_dual_arm_variant_rows_use_each_base_dof(catalogs: list[Any]) -> None:
     assert profiles[0][1]["dof"] == 12
     assert "ur10*" in profiles[0][0]
     assert profiles[1][0] == "FrankaPanda"
-    assert profiles[1][1]["dof"] == 16
-    assert len(profiles[1][1]["mimic_joints"]) == 2
-    assert "left_eef (1+1m)" in list_robot._format_control_parts(profiles[1][1])
+    assert profiles[1][1]["dof"] == 14
+    assert not profiles[1][1]["mimic_joints"]
+    assert "left_arm (7)" in list_robot._format_control_parts(profiles[1][1])
 
 
 def test_dual_arm_composite_part_marks_overlapping_mimics(
@@ -323,7 +354,7 @@ def test_w1_variants_show_body_releases_and_hand_specific_dofs(
     catalogs.append(
         metadata.EntryPoint(
             name="official",
-            value="embodichain_robots._catalog:ROBOT_CONFIGS",
+            value="embodichain.extensions.robots._catalog:ROBOT_CONFIGS",
             group="embodichain.robots",
         )
     )

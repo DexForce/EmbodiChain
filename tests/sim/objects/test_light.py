@@ -16,16 +16,96 @@
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 import pytest
 import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import LightCfg
+from embodichain.lab.sim.objects import Light
+from embodichain.utils import logger
+
+# These small scenes do not inspect pixels; leave room for all tested links.
+TEST_SCENE_NODE_CAPACITY = 512
+TEST_VIEWPORT_SIZE = 64
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "light_type,method,values",
+    [
+        pytest.param(
+            "point", "set_direction", ([1.0, 0.0, 0.0],), id="point-direction"
+        ),
+        pytest.param("point", "set_spot_angle", (15.0, 30.0), id="point-spot-angle"),
+        pytest.param("point", "set_rect_wh", (2.0, 3.0), id="point-rect-size"),
+        pytest.param(
+            "direction", "set_local_pose", ([1.0, 2.0, 3.0],), id="direction-position"
+        ),
+        pytest.param("sun", "set_local_pose", ([1.0, 2.0, 3.0],), id="sun-position"),
+    ],
+)
+def test_inapplicable_light_setters_warn_without_native_calls(
+    light_type: str,
+    method: str,
+    values: tuple[float | list[float], ...],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unsupported setters warn and leave native lights untouched."""
+    light = object.__new__(Light)
+    light.cfg = LightCfg(
+        uid="guarded_light",
+        light_type=light_type,
+        init_pos=(0.0, 0.0, 2.0),
+        direction=(0.0, -1.0, 0.0),
+    )
+    light.uid = light.cfg.uid
+    light.device = torch.device("cpu")
+    light._entities = [Mock() for _ in range(1 if light.is_global else 4)]
+    warning = Mock()
+    monkeypatch.setattr(logger, "log_warning", warning)
+    arguments = tuple(
+        torch.tensor(value, dtype=torch.float32, device="cpu") for value in values
+    )
+
+    getattr(light, method)(*arguments)
+
+    warning.assert_called_once()
+    assert all(not entity.method_calls for entity in light._entities)
+
+
+@pytest.mark.no_sim
+def test_from_dict_new_types() -> None:
+    """LightCfg.from_dict works with new type fields."""
+    cfg = LightCfg.from_dict(
+        {
+            "light_type": "spot",
+            "color": [1.0, 0.9, 0.8],
+            "intensity": 100.0,
+            "init_pos": [0.0, 0.0, 3.0],
+            "direction": [0.0, 0.0, -1.0],
+            "spot_angle_inner": 25.0,
+            "spot_angle_outer": 50.0,
+            "uid": "from_dict_spot",
+        }
+    )
+    assert cfg.light_type == "spot"
+    assert cfg.spot_angle_inner == 25.0
+    assert cfg.spot_angle_outer == 50.0
+    assert cfg.direction == (0.0, 0.0, -1.0) or cfg.direction == [0.0, 0.0, -1.0]
 
 
 class TestLight:
     def setup_method(self):
         # Setup SimulationManager
-        config = SimulationManagerCfg(headless=True, device="cpu", num_envs=10)
+        config = SimulationManagerCfg(
+            headless=True,
+            device="cpu",
+            num_envs=10,
+            scene_node_capacity=TEST_SCENE_NODE_CAPACITY,
+            width=TEST_VIEWPORT_SIZE,
+            height=TEST_VIEWPORT_SIZE,
+        )
         self.sim = SimulationManager(config)
 
         # Create batch of lights
@@ -155,13 +235,11 @@ class TestLight:
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()
+        # Drop test-owned views before queued child/parent destruction runs.
+        self.__dict__.clear()
         import embodichain.lab.sim as om
 
         om.SimulationManager.flush_cleanup_queue()
-        self.__dict__.clear()
-        import gc
-
-        gc.collect()
 
 
 class TestLightTypes:
@@ -170,17 +248,22 @@ class TestLightTypes:
     @pytest.fixture(autouse=True)
     def setup(self):
         """Create a SimulationManager for each test."""
-        config = SimulationManagerCfg(headless=True, device="cpu", num_envs=4)
+        config = SimulationManagerCfg(
+            headless=True,
+            device="cpu",
+            num_envs=4,
+            scene_node_capacity=TEST_SCENE_NODE_CAPACITY,
+            width=TEST_VIEWPORT_SIZE,
+            height=TEST_VIEWPORT_SIZE,
+        )
         self.sim = SimulationManager(config)
         yield
         self.sim.destroy()
+        # Drop test-owned views before queued child/parent destruction runs.
+        self.__dict__.clear()
         import embodichain.lab.sim as om
 
         om.SimulationManager.flush_cleanup_queue()
-        self.__dict__.clear()
-        import gc
-
-        gc.collect()
 
     # ------------------------------------------------------------------
     # Creation tests
@@ -207,10 +290,17 @@ class TestLightTypes:
             uid=f"test_{light_type}",
             light_type=light_type,
             init_pos=(0.0, 0.0, 3.0),
+            direction=(0.0, -1.0, 0.0),
+            spot_angle_inner=20.0,
+            spot_angle_outer=40.0,
+            rect_width=2.0,
+            rect_height=1.5,
+            mesh_path="",
         )
         light = self.sim.add_light(cfg=cfg)
         assert light is not None, f"Failed to create light of type '{light_type}'"
         assert light.num_instances == expected_num_instances
+        assert light.cfg.light_type == light_type
         if light_type in ("sun", "direction"):
             assert light.is_global, f"{light_type} should be a global light"
 
@@ -220,126 +310,124 @@ class TestLightTypes:
         with pytest.raises(ValueError, match="Unsupported light type"):
             self.sim.add_light(cfg=cfg)
 
-    def test_mesh_light_empty_path_warns(self):
-        """Mesh light with empty mesh_path warns at creation but succeeds."""
-        cfg = LightCfg(
-            uid="mesh_no_path",
-            light_type="mesh",
-            init_pos=(0.0, 0.0, 2.0),
-        )
-        light = self.sim.add_light(cfg=cfg)
-        assert light is not None, "Mesh light should be created even without path"
-
-    # ------------------------------------------------------------------
-    # Setter type-validation tests
-    # ------------------------------------------------------------------
-
-    def test_set_direction_on_point_warns(self):
-        """Calling set_direction on a point light logs a warning and no-ops."""
-        cfg = LightCfg(uid="pt", light_type="point", init_pos=(0, 0, 2))
-        light = self.sim.add_light(cfg=cfg)
-        direction = torch.tensor([1.0, 0.0, 0.0])
-        # Should not raise; should log a warning
-        try:
-            light.set_direction(direction)
-        except Exception as e:
-            pytest.fail(f"set_direction on point light should warn, not crash: {e}")
-
-    def test_set_spot_angle_on_point_warns(self):
-        """Calling set_spot_angle on a non-spot light warns and no-ops."""
-        cfg = LightCfg(uid="pt2", light_type="point", init_pos=(0, 0, 2))
-        light = self.sim.add_light(cfg=cfg)
-        inner = torch.tensor(15.0)
-        outer = torch.tensor(30.0)
-        try:
-            light.set_spot_angle(inner, outer)
-        except Exception as e:
-            pytest.fail(f"set_spot_angle on point light should warn, not crash: {e}")
-
-    def test_set_rect_wh_on_point_warns(self):
-        """Calling set_rect_wh on a non-rect light warns and no-ops."""
-        cfg = LightCfg(uid="pt3", light_type="point", init_pos=(0, 0, 2))
-        light = self.sim.add_light(cfg=cfg)
-        w = torch.tensor(2.0)
-        h = torch.tensor(3.0)
-        try:
-            light.set_rect_wh(w, h)
-        except Exception as e:
-            pytest.fail(f"set_rect_wh on point light should warn, not crash: {e}")
-
-    def test_set_local_pose_on_direction_warns(self):
-        """Calling set_local_pose on a direction light warns and no-ops."""
-        cfg = LightCfg(
-            uid="dir_light",
-            light_type="direction",
-            direction=(0.0, -1.0, 0.0),
-        )
-        light = self.sim.add_light(cfg=cfg)
-        pose = torch.tensor([1.0, 2.0, 3.0])
-        try:
-            light.set_local_pose(pose)
-        except Exception as e:
-            pytest.fail(
-                f"set_local_pose on direction light should warn, not crash: {e}"
-            )
-
-    def test_set_local_pose_on_sun_warns(self):
-        """Calling set_local_pose on a sun light warns and no-ops."""
-        cfg = LightCfg(
-            uid="sun_light",
-            light_type="sun",
-            direction=(0.0, -1.0, 0.0),
-        )
-        light = self.sim.add_light(cfg=cfg)
-        pose = torch.tensor([1.0, 2.0, 3.0])
-        try:
-            light.set_local_pose(pose)
-        except Exception as e:
-            pytest.fail(f"set_local_pose on sun light should warn, not crash: {e}")
-
     # ------------------------------------------------------------------
     # Type-specific property tests
     # ------------------------------------------------------------------
 
-    def test_spot_light_has_cone_angles(self):
-        """Spot light creation applies inner/outer cone angles from cfg."""
-        cfg = LightCfg(
-            uid="spot_test",
-            light_type="spot",
-            init_pos=(0.0, 0.0, 3.0),
-            direction=(0.0, 0.0, -1.0),
-            spot_angle_inner=20.0,
-            spot_angle_outer=40.0,
-        )
-        light = self.sim.add_light(cfg=cfg)
-        assert light is not None
-        # Should not crash on creation; spot_angle applied during reset()
+    @pytest.mark.parametrize("input_device", ["cpu", "cuda:0"])
+    def test_fused_light_selection_validation_and_translation_only_pose(
+        self, input_device
+    ):
+        """Fused fields preserve other rows and reject invalid writes atomically."""
+        import numpy as np
 
-    def test_rect_light_has_dimensions(self):
-        """Rect light creation applies width/height from cfg."""
-        cfg = LightCfg(
-            uid="rect_test",
-            light_type="rect",
-            init_pos=(0.0, 0.0, 3.0),
-            direction=(0.0, 0.0, -1.0),
-            rect_width=2.0,
-            rect_height=1.5,
+        light = self.sim.add_light(
+            LightCfg(
+                uid="batched_spot",
+                light_type="spot",
+                init_pos=(0.2, 0.3, 2),
+                color=(0.1, 0.2, 0.3),
+                intensity=12,
+            )
         )
-        light = self.sim.add_light(cfg=cfg)
-        assert light is not None
+        self.sim.prepare()
+        rows = torch.tensor([3, 1], device=input_device)
+        color = torch.tensor([[0.8, 0.2, 0.1], [0.2, 0.7, 0.4]], device=input_device)
+        intensity = torch.tensor([30.0, 40.0], device=input_device)
+        positions = torch.tensor(
+            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], device=input_device
+        )
+        light.apply_state(
+            color=color,
+            intensity=intensity,
+            position=positions,
+            direction=torch.tensor([1.0, 0.0, -1.0], device=input_device),
+            shadow_enabled=torch.tensor([0, 1], device=input_device),
+            env_ids=rows,
+        )
 
-    @pytest.mark.parametrize("light_type", ["sun", "direction"])
-    def test_global_light_no_position_in_reset(self, light_type):
-        """Global light (sun/direction) reset does not set position."""
-        cfg = LightCfg(
-            uid=f"{light_type}_test",
-            light_type=light_type,
-            direction=(0.0, -1.0, 0.0),
+        def snapshot():
+            return self.sim.spawn_result.create_light_batch(
+                light._light_handles
+            ).fetch_state(
+                fields=("color", "intensity", "position", "shadow_enabled"),
+                frame="local",
+            )
+
+        state = snapshot()
+        np.testing.assert_allclose(state["color"][[3, 1]], color.cpu())
+        np.testing.assert_allclose(state["color"][[0, 2]], [[0.1, 0.2, 0.3]] * 2)
+        np.testing.assert_allclose(state["intensity"], [12, 40, 12, 30])
+        np.testing.assert_allclose(state["position"][[3, 1]], positions.cpu())
+        np.testing.assert_array_equal(
+            state["shadow_enabled"], [True, True, True, False]
         )
-        light = self.sim.add_light(cfg=cfg)
-        assert light is not None
-        assert light.is_global
-        assert light.num_instances == 1
+        with pytest.raises(ValueError):
+            light.apply_state(
+                color=torch.ones_like(color),
+                intensity=torch.tensor([5.0, -1.0], device=input_device),
+                env_ids=rows,
+            )
+        for field, expected in state.items():
+            np.testing.assert_allclose(snapshot()[field], expected)
+        light.apply_state(color=color[:0], intensity=intensity[:0], env_ids=rows[:0])
+        before = light.get_local_pose(to_matrix=True)
+        matrices = torch.eye(4, device=input_device).repeat(2, 1, 1)
+        matrices[:, 0, 0] = matrices[:, 1, 1] = -1
+        matrices[:, :3, 3] = -positions
+        light.set_local_pose(matrices, env_ids=rows, to_matrix=True)
+        updated = light.get_local_pose(to_matrix=True)
+        torch.testing.assert_close(updated[:, :3, :3], before[:, :3, :3])
+        torch.testing.assert_close(updated[[3, 1], :3, 3], -positions.cpu())
+        # Old read results own their storage across later writes and reads.
+        torch.testing.assert_close(before[[3, 1], :3, 3], positions.cpu())
+        light.reset(env_ids=[3])
+        state = snapshot()
+        # Local reads round-trip float32 world coordinates through Arena offsets.
+        np.testing.assert_allclose(state["position"][3], [0.2, 0.3, 2], atol=2e-6)
+        np.testing.assert_allclose(state["position"][1], [-4, -5, -6])
+        np.testing.assert_allclose(state["color"][3], [0.1, 0.2, 0.3])
+        for selection, expected_color in (
+            ([3, 3], color[1]),
+            ([-1, 1], color[0]),
+        ):
+            light.apply_state(
+                color=color,
+                intensity=intensity,
+                env_ids=torch.tensor(selection, device=input_device),
+            )
+            torch.testing.assert_close(light.get_color()[3], expected_color.cpu())
+        torch.testing.assert_close(light.get_color()[1], color[1].cpu())
+        self.sim.remove_asset(light.uid)
+        with pytest.raises(RuntimeError, match="destroyed"):
+            light.set_intensity(torch.tensor(10.0))
+
+    def test_angle_and_rectangle_batches_preserve_unselected_rows(self):
+        """Coupled field setters validate complete pairs before mutation."""
+        import numpy as np
+
+        spot = self.sim.add_light(LightCfg(uid="angles", light_type="spot"))
+        rect = self.sim.add_light(LightCfg(uid="dimensions", light_type="rect"))
+        spot.set_spot_angle(
+            torch.tensor([10.0, 20.0]), torch.tensor([50.0, 60.0]), env_ids=[2, 0]
+        )
+        native = self.sim._spawn_scene.builder.result.create_light_batch(
+            spot._light_handles
+        )
+        np.testing.assert_allclose(native.fetch_spot_inner_angle(), [20, 30, 10, 30])
+        with pytest.raises(ValueError):
+            spot.set_spot_angle(
+                torch.tensor([10.0, 80.0]), torch.tensor([60.0, 70.0]), env_ids=[2, 0]
+            )
+        np.testing.assert_allclose(native.fetch_spot_inner_angle(), [20, 30, 10, 30])
+        rect.set_rect_wh(
+            torch.tensor([2.0, 3.0]), torch.tensor([0.5, 0.75]), env_ids=[2, 0]
+        )
+        native = self.sim._spawn_scene.builder.result.create_light_batch(
+            rect._light_handles
+        )
+        np.testing.assert_allclose(native.fetch_rect_width(), [3, 1, 2, 1])
+        np.testing.assert_allclose(native.fetch_rect_height(), [0.75, 1, 0.5, 1])
 
     @pytest.mark.parametrize("light_type", ["sun", "direction"])
     def test_reset_global_light_with_env_ids(self, light_type):
@@ -403,29 +491,6 @@ class TestLightTypes:
             pytest.fail(f"enable_shadow failed: {e}")
 
     # ------------------------------------------------------------------
-    # from_dict compatibility
-    # ------------------------------------------------------------------
-
-    def test_from_dict_new_types(self):
-        """LightCfg.from_dict works with new type fields."""
-        cfg = LightCfg.from_dict(
-            {
-                "light_type": "spot",
-                "color": [1.0, 0.9, 0.8],
-                "intensity": 100.0,
-                "init_pos": [0.0, 0.0, 3.0],
-                "direction": [0.0, 0.0, -1.0],
-                "spot_angle_inner": 25.0,
-                "spot_angle_outer": 50.0,
-                "uid": "from_dict_spot",
-            }
-        )
-        assert cfg.light_type == "spot"
-        assert cfg.spot_angle_inner == 25.0
-        assert cfg.spot_angle_outer == 50.0
-        assert cfg.direction == (0.0, 0.0, -1.0) or cfg.direction == [0.0, 0.0, -1.0]
-
-    # ------------------------------------------------------------------
     # Backward compatibility
     # ------------------------------------------------------------------
 
@@ -456,3 +521,60 @@ class TestLightTypes:
             light.set_falloff(torch.tensor(100.0))
         except Exception as e:
             pytest.fail(f"set_falloff failed: {e}")
+
+
+@pytest.mark.gpu
+def test_shared_mesh_binding_preserves_legacy_selection_contract():
+    """A shared native mesh keeps the scalar API's selection and warning behavior."""
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.shapes import CubeCfg
+
+    sim = SimulationManager(
+        SimulationManagerCfg(headless=True, device="cpu", num_envs=3)
+    )
+    try:
+        sim.add_rigid_object(
+            RigidObjectCfg(uid="emitter", shape=CubeCfg(), body_type="static")
+        )
+        light = sim.add_light(LightCfg(uid="mesh_light", light_type="mesh"))
+        sim.prepare()
+        arena_name = sim._spawn_scene.arena_names[0]
+        mesh = sim.spawn_result.handles[f"{arena_name}/emitter"].native()
+        light.set_mesh(mesh, env_ids=[0])
+        first_binding = light._entities[0].get_render_state()["mesh_entity_id"]
+        assert first_binding >= 0
+
+        # Native sharing conflicts warn without raising; a batch must not add
+        # a stricter same-Arena ownership failure for this existing call.
+        light.set_mesh(mesh, env_ids=[2, 0])
+        assert light._entities[0].get_render_state()["mesh_entity_id"] == first_binding
+        assert light._entities[1].get_render_state()["mesh_entity_id"] == -1
+        light.set_mesh(mesh, env_ids=[])
+        light.set_mesh(mesh)
+        assert light._entities[0].get_render_state()["mesh_entity_id"] == first_binding
+    finally:
+        sim.destroy()
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.gpu
+def test_light_getters_preserve_cpu_snapshots_with_cuda_manager():
+    """Manager-created light getters keep main's device and ownership contract."""
+    sim = SimulationManager(
+        SimulationManagerCfg(headless=True, device="cuda:0", num_envs=3)
+    )
+    try:
+        light = sim.add_light(
+            LightCfg(uid="getter_light", color=(0.1, 0.2, 0.3), intensity=2)
+        )
+        before = light.get_color()
+        assert before.device.type == "cpu"
+        assert light.get_intensity().device.type == "cpu"
+        light.set_color(torch.tensor([0.4, 0.5, 0.6], device="cuda:0"))
+        torch.testing.assert_close(before, torch.tensor([[0.1, 0.2, 0.3]] * 3))
+        torch.testing.assert_close(
+            light.get_color(), torch.tensor([[0.4, 0.5, 0.6]] * 3)
+        )
+    finally:
+        sim.destroy()
+        SimulationManager.flush_cleanup_queue()

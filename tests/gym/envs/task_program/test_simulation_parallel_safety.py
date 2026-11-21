@@ -27,8 +27,8 @@ from embodichain.lab.task_program.integrations import (
     CuroboParallelCommandSafetyValidator,
     CuroboParallelSafetyValidatorFactory,
 )
-from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
+from embodichain.lab.sim.atomic_skills import (
+    AtomicSkillEngine,
     EndpointCommand,
     JointPositionPayload,
     JointPositionTarget,
@@ -223,7 +223,7 @@ def test_curobo_parallel_safety_factory_binds_exact_runtime_components() -> None
     """The production factory consumes the assembled engine and registry."""
     robot = _Robot()
     motion_generator, _ = _motion_generator()
-    engine = AtomicActionEngine.__new__(AtomicActionEngine)
+    engine = AtomicSkillEngine.__new__(AtomicSkillEngine)
     engine._planning_services = SimpleNamespace(  # type: ignore[attr-defined]
         robot=robot,
         motion_generator=motion_generator,

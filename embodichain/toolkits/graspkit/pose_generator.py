@@ -19,206 +19,19 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from copy import deepcopy
-import math
-from types import MappingProxyType
 
 import torch
-
-from embodichain.utils import configclass
 
 __all__ = [
     "GraspPoseGenerator",
     "ParallelJawGraspPoseGenerator",
-    "ParallelJawGripperModelCfg",
-    "get_parallel_jaw_gripper_model",
 ]
-
-
-def _positive_finite(value: float, *, field_name: str) -> float:
-    """Return one validated positive finite value."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise TypeError(f"{field_name} must be a real number.")
-    normalized = float(value)
-    if not math.isfinite(normalized) or normalized <= 0.0:
-        raise ValueError(f"{field_name} must be finite and positive.")
-    return normalized
-
-
-@configclass
-class ParallelJawGripperModelCfg:
-    """Physical geometry shared by parallel-jaw grasp generators.
-
-    ``model_id`` names one concrete end-effector model or calibration. Product
-    names belong in that value (for example ``"dh_pgi_140_80"``), not in the
-    generator class hierarchy. Dimensions are in metres: the grasp frame's X
-    axis is the opening axis, Z is the approach axis, and Y is the remaining
-    finger-width axis. These scalar box dimensions do not encode a mounting
-    transform or the robot's complete collision geometry.
-    """
-
-    model_id: str = "parallel_jaw"
-    """Stable identifier for the concrete gripper geometry."""
-
-    min_opening_width: float = 0.001
-    """Minimum usable distance between the two fingers in metres."""
-
-    max_opening_width: float = 0.1
-    """Maximum usable distance between the two fingers in metres."""
-
-    finger_length: float = 0.08
-    """Finger length along the grasp-frame approach axis in metres."""
-
-    finger_width: float = 0.03
-    """Finger extent perpendicular to its opening and approach axes."""
-
-    finger_thickness: float = 0.01
-    """Finger extent along the opening axis in metres."""
-
-    palm_depth: float = 0.08
-    """Palm/root extent along the grasp-frame approach axis in metres."""
-
-    def __post_init__(self) -> None:
-        if (
-            type(self.model_id) is not str
-            or not self.model_id
-            or self.model_id != self.model_id.strip()
-        ):
-            raise ValueError(
-                "ParallelJawGripperModelCfg.model_id must be a non-empty "
-                "string without outer whitespace."
-            )
-        self.min_opening_width = _positive_finite(
-            self.min_opening_width,
-            field_name="min_opening_width",
-        )
-        self.max_opening_width = _positive_finite(
-            self.max_opening_width,
-            field_name="max_opening_width",
-        )
-        if self.min_opening_width >= self.max_opening_width:
-            raise ValueError("min_opening_width must be less than max_opening_width.")
-        for field_name in (
-            "finger_length",
-            "finger_width",
-            "finger_thickness",
-            "palm_depth",
-        ):
-            setattr(
-                self,
-                field_name,
-                _positive_finite(getattr(self, field_name), field_name=field_name),
-            )
-
-
-_PARALLEL_JAW_GRIPPER_MODELS = MappingProxyType(
-    {
-        # Pika's native X approaches and Y opens. See README.md for the
-        # source meshes, aperture measurement and adapter/TCP convention.
-        "pika_gripper": MappingProxyType(
-            {
-                "model_id": "pika_gripper",
-                "min_opening_width": 0.001,
-                "max_opening_width": 0.094,
-                "finger_length": 0.113,
-                "finger_width": 0.039,
-                "finger_thickness": 0.057,
-                "palm_depth": 0.085,
-            }
-        ),
-        "dh_pgi_140_80": MappingProxyType(
-            {
-                "model_id": "dh_pgi_140_80",
-                "min_opening_width": 0.005,
-                "max_opening_width": 0.1,
-                "finger_length": 0.12,
-                "finger_width": 0.04,
-                "finger_thickness": 0.01,
-                "palm_depth": 0.096,
-            }
-        ),
-        # Geometry provenance and mesh-axis mapping: graspkit/README.md.
-        # The 1 mm minimum is a planning cutoff, not a hardware closing limit.
-        "franka_panda_hand": MappingProxyType(
-            {
-                "model_id": "franka_panda_hand",
-                "min_opening_width": 0.001,
-                "max_opening_width": 0.08,
-                "finger_length": 0.054,
-                "finger_width": 0.022,
-                "finger_thickness": 0.027,
-                "palm_depth": 0.092,
-            }
-        ),
-        "cobotmagic_v100_gripper": MappingProxyType(
-            {
-                "model_id": "cobotmagic_v100_gripper",
-                "min_opening_width": 0.001,
-                "max_opening_width": 0.1,
-                "finger_length": 0.077,
-                "finger_width": 0.056,
-                "finger_thickness": 0.025,
-                "palm_depth": 0.074,
-            }
-        ),
-        "tianji_marvin_gripper": MappingProxyType(
-            {
-                "model_id": "tianji_marvin_gripper",
-                "min_opening_width": 0.001,
-                "max_opening_width": 0.095,
-                "finger_length": 0.103,
-                "finger_width": 0.043,
-                "finger_thickness": 0.034,
-                "palm_depth": 0.082,
-            }
-        ),
-    }
-)
-
-
-def get_parallel_jaw_gripper_model(model_id: str) -> ParallelJawGripperModelCfg:
-    """Return a fresh configuration for a named parallel-jaw gripper model.
-
-    The built-in catalog contains grasp-planning geometry rather than URDF or
-    downloadable asset metadata. Callers with an unregistered calibration can
-    construct :class:`ParallelJawGripperModelCfg` directly.
-
-    Built-in IDs are ``dh_pgi_140_80``, ``franka_panda_hand`` (the hand in the
-    packaged Panda asset), ``cobotmagic_v100_gripper`` (the V100 fingers), and
-    ``tianji_marvin_gripper`` (both hands in the asset with end effectors),
-    and ``pika_gripper`` (the standalone Pika asset).
-    The V100 preset is distinct from CobotMagic's V70 hardware variant. Source
-    archive checksums and dimension derivations are recorded in GraspKit's
-    ``README.md``. Sampling and collision policy remain generator settings.
-
-    Args:
-        model_id: Stable identifier of a built-in gripper geometry.
-
-    Returns:
-        An independently owned gripper-model configuration.
-
-    Raises:
-        ValueError: If ``model_id`` is malformed or is not built in.
-    """
-    if type(model_id) is not str or not model_id or model_id != model_id.strip():
-        raise ValueError(
-            "model_id must be a non-empty string without outer whitespace."
-        )
-    try:
-        values = _PARALLEL_JAW_GRIPPER_MODELS[model_id]
-    except KeyError as exc:
-        available = sorted(_PARALLEL_JAW_GRIPPER_MODELS)
-        raise ValueError(
-            f"unknown parallel-jaw gripper model {model_id!r}; "
-            f"available models are {available}."
-        ) from exc
-    return ParallelJawGripperModelCfg(**dict(values))
 
 
 class GraspPoseGenerator(ABC):
     """Standalone service that generates grasp poses from target geometry.
 
-    The contract has no dependency on Gym, simulation, atomic actions, or
+    The contract has no dependency on Gym, simulation, atomic skills, or
     Task Program. Application code may call it directly or install the same
     service instance alongside a motion generator in a higher-level runtime.
     """
@@ -251,17 +64,73 @@ class GraspPoseGenerator(ABC):
 class ParallelJawGraspPoseGenerator(GraspPoseGenerator, ABC):
     """Base service shared by two-finger parallel-jaw grippers."""
 
-    def __init__(self, gripper_model: ParallelJawGripperModelCfg) -> None:
-        if not isinstance(gripper_model, ParallelJawGripperModelCfg):
-            raise TypeError(
-                "gripper_model must be a ParallelJawGripperModelCfg instance."
-            )
-        self._gripper_model = deepcopy(gripper_model)
+    def __init__(
+        self,
+        *,
+        min_opening_width: float,
+        max_opening_width: float,
+        model_id: str = "parallel_jaw",
+    ) -> None:
+        """Own validated scalar constraints independently of any hardware Cfg.
+
+        Args:
+            min_opening_width: Minimum usable full contact distance in metres.
+            max_opening_width: Maximum usable full contact distance in metres.
+            model_id: Opaque caller identity used for provenance and compatibility.
+        """
+        import math
+
+        for name, value in (
+            ("min_opening_width", min_opening_width),
+            ("max_opening_width", max_opening_width),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value <= 0
+            ):
+                raise ValueError(f"{name} must be finite and positive.")
+        if min_opening_width >= max_opening_width:
+            raise ValueError("min_opening_width must be less than max_opening_width.")
+        if type(model_id) is not str or not model_id or model_id != model_id.strip():
+            raise ValueError("model_id must be an explicit nonempty caller identity.")
+        self._model_id = model_id
+        self._opening_limits = (float(min_opening_width), float(max_opening_width))
 
     @property
-    def gripper_model(self) -> ParallelJawGripperModelCfg:
-        """Return an owned snapshot of the physical gripper model."""
-        return deepcopy(self._gripper_model)
+    def model_id(self) -> str:
+        """Return the opaque identity without performing model lookup."""
+        return self._model_id
+
+    @property
+    def min_opening_width(self) -> float:
+        """Return the minimum full contact distance in metres."""
+        return self._opening_limits[0]
+
+    @property
+    def max_opening_width(self) -> float:
+        """Return the maximum full contact distance in metres."""
+        return self._opening_limits[1]
+
+    @property
+    def gripper_data(self) -> dict[str, object]:
+        """Return an owned scalar input snapshot for composed generator views."""
+        return {
+            "model_id": self.model_id,
+            "min_opening_width": self.min_opening_width,
+            "max_opening_width": self.max_opening_width,
+        }
+
+    @property
+    def paired_query_key(self) -> object:
+        """Identify one service that owns both role geometries and TCP mappings.
+
+        Distinct custom instances are incompatible unless they explicitly expose
+        an equal immutable key or share the same paired provider. Model identity
+        and opening limits alone cannot authorize one query for both hands.
+        """
+        return ("instance", id(self))
 
     def get_grasp_candidates(
         self,

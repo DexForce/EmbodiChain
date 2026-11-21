@@ -33,6 +33,7 @@ from embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler import (
     AntipodalSampler,
     AntipodalSamplerCfg,
 )
+from embodichain.toolkits.graspkit.pg_grasp._ranking import _normalized_ranking_weights
 
 
 def _box_geometry(*, subdivide_end: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
@@ -73,6 +74,8 @@ def _prepared_backend(
     backend._hit_point_pairs = pairs
     backend._center_mode = center_mode
     backend._approach_alignment_angle = None
+    backend._closing_geometry = None
+    backend._ranking_weights = (0.5, 0.5, 0.0)
     return backend
 
 
@@ -88,26 +91,62 @@ def _object_pose() -> torch.Tensor:
     )
 
 
-@pytest.mark.parametrize("second_center_x", [0.08, 0.0])
+def test_closing_floor_rejection_precedes_top_candidate_ranking() -> None:
+    from embodichain.toolkits.graspkit.pg_grasp.contact_fit import SampledHandGeometry
+
+    vertices, _ = _box_geometry()
+    centers = torch.tensor([[0.0, 0.0, 0.02], [0.0, 0.0, 0.06]])
+    offset = torch.tensor([0.02, 0.0, 0.0])
+    backend = _prepared_backend(
+        vertices, torch.stack((centers - offset, centers + offset), 1)
+    )
+    backend._max_deviation_angle = 0.1
+    backend._approach_direction_samples = 1
+    backend._max_candidates = 1
+    backend._filter_ground_collision = False
+    backend._collision_checker = Mock()
+    backend._collision_checker.query.side_effect = lambda obj, poses, **kwargs: (
+        torch.zeros(len(poses), dtype=torch.bool),
+        torch.zeros(len(poses)),
+    )
+    query = dict(
+        object_pose=torch.eye(4), approach_direction=torch.tensor([0.0, 0.0, -1.0])
+    )
+    success, poses, _, _ = backend.get_valid_grasp_poses(**query)
+    assert success and float(poses[0, 2, 3]) == pytest.approx(0.02)
+    backend._closing_geometry = SampledHandGeometry(
+        torch.tensor([[[0.0, 0.0, 0.0]], [[0.0, 0.0, 0.04]], [[0.0, 0.0, 0.08]]]),
+        torch.zeros(3, 2, 1, 3),
+        torch.tensor([0.1, 0.04, 0.0]),
+    )
+    backend._closing_ground_height_m = 0.0
+    backend._closing_ground_clearance_m = 0.002
+    backend._contact_half_turn = torch.diag(torch.tensor([-1.0, -1.0, 1.0, 1.0]))
+    success, poses, widths, costs = backend.get_valid_grasp_poses(**query)
+    assert success and len(poses) == 1 and torch.isfinite(costs).all()
+    assert float(poses[0, 2, 3]) == pytest.approx(0.06)
+    assert float(widths[0]) == pytest.approx(0.04)
+
+
+@pytest.mark.parametrize(("second_center_x", "narrow_cost"), [(0.08, 0.5), (0.0, 0.0)])
 def test_default_grasp_mode_ranks_by_transformed_bounding_box_center(
-    second_center_x,
+    second_center_x: float, narrow_cost: float
 ) -> None:
     vertices, _ = _box_geometry(subdivide_end=True)
-    # One pair is at the geometric center; another is near the densely meshed end.
+    # Grasp across the long and short sides. Both closing axes are perpendicular
+    # to the approach, so the costs should tie when both grasps are centered.
     centers = torch.tensor([[0.0, 0.0, 0.0], [second_center_x, 0.0, 0.0]])
-    contact_offset = torch.tensor([0.0, 0.02, 0.0])
-    pairs = torch.stack([centers - contact_offset, centers + contact_offset], dim=1)
+    offsets = torch.tensor([[0.1, 0.0, 0.0], [0.0, 0.02, 0.0]])
+    pairs = torch.stack([centers - offsets, centers + offsets], dim=1)
     backend = _prepared_backend(vertices, pairs)
     backend._max_deviation_angle = 0.1
     backend._approach_direction_samples = 1
     backend._max_candidates = 10
     backend._filter_ground_collision = False
     backend._collision_checker = Mock()
-    backend._collision_checker.query.side_effect = (
-        lambda obj, poses, widths, **kwargs: (
-            torch.zeros(len(poses), dtype=torch.bool),
-            torch.zeros(len(poses)),
-        )
+    backend._collision_checker.query.side_effect = lambda obj, poses, **kwargs: (
+        torch.zeros(len(poses), dtype=torch.bool),
+        torch.zeros(len(poses)),
     )
     object_pose = _object_pose()
 
@@ -117,10 +156,54 @@ def test_default_grasp_mode_ranks_by_transformed_bounding_box_center(
     )
 
     assert success
-    assert torch.isfinite(costs).all()
     torch.testing.assert_close(poses[costs.argmin(), :3, 3], object_pose[:3, 3])
-    torch.testing.assert_close(widths, torch.full((len(poses),), 0.04))
-    assert costs.min() == pytest.approx(0.0, abs=1.0e-6)
+    by_width = widths.argsort()
+    torch.testing.assert_close(widths[by_width], torch.tensor([0.04, 0.2]))
+    torch.testing.assert_close(costs[by_width], torch.tensor([narrow_cost, 0.0]))
+
+
+@pytest.mark.parametrize(
+    ("weights", "expected_costs", "best_center_x"),
+    [
+        ((0.5, 0.5, 0.0), [1 / 12, 0.05, 0.5], 0.01),
+        ((1e308, 1e308, 0.0), [1 / 12, 0.05, 0.5], 0.01),
+        ((0.25, 0.5, 0.25), [1 / 24, 0.175, 0.5], 0.0),
+        ((0.0, 1.0, 0.0), [0.0, 0.1, 1.0], 0.0),
+    ],
+)
+def test_ranking_weights_control_costs_and_top_candidate(
+    weights: tuple[float, float, float],
+    expected_costs: list[float],
+    best_center_x: float,
+) -> None:
+    """A centered 15-degree grasp competes with a narrower aligned grasp."""
+    centers = torch.tensor([[0.0, 0, 0], [0.01, 0, 0], [0.1, 0, 0]])
+    axes = torch.tensor(
+        [[math.cos(math.pi / 12), 0, math.sin(math.pi / 12)], [0, 1, 0], [1, 0, 0]]
+    )
+    offsets = axes * torch.tensor([0.08, 0.04, 0.08])[:, None] / 2
+    backend = _prepared_backend(
+        torch.tensor([[-0.2, -0.1, -0.1], [0.2, 0.1, 0.1]]),
+        torch.stack([centers - offsets, centers + offsets], dim=1),
+    )
+    backend._ranking_weights = _normalized_ranking_weights(*weights)
+    backend._max_deviation_angle = math.pi / 6
+    backend._approach_direction_samples = 1
+    backend._max_candidates = 10
+    backend._collision_checker = None
+    query = dict(
+        object_pose=torch.eye(4), approach_direction=torch.tensor([0.0, 0, -1])
+    )
+    success, poses, _, costs = backend.get_valid_grasp_poses(**query)
+    assert success
+    by_center = poses[:, 0, 3].argsort()
+    torch.testing.assert_close(costs[by_center], torch.tensor(expected_costs))
+
+    backend._max_candidates = 1
+    success, poses, _, costs = backend.get_valid_grasp_poses(**query)
+    assert success and len(poses) == 1
+    assert float(poses[0, 0, 3]) == pytest.approx(best_center_x)
+    assert float(costs[0]) == pytest.approx(min(expected_costs), abs=1e-7)
 
 
 @pytest.mark.parametrize("hard_angle", [None, math.radians(10)])
@@ -143,11 +226,9 @@ def test_hard_approach_filter_precedes_nms_and_top_candidate(
     backend._max_candidates = 1
     backend._filter_ground_collision = False
     backend._collision_checker = Mock()
-    backend._collision_checker.query.side_effect = (
-        lambda obj, poses, widths, **kwargs: (
-            torch.zeros(len(poses), dtype=torch.bool),
-            torch.zeros(len(poses)),
-        )
+    backend._collision_checker.query.side_effect = lambda obj, poses, **kwargs: (
+        torch.zeros(len(poses), dtype=torch.bool),
+        torch.zeros(len(poses)),
     )
     poses = torch.eye(4).repeat(3, 1, 1)
     poses[:, :3, 3] = centers

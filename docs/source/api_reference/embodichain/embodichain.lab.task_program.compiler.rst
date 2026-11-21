@@ -13,6 +13,7 @@ embodichain.lab.task_program.compiler
 
       CompiledArticulationJointPositionValidator
       CompiledBarrier
+      CompiledObjectNearRelativeTargetValidator
       CompiledObjectNearTargetValidator
       CompiledParallelBlock
       CompiledParallelBranch
@@ -35,3 +36,7 @@ Validator type aliases
 These aliases describe the compiled validator variants.
 
 .. autodata:: CompiledTaskProgramValidator
+
+Relative position acceptance retains both canonical scene references and a
+world-axis displacement. The simulation validator observes both objects again
+at acceptance time, independently of the pose used during action planning.

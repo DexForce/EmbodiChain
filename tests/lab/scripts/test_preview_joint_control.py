@@ -282,3 +282,17 @@ def test_overlapping_robot_control_parts_do_not_duplicate_joint_controls() -> No
     )
 
     assert [spec.joint_id for spec in controller.joint_control_specs()] == [0, 2]
+
+
+def test_scene_pose_editing_leaves_unedited_joints_and_velocities_untouched() -> None:
+    articulation = _Articulation()
+    runtime = _Runtime()
+    controller = ArticulationPreviewController([articulation], runtime, hold_pose=False)
+    assert controller.update() == 0
+    assert articulation.qpos_writes == []
+    assert articulation.qvel_writes == []
+    hinge_id = controller.joint_control_specs()[0].control_id
+    runtime.commands.append(_command(hinge_id, 0.5, sequence=1))
+    assert controller.update() == 1
+    assert all(row[1] == [0] for row in articulation.qpos_writes)
+    assert all(row[1] == [0] for row in articulation.qvel_writes)

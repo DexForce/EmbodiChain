@@ -30,6 +30,7 @@ from embodichain.learning.rl.runtime import (
 )
 from embodichain.lab.sim import SimulationManagerCfg
 from embodichain.lab.sim.cfg import RenderCfg
+from embodichain.lab.visualization import VisualizationCfg
 
 
 def _policy_config() -> dict:
@@ -65,18 +66,25 @@ class GymEnvironment:
         self.closed += 1
 
 
-def test_gym_environment_applies_runtime_overrides(tmp_path, monkeypatch):
+@pytest.mark.parametrize("web", [False, True])
+def test_gym_environment_applies_runtime_overrides(tmp_path, monkeypatch, web):
     gym_config = tmp_path / "gym.yaml"
     gym_config.write_text("id: Example\n", encoding="utf-8")
     env_cfg = SimpleNamespace(
         num_envs=8,
-        sim_cfg=None,
+        sim_cfg=(
+            SimulationManagerCfg(
+                headless=True, render_cfg=RenderCfg(renderer="no-render")
+            )
+            if web
+            else None
+        ),
         profiler=None,
     )
     built = GymEnvironment()
     monkeypatch.setattr(
         "embodichain.learning.rl.runtime.config_to_cfg",
-        lambda value, manager_modules: env_cfg,
+        lambda value, manager_modules, source_path=None: env_cfg,
     )
     monkeypatch.setattr(
         "embodichain.learning.rl.runtime.build_env",
@@ -87,7 +95,8 @@ def test_gym_environment_applies_runtime_overrides(tmp_path, monkeypatch):
         {"trainer": {"gym_config": "gym.yaml"}},
         simulation_device=torch.device("cpu"),
         num_envs=1,
-        headless=True,
+        headless=not web,
+        **({"visualization": VisualizationCfg(backend="dexsim-web")} if web else {}),
         renderer="hybrid",
         gpu_id=0,
         seed=17,
@@ -100,6 +109,7 @@ def test_gym_environment_applies_runtime_overrides(tmp_path, monkeypatch):
     assert runtime.env_cfg.seed == 17
     assert runtime.env_cfg.sim_cfg.sim_device == torch.device("cpu")
     assert runtime.env_cfg.sim_cfg.headless is True
+    assert runtime.env_cfg.sim_cfg.web is web
     assert runtime.env_cfg.sim_cfg.render_cfg.renderer == "hybrid"
 
 
@@ -117,7 +127,7 @@ def test_gym_runtime_preserves_task_renderer_when_override_is_omitted(
     original_render_cfg = env_cfg.sim_cfg.render_cfg
     monkeypatch.setattr(
         "embodichain.learning.rl.runtime.config_to_cfg",
-        lambda value, manager_modules: env_cfg,
+        lambda value, manager_modules, source_path=None: env_cfg,
     )
     monkeypatch.setattr(
         "embodichain.learning.rl.runtime.build_env",
@@ -241,3 +251,15 @@ def test_active_trainer_cameras_reserve_renderer_before_environment_build(
             )
         ],
     )
+
+
+def test_learning_environment_rejects_config_resource_collision():
+    from embodichain.learning.rl.runtime import _build_learning_environment
+
+    with pytest.raises(ValueError, match="config and resources overlap"):
+        _build_learning_environment(
+            {"trainer": {"learning_env": {"name": "Unused", "cfg": {"model": "file"}}}},
+            device=torch.device("cpu"),
+            num_envs=2,
+            resources={"model": object()},
+        )

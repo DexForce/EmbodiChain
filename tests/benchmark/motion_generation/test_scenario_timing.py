@@ -24,14 +24,17 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory, TimedTrajectory
+from embodichain.lab.sim.atomic_skills.plans import CompiledTrajectory, TimedTrajectory
 from embodichain.lab.sim.motion.planners.utils import PlanResult
-from embodichain_benchmarks.motion_generation.config import ProtocolCfg, SuiteCfg
-from embodichain_benchmarks.motion_generation.metrics.trajectory import (
+from embodichain.extensions.benchmarks.motion_generation.config import (
+    ProtocolCfg,
+    SuiteCfg,
+)
+from embodichain.extensions.benchmarks.motion_generation.metrics.trajectory import (
     compute_case_outcomes,
 )
-from embodichain_benchmarks.motion_generation.models import BenchmarkCase
-from embodichain_benchmarks.motion_generation.scenarios.atomic_skill import (
+from embodichain.extensions.benchmarks.motion_generation.models import BenchmarkCase
+from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_skill import (
     AtomicSkillScenario,
 )
 
@@ -88,7 +91,7 @@ def _compiled() -> CompiledTrajectory:
         trajectory=TimedTrajectory.from_uniform_step(
             positions, env_ids=torch.tensor([0]), step_dt=0.1
         ),
-        action_plans=(),
+        skill_plans=(),
         projected_context=SimpleNamespace(),
     )
 
@@ -131,7 +134,7 @@ def test_secondary_arm_uses_same_dynamic_policy(timing_is_solved: bool) -> None:
 
 def test_secondary_arm_preserves_unbounded_dynamic_evidence() -> None:
     """An invalid clock in the second arm survives JSON sanitization."""
-    from embodichain_benchmarks.motion_generation.models import (
+    from embodichain.extensions.benchmarks.motion_generation.models import (
         AlgorithmRole,
         CaseOutcome,
         TrialPhase,
@@ -227,7 +230,7 @@ def test_ik_skill_timing_is_independent_of_unused_planner(monkeypatch) -> None:
 def test_coordinated_pickment_keeps_its_fixed_clock_out_of_planner_attribution() -> (
     None
 ):
-    from embodichain_benchmarks.motion_generation.scenarios.atomic_policy import (
+    from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_policy import (
         benchmark_motion_policy_strategy,
     )
 
@@ -246,13 +249,13 @@ def test_coordinated_placement_keeps_the_selected_planner_attribution() -> None:
 
 
 def _budget_invocation(skill_id: str, strategy: str):
-    from embodichain.lab.sim.atomic_actions import ActionInvocation, MotionPolicy
-    from embodichain.lab.sim.atomic_actions.bindings import ActionBinding
+    from embodichain.lab.sim.atomic_skills import SkillInvocation, MotionPolicy
+    from embodichain.lab.sim.atomic_skills.bindings import SkillBinding
 
-    return ActionInvocation(
+    return SkillInvocation(
         skill_id=skill_id,
         goal=None,
-        binding=ActionBinding(owner_id="test", endpoints={}),
+        binding=SkillBinding(owner_id="test", endpoints={}),
         motion_policy=MotionPolicy(strategy=strategy),
     )
 
@@ -263,7 +266,7 @@ def _budget_invocation(skill_id: str, strategy: str):
 def test_scenario_owned_motion_consumes_shared_scalar_budget(
     skill: str, strategy: str
 ) -> None:
-    from embodichain_benchmarks.motion_generation.scenarios.atomic_policy import (
+    from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_policy import (
         with_motion_budget,
     )
 
@@ -281,7 +284,7 @@ def test_scenario_owned_motion_consumes_shared_scalar_budget(
 
 
 def test_vector_policy_budget_is_conservative_and_recorded() -> None:
-    from embodichain_benchmarks.motion_generation.scenarios.atomic_policy import (
+    from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_policy import (
         with_motion_budget,
     )
 
@@ -303,7 +306,7 @@ def test_vector_policy_budget_is_conservative_and_recorded() -> None:
 
 
 def test_policy_budget_keeps_unset_defaults_and_selected_backend_vectors() -> None:
-    from embodichain_benchmarks.motion_generation.scenarios.atomic_policy import (
+    from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_policy import (
         with_motion_budget,
     )
 
@@ -315,3 +318,14 @@ def test_policy_budget_keeps_unset_defaults_and_selected_backend_vectors() -> No
         joint_acceleration_limit_rad_s2=[3.0, 2.0],
     )
     assert with_motion_budget(selected, protocol) is selected
+
+
+def test_scenario_owned_ik_keeps_scalar_budget_when_options_are_injected() -> None:
+    from embodichain.lab.sim.motion.planners import ToppraPlanOptions
+    from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_policy import (
+        with_plan_options,
+    )
+
+    invocation = _budget_invocation("coordinated_pickment", "motion_gen")
+    updated = with_plan_options(invocation, ToppraPlanOptions())
+    assert updated.motion_policy.acceleration_limit == 0.5

@@ -1,0 +1,308 @@
+{
+  "source_commit": "05da44bd8f9c0fdace1a6c793d73d927daf10e72",
+  "scope": "source segment retry control-flow and RNG; deterministic motion callbacks, continuous adapter covered separately",
+  "cases": [
+    {
+      "case": {
+        "name": "nominal",
+        "count": 4,
+        "outcome": "nominal",
+        "defer": false
+      },
+      "calls": [
+        {
+          "count": 4,
+          "targets_sha256": "94adfd5c098151f86dc8c693ce8684e6a9d622d78add2739860a4cf5e58c1b98",
+          "draws": [
+            0.43424123525619507,
+            0.2946650026871097,
+            0.5219839097124932
+          ],
+          "preserve": true
+        }
+      ],
+      "continuous": [],
+      "used_continuity": false,
+      "success": [
+        true
+      ],
+      "positions_sha256": "312bc6b846c9ce83a72b724e7ae9b8e990306131418cd50b5185328bb4d2e363",
+      "dt_sha256": "61b442a98a8f525ff6628e7a25fafc6905bcdbfe7879abf666ae53f2b6d69f81",
+      "after_rng": [
+        "c27b58ca1de8d22987675cb1eb8921685571f49cee02313a4bf8108043c5adef",
+        0.5305867556052941,
+        0.8066907771186791
+      ]
+    },
+    {
+      "case": {
+        "name": "dense",
+        "count": 4,
+        "outcome": "dense",
+        "defer": false
+      },
+      "calls": [
+        {
+          "count": 4,
+          "targets_sha256": "94adfd5c098151f86dc8c693ce8684e6a9d622d78add2739860a4cf5e58c1b98",
+          "draws": [
+            0.43424123525619507,
+            0.2946650026871097,
+            0.5219839097124932
+          ],
+          "preserve": true
+        },
+        {
+          "count": 260,
+          "targets_sha256": "02c90d8a05a4ff0d7cc8bb8523ed2f46e232c71f8baaa170bfbe351da5d1e8ba",
+          "draws": [
+            0.5351095795631409,
+            0.5305867556052941,
+            0.8066907771186791
+          ],
+          "preserve": true
+        }
+      ],
+      "continuous": [],
+      "used_continuity": false,
+      "success": [
+        true
+      ],
+      "positions_sha256": "5971f154bb30a1386523837305985e74a672442b4c6a44174a2acb42a1b0f7fe",
+      "dt_sha256": "9e3761254740a9253ca1ff70668fd33b3d26a6e27238e0a4ddc0ea9c1a416591",
+      "after_rng": [
+        "b15baa748e05702b886840c24e696befc67736e73f2d5c1a13b797054ef4ed48",
+        0.19152078694749486,
+        0.9604947743238768
+      ]
+    },
+    {
+      "case": {
+        "name": "exhausted",
+        "count": 4,
+        "outcome": "failed",
+        "defer": false
+      },
+      "calls": [
+        {
+          "count": 4,
+          "targets_sha256": "94adfd5c098151f86dc8c693ce8684e6a9d622d78add2739860a4cf5e58c1b98",
+          "draws": [
+            0.43424123525619507,
+            0.2946650026871097,
+            0.5219839097124932
+          ],
+          "preserve": true
+        },
+        {
+          "count": 260,
+          "targets_sha256": "02c90d8a05a4ff0d7cc8bb8523ed2f46e232c71f8baaa170bfbe351da5d1e8ba",
+          "draws": [
+            0.5351095795631409,
+            0.5305867556052941,
+            0.8066907771186791
+          ],
+          "preserve": true
+        },
+        {
+          "count": 320,
+          "targets_sha256": "00d6f012dcf7c70b174c9d4537899dd867fe12c291db60612658b29c020811b0",
+          "draws": [
+            0.8302087187767029,
+            0.19152078694749486,
+            0.9604947743238768
+          ],
+          "preserve": true
+        }
+      ],
+      "continuous": [
+        {
+          "count": 4,
+          "targets_sha256": "94adfd5c098151f86dc8c693ce8684e6a9d622d78add2739860a4cf5e58c1b98",
+          "torch_rng_sha256": "df43063439b0969cbbfe7cdf2c1748864f6cda6f154353a6f809a63343535e59"
+        }
+      ],
+      "used_continuity": false,
+      "success": [
+        false
+      ],
+      "positions_sha256": "312bc6b846c9ce83a72b724e7ae9b8e990306131418cd50b5185328bb4d2e363",
+      "dt_sha256": "61b442a98a8f525ff6628e7a25fafc6905bcdbfe7879abf666ae53f2b6d69f81",
+      "after_rng": [
+        "df43063439b0969cbbfe7cdf2c1748864f6cda6f154353a6f809a63343535e59",
+        0.06790035819129137,
+        0.2896253777644655
+      ]
+    },
+    {
+      "case": {
+        "name": "continuous",
+        "count": 4,
+        "outcome": "continuous",
+        "defer": false
+      },
+      "calls": [
+        {
+          "count": 4,
+          "targets_sha256": "94adfd5c098151f86dc8c693ce8684e6a9d622d78add2739860a4cf5e58c1b98",
+          "draws": [
+            0.43424123525619507,
+            0.2946650026871097,
+            0.5219839097124932
+          ],
+          "preserve": true
+        },
+        {
+          "count": 260,
+          "targets_sha256": "02c90d8a05a4ff0d7cc8bb8523ed2f46e232c71f8baaa170bfbe351da5d1e8ba",
+          "draws": [
+            0.5351095795631409,
+            0.5305867556052941,
+            0.8066907771186791
+          ],
+          "preserve": true
+        },
+        {
+          "count": 320,
+          "targets_sha256": "00d6f012dcf7c70b174c9d4537899dd867fe12c291db60612658b29c020811b0",
+          "draws": [
+            0.8302087187767029,
+            0.19152078694749486,
+            0.9604947743238768
+          ],
+          "preserve": true
+        }
+      ],
+      "continuous": [
+        {
+          "count": 4,
+          "targets_sha256": "94adfd5c098151f86dc8c693ce8684e6a9d622d78add2739860a4cf5e58c1b98",
+          "torch_rng_sha256": "df43063439b0969cbbfe7cdf2c1748864f6cda6f154353a6f809a63343535e59"
+        }
+      ],
+      "used_continuity": true,
+      "success": [
+        true
+      ],
+      "positions_sha256": "312bc6b846c9ce83a72b724e7ae9b8e990306131418cd50b5185328bb4d2e363",
+      "dt_sha256": "61b442a98a8f525ff6628e7a25fafc6905bcdbfe7879abf666ae53f2b6d69f81",
+      "after_rng": [
+        "df43063439b0969cbbfe7cdf2c1748864f6cda6f154353a6f809a63343535e59",
+        0.06790035819129137,
+        0.2896253777644655
+      ]
+    },
+    {
+      "case": {
+        "name": "deferred",
+        "count": 4,
+        "outcome": "failed",
+        "defer": true
+      },
+      "calls": [
+        {
+          "count": 4,
+          "targets_sha256": "94adfd5c098151f86dc8c693ce8684e6a9d622d78add2739860a4cf5e58c1b98",
+          "draws": [
+            0.43424123525619507,
+            0.2946650026871097,
+            0.5219839097124932
+          ],
+          "preserve": true
+        }
+      ],
+      "continuous": [],
+      "used_continuity": false,
+      "success": [
+        false
+      ],
+      "positions_sha256": "312bc6b846c9ce83a72b724e7ae9b8e990306131418cd50b5185328bb4d2e363",
+      "dt_sha256": "61b442a98a8f525ff6628e7a25fafc6905bcdbfe7879abf666ae53f2b6d69f81",
+      "after_rng": [
+        "c27b58ca1de8d22987675cb1eb8921685571f49cee02313a4bf8108043c5adef",
+        0.5305867556052941,
+        0.8066907771186791
+      ]
+    },
+    {
+      "case": {
+        "name": "boundary",
+        "count": 260,
+        "outcome": "failed",
+        "defer": false
+      },
+      "calls": [
+        {
+          "count": 260,
+          "targets_sha256": "02c90d8a05a4ff0d7cc8bb8523ed2f46e232c71f8baaa170bfbe351da5d1e8ba",
+          "draws": [
+            0.43424123525619507,
+            0.2946650026871097,
+            0.5219839097124932
+          ],
+          "preserve": true
+        },
+        {
+          "count": 320,
+          "targets_sha256": "00d6f012dcf7c70b174c9d4537899dd867fe12c291db60612658b29c020811b0",
+          "draws": [
+            0.5351095795631409,
+            0.5305867556052941,
+            0.8066907771186791
+          ],
+          "preserve": true
+        }
+      ],
+      "continuous": [
+        {
+          "count": 260,
+          "targets_sha256": "02c90d8a05a4ff0d7cc8bb8523ed2f46e232c71f8baaa170bfbe351da5d1e8ba",
+          "torch_rng_sha256": "b15baa748e05702b886840c24e696befc67736e73f2d5c1a13b797054ef4ed48"
+        }
+      ],
+      "used_continuity": false,
+      "success": [
+        false
+      ],
+      "positions_sha256": "5971f154bb30a1386523837305985e74a672442b4c6a44174a2acb42a1b0f7fe",
+      "dt_sha256": "9e3761254740a9253ca1ff70668fd33b3d26a6e27238e0a4ddc0ea9c1a416591",
+      "after_rng": [
+        "b15baa748e05702b886840c24e696befc67736e73f2d5c1a13b797054ef4ed48",
+        0.19152078694749486,
+        0.9604947743238768
+      ]
+    },
+    {
+      "case": {
+        "name": "above_boundary",
+        "count": 320,
+        "outcome": "failed",
+        "defer": false
+      },
+      "calls": [
+        {
+          "count": 320,
+          "targets_sha256": "00d6f012dcf7c70b174c9d4537899dd867fe12c291db60612658b29c020811b0",
+          "draws": [
+            0.43424123525619507,
+            0.2946650026871097,
+            0.5219839097124932
+          ],
+          "preserve": true
+        }
+      ],
+      "continuous": [],
+      "used_continuity": false,
+      "success": [
+        false
+      ],
+      "positions_sha256": "e01d59f7ecfaa6d2bada2faccbd2c828dcf7e825c524386c17351a3f44f9b793",
+      "dt_sha256": "8c05dddbe588c76b1cd23e1b306e97809f805a8cada7e9dd60c770bdf0179a6b",
+      "after_rng": [
+        "c27b58ca1de8d22987675cb1eb8921685571f49cee02313a4bf8108043c5adef",
+        0.5305867556052941,
+        0.8066907771186791
+      ]
+    }
+  ]
+}

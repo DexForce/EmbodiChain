@@ -10,7 +10,7 @@ and current source code when this matrix and the repository diverge.
 - [Simulation core and scene objects](#simulation-core-and-scene-objects)
 - [Gym environments, managers, functors, and randomization](#gym-environments-managers-functors-and-randomization)
 - [Task Programs and configured deployments](#task-programs-and-configured-deployments)
-- [Atomic actions, motion planning, and IK](#atomic-actions-motion-planning-and-ik)
+- [Atomic Skills, motion planning, and IK](#atomic-skills-motion-planning-and-ik)
 - [Robots, sensors, and visualization](#robots-sensors-and-visualization)
 - [Reinforcement learning and data pipelines](#reinforcement-learning-and-data-pipelines)
 - [Official tasks and configuration packages](#official-tasks-and-configuration-packages)
@@ -20,7 +20,7 @@ and current source code when this matrix and the repository diverge.
 ## Common checks
 
 - Preserve the distribution name `embodichain`, the core import package
-  `embodichain`, and the bundled task import package `embodichain_tasks`.
+  `embodichain`, and the bundled task import package `embodichain.extensions.tasks`.
 - Check the complete call or configuration-resolution path, not only the
   changed definition. Inspect its closest tests and at least one caller or
   consumer.
@@ -127,9 +127,9 @@ Evidence surfaces: language decoder/validation, compiler, semantic catalog,
 configured composition/services, Gym registration/bridge, package-data tests,
 and the `$add-task-program` read-only deployment inspector.
 
-## Atomic actions, motion planning, and IK
+## Atomic Skills, motion planning, and IK
 
-**Paths:** `embodichain/lab/sim/atomic_actions/**`, `planners/**`,
+**Paths:** `embodichain/lab/sim/atomic_skills/**`, `planners/**`,
 `solvers/**`, and grasp/workspace utilities that feed plans.
 
 Check:
@@ -156,7 +156,7 @@ Check:
 
 Evidence surfaces: typed core contracts, engine/runner, simulation adapter,
 planner/solver base class, registration/export modules, and the nearest
-`tests/sim/atomic_actions/**`, planner, solver, or toolkit test.
+`tests/sim/atomic_skills/**`, planner, solver, or toolkit test.
 
 ## Robots, sensors, and visualization
 
@@ -212,7 +212,7 @@ tests. Run GPU/distributed tests serially and only when justified.
 
 ## Official tasks and configuration packages
 
-**Paths:** `extensions/embodichain_tasks/**` and reusable task components.
+**Paths:** `embodichain/extensions/tasks/**` and reusable task components.
 
 Check:
 
@@ -230,7 +230,7 @@ Check:
   composition, not only `yaml.safe_load`. Relative files and scene targets must
   resolve after wheel installation.
 - New or moved config/assets are present in wheel contents; deleted files are
-  not retained accidentally. Imports use `embodichain_tasks`, not a repository
+  not retained accidentally. Imports use `embodichain.extensions.tasks`, not a repository
   folder assumption.
 
 Evidence surfaces: the task-named module, deployment/component files,

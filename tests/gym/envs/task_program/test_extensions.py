@@ -37,9 +37,9 @@ from embodichain.lab.task_program.integrations.extensions import (
     build_standard_extension_declarations,
     validate_immutable_extension_declaration,
 )
-from embodichain.lab.sim.atomic_actions import PlanningContext
-from embodichain.lab.sim.atomic_actions.bindings import RuntimeEndpointTarget
-from embodichain.lab.sim.atomic_actions.runtime_commands import (
+from embodichain.lab.sim.atomic_skills import PlanningContext
+from embodichain.lab.sim.atomic_skills.bindings import RuntimeEndpointTarget
+from embodichain.lab.sim.atomic_skills.runtime_commands import (
     EndpointCommand,
     RuntimeCommandPayload,
 )

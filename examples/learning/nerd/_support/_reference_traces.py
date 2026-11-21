@@ -28,7 +28,7 @@ import numpy as np
 import torch
 
 from examples.learning.nerd._support._evaluation import _teacher_row_sha256
-from embodichain_models.dynamics.nerd.data import load_manifest
+from embodichain.extensions.models.dynamics.nerd.data import load_manifest
 from ._reference import OFFICIAL_COMMIT
 
 __all__: list[str] = []

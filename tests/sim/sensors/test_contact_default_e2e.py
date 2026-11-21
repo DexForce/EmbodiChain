@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import pytest
 import warp as wp
+import torch
 
 from embodichain.lab.sim.cfg import (
     DefaultPhysicsCfg,
@@ -26,7 +27,7 @@ from embodichain.lab.sim.cfg import (
     RigidBodyPhysicsCfg,
     RigidObjectCfg,
 )
-from embodichain.lab.sim.sensors import ContactSensorCfg
+from embodichain.lab.sim.sensors import ContactSensorCfg, ContactPermissionChecker
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.sim_manager import SimulationManager, SimulationManagerCfg
 
@@ -110,6 +111,86 @@ def test_default_contact_sensor_preserves_contact_multiplicity(
             sensor.get_actor_info(actor_id).path.endswith("/cube")
             for actor_id in cube_actor_ids
         )
+        assert sim.is_use_gpu_physics == device.startswith("cuda")
+        assert sim.get_world().get_physics_scene().is_direct_gpu() == (
+            device.startswith("cuda")
+        )
+        if device == "cpu":
+            maps = [{} for _ in range(2)]
+            for uid in ("cube", "ground", "default_plane"):
+                values = sensor.get_actor_ids(uid)[:, 0].cpu().tolist()
+                for row, actor in enumerate(values):
+                    maps[row][actor] = uid
+            checker = ContactPermissionChecker(
+                sensor,
+                maps,
+                allowed_contacts=(("cube", "ground"),),
+                moving_frames=("cube",),
+            )
+            accepted = checker.check()
+            assert accepted[:, 0].cpu().tolist() == [0, 0]
+            refused = ContactPermissionChecker(
+                sensor, maps, allowed_contacts=(), moving_frames=("cube",)
+            )
+            assert refused.check()[:, 0].cpu().tolist() == [3, 3]
+            assert accepted[:, 0].cpu().tolist() == [0, 0]
+            if device.startswith("cuda"):
+                other = torch.cuda.Stream()
+                with torch.cuda.stream(other):
+                    repeated = checker.check()
+                other.synchronize()
+                assert repeated[:, 0].cpu().tolist() == [0, 0]
+            bounded = sim.add_sensor(
+                ContactSensorCfg(
+                    uid="bounded",
+                    rigid_uid_list=["cube"],
+                    filter_need_both_actor=False,
+                    max_contacts_per_env=1,
+                )
+            )
+            bounded.update()
+            overflow = ContactPermissionChecker(
+                bounded,
+                maps,
+                allowed_contacts=(("cube", "ground"),),
+                moving_frames=("cube",),
+            )
+            assert overflow.check()[:, 0].cpu().tolist() == [4, 4]
+    finally:
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
+
+
+def test_resultant_does_not_claim_normal_force_from_total_default_cpu_impulse() -> None:
+    from embodichain.lab.sim.sensors import ContactResultantCfg
+
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            num_envs=2,
+            arena_space=2.0,
+            physics_cfg=DefaultPhysicsCfg(device="cpu"),
+        )
+    )
+    try:
+        sim.add_rigid_object(
+            RigidObjectCfg(
+                uid="cube",
+                shape=CubeCfg(size=(0.2, 0.2, 0.2)),
+                body_type="dynamic",
+                init_pos=(0.0, 0.0, 0.15),
+            )
+        )
+        sensor = sim.add_sensor(ContactResultantCfg(uid="resultant", asset_uid="cube"))
+        for _ in range(40):
+            sim.update(step=1, render_final_step=False)
+            if sensor.get_data()["contact"].all():
+                break
+        assert sensor.get_data()["contact"].tolist() == [True, True]
+        assert sensor.get_data()["normal_valid"].tolist() == [False, False]
+        assert sensor.get_data()["friction_valid"].tolist() == [False, False]
+        sim.reset_objects_state(env_ids=[0])
+        assert sensor.get_sample_metadata()["valid"].tolist() == [False, True]
     finally:
         sim.destroy(exit_process=False)
         SimulationManager.flush_cleanup_queue()

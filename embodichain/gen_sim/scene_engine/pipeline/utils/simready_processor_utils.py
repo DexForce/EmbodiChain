@@ -16,20 +16,19 @@
 
 from __future__ import annotations
 
+__all__: list[str] = []
+
 import json
-import os
 from pathlib import Path
-import sys
-from typing import Callable
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from scipy.spatial.transform import Rotation
 import trimesh
 
-from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
-    OpenAICompatibleVLM,
-)
+from embodichain.gen_sim._blender_runtime import _run_blender_job
+
+from embodichain.gen_sim.services.compat import VisionClient, vision_for_role
 
 _VLM_SYSTEM_PROMPT = """You inspect one isolated 3D object from elevated oblique and top views.
 The object is temporarily visual-normalized and placed on a small neutral
@@ -111,10 +110,6 @@ or prose outside the JSON object.
 """
 
 _POSE_CANDIDATE_X_ROTATIONS_DEGREES = {"a": 90.0, "b": -90.0}
-_VLM_ORTHOGRAPHIC_SCALE = 1.75  # Leave floor context around normalized assets.
-_VISUAL_MAX_OBJECT_EXTENT = 0.75  # Shared temporary extent for VLM pose views.
-_VISUAL_FLOOR_SCALE = 1.3  # Preserve a small border around the asset footprint.
-_VISUAL_MIN_FLOOR_SIZE = 0.45  # Keep a contact cue for compact upright objects.
 
 DEFAULT_NEEDED_LAYOUT = (
     "Rest this asset naturally, physically stably, and functionally correctly "
@@ -130,150 +125,22 @@ def render_object_front_top_views(
     output_path: str | Path,
     resolution: int = 512,
 ) -> Path:
-    """Render grounded fixed z-up oblique/top views and compose them horizontally."""
+    """Render grounded fixed z-up views in the isolated Blender runtime."""
     if resolution <= 0:
         raise ValueError("resolution must be positive.")
-    source_path = Path(glb_path).expanduser().resolve()
-    if not source_path.is_file():
-        raise FileNotFoundError(f"GLB for VLM rendering not found: {source_path}")
-    output_path = Path(output_path).expanduser().resolve()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    front_path = output_path.with_name(f"{output_path.stem}_front.png")
-    top_path = output_path.with_name(f"{output_path.stem}_top.png")
-    try:
-        import bpy
-        from mathutils import Vector
-    except ImportError as exc:
-        raise RuntimeError(
-            "Blender's bpy is required for SimReady VLM view rendering."
-        ) from exc
-
-    _run_blender_operation_silently(
-        lambda: bpy.ops.wm.read_factory_settings(use_empty=True)
-    )
-    _run_blender_operation_silently(
-        lambda: bpy.ops.import_scene.gltf(filepath=str(source_path))
-    )
-    mesh_objects = [obj for obj in bpy.context.scene.objects if obj.type == "MESH"]
-    if not mesh_objects:
-        raise ValueError(f"GLB contains no mesh objects: {source_path}")
-    scene = bpy.context.scene
-    # Eevee renders imported GLB materials and textures instead of Workbench previews.
-    try:
-        scene.render.engine = "BLENDER_EEVEE_NEXT"
-    except TypeError:
-        scene.render.engine = "BLENDER_EEVEE"
-    scene.render.resolution_x = resolution
-    scene.render.resolution_y = resolution
-    scene.render.resolution_percentage = 100
-    scene.render.image_settings.file_format = "PNG"
-    scene.render.film_transparent = False
-    if scene.world is None:
-        scene.world = bpy.data.worlds.new("VLM_World")
-    scene.world.color = (0.08, 0.08, 0.08)
-    for name, location, energy in (
-        ("VLM_Key", (2.0, -2.0, 3.0), 700.0),
-        ("VLM_Fill", (-2.0, 1.0, 2.0), 400.0),
-    ):
-        light_data = bpy.data.lights.new(name, type="AREA")
-        light_data.energy = energy
-        light_data.shape = "DISK"
-        light_data.size = 4.0
-        light = bpy.data.objects.new(name, light_data)
-        light.location = location
-        light.rotation_euler = (
-            (Vector((0.0, 0.0, 0.0)) - light.location)
-            .to_track_quat("-Z", "Y")
-            .to_euler()
+    source = Path(glb_path).expanduser().resolve()
+    if not source.is_file():
+        raise FileNotFoundError(f"GLB for VLM rendering not found: {source}")
+    return Path(
+        _run_blender_job(
+            "front_top",
+            {
+                "glb_path": str(source),
+                "output_path": str(Path(output_path).expanduser().resolve()),
+                "resolution": resolution,
+            },
         )
-        scene.collection.objects.link(light)
-    camera_data = bpy.data.cameras.new("VLM_Camera")
-    camera = bpy.data.objects.new("VLM_Camera", camera_data)
-    scene.collection.objects.link(camera)
-    scene.camera = camera
-    camera.data.type = "ORTHO"
-    # A wider framing preserves floor and orientation context for VLM inspection.
-    camera.data.ortho_scale = _VLM_ORTHOGRAPHIC_SCALE
-
-    _place_meshes_on_visual_floor(
-        bpy=bpy,
-        mesh_objects=mesh_objects,
     )
-
-    def render_view(path: Path, location: tuple[float, float, float]) -> None:
-        camera.location = location
-        camera.rotation_euler = (
-            (Vector((0.0, 0.0, 0.0)) - camera.location)
-            .to_track_quat("-Z", "Y")
-            .to_euler()
-        )
-        scene.render.filepath = str(path)
-        _run_blender_operation_silently(lambda: bpy.ops.render.render(write_still=True))
-
-    # A diagonal oblique view avoids looking straight down a long planar tool.
-    render_view(front_path, (3.0, -4.0, 3.0))
-    render_view(top_path, (0.0, 0.0, 4.0))
-    try:
-        with Image.open(front_path) as front, Image.open(top_path) as top:
-            composed = Image.new("RGB", (resolution * 2, resolution), "white")
-            composed.paste(front.convert("RGB"), (0, 0))
-            composed.paste(top.convert("RGB"), (resolution, 0))
-            draw = ImageDraw.Draw(composed)
-            # Use a readable scaled font for the panel labels when available.
-            try:
-                font = ImageFont.truetype(
-                    "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf",
-                    max(24, resolution // 16),
-                )
-            except OSError:
-                font = ImageFont.load_default()
-            # Label each panel so the VLM and manual debugging can distinguish views.
-            for label, origin in (
-                ("OBLIQUE VIEW", (0, 0)),
-                ("TOP VIEW", (resolution, 0)),
-            ):
-                x, y = origin
-                text_box = draw.textbbox((x + 16, y + 16), label, font=font)
-                draw.rectangle(
-                    (
-                        text_box[0] - 8,
-                        text_box[1] - 6,
-                        text_box[2] + 8,
-                        text_box[3] + 6,
-                    ),
-                    fill="white",
-                )
-                draw.text((x + 16, y + 16), label, fill="black", font=font)
-            # Mark the positive axes used by each projection for VLM interpretation.
-            _draw_arrow(
-                draw,
-                (resolution - 62, 62),
-                (resolution - 62, 20),
-                "+Z",
-                font,
-                color="blue",
-            )
-            _draw_arrow(
-                draw,
-                (2 * resolution - 92, 62),
-                (2 * resolution - 42, 62),
-                "+X",
-                font,
-                color="red",
-            )
-            _draw_arrow(
-                draw,
-                (2 * resolution - 92, 62),
-                (2 * resolution - 92, 20),
-                "+Y",
-                font,
-                color="green",
-            )
-            composed.save(output_path)
-    finally:
-        front_path.unlink(missing_ok=True)
-        top_path.unlink(missing_ok=True)
-    return output_path
 
 
 def render_object_pose_switch_candidates(
@@ -333,218 +200,16 @@ def _render_grounded_pose_candidate(
     output_path: Path,
     resolution: int,
 ) -> None:
-    """Render one temporary x-rotated candidate in the shared visual frame."""
-    try:
-        import bpy
-        from mathutils import Matrix, Vector
-    except ImportError as exc:
-        raise RuntimeError(
-            "Blender's bpy is required for SimReady candidate rendering."
-        ) from exc
-    _run_blender_operation_silently(
-        lambda: bpy.ops.wm.read_factory_settings(use_empty=True)
+    """Render one temporary candidate in the isolated Blender runtime."""
+    _run_blender_job(
+        "pose_candidate",
+        {
+            "glb_path": str(glb_path.resolve()),
+            "x_rotation_degrees": x_rotation_degrees,
+            "output_path": str(output_path.resolve()),
+            "resolution": resolution,
+        },
     )
-    _run_blender_operation_silently(
-        lambda: bpy.ops.import_scene.gltf(filepath=str(glb_path))
-    )
-    mesh_objects = [obj for obj in bpy.context.scene.objects if obj.type == "MESH"]
-    if not mesh_objects:
-        raise ValueError(f"GLB contains no mesh objects: {glb_path}")
-    scene = bpy.context.scene
-    _configure_vlm_render_scene(
-        scene=scene, resolution=resolution, bpy=bpy, Vector=Vector
-    )
-    root = bpy.data.objects.new("PoseCandidateRoot", None)
-    scene.collection.objects.link(root)
-    for mesh_object in mesh_objects:
-        original_world_matrix = mesh_object.matrix_world.copy()
-        mesh_object.parent = root
-        mesh_object.matrix_parent_inverse = root.matrix_world.inverted()
-        mesh_object.matrix_world = original_world_matrix
-    center = _mesh_world_bounds(mesh_objects)[0]
-    x_rotation = Rotation.from_euler("x", x_rotation_degrees, degrees=True).as_matrix()
-    rotation_transform = np.eye(4)
-    rotation_transform[:3, :3] = x_rotation
-    root.matrix_world = Matrix(
-        _translation_matrix(center) @ rotation_transform @ _translation_matrix(-center)
-    )
-    _place_meshes_on_visual_floor(bpy=bpy, mesh_objects=mesh_objects)
-    _add_oblique_camera(scene=scene, bpy=bpy, Vector=Vector)
-    scene.render.filepath = str(output_path)
-    _run_blender_operation_silently(lambda: bpy.ops.render.render(write_still=True))
-
-
-def _configure_vlm_render_scene(
-    *, scene: object, resolution: int, bpy: object, Vector: object
-) -> None:
-    """Configure the shared illuminated, opaque Blender render scene."""
-    try:
-        scene.render.engine = "BLENDER_EEVEE_NEXT"
-    except TypeError:
-        scene.render.engine = "BLENDER_EEVEE"
-    scene.render.resolution_x = resolution
-    scene.render.resolution_y = resolution
-    scene.render.resolution_percentage = 100
-    scene.render.image_settings.file_format = "PNG"
-    scene.render.film_transparent = False
-    if scene.world is None:
-        scene.world = bpy.data.worlds.new("VLM_World")
-    scene.world.color = (0.08, 0.08, 0.08)
-    for name, location, energy in (
-        ("VLM_Key", (2.0, -2.0, 3.0), 700.0),
-        ("VLM_Fill", (-2.0, 1.0, 2.0), 400.0),
-    ):
-        light_data = bpy.data.lights.new(name, type="AREA")
-        light_data.energy = energy
-        light_data.shape = "DISK"
-        light_data.size = 4.0
-        light = bpy.data.objects.new(name, light_data)
-        light.location = location
-        light.rotation_euler = (
-            (Vector((0.0, 0.0, 0.0)) - light.location)
-            .to_track_quat("-Z", "Y")
-            .to_euler()
-        )
-        scene.collection.objects.link(light)
-
-
-def _add_oblique_camera(*, scene: object, bpy: object, Vector: object) -> None:
-    """Add the fixed, wider z-up oblique camera used for pose candidates."""
-    camera_data = bpy.data.cameras.new("VLM_CandidateCamera")
-    camera = bpy.data.objects.new("VLM_CandidateCamera", camera_data)
-    scene.collection.objects.link(camera)
-    scene.camera = camera
-    camera.data.type = "ORTHO"
-    camera.data.ortho_scale = _VLM_ORTHOGRAPHIC_SCALE
-    camera.location = (0.0, -4.0, 5.0)
-    camera.rotation_euler = (
-        (Vector((0.0, 0.0, 0.3)) - camera.location).to_track_quat("-Z", "Y").to_euler()
-    )
-
-
-def _place_meshes_on_visual_floor(*, bpy: object, mesh_objects: list[object]) -> None:
-    """Normalize one temporary object and place it on a local support patch."""
-    from mathutils import Matrix, Vector
-
-    _run_blender_operation_silently(lambda: bpy.context.view_layer.update())
-    minimum, maximum = _mesh_world_aabb(mesh_objects)
-    extent = maximum - minimum
-    largest_extent = float(np.max(extent))
-    if not np.isfinite(largest_extent) or largest_extent <= 0.0:
-        raise ValueError("VLM pose rendering requires a mesh with positive extent.")
-    center = (minimum + maximum) * 0.5
-    visual_scale = _VISUAL_MAX_OBJECT_EXTENT / largest_extent
-    normalization_transform = np.eye(4)
-    normalization_transform[:3, :3] *= visual_scale
-    normalization_transform[:3, 3] = center - visual_scale * center
-    for mesh_object in mesh_objects:
-        mesh_object.matrix_world = (
-            Matrix(normalization_transform) @ mesh_object.matrix_world
-        )
-    _run_blender_operation_silently(lambda: bpy.context.view_layer.update())
-
-    minimum, maximum = _mesh_world_aabb(mesh_objects)
-    center = (minimum + maximum) * 0.5
-    for mesh_object in mesh_objects:
-        # Assign in world space so this remains correct under a rotated parent root.
-        mesh_object.matrix_world.translation -= Vector(
-            (center[0], center[1], minimum[2])
-        )
-    _run_blender_operation_silently(lambda: bpy.context.view_layer.update())
-    floor_size = max(
-        _VISUAL_MIN_FLOOR_SIZE,
-        _VISUAL_FLOOR_SCALE * float(np.max(maximum[:2] - minimum[:2])),
-    )
-    bpy.ops.mesh.primitive_plane_add(size=floor_size, location=(0.0, 0.0, 0.0))
-    floor = bpy.context.object
-    floor.name = "VLM_VisualFloor"
-    material = bpy.data.materials.new("VLM_VisualFloorMaterial")
-    material.diffuse_color = (0.22, 0.22, 0.22, 1.0)
-    floor.data.materials.append(material)
-
-
-def _mesh_world_bounds(mesh_objects: list[object]) -> tuple[np.ndarray, float]:
-    """Return a world-space AABB centre and its minimum z coordinate."""
-    minimum, maximum = _mesh_world_aabb(mesh_objects)
-    return (minimum + maximum) * 0.5, float(minimum[2])
-
-
-def _mesh_world_aabb(mesh_objects: list[object]) -> tuple[np.ndarray, np.ndarray]:
-    """Return world-space AABB minimum and maximum for one temporary object."""
-    from mathutils import Vector
-
-    points = np.asarray(
-        [
-            tuple(mesh_object.matrix_world @ Vector(corner))
-            for mesh_object in mesh_objects
-            for corner in mesh_object.bound_box
-        ],
-        dtype=float,
-    )
-    return points.min(axis=0), points.max(axis=0)
-
-
-def _translation_matrix(translation: np.ndarray) -> np.ndarray:
-    """Return one homogeneous translation transform."""
-    transform = np.eye(4)
-    transform[:3, 3] = translation
-    return transform
-
-
-def _run_blender_operation_silently(operation: Callable[[], object]) -> object:
-    """Run one bpy operation without forwarding Blender-native console output."""
-    # bpy writes render progress directly to process file descriptors, not Python streams.
-    sys.stdout.flush()
-    sys.stderr.flush()
-    saved_stdout_fd = os.dup(1)
-    saved_stderr_fd = os.dup(2)
-    try:
-        with open(os.devnull, "w", encoding="utf-8") as null_output:
-            os.dup2(null_output.fileno(), 1)
-            os.dup2(null_output.fileno(), 2)
-            return operation()
-    finally:
-        os.dup2(saved_stdout_fd, 1)
-        os.dup2(saved_stderr_fd, 2)
-        os.close(saved_stdout_fd)
-        os.close(saved_stderr_fd)
-
-
-def _draw_arrow(
-    draw: ImageDraw.ImageDraw,
-    start: tuple[int, int],
-    end: tuple[int, int],
-    label: str,
-    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
-    color: str,
-) -> None:
-    """Draw one labeled positive-axis arrow on a rendered view."""
-    dx, dy = end[0] - start[0], end[1] - start[1]
-    length = max(abs(dx), abs(dy))
-    if length == 0:
-        raise ValueError("Axis arrow start and end must differ.")
-    unit_x, unit_y = dx / length, dy / length
-    perpendicular_x, perpendicular_y = -unit_y, unit_x
-    head_length = 14.0
-    head_width = 8.0
-    tip_x, tip_y = end
-    base_x = tip_x - unit_x * head_length
-    base_y = tip_y - unit_y * head_length
-    arrowhead = (
-        (tip_x, tip_y),
-        (
-            base_x + perpendicular_x * head_width,
-            base_y + perpendicular_y * head_width,
-        ),
-        (
-            base_x - perpendicular_x * head_width,
-            base_y - perpendicular_y * head_width,
-        ),
-    )
-    draw.line((*start, *end), fill=color, width=4)
-    draw.polygon(arrowhead, fill=color)
-    # Put each axis label beside its arrowhead so it does not cover the arrow.
-    draw.text((int(tip_x + 8), int(tip_y - 8)), label, fill=color, font=font)
 
 
 def _label_font(image_height: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -579,7 +244,7 @@ def query_vlm_object_pose_and_target_size(
     scene_object_description: str,
     needed_layout: str,
     rendered_views_path: str | Path,
-    vlm_client: OpenAICompatibleVLM,
+    vlm_client: VisionClient,
     debug_output_path: str | Path | None = None,
     json_max_attempts: int = 3,
 ) -> dict[str, object]:
@@ -588,7 +253,7 @@ def query_vlm_object_pose_and_target_size(
         raise ValueError("json_max_attempts must be at least 1.")
     last_validation_error: ValueError | None = None
     for _ in range(json_max_attempts):
-        response_text = vlm_client.complete(
+        response_text = vision_for_role(vlm_client, "scene_asset_dimensions").complete(
             system_prompt=_VLM_SYSTEM_PROMPT,
             user_prompt=(
                 f"Object description:\n{scene_object_description}\n\n"
@@ -636,7 +301,7 @@ def query_vlm_pose_switch_candidate(
     scene_object_description: str,
     needed_layout: str,
     rendered_candidates_path: str | Path,
-    vlm_client: OpenAICompatibleVLM,
+    vlm_client: VisionClient,
     debug_output_path: str | Path | None = None,
     json_max_attempts: int = 3,
 ) -> tuple[float, str]:
@@ -645,7 +310,7 @@ def query_vlm_pose_switch_candidate(
         raise ValueError("json_max_attempts must be at least 1.")
     last_validation_error: ValueError | None = None
     for _ in range(json_max_attempts):
-        response_text = vlm_client.complete(
+        response_text = vision_for_role(vlm_client, "scene_asset_orientation").complete(
             system_prompt=_VLM_POSE_CANDIDATE_SYSTEM_PROMPT,
             user_prompt=(
                 f"Object description:\n{scene_object_description}\n\n"
@@ -832,3 +497,40 @@ def _strip_json_code_fence(response_text: str) -> str:
     if lines and lines[-1].strip() == "```":
         lines = lines[:-1]
     return "\n".join(lines).strip()
+
+
+def _draw_arrow(
+    draw: ImageDraw.ImageDraw,
+    start: tuple[int, int],
+    end: tuple[int, int],
+    label: str,
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    color: str,
+) -> None:
+    """Draw one labeled positive-axis arrow on a rendered view."""
+    dx, dy = end[0] - start[0], end[1] - start[1]
+    length = max(abs(dx), abs(dy))
+    if length == 0:
+        raise ValueError("Axis arrow start and end must differ.")
+    unit_x, unit_y = dx / length, dy / length
+    perpendicular_x, perpendicular_y = -unit_y, unit_x
+    head_length = 14.0
+    head_width = 8.0
+    tip_x, tip_y = end
+    base_x = tip_x - unit_x * head_length
+    base_y = tip_y - unit_y * head_length
+    arrowhead = (
+        (tip_x, tip_y),
+        (
+            base_x + perpendicular_x * head_width,
+            base_y + perpendicular_y * head_width,
+        ),
+        (
+            base_x - perpendicular_x * head_width,
+            base_y - perpendicular_y * head_width,
+        ),
+    )
+    draw.line((*start, *end), fill=color, width=4)
+    draw.polygon(arrowhead, fill=color)
+    # Put each axis label beside its arrowhead so it does not cover the arrow.
+    draw.text((int(tip_x + 8), int(tip_y - 8)), label, fill=color, font=font)

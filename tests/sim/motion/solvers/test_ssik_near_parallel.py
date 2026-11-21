@@ -29,7 +29,7 @@ import torch
 from scipy.spatial.transform import Rotation
 
 from embodichain.lab.sim.motion.solvers import SSIKSolver, SSIKSolverCfg
-from embodichain_robots import ARX5Cfg, FlexivRizon4SCfg
+from embodichain.extensions.robots import ARX5Cfg, FlexivRizon4SCfg
 
 _DEVICES = [
     "cpu",
@@ -380,7 +380,7 @@ torch.set_num_interop_threads(1)
 stage("torch_imported", version=torch.__version__,
       intraop_threads=torch.get_num_threads(), interop_threads=torch.get_num_interop_threads())
 from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
-from embodichain_robots import ARX5Cfg
+from embodichain.extensions.robots import ARX5Cfg
 stage("solver_imported", source=sys.modules[SSIKSolverCfg.__module__].__file__)
 preset = ARX5Cfg.from_dict({})
 original = preset.solver_cfg["arm"]

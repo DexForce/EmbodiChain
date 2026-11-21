@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 import json
 import hashlib
@@ -60,8 +62,12 @@ class URDFAssemblySignatureManager:
             str: MD5 hash representing the assembly configuration
         """
         signature_data = {
+            # Rebuild assemblies cached before OBJ mtllib dependencies were copied.
+            "mesh_copy_version": 1,
+            "sensor_attachment_version": 1,
             "output_filename": os.path.basename(output_path),
             "components": {},
+            "sensors": {},
             # Optional metadata that can affect the assembly even if the
             # component URDF files themselves do not change. For example,
             # the processing order and name prefixes for each component,
@@ -103,6 +109,22 @@ class URDFAssemblySignatureManager:
             # Special key reserved for global name_case policy (link/joint casing)
             if comp_type == "__name_case__":
                 signature_data["name_case"] = to_serializable(comp_obj)
+                continue
+
+            if comp_type == "__sensors__":
+                for name, attachment in comp_obj.items():
+                    signature_data["sensors"][name] = {
+                        "source": str(attachment.sensor_urdf),
+                        "file_md5": self._calculate_file_md5(attachment.sensor_urdf),
+                        "parent_component": attachment.parent_component,
+                        "parent_link": attachment.parent_link,
+                        "transform": (
+                            attachment.transform.tolist()
+                            if attachment.transform is not None
+                            else None
+                        ),
+                        "sensor_type": attachment.sensor_type,
+                    }
                 continue
 
             if comp_obj is None:

@@ -36,6 +36,7 @@ from embodichain.data.asset_catalog import (
     PreparationContext,
 )
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+from embodichain.lab.gym.utils.registration import get_env_spec
 from embodichain.lab.task_program.integrations.asset_materialization import (
     AssetAdaptationCfg,
     AssetPourAdaptationCfg,
@@ -49,7 +50,7 @@ from embodichain.lab.task_program.semantics.asset_requirements import (
 from embodichain.lab.task_program.semantics.asset_matching import resolve_asset_set
 
 ROOT = Path(__file__).resolve().parents[4]
-CONFIGS = ROOT / "extensions/embodichain_tasks/configs"
+CONFIGS = ROOT / "embodichain/extensions/tasks/configs"
 POUR = CONFIGS / "tasks/manipulation/tableware/pour_water"
 PROFILE_ID = "ur5_dh_pgi_140_80"
 
@@ -108,6 +109,7 @@ def pouring(tmp_path):
     task = {
         "id": "AssetPourTest-v0",
         "environment": {"component": "env.yaml"},
+        "evaluation": {"component": "evaluation.yaml"},
         "embodiment": {
             "component": str(CONFIGS / "components/embodiments/ur5_dh_pgi_140_80.yaml")
         },
@@ -124,6 +126,10 @@ def pouring(tmp_path):
         ("env", env),
         ("integration", integration),
         ("program", program),
+        (
+            "evaluation",
+            yaml.safe_load((POUR / "task_program/evaluation.yaml").read_text()),
+        ),
     ):
         _dump(source / f"{name}.yaml", document)
     return source / "task.yaml", requirements
@@ -192,10 +198,26 @@ def _prepared(tmp_path, *, bottle_height=0.14, cup_height=0.1, change=None):
 
 
 @pytest.mark.parametrize("bottle_height,cup_height", [(0.14, 0.1), (0.18, 0.12)])
+@pytest.mark.parametrize("remapped", (False, True))
 def test_pouring_rebinds_selected_bottle_and_cup_geometry(
-    pouring, tmp_path, bottle_height, cup_height
+    pouring, tmp_path, bottle_height, cup_height, remapped
 ):
     source, requirements = pouring
+    if remapped:
+        path = source.parent / "integration.yaml"
+        integration = yaml.safe_load(path.read_text())
+        for entity in integration["scene_binding"]["rigid_objects"]:
+            entity["simulation_uid"] = "native_" + entity["entity_id"]
+        # An existing support may itself omit a same-name native UID.
+        integration["scene_binding"]["rigid_objects"].append(
+            {"entity_id": "table", "dynamics": "static", "affordances": []}
+        )
+        _dump(path, integration)
+        path = source.parent / "env.yaml"
+        env = yaml.safe_load(path.read_text())
+        for obj in env["simulation"]["rigid_object"]:
+            obj["uid"] = "native_" + obj["uid"]
+        _dump(path, env)
     selected = resolve_asset_set(
         requirements,
         _prepared(
@@ -217,7 +239,7 @@ def test_pouring_rebinds_selected_bottle_and_cup_geometry(
     program = yaml.safe_load(
         (result.deployment_path.parent / "program.yaml").read_text()
     )
-    options = integration["profile"]["action_options"]
+    options = integration["profile"]["skill_options"]
     assert options["pick"]["fixed_object_to_eef"] == np.eye(4).reshape(-1).tolist()
     bottle = next(
         node
@@ -245,10 +267,17 @@ def test_pouring_rebinds_selected_bottle_and_cup_geometry(
     validators = program["program"]["items"][3]["validators"]
     assert all(item["kind"] == "object_relative_position" for item in validators)
     assert all(item["reference_frame"] == "parent" for item in validators)
-    assert (
-        program["program"]["items"][1]["validators"][0]["reference_frame"] == "parent"
+    assert program["program"]["items"][1]["validators"] == [
+        {"kind": "condition", "ref": "bottle_above_cup"}
+    ]
+    registration = get_env_spec(config["id"]).task_program_registration
+    arrival = registration.evaluation_conditions["bottle_above_cup"]
+    assert arrival.parameters["bottle_above_cup"]["displacement"] == pytest.approx(
+        pose[:3, 3].tolist()
     )
-    assert all(item["reference"] == "bottle_asset_return_table" for item in validators)
+    assert arrival.parameters["bottle_above_cup"]["tolerance"] == 0.01
+    support_id = "table" if remapped else "bottle_asset_return_table"
+    assert all(item["reference"] == support_id for item in validators)
     assert validators[0]["position_tolerance"] == pytest.approx(
         [0.05 / math.sqrt(3)] * 3
     )
@@ -377,7 +406,11 @@ def test_pouring_preserves_schema_default_position_tolerance(pouring, tmp_path):
 
     source, requirements = pouring
     program_path = source.parent / "program.yaml"
-    program = yaml.safe_load(program_path.read_text())
+    from embodichain.lab.task_program.language.authoring import normalize_task_program
+
+    program = normalize_task_program(
+        yaml.safe_load(program_path.read_text())
+    ).declaration
     for segment in program["program"]["items"]:
         for validator in segment.get("validators", []):
             if validator["kind"] == "object_near_target":

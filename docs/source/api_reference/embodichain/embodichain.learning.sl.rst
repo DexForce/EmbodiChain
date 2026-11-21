@@ -1,10 +1,13 @@
-Supervised learning (SL)
-========================
+Supervised learning
+===================
 
 The SL layer composes objective-owned losses with a common optimizer update and
 offline run lifecycle. Batches retain their tensor-tree structure and causal
 masks; source adapters, objectives and downstream execution define their semantics.
 Importing this package does not initialize simulation or reinforcement learning.
+
+Start with the :doc:`Supervised Learning overview </overview/learning/supervised_learning>`
+for the component data flow, a first training recipe and source-selection guidance.
 
 Single-node launch
 ------------------
@@ -30,8 +33,8 @@ The example factory uses a small masked MLP regression corpus generated locally.
 For ``WORLD_SIZE > 1``, the workflow initializes the process group before invoking
 the recipe factory. It resolves ``trainer.device`` to ``cpu`` or
 ``cuda:LOCAL_RANK``. ``trainer.batch_size`` is per worker; the global number of
-drawn examples is ``batch_size * world_size``. Each worker samples independently
-with replacement, so examples can overlap. The learning rate is not scaled
+drawn examples is ``batch_size * world_size``. Sampling semantics belong to each source: the tensor example samples independently
+with replacement, while explicit offline adapters may shard an epoch traversal. The learning rate is not scaled
 automatically.
 
 Objectives return a local mean loss and its valid supervision count in
@@ -99,6 +102,7 @@ embodichain.learning.sl
    LossResult
    SupervisedBatch
    SupervisedObjective
+   SupervisedTrainingState
    SupervisedLearner
    SupervisedSource
    TensorBatchSource
@@ -114,6 +118,9 @@ embodichain.learning.sl
    :members:
 
 .. autoclass:: SupervisedObjective
+   :members:
+
+.. autoclass:: SupervisedTrainingState
    :members:
 
 .. autoclass:: SupervisedLearner
@@ -234,6 +241,7 @@ embodichain.learning.sl.types
    SupervisedBatch
    LossResult
    SupervisedObjective
+   SupervisedTrainingState
 
 .. autoclass:: SupervisedBatch
    :members:
@@ -242,6 +250,9 @@ embodichain.learning.sl.types
    :members:
 
 .. autoclass:: SupervisedObjective
+   :members:
+
+.. autoclass:: SupervisedTrainingState
    :members:
 
 embodichain.learning.sl.workflow
@@ -265,3 +276,17 @@ Concrete models own their physical codecs, objectives and source adapters in
 the :doc:`official model library </api_reference/model_catalogs>`. The NeRD
 recipe connects committed trajectory windows to this common trainer without
 loading simulation or requiring the example runner.
+
+Recoverable update participants
+-------------------------------
+
+Factories may pass ordered ``training_states`` implementing
+``SupervisedTrainingState``. Participants commit after optimizer success; their
+owned state is saved per rank, validated before live recovery mutation, and
+restored after validation callbacks. This supports data cursors and model
+averages without model-specific trainer subclasses. Default empty participants
+retain compatibility with existing checkpoints.
+
+Checkpoint formats 3/4 mark nonempty training participants or nondefault buffer
+broadcasting, so older readers reject required state instead of discarding it.
+Default recipes continue to write/read formats 1/2.

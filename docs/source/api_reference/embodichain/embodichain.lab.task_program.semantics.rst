@@ -41,6 +41,8 @@ embodichain.lab.task_program.semantics
       Pick
       Place
       HandOver
+      MoveHeldObjectCall
+      SemanticRelativePose
       RegisteredSemanticCall
       SemanticCallDescriptor
       SemanticCallCatalog

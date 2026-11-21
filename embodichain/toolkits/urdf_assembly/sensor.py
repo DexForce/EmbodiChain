@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 import copy
 import traceback
@@ -774,7 +776,7 @@ class URDFSensorManager:
         base_points: dict,
         existing_link_names: set,
         existing_joint_names: set,
-    ):
+    ) -> None:
         r"""Process all attached sensors by adding their link and joint elements to the robot.
 
         Args:
@@ -861,25 +863,61 @@ class URDFSensorManager:
                         if child_elem is not None:
                             child_elem.set("link", child_link)
 
-                        if attachment.transform is not None:
-                            transform = attachment.transform
-                            xyz = transform[:3, 3]
-                            rotation = R.from_matrix(transform[:3, :3])
-                            rpy = rotation.as_euler("xyz")
-
-                            origin_elem = joint.find("origin")
-                            if origin_elem is None:
-                                origin_elem = ET.SubElement(joint, "origin")
-                            origin_elem.set("xyz", f"{xyz[0]} {xyz[1]} {xyz[2]}")
-                            origin_elem.set("rpy", f"{rpy[0]} {rpy[1]} {rpy[2]}")
-
-                            self.logger.info(
-                                f"Applied transform to sensor joint {joint.get('name')}: xyz={xyz}, rpy={rpy}"
-                            )
-
                         existing_joint_names.add(formatted_name)
                         joints.append(joint)
                         self.logger.debug(f"Added sensor joint: {formatted_name}")
+
+                # A standalone sensor/frame root needs an explicit connector to
+                # the authored parent. Internal joint origins stay sensor-local;
+                # applying the mounting transform to each joint corrupts its FK.
+                sensor_names = {link.get("name") for link in sensor_links}
+                child_names = {
+                    joint.find("child").get("link")
+                    for joint in sensor_joints
+                    if joint.find("child") is not None
+                }
+                roots = sensor_names - child_names
+                external = [
+                    joint
+                    for joint in sensor_joints
+                    if joint.find("parent") is not None
+                    and joint.find("parent").get("link") not in sensor_names
+                ]
+                transform = attachment.transform
+                origin = {"xyz": "0 0 0", "rpy": "0 0 0"}
+                if transform is not None:
+                    origin = {
+                        "xyz": " ".join(map(str, transform[:3, 3])),
+                        "rpy": " ".join(
+                            map(str, R.from_matrix(transform[:3, :3]).as_euler("xyz"))
+                        ),
+                    }
+                # Retain support for fragments with an explicit external-parent
+                # connector; their one mounting joint consumes the transform.
+                for joint in external:
+                    if transform is not None:
+                        element = joint.find("origin")
+                        if element is None:
+                            element = ET.SubElement(joint, "origin")
+                        element.attrib.update(origin)
+                parent_link = attachment.parent_link
+                if parent_link not in existing_link_names:
+                    raise ValueError(
+                        f"Sensor {sensor_name!r} parent link {parent_link!r} is missing"
+                    )
+                for root_name in sorted(roots):
+                    name = f"{parent_link}_to_{root_name}".upper()
+                    suffix = 1
+                    base_name = name
+                    while name in existing_joint_names:
+                        name = f"{base_name}_{suffix}"
+                        suffix += 1
+                    connector = ET.Element("joint", name=name, type="fixed")
+                    ET.SubElement(connector, "parent", link=parent_link)
+                    ET.SubElement(connector, "child", link=root_name)
+                    ET.SubElement(connector, "origin", **origin)
+                    joints.append(connector)
+                    existing_joint_names.add(name)
 
             except Exception as e:
                 self.logger.error(

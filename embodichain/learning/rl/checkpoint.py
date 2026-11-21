@@ -19,6 +19,8 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import json
 import random
 import tempfile
 import warnings
@@ -30,7 +32,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from embodichain.learning.rl.env import ScheduledDifferentiableVecEnv
+from embodichain.learning.rl.env import ScheduledDifferentiableEnvProtocol
 
 __all__: list[str] = []
 
@@ -92,6 +94,13 @@ def _plain(value: Any) -> Any:
 
 def _type_name(value: Any) -> str:
     return f"{type(value).__module__}.{type(value).__qualname__}"
+
+
+def _gym_snapshot_fingerprint(config: Mapping[str, Any]) -> str:
+    """Identify the exact serializable Gym declaration recorded in a run."""
+    # Manager term order is semantic, particularly for policy action columns.
+    encoded = json.dumps(_plain(config), separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _space_layout(space: Any) -> Any:
@@ -178,9 +187,9 @@ def _metadata(trainer: Any) -> dict[str, Any]:
             trainer_config["gradient_accumulation_steps"] = (
                 trainer.cfg.gradient_accumulation_steps
             )
-            if not isinstance(trainer.env, ScheduledDifferentiableVecEnv):
+            if not isinstance(trainer.env, ScheduledDifferentiableEnvProtocol):
                 trainer_config["update_horizon"] = trainer.update_horizon
-    return {
+    metadata = {
         "trainer": _type_name(trainer),
         "trainer_config": trainer_config,
         "algorithm": _type_name(algorithm),
@@ -234,6 +243,15 @@ def _metadata(trainer: Any) -> dict[str, Any]:
         },
         "context": _plain(getattr(trainer, "_checkpoint_context", {})),
     }
+    snapshot_hash = getattr(trainer, "_checkpoint_gym_snapshot_hash", None)
+    if snapshot_hash is not None:
+        metadata["gym_snapshot_sha256"] = snapshot_hash
+    describe = getattr(policy, "checkpoint_contract", None)
+    if callable(describe):
+        components = describe()
+        if components:
+            metadata["policy_components"] = _plain(components)
+    return metadata
 
 
 def _differences(saved: Any, current: Any, path: str = "metadata") -> list[str]:
@@ -270,30 +288,24 @@ def _validate(trainer: Any, payload: Any, scheduler: str) -> list[str]:
     if not isinstance(payload, Mapping):
         raise ValueError("Checkpoint must contain a training-state mapping.")
     version = payload.get("schema_version")
-    if (version is not None and type(version) is not int) or version not in {
-        None,
-        1,
-        _SCHEMA_VERSION,
-    }:
+    if type(version) is not int or version != _SCHEMA_VERSION:
         raise ValueError(f"Unsupported checkpoint schema version {version!r}.")
-    if version != _SCHEMA_VERSION and (version == 1) != hasattr(
-        trainer, "_rollout_index"
-    ):
-        raise ValueError("Legacy checkpoint trainer type is incompatible.")
-    required = {"policy", "optimizer", "global_step", "num_updates"}
-    if version == _SCHEMA_VERSION:
-        required |= {
-            "metadata",
-            "rng_by_rank",
-            "normalizer_by_rank",
-            "world_size",
-            "best_eval_value",
-            "best_checkpoint",
-            "lr_scheduler",
-            "lr_scheduler_cfg",
-        }
-        if hasattr(trainer, "_rollout_index"):
-            required.add("rollout_index")
+    required = {
+        "policy",
+        "optimizer",
+        "global_step",
+        "num_updates",
+        "metadata",
+        "rng_by_rank",
+        "normalizer_by_rank",
+        "world_size",
+        "best_eval_value",
+        "best_checkpoint",
+        "lr_scheduler",
+        "lr_scheduler_cfg",
+    }
+    if hasattr(trainer, "_rollout_index"):
+        required.add("rollout_index")
     missing = required - payload.keys()
     if missing:
         raise ValueError(f"Checkpoint is missing required fields: {sorted(missing)}")
@@ -302,54 +314,100 @@ def _validate(trainer: Any, payload: Any, scheduler: str) -> list[str]:
     policy = getattr(trainer.policy, "module", trainer.policy)
     _validate_state_layout(policy.state_dict(), payload["policy"], "policy")
     unavailable = []
-    if version == _SCHEMA_VERSION:
-        saved_metadata = dict(payload["metadata"])
-        current_metadata = _metadata(trainer)
-        if not saved_metadata.get("context") or not current_metadata["context"]:
-            if bool(saved_metadata.get("context")) != bool(current_metadata["context"]):
-                unavailable.append("shared CLI configuration context")
-            saved_metadata.pop("context", None)
-            current_metadata.pop("context")
-        if "trainer_config" not in saved_metadata:
-            if current_metadata["trainer_config"]:
-                unavailable.append("APG trainer configuration")
-            current_metadata.pop("trainer_config")
-        differences = _differences(saved_metadata, current_metadata)
-        if differences:
-            raise ValueError(
-                "Incompatible checkpoint configuration: " + ", ".join(differences)
-            )
-        world_size = getattr(trainer, "world_size", 1)
-        if payload["world_size"] != world_size:
-            raise ValueError(
-                "Checkpoint world_size differs from the current training job."
-            )
-        for name in ("rng_by_rank", "normalizer_by_rank"):
-            if len(payload[name]) != world_size:
-                raise ValueError(f"Checkpoint {name} must contain one entry per rank.")
-        rank = getattr(trainer, "rank", 0)
-        rng = payload["rng_by_rank"][rank]
-        if not {"python", "numpy", "torch"} <= rng.keys():
-            raise ValueError("Checkpoint RNG state is incomplete.")
-        if trainer.algorithm.device.type == "cuda" and "cuda" not in rng:
-            raise ValueError("Checkpoint has no CUDA RNG for this rank.")
-        random.Random().setstate(rng["python"])
-        numpy_state = rng["numpy"]
-        np.random.RandomState().set_state(
-            (
-                numpy_state[0],
-                np.asarray(numpy_state[1], dtype=np.uint32),
-                *numpy_state[2:],
-            )
+    saved_metadata = dict(payload["metadata"])
+    current_metadata = _metadata(trainer)
+    snapshot_hash = saved_metadata.pop("gym_snapshot_sha256", None)
+    current_metadata.pop("gym_snapshot_sha256", None)
+    current_context = current_metadata["context"]
+    if "context" not in saved_metadata or not isinstance(
+        saved_metadata["context"], Mapping
+    ):
+        raise ValueError(
+            "Checkpoint metadata.context must contain the current configuration mapping."
         )
-        torch.Generator().set_state(rng["torch"].cpu())
-        if trainer.algorithm.device.type == "cuda":
-            torch.Generator(device=trainer.algorithm.device).set_state(
-                rng["cuda"].cpu()
+    saved_context = saved_metadata["context"]
+    if (
+        snapshot_hash is not None
+        and isinstance(saved_context, Mapping)
+        and "gym" in saved_context
+        and isinstance(current_context, Mapping)
+        and "gym" in current_context
+        and snapshot_hash == _gym_snapshot_fingerprint(current_context["gym"])
+    ):
+        # Accept only the snapshot actually recorded for this checkpoint;
+        # all remaining environment/training checks retain their identity.
+        saved_metadata["context"] = {
+            **saved_context,
+            "gym": current_context["gym"],
+        }
+    # A directly constructed current Trainer has no CLI declaration. Preserve
+    # current-schema CLI/API interoperation while validating every model field.
+    if bool(saved_context) != bool(current_context):
+        unavailable.append("shared CLI configuration context")
+        saved_metadata.pop("context")
+        current_metadata.pop("context")
+    from .algo.ppo import PPO
+
+    if isinstance(trainer.algorithm, PPO) and isinstance(
+        saved_metadata.get("algorithm_config"), Mapping
+    ):
+        # An omitted optional coefficient has zero-loss semantics in schema v2.
+        # Explicit values still participate in the strict configuration check.
+        saved_metadata["algorithm_config"] = {
+            "auxiliary_coef": 0.0,
+            **saved_metadata["algorithm_config"],
+        }
+    differences = _differences(saved_metadata, current_metadata)
+    if differences:
+        raise ValueError(
+            "Incompatible checkpoint configuration: " + ", ".join(differences)
+        )
+    world_size = getattr(trainer, "world_size", 1)
+    if payload["world_size"] != world_size:
+        raise ValueError("Checkpoint world_size differs from the current training job.")
+    for name in ("rng_by_rank", "normalizer_by_rank"):
+        if len(payload[name]) != world_size:
+            raise ValueError(f"Checkpoint {name} must contain one entry per rank.")
+    rank = getattr(trainer, "rank", 0)
+    rng = payload["rng_by_rank"][rank]
+    if not {"python", "numpy", "torch"} <= rng.keys():
+        raise ValueError("Checkpoint RNG state is incomplete.")
+    if trainer.algorithm.device.type == "cuda" and "cuda" not in rng:
+        raise ValueError("Checkpoint has no CUDA RNG for this rank.")
+    random.Random().setstate(rng["python"])
+    numpy_state = rng["numpy"]
+    np.random.RandomState().set_state(
+        (
+            numpy_state[0],
+            np.asarray(numpy_state[1], dtype=np.uint32),
+            *numpy_state[2:],
+        )
+    )
+    torch.Generator().set_state(rng["torch"].cpu())
+    if trainer.algorithm.device.type == "cuda":
+        torch.Generator(device=trainer.algorithm.device).set_state(rng["cuda"].cpu())
+    normalizers = payload["normalizer_by_rank"][rank]
+    expected = _policy_normalizers(policy)
+    _validate_state_layout(expected, normalizers, "rank normalizer")
+    environment_states = payload.get("environment_state_by_rank")
+    environment_state = None
+    if environment_states is not None:
+        if (
+            not isinstance(environment_states, list)
+            or len(environment_states) != world_size
+        ):
+            raise ValueError(
+                "Checkpoint environment state must contain one entry per rank."
             )
-        normalizers = payload["normalizer_by_rank"][rank]
-        expected = _policy_normalizers(policy)
-        _validate_state_layout(expected, normalizers, "rank normalizer")
+        environment_state = environment_states[rank]
+    if environment_state is not None:
+        validate = getattr(trainer.env, "validate_training_state", None)
+        load = getattr(trainer.env, "load_training_state", None)
+        if not callable(validate) or not callable(load):
+            raise ValueError("Environment cannot restore checkpoint training state.")
+        validate(environment_state)
+    elif callable(getattr(trainer.env, "get_training_state", None)):
+        unavailable.append("environment training state")
     normalizer = getattr(trainer, "observation_normalizer", None)
     saved_normalizer = payload.get("observation_normalizer")
     if (normalizer is None) != (saved_normalizer is None):
@@ -372,11 +430,7 @@ def _validate(trainer: Any, payload: Any, scheduler: str) -> list[str]:
         ):
             raise ValueError("Checkpoint observation normalization mask differs.")
     trainer.algorithm.validate_state_dict(payload, resume_scheduler=scheduler)
-    return (
-        unavailable
-        if version == _SCHEMA_VERSION
-        else ["configuration metadata", "per-rank RNG", "per-rank normalizers"]
-    )
+    return unavailable
 
 
 def _validate_saved_files(trainer: Any) -> None:
@@ -409,6 +463,8 @@ def _save(trainer: Any, path: str | Path, extra: Mapping[str, Any]) -> str:
             "rng": _capture_rng(trainer.algorithm.device),
             "normalizer": _policy_normalizers(policy),
         }
+        get_state = getattr(trainer.env, "get_training_state", None)
+        local["environment"] = get_state() if callable(get_state) else None
     except Exception as exc:
         error = exc
     _sync_errors(error, distributed)
@@ -426,6 +482,7 @@ def _save(trainer: Any, path: str | Path, extra: Mapping[str, Any]) -> str:
                 "world_size": len(ranks),
                 "rng_by_rank": [value["rng"] for value in ranks],
                 "normalizer_by_rank": [value["normalizer"] for value in ranks],
+                "environment_state_by_rank": [value["environment"] for value in ranks],
                 "global_step": trainer.global_step,
                 "num_updates": trainer.num_updates,
                 "policy": policy.state_dict(),
@@ -457,17 +514,9 @@ def _load(trainer: Any, path: str | Path, scheduler: str) -> dict[str, Any]:
     distributed = getattr(trainer, "distributed", False)
     payload = None
     error = None
-    missing = []
     try:
-        try:
-            payload = torch.load(path, map_location="cpu", weights_only=True)
-        except TypeError as exc:
-            if "weights_only" not in str(exc):
-                raise
-            payload = torch.load(path, map_location="cpu")
-        missing = _validate(trainer, payload, scheduler)
-        if payload.get("schema_version") != _SCHEMA_VERSION:
-            _validate_legacy_context(trainer, Path(path))
+        payload = torch.load(path, map_location="cpu", weights_only=True)
+        unavailable = _validate(trainer, payload, scheduler)
     except Exception as exc:
         error = exc
     _sync_errors(error, distributed)
@@ -488,6 +537,14 @@ def _load(trainer: Any, path: str | Path, scheduler: str) -> dict[str, Any]:
         trainer.best_checkpoint_path = None
         trainer.latest_checkpoint_path = str(path)
         trainer._last_saved_update = None
+        context = getattr(trainer, "_checkpoint_context", None)
+        original = payload["metadata"].get("context") or {}
+        if context is not None and "gym" in context and "gym" in original:
+            # Retain the source identity across successive snapshot-based resumes.
+            context["gym"] = deepcopy(original["gym"])
+        environment_states = payload.get("environment_state_by_rank")
+        if environment_states is not None and environment_states[rank] is not None:
+            trainer.env.load_training_state(environment_states[rank])
         if hasattr(trainer.collector, "obs_td"):
             trainer.collector.obs_td = trainer.collector._reset_env()
             trainer.curr_ret.zero_()
@@ -511,58 +568,13 @@ def _load(trainer: Any, path: str | Path, scheduler: str) -> dict[str, Any]:
         except Exception as exc:
             error = exc
     _sync_errors(error, distributed)
-    if missing and getattr(trainer, "rank", 0) == 0:
+    if unavailable and getattr(trainer, "rank", 0) == 0:
         warnings.warn(
-            (
-                "Legacy checkpoint has no "
-                if payload.get("schema_version") != _SCHEMA_VERSION
-                else "Checkpoint cannot validate "
-            )
-            + ", ".join(missing)
-            + "; restoring available learning state.",
+            "Checkpoint cannot validate " + ", ".join(unavailable),
             UserWarning,
             stacklevel=3,
         )
     return payload
-
-
-def _validate_legacy_context(trainer: Any, source: Path) -> None:
-    """Use a source run's config snapshots when an old payload has no metadata."""
-    current = getattr(trainer, "_checkpoint_config", None)
-    if current is None:
-        return
-    from embodichain.learning.rl.policy_evaluation.manifest import RunManifest
-    from embodichain.learning.rl.train import _checkpoint_context
-    from embodichain.utils.utility import load_config
-
-    try:
-        manifest = RunManifest.load(source.resolve().parents[1])
-    except (FileNotFoundError, IndexError):
-        return
-    saved = load_config(str(manifest.configs["train"]))
-    gym = manifest.configs.get("gym")
-    saved_context = _checkpoint_context(saved, load_config(str(gym)) if gym else None)
-    differences = _differences(
-        _plain(saved_context), _plain(trainer._checkpoint_context), "config"
-    )
-    if saved["algorithm"]["name"].lower() != current["algorithm"]["name"].lower():
-        differences.append("config.algorithm.name")
-
-    def optimization(config: dict) -> dict:
-        cfg = dict(config["algorithm"].get("cfg", {}))
-        cfg.pop("lr_scheduler", None)
-        optimizer = dict(cfg.pop("optimizer", {}))
-        optimizer.pop("learning_rate", None)
-        cfg["optimizer"] = optimizer
-        return cfg
-
-    differences.extend(
-        _differences(optimization(saved), optimization(current), "config.algorithm.cfg")
-    )
-    if differences:
-        raise ValueError(
-            "Incompatible legacy checkpoint configuration: " + ", ".join(differences)
-        )
 
 
 def _resolve_resume(resume: str | Path | None, run: str | Path | None) -> Path | None:

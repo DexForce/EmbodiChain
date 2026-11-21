@@ -72,36 +72,12 @@ button:disabled {
   cursor: default;
 }
 .app {
-  --bg: #171d24;
-  --panel: #1d252e;
-  --panel-raised: #242e38;
-  --panel-hover: #2b3744;
-  --canvas: #171d24;
-  --text: #e3e7ed;
-  --muted: #a6b2c0;
-  --subtle: #8b9aad;
-  --line: #3a4653;
-  --accent: #a7bfd9;
-  --accent-bg: #2b3c50;
-  --code: #19212a;
   height: 100%;
   background: var(--bg);
   color: var(--text);
   font-size: 14px;
 }
 .app[data-theme='light'] {
-  --bg: #faf9f6;
-  --panel: #fdfcf9;
-  --panel-raised: #f3f2ee;
-  --panel-hover: #eeefef;
-  --canvas: #faf9f6;
-  --text: #263340;
-  --muted: #596574;
-  --subtle: #697481;
-  --line: #d7dadb;
-  --accent: #375b7b;
-  --accent-bg: #eaf0f5;
-  --code: #f0f1ef;
 }
 .app-header {
   height: 64px;

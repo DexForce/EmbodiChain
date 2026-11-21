@@ -227,6 +227,15 @@ def test_planning_failure_and_assigned_cancellation_do_not_count_rollouts() -> N
     assert session.snapshot()["counts"]["rollout_attempted"] == 0
 
 
+def test_gym_joint_position_commands_share_the_expansion_episode_contract() -> None:
+    session = _session()
+    identity = _start(session)
+    episode = replace(
+        _episode(session, identity), action_representation="joint_position"
+    )
+    assert session.accept_episode(episode)
+
+
 def test_failed_validation_statuses_and_release_reason_survive_payload_discard() -> (
     None
 ):
@@ -726,3 +735,25 @@ def test_unbanded_coverage_rejects_a_reference_and_reports_no_bands() -> None:
     assert session.accept_episode(episode)
     session.apply_receipt(_receipt(episode))
     assert session.snapshot()["manipulability_bands"] == {"case": {}}
+
+
+def test_job_namespace_separates_physical_ids_without_changing_recipe_randomness():
+    records = []
+    for namespace in ("job-a", "job-b", "job-a"):
+        session = ExpansionSession(
+            TrajectoryExpansionJobCfg(), episode_namespace=namespace
+        )
+        session.register_case(CASE, LIMITS, joint_names=JOINT_NAMES)
+        identity, generator = _propose(session)
+        records.append(
+            (
+                identity,
+                torch.rand(4, generator=generator),
+                session.episode_ids(identity),
+            )
+        )
+    assert records[0][0] == records[1][0] == records[2][0]
+    assert torch.equal(records[0][1], records[1][1])
+    assert torch.equal(records[0][1], records[2][1])
+    assert records[0][2] == records[2][2]
+    assert records[0][2] != records[1][2]

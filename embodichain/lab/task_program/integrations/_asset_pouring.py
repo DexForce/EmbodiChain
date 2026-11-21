@@ -30,6 +30,8 @@ from typing import Any
 
 import numpy as np
 
+from .configured import _resolve_simulation_uid
+
 from embodichain.utils import configclass
 from embodichain.lab.task_program.semantics.asset_requirements import AssetRequirements
 from embodichain.lab.task_program.semantics.asset_matching import ResolvedAssetSet
@@ -148,7 +150,12 @@ def prepare_pour_adaptation(
     program: dict[str, Any],
 ) -> _PreparedPour:
     """Validate selected evidence and remove only the calibration being replaced."""
+    from .configured import _normalize_skill_options_key
+
     cfg.validate()
+    integration["profile"] = _normalize_skill_options_key(
+        integration["profile"], path="task integration.profile"
+    )
     for value in (
         cfg.bottle_role,
         cfg.cup_role,
@@ -237,7 +244,7 @@ def prepare_pour_adaptation(
     ]
     if len(grasps) != 1:
         raise ValueError("Pour bottle needs exactly one antipodal grasp")
-    options = integration["profile"]["action_options"]
+    options = integration["profile"]["skill_options"]
     pick_options = options.get("pick", {})
     pour_options = options.get("simulation.pour", {})
     angle = pour_options.get("rotate_angle")
@@ -356,12 +363,20 @@ def finish_pour_adaptation(
         support.get("init_pos", [0, 0, 0]), 3, "support initial position"
     )
     bottle_position = _array(
-        physical_objects[entities[p.bottle_id]["simulation_uid"]]["init_pos"],
+        physical_objects[
+            _resolve_simulation_uid(
+                entities[p.bottle_id], path=f"scene_binding.{p.bottle_id}"
+            )
+        ]["init_pos"],
         3,
         "bottle initial position",
     )
     cup_position = _array(
-        physical_objects[entities[p.cup_id]["simulation_uid"]]["init_pos"],
+        physical_objects[
+            _resolve_simulation_uid(
+                entities[p.cup_id], path=f"scene_binding.{p.cup_id}"
+            )
+        ]["init_pos"],
         3,
         "cup initial position",
     )
@@ -396,7 +411,10 @@ def finish_pour_adaptation(
     p.move_service["relative_pose"] = _pose(staging)
     scene_roots = integration["scene_binding"]["rigid_objects"]
     support_roots = [
-        node for node in scene_roots if node["simulation_uid"] == p.cfg.support_uid
+        node
+        for node in scene_roots
+        if _resolve_simulation_uid(node, path=f"scene_binding.{node['entity_id']}")
+        == p.cfg.support_uid
     ]
     if len(support_roots) > 1:
         raise ValueError(

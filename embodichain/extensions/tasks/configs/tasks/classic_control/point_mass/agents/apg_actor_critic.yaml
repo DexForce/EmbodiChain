@@ -1,0 +1,66 @@
+trainer:
+  exp_name: point_mass_apg_actor_critic
+  learning_env:
+    name: PointMassRL
+    cfg:
+      max_episode_steps: 100
+      success_threshold: 0.03
+  seed: 42
+  device: cuda:0
+  num_envs: 64
+  iterations: 800
+  segment_length: 32
+  update_horizon: 32
+  enable_eval: true
+  eval_freq: 32000
+  num_eval_envs: 32
+  num_eval_episodes: 128
+  eval_seed: 10042
+  best_eval_metric: eval/success_rate
+  best_eval_mode: max
+  save_frequency_updates: 0
+  use_wandb: false
+  wandb_project_name: embodichain-point-mass
+  deterministic_actions: true
+policy:
+  name: actor_critic
+  initial_log_std: -1.0
+  actor:
+    type: mlp
+    network_cfg:
+      hidden_sizes:
+      - 64
+      - 64
+      activation: tanh
+      last_activation: tanh
+      orthogonal_init:
+      - 1.414
+      - 1.414
+      - 0.01
+  critic:
+    type: mlp
+    network_cfg:
+      hidden_sizes:
+      - 64
+      - 64
+      activation: tanh
+      orthogonal_init:
+      - 1.414
+      - 1.414
+      - 1.0
+algorithm:
+  name: apg_actor_critic
+  cfg:
+    optimizer:
+      name: adam
+      learning_rate: 0.0003
+    critic_optimizer:
+      name: adam
+      learning_rate: 0.001
+    critic_epochs: 4
+    critic_minibatches: 4
+    gamma: 0.99
+    gae_lambda: 0.95
+    max_grad_norm: 1.0
+    critic_max_grad_norm: 1.0
+    normalize_return: true

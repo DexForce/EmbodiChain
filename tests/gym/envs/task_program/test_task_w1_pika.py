@@ -27,8 +27,8 @@ import torch
 
 from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.sim.cfg import DefaultPhysicsCfg
-from embodichain_robots.dexforce.w1 import DexforceW1Cfg
-from embodichain_robots.dexforce.w1.types import DexforceW1Version
+from embodichain.extensions.robots.dexforce.w1 import DexforceW1Cfg
+from embodichain.extensions.robots.dexforce.w1.types import DexforceW1Version
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
 from embodichain.lab.gym.utils._component_composition import (
@@ -43,7 +43,7 @@ from embodichain.utils.utility import load_config
 
 _CONFIGS = (
     Path(__file__).parents[4]
-    / "extensions/embodichain_tasks/configs/tasks/manipulation"
+    / "embodichain/extensions/tasks/configs/tasks/manipulation"
 )
 _TASKS = (
     ("repeated_pick_place", 6),
@@ -63,7 +63,7 @@ def test_w1_pika_deployment_composes_and_preserves_task_route(
     task: str, segments: int | None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import embodichain.lab.sim.cfg as sim_cfg
-    from embodichain_robots.dexforce.w1 import utils as w1_utils
+    from embodichain.extensions.robots.dexforce.w1 import utils as w1_utils
 
     def asset(value: str) -> str:
         path = tmp_path / value
@@ -78,7 +78,7 @@ def test_w1_pika_deployment_composes_and_preserves_task_route(
     physical = _resolve_gym_components(payload, base_dir=path.parent)
     if segments is None:
         importlib.import_module(
-            "embodichain_tasks.manipulation." + task.replace("/", ".")
+            "embodichain.extensions.tasks.manipulation." + task.replace("/", ".")
         )
     cfg = config_to_cfg(payload, source_path=path)
     assert isinstance(cfg.robot, DexforceW1Cfg)
@@ -103,8 +103,8 @@ def test_w1_pika_deployment_composes_and_preserves_task_route(
         assert restored.urdf_cfg.component_prefix == cfg.robot.urdf_cfg.component_prefix
         for side in ("left_arm", "right_arm"):
             torch.testing.assert_close(
-                torch.tensor(restored.solver_cfg[side].tcp),
-                torch.tensor(cfg.robot.solver_cfg[side].tcp),
+                torch.as_tensor(restored.solver_cfg[side].tcp, dtype=torch.float64),
+                torch.as_tensor(cfg.robot.solver_cfg[side].tcp, dtype=torch.float64),
             )
         for before, after in zip(cfg.robot.sensors, restored.sensors, strict=True):
             assert after.extrinsics.parent == before.extrinsics.parent

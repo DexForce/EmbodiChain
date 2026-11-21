@@ -36,14 +36,14 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     AntipodalAffordance,
     AxisAlignAffordance,
     ControlPartCommandProfile,
     EntityState,
     create_rigidized_articulation_antipodal_affordance,
 )
-from embodichain.lab.sim.atomic_actions.articulation_geometry import (
+from embodichain.lab.sim.atomic_skills.articulation_geometry import (
     _rigidized_articulation_tolerance,
 )
 from embodichain.lab.task_program.semantics.profiles import (
@@ -200,6 +200,18 @@ def _validate_scene_classification(
         raise TypeError("dynamics must be a SceneDynamics value.")
     if not isinstance(collision_role, SceneCollisionRole):
         raise TypeError("collision_role must be a SceneCollisionRole value.")
+
+
+@dataclass(frozen=True, slots=True)
+class _SimulationCableBinding:
+    """Material-state identity, deliberately without a rigid object pose."""
+
+    entity_id: str
+    simulation_uid: str
+
+    def __post_init__(self) -> None:
+        _identifier(self.entity_id, field_name="entity_id")
+        _identifier(self.simulation_uid, field_name="simulation_uid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -521,6 +533,8 @@ class ContainerAffordanceBinding:
         object_target_frame: ``parent`` composes the parent transform;
             ``world_axes`` uses its position with world-oriented target axes.
         minimum_confidence: Minimum parent/affordance observation confidence.
+        release_clearance: Non-negative local-z release offset in metres. The
+            declared object target remains the final semantic target.
         is_default: Whether this is the parent's default ``Place(inside=...)`` frame.
     """
 
@@ -530,11 +544,19 @@ class ContainerAffordanceBinding:
     aliases: tuple[str, ...] = ()
     object_target_pose: tuple[float, ...] = _IDENTITY_POSE
     minimum_confidence: float = 0.0
+    release_clearance: float = field(default=0.0, kw_only=True)
     is_default: bool = False
     object_target_frame: str = "parent"
 
     def __post_init__(self) -> None:
         _validate_placement_binding(self)
+        release_clearance = _finite(
+            self.release_clearance,
+            field_name="release_clearance",
+        )
+        if release_clearance < 0.0:
+            raise ValueError("release_clearance must be non-negative.")
+        object.__setattr__(self, "release_clearance", release_clearance)
 
 
 @dataclass(frozen=True, slots=True)
@@ -699,7 +721,10 @@ def _mesh_tensor(
     getter = getattr(entity, getter_name, None)
     if not callable(getter):
         raise TypeError(f"Simulation rigid object must provide {getter_name}().")
-    if vertices:
+    semantic_getter = getattr(entity, "get_semantic_mesh", None)
+    if callable(semantic_getter):
+        value = semantic_getter([mesh_env_id])[0 if vertices else 1]
+    elif vertices:
         value = getter(env_ids=[mesh_env_id], scale=True)
     else:
         value = getter(env_ids=[mesh_env_id])
@@ -803,6 +828,7 @@ class SimulationSceneBinding:
     """Build one authoritative registry from explicit simulation bindings."""
 
     registry_id: str
+    cables: tuple[_SimulationCableBinding, ...] = field(default=(), kw_only=True)
     rigid_objects: tuple[SimulationRigidObjectBinding, ...] = ()
     rigidized_articulations: tuple[
         SimulationRigidizedArticulationObjectBinding, ...
@@ -820,6 +846,7 @@ class SimulationSceneBinding:
     def __post_init__(self) -> None:
         _identifier(self.registry_id, field_name="registry_id")
         expected_types = {
+            "cables": _SimulationCableBinding,
             "rigid_objects": SimulationRigidObjectBinding,
             "rigidized_articulations": SimulationRigidizedArticulationObjectBinding,
             "articulations": SimulationArticulationBinding,
@@ -1046,6 +1073,11 @@ class SimulationSceneBinding:
         Returns:
             Immutable registry with typed roots, links, and affordances.
         """
+        for binding in self.cables:
+            if simulation.get_cable_object(binding.simulation_uid) is None:
+                raise ValueError(
+                    f"Cable {binding.simulation_uid!r} is absent from the live scene."
+                )
         objects = {item.entity_id: item for item in self.rigid_objects}
         rigidized_articulations = {
             item.entity_id: item for item in self.rigidized_articulations
@@ -1278,8 +1310,15 @@ class SimulationSceneBinding:
                         aliases=binding.aliases,
                         parent=parent,
                         native_name=binding.native_name,
-                        affordance=payload_type(
-                            minimum_confidence=binding.minimum_confidence,
+                        affordance=(
+                            ContainerAffordance(
+                                minimum_confidence=binding.minimum_confidence,
+                                release_clearance=binding.release_clearance,
+                            )
+                            if type(binding) is ContainerAffordanceBinding
+                            else SupportSurfaceAffordance(
+                                minimum_confidence=binding.minimum_confidence,
+                            )
                         ),
                         affordance_capabilities=frozenset({capability}),
                         affordance_revision=PLACEMENT_TARGET_AFFORDANCE_REVISION,
@@ -1362,6 +1401,27 @@ class ControlPartCommandPreset:
                 for command_id, positions in self.commands.items()
             }
         )
+
+
+def _bind_evaluation_joint_names(conditions, robot):
+    """Resolve preset joint identities through the Robot's expanded control parts."""
+    fields = {
+        field for spec in conditions.values() for field in spec._preset_joint_names()
+    }
+    layouts = {}
+    for field in fields:
+        owner, part, quantity = field.split("/")
+        if owner != "robot" or quantity != "qpos":
+            raise ValueError("Command presets require a native robot qpos channel.")
+        _require_control_part_dof(robot, part)
+        layouts[field] = tuple(
+            robot.joint_names[index] for index in robot.get_joint_ids(name=part)
+        )
+    cache = {}
+    return {
+        ref: spec._bind_joint_names(layouts, cache=cache)
+        for ref, spec in conditions.items()
+    }
 
 
 def _require_control_part_dof(robot: Robot, control_part: str) -> int:

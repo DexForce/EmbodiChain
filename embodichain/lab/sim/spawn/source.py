@@ -29,8 +29,11 @@ from dexsim.spawn import (
     CollisionDesc,
     DexsimCollisionDesc,
     DexsimPhysicsDesc,
+    JointDesc,
+    NewtonJointDesc,
     RigidBodyPhysicsDesc,
 )
+from dexsim.engine import JointType
 
 from embodichain.lab.sim._inertia import _principal_inertia_matrix
 from embodichain.utils.math import quat_wxyz_to_xyzw
@@ -91,6 +94,12 @@ def resolve_articulation_source(
         desc.joints = []
         desc.root_link_name = None
 
+    retained_joint_limits = {
+        joint.name
+        for joint in desc.joints
+        if joint.lower_limit is not None or joint.upper_limit is not None
+    }
+
     arena = _source_arena(builder, desc)
     temp_name = f"__embodichain_resolve__{desc.name.replace('/', '__')}__{id(desc)}"
     skeleton = arena.create_skeleton("skeleton")
@@ -121,6 +130,17 @@ def resolve_articulation_source(
             except (KeyError, RuntimeError, TypeError, AttributeError):
                 continue
         _translate_urdf_articulation(skeleton, desc)
+        _retain_urdf_joint_dynamics(desc)
+        # Native Skeleton metadata exposes (0, 0) for URDF continuous joints.
+        # Preserve their unbounded source intent before a MuJoCo build, while
+        # retaining caller-authored limits and subsequent config overlays.
+        for joint in desc.joints:
+            if (
+                joint.joint_type == JointType.CONTINUOUS
+                and joint.name not in retained_joint_limits
+            ):
+                joint.lower_limit = -np.inf
+                joint.upper_limit = np.inf
         source_states = _read_urdf_inertial_states(desc.urdf_path)
         _annotate_urdf_source_physics(
             desc,
@@ -381,6 +401,8 @@ def _apply_dexsim_source_overlay(
     calls limited to links marked by :func:`configure_articulation_desc`.
     Newton-only blocks may still be present in the copied descriptor for
     backend parity; this Default-only pass intentionally ignores them.
+    Partial joint drives are completed from each native instance before the
+    setter is called, preserving omitted properties and the current drive mode.
     """
     binding = getattr(handle, "_physics_binding", None)
     if binding is None:
@@ -434,7 +456,58 @@ def _apply_dexsim_source_overlay(
         _restore_dexsim_mass_override(rigid_body, link)
 
     if effective.joints:
+        _complete_dexsim_joint_drives(binding, effective.joints)
         _apply_dexsim_joint_properties(binding, effective.joints)
+
+
+def _complete_dexsim_joint_drives(binding: Any, joints: list[JointDesc]) -> None:
+    """Fill omitted drive fields before Default's non-sparse native setter."""
+    drive_fields = (
+        "stiffness",
+        "damping",
+        "max_force",
+        "max_velocity",
+        "joint_friction",
+    )
+    selected = [
+        joint
+        for joint in joints
+        if joint.dof_count
+        and joint.dexsim is not None
+        and (
+            joint.armature is not None
+            or joint.dexsim.drive_mode is not None
+            or any(
+                getattr(joint.dexsim, name) is not None
+                for name in drive_fields
+                if name != "max_velocity"
+            )
+        )
+    ]
+    if not selected:
+        return
+
+    joint_indices = {
+        name: index for index, name in enumerate(binding.get_actived_joint_names())
+    }
+    stiffness, damping, effort, velocity, friction, armature, modes = (
+        binding.get_drive()
+    )
+    for joint in selected:
+        index = joint_indices[joint.name]
+        # Native set_drive() supplies unrelated defaults for omitted arguments.
+        # Read each instance in cache order and preserve its actual values.
+        for name, values in zip(
+            drive_fields,
+            (stiffness, damping, effort, velocity, friction),
+            strict=True,
+        ):
+            if getattr(joint.dexsim, name) is None:
+                setattr(joint.dexsim, name, float(values[index]))
+        if joint.dexsim.drive_mode is None:
+            joint.dexsim.drive_mode = modes[index]
+        if joint.armature is None:
+            joint.armature = float(armature[index])
 
 
 def _restore_dexsim_mass_override(rigid_body: Any, link: Any) -> None:
@@ -463,6 +536,51 @@ def _restore_dexsim_mass_override(rigid_body: Any, link: Any) -> None:
     from dexsim.spawn.adapters.dexsim_adapter import _apply_rigid_body_mass_properties
 
     _apply_rigid_body_mass_properties(rigid_body, physics, apply_inertia=True)
+
+
+def _retain_urdf_joint_dynamics(desc: ArticulationDesc) -> None:
+    """Retain passive URDF dynamics independently of actuator target gains.
+
+    The native Skeleton caches these values, but its current Newton source
+    translator omits them. Resolve them from the same source at preparation
+    time so effort/disabled target modes cannot erase physical dissipation.
+    Existing descriptor values, including explicit zero overrides, win.
+    """
+    if desc.urdf_path is None:
+        return
+    try:
+        root = ElementTree.parse(desc.urdf_path).getroot()
+    except (OSError, ElementTree.ParseError):
+        return
+    joints = {joint.name: joint for joint in desc.joints}
+    for node in root.iter():
+        if _xml_local_name(node.tag) != "joint":
+            continue
+        joint = joints.get(node.attrib.get("name"))
+        if joint is None:
+            continue
+        dynamics = next(
+            (child for child in node if _xml_local_name(child.tag) == "dynamics"),
+            None,
+        )
+        if dynamics is None:
+            continue
+        for name in ("damping", "friction"):
+            if name not in dynamics.attrib:
+                continue
+            value = _parse_float(dynamics.attrib[name])
+            if value is None or not np.isfinite(value):
+                raise ValueError(
+                    f"URDF joint {joint.name!r} has non-finite or invalid {name}."
+                )
+            if joint.newton is None:
+                joint.newton = NewtonJointDesc()
+            if not hasattr(joint.newton, name):
+                raise NotImplementedError(
+                    f"The installed SDK cannot preserve passive joint {name}."
+                )
+            if getattr(joint.newton, name) is None:
+                setattr(joint.newton, name, value)
 
 
 def _read_urdf_inertial_states(

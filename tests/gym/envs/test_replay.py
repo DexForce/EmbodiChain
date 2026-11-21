@@ -103,8 +103,9 @@ def test_record_trajectory_populates_states():
         assert "states" in env._traj_buffer.keys()
         assert env._traj_steps.tolist() == [5, 5]
         states = env._traj_buffer["states"]
-        assert tuple(states["robot"]["qpos"].shape) == (2, 100, 6)
-        assert tuple(states["rigid_objects"]["cube"]["pose"].shape) == (2, 100, 7)
+        # A 100-action buffer also owns its initial/pending state boundary.
+        assert tuple(states["robot"]["qpos"].shape) == (2, 101, 6)
+        assert tuple(states["rigid_objects"]["cube"]["pose"].shape) == (2, 101, 7)
         # Saved rows are pre-action states. The post-final state is only the
         # pending seed for a possible next action and is excluded on save.
         assert torch.allclose(states["robot"]["qpos"][:, 0], initial_qpos)

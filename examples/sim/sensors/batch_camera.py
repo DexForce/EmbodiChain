@@ -85,8 +85,8 @@ def main(args):
 
     sim.prepare()
 
-    if not args.headless:
-        sim.open_window()
+    if not args.headless or getattr(args, "web", False):
+        sim.open_viewer()
 
     import torch
 
@@ -140,12 +140,22 @@ def main(args):
         axs[i].axis("off")
         axs[i].set_title(f"Env {i}")
 
-    if args.headless:
-        plt.savefig(f"camera_data.png")
-    else:
-        plt.show()
-
-    sim.destroy()
+    try:
+        if getattr(args, "web", False):
+            plt.close(fig)
+            # Sensors keep their last task-rendered frames; observer navigation
+            # and browser commands remain responsive without physics stepping.
+            while sim.is_viewer_open:
+                sim.poll_viewer()
+                time.sleep(0.02)
+        elif args.headless:
+            plt.savefig("camera_data.png")
+        else:
+            plt.show()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        sim.destroy()
 
 
 if __name__ == "__main__":

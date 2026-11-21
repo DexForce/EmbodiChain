@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+__all__: list[str] = []
+
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -29,9 +31,7 @@ from embodichain.gen_sim.scene_engine.core.scene_object import (
     ObjectPhysics,
     SceneObject,
 )
-from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
-    OpenAICompatibleVLM,
-)
+from embodichain.gen_sim.services.compat import VisionClient
 from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor_utils import (
     DEFAULT_NEEDED_LAYOUT,
     compute_uniform_xy_scale_for_target,
@@ -99,7 +99,7 @@ class SimReadyProcessor:
         simready_geometry_root: str | Path,
         debug_output_root: str | Path | None = None,
         config: SimReadyProcessorConfig | None = None,
-        vlm_client: OpenAICompatibleVLM | None = None,
+        vlm_client: VisionClient | None = None,
     ) -> None:
         self.scene = scene
         self.coarse_layout_by_id = coarse_layout_by_id

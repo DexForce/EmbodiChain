@@ -1,0 +1,341 @@
+{
+  "source_commit": "89d0b64194aaada87bf2cf81ebb78aa8026d320c",
+  "scope": "Actual source dispatch, MotionGenerator normalization and Atomic control-grid compilation; native planner mocked, no GPU qualification",
+  "traces": [
+    {
+      "cfg": {
+        "use_cuda_graph": false,
+        "warmup_iterations": 0,
+        "preserve_plan_samples": true,
+        "world_dynamic_obstacle_names": [],
+        "world_max_voxel_count": 4000000,
+        "world_voxel_size": 0.01,
+        "world_multi_env": false,
+        "interpolation_dt": 0.04,
+        "max_velocity": null,
+        "max_acceleration": null
+      },
+      "closed": 1,
+      "validation_calls": 0,
+      "runtime_robot_config": {
+        "robot_cfg": {
+          "kinematics": {
+            "tool_frames": [
+              "tool"
+            ],
+            "collision_link_names": [
+              "gripper",
+              "gen_sim_payload"
+            ],
+            "lock_joints": {
+              "passive": 0.8999999761581421
+            },
+            "extra_links": {
+              "gen_sim_payload": {
+                "link_name": "gen_sim_payload",
+                "joint_name": "gen_sim_payload_joint",
+                "joint_type": "FIXED",
+                "parent_link_name": "tool",
+                "fixed_transform": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0
+                ]
+              }
+            },
+            "extra_collision_spheres": {
+              "gen_sim_payload": 27
+            }
+          }
+        }
+      },
+      "motion_options": {
+        "strategy": "motion_gen",
+        "sample_count": null,
+        "velocity_limit": null,
+        "acceleration_limit": 0.5,
+        "interpolation_dt": 0.04,
+        "is_linear": false,
+        "preserve_cartesian_samples": false,
+        "is_interpolate": false
+      },
+      "plan_options": {
+        "max_velocity": null,
+        "max_acceleration": 0.5,
+        "control_part": "arm",
+        "start_qpos": [
+          [
+            0.10000000149011612
+          ]
+        ]
+      },
+      "move_types": [
+        "EEF_MOVE"
+      ],
+      "route": "drawer_transport",
+      "incoming": {
+        "velocity_limit": null,
+        "acceleration_limit": 0.5,
+        "sample_count": 50
+      },
+      "output_count": 4,
+      "output_dt": [
+        [
+          0.0,
+          0.03999999910593033,
+          0.03999999910593033,
+          0.03999999910593033
+        ]
+      ],
+      "control_grid": {
+        "positions": [
+          [
+            [
+              0.10000000149011612,
+              0.8999999761581421
+            ],
+            [
+              0.20000000298023224,
+              0.8999999761581421
+            ],
+            [
+              0.30000001192092896,
+              0.8999999761581421
+            ],
+            [
+              0.30000001192092896,
+              0.8999999761581421
+            ]
+          ]
+        ],
+        "dt": [
+          [
+            0.0,
+            0.03999999910593033,
+            0.03999999910593033,
+            0.03999999910593033
+          ]
+        ]
+      }
+    },
+    {
+      "cfg": {
+        "use_cuda_graph": false,
+        "warmup_iterations": 0,
+        "preserve_plan_samples": true,
+        "world_dynamic_obstacle_names": [],
+        "world_max_voxel_count": 4000000,
+        "world_voxel_size": 0.01,
+        "world_multi_env": false,
+        "interpolation_dt": 0.04,
+        "max_velocity": null,
+        "max_acceleration": null
+      },
+      "closed": 1,
+      "validation_calls": 0,
+      "runtime_robot_config": {
+        "robot_cfg": {
+          "kinematics": {
+            "tool_frames": [
+              "tool"
+            ],
+            "collision_link_names": [
+              "gripper",
+              "gen_sim_payload"
+            ],
+            "lock_joints": {
+              "passive": 0.8999999761581421
+            },
+            "extra_links": {
+              "gen_sim_payload": {
+                "link_name": "gen_sim_payload",
+                "joint_name": "gen_sim_payload_joint",
+                "joint_type": "FIXED",
+                "parent_link_name": "tool",
+                "fixed_transform": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0
+                ]
+              }
+            },
+            "extra_collision_spheres": {
+              "gen_sim_payload": 27
+            }
+          }
+        }
+      },
+      "motion_options": {
+        "strategy": "motion_gen",
+        "sample_count": null,
+        "velocity_limit": 0.3,
+        "acceleration_limit": 0.7,
+        "interpolation_dt": 0.04,
+        "is_linear": false,
+        "preserve_cartesian_samples": false,
+        "is_interpolate": false
+      },
+      "plan_options": {
+        "max_velocity": 0.3,
+        "max_acceleration": 0.7,
+        "control_part": "arm",
+        "start_qpos": [
+          [
+            0.10000000149011612
+          ]
+        ]
+      },
+      "move_types": [
+        "EEF_MOVE"
+      ],
+      "route": "drawer_transport",
+      "incoming": {
+        "velocity_limit": 0.3,
+        "acceleration_limit": 0.7,
+        "sample_count": 50
+      },
+      "output_count": 4,
+      "output_dt": [
+        [
+          0.0,
+          0.03999999910593033,
+          0.03999999910593033,
+          0.03999999910593033
+        ]
+      ],
+      "control_grid": {
+        "positions": [
+          [
+            [
+              0.10000000149011612,
+              0.8999999761581421
+            ],
+            [
+              0.20000000298023224,
+              0.8999999761581421
+            ],
+            [
+              0.30000001192092896,
+              0.8999999761581421
+            ],
+            [
+              0.30000001192092896,
+              0.8999999761581421
+            ]
+          ]
+        ],
+        "dt": [
+          [
+            0.0,
+            0.03999999910593033,
+            0.03999999910593033,
+            0.03999999910593033
+          ]
+        ]
+      }
+    },
+    {
+      "cfg": {
+        "use_cuda_graph": false,
+        "warmup_iterations": 0,
+        "preserve_plan_samples": true,
+        "world_dynamic_obstacle_names": [],
+        "world_max_voxel_count": 4000000,
+        "world_voxel_size": 0.01,
+        "world_multi_env": false,
+        "interpolation_dt": 0.04,
+        "max_velocity": null,
+        "max_acceleration": null
+      },
+      "closed": 1,
+      "validation_calls": 0,
+      "runtime_robot_config": {
+        "robot_cfg": {
+          "kinematics": {
+            "tool_frames": [
+              "tool"
+            ],
+            "collision_link_names": [
+              "gripper"
+            ],
+            "lock_joints": {
+              "passive": 0.8999999761581421
+            }
+          }
+        }
+      },
+      "motion_options": {
+        "strategy": "motion_gen",
+        "sample_count": null,
+        "velocity_limit": null,
+        "acceleration_limit": null,
+        "interpolation_dt": null,
+        "is_linear": false,
+        "preserve_cartesian_samples": false,
+        "is_interpolate": false
+      },
+      "plan_options": {
+        "max_velocity": null,
+        "max_acceleration": null,
+        "control_part": "arm",
+        "start_qpos": [
+          [
+            0.10000000149011612
+          ]
+        ]
+      },
+      "move_types": [
+        "JOINT_MOVE"
+      ],
+      "route": "joint_prefix",
+      "incoming": null,
+      "output_count": 4,
+      "output_dt": [
+        [
+          0.0,
+          0.03999999910593033,
+          0.03999999910593033,
+          0.03999999910593033
+        ]
+      ],
+      "control_grid": {
+        "positions": [
+          [
+            [
+              0.10000000149011612,
+              0.8999999761581421
+            ],
+            [
+              0.20000000298023224,
+              0.8999999761581421
+            ],
+            [
+              0.30000001192092896,
+              0.8999999761581421
+            ],
+            [
+              0.30000001192092896,
+              0.8999999761581421
+            ]
+          ]
+        ],
+        "dt": [
+          [
+            0.0,
+            0.03999999910593033,
+            0.03999999910593033,
+            0.03999999910593033
+          ]
+        ]
+      }
+    }
+  ]
+}

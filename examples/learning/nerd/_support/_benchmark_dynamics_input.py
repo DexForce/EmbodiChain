@@ -70,7 +70,7 @@ def create_stress_dataset(
 ) -> Path:
     """Repeat one real trajectory into independent shards for bounded-I/O stress."""
     import h5py
-    from embodichain_models.dynamics.nerd.data import (
+    from embodichain.extensions.models.dynamics.nerd.data import (
         load_manifest,
         DynamicsShardWriter,
         dataset_fingerprint,
@@ -124,8 +124,8 @@ def benchmark_inputs(
     import numpy as np
     import torch
     from torch.utils.data import default_collate
-    from embodichain_models.dynamics.nerd.codec import NeRDStateCodec
-    from embodichain_models.dynamics.nerd.data import DynamicsWindowDataset
+    from embodichain.extensions.models.dynamics.nerd.codec import NeRDStateCodec
+    from embodichain.extensions.models.dynamics.nerd.data import DynamicsWindowDataset
     from examples.learning.nerd._support._trainer import encode_batch
 
     if (

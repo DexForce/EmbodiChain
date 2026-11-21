@@ -33,6 +33,8 @@ from .calls import (
     SemanticCallDescriptor,
     SemanticCallSpec,
     SemanticPose,
+    SemanticRelativePose,
+    MoveHeldObjectCall,
     builtin_semantic_call_catalog,
 )
 from .effects import (
@@ -166,6 +168,8 @@ from .scene import (
 )
 
 __all__ = [
+    "SemanticRelativePose",
+    "MoveHeldObjectCall",
     "AmbiguousSceneAffordanceError",
     "AmbiguousSkillBindingError",
     "ArticulationJointEvidenceAddress",

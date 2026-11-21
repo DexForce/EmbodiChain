@@ -23,8 +23,8 @@ from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import TypeVar
 
-from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
+from embodichain.lab.sim.atomic_skills import (
+    AtomicSkillEngine,
     DynamicCollisionMode,
     DisjointResourceSlots,
     DisjointSlotEndpoints,
@@ -34,6 +34,7 @@ from embodichain.lab.sim.atomic_actions import (
 
 from .calls import (
     HandOver,
+    MoveHeldObjectCall,
     Pick,
     Place,
     RegisteredSemanticCall,
@@ -403,6 +404,7 @@ class LinkedSemanticCall:
             Pick,
             Place,
             HandOver,
+            MoveHeldObjectCall,
             RegisteredSemanticCall,
         ):
             raise TypeError("call must be an exact supported semantic call value.")
@@ -478,7 +480,7 @@ class BoundSemanticCall:
         if not isinstance(self._robot_profile, BoundRobotSkillProfile):
             raise TypeError("robot_profile must be a BoundRobotSkillProfile.")
         if (
-            self.binding.action_binding.owner_id
+            self.binding.skill_binding.owner_id
             != self._robot_profile.engine.binding_owner_id
         ):
             raise ValueError("binding belongs to a different action engine.")
@@ -536,19 +538,19 @@ class SemanticIntegrationManifest:
                     )
                 )
             unknown_option_ids = sorted(
-                set(preset.action_option_templates).difference(known_semantic_ids)
+                set(preset.skill_option_templates).difference(known_semantic_ids)
             )
             if unknown_option_ids:
                 semantic_id = unknown_option_ids[0]
                 raise SemanticValidationError(
                     SemanticDiagnostic(
-                        "unknown_action_option_call",
+                        "unknown_skill_option_call",
                         (
                             "integration",
                             "robot_profile",
                             "presets",
                             preset_id,
-                            "action_option_templates",
+                            "skill_option_templates",
                             semantic_id,
                         ),
                         f"Action-option configuration references unknown semantic "
@@ -556,7 +558,7 @@ class SemanticIntegrationManifest:
                         tuple(self.call_catalog.descriptors),
                     )
                 )
-            for semantic_id, options in preset.action_option_templates.items():
+            for semantic_id, options in preset.skill_option_templates.items():
                 descriptor = self.call_catalog.descriptors[semantic_id]
                 target = descriptor.target_descriptor
                 assert target is not None
@@ -565,13 +567,13 @@ class SemanticIntegrationManifest:
                     "robot_profile",
                     "presets",
                     preset_id,
-                    "action_option_templates",
+                    "skill_option_templates",
                     semantic_id,
                 )
                 if type(options) is not target.options_type:
                     raise SemanticValidationError(
                         SemanticDiagnostic(
-                            "incompatible_action_option_template",
+                            "incompatible_skill_option_template",
                             option_path,
                             f"Semantic call {semantic_id!r} targets options type "
                             f"{target.options_type.__name__}, not "
@@ -584,7 +586,7 @@ class SemanticIntegrationManifest:
                     if options.downstream_object_target_poses:
                         raise SemanticValidationError(
                             SemanticDiagnostic(
-                                "reserved_action_option_field",
+                                "reserved_skill_option_field",
                                 (*option_path, "downstream_object_target_poses"),
                                 "Pick downstream targets are compiler-owned and "
                                 "the template field must be empty.",
@@ -610,11 +612,13 @@ class SemanticIntegrationManifest:
         call: SemanticCallSpec,
         *,
         path: tuple[PathPart, ...] = ("call",),
+        preset_id: str | None = None,
     ) -> LinkedSemanticCall:
         """Resolve static refs, affordances, and declared resource structure.
 
         This method never observes scene providers, constructs an engine,
-        samples a grasp, or runs a planner.
+        samples a grasp, or runs a planner. An explicit ``preset_id`` selects
+        a declared occurrence policy without changing effect assurance.
         """
         if not isinstance(call, SemanticCallSpec):
             raise TypeError("call must be a SemanticCallSpec.")
@@ -649,6 +653,13 @@ class SemanticIntegrationManifest:
                 grasp=grasp,
             )
             affordances["grasp"] = grasp
+        elif isinstance(call, MoveHeldObjectCall):
+            normalized_call = replace(
+                call,
+                object=self.scene.resolve(
+                    call.object, expected_type=SceneObjectRef, path=(*path, "object")
+                ),
+            )
         elif isinstance(call, Place):
             object_ref = self.scene.resolve(
                 call.object,
@@ -707,28 +718,78 @@ class SemanticIntegrationManifest:
             normalized_call.resources,
             path=(*path, "resources"),
         )
-        preset_id = self._resolve_declared_preset(
+        default_preset_id = self._resolve_declared_preset(
             descriptor,
             path=(*path, "preset"),
         )
+        if preset_id is None:
+            preset_id = default_preset_id
+        else:
+            _validate_identifier(preset_id, field_name="preset_id")
+            if preset_id not in self.robot_profile.presets:
+                raise SemanticValidationError(
+                    SemanticDiagnostic(
+                        "unknown_preset",
+                        (*path, "preset"),
+                        f"Unknown occurrence policy preset {preset_id!r}.",
+                        tuple(self.robot_profile.presets),
+                    )
+                )
+            if (
+                self.robot_profile.presets[preset_id].effect_assurance
+                is not self.robot_profile.presets[default_preset_id].effect_assurance
+            ):
+                raise SemanticValidationError(
+                    SemanticDiagnostic(
+                        "occurrence_effect_assurance_mismatch",
+                        (*path, "preset"),
+                        "Occurrence policy selection must preserve the declared effect assurance.",
+                    )
+                )
         preset = self.robot_profile.presets[preset_id]
-        if descriptor.call_id not in preset.action_option_templates:
+        if descriptor.target_descriptor is not None:
+            try:
+                descriptor.target_descriptor.validate_planning_recovery(
+                    preset.recovery_policy
+                )
+            except (TypeError, ValueError) as error:
+                raise SemanticValidationError(
+                    SemanticDiagnostic(
+                        "incompatible_planning_recovery",
+                        (*path, "preset", "recovery", "planning_recovery"),
+                        str(error),
+                    )
+                ) from error
+        if descriptor.target_descriptor is not None:
+            try:
+                descriptor.target_descriptor.validate_motion_policy(
+                    preset.motion_policy
+                )
+            except (TypeError, ValueError) as error:
+                raise SemanticValidationError(
+                    SemanticDiagnostic(
+                        "incompatible_motion_policy",
+                        (*path, "preset", "motion"),
+                        str(error),
+                    )
+                ) from error
+        if descriptor.call_id not in preset.skill_option_templates:
             option_path = (
                 "integration",
                 "robot_profile",
                 "presets",
                 preset_id,
-                "action_option_templates",
+                "skill_option_templates",
                 descriptor.call_id,
             )
             raise SemanticValidationError(
                 SemanticDiagnostic(
-                    "missing_action_option_template",
+                    "missing_skill_option_template",
                     option_path,
                     f"Policy preset {preset_id!r} has no action-option template "
                     f"for semantic call {descriptor.call_id!r} selected at "
                     f"{_render_path(path)}.",
-                    tuple(preset.action_option_templates),
+                    tuple(preset.skill_option_templates),
                 )
             )
         return LinkedSemanticCall(
@@ -1064,7 +1125,7 @@ class SemanticIntegrationManifest:
     def bind(
         self,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         *,
         endpoint_adapters: (
             Mapping[type[ResourceEndpoint], ResourceEndpointAdapter] | None
@@ -1072,8 +1133,8 @@ class SemanticIntegrationManifest:
     ) -> BoundSemanticIntegration:
         """Validate live scene and robot bindings without observing or planning."""
         self.scene.validate_registry(scene_registry)
-        if not isinstance(engine, AtomicActionEngine):
-            raise TypeError("engine must be an AtomicActionEngine.")
+        if not isinstance(engine, AtomicSkillEngine):
+            raise TypeError("engine must be an AtomicSkillEngine.")
         self._validate_safe_dynamic_collision_policy(
             scene_registry=scene_registry,
             engine=engine,
@@ -1102,7 +1163,7 @@ class SemanticIntegrationManifest:
         self,
         *,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> None:
         """Fail before observation when selected safe planning cannot be strict."""
         if not scene_registry.dynamic_collision_entity_ids or not self._selects_preset(
@@ -1155,7 +1216,7 @@ class BoundSemanticIntegration:
         manifest: SemanticIntegrationManifest,
         scene_registry: SceneRegistry,
         robot_profile: BoundRobotSkillProfile,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> None:
         if type(manifest) is not SemanticIntegrationManifest:
             raise TypeError("manifest must be exactly SemanticIntegrationManifest.")
@@ -1163,8 +1224,8 @@ class BoundSemanticIntegration:
             raise TypeError("scene_registry must be a SceneRegistry.")
         if type(robot_profile) is not BoundRobotSkillProfile:
             raise TypeError("robot_profile must be exactly BoundRobotSkillProfile.")
-        if not isinstance(engine, AtomicActionEngine):
-            raise TypeError("engine must be an AtomicActionEngine.")
+        if not isinstance(engine, AtomicSkillEngine):
+            raise TypeError("engine must be an AtomicSkillEngine.")
         manifest.scene.validate_registry(scene_registry)
         manifest._validate_safe_dynamic_collision_policy(
             scene_registry=scene_registry,
@@ -1198,7 +1259,7 @@ class BoundSemanticIntegration:
         return self._robot_profile
 
     @property
-    def engine(self) -> AtomicActionEngine:
+    def engine(self) -> AtomicSkillEngine:
         """Return the engine whose used call targets are validated at link time."""
         return self._engine
 
@@ -1207,8 +1268,9 @@ class BoundSemanticIntegration:
         call: SemanticCallSpec,
         *,
         path: tuple[PathPart, ...] = ("call",),
+        preset_id: str | None = None,
     ) -> BoundSemanticCall:
-        """Resolve one call against exact installed skills, resources, and preset."""
+        """Resolve a call and optional named occurrence preset before grounding."""
         try:
             self._robot_profile.assert_current()
         except RuntimeError as exc:
@@ -1219,8 +1281,8 @@ class BoundSemanticIntegration:
                     str(exc),
                 )
             ) from exc
-        linked = self._manifest.link_call(call, path=path)
-        installed = self._engine.skills.get(linked.descriptor.skill_id)
+        linked = self._manifest.link_call(call, path=path, preset_id=preset_id)
+        installed = self._engine.skill_catalog.get(linked.descriptor.skill_id)
         if installed is None or installed != linked.descriptor.target_descriptor:
             raise SemanticValidationError(
                 SemanticDiagnostic(
@@ -1228,7 +1290,7 @@ class BoundSemanticIntegration:
                     (*path, "kind"),
                     f"Installed engine skill {linked.descriptor.skill_id!r} is "
                     "missing or has a different goal/options/resource contract.",
-                    tuple(self._engine.skills),
+                    tuple(self._engine.skill_catalog),
                 )
             )
         try:
@@ -1265,7 +1327,7 @@ class BoundSemanticIntegration:
                 runner_cfg=preset.runner_cfg,
                 effect_monitors=preset.effect_monitors,
                 required_planner=preset.required_planner,
-                action_option_templates=preset.action_option_templates,
+                skill_option_templates=preset.skill_option_templates,
             )
         return BoundSemanticCall._create(
             linked=linked,

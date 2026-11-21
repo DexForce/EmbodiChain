@@ -1,0 +1,19 @@
+deployment: task.default.yaml
+source: task_program
+collision_profile: ../scene_robot_feasibility/search.ur5.yaml
+output_dir: /tmp/embodichain-expansion/motion
+batch_size: 2
+target_episodes: 2
+max_attempts: 16
+max_steps: 2000
+seed: 7
+settling_steps: 5
+mass_scale:
+  cube:
+  - 0.98
+  - 1.02
+friction:
+  cube:
+  - 0.95
+  - 1.0
+motion_profile: motion.yaml

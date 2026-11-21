@@ -17,6 +17,7 @@
 """Grasp-pose and constrained qpos operators requiring downstream validation."""
 
 from __future__ import annotations
+from collections.abc import Mapping, Sequence
 
 from dataclasses import replace
 import math
@@ -45,6 +46,7 @@ __all__ = [
     "nullspace_residual",
     "retime",
     "validate_motion_limits",
+    "validate_motion_samples",
 ]
 
 TIMING_PROFILES = ("uniform", "ease_in", "ease_out")
@@ -311,6 +313,7 @@ def joint_residual(
     joint_limits: torch.Tensor,
     normalized_scale: float,
     generator: torch.Generator,
+    joint_samples: Mapping[str, float] | None = None,
 ) -> TrajectoryTemplate:
     """Add one smooth, endpoint-preserving residual per allowed free phase.
 
@@ -323,6 +326,10 @@ def joint_residual(
         joint_limits: Finite lower/upper limits with shape ``(D, 2)``.
         normalized_scale: Maximum offset as a fraction of each joint range.
         generator: Explicit local generator; global RNG is never consumed.
+        joint_samples: Optional signed fractions in [-1,1], keyed by all
+            controlled joint names. Extra names must belong to the full template.
+            Uses the same draw in each permitted phase; endpoints and validation
+            remain unchanged. Omit to retain ordinary random sampling.
 
     Returns:
         A new template requiring path and physical validation.
@@ -335,6 +342,14 @@ def joint_residual(
     q = template.positions.clone()
     limits = _resolve_joint_limits(q, joint_limits)
     indices = list(template.controlled_joint_indices)
+    from ._samples import validate_samples
+
+    samples, _ = validate_samples({} if joint_samples is None else joint_samples, (), 1)
+    if samples and (
+        set(samples) - set(template.joint_names)
+        or any(template.joint_names[i] not in samples for i in indices)
+    ):
+        raise ValueError("joint_samples must cover the controlled joint names")
     for phase in phases:
         length = phase.stop_index - phase.start_index
         if length < 3:
@@ -343,7 +358,16 @@ def joint_residual(
         values = torch.rand(
             len(indices), generator=generator, device=generator.device, dtype=q.dtype
         ).to(q.device)
-        offsets = (2 * values - 1) * scale * (limits[indices, 1] - limits[indices, 0])
+        direction = (
+            torch.tensor(
+                [samples[template.joint_names[i]] for i in indices],
+                device=q.device,
+                dtype=q.dtype,
+            )
+            if samples
+            else 2 * values - 1
+        )
+        offsets = direction * scale * (limits[indices, 1] - limits[indices, 0])
         q[phase.start_index : phase.stop_index, indices] += envelope[:, None] * offsets
     _reject_limit_violations(q, limits, indices)
     return replace(template, positions=q)
@@ -356,6 +380,8 @@ def via_points(
     via_count: int,
     normalized_scale: float,
     generator: torch.Generator,
+    joint_samples: Mapping[str, float] | None = None,
+    knot_samples: Sequence[float] = (),
 ) -> TrajectoryTemplate:
     """Route each allowed free phase through sampled interior joint knots.
 
@@ -382,6 +408,11 @@ def via_points(
         via_count: Number of interior knots per phase, at least one.
         normalized_scale: Maximum knot offset as a fraction of each joint range.
         generator: Explicit local generator; global RNG is never consumed.
+        knot_samples: Optional signed knot magnitudes; length must match via_count.
+        joint_samples: Optional signed fractions in [-1,1], keyed by all
+            controlled joint names. Extra names must belong to the full template.
+            Uses the same draw in each permitted phase; endpoints and validation
+            remain unchanged. Omit to retain ordinary random sampling.
 
     Returns:
         A new template requiring path and physical validation.
@@ -397,6 +428,16 @@ def via_points(
     limits = _resolve_joint_limits(q, joint_limits)
     indices = list(template.controlled_joint_indices)
     spans = limits[indices, 1] - limits[indices, 0]
+    from ._samples import validate_samples
+
+    samples, knots_fixed = validate_samples(
+        {} if joint_samples is None else joint_samples, knot_samples, via_count
+    )
+    if samples and (
+        set(samples) - set(template.joint_names)
+        or any(template.joint_names[i] not in samples for i in indices)
+    ):
+        raise ValueError("joint_samples must cover the controlled joint names")
     for phase in phases:
         length = phase.stop_index - phase.start_index
         if length < via_count + 2:
@@ -407,8 +448,20 @@ def via_points(
             device=generator.device,
             dtype=q.dtype,
         ).to(q.device)
-        magnitudes = 2 * values[:via_count] - 1
-        direction = 2 * values[via_count:] - 1
+        magnitudes = (
+            torch.tensor(knots_fixed, device=q.device, dtype=q.dtype)
+            if knots_fixed
+            else 2 * values[:via_count] - 1
+        )
+        direction = (
+            torch.tensor(
+                [samples[template.joint_names[i]] for i in indices],
+                device=q.device,
+                dtype=q.dtype,
+            )
+            if samples
+            else 2 * values[via_count:] - 1
+        )
         knots = magnitudes[:, None] * (direction * scale * spans)[None, :]
         progress = torch.linspace(0, 1, length, device=q.device, dtype=q.dtype)
         q[phase.start_index : phase.stop_index, indices] += _clamped_hermite(
@@ -653,10 +706,48 @@ def validate_motion_limits(
     Returns:
         A single ``motion_limits`` check with maximum normalized ratios.
     """
+    return validate_motion_samples(
+        template.positions,
+        template.dt,
+        velocity_limits=velocity_limits,
+        acceleration_limits=acceleration_limits,
+    )
+
+
+def validate_motion_samples(
+    positions: torch.Tensor,
+    dt: torch.Tensor,
+    *,
+    velocity_limits: torch.Tensor,
+    acceleration_limits: torch.Tensor,
+) -> ValidationResult:
+    """Check full-joint sampled positions and intervals against motion limits.
+
+    The first interval must be zero; later intervals are strictly positive.
+    This finite-difference check does not establish continuous-time dynamics.
+    """
+    if not isinstance(positions, torch.Tensor) or not isinstance(dt, torch.Tensor):
+        raise TypeError("positions and dt must be tensors")
+    if (
+        positions.ndim != 2
+        or positions.shape[0] == 0
+        or positions.shape[1] == 0
+        or dt.shape != (positions.shape[0],)
+    ):
+        raise ValueError("positions and dt must have shapes (T, D) and (T,)")
+    if (
+        not bool(torch.isfinite(positions).all())
+        or not bool(torch.isfinite(dt).all())
+        or dt[0] != 0
+        or bool((dt[1:] <= 0).any())
+    ):
+        raise ValueError(
+            "positions and intervals must be finite with positive later intervals"
+        )
     # Accumulate derivatives outside the source's storage dtype. Half-precision
     # ratios can overflow even for ordinary joint motion and finite profiles.
-    q = template.positions.to(dtype=torch.float64)
-    dt = template.dt.to(dtype=torch.float64)
+    q = positions.to(dtype=torch.float64)
+    dt = dt.to(device=q.device, dtype=torch.float64)
     limits = [
         x.to(device=q.device, dtype=q.dtype)
         for x in (velocity_limits, acceleration_limits)

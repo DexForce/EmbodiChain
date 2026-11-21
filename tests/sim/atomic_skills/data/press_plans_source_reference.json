@@ -1,0 +1,553 @@
+{
+  "source": "489dddd7c646925beecfffbb4e1c9afed0c3a67d",
+  "scope": "CPU deterministic full public Atomic plan; no native construction or physical qualification",
+  "cases": [
+    {
+      "mode": "default",
+      "expected": {
+        "success": [
+          true
+        ],
+        "positions": "6e1a1fce199c85a3391af02bf9990677519045000bdfd63344059da6a3ca0070",
+        "dt": "a247fd07946bc76bd49e0cb073329af549d56364bb434e814cd0edb5afa7be40",
+        "commands": "a0288dc2fcae0935bafd551129c9fe68a4f590a849b1fe022884ac97bb994abc",
+        "segments": [
+          [
+            "close",
+            0,
+            5
+          ],
+          [
+            "approach",
+            5,
+            24
+          ],
+          [
+            "contact",
+            24,
+            43
+          ],
+          [
+            "press",
+            43,
+            62
+          ],
+          [
+            "retract",
+            62,
+            80
+          ]
+        ],
+        "calls": "b9661b71d901de31172e88868812d6949c1241a7cfc88797b9d8d7d2d3952cd4",
+        "call_count": 4,
+        "continuation_calls": 0,
+        "metadata": {
+          "affordance_sample": {
+            "pose_frame": "world",
+            "selected_poses": [
+              [
+                [
+                  -1.0,
+                  -0.0,
+                  0.0,
+                  0.20000000298023224
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  -0.0,
+                  0.0,
+                  -1.0,
+                  0.10000000149011612
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            ],
+            "reference_poses": [
+              [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.20000000298023224
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.10000000149011612
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            ],
+            "success": [
+              true
+            ],
+            "env_ids": [
+              0
+            ],
+            "key": "source-press:contact",
+            "sampling": null,
+            "roll": [
+              0.0
+            ]
+          }
+        },
+        "next_random": [
+          0.6789542237623437,
+          0.012309856865166613,
+          0.6669285297393799
+        ]
+      }
+    },
+    {
+      "mode": "nominal",
+      "expected": {
+        "success": [
+          true
+        ],
+        "positions": "6e1a1fce199c85a3391af02bf9990677519045000bdfd63344059da6a3ca0070",
+        "dt": "a247fd07946bc76bd49e0cb073329af549d56364bb434e814cd0edb5afa7be40",
+        "commands": "a0288dc2fcae0935bafd551129c9fe68a4f590a849b1fe022884ac97bb994abc",
+        "segments": [
+          [
+            "close",
+            0,
+            5
+          ],
+          [
+            "approach",
+            5,
+            24
+          ],
+          [
+            "contact",
+            24,
+            43
+          ],
+          [
+            "press",
+            43,
+            62
+          ],
+          [
+            "retract",
+            62,
+            80
+          ]
+        ],
+        "calls": "b9661b71d901de31172e88868812d6949c1241a7cfc88797b9d8d7d2d3952cd4",
+        "call_count": 4,
+        "continuation_calls": 0,
+        "metadata": {
+          "affordance_sample": {
+            "pose_frame": "world",
+            "selected_poses": [
+              [
+                [
+                  -1.0,
+                  -0.0,
+                  0.0,
+                  0.20000000298023224
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  -0.0,
+                  0.0,
+                  -1.0,
+                  0.10000000149011612
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            ],
+            "reference_poses": [
+              [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.20000000298023224
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.10000000149011612
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            ],
+            "success": [
+              true
+            ],
+            "env_ids": [
+              0
+            ],
+            "key": "source-press:contact",
+            "sampling": null,
+            "roll": [
+              0.0
+            ]
+          }
+        },
+        "next_random": [
+          0.6789542237623437,
+          0.012309856865166613,
+          0.6669285297393799
+        ]
+      }
+    },
+    {
+      "mode": "roll",
+      "expected": {
+        "success": [
+          true
+        ],
+        "positions": "6e1a1fce199c85a3391af02bf9990677519045000bdfd63344059da6a3ca0070",
+        "dt": "a247fd07946bc76bd49e0cb073329af549d56364bb434e814cd0edb5afa7be40",
+        "commands": "a0288dc2fcae0935bafd551129c9fe68a4f590a849b1fe022884ac97bb994abc",
+        "segments": [
+          [
+            "close",
+            0,
+            5
+          ],
+          [
+            "approach",
+            5,
+            24
+          ],
+          [
+            "contact",
+            24,
+            43
+          ],
+          [
+            "press",
+            43,
+            62
+          ],
+          [
+            "retract",
+            62,
+            80
+          ]
+        ],
+        "calls": "d36508b19ed3e0476300d0809123175cdc633f2feb7b4b8812db593ce473204a",
+        "call_count": 8,
+        "continuation_calls": 52,
+        "metadata": {
+          "affordance_sample": {
+            "pose_frame": "world",
+            "selected_poses": [
+              [
+                [
+                  -0.0,
+                  1.0,
+                  0.0,
+                  0.20000000298023224
+                ],
+                [
+                  1.0,
+                  -0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  -1.0,
+                  0.10000000149011612
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            ],
+            "reference_poses": [
+              [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.20000000298023224
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.10000000149011612
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            ],
+            "success": [
+              true
+            ],
+            "env_ids": [
+              0
+            ],
+            "key": "source-press:contact",
+            "sampling": null,
+            "roll": [
+              0.0
+            ]
+          },
+          "press_roll_recovery": {
+            "maximum_complete_plans": 2,
+            "complete_plans": 2,
+            "roll_rad": 1.5707963267948966,
+            "accepted": true,
+            "alternate_phases": [],
+            "scope": "same_contact_point_axis_and_resource_not_physical_evidence"
+          }
+        },
+        "next_random": [
+          0.6837498310616852,
+          0.8202254409317387,
+          0.15132391452789307
+        ]
+      }
+    },
+    {
+      "mode": "exhausted",
+      "expected": {
+        "success": [
+          false
+        ],
+        "positions": "378a76a765ca87e252314b011dd3437f878a30a210a93cf1a20590be5b489da0",
+        "dt": "a247fd07946bc76bd49e0cb073329af549d56364bb434e814cd0edb5afa7be40",
+        "commands": "1ce3cfcbd08d4e2f73c239865e571d4526c57b85d734115a69cee9d9a146ee36",
+        "segments": [
+          [
+            "close",
+            0,
+            5
+          ],
+          [
+            "approach",
+            5,
+            24
+          ],
+          [
+            "contact",
+            24,
+            43
+          ],
+          [
+            "press",
+            43,
+            62
+          ],
+          [
+            "retract",
+            62,
+            80
+          ]
+        ],
+        "calls": "d36508b19ed3e0476300d0809123175cdc633f2feb7b4b8812db593ce473204a",
+        "call_count": 8,
+        "continuation_calls": 104,
+        "metadata": {
+          "affordance_sample": {
+            "pose_frame": "world",
+            "selected_poses": [
+              [
+                [
+                  -1.0,
+                  -0.0,
+                  0.0,
+                  0.20000000298023224
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  -0.0,
+                  0.0,
+                  -1.0,
+                  0.10000000149011612
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            ],
+            "reference_poses": [
+              [
+                [
+                  1.0,
+                  0.0,
+                  0.0,
+                  0.20000000298023224
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.10000000149011612
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            ],
+            "success": [
+              true
+            ],
+            "env_ids": [
+              0
+            ],
+            "key": "source-press:contact",
+            "sampling": null,
+            "roll": [
+              0.0
+            ]
+          },
+          "press_continuous_ik": [
+            {
+              "phase": "approach",
+              "sample_count": 19,
+              "control_dt": 0.04,
+              "accepted": false,
+              "scope": "failure_only_seeded_ik_same_targets_and_time_not_physical_evidence"
+            },
+            {
+              "phase": "contact",
+              "sample_count": 19,
+              "control_dt": 0.04,
+              "accepted": false,
+              "scope": "failure_only_seeded_ik_same_targets_and_time_not_physical_evidence"
+            },
+            {
+              "phase": "press",
+              "sample_count": 19,
+              "control_dt": 0.04,
+              "accepted": false,
+              "scope": "failure_only_seeded_ik_same_targets_and_time_not_physical_evidence"
+            },
+            {
+              "phase": "retract",
+              "sample_count": 18,
+              "control_dt": 0.04,
+              "accepted": false,
+              "scope": "failure_only_seeded_ik_same_targets_and_time_not_physical_evidence"
+            }
+          ],
+          "press_roll_recovery": {
+            "maximum_complete_plans": 2,
+            "complete_plans": 2,
+            "roll_rad": 1.5707963267948966,
+            "accepted": false,
+            "alternate_phases": [
+              {
+                "phase": "approach",
+                "sample_count": 19,
+                "control_dt": 0.04,
+                "accepted": false,
+                "scope": "failure_only_seeded_ik_same_targets_and_time_not_physical_evidence"
+              },
+              {
+                "phase": "contact",
+                "sample_count": 19,
+                "control_dt": 0.04,
+                "accepted": false,
+                "scope": "failure_only_seeded_ik_same_targets_and_time_not_physical_evidence"
+              },
+              {
+                "phase": "press",
+                "sample_count": 19,
+                "control_dt": 0.04,
+                "accepted": false,
+                "scope": "failure_only_seeded_ik_same_targets_and_time_not_physical_evidence"
+              },
+              {
+                "phase": "retract",
+                "sample_count": 18,
+                "control_dt": 0.04,
+                "accepted": false,
+                "scope": "failure_only_seeded_ik_same_targets_and_time_not_physical_evidence"
+              }
+            ],
+            "scope": "same_contact_point_axis_and_resource_not_physical_evidence"
+          }
+        },
+        "next_random": [
+          0.6837498310616852,
+          0.8202254409317387,
+          0.15132391452789307
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+# Browser and offline-plot extras; Torch, Warp and Viser come with EmbodiChain.
+matplotlib
+plotly
+trimesh
+yourdfpy

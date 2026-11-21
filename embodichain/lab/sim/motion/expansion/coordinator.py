@@ -153,6 +153,11 @@ class CandidateCoordinator:
     template's controlled joint order. Task-space and guided proposals share
     this callable; guidance uses the initial state's registered reference
     normalizer. Candidate metadata preserves the actual selection evidence.
+    An optional ``geometry_family_id`` pins a host-owned baseline across
+    variants. ``label_proposal_ordinal`` includes the accepted numerical draw in
+    candidate identity, so rejected draws cannot be mistaken for the winner.
+    ``max_generation_attempts`` bounds proposal draws; their rejection counts
+    remain available through :attr:`last_generation_statistics`.
     """
 
     def __init__(
@@ -168,6 +173,9 @@ class CandidateCoordinator:
         acceleration_limits: torch.Tensor | None = None,
         task_jacobians: torch.Tensor | None = None,
         kinematics: KinematicsFn | None = None,
+        geometry_family_id: str | None = None,
+        label_proposal_ordinal: bool = False,
+        max_generation_attempts: int | None = None,
     ) -> None:
         if isinstance(cfg, TrajectoryExpansionJobCfg):
             cfg = TrajectoryExpansionCfg.from_expansion_job(cfg)
@@ -183,6 +191,18 @@ class CandidateCoordinator:
             raise TypeError("joint_limits must be a tensor")
         if type(backend_id) is not str or not backend_id.strip():
             raise ValueError("backend_id must be a nonempty string")
+        if geometry_family_id is not None and (
+            not isinstance(geometry_family_id, str) or not geometry_family_id.strip()
+        ):
+            raise ValueError("geometry_family_id must be a nonempty string or None")
+        if type(label_proposal_ordinal) is not bool:
+            raise TypeError("label_proposal_ordinal must be a boolean")
+        if max_generation_attempts is not None and (
+            type(max_generation_attempts) is not int or max_generation_attempts < 1
+        ):
+            raise ValueError(
+                "max_generation_attempts must be a positive integer or None"
+            )
         if (velocity_limits is None) != (acceleration_limits is None):
             raise ValueError(
                 "velocity_limits and acceleration_limits must be supplied together"
@@ -193,6 +213,9 @@ class CandidateCoordinator:
         self._source_context = source_context
         self._joint_limits = joint_limits.detach().clone()
         self._backend_id = backend_id
+        self._geometry_family_id = geometry_family_id
+        self._label_proposal_ordinal = label_proposal_ordinal
+        self._max_generation_attempts = max_generation_attempts
         self._observation_profiles = (
             self._cfg.observation.profiles if self._cfg.observation.enabled else ()
         )
@@ -212,6 +235,7 @@ class CandidateCoordinator:
         self._kinematics = kinematics
         self._pending: deque[CandidateWorkItem] = deque()
         self._seen_fingerprints: set[str] = set()
+        self._last_generation_statistics: dict[str, object] | None = None
 
     @property
     def pending_count(self) -> int:
@@ -222,6 +246,16 @@ class CandidateCoordinator:
     def session(self) -> ExpansionSession:
         """Return the session that owns candidate lifecycle and receipts."""
         return self._session
+
+    @property
+    def last_generation_statistics(self) -> dict[str, object] | None:
+        """Return attempted and rejected proposal counts from the last source."""
+        if self._last_generation_statistics is None:
+            return None
+        return {
+            "attempted": self._last_generation_statistics["attempted"],
+            "rejected": dict(self._last_generation_statistics["rejected"]),
+        }
 
     @property
     def source_case(self) -> SceneCase:
@@ -297,6 +331,7 @@ class CandidateCoordinator:
             acceleration_limits=self._acceleration_limits,
             task_jacobians=self._task_jacobians,
             generator=generator,
+            max_attempts=self._max_generation_attempts,
             kinematics=self._kinematics,
             manipulability_reference=(
                 self._session.manipulability_reference(self._source_context.scene_case)
@@ -305,6 +340,10 @@ class CandidateCoordinator:
                 else None
             ),
         )
+        self._last_generation_statistics = {
+            "attempted": variants.attempted,
+            "rejected": dict(variants.rejected),
+        }
         if compatibility_key is not None and (
             type(compatibility_key) is not str or not compatibility_key.strip()
         ):
@@ -358,7 +397,12 @@ class CandidateCoordinator:
                     self._source_context.source_id,
                     self._source_context.source_revision,
                     self._source_context.unit_id,
-                    variant.spatial_operator,
+                    (
+                        f"{variant.spatial_operator}:{'task' if variant.task_space else 'joint'}:ordinal:{variant.ordinal}"
+                        if self._label_proposal_ordinal
+                        else variant.spatial_operator
+                    ),
+                    geometry_family_id=self._geometry_family_id,
                 )
                 for variant, _, _, _ in prepared
             )

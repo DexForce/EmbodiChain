@@ -50,7 +50,7 @@ from scripts.benchmark.rl.locomotion_ppo import (
 )
 
 ROOT = Path(__file__).resolve().parents[4]
-TASK_DIR = ROOT / "extensions/embodichain_tasks/configs/tasks/locomotion/velocity"
+TASK_DIR = ROOT / "embodichain/extensions/tasks/configs/tasks/locomotion/velocity"
 
 
 def _subprocess_env() -> dict[str, str]:
@@ -304,7 +304,12 @@ def _resume_checkpoint(backend: str, output: Path) -> None:
 
 
 if __name__ == "__main__":
-    if sys.argv[1] == "resume":
-        _resume_checkpoint(sys.argv[2], Path(sys.argv[3]))
-    else:
-        _run_locomotion_smoke(sys.argv[1], sys.argv[2])
+    from embodichain.lab.sim import SimulationManager
+
+    try:
+        if sys.argv[1] == "resume":
+            _resume_checkpoint(sys.argv[2], Path(sys.argv[3]))
+        else:
+            _run_locomotion_smoke(sys.argv[1], sys.argv[2])
+    finally:
+        SimulationManager.flush_cleanup_queue()

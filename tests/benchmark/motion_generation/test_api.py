@@ -26,7 +26,7 @@ from unittest.mock import Mock
 import pytest
 import torch
 import yaml
-from embodichain_benchmarks.motion_generation import (
+from embodichain.extensions.benchmarks.motion_generation import (
     BenchmarkCase,
     PlannerAdapter,
     PlannerSpecCfg,
@@ -34,13 +34,19 @@ from embodichain_benchmarks.motion_generation import (
     load_suite,
     run_benchmark,
 )
-from embodichain_benchmarks.motion_generation import runner as runner_module
-from embodichain_benchmarks.motion_generation.config import TrackCfg, suite_to_dict
-from embodichain_benchmarks.motion_generation.metrics.trajectory import (
+from embodichain.extensions.benchmarks.motion_generation import runner as runner_module
+from embodichain.extensions.benchmarks.motion_generation.config import (
+    TrackCfg,
+    suite_to_dict,
+)
+from embodichain.extensions.benchmarks.motion_generation.metrics.trajectory import (
     make_failure_outcomes,
 )
-from embodichain_benchmarks.motion_generation.registry import planner_adapter_names
-from embodichain_benchmarks.motion_generation.scenarios.base import (
+from embodichain.extensions.benchmarks.motion_generation.registry import (
+    planner_adapter_names,
+    planner_configuration_features,
+)
+from embodichain.extensions.benchmarks.motion_generation.scenarios.base import (
     ScenarioEvaluation,
     ScenarioProvider,
 )
@@ -48,6 +54,34 @@ from embodichain_benchmarks.motion_generation.scenarios.base import (
 from embodichain.lab.sim.motion.planners.utils import PlanResult
 
 pytestmark = pytest.mark.no_sim
+
+
+@pytest.mark.parametrize(
+    "adapter,expected",
+    [
+        ("toppra", {"masked_constraints"}),
+        ("curobo", {"masked_constraints"}),
+        (
+            "nmg_onnx",
+            {
+                "policy_frame_from_world_by_control_part",
+                "preserve_waypoint_arrivals",
+                "batch_control_parts",
+                "onnx_cuda_use_tf32",
+            },
+        ),
+        ("ik_interpolate", set()),
+    ],
+)
+def test_configuration_features_are_available_without_backend_construction(
+    monkeypatch: pytest.MonkeyPatch, adapter: str, expected: set[str]
+) -> None:
+    monkeypatch.setattr(
+        PlannerAdapter,
+        "__init__",
+        lambda *args, **kwargs: pytest.fail("feature discovery constructed a backend"),
+    )
+    assert planner_configuration_features(adapter) == expected
 
 
 def test_suite_rejects_retired_top_level_free_space_configuration() -> None:
@@ -199,6 +233,44 @@ def test_external_adapter_runs_without_global_registration_or_input_mutation(
     fake_runtime[0].flush_cleanup_queue.assert_called_once()
 
 
+def test_quality_capture_persists_exact_result_and_excludes_comparable_timing(
+    fake_runtime, tmp_path
+):
+    import hashlib
+
+    suite = load_suite()
+    suite.protocol.warmup_trials = 0
+    suite.protocol.measured_trials = 1
+    spec = PlannerSpecCfg(id="external", adapter="external", role="candidate")
+    result = run_benchmark(
+        suite,
+        planners=[spec],
+        adapters={"external": ExternalAdapter},
+        device="cpu",
+        output_root=tmp_path,
+        capture_trajectories=True,
+    )
+    rows = [json.loads(line) for line in result.trials_path.read_text().splitlines()]
+    measured = next(row for row in rows if row["phase"] == "measured")
+    reference = measured["metadata"]["trajectory_trace"]
+    path = Path(reference["path"])
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == reference["sha256"]
+    trace = torch.load(path, weights_only=True)
+    assert trace["algorithm_id"] == "external"
+    assert trace["case_id"] == measured["case_id"]
+    assert reference["stage_count"] == 1
+    stage = trace["stages"][0]
+    assert stage["stage"] == "planning_result"
+    torch.testing.assert_close(stage["positions"], torch.zeros(1, 2, 2))
+    torch.testing.assert_close(stage["dt"], torch.tensor([[0.0, 0.1]]))
+    assert measured["metadata"]["benchmark_execution"]["timing_comparable"] is False
+    assert all(
+        "trajectory_trace" not in row["metadata"]
+        for row in rows
+        if row["phase"] != "measured"
+    )
+
+
 def test_adapter_mapping_is_local_to_each_run(fake_runtime, tmp_path: Path) -> None:
     class First(ExternalAdapter):
         events = []
@@ -260,7 +332,9 @@ def test_suite_with_no_enabled_planners_fails_before_simulation(fake_runtime) ->
 def test_framework_revision_is_independent_of_caller_directory(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from embodichain_benchmarks.motion_generation.artifacts import _git_commit
+    from embodichain.extensions.benchmarks.motion_generation.artifacts import (
+        _git_commit,
+    )
 
     framework_revision = _git_commit()
     assert framework_revision is not None
@@ -459,7 +533,9 @@ def test_frozen_manifest_rejects_changed_embodiment_before_simulation(
 def test_prepare_case_manifest_is_planner_independent_and_never_overwrites(
     fake_runtime, tmp_path, monkeypatch
 ):
-    from embodichain_benchmarks.motion_generation import prepare_case_manifest
+    from embodichain.extensions.benchmarks.motion_generation import (
+        prepare_case_manifest,
+    )
 
     suite = load_suite()
     monkeypatch.setattr(
@@ -505,7 +581,7 @@ def _spawned_fake_shard(job):
     from dataclasses import replace
     from unittest.mock import patch
 
-    from embodichain_benchmarks.motion_generation.parallel import _run_shard
+    from embodichain.extensions.benchmarks.motion_generation.parallel import _run_shard
 
     robot = Mock(uid="test_robot")
     provider = Mock(control_part="arm")
@@ -550,14 +626,17 @@ def _spawned_fake_shard(job):
         return _run_shard(job)
 
 
-@pytest.mark.parametrize("execution", ["inline", "spawn"])
+@pytest.mark.parametrize("execution", ["inline", "spawn", "multi_device"])
 def test_parallel_quality_merges_full_population_and_preserves_inputs(
     fake_runtime, tmp_path, monkeypatch, execution
 ):
     from dataclasses import replace
 
-    from embodichain_benchmarks.motion_generation import parallel, prepare_case_manifest
-    from embodichain_benchmarks.motion_generation.models import TrialPhase
+    from embodichain.extensions.benchmarks.motion_generation import (
+        parallel,
+        prepare_case_manifest,
+    )
+    from embodichain.extensions.benchmarks.motion_generation.models import TrialPhase
 
     suite = load_suite()
     suite.protocol.warmup_trials = 0
@@ -601,8 +680,23 @@ def test_parallel_quality_merges_full_population_and_preserves_inputs(
         "create_planner_adapter",
         lambda spec, context: ExternalAdapter(spec, context),
     )
-    if execution == "inline":
+    assigned_devices = []
+    quality_devices = None
+    workers = 2
+    if execution in {"inline", "multi_device"}:
         monkeypatch.setattr(parallel, "ProcessPoolExecutor", _InlineExecutor)
+        if execution == "multi_device":
+            quality_devices = ["cuda:2", "cuda:5"]
+            workers = 3
+            monkeypatch.setattr(parallel, "resolve_quality_devices", list)
+            actual_worker = parallel._run_shard
+
+            def cpu_shard(job):
+                # Exercise real partition/merge while replacing only GPU execution.
+                assigned_devices.append(job["device"])
+                return actual_worker({**job, "device": "cpu"})
+
+            monkeypatch.setattr(parallel, "_run_shard", cpu_shard)
     else:
         monkeypatch.setattr(parallel, "_run_shard", _spawned_fake_shard)
     serial = run_benchmark(
@@ -613,7 +707,8 @@ def test_parallel_quality_merges_full_population_and_preserves_inputs(
         case_manifest=corpus,
         output_root=tmp_path / "parallel",
         device="cpu",
-        workers=2,
+        workers=workers,
+        quality_devices=quality_devices,
     )
     measured = [row for row in result.records if row.phase is TrialPhase.MEASURED]
     assert [row.case_id for row in measured] == ["case_0", "case_1", "case_2"]
@@ -634,7 +729,12 @@ def test_parallel_quality_merges_full_population_and_preserves_inputs(
         json.loads((result.run_dir / "case_manifest.json").read_text())["cases_sha256"]
         == json.loads(original)["cases_sha256"]
     )
-    assert json.loads((result.run_dir / "execution.json").read_text())["workers"] == 2
+    state = json.loads((result.run_dir / "execution.json").read_text())
+    assert state["workers"] == workers
+    if quality_devices is not None:
+        assert assigned_devices == ["cuda:2", "cuda:5", "cuda:2"]
+        assert state["quality_devices"] == quality_devices
+    assert all(shard["device"] == "cpu" for shard in state["shards"])
     assert result.report_path.is_file()
 
     frozen_rows = json.loads(original)["cases"]
@@ -666,6 +766,8 @@ def test_parallel_quality_merges_full_population_and_preserves_inputs(
     )
     assert failed in preserved
 
+    if execution == "multi_device":
+        return
     if execution == "spawn":
         state = json.loads((result.run_dir / "execution.json").read_text())
         import os
@@ -701,9 +803,12 @@ def test_parallel_merges_initialized_and_unsupported_only_nmg_workers(
     from copy import deepcopy
     from dataclasses import replace
 
-    from embodichain_benchmarks.motion_generation import parallel, prepare_case_manifest
-    from embodichain_benchmarks.motion_generation.models import TrialPhase
-    from embodichain_benchmarks.motion_generation.planners.nmg_onnx import (
+    from embodichain.extensions.benchmarks.motion_generation import (
+        parallel,
+        prepare_case_manifest,
+    )
+    from embodichain.extensions.benchmarks.motion_generation.models import TrialPhase
+    from embodichain.extensions.benchmarks.motion_generation.planners.nmg_onnx import (
         NmgOnnxAdapter,
     )
 
@@ -800,8 +905,11 @@ def test_parallel_merges_initialized_and_unsupported_only_nmg_workers(
 def test_parallel_partition_preserves_shared_geometry_and_rejects_timing(
     fake_runtime, tmp_path, monkeypatch
 ):
-    from embodichain_benchmarks.motion_generation import parallel, prepare_case_manifest
-    from embodichain_benchmarks.motion_generation.config import stable_hash
+    from embodichain.extensions.benchmarks.motion_generation import (
+        parallel,
+        prepare_case_manifest,
+    )
+    from embodichain.extensions.benchmarks.motion_generation.config import stable_hash
 
     rows = [
         {
@@ -836,6 +944,72 @@ def test_parallel_partition_preserves_shared_geometry_and_rejects_timing(
         run_benchmark(
             suite, case_manifest=corpus, output_root=tmp_path, device="cpu", workers=2
         )
+    monkeypatch.setattr(parallel, "resolve_quality_devices", list)
+    for workers in (1, 2):
+        with pytest.raises(ValueError, match="Performance replay does not accept"):
+            run_benchmark(
+                suite,
+                case_manifest=corpus,
+                output_root=tmp_path,
+                device="cpu",
+                workers=workers,
+                quality_devices=["cuda:0", "cuda:1"],
+            )
+
+
+@pytest.mark.parametrize("devices", [[], ["cuda"], ["cuda:0", "cuda:0"], ["cuda:2"]])
+def test_quality_device_list_is_explicit_unique_and_available(monkeypatch, devices):
+    from embodichain.extensions.benchmarks.motion_generation import (
+        resolve_quality_devices,
+    )
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    with pytest.raises(ValueError, match="quality.device"):
+        resolve_quality_devices(devices)
+    assert resolve_quality_devices(["cuda:1", "cuda:0"]) == ["cuda:1", "cuda:0"]
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_serial_quality_device_scope_restores_host_on_return_or_failure(
+    monkeypatch, fails
+):
+    from contextlib import contextmanager
+    from embodichain.extensions.benchmarks.motion_generation import parallel
+
+    events = []
+
+    @contextmanager
+    def device_scope(device):
+        assert device == "cuda:2"
+        events.append("enter")
+        try:
+            yield
+        finally:
+            events.append("restore")
+
+    class Runner:
+        def __init__(self, suite, planners, **kwargs):
+            assert events == ["enter"]
+            assert kwargs["device"] == "cuda:2"
+            assert kwargs["execution"]["quality_devices"] == ["cuda:2"]
+            self.suite, self.planner_specs = suite, planners
+
+        def run(self):
+            assert events == ["enter"]
+            if fails:
+                raise RuntimeError("fixture failure")
+            return "complete"
+
+    monkeypatch.setattr(parallel, "resolve_quality_devices", list)
+    monkeypatch.setattr(torch.cuda, "device", device_scope)
+    monkeypatch.setattr(runner_module, "BenchmarkRunner", Runner)
+    if fails:
+        with pytest.raises(RuntimeError, match="fixture failure"):
+            run_benchmark(device="cpu", quality_devices=["cuda:2"])
+    else:
+        assert run_benchmark(device="cpu", quality_devices=["cuda:2"]) == "complete"
+    assert events == ["enter", "restore"]
 
 
 @pytest.mark.parametrize(
@@ -851,7 +1025,9 @@ def test_parallel_partition_preserves_shared_geometry_and_rejects_timing(
 def test_parallel_resolves_device_index_in_parent(
     monkeypatch, requested, expected, uses_current
 ):
-    from embodichain_benchmarks.motion_generation.parallel import _worker_device
+    from embodichain.extensions.benchmarks.motion_generation.parallel import (
+        _worker_device,
+    )
 
     current = Mock(return_value=5)
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
@@ -861,3 +1037,54 @@ def test_parallel_resolves_device_index_in_parent(
     assert current.call_count == int(uses_current)
     if torch.device(resolved).type == "cuda":
         assert torch.device(resolved).index is not None
+
+
+@pytest.mark.parametrize("change", ["none", "source", "config", "corrupt"])
+def test_preparation_progress_survives_interruption_and_rejects_mismatch(
+    fake_runtime, tmp_path, monkeypatch, change
+):
+    """Interrupted preparation retains inputs but never publishes a partial corpus."""
+    from embodichain.extensions.benchmarks.motion_generation import (
+        prepare_case_manifest,
+    )
+
+    suite = load_suite()
+    output, progress = tmp_path / "frozen.json", tmp_path / "progress"
+    generate = Mock(wraps=fake_runtime[2].generate_cases)
+    monkeypatch.setattr(fake_runtime[2], "generate_cases", generate)
+    writer = runner_module.write_case_manifest
+    monkeypatch.setattr(
+        runner_module,
+        "write_case_manifest",
+        Mock(side_effect=KeyboardInterrupt("interrupted before final publication")),
+    )
+    kwargs = dict(
+        output=output, device="cpu", progress=progress, generation_revision="A"
+    )
+    with pytest.raises(KeyboardInterrupt):
+        prepare_case_manifest(suite, **kwargs)
+    assert not output.exists()
+    assert generate.call_count == 1
+    saved = list(progress.glob("case-*.json"))
+    assert len(saved) == 1
+    original = saved[0].read_bytes()
+    monkeypatch.setattr(runner_module, "write_case_manifest", writer)
+    if change == "source":
+        kwargs["generation_revision"] = "B"
+    elif change == "config":
+        suite.protocol.position_threshold_m *= 2
+    elif change == "corrupt":
+        payload = json.loads(saved[0].read_text())
+        payload["cases"][0]["seed"] += 1
+        saved[0].write_text(json.dumps(payload))
+    if change != "none":
+        with pytest.raises(ValueError, match="preparation|hash"):
+            prepare_case_manifest(suite, **kwargs)
+        assert not output.exists()
+    else:
+        prepare_case_manifest(suite, **kwargs)
+        assert saved[0].read_bytes() == original
+        payload = json.loads(output.read_text())
+        assert payload["cases"][0]["case_id"] == "test_case"
+        assert len(payload["cases"]) == 1
+    assert generate.call_count == 1

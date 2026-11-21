@@ -59,12 +59,14 @@ if TYPE_CHECKING:
 
 
 __all__ = [
+    "reset_fluid_in_container",
     "apply_expansion_profile_reset",
     "replace_assets_from_group",
     "prepare_extra_attr",
     "register_entity_attrs",
     "register_entity_pose",
     "register_info_to_env",
+    "set_visual_object_pose_from_env",
     "resolve_uids",
     "resolve_dict",
     "get_pose",
@@ -74,6 +76,49 @@ __all__ = [
     "create_rigid_constraint",
     "remove_rigid_constraint",
 ]
+
+
+def set_visual_object_pose_from_env(
+    env: EmbodiedEnv,
+    env_ids: torch.Tensor | Sequence[int] | slice | None,
+    entity_cfg: SceneEntityCfg,
+    pose_key: str,
+) -> None:
+    """Set a render-only object's arena-local pose from environment state.
+
+    This deterministic event can synchronize a goal marker after an event that
+    populates ``env.<pose_key>``. It does not sample a pose, modify the stored
+    poses, or advance physics. Configure it after the event supplying the pose.
+    Without a native renderer, visual objects remain declarations and this
+    event is a no-op.
+
+    Args:
+        env: Environment holding the source poses and destination visual object.
+        env_ids: Environment rows to update. None selects all environments.
+        entity_cfg: Destination visual object, such as a configured goal marker.
+        pose_key: Environment attribute containing arena-local poses with shape
+            ``(num_envs, 4, 4)`` or ``(num_envs, 7)`` in position/xyzw form.
+
+    Raises:
+        AttributeError: The source pose attribute has not been populated.
+        ValueError: The destination is not a registered visual object.
+    """
+    if not env.sim.has_native_renderer:
+        return
+    if env_ids is None:
+        env_ids = torch.arange(env.num_envs, device=env.device)
+    elif isinstance(env_ids, slice):
+        env_ids = torch.arange(*env_ids.indices(env.num_envs), device=env.device)
+    else:
+        env_ids = torch.as_tensor(env_ids, dtype=torch.long, device=env.device)
+    if len(env_ids) == 0:
+        return
+
+    poses = getattr(env, pose_key)[env_ids]
+    target = env.sim.get_visual_object(entity_cfg.uid)
+    if target is None:
+        raise ValueError(f"Visual object '{entity_cfg.uid}' does not exist.")
+    target.set_local_pose(poses, env_ids=env_ids)
 
 
 def apply_expansion_profile_reset(
@@ -866,3 +911,34 @@ def remove_rigid_constraint(
         name: Base constraint name to remove.
     """
     env.sim.remove_rigid_constraint(name, env_ids=env_ids)
+
+
+def reset_fluid_in_container(
+    env: EmbodiedEnv,
+    env_ids: Sequence[int] | torch.Tensor,
+    entity_cfgs: list[SceneEntityCfg],
+) -> None:
+    """Refill selected rows from the declared local template after container reset.
+
+    Args:
+        env: Owning environment.
+        env_ids: Selected environment indices.
+        entity_cfgs: Fluid and rigid container selections, in that order.
+    """
+    from embodichain.lab.sim.spawn.descriptors import _pose_from_cfg
+    from embodichain.utils.math import quat_from_matrix
+
+    if len(entity_cfgs) != 2:
+        raise ValueError("Expected fluid and container selections.")
+    fluid = env.sim.get_fluid_object(entity_cfgs[0].uid)
+    container = env.sim.get_rigid_object(entity_cfgs[1].uid)
+    if fluid is None or container is None:
+        raise ValueError("Unknown fluid or container.")
+    ids = torch.as_tensor(env_ids, device=env.device, dtype=torch.long)
+    local = torch.as_tensor(
+        _pose_from_cfg(fluid.cfg), dtype=torch.float32, device=env.device
+    )
+    world = container.get_local_pose(to_matrix=True)[ids] @ local
+    world[:, :3, 3] += env.sim.arena_offsets[ids]
+    pose = torch.cat((world[:, :3, 3], quat_from_matrix(world[:, :3, :3])), dim=-1)
+    fluid.reset_to_pose(pose, ids)

@@ -30,7 +30,9 @@ __all__ = ["reshape_tiled_image", "scatter_contact_data"]
 
 def __getattr__(name: str) -> Any:
     if name == "scatter_contact_data":
-        from embodichain.lab.sim.sensors._warp.contact import scatter_contact_data
+        from embodichain.lab.sim.sensors.contact._warp.scatter import (
+            scatter_contact_data,
+        )
 
         return scatter_contact_data
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

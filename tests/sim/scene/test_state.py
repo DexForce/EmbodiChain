@@ -21,7 +21,7 @@ import torch
 from embodichain.lab.sim.scene.query import SceneView
 from embodichain.lab.sim.scene.state import capture_state, restore_state
 from embodichain.lab.sim.scene.validation import compare_states
-from ._runtime_ports import Sim, Rigid
+from ._runtime_ports import Sim, Rigid, Visual
 
 
 def test_capture_owns_batches_and_restores_targets_effort_and_velocity():
@@ -36,6 +36,26 @@ def test_capture_owns_batches_and_restores_targets_effort_and_velocity():
     assert compare_states(saved, capture_state(view)).passed
     assert sim.steps == 0 and sim.syncs == 1
     assert sim.articulations["drawer"].state["qf"].item() == pytest.approx(0.5)
+
+
+def test_mixed_group_snapshot_retains_only_selected_physical_state():
+    sim = Sim(4)
+    sim.visuals["scan"] = Visual(4)
+    view = SceneView(sim, env_ids=(3, 1), entity_uids=("scan", "cube"))
+    saved = capture_state(view)
+    assert [[row.uid for row in batch] for batch in saved.batches] == [
+        ["cube"],
+        ["cube"],
+    ]
+    sim.rigid["cube"].value[[3, 1], 0] = 9
+    sim.visuals["scan"].value[:, 0, 3] = 5
+    restore_state(view, saved)
+    torch.testing.assert_close(
+        sim.rigid["cube"].value[[3, 1], 0], torch.full((2,), 0.2)
+    )
+    assert sim.rigid["other"].writes == 0
+    assert sim.visuals["scan"].writes == 0
+    assert sim.visuals["scan"].value[:, 0, 3].tolist() == [5.0] * 4
 
 
 def test_foreign_and_rebound_snapshots_rejected_before_writes():
@@ -155,7 +175,10 @@ def test_boundary_positions_round_trip_through_production_articulation_setter(
     articulation._resolve_env_ids = lambda ids: torch.tensor([0])
     articulation._resolve_joint_ids = lambda ids: torch.tensor([0])
     articulation._stabilize_newton_mimic_target_write = lambda *args, **kwargs: None
-    articulation._world = SimpleNamespace(update=lambda dt: None)
+    articulation._world = SimpleNamespace(
+        update=lambda dt: None,
+        get_physics_scene=lambda: SimpleNamespace(is_direct_gpu=lambda: False),
+    )
     articulation.body_data.is_newton_backend = False
     port_write = articulation.set_state
     articulation.body_data.articulation_view = SimpleNamespace(
@@ -179,4 +202,35 @@ def test_invalid_qpos_tolerance_rejected_before_writes(tolerance: object) -> Non
     with pytest.raises(ValueError, match="qpos_tolerance"):
         restore_state(view, saved, qpos_tolerance=tolerance)
     assert all(body.writes == 0 for body in sim.rigid.values())
+    assert sim.syncs == 0
+
+
+def test_ordered_partial_snapshot_restores_only_selected_rows():
+    sim = Sim(4)
+    sim.rigid["cube"].value[:, 0] = torch.arange(4)
+    sim.articulations["drawer"].state["target_qpos"][:, 0] = torch.arange(4) * 0.1
+    view = SceneView(sim, env_ids=(3, 1))
+    saved = capture_state(view)
+    assert [next(e for e in b if e.uid == "cube").pose[0] for b in saved.batches] == [
+        3,
+        1,
+    ]
+    sim.rigid["cube"].value[:, 0] = 9
+    sim.articulations["drawer"].state["target_qpos"].zero_()
+    restore_state(view, saved)
+    assert compare_states(saved, capture_state(view)).passed
+    assert sim.rigid["cube"].value[:, 0].tolist() == [9, 1, 9, 3]
+    assert sim.articulations["drawer"].state["target_qpos"][[0, 2]].count_nonzero() == 0
+    assert sim.steps == 0
+
+
+def test_invalid_last_arena_prevents_every_native_write():
+    sim = Sim(4)
+    view = SceneView(sim, env_ids=(3, 1))
+    sim.articulations["drawer"].state["qpos"][1] = 2
+    saved = capture_state(view)
+    sim.articulations["drawer"].state["qpos"].zero_()
+    with pytest.raises(ValueError, match="exceeds"):
+        restore_state(view, saved)
+    assert all(entity.writes == 0 for entity in sim.rigid.values())
     assert sim.syncs == 0

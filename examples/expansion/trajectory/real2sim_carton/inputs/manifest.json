@@ -1,0 +1,130 @@
+{
+  "schema": "carton-frozen-inputs/v1",
+  "files": [
+    {
+      "path": "measured/0/normalized.npz",
+      "sha256": "4bc87485cfe60294a4a230bc3202f101c9258ab180d663883bd37cc69911878d",
+      "size": 15777
+    },
+    {
+      "path": "measured/0/prototype.json",
+      "sha256": "33334f6e11aa3e49555d6753a222574082cbf831edfdcbff606c1d2aa912e699",
+      "size": 3360
+    },
+    {
+      "path": "measured/0/source/trajectory.json",
+      "sha256": "137d8c7752c20c8a83ebdb82fea940ca33cdd7c64ae90e5475fe5ff2ab4a1996",
+      "size": 2197
+    },
+    {
+      "path": "measured/0/source/trajectory.npz",
+      "sha256": "ba6086c3527c409defddfcbe0ea8bd9ebb929b43e0db779367cec525c542c475",
+      "size": 7100
+    },
+    {
+      "path": "measured/1/normalized.npz",
+      "sha256": "443c6e3d7ee347a7f782062adce610ac1c9a2b9179cabc4f173afb5e663b9106",
+      "size": 5498
+    },
+    {
+      "path": "measured/1/prototype.json",
+      "sha256": "c95045413ca712f4d288a82db8768f70fc6708e9213d37a530b3617c9d91ae45",
+      "size": 3360
+    },
+    {
+      "path": "measured/1/source/trajectory.json",
+      "sha256": "0f79676a81c819adf5a29c83ba231bfc97e055bfa4e2c5eda463092eb9bbe65b",
+      "size": 1881
+    },
+    {
+      "path": "measured/1/source/trajectory.npz",
+      "sha256": "b4056a16b5bc004f541f65968735b572df3ad70d7f8f75e80107ecd5f2ba730a",
+      "size": 3408
+    },
+    {
+      "path": "measured/2/normalized.npz",
+      "sha256": "3ee2a835f3abc549da8144edde72c038b496728fa1e7784c172a57d0cc151822",
+      "size": 8858
+    },
+    {
+      "path": "measured/2/prototype.json",
+      "sha256": "0b7db9312750e1fc8d11293f8b630d25a304627b6010dcc0e750ea259525945d",
+      "size": 3360
+    },
+    {
+      "path": "measured/2/source/trajectory.json",
+      "sha256": "50e54ec65b2f58969ffeaff5b895921924ac4e61e4fba2978721e4961bffd42d",
+      "size": 2346
+    },
+    {
+      "path": "measured/2/source/trajectory.npz",
+      "sha256": "424f0c6309b25223d2d03bdc6918d6f015b498f6e52ea6255044f0d3848391ed",
+      "size": 4754
+    },
+    {
+      "path": "synthetic_reference/0/normalized.npz",
+      "sha256": "3898482fdabe3676c80e8bd994dcaceba77fbeb5b05c2c7a2b29fbf5330222bf",
+      "size": 31273
+    },
+    {
+      "path": "synthetic_reference/0/prototype.json",
+      "sha256": "0de7e14833141fb641b6ed0d835f503c49bb0c1a1f793cebb49363889d80eb36",
+      "size": 3346
+    },
+    {
+      "path": "synthetic_reference/0/source/trajectory.json",
+      "sha256": "20a8acc8a5248ce1d548343050921417dd185d43ab3a14ab98d39e9c9e136700",
+      "size": 1988
+    },
+    {
+      "path": "synthetic_reference/0/source/trajectory.npz",
+      "sha256": "ac77b5b62197586b62261631cae77099aa0b958fb8852c32493c82d6a4dbdf80",
+      "size": 23405
+    },
+    {
+      "path": "synthetic_reference/1/normalized.npz",
+      "sha256": "05574232cdbf6d8f4b2a2dacc134a23693046689fd4a839614c563ec3f7119a2",
+      "size": 17400
+    },
+    {
+      "path": "synthetic_reference/1/prototype.json",
+      "sha256": "3ee242813d61f6a709e9847b4bf1e0ddab6f2ed787344db0c5433b539a3c5123",
+      "size": 3347
+    },
+    {
+      "path": "synthetic_reference/1/source/trajectory.json",
+      "sha256": "83618e692bfdea96f4f98fcc45baabd3a42f7a900bc8c041aed3f70d4e5e720d",
+      "size": 1668
+    },
+    {
+      "path": "synthetic_reference/1/source/trajectory.npz",
+      "sha256": "c5edbf1604740da55160890c1317efac5aa5b158c7a78f82f359c2c22b401e45",
+      "size": 13372
+    },
+    {
+      "path": "synthetic_reference/2/normalized.npz",
+      "sha256": "2cf14924bd5442220d9ec40c11c8203484c8cb69953918d06c7971c1e1cf5c81",
+      "size": 23396
+    },
+    {
+      "path": "synthetic_reference/2/prototype.json",
+      "sha256": "4f3a609ab35e789bdccc806c0ca576b4a4f441737e275dde7898a1d798e46b56",
+      "size": 3347
+    },
+    {
+      "path": "synthetic_reference/2/source/trajectory.json",
+      "sha256": "e4c565c16e0dae33756be4a76c4d0cb5033d550f73737015b2ae56c56bec2a17",
+      "size": 2137
+    },
+    {
+      "path": "synthetic_reference/2/source/trajectory.npz",
+      "sha256": "a7b506fe4ad52feb7ee3d6df67347684b67b251478013b2e0386d4b582ffd1a4",
+      "size": 17264
+    }
+  ],
+  "origins": {
+    "measured": "DROID raw RAIL+d027f2ae+2023-11-20-11h-50m-49s; CC BY 4.0",
+    "synthetic_reference": "Independent native simulator reference with explicit injected error; Apache-2.0"
+  },
+  "usage": "Inspection and source fingerprint reference. Qualified execution also requires the pinned original HDF5 and typed evidence from prepare."
+}

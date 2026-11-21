@@ -1,0 +1,225 @@
+request:
+  task_id: hand-over:bar-feasibility-example:v1
+  robot_profile_id: dual-ur5-dh-pgi-140-80:v1
+  policy_id: motion-gen-verified:v1
+  validator_id: measured-bar-transfer-release:v1
+  parent_scene_id: tabletop-bar:v1
+  entity_poses:
+    DualUR5:
+    - [0.0, 0.9999999999999998, 0.0, 1.4500000476837158]
+    - [-0.9999999999999998, 0.0, 0.0, 0.0]
+    - [0.0, 0.0, 0.9999999999999998, 0.25]
+    - [0.0, 0.0, 0.0, 1.0]
+    support_surface:
+    - [1.0, 0.0, 0.0, 0.6000000238418579]
+    - [0.0, 1.0, 0.0, 0.0]
+    - [0.0, 0.0, 1.0, 0.7300000190734863]
+    - [0.0, 0.0, 0.0, 1.0]
+    pickup_stand:
+    - [1.0, 0.0, 0.0, 0.44999998807907104]
+    - [0.0, 1.0, 0.0, 0.019999999552965164]
+    - [0.0, 0.0, 1.0, 0.7699999809265137]
+    - [0.0, 0.0, 0.0, 1.0]
+    bar:
+    - [1.0, 0.0, 0.0, 0.45]
+    - [0.0, 1.0, 0.0, 0.02]
+    - [0.0, 0.0, 1.0, 0.815]
+    - [0.0, 0.0, 0.0, 1.0]
+  variables:
+  - name: pickup_group
+    kind: scene
+    reference_pose:
+    - [1.0, 0.0, 0.0, 0.44999998807907104]
+    - [0.0, 1.0, 0.0, 0.019999999552965164]
+    - [0.0, 0.0, 1.0, 0.7699999809265137]
+    - [0.0, 0.0, 0.0, 1.0]
+    lower: [-0.03, -0.015, -3.141592653589793]
+    upper: [0.03, 0.015, 3.141592653589793]
+    members:
+      pickup_stand:
+      - [1.0, 0.0, 0.0, 0.0]
+      - [0.0, 1.0, 0.0, 0.0]
+      - [0.0, 0.0, 1.0, 0.0]
+      - [0.0, 0.0, 0.0, 1.0]
+      bar:
+      - [0.9999999990933077, -9.01823747441382e-09, 4.258385504263631e-05, 1.0132789611816406e-06]
+      - [7.2671764176219735e-09, 0.9999999991545604, 4.112030378657231e-05, 1.51805579662323e-06]
+      - [-4.258385537746689e-05, -4.1120303439824455e-05, 0.9999999982478681, 0.0450000190734863]
+      - [0.0, 0.0, 0.0, 1.0]
+  - name: installation
+    kind: robot
+    reference_pose:
+    - [1.0, 0.0, 0.0, 0.0]
+    - [0.0, 1.0, 0.0, 0.0]
+    - [0.0, 0.0, 1.0, 0.65]
+    - [0.0, 0.0, 0.0, 1.0]
+    lower: [-0.06, -0.06, -0.15]
+    upper: [0.06, 0.06, 0.15]
+    members:
+      DualUR5:
+      - [0.0, 0.9999999999999998, 0.0, 1.4500000476837158]
+      - [-0.9999999999999998, 0.0, 0.0, 0.0]
+      - [0.0, 0.0, 0.9999999999999998, -0.4]
+      - [0.0, 0.0, 0.0, 1.0]
+  modes:
+  - mode_id: runtime
+    phases:
+    - phase_id: initial_bimanual_clearance
+      targets:
+      - control_part: left_arm
+        pose: &id002
+        - [-8.737957940512866e-06, -0.9999958909761414, -0.0028666974868478594, 0.48687267303466797]
+        - [-0.9999999999594272, 8.744198405380918e-06, -2.164349440834587e-06, 0.40914520621299744]
+        - [2.189407519064164e-06, 0.0028666974678195553, -0.9999958910119753, 0.92548006772995]
+        - [0.0, 0.0, 0.0, 1.0]
+      - control_part: right_arm
+        pose: &id001
+        - [-8.912776833971806e-06, -0.9999958909745983, -0.002866697487035369, 0.48687270283699036]
+        - [-0.9999999999578846, 8.91901658055265e-06, -2.163848302297886e-06, -0.19085489213466644]
+        - [2.1894075334083756e-06, 0.00286669746762874, -0.9999958910119761, 0.92548006772995]
+        - [0.0, 0.0, 0.0, 1.0]
+      allowed_contacts:
+      - [bar, support_surface]
+      - [bar, pickup_stand]
+      - [bar, DualUR5/left_gripper_finger1_link_1]
+      - [bar, DualUR5/left_gripper_finger2_link_1]
+      - [bar, DualUR5/right_gripper_finger1_link_1]
+      - [bar, DualUR5/right_gripper_finger2_link_1]
+      - [pickup_stand, support_surface]
+    - phase_id: pickup_requirement
+      dependencies: [initial_bimanual_clearance]
+      targets:
+      - control_part: left_arm
+        frame_uid: bar
+        pose:
+        - [-8.737957940512866e-06, -0.9999958909761414, -0.0028666974868478594, 0.0]
+        - [-0.9999999999594272, 8.744198405380918e-06, -2.164349440834587e-06, 0.0]
+        - [2.189407519064164e-06, 0.0028666974678195553, -0.9999958910119753, 0.12]
+        - [0.0, 0.0, 0.0, 1.0]
+      - control_part: right_arm
+        pose: *id001
+      allowed_contacts:
+      - [bar, support_surface]
+      - [bar, pickup_stand]
+      - [bar, DualUR5/left_gripper_finger1_link_1]
+      - [bar, DualUR5/left_gripper_finger2_link_1]
+      - [bar, DualUR5/right_gripper_finger1_link_1]
+      - [bar, DualUR5/right_gripper_finger2_link_1]
+      - [pickup_stand, support_surface]
+    - phase_id: delivery_requirement
+      dependencies: [pickup_requirement]
+      targets:
+      - control_part: left_arm
+        pose: *id002
+      - control_part: right_arm
+        pose:
+        - [-8.912776833916295e-06, -0.999995890974598, -0.0028666974870353687, 0.45]
+        - [-0.9999999999578842, 8.919016580497138e-06, -2.163848302297452e-06, -0.18]
+        - [2.1894075334081588e-06, 0.002866697467628739, -0.9999958910119757, 0.95]
+        - [0.0, 0.0, 0.0, 1.0]
+      allowed_contacts:
+      - [bar, support_surface]
+      - [bar, pickup_stand]
+      - [bar, DualUR5/left_gripper_finger1_link_1]
+      - [bar, DualUR5/left_gripper_finger2_link_1]
+      - [bar, DualUR5/right_gripper_finger1_link_1]
+      - [bar, DualUR5/right_gripper_finger2_link_1]
+      - [pickup_stand, support_surface]
+search:
+  seed: 7
+  max_wall_time_s: 600.0
+  max_candidates: 8
+  max_regions: 1
+  validation_samples: 1
+  ik_seeds: 2
+  beam_width: 4
+  max_rrt_nodes: 128
+  max_ik_calls: 65536
+task_program:
+  deployment: hand_over/task.dual_ur5.yaml
+  simulation_device: cpu
+  enable_sensor: false
+  settle_steps: 30
+  initial_semantics:
+  - kind: pose_near
+    entity: bar
+    position: [0.45, 0.02, 0.815]
+    tolerance_m: 0.05
+  initial_geometry:
+  - kind: support_bounds
+    entity: bar
+    lower: [0.25, -0.15, 0.7]
+    upper: [0.7, 0.2, 1.0]
+  final_checks:
+  - &id003
+    kind: pose_near
+    entity: bar
+    position: [0.45, -0.18, 0.775]
+    tolerance_m: 0.04
+  - &id004
+    kind: joint_range
+    joint: right_gripper_finger1_joint_1
+    lower: -0.001
+    upper: 0.005
+  - &id005
+    kind: speed_below
+    entity: bar
+    linear_m_s: 0.03
+    angular_rad_s: 0.2
+  events:
+  - event_id: lift
+    conditions:
+    - kind: lifted
+      entity: bar
+      height_m: 0.05
+  - event_id: right_holds_left_released
+    conditions:
+    - kind: joint_range
+      joint: right_gripper_finger1_joint_1
+      lower: 0.01
+      upper: 0.06
+    - kind: joint_range
+      joint: left_gripper_finger1_joint_1
+      lower: -0.001
+      upper: 0.005
+    - kind: lifted
+      entity: bar
+      height_m: 0.05
+  - event_id: placed_and_released
+    conditions:
+    - *id003
+    - *id004
+    - *id005
+    consecutive_steps: 3
+  runtime_phase_by_call:
+    '0': delivery_requirement
+  runtime_phase_by_segment:
+    tabletop_hand_over:segment:$.program: delivery_requirement
+  ignored_contacts:
+  - [DualUR5/left_base_link, DualUR5/left_shoulder_link]
+  - [DualUR5/left_base_link, DualUR5/right_base_link]
+  - [DualUR5/left_base_link, DualUR5/right_shoulder_link]
+  - [DualUR5/left_forearm_link, DualUR5/left_upper_arm_link]
+  - [DualUR5/left_forearm_link, DualUR5/left_wrist_1_link]
+  - [DualUR5/left_gripper_base_link_1, DualUR5/left_gripper_finger1_link_1]
+  - [DualUR5/left_gripper_base_link_1, DualUR5/left_gripper_finger2_link_1]
+  - [DualUR5/left_gripper_base_link_1, DualUR5/left_wrist_2_link]
+  - [DualUR5/left_gripper_base_link_1, DualUR5/left_wrist_3_link]
+  - [DualUR5/left_gripper_finger1_link_1, DualUR5/left_wrist_3_link]
+  - [DualUR5/left_gripper_finger2_link_1, DualUR5/left_wrist_3_link]
+  - [DualUR5/left_shoulder_link, DualUR5/left_upper_arm_link]
+  - [DualUR5/left_shoulder_link, DualUR5/right_base_link]
+  - [DualUR5/left_wrist_1_link, DualUR5/left_wrist_2_link]
+  - [DualUR5/left_wrist_2_link, DualUR5/left_wrist_3_link]
+  - [DualUR5/right_base_link, DualUR5/right_shoulder_link]
+  - [DualUR5/right_forearm_link, DualUR5/right_upper_arm_link]
+  - [DualUR5/right_forearm_link, DualUR5/right_wrist_1_link]
+  - [DualUR5/right_gripper_base_link_1, DualUR5/right_gripper_finger1_link_1]
+  - [DualUR5/right_gripper_base_link_1, DualUR5/right_gripper_finger2_link_1]
+  - [DualUR5/right_gripper_base_link_1, DualUR5/right_wrist_2_link]
+  - [DualUR5/right_gripper_base_link_1, DualUR5/right_wrist_3_link]
+  - [DualUR5/right_gripper_finger1_link_1, DualUR5/right_wrist_3_link]
+  - [DualUR5/right_gripper_finger2_link_1, DualUR5/right_wrist_3_link]
+  - [DualUR5/right_shoulder_link, DualUR5/right_upper_arm_link]
+  - [DualUR5/right_wrist_1_link, DualUR5/right_wrist_2_link]
+  - [DualUR5/right_wrist_2_link, DualUR5/right_wrist_3_link]

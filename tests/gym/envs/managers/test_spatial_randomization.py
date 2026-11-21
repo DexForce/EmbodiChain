@@ -27,6 +27,7 @@ import torch
 from embodichain.lab.gym.envs.managers import SceneEntityCfg
 from embodichain.lab.gym.envs.managers.randomization.spatial import (
     randomize_rigid_object_pose,
+    randomize_target_pose,
     randomize_robot_eef_pose,
     randomize_robot_qpos,
 )
@@ -191,3 +192,30 @@ def test_rigid_pose_randomization_preserves_unselected_velocity() -> None:
     torch.testing.assert_close(velocity[0], torch.zeros(3))
     torch.testing.assert_close(velocity[1], torch.tensor([4.0, 5.0, 6.0]))
     env.sim.update.assert_not_called()
+
+
+def test_relative_target_pose_updates_only_selected_virtual_goal():
+    source_pose = torch.eye(4).repeat(2, 1, 1)
+    source_pose[:, :3, 3] = torch.tensor([[-0.5, -0.1, 0.02], [-0.4, 0.1, 0.02]])
+    entities = {
+        "cube": SimpleNamespace(get_local_pose=lambda **kw: source_pose),
+    }
+    goal_before = torch.eye(4).repeat(2, 1, 1)
+    env = SimpleNamespace(
+        num_envs=2,
+        device="cpu",
+        goal_pose=goal_before.clone(),
+        sim=SimpleNamespace(get_rigid_object=lambda uid: entities[uid]),
+    )
+    randomize_target_pose(
+        env,
+        torch.tensor([1]),
+        position_range=([0.2, 0.0, -0.019], [0.2, 0.0, -0.019]),
+        relative_position=True,
+        reference_entity_cfg=SceneEntityCfg(uid="cube"),
+        store_key="goal_pose",
+    )
+    torch.testing.assert_close(
+        env.goal_pose[1, :3, 3], torch.tensor([-0.2, 0.1, 0.001])
+    )
+    torch.testing.assert_close(env.goal_pose[0], goal_before[0])

@@ -163,7 +163,7 @@ headless evaluation keep their original behavior.
 ## Headless locomotion checkpoint example
 
 Use a checkpoint trained with the Go2 Default deployment's
-`embodichain_tasks/configs/tasks/locomotion/velocity/go2_flat/agents/ppo.yaml`.
+`embodichain/extensions/tasks/configs/tasks/locomotion/velocity/go2_flat/agents/ppo.yaml`.
 Set `go2_run` to that run's directory and `go2_checkpoint` to the specific saved
 checkpoint to assess. Keep the training and environment snapshots from the same
 run; a Newton checkpoint uses the snapshots produced by `agents/ppo.newton.yaml`.
@@ -215,8 +215,15 @@ and `result.episodes` before interpreting `result.metrics`:
 
 `eval/metrics/*` samples scalar task metrics **at episode completion**, then
 averages across episodes. It does not average each metric over the trajectory.
-The native headless report stores aggregate metrics, without individual episode
-traces or termination reasons. Locomotion's `eval/success_rate: 0.0` should be
+The native headless report stores aggregate metrics and, when the environment
+publishes them, `result.episode_outcomes` for the selected completed episodes.
+Each outcome includes row and episode identities, cached execution and physical
+evidence, acceptance, termination flags and any persistence receipts. The Viewer
+includes the same host snapshot under each episode's `episode_outcome`. A
+`queued` dataset receipt indicates that a background recorder accepted the
+payload. Its committed sidecar reports `persisted`.
+
+Locomotion's `eval/success_rate: 0.0` should be
 recorded as **not applicable** in a qualification assessment. When a task emits
 no success field at all, the report contains `null` for this metric.
 

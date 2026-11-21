@@ -31,15 +31,16 @@ from __future__ import annotations
 import hashlib
 import importlib
 import logging
+import math
 import os
 import threading
 import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import torch
 
@@ -57,18 +58,27 @@ from embodichain.lab.sim.motion.planners.base_planner import (
     validate_plan_options,
 )
 from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import (
+    _TCP_LINK,
     _curobo_joint_limits,
     _named_rigid_objects,
 )
 from embodichain.lab.sim.motion.planners.utils import MoveType, PlanResult, PlanState
+from .payload import (
+    CuroboQuerySnapshot,
+    _PAYLOAD_LINK,
+    _attachment_models,
+    _query_robot_config,
+)
 
 if TYPE_CHECKING:
     from typing import Any
 
     from embodichain.lab.sim.objects import RigidObject
+    from embodichain.lab.sim.scene.collision_sources import CollisionObjectSnapshot
 
 __all__ = [
     "CuroboAutoGenCfg",
+    "CuroboPoseConstraintCfg",
     "CuroboPlanOptions",
     "CuroboPlanner",
     "CuroboPlannerCfg",
@@ -81,10 +91,11 @@ _CUROBO_INSTALL_URL = (
     "https://nvlabs.github.io/curobo/latest/getting-started/installation.html"
 )
 
-# cuRobo 0.8 does not expose PyTorch's CUDA stream-capture error mode. The
+# cuRobo does not expose PyTorch's CUDA stream-capture error mode. The
 # temporary adapter below therefore replaces ``torch.cuda.graph`` only while
 # cuRobo can lazily record graphs. Serialize that small process-wide patch.
-_TORCH_CUDA_GRAPH_PATCH_LOCK = threading.Lock()
+# Runtime-mode and capture-error-mode scopes share this lock and may nest.
+_TORCH_CUDA_GRAPH_PATCH_LOCK = threading.RLock()
 
 
 @dataclass
@@ -104,13 +115,13 @@ class _CuroboProfile:
     """Simulator -> cuRobo joint-name mapping (identity for the auto-gen YAML)."""
 
     tool_frame_name: str | None = None
-    """cuRobo tool frame (a URDF link name) used as the planning target."""
+    """cuRobo tool frame (an original or generated fixed TCP link)."""
 
     tool_frame_to_tcp: list[list[float]] | None = None
     """Fixed transform from the cuRobo tool frame to the simulator TCP frame.
 
-    ``None`` means the tool frame is already the TCP (the common auto-derived
-    case, where the solver's ``end_link_name`` is the TCP).
+    ``None`` means the native tool frame is already the TCP. Generated profiles
+    embed calibration in a fixed TCP link and leave this field unset.
     """
 
     base_link_name: str | None = None
@@ -152,11 +163,15 @@ class CuroboWorldCfg:
     scene-YAML path.
     """
 
-    rigid_objects: list[RigidObject] | Mapping[str, RigidObject] | None = None
-    """Live objects to export into the auto-generated collision scene.
+    rigid_objects: (
+        list[RigidObject] | Mapping[str, RigidObject | CollisionObjectSnapshot] | None
+    ) = None
+    """Live objects or explicit snapshots defining the collision scene.
 
     The adapter reads :meth:`RigidObject.get_collision_shapes`, so planning uses
-    the physical geometry seen by DexSim rather than combined visual meshes.
+    supplied shape descriptors rather than combined visual meshes. Live rigid
+    objects supply their runtime geometry; explicit snapshots retain their
+    input provenance and may be conservative component envelopes.
     A mapping is the registry-backed form: each mapping key is the authoritative
     obstacle ID even when it differs from :attr:`RigidObject.uid`. The list form
     derives IDs from ``uid`` (or ``obstacle_<index>`` when absent). Poses are
@@ -202,6 +217,9 @@ class CuroboWorldCfg:
 
     multi_env: bool = False
     """Whether cuRobo allocates one collision-world instance per environment.
+
+    Differing per-environment collider geometry is rejected because these worlds
+    clone the geometry of environment zero. Only obstacle poses can vary.
 
     This setting concerns collision-world batching only; robot states and goals
     remain env-batched in either mode. The relevant comparison is between
@@ -344,7 +362,7 @@ class CuroboAutoGenCfg:
 
 @configclass
 class CuroboPlannerCfg(BasePlannerCfg):
-    """Configuration for the cuRobo V2 planner backend.
+    """Configuration for the cuRobo V2-Fast (0.9+) planner backend.
 
     cuRobo runs in the simulator process so it reuses the existing CUDA context
     instead of keeping a spawned Python process and a second CUDA context alive.
@@ -399,6 +417,48 @@ class CuroboPlannerCfg(BasePlannerCfg):
     collision_activation_distance: float = 0.01
     """cuRobo collision activation distance (optimizer setting)."""
 
+    position_tolerance: float = field(default=0.005, kw_only=True)
+    """Native tool-position convergence tolerance in meters.
+
+    Passed to both IK and trajectory optimization. The default preserves
+    cuRobo V2-Fast's 5 mm acceptance bound; external scoring is independent.
+    """
+
+    orientation_tolerance: float = field(default=0.05, kw_only=True)
+    """Native quaternion-vector convergence tolerance.
+
+    V2-Fast uses the residual norm ``2 * sin(theta / 2)`` for a full orientation
+    goal, not the geodesic angle ``theta`` itself. For an angular bound of
+    0.1 rad, use ``2 * sin(0.1 / 2)``. The default preserves native behavior.
+    These tolerances also set the native default IK seed-ranking normalization.
+    """
+
+    use_runtime_tcp: bool = field(default=False, kw_only=True)
+    """Evaluate native pose costs and convergence at the simulator TCP.
+
+    When the solver TCP is offset from its URDF end link, add a massless fixed
+    tool frame carrying that transform. This makes position tolerance refer to
+    the requested TCP origin, including its coupling to orientation error.
+    ``False`` preserves the historical end-link goal conversion and tolerances.
+    """
+
+    graph_planner_algorithm: str = field(default="rrt", kw_only=True)
+    """Fallback route initializer: GPU ``"rrt"`` or legacy ``"prm"``.
+
+    Planning first tries a direct trajectory seed. The selected graph planner
+    supplies collision-free seeds on subsequent attempts.
+    """
+
+    enable_timeopt: bool = field(default=True, kw_only=True)
+    """Optimize traversal timing along each candidate's fixed B-spline path.
+
+    TimeOpt respects sampled velocity, acceleration, jerk and torque limits.
+    It requires valid robot inertial data and effort limits in the source URDF;
+    carried-object inertia is not inferred from collision geometry.
+    Simulator gravity is expressed in the cuRobo base frame. Differently
+    oriented batch rows requiring distinct gravity vectors must disable TimeOpt.
+    """
+
     max_attempts: int = 5
     """Default per-plan cuRobo attempt count."""
 
@@ -425,7 +485,7 @@ class CuroboPlannerCfg(BasePlannerCfg):
     """
 
     cuda_graph_fallback: bool = True
-    """Use non-graph mode if the capture coordinator times out before capture.
+    """Use non-graph mode if coordination times out during backend initialization.
 
     An error after capture starts is never downgraded in-process because CUDA
     may leave the context in an invalid state. Such errors are raised and the
@@ -443,11 +503,12 @@ class CuroboPlannerCfg(BasePlannerCfg):
     """
 
     capture_acquire_timeout: float | None = 2.0
-    """Seconds to wait for the per-device capture coordinator.
+    """Seconds to wait for coordination during initialization or graph planning.
 
     ``None`` waits indefinitely. After a finite timeout, graph mode falls back
     to non-graph mode, then waits for the active capture to finish before
     launching planner initialization kernels.
+    A cached graph-planning call instead raises on timeout before native execution.
     """
 
     capture_wait_log_interval: float | None = 10.0
@@ -463,7 +524,7 @@ class CuroboPlannerCfg(BasePlannerCfg):
     :class:`~embodichain.lab.sim.motion.motion_generator.MotionGenerator`
     resamples the returned trajectory to ``MotionGenOptions.sample_count`` -
     matching the documented contract of
-    :attr:`~embodichain.lab.sim.atomic_actions.MotionPolicy.sample_count`
+    :attr:`~embodichain.lab.sim.atomic_skills.MotionPolicy.sample_count`
     and the other planners. The resample is arc-length piecewise-linear along
     cuRobo's joint-space path, so the collision-free path is preserved; only the
     sample density changes (cuRobo's own count is derived from
@@ -482,6 +543,177 @@ class CuroboPlannerCfg(BasePlannerCfg):
     runs at least one coordinated warmup because otherwise the first real plan
     would perform an uncoordinated lazy capture.
     """
+
+    def __post_init__(self) -> None:
+        if type(self.use_runtime_tcp) is not bool:
+            raise TypeError("CuroboPlannerCfg.use_runtime_tcp must be a boolean.")
+        for name in ("position_tolerance", "orientation_tolerance"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value <= 0.0
+            ):
+                raise ValueError(
+                    f"CuroboPlannerCfg.{name} must be positive and finite."
+                )
+
+
+def _pose_projector(value: object, name: str) -> tuple[tuple[float, float, float], ...]:
+    """Validate and own a plain-data orthogonal 3D projector."""
+    if (
+        not isinstance(value, (tuple, list))
+        or len(value) != 3
+        or any(not isinstance(row, (tuple, list)) or len(row) != 3 for row in value)
+        or any(
+            isinstance(x, bool)
+            or not isinstance(x, (int, float))
+            or not math.isfinite(x)
+            for row in value
+            for x in row
+        )
+    ):
+        raise ValueError(f"{name} must be a finite 3x3 matrix.")
+    matrix = tuple(tuple(float(x) for x in row) for row in value)
+    if any(abs(matrix[i][j] - matrix[j][i]) > 1e-6 for i in range(3) for j in range(3)):
+        raise ValueError(f"{name} must be symmetric.")
+    if any(
+        abs(sum(matrix[i][k] * matrix[k][j] for k in range(3)) - matrix[i][j]) > 1e-6
+        for i in range(3)
+        for j in range(3)
+    ):
+        raise ValueError(f"{name} must be idempotent.")
+    return matrix
+
+
+def _orthogonal_direction_projector(
+    direction: tuple[float, float, float],
+    name: str,
+) -> tuple[tuple[float, float, float], ...]:
+    """Construct the projector orthogonal to a nonzero configuration direction."""
+    if (
+        not isinstance(direction, (tuple, list))
+        or len(direction) != 3
+        or any(
+            isinstance(x, bool)
+            or not isinstance(x, (int, float))
+            or not math.isfinite(x)
+            for x in direction
+        )
+        or not 0 < math.hypot(*direction) < math.inf
+    ):
+        raise ValueError(f"{name} must contain three finite values with nonzero norm.")
+    unit = [x / math.hypot(*direction) for x in direction]
+    return tuple(
+        tuple(float(i == j) - unit[i] * unit[j] for j in range(3)) for i in range(3)
+    )
+
+
+@configclass
+class CuroboPoseConstraintCfg:
+    """Data-only path fields adapted from cuRobo's ``ToolPoseCriteria``.
+
+    Projectors select components of target-relative TCP displacement and the
+    canonical error quaternion's vector part. A zero projector disables that
+    component; identity constrains all three components. Terminal goals remain owned by
+    the target waypoints. Native tensors are created lazily by the planner.
+
+    Args:
+        path_position_projector: Symmetric, idempotent 3x3 position projector.
+        path_rotation_projector: Symmetric, idempotent 3x3 rotation projector.
+        position_scale: Positive uniform native position residual scale;
+            preserves the physical acceptance bound.
+        rotation_scale: Positive uniform native rotation residual scale;
+            preserves the physical acceptance bound.
+        position_tolerance: Unscaled projected TCP distance bound in meters.
+        orientation_tolerance: Projected angular bound in radians, measured as
+            ``2 * asin(norm(P @ vec(q_error)))`` for a unit error quaternion.
+            Identity projection gives the full shortest rotation angle.
+        frame: ``goal`` uses the target TCP axes; ``base`` uses the native
+            planning-base axes, independently in each environment.
+    """
+
+    path_position_projector: tuple[tuple[float, float, float], ...] = (
+        (0.0, 0.0, 0.0),
+        (0.0, 0.0, 0.0),
+        (0.0, 0.0, 0.0),
+    )
+    path_rotation_projector: tuple[tuple[float, float, float], ...] = (
+        (0.0, 0.0, 0.0),
+        (0.0, 0.0, 0.0),
+        (0.0, 0.0, 0.0),
+    )
+    position_scale: float = 1.0
+    rotation_scale: float = 1.0
+    position_tolerance: float = 0.005
+    orientation_tolerance: float = 0.05
+    frame: Literal["goal", "base"] = "goal"
+
+    def __post_init__(self) -> None:
+        """Normalize plain matrix data and validate geometric acceptance bounds."""
+        for name in ("path_position_projector", "path_rotation_projector"):
+            setattr(self, name, _pose_projector(getattr(self, name), name))
+        if self.frame not in ("goal", "base"):
+            raise ValueError("frame must be 'goal' or 'base'.")
+        for name in (
+            "position_scale",
+            "rotation_scale",
+            "position_tolerance",
+            "orientation_tolerance",
+        ):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value <= 0
+            ):
+                raise ValueError(f"{name} must be finite and positive.")
+        if self.orientation_tolerance > math.pi:
+            raise ValueError("orientation_tolerance must not exceed pi.")
+
+    @classmethod
+    def linear_motion(
+        cls,
+        direction: tuple[float, float, float] = (0.0, 0.0, 1.0),
+        *,
+        rotation_axis: tuple[float, float, float] | None = None,
+        non_terminal_scale: float = 1.0,
+        position_tolerance: float = 0.005,
+        orientation_tolerance: float = 0.05,
+        frame: Literal["goal", "base"] = "goal",
+    ) -> CuroboPoseConstraintCfg:
+        """Build line/rotation projectors without importing cuRobo or allocating tensors.
+
+        Args:
+            direction: Line direction; magnitude and sign do not change the line.
+            rotation_axis: Optional axis of free rotation. Omission holds the
+                complete target orientation, matching the native factory.
+            non_terminal_scale: Uniform scale for both native path residuals;
+                does not change the physical acceptance bounds.
+            position_tolerance: Unscaled perpendicular TCP bound in meters.
+            orientation_tolerance: Unscaled projected rotation bound in radians.
+            frame: Shared reference frame for both projectors.
+
+        Returns:
+            A normal pose-constraint configuration with explicit projector data.
+        """
+        return cls(
+            path_position_projector=_orthogonal_direction_projector(
+                direction, "direction"
+            ),
+            path_rotation_projector=(
+                ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+                if rotation_axis is None
+                else _orthogonal_direction_projector(rotation_axis, "rotation_axis")
+            ),
+            position_scale=non_terminal_scale,
+            rotation_scale=non_terminal_scale,
+            position_tolerance=position_tolerance,
+            orientation_tolerance=orientation_tolerance,
+            frame=frame,
+        )
 
 
 @configclass
@@ -510,6 +742,25 @@ class CuroboPlanOptions(PlanOptions):
 
     max_acceleration: float | list[float] | None = None
     """Per-plan joint acceleration budget, intersected by the motion facade."""
+
+    waypoint_modalities: list[str] | None = None
+    """Optional per-waypoint joint/position/orientation/pose semantics.
+
+    Omitted values retain full-pose Cartesian targets. Partial Cartesian goals
+    change terminal costs and convergence tests only; they impose no additional
+    path constraint. Position-only targets require the cuRobo tool and TCP
+    origins to coincide.
+    """
+
+    path_constraints: list[CuroboPoseConstraintCfg | None] | None = None
+    """Optional constraint for each segment arriving at the corresponding target.
+
+    The list must match the target count. ``None`` entries retain unconstrained
+    paths; configured entries require full-pose ``EEF_MOVE`` targets and
+    ``CuroboPlannerCfg.preserve_plan_samples=True``. The optimizer's line costs
+    are followed by independent TCP checks on every returned sample. Failure
+    in one environment retains the ordinary failed-row start hold.
+    """
 
 
 # =============================================================================
@@ -613,22 +864,6 @@ def _validate_world_cfg(cfg: CuroboWorldCfg) -> None:
 # =============================================================================
 
 
-def _ensure_warp_torch_compat() -> None:
-    """Restore ``warp.torch`` for cuRobo 0.8 when using Warp 1.13 or newer."""
-    import sys
-
-    import warp as wp
-
-    if hasattr(wp, "torch"):
-        return
-    try:
-        import warp._src.torch as torch_interop
-    except ImportError:
-        return
-    wp.torch = torch_interop  # type: ignore[attr-defined]
-    sys.modules["warp.torch"] = torch_interop
-
-
 class _LocalCaptureCoordinator:
     """Fallback per-device capture lock when DexSim's coordinator is unavailable."""
 
@@ -682,7 +917,7 @@ class _CaptureOwner:
 def _torch_cuda_graph_capture_mode(mode: str) -> Iterator[None]:
     """Temporarily force a capture mode for cuRobo's PyTorch graph contexts.
 
-    cuRobo 0.8 creates every graph through ``torch.cuda.graph`` but does not
+    cuRobo graph executors use ``torch.cuda.graph`` but do not
     forward its ``capture_error_mode`` argument. The patch is deliberately
     scoped to planner warmup/planning and restored even when capture raises.
     """
@@ -749,7 +984,7 @@ def _configure_curobo_logging(log_level: str) -> None:
 
 
 def _require_curobo(log_level: str = "error") -> "Any":
-    """Lazily import and bundle the cuRobo V2 public facade types.
+    """Lazily import and bundle the cuRobo V2-Fast public facade types.
 
     Args:
         log_level: cuRobo logger level applied before importing the backend.
@@ -759,27 +994,29 @@ def _require_curobo(log_level: str = "error") -> "Any":
         ``BatchMotionPlanner``, ``JointState``, ``Pose``, and ``GoalToolPose``.
 
     Raises:
-        ImportError: If cuRobo V2 is not installed, with an actionable message
+        ImportError: If cuRobo V2-Fast is not installed, with an actionable message
             naming NVIDIA's CUDA-matched source variants.
     """
     _configure_curobo_logging(log_level)
-    # cuRobo 0.8 references ``wp.torch.*``, which Warp >= 1.13 relocated.
-    _ensure_warp_torch_compat()
     matmul_precision = torch.get_float32_matmul_precision()
     matmul_allow_tf32 = torch.backends.cuda.matmul.allow_tf32
     cudnn_allow_tf32 = torch.backends.cudnn.allow_tf32
     try:
+        # This public module was introduced with V2-Fast. Fail with the same
+        # installation guidance for legacy V2 instead of a factory TypeError.
+        importlib.import_module("curobo.trajectory_timeopt")
         planner_mod = importlib.import_module("curobo.motion_planner")
         batch_mod = importlib.import_module("curobo.batch_motion_planner")
         collision_mod = importlib.import_module("curobo.collision_checking")
         scene_mod = importlib.import_module("curobo.scene")
         types_mod = importlib.import_module("curobo.types")
+        runtime_mod = importlib.import_module("curobo._src.runtime")
     except ModuleNotFoundError as exc:
         raise ImportError(
-            "cuRobo V2 is required for the 'curobo' planner but was not found. "
+            "cuRobo V2-Fast (0.9+) is required for the 'curobo' planner but was not found. "
             "Install NVIDIA's CUDA-matched source package separately, e.g. "
             "`pip install 'nvidia-curobo[cu12] @ "
-            "git+https://github.com/NVlabs/curobo.git@v0.8.0'` for CUDA 12.x "
+            "git+https://github.com/NVlabs/curobo.git@v0.9.0'` for CUDA 12.x "
             "or replace `cu12` with `cu13` for CUDA 13.x. "
             f"See {_CUROBO_INSTALL_URL} for details."
         ) from exc
@@ -800,6 +1037,8 @@ def _require_curobo(log_level: str = "error") -> "Any":
         Pose=types_mod.Pose,
         GoalToolPose=types_mod.GoalToolPose,
         DeviceCfg=types_mod.DeviceCfg,
+        ToolPoseCriteria=types_mod.ToolPoseCriteria,
+        Runtime=runtime_mod,
         Scene=scene_mod.Scene,
     )
 
@@ -876,6 +1115,8 @@ class CuroboPlanner(BasePlanner):
 
     Args:
         cfg: Configuration for the cuRobo planner.
+        query_snapshot: Optional owned environment-batched observation for a fresh static-world
+            query. Its frame applies to world snapshots, goals and payload.
 
     Raises:
         ImportError: If cuRobo V2 is not installed.
@@ -884,6 +1125,8 @@ class CuroboPlanner(BasePlanner):
     """
 
     supported_move_types = frozenset({MoveType.EEF_MOVE, MoveType.JOINT_MOVE})
+    supports_heterogeneous_waypoints = True
+    """Sequential segments retain their individual pose or joint backend."""
     supports_collision_world_updates = True
     supports_joint_trajectory_validation = True
 
@@ -892,7 +1135,7 @@ class CuroboPlanner(BasePlanner):
         """Whether callers must retain this planner's raw samples exactly.
 
         Mirrors :attr:`CuroboPlannerCfg.preserve_plan_samples`; read by the
-        atomic-action motion adapter to decide whether to resample the returned
+        atomic-skill motion adapter to decide whether to resample the returned
         trajectory to the action's ``sample_interval``.
         """
         return self.cfg.preserve_plan_samples
@@ -906,7 +1149,7 @@ class CuroboPlanner(BasePlanner):
             ),
             dynamic_entity_ids=tuple(self.cfg.world.dynamic_obstacle_names),
             batch_mode="per_env" if self.cfg.world.multi_env else "shared",
-            supports_updates=True,
+            supports_updates=self.supports_collision_world_updates,
         )
 
     def validate_joint_trajectory(
@@ -933,6 +1176,12 @@ class CuroboPlanner(BasePlanner):
         Returns:
             A boolean ``(B, T)`` mask on the trajectory device.
         """
+        snapshot = getattr(self, "_query_snapshot", None)
+        if snapshot is not None and snapshot.payload is not None:
+            raise NotImplementedError(
+                "Payload snapshots require untouched planner samples; arbitrary "
+                "trajectory validation has no attached checker."
+            )
         if (
             not isinstance(trajectory, torch.Tensor)
             or not trajectory.is_floating_point()
@@ -942,6 +1191,7 @@ class CuroboPlanner(BasePlanner):
         ):
             raise ValueError("trajectory must be finite floating shape (B, T, D).")
         batch_size, horizon, dof = trajectory.shape
+        self._validate_query_backend(control_part, batch_size)
         backend = next(
             (
                 cached
@@ -986,7 +1236,7 @@ class CuroboPlanner(BasePlanner):
 
         if backend.collision_checker is None:
             checker_cfg = self._bindings.RobotCollisionCheckerCfg.load_from_config(
-                robot_config=self._load_runtime_robot_config(
+                robot_config=self._query_runtime_robot_config(
                     backend.profile.robot_config_path
                 ),
                 scene_collision_checker=backend.planner.scene_collision_checker,
@@ -1041,7 +1291,34 @@ class CuroboPlanner(BasePlanner):
                 samples.append(valid[:, 0].to(torch.bool))
         return torch.stack(samples, dim=1).to(trajectory.device)
 
-    def __init__(self, cfg: CuroboPlannerCfg) -> None:
+    def __init__(
+        self,
+        cfg: CuroboPlannerCfg,
+        *,
+        query_snapshot: CuroboQuerySnapshot | None = None,
+    ) -> None:
+        if (
+            query_snapshot is not None
+            and type(query_snapshot) is not CuroboQuerySnapshot
+        ):
+            raise TypeError("query_snapshot must be CuroboQuerySnapshot or None.")
+        self._query_snapshot = (
+            None if query_snapshot is None else replace(query_snapshot)
+        )
+        self._query_control_part: str | None = None
+        self._query_closed = False
+        self._payload_managers: dict[int, list[Any]] = {}
+        if query_snapshot is not None:
+            self._validate_query_cfg(cfg)
+            if (
+                query_snapshot.payload is not None
+                and query_snapshot.payload.object_id in (cfg.world.rigid_objects or {})
+            ):
+                raise ValueError(
+                    "Exclude the attached payload from the world snapshot."
+                )
+            self.supports_collision_world_updates = False
+            self.supports_joint_trajectory_validation = query_snapshot.payload is None
         super().__init__(cfg)
         self.cfg: CuroboPlannerCfg = cfg
         self._configured_max_velocity = cfg.max_velocity
@@ -1165,6 +1442,8 @@ class CuroboPlanner(BasePlanner):
             "move_type": backend.planning_mode.name,
             "multi_env": bool(self.cfg.world.multi_env),
             "use_cuda_graph": backend.use_cuda_graph,
+            "graph_planner_algorithm": backend.graph_planner_algorithm,
+            "enable_timeopt": self.cfg.enable_timeopt,
         }
 
     def with_collision_world(
@@ -1176,7 +1455,7 @@ class CuroboPlanner(BasePlanner):
         """Bind snapshot obstacle poses to one cuRobo planning attempt.
 
         Args:
-            options: Reusable caller options copied by the atomic-action layer.
+            options: Reusable caller options copied by the atomic-skill layer.
             obstacle_poses: Batched simulator-world poses keyed by configured
                 dynamic obstacle name.
 
@@ -1224,6 +1503,7 @@ class CuroboPlanner(BasePlanner):
                 success=torch.zeros(0, dtype=torch.bool, device=self.device),
                 positions=None,
             )
+        self._validate_path_constraints(target_states, options)
         # MotionGenOptions carries backend-neutral per-invocation limits. Keep
         # the planner-owned baseline so a later call without overrides does not
         # inherit a previous invocation's stricter budget. The backend cache key
@@ -1303,7 +1583,19 @@ class CuroboPlanner(BasePlanner):
     ) -> torch.Tensor:
         """Resolve the planning start qpos into ``(B, controlled_dof)``."""
         if start_qpos is None:
-            start_qpos = self.robot.get_qpos(name=control_part)
+            snapshot = getattr(self, "_query_snapshot", None)
+            if snapshot is None:
+                start_qpos = self.robot.get_qpos(name=control_part)
+            else:
+                if snapshot.full_qpos.shape[1] != len(self.robot.joint_names):
+                    raise ValueError(
+                        "Query full_qpos must match the full robot joint order."
+                    )
+                ids = [
+                    self.robot.joint_names.index(name)
+                    for name in self._resolve_sim_joint_names(control_part)
+                ]
+                start_qpos = snapshot.full_qpos[:, ids]
         start_qpos = torch.as_tensor(
             start_qpos, dtype=torch.float32, device=self._curobo_device
         )
@@ -1346,17 +1638,37 @@ class CuroboPlanner(BasePlanner):
         planning_mode: MoveType = MoveType.EEF_MOVE,
     ) -> "_CuroboBackend":
         """Return a cached in-process backend for one goal-buffer shape."""
+        self._validate_query_backend(control_part, batch_size)
         multi_env = bool(self.cfg.world.multi_env)
         key = (control_part, int(batch_size), multi_env, planning_mode)
+        solver = (getattr(self.robot, "_solvers", None) or {}).get(control_part)
+        tcp = getattr(solver, "tcp_xpos", None)
         limits_key = self._robot_yaml_cache_key(
-            self.robot.cfg.fpath, control_part, None, self.cfg.auto_gen
+            self.robot.cfg.fpath,
+            control_part,
+            None,
+            self.cfg.auto_gen,
+            None if tcp is None else tcp.tolist(),
         )
         cached = self._backend_cache.get(key)
         if cached is not None:
-            if cached.motion_limits_key == limits_key:
+            gravity = self._timeopt_gravity(cached) if self.cfg.enable_timeopt else None
+            if cached.motion_limits_key == limits_key and cached.gravity == gravity:
                 return cached
-            self._close_planner(cached.planner)
-            del self._backend_cache[key]
+            if getattr(self, "_query_snapshot", None) is not None:
+                detach_error = self._detach_payload(cached)
+                try:
+                    self._close_planner(cached.planner)
+                except Exception as error:
+                    if detach_error is None:
+                        detach_error = error
+                finally:
+                    del self._backend_cache[key]
+                if detach_error is not None:
+                    raise detach_error
+            else:
+                self._close_planner(cached.planner)
+                del self._backend_cache[key]
 
         profile = self._materialize_profile(control_part)
         sim_joint_names = self._resolve_sim_joint_names(control_part)
@@ -1445,6 +1757,14 @@ class CuroboPlanner(BasePlanner):
                         f"cuRobo capture coordinator release failed: {exc}"
                     )
 
+        try:
+            self._attach_payload(backend)
+        except BaseException:
+            try:
+                self._close_planner(backend.planner)
+            except Exception as error:
+                logger.log_warning(f"cuRobo query cleanup failed: {error}")
+            raise
         backend.motion_limits_key = limits_key
         self._backend_cache[key] = backend
         logger.log_info(
@@ -1466,8 +1786,30 @@ class CuroboPlanner(BasePlanner):
         planning_mode: MoveType,
     ) -> "_CuroboBackend":
         """Construct and validate one cuRobo planner on the selected CUDA device."""
-        robot_config = self._load_runtime_robot_config(profile.robot_config_path)
-        with torch.cuda.device(self._curobo_device):
+        algorithm = self.cfg.graph_planner_algorithm
+        backend = _CuroboBackend(
+            planner=None,
+            control_part=control_part,
+            sim_joint_names=sim_joint_names,
+            tool_frame="",
+            profile=profile,
+            batch_size=batch_size,
+            use_cuda_graph=use_cuda_graph,
+            planning_mode=planning_mode,
+            graph_planner_algorithm=algorithm,
+        )
+        if self.cfg.enable_timeopt:
+            backend.gravity = self._timeopt_gravity(backend)
+        robot_config = self._query_runtime_robot_config(profile.robot_config_path)
+        if self.cfg.use_runtime_tcp and profile.tool_frame_to_tcp is not None:
+            profile = self._configure_runtime_tcp(robot_config, profile)
+            backend.profile = profile
+        if backend.gravity is not None:
+            robot_config["robot_cfg"]["load_dynamics"] = True
+        with (
+            self._native_graph_mode(use_cuda_graph),
+            torch.cuda.device(self._curobo_device),
+        ):
             planner_cfg = self._bindings.MotionPlannerCfg.create(
                 robot=robot_config,
                 scene_model=scene_model,
@@ -1479,13 +1821,27 @@ class CuroboPlanner(BasePlanner):
                     self.cfg.collision_activation_distance
                 ),
                 use_cuda_graph=use_cuda_graph,
+                graph_planner_algorithm=algorithm,
+                enable_timeopt=self.cfg.enable_timeopt,
+                interpolation_dt=float(self.cfg.interpolation_dt),
+                position_tolerance=float(self.cfg.position_tolerance),
+                orientation_tolerance=float(self.cfg.orientation_tolerance),
             )
+            if backend.gravity is not None:
+                # All rollout configurations share this native model. Bind its
+                # dynamics before constructing any solver or TimeOpt buffers.
+                planner_cfg.trajopt_solver_config.robot_config.dynamics.gravity = list(
+                    backend.gravity
+                )
+            if algorithm == "rrt":
+                # RRT reserves tree/search buffers per lane. Size its power-of-two
+                # capacity for this cached backend's actual batch and seed count
+                # rather than always allocating the upstream 128-lane default.
+                lanes = batch_size * planner_cfg.trajopt_solver_config.num_seeds
+                planner_cfg.rrt_graph_planner_config.planner_config.max_batched_lanes = (
+                    1 << (lanes - 1).bit_length()
+                )
             self._disable_curobo_self_collision_rollouts(planner_cfg)
-            # cuRobo 0.8 reads interpolation_dt from the trajectory optimizer
-            # config rather than accepting it in MotionPlannerCfg.create().
-            planner_cfg.trajopt_solver_config.interpolation_dt = float(
-                self.cfg.interpolation_dt
-            )
             planner = (
                 self._bindings.MotionPlanner(planner_cfg)
                 if batch_size == 1
@@ -1501,23 +1857,206 @@ class CuroboPlanner(BasePlanner):
         except Exception:
             self._close_planner(planner)
             raise
-        return _CuroboBackend(
-            planner=planner,
-            control_part=control_part,
-            sim_joint_names=sim_joint_names,
-            tool_frame=tool_frame,
-            profile=profile,
-            batch_size=batch_size,
-            use_cuda_graph=use_cuda_graph,
-            planning_mode=planning_mode,
+        backend.planner = planner
+        backend.tool_frame = tool_frame
+        return backend
+
+    @staticmethod
+    def _configure_runtime_tcp(
+        robot_config: dict, profile: _CuroboProfile
+    ) -> _CuroboProfile:
+        """Add the physical TCP as a fixed native goal frame, without extra mass."""
+        if profile.tool_frame_name is None or profile.tool_frame_to_tcp is None:
+            raise ValueError("Runtime TCP requires a parent tool frame and transform.")
+        kinematics = robot_config["robot_cfg"]["kinematics"]
+        parent = profile.tool_frame_name
+        frame = f"__embodichain_tcp_{parent}"
+        extra_links = kinematics.setdefault("extra_links", {})
+        if frame in extra_links or frame in kinematics["tool_frames"]:
+            raise ValueError(f"Reserved runtime TCP frame already exists: {frame}.")
+        position, quaternion = _matrix_to_position_quaternion(
+            torch.as_tensor(profile.tool_frame_to_tcp, dtype=torch.float32)[None]
         )
+        extra_links[frame] = {
+            "link_name": frame,
+            "joint_name": f"{frame}_fixed",
+            "joint_type": "FIXED",
+            "parent_link_name": parent,
+            "fixed_transform": torch.cat((position[0], quaternion[0])).tolist(),
+            "link_mass": 0.0,
+            "link_inertia": [0.0] * 6,
+        }
+        kinematics["tool_frames"] = [
+            frame if name == parent else name for name in kinematics["tool_frames"]
+        ]
+        return replace(profile, tool_frame_name=frame, tool_frame_to_tcp=None)
+
+    def _timeopt_gravity(self, backend: "_CuroboBackend") -> tuple[float, float, float]:
+        """Resolve one gravity vector shared by every native planning row.
+
+        cuRobo 0.9 accepts only one dynamics frame per solver. Reject missing
+        physics state or differing per-row gravity rather than silently using
+        its default Earth gravity. Rebuild cached solvers when this frame moves.
+        """
+        from embodichain.lab.sim import SimulationManager
+
+        manager = SimulationManager.get_instance(self.cfg.sim_instance_id)
+        world_gravity = torch.as_tensor(
+            manager.sim_config.physics_cfg.gravity,
+            dtype=torch.float32,
+            device=self._curobo_device,
+        )
+        world_to_base = self._sim_base_to_curobo_matrix(backend)[None] @ pose_inv(
+            self._get_sim_base_pose(backend, backend.batch_size)
+        )
+        gravity = world_to_base[:, :3, :3] @ world_gravity
+        if not torch.isfinite(gravity).all() or not torch.allclose(
+            gravity, gravity[:1].expand_as(gravity), atol=1e-5, rtol=0.0
+        ):
+            raise ValueError(
+                "TimeOpt requires one known gravity vector in the cuRobo base "
+                "frame for the entire batch; set enable_timeopt=False for "
+                "differently oriented bases."
+            )
+        return tuple(round(value, 6) for value in gravity[0].tolist())
+
+    @staticmethod
+    def _validate_query_cfg(cfg: CuroboPlannerCfg) -> None:
+        if (
+            cfg.use_cuda_graph
+            or not cfg.preserve_plan_samples
+            or cfg.world.multi_env
+            or cfg.world.dynamic_obstacle_names
+        ):
+            raise ValueError(
+                "Query snapshots require CUDA graphs off, preserved planner samples "
+                "and a single static collision world."
+            )
+        if cfg.world.rigid_objects:
+            from embodichain.lab.sim.scene.collision_sources import (
+                CollisionObjectSnapshot,
+            )
+
+            if not isinstance(cfg.world.rigid_objects, Mapping) or any(
+                type(source) is not CollisionObjectSnapshot
+                for source in cfg.world.rigid_objects.values()
+            ):
+                raise ValueError(
+                    "Observed queries require explicit CollisionObjectSnapshot mappings; "
+                    "live pose getters are not consumed."
+                )
+
+    def _validate_query_backend(self, control_part: str, batch_size: int) -> None:
+        snapshot = getattr(self, "_query_snapshot", None)
+        if snapshot is None:
+            return
+        if getattr(self, "_query_closed", False):
+            raise RuntimeError("The observed cuRobo query lifetime is closed.")
+        self._validate_query_cfg(self.cfg)
+        if batch_size != snapshot.full_qpos.shape[0]:
+            raise ValueError("Observed query batch must match its snapshot.")
+        if batch_size > 1 and batch_size != self.robot.num_instances:
+            raise ValueError("Observed batch must match robot.num_instances.")
+        selected = getattr(self, "_query_control_part", None)
+        if selected is not None and selected != control_part:
+            raise ValueError("A query snapshot belongs to one control part.")
+        if (
+            snapshot.payload is not None
+            and snapshot.payload.control_part != control_part
+        ):
+            raise ValueError("Payload control_part does not match the query.")
+        self._query_control_part = control_part
+
+    def _query_runtime_robot_config(self, path: str) -> dict:
+        config = self._load_runtime_robot_config(path)
+        snapshot = getattr(self, "_query_snapshot", None)
+        return (
+            config
+            if snapshot is None
+            else _query_robot_config(config, snapshot, self.robot.joint_names)
+        )
+
+    def _attach_payload(self, backend: _CuroboBackend) -> None:
+        snapshot = getattr(self, "_query_snapshot", None)
+        if snapshot is None or snapshot.payload is None:
+            return
+        from curobo._src.collision.attachment_manager import AttachmentManager
+
+        payload = snapshot.payload
+        object_pose = payload.object_pose.to(
+            device=self._curobo_device, dtype=torch.float32
+        )
+        base_pose = self._sim_world_to_curobo_base_pose(object_pose, backend)
+        position, quaternion = _matrix_to_position_quaternion(base_pose)
+        native_pose = self._bindings.Pose(position=position, quaternion=quaternion)
+        ids = [self.robot.joint_names.index(name) for name in backend.sim_joint_names]
+        state = self._to_curobo_joint_state(snapshot.full_qpos[:, ids], backend)
+        spheres = payload.spheres.to(
+            device=self._curobo_device, dtype=torch.float32
+        ).clone()
+        managers: list[Any] = []
+        self._payload_managers[id(backend)] = managers
+        try:
+            models = _attachment_models(backend.planner)
+            for model in models:
+                managers.append(
+                    AttachmentManager(
+                        model,
+                        device_cfg=self._bindings.DeviceCfg(device=self._curobo_device),
+                    )
+                )
+            for model, manager in zip(models, managers, strict=True):
+                local_spheres = spheres
+                pose_offset = native_pose
+                if len(spheres) == 1:
+                    # cuRobo 0.8 squeezes a singleton point into shape (3,).
+                    # Supply link-local spheres to its no-transform update path;
+                    # keep the radius and the reserved link's capacity unchanged.
+                    model_state = self._bindings.JointState.from_position(
+                        state.position, joint_names=model.joint_names
+                    )
+                    fk = model.compute_kinematics(model_state)
+                    if fk.tool_poses is None:
+                        raise ValueError("Payload attachment requires tool poses.")
+                    tool_pose = fk.tool_poses.get_link_pose(model.tool_frames[0])
+                    offset = tool_pose.inverse().multiply(native_pose)
+                    centers = offset.transform_points(spheres[:, :3].contiguous())
+                    local_spheres = torch.cat(
+                        (centers.reshape(1, 3), spheres[:, 3:]), dim=-1
+                    )
+                    pose_offset = None
+                manager.update(
+                    local_spheres,
+                    state,
+                    link_name=_PAYLOAD_LINK,
+                    world_objects_pose_offset=pose_offset,
+                )
+        except BaseException:
+            error = self._detach_payload(backend)
+            if error is not None:
+                logger.log_warning(f"cuRobo attachment cleanup failed: {error}")
+            raise
+
+    def _detach_payload_id(self, identity: int) -> Exception | None:
+        first_error: Exception | None = None
+        managers = getattr(self, "_payload_managers", {}).pop(identity, ())
+        for manager in managers:
+            try:
+                manager.detach(link_name=_PAYLOAD_LINK)
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+        return first_error
+
+    def _detach_payload(self, backend: _CuroboBackend) -> Exception | None:
+        return self._detach_payload_id(id(backend))
 
     @staticmethod
     def _load_runtime_robot_config(robot_config_path: str) -> dict:
-        """Load robot YAML and add cuRobo 0.8's required empty placeholders.
+        """Load robot YAML with runtime-only self-collision placeholders.
 
         Self-collision metadata is intentionally absent from EmbodiChain's
-        generated cache. cuRobo 0.8 nevertheless builds internal sphere-pair
+        generated cache. cuRobo nevertheless builds internal sphere-pair
         bookkeeping while loading robot spheres, even when
         ``self_collision_check=False``, and assumes these two values are
         mappings. Supplying empty runtime-only mappings avoids its ``None``
@@ -1533,14 +2072,11 @@ class CuroboPlanner(BasePlanner):
 
     @staticmethod
     def _disable_curobo_self_collision_rollouts(planner_cfg: "Any") -> None:
-        """Disable self-collision in every cuRobo 0.8 rollout configuration.
+        """Disable self-collision in optimizer, metrics and graph rollouts.
 
-        cuRobo 0.8's ``MotionPlannerCfg.create(self_collision_check=False)``
-        disables the constraint in optimizer rollouts, but does not propagate
-        the flag to the IK/TrajOpt metrics rollouts or the PRM graph rollout.
-        Those metrics can therefore reject a converged solution as infeasible.
-        Apply the same public cost-manager switch to all rollout variants
-        before the planner materializes them.
+        The native factory's ``self_collision_check=False`` flag does not reach
+        the RRT resource factory. Apply the same public cost-manager switch to
+        every solver and graph rollout before the planner materializes them.
         """
         rollouts: list[Any] = []
         for solver_attr in ("ik_solver_config", "trajopt_solver_config"):
@@ -1551,10 +2087,12 @@ class CuroboPlanner(BasePlanner):
                 rollouts.append(metrics_rollout)
             rollouts.extend(getattr(core_cfg, "optimizer_rollout_configs", None) or [])
 
-        graph_cfg = getattr(planner_cfg, "graph_planner_config", None)
-        graph_rollout = getattr(graph_cfg, "rollout_config", None)
-        if graph_rollout is not None:
-            rollouts.append(graph_rollout)
+        for graph_attr in ("prm_graph_planner_config", "rrt_graph_planner_config"):
+            graph_cfg = getattr(planner_cfg, graph_attr, None)
+            resources = getattr(graph_cfg, "resources_config", None)
+            graph_rollout = getattr(resources, "rollout_config", None)
+            if graph_rollout is not None:
+                rollouts.append(graph_rollout)
 
         visited: set[int] = set()
         for rollout in rollouts:
@@ -1582,7 +2120,11 @@ class CuroboPlanner(BasePlanner):
             if backend.use_cuda_graph
             else nullcontext()
         )
-        with capture_mode, torch.cuda.device(self._curobo_device):
+        with (
+            self._native_graph_mode(backend.use_cuda_graph),
+            capture_mode,
+            torch.cuda.device(self._curobo_device),
+        ):
             planner = backend.planner
             default_position = planner.default_joint_state.position
             if default_position.dim() == 1:
@@ -1626,7 +2168,30 @@ class CuroboPlanner(BasePlanner):
 
                 graph_planner = getattr(planner, "graph_planner", None)
                 if backend.use_cuda_graph and graph_planner is not None:
-                    graph_planner.warmup(num_warmup_iterations=iterations)
+                    warmup_kwargs = {"num_warmup_iterations": iterations}
+                    if backend.graph_planner_algorithm == "rrt":
+                        warmup_kwargs["max_batch_size"] = (
+                            backend.batch_size * planner.trajopt_solver.config.num_seeds
+                        )
+                    graph_planner.warmup(**warmup_kwargs)
+                seed_fitter = getattr(planner, "graph_seed_fitter", None)
+                if backend.use_cuda_graph and seed_fitter is not None:
+                    seed_fitter.warmup()
+                if backend.use_cuda_graph and graph_planner is not None:
+                    # Native graph-seed merging has a separate lazy executor.
+                    # Exercise the full fallback while capture is coordinated.
+                    if backend.planning_mode == MoveType.EEF_MOVE:
+                        planner.plan_pose(
+                            goal, current_state, max_attempts=1, enable_graph_attempt=0
+                        )
+                    else:
+                        planner.plan_cspace(
+                            goal_state,
+                            current_state,
+                            max_attempts=1,
+                            enable_graph_attempt=0,
+                        )
+                    planner.reset_seed()
             finally:
                 planner.ik_solver.config.exit_early = original_exit_early
         self._synchronize_device()
@@ -1634,6 +2199,54 @@ class CuroboPlanner(BasePlanner):
     def _synchronize_device(self) -> None:
         """Synchronize only the CUDA device used by this planner."""
         torch.cuda.synchronize(self._curobo_device)
+
+    @contextmanager
+    def _native_graph_mode(self, enabled: bool) -> Iterator[None]:
+        """Scope cuRobo 0.9's effective graph switch, including lazy helpers.
+
+        Some native executors ignore solver flags. The public runtime facade
+        copies flag values, so update the module actually read by executors.
+        Serialize with all adapter graph construction and restore on failure.
+        """
+        with _TORCH_CUDA_GRAPH_PATCH_LOCK:
+            runtime = self._bindings.Runtime
+            previous = runtime.cuda_graphs
+            runtime.cuda_graphs = previous and enabled
+            try:
+                yield
+            finally:
+                runtime.cuda_graphs = previous
+
+    @contextmanager
+    def _planning_capture_scope(self, backend: "_CuroboBackend") -> Iterator[None]:
+        """Coordinate native graph replay and any data-dependent lazy captures."""
+        if not backend.use_cuda_graph:
+            with self._native_graph_mode(False):
+                yield
+            return
+        coordinator = _get_capture_coordinator()
+        owner = _CaptureOwner()
+        if not coordinator.acquire_for_capture(
+            str(self._curobo_device),
+            owner,
+            timeout=self.cfg.capture_acquire_timeout,
+            wait_log_interval=self.cfg.capture_wait_log_interval,
+        ):
+            raise RuntimeError(
+                "Timed out waiting for coordinated cuRobo graph planning."
+            )
+        try:
+            self._synchronize_device()
+            with (
+                self._native_graph_mode(True),
+                _torch_cuda_graph_capture_mode(self.cfg.cuda_graph_capture_error_mode),
+            ):
+                yield
+        finally:
+            try:
+                self._synchronize_device()
+            finally:
+                coordinator.release_for_capture(str(self._curobo_device), owner)
 
     @staticmethod
     def _close_planner(planner: "Any") -> None:
@@ -1729,7 +2342,9 @@ class CuroboPlanner(BasePlanner):
         Reads the tool frame, TCP offset, and base link from the control part's
         IK solver, builds the identity simulator->cuRobo joint mapping (the
         auto-generated robot YAML reuses the URDF joint names), and generates
-        the cuRobo robot YAML from the URDF. Nothing robot-specific is hardcoded.
+        the cuRobo robot YAML from the URDF. The solver's TCP calibration is
+        embedded as a fixed native tool frame, including its positional lever
+        arm. Nothing robot-specific is hardcoded.
         """
         robot = self.robot
         assert (
@@ -1755,7 +2370,7 @@ class CuroboPlanner(BasePlanner):
                 )
             tool_frame = part_links[-1]
 
-        # TCP offset: only when the solver's tool frame is not itself the TCP.
+        # Read the solver calibration for the generated fixed TCP tool frame.
         tool_frame_to_tcp = None
         if solver is not None:
             tcp_xpos = getattr(solver, "tcp_xpos", None)
@@ -1779,15 +2394,16 @@ class CuroboPlanner(BasePlanner):
         sim_joints = self._resolve_sim_joint_names(control_part)
         sim_to_curobo = {j: j for j in sim_joints}
 
-        robot_config_path = self._auto_generate_robot_yaml(control_part, tool_frame)
+        robot_config_path = self._auto_generate_robot_yaml(
+            control_part, tool_frame, tool_frame_to_tcp
+        )
         base_link = self._read_curobo_base_link(robot_config_path) or solver_base_link
         sim_base_link = base_link
 
         return _CuroboProfile(
             robot_config_path=robot_config_path,
             sim_to_curobo_joint_names=sim_to_curobo,
-            tool_frame_name=tool_frame,
-            tool_frame_to_tcp=tool_frame_to_tcp,
+            tool_frame_name=_TCP_LINK if tool_frame_to_tcp is not None else tool_frame,
             base_link_name=base_link,
             sim_base_link_name=sim_base_link,
             sim_base_to_curobo_base=self.cfg.sim_base_to_curobo_base,
@@ -1819,7 +2435,10 @@ class CuroboPlanner(BasePlanner):
             return None
 
     def _auto_generate_robot_yaml(
-        self, control_part: str, tool_frame: str | None
+        self,
+        control_part: str,
+        tool_frame: str | None,
+        tool_frame_to_tcp: list[list[float]] | None = None,
     ) -> str:
         """Return a cached cuRobo robot YAML path, generating it from the URDF if needed."""
         from .curobo_yaml import generate_curobo_robot_yaml
@@ -1843,7 +2462,7 @@ class CuroboPlanner(BasePlanner):
             "embodichain_curobo",
         )
         cache_key = self._robot_yaml_cache_key(
-            urdf_path, control_part, tool_frame, auto
+            urdf_path, control_part, tool_frame, auto, tool_frame_to_tcp
         )
         cache_path = os.path.join(cache_dir, f"{cache_key}.yml")
         motion_urdf_path = os.path.splitext(cache_path)[0] + ".motion.urdf"
@@ -1862,6 +2481,7 @@ class CuroboPlanner(BasePlanner):
             control_part,
             cache_path,
             tool_frame=tool_frame,
+            tool_frame_to_tcp=tool_frame_to_tcp,
             urdf_path=urdf_path,
             num_spheres=auto.num_spheres,
             sphere_density=auto.sphere_density,
@@ -1879,10 +2499,11 @@ class CuroboPlanner(BasePlanner):
         control_part: str,
         tool_frame: str | None,
         auto: CuroboAutoGenCfg,
+        tool_frame_to_tcp: list[list[float]] | None = None,
     ) -> str:
-        """Hash the URDF path/content and fit parameters into a stable cache key."""
+        """Hash URDF, limits, fit settings and fixed TCP calibration for the cache."""
         hasher = hashlib.md5()
-        hasher.update(b"absolute-motion-limits-v2")
+        hasher.update(b"tcp-tool-frame-v3")
         hasher.update(urdf_path.encode("utf-8"))
         try:
             with open(urdf_path, "rb") as urdf_file:
@@ -1891,6 +2512,7 @@ class CuroboPlanner(BasePlanner):
             pass
         hasher.update(control_part.encode("utf-8"))
         hasher.update((tool_frame or "").encode("utf-8"))
+        hasher.update(repr(tool_frame_to_tcp).encode("utf-8"))
         hasher.update(str(auto.num_spheres).encode("utf-8"))
         hasher.update(str(auto.sphere_density).encode("utf-8"))
         hasher.update(str(auto.surface_radius).encode("utf-8"))
@@ -1973,7 +2595,9 @@ class CuroboPlanner(BasePlanner):
         hasher.update(repr(world_cfg.plane_dims).encode("utf-8"))
         for name, obj in _named_rigid_objects(world_cfg.rigid_objects):
             hasher.update(name.encode("utf-8"))
-            for shape in obj.get_collision_shapes(env_id=0):
+            shapes = obj.get_collision_shapes(env_id=0)
+            self._validate_variant_collision_geometry(obj, shapes)
+            for shape in shapes:
                 hasher.update(shape.name.encode("utf-8"))
                 hasher.update(str(shape.shape_type.value).encode("utf-8"))
                 for value in (
@@ -1989,6 +2613,41 @@ class CuroboPlanner(BasePlanner):
             pose = obj.get_local_pose(to_matrix=True)[0]
             hasher.update(pose.detach().to("cpu").to(torch.float32).numpy().tobytes())
         return hasher.hexdigest()
+
+    @staticmethod
+    def _validate_variant_collision_geometry(obj: object, reference: list) -> None:
+        """Reject per-row physical geometry that a cloned cuRobo world would lose."""
+        variants = getattr(getattr(obj, "cfg", None), "env_variants", None)
+        if not variants:
+            return
+        count = int(obj.num_instances)
+        indices = set(variants)
+        if len(indices) < count:
+            indices.add(next(index for index in range(count) if index not in indices))
+
+        def same_tensor(left: torch.Tensor | None, right: torch.Tensor | None) -> bool:
+            if left is None or right is None:
+                return left is None and right is None
+            return torch.equal(left, right)
+
+        for env_id in sorted(indices - {0}):
+            current = obj.get_collision_shapes(env_id=env_id, allow_heterogeneous=True)
+            if len(current) != len(reference) or any(
+                a.name != b.name
+                or a.shape_type != b.shape_type
+                or a.radius != b.radius
+                or a.half_height != b.half_height
+                or any(
+                    not same_tensor(getattr(a, field), getattr(b, field))
+                    for field in ("local_pose", "half_extents", "vertices", "triangles")
+                )
+                for a, b in zip(reference, current)
+            ):
+                raise ValueError(
+                    f"RigidObject {obj.uid!r} has different collision geometry "
+                    f"in environment rows 0 and {env_id}; cuRobo cannot clone "
+                    "one collision world for these variants."
+                )
 
     def visualize_robot_collision_models(
         self,
@@ -2015,12 +2674,16 @@ class CuroboPlanner(BasePlanner):
         world_scene = None
         if rigid_objects:
             world_scene = self._auto_generate_world_scene(world_cfg)
+        from embodichain.lab.sim import SimulationManager
+
+        manager = SimulationManager.get_instance(self.cfg.sim_instance_id)
         visualize_curobo_collision_models(
             self.robot,
             profile.robot_config_path,
             rigid_objects,
             world_scene,
             env_id,
+            wait_for_input=manager.wait_for_input,
         )
 
     def _resolve_sim_joint_names(self, control_part: str) -> list[str]:
@@ -2037,6 +2700,186 @@ class CuroboPlanner(BasePlanner):
     # ------------------------------------------------------------------
     # Segment planning
     # ------------------------------------------------------------------
+
+    def _validate_path_constraints(
+        self, target_states: list[PlanState], options: CuroboPlanOptions
+    ) -> None:
+        """Reject unsupported constraints before constructing native backends."""
+        constraints = options.path_constraints
+        if constraints is None:
+            return
+        if len(constraints) != len(target_states):
+            raise ValueError("path_constraints must match the target count.")
+        if options.waypoint_modalities is not None and len(
+            options.waypoint_modalities
+        ) != len(target_states):
+            raise ValueError("waypoint_modalities must match the target count.")
+        for index, (target, constraint) in enumerate(zip(target_states, constraints)):
+            if constraint is None:
+                continue
+            if not isinstance(constraint, CuroboPoseConstraintCfg):
+                raise TypeError(
+                    "path_constraints entries must be pose configs or None."
+                )
+            constraint.__post_init__()
+            if target.move_type != MoveType.EEF_MOVE or (
+                options.waypoint_modalities is not None
+                and options.waypoint_modalities[index] != "pose"
+            ):
+                raise ValueError(
+                    "Pose path constraints require full-pose EEF_MOVE targets."
+                )
+            if not self.cfg.preserve_plan_samples:
+                raise ValueError(
+                    "Pose path constraints require preserve_plan_samples=True."
+                )
+
+    @contextmanager
+    def _pose_constraint_scope(
+        self, backend: "_CuroboBackend", constraint: CuroboPoseConstraintCfg | None
+    ) -> Iterator[None]:
+        """Apply a segment-local native cost and restore it even on failure."""
+        if constraint is None:
+            yield
+            return
+        compiled = self._compile_pose_criteria(backend, constraint)
+        try:
+            backend.planner.update_tool_pose_criteria(
+                {backend.tool_frame: compiled.criteria}
+            )
+            yield
+        finally:
+            backend.planner.update_tool_pose_criteria(
+                {backend.tool_frame: compiled.baseline}
+            )
+
+    def _compile_pose_criteria(
+        self, backend: "_CuroboBackend", constraint: CuroboPoseConstraintCfg
+    ) -> "_CuroboPoseCriteria":
+        """Compile one bounded cache entry shared by native solving and TCP checks."""
+        key = (
+            constraint.path_position_projector,
+            constraint.path_rotation_projector,
+            constraint.frame,
+            constraint.position_scale,
+            constraint.rotation_scale,
+            constraint.position_tolerance,
+            constraint.orientation_tolerance,
+        )
+        cached = getattr(backend, "pose_criteria_cache", None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        device_cfg = self._bindings.DeviceCfg(device=str(self._curobo_device))
+        position = torch.tensor(
+            constraint.path_position_projector,
+            device=self._curobo_device,
+            dtype=torch.float32,
+        )
+        rotation = position.new_tensor(constraint.path_rotation_projector)
+        native_position, native_rotation = position, rotation
+        tool_to_tcp = backend.profile.tool_frame_to_tcp
+        if constraint.frame == "goal" and tool_to_tcp is not None:
+            basis = position.new_tensor(tool_to_tcp)[:3, :3]
+            native_position = basis @ position @ basis.T
+            native_rotation = basis @ rotation @ basis.T
+        # Native feasibility compares scaled residuals, including the chordal
+        # quaternion rotation distance. Preserve the public meter/radian bounds.
+        criteria = self._bindings.ToolPoseCriteria(
+            path_position_projector=native_position,
+            path_rotation_projector=native_rotation,
+            path_position_axis_scale=[constraint.position_scale] * 3,
+            path_rotation_axis_scale=[constraint.rotation_scale] * 3,
+            path_tolerance=[
+                constraint.position_tolerance * constraint.position_scale,
+                2.0
+                * math.sin(constraint.orientation_tolerance / 2.0)
+                * constraint.rotation_scale,
+            ],
+            enforce_path_tolerance=True,
+            project_distance_to_goal=constraint.frame == "goal",
+            device_cfg=device_cfg,
+        )
+        baseline = self._bindings.ToolPoseCriteria(
+            terminal_pose_axes_weight_factor=[1.0] * 6,
+            non_terminal_pose_axes_weight_factor=[0.0] * 6,
+            device_cfg=device_cfg,
+        )
+        compiled = _CuroboPoseCriteria(criteria, baseline, position, rotation)
+        # Only the most recent specification is retained. No goal or observed
+        # robot state is cached; native updates copy into fixed-address buffers.
+        backend.pose_criteria_cache = (key, compiled)
+        return compiled
+
+    def _pose_path_validity(
+        self,
+        positions: torch.Tensor,
+        target_xpos: torch.Tensor,
+        backend: "_CuroboBackend",
+        constraint: CuroboPoseConstraintCfg,
+        sim_base_pose_inv: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """Check actual TCP geometry in bounded device-resident FK batches."""
+        batch, horizon, dof = positions.shape
+        target_xpos = target_xpos.to(device=self._curobo_device, dtype=torch.float32)
+        goal = self._sim_world_to_curobo_base_pose(
+            target_xpos, backend, sim_base_pose_inv
+        )
+        compiled = self._compile_pose_criteria(backend, constraint)
+        tool_to_tcp = backend.profile.tool_frame_to_tcp
+        offset = None if tool_to_tcp is None else goal.new_tensor(tool_to_tcp)
+        check_position = any(
+            x != 0 for row in constraint.path_position_projector for x in row
+        )
+        check_rotation = any(
+            x != 0 for row in constraint.path_rotation_projector for x in row
+        )
+        rotation_bound = math.sin(constraint.orientation_tolerance / 2.0)
+        validity = []
+        # Bound native FK storage independently of the trajectory batch/horizon.
+        chunk_size = 1024
+        for start in range(0, batch * horizon, chunk_size):
+            joints = positions.reshape(-1, dof)[start : start + chunk_size]
+            state = self._to_curobo_joint_state(joints, backend)
+            tools = backend.planner.compute_kinematics(state).tool_poses
+            tcp = tools.get_link_pose(backend.tool_frame).get_matrix()
+            if offset is not None:
+                tcp = tcp @ offset
+            rows = (
+                torch.arange(start, start + joints.shape[0], device=goal.device)
+                // horizon
+            )
+            valid = torch.isfinite(tcp).all(dim=(-2, -1))
+            goal_rotation = goal[rows, :3, :3]
+            if check_position:
+                delta = tcp[:, :3, 3] - goal[rows, :3, 3]
+                if constraint.frame == "goal":
+                    delta = (
+                        goal_rotation.transpose(-1, -2) @ delta[..., None]
+                    ).squeeze(-1)
+                projected = delta @ compiled.position_projector.T
+                valid &= (
+                    torch.linalg.vector_norm(projected, dim=-1)
+                    <= constraint.position_tolerance
+                )
+            if check_rotation:
+                relative = (
+                    goal_rotation.transpose(-1, -2) @ tcp[:, :3, :3]
+                    if constraint.frame == "goal"
+                    else tcp[:, :3, :3] @ goal_rotation.transpose(-1, -2)
+                )
+                quaternion = quat_from_matrix(relative)
+                quaternion = quaternion / torch.linalg.vector_norm(
+                    quaternion, dim=-1, keepdim=True
+                ).clamp_min(1e-12)
+                projected = quaternion[:, :3] @ compiled.rotation_projector.T
+                # Equivalent to 2*asin(norm(P @ vec(q))) <= angular tolerance.
+                # Comparing sine avoids a per-sample inverse trig operation.
+                valid &= (
+                    torch.linalg.vector_norm(projected, dim=-1).clamp_max(1.0)
+                    <= rotation_bound
+                )
+            validity.append(valid)
+        return torch.cat(validity).reshape(batch, horizon).all(dim=-1)
 
     def _plan_segments(
         self,
@@ -2068,9 +2911,29 @@ class CuroboPlanner(BasePlanner):
         alive = torch.ones(B, dtype=torch.bool, device=self._curobo_device)
         current = start.clone()
 
+        modalities = options.waypoint_modalities
+        if modalities is not None:
+            if len(modalities) != len(target_states):
+                raise ValueError("waypoint_modalities must match the target count.")
+            for target, modality in zip(target_states, modalities):
+                expected = (
+                    {"joint"}
+                    if target.move_type == MoveType.JOINT_MOVE
+                    else {"position", "orientation", "pose"}
+                )
+                if modality not in expected:
+                    raise ValueError(
+                        "Waypoint modality is incompatible with its move type."
+                    )
+
         for seg_idx, target in enumerate(target_states):
             self._validate_segment_batch(target, B, seg_idx)
             backend = backends[target.move_type]
+            constraint = (
+                None
+                if options.path_constraints is None
+                else options.path_constraints[seg_idx]
+            )
             current_state = self._to_curobo_joint_state(current, backend)
             if target.move_type == MoveType.EEF_MOVE:
                 if target.xpos is None:
@@ -2078,26 +2941,35 @@ class CuroboPlanner(BasePlanner):
                         f"Segment {seg_idx} EEF_MOVE target missing xpos.",
                         ValueError,
                     )
-                goal = self._to_curobo_pose_goal(
-                    target.xpos, backend, sim_base_pose_inv
-                )
-                start_time = time.time()
-                capture_mode = (
-                    _torch_cuda_graph_capture_mode(
-                        self.cfg.cuda_graph_capture_error_mode
+                modality = "pose" if modalities is None else modalities[seg_idx]
+                self._set_pose_modality(backend, modality)
+                # Never pass an unused component into frame conversion or the
+                # native optimizer, even when its terminal cost is disabled.
+                xpos = target.xpos
+                if modality != "pose":
+                    xpos = (
+                        torch.eye(4, device=xpos.device, dtype=xpos.dtype)
+                        .expand_as(xpos)
+                        .clone()
                     )
-                    if backend.use_cuda_graph
-                    else nullcontext()
-                )
-                with capture_mode, torch.cuda.device(self._curobo_device):
+                    if modality == "position":
+                        xpos[:, :3, 3] = target.xpos[:, :3, 3]
+                    else:
+                        xpos[:, :3, :3] = target.xpos[:, :3, :3]
+                goal = self._to_curobo_pose_goal(xpos, backend, sim_base_pose_inv)
+                start_time = time.time()
+                capture_mode = self._planning_capture_scope(backend)
+                with (
+                    capture_mode,
+                    torch.cuda.device(self._curobo_device),
+                    self._pose_constraint_scope(backend, constraint),
+                ):
                     v2_result = backend.planner.plan_pose(
                         goal,
                         current_state,
                         max_attempts=max_attempts,
-                        # Match MotionPlanner's scalar default. BatchMotionPlanner
-                        # otherwise starts with PRM at attempt zero and can feed
-                        # zero-filled seeds to individual rows whose graph query
-                        # failed. Try the native direct seed first, then PRM.
+                        # Keep direct-first planning for scalar and batched
+                        # calls, using graph routes only on subsequent attempts.
                         enable_graph_attempt=1,
                     )
                 logger.log_info(
@@ -2112,23 +2984,10 @@ class CuroboPlanner(BasePlanner):
                     )
                 goal_state = self._to_curobo_joint_goal(target.qpos, backend)
                 start_time = time.time()
-                capture_mode = (
-                    _torch_cuda_graph_capture_mode(
-                        self.cfg.cuda_graph_capture_error_mode
-                    )
-                    if backend.use_cuda_graph
-                    else nullcontext()
-                )
+                capture_mode = self._planning_capture_scope(backend)
                 with capture_mode, torch.cuda.device(self._curobo_device):
-                    # cuRobo 0.8's BatchMotionPlanner zero-fills PRM seeds for
-                    # individual batch rows whose graph query fails.  If any
-                    # sibling row found a graph path, that partially invalid
-                    # seed tensor is still forwarded to TrajOpt and can turn a
-                    # trivial direct c-space move into a false per-row failure.
-                    # The native c-space solver already constructs direct
-                    # start-to-goal seeds.  Match MotionPlanner's direct-first
-                    # policy for both scalar and batched solves, then allow PRM
-                    # seeds to help on later attempts.
+                    # The native solver already constructs start-to-goal seeds.
+                    # Keep the same direct-first policy as Cartesian planning.
                     v2_result = backend.planner.plan_cspace(
                         goal_state,
                         current_state,
@@ -2165,6 +3024,16 @@ class CuroboPlanner(BasePlanner):
                     seg_velocities,
                     seg_accelerations,
                 ) = self._extract_segment(v2_result, backend)
+                if constraint is not None:
+                    assert target.xpos is not None
+                    with torch.cuda.device(self._curobo_device):
+                        seg_success &= self._pose_path_validity(
+                            seg_positions,
+                            target.xpos,
+                            backend,
+                            constraint,
+                            sim_base_pose_inv,
+                        )
             seg_success = seg_success.to(self._curobo_device) & alive
             if v2_result is not None and self.cfg.max_planning_time is not None:
                 total_time = self._extract_total_time(v2_result, B)
@@ -2467,7 +3336,7 @@ class CuroboPlanner(BasePlanner):
 
         # cuRobo interpolation can round its first sample by a few float32
         # ulps. Preserve the requested boundary exactly at that precision:
-        # Atomic action concatenation gives a repeated start zero arrival time,
+        # Atomic Skill concatenation gives a repeated start zero arrival time,
         # so even one ulp otherwise appears to be an instantaneous joint jump.
         # Keep larger mismatches visible to callers and external validation.
         roundoff = 4 * torch.finfo(positions.dtype).eps * start.abs().clamp_min(1)
@@ -2545,6 +3414,29 @@ class CuroboPlanner(BasePlanner):
         return self._bindings.JointState.from_position(
             position, joint_names=curobo_names
         )
+
+    def _set_pose_modality(self, backend: "_CuroboBackend", modality: str) -> None:
+        """Update native terminal pose costs, including reset after partial goals."""
+        if modality == "position":
+            transform = self._tool_to_frame_matrix(backend)
+            if transform is not None and bool((transform[:3, 3].abs() > 1.0e-8).any()):
+                raise ValueError(
+                    "cuRobo position-only goals require coincident tool/TCP origins."
+                )
+        if getattr(backend, "pose_modality", "pose") == modality:
+            return
+        weights = {
+            "position": [1.0, 1.0, 1.0, 0.0, 0.0, 0.0],
+            "orientation": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            "pose": [1.0] * 6,
+        }[modality]
+        criteria = self._bindings.ToolPoseCriteria(
+            terminal_pose_axes_weight_factor=weights,
+            non_terminal_pose_axes_weight_factor=[0.0] * 6,
+            device_cfg=self._bindings.DeviceCfg(device=str(self._curobo_device)),
+        )
+        backend.planner.update_tool_pose_criteria({backend.tool_frame: criteria})
+        backend.pose_modality = modality
 
     def _to_curobo_pose_goal(
         self,
@@ -2639,6 +3531,11 @@ class CuroboPlanner(BasePlanner):
                 ValueError,
             )
         batch_size = world_pose.shape[0]
+        snapshot = getattr(self, "_query_snapshot", None)
+        if snapshot is not None:
+            if batch_size != snapshot.full_qpos.shape[0]:
+                raise ValueError("Observed query batch must match its snapshot.")
+            return snapshot.world_to_base.to(world_pose) @ world_pose
         if sim_base_pose_inv is None:
             sim_base_pose = self._get_sim_base_pose(backend, batch_size)
             sim_base_pose_inv = pose_inv(sim_base_pose)
@@ -2680,6 +3577,16 @@ class CuroboPlanner(BasePlanner):
         self, backend: "_CuroboBackend", batch_size: int
     ) -> torch.Tensor:
         """Return ``(B, 4, 4)`` world poses of a control part's solver base."""
+        snapshot = getattr(self, "_query_snapshot", None)
+        if snapshot is not None:
+            if batch_size != snapshot.full_qpos.shape[0]:
+                raise ValueError("Observed query batch must match its snapshot.")
+            # Derive the legacy intermediate frame from the explicit observation.
+            # Final goal/payload projection uses world_to_base directly, and no
+            # live robot pose is reread during this query.
+            fixed = self._sim_base_to_curobo_matrix(backend)[None]
+            world_to_base = snapshot.world_to_base.to(fixed)
+            return pose_inv(pose_inv(fixed) @ world_to_base)
         control_part = backend.control_part
         root_link_name = backend.profile.sim_base_link_name
         if root_link_name is None:
@@ -2733,6 +3640,10 @@ class CuroboPlanner(BasePlanner):
         """
         if poses is None:
             return
+        if getattr(self, "_query_snapshot", None) is not None and poses:
+            raise NotImplementedError(
+                "Observed cuRobo collision worlds are immutable; create a fresh query."
+            )
         _validate_dynamic_obstacles(poses, list(self.cfg.world.dynamic_obstacle_names))
         backends = (
             [backend] if backend is not None else list(self._backend_cache.values())
@@ -2870,6 +3781,25 @@ class CuroboPlanner(BasePlanner):
 
     def close(self) -> None:
         """Destroy every cached in-process cuRobo planner."""
+        if getattr(self, "_query_snapshot", None) is not None:
+            if getattr(self, "_query_closed", False):
+                return
+            self._query_closed = True
+            first_error: Exception | None = None
+            for identity in tuple(getattr(self, "_payload_managers", {})):
+                error = self._detach_payload_id(identity)
+                if first_error is None:
+                    first_error = error
+            for backend in list(getattr(self, "_backend_cache", {}).values()):
+                try:
+                    self._close_planner(backend.planner)
+                except Exception as error:
+                    if first_error is None:
+                        first_error = error
+            getattr(self, "_backend_cache", {}).clear()
+            if first_error is not None:
+                raise first_error
+            return
         for backend in list(self._backend_cache.values()):
             self._close_planner(backend.planner)
         self._backend_cache.clear()
@@ -2879,6 +3809,16 @@ class CuroboPlanner(BasePlanner):
             self.close()
         except Exception:
             pass
+
+
+@dataclass
+class _CuroboPoseCriteria:
+    """Cached native criteria and unscaled TCP projectors owned by one backend."""
+
+    criteria: Any
+    baseline: Any
+    position_projector: torch.Tensor
+    rotation_projector: torch.Tensor
 
 
 @dataclass
@@ -2893,8 +3833,11 @@ class _CuroboBackend:
     batch_size: int
     use_cuda_graph: bool
     planning_mode: MoveType
+    graph_planner_algorithm: str = "prm"
+    gravity: tuple[float, float, float] | None = None
     motion_limits_key: str | None = None
     collision_checker: "Any | None" = None
+    pose_criteria_cache: tuple[tuple[object, ...], _CuroboPoseCriteria] | None = None
     # Lazily-built device-tensor caches for the shared post-processing. The
     # cuRobo joint order and the profile's fixed transforms are stable for a
     # planner's life, so these are built once on first use and reused across

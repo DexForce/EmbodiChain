@@ -550,7 +550,7 @@ def _verify_task(
     import gymnasium
     from embodichain.lab.gym.envs.demo import execute_demo_episode
     from embodichain.lab.gym.envs.types import ControllerAction
-    from embodichain.lab.sim.sensors.contact_sensor import (
+    from embodichain.lab.sim.sensors.contact.sensor import (
         ArticulationContactFilterCfg,
         ContactSensor,
         ContactSensorCfg,
@@ -838,7 +838,7 @@ def run_all_benchmarks(output: Path, profiles: list[str]) -> None:
     from embodichain.data import get_data_path
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import DefaultPhysicsCfg, RenderCfg
-    from embodichain_robots import CobotMagicCfg
+    from embodichain.extensions.robots import CobotMagicCfg
 
     audit = _audit_urdf(
         Path(get_data_path("CobotMagicArm/CobotMagicWithGripperV100.urdf"))

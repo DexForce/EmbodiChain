@@ -32,7 +32,7 @@ from embodichain.lab.visualization import (
     add_viser_args_to_parser,
     visualization_cfg_from_args,
 )
-from embodichain_robots import DexforceW1Cfg
+from embodichain.extensions.robots import DexforceW1Cfg
 
 
 def parse_args(description: str, *, samples: int, device: str) -> argparse.Namespace:

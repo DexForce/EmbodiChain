@@ -25,7 +25,7 @@
 ### v0.2.0
 
 - Platform upgrade release.
-- Focus: DexSim v0.4.0 migration, atomic action abstraction, benchmarking, multi-version docs, PyPI release workflow fixes, and dependency bumps.
+- Focus: DexSim v0.4.0 migration, atomic skill abstraction, benchmarking, multi-version docs, PyPI release workflow fixes, and dependency bumps.
 
 ### v0.2.1
 
@@ -45,6 +45,7 @@
 
 ## Release workflow cues
 
-- Tag pushes trigger the release build path in `.github/workflows/`.
-- Release builds produce package distributions.
-- Docs builds preserve older versioned documentation when a new tag is published.
+- Tag pushes run the distribution build/validation path in `.github/workflows/main.yml`.
+- `.github/workflows/release-publish.yml` responds to a published release and reuses validated tag-build distributions for PyPI.
+- `.github/workflows/docs-pages.yml` responds to publication and deploys versioned documentation while preserving older versions.
+- Check the current workflows before relying on these cues; a main build and a tag build exercise different gates.

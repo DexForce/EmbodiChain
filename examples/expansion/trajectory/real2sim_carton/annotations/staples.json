@@ -1,0 +1,126 @@
+{
+  "schema": "real2sim-carton-annotation/v1",
+  "revision": "staples-proxy-v1",
+  "source_id": "RAIL+d027f2ae+2023-11-20-11h-50m-49s",
+  "object_identity": "Closed STAPLES 5000 COUNT carton, visible in wrist frame 48; SKU not independently identified",
+  "geometry_basis": "Two calibrated external views and observed aperture; declared rigid cuboid proxy, not a YCB substitution or a measured CAD model",
+  "support_basis": "Initial proxy bottom on one planar worktop; transport free of other contacts, manually inspected original views",
+  "mount_basis": "Coaxial 18 mm estimated adapter; conditional pad-tip registration, not manufacturer mounting CAD",
+  "robot_model": "original Panda, seven source joints; Robotiq 2F-85 linkage",
+  "robot_mount_z_m": 0.018,
+  "robot_mount_yaw_rad": 0.0,
+  "tcp_offset_m": 0.15,
+  "video_state_offset": 0,
+  "video_frames": 95,
+  "video_encoding_fps": 60.0,
+  "clock_basis": "Frame acquisition index maps to original robot state clock; encoding fps does not specify physical time",
+  "missing_terminal_video": true,
+  "scene_xy_shift_m": [
+    -0.2,
+    0.0
+  ],
+  "pick_lift_m": 0.045,
+  "grasp_inset_m": 0.01,
+  "grasp_height_m": -0.005,
+  "release_gap_m": 0.022,
+  "carry_clearance_m": 0.055,
+  "phases": [
+    {
+      "skill_id": "pick_up",
+      "start": 25,
+      "stop": 66,
+      "phases": [
+        {
+          "name": "approach",
+          "start": 25,
+          "stop": 52,
+          "kind": "free",
+          "reference": "object"
+        },
+        {
+          "name": "close",
+          "start": 52,
+          "stop": 60,
+          "kind": "contact",
+          "reference": "object"
+        },
+        {
+          "name": "lift",
+          "start": 60,
+          "stop": 66,
+          "kind": "hold",
+          "reference": "gravity"
+        }
+      ]
+    },
+    {
+      "skill_id": "move_held_object",
+      "start": 65,
+      "stop": 75,
+      "phases": [
+        {
+          "name": "transport",
+          "start": 65,
+          "stop": 75,
+          "kind": "free",
+          "reference": "target"
+        }
+      ]
+    },
+    {
+      "skill_id": "place",
+      "start": 74,
+      "stop": 94,
+      "phases": [
+        {
+          "name": "approach",
+          "start": 74,
+          "stop": 83,
+          "kind": "free",
+          "reference": "target"
+        },
+        {
+          "name": "release",
+          "start": 83,
+          "stop": 91,
+          "kind": "contact",
+          "reference": "target"
+        },
+        {
+          "name": "retract",
+          "start": 91,
+          "stop": 94,
+          "kind": "free",
+          "reference": "target"
+        }
+      ]
+    }
+  ],
+  "hard_events": {
+    "close_command_original_index": 52,
+    "grasp_observed_original_index": 60,
+    "release_command_original_index": 83,
+    "open_observed_original_index": 91
+  },
+  "admission_limits": {
+    "camera_fit_rms_px": 5.0,
+    "camera_fit_max_coordinate_px": 10.0,
+    "camera_holdout_px": 12.0,
+    "box_bbox_rms_px": 4.0,
+    "box_bbox_max_coordinate_px": 7.0,
+    "flange_fk_position_m": 0.0001,
+    "flange_fk_rotation_rad": 0.001,
+    "maximum_event_quantization_s": 0.016666666666666666
+  },
+  "holdout": {
+    "original_index": 40,
+    "link": "right_inner_finger_pad",
+    "pixel": [
+      1112.0,
+      115.0
+    ],
+    "uncertainty_px": 4.0
+  },
+  "scope": "Public real motion transferred into a declared approximate physical proxy; no real dynamics or hardware deployment qualification",
+  "grasp_region_basis": "Opposed +/-Y side faces; +X inset 10 mm; TCP height -5 mm leaves estimated pad-tip clearance above support. Closest source grasp projection, no clean-reference oracle."
+}

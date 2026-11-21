@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Generic dual-arm composition; concrete presets live in embodichain_robots."""
+"""Generic dual-arm composition; concrete presets live in embodichain.extensions.robots."""
 
 from __future__ import annotations
 

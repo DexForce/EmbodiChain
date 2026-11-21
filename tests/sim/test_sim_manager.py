@@ -19,6 +19,8 @@ from __future__ import annotations
 from contextlib import nullcontext
 import gc
 import queue
+import threading
+import weakref
 
 from pathlib import Path
 
@@ -30,9 +32,12 @@ import numpy as np
 import pytest
 import torch
 
+
 import embodichain.lab.sim.sim_manager as sim_manager_module
 import embodichain.lab.visualization as visualization_module
 from embodichain.lab.sim.cfg import (
+    ArticulationCfg,
+    CableObjectCfg,
     DefaultPhysicsCfg,
     DenoisingCfg,
     DLSSCfg,
@@ -51,6 +56,7 @@ from embodichain.lab.sim.sim_manager import (
     _WindowRecordState,
 )
 from embodichain.lab.sim.sensors import Camera, CameraCfg, StereoCamera, StereoCameraCfg
+from embodichain.lab.sim.sensors.stereo import PairCameraView
 from embodichain.lab.visualization import (
     GizmoCommand,
     PickCommand,
@@ -249,6 +255,24 @@ class FakeCamera:
         return np.full((4, 4, 4), 7, dtype=np.uint8)
 
 
+class FakeWindow:
+    """Native-window stub exposing picture and pose readback."""
+
+    def __init__(self, picture: np.ndarray | None) -> None:
+        self.picture = picture
+        self.pose = np.eye(4, dtype=np.float32)
+        self.input_controls: list[object] = []
+
+    def get_picture(self) -> np.ndarray | None:
+        return self.picture
+
+    def get_pose_matrix(self) -> np.ndarray:
+        return self.pose
+
+    def add_input_control(self, control: object) -> None:
+        self.input_controls.append(control)
+
+
 class FakePointCloud:
     """Point-cloud stub that records native rendering calls."""
 
@@ -314,6 +338,9 @@ class FakeWorld:
 
     def update(self, physics_dt: float) -> None:
         self.physics_updates.append(physics_dt)
+
+    def _flush_render_updates(self) -> int:
+        return 0
 
     def enable_entity_gizmo(self, config: object | None = None) -> object:
         self.entity_gizmo_configs.append(config)
@@ -430,6 +457,7 @@ def _make_sim_manager(
     sim._window_record_save_threads = []
     sim._window_record_hotkey_cfg = None
     sim._window_record_input_control = None
+    sim._window_capture_requests = queue.SimpleQueue()
     sim._window_camera_pose_hotkey_cfg = None
     sim._window_camera_pose_input_control = None
     sim._env = FakeEnv()
@@ -453,6 +481,7 @@ def _make_visualization_sim_manager() -> (
         physics_dt=0.01,
         physics_cfg=DefaultPhysicsCfg(),
         visualization=SimpleNamespace(backend="viser"),
+        render_cfg=SimpleNamespace(renderer="hybrid"),
     )
     sim.device = SimpleNamespace(type="cpu")
     sim.profiler = Profiler(None, torch.device("cpu"))
@@ -486,6 +515,7 @@ def _make_runtime_control_sim_manager(
     sim._robots = {"robot": object()}
     sim._articulations = {}
     sim._rigid_objects = {"table": object()}
+    sim._fluid_objects = {}
     sim._deformable_objects = {
         "cloth": SimpleNamespace(
             cfg=SurfaceDeformableObjectCfg(uid="cloth", particle_flags=[0, 1, 0])
@@ -538,6 +568,19 @@ def test_flush_cleanup_queue_waits_after_running_pending_destroy(
     wait_scene_destruction.assert_called_once_with()
 
 
+@pytest.mark.parametrize("worlds", [0, 1])
+def test_wait_scene_destruction_collects_only_when_worlds_remain(
+    monkeypatch: pytest.MonkeyPatch, worlds: int
+) -> None:
+    """An empty World set needs no GC; cyclic live Worlds still get collected."""
+    counts = iter([worlds, 0])
+    monkeypatch.setattr(dexsim, "get_world_num", lambda: next(counts))
+    collect = MagicMock()
+    monkeypatch.setattr(gc, "collect", collect)
+    SimulationManager.wait_scene_destruction()
+    assert collect.call_count == worlds
+
+
 def test_flush_cleanup_queue_preserves_other_live_managers(monkeypatch):
     cleanup_queue = queue.Queue()
     cleanup_queue.put(MagicMock())
@@ -556,6 +599,11 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
 ) -> None:
     """Backend-owned views are released before Spawn and World resources."""
     events: list[str] = []
+
+    class CyclicView:
+        def __init__(self) -> None:
+            self.retained_view = self
+
     sim = object.__new__(SimulationManager)
     spawn_scene = MagicMock()
     spawn_scene.close.side_effect = lambda: events.append("spawn_close")
@@ -564,9 +612,17 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
     )
     sim._gizmos = {}
     sim._markers = {}
-    sim._rigid_objects = {}
+    view = CyclicView()
+    released = weakref.finalize(view, events.append, "view_released")
+    sim._rigid_objects = {
+        "asset": SimpleNamespace(
+            _data=view, _entities=[view], _spawn_result=spawn_scene
+        )
+    }
+    del view
     sim._constraints = {}
     sim._rigid_object_groups = {}
+    sim._fluid_objects = {}
     sim._deformable_objects = {}
     sim._articulations = {}
     sim._robots = {}
@@ -595,10 +651,21 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
         instances.pop(instance_id)
 
     monkeypatch.setattr(SimulationManager, "reset", reset)
-    monkeypatch.setattr(gc, "collect", lambda: events.append("gc_collect"))
+    collect = gc.collect
+
+    def collect_views() -> int:
+        events.append("gc_collect")
+        return collect()
+
+    monkeypatch.setattr(gc, "collect", collect_views)
 
     sim._deferred_destroy()
 
+    # Clearing a facade can make its cyclic native views collectible. Their
+    # finalizers must run before the owning native Scene/World are closed.
+    assert not released.alive
+    assert events.index("backend_prepare") < events.index("view_released")
+    assert events.index("view_released") < events.index("spawn_close")
     assert events.index("backend_prepare") < events.index("gc_collect")
     assert events.index("backend_prepare") < events.index("spawn_close")
     assert events.index("backend_prepare") < events.index("world_quit")
@@ -649,7 +716,9 @@ def test_sim_update_owns_physics_and_visualization_time(step: int) -> None:
     assert events == ["control", "physics", "capture"] * step
     assert sim._world.physics_updates == [physics_dt] * step
     assert sim._visualization_sim_step == step
+    assert sim.physics_step_index == step
     assert sim._visualization_sim_time == pytest.approx(step * physics_dt)
+    assert sim.simulation_time == pytest.approx(step * physics_dt)
 
 
 def test_drawing_markers_and_publishing_visualization_do_not_step_physics() -> None:
@@ -665,6 +734,7 @@ def test_drawing_markers_and_publishing_visualization_do_not_step_physics() -> N
     assert sim._world.physics_updates == []
     assert sim._visualization_sim_step == 0
     assert sim._visualization_sim_time == 0.0
+    assert sim.simulation_time == 0.0
     assert runtime.capture_calls[-1]["sim_step"] == 0
     assert runtime.capture_calls[-1]["sim_time"] == 0.0
 
@@ -1149,6 +1219,20 @@ def test_open_window_is_idempotent() -> None:
     sim._world.open_window.assert_not_called()
 
 
+def test_open_window_registers_capture_hotkey_for_existing_window() -> None:
+    sim = _make_sim_manager(window=FakeWindow(np.ones((2, 2, 3), dtype=np.uint8)))
+    sim._window_capture_hotkey_cfg = {
+        "save_path": None,
+        "image_prefix": "capture",
+        "hotkey": "c",
+    }
+    sim._window_capture_input_control = None
+
+    assert sim.open_window()
+
+    assert len(sim._window.input_controls) == 1
+
+
 def test_entity_gizmo_delegates_to_dexsim_and_excludes_default_plane() -> None:
     sim = _make_sim_manager()
     config = object()
@@ -1269,10 +1353,12 @@ def test_start_visualization_rejects_open_native_window() -> None:
         sim.start_visualization()
 
 
-def test_start_visualization_does_not_prepare_an_empty_declaration_phase(
+@pytest.mark.parametrize("has_cable", [False, True], ids=["empty", "cable-only"])
+def test_start_visualization_prepares_only_when_assets_are_declared(
     monkeypatch: pytest.MonkeyPatch,
+    has_cable: bool,
 ) -> None:
-    """Starting Viser must not finalize Newton before assets are declared."""
+    """Viser prepares cable-only scenes but leaves an empty builder open."""
 
     class _Exporter:
         def __init__(self, sim: SimulationManager, cfg: object) -> None:
@@ -1288,6 +1374,7 @@ def test_start_visualization_does_not_prepare_an_empty_declaration_phase(
             self.captures = 0
 
         def start(self) -> None:
+            assert self.exporter.sim.prepare.call_count == int(has_cable)
             self.is_running = True
 
         def capture(self, **_kwargs: object) -> None:
@@ -1309,7 +1396,9 @@ def test_start_visualization_does_not_prepare_an_empty_declaration_phase(
     )
     sim._rigid_objects = {}
     sim._rigid_object_groups = {}
+    sim._fluid_objects = {}
     sim._deformable_objects = {}
+    sim._cable_objects = {"cable": object()} if has_cable else {}
     sim._articulations = {}
     sim._robots = {}
     sim._sensors = {}
@@ -1326,7 +1415,7 @@ def test_start_visualization_does_not_prepare_an_empty_declaration_phase(
 
     runtime = sim.start_visualization()
 
-    sim.prepare.assert_not_called()
+    assert sim.prepare.call_count == int(has_cable)
     sim.sync_render_state.assert_not_called()
     assert runtime is not None
     assert runtime.captures == 1
@@ -1449,19 +1538,45 @@ def test_constructor_starts_visualization_after_default_scene(
     assert sim._arenas == []
 
 
-def test_render_camera_group_syncs_state_before_rendering() -> None:
+@pytest.mark.parametrize("in_render_frame", [False, True])
+def test_render_camera_group_syncs_state_before_rendering(
+    in_render_frame: bool,
+) -> None:
     lifecycle: list[str] = []
     sim = object.__new__(SimulationManager)
     sim.is_window_opened = False
+    sim._render_state_published = False if in_render_frame else None
+    camera = MagicMock(spec=Camera)
+    camera.group_id = 3
+    camera.group_ids = (3,)
+    camera._capture_metadata = {"capture_sequence": 1}
+    camera._pending_capture_metadata = {"capture_sequence": 2}
+    camera._snapshot_render_metadata.side_effect = lambda: lifecycle.append("metadata")
+    other_camera = MagicMock(spec=Camera)
+    other_camera.group_id = 4
+    other_camera.group_ids = (4,)
+    other_camera._capture_metadata = {"capture_sequence": 5}
+    sim._sensors = {"selected": camera, "other": other_camera}
     sim.sync_render_state = MagicMock(side_effect=lambda: lifecycle.append("sync"))
+
+    def render(_group_ids: list[int]) -> None:
+        assert camera._capture_metadata is None
+        assert camera._pending_capture_metadata is None
+        lifecycle.append("render")
+
     sim._world = SimpleNamespace(
-        render_camera_group=lambda _group_ids: lifecycle.append("render")
+        render_camera_group=render,
     )
+    sim.poll_viewer = lambda: lifecycle.append("viewer")
     sim._log_scene_summary = lambda: lifecycle.append("summary")
 
     sim.render_camera_group([3])
 
-    assert lifecycle == ["sync", "render", "summary"]
+    assert lifecycle == ["sync", "render", "metadata"] + (
+        [] if in_render_frame else ["viewer"]
+    ) + ["summary"]
+    assert other_camera._capture_metadata == {"capture_sequence": 5}
+    other_camera._snapshot_render_metadata.assert_not_called()
 
 
 def test_empty_camera_group_does_not_publish_render_state() -> None:
@@ -1482,13 +1597,13 @@ def test_empty_camera_group_does_not_publish_render_state() -> None:
 def test_empty_camera_group_still_publishes_for_an_open_window() -> None:
     sim = object.__new__(SimulationManager)
     sim.is_window_opened = True
-    sim.sync_render_state = MagicMock()
+    sim._publish_render_state = MagicMock()
     sim._world = SimpleNamespace(render_camera_group=MagicMock())
     sim._log_scene_summary = MagicMock()
 
     sim.render_camera_group([])
 
-    sim.sync_render_state.assert_called_once_with()
+    sim._publish_render_state.assert_called_once_with()
     sim._world.render_camera_group.assert_not_called()
 
 
@@ -1514,6 +1629,7 @@ def test_recording_and_viser_share_substep_publication() -> None:
 def _make_render_frame_sim(*, window=False, viser=False, automatic_sync=False):
     """Track published state through real manager/backend scheduling methods."""
     sim, runtime = _make_visualization_sim_manager()
+    sim._sensors = {}
     sim.sim_config.physics_cfg = NewtonPhysicsCfg(sync_to_renderer=automatic_sync)
     sim.sim_config.visualization.backend = "viser" if viser else "none"
     sim.physics = NewtonPhysicsBackend(sim)
@@ -1545,18 +1661,121 @@ def _make_render_frame_sim(*, window=False, viser=False, automatic_sync=False):
 
 @pytest.mark.parametrize("automatic_sync", [None, False, True])
 @pytest.mark.parametrize("window", [False, True])
+@pytest.mark.parametrize("defer_final_frame", [False, True])
 def test_window_publication_respects_consumers_with_all_newton_policies(
-    automatic_sync, window
+    automatic_sync, window, defer_final_frame
 ):
     sim, _, _, publications, rendered = _make_render_frame_sim(
         window=window, automatic_sync=automatic_sync
     )
+    sim._world._flush_render_updates = MagicMock(return_value=0)
     for _ in range(3):
-        sim.update(0.01, 1, render_final_step=False)
-        with sim.render_frame():
-            sim.render_camera_group([])
+        sim.update(0.01, 1, render_final_step=not defer_final_frame)
+        if defer_final_frame:
+            with sim.render_frame():
+                sim.render_camera_group([])
     assert publications == ([1, 2, 3] if window or automatic_sync is True else [])
     assert rendered == []
+    sim._world._flush_render_updates.assert_not_called()
+
+
+@pytest.mark.parametrize("camera", [False, True])
+def test_window_publication_waits_once_for_cameras_and_recording(camera: bool) -> None:
+    sim, _, state, publications, rendered = _make_render_frame_sim(window=True)
+    completed, recorded = [], []
+    sim._world._flush_render_updates = lambda: completed.append(state["published"]) or 0
+    sim._world.render_camera_group = lambda _: rendered.append(completed[-1])
+    sim._window_record_state = _WindowRecordState(
+        time_step=0.01,
+        max_memory_bytes=1024,
+        output_dir="unused",
+        video_name="unused",
+        save_kwargs={},
+        capture_from_sim_update=True,
+    )
+    sim._capture_window_record_frame = lambda _: recorded.append(completed[-1])
+    for value in (4, 7):
+        state["value"] = value
+        sim._pending_record_dt = 0.01
+        with sim.render_frame():
+            assert completed == publications[:-1]
+            if camera:
+                sim.render_camera_group([1])
+                sim.render_camera_group([2])
+    assert publications == completed == recorded == [4, 7]
+    assert rendered == ([4, 4, 7, 7] if camera else [])
+
+
+def test_window_camera_wait_failure_retries_without_republishing() -> None:
+    sim, _, state, publications, rendered = _make_render_frame_sim(window=True)
+    sim._world._flush_render_updates = MagicMock(side_effect=[-1, 0])
+    state["value"] = 5
+    with sim.render_frame():
+        with pytest.raises(
+            RuntimeError, match="Native render-state publication failed"
+        ):
+            sim.render_camera_group([1])
+        assert rendered == []
+        sim.render_camera_group([1])
+        sim.render_camera_group([2])
+    assert publications == [5]
+    assert rendered == [5, 5]
+    assert sim._world._flush_render_updates.call_count == 2
+
+
+def test_fluid_window_publication_completes_before_reusing_native_staging() -> None:
+    sim, _, state, _, rendered = _make_render_frame_sim(window=True)
+    sim._fluid_objects = {"water": object()}
+    pending = []
+    visible = []
+
+    def stage(_result):
+        # Native fluid staging drops an update when both copy slots are busy.
+        if len(pending) < 2:
+            pending.append(state["value"])
+
+    def complete():
+        if pending:
+            visible[:] = [pending[-1]]
+            pending.clear()
+        return 0
+
+    sim.physics.sync_render_state = stage
+    sim._world._flush_render_updates = complete
+    sim._world.render_camera_group = lambda _: rendered.append(visible[-1])
+    sim.update(0.01, 3, render_final_step=False)
+    with sim.render_frame():
+        sim.render_camera_group([1])
+    assert rendered == [3]
+
+
+@pytest.mark.parametrize("prior_steps", [0, 2])
+def test_window_record_wait_failure_preserves_due_frame_for_retry(
+    prior_steps: int,
+) -> None:
+    sim, _, state, _, _ = _make_render_frame_sim(window=True)
+    sim._window_record_state = _WindowRecordState(
+        time_step=(prior_steps + 1) * 0.01,
+        max_memory_bytes=1024,
+        output_dir="unused",
+        video_name="unused",
+        save_kwargs={},
+        capture_from_sim_update=True,
+    )
+    recorded = []
+    sim._capture_window_record_frame = lambda _: recorded.append(state["published"])
+    sim.update(0.01, prior_steps)
+    sim._world._flush_render_updates = MagicMock(side_effect=[-1, 0])
+    sim.update(0.01, 1, render_final_step=False)
+    with pytest.raises(RuntimeError, match="Native render-state publication failed"):
+        with sim.render_frame():
+            pass
+    assert recorded == []
+    with sim.render_frame():
+        pass
+    assert recorded == [prior_steps + 1]
+    assert sim._pending_record_dt == 0
+    assert sim._window_record_state.accumulated_sim_time == 0
 
 
 @pytest.mark.parametrize("camera", [False, True])
@@ -1590,6 +1809,49 @@ def test_final_substep_consumers_share_publication(camera, record, viser):
     assert len(runtime.capture_calls) == (3 if viser else 0)
 
 
+def test_embodied_substep_actions_preserve_intermediate_window_frames():
+    """Action refresh keeps physics-rate recording without extra camera captures."""
+    from embodichain.lab.gym.envs import EmbodiedEnv
+    from embodichain.lab.gym.envs.managers import ActionManager
+
+    sim, _, state, publications, rendered = _make_render_frame_sim()
+    sim._window_record_state = _WindowRecordState(
+        time_step=0.01,
+        max_memory_bytes=1024,
+        output_dir="unused",
+        video_name="unused",
+        save_kwargs={},
+        capture_from_sim_update=True,
+    )
+    recorded = []
+    refreshed = []
+    sim._capture_window_record_frame = lambda _: recorded.append(state["published"])
+    env = EmbodiedEnv.__new__(EmbodiedEnv)
+    env.cfg = SimpleNamespace(sim_steps_per_control=3)
+    env.sim_cfg = SimpleNamespace(physics_dt=0.01)
+    env.sim = sim
+    env.sensors = {}
+    env._step_uses_action_manager = True
+    manager = ActionManager.__new__(ActionManager)
+    manager._substep_terms = (
+        SimpleNamespace(
+            update_substep=lambda: refreshed.append(state["value"]),
+            apply_actions=lambda: None,
+        ),
+    )
+    manager._substep_active_mask = None
+    env.action_manager = manager
+
+    env._advance_physics()
+    with sim.render_frame():
+        sim.render_camera_group([3])
+
+    assert recorded == [1, 2, 3]
+    assert publications == [1, 2, 3]
+    assert rendered == [3]
+    assert refreshed == [1, 2]
+
+
 def test_render_frames_and_independent_reads_refresh_direct_state_writes():
     sim, _, state, publications, rendered = _make_render_frame_sim()
     for value in (4, 7):
@@ -1605,8 +1867,9 @@ def test_render_frames_and_independent_reads_refresh_direct_state_writes():
     assert rendered == [4, 4, 7, 7, 9, 12]
 
 
-def test_explicit_publication_inside_frame_refreshes_after_state_edit():
-    sim, _, state, publications, rendered = _make_render_frame_sim()
+@pytest.mark.parametrize("window", [False, True])
+def test_explicit_publication_inside_frame_refreshes_after_state_edit(window):
+    sim, _, state, publications, rendered = _make_render_frame_sim(window=window)
     with sim.render_frame():
         sim.render_camera_group([1])
         state["value"] = 5
@@ -1645,6 +1908,31 @@ def test_failed_publication_retries_within_the_same_frame():
     assert sim.physics.sync_render_state.call_count == 2
 
 
+def test_joint_motor_registration_preserves_manager_arena_order() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    control = sim._register_joint_dc_motor_control("robot", {})
+    builder.add_runtime_control.assert_called_once_with(control)
+    assert control.target_paths == ("arena_0/robot", "arena_1/robot")
+
+
+@pytest.mark.parametrize(
+    "backend, uid, finalized, error",
+    [
+        ("default", "robot", False, RuntimeError),
+        ("newton", "missing", False, KeyError),
+        ("newton", "robot", True, RuntimeError),
+    ],
+)
+def test_joint_motor_registration_rejects_invalid_lifecycle(
+    backend, uid, finalized, error
+) -> None:
+    sim, builder = _make_runtime_control_sim_manager(backend=backend)
+    builder.is_finalized = finalized
+    with pytest.raises(error):
+        sim._register_joint_dc_motor_control(uid, {})
+    builder.add_runtime_control.assert_not_called()
+
+
 def test_register_kinematic_joint_trajectory_expands_each_arena() -> None:
     sim, builder = _make_runtime_control_sim_manager()
     frame_count = 3
@@ -1663,6 +1951,8 @@ def test_register_kinematic_joint_trajectory_expands_each_arena() -> None:
         positions,
         fps=50.0,
         root_poses=root_poses,
+        joint_names=("joint_b", "joint_a"),
+        initialize_pose=True,
     )
 
     assert builder.add_runtime_control.call_count == sim.num_envs
@@ -1672,6 +1962,8 @@ def test_register_kinematic_joint_trajectory_expands_each_arena() -> None:
         control = control_call.args[0]
         assert control.target == f"arena_{env_index}/robot"
         assert control.fps == 50.0
+        assert control.joint_names == ("joint_b", "joint_a")
+        assert control.initialize_pose is True
         np.testing.assert_array_equal(
             control.joint_positions,
             positions[env_index].numpy(),
@@ -1846,6 +2138,68 @@ def test_register_kinematic_nodal_trajectory_rejects_finalized_scene() -> None:
     builder.add_runtime_control.assert_not_called()
 
 
+def _runtime_control(**attrs: object):
+    from dexsim.engine.newton_physics.runtime_control import RuntimeControl
+
+    control = type("RecordingControl", (RuntimeControl,), {})()
+    for name, value in attrs.items():
+        setattr(control, name, value)
+    return control
+
+
+def test_add_runtime_control_registers_one_scene_control() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    control = _runtime_control()
+
+    assert sim.add_runtime_control(control) == (control,)
+
+    builder.add_runtime_control.assert_called_once_with(control)
+
+
+def test_add_runtime_control_expands_factory_per_arena() -> None:
+    sim, builder = _make_runtime_control_sim_manager(num_envs=3)
+
+    controls = sim.add_runtime_control(
+        lambda arena_name, env_index: _runtime_control(
+            target=f"{arena_name}/robot", env_index=env_index
+        )
+    )
+
+    assert [control.target for control in controls] == [
+        "arena_0/robot",
+        "arena_1/robot",
+        "arena_2/robot",
+    ]
+    assert [control.env_index for control in controls] == [0, 1, 2]
+    assert [
+        call.args[0] for call in builder.add_runtime_control.call_args_list
+    ] == list(controls)
+
+
+def test_add_runtime_control_rejects_non_control_factory_results() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+
+    with pytest.raises(TypeError, match="RuntimeControl instances"):
+        sim.add_runtime_control(lambda arena_name, env_index: object())
+    with pytest.raises(TypeError, match="RuntimeControl or a factory"):
+        sim.add_runtime_control(object())
+
+    builder.add_runtime_control.assert_not_called()
+
+
+def test_add_runtime_control_rejects_finalized_scene_and_default_backend() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    builder.is_finalized = True
+    with pytest.raises(RuntimeError, match=r"before SimulationManager\.prepare"):
+        sim.add_runtime_control(_runtime_control())
+
+    sim, builder = _make_runtime_control_sim_manager(backend="default")
+    with pytest.raises(RuntimeError, match="Newton backend"):
+        sim.add_runtime_control(_runtime_control())
+
+    builder.add_runtime_control.assert_not_called()
+
+
 def test_add_robot_resolves_backend_preset_before_declaration() -> None:
     @configclass
     class TestRobotPresetCfg(RobotPresetCfg):
@@ -1871,14 +2225,15 @@ def test_robot_mounted_camera_creation_and_local_parent_binding(
     enabled: bool, stereo: bool
 ) -> None:
     sim = _make_camera_attachment_manager()
-    sim._spawn_scene.builder.result = None
     sim._spawn_scene.builder.is_finalized = False
+    sim._ready_spawn_topology_revision = -1
     sim.physics = SimpleNamespace(supports_robot=True)
-    asset, nodes = _make_camera_parent_asset()
+    asset, nodes = _make_unbound_camera_parent_asset(sim.num_envs, uid="renamed_robot")
     sim._declare_spawn_articulation = MagicMock(return_value=asset)
     cfg_type = StereoCameraCfg if stereo else CameraCfg
     camera_type = StereoCamera if stereo else Camera
     camera = object.__new__(camera_type)
+    camera._is_attached = False
     camera.attach_to_parent_nodes = MagicMock()
 
     class CameraFactory(camera_type):
@@ -1902,7 +2257,8 @@ def test_robot_mounted_camera_creation_and_local_parent_binding(
         assert sim.get_sensor("wrist_camera") is camera
         assert camera.cfg.extrinsics.parent == "renamed_robot/wrist"
         camera.attach_to_parent_nodes.assert_not_called()
-        sim._spawn_scene.builder.result = object()
+        _bind_camera_parent_asset(asset, sim.num_envs)
+        sim._spawn_scene.builder.is_finalized = True
         sim._attach_parented_cameras()
         camera.attach_to_parent_nodes.assert_called_once_with(nodes)
     else:
@@ -1944,8 +2300,19 @@ def test_robot_sensor_preflight_precedes_resource_allocation(invalid: str) -> No
 
 @pytest.mark.gpu
 @pytest.mark.requires_sim
-@pytest.mark.parametrize("backend", ["default", "newton"])
-def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) -> None:
+@pytest.mark.parametrize(
+    "backend,stereo",
+    [
+        ("default", False),
+        ("default", True),
+        ("newton", False),
+        ("newton", True),
+        ("newton_cable", False),
+    ],
+)
+def test_robot_mounted_camera_backend_lifecycle(
+    tmp_path: Path, backend: str, stereo: bool
+) -> None:
     """Mounted cameras follow state writes and survive physical topology rebuilds."""
     urdf_path = tmp_path / "camera_robot.urdf"
     urdf_path.write_text("""<robot name="camera_robot">
@@ -1970,7 +2337,9 @@ def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) ->
             device="cuda:0",
             use_cuda_graph=False,
             num_substeps=1,
-            solver_cfg={"solver_type": "mujoco_warp"},
+            solver_cfg={
+                "solver_type": "dexuni" if backend == "newton_cable" else "mujoco_warp"
+            },
         )
     )
     sim = SimulationManager(
@@ -1982,7 +2351,7 @@ def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) ->
         )
     )
     try:
-        camera_cfg = CameraCfg(
+        camera_cfg = (StereoCameraCfg if stereo else CameraCfg)(
             uid="mounted",
             width=32,
             height=24,
@@ -1997,6 +2366,15 @@ def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) ->
                 sensors=[camera_cfg],
             )
         )
+        if backend == "newton_cable":
+            sim.add_cable_object(
+                CableObjectCfg(
+                    uid="wire",
+                    points=[[0, 0, 0], [0, 0, 0.1], [0, 0, 0.2]],
+                    radius=0.01,
+                    init_pos=(0.3, 0, 1),
+                )
+            )
         sim.prepare()
         camera = sim.get_sensor("mounted")
         assert camera.is_attached
@@ -2006,6 +2384,14 @@ def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) ->
             camera.get_local_pose(to_matrix=True)[0].cpu(),
             camera_cfg.extrinsics.transformation,
         )
+        if backend == "newton_cable":
+            with pytest.raises(NotImplementedError, match="topology changes"):
+                sim.remove_asset("robot")
+            assert sim.get_asset("robot") is robot
+            assert sim.get_sensor("mounted") is camera and camera.is_attached
+            camera.update()
+            assert camera.get_data()["color"].shape == (1, 24, 32, 4)
+            return
         before = camera.get_arena_pose(to_matrix=True).clone()
         robot.set_qpos(torch.tensor([[0.5]], device=sim.device), target=False)
         sim.sync_render_state()
@@ -2036,6 +2422,7 @@ def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) ->
 
 def test_default_plane_authors_repeated_uv_before_spawn() -> None:
     sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg()
     sim._spawn_scene = MagicMock()
     sim._spawn_scene.handles.return_value = []
     sim._spawn_default_plane_material = object()
@@ -2056,6 +2443,43 @@ def test_default_plane_authors_repeated_uv_before_spawn() -> None:
             dtype=np.float32,
         ),
     )
+
+
+def test_ground_plane_can_be_disabled_before_declaration() -> None:
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(enable_ground_plane=False)
+    sim._spawn_scene = MagicMock()
+    sim._declare_spawn_default_plane()
+    sim._spawn_scene.declare.assert_not_called()
+
+
+def test_ground_plane_uses_explicit_portable_contact_material() -> None:
+    from embodichain.lab.sim.cfg import (
+        CollisionPropertiesCfg,
+        RigidBodyMaterialCfg,
+        RigidBodyPhysicsCfg,
+    )
+
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(
+        ground_plane_attrs=RigidBodyPhysicsCfg(
+            collision_props=CollisionPropertiesCfg(contact_offset=0, rest_offset=0),
+            material_props=RigidBodyMaterialCfg(
+                dynamic_friction=0.7, static_friction=0.7
+            ),
+        )
+    )
+    sim.physics = SimpleNamespace(name="default", solver_type=None)
+    sim._spawn_scene = MagicMock()
+    sim._spawn_scene.handles.return_value = []
+    sim._spawn_default_plane_material = None
+    sim._declare_spawn_default_plane()
+    collision = sim._spawn_scene.declare.call_args.args[2].collisions[0]
+    assert collision.dexsim.contact_offset == 0
+    assert collision.dexsim.dynamic_friction == pytest.approx(0.7)
+    assert collision.newton.margin == 0
+    assert collision.newton.gap == 0
+    assert collision.newton.mu == pytest.approx(0.7)
 
 
 @pytest.mark.parametrize("num_envs", [1, 8])
@@ -2156,6 +2580,8 @@ def test_prepare_initializes_runtime_for_backend_device_matrix(
     spawn_scene.bind.side_effect = lambda: events.append("bind")
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sync_render_state = MagicMock()
     sim.device = device
     sim._world = MagicMock()
@@ -2208,6 +2634,8 @@ def test_prepare_retries_runtime_and_binding_without_recommit() -> None:
     spawn_scene.builder.has_pending_changes = False
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sync_render_state = MagicMock()
     prepare_spawn_runtime = MagicMock(side_effect=[RuntimeError("first attempt"), None])
     sim.physics = SimpleNamespace(
@@ -2246,6 +2674,8 @@ def test_prepare_retries_camera_attachment_without_recommit() -> None:
     spawn_scene.builder.has_pending_changes = False
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sync_render_state = MagicMock()
     sim.physics = SimpleNamespace(
         name="default",
@@ -2285,6 +2715,8 @@ def test_prepare_syncs_render_state_once_per_topology_revision() -> None:
     sync_render_state = MagicMock(side_effect=lambda _result: events.append("sync"))
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sim.physics = SimpleNamespace(
         name="newton",
         prepare_spawn_runtime=MagicMock(),
@@ -2328,6 +2760,8 @@ def test_prepare_retries_render_state_sync_without_recommit() -> None:
     )
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sim.physics = SimpleNamespace(
         name="newton",
         prepare_spawn_runtime=MagicMock(),
@@ -2352,23 +2786,45 @@ def test_prepare_retries_render_state_sync_without_recommit() -> None:
     sim._world.update.assert_not_called()
 
 
-def test_sync_render_state_publishes_current_state_without_stepping() -> None:
-    """Explicit publication must refresh render state without advancing physics."""
+@pytest.mark.parametrize("renderer", ["hybrid", "no-render"])
+def test_sync_render_state_publishes_current_state_without_stepping(renderer) -> None:
+    """Explicit publication makes staged states visible without a physics step."""
     result = MagicMock()
     spawn_scene = MagicMock()
     spawn_scene.builder.is_finalized = True
     spawn_scene.builder.result = result
-    sync_render_state = MagicMock()
-
+    staged, visible = {}, {}
     sim = object.__new__(SimulationManager)
+    sim.sim_config = SimpleNamespace(render_cfg=RenderCfg(renderer=renderer))
     sim._spawn_scene = spawn_scene
     sim._world = MagicMock()
-    sim.physics = SimpleNamespace(sync_render_state=sync_render_state)
+    sim._render_state_published = False
+    sim.physics = SimpleNamespace(
+        sync_render_state=lambda _result: staged.update(robot=3)
+    )
+    sim._refresh_marker_attachments = lambda: staged.update(marker=7)
 
+    def publish():
+        visible.update(staged)
+        return 0
+
+    sim._world._flush_render_updates.side_effect = publish
     sim.sync_render_state()
 
-    sync_render_state.assert_called_once_with(result)
+    assert visible == ({"robot": 3, "marker": 7} if renderer == "hybrid" else {})
+    assert sim._render_state_published is True
     sim._world.update.assert_not_called()
+
+
+def test_failed_native_render_publication_remains_retryable() -> None:
+    sim, _, _, _, _ = _make_render_frame_sim()
+    sim._world._flush_render_updates = MagicMock(side_effect=[-1, 0])
+    sim._render_state_published = False
+    with pytest.raises(RuntimeError, match="Native render-state publication failed"):
+        sim.sync_render_state()
+    assert sim._render_state_published is False
+    sim.sync_render_state()
+    assert sim._render_state_published is True
 
 
 def test_add_camera_uses_owning_manager_render_context(
@@ -2382,6 +2838,10 @@ def test_add_camera_uses_owning_manager_render_context(
         num_envs=len(arenas), render_cfg=RenderCfg(renderer="hybrid")
     )
     sim.device = torch.device("cpu")
+    sim._spawn_scene = SimpleNamespace(
+        builder=SimpleNamespace(result=object(), is_finalized=False),
+        arena_names=("arena_0", "arena_1"),
+    )
     sim._world = world
     sim._arenas = arenas
     sim._sensors = {}
@@ -2454,6 +2914,7 @@ def test_manager_resolves_camera_parent_before_attachment() -> None:
 
 def test_parented_cameras_include_only_configured_camera_sensors() -> None:
     parented_camera = object.__new__(sim_manager_module.Camera)
+    parented_camera._is_attached = False
     parented_camera.cfg = CameraCfg(
         extrinsics=CameraCfg.ExtrinsicsCfg(parent="robot/tool")
     )
@@ -2482,6 +2943,7 @@ def test_remove_asset_marks_visualization_topology_dirty() -> None:
     sim.prepare = MagicMock()
     sim._rigid_objects = {"cube": rigid_object}
     sim._rigid_object_groups = {}
+    sim._fluid_objects = {}
     sim._deformable_objects = {}
     sim._articulations = {}
     sim._robots = {}
@@ -2549,8 +3011,64 @@ def _make_camera_parent_asset(
     )
 
 
+def _make_unbound_camera_parent_asset(
+    num_envs: int, uid: str = "arm"
+) -> tuple[sim_manager_module.Articulation, list[object]]:
+    """Use the real facade so premature metadata access fails like Newton."""
+    asset = sim_manager_module.Articulation(
+        RobotCfg(uid=uid, fpath="robot.urdf"), device=torch.device("cpu")
+    )
+    asset._initialize_spawn_declaration(num_envs)
+    nodes = [object() for _ in range(num_envs)]
+    asset.get_link_render_nodes = MagicMock(return_value=nodes)
+    return asset, nodes
+
+
+def _bind_camera_parent_asset(
+    asset: sim_manager_module.Articulation, num_envs: int
+) -> None:
+    """Give the declared facade fake per-arena handles with known metadata."""
+    asset._entities = [
+        SimpleNamespace(get_link_names=lambda: ["wrist"]) for _ in range(num_envs)
+    ]
+
+
+def _make_camera_with_fake_views(
+    cfg: CameraCfg, num_envs: int
+) -> tuple[Camera, list[MagicMock]]:
+    """Exercise real camera pose and attachment logic with CPU-only views."""
+    stereo = isinstance(cfg, StereoCameraCfg)
+    camera_type = StereoCamera if stereo else Camera
+    camera = object.__new__(camera_type)
+    camera.cfg = cfg
+    camera.device = torch.device("cpu")
+    camera._num_instances = num_envs
+    camera._is_attached = False
+    native_views = []
+
+    def make_view() -> MagicMock:
+        view = MagicMock()
+        view.get_local_pose.return_value = np.eye(4, dtype=np.float32)
+        view.set_local_pose.side_effect = lambda pose: setattr(
+            view.get_local_pose, "return_value", pose.copy()
+        )
+        native_views.append(view)
+        return view
+
+    camera._entities = [
+        (
+            PairCameraView(make_view(), make_view(), cfg.left_to_right.numpy())
+            if stereo
+            else make_view()
+        )
+        for _ in range(num_envs)
+    ]
+    return camera, native_views
+
+
 def _make_camera_attachment_manager(num_envs: int = 2) -> SimulationManager:
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
     sim.num_envs = num_envs
     sim.device = torch.device("cpu")
     sim._robots = {}
@@ -2558,10 +3076,355 @@ def _make_camera_attachment_manager(num_envs: int = 2) -> SimulationManager:
     sim._sensors = {}
     sim._visualization_topology_revision = 0
     sim._arenas = [object() for _ in range(num_envs)]
-    sim._spawn_scene = SimpleNamespace(
-        builder=SimpleNamespace(result=object()),
+    result = SimpleNamespace(
+        topology_revision=3, needs_rebuild=False, get_arena=MagicMock()
     )
+    sim._spawn_scene = SimpleNamespace(
+        builder=SimpleNamespace(
+            result=result, is_finalized=True, has_pending_changes=False
+        ),
+        arena_names=[f"arena_{i}" for i in range(num_envs)],
+        commit=MagicMock(return_value=result),
+        prepare_runtime_config=MagicMock(),
+        bind=MagicMock(),
+    )
+    sim.physics = SimpleNamespace(
+        _prepare_scene_build=MagicMock(),
+        prepare_spawn_runtime=MagicMock(),
+        sync_render_state=MagicMock(),
+    )
+    sim._default_plane = object()
+    sim._ready_spawn_topology_revision = result.topology_revision
+    sim._prepared_spawn_topology_revision = result.topology_revision
+    sim._synced_spawn_render_topology_revision = result.topology_revision
+    sim._camera_attachment_topology_revision = result.topology_revision
     return sim
+
+
+def test_prepare_retries_deferred_mounted_sensor_after_factory_failure() -> None:
+    sim = _make_camera_attachment_manager()
+    cfg = CameraCfg(uid="pending")
+    sim._pending_mounted_sensors = {"pending": cfg}
+    sensor = object()
+    sim.add_sensor = MagicMock(side_effect=[RuntimeError("factory failed"), sensor])
+    with pytest.raises(RuntimeError, match="factory failed"):
+        sim.prepare()
+    assert sim._pending_mounted_sensors == {"pending": cfg}
+    sim.prepare()
+    assert not sim._pending_mounted_sensors
+    assert sim.add_sensor.call_count == 2
+
+
+def test_auto_sensor_uid_skips_deferred_mounted_reservations() -> None:
+    sim = _make_camera_attachment_manager()
+    sim._pending_mounted_sensors = {"camera_0": CameraCfg(uid="camera_0")}
+    camera = object.__new__(Camera)
+
+    class Factory(Camera):
+        def __new__(cls, cfg, *args, **kwargs):
+            camera.cfg = cfg
+            return camera
+
+    sim.SUPPORTED_SENSOR_TYPES = {"Camera": Factory}
+    sim.add_sensor(CameraCfg())
+    assert camera.cfg.uid == "camera_1"
+    assert sim.remove_asset("camera_0")
+    assert not sim._pending_mounted_sensors
+
+
+@pytest.mark.parametrize("failure", [None, "parent", "attachment"])
+@pytest.mark.parametrize(
+    "factory_mode", ["context_class", "context_function", "legacy_function"]
+)
+def test_context_camera_uses_manager_attachment_at_the_current_revision(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str | None,
+    factory_mode: str,
+) -> None:
+    from embodichain.lab.sim.sensors import (
+        SensorRegistration,
+        register_sensor,
+        registry,
+    )
+
+    @configclass
+    class ContextCameraCfg(CameraCfg):
+        sensor_type: str = "ContextCamera"
+
+    sim = _make_camera_attachment_manager()
+    asset, nodes = _make_camera_parent_asset()
+    sim._robots["arm"] = asset
+    cfg = ContextCameraCfg(
+        uid="camera",
+        extrinsics=CameraCfg.ExtrinsicsCfg(
+            parent="missing" if failure == "parent" else "arm/wrist"
+        ),
+    )
+    camera = object.__new__(Camera)
+    camera.cfg = cfg
+    camera._is_attached = False
+    camera.destroy = MagicMock()
+    camera._bound_topology = None
+    camera._sample_metadata = None
+    camera.on_bind = MagicMock()
+    camera.on_unbind = MagicMock()
+    camera.attach_to_parent_nodes = MagicMock(
+        side_effect=(
+            RuntimeError("attachment failed")
+            if failure == "attachment"
+            else lambda parents: setattr(camera, "_is_attached", True)
+        )
+    )
+    calls = []
+
+    class ContextCamera(Camera):
+        def __new__(cls, config, *, context):
+            calls.append(context.num_instances)
+            return camera
+
+    def context_factory(config, *, context):
+        return ContextCamera(config, context=context)
+
+    def legacy_factory(config, device):
+        calls.append(sim.num_envs)
+        return camera
+
+    factory = {
+        "context_class": ContextCamera,
+        "context_function": context_factory,
+        "legacy_function": legacy_factory,
+    }[factory_mode]
+    monkeypatch.setattr(registry, "_registrations", registry._registrations.copy())
+    register_sensor(
+        SensorRegistration(
+            "ContextCamera",
+            ContextCameraCfg,
+            factory,
+            legacy_factory=factory_mode == "legacy_function",
+        )
+    )
+    if failure:
+        with pytest.raises(
+            (ValueError, RuntimeError), match="was not found|attachment failed"
+        ):
+            sim.add_sensor(cfg)
+        assert not sim._sensors
+        assert calls == ([] if failure == "parent" else [sim.num_envs])
+        assert camera.destroy.call_count == int(failure == "attachment")
+    else:
+        assert sim.add_sensor(cfg) is camera
+        assert camera.is_attached
+        camera.attach_to_parent_nodes.assert_called_once_with(nodes)
+        revision = sim._camera_attachment_topology_revision
+        sim.prepare()
+        assert sim._camera_attachment_topology_revision == revision
+        camera.attach_to_parent_nodes.assert_called_once_with(nodes)
+
+
+@pytest.mark.parametrize("scene_first", [False, True])
+@pytest.mark.parametrize("typed_stereo", [False, True])
+@pytest.mark.parametrize("callable_factory", [False, True])
+def test_gaussian_capture_rejects_registered_stereo_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+    scene_first: bool,
+    typed_stereo: bool,
+    callable_factory: bool,
+) -> None:
+    from embodichain.lab.sim.sensors import (
+        SensorRegistration,
+        register_sensor,
+        registry,
+    )
+
+    @configclass
+    class AliasStereoCfg(StereoCameraCfg if typed_stereo else CameraCfg):
+        sensor_type: str = "AliasStereo"
+
+    camera = object.__new__(StereoCamera)
+    camera.cfg = AliasStereoCfg(uid="stereo")
+    camera.destroy = MagicMock()
+
+    class AliasStereo(StereoCamera):
+        def __new__(cls, *_args, **_kwargs):
+            return camera
+
+    monkeypatch.setattr(registry, "_registrations", registry._registrations.copy())
+    register_sensor(
+        SensorRegistration(
+            "AliasStereo",
+            AliasStereoCfg,
+            (lambda cfg, device: camera) if callable_factory else AliasStereo,
+            legacy_factory=True,
+        )
+    )
+    sim = _make_camera_attachment_manager()
+    if scene_first:
+        sim._spawn_scene.has_gaussians = True
+        with pytest.raises(NotImplementedError, match="StereoCamera"):
+            sim.add_sensor(camera.cfg)
+        assert sim._sensors == {}
+        assert camera.destroy.call_count == int(callable_factory and not typed_stereo)
+    else:
+        from dexsim.types import Renderer
+        from embodichain.lab.sim.cfg import GaussianRenderCfg
+
+        sim._sensors[camera.uid or "stereo"] = camera
+        sim.sim_config = SimulationManagerCfg(
+            num_envs=1,
+            render_cfg=RenderCfg(
+                renderer="hybrid",
+                gaussian=GaussianRenderCfg(enabled=True),
+                denoising=DenoisingCfg(window="off", offscreen="off"),
+            ),
+        )
+        sim.num_envs = 1
+        sim.physics.name = "default"
+        sim._world = SimpleNamespace(
+            get_renderer_type=lambda: Renderer.HYBRID,
+            get_gaussian_effective_config=lambda: {"normalized": {"enabled": True}},
+        )
+        monkeypatch.setattr(
+            sim_manager_module, "_has_native_gaussian_renders", lambda desc: True
+        )
+        # Exercise the actual preflight used when Gaussian USD assets follow a camera.
+        with pytest.raises(NotImplementedError, match="StereoCamera"):
+            sim._prepare_native_usd_gaussians([object()])
+
+
+@pytest.mark.parametrize("stereo", [False, True])
+@pytest.mark.parametrize("state", ["failed_bind", "pending_changes", "needs_rebuild"])
+def test_add_camera_waits_for_parent_readiness_and_next_prepare(
+    stereo: bool, state: str
+) -> None:
+    sim = _make_camera_attachment_manager()
+    scene = sim._spawn_scene
+    result = scene.builder.result
+    asset, nodes = _make_unbound_camera_parent_asset(sim.num_envs)
+    sim._robots["arm"] = asset
+    cfg_type = StereoCameraCfg if stereo else CameraCfg
+    camera_type = StereoCamera if stereo else Camera
+    cfg = cfg_type(uid="camera", extrinsics=CameraCfg.ExtrinsicsCfg(parent="arm/wrist"))
+    camera = object.__new__(camera_type)
+    camera.cfg = cfg
+    camera._is_attached = False
+    camera.attach_to_parent_nodes = MagicMock(
+        side_effect=lambda _nodes: setattr(camera, "_is_attached", True)
+    )
+    camera._detach_from_parent_nodes = MagicMock()
+
+    existing_cfg = cfg_type(
+        uid="existing", extrinsics=CameraCfg.ExtrinsicsCfg(parent="existing_arm/wrist")
+    )
+    existing, native_views = _make_camera_with_fake_views(existing_cfg, sim.num_envs)
+    existing_asset, _ = _make_camera_parent_asset(sim.num_envs)
+    sim._robots["existing_arm"] = existing_asset
+
+    class CameraFactory(camera_type):
+        def __new__(cls, sensor_cfg, *_args, **_kwargs):
+            return existing if sensor_cfg.uid == "existing" else camera
+
+    sim.SUPPORTED_SENSOR_TYPES = {cfg.sensor_type: CameraFactory}
+    assert sim.add_sensor(existing_cfg) is existing
+    assert existing.is_attached
+    runtime_pose = torch.eye(4).unsqueeze(0).repeat(sim.num_envs, 1, 1)
+    runtime_pose[:, 0, 3] = 0.25
+    existing.set_local_pose(runtime_pose)
+    if state == "failed_bind":
+        scene.bind.side_effect = RuntimeError("bind failed")
+        with pytest.raises(RuntimeError, match="bind failed"):
+            sim.prepare()
+        scene.bind.side_effect = None
+    else:
+        # Existing handles can be stale while a rebuild or changes are pending.
+        _bind_camera_parent_asset(asset, sim.num_envs)
+        asset.get_link_render_nodes.return_value = [object() for _ in nodes]
+        if state == "pending_changes":
+            scene.builder.has_pending_changes = True
+        else:
+            result.needs_rebuild = True
+
+    # The scene result exists, but parent handles are unbound or may be stale.
+    assert sim.add_sensor(cfg) is camera
+    camera.attach_to_parent_nodes.assert_not_called()
+
+    def bind() -> None:
+        _bind_camera_parent_asset(asset, sim.num_envs)
+        asset.get_link_render_nodes.return_value = nodes
+
+    def commit() -> SimpleNamespace:
+        scene.builder.has_pending_changes = False
+        result.needs_rebuild = False
+        result.topology_revision += 1
+        return result
+
+    scene.bind.side_effect = bind
+    scene.commit.side_effect = commit
+    sim.prepare()
+
+    camera.attach_to_parent_nodes.assert_called_once_with(nodes)
+    assert camera.is_attached
+    assert existing.is_attached
+    if state == "failed_bind":
+        # A retry can succeed at the same revision as a previously attached camera.
+        scene.commit.assert_not_called()
+        assert result.topology_revision == 3
+        torch.testing.assert_close(
+            existing.get_local_pose(to_matrix=True), runtime_pose
+        )
+        for view in native_views:
+            view.attach_node.assert_called_once()
+    else:
+        for view in native_views:
+            assert view.attach_node.call_count == 2
+
+
+@pytest.mark.parametrize("stereo", [False, True])
+@pytest.mark.parametrize("qualified", [False, True])
+def test_eager_articulation_addition_revalidates_existing_camera_parent(
+    stereo: bool, qualified: bool
+) -> None:
+    sim = _make_camera_attachment_manager()
+    first_asset, _ = _make_camera_parent_asset(sim.num_envs)
+    sim._robots["first"] = first_asset
+    cfg_type = StereoCameraCfg if stereo else CameraCfg
+    camera_type = StereoCamera if stereo else Camera
+    parent = "first/wrist" if qualified else "wrist"
+    cfg = cfg_type(uid="camera", extrinsics=CameraCfg.ExtrinsicsCfg(parent=parent))
+    camera, native_views = _make_camera_with_fake_views(cfg, sim.num_envs)
+
+    class CameraFactory(camera_type):
+        def __new__(cls, *_args, **_kwargs):
+            return camera
+
+    sim.SUPPORTED_SENSOR_TYPES = {cfg.sensor_type: CameraFactory}
+    assert sim.add_sensor(cfg) is camera
+    assert camera.is_attached
+    runtime_pose = torch.eye(4).unsqueeze(0).repeat(sim.num_envs, 1, 1)
+    runtime_pose[:, 0, 3] = 0.25
+    camera.set_local_pose(runtime_pose)
+
+    second_asset, _ = _make_camera_parent_asset(sim.num_envs)
+    result = sim._spawn_scene.builder.result
+
+    def declare(*_args) -> SimpleNamespace:
+        # Default eagerly adds the asset and advances the revision without rebuild.
+        result.topology_revision += 1
+        return second_asset
+
+    sim._declare_spawn_articulation = MagicMock(side_effect=declare)
+    second_cfg = ArticulationCfg(uid="second", fpath="robot.urdf")
+    if qualified:
+        assert sim.add_articulation(second_cfg) is second_asset
+    else:
+        with pytest.raises(ValueError, match="ambiguous"):
+            sim.add_articulation(second_cfg)
+
+    sim._spawn_scene.commit.assert_not_called()
+    assert result.topology_revision == 4
+    assert camera.is_attached
+    torch.testing.assert_close(camera.get_local_pose(to_matrix=True), runtime_pose)
+    for view in native_views:
+        view.attach_node.assert_called_once()
 
 
 @pytest.mark.parametrize("registry", ["_robots", "_articulations"])
@@ -2597,17 +3460,20 @@ def test_add_camera_attaches_resolved_nodes_only_when_parent_is_configured(
         asset.get_link_render_nodes.assert_called_once_with("wrist")
 
 
-def test_add_camera_validates_parent_before_allocating_views() -> None:
+@pytest.mark.parametrize("stereo", [False, True])
+def test_add_camera_validates_parent_before_allocating_views(stereo: bool) -> None:
     sim = _make_camera_attachment_manager()
     factory = MagicMock()
+    cfg_type = StereoCameraCfg if stereo else CameraCfg
+    camera_type = StereoCamera if stereo else Camera
 
-    class CameraFactory(Camera):
+    class CameraFactory(camera_type):
         def __new__(cls, *_args, **_kwargs):
             factory()
-            return object.__new__(Camera)
+            return object.__new__(camera_type)
 
-    sim.SUPPORTED_SENSOR_TYPES = {"Camera": CameraFactory}
-    cfg = CameraCfg(uid="camera", extrinsics=CameraCfg.ExtrinsicsCfg(parent="missing"))
+    cfg = cfg_type(uid="camera", extrinsics=CameraCfg.ExtrinsicsCfg(parent="missing"))
+    sim.SUPPORTED_SENSOR_TYPES = {cfg.sensor_type: CameraFactory}
 
     with pytest.raises(ValueError, match="was not found"):
         sim.add_sensor(cfg)
@@ -2627,6 +3493,135 @@ def test_window_camera_pose_to_look_at_uses_dexsim_world_up() -> None:
     np.testing.assert_allclose(eye, [1.0, 2.0, 3.0])
     np.testing.assert_allclose(look_at, [1.0, 2.0, 2.0])
     np.testing.assert_allclose(up, [0.0, 0.0, 1.0])
+
+
+def test_capture_window_returns_owned_picture_and_writes_png(tmp_path: Path) -> None:
+    source = np.full((3, 4, 3), 11, dtype=np.uint8)
+    sim = _make_sim_manager(window=FakeWindow(source))
+
+    captured = sim.capture_window(save_path=tmp_path / "viewport")
+
+    assert captured is not None
+    assert captured.flags.owndata
+    np.testing.assert_array_equal(captured, source)
+    assert (tmp_path / "viewport.png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    source[...] = 0
+    assert captured[0, 0, 0] == 11
+
+
+def test_capture_window_uses_pose_preserving_camera_fallback() -> None:
+    sim = _make_sim_manager(window=FakeWindow(np.empty((0,), dtype=np.uint8)))
+
+    captured = sim.capture_window()
+
+    assert captured is not None
+    assert captured.shape == (4, 4, 4)
+    assert sim._window_capture_camera is not None
+    assert sim._window_capture_camera.render_count == 1
+    np.testing.assert_array_equal(
+        sim._window_capture_camera.last_pose,
+        np.eye(4, dtype=np.float32),
+    )
+
+
+def test_capture_window_returns_none_without_an_open_window() -> None:
+    sim = _make_sim_manager()
+
+    assert sim.capture_window() is None
+
+
+def test_capture_window_native_failure_does_not_query_retired_camera(
+    tmp_path: Path,
+) -> None:
+    window = FakeWindow(None)
+    window.get_picture = MagicMock(side_effect=RuntimeError("Window is closed"))
+    window.get_pose_matrix = MagicMock()
+    sim = _make_sim_manager(window=window)
+
+    assert sim.capture_window(tmp_path / "closed.png") is None
+    window.get_pose_matrix.assert_not_called()
+    assert not (tmp_path / "closed.png").exists()
+
+
+def test_capture_window_hotkey_saves_one_frame_and_rejects_conflicts(
+    tmp_path: Path,
+) -> None:
+    window = FakeWindow(np.full((2, 2, 3), 3, dtype=np.uint8))
+    sim = _make_sim_manager(window=window)
+
+    assert sim.enable_window_capture_hotkey(save_path=tmp_path / "hotkey")
+    assert len(window.input_controls) == 1
+    sim._publish_render_state = MagicMock()
+    owner_thread = threading.get_ident()
+    get_picture = window.get_picture
+
+    def read_on_owner_thread() -> np.ndarray:
+        assert threading.get_ident() == owner_thread
+        return get_picture()
+
+    window.get_picture = MagicMock(side_effect=read_on_owner_thread)
+    callback = threading.Thread(
+        target=window.input_controls[0].on_key_down,
+        args=(dexsim.types.InputKey.SCANCODE_C.value,),
+    )
+    callback.start()
+    callback.join(timeout=1)
+    assert not callback.is_alive()
+    window.get_picture.assert_not_called()
+    assert not (tmp_path / "hotkey.png").exists()
+
+    with sim.render_frame():
+        pass
+
+    window.get_picture.assert_called_once()
+    assert (tmp_path / "hotkey.png").is_file()
+
+    with pytest.raises(ValueError, match="conflicts"):
+        sim.enable_window_capture_hotkey(hotkey=dexsim.types.InputKey.SCANCODE_R)
+
+
+def test_capture_window_hotkey_discards_requests_from_closed_window(
+    tmp_path: Path,
+) -> None:
+    sim = _make_sim_manager(window=FakeWindow(np.ones((2, 2, 3), dtype=np.uint8)))
+    sim._publish_render_state = MagicMock()
+    sim.capture_window = MagicMock()
+    assert sim.enable_window_capture_hotkey(save_path=tmp_path / "old")
+    old_control = sim._window_capture_input_control
+    old_control.on_key_down(dexsim.types.InputKey.SCANCODE_C.value)
+
+    sim.close_window()
+    sim._world.window = FakeWindow(np.ones((2, 2, 3), dtype=np.uint8))
+    assert sim.open_window()
+    # A late native callback must not capture the replacement window either.
+    old_control.on_key_down(dexsim.types.InputKey.SCANCODE_C.value)
+    with sim.render_frame():
+        pass
+    sim.capture_window.assert_not_called()
+
+    sim._window_capture_input_control.on_key_down(
+        dexsim.types.InputKey.SCANCODE_C.value
+    )
+    with sim.render_frame():
+        pass
+    sim.capture_window.assert_called_once()
+
+
+def test_capture_window_hotkey_applies_updated_key_and_output(tmp_path: Path) -> None:
+    window = FakeWindow(np.ones((2, 2, 3), dtype=np.uint8))
+    sim = _make_sim_manager(window=window)
+    sim._publish_render_state = MagicMock()
+    assert sim.enable_window_capture_hotkey(save_path=tmp_path / "old", hotkey="c")
+    assert sim.enable_window_capture_hotkey(save_path=tmp_path / "new", hotkey="x")
+    assert len(window.input_controls) == 1
+
+    window.input_controls[0].on_key_down(dexsim.types.InputKey.SCANCODE_C.value)
+    window.input_controls[0].on_key_down(dexsim.types.InputKey.SCANCODE_X.value)
+    with sim.render_frame():
+        pass
+
+    assert (tmp_path / "new.png").is_file()
+    assert not (tmp_path / "old.png").exists()
 
 
 def test_start_window_record_rejects_invalid_parameters() -> None:
@@ -2689,6 +3684,62 @@ def test_headless_recording_uses_sim_time_and_captures_frames() -> None:
     )
 
 
+@pytest.mark.parametrize("use_sim_time", [None, True])
+def test_web_follow_recording_captures_pose_on_creator_thread(use_sim_time) -> None:
+    import threading
+
+    from embodichain.lab.visualization._web_viewer import _WebViewer
+
+    sim = _make_sim_manager()
+    viewer = object.__new__(_WebViewer)
+    viewer.owner = threading.get_ident()
+    pose = np.eye(4, dtype=np.float32)
+    pose[:3, 3] = [1.0, 2.0, 3.0]
+    viewer.camera = SimpleNamespace(get_world_pose=MagicMock(return_value=pose))
+    sim._web_viewer = viewer
+    sim.sync_render_state = MagicMock()
+
+    assert sim.start_window_record(use_sim_time=use_sim_time, fps=5, max_memory=1)
+    state = sim._window_record_state
+    assert state.capture_from_sim_update is True
+    assert sim._world.thread_runtime.add_loop_calls == []
+    sim._step_window_record_from_sim_update(state, physics_dt=0.2)
+
+    assert len(state.frames) == 1
+    viewer.camera.get_world_pose.assert_called_once()
+    np.testing.assert_array_equal(sim._window_record_camera.last_pose, pose)
+
+
+def test_web_follow_recording_rejects_wall_time_before_allocating_camera() -> None:
+    sim = _make_sim_manager()
+    sim._web_viewer = object()
+
+    with pytest.raises(ValueError, match="Web-follow recording requires use_sim_time"):
+        sim.start_window_record(use_sim_time=False)
+
+    assert sim._window_record_camera is None
+    assert sim._window_record_state is None
+    assert sim._world.thread_runtime.add_loop_calls == []
+
+
+@pytest.mark.parametrize("pose_source", ["fixed_pose", "pose_provider"])
+def test_web_custom_recording_pose_retains_wall_time_option(pose_source) -> None:
+    sim = _make_sim_manager()
+    sim._web_viewer = object()
+    pose = np.eye(4, dtype=np.float32)
+    pose[:3, 3] = [1.0, 2.0, 3.0]
+    source = pose if pose_source == "fixed_pose" else lambda: pose
+
+    assert sim.start_window_record(use_sim_time=False, **{pose_source: source})
+    state = sim._window_record_state
+    assert state.capture_from_sim_update is False
+    callback, _ = sim._world.thread_runtime.add_loop_calls[0]
+    callback(0.0)
+
+    assert len(state.frames) == 1
+    np.testing.assert_array_equal(sim._window_record_camera.last_pose, pose)
+
+
 def test_render_thread_recording_does_not_republish_render_state() -> None:
     """Native recording consumes state already published by simulation calls."""
     sim = _make_sim_manager(window=object())
@@ -2739,13 +3790,15 @@ def test_stop_window_record_waits_for_background_export(monkeypatch) -> None:
 
 def test_reset_objects_state_includes_deformable_assets() -> None:
     sim = object.__new__(SimulationManager)
-    sim.physics = SimpleNamespace(name="default")
+    sim.physics = SimpleNamespace(name="default", _reset_scene_state=lambda *_: None)
     sim._robots = {}
     sim._articulations = {}
     sim._rigid_objects = {}
     sim._rigid_object_groups = {}
     sim._lights = {}
     sim._sensors = {}
+    sim._fluid_objects = {}
+    sim._visualization_sim_time = 1.25
     sim._deformable_objects = {
         "soft": MagicMock(),
         "cloth": MagicMock(),
@@ -2755,9 +3808,32 @@ def test_reset_objects_state_includes_deformable_assets() -> None:
 
     sim._deformable_objects["soft"].reset.assert_called_once_with([1])
     sim._deformable_objects["cloth"].reset.assert_called_once_with([1])
+    assert sim.simulation_time == 1.25
 
 
-def test_newton_reset_clears_all_articulations_in_selected_worlds_together() -> None:
+def test_scene_reset_delegates_physical_ownership_to_backend() -> None:
+    sim = object.__new__(SimulationManager)
+    scene_reset = MagicMock(return_value=[1])
+    sim.physics = SimpleNamespace(name="third_party", _reset_scene_state=scene_reset)
+    robot, cloth, light, camera = (MagicMock() for _ in range(4))
+    sim._robots = {"robot": robot}
+    sim._deformable_objects = {"cloth": cloth}
+    sim._lights = {"light": light}
+    sim._sensors = {"camera": camera}
+
+    sim.reset_objects_state(env_ids=[1], excluded_sensor_uids=["camera"])
+
+    scene_reset.assert_called_once_with([1], set())
+    robot.reset.assert_not_called()
+    cloth.reset.assert_not_called()
+    light.reset.assert_called_once_with([1])
+    camera.reset.assert_not_called()
+
+
+@pytest.mark.parametrize("solver_type", ["mujoco_warp", "dexuni"])
+def test_newton_reset_clears_all_articulations_in_selected_worlds_together(
+    solver_type,
+) -> None:
     sim = object.__new__(SimulationManager)
     robot = MagicMock()
     articulation = MagicMock()
@@ -2768,7 +3844,9 @@ def test_newton_reset_clears_all_articulations_in_selected_worlds_together() -> 
         "robot": ("robot_0", "robot_1"),
         "arm": ("arm_0", "arm_1"),
     }
-    sim.physics = SimpleNamespace(name="newton", solver_type="mujoco_warp")
+    sim.physics = SimpleNamespace(
+        name="newton", solver_type=solver_type, _reset_scene_state=lambda *_: None
+    )
     sim.num_envs = 2
     sim._spawn_scene = SimpleNamespace(
         builder=SimpleNamespace(is_finalized=True, result=spawn_result),
@@ -2778,6 +3856,7 @@ def test_newton_reset_clears_all_articulations_in_selected_worlds_together() -> 
     sim._articulations = {"arm": articulation}
     sim._rigid_objects = {}
     sim._rigid_object_groups = {}
+    sim._fluid_objects = {}
     sim._deformable_objects = {}
     sim._lights = {}
     sim._sensors = {}
@@ -2790,15 +3869,21 @@ def test_newton_reset_clears_all_articulations_in_selected_worlds_together() -> 
     native_batch.clear_dynamics.assert_called_once_with()
 
 
-def test_newton_reset_rejects_excluding_one_articulation_from_selected_worlds() -> None:
+@pytest.mark.parametrize("solver_type", ["mujoco_warp", "dexuni"])
+def test_newton_reset_rejects_excluding_one_articulation_from_selected_worlds(
+    solver_type,
+) -> None:
     sim = object.__new__(SimulationManager)
     robot = MagicMock()
     articulation = MagicMock()
-    sim.physics = SimpleNamespace(name="newton", solver_type="mujoco_warp")
+    sim.physics = SimpleNamespace(
+        name="newton", solver_type=solver_type, _reset_scene_state=lambda *_: None
+    )
     sim._robots = {"robot": robot}
     sim._articulations = {"arm": articulation}
     sim._rigid_objects = {}
     sim._rigid_object_groups = {}
+    sim._fluid_objects = {}
     sim._deformable_objects = {}
     sim._lights = {}
     sim._sensors = {}
@@ -2817,7 +3902,9 @@ def test_newton_non_mujoco_reset_allows_excluding_an_articulation() -> None:
     native_batch = MagicMock()
     spawn_result = SimpleNamespace(create_articulation_batch=MagicMock())
     spawn_result.create_articulation_batch.return_value = native_batch
-    sim.physics = SimpleNamespace(name="newton", solver_type="xpbd")
+    sim.physics = SimpleNamespace(
+        name="newton", solver_type="xpbd", _reset_scene_state=lambda *_: None
+    )
     sim.num_envs = 2
     sim._spawn_scene = SimpleNamespace(
         builder=SimpleNamespace(is_finalized=True, result=spawn_result),
@@ -2827,6 +3914,7 @@ def test_newton_non_mujoco_reset_allows_excluding_an_articulation() -> None:
     sim._articulations = {"arm": articulation}
     sim._rigid_objects = {}
     sim._rigid_object_groups = {}
+    sim._fluid_objects = {}
     sim._deformable_objects = {}
     sim._lights = {}
     sim._sensors = {}
@@ -2861,6 +3949,8 @@ def test_prepare_detaches_camera_before_rebuilding_parent(rebuild: bool) -> None
 
     scene.commit.side_effect = commit
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sim._spawn_scene = scene
     sim._sensors = {"camera": camera}
     sim._default_plane = object()
@@ -2898,6 +3988,56 @@ def test_replace_rigid_object_commits_only_after_new_declaration() -> None:
 
     assert operations == ["remove", "add", "prepare"]
     assert sim._rigid_objects["box"] is replacement
+
+
+@pytest.mark.parametrize("backend,num_envs", [("newton", 1), ("dexsim", 2)])
+def test_replace_invalid_variants_preserves_existing_spawn_object(backend, num_envs):
+    from embodichain.lab.sim.spawn.scene import SpawnScene, _AssetDeclaration
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.shapes import CubeCfg
+    from dexsim.spawn import ObjectDesc
+
+    old = object()
+    original = ObjectDesc(name="box")
+    scene = object.__new__(SpawnScene)
+    scene._num_envs = num_envs
+    scene._assets = {
+        "box": _AssetDeclaration(kind="rigid_object", descriptor=original, facade=old)
+    }
+    objects = [original]
+    scene.builder = SimpleNamespace(
+        backend=backend,
+        is_finalized=False,
+        result=None,
+        mesh_objects=objects,
+        scene_entities=[],
+        cables=[],
+        particle_sets=[],
+        remove_object=MagicMock(side_effect=lambda uid: objects.pop()),
+    )
+    scene._register_material_batches = MagicMock()
+    sim = object.__new__(SimulationManager)
+    sim.device = torch.device("cpu")
+    sim.physics = SimpleNamespace(
+        name="newton" if backend == "newton" else "default", solver_type="mujoco_warp"
+    )
+    sim._rigid_objects = {"box": old}
+    sim._spawn_scene = scene
+    sim._validate_visual_config = lambda cfg: None
+    cfg = RigidObjectCfg(
+        uid="box", shape=CubeCfg(), env_variants={1: RigidObjectCfg(shape=CubeCfg())}
+    )
+
+    with pytest.raises(
+        (ValueError, NotImplementedError), match="env_variants|Newton backend"
+    ):
+        sim.replace_rigid_object(cfg)
+
+    assert sim._rigid_objects["box"] is old
+    assert scene._assets["box"].descriptor is original
+    assert objects == [original]
+    scene.builder.remove_object.assert_not_called()
+    scene._register_material_batches.assert_not_called()
 
 
 def test_replace_missing_rigid_object_does_not_mutate_scene() -> None:
@@ -2988,6 +4128,393 @@ def test_replace_rigid_objects_prevalidates_and_prepares_once(monkeypatch, inval
         assert operations == []
 
 
+@pytest.mark.parametrize(
+    ("renderer", "backend"),
+    [("hybrid", "viser"), ("no-render", "none"), ("no-render", "viser")],
+)
+def test_marker_group_lifecycle_and_environment_offsets_do_not_step_physics(
+    renderer, backend
+):
+    from embodichain.lab.visualization.markers import MarkerGroupCfg, MarkerPrototypeCfg
+
+    sim, runtime = _make_visualization_sim_manager()
+    sim._marker_groups = {}
+    sim._native_markers = None
+    sim._markers = {}
+    sim.sim_config.visualization.backend = backend
+    sim.sim_config.render_cfg = SimpleNamespace(renderer=renderer)
+    sim.sim_config.num_envs = 1
+    sim.arena_offsets = torch.tensor([[10.0, 20.0, 30.0]])
+    group = sim.add_marker_group(
+        MarkerGroupCfg(
+            name="goal",
+            prototypes={"sphere": MarkerPrototypeCfg(shape="sphere")},
+        )
+    )
+    assert sim.get_marker_group("goal") is group
+    assert sim._native_markers is None
+    group.update(translations=[[1, 2, 3]])
+    np.testing.assert_allclose(sim.get_marker_overlays()[0].position, [11, 22, 33])
+    assert sim._world.physics_updates == []
+    assert sim._visualization_sim_step == 0
+    with pytest.raises(ValueError, match="already exists"):
+        sim.add_marker_group(
+            MarkerGroupCfg(name="goal", prototypes={"box": MarkerPrototypeCfg()})
+        )
+    group.clear()
+    assert sim.get_marker_overlays() == ()
+    group.update(translations=[[0, 0, 0]])
+    assert sim.remove_marker("goal")
+    assert sim.get_marker_overlays() == ()
+    with pytest.raises(RuntimeError, match="removed"):
+        group.update(translations=[[0, 0, 0]])
+
+
+def test_legacy_marker_arena_names_are_unique_before_registration():
+    sim, _ = _make_visualization_sim_manager()
+    sim._markers = {}
+    sim._arenas = [MagicMock()]
+    cfg = MarkerCfg(name="target", axis_xpos=np.eye(4), arena_index=0)
+    sim.draw_marker(cfg)
+    sim.draw_marker(cfg)
+    assert set(sim._markers) == {"target_0", "target_0_1"}
+
+
+def test_marker_publication_before_prepare_only_uses_existing_manifest():
+    from embodichain.lab.visualization.markers import MarkerGroupCfg, MarkerPrototypeCfg
+
+    sim, runtime = _make_visualization_sim_manager()
+    sim.sim_config.num_envs = 1
+    sim._marker_groups, sim._markers, sim._native_markers = {}, {}, None
+    sim.arena_offsets = torch.zeros((1, 3))
+    sim._spawn_scene = MagicMock()
+    sim._rigid_objects = {"declared_but_not_prepared": object()}
+    sim._visualization_manifest_topology_revision = sim._visualization_topology_revision
+    sim.start_visualization = MagicMock(side_effect=AssertionError("must not prepare"))
+    sim.sync_render_state = MagicMock(side_effect=AssertionError("must not sync"))
+    group = sim.add_marker_group(
+        MarkerGroupCfg(name="only_markers", prototypes={"box": MarkerPrototypeCfg()})
+    )
+    group.update(translations=[[0, 0, 0]])
+    assert len(runtime.capture_calls) == 1
+    assert runtime.capture_calls[-1]["capture_camera_images"] is False
+    assert not sim._visualization_error_reported
+    sim.prepare.assert_not_called()
+    sim.start_visualization.assert_not_called()
+    sim.sync_render_state.assert_not_called()
+    # Declarations may invalidate captured sources. Wait for explicit host prepare.
+    sim._visualization_topology_revision += 1
+    group.update(translations=[[1, 0, 0]])
+    assert len(runtime.capture_calls) == 1
+    assert sim.get_marker_overlays()[0].position[0] == 1
+    sim.prepare.assert_not_called()
+
+
+def _make_attachment_sim():
+    from embodichain.lab.visualization.markers import MarkerGroupCfg, MarkerPrototypeCfg
+
+    sim, runtime = _make_visualization_sim_manager()
+    sim.sim_config.num_envs = 2
+    sim.arena_offsets = torch.tensor([[10.0, 0, 0], [0, 20.0, 0]])
+    sim._marker_groups, sim._markers, sim._native_markers = {}, {}, None
+    sim._rigid_objects, sim._robots, sim._articulations = {}, {}, {}
+    sim._sensors, sim._deformable_objects, sim._rigid_object_groups = {}, {}, {}
+    sim._lights = {}
+    sim._spawn_scene = MagicMock()
+    sim._spawn_scene.builder.is_finalized = True
+    sim._spawn_scene.__contains__.side_effect = lambda uid: uid in sim._rigid_objects
+    sim.physics.sync_render_state = lambda result: None
+    group = sim.add_marker_group(
+        MarkerGroupCfg(name="attached", prototypes={"box": MarkerPrototypeCfg()})
+    )
+    group.update(translations=[[[1, 0, 0]], [[2, 0, 0]]])
+    return sim, group
+
+
+def test_marker_manager_default_batches_root_and_link_attachment_without_prepare():
+    sim, group = _make_attachment_sim()
+    root = torch.tensor([[2.0, 0, 0, 0, 0, 0, 1], [3.0, 0, 0, 0, 0, 0, 1]])
+    tool = torch.tensor([[0.0, 4, 0, 0, 0, 0, 1], [0.0, 5, 0, 0, 0, 0, 1]])
+    sim._robots["robot"] = SimpleNamespace(
+        is_spawn_bound=True,
+        link_names=["tool"],
+        get_local_pose=lambda: root,
+        get_link_pose=lambda name, env_ids: tool[env_ids],
+    )
+    assert group.num_envs == sim.num_envs == 2
+    group.attach("robot", env_ids=[0])
+    group.attach("robot", link_name="tool", env_ids=[1])
+    np.testing.assert_allclose(
+        [m.position for m in sim.get_marker_overlays()], [[13, 0, 0], [2, 25, 0]]
+    )
+    root[0, 0] = 4
+    tool[1, 1] = 7
+    SimulationManager.sync_render_state(sim)
+    np.testing.assert_allclose(
+        [m.position for m in sim.get_marker_overlays()], [[15, 0, 0], [2, 27, 0]]
+    )
+    sim.prepare.assert_not_called()
+    assert sim._world.physics_updates == []
+
+
+def test_marker_attachment_update_precedes_recording_and_uses_live_replacement():
+    sim, group = _make_attachment_sim()
+    pose = torch.tensor([[2.0, 0, 0, 0, 0, 0, 1], [3.0, 0, 0, 0, 0, 0, 1]])
+    sim._rigid_objects["target"] = SimpleNamespace(
+        is_spawn_bound=True, get_local_pose=lambda: pose
+    )
+    group.attach("target")
+    # Replacing the registry facade must not leave borrowed parent/native handles.
+    sim._rigid_objects["target"] = SimpleNamespace(
+        is_spawn_bound=True,
+        get_local_pose=lambda: pose + torch.tensor([5.0, 0, 0, 0, 0, 0, 0]),
+    )
+    recorded = []
+    sim._window_record_state = SimpleNamespace(capture_from_sim_update=True)
+    sim._step_window_record_from_sim_update = lambda state, dt: recorded.append(
+        [m.position.copy() for m in sim.get_marker_overlays()]
+    )
+    sim.update_gizmos = lambda: None
+    sim.capture_visualization_safely = lambda **kw: None
+    sim._log_scene_summary = lambda: None
+    sim.update(step=1)
+    np.testing.assert_allclose(recorded[0], [[18, 0, 0], [10, 20, 0]])
+    assert len(sim._world.physics_updates) == 1
+
+
+def test_marker_attachment_removal_detaches_before_destroying_parent():
+    sim, group = _make_attachment_sim()
+    alive = True
+
+    def pose():
+        assert alive, "read destroyed parent"
+        return torch.tensor([[2.0, 0, 0, 0, 0, 0, 1], [3.0, 0, 0, 0, 0, 0, 1]])
+
+    def remove(uid):
+        nonlocal alive
+        alive = False
+
+    sim._rigid_objects["target"] = SimpleNamespace(
+        is_spawn_bound=True, get_local_pose=pose
+    )
+    sim._spawn_scene.remove.side_effect = remove
+    group.attach("target")
+    assert sim.remove_asset("target")
+    SimulationManager.sync_render_state(sim)
+    group.update(env_ids=[0], colors=[[0, 1, 0, 0.5]])
+    np.testing.assert_allclose(
+        [m.position for m in sim.get_marker_overlays()], [[13, 0, 0], [5, 20, 0]]
+    )
+
+
+@pytest.mark.parametrize(
+    "target,link,error",
+    [
+        ("missing", None, KeyError),
+        ("unbound", None, RuntimeError),
+        ("rigid", "tool", ValueError),
+        ("robot", "missing", ValueError),
+    ],
+)
+def test_marker_attach_rejects_missing_unprepared_and_invalid_links(
+    target, link, error
+):
+    sim, group = _make_attachment_sim()
+    sim._rigid_objects = {
+        "unbound": SimpleNamespace(is_spawn_bound=False),
+        "rigid": SimpleNamespace(is_spawn_bound=True),
+    }
+    sim._robots["robot"] = SimpleNamespace(is_spawn_bound=True, link_names=["tool"])
+    with pytest.raises(error):
+        group.attach(target, link_name=link)
+    np.testing.assert_allclose(
+        [m.position for m in group.snapshot()], [[11, 0, 0], [2, 20, 0]]
+    )
+    sim.prepare.assert_not_called()
+    assert sim._world.physics_updates == []
+
+
+def test_marker_publication_failure_rolls_back_selected_environment_state():
+    sim, group = _make_attachment_sim()
+    sim._visualization_manifest_topology_revision = sim._visualization_topology_revision
+
+    def fail_capture(**kwargs):
+        raise RuntimeError("snapshot capture failed")
+
+    sim._visualization_runtime.capture = fail_capture
+    with pytest.raises(RuntimeError, match="snapshot capture failed"):
+        group.update(env_ids=[1], translations=[[9, 0, 0], [8, 0, 0]])
+    assert group.counts == (1, 1)
+    np.testing.assert_allclose(
+        [m.position for m in group.snapshot()], [[11, 0, 0], [2, 20, 0]]
+    )
+    assert sim._visualization_error_reported
+
+
+def _attach_groups_for_host_update(group_count):
+    from embodichain.lab.visualization.markers import MarkerGroupCfg, MarkerPrototypeCfg
+
+    sim, group = _make_attachment_sim()
+    pose = torch.tensor([[2.0, 0, 0, 0, 0, 0, 1], [3.0, 0, 0, 0, 0, 0, 1]])
+    sim._rigid_objects["target"] = SimpleNamespace(
+        is_spawn_bound=True, get_local_pose=lambda: pose
+    )
+    groups = [group]
+    for index in range(1, group_count):
+        extra = sim.add_marker_group(
+            MarkerGroupCfg(
+                name=f"attached_{index}", prototypes={"box": MarkerPrototypeCfg()}
+            )
+        )
+        extra.update(translations=[[[1, 0, 0]], [[2, 0, 0]]])
+        groups.append(extra)
+    for attached in groups:
+        attached.attach("target")
+    sim._visualization_manifest_topology_revision = sim._visualization_topology_revision
+    runtime = sim._visualization_runtime
+    sim.start_visualization = lambda: runtime
+    sim.sync_render_state = lambda: SimulationManager.sync_render_state(sim)
+    sim.update_gizmos = lambda: None
+    sim._log_scene_summary = lambda: None
+    runtime.capture_calls.clear()
+    return sim, groups, pose
+
+
+def test_automatic_attachment_capture_failure_does_not_interrupt_physics_or_recording():
+    sim, groups, pose = _attach_groups_for_host_update(2)
+    pose[:, 0] += 1
+    attempts = []
+
+    def fail_capture(**kwargs):
+        attempts.append(kwargs)
+        raise RuntimeError("worker capture failed")
+
+    sim._visualization_runtime.capture = fail_capture
+    recorded = []
+    sim._window_record_state = SimpleNamespace(capture_from_sim_update=True)
+    sim._step_window_record_from_sim_update = lambda state, dt: recorded.append(
+        (sim._visualization_sim_step, groups[0].snapshot()[0].position.copy())
+    )
+    sim.update(step=2)
+    assert len(sim._world.physics_updates) == sim._visualization_sim_step == 2
+    assert sim._visualization_sim_time == pytest.approx(0.02)
+    assert [step for step, _ in recorded] == [1, 2]
+    for _, position in recorded:
+        np.testing.assert_allclose(position, [14, 0, 0])
+    assert len(attempts) == 1 and attempts[0]["force"] is False
+    assert sim._visualization_error_reported
+
+
+def test_automatic_attachment_native_publication_only_when_parent_changes():
+    sim, groups, pose = _attach_groups_for_host_update(1)
+    published = []
+    sim._native_markers = SimpleNamespace(
+        publish=lambda name, markers: published.append((name, markers))
+    )
+    SimulationManager.sync_render_state(sim)
+    assert published == []
+    pose[:, 0] += 1
+    SimulationManager.sync_render_state(sim)
+    SimulationManager.sync_render_state(sim)
+    assert len(published) == 1
+    np.testing.assert_allclose(published[0][1][0].position, [14, 0, 0])
+    assert sim._visualization_runtime.capture_calls == []
+
+
+@pytest.mark.parametrize(
+    "backend,captures_browser",
+    [("none", False), ("viser", True), ("dexsim-web", True)],
+)
+def test_render_frame_only_captures_browser_presentations(
+    backend, captures_browser
+) -> None:
+    sim, *_ = _make_render_frame_sim()
+    sim.sim_config.visualization.backend = backend
+    sim.capture_visualization_safely = MagicMock()
+
+    with sim.render_frame(force_visualization=True, capture_camera_images=False):
+        pass
+
+    if captures_browser:
+        sim.capture_visualization_safely.assert_called_once_with(
+            force=True, capture_camera_images=False
+        )
+    else:
+        sim.capture_visualization_safely.assert_not_called()
+
+
+def test_window_updates_attached_markers_without_waiting() -> None:
+    sim, _, pose = _attach_groups_for_host_update(1)
+    sim.sim_config.visualization.backend = "native"
+    sim.is_window_opened = True
+    published = []
+    sim._native_markers = SimpleNamespace(
+        publish=lambda name, markers: published.append(markers[0].position.copy())
+    )
+    sim._world._flush_render_updates = MagicMock(return_value=0)
+
+    def move_parent(_dt: float) -> None:
+        pose[:, 0] += 1
+
+    sim.update(step=2, after_substep=move_parent)
+
+    np.testing.assert_allclose(published, [[14, 0, 0], [15, 0, 0]])
+    assert sim.simulation_time == pytest.approx(0.02)
+    sim._world._flush_render_updates.assert_not_called()
+
+
+def test_automatic_attachment_native_failure_preserves_step_accounting():
+    sim, groups, pose = _attach_groups_for_host_update(1)
+    sim.sim_config.visualization.backend = "none"
+    pose[:, 0] += 1
+
+    def fail_publish(name, markers):
+        raise RuntimeError("native marker upload failed")
+
+    sim._native_markers = SimpleNamespace(publish=fail_publish)
+    sim.update(step=2)
+    assert len(sim._world.physics_updates) == sim._visualization_sim_step == 2
+    assert sim._visualization_sim_time == pytest.approx(0.02)
+    # Failed native publication keeps the previous detached transforms.
+    np.testing.assert_allclose(groups[0].snapshot()[0].position, [13, 0, 0])
+
+
+@pytest.mark.parametrize(
+    "renderer_name, use_scene", [("hybrid", False), ("fast-rt", True), ("rt", True)]
+)
+def test_native_markers_receive_prepared_scene_without_preparing_physics(
+    monkeypatch, renderer_name: str, use_scene: bool
+) -> None:
+    from embodichain.lab.visualization.markers import MarkerGroupCfg, MarkerPrototypeCfg
+
+    sim, _ = _make_visualization_sim_manager()
+    sim.sim_config.num_envs = 1
+    sim.sim_config.visualization.backend = "native"
+    sim.sim_config.render_cfg.renderer = renderer_name
+    sim._marker_groups, sim._markers, sim._native_markers = {}, {}, None
+    sim.arena_offsets = torch.zeros((1, 3))
+    scene = object()
+    sim._spawn_scene = SimpleNamespace(
+        builder=SimpleNamespace(backend="newton", is_finalized=False, result=scene)
+    )
+    sim.get_env = MagicMock(side_effect=AssertionError("raw Arena is not the owner"))
+    renderer = SimpleNamespace(publish=MagicMock(), remove=MagicMock())
+    factory = MagicMock(return_value=renderer)
+    monkeypatch.setattr(sim_manager_module, "NativeMarkerRenderer", factory)
+
+    group = sim.add_marker_group(
+        MarkerGroupCfg(name="goal", prototypes={"box": MarkerPrototypeCfg()})
+    )
+    group.update(translations=[[0, 0, 0]])
+
+    factory.assert_called_once_with(scene, use_scene_for_overlays=use_scene)
+    renderer.publish.assert_called_once()
+    sim.get_env.assert_not_called()
+    sim.prepare.assert_not_called()
+    sim.sync_render_state.assert_not_called()
+    assert sim._world.physics_updates == []
+
+
 @pytest.mark.parametrize("steps", [0, 1, 4])
 def test_after_substep_observer_preserves_manager_and_camera_boundaries(
     steps: int,
@@ -3005,15 +4532,20 @@ def test_after_substep_observer_preserves_manager_and_camera_boundaries(
     sim.update(
         0.01,
         steps,
-        after_substep=lambda dt: observed.append((dt, len(sim._world.physics_updates))),
+        after_substep=lambda dt: observed.append(
+            (dt, len(sim._world.physics_updates), sim.simulation_time)
+        ),
     )
     assert len(prepare_calls) == 1
-    assert observed == [(0.01, i + 1) for i in range(steps)]
+    assert observed == [
+        (0.01, i + 1, pytest.approx((i + 1) * 0.01)) for i in range(steps)
+    ]
     assert [item["capture_camera_images"] for item in runtime.capture_calls] == [
         False
     ] * max(0, steps - 1) + ([True] if steps else [])
     sim.update(0.01, 1)
     assert len(observed) == steps  # The observer is not retained for later calls.
+    assert sim.simulation_time == pytest.approx((steps + 1) * 0.01)
 
 
 @pytest.mark.parametrize("process_renderer", ["no-render", "hybrid", "fast-rt", "rt"])
@@ -3057,3 +4589,450 @@ def test_process_no_render_is_detected_after_world_cleanup(monkeypatch) -> None:
         lambda: SimpleNamespace(renderer=dexsim.types.Renderer.NORENDER),
     )
     assert SimulationManager._get_process_renderer() == "no-render"
+
+
+@pytest.mark.parametrize("num_envs,renderer", [(1, "no-render")])
+def test_web_rejects_unsupported_world_before_creation(num_envs, renderer) -> None:
+    with pytest.raises(ValueError, match="web"):
+        SimulationManagerCfg(
+            num_envs=num_envs,
+            render_cfg=RenderCfg(renderer=renderer),
+            visualization=VisualizationCfg(backend="dexsim-web"),
+        )
+
+
+def test_web_config_selects_headless_native_streaming(monkeypatch, tmp_path) -> None:
+    from embodichain.lab.visualization import DexSimWebCfg
+
+    runtime_check = MagicMock()
+    monkeypatch.setattr(
+        "embodichain.lab.visualization._web_viewer._require_webrtc_runtime",
+        runtime_check,
+    )
+    monkeypatch.setattr(SimulationManager, "_get_process_renderer", lambda: None)
+    monkeypatch.setattr(
+        "embodichain.lab.sim.utility.render_utils.select_default_renderer",
+        lambda _: "fast-rt",
+    )
+    monkeypatch.setattr(dexsim, "WebApplication", object, raising=False)
+    native = dexsim.WorldConfig()
+    world_fields = SimpleNamespace(
+        webrtc_enabled=False,
+        raytrace_config=native.raytrace_config,
+        postprocess_config=native.postprocess_config,
+    )
+    monkeypatch.setattr(dexsim, "WorldConfig", lambda: world_fields)
+    config = SimulationManagerCfg(
+        visualization=VisualizationCfg(
+            backend="dexsim-web", web=DexSimWebCfg(port=8766)
+        )
+    )
+    manager = SimpleNamespace(
+        _material_cache_dir=tmp_path,
+        physics=SimpleNamespace(configure_world=lambda *_: None),
+    )
+    world = SimulationManager._convert_sim_config(manager, config)
+    runtime_check.assert_called_once_with()
+    assert config.headless and not world.open_windows
+    assert world.webrtc_enabled and world.webrtc_port == 8766
+    assert world.webrtc_input_camera == "__embodichain_web_input_disabled"
+    assert world.renderer == RenderCfg(renderer="fast-rt").to_dexsim_flags()
+
+
+def test_web_preflight_reports_missing_dexsim_api(monkeypatch, tmp_path) -> None:
+    monkeypatch.delattr(dexsim, "WebApplication", raising=False)
+    config = SimulationManagerCfg(visualization=VisualizationCfg(backend="dexsim-web"))
+    manager = SimpleNamespace(_material_cache_dir=tmp_path)
+    with pytest.raises(RuntimeError, match="WebRTC-enabled DexSim"):
+        SimulationManager._convert_sim_config(manager, config)
+
+
+def test_web_is_a_top_level_mode_independent_of_environment_count():
+    config = SimulationManagerCfg(web=True, num_envs=8)
+    assert config.web and config.headless
+    assert config.visualization.backend == "dexsim-web"
+    assert config.num_envs == 8
+
+
+def test_closed_web_viewer_stays_closed_until_explicit_reopen() -> None:
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(web=True)
+    viewer = MagicMock()
+    sim._web_viewer = viewer
+    sim._visualization_runtime = None
+    sim.stop_visualization()
+    viewer.close.assert_called_once()
+    sim.start_visualization = MagicMock(side_effect=AssertionError("unexpected reopen"))
+    assert not sim.capture_visualization(force=True)
+    sim.start_visualization.assert_not_called()
+
+
+def test_web_open_viewer_keeps_information_display_separate_from_input_controls() -> (
+    None
+):
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(web=True)
+    sim._web_viewer = SimpleNamespace(closed=False)
+    sim._visualization_runtime = None
+    sim._window = None
+    sim.start_visualization = MagicMock()
+    sim._setup_viewer_controls = MagicMock()
+    assert sim.open_viewer()
+    assert sim.open_viewer()
+    assert sim.visualization_runtime is None
+    sim._setup_viewer_controls.assert_not_called()
+
+
+def test_web_terminal_wait_keeps_polling_without_advancing_physics(monkeypatch) -> None:
+    import os
+
+    if os.name == "nt":
+        pytest.skip("WebRTC terminal polling runs on its Linux host")
+    import threading
+
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(web=True)
+    sim.poll_viewer = MagicMock()
+    sim._world = MagicMock()
+    reader, writer = os.pipe()
+    timer = threading.Timer(0.1, lambda: os.write(writer, b"continue\n"))
+    try:
+        with os.fdopen(reader) as stream:
+            monkeypatch.setattr("sys.stdin", stream)
+            timer.start()
+            assert sim.wait_for_input() == "continue"
+        assert sim.poll_viewer.call_count > 0
+        sim._world.update.assert_not_called()
+    finally:
+        timer.join()
+        os.close(writer)
+
+
+def test_web_terminal_wait_reads_queued_lines_without_waiting_for_new_bytes(
+    monkeypatch,
+) -> None:
+    import os
+    import select
+
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(web=True)
+    sim.poll_viewer = MagicMock()
+    reader, writer = os.pipe()
+    original_select = select.select
+
+    def require_ready(*args):
+        ready = original_select(*args)
+        assert ready[0], "A queued terminal line must not wait for another write"
+        return ready
+
+    try:
+        with os.fdopen(reader, encoding="utf-8") as stream:
+            monkeypatch.setattr("sys.stdin", stream)
+            monkeypatch.setattr(select, "select", require_ready)
+            os.write(writer, b"first\nsecond\nlast")
+            assert sim.wait_for_input() == "first"
+            assert sim.wait_for_input() == "second"
+            os.close(writer)
+            writer = None
+            assert sim.wait_for_input() == "last"
+            with pytest.raises(EOFError):
+                sim.wait_for_input()
+    finally:
+        if writer is not None:
+            os.close(writer)
+
+
+def test_web_terminal_partial_unicode_line_keeps_polling_on_creator_thread(
+    monkeypatch,
+) -> None:
+    import os
+    import select
+    import threading
+
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(web=True)
+    owner = threading.get_ident()
+    idle = threading.Event()
+    reader, writer = os.pipe()
+
+    def poll():
+        assert threading.get_ident() == owner
+        if not select.select([reader], [], [], 0)[0]:
+            idle.set()
+
+    sim.poll_viewer = poll
+
+    def finish_line():
+        # The timeout also unblocks the old implementation so a regression
+        # fails an assertion instead of hanging this test indefinitely.
+        idle.wait(timeout=1)
+        os.write(writer, b"\xa9\n")
+
+    sender = threading.Thread(target=finish_line)
+    try:
+        with os.fdopen(reader, encoding="utf-8") as stream:
+            monkeypatch.setattr("sys.stdin", stream)
+            os.write(writer, b"caf\xc3")
+            sender.start()
+            assert sim.wait_for_input() == "café"
+            assert idle.is_set(), "A partial line must not block viewer polling"
+    finally:
+        sender.join()
+        os.close(writer)
+
+
+def test_stopping_web_visualization_stops_viewer_recording_before_camera_close():
+    sim = object.__new__(SimulationManager)
+    sim._window_record_state = SimpleNamespace(pose_provider=None, fixed_pose=None)
+    viewer = MagicMock()
+    sim._web_viewer = viewer
+    sim._visualization_runtime = None
+
+    def stop_record():
+        sim._window_record_state = None
+
+    def close():
+        assert sim._window_record_state is None
+
+    sim.stop_window_record = MagicMock(side_effect=stop_record)
+    viewer.close.side_effect = close
+    sim.stop_visualization()
+    sim.stop_window_record.assert_called_once()
+    viewer.close.assert_called_once()
+
+
+def test_after_substep_marker_refresh_precedes_visualization_capture() -> None:
+    sim, groups, pose = _attach_groups_for_host_update(3)
+    runtime = sim._visualization_runtime
+    events: list[str] = []
+    captured_positions: list[np.ndarray] = []
+    published_positions: list[np.ndarray] = []
+    world_update = sim._world.update
+    capture = sim.capture_visualization_safely
+
+    def update_world(dt: float) -> None:
+        world_update(dt)
+        events.append("physics")
+
+    def after_substep(dt: float) -> None:
+        events.append("observer")
+        pose[:, 0] += 1
+
+    def publish(name: str, markers: object) -> None:
+        events.append("markers")
+        published_positions.append(np.array([marker.position for marker in markers]))
+
+    def capture_state(**kwargs: object) -> None:
+        events.append("capture")
+        captured_positions.append(
+            np.array([marker.position for marker in groups[0].snapshot()])
+        )
+        capture(**kwargs)
+
+    sim._world.update = update_world
+    sim._native_markers = SimpleNamespace(publish=publish)
+    sim.capture_visualization_safely = capture_state
+
+    sim.update(step=2, after_substep=after_substep)
+
+    assert (
+        events
+        == ["physics", "observer", "markers", "markers", "markers", "capture"] * 2
+    )
+    # The fixture's parent poses, marker offsets, and Arena offsets produce
+    # these world positions after the observer moves each parent by one unit.
+    expected = [[[14, 0, 0], [6, 20, 0]], [[15, 0, 0], [7, 20, 0]]]
+    np.testing.assert_allclose(published_positions, np.repeat(expected, 3, axis=0))
+    np.testing.assert_allclose(captured_positions, expected)
+    assert [call["capture_camera_images"] for call in runtime.capture_calls] == [
+        False,
+        True,
+    ]
+    assert [(call["sim_step"], call["force"]) for call in runtime.capture_calls] == [
+        (1, False),
+        (2, False),
+    ]
+    groups[0].update(env_ids=[0], translations=[[2, 0, 0]])
+    assert len(runtime.capture_calls) == 3
+    assert runtime.capture_calls[-1]["force"] is True
+
+
+def test_deferred_final_frame_refreshes_markers_after_interval_state_writes() -> None:
+    sim, groups, pose = _attach_groups_for_host_update(1)
+    runtime = sim._visualization_runtime
+    rendered, recorded, captured = [], [], []
+
+    def marker_positions():
+        return np.array([marker.position for marker in groups[0].snapshot()])
+
+    sim._world.render_camera_group = lambda _: rendered.append(marker_positions())
+    sim._window_record_state = SimpleNamespace(capture_from_sim_update=True)
+    sim._step_window_record_from_sim_update = lambda _state, _dt: recorded.append(
+        marker_positions()
+    )
+    capture = sim.capture_visualization_safely
+
+    def capture_markers(**kwargs: object) -> None:
+        capture(**kwargs)
+        captured.append(marker_positions())
+
+    sim.capture_visualization_safely = capture_markers
+
+    def after_substep(_dt: float) -> None:
+        pose[:, 0] += 1
+
+    sim.update(step=1, after_substep=after_substep, render_final_step=False)
+    assert runtime.capture_calls == []
+    assert rendered == recorded == []
+    np.testing.assert_allclose(marker_positions(), [[14, 0, 0], [6, 20, 0]])
+
+    # Gym interval events may change the parent after the final physics substep.
+    pose[:, 0] += 5
+    with sim.render_frame():
+        sim.render_camera_group([0])
+
+    expected = [[19, 0, 0], [11, 20, 0]]
+    np.testing.assert_allclose(rendered, [expected])
+    np.testing.assert_allclose(recorded, [expected])
+    np.testing.assert_allclose(captured, [expected])
+    assert len(runtime.capture_calls) == 1
+    assert len(sim._world.physics_updates) == 1
+
+
+def test_marker_update_in_observer_waits_for_deferred_final_frame() -> None:
+    sim, groups, pose = _attach_groups_for_host_update(2)
+    runtime = sim._visualization_runtime
+
+    def after_substep(_dt: float) -> None:
+        pose[:, 0] += 1
+        groups[1].set_visibility(False)
+
+    sim.update(step=1, after_substep=after_substep, render_final_step=False)
+
+    assert runtime.capture_calls == []
+    assert all(not marker.visible for marker in groups[1].snapshot())
+    np.testing.assert_allclose(
+        [marker.position for marker in groups[0].snapshot()],
+        [[14, 0, 0], [6, 20, 0]],
+    )
+    with sim.render_frame():
+        pass
+    assert len(runtime.capture_calls) == 1
+    assert runtime.capture_calls[0]["sim_step"] == 1
+
+
+def test_reset_fluids_selects_rows_and_honors_exclusions():
+    sim = object.__new__(SimulationManager)
+    sim.physics = NewtonPhysicsBackend(sim)
+    sim.num_envs = 2
+    for name in (
+        "_robots",
+        "_articulations",
+        "_rigid_objects",
+        "_rigid_object_groups",
+        "_lights",
+        "_sensors",
+        "_deformable_objects",
+    ):
+        setattr(sim, name, {})
+    fluid, excluded_fluid = MagicMock(), MagicMock()
+    sim._fluid_objects = {"water": fluid, "other_fluid": excluded_fluid}
+    sim.reset_objects_state(env_ids=[1], excluded_uids=["other_fluid"])
+    excluded_fluid.reset.assert_not_called()
+    fluid.reset.assert_called_once_with([1])
+
+
+@pytest.mark.usefixtures("requires_particle_contact_material")
+def test_targeted_particle_material_schedule_expands_arena_paths() -> None:
+    from dexsim.engine import newton_physics
+    from dexsim.engine.newton_physics.runtime_control import GraphRuntimeControl
+
+    if not hasattr(newton_physics, "DexUniParticleContactMaterialSchedule"):
+        pytest.skip("Targeted particle schedules require a supporting DexSim build.")
+    sim, builder = _make_runtime_control_sim_manager()
+    sim.register_particle_contact_material_schedule(
+        {"dynamic_friction": ((0.0, 0.5), (1.0, 1.2))}, uid="cloth"
+    )
+    controls = [call.args[0] for call in builder.add_runtime_control.call_args_list]
+    assert [control.target for control in controls] == [
+        "arena_0/cloth",
+        "arena_1/cloth",
+    ]
+    assert all(isinstance(control, GraphRuntimeControl) for control in controls)
+
+
+def test_targeted_particle_material_schedule_rejects_unknown_uid() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    with pytest.raises(KeyError, match="missing"):
+        sim.register_particle_contact_material_schedule(
+            {"stiffness": ((0.0, 1000.0),)}, uid="missing"
+        )
+    builder.add_runtime_control.assert_not_called()
+
+
+def test_targeted_particle_material_schedule_validates_before_registration() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    sim._spawn_scene.arena_names = ("arena_0",)
+    with pytest.raises(RuntimeError, match="arena count"):
+        sim.register_particle_contact_material_schedule(
+            {"stiffness": ((0.0, 1000.0),)}, uid="cloth"
+        )
+    builder.add_runtime_control.assert_not_called()
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_configure_collision_when_ground_is_disabled(enabled):
+    from embodichain.lab.sim.sim_manager import SimulationManager
+
+    manager = SimpleNamespace(
+        spawn_result=None, sim_config=SimpleNamespace(enable_ground_plane=False)
+    )
+    if enabled:
+        with pytest.raises(ValueError, match="ground plane is disabled"):
+            SimulationManager.configure_ground_plane_collision(manager, enabled=True)
+    else:
+        assert (
+            SimulationManager.configure_ground_plane_collision(manager, enabled=False)
+            is None
+        )
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_group_file_batches_reject_before_losing_appearance(explicit):
+    from embodichain.lab.sim.cfg import (
+        RigidObjectCfg,
+        RigidObjectGroupCfg,
+        VisualElementCfg,
+    )
+    from embodichain.lab.sim.shapes import (
+        CompoundShapeCfg,
+        CubeCfg,
+        MeshCfg,
+        MeshCollisionCfg,
+        ShapePartCfg,
+    )
+    from embodichain.lab.sim.sim_manager import SimulationManager
+
+    mesh = MeshCfg(
+        fpath="part.obj", collision=MeshCollisionCfg(approximation="convex_hull")
+    )
+    if explicit:
+        member = RigidObjectCfg(
+            shape=CubeCfg(),
+            visuals=[
+                VisualElementCfg(id="file", representation=mesh),
+                VisualElementCfg(id="box", representation=CubeCfg()),
+            ],
+        )
+    else:
+        member = RigidObjectCfg(
+            shape=CompoundShapeCfg(
+                parts=[
+                    ShapePartCfg(shape=mesh),
+                    ShapePartCfg(shape=CubeCfg()),
+                ]
+            )
+        )
+    cfg = RigidObjectGroupCfg(uid="group", rigid_objects={"piece": member})
+    with pytest.raises(NotImplementedError, match="declare individual RigidObjects"):
+        SimulationManager.add_rigid_object_group(SimpleNamespace(), cfg)

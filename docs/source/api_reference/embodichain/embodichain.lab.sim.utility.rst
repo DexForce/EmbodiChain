@@ -17,6 +17,7 @@ action/solver adaptation.
    action_utils
    atom_action_utils
    cfg_utils
+   grasp_geometry
    import_utils
    io_utils
    keyboard_utils
@@ -33,7 +34,7 @@ Action Utilities
 .. automodule:: embodichain.lab.sim.utility.action_utils
    :members:
 
-Atomic Action Utilities
+Atomic Skill Utilities
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: embodichain.lab.sim.utility.atom_action_utils
@@ -44,6 +45,50 @@ Configuration Utilities
 
 .. automodule:: embodichain.lab.sim.utility.cfg_utils
    :members:
+
+Sampled Hand Geometry
+~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.lab.sim.utility.grasp_geometry
+
+These adapters own named robot FK and explicit hand/TCP calibration. A hand
+capture reads the first measured posture without stepping or modifying the
+robot. Hand commands must cover the selected moving joints, including mimic
+followers, and must leave the declared motion TCP fixed.
+
+The paired provider captures once on its first paired query and belongs to one
+Robot/environment adapter. It may be retained across bridge, engine and episode
+resets while that model, calibration and hand commands remain unchanged;
+single-arm calls do not trigger capture. Concrete sampling and contact fitting
+remain data-only GraspKit services.
+
+``RobotCoordinatedGraspProvider.clear_cache()`` releases asset-query caches
+without reading the robot or discarding captured hand geometry. It is also safe
+before the first query. Changes to the model, commands or TCP calibration still
+require a new provider.
+
+.. autosummary::
+   :nosignatures:
+
+   RobotHandGeometryCfg
+   ordered_pad_line_world
+   build_parallel_jaw_hand_geometry
+   RobotHandGeometryProvider
+   RobotCoordinatedGraspProvider
+
+.. autoclass:: RobotHandGeometryCfg
+   :members:
+
+.. autofunction:: ordered_pad_line_world
+
+.. autofunction:: build_parallel_jaw_hand_geometry
+
+.. autoclass:: RobotHandGeometryProvider
+   :members:
+
+.. autoclass:: RobotCoordinatedGraspProvider
+   :members:
+
 
 Import Utilities
 ~~~~~~~~~~~~~~~~

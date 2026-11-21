@@ -61,13 +61,23 @@ class ExpertTrajectoryCfg:
 
     Args:
         joint_command_mode: Position-only or position-velocity expert targets.
+        use_action_manager: Route position targets through configured policy terms.
     """
 
     joint_command_mode: JointCommandMode = "position"
     """Joint targets emitted and stored by expert trajectory generation."""
 
+    use_action_manager: bool = False
+    """Execute expert position targets through configured policy action terms."""
+
     def __post_init__(self) -> None:
         self.joint_command_mode = _validate_joint_command_mode(self.joint_command_mode)
+        if type(self.use_action_manager) is not bool:
+            raise ValueError("use_action_manager must be boolean.")
+        if self.use_action_manager and self.joint_command_mode != "position":
+            raise ValueError(
+                "ActionManager expert execution requires position-only targets."
+            )
 
 
 @dataclass(frozen=True, slots=True)

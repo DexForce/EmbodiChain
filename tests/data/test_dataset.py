@@ -18,9 +18,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import multiprocessing as mp
 import time
+from types import SimpleNamespace
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 
@@ -31,6 +34,242 @@ from embodichain.data.dataset import _dataset_download_lock
 LOCK_HOLD_SECONDS = 0.2
 PROCESS_JOIN_TIMEOUT_SECONDS = 5.0
 PROCESS_START_TIMEOUT_SECONDS = 60.0
+
+
+@pytest.mark.parametrize("healthy", [True, False])
+def test_source_cache_validation_keeps_prepared_models_readable(
+    tmp_path: Path, monkeypatch, healthy: bool
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from embodichain.extensions.robots.flexiv.rizon4s._menagerie_assets import (
+        FlexivRizon4SMenagerie,
+    )
+    from embodichain.extensions.benchmarks.assembly.robot_reference import (
+        prepare_rizon4s_urdf,
+    )
+
+    root = tmp_path / "cache"
+    prefix = "FlexivRizon4SMenagerie"
+    extracted = root / "extract" / prefix
+    extracted.mkdir(parents=True)
+    (extracted / "LICENSE").write_text("source seed")
+    download = root / "download" / prefix
+    download.mkdir(parents=True)
+    (download / "LICENSE").write_text("downloaded seed")
+    output = root / "generated" / "assembly" / prefix / "prepared_v4_parallel_jaw"
+    output.mkdir(parents=True)
+    urdf = output / "rizon4s_robotiq2f85.urdf"
+    urdf.write_text('<robot name="prepared"><link name="root"/></robot>')
+    (output / "fidelity.json").write_text("{}")
+    prepared = Path(prepare_rizon4s_urdf(extracted, gripper_model="parallel_jaw"))
+    assert not prepared.is_relative_to(extracted)
+    from embodichain.utils.utility import load_config
+
+    declaration = load_config(
+        str(
+            Path(__file__).resolve().parents[2]
+            / "embodichain/extensions/tasks/configs/components/embodiments/"
+            "flexiv_rizon4s_robotiq2f85.nominal.yaml"
+        )
+    )
+    monkeypatch.setattr(constants, "EMBODICHAIN_DEFAULT_DATA_ROOT", str(root))
+    assert dataset_module.get_data_path(declaration["simulation"]["fpath"]) == str(
+        prepared
+    )
+    with ThreadPoolExecutor(max_workers=1) as readers:
+
+        def check_during_validation(path):
+            assert (
+                readers.submit(prepared.read_text).result(timeout=3) == urdf.read_text()
+            )
+            return "valid" if healthy else "invalid"
+
+        FlexivRizon4SMenagerie.check_zip(
+            SimpleNamespace(calculate_md5=check_during_validation),
+            prefix,
+            SimpleNamespace(urls=["https://example.invalid/LICENSE"], md5="valid"),
+            str(root),
+        )
+    assert prepared.read_text().startswith('<robot name="prepared">')
+    assert extracted.exists() is healthy
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "urls, expected",
+    [
+        (
+            [
+                "https://hf-mirror.com/datasets/DexForceAI/embodichain_data/resolve/v1/model.zip"
+            ],
+            [
+                "https://hf-mirror.com/datasets/DexForceAI/embodichain_data/resolve/v1/model.zip",
+                "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/v1/model.zip",
+            ],
+        ),
+        (
+            ["https://assets.example/model.zip"],
+            ["https://assets.example/model.zip"],
+        ),
+        (
+            ["https://hf-mirror.com/datasets/Other/data/resolve/main/model.zip"],
+            ["https://hf-mirror.com/datasets/Other/data/resolve/main/model.zip"],
+        ),
+        (
+            [
+                "https://hf-mirror.com/datasets/DexForceAI/embodichain_data/resolve/main/model.zip",
+                "https://assets.example/model.zip",
+                "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/model.zip",
+            ],
+            [
+                "https://hf-mirror.com/datasets/DexForceAI/embodichain_data/resolve/main/model.zip",
+                "https://assets.example/model.zip",
+                "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/model.zip",
+            ],
+        ),
+    ],
+)
+def test_asset_origin_fallback_preserves_sources_and_metadata(urls, expected) -> None:
+    """Only the known asset mirror gains an origin, without changing its revision."""
+    descriptor = dataset_module.o3d.data.DataDescriptor(urls, "a" * 32, "mounted")
+    result = dataset_module._with_asset_origin_fallback(descriptor)
+
+    assert result.urls == expected
+    assert result.md5 == "a" * 32
+    assert result.extract_in_subdir == "mounted"
+    assert descriptor.urls == urls
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "mirror_content, origin_valid",
+    [(None, True), (b"corrupt", True), (b"corrupt", False)],
+)
+def test_dataset_download_falls_back_with_integrity_checks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mirror_content, origin_valid: bool
+) -> None:
+    """The real downloader recovers missing/corrupt mirrors and rejects bad origins."""
+    mirror = tmp_path / "mirror"
+    origin = tmp_path / "origin"
+    mirror.mkdir()
+    origin.mkdir()
+    archive = origin / "model.zip"
+    with ZipFile(archive, "w") as bundle:
+        bundle.writestr("model.urdf", "verified model")
+    expected_md5 = hashlib.md5(archive.read_bytes()).hexdigest()
+    if mirror_content is not None:
+        (mirror / "model.zip").write_bytes(mirror_content)
+    if not origin_valid:
+        archive.write_bytes(b"invalid origin")
+    monkeypatch.setattr(dataset_module, "_HF_ASSET_MIRROR", mirror.as_uri() + "/")
+    monkeypatch.setattr(dataset_module, "_HF_ASSET_ORIGIN", origin.as_uri() + "/")
+    descriptor = dataset_module.o3d.data.DataDescriptor(
+        (mirror / "model.zip").as_uri(), expected_md5, "mounted"
+    )
+    cache = str(tmp_path / "cache")
+
+    if not origin_valid:
+        with pytest.raises(RuntimeError, match="Downloading failed"):
+            dataset_module.EmbodiChainDataset("Model", descriptor, cache)
+        return
+
+    dataset = dataset_module.EmbodiChainDataset("Model", descriptor, cache)
+    model = Path(dataset.extract_dir) / "mounted/model.urdf"
+    assert model.read_text() == "verified model"
+    archive.unlink()
+    cached = dataset_module.EmbodiChainDataset("Model", descriptor, cache)
+    assert (
+        Path(cached.extract_dir) / "mounted/model.urdf"
+    ).read_text() == "verified model"
+
+
+@pytest.mark.no_sim
+def test_default_data_modules_remains_a_public_export() -> None:
+    from embodichain.data import DEFAULT_DATA_MODULES
+
+    assert DEFAULT_DATA_MODULES is dataset_module.DEFAULT_DATA_MODULES
+
+
+def _check_cache(
+    root: Path, prefix: str = "TestAsset", expected: str = "valid"
+) -> None:
+    """Run cache preparation without starting a network download."""
+    descriptor = SimpleNamespace(
+        urls=["https://example.invalid/model.zip"], md5=expected
+    )
+    dataset = SimpleNamespace(calculate_md5=lambda path: "valid")
+    dataset_module.EmbodiChainDataset.check_zip(dataset, prefix, descriptor, str(root))
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("has_zip", [False, True])
+def test_custom_cache_removes_stale_extraction(tmp_path: Path, has_zip: bool) -> None:
+    """An orphaned or invalid download clears only its own extraction."""
+    root = tmp_path / "asset-cache"
+    extracted = root / "extract/TestAsset"
+    extracted.mkdir(parents=True)
+    (extracted / "stale.txt").write_text("stale")
+    neighbor = root / "extract/AnotherAsset"
+    neighbor.mkdir()
+    (neighbor / "keep.txt").write_text("keep")
+    download = root / "download/TestAsset/model.zip"
+    if has_zip:
+        download.parent.mkdir(parents=True)
+        download.write_bytes(b"invalid")
+
+    _check_cache(root, expected="different")
+
+    assert not extracted.exists()
+    assert not download.exists()
+    assert (neighbor / "keep.txt").read_text() == "keep"
+
+
+@pytest.mark.no_sim
+def test_custom_cache_preserves_valid_download(tmp_path: Path) -> None:
+    """A valid archive with extracted contents is reused."""
+    root = tmp_path / "asset-cache"
+    download = root / "download/TestAsset/model.zip"
+    download.parent.mkdir(parents=True)
+    download.write_bytes(b"archive")
+    extracted = root / "extract/TestAsset"
+    extracted.mkdir(parents=True)
+    (extracted / "model.xml").write_text("model")
+
+    _check_cache(root)
+
+    assert download.read_bytes() == b"archive"
+    assert (extracted / "model.xml").read_text() == "model"
+
+
+@pytest.mark.no_sim
+def test_cache_rejects_extraction_symlink_outside_root(tmp_path: Path) -> None:
+    """Invalid extraction paths fail before an archive or outside data is removed."""
+    root = tmp_path / "asset-cache"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("keep")
+    (root / "extract").mkdir(parents=True)
+    (root / "extract/TestAsset").symlink_to(outside, target_is_directory=True)
+    download = root / "download/TestAsset/model.zip"
+    download.parent.mkdir(parents=True)
+    download.write_bytes(b"archive")
+
+    with pytest.raises(ValueError, match="cache"):
+        _check_cache(root, expected="different")
+
+    assert download.read_bytes() == b"archive"
+    assert (outside / "keep.txt").read_text() == "keep"
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "prefix",
+    ["", ".", "..", "../outside", "/absolute", "nested/name", "nested\\name", ".locks"],
+)
+def test_cache_rejects_non_entry_prefix(tmp_path: Path, prefix: str) -> None:
+    """A dataset owns one cache entry, never a parent or reserved lock directory."""
+    with pytest.raises(ValueError, match="prefix"):
+        _check_cache(tmp_path, prefix)
 
 
 @pytest.mark.no_sim
@@ -126,3 +365,75 @@ def test_dataset_initialization_is_serialized_across_processes(tmp_path) -> None
 
     assert [worker.exitcode for worker in workers] == [0, 0]
     assert maximum_active_initializers.value == 1
+
+
+@pytest.mark.no_sim
+def test_registered_file_reference_uses_verified_asset_root(
+    tmp_path, monkeypatch
+) -> None:
+    from types import SimpleNamespace
+    from embodichain.data._references import _resolve_data_reference
+
+    root = tmp_path / "bundle"
+    root.mkdir()
+    (root / "trajectory.json").write_text("verified")
+    calls = []
+
+    def asset_type(name):
+        calls.append(name)
+        return lambda: SimpleNamespace(extract_dir=str(root))
+
+    monkeypatch.setattr("embodichain.data.get_data_class", asset_type)
+    resolved = _resolve_data_reference(
+        {"asset": "DemoInputs", "path": "trajectory.json"}, base_dir=tmp_path / "owner"
+    )
+    assert resolved == root / "trajectory.json"
+    assert calls == ["DemoInputs"]
+    assert (
+        _resolve_data_reference("source.json", base_dir=tmp_path)
+        == tmp_path / "source.json"
+    )
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "reference",
+    [
+        {"asset": "DemoInputs", "path": "../secret"},
+        {"asset": "DemoInputs", "path": "/secret"},
+        {"asset": "DemoInputs", "path": "a\\secret"},
+        {"asset": "DemoInputs", "path": "a.json", "import": "arbitrary"},
+        {"asset": "https://example.test", "path": "a.json"},
+    ],
+)
+def test_asset_file_reference_rejects_invalid_input_before_download(
+    tmp_path, monkeypatch, reference
+) -> None:
+    from embodichain.data._references import _resolve_data_reference
+
+    def forbidden(*args):
+        raise AssertionError("invalid reference reached asset initialization")
+
+    monkeypatch.setattr("embodichain.data.get_data_class", forbidden)
+    with pytest.raises(ValueError):
+        _resolve_data_reference(reference, base_dir=tmp_path)
+
+
+@pytest.mark.no_sim
+def test_asset_file_reference_rejects_symlink_escape(tmp_path, monkeypatch) -> None:
+    from types import SimpleNamespace
+    from embodichain.data._references import _resolve_data_reference
+
+    root = tmp_path / "bundle"
+    root.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_text("outside")
+    (root / "escape.json").symlink_to(outside)
+    monkeypatch.setattr(
+        "embodichain.data.get_data_class",
+        lambda _: lambda: SimpleNamespace(extract_dir=str(root)),
+    )
+    with pytest.raises(ValueError, match="escapes"):
+        _resolve_data_reference(
+            {"asset": "DemoInputs", "path": "escape.json"}, base_dir=tmp_path
+        )

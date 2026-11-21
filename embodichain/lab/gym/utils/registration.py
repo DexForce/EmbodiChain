@@ -23,7 +23,6 @@ import importlib.metadata
 import importlib.util
 import json
 import logging
-import os
 import sys
 import torch
 
@@ -72,8 +71,14 @@ class EnvSpec:
         task_program_registration: SimulationTaskProgramRegistration | None = None,
         task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
         supports_rl: bool = False,
+        supports_handwritten_demo: bool | None = None,
     ):
         """A specification for a Embodied environment."""
+        if (
+            supports_handwritten_demo is not None
+            and type(supports_handwritten_demo) is not bool
+        ):
+            raise TypeError("supports_handwritten_demo must be a bool or None.")
         if type(supports_rl) is not bool:
             raise TypeError("supports_rl must be a bool.")
         if task_program_registration is not None:
@@ -130,6 +135,7 @@ class EnvSpec:
         self.max_episode_steps = max_episode_steps
         self.default_kwargs = {} if default_kwargs is None else default_kwargs
         self.supports_rl = supports_rl
+        self.supports_handwritten_demo = supports_handwritten_demo
         self.task_program_registration = task_program_registration
         self.task_program_adapter_factory = task_program_adapter_factory
 
@@ -172,6 +178,7 @@ def register(
     task_program_registration: SimulationTaskProgramRegistration | None = None,
     task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
     supports_rl: bool = False,
+    supports_handwritten_demo: bool | None = None,
 ):
     """Register a Embodied environment."""
 
@@ -188,6 +195,7 @@ def register(
         max_episode_steps=max_episode_steps,
         default_kwargs=default_kwargs,
         supports_rl=supports_rl,
+        supports_handwritten_demo=supports_handwritten_demo,
         task_program_registration=task_program_registration,
         task_program_adapter_factory=task_program_adapter_factory,
     )
@@ -287,6 +295,7 @@ def register_env(
     override=False,
     *,
     supports_rl: bool = False,
+    supports_handwritten_demo: bool | None = None,
     task_program_registration: SimulationTaskProgramRegistration | None = None,
     task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
     **kwargs,
@@ -298,6 +307,9 @@ def register_env(
         max_episode_steps (int): maximum number of steps in an episode.
         override (bool): whether to override the environment if it is already registered.
         supports_rl: Whether the environment has a supported RL training path.
+        supports_handwritten_demo: Optional per-registration expert capability.
+            None preserves inference from the environment class; False disables
+            the label for deployments without configured expert behavior.
 
     Notes:
         - `max_episode_steps` is processed differently from other keyword arguments in gym.
@@ -318,6 +330,7 @@ def register_env(
             override,
             max_episode_steps,
             supports_rl=supports_rl,
+            supports_handwritten_demo=supports_handwritten_demo,
             task_program_registration=task_program_registration,
             task_program_adapter_factory=task_program_adapter_factory,
             **kwargs,
@@ -334,6 +347,7 @@ def register_env_function(
     max_episode_steps=None,
     *,
     supports_rl: bool = False,
+    supports_handwritten_demo: bool | None = None,
     task_program_registration: SimulationTaskProgramRegistration | None = None,
     task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
     **kwargs,
@@ -355,6 +369,7 @@ def register_env_function(
         max_episode_steps=max_episode_steps,
         default_kwargs=deepcopy(kwargs),
         supports_rl=supports_rl,
+        supports_handwritten_demo=supports_handwritten_demo,
         task_program_registration=task_program_registration,
         task_program_adapter_factory=task_program_adapter_factory,
     )
@@ -369,62 +384,6 @@ def register_env_function(
         kwargs=deepcopy(kwargs),
     )
     return cls
-
-
-def _import_task_package(ep: importlib.metadata.EntryPoint):
-    """Import a task package and ensure its auto-registration runs.
-
-    Legacy editable installs from before official tasks were bundled in the
-    main distribution can expose two editable projects from the same checkout.
-    The ``extensions/embodichain_tasks/`` source container may then be picked
-    up as a namespace package that shadows the real
-    ``extensions/embodichain_tasks/embodichain_tasks/`` package.
-
-    A namespace package never executes ``__init__.py``, so the package's
-    ``import_packages()`` call -- which triggers every ``@register_env`` --
-    is skipped and no environments are registered.
-
-    When such shadowing is detected (the imported module has no ``__file__``),
-    this helper locates the real ``__init__.py`` beneath one of the namespace's
-    search locations (``<location>/<top_level>/__init__.py``) and loads it
-    directly so registration runs. This is a no-op for regular, non-shadowed
-    installs.
-
-    Args:
-        ep: The ``embodichain.tasks`` entry point to import.
-
-    Returns:
-        The imported module (the real package when possible, otherwise the
-        namespace module).
-    """
-    module_name = ep.value
-    top_level = module_name.partition(".")[0]
-    mod = importlib.import_module(module_name)
-    if getattr(mod, "__file__", None) is not None:
-        return mod
-
-    # Only top-level packages can be reliably force-loaded here; dotted entry
-    # point values fall back to the plain import above.
-    if module_name != top_level:
-        return mod
-
-    # Namespace shadowing: search each namespace location for the real
-    # package's __init__.py and load it in place of the namespace module.
-    for location in list(getattr(mod, "__path__", [])):
-        init_path = os.path.join(location, top_level, "__init__.py")
-        if not os.path.isfile(init_path):
-            continue
-        pkg_dir = os.path.dirname(init_path)
-        spec = importlib.util.spec_from_file_location(
-            top_level, init_path, submodule_search_locations=[pkg_dir]
-        )
-        if spec is None or spec.loader is None:
-            continue
-        real_mod = importlib.util.module_from_spec(spec)
-        sys.modules[top_level] = real_mod
-        spec.loader.exec_module(real_mod)
-        return real_mod
-    return mod
 
 
 def discover_task_packages() -> list[str]:
@@ -446,7 +405,7 @@ def discover_task_packages() -> list[str]:
 
     for ep in eps:
         try:
-            _import_task_package(ep)
+            importlib.import_module(ep.value)
             imported.append(ep.name)
         except Exception:
             _logger.warning(

@@ -50,26 +50,26 @@ Training is configured via a JSON or YAML file that defines runtime settings, en
 Example Configuration
 ---------------------   
 
-Training configurations are task-local: PushCube uses ``embodichain_tasks/configs/tasks/manipulation/push_cube/agents`` and CartPole uses ``embodichain_tasks/configs/tasks/classic_control/cart_pole/agents``. PointMass APG/PPO configs live under ``embodichain_tasks/configs/tasks/classic_control/point_mass/agents``:
+Training configurations are task-local: PushCube uses ``embodichain/extensions/tasks/configs/tasks/manipulation/push_cube/agents`` and CartPole uses ``embodichain/extensions/tasks/configs/tasks/classic_control/cart_pole/agents``. PointMass APG/PPO configs live under ``embodichain/extensions/tasks/configs/tasks/classic_control/point_mass/agents``:
 
 .. dropdown:: Example: train_config.json
    :icon: code
 
-   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/push_cube/agents/ppo.json
+   .. literalinclude:: ../../../embodichain/extensions/tasks/configs/tasks/manipulation/push_cube/agents/ppo.json
       :language: json
       :linenos:
 
 .. dropdown:: Example: train_config.yaml (CartPole)
    :icon: code
 
-   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml
+   .. literalinclude:: ../../../embodichain/extensions/tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml
       :language: yaml
       :linenos:
 
 .. dropdown:: Example: train_apg.yaml (PointMass)
    :icon: code
 
-   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml
+   .. literalinclude:: ../../../embodichain/extensions/tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml
       :language: yaml
       :linenos:
 
@@ -78,8 +78,8 @@ APG and PPO. Launch either config with the same CLI:
 
 .. code-block:: bash
 
-   embodichain train-rl --config embodichain_tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml
-   embodichain train-rl --config embodichain_tasks/configs/tasks/classic_control/point_mass/agents/ppo.yaml
+   embodichain train-rl --config embodichain/extensions/tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml
+   embodichain train-rl --config embodichain/extensions/tasks/configs/tasks/classic_control/point_mass/agents/ppo.yaml
 
 Configuration Sections
 ----------------------
@@ -250,13 +250,13 @@ To start training, run:
 
 .. code-block:: bash
 
-   embodichain train-rl --config embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml
+   embodichain train-rl --config embodichain/extensions/tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml
 
 JSON configs are also supported:
 
 .. code-block:: bash
 
-   embodichain train-rl --config embodichain_tasks/configs/tasks/manipulation/push_cube/agents/ppo.json
+   embodichain train-rl --config embodichain/extensions/tasks/configs/tasks/manipulation/push_cube/agents/ppo.json
 
 Outputs
 -------

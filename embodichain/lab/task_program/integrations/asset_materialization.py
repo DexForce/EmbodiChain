@@ -29,6 +29,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import re
 import shutil
@@ -42,7 +43,8 @@ from ._asset_pouring import (
     prepare_pour_adaptation,
     finish_pour_adaptation,
 )
-from ._configured_composition import _resolve_execution_policy
+from ._configured_composition import _resolve_execution_policy, _select_integration
+from .configured import _resolve_simulation_uid
 
 from embodichain.utils import configclass
 from embodichain.utils.config_paths import resolve_config_path
@@ -109,7 +111,9 @@ def load_asset_requirements_from_deployment(
 
     source = Path(task_config_path).resolve()
     task = _read(source)
-    integration = _read(_path(task["task_program"]["integration"], source))
+    integration, _ = _select_integration(
+        task["task_program"]["integration"], base_dir=source.parent
+    )
     if "asset_requirements" not in integration:
         raise ValueError("Task integration does not declare asset_requirements")
     return AssetRequirements.from_dict(integration["asset_requirements"])
@@ -260,10 +264,10 @@ def validate_materialized_deployment(deployment: MaterializedAssetDeployment) ->
     checked_resources = set()
     for filename in required_files:
         document = _read(root / filename)
-        if filename == "task.yaml" and "objective" in document:
-            required = document["objective"]["component"]
-            if required not in files:
-                raise ValueError("Materialized manifest is missing the objective")
+        if filename == "task.yaml":
+            for owner in ("objective", "evaluation"):
+                if owner in document and document[owner]["component"] not in files:
+                    raise ValueError(f"Materialized manifest is missing the {owner}")
         for node in _walk(document):
             for key in ("fpath", "urdf_path", "xml_path"):
                 value = node.get(key)
@@ -385,13 +389,30 @@ def materialize_asset_deployment(
     if unknown:
         raise ValueError(f"Unknown initial-bottom roles: {sorted(unknown)}")
     task_program = raw["task_program"]
-    integration_path = _path(task_program["integration"], source)
     program_path = _path(task_program["program"], source)
     policy_path, policy = _resolve_execution_policy(
         task_program["execution_policy"], base_dir=source.parent
     )
     embodiment_path = _path(raw["embodiment"]["component"], source)
-    integration = _read(integration_path)
+    integration, integration_base = _select_integration(
+        task_program["integration"], base_dir=source.parent
+    )
+    # Keep registry references declarative so each destination uses its own cache.
+    # Rebase component-relative filenames to the output integration. Explicit
+    # absolute and home-anchored paths keep their authored external-library spelling.
+    from embodichain.data._references import _resolve_data_reference
+
+    for node in _walk(integration.get("runtime_services", {})):
+        for field in ("asset_manifest", "prototype_manifest"):
+            if field in node and isinstance(node[field], (str, Path)):
+                if Path(node[field]).expanduser().is_absolute():
+                    node[field] = str(node[field])
+                    continue
+                manifest = _resolve_data_reference(
+                    node[field], base_dir=integration_base
+                )
+                relative = os.path.relpath(manifest, Path(output_dir).resolve())
+                node[field] = "./" + Path(relative).as_posix()
     if (
         "asset_requirements" in integration
         and type(requirements).from_dict(integration["asset_requirements"]).to_dict()
@@ -400,7 +421,17 @@ def materialize_asset_deployment(
         raise ValueError(
             "Supplied requirements differ from the task integration contract"
         )
-    program = _read(program_path)
+    from embodichain.lab.task_program.language.authoring import normalize_task_program
+
+    aliases = {
+        alias: entry["call_id"]
+        for alias, entry in integration.get("runtime_services", {})
+        .get("demo_skills", {})
+        .items()
+    }
+    program = normalize_task_program(
+        _read(program_path), demo_skills=aliases
+    ).declaration
     embodiment = _read(embodiment_path)
     prepared_pour = None
     if adaptations.pour is not None:
@@ -469,11 +500,16 @@ def materialize_asset_deployment(
                     "Rigid MeshCfg cannot consume a distinct collision_path"
                 )
             entity = entities.get(role.entity_id)
-            if entity is None or entity["simulation_uid"] not in objects:
+            uid = (
+                _resolve_simulation_uid(entity, path=f"scene_binding.{role.entity_id}")
+                if entity is not None
+                else None
+            )
+            if uid not in objects:
                 raise ValueError(
                     f"Role {name} must map to a declared physical rigid object"
                 )
-            obj = objects[entity["simulation_uid"]]
+            obj = objects[uid]
             if obj.get("init_local_pose") is not None:
                 raise ValueError(f"Role {name} cannot inherit init_local_pose")
             if any(float(v) != 0.0 for v in obj.get("init_rot", [0, 0, 0])):
@@ -709,6 +745,9 @@ def materialize_asset_deployment(
             objective = _read(objective_path)
             shutil.copy2(objective_path, output / "objective.yaml")
             config["objective"]["component"] = "objective.yaml"
+        if physical.evaluation is not None:
+            _dump(output / "evaluation.yaml", physical.evaluation)
+            config["evaluation"] = {"component": "evaluation.yaml"}
         # Include all source configuration and adaptation content in identity;
         # the same assets used by a changed task cannot reuse registry IDs.
         identity = hashlib.sha256(
@@ -721,6 +760,11 @@ def materialize_asset_deployment(
                     "embodiment": embodiment,
                     "assets": resolved_assets.set_id,
                     "objective": objective,
+                    **(
+                        {"evaluation": physical.evaluation}
+                        if physical.evaluation is not None
+                        else {}
+                    ),
                 },
                 sort_keys=True,
                 separators=(",", ":"),

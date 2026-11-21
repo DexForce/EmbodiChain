@@ -11,9 +11,9 @@ enables rapid experimentation, seamless deployment of intelligent
 agents, and effective Sim2Real transfer for real-world robotic systems.
 
 Official task and robot modules live under
-`extensions/ <extensions/README.md>`__ and ship with the main
-distribution. Their Python imports remain ``embodichain_tasks`` and
-``embodichain_robots``.
+`extensions/ <embodichain/extensions/README.md>`__ and ship with the main
+distribution. Their Python imports remain ``embodichain.extensions.tasks`` and
+``embodichain.extensions.robots``.
 
 .. NOTE::
    EmbodiChain is in Alpha and under active development: * More

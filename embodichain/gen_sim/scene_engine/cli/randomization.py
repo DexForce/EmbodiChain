@@ -24,7 +24,9 @@ from collections.abc import Sequence
 __all__ = ["main"]
 
 
-def main(argv: Sequence[str] | None = None) -> None:
+def main(
+    argv: Sequence[str] | None = None, *, prog: str = "embodichain scene-randomization"
+) -> None:
     """Prepare a baseline, generate layouts and save a new run directory.
 
     Exhausting the attempt budget is a normal result, including when no
@@ -32,16 +34,23 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     Args:
         argv: Arguments excluding the command name; defaults to ``sys.argv``.
+        prog: Display name supplied by the unified GenSim dispatcher.
     """
     parser = argparse.ArgumentParser(
-        prog="embodichain scene-randomization",
+        prog=prog,
         description=(
             "Prepare a reusable baseline, generate group XY and member XY/yaw layouts using "
             "validated YAML parameters, and save each successful layout."
         ),
     )
+    workspace_flags = (
+        ("--output_root", "--scene", "--output-root")
+        if prog == "embodichain scene-randomization"
+        else ("--scene", "--output-root", "--output_root")
+    )
     parser.add_argument(
-        "--output_root",
+        *workspace_flags,
+        dest="output_root",
         required=True,
         help="Scene workspace containing scene_export/; the baseline is written there.",
     )

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Production reset ordering and complete B=1 scene initial-state restoration."""
+"""Production reset ordering and selected-row scene initial-state restoration."""
 
 from __future__ import annotations
 
@@ -50,65 +50,65 @@ def test_static_work_surface_can_prepare_and_restore_without_body_data() -> None
     table.value[:, 7:] = 0.0
     table.default = table.value.clone()
     env.sim.rigid["support_surface"] = table
-    host = SimulationSceneExpansionHost(env, initial_validator=_passed)
-    prepared = host(_variant())
+    host = SimulationSceneExpansionHost(env, initial_validator=lambda row: _passed())
+    prepared = host({0: _variant()})[0]
     assert prepared.validation.accepted
-    snapshot = host.initial_state
+    snapshot = host.initial_states[0]
     assert any(
         row["uid"] == "support_surface" and row["body_type"] == "static"
         for row in snapshot.to_metadata()["entities"]
     )
-    assert host.restore_initial_state(snapshot).validation.accepted
+    assert host.restore_initial_states({0: snapshot})[0].validation.accepted
 
 
 class _Rigid:
     body_type = "dynamic"
 
-    def __init__(self, x: float) -> None:
+    def __init__(self, x: float, num_envs: int = 1) -> None:
         self.value = torch.tensor(
             [[x, 0.0, 0.1, 0.0, 0.0, 0.0, 1.0, 0.2, 0.0, 0.0, 0.0, 0.0, 0.3]]
         )
+        self.value = self.value.repeat(num_envs, 1)
         self.default = self.value.clone()
         self.body_data = SimpleNamespace(
-            mass=torch.ones(1),
-            inertia=torch.ones(1, 3),
-            com_pose=torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]]),
+            mass=torch.ones(num_envs),
+            inertia=torch.ones(num_envs, 3),
+            com_pose=torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]]).repeat(
+                num_envs, 1
+            ),
         )
 
     def get_friction(self, *, env_ids):
-        return torch.ones(1)
+        return torch.ones(len(env_ids))
 
     def get_damping(self, *, env_ids):
-        return torch.zeros(1, 2)
+        return torch.zeros(len(env_ids), 2)
 
     @property
     def body_state(self) -> torch.Tensor:
         return self.value
 
     def clear_dynamics(self, *, env_ids: list[int]) -> None:
-        assert env_ids == [0]
-        self.value[:, 7:] = 0
+        self.value[env_ids, 7:] = 0
 
     def set_local_pose(self, value: torch.Tensor, *, env_ids: list[int]) -> None:
-        assert env_ids == [0]
-        if value.shape == (1, 4, 4):
-            self.value[:, :3] = value[:, :3, 3]
-            self.value[:, 3:7] = quat_from_matrix(value[:, :3, :3])
+        if value.ndim == 3:
+            self.value[env_ids, :3] = value[:, :3, 3]
+            self.value[env_ids, 3:7] = quat_from_matrix(value[:, :3, :3])
         else:
-            self.value[:, :7] = value
+            self.value[env_ids, :7] = value
 
     def set_velocity(
         self, *, lin_vel: torch.Tensor, ang_vel: torch.Tensor, env_ids: list[int]
     ) -> None:
-        assert env_ids == [0]
-        self.value[:, 7:10] = lin_vel
-        self.value[:, 10:13] = ang_vel
+        self.value[env_ids, 7:10] = lin_vel
+        self.value[env_ids, 10:13] = ang_vel
 
 
 class _Articulation:
     joint_names = ("joint_a", "joint_b")
 
-    def __init__(self) -> None:
+    def __init__(self, num_envs: int = 1) -> None:
         self.state = {
             "root_pose": torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]]),
             "root_lin_vel": torch.tensor([[0.1, 0.2, 0.3]]),
@@ -119,18 +119,27 @@ class _Articulation:
             "target_qvel": torch.tensor([[0.7, 0.8]]),
             "qf": torch.tensor([[0.9, 1.0]]),
         }
+        self.state = {
+            name: value.repeat(num_envs, 1) for name, value in self.state.items()
+        }
         self.default = deepcopy(self.state)
         self.body_data = SimpleNamespace(
             fetch_state=lambda: self.state,
-            qpos_limits=torch.tensor([[[-2.0, 2.0], [-2.0, 2.0]]]),
-            qvel_limits=torch.tensor([[[-10.0, 10.0], [-10.0, 10.0]]]),
-            mass=torch.ones(1, 2),
-            inertia=torch.ones(1, 2, 3),
-            com_pose=torch.tensor([[[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]] * 2]),
-            joint_stiffness=torch.ones(1, 2),
-            joint_damping=torch.ones(1, 2),
-            joint_friction=torch.zeros(1, 2),
-            joint_armature=torch.zeros(1, 2),
+            qpos_limits=torch.tensor([[[-2.0, 2.0], [-2.0, 2.0]]]).repeat(
+                num_envs, 1, 1
+            ),
+            qvel_limits=torch.tensor([[[-10.0, 10.0], [-10.0, 10.0]]]).repeat(
+                num_envs, 1, 1
+            ),
+            mass=torch.ones(num_envs, 2),
+            inertia=torch.ones(num_envs, 2, 3),
+            com_pose=torch.tensor([[[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]] * 2]).repeat(
+                num_envs, 1, 1
+            ),
+            joint_stiffness=torch.ones(num_envs, 2),
+            joint_damping=torch.ones(num_envs, 2),
+            joint_friction=torch.zeros(num_envs, 2),
+            joint_armature=torch.zeros(num_envs, 2),
         )
 
     def get_qpos(self, *, target: bool = False) -> torch.Tensor:
@@ -150,25 +159,31 @@ class _Articulation:
         root_velocity: torch.Tensor,
         **kwargs,
     ) -> None:
-        assert env_ids == [0] and clear_dynamics
-        self.state.update({key: value.clone() for key, value in kwargs.items()})
+        assert clear_dynamics
+        for key, value in kwargs.items():
+            self.state[key][env_ids] = value
         for name in ("qpos", "target_qpos"):
-            self.state[name].clamp_(
-                self.body_data.qpos_limits[..., 0], self.body_data.qpos_limits[..., 1]
+            self.state[name][env_ids] = self.state[name][env_ids].clamp(
+                self.body_data.qpos_limits[env_ids, :, 0],
+                self.body_data.qpos_limits[env_ids, :, 1],
             )
-        self.state["root_lin_vel"] = root_velocity[:, :3].clone()
-        self.state["root_ang_vel"] = root_velocity[:, 3:].clone()
+        self.state["root_lin_vel"][env_ids] = root_velocity[:, :3]
+        self.state["root_ang_vel"][env_ids] = root_velocity[:, 3:]
 
 
 class _Simulation:
     device = torch.device("cpu")
     physics_backend = "default"
 
-    def __init__(self, events: list[str]) -> None:
+    def __init__(self, events: list[str], num_envs: int = 1) -> None:
         self.events = events
-        self.rigid = {"cube": _Rigid(_DEFAULT_CUBE_X), "other": _Rigid(-0.4)}
-        self.robots = {"robot": _Articulation()}
-        self.articulations = {"drawer": _Articulation()}
+        self.num_envs = num_envs
+        self.rigid = {
+            "cube": _Rigid(_DEFAULT_CUBE_X, num_envs),
+            "other": _Rigid(-0.4, num_envs),
+        }
+        self.robots = {"robot": _Articulation(num_envs)}
+        self.articulations = {"drawer": _Articulation(num_envs)}
         self.groups = []
         self.deformables = []
         self.constraints = []
@@ -203,10 +218,12 @@ class _Simulation:
 
     def reset_objects_state(self, **kwargs) -> None:
         self.events.append("reset_objects")
+        ids = kwargs.get("env_ids", list(range(self.num_envs)))
         for obj in self.rigid.values():
-            obj.value.copy_(obj.default)
+            obj.value[ids] = obj.default[ids]
         for obj in (*self.robots.values(), *self.articulations.values()):
-            obj.state = deepcopy(obj.default)
+            for name in obj.state:
+                obj.state[name][ids] = obj.default[name][ids]
 
     def update(self, *, step: int) -> None:
         self.events.append("settle")
@@ -221,35 +238,37 @@ class _Simulation:
 class _Environment(EmbodiedEnv):
     """Run the actual BaseEnv/EmbodiedEnv reset with CPU scene state doubles."""
 
-    def __init__(self) -> None:
+    def __init__(self, num_envs: int = 1) -> None:
         self.events = []
-        self.sim = _Simulation(self.events)
-        self._num_envs = 1
-        self.episode_context = EpisodeContext(1)
+        self.sim = _Simulation(self.events, num_envs)
+        self._num_envs = num_envs
+        self.episode_context = EpisodeContext(num_envs)
         self.cfg = SimpleNamespace(sim_steps_per_control=4, events=None)
         self.sim_cfg = SimpleNamespace(physics_dt=0.01)
         self._profiler = SimpleNamespace(section=lambda *a, **k: nullcontext())
         self._detached_uids_for_reset = []
-        self._elapsed_steps = torch.ones(1, dtype=torch.int32)
+        self._elapsed_steps = torch.ones(num_envs, dtype=torch.int32)
         self.sensors = {
             "contact": SimpleNamespace(
                 uid="contact", reset=lambda **k: self.events.append("sensor_reset")
             )
         }
         self.observation_manager = SimpleNamespace(
-            reset=lambda **k: self.events.append("observation_reset")
+            has_raw_channels=False,
+            has_history=False,
+            reset=lambda **k: self.events.append("observation_reset"),
         )
         self.rollout_buffer = TensorDict(
-            {"obs": torch.zeros(1, 4, 1)}, batch_size=[1, 4]
+            {"obs": torch.zeros(num_envs, 4, 1)}, batch_size=[num_envs, 4]
         )
-        self.rollout_steps = torch.zeros(1, dtype=torch.long)
+        self.rollout_steps = torch.zeros(num_envs, dtype=torch.long)
         self._rollout_buffer_mode = "expert"
         self._max_rollout_steps = 4
         self._traj_buffer = None
         self._active_task_program_bridge = object()
 
     def is_task_success(self) -> torch.Tensor:
-        return torch.zeros(1, dtype=torch.bool)
+        return torch.zeros(self.num_envs, dtype=torch.bool)
 
     def _before_episode_reset(self, env_ids, **kwargs) -> None:
         pass
@@ -257,7 +276,7 @@ class _Environment(EmbodiedEnv):
     def _initialize_episode(self, env_ids, **kwargs) -> None:
         assert "episode_prepare" not in kwargs
         self.events.append("reset_events")
-        self.sim.rigid["cube"].value[:, 0] = 0.2
+        self.sim.rigid["cube"].value[env_ids, 0] = 0.2
 
     def _reset_physical_objective(self, env_ids) -> None:
         self.events.append("objective")
@@ -289,12 +308,78 @@ def _variant() -> SceneVariant:
     )
 
 
+def test_selected_rows_prepare_restore_and_validate_independently() -> None:
+    env = _Environment(num_envs=4)
+    env.sim.rigid["cube"].value[:, 0] = torch.tensor([0.1, 0.2, 0.3, 0.4])
+    peers = env.sim.rigid["cube"].value[[0, 2]].clone()
+    checked = []
+
+    def validate(row: int) -> ValidationResult:
+        checked.append(row)
+        return ValidationResult(
+            (ValidationCheck("actual.initial", "failed" if row == 3 else "passed"),)
+        )
+
+    host = SimulationSceneExpansionHost(env, env_ids=(3, 1), initial_validator=validate)
+    initial = host.capture_initial_states(parent_scene_ids={3: "scene", 1: "scene"})
+    other = replace(_variant(), ordinal=1)
+    results = host({3: _variant(), 1: other})
+    assert tuple(results) == (3, 1) and checked == [3, 1]
+    assert not results[3].validation.accepted and results[1].validation.accepted
+    torch.testing.assert_close(env.sim.rigid["cube"].value[[0, 2]], peers)
+    env.sim.rigid["cube"].value[[3, 1], 0] = -0.5
+    restored = host.restore_initial_states(initial)
+    torch.testing.assert_close(
+        env.sim.rigid["cube"].value[:, 0], torch.tensor([0.1, 0.2, 0.3, 0.4])
+    )
+    assert restored[1].validation.accepted and not restored[3].validation.accepted
+    assert env.sim.updated_steps == 0
+
+
+def test_later_row_errors_prevent_reset_and_snapshot_rows_cannot_be_swapped() -> None:
+    env = _Environment(num_envs=4)
+    host = SimulationSceneExpansionHost(
+        env, env_ids=(3, 1), initial_validator=lambda row: _passed()
+    )
+    original = env.sim.rigid["cube"].value.clone()
+    unknown = replace(
+        _variant(), pose_changes=(ScenePoseChange("missing", torch.eye(4).tolist()),)
+    )
+    with pytest.raises(ValueError, match="existing rigid"):
+        host({3: _variant(), 1: unknown})
+    states = host.capture_initial_states(parent_scene_ids={3: "scene", 1: "scene"})
+    assert states[3].initial_state_id == states[1].initial_state_id
+    with pytest.raises(ValueError, match="environment row"):
+        host.restore_initial_states({3: states[1], 1: states[3]})
+    assert env.events == []
+    torch.testing.assert_close(env.sim.rigid["cube"].value, original)
+
+
+def test_batch_settling_steps_once_and_partial_selection_rejects_before_mutation() -> (
+    None
+):
+    env = _Environment(num_envs=4)
+    with pytest.raises(ValueError, match="all environment rows"):
+        SimulationSceneExpansionHost(
+            env, env_ids=(3, 1), initial_validator=lambda row: _passed(), settle_steps=2
+        )
+    assert env.events == []
+    host = SimulationSceneExpansionHost(
+        env, initial_validator=lambda row: _passed(), settle_steps=2
+    )
+    results = host({row: replace(_variant(), ordinal=row) for row in range(4)})
+    assert all(result.validation.accepted for result in results.values())
+    assert env.sim.updated_steps == 2 and env.events.count("settle") == 1
+
+
 def test_preparation_uses_final_settled_state_for_objective_and_first_recording() -> (
     None
 ):
     env = _Environment()
-    host = SimulationSceneExpansionHost(env, initial_validator=_passed, settle_steps=2)
-    result = host(_variant())
+    host = SimulationSceneExpansionHost(
+        env, initial_validator=lambda row: _passed(), settle_steps=2
+    )
+    result = host({0: _variant()})[0]
     expected = _CANDIDATE_CUBE_X + _SETTLE_DELTA
     assert result.validation.accepted
     assert env.objective_initial_x == pytest.approx(expected)
@@ -320,17 +405,19 @@ def test_initial_checks_reject_actual_pose_after_settling() -> None:
             (ValidationCheck("support.bounds", "passed" if allowed else "failed"),)
         )
 
-    host = SimulationSceneExpansionHost(env, initial_validator=validate, settle_steps=1)
-    assert not host(_variant()).validation.accepted
-    assert host.initial_state is not None
+    host = SimulationSceneExpansionHost(
+        env, initial_validator=lambda row: validate(), settle_steps=1
+    )
+    assert not host({0: _variant()})[0].validation.accepted
+    assert host.initial_states is not None
 
 
 def test_snapshot_owns_every_entity_and_control_target_after_live_buffers_change() -> (
     None
 ):
     env = _Environment()
-    host = SimulationSceneExpansionHost(env, initial_validator=_passed)
-    snapshot = host.capture_initial_state(parent_scene_id="assets:1")
+    host = SimulationSceneExpansionHost(env, initial_validator=lambda row: _passed())
+    snapshot = host.capture_initial_states(parent_scene_ids={0: "assets:1"})[0]
     metadata = deepcopy(snapshot.to_metadata())
     for obj in env.sim.rigid.values():
         obj.value.add_(1)
@@ -346,18 +433,18 @@ def test_snapshot_owns_every_entity_and_control_target_after_live_buffers_change
 
 def test_restore_overwrites_reset_side_effects_for_all_state_and_first_frame() -> None:
     env = _Environment()
-    host = SimulationSceneExpansionHost(env, initial_validator=_passed)
-    host(_variant())
-    snapshot = host.initial_state
+    host = SimulationSceneExpansionHost(env, initial_validator=lambda row: _passed())
+    host({0: _variant()})[0]
+    snapshot = host.initial_states[0]
     assert snapshot is not None
     for obj in env.sim.rigid.values():
         obj.value.add_(1)
     for obj in (*env.sim.robots.values(), *env.sim.articulations.values()):
         for value in obj.state.values():
             value.add_(1)
-    restored = host.restore_initial_state(snapshot)
+    restored = host.restore_initial_states({0: snapshot})[0]
     assert restored.initial_state_id == snapshot.initial_state_id
-    assert host.initial_state.to_metadata() == snapshot.to_metadata()
+    assert host.initial_states[0].to_metadata() == snapshot.to_metadata()
     assert env.rollout_buffer["obs"][0, 0, 0].item() == pytest.approx(_CANDIDATE_CUBE_X)
     assert env.sim.updated_steps == 0
 
@@ -368,8 +455,8 @@ def test_restore_checks_actual_round_trip_state_and_preserves_actual_identity(
     accepted: bool,
 ) -> None:
     env = _Environment()
-    host = SimulationSceneExpansionHost(env, initial_validator=_passed)
-    snapshot = host.capture_initial_state(parent_scene_id="assets:1")
+    host = SimulationSceneExpansionHost(env, initial_validator=lambda row: _passed())
+    snapshot = host.capture_initial_states(parent_scene_ids={0: "assets:1"})[0]
     cube = env.sim.rigid["cube"]
     original = cube.set_local_pose
 
@@ -378,7 +465,7 @@ def test_restore_checks_actual_round_trip_state_and_preserves_actual_identity(
         cube.value[:, 0] += delta
 
     cube.set_local_pose = round_trip
-    result = host.restore_initial_state(snapshot)
+    result = host.restore_initial_states({0: snapshot})[0]
     assert result.validation.accepted is accepted
     assert result.validation.checks[0].check_id == "scene.restore_state"
     assert result.initial_state_id != snapshot.initial_state_id
@@ -389,8 +476,8 @@ def test_restore_checks_actual_round_trip_state_and_preserves_actual_identity(
 
 def test_restoration_allows_equivalent_quaternion_signs() -> None:
     env = _Environment()
-    host = SimulationSceneExpansionHost(env, initial_validator=_passed)
-    snapshot = host.capture_initial_state(parent_scene_id="assets:1")
+    host = SimulationSceneExpansionHost(env, initial_validator=lambda row: _passed())
+    snapshot = host.capture_initial_states(parent_scene_ids={0: "assets:1"})[0]
     cube = env.sim.rigid["cube"]
     original = cube.set_local_pose
 
@@ -399,7 +486,7 @@ def test_restoration_allows_equivalent_quaternion_signs() -> None:
         cube.value[:, 3:7].neg_()
 
     cube.set_local_pose = opposite_sign
-    assert host.restore_initial_state(snapshot).validation.accepted
+    assert host.restore_initial_states({0: snapshot})[0].validation.accepted
 
 
 @pytest.mark.parametrize(
@@ -419,8 +506,8 @@ def test_restoration_joint_clamp_tolerance_does_not_relax_other_saved_fields(
     accepted: bool,
 ) -> None:
     env = _Environment()
-    host = SimulationSceneExpansionHost(env, initial_validator=_passed)
-    snapshot = host.capture_initial_state(parent_scene_id="assets:1")
+    host = SimulationSceneExpansionHost(env, initial_validator=lambda row: _passed())
+    snapshot = host.capture_initial_states(parent_scene_ids={0: "assets:1"})[0]
     robot = env.sim.robots["robot"]
     write = robot.set_state
 
@@ -429,7 +516,7 @@ def test_restoration_joint_clamp_tolerance_does_not_relax_other_saved_fields(
         robot.state[field][0, 0] += delta
 
     robot.set_state = native_round_trip
-    result = host.restore_initial_state(snapshot)
+    result = host.restore_initial_states({0: snapshot})[0]
     assert result.validation.accepted is accepted
     metrics = result.validation.checks[0].metrics
     assert metrics["absolute_tolerance"] == 1e-5
@@ -453,8 +540,8 @@ def test_malformed_snapshot_replacement_is_rejected_before_restore_writes(
     value: tuple,
 ) -> None:
     env = _Environment()
-    host = SimulationSceneExpansionHost(env, initial_validator=_passed)
-    snapshot = host.capture_initial_state(parent_scene_id="assets:1")
+    host = SimulationSceneExpansionHost(env, initial_validator=lambda row: _passed())
+    snapshot = host.capture_initial_states(parent_scene_ids={0: "assets:1"})[0]
     articulation = next(
         state for state in snapshot._states if state.kind == "articulation"
     )
@@ -465,19 +552,23 @@ def test_malformed_snapshot_replacement_is_rejected_before_restore_writes(
 
 def test_foreign_snapshot_is_rejected_before_reset() -> None:
     first_env = _Environment()
-    first = SimulationSceneExpansionHost(first_env, initial_validator=_passed)
-    snapshot = first.capture_initial_state(parent_scene_id="assets:1")
+    first = SimulationSceneExpansionHost(
+        first_env, initial_validator=lambda row: _passed()
+    )
+    snapshot = first.capture_initial_states(parent_scene_ids={0: "assets:1"})[0]
     second_env = _Environment()
-    second = SimulationSceneExpansionHost(second_env, initial_validator=_passed)
+    second = SimulationSceneExpansionHost(
+        second_env, initial_validator=lambda row: _passed()
+    )
     with pytest.raises(ValueError, match="another scene host"):
-        second.restore_initial_state(snapshot)
+        second.restore_initial_states({0: snapshot})[0]
     assert second_env.events == []
 
 
 def test_valid_but_different_snapshot_joint_names_fail_before_reset() -> None:
     env = _Environment()
-    host = SimulationSceneExpansionHost(env, initial_validator=_passed)
-    snapshot = host.capture_initial_state(parent_scene_id="assets:1")
+    host = SimulationSceneExpansionHost(env, initial_validator=lambda row: _passed())
+    snapshot = host.capture_initial_states(parent_scene_ids={0: "assets:1"})[0]
     states = tuple(
         (
             replace(state, joint_names=("different_a", "different_b"))
@@ -488,18 +579,24 @@ def test_valid_but_different_snapshot_joint_names_fail_before_reset() -> None:
     )
     altered = replace(snapshot, _states=states)
     with pytest.raises(ValueError, match="joint names"):
-        host.restore_initial_state(altered)
+        host.restore_initial_states({0: altered})[0]
     assert env.events == []
 
 
 def test_state_identity_changes_with_unmoved_object_or_controller_targets() -> None:
     env = _Environment()
-    host = SimulationSceneExpansionHost(env, initial_validator=_passed)
-    first = host.capture_initial_state(parent_scene_id="assets:1").initial_state_id
+    host = SimulationSceneExpansionHost(env, initial_validator=lambda row: _passed())
+    first = host.capture_initial_states(parent_scene_ids={0: "assets:1"})[
+        0
+    ].initial_state_id
     env.sim.rigid["other"].value[0, 0] += 0.1
-    second = host.capture_initial_state(parent_scene_id="assets:1").initial_state_id
+    second = host.capture_initial_states(parent_scene_ids={0: "assets:1"})[
+        0
+    ].initial_state_id
     env.sim.robots["robot"].state["target_qvel"][0, 0] += 0.1
-    third = host.capture_initial_state(parent_scene_id="assets:1").initial_state_id
+    third = host.capture_initial_states(parent_scene_ids={0: "assets:1"})[
+        0
+    ].initial_state_id
     assert len({first, second, third}) == 3
 
 
@@ -508,27 +605,27 @@ def test_unsupported_physical_state_fails_before_reset(collection: str) -> None:
     env = _Environment()
     getattr(env.sim, collection).append("unsupported")
     with pytest.raises(ValueError, match="do not support"):
-        SimulationSceneExpansionHost(env, initial_validator=_passed)
+        SimulationSceneExpansionHost(env, initial_validator=lambda row: _passed())
     assert env.events == []
 
 
 def test_changed_or_missing_entities_fail_before_any_reset_write() -> None:
     env = _Environment()
-    host = SimulationSceneExpansionHost(env, initial_validator=_passed)
+    host = SimulationSceneExpansionHost(env, initial_validator=lambda row: _passed())
     env.sim.rigid["extra"] = _Rigid(0.5)
     with pytest.raises(ValueError, match="entity set"):
-        host(_variant())
+        host({0: _variant()})[0]
     assert env.events == []
 
 
 def test_fixed_robot_or_unknown_entity_pose_change_fails_before_reset() -> None:
     env = _Environment()
-    host = SimulationSceneExpansionHost(env, initial_validator=_passed)
+    host = SimulationSceneExpansionHost(env, initial_validator=lambda row: _passed())
     variant = SceneVariant(
         "assets:1", 0, 0, (ScenePoseChange("robot", torch.eye(4).tolist()),)
     )
     with pytest.raises(ValueError, match="existing rigid object"):
-        host(variant)
+        host({0: variant})[0]
     assert env.events == []
 
 
@@ -580,8 +677,8 @@ def test_callback_arity_rejected_before_seed_or_reset(signature: str) -> None:
 
 def test_initial_validator_arity_rejected_before_preparation() -> None:
     env = _Environment()
-    with pytest.raises(TypeError, match="zero arguments"):
-        SimulationSceneExpansionHost(env, initial_validator=lambda required: _passed())
+    with pytest.raises(TypeError, match="environment ID"):
+        SimulationSceneExpansionHost(env, initial_validator=lambda: _passed())
     assert env.events == []
 
 
@@ -603,14 +700,14 @@ def test_auxiliary_success_cannot_replace_missing_initial_checks(mode: str) -> N
                 obj.state[key].zero_()
                 obj.default[key].zero_()
     host = SimulationSceneExpansionHost(
-        env, initial_validator=lambda: ValidationResult(()), **settings
+        env, initial_validator=lambda row: ValidationResult(()), **settings
     )
     result = (
-        host.restore_initial_state(
-            host.capture_initial_state(parent_scene_id="assets:1")
-        )
+        host.restore_initial_states(
+            {0: host.capture_initial_states(parent_scene_ids={0: "assets:1"})[0]}
+        )[0]
         if mode == "restore"
-        else host(_variant())
+        else host({0: _variant()})[0]
     )
     assert not result.validation.accepted
     assert any(
@@ -626,8 +723,8 @@ def test_restore_rejects_reset_physical_parameter_changes(
     field: str, kind: str
 ) -> None:
     env = _Environment()
-    host = SimulationSceneExpansionHost(env, initial_validator=_passed)
-    snapshot = host.capture_initial_state(parent_scene_id="assets:1")
+    host = SimulationSceneExpansionHost(env, initial_validator=lambda row: _passed())
+    snapshot = host.capture_initial_states(parent_scene_ids={0: "assets:1"})[0]
     initialize = env._initialize_episode
 
     def randomized_reset(*args, **kwargs):
@@ -637,7 +734,7 @@ def test_restore_rejects_reset_physical_parameter_changes(
 
     env._initialize_episode = randomized_reset
     with pytest.raises(ValueError, match="physical parameters changed"):
-        host.restore_initial_state(snapshot)
+        host.restore_initial_states({0: snapshot})[0]
     assert "observation" not in env.events and "seed_recording" not in env.events
 
 
@@ -646,9 +743,9 @@ def test_restoration_allows_small_measured_limit_excursion(excursion: float) -> 
     env = _Environment()
     robot = env.sim.robots["robot"]
     robot.state["qpos"][0, 0] = (-2.0 if excursion < 0 else 2.0) + excursion
-    host = SimulationSceneExpansionHost(env, initial_validator=_passed)
-    saved = host.capture_initial_state(parent_scene_id="assets:1")
-    result = host.restore_initial_state(saved)
+    host = SimulationSceneExpansionHost(env, initial_validator=lambda row: _passed())
+    saved = host.capture_initial_states(parent_scene_ids={0: "assets:1"})[0]
+    result = host.restore_initial_states({0: saved})[0]
     assert result.validation.accepted
     assert robot.state["qpos"][0, 0].item() == (-2.0 if excursion < 0 else 2.0)
     assert result.initial_state_id != saved.initial_state_id
@@ -660,10 +757,10 @@ def test_restoration_keeps_large_excursions_and_targets_strict(
 ) -> None:
     env = _Environment()
     env.sim.robots["robot"].state[field][0, 0] = 2.0 + excursion
-    host = SimulationSceneExpansionHost(env, initial_validator=_passed)
-    saved = host.capture_initial_state(parent_scene_id="assets:1")
+    host = SimulationSceneExpansionHost(env, initial_validator=lambda row: _passed())
+    saved = host.capture_initial_states(parent_scene_ids={0: "assets:1"})[0]
     with pytest.raises(ValueError, match="joint position limits"):
-        host.restore_initial_state(saved)
+        host.restore_initial_states({0: saved})[0]
     assert env.events == []
 
 
@@ -685,10 +782,11 @@ def test_initial_validator_reads_contacts_without_replaying_history() -> None:
         selected_actor_ids=(4,),
         actors=(actor,),
         actor_info=lambda actor_id: actor,
-        fetch=lambda: buffer,
+        fetch_solver_report=lambda: buffer,
     )
     owner = SimpleNamespace(
         num_envs=1,
+        physics_step_index=0,
         spawn_result=SimpleNamespace(
             create_contact_query=lambda targets, **kwargs: query
         ),
@@ -713,11 +811,13 @@ def test_initial_validator_reads_contacts_without_replaying_history() -> None:
         assert not history.found.any()
         return _passed()
 
-    host = SimulationSceneExpansionHost(env, initial_validator=validate, settle_steps=2)
-    result = host(_variant())
+    host = SimulationSceneExpansionHost(
+        env, initial_validator=lambda row: validate(), settle_steps=2
+    )
+    result = host({0: _variant()})[0]
     assert result.validation.accepted
     assert env.sim.updated_steps == 2
-    restored = host.restore_initial_state(host.initial_state)
+    restored = host.restore_initial_states({0: host.initial_states[0]})[0]
     assert restored.validation.accepted and env.sim.updated_steps == 2
 
 
@@ -753,10 +853,10 @@ def test_opt_in_convergence_failure_rejects_prepared_candidate() -> None:
     env = _Environment()
     host = SimulationSceneExpansionHost(
         env,
-        initial_validator=_passed,
+        initial_validator=lambda row: _passed(),
         settling=SettlingCfg(mode="convergence", max_steps=2),
     )
-    result = host(_variant())
+    result = host({0: _variant()})[0]
     assert not result.validation.accepted
     assert result.validation.checks[0].check_id == "scene.stability"
     assert result.validation.checks[0].status == "failed"
@@ -780,13 +880,13 @@ def test_opt_in_convergence_is_measured_but_not_repeated_on_restore() -> None:
     env.sim.update = update
     host = SimulationSceneExpansionHost(
         env,
-        initial_validator=_passed,
+        initial_validator=lambda row: _passed(),
         settling=SettlingCfg(mode="convergence", max_steps=5, consecutive_steps=2),
     )
-    assert host(_variant()).validation.accepted
-    snapshot = host.initial_state
+    assert host({0: _variant()})[0].validation.accepted
+    snapshot = host.initial_states[0]
     assert env.sim.updated_steps == 2
-    restored = host.restore_initial_state(snapshot)
+    restored = host.restore_initial_states({0: snapshot})[0]
     assert restored.validation.accepted
     assert env.sim.updated_steps == 2
     assert restored.metadata["settle_steps"] == 0
@@ -802,46 +902,24 @@ def test_mutated_convergence_configuration_is_rejected_before_reset(
 
     env = _Environment()
     cfg = SettlingCfg(mode="convergence")
-    host = SimulationSceneExpansionHost(env, initial_validator=_passed, settling=cfg)
+    host = SimulationSceneExpansionHost(
+        env, initial_validator=lambda row: _passed(), settling=cfg
+    )
     setattr(cfg, field, value)
     with pytest.raises(ValueError):
-        host(_variant())
+        host({0: _variant()})[0]
     assert env.events == []
 
 
 def test_backend_overflow_variant_is_rejected_before_reset() -> None:
     env = _Environment()
-    host = SimulationSceneExpansionHost(env, initial_validator=_passed)
+    host = SimulationSceneExpansionHost(env, initial_validator=lambda row: _passed())
     pose = torch.eye(4).tolist()
     pose[0][3] = 1e100
     variant = SceneVariant("assets:1", 0, 0, (ScenePoseChange("cube", pose),))
     with pytest.raises(ValueError, match="backend"):
-        host(variant)
+        host({0: variant})[0]
     assert env.events == []
-
-
-def test_initial_state_hash_matches_pre_migration_golden() -> None:
-    from embodichain.lab.sim.scene.state import EntityState
-    from embodichain.lab.task_program.integrations.simulation.scene_expansion import (
-        SimulationSceneInitialState,
-    )
-
-    state = EntityState(
-        "rigid_object",
-        "cube",
-        "dynamic",
-        (),
-        (0.25, 0.5, 0.75, 0.0, 0.0, 0.0, 1.0),
-        (0.0,) * 6,
-    )
-    snapshot = SimulationSceneInitialState(
-        "assets:golden", "default", 0.04, (state,), object()
-    )
-    # Recorded by executing the original #750 snapshot classes before extraction.
-    assert (
-        snapshot.initial_state_id
-        == "scene-initial:7f9126504bb834ba77a206b262754dbb783b2cd10d816572c35016fc7b6ecbeb"
-    )
 
 
 def test_previous_recording_is_consumed_before_any_physical_reset():

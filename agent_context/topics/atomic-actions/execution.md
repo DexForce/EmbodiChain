@@ -1,4 +1,4 @@
-# Atomic Action planning and execution
+# Atomic Skill planning and execution
 
 Read this when the request needs these details. [Topic overview](atomic-actions.md).
 
@@ -6,13 +6,13 @@ Read this when the request needs these details. [Topic overview](atomic-actions.
 
 ### 1. Construct the engine
 
-`AtomicActionEngine` owns one `ActionPlanningServices` snapshot: robot, motion
+`AtomicSkillEngine` owns one `SkillPlanningServices` snapshot: robot, motion
 generator, device, planner backend, trajectory builder, and command profiles.
 Built-ins are installed through the engine catalog. An engine is not a global
 process registry.
 
 The standard simulation composition root is
-`create_simulation_atomic_action_engine()` in `sim_adapter.py`.
+`create_simulation_atomic_skill_engine()` in `sim_adapter.py`.
 
 ### 2. Bind resources
 
@@ -26,7 +26,7 @@ targets. They do not contain live planners or mutable controller state.
 
 ### 3. Build an invocation
 
-`ActionInvocation` contains:
+`SkillInvocation` contains:
 
 - exact action `skill_id`;
 - an action-owned frozen goal;
@@ -35,17 +35,32 @@ targets. They do not contain live planners or mutable controller state.
 - motion, tracking, and recovery policy; and
 - a monotonic revision when replacing a compatible in-flight request.
 
-The engine resolves the invocation into `ResolvedActionRequest`. The action's
+The engine resolves the invocation into `ResolvedSkillRequest`. The action's
 framework-owned `plan()` validates exact goal/options types and then calls the
 implementation `_plan(request, context)` hook.
 
 ### 4. Choose planning or execution
 
-- `engine.plan(invocation, context)` returns one `ActionPlan`.
+- `engine.plan(invocation, context)` returns one `SkillPlan`.
 - `engine.compile(invocations, context)` performs a fixed offline projection.
 - `engine.start(invocations, context)` creates an observed `ExecutionSession`.
 - `ExecutionRunner` drives that session against observation, command, and clock
   ports without blocking `step()`.
+
+An opt-in `SkillPlan.continuation` requests fresh-observation planning inside
+one invocation. Progress is bounded and strictly advances; rejected rows cannot
+return. `PLAN_CONTINUED` records each installed chunk without consuming a retry
+or resetting the invocation timeout. Intermediate chunks commit no symbolic
+effects. Contact paths require execution, reject offline `compile()`, external
+nominal/expanded trajectories and invocation revisions, and retain loaded joint
+targets across internal holds. `PlanningContext.planning_mask` scopes geometric
+reductions and IK to the session's eligible rows before selecting shared timing.
+
+For a prequalified replay, `MoveJoints` accepts a typed full-robot
+`TimedTrajectory`. Each command occupies one environment control step.
+The motion binding covers all joints, and the selected rows match the planning
+context. This preserves authored samples and disables replanning. The caller
+qualifies the authored path.
 
 ## PlanningContext invariants
 
@@ -64,8 +79,8 @@ object guards, phase gates, retries, or later calls.
 
 Focused regression coverage:
 
-- `tests/sim/atomic_actions/test_engine_per_env.py`
-- `tests/sim/atomic_actions/test_endpoint_runtime_e2e.py`
+- `tests/sim/atomic_skills/test_engine_per_env.py`
+- `tests/sim/atomic_skills/test_endpoint_runtime_e2e.py`
 
 ## Execution and verification
 
@@ -163,7 +178,7 @@ it in every command-cycle guard copies the complete command stream repeatedly.
 
 Tracking recovery is separate from task-level semantic recovery:
 
-- Atomic Actions owns planning failure, target/collision revision, transport
+- Atomic Skills owns planning failure, target/collision revision, transport
   acknowledgement, tracking error, timeout, retry, and safe stop.
 - Task Program may perform bounded workflow recovery after the action reaches
 a semantic effect boundary.
@@ -172,6 +187,10 @@ a semantic effect boundary.
 scalar budgets to `MotionGenOptions` for both strategies. Omitted velocity
 preserves Robot caps; the default acceleration budget is 0.5. Typed `plan_opts`
 require `motion_gen`; each backend owns how they consume scalar budgets.
+For `motion_gen`, an explicit `acceleration_limit=None` preserves the backend's
+configured budget; `ik_interp` still requires a positive scalar. The benchmark
+uses this delegation when injecting selected-planner options so task defaults
+do not replace the suite's per-joint limits or invalidate prepared backends.
 Configured execution policies expose the same fields under `motion`, and
 requested budgets are retained in execution metadata. Use these fields when a
 physically qualified task needs a lower speed than the selected robot's limits.
@@ -181,7 +200,7 @@ physically qualified task needs a lower speed than the selected robot's limits.
 `MotionPolicy.velocity_targets` selects `auto` (use trajectory velocities,
 default) or `zero` (explicit position-only control).
 Configured execution policies decode the same field under `motion`.
-`AtomicAction.build_plan` derives missing velocities after composite skills
+`AtomicSkill.build_plan` derives missing velocities after composite skills
 have assembled their final full-robot positions and timing. The first command,
 both ends of every stationary joint interval, and terminal settling commands
 use zero velocity; failed rows remain held.
@@ -197,3 +216,91 @@ of choosing the maximum. Simulation control periods and sleeps must be integer
 multiples of `physics_dt`; the adapter never rounds a motion-command request
 upward. Passive runner polling, including physical-effect waits, rounds the
 configured minimum cycle up to an advertised clock quantum before sleeping.
+
+## Benchmark physical replay evidence
+
+The benchmark extension's `scenarios/_replay_diagnostics.py` and
+`atomic_replay.py` collect optional Atomic replay evidence without changing
+stage scoring or controller commands. The
+[benchmark README](../../../embodichain/extensions/benchmarks/motion_generation/README.md#physical-replay-diagnostics)
+owns the configuration, recorded fields and timing interpretation.
+
+## Planning budgets and adoption
+
+`RecoveryPolicy.planning_budget` installs a complete-request ledger and optional
+cooperative deadline; nested work retains the parent, and None adds neither.
+Typed recovery data is immutable/finite and must match the descriptor's accepted
+skill/revision type before preparation. Complete-action retries, segment
+alternatives and final emitted-speed qualification are separate boundaries.
+
+Segment recovery capability comes from the actual validation override, not a
+copied class marker; configured preflight rejects unsupported combinations
+before provider acquisition. Preview uses the same engine and a distinct
+occurrence in an explicit same-observation projected context. Transform/final
+speed checks are rejection-only; they never replace nominal external motion.
+
+Explicit Press recovery permits at most two B1 complete plans and consumes its
+contact-roll alternative only after failure. Failed phases use Motion's bounded
+continuous IK on unchanged targets/time grid, not Robot's different candidate
+selection hook. Final full-robot speed rejection does not start another search.
+
+`ExecutionPlanLifecycle` adopts an owned validated attempt before dispatch.
+Rejected installation latches the session against later tick/revision resumption.
+The runner cancels/holds safely before its once-only abort notification.
+
+## Goal-specific boundaries
+
+| Primitive | Contract that callers must retain |
+|---|---|
+| PickUp / AxisAlign | Normalize approach directions per row and preserve each frozen realization; explicit grasp-axis approach uses realized TCP +Z. Alignment twist/offset do not prove feasibility. |
+| MoveHeldObject | Keep the verified grasp while consuming ordered object poses; optional final yaw is the only freed pose component. An explicit object ID must match and reports attachment; omission retains effectless transport. |
+| Slide | An explicit joint target is absolute, with calibrated axis sign and same-timestamp state. Satisfied rows hold, invalid observations fail, and mixed active directions reject. Fixed-distance mode remains separate and open-loop. |
+| Pour | A supplied receiver/source-mouth target determines compensated geometry; omission retains local-axis mode. An optional `reference_object_pose` anchors local-axis tilt and return to an authored upright object pose instead of propagating a preceding endpoint error; it is exclusive with a receiver target and retains the actual start joints. `PourOptions.rotation_duration` sets an optional minimum for each tilt/return leg. Local-axis mode stretches each row's native timing before control-grid resampling and batch padding, retaining planning policy and motion limits. Hosts measure mouth alignment/height during tilt and physical outcome. |
+| Held transport / Place / Pour | Continue the bound closing command until release; a contact-blocked measured aperture does not maintain closing effort. |
+| ExecuteDemoSkill | Internal demonstration events do not introduce independent recovery boundaries. |
+
+
+## Contact-path selection
+
+Pickup's optional `cartesian_lift` and placement's `cartesian_approach` use the
+existing sampled Cartesian path and joint-limit retiming with `ik_interp`.
+Pickup plans a separate straight world-Z lift only after a feasible approach;
+failed rows remain ineligible. Placement times each required approach leg
+separately and retains both adjacent endpoints as a one-control-interval stop,
+preserving exact arrivals and the independently checked acceleration bounds at
+corners. Ineligible or previously failed rows bypass IK and timing for each
+approach leg and retract; active rows retain their physical environment mapping,
+and joint-space holds are scattered back for rejected rows. An FK hold pose is
+insufficient because redundant IK can select another posture. Adaptive PickUp
+and Place sampling grows to fit the required arrivals; fixed-grid budgets remain
+explicit. It retains its closing pressure until release. The default paths remain
+unchanged. HandOver can explicitly retract
+sampled grasp TCPs through `grasp_retract_distance` before deriving transport
+and handover targets. The offset is a planning declaration; acquisition,
+retention and final acceptance still require the original physical evidence.
+
+## Tolerance-bounded invocation handoff
+
+`TrackingPolicy.boundary_stop` adds a joint-motion stop gate without replacing
+timed/feedback terminal acceptance or effect verification. It retains the exact
+terminal command, including hand targets, until two distinct observations satisfy
+the configured target error and control-grid measured-position speed tolerances.
+Rows that are ready retain their terminal arm/hand targets while eligible peers
+wait at the batch barrier; failed rows remain masked out.
+Native qvel remains a finite-data check and is logged separately; its post-substep
+value is not substituted for the control-grid derivative. Invalid rows and physical
+timeouts fail closed without keeping failed rows in another terminal gate's mask.
+The state resets on plan installation/recovery; snapshots preserve independent
+ownership. This is not strict reference continuity, C1/C2 blending or a zero
+tracking-error guarantee. `boundary_diagnostic` events identify tolerances, elapsed
+physical time and per-row error/speed/readiness.
+
+`boundary_reference_bridge` optionally separates controller-reference continuity
+from measured state. Native free entry phases can receive a bounded rest-to-rest
+prefix from captured drive targets to their original first sample. The original
+phase name, held/contact guards and suffix remain; lengths/monitor indices shift
+together. Prefix and join stencils are protected from expansion and retiming;
+rebuilding cannot prepend twice. Projected observations advance owned references
+without overwriting measured evidence. External nominal/unsupported phases retain
+existing behavior with explicit unavailable diagnostics. Physical qualification
+remains required after collision certificates are invalidated.

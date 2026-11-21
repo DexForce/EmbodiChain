@@ -6,8 +6,11 @@ embodichain.lab.task_program
    :undoc-members:
    :exclude-members: TaskProgramCfg, TaskProgramIntegrationCfg, PoseCfg, TargetRefCfg,
       CyclicPoseTargetCfg, PickCfg, PlaceCfg, HandOverCfg, RegisteredSemanticCallCfg,
+      PoseTargetCfg, SceneRelativePoseTargetCfg, MoveHeldObjectCfg, HoldPostCfg,
+      NormalizedTaskProgram, normalize_task_program,
       InvokeCfg, SequenceCfg, RepeatCfg, SegmentCfg, ParallelCfg, BarrierCfg,
-      WaitStablePostCfg, ObjectNearTargetValidatorCfg, ObjectLiftedValidatorCfg,
+      WaitStablePostCfg, ObjectNearTargetValidatorCfg,
+      ObjectNearRelativeTargetValidatorCfg, ObjectLiftedValidatorCfg,
       ObjectRelativePositionValidatorCfg, ObjectUprightValidatorCfg,
       ArticulationJointPositionValidatorCfg, load_task_program, loads_task_program_json,
       parse_task_program_json, decode_task_program, validate_task_program,
@@ -23,6 +26,12 @@ embodichain.lab.task_program
       PoseCfg
       TargetRefCfg
       CyclicPoseTargetCfg
+      PoseTargetCfg
+      SceneRelativePoseTargetCfg
+      MoveHeldObjectCfg
+      HoldPostCfg
+      NormalizedTaskProgram
+      normalize_task_program
       PickCfg
       PlaceCfg
       HandOverCfg
@@ -31,10 +40,13 @@ embodichain.lab.task_program
       SequenceCfg
       RepeatCfg
       SegmentCfg
+      SegmentContractCfg
+      SegmentEvidenceCfg
       ParallelCfg
       BarrierCfg
       WaitStablePostCfg
       ObjectNearTargetValidatorCfg
+      ObjectNearRelativeTargetValidatorCfg
       ArticulationJointPositionValidatorCfg
       TaskProgramCompiler
       CompiledTaskProgram
@@ -198,6 +210,14 @@ Schema
 .. autoclass:: ObjectNearTargetValidatorCfg
    :members:
 
+.. py:class:: ObjectNearRelativeTargetValidatorCfg
+   :module: embodichain.lab.task_program.language.schema
+   :no-typesetting:
+   :no-index-entry:
+
+.. autoclass:: ObjectNearRelativeTargetValidatorCfg
+   :members:
+
 .. py:class:: ObjectLiftedValidatorCfg
    :module: embodichain.lab.task_program.language.schema
    :no-typesetting:
@@ -309,6 +329,35 @@ Gym lifecycle bridge is :mod:`embodichain.lab.gym.envs.task_program`.
 
 .. autoclass:: TaskProgramCompileError
 
+Configured deployment composition
+---------------------------------
+
+Compose program, integration and execution-policy selections with a resolved
+embodiment skill profile through the public loader. It uses the same strict
+component decoders as the Gym loader, returns independently owned declarations,
+and preserves the integration fingerprint across identical inputs. This step
+does not register an environment or create a simulator or live adapter.
+
+The host still resolves physical components and loads the selected program.
+After creating its live scene, it can call the returned integration's
+``adapter_factory.create_adapter(environment)`` through the existing
+``TaskProgramAdapterFactory`` protocol. Configured nominal motion sources retain
+their existing static program preflight during composition.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.composition
+
+.. autosummary::
+
+   ConfiguredTaskProgramDeployment
+   ConfiguredTaskProgramIntegration
+   load_configured_task_program_deployment
+
+.. autoclass:: ConfiguredTaskProgramDeployment
+
+.. autoclass:: ConfiguredTaskProgramIntegration
+
+.. autofunction:: load_configured_task_program_deployment
+
 Expansion integration
 ----------------------
 
@@ -324,11 +373,23 @@ template contract.
 
    TaskProgramPlanRequest
    TaskProgramPlanTransformFactory
+   TaskProgramNominalSourceFactory
 
 .. autoclass:: TaskProgramPlanRequest
    :members:
 
 .. autoclass:: TaskProgramPlanTransformFactory
+   :members:
+
+.. autoclass:: TaskProgramNominalSourceFactory
+   :members:
+
+.. currentmodule:: embodichain.lab.task_program.integrations.nominal
+
+.. autoclass:: BoundTaskProgramNominalSources
+   :members:
+
+.. autoclass:: TracingTaskProgramNominalSources
    :members:
 
 .. currentmodule:: embodichain.lab.task_program.integrations.expansion
@@ -339,6 +400,11 @@ template contract.
    TaskProgramSourceAdapter
    TaskProgramExpansionRecord
    CombinedTaskProgramExpansionFactory
+   TaskProgramMappedRetimeFactory
+   TaskProgramMappedRetimeRecord
+   TaskProgramSameGridExpansionFactory
+   TaskProgramSameGridExpansionRecord
+   TaskProgramNativeExpansionRecord
 
 .. autoclass:: TaskProgramSourceAdapter
    :members:
@@ -349,6 +415,21 @@ template contract.
 .. autoclass:: CombinedTaskProgramExpansionFactory
    :members:
 
+.. autoclass:: TaskProgramMappedRetimeFactory
+   :members:
+
+.. autoclass:: TaskProgramMappedRetimeRecord
+   :members:
+
+.. autoclass:: TaskProgramSameGridExpansionFactory
+   :members:
+
+.. autoclass:: TaskProgramSameGridExpansionRecord
+   :members:
+
+.. autoclass:: TaskProgramNativeExpansionRecord
+   :members:
+
 .. currentmodule:: embodichain.lab.task_program
 
 MLLM frontend
@@ -357,3 +438,46 @@ MLLM frontend
 .. autofunction:: embodichain.agents.mllm.decode_mllm_task_program
 
 .. autofunction:: embodichain.agents.mllm.compile_mllm_task_program
+
+
+Segment acceptance contracts
+----------------------------
+
+.. autoclass:: SegmentContractCfg
+   :members:
+
+.. autoclass:: SegmentEvidenceCfg
+Shared targets and duration policies
+------------------------------------
+
+.. py:class:: PoseTargetCfg
+   :module: embodichain.lab.task_program.language.schema
+   :no-typesetting:
+   :no-index-entry:
+
+.. autoclass:: PoseTargetCfg
+   :members:
+
+.. py:class:: SceneRelativePoseTargetCfg
+   :module: embodichain.lab.task_program.language.schema
+   :no-typesetting:
+   :no-index-entry:
+
+.. autoclass:: SceneRelativePoseTargetCfg
+   :members:
+
+.. py:class:: MoveHeldObjectCfg
+   :module: embodichain.lab.task_program.language.schema
+   :no-typesetting:
+   :no-index-entry:
+
+.. autoclass:: MoveHeldObjectCfg
+   :members:
+
+.. py:class:: HoldPostCfg
+   :module: embodichain.lab.task_program.language.schema
+   :no-typesetting:
+   :no-index-entry:
+
+.. autoclass:: HoldPostCfg
+   :members:

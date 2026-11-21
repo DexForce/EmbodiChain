@@ -18,18 +18,20 @@
 
 from __future__ import annotations
 
-import inspect
 import torch
 from collections.abc import Sequence
 from prettytable import PrettyTable
 from typing import TYPE_CHECKING, Union
 
 from embodichain.utils import logger
-from .manager_base import ManagerBase
+from .manager_base import Functor, ManagerBase
 from .cfg import RewardCfg
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
+
+
+__all__ = ["RewardManager"]
 
 
 class RewardManager(ManagerBase):
@@ -225,5 +227,5 @@ class RewardManager(ManagerBase):
             self._mode_functor_cfgs[functor_cfg.mode].append(functor_cfg)
 
             # check if the functor is a class
-            if inspect.isclass(functor_cfg.func):
+            if isinstance(functor_cfg.func, Functor):
                 self._mode_class_functor_cfgs[functor_cfg.mode].append(functor_cfg)

@@ -28,11 +28,11 @@ from embodichain.lab.sim.cfg import NewtonPhysicsCfg
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 _ROBOT_ENTRYPOINTS = (
-    "extensions/embodichain_robots/agilex/cobotmagic/cfg.py",
-    "extensions/embodichain_robots/franka/panda.py",
-    "extensions/embodichain_robots/universal_robots/ur_robot.py",
+    "embodichain/extensions/robots/agilex/cobotmagic/cfg.py",
+    "embodichain/extensions/robots/franka/panda.py",
+    "embodichain/extensions/robots/universal_robots/ur_robot.py",
     "embodichain/lab/sim/robots/dual_arm.py",
-    "extensions/embodichain_robots/dexforce/w1/cfg.py",
+    "embodichain/extensions/robots/dexforce/w1/cfg.py",
 )
 
 
@@ -62,6 +62,9 @@ def test_robot_entrypoint_selects_newton_backend(
             pass
 
         def open_window(self) -> None:
+            pass
+
+        def open_viewer(self) -> None:
             pass
 
         def destroy(self) -> None:

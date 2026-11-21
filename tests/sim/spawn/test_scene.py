@@ -22,16 +22,27 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from embodichain.lab.sim.cfg import ArticulationRootPropertiesCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import (
+    ArticulationRootPropertiesCfg,
+    RigidObjectCfg,
+    VisualObjectCfg,
+)
 from embodichain.lab.sim.objects import (
     Articulation,
     DeformableObject,
+    FluidObject,
     RigidObject,
     RigidObjectGroup,
     Robot,
 )
 from embodichain.lab.sim.spawn.scene import SpawnScene
-from dexsim.spawn import MaterialDesc
+from dexsim.spawn import (
+    MaterialDesc,
+    MeshObjectDesc,
+    ObjectDesc,
+    SceneBuilder,
+    SceneDesc,
+)
 
 pytestmark = pytest.mark.no_sim
 
@@ -49,6 +60,29 @@ def test_material_resolution_rejects_conflicting_explicit_definitions():
     assert scene.builder.materials["shared"] is original
 
 
+def test_no_render_preserves_authored_alpha_recipe_without_native_alpha_write():
+    scene = object.__new__(SpawnScene)
+    scene.builder = SimpleNamespace(materials={})
+    scene._usd_texture_files = SimpleNamespace(resolve=lambda materials: materials)
+    scene._material_resources = SimpleNamespace(renderer="no-render")
+    original = MaterialDesc(
+        name="glass", alpha_mode="BLEND", base_color_map="authored.png"
+    )
+
+    native = scene._resolve_materials({"glass": original})
+
+    assert native["glass"].alpha_mode is None
+    assert native["glass"].base_color_map is None
+    assert original.alpha_mode == "BLEND"
+    assert original.base_color_map == "authored.png"
+    scene.builder.materials.update(native)
+    assert scene._material_definition("glass") is original
+    with pytest.raises(ValueError, match="Conflicting visual material"):
+        scene._resolve_materials(
+            {"glass": MaterialDesc(name="glass", alpha_mode="MASK")}
+        )
+
+
 def _make_scene(handles: dict[str, object]) -> SpawnScene:
     scene = object.__new__(SpawnScene)
     scene._num_envs = 1
@@ -58,6 +92,21 @@ def _make_scene(handles: dict[str, object]) -> SpawnScene:
     )
     scene._assets = {}
     return scene
+
+
+@pytest.mark.parametrize("backend", ["newton", "dexsim"])
+def test_invalid_prepared_variants_fail_before_declaration(backend: str) -> None:
+    scene = _make_scene({})
+    scene.builder.backend = backend
+    scene.builder.add_object = MagicMock()
+    descriptor = SimpleNamespace(
+        name="variant", per_env=True, env_variants={1: object()}
+    )
+    expected_error = ValueError if backend == "newton" else NotImplementedError
+    with pytest.raises(expected_error):
+        scene.declare("rigid_object", "variant", descriptor)
+    scene.builder.add_object.assert_not_called()
+    assert "variant" not in scene
 
 
 def _material_assignment_scene(kind: str):
@@ -231,7 +280,10 @@ def test_bind_retries_only_incomplete_declarations() -> None:
     assert second.bind_attempts == 2
 
 
-def test_declare_initializes_facade_with_spawn_instance_count() -> None:
+@pytest.mark.parametrize("per_env,instances", [(True, 3), (False, 1)])
+def test_declare_initializes_facade_with_spawn_instance_count(
+    per_env, instances
+) -> None:
     scene = object.__new__(SpawnScene)
     scene._num_envs = 3
     scene.builder = SimpleNamespace(
@@ -245,11 +297,45 @@ def test_declare_initializes_facade_with_spawn_instance_count() -> None:
     scene.declare(
         "rigid_object",
         "cube",
-        SimpleNamespace(name="cube", per_env=True),
+        SimpleNamespace(name="cube", per_env=per_env),
         facade=facade,
     )
 
-    assert facade.declared_num_instances == 3
+    assert facade.declared_num_instances == instances
+
+
+@pytest.mark.parametrize("failure", ["duplicate", "partial_add"])
+def test_visual_owner_add_failure_preserves_existing_companion(failure):
+    companion = MeshObjectDesc(name="room__visual_0_mesh")
+    builder = object.__new__(SceneBuilder)
+    builder.backend = "dexsim"
+    builder.scene_desc = SceneDesc(mesh_objects=[companion])
+    builder._finalized = False
+    builder._pending_changes = {}
+    builder.result = None
+    builder._adapter = SimpleNamespace(
+        backend="dexsim",
+        add=MagicMock(side_effect=RuntimeError("partial native add")),
+        remove=MagicMock(),
+    )
+    scene = object.__new__(SpawnScene)
+    scene.builder = builder
+    scene._assets = {"room": SimpleNamespace()}
+    scene._material_resources = SimpleNamespace(renderer="fast-rt")
+    uid = companion.name if failure == "duplicate" else "new_owner"
+    facade = SimpleNamespace(
+        uid=uid, num_instances=1, cfg=VisualObjectCfg(uid=uid, visuals=[])
+    )
+    error = ValueError if failure == "duplicate" else RuntimeError
+    message = "already" if failure == "duplicate" else "partial native add"
+
+    with pytest.raises(error, match=message):
+        scene.declare("visual_object", uid, ObjectDesc(name=uid), facade=facade)
+
+    assert len(builder.mesh_objects) == 1
+    assert builder.mesh_objects[0] is companion
+    assert set(scene._assets) == {"room"}
+    assert getattr(facade, "_visual_binding", None) is None
 
 
 def test_rigid_object_receives_instance_count_only_when_declared() -> None:
@@ -279,7 +365,7 @@ def test_rigid_object_receives_instance_count_only_when_declared() -> None:
 
 @pytest.mark.parametrize(
     "facade_type",
-    [RigidObject, Articulation, Robot, RigidObjectGroup, DeformableObject],
+    [RigidObject, Articulation, Robot, RigidObjectGroup, DeformableObject, FluidObject],
 )
 def test_object_constructors_hide_spawn_lifecycle_parameters(
     facade_type: type[object],
@@ -288,6 +374,9 @@ def test_object_constructors_hide_spawn_lifecycle_parameters(
 
     assert "declared_num_instances" not in parameters
     assert "spawn_result" not in parameters
+    assert "positions" not in parameters
+    assert "pose" not in parameters
+    assert "on_write" not in parameters
 
 
 def test_runtime_config_attaches_articulation_before_preparing_it() -> None:
@@ -649,3 +738,36 @@ def test_no_render_retains_visual_declaration_without_native_transform_binding()
     assert "visual" in scene._assets
     scene.remove("visual")
     assert "visual" not in scene._assets
+
+
+def test_no_render_excludes_visual_materials_during_native_spawn() -> None:
+    scene = object.__new__(SpawnScene)
+    material = MaterialDesc(name="textured", base_color_map="texture.png")
+    observed_materials = []
+
+    def add_object(descriptor):
+        observed_materials.append(dict(scene.builder.materials))
+        return descriptor
+
+    def finalize():
+        observed_materials.append(dict(scene.builder.materials))
+        return SimpleNamespace(handles={})
+
+    scene.builder = SimpleNamespace(
+        materials={"texture": material},
+        is_finalized=False,
+        result=None,
+        backend="dexsim",
+        add_object=add_object,
+        finalize=finalize,
+    )
+    scene._num_envs = 1
+    scene._assets = {}
+    scene._material_resources = SimpleNamespace(renderer="no-render")
+    scene._resource_material_definitions = {}
+
+    scene.declare("rigid_object", "box", SimpleNamespace(name="box", per_env=False))
+    scene.commit()
+
+    assert observed_materials == [{}, {}]
+    assert scene.builder.materials == {"texture": material}

@@ -21,7 +21,12 @@ from __future__ import annotations
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
-from .types import LossResult, SupervisedBatch, SupervisedObjective
+from .types import (
+    LossResult,
+    SupervisedBatch,
+    SupervisedObjective,
+    SupervisedTrainingState,
+)
 from .distributed import distributed_run
 from .learner import SupervisedLearner
 from .sources import SupervisedSource, TensorBatchSource
@@ -34,6 +39,7 @@ __all__ = [
     "LossResult",
     "SupervisedBatch",
     "SupervisedObjective",
+    "SupervisedTrainingState",
     "SupervisedLearner",
     "SupervisedSource",
     "TensorBatchSource",

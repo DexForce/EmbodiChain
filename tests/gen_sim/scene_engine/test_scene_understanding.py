@@ -77,6 +77,63 @@ def test_image_object_analysis_preserves_articulated_object_metadata() -> None:
     assert scene.assets[0].is_articulated is True
 
 
+@pytest.mark.parametrize("category", ["bell", "push_button", "water_dispenser", "knob"])
+def test_known_movable_categories_are_promoted_to_articulation(category: str) -> None:
+    scene = scene_understanding._parse_image_object_analysis_response(_response())
+    scene.assets[0].category = category
+    scene.assets[0].is_articulated = False
+
+    scene_understanding._force_known_movable_objects_articulated(scene)
+
+    assert scene.assets[0].is_articulated is True
+
+
+@pytest.mark.parametrize("category", ["cup", "wooden_cube", "puzzle_cube", "oven_mitt"])
+def test_articulation_promotion_preserves_rigid_objects(category: str) -> None:
+    scene = scene_understanding._parse_image_object_analysis_response(_response())
+    scene.assets[0].category = category
+    scene_understanding._force_known_movable_objects_articulated(scene)
+    assert scene.assets[0].is_articulated is False
+
+
+def test_button_box_description_promotes_generic_box() -> None:
+    scene = scene_understanding._parse_image_object_analysis_response(_response())
+    scene.assets[0].category = "box"
+    scene.assets[0].name = "gray box with green button"
+    scene.assets[0].description = "gray rectangular box with a push button on top"
+    scene_understanding._force_known_movable_objects_articulated(scene)
+    assert scene.assets[0].is_articulated is True
+
+
+@pytest.mark.parametrize(
+    ("category", "required_alias"),
+    [("bell", "hotel bell"), ("water_dispenser", "dispenser")],
+)
+def test_segmentation_aliases_cover_observed_service_vocabulary(
+    category: str, required_alias: str
+) -> None:
+    assert required_alias in scene_understanding._SEGMENTATION_PROMPT_ALIASES[category]
+
+
+def test_image_analysis_promotes_bell_before_generation(tmp_path: Path) -> None:
+    payload = json.loads(_response())
+    payload["assets"][0].update(category="bell", name="silver service bell")
+
+    class VLM:
+        def complete(self, **_: object) -> str:
+            return json.dumps(payload)
+
+    image = tmp_path / "scene.png"
+    Image.new("RGB", (8, 8)).save(image)
+    scene = Scene()
+    scene_understanding._analyze_image_objects(
+        scene=scene,
+        image_path=image,
+        vlm_client=VLM(),  # type: ignore[arg-type]
+    )
+    assert scene.assets[0].is_articulated is True
+
+
 def test_image_object_analysis_accepts_name_with_spatial_words() -> None:
     scene = scene_understanding._parse_image_object_analysis_response(
         _response(asset_name="left cup")
@@ -117,6 +174,92 @@ def test_image_object_analysis_retries_then_updates_scene(tmp_path: Path) -> Non
 
     assert scene.table is not None
     assert [asset.id for asset in scene.assets] == ["cup_001"]
+
+
+class _PromptedSegmentation:
+    """Return one rectangular mask only for the prompts it recognizes."""
+
+    def __init__(self, image_size: tuple[int, int], known: set[str]) -> None:
+        mask = Image.new("L", image_size, 0)
+        ImageDraw.Draw(mask).rectangle((8, 8, 24, 20), fill=255)
+        self.mask = image_segmentation_utils._encode_binary_mask_rle(mask)
+        self.known = known
+        self.prompts: list[str] = []
+
+    def segment_single_object(self, *, image_path: Path, prompt: str) -> list:
+        self.prompts.append(prompt)
+        return [self.mask] if prompt in self.known else []
+
+
+def test_seamless_tabletop_falls_back_to_a_surface_prompt(tmp_path: Path) -> None:
+    image_path = tmp_path / "scene.png"
+    Image.new("RGB", (48, 32), "white").save(image_path)
+    scene = Scene(
+        objects=[
+            SceneObject(
+                id="table",
+                kind="table",
+                category="table",
+                name="white table",
+                description="A white tabletop filling the frame.",
+            )
+        ]
+    )
+    segmentation = _PromptedSegmentation((48, 32), {"surface"})
+
+    class VLM:
+        def complete(self, **_: object) -> str:
+            return json.dumps({"selected_mask_index": 1})
+
+    scene_understanding._segment_table(
+        image_path,
+        image_path,
+        Image.new("L", (48, 32), 0),
+        tmp_path,
+        tmp_path,
+        scene,
+        vlm_client=VLM(),  # type: ignore[arg-type]
+        image_segmentation_client=segmentation,  # type: ignore[arg-type]
+    )
+
+    assert segmentation.prompts[-1] == "surface"
+    assert scene.table is not None and scene.table.mask_path is not None
+
+
+def test_unsegmented_asset_retries_with_vlm_appearance_prompts(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "scene.png"
+    Image.new("RGB", (48, 32), "white").save(image_path)
+    hammer = SceneObject(
+        id="tool_001",
+        kind="asset",
+        category="tool",
+        name="hammer",
+        description="A hammer seen from above.",
+    )
+    scene = Scene(objects=[hammer])
+    segmentation = _PromptedSegmentation((48, 32), {"tool with black handle"})
+
+    class VLM:
+        def complete(self, *, system_prompt: str, **_: object) -> str:
+            if "found no mask" in system_prompt:
+                return json.dumps({"prompts": ["tool", "tool with black handle"]})
+            return json.dumps(
+                {"assignments": [{"asset_id": "tool_001", "mask_index": 1}]}
+            )
+
+    scene_understanding._segment_assets(
+        image_path,
+        tmp_path,
+        tmp_path,
+        scene,
+        vlm_client=VLM(),  # type: ignore[arg-type]
+        image_segmentation_client=segmentation,  # type: ignore[arg-type]
+    )
+
+    assert segmentation.prompts == ["tool", "hammer", "tool with black handle"]
+    assert hammer.mask_path is not None
 
 
 def test_asset_mask_id_overlay_excludes_the_table_mask(tmp_path: Path) -> None:

@@ -143,15 +143,15 @@ def main(args: argparse.Namespace | None = None) -> None:
     sensor = create_sensor(sim, args)
 
     # Open visualization window if not headless
-    if not args.headless:
-        sim.open_window()
+    if not args.headless or getattr(args, "web", False):
+        sim.open_viewer()
 
     # Run simulation loop
     run_simulation(
         sim,
         robot,
         sensor,
-        use_viser=args.viser,
+        use_viser=args.viser or getattr(args, "web", False),
         max_steps=args.steps,
     )
 

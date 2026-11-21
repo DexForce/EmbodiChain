@@ -1,0 +1,31 @@
+id: TaskProgramRepeatedPickPlace-DualUR5-v1
+environment:
+  component: envs/tabletop.default.yaml
+task_program:
+  program: task_program/program.tabletop.yaml
+  integration:
+    component: task_program/integration.tabletop.yaml
+    overrides:
+      integration_id: repeated_pick_place_dual_ur_v1
+      profile:
+        skill_options:
+          pick:
+            fixed_object_to_eef:
+              position: [0.0, 0.0, -0.01]
+              quaternion_xyzw: [1.0, 0.0, 0.0, 0.0]
+  execution_policy:
+    component: ../../../components/execution_policies/motion_gen_verified.yaml
+    overrides:
+      motion:
+        velocity_limit: 0.5
+embodiment:
+  component: ../../../components/embodiments/dual_ur5_dh_pgi_140_80.yaml
+  overrides:
+    init_pos:
+    - 1.683
+    - 0.0
+    - 0.4525
+    init_rot:
+    - 0.0
+    - 0.0
+    - -90.0

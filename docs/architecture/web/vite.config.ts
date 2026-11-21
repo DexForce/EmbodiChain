@@ -23,6 +23,7 @@ const snapshotPath =
   fileURLToPath(new URL('../generated/architecture.json', import.meta.url));
 export default defineConfig({
   base: './',
+  resolve: { preserveSymlinks: true, dedupe: ['react', 'react-dom', '@xyflow/react'] },
   plugins: [
     react(),
     {

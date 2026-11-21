@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "baseline": "460939c83b6fc62f113b62af4798a89c42b3bec2",
+  "groups": [
+    {
+      "owner": "tests/sim/objects/test_light.py",
+      "removed": [
+        "TestLightTypes::test_spot_light_has_cone_angles",
+        "TestLightTypes::test_rect_light_has_dimensions",
+        "TestLightTypes::test_global_light_no_position_in_reset[sun]",
+        "TestLightTypes::test_global_light_no_position_in_reset[direction]"
+      ],
+      "retained": "TestLightTypes::test_create_each_light_type[spot-4,rect-4,sun-1,direction-1]",
+      "contract": "Native creation with nondefault cone/rectangle configuration; global-light identity and instance count. Original tests did not check readback of cone angles or dimensions, so no readback coverage is claimed."
+    },
+    {
+      "owner": "tests/utils/test_nms.py",
+      "changed": "3 seeds x 4 chunk sizes x 2 ordering policies use 64 rather than 400 poses; actual CPU execution is explicit.",
+      "retained": [
+        "24-case CPU seed/order/chunk matrix",
+        "400-pose partial/multirow tiles for both ordering policies",
+        "6000-pose heavy suppression for both ordering policies",
+        "Independent CUDA and CPU-input-offload/device coverage",
+        "Explicit empty, duplicates, float64, thresholds and deterministic priority cases"
+      ],
+      "contract": "Reference-equivalent selection and ordering, tile boundaries and bounded reference blocks. Large-input Cartesian repetition is reduced; unique branch and stress coverage remains."
+    },
+    {
+      "owner": "tests/sim/test_backend_parity.py;tests/sim/test_sim_manager_cfg.py;tests/sim/motion/planners/test_neural_planner.py",
+      "changed": "Module-level no_sim classification; no assertion or input changes.",
+      "contract": "Configuration, fake backends and fake ONNX/robot state do not initialize a native engine."
+    },
+    {
+      "owner": "embodichain/lab/sim/sim_manager.py",
+      "changed": "Consolidate post-World collections and skip a redundant collection when no Worlds remain.",
+      "contract": "Backend synchronization and child-before-parent release remain; queued cleanup still performs an outer full collection. Existing lifecycle regressions and complete native validation are required."
+    },
+    {
+      "owner": "tests/conftest.py",
+      "changed": "Clear reported sys.last_exc and legacy traceback fields before native/GPU user finalizers, with a fallback at global queue cleanup.",
+      "contract": "The original failed test remains failed; its frame-owned resources can be reclaimed before finalizers and the next test. Python 3.12 regression fails before the fix and passes afterward."
+    },
+    {
+      "owner": "tests/sim/objects/test_{light,rigid_object,articulation,rigid_object_group}.py",
+      "changed": "Use 512 scene nodes and a 64x64 unused viewport in small object fixtures; release test-owned references before queue flushing.",
+      "contract": "Backend/device, arena counts, models, timesteps, controller inputs, tolerances and all physical assertions are retained. Pixel tests and standalone default-capacity regressions are unchanged. Native state observations must end with no Worlds, managers or queued cleanup."
+    },
+    {
+      "owner": "tests/sim/motion/workspace/test_manipulability.py",
+      "changed": "Reuse one class-scoped native CobotMagic scene and reset object state before each analysis; keep fresh analyzers/configs and independent cache directories. Move a mock-only cache-aggregate test to the existing no_sim metric unit class.",
+      "removed": [
+        "TestAnalyzerManipulability::test_no_solver_hit_recomputes_aggregates_under_current_config"
+      ],
+      "retained": [
+        "TestManipulabilityMetricUnit::test_no_solver_hit_recomputes_aggregates_under_current_config"
+      ],
+      "contract": "All14case assertions remain, with unchanged robot/solver/backend/device/arena settings,100sample workloads and seed42. Only World lifetime changes; at most one scene/manager may remain inside the class, and both must return to zero when its fixture ends."
+    },
+    {
+      "owner": "tests/sim/motion/workspace/test_analyzer.py;tests/sim/motion/workspace/test_cache.py;tests/sim/motion/solvers/test_opw_solver.py",
+      "changed": "Share identical native robot topology within a module or device class, reset object state before each case, and clear all binding/fixture owners before final queue flushing.",
+      "contract": "Analysis modes/sample counts, OPW grids including65536samples, TCP/limits, backend/device, assertions and fresh per-test analyzers/cache paths remain unchanged. CLI startup cases keep independent scenes. Owned scenes stay bounded at one and return to zero at scope/session end."
+    },
+    {
+      "owner": "scripts/ci/pytest_no_finalize.py;scripts/ci/run_test_plan.py",
+      "changed": "Opt-in static dependency import freezing only inside the existing owned no-finalize process; refuse domain/test preloads and preserve normal GC for objects created afterward.",
+      "contract": "Full lifecycle GC remains enabled for domain/test objects. Existing permanent roots are retained through process exit; reusable application interpreters are unaffected. Original failed tests keep their exit codes; successful optimized exits additionally require zero nativeWorlds/managers/queue. Discovery stays unmodified and ordered execution must match it."
+    },
+    {
+      "owner": "tests/sim/objects/test_light.py",
+      "removed": [
+        "TestLightTypes::test_mesh_light_empty_path_warns"
+      ],
+      "retained": "TestLightTypes::test_create_each_light_type[mesh-4], now with explicit empty mesh_path and cfg type readback",
+      "relocated": {
+        "TestLightTypes::test_from_dict_new_types": "test_from_dict_new_types",
+        "TestLightTypes::test_set_direction_on_point_warns": "test_inapplicable_light_setters_warn_without_native_calls[point-direction]",
+        "TestLightTypes::test_set_spot_angle_on_point_warns": "test_inapplicable_light_setters_warn_without_native_calls[point-spot-angle]",
+        "TestLightTypes::test_set_rect_wh_on_point_warns": "test_inapplicable_light_setters_warn_without_native_calls[point-rect-size]",
+        "TestLightTypes::test_set_local_pose_on_direction_warns": "test_inapplicable_light_setters_warn_without_native_calls[direction-position]",
+        "TestLightTypes::test_set_local_pose_on_sun_warns": "test_inapplicable_light_setters_warn_without_native_calls[sun-position]"
+      },
+      "contract": "The configuration assertions are unchanged and require no World. The five unsupported type/setter combinations retain their original call arguments and now assert one warning and no native calls using CPU-only handles. Real supported setters, creation for all six types, unknown-type factory errors, global reset and four-arena legacy compatibility remain native tests."
+    },
+    {
+      "owner": "tests/sim/objects/test_rigid_object.py;tests/sim/objects/test_rigid_object_group.py",
+      "changed": "For each object kind, merge collision-overlay and render-visibility smoke checks into test_visibility_controls on the original CPU, CUDA and Newton classes.",
+      "removed": [
+        "TestRigidObject{CPU,CUDA,Newton}::test_set_visible",
+        "TestRigidObjectGroup{CPU,CUDA,Newton}::test_set_visible"
+      ],
+      "renamed": {
+        "test_set_physical_visible": "test_visibility_controls"
+      },
+      "contract": "All original true/false and RGBA calls remain. Render toggles run before collision overlays exist; visibility is restored before the original collision-overlay sequence. Each backend retains a fresh native scene for the combined test and its original teardown. No simulation, pose, mass, limit or other numeric assertions are removed."
+    }
+  ],
+  "measurement": "Report original, cleaned and final execution policy separately. Preserve raw failures/skips and explicitly list removed/consolidated coverage; do not add stage percentages. Use the same qualified CXX compiler and JIT-cache policy for both variants and retain their environment metadata. Original solver pose-reference assertions are unchanged."
+}

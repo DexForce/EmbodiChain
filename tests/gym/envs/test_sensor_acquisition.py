@@ -16,10 +16,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
+import torch
 
 from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.sim.cfg import (
@@ -44,7 +47,10 @@ def _sensor_env(*, enable_sensor: bool) -> EmbodiedEnv:
         enable_sensor=enable_sensor,
         sensor=[SimpleNamespace(uid="camera")],
     )
-    env.sim = SimpleNamespace(add_sensor=MagicMock(return_value=object()))
+    env.sim = SimpleNamespace(
+        add_sensor=MagicMock(return_value=object()),
+        _plan_camera_groups=MagicMock(),
+    )
     return env
 
 
@@ -64,6 +70,66 @@ def test_enabled_sensor_acquisition_creates_configured_sensor() -> None:
 
     assert list(sensors) == ["camera"]
     env.sim.add_sensor.assert_called_once_with(env.cfg.sensor[0])
+
+
+def test_tactile_rgb_preview_saves_completed_normalized_rgb(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Use the configured field and current environment's completed frame."""
+    cv2 = pytest.importorskip("cv2")
+    monkeypatch.chdir(tmp_path)
+    env = _sensor_env(enable_sensor=True)
+    sensor = SimpleNamespace(
+        cfg=SimpleNamespace(sensor_type="TactileIndentation"),
+        SUPPORTED_DATA_TYPES=[],
+        get_data=lambda: {
+            "rgb": torch.tensor([[[[0.0, 0.0, 0.0]]], [[[1.0, 0.5, 0.0]]]])
+        },
+        get_sample_metadata=lambda: {"valid": torch.tensor([False, True])},
+        update=MagicMock(),
+    )
+    env.get_sensor = MagicMock(return_value=sensor)
+
+    with pytest.raises(RuntimeError, match="no valid scheduled sample"):
+        env.preview_sensor_data("pad", data_type="rgb", env_ids=0, save=True)
+    env.preview_sensor_data("pad", data_type="rgb", env_ids=1, save=True)
+
+    sensor.update.assert_not_called()
+    np.testing.assert_array_equal(
+        cv2.imread("sensor_data_rgb.png"),
+        np.array([[[0, 128, 255]]], dtype=np.uint8),
+    )
+
+
+def test_legacy_stereo_preview_refreshes_and_saves_both_images(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unphased camera can populate its images during preview."""
+    cv2 = pytest.importorskip("cv2")
+    monkeypatch.chdir(tmp_path)
+    env = _sensor_env(enable_sensor=True)
+    data = {}
+    sensor = SimpleNamespace(
+        cfg=SimpleNamespace(sensor_type="StereoCamera"),
+        SUPPORTED_DATA_TYPES=["color"],
+        get_data=lambda: data,
+        get_sample_metadata=lambda: None,
+        update=MagicMock(
+            side_effect=lambda: data.update(
+                color=torch.tensor([[[[255, 0, 0]]]], dtype=torch.uint8),
+                color_right=torch.tensor([[[[0, 255, 0]]]], dtype=torch.uint8),
+            )
+        ),
+    )
+    env.get_sensor = MagicMock(return_value=sensor)
+
+    env.preview_sensor_data("stereo", save=True)
+
+    sensor.update.assert_called_once_with()
+    np.testing.assert_array_equal(
+        cv2.imread("sensor_data_color.png"),
+        np.array([[[0, 0, 255], [0, 255, 0]]], dtype=np.uint8),
+    )
 
 
 @pytest.mark.parametrize("enable_sensor", [False, True])
@@ -101,11 +167,13 @@ def test_gym_overrides_robot_sensor_switch_on_a_copy(
     assert runtime_cfg is not original
     sensors = env._setup_sensors()
     if enable_sensor:
+        env.sim._plan_camera_groups.assert_called_once()
         assert list(sensors) == ["camera", "wrist"]
         assert sensors["wrist"] is mounted_instance
         env.sim.add_sensor.assert_called_once_with(env.cfg.sensor[0])
         env.sim.get_sensor.assert_called_once_with("wrist")
     else:
+        env.sim._plan_camera_groups.assert_not_called()
         assert sensors == {}
         env.sim.add_sensor.assert_not_called()
         env.sim.get_sensor.assert_not_called()

@@ -25,17 +25,17 @@ import sys
 import pytest
 import torch
 
-from embodichain_models.dynamics.rwm.robot_state import (
+from embodichain.extensions.models.dynamics.rwm.robot_state import (
     integrate_robot_state,
     robot_state_error,
 )
-from embodichain_models.dynamics.rwm.model import (
+from embodichain.extensions.models.dynamics.rwm.model import (
     RobotWorldModel,
     RobotWorldModelCfg,
     frozen_world_model,
 )
 from embodichain.learning.sl import SupervisedBatch, SupervisedLearner
-from embodichain_models.dynamics.rwm import (
+from embodichain.extensions.models.dynamics.rwm import (
     RobotWorldModelObjective,
     RWMPredictor,
     build_rwm_trainer,
@@ -337,9 +337,9 @@ def test_rwm_imports_do_not_initialize_simulation():
     code = """
 import sys
 import embodichain.learning.sl
-assert not any(name == 'embodichain_models' or name.startswith('embodichain_models.') for name in sys.modules)
-from embodichain_models.dynamics.rwm import RobotWorldModel, RobotWorldModelObjective, RWMPredictor, build_rwm_trainer
-import embodichain_models.dynamics.rwm.replay
+assert not any(name == 'embodichain.extensions.models' or name.startswith('embodichain.extensions.models.') for name in sys.modules)
+from embodichain.extensions.models.dynamics.rwm import RobotWorldModel, RobotWorldModelObjective, RWMPredictor, build_rwm_trainer
+import embodichain.extensions.models.dynamics.rwm.replay
 assert not any(name == 'dexsim' or name.startswith('dexsim.') or name.startswith('embodichain.lab.') for name in sys.modules)
 """
     subprocess.run([sys.executable, "-c", code], check=True)
@@ -393,7 +393,7 @@ def test_offline_recipe_preserves_committed_updates_on_resume(tmp_path):
 
 @pytest.mark.gpu
 def test_cuda_replay_and_bfloat16_network_preserve_fp32_state():
-    from embodichain_models.dynamics.rwm.replay import TransitionReplay
+    from embodichain.extensions.models.dynamics.rwm.replay import TransitionReplay
 
     model = RobotWorldModel(
         RobotWorldModelCfg(hidden_dims=(16,), amp_bfloat16=True)

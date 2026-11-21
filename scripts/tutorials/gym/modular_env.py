@@ -55,7 +55,7 @@ from embodichain.lab.gym.envs.managers import (
 )
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
-from embodichain_robots import DexforceW1Cfg
+from embodichain.extensions.robots import DexforceW1Cfg
 from embodichain.lab.sim.sensors import StereoCameraCfg, SensorCfg
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.cfg import (
@@ -211,7 +211,7 @@ class ExampleCfg(EmbodiedEnvCfg):
             shape=MeshCfg(
                 fpath=get_data_path("TableWare/tableware/fork/standard_fork_scale.ply"),
             ),
-            body_scale=(0.75, 0.75, 1.0),
+            body_scale=(0.75, 0.75, 0.75),
             init_pos=(0.8, 0, 1.0),
         ),
     ]

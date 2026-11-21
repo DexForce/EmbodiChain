@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+import inspect
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
@@ -37,11 +38,16 @@ from embodichain.lab.task_program import CompiledTaskProgram, TaskProgramCfg
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+    from embodichain.lab.sim.motion.expansion import CombinedExpansionProfile
+    from embodichain.lab.task_program.runtime.expansion import (
+        TaskProgramNominalSourceFactory,
+        TaskProgramPlanTransformFactory,
+    )
 
 __all__ = [
     "ScenePreparationResult",
     "SceneVariantEpisodeResult",
-    "execute_scene_variant",
+    "execute_scene_variants",
 ]
 
 
@@ -109,6 +115,7 @@ class SceneVariantEpisodeResult:
     """Independent scene preparation, program execution, and measured outcome.
 
     Args:
+        env_id: Physical environment row represented by this result.
         variant: Exact proposed scene evaluated by this attempt.
         preparation: Actual settled initial-state identity and checks.
         execution: Existing demo executor result, absent for an invalid initial
@@ -127,8 +134,11 @@ class SceneVariantEpisodeResult:
     measured_validation: ValidationResult | None
     program_completed: bool = False
     program_completion_mask: tuple[bool, ...] = ()
+    env_id: int = field(kw_only=True)
 
     def __post_init__(self) -> None:
+        if type(self.env_id) is not int or self.env_id < 0:
+            raise ValueError("env_id must be a nonnegative integer")
         if not isinstance(self.variant, SceneVariant):
             raise TypeError("variant must be a SceneVariant")
         if not isinstance(self.preparation, ScenePreparationResult):
@@ -141,6 +151,11 @@ class SceneVariantEpisodeResult:
             self.measured_validation, ValidationResult
         ):
             raise TypeError("measured_validation must be a ValidationResult or None")
+        if self.execution is not None and (
+            self.env_id >= len(self.execution.success)
+            or len(self.execution.completed_by_env) != len(self.execution.success)
+        ):
+            raise ValueError("execution must include completion evidence for this row")
         if type(self.program_completed) is not bool:
             raise TypeError("program_completed must be a bool")
         try:
@@ -164,8 +179,8 @@ class SceneVariantEpisodeResult:
             self.program_completed
             and self.program_completion_mask == (True,)
             and self.execution is not None
-            and self.execution.completed
-            and self.execution.all_success
+            and self.execution.completed_by_env[self.env_id]
+            and self.execution.success[self.env_id]
         )
 
     @property
@@ -190,7 +205,8 @@ class SceneVariantEpisodeResult:
             Provenance suitable for the existing episode recording path.
         """
         return {
-            "schema_version": 1,
+            "schema_version": 2,
+            "env_id": self.env_id,
             "variant": _variant_metadata(self.variant),
             "initial_state_id": self.preparation.initial_state_id,
             "preparation": json_safe_copy(
@@ -222,71 +238,92 @@ def _variant_metadata(variant: SceneVariant) -> dict[str, object]:
     }
 
 
-def execute_scene_variant(
+def execute_scene_variants(
     env: EmbodiedEnv,
-    variant: SceneVariant,
+    variants: Mapping[int, SceneVariant],
     *,
-    prepare_scene: Callable[[SceneVariant], ScenePreparationResult],
-    measured_validator: Callable[[], ValidationResult],
+    prepare_scene: Callable[
+        [Mapping[int, SceneVariant]], Mapping[int, ScenePreparationResult]
+    ],
+    measured_validator: Callable[[int], ValidationResult],
     task_program: TaskProgramCfg | CompiledTaskProgram | None = None,
     episode_index: int = 0,
     attempt_id: int = 0,
     execution_cfg: DemoExecutionCfg | None = None,
-) -> SceneVariantEpisodeResult:
-    """Prepare and evaluate one scene through the ordinary demo execution path.
+    nominal_source_factory: TaskProgramNominalSourceFactory | None = None,
+    expansion_profile: CombinedExpansionProfile | None = None,
+    expansion_candidate_index: int = 0,
+    plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
+    trace_actions: bool = False,
+) -> Mapping[int, SceneVariantEpisodeResult]:
+    """Prepare selected scenes and execute their valid rows on one World clock.
 
-    The host prepares/restores the candidate, settles physics, validates the
-    actual initial state, and refreshes recording observations and bindings.
-    Only then does the canonical
-    ``EmbodiedEnv.create_demo_segments(task_program=...)`` create the fresh
-    runtime bridge. Its segments flow through :func:`execute_demo_episode`,
-    including for subclasses with a handwritten segment-planner override.
+    The canonical Task Program bridge is created after preparation. Its segments
+    use the ordinary batched demo executor with an explicit active-row mask.
+    Initial failures prevent execution of those rows; program completion and
+    measured acceptance are checked independently for every remaining row.
 
-    This function performs one attempt and no persistence. The caller retains
-    the existing transaction boundary: reset to commit an accepted episode or
-    reset with ``save_data=False`` to discard it. Failed or unverified scene
-    acceptance also blocks a later ordinary reset from saving this recording.
-    Automatic resets and persistence remain suspended throughout preparation,
-    execution, and measurement. A rejected recording stays ineligible until
-    the host resets its buffers, including before a later accepted attempt.
+    This entry performs no persistence. The caller resets to commit accepted
+    rows or discard rejected buffers. Checks block saving during preparation,
+    execution and measurement; rejection stays attached to its row until reset.
+    Physics advances the entire World, including unassigned rows.
 
     Args:
-        env: Initialized single-row EmbodiedEnv or a wrapper around one.
-        variant: Existing-entity scene candidate to evaluate.
-        prepare_scene: Narrow host callback that applies/restores the variant,
-            settles and refreshes observations, and returns explicit checks.
-        measured_validator: Callback reading physical state and required
-            execution evidence. It must return ValidationResult, independently
-            of Task Program completion; arbitrary truthy values are rejected.
-        task_program: Explicit config/compiled program, or the environment's
-            configured Task Program. Handwritten action-list execution is not
-            accepted by this entry point.
-        episode_index: Existing demo episode metadata index.
-        attempt_id: Existing demo execution attempt index.
-        execution_cfg: Existing demo persistence layout settings.
+        env: Initialized EmbodiedEnv or wrapper owning the physical World.
+        variants: Nonempty ordered mapping from physical row to scene proposal.
+        prepare_scene: Batch callback returning exactly one preparation result
+            per requested row, after state writes and any whole-World settling.
+        measured_validator: Required post-execution checks for one physical row.
+        task_program: Shared config/compiled program, or the configured program.
+        episode_index: Logical index used by the existing demo recording path.
+        attempt_id: Collection attempt index.
+        execution_cfg: Existing batched demo persistence layout settings.
+        nominal_source_factory: Optional episode-scoped external motion binding.
+        expansion_profile: Optional episode-owned combined motion profile.
+        expansion_candidate_index: Shared combined recipe index.
+        plan_transform_factory: Optional trusted plan transform; mutually
+            exclusive with an expansion profile.
+        trace_actions: Enable source tracing, qualified only for a B=1 World.
 
     Returns:
-        Separate initial-state, program, and measured validation results with
-        an acceptance decision. Invalid initial checks prevent execution.
+        Immutable row mapping with separate initial, program and measured
+        outcomes. A rejected row does not invalidate a successful peer.
 
     Raises:
-        TypeError: For invalid contracts, callbacks, or program types.
-        ValueError: For unsupported batching or invalid attempt identifiers.
-        RuntimeError: If another scene expansion attempt is already active.
-        Exception: Host, planning, execution, and measurement errors propagate
-            after the episode is marked ineligible for persistence.
+        ValueError: For malformed selections/configuration before preparation.
+        TypeError: For invalid callbacks, candidates or result contracts.
+        RuntimeError: For another active scene attempt on the same World.
+        Exception: Runtime failures reject all requested buffers before propagating.
     """
     from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
 
     target = getattr(env, "unwrapped", env)
     if not isinstance(target, EmbodiedEnv):
         raise TypeError("env must be an EmbodiedEnv or a wrapper around one")
-    if target.num_envs != 1:
-        raise ValueError("scene expansion currently requires B=1")
-    if not isinstance(variant, SceneVariant):
-        raise TypeError("variant must be a SceneVariant")
-    if not callable(prepare_scene) or not callable(measured_validator):
-        raise TypeError("prepare_scene and measured_validator must be callable")
+    if getattr(target, "_scene_expansion_active", False):
+        raise RuntimeError("A scene expansion attempt already owns this World")
+    if (
+        not isinstance(variants, Mapping)
+        or not variants
+        or any(
+            type(row) is not int or not 0 <= row < target.num_envs for row in variants
+        )
+    ):
+        raise ValueError("variants must map nonempty valid environment rows")
+    variants = MappingProxyType(dict(variants))
+    rows = tuple(variants)
+    if any(not isinstance(variant, SceneVariant) for variant in variants.values()):
+        raise TypeError("variants must contain SceneVariant objects")
+    for callback, argument, name in (
+        (prepare_scene, variants, "prepare_scene"),
+        (measured_validator, rows[0], "measured_validator"),
+    ):
+        if not callable(callback):
+            raise TypeError(f"{name} must be callable")
+        try:
+            inspect.signature(callback).bind(argument)
+        except (TypeError, ValueError) as error:
+            raise TypeError(f"{name} must accept its row contract") from error
     selected_program = task_program
     if selected_program is None:
         selected_program = getattr(target.cfg, "task_program", None)
@@ -299,72 +336,125 @@ def execute_scene_variant(
             raise ValueError(f"{name} must be a nonnegative integer")
     if execution_cfg is not None and not isinstance(execution_cfg, DemoExecutionCfg):
         raise TypeError("execution_cfg must be a DemoExecutionCfg or None")
+    if plan_transform_factory is not None and expansion_profile is not None:
+        raise ValueError("one episode may have only one expansion owner")
+    if expansion_profile is None and expansion_candidate_index != 0:
+        raise ValueError("expansion_candidate_index requires an expansion profile")
+    if type(trace_actions) is not bool:
+        raise TypeError("trace_actions must be a boolean")
+    if trace_actions and target.num_envs != 1:
+        raise ValueError("source execution tracing requires a B=1 World")
     previous_no_auto_reset = bool(getattr(target, "_demo_no_auto_reset", False))
-
-    pending: dict[str, object] = {
-        "schema_version": 1,
-        "variant": _variant_metadata(variant),
-        "accepted": False,
-        "status": "preparing",
+    pending = {
+        row: {
+            "schema_version": 2,
+            "env_id": row,
+            "variant": _variant_metadata(variant),
+            "accepted": False,
+            "status": "preparing",
+        }
+        for row, variant in variants.items()
     }
-
-    with target.episode_context.check("scene_expansion/task_program", [0]) as finish:
+    with target.episode_context.check("scene_expansion/task_program", rows) as finish:
+        target._scene_expansion_active = True
         target._demo_no_auto_reset = True
         try:
-            preparation = prepare_scene(variant)
-            if not isinstance(preparation, ScenePreparationResult):
-                raise TypeError("prepare_scene must return a ScenePreparationResult")
-            if not preparation.validation.accepted:
-                result = SceneVariantEpisodeResult(variant, preparation, None, None)
-                finish(accepted=False, metadata=result.to_metadata())
-                return result
-
-            pending["initial_state_id"] = preparation.initial_state_id
-            pending["status"] = "executing"
-            segments = EmbodiedEnv.create_demo_segments(
-                target, task_program=selected_program
-            )
-            bridge = target._active_task_program_bridge
-            if bridge is None:
-                raise RuntimeError("canonical Task Program bridge was not created")
-            execution = execute_demo_episode(
-                env,
-                episode_index=episode_index,
-                attempt_id=attempt_id,
-                execution_cfg=execution_cfg,
-                segments=() if segments is None else segments,
-                task_program=selected_program,
-            )
-            program_completed = bridge.program_completed
-            if type(program_completed) is not bool:
-                raise TypeError("Task Program bridge program_completed must be a bool")
-            program_completion_mask: tuple[bool, ...] = ()
-            if program_completed:
-                completion_mask = bridge.completion_mask
-                if not isinstance(completion_mask, torch.Tensor):
-                    raise TypeError("Task Program completion mask must be a tensor")
-                if completion_mask.dtype != torch.bool or completion_mask.shape != (1,):
-                    raise ValueError(
-                        "Task Program completion mask must be bool with one environment row"
+            preparation = prepare_scene(variants)
+            if (
+                not isinstance(preparation, Mapping)
+                or any(type(row) is not int for row in preparation)
+                or set(preparation) != set(rows)
+                or any(
+                    not isinstance(value, ScenePreparationResult)
+                    for value in preparation.values()
+                )
+            ):
+                raise TypeError(
+                    "prepare_scene must return exactly the requested row results"
+                )
+            preparation = dict(preparation)
+            results = {
+                row: SceneVariantEpisodeResult(
+                    variants[row], preparation[row], None, None, env_id=row
+                )
+                for row in rows
+                if not preparation[row].validation.accepted
+            }
+            active_rows = tuple(row for row in rows if row not in results)
+            if active_rows:
+                for row in active_rows:
+                    pending[row].update(
+                        initial_state_id=preparation[row].initial_state_id,
+                        status="executing",
                     )
-                program_completion_mask = tuple(completion_mask.detach().cpu().tolist())
-            measured = measured_validator()
-            if not isinstance(measured, ValidationResult):
-                raise TypeError("measured_validator must return a ValidationResult")
-            result = SceneVariantEpisodeResult(
-                variant,
-                preparation,
-                execution,
-                measured,
-                program_completed=program_completed,
-                program_completion_mask=program_completion_mask,
+                plan_options = {}
+                if nominal_source_factory is not None:
+                    plan_options["nominal_source_factory"] = nominal_source_factory
+                if plan_transform_factory is not None:
+                    plan_options["plan_transform_factory"] = plan_transform_factory
+                if expansion_profile is not None:
+                    plan_options["expansion_profile"] = expansion_profile
+                    plan_options["expansion_candidate_index"] = (
+                        expansion_candidate_index
+                    )
+                segments = EmbodiedEnv.create_demo_segments(
+                    target, task_program=selected_program, **plan_options
+                )
+                bridge = target._active_task_program_bridge
+                if bridge is None:
+                    raise RuntimeError("canonical Task Program bridge was not created")
+                if trace_actions:
+                    bridge.enable_execution_trace()
+                execution = execute_demo_episode(
+                    env,
+                    episode_index=episode_index,
+                    attempt_id=attempt_id,
+                    execution_cfg=execution_cfg,
+                    segments=() if segments is None else segments,
+                    task_program=selected_program,
+                    active_env_ids=active_rows,
+                )
+                completed = bridge.program_completed
+                if type(completed) is not bool:
+                    raise TypeError(
+                        "Task Program bridge program_completed must be a bool"
+                    )
+                completion = ()
+                if completed:
+                    mask = bridge.completion_mask
+                    if not isinstance(mask, torch.Tensor):
+                        raise TypeError("Task Program completion mask must be a tensor")
+                    if mask.dtype != torch.bool or mask.shape != (target.num_envs,):
+                        raise ValueError(
+                            "Task Program completion mask must match the World rows"
+                        )
+                    completion = tuple(mask.detach().cpu().tolist())
+                for row in active_rows:
+                    measured = measured_validator(row)
+                    if not isinstance(measured, ValidationResult):
+                        raise TypeError(
+                            "measured_validator must return a ValidationResult"
+                        )
+                    results[row] = SceneVariantEpisodeResult(
+                        variants[row],
+                        preparation[row],
+                        execution,
+                        measured,
+                        program_completed=completed,
+                        program_completion_mask=(completion[row],) if completed else (),
+                        env_id=row,
+                    )
+            ordered = {row: results[row] for row in rows}
+            finish(
+                accepted=[ordered[row].accepted for row in rows],
+                metadata={row: ordered[row].to_metadata() for row in rows},
             )
-            finish(accepted=result.accepted, metadata=result.to_metadata())
-            return result
+            return MappingProxyType(ordered)
         except BaseException as error:
-            pending["status"] = "error"
-            pending["error_type"] = type(error).__name__
+            for metadata in pending.values():
+                metadata.update(status="error", error_type=type(error).__name__)
             finish(accepted=False, metadata=pending)
             raise
         finally:
             target._demo_no_auto_reset = previous_no_auto_reset
+            target._scene_expansion_active = False

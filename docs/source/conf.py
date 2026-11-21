@@ -35,10 +35,7 @@ os.environ.setdefault(
 )
 os.environ.setdefault("AZURE_OPENAI_API_KEY", "mock-api-key-for-docs-build")
 
-sys.path.insert(0, os.path.abspath("../.."))
-sys.path.insert(
-    0, str(Path(__file__).resolve().parents[2] / "extensions" / "embodichain_models")
-)
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 
@@ -110,6 +107,7 @@ html_sidebars = {
 
 html_theme = "sphinx_book_theme"
 html_static_path = ["_static"]
+html_extra_path = ["labs"]
 # Don't include version-redirect.js automatically - we add it manually to root
 html_js_files = []
 # html_logo = "_static/logo_e.png"
@@ -118,8 +116,15 @@ html_js_files = []
 # Use empty string to use relative paths from the build directory
 html_baseurl = ""
 
-# Keep published model URLs working after the vendor/model reorganization.
-robot_doc_redirects = {
+# Keep published URLs working after documentation reorganizations.
+doc_redirects = {
+    "features/interaction/index": "overview/sim/visualization/index",
+    "features/interaction/window": "overview/sim/visualization/window",
+    "features/interaction/gizmo": "overview/sim/visualization/gizmo",
+    "features/interaction/preview_asset": "guides/preview_asset",
+    "overview/sim/viser_visualization": "overview/sim/visualization/viser",
+    "overview/sim/sim_soft_object": "overview/sim/sim_volume_deformable_object",
+    "overview/sim/sim_cloth": "overview/sim/sim_surface_deformable_object",
     "resources/robot/anymal_c": "resources/robot/anybotics/anymal_c",
     "resources/robot/microduck": "resources/robot/pollen_robotics/microduck",
     "resources/robot/unitree_g1": "resources/robot/unitree/g1",
@@ -137,7 +142,7 @@ robot_doc_redirects = {
     "resources/robot/aloha_mini": "resources/robot/alohamini/aloha_mini",
 }
 html_additional_pages = {
-    old_docname: "robot_redirect.html" for old_docname in robot_doc_redirects
+    old_docname: "doc_redirect.html" for old_docname in doc_redirects
 }
 
 # HTML context for better path handling
@@ -146,7 +151,7 @@ html_context = {
     "github_repo": "EmbodiChain",
     "github_version": "main",
     "doc_path": "docs/source",
-    "robot_doc_redirects": robot_doc_redirects,
+    "doc_redirects": doc_redirects,
 }
 
 html_theme_options = {
