@@ -3875,11 +3875,17 @@ embodichain.lab.sim.motion.planners.base_planner
 embodichain.lab.sim.motion.planners.curobo.curobo_planner
 ---------------------------------------------------------
 
+Pose path criteria use serializable position/rotation projectors with independent
+scales and physical tolerances. ``CuroboPoseConstraintCfg.linear_motion()`` builds
+the same configuration as a convenience preset; native objects remain owned by
+the planner runtime and terminal goals remain waypoint-owned.
+
 .. currentmodule:: embodichain.lab.sim.motion.planners.curobo.curobo_planner
 
 .. autosummary::
 
    CuroboAutoGenCfg
+   CuroboPoseConstraintCfg
    CuroboPlanOptions
    CuroboPlanner
    CuroboPlannerCfg

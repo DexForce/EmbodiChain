@@ -68,6 +68,7 @@ __all__ = [
 
 _ROBOT_MAX_CONVEX_HULL_NUM = 2
 _DEFAULT_CUROBO_ACCELERATION = 15.0
+_TCP_LINK = "embodichain_tcp"
 
 
 def _curobo_joint_limits(
@@ -166,6 +167,7 @@ def generate_curobo_robot_yaml(
     output_path: str,
     *,
     tool_frame: str | None = None,
+    tool_frame_to_tcp: list[list[float]] | None = None,
     urdf_path: str | None = None,
     num_spheres: int | None = None,
     sphere_density: float = 1.0,
@@ -198,6 +200,9 @@ def generate_curobo_robot_yaml(
             effective velocity caps without modifying the source asset.
         tool_frame: cuRobo tool frame (a URDF link name) to plan to. If ``None``,
             defaults to the last link of the control part.
+        tool_frame_to_tcp: Optional fixed 4x4 transform from ``tool_frame`` to
+            the runtime TCP. Adds a massless fixed TCP frame to the generated
+            model and selects it as the native tool, including for path costs.
         urdf_path: URDF to generate the cuRobo model from. If ``None`` (default),
             uses ``robot.cfg.fpath`` -- the *assembled* URDF that includes every
             mounted component (arm + gripper). Pass this explicitly when the
@@ -229,7 +234,8 @@ def generate_curobo_robot_yaml(
         ImportError: If DexSim or Open3D is not installed.
         RuntimeError: If CUDA is unavailable or no spheres could be fitted.
         ValueError: If a controlled joint has a zero velocity cap, which cuRobo
-            cannot represent, or the output URDF would overwrite the source.
+            cannot represent, the output URDF would overwrite the source,
+            or a TCP transform is invalid or its reserved link already exists.
     """
     import os
 
@@ -357,6 +363,28 @@ def generate_curobo_robot_yaml(
             )
         tool_frame = part_links[-1]
 
+    extra_links = {}
+    if tool_frame_to_tcp is not None:
+        if _TCP_LINK in (robot.get_link_names() or []):
+            raise ValueError(
+                "The reserved cuRobo TCP link already exists in the robot."
+            )
+        transform = torch.as_tensor(
+            tool_frame_to_tcp, dtype=torch.float32, device="cpu"
+        )
+        if transform.shape != (4, 4) or not bool(torch.isfinite(transform).all()):
+            raise ValueError("tool_frame_to_tcp must be a finite 4x4 transform.")
+        extra_links[_TCP_LINK] = {
+            "link_name": _TCP_LINK,
+            "joint_name": f"{_TCP_LINK}_joint",
+            "joint_type": "FIXED",
+            "parent_link_name": tool_frame,
+            "fixed_transform": _pose_matrix_to_list(transform),
+            "link_mass": 0.0,
+            "link_inertia": [0.0] * 6,
+        }
+        tool_frame = _TCP_LINK
+
     # 6. Encode absolute speeds in a cache-owned URDF; leave scales at one.
     motion_urdf_path = _write_velocity_limited_urdf(
         urdf_path,
@@ -384,6 +412,8 @@ def generate_curobo_robot_yaml(
             }
         }
     }
+    if extra_links:
+        data["robot_cfg"]["kinematics"]["extra_links"] = extra_links
 
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     with open(output_path, "w") as yaml_file:
