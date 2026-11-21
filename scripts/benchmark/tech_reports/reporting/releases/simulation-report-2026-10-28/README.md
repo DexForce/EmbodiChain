@@ -2,7 +2,7 @@
 
 本次为 **draft 源码提交**，整理已有实验、方案和离线报告工具；没有新增测量。
 原始数值、报告和保留的代表性媒体位于原工作区；旧／无效／重复视频和帧图已按用户要求清理，见下文。
-Hugging Face 上传按用户要求暂缓，`dataset_revision` 为 `null`；本页不代表数据集已发布或最新引擎已经通过完整复测。
+历史原始数值与媒体暂缓发布。当前运行输入已发布并固定修订，见下方的复现入口。
 
 目标数据集：[DexForceAI/embodichain_reports](https://huggingface.co/datasets/DexForceAI/embodichain_reports)。
 稳定报告 ID：`simulation-report-2026-10-28`；实验 ID 保留 L-02～L-05、R-01、P-01～P-07、D-01。
@@ -46,6 +46,14 @@ P-01 初态种子为 20261014；P-02／P-03 使用各自冻结初态文件，不
 `source-map.json` 记录每个迁入源码的原路径和原 SHA-256。添加版权头、格式化、调整源码入口／数据根目录后的文件是维护版本；运行目录内的原源码快照不变。
 `release.json` 记录数据上传状态与本轮离线检查范围。原始文件逐项清单由下节命令生成，不将大清单和测量产物放进 Git。
 
+## 运行输入发布
+
+[Hugging Face 运行输入](https://huggingface.co/datasets/DexForceAI/embodichain_reports/tree/ba51ac54a4c28417691bbed5a23848b01cb21396/reports/simulation-report-2026-10-28)
+包含 L-02、L-03、L-04 候选与 P-01～P-03 共六个 bundle。
+运行入口自动读取同一数据集提交的索引并校验文件。L-03 与 P-03 的 NVIDIA
+模型按来源和哈希从 NVIDIA 下载，P-03 的命令和指尖几何在本地生成。
+L-04 ForgeCAD 候选包含完整 USD 依赖和署名。运行示例见[总览](../../../README.md#run-the-published-comparison)。
+
 ## 阅读、离线重建与执行边界
 
 源码按 `loading/physics/.../experiments`、`platforms/<platform>`、`reporting` 归属。
@@ -76,7 +84,7 @@ python -m scripts.benchmark.tech_reports.reporting.site.build \
 **本 draft 尚未承诺所有仿真入口可在新机器／最新 main 直接运行。**
 历史批次脚本仍含原机器解释器、安装路径和冻结依赖注入；P-01 的部分旧相对路径还用于历史证据校验。
 当前源码与数据工作区分离后，P-01 新测量的源码快照路径也需单独适配。
-这些入口仅作原实验实现和续作起点；跨机参数化、历史 runtime 合法获取及最新版本最小试跑是后续工作，不在本次发布整理时重跑整个矩阵。
+历史入口供复核原实验，新的运行入口见上节。原实验的完整矩阵按记录的历史版本管理。
 离线已验证内容和未验证内容见 `release.json`，不能从编译检查推出动力学等价。
 
 ## 延后上传的资产准备
@@ -109,7 +117,7 @@ reports/simulation-report-2026-10-28/
 
 `index.fragment.json` 仅含真实输入候选，不能替换远端现有 index。上传前重新核对清单和逐文件许可，将输入、报告元数据和合并后的 index 在同一数据集提交中发布；随后验证下载字节并写回完整 commit SHA。
 远端已有 `dexuni-physics-2026-10-27` 是另一份报告，不能覆盖或冒用其发布状态。
-本 draft 的数据尚未上传，因此无法仅凭公网 checkout 重建完整网页。
+完整网页仍需要原工作区的历史轨迹、报告正文和媒体。
 
 后续资产优先采用可追溯、体积适中的原生 USD。L-04 柜体候选为 ForgeCAD 的 `kitchen_base_cabinet/`，来源修订
 `0573053fa2c9174ca2a4678a462ec4dfd3035d59`，约 17.7 MB，包装元数据声明 CC-BY-4.0。

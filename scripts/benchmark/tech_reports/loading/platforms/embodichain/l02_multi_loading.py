@@ -107,8 +107,13 @@ class Simulation:
 
         backend = get_newton_backend(self.sim.get_world())
         model = backend.model
-        sleeping = backend.solver.vbd_solver._rigid_sleep is not None
-        assert sleeping == self.cfg.get("rigid_enable_sleep", True)
+        vbd_solver = backend.solver.vbd_solver
+        sleeping = None
+        physics = f"Newton / {self.sim.physics.solver_type}"
+        if vbd_solver is not None:
+            sleeping = vbd_solver._rigid_sleep is not None
+            assert sleeping == self.cfg.get("rigid_enable_sleep", True)
+            physics += f" VBD {self.cfg['dexuni_iterations']}, sleep {sleeping}"
         arrays = {
             "mass": self.group.get_mass().cpu().numpy(),
             "inertia": self.group.get_inertia().cpu().numpy(),
@@ -137,7 +142,7 @@ class Simulation:
             "replication": "SimulationManagerCfg.num_envs -> SpawnScene replicated arenas",
             "collision_isolation": "native arena world IDs; overlap probe saved for pilots",
             "effective_config": self.sim.sim_config.to_dict(),
-            "physics": f"Newton / DexUni VBD {self.cfg['dexuni_iterations']}, sleep {sleeping}",
+            "physics": physics,
             "rigid_enable_sleep": sleeping,
             "body_count": model.body_count,
             "renderer": "hybrid (media)" if self.cfg["record"] else "no-render",

@@ -40,6 +40,8 @@ ROOT = Path(
 sys.path.insert(0, str(ROOT / "outputs/benchmarks/L-02/runtime"))
 import pynvml as nv
 
+from ...assets.runtime import add_runtime_arguments, prepare_inputs, runtime_python
+
 __all__ = ["main"]
 
 
@@ -70,6 +72,7 @@ def main() -> None:
     )
     p.add_argument("--allow-busy", action="store_true")
     p.add_argument("--wait-idle", action="store_true")
+    add_runtime_arguments(p)
     args = p.parse_args()
     assert not (
         args.suite == "main" and args.allow_busy
@@ -80,11 +83,35 @@ def main() -> None:
         ], "Media uses four arenas and separately accounted cameras"
     base = args.output_root.resolve()
     (base / "plans").mkdir(parents=True, exist_ok=True)
-    manifest_path = (
-        ROOT / "outputs/benchmarks/L-03/prepared/shared-usd-v1/manifest.json"
-    )
-    manifest = json.loads(manifest_path.read_text())
-    profiles = json.loads((ROOT / "configs/environments.json").read_text())["profiles"]
+    legacy = bool(os.environ.get("SIM_REPORT_ROOT"))
+    prepared = None
+    if legacy:
+        manifest_path = (
+            ROOT / "outputs/benchmarks/L-03/prepared/shared-usd-v1/manifest.json"
+        )
+        manifest = json.loads(manifest_path.read_text())
+        profiles = json.loads((ROOT / "configs/environments.json").read_text())[
+            "profiles"
+        ]
+    else:
+        from .l03_prepare import describe_published_robots
+
+        prepared = prepare_inputs(
+            "l-03",
+            revision=args.revision,
+            cache_dir=args.cache_dir,
+            local_files_only=args.offline,
+            robots=tuple(args.robots),
+        )
+        manifest = describe_published_robots(prepared.bundle, prepared.robots)
+        profiles = {
+            platform: {
+                "python": runtime_python(args, platform, legacy),
+                "repository": ROOT if platform == "embodichain" else args.isaaclab_repo,
+                "launch_pythonpath": [str(ROOT)],
+            }
+            for platform in args.platforms
+        }
     for robot in args.robots:
         for item in manifest["robots"][robot]["files"]:
             assert (
@@ -110,6 +137,7 @@ def main() -> None:
             ["git", "-C", profile["repository"], "rev-parse", "HEAD"], text=True
         ).strip()
         for platform, profile in profiles.items()
+        if profile["repository"] is not None
     }
 
     def compute_pids() -> list[int]:
@@ -202,6 +230,8 @@ def main() -> None:
                 target=[0, 0, 2.2],
             ),
         )
+        if prepared is not None:
+            cfg["asset_revision"] = prepared.provenance["revision"]
         (out / "config.json").write_text(json.dumps(cfg, indent=2) + "\n")
         source = out / "source"
         source.mkdir()
@@ -216,7 +246,7 @@ def main() -> None:
             shutil.copy2(path, source / path.name)
             hashes[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
         paths = profiles[job["platform"]]["launch_pythonpath"].copy()
-        if job["platform"] == "embodichain":
+        if job["platform"] == "embodichain" and legacy:
             paths.insert(0, str(ROOT / cfg["dexsim_runtime"]))
         overrides = dict(
             PYTHONPATH=":".join(paths),

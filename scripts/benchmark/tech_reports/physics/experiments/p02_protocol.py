@@ -43,7 +43,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--scene", required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--source-repo", type=Path, required=True)
+    parser.add_argument("--source-repo", type=Path)
     parser.add_argument("--spec", type=Path)
     parser.add_argument("--dt", type=float, default=0.005)
     parser.add_argument("--count", type=int, default=10)
@@ -158,7 +158,6 @@ def begin_run(
     )
     args.duration = float(duration)
     assert abs(round(duration / args.dt) * args.dt - duration) < 1e-10
-    repo = args.source_repo.resolve()
     packages = (
         ["embodichain", "dexsim-engine", "newton", "warp-lang", "torch", "numpy"]
         if platform == "embodichain"
@@ -181,13 +180,6 @@ def begin_run(
         command=[sys.executable, *sys.argv],
         python=sys.version,
         pythonpath=os.environ.get("PYTHONPATH"),
-        source_repository=str(repo),
-        source_commit=subprocess.check_output(
-            ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True
-        ).strip(),
-        source_status=subprocess.check_output(
-            ["git", "-C", str(repo), "status", "--porcelain"], text=True
-        ),
         packages={n: importlib.metadata.version(n) for n in packages},
         source_sha256=hashes,
         protocol=cfg,
@@ -223,6 +215,17 @@ def begin_run(
         physics_dtype="float32",
         storage_dtype="float64",
     )
+    if args.source_repo is not None:
+        repo = args.source_repo.resolve()
+        meta.update(
+            source_repository=str(repo),
+            source_commit=subprocess.check_output(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True
+            ).strip(),
+            source_status=subprocess.check_output(
+                ["git", "-C", str(repo), "status", "--porcelain"], text=True
+            ).strip(),
+        )
     write_run(args.output, meta)
     return cfg, inputs, scene, meta
 

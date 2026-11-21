@@ -3,6 +3,13 @@
   "dataset": "DexForceAI/embodichain_reports",
   "publication_status": "not_uploaded_user_deferred",
   "dataset_revision": null,
+  "runtime_inputs": {
+    "publication_status": "published",
+    "dataset_revision": "ba51ac54a4c28417691bbed5a23848b01cb21396",
+    "bundle_count": 6,
+    "nvidia_models": "verified source download",
+    "p03_derived_inputs": "generated locally from the pinned Franka USD"
+  },
   "source_import_base": "950a16c6d93ba6bbbef384fcf8350c7ca2a0aa4d",
   "experiment_status": {
     "L-02": "partial",

@@ -12,7 +12,7 @@ existing L-02/L-03/L-04 and P-01/P-02/P-03 experiment sources, offline analysis,
 HTML builder and planned-experiment specifications. See the
 [current report snapshot](reporting/releases/simulation-report-2026-10-28/README.md)
 for completion states, evidence locations, unresolved issues and validation.
-Report data/media upload is deferred; no dataset revision is claimed.
+Runtime inputs are published at a pinned dataset revision. Historical run data and media remain separate.
 
 ```text
 scripts/benchmark/tech_reports/
@@ -78,6 +78,31 @@ Large binary inputs live in Hugging Face or the existing asset repositories;
 downloads use an external cache. Run records, images, episodes, and reports go
 under `outputs/benchmarks/`, not into the source asset directories.
 
+## Run the published comparison
+
+From the repository checkout, using an EmbodiChain Python environment:
+
+```bash
+python -m scripts.benchmark.tech_reports.physics.experiments.p01_compare \
+  --isaaclab-python /path/to/IsaacLab/.venv/bin/python \
+  --output /path/to/new-comparison-directory
+```
+
+The comparison fetches the verified P-01 inputs before launching separate
+processes. Set `--isaaclab-repo` to record the Isaac Lab source commit. See the
+[Isaac Lab installation guide](https://isaac-sim.github.io/IsaacLab/v3.0.0/source/isaaclab/installation.html)
+for a Python environment with the Isaac Sim backend. The example produces two
+raw trajectories, both consoles and a `comparison.json` with errors against
+analytic free fall. The example measures one initial state over one second
+at a 1 ms physics step.
+
+The `l02_multi_batch`, `l03_batch`, `p02_batch` and `p03_batch` modules
+also prepare their inputs automatically when launched from the checkout with
+`SIM_REPORT_ROOT` unset. Pass `--isaaclab-python` for subprocesses using Isaac Lab,
+`--embodichain-python` to override the local interpreter, and `--offline`
+to use a populated cache. Setting `SIM_REPORT_ROOT` selects the historical
+workspace layout and its archived defaults.
+
 ## Technical report assets
 
 The [report asset guide](assets/README.md) describes the public
@@ -87,5 +112,7 @@ The [download design](assets/DOWNLOAD_DESIGN.md) defines future shared
 benchmark input preparation, revision pinning, cache behavior, and provenance.
 
 These conventions and the proposed download helper are owned by the benchmark
-scripts. The helper and asset CLI are design only; existing benchmark commands
-keep their current behavior until actual report inputs are integrated.
+scripts. Prepare the input bundle and any upstream or derived assets with
+`python -m scripts.benchmark.tech_reports.assets.runtime p-03`.
+The command verifies the same pinned input revision as the launchers.
+See the [asset guide](assets/README.md) for provenance and cache behavior.

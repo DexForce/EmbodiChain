@@ -30,6 +30,9 @@ import subprocess
 import sys
 
 
+from ...assets.runtime import add_runtime_arguments, prepare_inputs, runtime_python
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -61,15 +64,37 @@ def main() -> None:
     parser.add_argument("--tag", default="")
     parser.add_argument("--config", type=Path)
     parser.add_argument("--output-root", type=Path)
+    add_runtime_arguments(parser)
     args = parser.parse_args()
     root = Path(
         os.environ.get("SIM_REPORT_ROOT", Path(__file__).resolve().parents[5])
     ).resolve()
-    config = (
-        args.config
-        or root / "scripts/benchmark/tech_reports/assets/physics/P-02/protocol.json"
+    legacy = bool(os.environ.get("SIM_REPORT_ROOT"))
+    repo = Path(__file__).resolve().parents[5]
+    runtime = {name: runtime_python(args, name, legacy) for name in args.platforms}
+    prepared = None
+    config = args.config
+    if config is None:
+        if legacy:
+            config = (
+                root
+                / "scripts/benchmark/tech_reports/assets/physics/P-02/protocol.json"
+            )
+        else:
+            prepared = prepare_inputs(
+                "p-02",
+                revision=args.revision,
+                cache_dir=args.cache_dir,
+                local_files_only=args.offline,
+            )
+            config = prepared.bundle / "protocol.json"
+    if prepared is None:
+        config = config.resolve()
+    spec = (
+        root / "specs/p-02-contact-stability-spec.md"
+        if legacy
+        else Path(__file__).with_name("p-02-contact-stability-spec.md")
     )
-    config = config.resolve()
     output_root = (args.output_root or root / "outputs/benchmarks/P-02").resolve()
     output_root.mkdir(parents=True, exist_ok=True)
     scenes = args.scenes or [
@@ -94,14 +119,17 @@ def main() -> None:
             / f"runs/{tag}_{args.phase}_{platform}_{scene}_dt{args.dt:g}_initial{initial:02d}"
         )
         output.mkdir(parents=True)
-        source = Path(
-            "/home/oem/code/EmbodiChain"
-            if platform == "embodichain"
-            else "/home/oem/code/IsaacLab"
+        source = (
+            Path(
+                "/home/oem/code/EmbodiChain"
+                if platform == "embodichain"
+                else "/home/oem/code/IsaacLab"
+            )
+            if legacy
+            else (repo if platform == "embodichain" else args.isaaclab_repo)
         )
-        python = f"/home/oem/miniconda3/envs/{platform}/bin/python"
         cmd = [
-            python,
+            runtime[platform],
             "-u",
             "-m",
             f"scripts.benchmark.tech_reports.physics.platforms.{platform}.p02_contact",
@@ -111,10 +139,8 @@ def main() -> None:
             scene,
             "--output",
             str(output),
-            "--source-repo",
-            str(source),
             "--spec",
-            str(root / "specs/p-02-contact-stability-spec.md"),
+            str(spec),
             "--dt",
             str(args.dt),
             "--count",
@@ -124,6 +150,12 @@ def main() -> None:
             "--phase",
             args.phase,
         ]
+        if source is not None:
+            cmd += ["--source-repo", str(source.resolve())]
+        if prepared is not None:
+            (output / "assets.json").write_text(
+                json.dumps(prepared.provenance, indent=2) + "\\n"
+            )
         if args.duration is not None:
             cmd += ["--duration", str(args.duration)]
         if args.phase == "capture":
@@ -131,9 +163,10 @@ def main() -> None:
         env = os.environ.copy()
         env["PYTHONPATH"] = str(root)
         if platform == "embodichain":
-            env[
-                "PYTHONPATH"
-            ] += ":/home/oem/code/EmbodiChain:/home/oem/code/EmbodiChain/extensions:/home/oem/code/EmbodiChain/extensions/embodichain_tasks"
+            if legacy:
+                env[
+                    "PYTHONPATH"
+                ] += ":/home/oem/code/EmbodiChain:/home/oem/code/EmbodiChain/extensions:/home/oem/code/EmbodiChain/extensions/embodichain_tasks"
             if args.iterations is not None:
                 cmd += ["--iterations", str(args.iterations)]
             if args.contact_grouping:

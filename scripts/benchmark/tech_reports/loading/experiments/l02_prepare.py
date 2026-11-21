@@ -29,6 +29,11 @@ from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, UsdShade
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--output", type=Path, required=True)
+    p.add_argument(
+        "--shared-only",
+        action="store_true",
+        help="Generate only the multi-arena shared sources",
+    )
     args = p.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     manifest = []
@@ -106,7 +111,8 @@ def main() -> None:
             < 0
         )
         faces[inward] = faces[inward][:, [0, 2, 1]]
-        for index in range(-1, limit):
+        generated_limit = 0 if args.shared_only else limit
+        for index in range(-1, generated_limit):
             mode = "S" if index < 0 else "U"
             scale = 1.0 if index < 0 else 0.9 + 0.2 * ((index * 997) % 16000) / 15999
             color = (
@@ -191,7 +197,7 @@ def main() -> None:
                     ).hexdigest(),
                 )
             )
-        print(shape, limit + 1, flush=True)
+        print(shape, generated_limit + 1, flush=True)
     positions = np.array(
         [
             [0.1 * (i % 10), 0.1 * ((i // 10) % 10), 0.1 + 0.1 * (i // 100)]

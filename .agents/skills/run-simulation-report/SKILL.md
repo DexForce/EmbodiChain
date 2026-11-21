@@ -45,6 +45,6 @@ description: Continue the L-02–L-05, R-01, P-01–P-07 and D-01 simulation rep
 不要把尚未实现的共享 core 或下载 CLI 写成可用命令。
 当前 draft 仍有机器路径及冻结依赖耦合，只有离线验证明确通过的入口可称已迁移验证；新机器执行前先参数化及最小试跑。
 
-数据集为 `DexForceAI/embodichain_reports`。当前用户选择先建 PR、上传稍后处理；不得声称已上传。
+数据集为 `DexForceAI/embodichain_reports`。六组运行输入已发布，修订见快照的 `runtime_inputs`。运行入口从同一修订校验下载，NVIDIA 模型按清单从源站获取。历史批次结果和媒体的发布仍暂缓。
 `reporting.prepare_release` 仅生成本地清单与输入候选，不提供网络发布功能。逐文件许可必须核实；输入 index 不包含结果／视频，也不能覆盖远端已有其他报告条目。
 真实发布将输入、元数据和合并 index 放入同一提交，验证后记录完整 SHA。新版本结果另存，不能把维护分支提交冒充测量版本。

@@ -41,6 +41,8 @@ PROJECT = Path(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--input-bundle", type=Path)
+    parser.add_argument("--source-repo", type=Path)
     parser.add_argument("--case", choices=["freefall", "pendulum"], required=True)
     parser.add_argument("--dt", type=float, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -53,9 +55,14 @@ def main() -> None:
     parser.add_argument("--common-view", type=Path)
     args = parser.parse_args()
     assert args.common_view is None or args.record
-    cfg_path = PROJECT / "configs/P-01/embodichain-dexuni.json"
+    bundle = args.input_bundle
+    cfg_path = (bundle or PROJECT / "configs/P-01") / "embodichain-dexuni.json"
     cfg = json.loads(cfg_path.read_text())
-    inputs_path = PROJECT / cfg["initial_states"]
+    inputs_path = (
+        bundle / "initial-states.json" if bundle else PROJECT / cfg["initial_states"]
+    )
+    assets = bundle or PROJECT / "assets/P-01"
+    spec = (bundle or PROJECT / "specs") / "p-01-dynamics-spec.md"
     inputs = json.loads(inputs_path.read_text())
     assert 1 <= args.count <= 10 and args.dt > 0 and args.duration > 0
     assert not args.record or (args.count == 1 and args.phase == "capture")
@@ -69,21 +76,22 @@ def main() -> None:
         Path(__file__),
         cfg_path,
         inputs_path,
-        PROJECT / "assets/P-01/pendulum.urdf",
-        PROJECT / "specs/p-01-dynamics-spec.md",
+        assets / "pendulum.urdf",
+        spec,
     ]
     if args.common_view is not None:
         sources += [
             args.common_view,
-            PROJECT / "assets/P-01/pendulum-display.urdf",
+            assets / "pendulum-display.urdf",
             Path(__file__).with_name("p01_common_capture.py"),
         ]
     hashes = {}
     for path in sources:
         shutil.copy2(path, snapshot / path.name)
-        hashes[str(path.relative_to(PROJECT))] = hashlib.sha256(
-            path.read_bytes()
-        ).hexdigest()
+        source_name = (
+            path.relative_to(PROJECT) if path.is_relative_to(PROJECT) else path
+        )
+        hashes[str(source_name)] = hashlib.sha256(path.read_bytes()).hexdigest()
     now = lambda: datetime.now(ZoneInfo("Asia/Shanghai")).isoformat()
     meta = dict(
         run_id=out.name,
@@ -107,9 +115,12 @@ def main() -> None:
         python=sys.version,
         pythonpath=os.environ.get("PYTHONPATH"),
         performance_benchmark=False,
-        ground_note="EmbodiChain creates a mandatory ground; all test-body colliders are disabled. No ground contact can occur.",
+        ground_enabled=bundle is None,
     )
-    repo = Path(cfg["repository"])
+    repo = (
+        args.source_repo
+        or (Path(__file__).resolve().parents[6] if bundle else Path(cfg["repository"]))
+    ).resolve()
     meta["repository_commit"] = subprocess.check_output(
         ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True
     ).strip()
@@ -130,9 +141,11 @@ def main() -> None:
             "mujoco-warp",
         ]
     }
+    modules = ["embodichain"]
+    if not bundle:
+        modules.extend(["embodichain_robots", "embodichain_tasks"])
     meta["module_origins"] = {
-        name: importlib.util.find_spec(name).origin
-        for name in ["embodichain", "embodichain_robots", "embodichain_tasks"]
+        name: importlib.util.find_spec(name).origin for name in modules
     }
     assert all(str(repo) in path for path in meta["module_origins"].values()), meta[
         "module_origins"
@@ -184,6 +197,7 @@ def main() -> None:
             num_envs=1,
             width=640,
             height=480,
+            enable_ground_plane=bundle is None,
             startup_summary="full",
             dexsim_startup_info=True,
             physics_cfg=NewtonPhysicsCfg(
@@ -241,11 +255,11 @@ def main() -> None:
                 ArticulationCfg(
                     uid="pendulum",
                     fpath=str(
-                        PROJECT
+                        assets
                         / (
-                            "assets/P-01/pendulum-display.urdf"
+                            "pendulum-display.urdf"
                             if args.common_view
-                            else "assets/P-01/pendulum.urdf"
+                            else "pendulum.urdf"
                         )
                     ),
                     init_pos=(0.0, 0.0, 1.0),

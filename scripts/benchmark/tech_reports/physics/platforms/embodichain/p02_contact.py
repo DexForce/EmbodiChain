@@ -67,13 +67,16 @@ def main() -> None:
         from embodichain.lab.sim.shapes import CubeCfg
 
         meta["module_origins"] = {
-            n: importlib.util.find_spec(n).origin
-            for n in ["embodichain", "embodichain_robots", "embodichain_tasks"]
+            name: spec.origin
+            for name in ("embodichain", "embodichain_robots", "embodichain_tasks")
+            if (spec := importlib.util.find_spec(name)) is not None
         }
-        assert all(
-            str(args.source_repo.resolve()) in p
-            for p in meta["module_origins"].values()
-        ), meta["module_origins"]
+        if args.source_repo is not None:
+            source_repo = args.source_repo.resolve()
+            assert all(
+                origin and Path(origin).is_relative_to(source_repo)
+                for origin in meta["module_origins"].values()
+            ), meta["module_origins"]
         solver = cfg["dexuni_options"].copy()
         solver["vbd_options"] = solver["vbd_options"].copy()
         solver["collision_options"] = solver["collision_options"].copy()
@@ -202,9 +205,9 @@ def main() -> None:
         assert meta["resolved_solver"] == "dexuni"
         meta["contact_export"] = {
             "supported": sim.physics.supports_contact_sensor,
-            "reason": "DexUni does not expose EmbodiChain ContactQuery; signed gaps and box intersections are computed offline from raw poses. No solver-force values are fabricated.",
+            "collected": False,
+            "reason": "Raw poses provide the common reference for offline signed gaps and box intersections.",
         }
-        assert not meta["contact_export"]["supported"]
         meta["material_semantics"] = (
             "Single Coulomb mu = dynamic_friction; separate static_friction is not consumed by Newton. Both contacting shapes share mu."
         )

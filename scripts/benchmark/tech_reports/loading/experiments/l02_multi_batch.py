@@ -35,6 +35,9 @@ sys.path.insert(
 import pynvml as nv
 
 
+from ...assets.runtime import add_runtime_arguments, prepare_inputs, runtime_python
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument(
@@ -59,6 +62,7 @@ def main() -> None:
     p.add_argument("--tag", required=True)
     p.add_argument("--allow-busy", action="store_true")
     p.add_argument("--wait-idle", action="store_true")
+    add_runtime_arguments(p)
     args = p.parse_args()
     root = Path(
         os.environ.get("SIM_REPORT_ROOT", Path(__file__).resolve().parents[5])
@@ -73,13 +77,29 @@ def main() -> None:
         ), "Sleep-off diagnostics require a separate --output-root"
     (base / "plans").mkdir(parents=True, exist_ok=True)
     assert args.modes == ["S"], "Multi-arena v1 uses one shared source per arena"
-    protocol = json.loads(
-        (
+    legacy = bool(os.environ.get("SIM_REPORT_ROOT"))
+    repo = Path(__file__).resolve().parents[5]
+    python = {
+        platform: runtime_python(args, platform, legacy) for platform in args.platforms
+    }
+    prepared = None
+    if legacy:
+        protocol_path = (
             root
             / "scripts/benchmark/tech_reports/assets/loading/L-02/protocol-v3-multi-arena.json"
-        ).read_text()
-    )
-    asset_dir = root / protocol["asset_dir"]
+        )
+        protocol = json.loads(protocol_path.read_text())
+        asset_dir = root / protocol["asset_dir"]
+    else:
+        prepared = prepare_inputs(
+            "l-02",
+            revision=args.revision,
+            cache_dir=args.cache_dir,
+            local_files_only=args.offline,
+        )
+        protocol_path = prepared.bundle / "protocol-v3-multi-arena.json"
+        protocol = json.loads(protocol_path.read_text())
+        asset_dir = prepared.bundle / "shared"
     manifest = json.loads((asset_dir / "manifest.json").read_text())
     byname = {x["file"]: x for x in manifest["files"]}
     import numpy as np
@@ -99,15 +119,20 @@ def main() -> None:
     hardware = {
         k: v.decode() if isinstance(v, bytes) else v for k, v in hardware.items()
     }
-    commits = {
-        str(repo): subprocess.check_output(
-            ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True
-        ).strip()
-        for repo in [
-            Path("/home/oem/code/EmbodiChain"),
-            Path("/home/oem/code/IsaacLab"),
-            Path("/home/oem/code/dexsim"),
+    repositories = (
+        [
+            Path("/home/oem/code") / name
+            for name in ("EmbodiChain", "IsaacLab", "dexsim")
         ]
+        if legacy
+        else [repo, args.isaaclab_repo]
+    )
+    commits = {
+        str(source): subprocess.check_output(
+            ["git", "-C", str(source), "rev-parse", "HEAD"], text=True
+        ).strip()
+        for source in repositories
+        if source is not None
     }
 
     def gpu_processes() -> dict:
@@ -208,6 +233,8 @@ def main() -> None:
         shape = job["shape"]
         mode = job["asset_mode"]
         cfg = dict(protocol, **{k: v for k, v in job.items() if k != "status"})
+        if prepared is not None:
+            cfg["asset_revision"] = prepared.provenance["revision"]
         cfg["num_envs"] = count
         cfg["positions"] = [protocol["local_position"]]
         names = [f"{shape}_S.usda"]
@@ -237,10 +264,9 @@ def main() -> None:
         for path in [
             Path(__file__),
             Path(__file__).with_name("l02_multi_run.py"),
-            root
+            repo
             / f"scripts/benchmark/tech_reports/loading/platforms/{job['platform']}/l02_multi_loading.py",
-            root
-            / "scripts/benchmark/tech_reports/assets/loading/L-02/protocol-v3-multi-arena.json",
+            protocol_path,
         ]:
             shutil.copy2(path, source / path.name)
         env = os.environ.copy()
@@ -248,7 +274,7 @@ def main() -> None:
         env["OMP_NUM_THREADS"] = "4"
         env["OPENBLAS_NUM_THREADS"] = "4"
         paths = [str(root)]
-        if job["platform"] == "embodichain":
+        if job["platform"] == "embodichain" and legacy:
             paths = [
                 str(root / protocol["dexsim_runtime"]),
                 str(root),
@@ -258,7 +284,7 @@ def main() -> None:
             ]
         env["PYTHONPATH"] = ":".join(paths)
         command = [
-            f"/home/oem/miniconda3/envs/{job['platform']}/bin/python",
+            python[job["platform"]],
             "-u",
             "-m",
             "scripts.benchmark.tech_reports.loading.experiments.l02_multi_run",

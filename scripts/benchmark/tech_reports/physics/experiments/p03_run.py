@@ -44,6 +44,9 @@ def main() -> None:
     )
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--inputs", type=Path, required=True)
+    parser.add_argument("--robot-asset", type=Path)
+    parser.add_argument("--portable", action="store_true")
+    parser.add_argument("--source-repo", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--shape", choices=["cube", "cylinder"], default="cube")
     parser.add_argument("--num-envs", type=int, default=1)
@@ -57,6 +60,8 @@ def main() -> None:
     args.output.mkdir(parents=True, exist_ok=True)
     assert not (args.output / "run.json").exists()
     cfg = json.loads(args.config.read_text())
+    if args.robot_asset is not None:
+        cfg["asset"] = str(args.robot_asset.resolve())
     assert abs(cfg["control_dt"] - 4 * cfg["dt"]) < 1e-12
     cfg["execution_mode"] = args.mode
     assert not (args.record and args.mode == "env")
@@ -100,11 +105,23 @@ def main() -> None:
     for path in files:
         shutil.copy2(path, snapshot / path.name)
         meta["source_files"][str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
+    sources = (
+        {args.platform: args.source_repo}
+        if args.portable and args.source_repo is not None
+        else (
+            {}
+            if args.portable
+            else {
+                name: Path("/home/oem/code") / name
+                for name in ("EmbodiChain", "IsaacLab", "dexsim")
+            }
+        )
+    )
     meta["source_commits"] = {
         name: subprocess.check_output(
-            ["git", "-C", f"/home/oem/code/{name}", "rev-parse", "HEAD"], text=True
+            ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True
         ).strip()
-        for name in ["EmbodiChain", "IsaacLab", "dexsim"]
+        for name, repo in sources.items()
     }
     meta["gpu_inventory"] = subprocess.check_output(
         [
@@ -134,14 +151,15 @@ def main() -> None:
         import torch
 
         inputs = dict(np.load(args.inputs / "commands.npz"))
-        for key in (
-            ["embodichain", "embodichain_robots", "embodichain_tasks", "dexsim"]
-            if args.platform == "embodichain"
-            else ["isaaclab", "isaacsim"]
-        ):
-            meta.setdefault("module_origins", {})[key] = importlib.util.find_spec(
-                key
-            ).origin
+        if args.platform == "embodichain":
+            modules = ["embodichain", "dexsim"]
+            if not args.portable:
+                modules.extend(["embodichain_robots", "embodichain_tasks"])
+        else:
+            modules = ["isaaclab", "isaacsim"]
+        meta["module_origins"] = {
+            name: importlib.util.find_spec(name).origin for name in modules
+        }
         meta["packages"] = {
             n: importlib.metadata.version(n)
             for n in (

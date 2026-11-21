@@ -28,12 +28,16 @@ import time
 import psutil
 
 
+from ...assets.runtime import add_runtime_arguments, prepare_inputs, runtime_python
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--platforms", nargs="+", default=["embodichain", "isaaclab"])
     p.add_argument("--shapes", nargs="+", default=["cube"])
     p.add_argument("--config", type=Path)
     p.add_argument("--inputs", type=Path)
+    p.add_argument("--output-root", type=Path)
     p.add_argument("--num-envs", type=int, default=1)
     p.add_argument("--count", type=int, default=1)
     p.add_argument("--episode-start", type=int, default=0)
@@ -49,17 +53,38 @@ def main() -> None:
     )
     p.add_argument("--tag", default="pilot")
     p.add_argument("--timeout", type=int, default=1800)
+    add_runtime_arguments(p)
     args = p.parse_args()
     root = Path(
         os.environ.get("SIM_REPORT_ROOT", Path(__file__).resolve().parents[5])
     ).resolve()
-    output = root / "outputs/benchmarks/P-03"
-    runtime = output / "runtime/p03-frozen-v1"
-    config = (
-        args.config
-        or root / "scripts/benchmark/tech_reports/assets/physics/P-03/protocol-v4.json"
-    ).resolve()
-    inputs = (args.inputs or output / "prepared/grasp-v1").resolve()
+    legacy = bool(os.environ.get("SIM_REPORT_ROOT"))
+    source_root = Path(__file__).resolve().parents[5]
+    python = {name: runtime_python(args, name, legacy) for name in args.platforms}
+    output = (args.output_root or root / "outputs/benchmarks/P-03").resolve()
+    runtime = root / "outputs/benchmarks/P-03/runtime/p03-frozen-v1"
+    prepared = None
+    if legacy:
+        config = (
+            args.config
+            or root
+            / "scripts/benchmark/tech_reports/assets/physics/P-03/protocol-v4.json"
+        ).resolve()
+        inputs = (args.inputs or output / "prepared/grasp-v1").resolve()
+    elif args.config is not None and args.inputs is not None:
+        config, inputs = args.config.resolve(), args.inputs.resolve()
+    else:
+        if args.config is not None or args.inputs is not None:
+            p.error("Supply --config and --inputs together for a custom grasp")
+        prepared = prepare_inputs(
+            "p-03",
+            revision=args.revision,
+            cache_dir=args.cache_dir,
+            local_files_only=args.offline,
+        )
+        config = prepared.bundle / "protocol-v4.json"
+        inputs = prepared.grasp_inputs
+        assert inputs is not None
     for shape in args.shapes:
         for repeat in range(args.repeat):
             for platform in args.platforms:
@@ -82,10 +107,10 @@ def main() -> None:
                     + f"_{args.tag}_{platform}_{shape}_{args.mode}_n{args.num_envs:04d}_r{repeat:02d}"
                 )
                 folder = output / "runs" / run_id
-                folder.mkdir()
+                folder.mkdir(parents=True)
                 env = os.environ.copy()
                 paths = [str(root)]
-                if platform == "embodichain":
+                if platform == "embodichain" and legacy:
                     paths = (
                         [str(runtime)]
                         + paths
@@ -95,11 +120,11 @@ def main() -> None:
                             "/home/oem/code/EmbodiChain/extensions/embodichain_tasks",
                         ]
                     )
-                else:
+                elif platform == "isaaclab":
                     env["OMNI_KIT_ACCEPT_EULA"] = "YES"
                 env["PYTHONPATH"] = ":".join(paths)
                 cmd = [
-                    f"/home/oem/miniconda3/envs/{platform}/bin/python",
+                    python[platform],
                     "-u",
                     "-m",
                     "scripts.benchmark.tech_reports.physics.experiments.p03_run",
@@ -122,6 +147,18 @@ def main() -> None:
                     "--mode",
                     args.mode,
                 ]
+                if not legacy:
+                    source = (
+                        source_root if platform == "embodichain" else args.isaaclab_repo
+                    )
+                    cmd += ["--portable"]
+                    if source is not None:
+                        cmd += ["--source-repo", str(source.resolve())]
+                if prepared is not None:
+                    cmd += ["--robot-asset", str(prepared.robots["franka"])]
+                    (folder / "assets.json").write_text(
+                        json.dumps(prepared.provenance, indent=2) + "\n"
+                    )
                 for flag in ["record", "calibrate", "latency"]:
                     if getattr(args, flag):
                         cmd.append("--" + flag)
@@ -131,7 +168,7 @@ def main() -> None:
                     OMNI_KIT_ACCEPT_EULA=env.get("OMNI_KIT_ACCEPT_EULA"),
                     runtime_manifest=(
                         str(runtime / "manifest.json")
-                        if platform == "embodichain"
+                        if platform == "embodichain" and legacy
                         else None
                     ),
                 )

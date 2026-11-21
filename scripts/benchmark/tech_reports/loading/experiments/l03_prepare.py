@@ -34,6 +34,85 @@ from pxr import Usd, UsdPhysics
 __all__ = ["main"]
 
 
+def _describe_robot(
+    name: str,
+    usd_path: Path,
+    original: Path,
+    files: list[dict],
+    external: list[dict],
+    edits: list[dict],
+) -> dict:
+    stage = Usd.Stage.Open(str(usd_path))
+    assert stage.GetDefaultPrim()
+    joints = {}
+    bodies = []
+    for prim in stage.Traverse():
+        if prim.HasAPI(UsdPhysics.RigidBodyAPI):
+            bodies.append(prim.GetName())
+        if prim.IsA(UsdPhysics.Joint) and not prim.IsA(UsdPhysics.FixedJoint):
+            joint = UsdPhysics.Joint(prim)
+            if joint.GetJointEnabledAttr().Get() is False:
+                continue
+            scale = math.pi / 180 if prim.IsA(UsdPhysics.RevoluteJoint) else 1
+            lo = float(prim.GetAttribute("physics:lowerLimit").Get()) * scale
+            hi = float(prim.GetAttribute("physics:upperLimit").Get()) * scale
+            joints[prim.GetName()] = max(lo, min(hi, 0.0))
+    if name == "franka":
+        joints.update(
+            dict(
+                zip(
+                    [f"panda_joint{i}" for i in range(1, 8)]
+                    + ["panda_finger_joint1", "panda_finger_joint2"],
+                    [0.0, -0.569, 0.0, -2.810, 0.0, 3.037, 0.741, 0.04, 0.04],
+                )
+            )
+        )
+    return {
+        "usd_path": str(usd_path),
+        "source": str(original),
+        "default_prim": str(stage.GetDefaultPrim().GetPath()),
+        "expected_joint_names": sorted(joints),
+        "source_body_names": bodies,
+        "initial_qpos": joints,
+        "fixed_base": name in ("cartpole", "franka"),
+        "initial_position": [0.0, 0.0, 2.0],
+        "env_spacing": 3.0,
+        "preparation_edits": edits,
+        "external_shader_dependencies": external,
+        "variant_selections": {
+            str(p.GetPath()): {
+                v: p.GetVariantSet(v).GetVariantSelection()
+                for v in p.GetVariantSets().GetNames()
+            }
+            for p in stage.Traverse()
+            if p.GetVariantSets().GetNames()
+        },
+        "files": files,
+    }
+
+
+def describe_published_robots(bundle: Path, robots: dict[str, Path]) -> dict:
+    """Read common robot starting states from verified upstream USDs."""
+    source_manifest = json.loads((bundle / "sources.json").read_text())["robots"]
+    manifest = {"phase": "shared_input_preparation", "robots": {}}
+    for name, usd_path in robots.items():
+        entry = source_manifest[name]
+        root = usd_path.parents[len(Path(entry["entrypoint"]).parts) - 1]
+        records = [
+            {
+                "path": str(root / item["source_relative_path"]),
+                "source": item["source_relative_path"],
+                "bytes": item["size_bytes"],
+                "sha256": item["sha256"],
+            }
+            for item in entry["files"]
+        ]
+        manifest["robots"][name] = _describe_robot(
+            name, usd_path, usd_path, records, [], []
+        )
+    return manifest
+
+
 def main() -> None:
     """Copy audited dependencies and declare the common initial conditions."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -80,61 +159,19 @@ def main() -> None:
             assert after.replace('    defaultPrim = "g1_23dof_mode_10"\n', "") == before
             stage.GetRootLayer().Save()
             edits.append({"defaultPrim": "g1_23dof_mode_10", "physics_changed": False})
-        assert stage.GetDefaultPrim()
-        joints = {}
-        bodies = []
-        for prim in stage.Traverse():
-            if prim.HasAPI(UsdPhysics.RigidBodyAPI):
-                bodies.append(prim.GetName())
-            if prim.IsA(UsdPhysics.Joint) and not prim.IsA(UsdPhysics.FixedJoint):
-                joint = UsdPhysics.Joint(prim)
-                if joint.GetJointEnabledAttr().Get() is False:
-                    continue
-                scale = math.pi / 180 if prim.IsA(UsdPhysics.RevoluteJoint) else 1
-                lo = float(prim.GetAttribute("physics:lowerLimit").Get()) * scale
-                hi = float(prim.GetAttribute("physics:upperLimit").Get()) * scale
-                joints[prim.GetName()] = max(lo, min(hi, 0.0))
-        if name == "franka":
-            joints.update(
-                dict(
-                    zip(
-                        [f"panda_joint{i}" for i in range(1, 8)]
-                        + ["panda_finger_joint1", "panda_finger_joint2"],
-                        [0.0, -0.569, 0.0, -2.810, 0.0, 3.037, 0.741, 0.04, 0.04],
-                    )
-                )
-            )
-        result["robots"][name] = {
-            "usd_path": str(usd_path),
-            "source": str(original),
-            "default_prim": str(stage.GetDefaultPrim().GetPath()),
-            "expected_joint_names": sorted(joints),
-            "source_body_names": bodies,
-            "initial_qpos": joints,
-            "fixed_base": name in ("cartpole", "franka"),
-            "initial_position": [0.0, 0.0, 2.0],
-            "env_spacing": 3.0,
-            "preparation_edits": edits,
-            "external_shader_dependencies": external,
-            "variant_selections": {
-                str(p.GetPath()): {
-                    v: p.GetVariantSet(v).GetVariantSelection()
-                    for v in p.GetVariantSets().GetNames()
-                }
-                for p in stage.Traverse()
-                if p.GetVariantSets().GetNames()
-            },
-            "files": [
-                {
-                    "path": str(p),
-                    "source": item["path"],
-                    "source_sha256": item["sha256"],
-                    "bytes": p.stat().st_size,
-                    "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
-                }
-                for p, item in copied
-            ],
-        }
+        records = [
+            {
+                "path": str(p),
+                "source": item["path"],
+                "source_sha256": item["sha256"],
+                "bytes": p.stat().st_size,
+                "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
+            }
+            for p, item in copied
+        ]
+        result["robots"][name] = _describe_robot(
+            name, usd_path, original, records, external, edits
+        )
     (args.output / "manifest.json").write_text(json.dumps(result, indent=2) + "\n")
     print(
         json.dumps(

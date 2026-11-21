@@ -41,6 +41,8 @@ PROJECT = Path(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--input-bundle", type=Path)
+    parser.add_argument("--source-repo", type=Path)
     parser.add_argument("--case", required=True, choices=["freefall", "pendulum"])
     parser.add_argument("--dt", required=True, type=float)
     parser.add_argument("--output", required=True, type=Path)
@@ -81,8 +83,13 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     if (out / "run.json").exists():
         raise FileExistsError(f"Run already exists: {out}")
-    config = json.loads((PROJECT / "configs/P-01/isaaclab.json").read_text())
-    inputs = json.loads((PROJECT / config["initial_states"]).read_text())
+    bundle = args.input_bundle
+    cfg_path = (bundle or PROJECT / "configs/P-01") / "isaaclab.json"
+    config = json.loads(cfg_path.read_text())
+    inputs_path = (
+        bundle / "initial-states.json" if bundle else PROJECT / config["initial_states"]
+    )
+    inputs = json.loads(inputs_path.read_text())
     assert 1 <= args.count <= 10 and args.dt > 0 and args.duration > 0
     assert args.theta_deg is None or (args.case == "pendulum" and args.count == 1)
     assert args.position_iterations >= 1 and args.velocity_iterations >= 0
@@ -90,9 +97,9 @@ def main() -> None:
     snapshots.mkdir()
     sources = [
         Path(__file__),
-        PROJECT / "configs/P-01/isaaclab.json",
-        PROJECT / config["initial_states"],
-        PROJECT / "specs/p-01-dynamics-spec.md",
+        cfg_path,
+        inputs_path,
+        (bundle or PROJECT / "specs") / "p-01-dynamics-spec.md",
     ]
     if args.phase == "investigation":
         sources.append(PROJECT / "configs/P-01/iteration-study.json")
@@ -103,9 +110,10 @@ def main() -> None:
     hashes = {}
     for path in sources:
         shutil.copy2(path, snapshots / path.name)
-        hashes[str(path.relative_to(PROJECT))] = hashlib.sha256(
-            path.read_bytes()
-        ).hexdigest()
+        source_name = (
+            path.relative_to(PROJECT) if path.is_relative_to(PROJECT) else path
+        )
+        hashes[str(source_name)] = hashlib.sha256(path.read_bytes()).hexdigest()
     now = lambda: datetime.now(ZoneInfo("Asia/Shanghai")).isoformat()
     meta = dict(
         run_id=out.name,
@@ -142,12 +150,16 @@ def main() -> None:
             "numpy",
         ]
     }
-    meta["isaaclab_commit"] = subprocess.check_output(
-        ["git", "-C", "/home/oem/code/IsaacLab", "rev-parse", "HEAD"], text=True
-    ).strip()
-    meta["isaaclab_worktree_status"] = subprocess.check_output(
-        ["git", "-C", "/home/oem/code/IsaacLab", "status", "--porcelain"], text=True
-    )
+    repo = args.source_repo
+    if repo is None and not bundle:
+        repo = Path("/home/oem/code/IsaacLab")
+    if repo is not None:
+        meta["isaaclab_commit"] = subprocess.check_output(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True
+        ).strip()
+        meta["isaaclab_worktree_status"] = subprocess.check_output(
+            ["git", "-C", str(repo), "status", "--porcelain"], text=True
+        ).strip()
     meta["gpu_inventory"] = subprocess.check_output(
         [
             "nvidia-smi",

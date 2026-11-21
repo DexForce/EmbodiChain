@@ -5,6 +5,7 @@
     "cartpole": {
       "upstream": "NVIDIA Isaac Sim 5.1 asset package",
       "default_prim": "/cartpole",
+      "entrypoint": "Isaac/IsaacLab/Robots/Classic/Cartpole/cartpole.usd",
       "variant_selections": {},
       "files": [
         {
@@ -22,6 +23,7 @@
     "franka": {
       "upstream": "NVIDIA Isaac Sim 5.1 asset package",
       "default_prim": "/panda",
+      "entrypoint": "Isaac/IsaacLab/Factory/franka_mimic.usd",
       "variant_selections": {},
       "files": [
         {
@@ -34,6 +36,7 @@
     "go2": {
       "upstream": "NVIDIA Isaac Sim 5.1 asset package",
       "default_prim": "/go2_description",
+      "entrypoint": "Isaac/IsaacLab/Robots/Unitree/Go2/go2.usd",
       "variant_selections": {},
       "files": [
         {

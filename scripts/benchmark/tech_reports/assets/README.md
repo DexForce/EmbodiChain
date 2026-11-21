@@ -14,12 +14,27 @@ tags:
 
 Public asset repository: [DexForceAI/embodichain_reports](https://huggingface.co/datasets/DexForceAI/embodichain_reports).
 
-This repository stores report-specific benchmark inputs, published measurement
-artifacts, figures, and videos for EmbodiChain technical reports. It starts with
-documentation and an [empty asset index](index.json): **no asset bundles are
-available yet**. The [download design](DOWNLOAD_DESIGN.md) specifies future
-integration; the Python helper and benchmark download commands are not
-implemented by this initialization.
+The dataset stores report-specific benchmark inputs, published measurements,
+figures, and videos. The [empty bootstrap index](index.json) in this checkout
+is for repository initialization. The dataset index at the pinned revision
+lists the available inputs. The [download design](DOWNLOAD_DESIGN.md) also
+describes the planned general benchmark CLI.
+
+## Runtime inputs for this report
+
+The release [simulation-report-2026-10-28](https://huggingface.co/datasets/DexForceAI/embodichain_reports/tree/ba51ac54a4c28417691bbed5a23848b01cb21396/reports/simulation-report-2026-10-28)
+contains six experiment input bundles and their checksums. Its root index is
+read at the same commit as the files. The authored L-02 USDs and the CC BY 4.0
+ForgeCAD cabinet, including USD dependencies and attribution, are included.
+The NVIDIA 5.1 material license applies to the robot USDs. L-03 and P-03
+fetch the declared files from NVIDIA, verify the published hashes, and
+preserve their dependency layout. P-03 derives the commands and finger
+geometry locally from the verified Franka USD.
+
+`python -m scripts.benchmark.tech_reports.assets.runtime <experiment>`
+prepares those inputs. Use `--cache-dir` to choose the cache or `--offline`
+to resolve a populated cache. Existing inputs and derived files are verified
+on reuse. See the [report runner](../README.md#run-the-published-comparison).
 
 ## Ownership
 
@@ -58,15 +73,12 @@ demonstrations/
 These match the L/R/P/G/D families in
 [issue #679](https://github.com/DexForce/EmbodiChain/issues/679). Put future
 experiment-specific material under the appropriate family and experiment ID;
-shared definitions belong in `shared/`. The directories initially contain only
-Git placeholders. They are source organization, separate from the dataset's
-report layout below. Publish the three named bootstrap files explicitly, not
+shared definitions belong in `shared/`. These are source directories. The dataset uses the report layout below. Publish the three named bootstrap files explicitly, not
 the entire source directory or its `.gitkeep` files.
 
 Large input binaries remain in the selected asset repository and download to
 the external cache. Generated run artifacts and reports belong in
-`outputs/benchmarks/`. The first real input publication will define the matching
-bundle IDs and hashes; this scaffold does not supply datasets or measured results.
+`outputs/benchmarks/`. The published input bundles declare the matching IDs and hashes.
 
 ## Layout
 
@@ -82,8 +94,8 @@ reports/<report-id>/
   videos/...
 ```
 
-The `reports/` subtree above is a convention, not a claim that those files
-already exist. Hugging Face may also maintain repository metadata such as
+Each report declares the directories it publishes. Hugging Face may also
+maintain repository metadata such as
 `.gitattributes`.
 
 ## Access
@@ -95,7 +107,7 @@ project's existing `huggingface_hub>=0.35.3,<1.0` dependency, publishers can use
 Credentials must not be written into report files, commands recorded in reports,
 or benchmark provenance. Downloads use `https://huggingface.co` directly.
 
-A client can retrieve the current empty index without logging in using the existing
+A client can retrieve the published index without logging in using the existing
 Hugging Face SDK; this is not the proposed EmbodiChain download helper:
 
 ```python
