@@ -250,3 +250,17 @@ class ToolHangMotion:
                 rate=0.65,
                 settle=20,
             )
+
+        # Clear the installed crossbar before changing from the horizontal
+        # insertion grasp to the top-down wrench grasp. Interpolating those
+        # wrist poses directly can sweep the open hand through the stand.
+        hand = self.hand()
+        lift = hand[:3, 3].copy()
+        lift[2] = self.point("frame", _GRIP)[2] + 0.14
+        yield from self.move(lift, hand[:3, :3], 0.04, rate=0.75)
+        # Cross at that height on the wrench side of the stand, then descend.
+        wrench = self.pose("tool")[:3, 3]
+        across = lift.copy()
+        across[0] = socket[0]
+        across[1] = 0.35 * socket[1] + 0.65 * wrench[1]
+        yield from self.move(across, hand[:3, :3], 0.04, rate=0.75, settle=8)

@@ -45,4 +45,6 @@ embodichain run-task \
   --headless --seed 7 --max_episodes 1
 ```
 
-In the recorded seed-7 episode the Panda lifted the loose frame by step 266, seated and released it by step 735, and triggered the native success condition at step 983. The camera continued through jaw withdrawal and 4.5 seconds of settling. At the last frame the ring touched the bar 30% of the way along its length and both fingers were open. This is one Newton GPU rollout. Contact dynamics can vary between runs, including with the same reset seed.
+After inserting the frame, the Panda raises the open hand above the crossbar and crosses to the wrench side before turning the wrist for pickup. It tracks the measured bar end while guiding the large wrench ring over the retaining lip. The release sequence checks frame insertion, ring threading, ring–bar contact and insertion depth before commanding the fingers open. A settled hang can be checked by letting the open hand withdraw and observing the same contact conditions for a further 90 control steps (4.5 seconds).
+
+The public collector can reset and try again after an incomplete episode. When measuring first-attempt success, run each seed once and record both the native termination and the state after withdrawal.

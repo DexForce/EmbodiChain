@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from itertools import chain
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -66,67 +67,97 @@ def _place_site(
     site: np.ndarray,
     goal: np.ndarray,
     orientation: np.ndarray,
-    *,
-    refine: bool = False,
 ) -> Iterator[ControllerAction]:
-    for _ in range(3 if refine else 1):
+    hand = motion.hand()
+    if np.linalg.norm(hand[:3, 3] - motion.point("tool", _GRIP)) > 0.05:
+        raise RuntimeError("The wrench slipped during transport.")
+    rotation = Rotation.from_matrix(
+        orientation @ motion.pose("tool")[:3, :3].T
+    ).as_matrix()
+    xyz = goal - rotation @ (motion.point("tool", site) - hand[:3, 3])
+    yield from motion.move(xyz, rotation @ hand[:3, :3], 0.0, rate=1.5, settle=3)
+
+
+def _bar(motion: ToolHangMotion) -> tuple[np.ndarray, np.ndarray]:
+    tip = motion.point("frame", _FREE_END)
+    along = motion.point("frame", _ELBOW) - tip
+    return tip, along / np.linalg.norm(along)
+
+
+def _ring_target(
+    motion: ToolHangMotion, x: float, height: float, lean: float, spin: float
+) -> tuple[np.ndarray, np.ndarray]:
+    tip, along = _bar(motion)
+    horizontal = along.copy()
+    horizontal[2] = 0.0
+    horizontal /= np.linalg.norm(horizontal)
+    upright = np.column_stack((-_UP, np.cross(-horizontal, -_UP), -horizontal))
+    rotation = Rotation.from_rotvec(np.cross(_UP, horizontal) * np.deg2rad(lean))
+    side = Rotation.from_euler("z", spin, degrees=True).as_matrix()
+    return tip + x * along + height * _UP, rotation.as_matrix() @ upright @ side
+
+
+def _guide_ring(
+    motion: ToolHangMotion, x: float, height: float, lean: float, spin: float
+) -> Iterator[ControllerAction]:
+    """Track the live bar and wrench without pushing a wedged ring through the lip."""
+    for _ in range(6):
+        goal, orientation = _ring_target(motion, x, height, lean, spin)
         hand = motion.hand()
-        if np.linalg.norm(hand[:3, 3] - motion.point("tool", _GRIP)) > 0.05:
-            raise RuntimeError("The wrench slipped during transport.")
-        position = motion.point("tool", site)
-        difference = Rotation.from_matrix(orientation @ motion.pose("tool")[:3, :3].T)
-        if refine:
-            if (
-                np.linalg.norm(goal - position) < 0.0028
-                and difference.magnitude() < 0.38
-            ):
-                break
-            difference = Rotation.from_rotvec(_limit(difference.as_rotvec(), 0.12))
-        rotation = difference.as_matrix()
-        xyz = goal - rotation @ (position - hand[:3, 3])
-        if refine:
-            xyz = hand[:3, 3] + _limit(xyz - hand[:3, 3], 0.03)
+        current = motion.pose("tool")[:3, :3]
+        site = motion.point("tool", _HOLE)
+        turn = Rotation.from_matrix(orientation @ current.T).as_rotvec()
+        if np.linalg.norm(goal - site) < 0.0016 and np.linalg.norm(turn) < 0.10:
+            break
+        rotation = Rotation.from_rotvec(_limit(turn, 0.14)).as_matrix()
+        target = goal - rotation @ (site - hand[:3, 3])
+        target = hand[:3, 3] + _limit(target - hand[:3, 3], 0.012)
         yield from motion.move(
-            xyz,
-            rotation @ hand[:3, :3],
-            0.0,
-            rate=1.1 if refine else 1.5,
-            settle=6 if refine else 3,
+            target, rotation @ hand[:3, :3], 0.0, rate=0.60, settle=4
         )
 
 
 def hang_wrench(motion: ToolHangMotion) -> Iterator[ControllerAction]:
-    """Lift the large ring above the retaining lip and release it onto the bar."""
+    """Guide the ring over the lip and seat it on the bar before opening the fingers."""
     motion.grip_effort = 19.0
     yield from _pick_wrench(motion)
-    free_end = motion.point("frame", _FREE_END)
-    along = motion.point("frame", _ELBOW) - free_end
-    along[2] = 0.0
-    along /= np.linalg.norm(along)
-    lean = np.deg2rad(62.0)
-    tilt = Rotation.from_rotvec(np.cross(_UP, along) * lean)
-    hanging = np.column_stack((-_UP, np.cross(-along, -_UP), -along))
-    orientation = tilt.as_matrix() @ hanging
-    ring_up = np.cos(lean) * _UP + np.sin(lean) * along
-    # The upper segment passes the lip while the lower segment stays outside.
-    toward_base = motion.robot.get_local_pose()[0, :3].cpu().numpy() - free_end
-    far_side = np.dot(toward_base, along) > 0
-    into_bar, drop = (0.016, 0.038) if far_side else (0.014, 0.040)
-    release = free_end + into_bar * along + drop * _UP - 0.012934 * ring_up
+    # Turn the long handle toward the open work area so its swing clears the
+    # socket. Keep the chosen side as small forces rotate the loose frame.
+    _, axis = _bar(motion)
+    spin = 40.0 if axis[0] >= 0.0 else -40.0
+    above, orientation = _ring_target(motion, 0.004, 0.065, 62.0, spin)
     current = motion.pose("tool")[:3, :3]
     swing = Rotation.from_matrix(orientation @ current.T).as_rotvec()
     halfway = Rotation.from_rotvec(0.58 * swing).as_matrix() @ current
     yield from _place_site(motion, _GRIP, np.array([-0.07, -0.15, 1.07]), halfway)
-    above = release + 0.03 * _UP
     yield from _place_site(motion, _HOLE, above, orientation)
-    yield from _place_site(motion, _HOLE, above, orientation, refine=True)
-    yield from _place_site(motion, _HOLE, release, orientation, refine=True)
-    hand = motion.hand().copy()
-    yield from motion.move(hand[:3, 3], hand[:3, :3], 0.04, steps=7, settle=3)
-    # On the far side of the fixture, withdrawing along the wrist can sweep the
-    # shaft. Back out along the bar's free end before raising the open jaws.
-    retreat = (
-        -0.060 * along + 0.025 * _UP if far_side else -0.060 * hand[:3, 2] + 0.040 * _UP
+    # Each position is (distance along the bar, height above it, ring tilt).
+    waypoints = (
+        (0.004, 0.029, 62.0),
+        (0.004, 0.013, 62.0),
+        (0.005, 0.008, 55.0),
+        (0.009, 0.005, 43.0),
+        (0.016, 0.002, 26.0),
+        (0.027, -0.002, 6.0),
     )
-    yield from motion.move(hand[:3, 3] + retreat, hand[:3, :3], 0.04, rate=0.8)
-    yield from motion.hold(0.04, 24)
+    motions = (_guide_ring(motion, *waypoint, spin) for waypoint in waypoints)
+    for action in chain.from_iterable(motions):
+        yield action
+        metrics = motion.env.compute_task_state()[2]
+        if (
+            metrics["success.hanging.frame_assembled"].item()
+            and metrics["success.hanging.hole_threaded"].item()
+            and metrics["success.hanging.ring_bar_contact"].item()
+            and metrics["success.hanging.along_fraction"].item() >= 0.065
+        ):
+            break
+    else:
+        # The ring has not reached the bar. Let the normal evaluator report
+        # the incomplete attempt without opening the grasp in free space.
+        return
+    hand = motion.hand().copy()
+    yield from motion.hold(0.04, 12, target=True)
+    yield from motion.move(
+        hand[:3, 3] - 0.055 * hand[:3, 2] + 0.025 * _UP, hand[:3, :3], 0.04, rate=0.6
+    )
+    yield from motion.hold(0.04, 24, target=True)

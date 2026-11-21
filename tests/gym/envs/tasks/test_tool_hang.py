@@ -157,7 +157,7 @@ def _exercise_hanging_scene() -> None:
 @pytest.mark.skipif(
     not torch.cuda.is_available(), reason="Newton MuJoCo-Warp needs CUDA"
 )
-@pytest.mark.parametrize("case", ["contact", "expert"])
+@pytest.mark.parametrize("case", ["contact", "wrench_approach", "expert"])
 def test_native_hanging_requires_both_stages_and_a_released_supported_ring(
     case: str,
 ) -> None:
@@ -171,7 +171,40 @@ def test_native_hanging_requires_both_stages_and_a_released_supported_ring(
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def _exercise_expert_episode() -> None:
+def _check_wrench_approach(env) -> None:
+    from embodichain.lab.gym.envs import execute_demo_episode
+
+    # Match the public collector's prepare and first batch resets with seed 7.
+    env.reset(options={"save_data": False})
+    env.reset()
+    reaching_for_wrench = False
+    touched_wrench = False
+
+    def segments():
+        nonlocal reaching_for_wrench
+        for segment in env.create_demo_segments():
+            reaching_for_wrench = segment.name == "hang_wrench"
+            yield segment
+
+    def observe(_active, _action, _observation):
+        nonlocal touched_wrench
+        if reaching_for_wrench:
+            metrics = env.compute_task_state()[2]
+            assert metrics[
+                "success.hanging.frame_assembled"
+            ].item(), "The open hand dislodged the frame on its approach to the wrench."
+            touched_wrench = metrics["success.hanging.hand_tool_contact"].item()
+
+    execute_demo_episode(
+        env,
+        segments=segments(),
+        step_observer=observe,
+        should_stop=lambda: touched_wrench,
+    )
+    assert touched_wrench, "The gripper never reached the wrench."
+
+
+def _exercise_expert_episode(*, check_approach: bool = False) -> None:
     import gymnasium as gym
     import embodichain.extensions.tasks
     from embodichain.lab.gym.envs import execute_demo_episode
@@ -183,10 +216,15 @@ def _exercise_expert_episode() -> None:
         / "embodichain/extensions/tasks/configs/tasks/manipulation/assembly/tool_hang/task.expert.panda.yaml"
     )
     declaration = yaml.safe_load(path.read_text())
+    if check_approach:
+        declaration["seed"] = 7
     env = gym.make(
         declaration["id"], cfg=config_to_cfg(declaration, source_path=path)
     ).unwrapped
     try:
+        if check_approach:
+            _check_wrench_approach(env)
+            return
         # A collection permits three attempts at an unassisted physical rollout.
         # GPU contacts may yield different outcomes from the same initial pose.
         attempts = []
@@ -216,7 +254,7 @@ def _exercise_expert_episode() -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "expert":
-        _exercise_expert_episode()
+    if len(sys.argv) > 1 and sys.argv[1] in ("expert", "wrench_approach"):
+        _exercise_expert_episode(check_approach=sys.argv[1] == "wrench_approach")
     else:
         _exercise_hanging_scene()
