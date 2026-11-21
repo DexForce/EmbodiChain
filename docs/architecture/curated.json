@@ -5937,8 +5937,8 @@
           "path": "embodichain/extensions/benchmarks/motion_generation/runner.py",
           "symbol": "BenchmarkRunner._create_simulation",
           "start_line": 276,
-          "end_line": 286,
-          "excerpt": "        sim = SimulationManager(\n            SimulationManagerCfg(\n                headless=self.headless,\n                sim_device=str(self.device),\n                num_envs=batch_size,\n                arena_space=2.0,\n                physics_cfg=DefaultPhysicsCfg(\n                    num_substeps=self.suite.protocol.physics_substeps\n                ),\n            )\n        )"
+          "end_line": 287,
+          "excerpt": "        sim = SimulationManager(\n            SimulationManagerCfg(\n                headless=self.headless,\n                sim_device=str(self.device),\n                num_envs=batch_size,\n                arena_space=2.0,\n                physics_cfg=DefaultPhysicsCfg(\n                    num_substeps=self.suite.protocol.physics_substeps\n                ),\n            ),\n            requires_native_renderer=not self.headless or self.video.enabled,\n        )"
         }
       ]
     },

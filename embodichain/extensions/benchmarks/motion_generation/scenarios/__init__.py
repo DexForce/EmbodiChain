@@ -38,8 +38,10 @@ from . import atomic_dual_arm_providers as _atomic_dual_arm_providers  # noqa: F
 from . import atomic_skill_providers as _atomic_skill_providers  # noqa: F401
 from .base import ScenarioEvaluation, ScenarioProvider
 from .free_space import FreeSpaceScenario
+from .affordance_reaching import AffordanceReachingScenario
 
 __all__ = [
+    "AffordanceReachingScenario",
     "AtomicObjectHandle",
     "AtomicSkillCaseProvider",
     "AtomicSkillScenario",

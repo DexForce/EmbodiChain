@@ -232,7 +232,9 @@ def test_public_batch_replay_preserves_original_records_and_scores(
             pose[..., :3, 3] = qpos[..., :3]
             return pose
 
-    def simulation(cfg):
+    def simulation(cfg, *, requires_native_renderer):
+        assert cfg.headless is True
+        assert requires_native_renderer is False
         return SimpleNamespace(
             robot=Robot(cfg.num_envs),
             update=lambda **kw: None,
