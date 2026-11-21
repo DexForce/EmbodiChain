@@ -27,6 +27,8 @@ from embodichain.data.constants import (
 
 __all__ = [
     "SceneData",
+    "CalvinPlayTableD",
+    "RoboCasa365Microwave048",
     "EmptyRoom",
     "WoodLab",
     "IndustrialWorkshop",
@@ -261,3 +263,41 @@ class CleanLab(EmbodiChainDataset):
         descriptor = o3d.data.DataDescriptor(urls, "3e0c7a820aa5a72bddf6292be85ee6a4")
         root = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
         super().__init__(type(self).__name__, descriptor, root)
+
+
+class _ManipulationWorkcellAsset(EmbodiChainDataset):
+    """Versioned scene asset with its original attribution inside the archive."""
+
+    cache_prefix: ClassVar[str]
+    archive: ClassVar[str]
+    revision: ClassVar[str]
+    md5: ClassVar[str]
+
+    def __init__(self, data_root: str | None = None) -> None:
+        prefix = EMBODICHAIN_DOWNLOAD_PREFIX.replace(
+            "/resolve/main/", f"/resolve/{self.revision}/", 1
+        )
+        descriptor = o3d.data.DataDescriptor(prefix + self.archive, self.md5)
+        super().__init__(
+            self.cache_prefix,
+            descriptor,
+            EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root,
+        )
+
+
+class CalvinPlayTableD(_ManipulationWorkcellAsset):
+    """CALVIN table D and three block descriptions from the original MIT release."""
+
+    cache_prefix = "CalvinPlayTableDV1"
+    archive = "scene_assets/calvin_v1/CalvinPlayTableD.zip"
+    revision = "81aa73a63345dd27187f149db5186786d9e3c429"
+    md5 = "6e6b1f7b23c39eeac020293a16993726"
+
+
+class RoboCasa365Microwave048(_ManipulationWorkcellAsset):
+    """LightWheel Microwave048 with the geometry and joint range of episode 86."""
+
+    cache_prefix = "RoboCasa365Microwave048V1"
+    archive = "scene_assets/robocasa365_v1/OpenMicrowave048.zip"
+    revision = "477f042473e6514fe9d97c0940c20d1e88f5d795"
+    md5 = "25fea3cd8daf7ea6adab96efedc7b570"
