@@ -2584,6 +2584,13 @@ def test_prepare_initializes_runtime_for_backend_device_matrix(
     sim.num_envs = 1
     sync_render_state = MagicMock()
     sim.device = device
+    sim.sim_config = SimulationManagerCfg(
+        physics_cfg=(
+            DefaultPhysicsCfg(device=str(device))
+            if backend == "default"
+            else NewtonPhysicsCfg(device=str(device))
+        )
+    )
     sim._world = MagicMock()
     backend_cls = (
         DefaultPhysicsBackend if backend == "default" else NewtonPhysicsBackend

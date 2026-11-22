@@ -331,77 +331,84 @@ def test_marvin_constraint_evidence_reads_negative_two_finger_displacement(
     assert observation.valid.tolist() == [True, True, True, True]
 
 
-def test_marvin_pour_lowers_scene_and_targets_without_changing_program_steps(
+def test_marvin_pour_matches_the_low_table_scene_and_four_segment_program(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The 750 mm table variant shifts assets and targets together by 125 mm."""
+    """Marvin's rigid scene and pose targets use the 750 mm tabletop."""
     monkeypatch.setattr(
         "embodichain.extensions.robots.tianji.marvin.cfg.get_data_path",
         lambda value: value,
     )
     path, payload, _, deployment = _deployment("tableware/pour_water")
-    reference = load_config(path.parent / "task.cobotmagic.yaml")
     scene = load_config(path.parent / payload["environment"]["component"])
-    original_scene = load_config(path.parent / reference["environment"]["component"])
-    assert scene.pop("environment_id") != original_scene.pop("environment_id")
+    assert scene["physics"] == "default"
     assert (
-        scene["env"]["dataset"]["lerobot"]["params"]["robot_meta"].pop("robot_type")
+        scene["env"]["dataset"]["lerobot"]["params"]["robot_meta"]["robot_type"]
         == "TianjiMarvin"
     )
-    assert (
-        original_scene["env"]["dataset"]["lerobot"]["params"]["robot_meta"].pop(
-            "robot_type"
-        )
-        == "CobotMagic"
-    )
-    for category in ("background", "rigid_object"):
-        for entity, original in zip(
-            scene["simulation"][category],
-            original_scene["simulation"][category],
-            strict=True,
-        ):
-            position, original_position = entity.pop("init_pos"), original.pop(
-                "init_pos"
-            )
-            assert position[:2] == original_position[:2]
-            assert position[2] == pytest.approx(original_position[2] - 0.125)
-    assert scene == original_scene
-    program = load_config(path.parent / payload["task_program"]["program"])
-    original_program = load_config(path.parent / reference["task_program"]["program"])
+    positions = {
+        entity["uid"]: entity["init_pos"]
+        for category in ("background", "rigid_object")
+        for entity in scene["simulation"][category]
+    }
+    assert positions == {
+        "table": pytest.approx((0.725, 0.0, 0.700)),
+        "cup": pytest.approx((0.75, 0.1, 0.796)),
+        "bottle": pytest.approx((0.75, -0.1, 0.837)),
+    }
+    targets = deployment.load_program().targets
+    expected_positions = {
+        "bottle_return_pose": positions["bottle"],
+        "bottle_release_pose": (0.75, -0.1, 0.844),
+        "bottle_pour_pose": (0.777645, 0.046435, 0.976),
+        "cup_rest_pose": positions["cup"],
+    }
+    assert targets.keys() == expected_positions.keys()
+    for name, pose in targets.items():
+        assert pose.position == pytest.approx(expected_positions[name], abs=1e-6)
+        assert pose.quaternion_xyzw == (0.0, 0.0, 0.0, 1.0)
+        assert pose.kind == "pose" and pose.frame == "world"
+
     from embodichain.lab.task_program.language.authoring import normalize_task_program
 
-    program = normalize_task_program(program).declaration
-    original_program = normalize_task_program(original_program).declaration
-    targets, original_targets = program.pop("targets"), original_program.pop("targets")
-    assert targets.keys() - original_targets.keys() == {"bottle_pour_pose"}
-    assert original_targets.keys() <= targets.keys()
-    from embodichain.lab.task_program import load_task_program
-
-    decoded = deployment.load_program().targets
-    original_decoded = load_task_program(
-        path.parent / reference["task_program"]["program"],
-        integration=deployment.selection,
-    ).targets
-    for name, target in original_decoded.items():
-        pose = decoded[name]
-        position, original_position = pose.position, target.position
-        assert position[:2] == original_position[:2]
-        assert position[2] == pytest.approx(original_position[2] - 0.125)
-        assert pose.quaternion_xyzw == target.quaternion_xyzw
-        assert pose.frame == target.frame
-        assert pose.kind == target.kind
-    marvin_segments = program["program"]["items"]
-    cobot_segments = original_program["program"]["items"]
-    assert cobot_segments[0].pop("validators") == [
-        {"kind": "condition", "ref": "bottle_lifted"}
+    program = load_config(deployment.program_path)
+    segments = normalize_task_program(program).declaration["program"]["items"]
+    assert [segment["steps"]["call"] for segment in segments] == [
+        {"kind": "pick", "object": "bottle", "grasp": "bottle_grasp"},
+        {
+            "kind": "registered",
+            "call_id": "simulation.move_held_object",
+            "arguments": {"target": "cup_pour_pose"},
+        },
+        {
+            "kind": "registered",
+            "call_id": "simulation.pour",
+            "arguments": {"object": "bottle"},
+        },
+        {
+            "kind": "place",
+            "object": "bottle",
+            "at": {"kind": "target_ref", "target": "bottle_release_pose"},
+        },
     ]
-    assert cobot_segments[1].pop("validators") == [
-        {"kind": "condition", "ref": "bottle_above_cup"}
+    (arrival_check,) = segments[1]["validators"]
+    assert arrival_check == {
+        "kind": "object_near_target",
+        "object": "bottle",
+        "target": "bottle_pour_pose",
+        "position_tolerance": 0.01,
+    }
+    assert segments[3]["post"] == [
+        {"kind": "wait_stable", "entity": "bottle"},
+        {"kind": "wait_stable", "entity": "cup"},
     ]
-    assert marvin_segments[1].pop("validators")[0]["target"] == "bottle_pour_pose"
-    for segment in cobot_segments:
-        assert segment.pop("contract")["outcomes"]
-    assert program == original_program
+    assert [
+        (check["target"], check["position_tolerance"])
+        for check in segments[3]["validators"]
+    ] == [
+        ("bottle_return_pose", 0.05),
+        ("cup_rest_pose", 0.002),
+    ]
     cfg = config_to_cfg(payload, source_path=path)
     assert cfg.target_control_frequency == 100
     preset = deployment.integration.registration.robot_profile_binding.presets[0]
