@@ -33,6 +33,7 @@ import embodichain.cli.main as cli
 from embodichain import __main__ as entrypoint
 
 EXPECTED_COMMANDS = {
+    "mcp",
     "analyze-workspace",
     "annotate-grasp",
     "benchmark",

@@ -573,6 +573,56 @@
       "details": "The unified embodichain command resolves a requested subcommand and loads its handler lazily. Use the CLI reference to find launch options for environments, training, assets, and other tools; task behavior stays in the handler-owned subsystem."
     },
     {
+      "id": "mcp",
+      "label": "EmbodiChain MCP",
+      "kind": "module",
+      "topic_ids": [
+        "robot-system"
+      ],
+      "summary": "Reads measured robot joint positions and velocities from an existing DexSim session over stdio.",
+      "boundaries": [
+        "The DexSim host owns the World and executes queries on the World owner thread."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/mcp/server.py",
+          "symbol": "serve",
+          "start_line": 38,
+          "end_line": 39,
+          "excerpt": "    with Session.connect(\n        session_id, directory=directory, client={\"kind\": \"embodichain-mcp\"}"
+        },
+        {
+          "path": "embodichain/mcp/tools/robot.py",
+          "symbol": "register_robot_tools.embodichain_get_robot_state",
+          "start_line": 48,
+          "end_line": 49,
+          "excerpt": "            return session.invoke(\n                \"embodichain.lab.sim.dexsim_session.robot_state\","
+        },
+        {
+          "path": "embodichain/lab/sim/dexsim_session/robot_state.py",
+          "symbol": "read_robot_state",
+          "start_line": 96,
+          "end_line": 97,
+          "excerpt": "    names, indices, units = _select_dofs(handle.joint_dof_layout, parts[control_part])\n    positions = np.asarray(handle.get_current_qpos()).reshape(-1)[indices]"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "guides/mcp",
+          "label": "Connect a stdio client"
+        },
+        {
+          "docname": "features/mcp/index",
+          "label": "EmbodiChain MCP tool contract"
+        },
+        {
+          "docname": "api_reference/embodichain/embodichain.mcp",
+          "label": "Python API"
+        }
+      ],
+      "details": "The CLI connects to an explicit DexSim Runtime session. The stdio server registers robot tools that invoke the EmbodiChain adapter in the World host. Native DexSim MCP clients can attach separately to the same session. The host resolves the live articulation and returns a detached measurement in control-part order."
+    },
+    {
       "id": "tasks",
       "label": "Official tasks",
       "kind": "module",
@@ -3543,6 +3593,45 @@
       ]
     },
     {
+      "id": "visual-world-model",
+      "label": "LeWM visual world model",
+      "kind": "package",
+      "topic_ids": [
+        "visual-world-model"
+      ],
+      "summary": "Predicts action-conditioned visual latents for image-goal planning.",
+      "details": "LeWM encodes observed RGB histories and predicts future latents under candidate actions. The CEM planner scores candidates against an encoded goal image. The Cube example owns DexUni simulation, native camera collection and closed-loop evaluation.",
+      "boundaries": [
+        "The model and planner operate on tensors supplied by the caller. The example owns rendering and execution."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/extensions/models/dynamics/lewm/model.py",
+          "symbol": "LeWM",
+          "start_line": 101,
+          "end_line": 101,
+          "excerpt": "class LeWM(nn.Module):"
+        },
+        {
+          "path": "embodichain/extensions/models/dynamics/lewm/planner.py",
+          "symbol": "LeWMCEMPlanner",
+          "start_line": 74,
+          "end_line": 74,
+          "excerpt": "class LeWMCEMPlanner:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/neural_dynamics/lewm",
+          "label": "LeWM model and Cube workflow"
+        },
+        {
+          "docname": "api_reference/lewm",
+          "label": "LeWM API"
+        }
+      ]
+    },
+    {
       "id": "task-spec",
       "label": "TaskSpec",
       "kind": "module",
@@ -4109,6 +4198,31 @@
           "start_line": 556,
           "end_line": 560,
           "excerpt": "            self.sim = SimulationManager(\n                self.sim_cfg,\n                defer_startup_summary=True,\n                requires_native_renderer=requires_native_renderer,\n            )"
+        }
+      ]
+    },
+    {
+      "id": "cli-calls-mcp",
+      "source": "cli",
+      "target": "mcp",
+      "relation": "calls",
+      "description": "Dispatch the mcp subcommand to the stdio MCP server.",
+      "scope": "Lazy command dispatch when the user selects embodichain mcp.",
+      "provenance": "source-reviewed",
+      "evidence": [
+        {
+          "path": "embodichain/cli/main.py",
+          "symbol": "<module>",
+          "start_line": 41,
+          "end_line": 42,
+          "excerpt": "        name=\"mcp\",\n        target=\"embodichain.cli.mcp:main\","
+        },
+        {
+          "path": "embodichain/cli/main.py",
+          "symbol": "main",
+          "start_line": 267,
+          "end_line": 268,
+          "excerpt": "    handler = _load_handler(command.target)\n    handler(arguments[1:])"
         }
       ]
     },
@@ -6029,6 +6143,7 @@
       "description": "Module responsibilities and direct dependencies, from task entry points to motion execution.",
       "node_ids": [
         "cli",
+        "mcp",
         "env-launcher",
         "task-discovery",
         "tasks",
@@ -6118,6 +6233,7 @@
         "supervised-learning",
         "nerd-showcase",
         "robot-world-model",
+        "visual-world-model",
         "task-spec",
         "task-engine"
       ],
@@ -6134,6 +6250,7 @@
         "bridge-holds-executor",
         "env-inherits-base",
         "base-constructs-simulation",
+        "cli-calls-mcp",
         "cli-calls-env-launcher",
         "cli-calls-training-assembly",
         "launcher-calls-discovery",
@@ -6217,6 +6334,7 @@
           "label": "Entry points & environments",
           "node_ids": [
             "cli",
+            "mcp",
             "env-launcher",
             "task-discovery",
             "tasks",
@@ -6344,7 +6462,8 @@
             "neural-dynamics",
             "supervised-learning",
             "nerd-showcase",
-            "robot-world-model"
+            "robot-world-model",
+            "visual-world-model"
           ]
         },
         {
@@ -6688,7 +6807,8 @@
         "supervised-learning",
         "neural-dynamics",
         "nerd-showcase",
-        "robot-world-model"
+        "robot-world-model",
+        "visual-world-model"
       ],
       "edge_ids": [
         "cli-calls-training-assembly",
@@ -6762,7 +6882,8 @@
             "supervised-learning",
             "neural-dynamics",
             "nerd-showcase",
-            "robot-world-model"
+            "robot-world-model",
+            "visual-world-model"
           ]
         },
         {

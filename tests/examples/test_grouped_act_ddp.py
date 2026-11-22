@@ -224,7 +224,6 @@ def test_audit_requires_release_for_each_authorized_generation(layout: str) -> N
 
 
 def test_calibration_merges_rank_frames_and_episode_lengths() -> None:
-    pytest.importorskip("lerobot")
     first = {
         "state": torch.tensor([[0.0], [2.0]]),
         "action": torch.tensor([[1.0], [3.0]]),

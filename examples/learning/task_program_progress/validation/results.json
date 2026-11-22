@@ -1,0 +1,168 @@
+{
+  "scope": "Task Program reward composition, without a trained policy or optimizer",
+  "program_id": "stack_two_blocks",
+  "seed": 17,
+  "controller_source_sha256": "d076213ece504d5247ceee33077b1c2835ccffe8e5409f382fb9c7450d8964fe",
+  "cases": {
+    "success": {
+      "steps": 893,
+      "num_envs": 2,
+      "passed": true,
+      "max_reward_error": 8.940696716308594e-08,
+      "max_repeat_read_error": 0.0,
+      "shaping_identity_error": 1.496893156068067e-08,
+      "weighted_milestone_sums": [
+        [
+          0.5,
+          0.5
+        ],
+        [
+          0.0,
+          0.0
+        ]
+      ],
+      "outcome_sums": [
+        10.0,
+        0.0
+      ],
+      "effective_contract_sha256": "2ae3e72dec57e46ffc3fda41adb08a8dcaec544ee7ff1250ec85bfe4bcb4d561"
+    },
+    "hold": {
+      "steps": 64,
+      "num_envs": 2,
+      "passed": true,
+      "max_reward_error": 1.70985004177256e-12,
+      "max_repeat_read_error": 0.0,
+      "shaping_identity_error": 2.7795459625623315e-11,
+      "weighted_milestone_sums": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ]
+      ],
+      "outcome_sums": [
+        0.0,
+        0.0
+      ],
+      "effective_contract_sha256": "08a0b22bad76b52911cf6a098b94425585be5cfc15715ebed6fa8595b0fe21ee"
+    },
+    "truncated": {
+      "steps": 600,
+      "num_envs": 2,
+      "passed": true,
+      "max_reward_error": 8.553266528377179e-08,
+      "max_repeat_read_error": 0.0,
+      "shaping_identity_error": 1.250285896125733e-08,
+      "weighted_milestone_sums": [
+        [
+          0.5,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ]
+      ],
+      "outcome_sums": [
+        0.0,
+        0.0
+      ],
+      "effective_contract_sha256": "c25c891fd22c1339439d9ba41c251d2b966810dc67ade4dd8247d5684f438266"
+    },
+    "failure": {
+      "steps": 1,
+      "num_envs": 2,
+      "passed": true,
+      "max_reward_error": 0.0,
+      "max_repeat_read_error": 0.0,
+      "shaping_identity_error": 0.0,
+      "weighted_milestone_sums": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ]
+      ],
+      "outcome_sums": [
+        -10.0,
+        -10.0
+      ],
+      "effective_contract_sha256": "c8fefa70d12eb6f62534ecbe78ca2a320eeb9105e770efa905a9a784a8ee2c39"
+    }
+  },
+  "env_step_calls": 1559,
+  "reward_samples": 3118,
+  "max_reward_error": 8.940696716308594e-08,
+  "max_repeat_read_error": 0.0,
+  "max_shaping_identity_error": 1.496893156068067e-08,
+  "post_reset": {
+    "reward": [
+      5.033616616856307e-07,
+      -7.589624146930873e-07
+    ],
+    "expected_reward": [
+      5.033612251281768e-07,
+      -7.589633969473636e-07
+    ],
+    "terms": {
+      "composed_potential": [
+        5.033616616856307e-07,
+        -7.589624146930873e-07
+      ],
+      "composed_outcome": [
+        0.0,
+        0.0
+      ],
+      "composed_stage_0": [
+        0.0,
+        0.0
+      ],
+      "composed_stage_1": [
+        0.0,
+        0.0
+      ]
+    },
+    "peer_reward_error": 9.822542762884592e-13,
+    "max_reward_error": 9.822542762884592e-13,
+    "episode_ids": [
+      1,
+      0
+    ]
+  },
+  "events": [
+    {
+      "event": "lift",
+      "step_zero_based": 468,
+      "milestone_bonus": 0.5,
+      "shape": 0.1178956925868988,
+      "program_progress_shape": 0.495,
+      "skill_goal_shape": -0.377104309797287,
+      "outcome": 0.0,
+      "total": 0.6178957223892212
+    },
+    {
+      "event": "place",
+      "step_zero_based": 892,
+      "milestone_bonus": 0.5,
+      "shape": -0.9424504041671753,
+      "program_progress_shape": -0.5,
+      "skill_goal_shape": -0.4424504339694977,
+      "outcome": 10.0,
+      "total": 9.557549476623535
+    }
+  ],
+  "oracle": "Independent scalar reward-composition arithmetic using canonical measured skill potentials; not an independent geometry/skill-formula oracle",
+  "preview_sha256": "18d3f057ae24d44d4f87ea4a093a3d74ce58045e5799f2ba4e2b8f55e251b638",
+  "preview_source": {
+    "video_sha256": "1baf7ecb9bec83e94d7a3aba09d336486c3bd49baab006e29f1b4453395a9443",
+    "trace_sha256": "977864ac1a175aec196010ee74617fb37252ec5ac9776eb87420a0ff9114ae65",
+    "frame_count": 447
+  }
+}

@@ -509,6 +509,8 @@ def test_locomotion_overrides_are_isolated_and_roundtrip(
         ("UnitreeH1_2", "unitree", "bipedal_humanoid", 2),
         ("ANYmalC", "anybotics", "quadruped", 0),
         ("MicroDuck", "pollen_robotics", "biped", 0),
+        ("RoboPartyRPO", "roboparty", "bipedal_humanoid", 2),
+        ("RoboPartyRP1", "roboparty", "bipedal_humanoid", 2),
     ],
 )
 def test_locomotion_catalog_classifies_body_independently_of_arms(

@@ -764,6 +764,8 @@ class EmbodiedEnv(BaseEnv):
                         registration, self.robot, self.action_manager
                     )
 
+                    from .managers.skill_objective import _program_objective_conditions
+
                     self.task_program_progress = TaskProgramProgress(
                         registration.catalog.preflight(
                             cfg.task_program, strict_contracts=True
@@ -779,6 +781,7 @@ class EmbodiedEnv(BaseEnv):
                         device=self.device,
                         final_rules=dict(self._final_acceptance_rules),
                         process_rules=dict(self._process_evaluation_rules),
+                        skill_conditions=_program_objective_conditions(cfg),
                     )
             if self._explicit_policy_rollout and self.action_manager is None:
                 raise ValueError(
@@ -1688,6 +1691,8 @@ class EmbodiedEnv(BaseEnv):
             termination is not None
             and getattr(getattr(self, "cfg", None), "task_program_execution", "expert")
             != "policy"
+            and getattr(getattr(self.cfg, "rl_task", None), "reward_composition", None)
+            is None
         ):
             # BaseEnv advances elapsed steps after rewards. Supply this
             # transition's deadline once; Gym flags later consume this cache.
@@ -1697,18 +1702,32 @@ class EmbodiedEnv(BaseEnv):
             )
 
     def _after_observation(self, frame: ObservationFrame) -> None:
-        """Advance policy progress once before reward and termination read caches."""
+        """Advance measured objectives and progress before reward consumers."""
+        from .managers.skill_objective import _advance_objectives
+
+        _advance_objectives(self)
         progress = getattr(self, "task_program_progress", None)
-        if progress is None:
-            return
-        progress.advance(
-            frame, step=self._program_transition, episode_owner=self.episode_context
+        composition = getattr(
+            getattr(self.cfg, "rl_task", None), "reward_composition", None
         )
-        self._program_transition += 1
-        self.termination_manager.compute(
-            self._elapsed_steps + 1 >= self.max_episode_steps,
-            ignore_terminations=self.cfg.ignore_terminations,
-        )
+        if progress is not None:
+            progress.advance(
+                frame, step=self._program_transition, episode_owner=self.episode_context
+            )
+            self._program_transition += 1
+        if progress is not None or composition is not None:
+            self.termination_manager.compute(
+                self._elapsed_steps + 1 >= self.max_episode_steps,
+                ignore_terminations=self.cfg.ignore_terminations,
+            )
+        if composition is not None:
+            from .managers.reward_context import RewardTransitionContext
+
+            valid = self.reward_manager.prepare_observation(frame)
+            self.termination_manager.invalidate_reward_evidence(valid)
+            self.reward_manager.transition_context = RewardTransitionContext(
+                frame, self.termination_manager.terminated
+            )
 
     def _initialize_physical_objective(self) -> None:
         """Bind an optional objective to an existing measured rigid object."""

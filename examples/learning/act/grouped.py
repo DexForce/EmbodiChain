@@ -330,9 +330,6 @@ def _calibration_stats(
     samples: list[dict | None], elapsed: bool
 ) -> tuple[dict, float | None]:
     import torch
-    from lerobot.utils.constants import IMAGENET_STATS
-
-    from ._grouped_ddp import IMAGE
 
     rows = [sample for sample in samples if sample is not None]
 
@@ -351,7 +348,6 @@ def _calibration_stats(
         mean.append(progress.mean().reshape(1))
         std.append(progress.std(correction=0).clamp_min(0.05).reshape(1))
     return {
-        IMAGE: {key: torch.tensor(value) for key, value in IMAGENET_STATS.items()},
         "observation.state": {"mean": torch.cat(mean), "std": torch.cat(std)},
         "action": {"mean": action.mean(0), "std": action.std(0, correction=0)},
     }, time_scale
@@ -381,6 +377,7 @@ def _policy(schema: dict, spec: dict, device: Any, stats: dict, seed: int) -> tu
     import torch
     from lerobot.policies.act.modeling_act import ACTPolicy
     from lerobot.policies.act.processor_act import make_act_pre_post_processors
+    from lerobot.utils.constants import IMAGENET_STATS
     from embodichain.extensions.models.policy.act.training import _act_config
 
     from ._grouped_ddp import IMAGE
@@ -415,6 +412,10 @@ def _policy(schema: dict, spec: dict, device: Any, stats: dict, seed: int) -> tu
     np.random.seed(seed)
     torch.manual_seed(seed)
     policy = ACTPolicy(cfg).to(device)
+    stats = {
+        IMAGE: {key: torch.tensor(value) for key, value in IMAGENET_STATS.items()},
+        **stats,
+    }
     pre, post = make_act_pre_post_processors(cfg, stats)
     settings = cfg.get_optimizer_preset()
     return policy, pre, post, settings.build(policy.get_optim_params()), settings
