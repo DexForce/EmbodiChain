@@ -89,9 +89,6 @@ def _audit_supply(recipe: dict, supply: dict, spec: dict) -> list[int]:
         width, slots, cap = (producer[key] for key in ("width", "slots", "cap"))
         rank = producer["rank"]
         stats = producer["engine"]
-        completed, requested = (
-            stats[key] for key in ("completed_generation", "requested_generation")
-        )
         releases = producer["releases"]
         if (
             producer["gpu_uuid"] != ranks[rank]["gpu_uuid"]
@@ -103,20 +100,28 @@ def _audit_supply(recipe: dict, supply: dict, spec: dict) -> list[int]:
         ):
             raise ValueError(f"Producer {rank} differs from the supply contract")
         if (
-            completed < 1
-            or requested not in (completed, completed + 1)
-            or len(releases) != requested - 1
-            or requested * width > cap
-            or stats["successful_episodes"] != completed * width
+            stats["requested_generation"] * width > cap
+            or stats["successful_episodes"] != stats["completed_generation"] * width
         ):
             raise ValueError(f"Producer {rank} has an incomplete release chain")
-        counts.extend(_audit_releases(releases, width, slots, spec["draw_floor"]))
+        counts.extend(
+            _audit_releases(stats, releases, width, slots, spec["draw_floor"])
+        )
     return counts
 
 
 def _audit_releases(
-    releases: list[dict], width: int, slots: int, floor: int
+    stats: dict, releases: list[dict], width: int, slots: int, floor: int
 ) -> list[int]:
+    completed = stats["completed_generation"]
+    requested = stats["requested_generation"]
+    if (
+        completed < 1
+        or requested not in (completed, completed + 1)
+        or len(releases) != requested - 1
+        or stats["successful_episodes"] not in (completed * width, requested * width)
+    ):
+        raise ValueError("Producer has an incomplete release chain")
     counts = []
     for generation, release in enumerate(releases, 2):
         first = (generation - 1) * width - slots
@@ -246,7 +251,11 @@ def _audit(path: Path, spec: dict, seed: int) -> dict:
             raise ValueError("Sample count disagrees with completed optimizer batches")
         releases = supply["releases"]
         counts = _audit_releases(
-            releases, spec["producer_envs"], spec["shared_slots"], spec["draw_floor"]
+            supply["engine"],
+            releases,
+            spec["producer_envs"],
+            spec["shared_slots"],
+            spec["draw_floor"],
         )
     submission = published if published is not None else receipt.get("locked_seconds")
     qualified = (

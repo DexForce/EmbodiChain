@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from pathlib import Path
 import sys
 import time
 
@@ -37,6 +38,15 @@ def main() -> None:
     ):
         parser.error("The cold launcher supplies the clock origin")
     env = os.environ.copy()
+    # Resolve example imports from this installation while retaining the caller's cwd.
+    env["PYTHONSAFEPATH"] = "1"
+    examples_parent = Path(__file__).resolve().parents[3]
+    pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        f"{examples_parent}{os.pathsep}{pythonpath}"
+        if pythonpath
+        else str(examples_parent)
+    )
     for key, value in (
         ("EMBODICHAIN_SIM_EXIT_PROCESS", "0"),
         ("CUBLAS_WORKSPACE_CONFIG", ":4096:8"),

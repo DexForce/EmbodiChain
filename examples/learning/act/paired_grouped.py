@@ -166,8 +166,7 @@ def _run_seed(
     command = [
         sys.executable,
         "-Bu",
-        "-m",
-        "examples.learning.act.timed_grouped",
+        str(Path(__file__).resolve().with_name("timed_grouped.py")),
         "--nproc-per-node",
         "2",
         "--producer-layout",

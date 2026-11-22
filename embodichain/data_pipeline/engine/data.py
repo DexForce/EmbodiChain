@@ -2309,7 +2309,12 @@ class OnlineDataEngine:
             if not len(anchors):
                 raise DataUnavailableError("No unlocked valid group anchors")
             rows, frames = anchors[
-                torch.randint(len(anchors), (batch_size,), generator=generator)
+                torch.randint(
+                    len(anchors),
+                    (batch_size,),
+                    generator=generator,
+                    device=anchors.device,
+                )
             ].unbind(1)
             indices, mask, _ = _context_indices(
                 valid, continuity, rows, frames, 1, horizon

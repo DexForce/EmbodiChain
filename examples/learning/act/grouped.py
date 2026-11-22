@@ -172,6 +172,22 @@ def make_engine(
     )
 
 
+def _source_hashes() -> dict[str, str]:
+    import embodichain
+
+    package = Path(embodichain.__file__).resolve().parent
+    example = Path(__file__).resolve()
+    paths = (
+        example,
+        example.with_name("_grouped_ddp.py"),
+        example.with_name("_study_panel.py"),
+        package / "extensions/models/policy/act/runtime.py",
+        package / "lab/gym/envs/base_env.py",
+        package / "data_pipeline/engine/data.py",
+    )
+    return {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
+
+
 def _write(path: Path, value: Any) -> None:
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(value, indent=2, allow_nan=False) + "\n")
@@ -578,20 +594,7 @@ def _train(
                         "smoke": smoke,
                         "task_identity": task_identity(),
                         "clock_origin_monotonic": started,
-                        "source_hashes": {
-                            str(path): hashlib.sha256(path.read_bytes()).hexdigest()
-                            for path in (
-                                Path(__file__),
-                                Path(__file__).with_name("_grouped_ddp.py"),
-                                Path(__file__).with_name("_study_panel.py"),
-                                Path(__file__).parents[3]
-                                / "embodichain/extensions/models/policy/act/runtime.py",
-                                Path(__file__).parents[3]
-                                / "embodichain/lab/gym/envs/base_env.py",
-                                Path(__file__).parents[3]
-                                / "embodichain/data_pipeline/engine/data.py",
-                            )
-                        },
+                        "source_hashes": _source_hashes(),
                     },
                 )
                 _write(out / "development.json", [])

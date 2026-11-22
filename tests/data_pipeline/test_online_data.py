@@ -2739,8 +2739,9 @@ def test_group_commit_and_retirement_are_per_episode_and_exactly_once() -> None:
         with engine.group_batch(1, 3, anchor_fields=["obs"]):
             raise ArithmeticError("failed optimizer")
     assert engine.try_refill_group() is None
-    cm = engine.group_batch(1, 3, anchor_fields=["obs"])
-    with cm as batch:
+    generator = torch.Generator(device="cpu").manual_seed(1)
+    cm = engine.group_batch(1, 3, anchor_fields=["obs"], generator=generator)
+    with torch.device("cuda"), cm as batch:
         # Padding must not cross a continuity boundary or charge padded steps.
         assert batch["action_is_pad"].tolist() == [[False, True, True]]
         torch.testing.assert_close(

@@ -20,8 +20,12 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import timedelta
+import hashlib
+import json
 import multiprocessing as mp
+import os
 from pathlib import Path
+import shutil
 from types import SimpleNamespace
 
 import pytest
@@ -38,7 +42,8 @@ from examples.learning.act._grouped_ddp import (
     Ranks,
     training_batch,
 )
-from examples.learning.act.audit_grouped import _audit_supply
+from examples.learning.act import paired_grouped
+from examples.learning.act.audit_grouped import _audit, _audit_supply
 from examples.learning.act.grouped import _calibration_stats, _scene_shard
 
 
@@ -221,6 +226,131 @@ def test_audit_requires_release_for_each_authorized_generation(layout: str) -> N
     producers[-1]["releases"][1]["committed_draws"][-1] = 191
     with pytest.raises(ValueError, match="committed-draw floor"):
         _audit_supply(recipe, supply, spec)
+
+
+def test_legacy_audit_requires_pending_group_receipt(tmp_path: Path) -> None:
+    spec = dict(
+        producer_envs=2,
+        shared_slots=4,
+        batch_size=32,
+        draw_floor=192,
+        checkpoints=[],
+        deadline_seconds=300,
+        required_reserved_successes=95,
+    )
+    seed = 7
+    releases = [
+        dict(requested_generation=2, episode_ids=[], committed_draws=[]),
+        dict(requested_generation=3, episode_ids=[0, 1], committed_draws=[192, 193]),
+        dict(requested_generation=4, episode_ids=[2, 3], committed_draws=[200, 201]),
+    ]
+    # The old launcher took its snapshot before shutdown. A pending group can
+    # contribute its accepted episodes before the published generation advances.
+    supply = dict(
+        step=100,
+        first_update=1.0,
+        releases=releases,
+        engine=dict(
+            completed_generation=3,
+            requested_generation=4,
+            successful_episodes=8,
+            sampled_chunks=3200,
+        ),
+    )
+    for name, data in {
+        "recipe": dict(protocol=spec, seed=seed, gpu="0", source_hashes={}),
+        "supply": supply,
+        "development": [],
+        "deadline": dict(budget_seconds=300, chosen=None),
+        "metrics": dict(
+            seed=seed, selected=None, reserved_successes=None, pass_gate=False
+        ),
+    }.items():
+        (tmp_path / f"{name}.json").write_text(json.dumps(data))
+
+    assert _audit(tmp_path, spec, seed)["authorized_episode_replacements"] == 4
+
+    releases.pop()
+    (tmp_path / "supply.json").write_text(json.dumps(supply))
+    with pytest.raises(ValueError, match="incomplete release chain"):
+        _audit(tmp_path, spec, seed)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="The cold launcher uses Xvfb")
+def test_paired_seed_launches_installed_example_outside_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import embodichain
+
+    source = Path(paired_grouped.__file__).parent
+    installed = tmp_path / "prefix/share/embodichain/examples/learning/act"
+    installed.mkdir(parents=True)
+    for package in (installed, installed.parent, installed.parents[1]):
+        (package / "__init__.py").touch()
+    for name in (
+        "timed_grouped.py",
+        "grouped.py",
+        "_environment.py",
+        "_grouped_ddp.py",
+        "_study_panel.py",
+    ):
+        shutil.copyfile(source / name, installed / name)
+
+    core = Path(embodichain.__file__).resolve().parent
+    site = tmp_path / "prefix/lib/site-packages"
+    site.mkdir(parents=True)
+    (site / "embodichain").symlink_to(core, target_is_directory=True)
+    dependency = site / "act_test_dependency.py"
+    dependency.write_text("VALUE = 51\n")
+
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    (caller / "examples").mkdir()
+    (caller / "examples/__init__.py").write_text(
+        "raise AssertionError('caller examples shadowed the wheel')\n"
+    )
+    monkeypatch.chdir(caller)
+    # Stand in for Xvfb and the GPUs while keeping the real cold launcher and
+    # a fresh Python process with its inherited environment.
+    xvfb = caller / "xvfb-run"
+    xvfb.write_text('#!/bin/sh\nexec "$2" -B launch_probe.py\n')
+    xvfb.chmod(0o755)
+    (caller / "launch_probe.py").write_text(
+        "import json\n"
+        "from pathlib import Path\n"
+        "from act_test_dependency import VALUE\n"
+        "from examples.learning.act import grouped\n"
+        "assert VALUE == 51\n"
+        "Path('launch.json').write_text(json.dumps(grouped._source_hashes()))\n"
+    )
+    env = {
+        **os.environ,
+        "PATH": f"{caller}{os.pathsep}{os.environ['PATH']}",
+        "PYTHONPATH": str(site),
+        "CUDA_VISIBLE_DEVICES": "0,1",
+    }
+    env.pop("PYTHONSAFEPATH", None)
+    monkeypatch.setattr(
+        paired_grouped, "__file__", str(installed / "paired_grouped.py")
+    )
+    monkeypatch.setattr(paired_grouped, "_telemetry", lambda *_: None)
+    root = tmp_path / "runs"
+    root.mkdir()
+    path, outcome = paired_grouped._run_seed(
+        root,
+        "A",
+        7,
+        Path("protocol.json"),
+        Path("qualify.json"),
+        env,
+        {"deadline_seconds": 1},
+        smoke=True,
+    )
+    assert outcome["returncode"] == 0, path.with_suffix(".log").read_text()
+    hashes = json.loads((caller / "launch.json").read_bytes())
+    assert str(installed / "grouped.py") in hashes
+    engine = core / "data_pipeline/engine/data.py"
+    assert hashes[str(engine)] == hashlib.sha256(engine.read_bytes()).hexdigest()
 
 
 def test_calibration_merges_rank_frames_and_episode_lengths() -> None:
