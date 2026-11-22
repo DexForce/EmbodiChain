@@ -113,6 +113,18 @@ def test_batched_geometry_matches_scalar_rows_and_rebinds_permissions(device):
             )
             assert [report.status for report in selected] == [expected[2], expected[0]]
         assert expected == ["passed", "passed", "failed"]
+        # An inactive physical row can retain an out-of-budget pose after a
+        # rejected installation. It must not poison other selected rows.
+        inactive = {key: value.copy() for key, value in frames.items()}
+        inactive["payload"][1, 0, 3] = 1e5
+        selected = checker.check_batch(
+            inactive, moving_objects=("payload",), env_ids=(2, 0)
+        )
+        assert [report.status for report in selected] == ["failed", "passed"]
+        assert checker.last_batch_pairs == (pairs[2], pairs[0])
+        # The same unsupported transform is still rejected when selected.
+        with pytest.raises(UnsupportedFeasibilityError, match="precision budget"):
+            checker.check_batch(inactive, moving_objects=("payload",), env_ids=(1,))
         # Changing permissions cannot reuse the previous mask, and invalid row
         # IDs or malformed physical transforms fail before querying geometry.
         assert (

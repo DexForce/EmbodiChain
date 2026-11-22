@@ -48,7 +48,7 @@ from embodichain.lab.task_program.integrations.progress import TaskProgramProgre
 from test_program_compiler import _scene_registry, _integration
 
 
-def _setup(*, repeat=1, ids=(0, 1), count=2, gates=False):
+def _setup(*, repeat=1, ids=(0, 1), count=2, gates=False, stage_names=None):
     calls = []
     registry = builtin_predicates()
 
@@ -94,6 +94,11 @@ def _setup(*, repeat=1, ids=(0, 1), count=2, gates=False):
             else {"kind": "repeat", "count": repeat, "body": segment}
         ),
     }
+    if stage_names is not None:
+        data["program"] = {
+            "kind": "sequence",
+            "items": [{**segment, "name": name} for name in stage_names],
+        }
     scene, provider = _scene_registry()
     program = TaskProgramCompiler(
         SceneManifest.from_registry(scene), evaluation_conditions=conditions
@@ -471,3 +476,366 @@ def test_replacing_episode_owner_with_matching_ids_does_not_rebind_evidence():
     p.advance(_frame(foreign, [0.2, 0.2], 2), step=1, episode_owner=foreign)
     assert not p.snapshot()["achieved"].any()
     assert not p.condition()[1].any()
+
+
+def test_multicall_segment_requires_each_measured_call_in_order():
+    from embodichain.lab.task_program import CompiledTaskProgram
+
+    env, owner, _, _, graph = _setup()
+    original = env.task_program_progress._program_for_test
+    stage = next(original.iter_segments())
+    call = stage.calls[0]
+    stage = replace(
+        stage, calls=(call, replace(call, call_index=1, segment_call_index=1))
+    )
+    program = CompiledTaskProgram._create(
+        program_id=original.program_id,
+        instruction=original.instruction,
+        integration=original.integration,
+        segments=(stage,),
+    )
+    progress = TaskProgramProgress(
+        program,
+        {"lifted": graph},
+        env_ids=(0, 1),
+        episode_ids=owner.episode_ids,
+        skill_conditions={"call:0": graph, "call:1": graph},
+    )
+    progress.advance(_frame(owner, [0.2, 0.2], 1), step=0, episode_owner=owner)
+    assert progress.snapshot()["achieved"].tolist() == [[True, False], [True, False]]
+    progress.advance(_frame(owner, [0.2, 0.2], 2), step=1, episode_owner=owner)
+    assert progress.snapshot()["achieved"].tolist() == [[True, True], [True, True]]
+    assert progress.indices(stage.segment_id) == (0, 1)
+    assert progress.indices("call:1") == (1,)
+    with pytest.raises(ValueError, match="every call_index"):
+        TaskProgramProgress(
+            program,
+            {"lifted": graph},
+            env_ids=(0, 1),
+            episode_ids=owner.episode_ids,
+            skill_conditions={"call:0": graph},
+        )
+
+
+def test_progress_rejects_unmatched_skill_conditions_in_direct_python_calls():
+    env, owner, _, _, graph = _setup()
+    program = env.task_program_progress._program_for_test
+    registry = builtin_predicates()
+
+    def unsatisfied(arguments, params):
+        height = arguments["height"]
+        return PredicateMeasurement(height >= 0.5, torch.isfinite(height), {})
+
+    registry.register(
+        "extra_height", PredicateDefinition(1, ("height",), dict, unsatisfied)
+    )
+    extra = registry.compile(
+        EvaluationSpec(
+            {"extra": PredicateSpec("extra_height", {"height": "height"}, {})},
+            ("extra",),
+        )
+    )
+    progress = TaskProgramProgress(
+        program,
+        {"lifted": graph},
+        env_ids=(0, 1),
+        episode_ids=owner.episode_ids,
+        skill_conditions={("call", 0): extra},
+    )
+    progress.advance(_frame(owner, [0.2, 0.2], 1), step=0, episode_owner=owner)
+    assert not progress.snapshot()["achieved"].any()
+    for selector in (("call", 99), "missing_stage"):
+        with pytest.raises(ValueError) as error:
+            TaskProgramProgress(
+                program,
+                {"lifted": graph},
+                env_ids=(0, 1),
+                episode_ids=owner.episode_ids,
+                skill_conditions={selector: extra},
+            )
+        assert repr(selector) in str(error.value)
+
+
+def test_progress_identity_binds_additional_skill_acceptance_graph():
+    env, owner, _, _, graph = _setup()
+    original = env.task_program_progress
+    changed = TaskProgramProgress(
+        original._program_for_test,
+        {"lifted": graph},
+        env_ids=(0, 1),
+        episode_ids=owner.episode_ids,
+        skill_conditions={"lift": graph},
+    )
+    assert original.compiled.identity != changed.compiled.identity
+
+
+def test_program_rewards_have_exact_milestone_and_terminal_values_across_partial_reset():
+    from embodichain.lab.gym.envs.managers.reward_composition import (
+        compose_reward_terms,
+        _add_common_rewards,
+    )
+    from embodichain.lab.gym.envs.managers.reward_context import RewardTransitionContext
+
+    env, owner, _, _, _ = _setup(repeat=2)
+    env.step_dt = 0.04
+    env.episode_context = owner
+    progress = env.task_program_progress
+    specification = {"discount": 0.99, "skills": []}
+    task = RLTaskCfg(
+        success={
+            "all_stages": ConditionCfg(
+                func=program_stage_condition, params={"state": "achieved"}
+            )
+        },
+        reward_composition=specification,
+    )
+    terms = compose_reward_terms(specification, program=True)
+    _add_common_rewards(
+        SimpleNamespace(rl_task=task, rewards=SimpleNamespace()),
+        terms,
+        tuple(progress._program_for_test.iter_segments()),
+    )
+    manager = env.reward_manager = RewardManager(terms, env)
+    termination = TerminationManager(task, env)
+    manager.initialize_observation(_frame(owner, [0.0, 0.0], 0), [0, 1])
+    for step, heights, expected in (
+        (0, [0.2, 0.0], [0.995, 0.0]),
+        (1, [0.2, 0.2], [10.0, 0.995]),
+        (2, [0.0, 0.2], [0.0, 10.0]),
+    ):
+        if step == 2:
+            owner._begin_episode([0])
+            progress.reset([0], [owner.episode_ids[0]])
+            manager.reset([0])
+            termination.reset([0])
+            manager.initialize_observation(_frame(owner, [0.0, 0.2], 3), [0])
+        frame = _frame(owner, heights, step + 4)
+        progress.advance(frame, step=step, episode_owner=owner)
+        termination.compute()
+        info = {"task_outcome": termination.snapshot()}
+        manager.transition_context = RewardTransitionContext(
+            frame, termination.terminated
+        )
+        value, _ = manager.compute({}, torch.zeros(2, 1), info)
+        torch.testing.assert_close(value, torch.tensor(expected), atol=1e-6, rtol=0)
+        again, _ = manager.compute({}, torch.zeros(2, 1), info)
+        torch.testing.assert_close(again, value)
+
+
+@pytest.mark.parametrize(
+    "composition,expected", [(False, (0.0, 7.0)), (True, (0.995, 7.49))]
+)
+@pytest.mark.parametrize("collision", ["call", "occurrence"])
+def test_authored_stage_names_precede_call_aliases_with_and_without_composition(
+    composition, expected, collision
+):
+    from embodichain.lab.gym.envs.managers.reward_composition import (
+        compose_reward_terms,
+        _add_common_rewards,
+    )
+    from embodichain.lab.gym.envs.managers.reward_context import RewardTransitionContext
+
+    selector = "call:0"
+    if collision == "occurrence":
+        fixture, _, _, _, _ = _setup(stage_names=("first", "second"))
+        selector = next(
+            fixture.task_program_progress._program_for_test.iter_segments()
+        ).segment_id
+    env, owner, _, _, _ = _setup(stage_names=("first", selector))
+    env.step_dt = 0.04
+    progress = env.task_program_progress
+    manual = RewardCfg(
+        func=program_stage_reward,
+        weight=7.0,
+        params={"stage": selector, "mode": "first_achievement", "scope": "occurrence"},
+    )
+    terms = {"manual": manual}
+    if composition:
+        declaration = {"discount": 0.99, "skills": []}
+        generated = compose_reward_terms(declaration, program=True)
+        _add_common_rewards(
+            SimpleNamespace(
+                rl_task=SimpleNamespace(reward_composition=declaration),
+                rewards=SimpleNamespace(manual=manual),
+            ),
+            generated,
+            tuple(progress._program_for_test.iter_segments()),
+        )
+        terms.update(generated)
+    manager = env.reward_manager = RewardManager(terms, env)
+    if composition:
+        manager.initialize_observation(_frame(owner, [0.0, 0.0], 0), [0, 1])
+    for step, reward in enumerate(expected):
+        frame = _frame(owner, [0.2, 0.0], step + 1)
+        progress.advance(frame, step=step, episode_owner=owner)
+        if composition:
+            manager.transition_context = RewardTransitionContext(
+                frame, torch.zeros(2, dtype=torch.bool)
+            )
+        value, _ = manager.compute(
+            {},
+            torch.zeros(2, 1),
+            {
+                "task_outcome": {
+                    "accepted": torch.zeros(2, dtype=torch.bool),
+                    "failure": torch.zeros(2, dtype=torch.bool),
+                },
+            },
+        )
+        torch.testing.assert_close(
+            value, torch.tensor([reward, 0.0]), atol=1e-6, rtol=0
+        )
+    assert progress.indices(selector) == (1,)
+
+    class StageName(str):
+        pass
+
+    assert progress.indices(StageName(selector)) == (1,)
+
+
+def test_structured_call_index_shaping_is_not_shadowed_by_an_authored_name():
+    from embodichain.lab.gym.envs.managers.reward_composition import (
+        compose_reward_terms,
+    )
+    from embodichain.lab.gym.envs.managers.reward_context import RewardTransitionContext
+
+    env, owner, _, _, _ = _setup(stage_names=("first", "call:0"))
+    env.episode_context = owner
+    manager = env.reward_manager = RewardManager(
+        compose_reward_terms(
+            {
+                "discount": 0.99,
+                "skills": [
+                    {
+                        "skill_id": "move_joints",
+                        "call_index": 0,
+                        "metrics": {"joints": {"field": "score"}},
+                    }
+                ],
+            },
+            program=True,
+        ),
+        env,
+    )
+
+    def measured(scores, revision):
+        frame = _frame(owner, [0.0, 0.0], revision)
+        value = torch.tensor(scores)
+        sample = ObservationSample(
+            ObservationDescriptor(
+                "score", "scalar", "arena", "scalar", (), (), value.dtype
+            ),
+            value,
+            torch.ones(2, dtype=torch.bool),
+            (None, None),
+        )
+        return replace(frame, fields={**frame.fields, "score": sample})
+
+    manager.initialize_observation(measured([0.2, 0.4], 0), [0, 1])
+    frame = measured([0.8, 0.6], 1)
+    env.task_program_progress.advance(frame, step=0, episode_owner=owner)
+    manager.transition_context = RewardTransitionContext(
+        frame, torch.zeros(2, dtype=torch.bool)
+    )
+    reward, _ = manager.compute({}, torch.zeros(2, 1), {})
+    # Two progress units; only the first call's score contributes to phi.
+    torch.testing.assert_close(reward, torch.tensor([0.296, 0.097]))
+
+
+@pytest.mark.parametrize("selector", ["call:0", "occurrence", "lift"])
+def test_explicit_milestone_alias_suppresses_automatic_reward_for_same_event(selector):
+    from embodichain.lab.gym.envs.managers.reward_composition import (
+        compose_reward_terms,
+        _add_common_rewards,
+    )
+    from embodichain.lab.gym.envs.managers.reward_context import RewardTransitionContext
+
+    env, owner, _, _, _ = _setup(repeat=2)
+    env.step_dt = 0.04
+    progress = env.task_program_progress
+    stages = tuple(progress._program_for_test.iter_segments())
+    selected = stages[0].segment_id if selector == "occurrence" else selector
+    manual = RewardCfg(
+        func=program_stage_reward,
+        weight=7.0,
+        params={
+            "stage": selected,
+            "mode": "first_achievement",
+            "scope": "occurrence",
+        },
+    )
+    specification = {"discount": 0.99, "skills": []}
+    generated = compose_reward_terms(specification, program=True)
+    _add_common_rewards(
+        SimpleNamespace(
+            rl_task=SimpleNamespace(reward_composition=specification),
+            rewards=SimpleNamespace(manual=manual),
+        ),
+        generated,
+        stages,
+    )
+    env.reward_manager = RewardManager({**generated, "manual": manual}, env)
+    env.reward_manager.initialize_observation(_frame(owner, [0.0, 0.0], 0), [0, 1])
+    frame = _frame(owner, [0.2, 0.0], 1)
+    progress.advance(frame, step=0, episode_owner=owner)
+    env.reward_manager.transition_context = RewardTransitionContext(
+        frame, torch.zeros(2, dtype=torch.bool)
+    )
+    info = {
+        "task_outcome": {
+            "accepted": torch.zeros(2, dtype=torch.bool),
+            "failure": torch.zeros(2, dtype=torch.bool),
+        }
+    }
+    value, _ = env.reward_manager.compute({}, torch.zeros(2, 1), info)
+    # First stage: generic shaping .99*.5, explicitly selected event 7, no extra .5.
+    torch.testing.assert_close(value, torch.tensor([7.495, 0.0]), atol=1e-6, rtol=0)
+
+
+@pytest.mark.parametrize("selector,first_reward", [("lift", 7.495), ("call:1", 0.995)])
+def test_episode_scoped_bonus_only_suppresses_events_it_can_pay(selector, first_reward):
+    from embodichain.lab.gym.envs.managers.reward_composition import (
+        compose_reward_terms,
+        _add_common_rewards,
+    )
+    from embodichain.lab.gym.envs.managers.reward_context import RewardTransitionContext
+
+    env, owner, _, _, _ = _setup(repeat=2)
+    env.step_dt = 0.04
+    progress = env.task_program_progress
+    manual = RewardCfg(
+        func=program_stage_reward,
+        weight=7.0,
+        params={"stage": selector, "mode": "first_achievement", "scope": "episode"},
+    )
+    specification = {"discount": 0.99, "skills": []}
+    generated = compose_reward_terms(specification, program=True)
+    _add_common_rewards(
+        SimpleNamespace(
+            rl_task=SimpleNamespace(reward_composition=specification),
+            rewards=SimpleNamespace(manual=manual),
+        ),
+        generated,
+        tuple(progress._program_for_test.iter_segments()),
+    )
+    manager = env.reward_manager = RewardManager({**generated, "manual": manual}, env)
+    manager.initialize_observation(_frame(owner, [0.0, 0.0], 0), [0, 1])
+    for step, expected in enumerate((first_reward, 0.99)):
+        frame = _frame(owner, [0.2, 0.0], step + 1)
+        progress.advance(frame, step=step, episode_owner=owner)
+        manager.transition_context = RewardTransitionContext(
+            frame, torch.zeros(2, dtype=torch.bool)
+        )
+        value, _ = manager.compute(
+            {},
+            torch.zeros(2, 1),
+            {
+                "task_outcome": {
+                    "accepted": torch.zeros(2, dtype=torch.bool),
+                    "failure": torch.zeros(2, dtype=torch.bool),
+                }
+            },
+        )
+        torch.testing.assert_close(
+            value, torch.tensor([expected, 0.0]), atol=1e-6, rtol=0
+        )

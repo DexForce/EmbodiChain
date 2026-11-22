@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, TypeVar, cast
-import re
 
 import torch
 
@@ -27,6 +26,7 @@ from embodichain.lab.sim.cfg import JointDrivePropertiesCfg, RobotCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.utils import configclass
 
+from ._joint_drives import _prepare_joint_drive_overrides
 from .locomotion_profiles import load_locomotion_robot_profile
 
 if TYPE_CHECKING:
@@ -51,56 +51,8 @@ class _LocomotionRobotCfg(RobotCfg):
         """
         cfg = cls()
         cfg._build_defaults(init_dict)
-        cfg._prepare_joint_drive_overrides(init_dict)
+        _prepare_joint_drive_overrides(cfg, init_dict, cfg.control_parts["locomotion"])
         return cast(_CfgT, merge_robot_cfg(cfg, init_dict))
-
-    def _prepare_joint_drive_overrides(self, init_dict: dict[str, Any]) -> None:
-        """Remove model rules selected by explicit caller drive rules.
-
-        Preserve caller expressions for the runtime matcher, including its
-        direct-rule priority over control parts and ambiguity validation.
-        """
-        overrides = init_dict.get("joint_drive_props")
-        if not isinstance(overrides, dict):
-            return
-        parts = dict(self.control_parts)
-        if isinstance(init_dict.get("control_parts"), dict):
-            parts.update(init_dict["control_parts"])
-        joint_names = self.control_parts["locomotion"]
-        for field in (
-            "stiffness",
-            "damping",
-            "max_effort",
-            "max_velocity",
-            "friction",
-            "armature",
-        ):
-            provided = overrides.get(field)
-            if not isinstance(provided, dict):
-                continue
-            defaults = getattr(self.joint_drive_props, field)
-            if isinstance(defaults, (int, float)):
-                defaults = {name: defaults for name in joint_names}
-            if not isinstance(defaults, dict):
-                continue
-            shadowed = {
-                name
-                for name in joint_names
-                if any(
-                    re.fullmatch(expression, name)
-                    for pattern in provided
-                    for expression in parts.get(pattern, [pattern])
-                )
-            }
-            setattr(
-                self.joint_drive_props,
-                field,
-                {
-                    name: value
-                    for name, value in defaults.items()
-                    if name not in shadowed
-                },
-            )
 
     def build_pk_serial_chain(
         self, device: torch.device = torch.device("cpu"), **kwargs: Any
