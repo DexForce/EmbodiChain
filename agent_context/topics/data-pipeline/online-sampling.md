@@ -73,7 +73,10 @@ episode IDs and their committed counts for audit. The engine statistic
 `sampled_chunks` counts delivered anchors, including a batch whose optimizer
 update subsequently raised. Rows left resident at shutdown can have
 fewer draws than the recycling floor. The ACT example owns the deadline and
-physical scoring. See the [grouped ACT study](../../../examples/learning/act/GROUP_PUBLICATION.md).
+physical scoring. The dual-GPU example has two layouts. Each rank can own a
+local engine, or rank zero can draw and distribute one global batch. The
+application waits for all optimizer updates before committing its contexts.
+See the [grouped ACT study](../../../examples/learning/act/GROUP_PUBLICATION.md#compare-dual-gpu-supply-layouts).
 
 ## Environment sources and episode execution
 

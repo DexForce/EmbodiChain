@@ -46,7 +46,8 @@ operations remain in `compute`; source storage belongs to data adapters.
   physical evaluation. The grouped example can pool only the backbone image
   and query in blocks of control steps. The native runtime ensembles overlapping
   blocks at matching control times. Full-resolution landmarks and control cadence
-  are preserved. See the [grouped deadline study](../../../examples/learning/act/GROUPED_REPAIR.md).
+  are preserved. The [grouped ACT example](../../../examples/learning/act/GROUP_PUBLICATION.md)
+  also compares local and shared ODS producers under native ACT DDP.
   Historical custom ACT checkpoints require retraining.
 
 

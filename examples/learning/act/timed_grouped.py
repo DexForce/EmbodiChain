@@ -14,36 +14,63 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Start the single-GPU wall clock before Xvfb, simulator and training imports."""
+"""Start the experiment wall clock before Xvfb, simulator and training imports."""
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 import time
 
+__all__ = ["main"]
+
 
 def main() -> None:
-    """Replace the launcher with Xvfb and forward its monotonic origin."""
+    """Start one X server and optionally launch a single-node DDP job."""
     origin = time.monotonic()
-    if "--clock-origin" in sys.argv or any(
-        arg.startswith("--clock-origin=") for arg in sys.argv
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--nproc-per-node", type=int, choices=(1, 2), default=1)
+    args, rest = parser.parse_known_args()
+    if any(
+        arg == "--clock-origin" or arg.startswith("--clock-origin=") for arg in rest
     ):
-        raise SystemExit("The cold launcher supplies the clock origin")
-    os.execvp(
-        "xvfb-run",
-        [
-            "xvfb-run",
-            "-a",
-            sys.executable,
-            "-Bu",
+        parser.error("The cold launcher supplies the clock origin")
+    env = os.environ.copy()
+    for key, value in (
+        ("EMBODICHAIN_SIM_EXIT_PROCESS", "0"),
+        ("CUBLAS_WORKSPACE_CONFIG", ":4096:8"),
+        ("OMP_NUM_THREADS", "2"),
+        ("MKL_NUM_THREADS", "2"),
+        ("OPENBLAS_NUM_THREADS", "1"),
+        ("GLOO_SOCKET_IFNAME", "lo"),
+    ):
+        env.setdefault(key, value)
+    if args.nproc_per_node == 2:
+        runner = [
             "-m",
-            "examples.learning.act.grouped",
-            *sys.argv[1:],
-            "--clock-origin",
-            str(origin),
-        ],
-    )
+            "torch.distributed.run",
+            "--standalone",
+            "--nnodes=1",
+            "--local-addr=127.0.0.1",
+            "--nproc-per-node=2",
+            "--max-restarts=0",
+            "--module",
+        ]
+    else:
+        runner = ["-m"]
+    command = [
+        "xvfb-run",
+        "-a",
+        sys.executable,
+        "-Bu",
+        *runner,
+        "examples.learning.act.grouped",
+        *rest,
+        "--clock-origin",
+        str(origin),
+    ]
+    os.execvpe(command[0], command, env)
 
 
 if __name__ == "__main__":

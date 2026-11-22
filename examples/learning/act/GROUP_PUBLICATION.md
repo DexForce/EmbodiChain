@@ -59,3 +59,36 @@ all five policies meet the deadline and each reaches 95/100.
 The [acceptance report](GROUPED_REPAIR.md#acceptance) records the passing run
 and both earlier repair cohorts. The [original core study](results/GROUPED_CORE.md)
 records the initial five-seed trial and the archived double-layer comparison.
+
+## Compare dual-GPU supply layouts
+
+Both layouts train one ACT policy using two local DDP ranks and a global batch
+of 32. With `per-rank`, each rank owns a five-environment producer and a
+ten-slot cache on its GPU. With `shared`, rank 0 owns one ten-environment
+producer and a twenty-slot cache, and sends half of each CPU batch to rank 1.
+Each layout budgets 100 accepted trajectories and uses the same 192-draw
+floor. Rank 0 selects and evaluates the checkpoint on the first GPU.
+
+Use the elapsed-input protocol and a qualified expert report from the
+commands above. Select an idle pair of identical GPUs. Keep the CUDA,
+LeRobot and DexSim environment and the ResNet-18 weight cache fixed across
+the paired runs.
+
+```bash
+python -m examples.learning.act.paired_grouped --gpus 1,2 \
+    --qualification "$ACT_ROOT/qualification/report.json" \
+    --root "$ACT_ROOT/pair"
+```
+
+The paired launcher runs a recycling and checkpoint smoke test in each layout,
+then alternates their order for the five seeds. It saves GPU telemetry,
+per-run supply evidence, `comparison.json` and `comparison.md`. The report
+uses committed updates 101 through 600 for steady-state rates. A partial
+window is recorded with its completed step count. Deadline and reserved-scene
+outcomes are recorded for all ten planned runs.
+
+To run a single layout with the same cold clock, set `CUDA_VISIBLE_DEVICES`
+to the ordered GPU pair and pass `--nproc-per-node 2` with
+`--producer-layout per-rank` or `--producer-layout shared` to
+`examples.learning.act.timed_grouped`. The first visible GPU owns evaluation
+in both layouts. The single-GPU command uses the default launcher settings.

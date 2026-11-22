@@ -25,6 +25,8 @@ from pathlib import Path
 from typing import Any
 import math
 
+__all__ = ["main"]
+
 
 def _read(path: Path) -> Any:
     return json.loads(path.read_bytes())
@@ -51,15 +53,97 @@ def _panel(path: Path, base: int, count: int, fingerprint: str) -> dict:
     return panel
 
 
+def _audit_supply(recipe: dict, supply: dict, spec: dict) -> list[int]:
+    """Check delivered draws and each producer's complete authorization chain."""
+    layouts = {"per-rank": 2, "shared": 1}
+    world_size = recipe["world_size"]
+    layout = recipe["producer_layout"]
+    producer_count = layouts[layout]
+    if world_size not in (1, 2) or producer_count > world_size:
+        raise ValueError("Unexpected rank or producer count")
+    ranks = recipe["ranks"]
+    if (
+        [rank["rank"] for rank in ranks] != list(range(world_size))
+        or len({rank["pid"] for rank in ranks}) != world_size
+        or len({rank["gpu_uuid"] for rank in ranks}) != world_size
+    ):
+        raise ValueError("Training ranks have inconsistent GPU assignments")
+    steps = supply["step"]
+    draw_counts = supply["ranks"]
+    if [row["rank"] for row in draw_counts] != list(range(world_size)) or any(
+        row["committed_draws"] * world_size != steps * spec["batch_size"]
+        for row in draw_counts
+    ):
+        raise ValueError("Rank draw counts disagree with completed optimizer batches")
+    producers = supply["producers"]
+    if (
+        [producer["rank"] for producer in producers] != list(range(producer_count))
+        or len({producer["pid"] for producer in producers}) != producer_count
+        or len({producer["engine"]["run_id"] for producer in producers})
+        != producer_count
+    ):
+        raise ValueError("Producer identities differ from the requested topology")
+
+    counts: list[int] = []
+    for producer in producers:
+        width, slots, cap = (producer[key] for key in ("width", "slots", "cap"))
+        rank = producer["rank"]
+        stats = producer["engine"]
+        completed, requested = (
+            stats[key] for key in ("completed_generation", "requested_generation")
+        )
+        releases = producer["releases"]
+        if (
+            producer["gpu_uuid"] != ranks[rank]["gpu_uuid"]
+            or producer["pid"] in {record["pid"] for record in ranks}
+            or width * producer_count != spec["producer_envs"]
+            or slots * producer_count != spec["shared_slots"]
+            or cap * producer_count != spec["episodes"]
+            or stats["sampled_chunks"] * producer_count != steps * spec["batch_size"]
+        ):
+            raise ValueError(f"Producer {rank} differs from the supply contract")
+        if (
+            completed < 1
+            or requested not in (completed, completed + 1)
+            or len(releases) != requested - 1
+            or requested * width > cap
+            or stats["successful_episodes"] != completed * width
+        ):
+            raise ValueError(f"Producer {rank} has an incomplete release chain")
+        counts.extend(_audit_releases(releases, width, slots, spec["draw_floor"]))
+    return counts
+
+
+def _audit_releases(
+    releases: list[dict], width: int, slots: int, floor: int
+) -> list[int]:
+    counts = []
+    for generation, release in enumerate(releases, 2):
+        first = (generation - 1) * width - slots
+        ids = list(range(first, first + width)) if first >= 0 else []
+        credits = release["committed_draws"]
+        if (
+            release["requested_generation"] != generation
+            or release["episode_ids"] != ids
+            or len(credits) != len(ids)
+            or any(type(draw) is not int or draw < floor for draw in credits)
+        ):
+            raise ValueError("Group authorization violated the committed-draw floor")
+        counts.extend(credits)
+    return counts
+
+
 def _audit(path: Path, spec: dict, seed: int) -> dict:
     from embodichain.extensions.models.policy.act import policy_fingerprint
 
     recipe = _read(path / "recipe.json")
     supply = _read(path / "supply.json")
+    current = "world_size" in recipe
     if (
         recipe["protocol"] != spec
         or recipe["seed"] != seed
-        or len(recipe["gpu"].split(",")) != 1
+        or recipe.get("smoke", False)
+        or (not current and len(recipe["gpu"].split(",")) != 1)
         or not recipe["gpu"]
     ):
         raise ValueError("Run configuration or GPU assignment differs")
@@ -100,7 +184,8 @@ def _audit(path: Path, spec: dict, seed: int) -> dict:
     if "submission_margin_seconds" in spec:
         if (
             receipt["selection_cutoff_seconds"] != cutoff
-            or not 0 <= receipt["locked_seconds"] <= spec["deadline_seconds"]
+            or not 0 <= receipt["locked_seconds"]
+            or (not current and receipt["locked_seconds"] > spec["deadline_seconds"])
         ):
             raise ValueError("Submission receipt missed its physical deadline")
         if chosen and receipt["locked_seconds"] < chosen["result_seconds"]:
@@ -110,7 +195,8 @@ def _audit(path: Path, spec: dict, seed: int) -> dict:
         evidence = _read(path / "publication.json")
         published = evidence["published_seconds"]
         if (
-            not receipt["locked_seconds"] <= published <= spec["deadline_seconds"]
+            not receipt["locked_seconds"] <= published
+            or (not current and published > spec["deadline_seconds"])
             or evidence["decision_sha256"]
             != hashlib.sha256((path / "deadline.json").read_bytes()).hexdigest()
         ):
@@ -150,25 +236,24 @@ def _audit(path: Path, spec: dict, seed: int) -> dict:
         or (not chosen and (path / "test.json").exists())
     ):
         raise ValueError("Reported result differs from verified checkpoint")
-    width, slots = spec["producer_envs"], spec["shared_slots"]
-    counts = []
-    if supply["engine"]["sampled_chunks"] != supply["step"] * spec["batch_size"]:
-        raise ValueError(
-            "Committed sample count disagrees with completed optimizer batches"
+    if current:
+        counts = _audit_supply(recipe, supply, spec)
+        engine_stats = [producer["engine"] for producer in supply["producers"]]
+        releases = supply["producers"]
+    else:
+        engine_stats = [supply["engine"]]
+        if supply["engine"]["sampled_chunks"] != supply["step"] * spec["batch_size"]:
+            raise ValueError("Sample count disagrees with completed optimizer batches")
+        releases = supply["releases"]
+        counts = _audit_releases(
+            releases, spec["producer_envs"], spec["shared_slots"], spec["draw_floor"]
         )
-    for generation, release in enumerate(supply["releases"], 2):
-        first = (generation - 1) * width - slots
-        ids = list(range(first, first + width)) if first >= 0 else []
-        credits = release["committed_draws"]
-        if (
-            release["requested_generation"] != generation
-            or release["episode_ids"] != ids
-            or len(credits) != len(ids)
-            or any(type(v) is not int or v < spec["draw_floor"] for v in credits)
-        ):
-            raise ValueError("Group authorization violated the committed-draw floor")
-        counts.extend(credits)
-    qualified = score is not None and score >= spec["required_reserved_successes"]
+    submission = published if published is not None else receipt.get("locked_seconds")
+    qualified = (
+        score is not None
+        and score >= spec["required_reserved_successes"]
+        and (submission is None or submission <= spec["deadline_seconds"])
+    )
     if m["seed"] != seed or m["pass_gate"] != qualified:
         raise ValueError("Inconsistent run gate")
     return dict(
@@ -181,11 +266,13 @@ def _audit(path: Path, spec: dict, seed: int) -> dict:
         chosen_manifest_sha256=manifest_hash,
         updates=supply["step"],
         first_update=supply["first_update"],
-        sampled_chunks=supply["engine"]["sampled_chunks"],
-        successful_episodes=supply["engine"]["successful_episodes"],
+        sampled_chunks=sum(engine["sampled_chunks"] for engine in engine_stats),
+        successful_episodes=sum(
+            engine["successful_episodes"] for engine in engine_stats
+        ),
         authorized_episode_replacements=len(counts),
         minimum_at_release=min(counts, default=None),
-        releases=supply["releases"],
+        releases=releases,
         development=events,
         source_hashes=recipe["source_hashes"],
         artifact_sha256={
