@@ -241,6 +241,7 @@ class _Task:
     deployments: list[_Deployment]
     readme: Traversable | None = None
     aliases: dict[str, _Deployment] = field(default_factory=dict)
+    source_path: tuple[str, ...] = ()
 
     @property
     def qualified_key(self) -> str:
@@ -354,8 +355,10 @@ def _agent_matches(
     return reference == deployment.config_ref
 
 
-def _load_catalog(roots: Mapping[str, Traversable]) -> list[_Task]:
-    """Read static task metadata; never import environment or robot modules."""
+def _load_catalog(
+    roots: Mapping[str, Traversable], *, runtime_packages: Sequence[str] | None = None
+) -> list[_Task]:
+    """Build the inventory before applying deployment-level browsing metadata."""
     tasks: list[_Task] = []
     identities: set[str] = set()
     variants: list[tuple[_Task, str]] = []
@@ -545,6 +548,7 @@ def _load_catalog(roots: Mapping[str, Traversable]) -> list[_Task]:
                 deployments,
                 readme if readme.is_file() else None,
                 aliases,
+                source_path=task_path,
             )
             if "variant_of" in metadata:
                 variants.append((task, _text(metadata["variant_of"], "variant_of")))
@@ -575,15 +579,26 @@ def _load_catalog(roots: Mapping[str, Traversable]) -> list[_Task]:
             d.name for d in task.deployments
         }:
             raise ValueError("default_deployment must name a declared deployment")
+    if runtime_packages is not None:
+        _augment_runtime(tasks, runtime_packages)
     for package, root in roots.items():
         portfolio = root.joinpath("portfolio.yaml")
         if portfolio.is_file():
-            _apply_portfolio(tasks, package, _load_metadata(portfolio))
+            _apply_portfolio(
+                tasks,
+                package,
+                _load_metadata(portfolio),
+                complete=runtime_packages is not None,
+            )
     return sorted(tasks, key=lambda task: (task.task_path, task.package))
 
 
 def _apply_portfolio(
-    tasks: Sequence[_Task], package: str, portfolio: Mapping[str, Any]
+    tasks: Sequence[_Task],
+    package: str,
+    portfolio: Mapping[str, Any],
+    *,
+    complete: bool,
 ) -> None:
     """Attach editorial uses to deployments available in this discovery mode."""
     for task in tasks:
@@ -595,11 +610,14 @@ def _apply_portfolio(
         purpose = entry.get("purpose")
         names = {d.name for d in task.deployments}
         featured = entry.get("featured", [])
-        overrides = _fields(
-            entry.get("overrides", {}), names, "deployment purpose overrides"
-        )
+        overrides = entry.get("overrides", {})
+        if not isinstance(overrides, Mapping):
+            raise ValueError("Deployment purpose overrides must be a mapping")
+        if complete and set(overrides) - names:
+            raise ValueError(f"Unknown purpose override for {task.qualified_key}")
         if not isinstance(featured, list) or any(
-            name not in names for name in featured
+            not isinstance(name, str) or (complete and name not in names)
+            for name in featured
         ):
             raise ValueError(f"Unknown featured deployment for {task.qualified_key}")
         if purpose not in _PURPOSES or any(
@@ -717,7 +735,12 @@ def _augment_runtime(tasks: list[_Task], task_packages: Sequence[str]) -> None:
                 key=len,
             )
             task = next(
-                (t for t in tasks if t.package == package and t.task_path == task_path),
+                (
+                    t
+                    for t in tasks
+                    if t.package == package
+                    and (t.source_path or t.task_path) == task_path
+                ),
                 None,
             )
             if task is None:
@@ -767,14 +790,7 @@ def _discover_catalog() -> list[_Task]:
     roots = {
         package: root for package in packages for root in _task_config_roots((package,))
     }
-    tasks = _load_catalog(roots)
-    static_count = len(tasks)
-    _augment_runtime(tasks, packages)
-    for package, root in roots.items():
-        portfolio = root.joinpath("portfolio.yaml")
-        if portfolio.is_file():
-            _apply_portfolio(tasks[static_count:], package, _load_metadata(portfolio))
-    return tasks
+    return _load_catalog(roots, runtime_packages=packages)
 
 
 def _select_task(tasks: Sequence[_Task], key: str) -> _Task:

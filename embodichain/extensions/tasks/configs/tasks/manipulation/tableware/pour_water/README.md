@@ -3,7 +3,7 @@
 The default deployment is Franka cup-to-bowl (`franka_fluid`). The former
 `pour_cup` catalog key selects that deployment. CobotMagic uses a bottle
 and a tapered cup. Both fluid deployments require at least 50 mL in the
-receiver at the final physical observation. The three other bottle
+receiver at the final physical observation. The four rigid bottle
 deployments retain their rigid-motion criteria and original Gym IDs.
 
 `task.cobotmagic.yaml` runs the existing right-arm pick, tilt and return Task
@@ -22,11 +22,13 @@ inactive rows still hold their measured positions.
 
 ## Measured CobotMagic fluid qualification
 
+Use `task.cobotmagic.fluid.yaml` (Gym ID `PourWater-CobotMagic-Fluid-v1`) for Newton fluid simulation. The original `task.cobotmagic.yaml` (`PourWater-v1`) uses Default physics for bottle motion and return, with no liquid.
+
 Single-arena, seed-0 runs used DexSim 0.6.0, CUDA on an RTX 5090, NoRender,
 100 Hz controls and 1.5 mm particle spacing. The received volume is measured
 after release and settling. The current CobotMagic scene fills the bottle using
 its inner profile and advances the fluid every 0.833 ms. The
-[containment report](validation/cobotmagic.json) records the upright particle
+[containment report](validation/cobotmagic.fluid.json) records the upright particle
 count outside the bottle and the final received volume.
 
 The following trials used the earlier fill and 2.5 ms fluid step. Each
@@ -80,7 +82,7 @@ directory into the chosen data root before launching.
 
 The bottle retains the previous local Z bounds and grasp frame. The cup retains
 its height with a 62 mm outer diameter. Both start just above the table's 875 mm
-support height, avoiding deep initial interpenetration. For CobotMagic the rigid contacts use axial cylinder sections and the water contacts use separate, open, watertight shell boundaries. The cup has 30 g mass; reset waits for both objects to settle.
+support height, avoiding deep initial interpenetration. For the CobotMagic fluid deployment the rigid contacts use axial cylinder sections and the water contacts use separate, open, watertight shell boundaries. The cup has 30 g mass; reset waits for both objects to settle.
 The bottle shell and cup shell use closed outer and inner surfaces joined at the lip and base, with an open cavity. Profiles are in metres in the container frame. The bottle includes a narrow neck. The CobotMagic shell inertias are calculated about their centres of mass. The cup observation uses a conservative axial profile inside the wall and excludes the space above its rim.
 
 ## Sources and redistribution

@@ -140,6 +140,11 @@ _DEPLOYMENTS = {
         "task_program_pour_water",
         "cobotmagic",
     ),
+    Path("tasks/manipulation/tableware/pour_water/task.cobotmagic.fluid.yaml"): (
+        "pour_water_with_right_arm",
+        "task_program_pour_water",
+        "cobotmagic",
+    ),
     Path("tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"): (
         "pick_aim_pour_return_cup",
         "task_program_pour_cup_fluid",

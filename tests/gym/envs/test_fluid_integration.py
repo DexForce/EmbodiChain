@@ -213,10 +213,10 @@ def test_cobotmagic_final_acceptance_counts_water_inside_cup_only(monkeypatch):
     from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
 
     monkeypatch.setattr("embodichain.data.get_data_path", lambda path: path)
-    source = TASK.parents[1] / "pour_water/task.cobotmagic.yaml"
+    source = TASK.parents[1] / "pour_water/task.cobotmagic.fluid.yaml"
     cfg = config_to_cfg(load_config(source), source_path=source)
     assert cfg.robot.root_props.newton_mimic_stabilizer is True
-    reg = REGISTERED_ENVS["PourWater-v1"].task_program_registration
+    reg = REGISTERED_ENVS["PourWater-CobotMagic-Fluid-v1"].task_program_registration
     rule = reg.evaluation_conditions["water_received"]
     # Identical cup poses in separate arenas. 60 one-mL particles are inside,
     # beside the rim (inside the bounding box), or directly above the cup.

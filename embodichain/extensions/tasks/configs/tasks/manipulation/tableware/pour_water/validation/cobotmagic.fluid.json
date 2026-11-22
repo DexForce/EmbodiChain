@@ -1,6 +1,6 @@
 {
   "status": "measured",
-  "deployment": "cobotmagic",
+  "deployment": "cobotmagic_fluid",
   "seed": 0,
   "device": "NVIDIA GeForce RTX 5090",
   "engine": "dexsim-engine 0.6.0",

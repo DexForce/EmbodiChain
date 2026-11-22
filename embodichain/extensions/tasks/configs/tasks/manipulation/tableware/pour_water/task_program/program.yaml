@@ -24,13 +24,12 @@ targets:
     - 0.0
     - 0.0
     - 1.0
-  # Settled rigid centre: 0.875 m tabletop plus 0.044 m cup-base offset.
   cup_rest_pose:
     kind: pose
     position:
     - 0.75
     - 0.1
-    - 0.919
+    - 0.921
     quaternion_xyzw:
     - 0.0
     - 0.0
@@ -89,6 +88,7 @@ program:
         outcomes:
           - {kind: call_effect, ref: 0, assurance: projected}
           - {kind: held, ref: bottle}
+          - {kind: unsupported, ref: liquid_transfer, required: false}
       steps:
         kind: invoke
         call:

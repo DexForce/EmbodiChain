@@ -108,6 +108,23 @@ def prepare_tableware_drawer(
 class PlaceObjectDrawerDexUniEnv(EmbodiedEnv):
     """Put the toy in the open tabletop drawer, then push the drawer closed."""
 
+    def _object_on_liner(self) -> torch.Tensor:
+        tray = self.sim.get_articulation("drawer").get_link_pose(
+            "inner_box", to_matrix=True
+        )
+        position = self.sim.get_rigid_object("object").get_local_pose()[:, :3]
+        offset = (position - tray[:, :3, 3]).unsqueeze(-1)
+        relative = (tray[:, :3, :3].transpose(1, 2) @ offset).squeeze(-1)
+        centered = (relative[:, :2].abs() < 0.03).all(dim=-1)
+        above_liner = (relative[:, 2] > 0.062) & (relative[:, 2] < 0.18)
+        released = (self.robot.get_qpos(name="eef").abs() <= 0.002).all(dim=-1)
+        return centered & above_liner & released
+
+    def is_task_success(self, **kwargs: Any) -> torch.Tensor:
+        """Check the released toy and closed rail for each arena."""
+        rail = self.sim.get_articulation("drawer").get_qpos()[:, 0]
+        return (rail.abs() < 0.04) & self._object_on_liner()
+
     def create_demo_segments(self, **kwargs: Any) -> Iterable[DemoSegment]:
         """Generate the physical pickup, placement and closing actions.
 
@@ -135,14 +152,14 @@ class PlaceObjectDrawerDexUniEnv(EmbodiedEnv):
             target_uid="object",
             instruction="Place the duck on the liner inside the open drawer.",
             actions=expert.store(),
-            validator=expert.object_on_liner,
+            validator=lambda: bool(self._object_on_liner()[0]),
         )
         yield DemoSegment(
             name="close_drawer",
             target_uid="drawer",
             instruction="Push the drawer closed while the duck stays inside.",
             actions=expert.close(),
-            validator=lambda: expert.rail < 0.04 and expert.object_on_liner(),
+            validator=lambda: bool(self.is_task_success()[0]),
         )
 
 
@@ -204,12 +221,3 @@ class _TablewareDrawerExpert(_DrawerMotion):
         yield from self._move(retreat, self.push, 36)
         yield from self._grip(0.0)
         yield from self._hold(40)
-
-    def object_on_liner(self) -> bool:
-        tray = self.drawer.get_link_pose("inner_box", to_matrix=True)[0]
-        displacement = self.duck.get_local_pose()[0, :3] - tray[:3, 3]
-        relative = tray[:3, :3].T @ displacement
-        centered = bool((relative[:2].abs() < 0.03).all())
-        above_liner = 0.062 < float(relative[2]) < 0.18
-        released = bool((self.robot.get_qpos(name="eef").abs() <= 0.002).all())
-        return centered and above_liner and released

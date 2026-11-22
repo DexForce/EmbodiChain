@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
-from itertools import product
 from typing import Any
 
 import torch
@@ -36,6 +35,32 @@ __all__ = ["DrawerStorageDexUniEnv"]
 @register_env("DrawerStorage-UR5-DexUni-v1", max_episode_steps=4800)
 class DrawerStorageDexUniEnv(EmbodiedEnv):
     """Store a cube inside a drawer and leave the rail closed."""
+
+    def _cube_stored(self) -> torch.Tensor:
+        tray = self.sim.get_articulation("drawer").get_link_pose(
+            "drawer", to_matrix=True
+        )
+        cube = self.sim.get_rigid_object("cube").get_local_pose(to_matrix=True)
+        to_tray = tray[:, :3, :3].transpose(1, 2)
+        center = (to_tray @ (cube[:, :3, 3] - tray[:, :3, 3]).unsqueeze(-1)).squeeze(-1)
+        # Project the 50 mm cube's half extents onto the three tray axes.
+        extent = (to_tray @ cube[:, :3, :3]).abs().sum(dim=-1) * 0.025
+        contained = (
+            (center - extent >= center.new_tensor((-0.1975, 0.009, -0.058)))
+            & (center + extent <= center.new_tensor((0.1975, 0.310, 0.0435)))
+        ).all(dim=-1)
+        released = (self.robot.get_qpos(name="eef").abs() <= 0.002).all(dim=-1)
+        success = contained & released
+        for link in ("gripper_finger1_link_1", "gripper_finger2_link_1"):
+            offset = self.robot.get_link_pose(link)[:, :3] - cube[:, :3, 3]
+            distance = torch.linalg.vector_norm(offset, dim=-1)
+            success &= torch.isfinite(distance) & (distance > 0.08)
+        return success
+
+    def is_task_success(self, **kwargs: Any) -> torch.Tensor:
+        """Measure containment, release, finger clearance and closure in each arena."""
+        rail = self.sim.get_articulation("drawer").get_qpos()[:, 0]
+        return (rail.abs() <= 0.01) & self._cube_stored()
 
     def create_demo_segments(self, **kwargs: Any) -> Iterable[DemoSegment]:
         """Generate measured opening, transfer and closure actions for the UR5.
@@ -71,14 +96,14 @@ class DrawerStorageDexUniEnv(EmbodiedEnv):
             target_uid="cube",
             instruction="Release the cube inside the open drawer.",
             actions=expert.store(),
-            validator=expert.cube_stored,
+            validator=lambda: bool(self._cube_stored()[0]),
         )
         yield DemoSegment(
             name="close_drawer",
             target_uid="drawer",
             instruction="Close the drawer and withdraw the gripper.",
             actions=expert.slide(0.0),
-            validator=lambda: expert.rail <= 0.01 and expert.cube_stored(),
+            validator=lambda: bool(self.is_task_success()[0]),
         )
 
 
@@ -92,7 +117,6 @@ class _DrawerExpert(_DrawerMotion):
         self.initial_cube_height = self.cube_height
         self.top = self._tensor(((1, 0, 0), (0, -1, 0), (0, 0, -1)))
         self.handle_orientation = self._tensor(((0, 0, -1), (0, 1, 0), (1, 0, 0)))
-        self.corners = self._tensor(list(product((-0.025, 0.025), repeat=3)))
 
     @property
     def rail(self) -> float:
@@ -150,23 +174,3 @@ class _DrawerExpert(_DrawerMotion):
         yield from self._grip(0.0)
         yield from self._hold(25)
         yield from self._move(above, self.top, 45)
-
-    def cube_stored(self) -> bool:
-        tray = self.drawer.get_link_pose("drawer", to_matrix=True)[0]
-        cube = self.cube.get_local_pose(to_matrix=True)[0]
-        local = torch.linalg.solve(tray, cube)
-        corners = self.corners @ local[:3, :3].T + local[:3, 3]
-        lower = self._tensor((-0.1975, 0.009, -0.058))
-        upper = self._tensor((0.1975, 0.310, 0.0435))
-        contained = bool(((corners >= lower) & (corners <= upper)).all())
-        released = bool((self.robot.get_qpos(name="eef").abs() <= 0.002).all())
-        clear = all(
-            float(
-                torch.linalg.vector_norm(
-                    self.robot.get_link_pose(link)[0, :3] - cube[:3, 3]
-                )
-            )
-            > 0.08
-            for link in ("gripper_finger1_link_1", "gripper_finger2_link_1")
-        )
-        return contained and released and clear

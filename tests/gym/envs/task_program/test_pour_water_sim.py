@@ -54,8 +54,8 @@ def _run_episode(variant: str, seed: int) -> dict[str, Any]:
     payload.update(
         num_envs=1,
         headless=True,
-        renderer="no-render" if variant == "cobotmagic" else "hybrid",
-        device="cuda:0" if variant == "cobotmagic" else "cpu",
+        renderer="no-render" if variant == "cobotmagic.fluid" else "hybrid",
+        device="cuda:0" if variant == "cobotmagic.fluid" else "cpu",
         enable_sensor=False,
         seed=seed,
     )
@@ -67,7 +67,7 @@ def _run_episode(variant: str, seed: int) -> dict[str, Any]:
     cfg.record_trajectory = False
     program = load_config(source.parent / payload["task_program"]["program"])
     target = None
-    if variant != "cobotmagic":
+    if "bottle_pour_pose" in program["targets"]:
         target = np.array(
             _decode_target(
                 program["targets"]["bottle_pour_pose"],
@@ -111,7 +111,7 @@ def _run_episode(variant: str, seed: int) -> dict[str, Any]:
                 .numpy()
                 .copy()
             )
-            if variant == "cobotmagic" and len(poses) == round(1.0 / env.step_dt):
+            if variant == "cobotmagic.fluid" and len(poses) == round(1.0 / env.step_dt):
                 # The seed-0 bottle is still upright and stationary at one second.
                 # A particle outside its bounding cylinder has escaped before pouring.
                 water = env.sim.get_fluid_object("water")
@@ -140,7 +140,7 @@ def _run_episode(variant: str, seed: int) -> dict[str, Any]:
             item for item in episode["segments"] if item["name"] == "pour_water"
         )
         pouring = np.stack(poses[segment["start_step"] : segment["end_step"]])
-        if variant == "cobotmagic":
+        if variant == "cobotmagic.fluid":
             volume = cfg.observations.received_volume
             received_m3 = volume.func(env, {}, **volume.params)
             assert received_m3[0, 0].item() >= 0.00005
@@ -153,6 +153,16 @@ def _run_episode(variant: str, seed: int) -> dict[str, Any]:
             assert volume.func(env, {}, **volume.params)[0, 0].item() == 0.0
             assert not env.is_task_success()[0].item()
 
+        if variant == "cobotmagic":
+            contract = segment["metadata"]["segment_contract"]
+            liquid_transfer = next(
+                item
+                for item in contract["outcomes"]
+                if item["ref"] == "liquid_transfer"
+            )
+            assert liquid_transfer["status"] == ["unavailable"]
+            assert liquid_transfer["required"] is False
+            assert contract["accepted_mask"] == [True]
         errors = np.linalg.norm(pouring[:, :3, 3] - target, axis=-1)
         tilts = np.degrees(np.arccos(np.clip(pouring[:, 2, 2], -1.0, 1.0)))
         return {
@@ -201,6 +211,7 @@ def _run_child(variant: str, seed: int, destination: str) -> None:
     ("variant", "seed"),
     [
         ("cobotmagic", 0),
+        ("cobotmagic.fluid", 0),
         ("dual_ur5_dh_pgi_140_80", 0),
         ("tianji_marvin", 0),
         ("dual_ur5_dh_pgi_140_80", 1),
@@ -226,7 +237,7 @@ def test_pour_keeps_bottle_grasped_tilts_and_returns(
         cwd=_REPOSITORY_ROOT,
         capture_output=True,
         text=True,
-        timeout=1800 if variant == "cobotmagic" else 180,
+        timeout=1800 if variant == "cobotmagic.fluid" else 180,
         check=False,
     )
     assert process.returncode == 0, process.stdout + process.stderr

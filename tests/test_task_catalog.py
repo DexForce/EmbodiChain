@@ -462,10 +462,20 @@ def test_official_portfolio_keeps_deployment_purposes_and_evidence_separate() ->
     assert {d.env_id for d in pour.deployments} == {
         "PourCup-Franka-Fluid-v1",
         "PourWater-v1",
+        "PourWater-CobotMagic-Fluid-v1",
         "PourWater-TianjiMarvin-v1",
         "PourWater-DualUR5-v1",
         "PourWater-DexforceW1V030Pika-v1",
     }
+    rigid = next(d for d in pour.deployments if d.name == "cobotmagic")
+    fluid = next(d for d in pour.deployments if d.name == "cobotmagic_fluid")
+    assert (rigid.env_id, rigid.physics, rigid.validation) == (
+        "PourWater-v1",
+        "default",
+        None,
+    )
+    assert (fluid.env_id, fluid.physics) == ("PourWater-CobotMagic-Fluid-v1", "newton")
+    assert fluid.validation["deployment"] == fluid.name
     assert catalog._select_task(tasks, "pour_cup").qualified_key == pour.qualified_key
     research = catalog._portfolio_view(tasks, "research", False)
     stack = catalog._select_task(research, "stack_blocks_two")
@@ -640,3 +650,52 @@ def test_carton_source_and_ordinary_rgbd_deployments_without_loading_assets(
     assert deployments["panda_rgbd"].capabilities == {catalog._TASK_PROGRAM}
     assert not deployments["panda_rgbd"].requires_dataset_dir
     assert "--dataset-dir" not in deployments["panda_rgbd"].command
+
+
+def test_grouped_runtime_deployments_keep_identity_and_purpose(task_root, monkeypatch):
+    from types import SimpleNamespace
+    from embodichain.lab.gym.utils import registration
+    from embodichain.learning.rl import env
+
+    path = task_root / "manipulation/pick/catalog.yaml"
+    write(path, {**json.loads(path.read_text()), "group": "pick_place"})
+    cls = type("PickEnv", (), {"__module__": "demo.manipulation.pick"})
+    spec = SimpleNamespace(
+        cls=cls,
+        supports_handwritten_demo=False,
+        supports_rl=True,
+        task_program_registration=None,
+        task_program_adapter_factory=None,
+    )
+    monkeypatch.setattr(
+        registration, "REGISTERED_ENVS", {"PickAlt": spec, "PickResearch": spec}
+    )
+    monkeypatch.setattr(env, "get_registered_learning_env_names", lambda: [])
+    write(
+        task_root / "portfolio.yaml",
+        {
+            "pick": {
+                "purpose": "training",
+                "featured": ["PickAlt"],
+                "overrides": {"PickResearch": "research"},
+            }
+        },
+    )
+    roots = {"demo": task_root}
+    static = catalog._load_catalog(roots)
+    assert {d.name for d in catalog._select_task(static, "pick").deployments} == {
+        "a",
+        "b",
+    }
+    tasks = catalog._load_catalog(roots, runtime_packages=["demo"])
+    (pick,) = tasks
+    assert catalog._select_task(tasks, "demo:pick") is pick
+    assert pick.task_path == ("manipulation", "pick_place", "pick")
+    training = catalog._portfolio_view(tasks, "training", False)
+    assert {d.name for d in training[0].deployments} == {"a", "b", "PickAlt"}
+    assert [
+        d.name for d in catalog._portfolio_view(tasks, None, True)[0].deployments
+    ] == ["PickAlt"]
+    assert [
+        d.name for d in catalog._portfolio_view(tasks, "research", False)[0].deployments
+    ] == ["PickResearch"]

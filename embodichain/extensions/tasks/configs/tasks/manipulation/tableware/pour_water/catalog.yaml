@@ -8,8 +8,11 @@ tags:
 default_deployment: franka_fluid
 deployments:
   cobotmagic:
-    validation: validation/cobotmagic.json
     config: task.cobotmagic.yaml
+    note: Default physics bottle motion without fluid simulation.
+  cobotmagic_fluid:
+    config: task.cobotmagic.fluid.yaml
+    validation: validation/cobotmagic.fluid.json
   tianji_marvin:
     note: Legacy rigid-body motion demonstration without measured liquid transfer.
     config: task.tianji_marvin.yaml

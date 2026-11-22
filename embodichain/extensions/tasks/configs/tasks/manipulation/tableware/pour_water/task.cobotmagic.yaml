@@ -1,10 +1,5 @@
 id: PourWater-v1
 
-collection:
-  qualification:
-    observations:
-      received_volume: {min: [0.00005]}
-      water_summary: {min: [null, null, null, null, 1.0], when: always}
 environment:
   component: env.yaml
 
@@ -24,6 +19,3 @@ task_program:
 
 embodiment:
   component: ../../../../components/embodiments/cobotmagic.yaml
-  overrides:
-    root_props:
-      newton_mimic_stabilizer: true
