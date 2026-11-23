@@ -65,6 +65,11 @@ def _parse_args(robot_name: str) -> argparse.Namespace:
     parser.add_argument(
         "--output", type=Path, help="Write the demonstration report as JSON."
     )
+    parser.add_argument(
+        "--video",
+        type=Path,
+        help="Record simulated playback to a 720p MP4, including in headless mode.",
+    )
     return parser.parse_args()
 
 
@@ -89,6 +94,15 @@ def _model_path(robot_name: str, args: argparse.Namespace) -> Path:
 def run(robot_name: str) -> None:
     """Download the release and run one free-space robot demonstration."""
     args = _parse_args(robot_name)
+    if args.video and not args.download_only:
+        if args.video.suffix.lower() != ".mp4":
+            raise ValueError("--video must end in .mp4.")
+        if args.no_playback:
+            raise ValueError("--video requires playback; omit --no-playback.")
+        if args.renderer == "no-render":
+            raise ValueError("--video requires a renderer; omit --renderer no-render.")
+        if args.renderer == "auto":
+            args.renderer = "fast-rt"
     model_path = _model_path(robot_name, args)
     if args.download_only:
         return
@@ -124,6 +138,8 @@ def run(robot_name: str) -> None:
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=args.headless,
+            width=1280,
+            height=720,
             device=str(device),
             num_envs=args.num_envs,
             arena_space=args.arena_space,
@@ -285,6 +301,20 @@ def run(robot_name: str) -> None:
                 report["arrivals"].append(entry)
         # A geometric failure is reported, never passed off as a completed motion.
         if result.is_all_success() and not args.no_playback:
+            if args.video:
+                look_at = (
+                    ((1.35, -1.35, 1.10), (0.30, 0.0, 0.40), (0.0, 0.0, 1.0))
+                    if robot_name == "franka"
+                    else ((1.0, -1.0, 0.85), (0.20, 0.0, 0.27), (0.0, 0.0, 1.0))
+                )
+                if not sim.start_window_record(
+                    save_path=str(args.video),
+                    fps=25,
+                    max_memory=1024,
+                    look_at=look_at,
+                    use_sim_time=True,
+                ):
+                    raise RuntimeError("Could not start the demo video recorder.")
             # Regrid each rest-to-rest phase separately so intermediate
             # constraint arrivals remain exact endpoints during playback.
             previous = 0
@@ -303,7 +333,10 @@ def run(robot_name: str) -> None:
                         control_dt=control_dt, joint_command_mode="position_velocity"
                     ),
                 )
-                sim.update(step=round(0.5 / sim.sim_config.physics_dt))
+                # Advance settling holds in small increments so the recorder
+                # samples simulation time instead of skipping the whole hold.
+                for _ in range(round(0.5 / sim.sim_config.physics_dt)):
+                    sim.update(step=1)
                 measured = robot.get_qpos(name="arm")
                 report["measured_tracking_error_rad"].append(
                     float((measured - result.positions[:, end]).abs().max())
@@ -312,6 +345,13 @@ def run(robot_name: str) -> None:
                 previous = end
             report["simulation_playback"] = "completed"
             report["playback_duration_s"] = playback_seconds
+            if args.video:
+                if not sim.stop_window_record():
+                    raise RuntimeError("No video frames were captured.")
+                sim.wait_window_record_saves()
+                if not args.video.is_file() or args.video.stat().st_size == 0:
+                    raise RuntimeError(f"Video encoding did not produce {args.video}.")
+                report["video"] = str(args.video.resolve())
         report["duration_s"] = result.duration.cpu().tolist()
         text = json.dumps(report, indent=2)
         print(text)
@@ -327,5 +367,8 @@ def run(robot_name: str) -> None:
                 "NMG did not reach every demo target; see the arrival report."
             )
     finally:
+        if sim.is_window_recording():
+            sim.stop_window_record()
+        sim.wait_window_record_saves()
         sim.destroy(exit_process=False)
         SimulationManager.flush_cleanup_queue()

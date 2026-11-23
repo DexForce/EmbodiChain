@@ -50,6 +50,21 @@ joint tracking error. Playback completion is not a physical task-success claim.
 There are no obstacle or self-collision guarantees. A failed plan is reported
 and is not played back.
 
+## Record a video
+
+Record actual simulated playback with a fixed overview camera:
+
+```bash
+embodichain run-example sim/motion/planners/nmg/franka --headless --device cpu --video /tmp/nmg-franka.mp4
+embodichain run-example sim/motion/planners/nmg/piper --headless --device cpu --video /tmp/nmg-piper.mp4
+```
+
+The recorder writes 1280×720 MP4 at 25 fps, using simulation time. A rendering
+GPU is required even when physics and ONNX inference use `--device cpu`.
+`--video` selects Fast-RT when `--renderer auto`; it cannot be combined with
+`--no-playback` or `--renderer no-render`. The process waits for encoding before
+exiting. Camera capture and encoding use EmbodiChain's existing recorder.
+
 ## Download and reproducibility
 
 The demos pin commit `ddca0e456e097ba42c05e1269febf73fa2835541`, use the Hugging Face
