@@ -559,10 +559,37 @@ def test_articulation_needs_the_part_joint_not_the_stationary_body():
         ],
         conditions=[dict(scope="final", fact=opened, quote=text)],
     )
-    validate_intent(plan, text, scene_objects={})
+    with pytest.raises(
+        ValueError, match="cabinet.*requires articulation.*scene-context"
+    ):
+        validate_intent(plan, text, scene_objects={})
+    cabinet = {"id": "cabinet", "description": "cabinet", "asset_kind": "rigid"}
+    with pytest.raises(ValueError, match="cabinet.*rigid.*requires articulation"):
+        validate_intent(plan, text, scene_objects={"cabinet": cabinet})
+    plan["roles"][0]["asset_kind"] = "articulated"
+    with pytest.raises(
+        ValueError, match="cabinet.*requires articulation.*scene-context"
+    ):
+        validate_intent(plan, text, scene_objects={})
+    cabinet["asset_kind"] = "articulated"
+    plan["roles"][0]["asset_kind"] = "rigid"
+    scene_objects = {"cabinet": cabinet}
+    rigid_flap = dict(id="flap", description="flap", asset_kind="rigid")
+    with pytest.raises(ValueError, match="flap.*rigid.*requires articulation"):
+        validate_intent(plan, text, scene_objects={**scene_objects, "flap": rigid_flap})
+    validated = validate_intent(plan, text, scene_objects=scene_objects)
+    spec, _, _, _ = compile_intent(validated, text, "hinged", scene_objects)
+    requirements = [row.to_dict() for row in spec.requirements]
+    assert requirements == [
+        dict(
+            consumer="scene",
+            key="scene_objects",
+            value=[{**cabinet, "is_articulated": True}],
+        )
+    ]
     opened["references"] = ["cabinet"]
     with pytest.raises(ValueError, match="distinct joint"):
-        validate_intent(plan, text, scene_objects={})
+        validate_intent(plan, text, scene_objects=scene_objects)
 
 
 def test_implicit_completion_does_not_invent_a_terminal_state():
@@ -583,8 +610,11 @@ def test_implicit_completion_does_not_invent_a_terminal_state():
         ],
         conditions=[],
     )
-    validate_intent(plan, text, scene_objects={})
-    spec, graph, _, _ = compile_intent(plan, text, "switch_press", {})
+    scene_objects = {
+        "switch": dict(id="switch", description="switch", asset_kind="articulated"),
+    }
+    validate_intent(plan, text, scene_objects=scene_objects)
+    spec, graph, _, _ = compile_intent(plan, text, "switch_press", scene_objects)
     assert graph["success"]["conditions"]["final"] == []
     assert graph["success"]["terminal_step"] == "step_01"
     assert spec.to_dict()["goal"][0]["arguments"] == {"terminal_step": "step_01"}
@@ -641,8 +671,20 @@ def test_hybrid_preserves_simultaneous_support_and_initial_arm_poses(
     )
     image, output = tmp_path / "input.png", tmp_path / "graph"
     Image.new("RGB", (10, 10)).save(image)
+    context = tmp_path / "context.json"
+    background = dict(id="stapler", description="a stapler", asset_kind="articulated")
+    context.write_text(
+        json.dumps(
+            dict(
+                schema_version="embodichain.task-scene-context/v1", objects=[background]
+            )
+        ),
+        encoding="utf-8",
+    )
     with GenSimServices(GenSimServicesCfg()) as services:
-        result = publish_hybrid(instruction, "two_supports", image, output, services)
+        result = publish_hybrid(
+            instruction, "two_supports", image, output, services, scene_context=context
+        )
     graph = result["semantic_task_graph"]
     assert graph["nodes"][1]["call"]["arguments"]["effects"] == [support]
     terminal = graph["nodes"][-1]
@@ -658,6 +700,10 @@ def test_hybrid_preserves_simultaneous_support_and_initial_arm_poses(
         verified["stage"] == "authoring_only" and verified["execution_ready"] is False
     )
     assert result["coverage"]["status"] == "source_reviewed"
+    assert "stapler" not in {row["id"] for row in result["task_spec"]["roles"]}
+    assert {**background, "is_articulated": True} in verified["scene_requirements"][
+        "configuration"
+    ]["requirements"][0]["value"]
     assert parked in [
         p["arguments"] for p in verified["task_document"]["objectives"]["goal"]
     ]

@@ -23,6 +23,7 @@ import re
 from typing import Any
 
 from ..task_spec import TaskSpec, validate_task_spec
+from .scene_context import require_articulation, scene_objects_requirement
 from .semantic_graph import (
     _AUTHORING_INTENT_PREFIX,
     SEMANTIC_TASK_GRAPH_SCHEMA,
@@ -231,7 +232,7 @@ _PROMPT = {
         "and destination slots. A role may have optional part_of: owning_role_id. Do not guess poses. "
         "Declare both the moving part and its joint, and every specified grip site, as roles with "
         "explicit part_of links. Mentioning ownership only in a description is not a binding. "
-        "Use optional role asset_kind:rigid|articulated for explicit asset declarations. "
+        "Use the caller's scene_context for asset modeling; do not infer asset_kind on roles. "
         "Arms belong in the arms field, not object roles. "
         "Keep stated defining attributes such as color and material in role descriptions. If rank by size is the selector, "
         "use that rank, not an extra guessed location. Only encode camera locations as typed facts when required. "
@@ -323,6 +324,7 @@ _PROMPT = {
         "For articulated movement, grasp the moving part at the specified site, articulate that same held "
         "part with articulated referencing a distinct articulation role for its joint, part_of the "
         "moving part or its owner, plus the mechanism, then release if requested. "
+        "Reuse the owning asset's scene_context ID when it is supplied. A turn of a free object is not joint actuation. "
         "For a press without grasping, move_gripper with gripper_relation:above at the actual site, "
         "press that site (actuated:pressed), then move_gripper with gripper_relation:clear_of if requested. "
         "When the source describes a button on a surface, the press effect names that button, "
@@ -728,14 +730,8 @@ def validate_intent(
                 "Roles require distinct snake_case IDs, one scalar kind string and a description"
             )
         role_kinds[name] = role["kind"]
-        if "asset_kind" in role and (
-            role["asset_kind"] not in {"rigid", "articulated"}
-            or scene_objects.get(name, {}).get("asset_kind", role["asset_kind"])
-            != role["asset_kind"]
-        ):
-            raise ValueError(
-                "Role asset_kind must agree with the explicit scene context"
-            )
+        # Older candidates can carry a model hint, not a caller declaration.
+        role.pop("asset_kind", None)
         parent = role.get("part_of")
         if parent is None:
             role.pop("part_of", None)
@@ -836,6 +832,9 @@ def validate_intent(
                     "Articulation must reference a distinct joint of the moving part or its owning object; "
                     f"declare the part_of links for {part!r} and joint {joint!r} explicitly"
                 )
+        if fact["kind"] in {"articulated", "actuated"}:
+            for subject in fact["subjects"]:
+                require_articulation(subject, scene_objects, parents)
 
     for condition in plan["conditions"]:
         _shape(condition, {"scope", "fact", "quote"}, set(), "condition")
@@ -926,6 +925,9 @@ def validate_intent(
             check_fact_state(fact)
         for fact in step["effects"]:
             check_fact(fact)
+        if verb == "actuate":
+            for subject in subjects:
+                require_articulation(subject, scene_objects, parents)
         if "release_quote" in step:
             step["release_quote"] = _quote(step["release_quote"], instruction, spans)
             if verb != "place":
@@ -1112,11 +1114,7 @@ def compile_intent(
         name = role["id"]
         context = scene_objects.get(name, {})
         descriptions[name] = context.get("description", role["description"])
-        properties = {
-            key: role[key] for key in ("asset_kind", "part_of") if key in role
-        }
-        if "asset_kind" in context:
-            properties["asset_kind"] = context["asset_kind"]
+        properties = {"part_of": role["part_of"]} if "part_of" in role else {}
         role_rows.append(
             dict(
                 id=name,
@@ -1228,7 +1226,23 @@ def compile_intent(
         definitions["goal"].append(predicate(completion, {"terminal_step": prior[0]}))
         clause(completion, completion, plan["steps"][-1]["quote"])
     spec = TaskSpec.from_dict(
-        dict(task_id=task_id, instruction=instruction, roles=role_rows, **definitions)
+        dict(
+            task_id=task_id,
+            instruction=instruction,
+            roles=role_rows,
+            requirements=[
+                scene_objects_requirement(
+                    scene_objects,
+                    {
+                        role["id"]: descriptions[role["id"]]
+                        for role in plan["roles"]
+                        if "part_of" not in role
+                        and role["kind"] not in {"target", "robot"}
+                    },
+                )
+            ],
+            **definitions,
+        )
     )
     validate_task_spec(spec)
     graph = validate_semantic_task_graph(

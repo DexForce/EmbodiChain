@@ -68,9 +68,14 @@ orientation without returning to the original position.
 Hybrid accepts optional `--scene-context FILE` for scene facts, not extra task
 actions. The `embodichain.task-scene-context/v1` JSON has optional `description`
 and `objects` entries (`id`, `description`, optional `asset_kind` of `rigid` or
-`articulated`). Object IDs assert task roles; unrelated scene notes belong in
-`description`. Context guides interpretation and grounding, does not establish
-visibility, and is retained in the plan artifact inventory.
+`articulated`). Objects default to `rigid`; joint and control operations require
+an explicit `articulated` declaration on the owning object. Native operations
+can link a part to that object with `part_of`. Both authoring paths reject a
+missing or conflicting declaration rather than rewriting the action. Referenced
+objects use their declared IDs; background objects do not become task roles.
+The frozen spec and scene projection publish the resolved `scene_objects`
+requirement with derived `is_articulated` values. The original scene context is
+retained in the plan inventory and does not establish visibility.
 For rigid pick/place, named handovers ending in placement and coordinated tray release, hybrid automatically grounds frozen roles in the original image, or verifies a supplied `--scene-grounding FILE`. A null box retains a pending role. Plans outside this deployment scope publish an authoring-only manifest. Qualification and deployment preparation then use the same
 role, geometry, resource and configuration checks as template plans. The same tray identity is retained across fruit landings and the final transport;
 qualification selects non-overlapping landing poses and the terminal segment

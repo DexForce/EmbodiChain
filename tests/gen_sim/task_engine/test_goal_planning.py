@@ -160,7 +160,24 @@ def test_failed_source_audit_prevents_publication(tmp_path, monkeypatch):
     assert not (tmp_path / "plan").exists()
 
 
-def test_hybrid_reaudits_a_repair_before_selecting_it(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "revision,reviewed",
+    [
+        (dict(kind="place", object="cup", on="bowl", resources={}), True),
+        (
+            dict(
+                kind="registered",
+                call_id="simulation.press",
+                arguments={"object": "cup"},
+                resources={},
+            ),
+            False,
+        ),
+    ],
+)
+def test_hybrid_validates_a_repair_before_selecting_it(
+    tmp_path, monkeypatch, revision, reviewed
+):
     from PIL import Image
     from embodichain.gen_sim.services import GenSimServices, GenSimServicesCfg, compat
     from embodichain.gen_sim.task_engine.hybrid import publish_hybrid
@@ -179,15 +196,10 @@ def test_hybrid_reaudits_a_repair_before_selecting_it(tmp_path, monkeypatch):
     def respond(**kwargs):
         prompt = json.loads(kwargs["prompt"])
         if kwargs["role"] == "task_semantic_planning":
-            return {
-                "calls": [
-                    *prompt["previous"],
-                    dict(kind="place", object="cup", on="bowl", resources={}),
-                ]
-            }
-        audited.append([call["kind"] for call in prompt["ordered_calls"]])
-        if "place" in audited[-1]:
-            return {"issues": [dict(quote=text, reason="unsupported placement")]}
+            return {"calls": [*prompt["previous"], revision]}
+        audited.append(prompt["ordered_calls"])
+        if revision in audited[-1]:
+            return {"issues": [dict(quote=text, reason="unsupported action")]}
         return {"issues": [], "source_operations": source}
 
     monkeypatch.setattr(compat, "structured_call", respond)
@@ -196,12 +208,15 @@ def test_hybrid_reaudits_a_repair_before_selecting_it(tmp_path, monkeypatch):
     with GenSimServices(GenSimServicesCfg()) as services:
         result = publish_hybrid(text, "pour", image, tmp_path / "plan", services)
     assert result["coverage"]["status"] == "uncovered"
-    assert result["planning_history"][-1]["coverage"]["status"] == "source_rejected"
-    assert len(audited) == 2 and "place" in audited[1]
-    assert all(
-        node["call"]["kind"] != "place"
-        for node in result["semantic_task_graph"]["nodes"]
-    )
+    rejection = result["planning_history"][-1]["coverage"]
+    assert rejection["status"] == "source_rejected"
+    assert (revision in audited[-1]) == reviewed
+    assert len(audited) == (2 if reviewed else 1)
+    if not reviewed:
+        assert "requires articulation" in rejection["error"]
+    assert revision not in [
+        node["call"] for node in result["semantic_task_graph"]["nodes"]
+    ]
 
 
 @pytest.mark.parametrize(
@@ -849,7 +864,10 @@ def test_hybrid_scene_context_selects_and_preserves_destination(
         context = {
             "schema_version": "embodichain.task-scene-context/v1",
             "description": "There are two blue trays in the scene.",
-            "objects": [dict(id=tray, description=description, asset_kind="rigid")],
+            "objects": [
+                dict(id=tray, description=description, asset_kind="rigid"),
+                dict(id="stapler", description="a stapler in the background"),
+            ],
         }
         source = tmp_path / "context.json"
         source.write_text(json.dumps(context), encoding="utf-8")
@@ -917,6 +935,18 @@ def test_hybrid_scene_context_selects_and_preserves_destination(
     assert plan["task_document"]["configuration"]["descriptions"][tray] == (
         description or tray
     )
+    configuration = plan["scene_requirements"]["configuration"]
+    assert {role["id"] for role in configuration["roles"]} == {"cup", tray}
+    objects = next(
+        entry["value"]
+        for entry in configuration["requirements"]
+        if (entry["consumer"], entry["key"]) == ("scene", "scene_objects")
+    )
+    assert {row["id"]: row["is_articulated"] for row in objects} == {
+        "cup": False,
+        tray: False,
+        **({"stapler": False} if context else {}),
+    }
     snapshot = output / "scene_context.json"
     if context is None:
         assert not snapshot.exists()
@@ -929,11 +959,13 @@ def test_hybrid_scene_context_selects_and_preserves_destination(
     "object_id,asset_kind,error",
     [
         ("drawer", "rigid", "drawer.*rigid.*articulation"),
-        ("top_drawer", "articulated", "top_drawer.*task role"),
+        (None, None, "drawer.*requires articulation.*scene-context"),
+        ("top_drawer", "articulated", "drawer.*requires articulation.*scene-context"),
         ("drawer", "container", "asset_kind"),
+        ("cabinet", "articulated", None),
     ],
 )
-def test_hybrid_scene_context_rejects_conflicting_input(
+def test_hybrid_scene_context_gates_native_joint_actions(
     tmp_path, monkeypatch, object_id, asset_kind, error
 ):
     from PIL import Image
@@ -943,33 +975,67 @@ def test_hybrid_scene_context_rejects_conflicting_input(
     instruction = "Open the drawer."
     image = tmp_path / "scene.png"
     Image.new("RGB", (20, 20)).save(image)
-    source = tmp_path / "context.json"
-    source.write_text(
-        json.dumps(
-            {
-                "schema_version": "embodichain.task-scene-context/v1",
-                "objects": [
-                    dict(id=object_id, description="top drawer", asset_kind=asset_kind)
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
+    source = None
+    if object_id is not None:
+        source = tmp_path / "context.json"
+        source.write_text(
+            json.dumps(
+                {
+                    "schema_version": "embodichain.task-scene-context/v1",
+                    "objects": [
+                        dict(id=object_id, description=object_id, asset_kind=asset_kind)
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+    op = dict(template="E6", object="drawer", state="open", quote=instruction)
+    if object_id == "cabinet":
+        op["part_of"] = "cabinet"
+    interpretations = []
 
     def interpret(self, **kwargs):
         assert asset_kind != "container", "Invalid context must fail before model calls"
-        return json.dumps(
-            [dict(template="E6", object="drawer", state="open", quote=instruction)]
-        )
+        interpretations.append(kwargs)
+        return json.dumps([op])
+
+    def audit(**kwargs):
+        assert error is None, "Conflicting declarations must fail before audit"
+        return {"issues": [], "source_operations": [op]}
 
     monkeypatch.setattr(compat.VisionFacade, "complete", interpret)
-    monkeypatch.setattr(
-        compat, "structured_call", lambda **kw: pytest.fail("Unexpected model call")
-    )
+    monkeypatch.setattr(compat, "structured_call", audit)
     output = tmp_path / "plan"
     with GenSimServices(GenSimServicesCfg()) as services:
-        with pytest.raises(ValueError, match=error):
-            publish_hybrid(
+        if error:
+            with pytest.raises(ValueError, match=error):
+                publish_hybrid(
+                    instruction,
+                    "example",
+                    image,
+                    output,
+                    services,
+                    scene_context=source,
+                )
+            assert len(interpretations) <= 1
+            assert not output.exists()
+        else:
+            result = publish_hybrid(
                 instruction, "example", image, output, services, scene_context=source
             )
-    assert not output.exists()
+            roles = result["task_spec"]["roles"]
+            assert [role["id"] for role in roles] == ["drawer"]
+            assert roles[0]["properties"]["part_of"] == "cabinet"
+            configuration = result["task_spec_v1"]["configuration"]
+            assert {
+                "consumer": "scene",
+                "key": "scene_objects",
+                "value": [
+                    dict(
+                        id="cabinet",
+                        description="cabinet",
+                        asset_kind="articulated",
+                        is_articulated=True,
+                    )
+                ],
+            } in configuration["requirements"]
