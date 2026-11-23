@@ -131,6 +131,18 @@ approach/hold and on the support hand through release/retreat. Contact-blocked
 measured jaw positions cannot replace these closing targets. Measured robot
 observations and held-object transforms still supply geometry and validation.
 
+## Reward templates
+
+`AtomicSkill.reward_profiles()` discovers immutable named measured-potential
+recipes independently of planning. The same skill identity can use those recipes
+for standalone training or a Task Program objective. Missing default templates
+reject explicit requests; trusted registration cannot overwrite an installed name.
+Profiles inheriting the built-in potential require its complete role set;
+custom `potential()` overrides may declare only the available roles they consume.
+Gym owns binding and execution through the
+[RewardManager composition contract](../manager-functor/manager-functor.md#composed-skill-rewards).
+Reward configuration does not implement a learned-policy execution backend.
+
 ## Recommended change sites
 
 Modify the package-map owner for the changed contract. Add skill goals,

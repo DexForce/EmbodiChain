@@ -506,9 +506,11 @@ def _decode_rl_task(value: object, modules: Sequence[str]) -> RLTaskCfg:
         "success",
         "failure",
         "truncation",
+        "reward_composition",
+        "skill",
     }:
         raise ValueError(
-            "rl_task accepts only success, failure and truncation mappings."
+            "rl_task accepts success, failure, truncation, skill and reward_composition mappings."
         )
     groups = {}
     for group in ("success", "failure", "truncation"):
@@ -544,7 +546,11 @@ def _decode_rl_task(value: object, modules: Sequence[str]) -> RLTaskCfg:
                 ),
                 params=params,
             )
-    return RLTaskCfg(**groups)
+    return RLTaskCfg(
+        **groups,
+        reward_composition=deepcopy(value.get("reward_composition")),
+        skill=deepcopy(value.get("skill")),
+    )
 
 
 def _register_configured_rl(
@@ -1432,6 +1438,76 @@ def config_to_cfg(
 
     if "rl_task" in config:
         env_cfg.rl_task = _decode_rl_task(config["rl_task"], manager_modules)
+        if env_cfg.rl_task.skill is not None:
+            if env_cfg.task_program is not None:
+                raise ValueError(
+                    "Standalone skill and Task Program targets are mutually exclusive"
+                )
+            if env_cfg.rl_task.reward_composition is None:
+                raise ValueError(
+                    "Standalone skill requires reward_composition with an explicit discount"
+                )
+        program_rewards = getattr(env_cfg.task_program, "rewards", None)
+        if program_rewards is not None:
+            combined = deepcopy(program_rewards)
+            combined.update(env_cfg.rl_task.reward_composition or {})
+            # Declarative snapshots store sequences as tuples.
+            if "skills" in combined:
+                combined["skills"] = list(combined["skills"])
+            env_cfg.rl_task.reward_composition = combined
+            config["rl_task"]["reward_composition"] = deepcopy(combined)
+        if env_cfg.rl_task.reward_composition is not None:
+            if env_cfg.ignore_terminations:
+                raise ValueError(
+                    "Composed rewards require active termination on invalid measurements"
+                )
+            from embodichain.lab.gym.envs.managers.reward_composition import (
+                _bind_skill_objectives,
+            )
+
+            _bind_skill_objectives(env_cfg)
+            from embodichain.lab.gym.envs.managers.reward_composition import (
+                compose_reward_terms,
+            )
+
+            generated = compose_reward_terms(
+                env_cfg.rl_task.reward_composition,
+                program=env_cfg.task_program is not None,
+            )
+            from embodichain.lab.gym.envs.managers.reward_composition import (
+                _add_common_rewards,
+            )
+            from embodichain.lab.task_program.integrations.progress import (
+                _policy_stages,
+            )
+            from embodichain.lab.gym.envs.managers.skill_objective import (
+                _program_objective_conditions,
+            )
+
+            stages = (
+                ()
+                if env_cfg.task_program is None
+                else _policy_stages(
+                    configured_task_program_integration.registration.catalog.preflight(
+                        env_cfg.task_program, strict_contracts=True
+                    ),
+                    _program_objective_conditions(env_cfg),
+                )
+            )
+            _add_common_rewards(env_cfg, generated, stages)
+            if any(
+                term.mode != "add"
+                for term in vars(env_cfg.rewards).values()
+                if isinstance(term, RewardCfg)
+            ):
+                raise ValueError(
+                    "Automatic reward composition requires additive rewards"
+                )
+            for name, term in generated.items():
+                if hasattr(env_cfg.rewards, name):
+                    raise ValueError(f"Duplicate generated reward {name!r}")
+                setattr(env_cfg.rewards, name, term)
+
         target_keys = {
             cfg.params["target_pose_key"]
             for group in ("success", "failure", "truncation")

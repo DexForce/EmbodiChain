@@ -66,8 +66,11 @@ class GymEnvironment:
         self.closed += 1
 
 
+@pytest.mark.parametrize("composition", [None, {"discount": 0.9}])
 @pytest.mark.parametrize("web", [False, True])
-def test_gym_environment_applies_runtime_overrides(tmp_path, monkeypatch, web):
+def test_gym_environment_applies_runtime_overrides(
+    tmp_path, monkeypatch, composition, web
+):
     gym_config = tmp_path / "gym.yaml"
     gym_config.write_text("id: Example\n", encoding="utf-8")
     env_cfg = SimpleNamespace(
@@ -80,6 +83,7 @@ def test_gym_environment_applies_runtime_overrides(tmp_path, monkeypatch, web):
             else None
         ),
         profiler=None,
+        rl_task=SimpleNamespace(reward_composition=composition),
     )
     built = GymEnvironment()
     monkeypatch.setattr(
@@ -92,7 +96,7 @@ def test_gym_environment_applies_runtime_overrides(tmp_path, monkeypatch, web):
     )
 
     runtime = _build_gym_environment(
-        {"trainer": {"gym_config": "gym.yaml"}},
+        {"trainer": {"gym_config": "gym.yaml"}, "policy": _policy_config()},
         simulation_device=torch.device("cpu"),
         num_envs=1,
         headless=not web,
@@ -262,4 +266,37 @@ def test_learning_environment_rejects_config_resource_collision():
             device=torch.device("cpu"),
             num_envs=2,
             resources={"model": object()},
+        )
+
+
+def test_reward_discount_mismatch_rejects_before_simulator_construction(
+    tmp_path, monkeypatch
+):
+    from embodichain.learning.rl import runtime
+
+    source = tmp_path / "gym.yaml"
+    source.write_text("id: Example\n")
+    monkeypatch.setattr(
+        runtime,
+        "config_to_cfg",
+        lambda *args, **kwargs: SimpleNamespace(
+            rl_task=SimpleNamespace(reward_composition={"discount": 0.9})
+        ),
+    )
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Simulator must not be built for inconsistent reward discounts")
+
+    monkeypatch.setattr(runtime, "build_env", forbidden)
+    with pytest.raises(ValueError, match="algorithm gamma"):
+        _build_gym_environment(
+            {
+                "trainer": {"gym_config": str(source)},
+                "algorithm": {"name": "ppo", "cfg": {"gamma": 0.99}},
+            },
+            simulation_device=torch.device("cpu"),
+            num_envs=1,
+            headless=True,
+            renderer=None,
+            gpu_id=0,
         )

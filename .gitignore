@@ -205,6 +205,7 @@ wandb/
 *.mp4
 # Curated recordings embedded in the Atomic Skills switching tutorial.
 !/docs/source/_static/atomic_actions/embodiment_switching/*.mp4
+!/docs/source/_static/lewm/cube-query-12.mp4
 
 # vscode settings
 .vscode/

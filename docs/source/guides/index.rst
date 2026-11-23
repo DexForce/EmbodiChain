@@ -24,4 +24,5 @@ Practical guides for common tasks in EmbodiChain.
    training_frameworks
    lerobot
    rlinf
+   mcp
    cli

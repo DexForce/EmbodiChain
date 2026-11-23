@@ -80,6 +80,7 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.motion.motion_generator import MotionGenerator
 
+    from .reward_profiles import SkillRewardProfile
     from .runtime import SkillPlanningServices
     from .state import PlanningContext
     from .nominal import NominalMotionSource
@@ -444,6 +445,13 @@ class AtomicSkill(Generic[GoalT, OptionsT], ABC):
                 "AtomicSkillEngine."
             )
         self._planning_services = services
+
+    @classmethod
+    def reward_profiles(cls) -> dict[str, SkillRewardProfile]:
+        """Return execution-independent reward recipes without binding a planner."""
+        from .reward_profiles import skill_reward_profiles
+
+        return skill_reward_profiles(cls.skill_id)
 
     @classmethod
     def descriptor(cls) -> SkillDescriptor:

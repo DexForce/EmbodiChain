@@ -31,6 +31,7 @@ asset ID. No compatibility forwarding module is provided.
 | `PikaGripper` | `embodichain.extensions.robots.agilex.pika.assets` | [AgileX Pika](agilex/pika.md) |
 | `WujiHand` | `embodichain.extensions.robots.wuji.hand.assets` | [Wuji Hand](wuji/hand.md) |
 | `SharpaWave` | `embodichain.extensions.robots.sharpa.wave.assets` | [Sharpa Wave 01](sharpa/wave.md) |
+| `RoboPartyRPHand` | `embodichain.extensions.robots.roboparty.rp_hand.assets` | [RP Hand](roboparty/rp_hand.md) |
 
 The existing asset IDs, class names, archive URLs, checksum validation and cache
 prefixes are preserved. All entries remain in the `eef` data category and use
@@ -77,6 +78,9 @@ source joints; see [Wuji Hand](wuji/hand.md) for control and physical defaults.
 
 `SharpaWaveCfg` adds a standalone left/right hand with 22 independent
 source joints; see [Sharpa Wave 01](sharpa/wave.md) for control and physical defaults.
+
+`RoboPartyRPHandCfg` provides a standalone left/right hand with six
+independent source joints and five mimic followers per side. [RP Hand](roboparty/rp_hand.md)
 
 `BrainCoRevo1Cfg` is a standalone joint-controlled hand preset. It uses
 six active joints and retains the four source mimic followers. Its native

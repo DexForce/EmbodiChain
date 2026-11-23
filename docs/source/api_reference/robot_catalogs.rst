@@ -767,3 +767,63 @@ embodichain.extensions.robots.wuji.hand
 .. automethod:: embodichain.extensions.robots.wuji.hand.cfg.WujiHandCfg.from_dict
 
 .. automethod:: embodichain.extensions.robots.wuji.hand.cfg.WujiHandCfg.build_pk_serial_chain
+
+
+RoboParty presets and assets
+----------------------------
+
+The RoboParty presets use source joint names and position drives for the
+Roboto Origin and RP1 humanoids and the standalone RP Hand. See the
+:doc:`RoboParty model pages </resources/robot/roboparty/index>` for variant IDs
+and control groups.
+
+.. py:class:: embodichain.extensions.robots.RoboPartyRPOCfg
+   :no-index:
+
+   Lazy public export of the 23-joint Roboto Origin configuration.
+
+.. py:class:: embodichain.extensions.robots.RoboPartyRP1Cfg
+   :no-index:
+
+   Lazy public export of the RP1 configuration with four source variants.
+
+.. py:class:: embodichain.extensions.robots.RoboPartyRPHandCfg
+   :no-index:
+
+   Lazy public export of the fixed-base RP Hand configuration.
+
+.. py:class:: embodichain.extensions.robots.roboparty.rpo.RoboPartyRPOCfg
+   :no-index:
+
+   Model-local export of the Roboto Origin preset.
+
+.. py:class:: embodichain.extensions.robots.roboparty.rp1.RoboPartyRP1Cfg
+   :no-index:
+
+   Model-local export of the RP1 preset.
+
+.. py:class:: embodichain.extensions.robots.roboparty.rp_hand.RoboPartyRPHandCfg
+   :no-index:
+
+   Model-local export of the standalone RP Hand preset.
+
+.. py:class:: embodichain.extensions.robots.roboparty.rpo.cfg.RoboPartyRPOCfg
+
+   Floating-base RPO with 23 joints in the ``locomotion`` group and source
+   effort and velocity limits.
+
+.. py:class:: embodichain.extensions.robots.roboparty.rp1.cfg.RoboPartyRP1Cfg
+
+   Floating-base RP1. The ``model`` field selects ``28dof``, ``24dof``,
+   ``hand``, or ``hand_fixed``.
+
+.. py:class:: embodichain.extensions.robots.roboparty.rp_hand.cfg.RoboPartyRPHandCfg
+
+   Fixed-base RP Hand. The ``side`` field selects ``left`` or ``right``.
+   The ``eef`` group contains the six independent finger commands.
+
+.. autoclass:: embodichain.extensions.robots.roboparty.rpo.assets.RoboPartyRPO
+
+.. autoclass:: embodichain.extensions.robots.roboparty.rp1.assets.RoboPartyRP1
+
+.. autoclass:: embodichain.extensions.robots.roboparty.rp_hand.assets.RoboPartyRPHand

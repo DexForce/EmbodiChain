@@ -59,3 +59,203 @@ requirements remain mandatory even after all achievements are reached. Missing o
 invalid evidence fails closed through TerminationManager. Temporal graphs, expert
 segment-start baselines, parallel/implicit segments, post-policies and required
 symbolic/call-effect outcomes are rejected by preflight.
+
+
+## Composed skill rewards
+
+Read the [system architecture and reward contract](../../../docs/architecture/task-program-reward-composition.md)
+for the component diagram, default skill formulas, configuration resolution,
+runtime ordering and reuse with future learned skills.
+
+The existing RewardManager remains the execution and weighting entry point.
+`joint_task.yaml` is a standalone MoveJoints objective; `program_task.yaml` uses
+`program_rewards.yaml` to share PickUp/Place templates with a policy-owned Task
+Program. The same profiles are independent of planning, Real2Sim and any future
+learned skill executor. This change supplies reward interfaces, not a learned
+skill execution backend.
+
+```bash
+python -m embodichain train-rl --config examples/learning/task_program_progress/joint_ppo.yaml
+python .agents/skills/add-task-program/scripts/inspect_deployment.py examples/learning/task_program_progress/program_task.yaml
+```
+
+The training configuration intentionally performs three PPO updates for pipeline
+qualification. Increase iterations for an actual training experiment; successful
+updates are not evidence of task convergence. The CLI validates reward discount
+against algorithm gamma before constructing simulation. Saved configurations pin
+the installed reward-profile revisions and resolved objective thresholds.
+
+A standalone objective declares the exact robot/control-part binding, a goal,
+and acceptance thresholds. Its measured success is independent of shaping weight.
+Manipulation objectives additionally bind target/support actors and a calibrated
+gripper with two opposing pads and its full collision-link selection. Contact evidence and collision
+geometry are required; unsupported backends fail explicitly. Geometry is bound
+for the environment lifetime; rebuild after changing assets or topology.
+Measured physical goals reject `replace_assets_from_group` before reset events
+run. Program hand links come from the selected resource's calibrated `grasp`
+endpoint; omitted lists are derived and explicit lists must match the full hand.
+
+Program objectives select an authored `stage`, or a global expanded `call_index`.
+A multi-call segment requires explicit objectives for every call before its
+internal progress can be expanded. Sequential repeats retain separate physical
+windows. Object, control resource and semantic placement targets must agree with
+the compiled calls. Parallel programs and expert post-policies remain outside
+policy progress support. An omitted skills list selects generic program progress.
+
+Held and stable windows sample every physics substep, so a brief contact at the
+end of a control step does not earn the full control interval. The first valid
+sample establishes a boundary; interrupted evidence restarts the window. Missing
+samples and pose changes after sampling invalidate the affected evidence.
+
+The composition generates additive potential, outcome and milestone RewardCfg
+terms. Existing explicit success/first-achievement terms suppress their matching
+automatic bonuses. `success`, `failure`, `milestone_budget`, `time_cost` and overall
+shaping `weight` may be specified in `reward_composition`; defaults are 10, -10,
+1, 0 and 1. Disabling shaping weight does not disable the physical goal. Every
+skill target and sampling/acceptance parameter is explicit in the effective config.
+Equivalent stage names, occurrence IDs and `call:N` selectors suppress the same
+automatic milestone. Standalone `rl_task.skill` requires `reward_composition`
+with an explicit discount.
+Episode-scoped explicit bonuses suppress only the first occurrence of their
+authored name, leaving later automatic milestones available.
+Authored names precede textual aliases. A stage named `call:0` selects that
+stage, while an explicit `call_index: 0` selects the compiled call. Generated
+bonuses use numeric progress occurrences to avoid name collisions.
+
+Program `scene_relative` call targets freeze their rigid reference at activation
+per row/occurrence; repeats and reset rows rebind without retargeting peers.
+Place orientation preservation applies to both `at` and `on` destinations.
+Articulation/link references are not supported by measured skill targets.
+Dynamic replay seeds reward baselines from the final restored observation.
+It preserves randomized camera extrinsics while invalidating stale samples.
+Scheduled cameras acquire a fresh restored-scene image immediately, including
+same-time render resets, before reward initialization; normal cadence then resumes.
+Policy-only inference does not require an algorithm block.
+
+Checkpoint snapshots persist all effective reward scalars, including a suppressed
+success default of zero, so changing referenced program reward defaults does not
+change a saved run's rewards. Custom potential overrides declare the roles they
+consume; complete built-in role requirements apply to inherited formulas.
+Measured `Place(on)` accepts the same linked support-surface shorthand as planning.
+
+Dense formulas accept scalar role scores or error channels with finite `target`
+and finite positive `scale`; vector errors reduce by Euclidean norm. Named templates can
+be registered by trusted code with `register_skill_reward_profile` and selected
+with `profile`. Extensions can subclass `SkillRewardProfile.potential`; templates
+receive measured tensors and never step simulation. Unknown names and mismatched
+saved revisions reject. Custom model entropy/KL losses remain algorithm-owned.
+
+Use `aggregate_reward_sequence` for VA/VLA action chunks: supply per-control-step
+rewards, executed masks and termination/truncation flags. It returns discounted
+return, continuation discount and actual prefix length. Keep the original
+pre-reset successor observation for bootstrap and never concatenate episodes.
+Image/language preprocessing and action/token log-probabilities belong to the
+model's collector. No specific VA/VLA training backend is included here.
+
+## Native acceptance and videos
+
+These fixed fixtures qualify physical evidence; they are not learned-policy
+success-rate experiments. `supported` must be accepted after a complete stable
+window; `floating` and `empty_grip` must not be accepted.
+
+```bash
+python -m examples.learning.task_program_progress.qualify_rewards --case floating --steps 15
+python -m examples.learning.task_program_progress.qualify_rewards --case empty_grip --steps 15
+xvfb-run -a python -m examples.learning.task_program_progress.qualify_rewards --case supported --video
+xvfb-run -a python -m examples.learning.task_program_progress.qualify_rewards --run outputs/YOUR_RUN --num-envs 1 --video
+python -m scripts.benchmark.learning.rewards
+```
+
+Use a working native display instead of xvfb-run when available. The commands
+write JSON traces and diagnostic MP4s under `outputs/reward_qualification`.
+Checkpoint video loads the actual saved policy with deterministic inference;
+fixture videos explicitly identify zero-action physical scenes. The performance
+benchmark excludes contact acquisition, rendering and policy inference, and
+reports correctness agreement separately from physical task success.
+Qualification writes its JSON before returning a failing exit status for
+nonfinite rewards or mismatched fixture outcomes: all `supported` rows must
+succeed, and `floating`/`empty_grip` rows must remain unsuccessful. Checkpoint
+previews enforce reward quality while keeping policy task success informational.
+Physical reports retain each step's per-row `invalid_measurement` flags and fail
+on invalid or missing measurements, even when a negative case reports zero
+successes and finite rewards. A legacy policy environment without those flags
+reports measurement validity as unknown; reported invalidity still fails.
+The aggregate `report` command requires explicit passing qualification and valid
+measurements for every physical input, including the expert. Failed or incomplete
+inputs stop reporting with a diagnostic error before a success summary is written.
+Accepted summaries retain `passed` and `valid_measurements`. Training/evaluation
+seeds are read from the saved train config and evaluation artifact; the report
+labels them as equal or different using those actual values.
+The training snapshot is resolved through `RunManifest`, including `.json` and
+`.yml` inputs. Training seeds use the trainer's integer conversion and default
+of 1. Evaluations are filtered by their canonical `inputs.run` before selecting
+the latest matching file; no match is an error. Failed or nonfinite checkpoint
+previews stop aggregate reporting. Their reward-quality flags remain in accepted
+summaries and Markdown, while policy task success stays informational.
+Checkpoint qualification records the checkpoint path and selected role actually
+loaded. Reporting requires a matching checkpoint and run, `mode: headless`, and
+complete finite success/reward/length/interval metrics before selecting the latest
+eligible evaluation. Viewer results cannot replace headless statistics. Re-run
+older previews without checkpoint identity before reporting. Counts reconstructed
+from success rates are rounded to the nearest episode, avoiding float truncation.
+
+
+A complete planning-expert grasp/place trace can qualify the same measured
+objectives independently of learned-policy performance:
+
+```bash
+xvfb-run -a python -m examples.learning.task_program_progress.qualify_rewards --expert --steps 1100 --video
+```
+
+This calibrated single-episode fixture uses CPU physics to avoid the native
+Default backend's direct-GPU controller-fetch issue seen during qualification.
+The JSON explicitly labels the planning source and separately reports the
+expert executor result, measured grasp acceptance and measured placement
+acceptance. A positive support witness may persist through sleeping-body reports
+only while both physical poses remain unchanged; motion, invalid acquisition or
+reset invalidates it. No reward bonus or symbolic attachment establishes support.
+A measured objective may select a trusted `reward_profile` while retaining the
+same independent physical acceptance thresholds.
+Planning-expert qualification additionally requires successful execution and
+valid measured grasp/place acceptance; incomplete or invalid evidence exits
+unsuccessfully after saving its report.
+
+
+## Task Program reward acceptance without training
+
+Use the focused acceptance harness when only Task Program reward correctness is
+needed. It constructs no policy model or optimizer. Planning commands are
+collected from the calibrated expert, then supplied through ordinary absolute
+JointPositionAction terms to the configuration-owned Task Program reward host.
+The host's `execution: policy` declaration identifies external action ownership;
+it does not require policy training.
+
+```bash
+python -m examples.learning.task_program_progress.accept_program_rewards --phase collect
+xvfb-run -a python -m examples.learning.task_program_progress.accept_program_rewards --phase replay --case success --video
+python -m examples.learning.task_program_progress.accept_program_rewards --phase replay --case hold
+python -m examples.learning.task_program_progress.accept_program_rewards --phase replay --case truncated
+python -m examples.learning.task_program_progress.accept_program_rewards --phase replay --case failure
+python -m examples.learning.task_program_progress.accept_program_rewards --phase report
+```
+
+Every native env.step return and each reward term is checked against independent
+scalar reward-composition arithmetic. The checks cover milestone weights,
+once-only outcome events, discounted shaping, true termination versus timeout,
+repeated reads, two asynchronous environments and the next reward after a partial
+reset. Local skill potentials come from canonical measured observations; the
+arithmetic audit is not an independent geometry or skill-potential-formula oracle.
+
+Reports under `outputs/task_program_reward_acceptance` bind the exact controller
+JSON hash, planning configuration hashes, replay evaluation declaration and
+effective reward/objective contracts. Inputs changing after collection reject
+replay. The annotated MP4 displays rewards from that same rollout and freezes
+the last frame for one second to make terminal rewards readable. Video hashes,
+captured step indices and the reward-trace hash bind footage to its replay;
+rerunning without `--video` produces no preview, even if old footage is present.
+The focused
+production regression is in `tests/lab/task_program/test_policy_progress.py`.
+
+
+A recorded native reward acceptance result and annotated preview are available
+in [validation/README.md](validation/README.md).
