@@ -15,8 +15,8 @@
 # ----------------------------------------------------------------------------
 """Dynamically replay a recorded Franka rope wrap through EmbodiChain.
 
-Use the standard run-task replay and measure cable geometry from its live
-state after reset and each control step.
+Use the standard run-task replay and capture measured robot and cable states
+after reset and each control step.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ __all__: list[str] = []
 
 
 def main() -> None:
-    """Run one headless dynamics replay and write its cable trajectory."""
+    """Run headless dynamics replay and write the measured trajectory."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--recording", required=True, type=Path, help="Trusted run-task .pt artifact"
@@ -48,6 +48,7 @@ def main() -> None:
     args = parser.parse_args()
 
     from franka_rope_wrap_inputs import (
+        JOINT_NAMES,
         TASK_CONFIG,
         file_info,
         geometry_summary,
@@ -73,10 +74,14 @@ def main() -> None:
     output.mkdir(parents=True, exist_ok=False)
 
     poses = np.empty((steps + 1, segments, 7), dtype=np.float32)
+    robot_q = np.empty((steps + 1, len(JOINT_NAMES)), dtype=np.float32)
+    robot_qd = np.empty_like(robot_q)
+    robot_root_pose = np.empty((steps + 1, 7), dtype=np.float32)
+    joint_order: list[int] = []
     next_frame = 0
 
     def observe(env: EmbodiedEnv, frame: int, total_steps: int) -> None:
-        nonlocal next_frame
+        nonlocal joint_order, next_frame
         if total_steps != steps or frame != next_frame or frame > steps:
             raise RuntimeError("Unexpected frame index in the Franka dynamics replay.")
         cable = env.sim.get_cable_object("cable")
@@ -88,6 +93,19 @@ def main() -> None:
         poses[frame] = state[0].cpu().numpy()
         if not np.isfinite(poses[frame]).all():
             raise FloatingPointError(f"Nonfinite cable pose at replay frame {frame}.")
+        if frame == 0:
+            names = tuple(env.robot.joint_names)
+            if len(names) != len(JOINT_NAMES) or set(names) != set(JOINT_NAMES):
+                raise RuntimeError("Unexpected Franka joint names in the replay scene.")
+            joint_order = [names.index(name) for name in JOINT_NAMES]
+        robot_q[frame] = env.robot.get_qpos()[0].cpu().numpy()[joint_order]
+        robot_qd[frame] = env.robot.get_qvel()[0].cpu().numpy()[joint_order]
+        robot_root_pose[frame] = env.robot.get_local_pose()[0].cpu().numpy()
+        if not all(
+            np.isfinite(values[frame]).all()
+            for values in (robot_q, robot_qd, robot_root_pose)
+        ):
+            raise FloatingPointError(f"Nonfinite robot state at replay frame {frame}.")
         next_frame += 1
         if frame != steps:
             return
@@ -111,6 +129,7 @@ def main() -> None:
             "control_steps": steps,
             "physics_steps_per_control": substeps,
             "cable_segments": segments,
+            "joint_names": JOINT_NAMES,
             "task_success": None,
             "final_geometry": geometry_summary(
                 poses, lengths, config["post_center_xy_m"], control_hz
@@ -121,6 +140,9 @@ def main() -> None:
         np.savez_compressed(
             trajectory,
             time_s=np.arange(steps + 1) / control_hz,
+            robot_q=robot_q,
+            robot_qd=robot_qd,
+            robot_root_pose=robot_root_pose,
             cable_body_pose=poses,
             cable_segment_lengths=lengths,
         )
