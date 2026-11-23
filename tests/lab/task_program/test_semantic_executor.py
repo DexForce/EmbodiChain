@@ -85,6 +85,7 @@ from embodichain.lab.task_program.semantics.calls import (
     Place,
     RegisteredSemanticCall,
     SemanticCallSpec,
+    SemanticRelativePose,
 )
 from embodichain.lab.task_program.compiler.lowering import (
     GroundedHeldObjectGuard,
@@ -1401,9 +1402,13 @@ def test_runtime_reacquires_a_lost_source_with_a_real_pick_then_retries() -> Non
         )
     )
     cube = SceneObjectRef("cube")
+    grasp_pose = SemanticRelativePose("cube", (0.03, 0.01, 0.05), (0, 0, 0, 1))
+    poses = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+    system.observation.entities["cube"] = EntityState(poses)
+    system.engine.robot.compute_fk.return_value = poses.clone()
 
     result = system.runtime.run(
-        Pick(object=cube),
+        Pick(object=cube, at=grasp_pose),
         Place(object=cube, inside=SceneObjectRef("bin")),
     )
 
@@ -1417,6 +1422,9 @@ def test_runtime_reacquires_a_lost_source_with_a_real_pick_then_retries() -> Non
         "pick",
         "place",
     ]
+    reacquisition = system.compiler.grounded_calls[2]
+    assert isinstance(reacquisition, Pick)
+    assert reacquisition.at == grasp_pose
     assert [mask.tolist() for mask in system.compiler.grounded_masks] == [
         [True, True],
         [True, True],

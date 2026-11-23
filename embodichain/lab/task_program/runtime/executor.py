@@ -2268,17 +2268,16 @@ class SemanticCallExecutor:
         trigger_object = getattr(barrier.trigger_call, "object", None)
         if type(trigger_object) is not SceneObjectRef:
             raise TypeError("Curated workflow recovery requires a SceneObjectRef.")
-        grasp: SceneAffordanceRef | None = None
         for candidate in reversed(self._calls[: barrier.trigger_call_index]):
             if (
                 type(candidate) is Pick
                 and candidate.object.entity_id == trigger_object.entity_id
             ):
-                grasp = candidate.grasp
-                break
+                return replace(
+                    candidate, resources={"primary": barrier.source_resource_id}
+                )
         return Pick(
             object=SceneObjectRef(trigger_object.entity_id),
-            grasp=(None if grasp is None else SceneAffordanceRef(grasp.entity_id)),
             resources={"primary": barrier.source_resource_id},
         )
 
