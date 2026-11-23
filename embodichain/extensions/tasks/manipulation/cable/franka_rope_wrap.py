@@ -20,6 +20,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 import json
+import math
 import shutil
 import numpy as np
 from scipy.interpolate import make_interp_spline
@@ -455,11 +456,30 @@ def materialize_deployment(config: dict[str, Any], robot_path: Path, out: Path) 
     import yaml
 
     _validate_config(config)
+    reference = task_directory()
+    deployment = yaml.safe_load((reference / "task.franka.yaml").read_text())
+    task_program = deployment["task_program"]
+    integration_path = reference / task_program["integration"]
+    integration = yaml.safe_load(integration_path.read_text())
+    pickup_options = integration["profile"]["skill_options"]["simulation.cable_pickup"]
+    pickup_targets = integration["runtime_services"]["cable_material"]["targets"]
+    settle_lift = pickup_targets["settle_lift"]
+    control_hz = config["control_hz"]
+    reference_hz = load_config()["control_hz"]
+    # The post-lift hold needs at least one tick within its authored duration.
+    minimum_hz = math.ceil(reference_hz / settle_lift["samples"])
+    if control_hz < minimum_hz:
+        raise ValueError(
+            f"control_hz must be at least {minimum_hz} for the cable pickup settle hold"
+        )
+    rate_scale = control_hz / reference_hz
+    for name in ("hand_interp_steps", "grasp_settle_steps"):
+        pickup_options[name] = round(pickup_options[name] * rate_scale)
+    settle_lift["samples"] = round(settle_lift["samples"] * rate_scale)
+
     folder = out.resolve() / "deployment"
     folder.mkdir()
     _write_cable_asset(config, folder / "cable.usda")
-    reference = task_directory()
-    deployment = yaml.safe_load((reference / "task.franka.yaml").read_text())
     embodiment_path = reference / deployment["embodiment"]["component"]
     embodiment = yaml.safe_load(embodiment_path.read_text())
     robot = embodiment["simulation"]
@@ -474,13 +494,9 @@ def materialize_deployment(config: dict[str, Any], robot_path: Path, out: Path) 
     scenario_path = folder / "config.json"
     _json(scenario_path, config)
     environment = _environment(config, scenario_path)
-    task_program = deployment["task_program"]
     task_program["program"] = str((reference / task_program["program"]).resolve())
     evaluation = deployment["evaluation"]
     evaluation["component"] = str((reference / evaluation["component"]).resolve())
-    integration_path = reference / task_program["integration"]
-    integration = yaml.safe_load(integration_path.read_text())
-    pickup_targets = integration["runtime_services"]["cable_material"]["targets"]
     for target in pickup_targets.values():
         if "material_inset" in target:
             target["material_inset"] = config["grasp_inset_m"]
@@ -494,14 +510,23 @@ def materialize_deployment(config: dict[str, Any], robot_path: Path, out: Path) 
 
     ends = np.asarray([0.0, *PHASE_END_S.values()])
     longest_phase_s = float(np.diff(ends).max()) * config["duration_s"] / ends[-1]
-    required_timeout = float(longest_phase_s + 2 / config["control_hz"])
+    required_timeout = float(longest_phase_s + 2 / control_hz)
     policy_path = (reference / task_program["execution_policy"]).resolve()
-    task_program["execution_policy"] = str(policy_path)
-    recovery = yaml.safe_load(policy_path.read_text())["recovery"]
+    policy = yaml.safe_load(policy_path.read_text())
+    overrides = {}
+    if control_hz != reference_hz:
+        descent_samples = policy["motion"]["sample_count"]
+        overrides["motion"] = {
+            "sample_count": max(2, round(descent_samples * rate_scale))
+        }
+    recovery = policy["recovery"]
     if required_timeout > recovery.get("skill_timeout", RecoveryPolicy().skill_timeout):
+        overrides["recovery"] = {"skill_timeout": required_timeout}
+    task_program["execution_policy"] = str(policy_path)
+    if overrides:
         task_program["execution_policy"] = {
             "component": str(policy_path),
-            "overrides": {"recovery": {"skill_timeout": required_timeout}},
+            "overrides": overrides,
         }
     deployment["embodiment"]["component"] = "embodiment.yaml"
     for name, values in [
