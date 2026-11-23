@@ -24,7 +24,7 @@ from embodichain.gen_sim.services.runtime import GenSimServices, service_entry
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
-from graphlib import TopologicalSorter
+from graphlib import CycleError, TopologicalSorter
 import json
 import math
 import os
@@ -489,7 +489,6 @@ def _review_source_intent(
         )
     proposed_order = _dependency_ancestors(proposed_steps)
     reviewed_order = _dependency_ancestors(reviewed_steps)
-    confirmed_references: list[tuple[int, str, str]] = []
     for index, (proposed, source) in enumerate(
         zip(proposed_steps, reviewed_steps, strict=True), start=1
     ):
@@ -518,7 +517,18 @@ def _review_source_intent(
             elif not _is_unique_source_mention(instruction, reference):
                 continue
             proposed[key]["reference"] = source[key]["reference"] = reference
-            confirmed_references.append((index - 1, key, reference))
+            # Grounding uses the draft from this attempt, not the audit copies.
+            selector = draft.intent["steps"][index - 1][key]
+            if (previous := selector["reference"]) != reference:
+                selector["reference"] = reference
+                draft.normalizations.append(
+                    {
+                        "path": f"steps[{index - 1}].{key}.reference",
+                        "from": previous,
+                        "to": reference,
+                        "reason": "verified_source_reference",
+                    }
+                )
         proposed["depends_on"] = sorted(proposed_order[proposed["id"]])
         source["depends_on"] = sorted(reviewed_order[source["id"]])
         if (
@@ -535,21 +545,6 @@ def _review_source_intent(
         if differences:
             raise ValueError(
                 f"Source audit disagrees at {source['id']} (reviewed fields: {differences!r})."
-            )
-    # Freeze confirmed mentions into the actual draft, not just the audit copies:
-    # grounding derives its selectors from this draft.
-    for index, key, reference in confirmed_references:
-        selector = draft.intent["steps"][index][key]
-        previous = selector["reference"]
-        if previous != reference:
-            selector["reference"] = reference
-            draft.normalizations.append(
-                {
-                    "path": f"steps[{index}].{key}.reference",
-                    "from": previous,
-                    "to": reference,
-                    "reason": "verified_source_reference",
-                }
             )
     return tuple(
         dict(arm=arm, quote=quote)
@@ -820,7 +815,10 @@ def validate_instruction_intent(value: Mapping[str, Any]) -> dict[str, Any]:
                 f"Instruction step {step_id!r} has unknown dependencies "
                 f"{sorted(unknown)}."
             )
-    _validate_dag(dependencies)
+    try:
+        TopologicalSorter(dependencies).prepare()
+    except CycleError as exc:
+        raise ValueError("Instruction intent dependencies contain a cycle.") from exc
     _validate_instruction_resources(steps)
     return {"steps": steps}
 
@@ -828,11 +826,8 @@ def validate_instruction_intent(value: Mapping[str, Any]) -> dict[str, Any]:
 def _canonicalize_intent(intent: Mapping[str, Any]) -> dict[str, Any]:
     """Remove arbitrary model step IDs while preserving the explicit DAG order."""
     normalized = validate_instruction_intent(intent)
-    id_map = {
-        step["id"]: f"step_{index + 1:02d}"
-        for index, step in enumerate(normalized["steps"])
-    }
     steps = normalized["steps"]
+    id_map = {step["id"]: f"step_{index + 1:02d}" for index, step in enumerate(steps)}
     for step in steps:
         step["id"] = id_map[step["id"]]
         step["depends_on"] = [id_map[value] for value in step["depends_on"]]
@@ -840,7 +835,7 @@ def _canonicalize_intent(intent: Mapping[str, Any]) -> dict[str, Any]:
             selector = step[selector_name]
             if selector["kind"] == "step_result":
                 selector["step_id"] = id_map[selector["step_id"]]
-    return validate_instruction_intent({"steps": steps})
+    return normalized
 
 
 def _validate_instruction_resources(steps: Sequence[Mapping[str, Any]]) -> None:
@@ -1526,25 +1521,6 @@ def _coerce_instruction_response(response: Any) -> Mapping[str, Any]:
     if not isinstance(parsed, Mapping):
         raise ValueError("Instruction model output must decode to a JSON object.")
     return dict(parsed)
-
-
-def _validate_dag(dependencies: Mapping[str, Sequence[str]]) -> None:
-    visiting: set[str] = set()
-    visited: set[str] = set()
-
-    def visit(node: str) -> None:
-        if node in visiting:
-            raise ValueError("Instruction intent dependencies contain a cycle.")
-        if node in visited:
-            return
-        visiting.add(node)
-        for dependency in dependencies[node]:
-            visit(str(dependency))
-        visiting.remove(node)
-        visited.add(node)
-
-    for node in dependencies:
-        visit(node)
 
 
 def _reject_forbidden_fields(value: Any) -> None:

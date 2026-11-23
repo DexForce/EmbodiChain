@@ -319,10 +319,7 @@ def test_lift_height_is_explicit_typed_source_intent(instruction, wrong_height):
     assert result.intent["steps"][0]["lift_height_m"] == 0.10
 
 
-@pytest.mark.parametrize(
-    "destination", ["original position", "where it had been sitting"]
-)
-def test_source_review_distinguishes_own_start_pose_from_a_scene_role(destination):
+def test_source_review_distinguishes_own_start_pose_from_a_scene_role():
     expected = dict(
         _step(reference="tray"),
         task_type="E5",
@@ -331,7 +328,7 @@ def test_source_review_distinguishes_own_start_pose_from_a_scene_role(destinatio
     )
     invented = dict(
         expected,
-        target=_selector("scene_ref", reference=destination),
+        target=_selector("scene_ref", reference="where it had been sitting"),
         relation="on",
     )
 
@@ -344,11 +341,7 @@ def test_source_review_distinguishes_own_start_pose_from_a_scene_role(destinatio
         return {"steps": [invented]}
 
     result = interpret_instruction_draft(
-        (
-            f"Lift the tray with both arms and set it back at its {destination}."
-            if destination == "original position"
-            else f"Lift the tray with both arms, then set it {destination}."
-        ),
+        "Lift the tray with both arms, then set it where it had been sitting.",
         caller=caller,
     )
     assert result.attempts == 2

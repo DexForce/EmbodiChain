@@ -167,28 +167,31 @@ def _operation_rows(response: Any, instruction: str) -> list[dict[str, Any]]:
     return result
 
 
+def _validate_audit_issues(instruction: str, audit: Any, evidence_key: str) -> None:
+    if (
+        not isinstance(audit, dict)
+        or audit.keys() - {"issues", evidence_key}
+        or not isinstance(audit.get("issues"), list)
+    ):
+        raise ValueError("Malformed source audit")
+    issues = audit["issues"]
+    if any(
+        not isinstance(issue, dict)
+        or not _source_quote(issue.get("quote"), instruction)
+        or not isinstance(issue.get("reason"), str)
+        or not issue["reason"].strip()
+        for issue in issues
+    ):
+        raise ValueError("Malformed source audit diagnostic")
+    if issues:
+        raise ValueError("source_audit: " + json.dumps(issues, ensure_ascii=False))
+
+
 def _validate_source_audit(
     instruction: str, operations: list[dict[str, Any]], audit: dict[str, Any]
 ) -> None:
     """Require independently source-anchored agreement on each ordered operation."""
-    if (
-        not isinstance(audit, dict)
-        or audit.keys() - {"issues", "source_operations"}
-        or not isinstance(audit.get("issues"), list)
-    ):
-        raise ValueError("Malformed source audit")
-    for issue in audit["issues"]:
-        if (
-            not isinstance(issue, dict)
-            or not _source_quote(issue.get("quote"), instruction)
-            or not isinstance(issue.get("reason"), str)
-            or not issue["reason"].strip()
-        ):
-            raise ValueError("Malformed source audit diagnostic")
-    if audit["issues"]:
-        raise ValueError(
-            "source_audit: " + json.dumps(audit["issues"], ensure_ascii=False)
-        )
+    _validate_audit_issues(instruction, audit, "source_operations")
     if "source_operations" not in audit:
         raise ValueError(
             "source_audit: missing independently reconstructed source_operations"
@@ -212,24 +215,7 @@ def _validate_source_audit(
 
 def _validate_intent_audit(instruction: str, plan: dict[str, Any], audit: Any) -> None:
     """Require an independent source review tied to typed facts and steps."""
-    if (
-        not isinstance(audit, dict)
-        or audit.keys() - {"issues", "checks"}
-        or not isinstance(audit.get("issues"), list)
-    ):
-        raise ValueError("Malformed semantic intent source audit")
-    if audit["issues"]:
-        if any(
-            not isinstance(issue, dict)
-            or not _source_quote(issue.get("quote"), instruction)
-            or not isinstance(issue.get("reason"), str)
-            or not issue["reason"].strip()
-            for issue in audit["issues"]
-        ):
-            raise ValueError("Malformed semantic intent issue")
-        raise ValueError(
-            "source_audit: " + json.dumps(audit["issues"], ensure_ascii=False)
-        )
+    _validate_audit_issues(instruction, audit, "checks")
     checks = audit.get("checks")
     steps = {f"step_{i:02d}": row for i, row in enumerate(plan["steps"], 1)}
     conditions = {
@@ -332,7 +318,8 @@ def _validate_intent_audit(instruction: str, plan: dict[str, Any], audit: Any) -
         )
 
 
-def _supported_program(operations, instruction, *, bindings=None, scene_objects=None):
+def _supported_program(operations, *, bindings=None, scene_objects=None):
+    """Expand operations already normalized by _operation_rows."""
     roles, goals, milestones, clauses, calls, requirements = {}, {}, [], [], [], set()
     last = None
     holder = {}
@@ -356,8 +343,6 @@ def _supported_program(operations, instruction, *, bindings=None, scene_objects=
         )
 
     def role(name):
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError("Empty role")
         roles.setdefault(name, dict(id=name, kind="object"))
 
     def milestone(predicate, quote):
@@ -377,8 +362,6 @@ def _supported_program(operations, instruction, *, bindings=None, scene_objects=
         template = op["template"]
         contract = task_contract(template)
         obj, quote = op["object"], op["quote"]
-        if not quote or quote not in instruction:
-            raise ValueError("Missing verbatim operation source")
         role(obj)
         if parent := op.get("part_of"):
             properties = roles[obj].setdefault("properties", {})
@@ -418,8 +401,6 @@ def _supported_program(operations, instruction, *, bindings=None, scene_objects=
                 if obj == ref:
                     raise ValueError("Pour needs a distinct receiver")
                 mode = op["mode"]
-                if mode not in {"motion", "fluid"}:
-                    raise ValueError("Pour mode is motion or fluid")
                 if not reuse:
                     calls.append(dict(kind="pick", object=obj, resources=resource))
                 holder[obj] = side
@@ -502,7 +483,7 @@ def _supported_program(operations, instruction, *, bindings=None, scene_objects=
                 ),
                 quote,
             )
-        elif template in {"E1", "E5"}:
+        else:  # E1 and E5
             ref, rel = op["reference"], op["relation"]
             role(ref)
             if obj == ref or rel not in {
@@ -565,18 +546,9 @@ def _supported_program(operations, instruction, *, bindings=None, scene_objects=
             )
             milestone(pred, quote)
             goals[obj] = (dict(pred, id=f"final_{obj}"), quote)
-        else:
-            raise ValueError(f"Unsupported hybrid template: {template}")
         terminal = op.get("terminal_behavior", "none")
         if terminal != "none":
-            if template not in _TERMINAL_FAMILIES or terminal not in (
-                "hold",
-                "return_and_release",
-            ):
-                raise ValueError("Unsupported terminal behavior")
-            terminal_quote = op.get("terminal_quote")
-            if not _source_quote(terminal_quote, instruction):
-                raise ValueError("Missing verbatim terminal behavior source")
+            terminal_quote = op["terminal_quote"]
             held_side = holder[obj]
             terminal_args = {} if held_side == "auto" else {"required_arm": held_side}
             if terminal == "hold":
@@ -1452,7 +1424,6 @@ def publish_hybrid(
                 bindings = {}
                 obj, clauses, calls = _supported_program(
                     operations,
-                    instruction,
                     bindings=bindings,
                     scene_objects=scene_objects,
                 )
@@ -1505,7 +1476,7 @@ def publish_hybrid(
                 semantic_intent=intent,
                 deployment_preflight={},
             )
-        for attempt in range(3 if intent is None else 0):
+        for _ in range(2 if intent is None else 0):
             try:
                 candidate = author_goal_plan(instruction, task_id, obj, calls)
                 spec = TaskSpec.from_dict(candidate["task_spec"])
@@ -1532,7 +1503,7 @@ def publish_hybrid(
             history.append(
                 dict(calls=calls, coverage=feedback, spec_hash=spec.semantic_hash)
             )
-            if feedback["status"] == "covered" or attempt == 2 or used + 2 > 5:
+            if feedback["status"] == "covered" or used + 2 > 5:
                 break
             used += 2
             revised = structured_call(

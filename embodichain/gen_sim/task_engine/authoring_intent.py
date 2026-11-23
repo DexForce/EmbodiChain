@@ -140,6 +140,11 @@ _SLOT_RELATIONS = {
     *_AXIS_RELATIONS,
 }
 _GROUP_RELATIONS = {"between", "opposite_sides", "opposite_ends", "spans"}
+_STRONGER_RELATIONS = {
+    "above": ("centered_above",),
+    "near": (*_NEAR_REGIONS, "next_to"),
+    "on": ("on_top_faces", "centered_on", "supported_by", "seated_on"),
+}
 
 _FACT_FIELDS = {
     "relation": ({"subjects", "references", "value"}, {"frame"}),
@@ -627,26 +632,12 @@ def verify_spatial_claim(
         direct = expected if expected in matches else set()
     else:
         direct = set().union(*matches)
-    if value == "above":
-        direct.update(
-            pair
-            for fact in relations
-            for pair in _relation_pairs(fact, "centered_above")
-        )
-    if value == "near":
-        direct.update(
-            pair
-            for fact in relations
-            for relation in (*_NEAR_REGIONS, "next_to")
-            for pair in _relation_pairs(fact, relation)
-        )
-    if value == "on":
-        direct.update(
-            pair
-            for fact in relations
-            for relation in ("on_top_faces", "centered_on", "supported_by", "seated_on")
-            for pair in _relation_pairs(fact, relation)
-        )
+    direct.update(
+        pair
+        for relation in _STRONGER_RELATIONS.get(value, ())
+        for fact in relations
+        for pair in _relation_pairs(fact, relation)
+    )
     if value == "near_center_of":
         near = set().union(*(_relation_pairs(fact, "near") for fact in relations))
         centers = set().union(
