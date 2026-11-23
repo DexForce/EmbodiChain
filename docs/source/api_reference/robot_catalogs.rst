@@ -645,9 +645,11 @@ embodichain.extensions.robots.franka.rj45_assets
 Both replay backends use the same derived Franka, plug and socket models.
 The Franka derivative retains the original joints and inertias and replaces
 the finger geometry with the narrow jaws calibrated for the RJ45 cycle.
-The fixture derives the GLB appearance and fixed socket mount from the
-verified archive while preserving the plug's passive latch and collision
-geometry.
+The fixture archive supplies the prepared GLB appearance and fixed socket
+mount while preserving the plug's passive latch and collision geometry.
+The fixture class is available from
+:class:`embodichain.data.assets.task_assets.Rj45Fixture` and through the import
+below.
 
 .. currentmodule:: embodichain.extensions.robots.franka.rj45_assets
 

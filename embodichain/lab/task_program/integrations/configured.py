@@ -3733,7 +3733,9 @@ def _decode_evaluation(
                     f"cables/{binding.simulation_uid}/wrap_{name}"
                 )
     if rj45_cycle:
-        from embodichain.extensions.tasks.manipulation.cable.rj45_measurements import RJ45_CHECKS
+        from embodichain.extensions.tasks.manipulation.cable.rj45_measurements import (
+            RJ45_CHECKS,
+        )
 
         for binding in scene.cables:
             for name in RJ45_CHECKS:

@@ -36,7 +36,9 @@ from embodichain.extensions.tasks.manipulation.cable.wrap_evaluation import (
 from embodichain.extensions.tasks.manipulation.cable.wrap_integration import (
     _CableWrapPhaseLowerer,
 )
-from embodichain.extensions.tasks.manipulation.cable.wrap_measurements import evaluate_wrap
+from embodichain.extensions.tasks.manipulation.cable.wrap_measurements import (
+    evaluate_wrap,
+)
 from embodichain.extensions.tasks.manipulation.cable.wrap_motion import _JOINT_NAMES
 
 pytestmark = pytest.mark.no_sim
