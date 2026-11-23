@@ -36,7 +36,9 @@ from torch.nn.parallel import DistributedDataParallel
 
 from examples.learning.act._grouped_ddp import (
     BatchTransfer,
+    IMAGE,
     MaskedACTLoss,
+    QPOS,
     RGB,
     RankFailure,
     Ranks,
@@ -44,7 +46,7 @@ from examples.learning.act._grouped_ddp import (
 )
 from examples.learning.act import paired_grouped
 from examples.learning.act.audit_grouped import _audit, _audit_supply
-from examples.learning.act.grouped import _calibration_stats, _scene_shard
+from examples.learning.act.grouped import _calibration_stats, _inputs, _scene_shard
 
 
 class _TinyACT(torch.nn.Module):
@@ -357,23 +359,41 @@ def test_calibration_merges_rank_frames_and_episode_lengths() -> None:
     first = {
         "state": torch.tensor([[0.0], [2.0]]),
         "action": torch.tensor([[1.0], [3.0]]),
-        "landmarks": torch.tensor([[0.1], [0.3]]),
         "frames": torch.arange(2),
         "lengths": torch.tensor([2]),
     }
     second = {
         "state": torch.tensor([[6.0]]),
         "action": torch.tensor([[8.0]]),
-        "landmarks": torch.tensor([[0.5]]),
         "frames": torch.arange(1),
         "lengths": torch.tensor([1]),
     }
     stats, scale = _calibration_stats([first, second], elapsed=True)
     assert scale == 1
     torch.testing.assert_close(
-        stats["observation.state"]["mean"], torch.tensor([8 / 3, 0.3, 1 / 3])
+        stats["observation.state"]["mean"], torch.tensor([8 / 3, 1 / 3])
     )
     torch.testing.assert_close(stats["action"]["mean"], torch.tensor([4.0]))
+
+
+def test_grouped_inputs_pool_rgb_and_append_only_elapsed_progress() -> None:
+    qpos = torch.arange(18, dtype=torch.float32).reshape(2, 9)
+    pixels = torch.zeros(2, 8, 8, 4, dtype=torch.uint8)
+    pixels[:, :4, :4, 0] = 255
+    pixels[:, 4:, 4:, 1] = 255
+    batch = {
+        RGB: pixels,
+        QPOS: qpos,
+        "ods_frame_index": torch.tensor([1, 8]),
+        "actions": torch.zeros(2, 30, 8),
+        "action_is_pad": torch.zeros(2, 30, dtype=torch.bool),
+    }
+    inputs = _inputs(batch, "cpu", 4, 4.0)
+    assert inputs[IMAGE].shape == (2, 3, 4, 4)
+    torch.testing.assert_close(
+        inputs["observation.state"],
+        torch.cat((qpos, torch.tensor([[0.25], [1.0]])), dim=1),
+    )
 
 
 def test_scene_shards_reconstruct_the_original_attempt() -> None:

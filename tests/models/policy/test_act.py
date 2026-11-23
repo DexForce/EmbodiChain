@@ -191,21 +191,15 @@ def test_portable_policy_manifest_prevents_train_and_selection_seed_overlap(arti
     _validate_policy_identity(loaded.metadata, root, panel="overfit", seeds=[100000])
 
 
-def test_rgb_landmarks_are_causal_scale_invariant_and_handle_missing_colors():
-    from embodichain.extensions.models.policy.act.runtime import _image_state
-
-    rgb = torch.zeros(2, 3, 8, 8, dtype=torch.uint8)
-    rgb[0, 0, :4, :4] = 220
-    rgb[0, 1, 4:, 4:] = 220
-    state = torch.randn(2, 9)
-    packed = _image_state(rgb, state)
-    torch.testing.assert_close(packed, _image_state(rgb.float() / 255, state))
-    torch.testing.assert_close(packed[:, :9], state)
-    torch.testing.assert_close(
-        packed[0, 9:13], torch.tensor([-2 / 3, 2 / 3, -2 / 3, 2 / 3])
-    )
-    torch.testing.assert_close(packed[0, 13:], torch.ones(2))
-    torch.testing.assert_close(packed[1, 9:], torch.zeros(6))
+def test_native_reload_rejects_extra_observation_state(artifact):
+    root, *_ = artifact
+    manifest = root / "embodichain_act.json"
+    metadata = json.loads(manifest.read_text())
+    joints = metadata["schema"]["observation"]
+    joints["names"] = joints["names"][:1]
+    manifest.write_text(json.dumps(metadata))
+    with pytest.raises(ValueError, match="state width differs"):
+        load_act_policy(root)
 
 
 def test_query_blocks_ensemble_matching_control_times(artifact, monkeypatch):
@@ -262,6 +256,8 @@ def test_elapsed_control_feature_counts_cached_commands_and_resets(
     manifest = root / "embodichain_act.json"
     meta = json.loads(manifest.read_text())
     meta.update(query_period=3, elapsed_control_scale=4)
+    joints = meta["schema"]["observation"]
+    joints["names"] = joints["names"][:1]
     manifest.write_text(json.dumps(meta))
     actor = load_act_policy(root)
     seen = []
@@ -270,13 +266,11 @@ def test_elapsed_control_feature_counts_cached_commands_and_resets(
     def preprocess(inputs):
         joints_and_time = inputs["observation.state"]
         seen.append(joints_and_time[:, -1].tolist())
-        return original_preprocess(
-            {**inputs, "observation.state": joints_and_time[:, :-1]}
-        )
+        return original_preprocess(inputs)
 
     monkeypatch.setattr(actor, "preprocessor", preprocess)
     pixels = torch.zeros(2, 3, 32, 32, dtype=torch.uint8)
-    joints = torch.zeros(2, 2)
+    joints = torch.zeros(2, 1)
     for _ in range(8):
         actor.select_action(pixels if actor.needs_observation else None, joints)
     actor.reset()

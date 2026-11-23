@@ -51,28 +51,6 @@ def policy_fingerprint(path: str | Path) -> str:
     return digest.hexdigest()
 
 
-def _image_state(rgb: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
-    """Append image-plane centroids and visibility for the red cube and green target."""
-    red, green, blue = rgb[:, :, ::2, ::2].float().unbind(1)
-    # Relative chroma makes the masks independent of uint8 versus unit-range scaling.
-    mask = torch.stack(
-        (
-            (red > 1.6 * green) & (red > 1.6 * blue),
-            (green > 1.4 * red) & (green > 1.4 * blue),
-        ),
-        1,
-    ).float()
-    h, w = mask.shape[-2:]
-    mass = mask.sum((-2, -1))
-    u = (mask.sum(-2) * torch.linspace(-1, 1, w, device=rgb.device)).sum(
-        -1
-    ) / mass.clamp_min(1)
-    v = (mask.sum(-1) * torch.linspace(-1, 1, h, device=rgb.device)).sum(
-        -1
-    ) / mass.clamp_min(1)
-    return torch.cat((state.float(), u, v, (mass >= 3).float()), dim=-1)
-
-
 def _backbone_image(rgb: torch.Tensor, size: tuple[int, int]) -> torch.Tensor:
     """Area-average native sensor pixels to the declared ACT visual shape."""
     if rgb.shape[-2:] == size:
@@ -199,10 +177,6 @@ class ACTInferencePolicy:
             # return_uint8=True. Match the upstream trainer's dtype contract.
             if batch[self.image_key].dtype == torch.uint8:
                 batch[self.image_key] = batch[self.image_key].float().div(255)
-            if self.metadata.get("image_landmarks"):
-                batch["observation.state"] = _image_state(
-                    batch[self.image_key], batch["observation.state"]
-                )
             if self._elapsed_scale is not None:
                 tick = (
                     batch["frame_index"].to(batch["observation.state"]).reshape(-1, 1)
@@ -274,8 +248,6 @@ class ACTInferencePolicy:
                 "Reset the ACT temporal ensemble before changing batch size"
             )
         self._batch_size = rgb.shape[0]
-        if self.metadata.get("image_landmarks"):
-            state = _image_state(rgb, state)
         if self._elapsed_scale is not None:
             tick = min(self._elapsed_controls / self._elapsed_scale, 1.0)
             state = torch.cat((state, state.new_full((len(state), 1), tick)), -1)
@@ -354,6 +326,14 @@ def load_act_policy(
     ) != policy_fingerprint(root):
         raise ValueError("ACT policy manifest or artifact fingerprint differs")
     config = ACTConfig.from_pretrained(root, local_files_only=True)
+    joint_width = len(metadata["schema"]["observation"]["names"])
+    state_width = joint_width + int(metadata.get("elapsed_control_scale") is not None)
+    state_feature = config.input_features.get("observation.state")
+    if state_feature is None or tuple(state_feature.shape) != (state_width,):
+        raise ValueError(
+            "ACT checkpoint state width differs from measured joints and optional "
+            "elapsed control progress. Retrain using the current observation layout."
+        )
     config.device = device
     config.pretrained_backbone_weights = (
         metadata["backbone_initialization"] if untrained else None

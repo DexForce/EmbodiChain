@@ -214,20 +214,23 @@ def _audit(path: Path, spec: dict, seed: int) -> dict:
         checkpoint = path / chosen["checkpoint"]
         manifest_file = checkpoint / "embodichain_act.json"
         manifest = _read(manifest_file)
-        image = _read(checkpoint / "config.json")["input_features"][
-            manifest["image_key"]
-        ]
+        features = _read(checkpoint / "config.json")["input_features"]
+        image = features[manifest["image_key"]]
         side = spec.get("backbone_image_side", 224)
+        elapsed_input = spec.get("elapsed_control_input", False)
+        state_width = len(manifest["schema"]["observation"]["names"]) + int(
+            elapsed_input
+        )
         if (
             manifest["task_identity"] != recipe["task_identity"]
             or manifest["update"] != chosen["step"]
             or manifest["policy_sha256"] != chosen["sha256"]
             or manifest.get("query_period", 1) != spec.get("query_period", 1)
             or image["shape"] != [3, side, side]
+            or features["observation.state"]["shape"] != [state_width]
             or manifest["selection"]["seeds"]
             != list(range(spec["dev_base"], spec["dev_base"] + spec["dev_scenes"]))
-            or (manifest.get("elapsed_control_scale") is not None)
-            != spec.get("elapsed_control_input", False)
+            or (manifest.get("elapsed_control_scale") is not None) != elapsed_input
         ):
             raise ValueError("Deployed ACT manifest differs from the frozen recipe")
         manifest_hash = hashlib.sha256(manifest_file.read_bytes()).hexdigest()
@@ -298,7 +301,7 @@ def main() -> None:
     parser.add_argument(
         "--protocol",
         type=Path,
-        default=Path(__file__).with_name("grouped_protocol.json"),
+        default=Path(__file__).with_name("grouped_elapsed_protocol.json"),
     )
     args = parser.parse_args()
     spec = _read(args.protocol)

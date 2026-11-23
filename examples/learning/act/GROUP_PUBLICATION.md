@@ -1,11 +1,13 @@
-# Single-GPU visual ACT with group publication
+# Visual ACT with grouped ODS publication
 
 The optional ODS mode publishes one vector rollout at a time. This PushCube
 recipe uses 10 producer environments, 20 shared CPU slots, and at least 192
 committed anchor draws per episode before its group can be recycled. The
 learner gathers one current RGB/state observation and 30 future actions into
-an owned minibatch. It retains the first group temporarily to freeze the
-training normalization statistics. There is no second RGB training replay.
+an owned minibatch. The camera publishes 224×224 frames. ACT receives 56×56
+RGB after area pooling, nine measured joint positions, and one normalized
+elapsed-control feature. Calibration copies the joint and action statistics
+from the first publication.
 
 ```python
 with engine.group_batch(32, 30, anchor_fields=[rgb_key, state_key]) as batch:
@@ -56,10 +58,6 @@ release for each seed. It writes checkpoint fingerprints, development results
 and release receipts to `$ACT_ROOT/acceptance.json`. It exits successfully when
 all five policies meet the deadline and each reaches 95/100.
 
-The [acceptance report](GROUPED_REPAIR.md#acceptance) records the passing run
-and both earlier repair cohorts. The [original core study](results/GROUPED_CORE.md)
-records the initial five-seed trial and the archived double-layer comparison.
-
 ## Compare dual-GPU supply layouts
 
 Both layouts train one ACT policy using two local DDP ranks and a global batch
@@ -92,3 +90,21 @@ to the ordered GPU pair and pass `--nproc-per-node 2` with
 `--producer-layout per-rank` or `--producer-layout shared` to
 `examples.learning.act.timed_grouped`. The first visible GPU owns evaluation
 in both layouts. The single-GPU command uses the default launcher settings.
+
+## Validation
+
+A pilot on two NVIDIA A100-SXM4-80GB GPUs used the same observation layout and
+300-second budget. Each selected policy for seed 207101 came
+from step 1,500 and ran on the same 100 reserved scenes.
+
+| Layout | Learner seed | Published (s) | Reserved successes | Minimum committed draws at release |
+| --- | ---: | ---: | ---: | ---: |
+| Per-rank | 207101 | 295.001 | 94/100 | 254 |
+| Shared | 207101 | 295.001 | 94/100 | 318 |
+| Shared | 207102 | — | — | 262 |
+
+Both published policies fell short of the 95/100 gate. The shared run for
+207102 ended without a checkpoint eligible for publication. The audit keeps
+those outcomes separate from the draw-floor check.
+The [historical report](GROUPED_REPAIR.md#acceptance) covers the earlier
+landmark-assisted observation layout.

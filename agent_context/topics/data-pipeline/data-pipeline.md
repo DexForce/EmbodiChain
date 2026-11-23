@@ -15,7 +15,7 @@ belongs to [data-assets](../data-assets/data-assets.md).
 | PyTorch iteration | `embodichain/data_pipeline/datasets/`: `sequence_data.py` owns `SequenceDataset`; `online_data.py` preserves `OnlineDataset`; `OfflineDataset` is an alias |
 | Shared sequence contract and sources | `embodichain/data_pipeline/datasets/sequence.py`, `sources.py`, `_sampling.py` |
 | Numeric and bounded RGB LeRobot loading | `embodichain/data_pipeline/datasets/lerobot.py`: `LeRobotDataSource`, explicit field mapping and image selection |
-| Grouped ODS training with ACT PushCube | [Single-GPU example](../../../examples/learning/act/GROUP_PUBLICATION.md), including the cold launcher and acceptance audit |
+| Grouped ODS training with ACT PushCube | [Single- and dual-GPU example](../../../examples/learning/act/GROUP_PUBLICATION.md), including the cold launcher and acceptance audit |
 | Commit/discard/finalization dispatch | `embodichain/lab/gym/envs/managers/dataset_manager.py` |
 | Synchronous LeRobot persistence | `embodichain/lab/gym/envs/managers/datasets.py`: `LeRobotRecorder` |
 | Background persistence | `embodichain/lab/gym/envs/managers/async_datasets.py`: `AsyncLeRobotRecorder` |

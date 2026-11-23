@@ -20,7 +20,7 @@
   "verification_workers": 4,
   "draw_floor": 192,
   "required_reserved_successes": 95,
-  "study": "core-grouped-pushcube-elapsed-v4",
+  "study": "core-grouped-pushcube-rgb-state-v1",
   "seeds": [
     207101,
     207102,

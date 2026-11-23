@@ -320,23 +320,14 @@ class _Deadline:
                 )
 
 
-def _calibration_rows(engine: Any, device: Any) -> dict:
-    import torch
-    from embodichain.extensions.models.policy.act.runtime import _image_state
+def _calibration_rows(engine: Any) -> dict:
+    from ._grouped_ddp import QPOS
 
-    from ._grouped_ddp import QPOS, RGB
-
-    initial = engine.snapshot_group(1, ["valid", RGB, QPOS, "actions"])
+    initial = engine.snapshot_group(1, ["valid", QPOS, "actions"])
     mask = initial["valid"]
-    landmarks = []
-    for pixels, valid in zip(initial[RGB], mask, strict=True):
-        for images in pixels[valid, :, :, :3].split(32):
-            rgb = images.permute(0, 3, 1, 2).to(device)
-            landmarks.append(_image_state(rgb, rgb.new_empty((len(rgb), 0))).cpu())
     return {
         "state": initial[QPOS][mask],
         "action": initial["actions"][mask],
-        "landmarks": torch.cat(landmarks),
         "frames": mask.nonzero()[:, 1],
         "lengths": mask.sum(1),
     }
@@ -354,9 +345,8 @@ def _calibration_stats(
 
     state = merged("state")
     action = merged("action")
-    marks = merged("landmarks")
-    mean = [state.mean(0), marks.mean(0)]
-    std = [state.std(0, correction=0), marks.std(0, correction=0).clamp_min(0.05)]
+    mean = [state.mean(0)]
+    std = [state.std(0, correction=0)]
     time_scale = None
     if elapsed:
         time_scale = float(merged("lengths").float().median())
@@ -398,14 +388,7 @@ def _policy(schema: dict, spec: dict, device: Any, stats: dict, seed: int) -> tu
 
     from ._grouped_ddp import IMAGE
 
-    names = schema["observation"]["names"] + [
-        "red_u",
-        "green_u",
-        "red_v",
-        "green_v",
-        "red_visible",
-        "green_visible",
-    ]
+    names = list(schema["observation"]["names"])
     if spec.get("elapsed_control_input", False):
         names.append("elapsed_control_fraction")
     feature_schema = {
@@ -439,10 +422,7 @@ def _policy(schema: dict, spec: dict, device: Any, stats: dict, seed: int) -> tu
 
 def _inputs(batch: Any, device: Any, side: int, time_scale: float | None) -> dict:
     import torch
-    from embodichain.extensions.models.policy.act.runtime import (
-        _backbone_image,
-        _image_state,
-    )
+    from embodichain.extensions.models.policy.act.runtime import _backbone_image
 
     from ._grouped_ddp import IMAGE, QPOS, RGB
 
@@ -453,7 +433,7 @@ def _inputs(batch: Any, device: Any, side: int, time_scale: float | None) -> dic
         .to(dtype=torch.float32)
         .div_(255)
     )
-    state = _image_state(rgb, batch[QPOS].to(device))
+    state = batch[QPOS].to(device)
     if time_scale is not None:
         tick = (batch["ods_frame_index"].to(rgb).reshape(-1, 1) / time_scale).clamp_max(
             1
@@ -501,7 +481,6 @@ def _checkpoint(
         "update": step,
         "smoke": smoke,
         "policy_sha256": fingerprint,
-        "image_landmarks": True,
         "query_period": spec.get("query_period", 1),
     }
     if time_scale is not None:
@@ -626,9 +605,7 @@ def _train(
                 producer.engine.start()
         ready = clock()
         with ranks.stage("first-publication calibration"):
-            calibration = (
-                _calibration_rows(producer.engine, ranks.device) if producer else None
-            )
+            calibration = _calibration_rows(producer.engine) if producer else None
             if panel is not None:
                 panel.receive()
         samples = ranks.gather(calibration)
@@ -927,7 +904,7 @@ def main() -> None:
     parser.add_argument(
         "--protocol",
         type=Path,
-        default=Path(__file__).with_name("grouped_protocol.json"),
+        default=Path(__file__).with_name("grouped_elapsed_protocol.json"),
     )
     parser.add_argument("--qualification", type=Path, required=True)
     parser.add_argument(
