@@ -22,6 +22,44 @@ on the ordered, quoted operations and check their expanded calls. This
 distinguishes mode, destination, laterality and terminal intent without
 vocabulary-based dispatch. Revised calls must pass the audit again before
 selection; a failed source interpretation cannot publish a plan.
+With no explicit deployment or scene-grounding input, hybrid can instead
+author typed intent when native E1–E9 calls would lose source requirements.
+`authoring_intent.py` owns the distinct roles, ordered steps, and scoped
+conditions, including pose references, retention, simultaneous supports,
+per-arm grip sites, part-specific contact and referenced articulation joints.
+Grip, contact, and resting-face constraints preserve the specificity of the
+instruction: a part named for hanging does not define the grip site, and a
+lying posture does not select a side.
+Step effects describe the end of the step; `maintain` describes a condition
+throughout that step. Unambiguous named-relation shorthand is normalized to
+the same typed fact before validation. A pickup can specify upward direction
+without another lift step. Placement already releases; an adjacent release
+of the same object by the same arm keeps its source clause without adding an
+operation. An automatic grasp reserves one arm until release; the ordered
+sequence cannot exceed the logical arm capacity. Source span IDs resolve to
+the original wording before compilation. The audit cites that wording and
+the relevant steps, conditions, or descriptive roles.
+Role descriptions do not witness an operative obligation. Structured spatial
+claims must match the cited relations, directly or through an exact authored
+slot. Exact centering and long-axis alignment are distinct from proximity
+and generic alignment. A one-axis selector does not establish center
+proximity, and a whole-object operand does not witness a relation to a named
+part. An initial distance comparison relates two roles to a common anchor,
+not one role's distance across time, and needs initial evidence.
+Pointing at or away from a named role refers to that role, not a frame axis.
+Transfers review the visible source and recipient against observations made
+without the candidate graph. Stability of an assembly names its member roles.
+An explicit source location is interpreted in its stated frame, not inferred
+again from image cropping. Typed complement protection and actuation claims
+must be attested by the relevant invariant or actuation effect, respectively.
+When the source gives no separate terminal state, completion is the last
+requested step, not a fabricated hold, release, or pose requirement.
+Semantic repair keeps the last well-formed graph when applying local audit
+findings. A malformed positive review can be repaired against the same graph;
+an unchanged graph cannot pass after a source rejection.
+`task_engine.intent.*` nodes stay in an unbound `authoring_only` graph
+(`source_reviewed`, not native call coverage); they are not lowerable
+Task Program calls. Pose binding and all execution remain out of scope.
 Align, pour and handover expand a final hold or return-and-release only from
 an explicit, quoted terminal declaration. When unspecified, no cleanup call
 or terminal hold goal is added. A following operation may reuse the still-held

@@ -37,6 +37,7 @@ __all__ = [
 
 SEMANTIC_TASK_GRAPH_SCHEMA: Final = "semantic_task_graph/v1"
 SemanticTaskGraph: TypeAlias = dict[str, Any]
+_AUTHORING_INTENT_PREFIX = "task_engine.intent."
 
 _GRAPH_KEYS = frozenset(
     {
@@ -215,6 +216,21 @@ def validate_semantic_task_graph(value: Mapping[str, Any]) -> SemanticTaskGraph:
     if type(graph["success"]) is not dict:
         raise TypeError("SemanticTaskGraph.success must be an exact mapping.")
     _reject_execution_data(graph["success"], path="SemanticTaskGraph.success")
+    intent_nodes = [
+        node
+        for node in nodes
+        if node["call"]["kind"] == "registered"
+        and node["call"]["call_id"].startswith(_AUTHORING_INTENT_PREFIX)
+    ]
+    if intent_nodes and (
+        fingerprint != "0" * 64
+        or graph["planner_route"] != "hybrid"
+        or graph["success"].get("authoring_only") is not True
+        or len(intent_nodes) != len(nodes)
+    ):
+        raise ValueError(
+            "Task Engine intent nodes require an unbound authoring-only hybrid graph."
+        )
 
     graph["nodes"] = nodes
     graph["task_groups"] = groups

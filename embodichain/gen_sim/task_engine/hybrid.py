@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Hybrid authoring pilot for handovers, relative placement and coordinated release."""
+"""Hybrid authoring with native witnesses and graph-only semantic intent."""
 
 from __future__ import annotations
 
@@ -23,6 +23,15 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .authoring_intent import (
+    _PROMPT as _INTENT_FORMAT,
+    AuthoringEvidenceError,
+    compile_intent,
+    source_spans,
+    validate_intent,
+    verify_spatial_claim,
+    verify_state_claim,
+)
 from .goal_planning import author_goal_plan, _deployment_check
 from .ontology import task_contract
 from .semantic_graph import validate_semantic_task_graph
@@ -185,6 +194,128 @@ def _validate_source_audit(
                 f"source_audit: operation {index} differs from the source: "
                 + json.dumps(expected, ensure_ascii=False)
             )
+
+
+def _validate_intent_audit(instruction: str, plan: dict[str, Any], audit: Any) -> None:
+    """Require an independent source review tied to typed facts and steps."""
+    if (
+        not isinstance(audit, dict)
+        or audit.keys() - {"issues", "checks"}
+        or not isinstance(audit.get("issues"), list)
+    ):
+        raise ValueError("Malformed semantic intent source audit")
+    if audit["issues"]:
+        if any(
+            not isinstance(issue, dict)
+            or not _source_quote(issue.get("quote"), instruction)
+            or not isinstance(issue.get("reason"), str)
+            or not issue["reason"].strip()
+            for issue in audit["issues"]
+        ):
+            raise ValueError("Malformed semantic intent issue")
+        raise ValueError(
+            "source_audit: " + json.dumps(audit["issues"], ensure_ascii=False)
+        )
+    checks = audit.get("checks")
+    steps = {f"step_{i:02d}": row for i, row in enumerate(plan["steps"], 1)}
+    conditions = {
+        f"condition_{i:02d}": row for i, row in enumerate(plan["conditions"], 1)
+    }
+    evidence = {
+        **{
+            ref: [*row["effects"], *row.get("maintain", [])]
+            for ref, row in steps.items()
+        },
+        **{ref: [row["fact"]] for ref, row in conditions.items()},
+    }
+    graph_evidence = set(evidence)
+    roles = {row["id"]: row["kind"] for row in plan["roles"]}
+    for name in roles:
+        evidence.setdefault(name, [])
+        evidence.setdefault(f"role_{name}", [])
+    invariants = {ref for ref, row in conditions.items() if row["scope"] == "always"}
+    maintained = invariants | {ref for ref, row in steps.items() if row.get("maintain")}
+    if not isinstance(checks, list) or not checks:
+        raise ValueError("source_audit: no independently reviewed requirements")
+    witnessed = False
+    for check in checks:
+        if (
+            not isinstance(check, dict)
+            or not {"quote", "requirement", "evidence"} <= set(check)
+            or set(check)
+            - {"quote", "requirement", "evidence", "spatial", "scope", "state"}
+            or (
+                "scope" in check and check["scope"] not in {"initial", "always", "step"}
+            )
+            or not _source_quote(check["quote"], instruction)
+            or not isinstance(check["requirement"], str)
+            or not check["requirement"].strip()
+            or not isinstance(check["evidence"], list)
+            or not check["evidence"]
+        ):
+            raise ValueError(
+                "source_audit: each reviewed requirement needs source and graph evidence"
+            )
+        unknown = [
+            ref
+            for ref in check["evidence"]
+            if not isinstance(ref, str) or ref not in evidence
+        ]
+        if unknown:
+            raise ValueError(f"source_audit: unknown evidence IDs {unknown!r}")
+        refs = check["evidence"]
+        scope = check.get("scope")
+        if scope == "initial":
+            refs = [
+                ref for ref in refs if conditions.get(ref, {}).get("scope") == "initial"
+            ]
+            if not refs:
+                raise AuthoringEvidenceError(
+                    "An initial source requirement needs an initial condition"
+                )
+        witnessed |= bool(graph_evidence.intersection(refs))
+        if "spatial" in check:
+            facts = [fact for ref in refs for fact in evidence[ref]]
+            verify_spatial_claim(check["spatial"], facts, roles)
+        if scope == "always" and not invariants.intersection(refs):
+            raise AuthoringEvidenceError(
+                "A continuous source requirement needs an always condition"
+            )
+        if scope == "step" and not maintained.intersection(refs):
+            raise AuthoringEvidenceError(
+                "A during-step source requirement needs maintain or an always condition"
+            )
+        if "state" in check:
+            claim = check["state"]
+            if not isinstance(claim, dict):
+                raise ValueError("A source state claim must be a typed fact")
+            kind = claim.get("kind")
+            if scope == "step":
+                facts = [
+                    fact
+                    for ref in refs
+                    for fact in (
+                        evidence[ref]
+                        if ref in invariants
+                        else steps.get(ref, {}).get("maintain", ())
+                    )
+                ]
+            elif scope == "always" or kind == "untouched_except":
+                facts = [conditions[ref]["fact"] for ref in refs if ref in invariants]
+            elif kind == "actuated":
+                facts = [
+                    fact
+                    for ref in refs
+                    if ref in steps and steps[ref]["verb"] in {"press", "actuate"}
+                    for fact in steps[ref]["effects"]
+                ]
+            else:
+                facts = [fact for ref in refs for fact in evidence[ref]]
+            verify_state_claim(claim, facts, roles)
+    if not witnessed:
+        raise ValueError(
+            "A source audit needs at least one step or condition, not roles alone"
+        )
 
 
 def _supported_program(operations, instruction, *, bindings=None, scene_objects=None):
@@ -935,9 +1066,35 @@ def publish_hybrid(
             "invent extra operations. For E5 retain each explicitly requested payload placement in order."
         ),
     }
+    native_format = prompt["request"]
+    allow_intent = deployment is None and scene_grounding is None
+    spans = source_spans(instruction) if allow_intent else {}
+    if allow_intent:
+        prompt["request"] = (
+            "Return exactly one of {semantic_plan:{roles,steps,conditions}} or {operations:[...]}. "
+            "Use the native operations only if the supplied native format expresses every operative "
+            "source requirement exactly. Otherwise use semantic_plan_format. "
+            "E1 has one destination relation and releases. E4 already picks an object if not held: "
+            "do not add a pick-and-place before a direct handover. Native press does not represent "
+            "separate approach/retreat, and native hinged opening cannot express a grip site plus an "
+            "explicit release step. Use semantic_plan for compound destinations, explicit grip "
+            "sites, distance comparisons or changes, retained bimanual lifts and contact without placing. "
+            "This is a graph-only interpretation; do not approximate unsupported details or assert "
+            "execution, calibrated poses or physical success. Do not mix the two response formats."
+        )
+        prompt["native_operation_format"] = native_format
+        prompt["semantic_plan_format"] = _INTENT_FORMAT
+        prompt["source_spans"] = spans
     system_prompt = (
         "Interpret task goals and resources from the complete instruction and image."
     )
+    if allow_intent:
+        system_prompt += (
+            " The instruction supplies source scene relationships in its stated frame;"
+            " use the image to identify instances, not to replace those relationships with"
+            " coordinates or directions derived from the image crop. Preserve source selectors"
+            " in descriptions or typed initial facts; do not omit or contradict them."
+        )
     if context is not None:
         prompt["scene_context"] = context
         system_prompt += (
@@ -946,54 +1103,322 @@ def publish_hybrid(
         )
     with service_scope(services) as run:
         audit_history = []
+        rejected: dict[str, str] = {}
+        transfer_observations = None
+
+        def review(payload, identity, validate, *, visual=False):
+            if identity in rejected:
+                raise ValueError("Unchanged rejected graph: " + rejected[identity])
+            request = {
+                "instruction": instruction,
+                **({"scene_context": context} if context is not None else {}),
+                **payload,
+            }
+            span_quotes = {}
+            for attempt in range(2 if visual else 1):
+                audit = structured_call(
+                    services=run,
+                    role="task_image_grounding" if visual else "task_interpretation",
+                    image_path=image if visual else None,
+                    schema={"type": "object"},
+                    prompt=json.dumps(request, ensure_ascii=False),
+                )
+                if span_quotes and isinstance(audit, dict):
+                    for key in ("issues", "checks"):
+                        rows = audit.get(key)
+                        if isinstance(rows, list):
+                            for row in rows:
+                                quote = (
+                                    row.get("quote") if isinstance(row, dict) else None
+                                )
+                                if isinstance(quote, str) and quote in span_quotes:
+                                    row["quote"] = span_quotes[quote]
+                audit_history.append(audit)
+                try:
+                    validate(audit)
+                    return
+                except ValueError as error:
+                    if isinstance(error, AuthoringEvidenceError) or (
+                        isinstance(audit, dict) and audit.get("issues")
+                    ):
+                        rejected[identity] = str(error)
+                        raise
+                    if (
+                        attempt
+                        or not visual
+                        or not isinstance(audit, dict)
+                        or audit.get("issues") != []
+                    ):
+                        raise
+                    # Repair the positive review's citations, not the candidate.
+                    span_quotes = spans
+                    request["review_format_feedback"] = {
+                        "previous_review": audit,
+                        "diagnostic": str(error),
+                        "request": (
+                            "Recheck this same graph. Correct malformed fields or citations, "
+                            "using an exact source quote or a source_spans key in quote. "
+                            "Use existing evidence IDs."
+                        ),
+                        "source_spans": span_quotes,
+                    }
 
         def audit_calls(operations, calls, bindings):
-            audit = structured_call(
-                services=run,
-                role="task_interpretation",
-                schema={"type": "object"},
-                prompt=json.dumps(
-                    {
-                        "instruction": instruction,
-                        **({"scene_context": context} if context is not None else {}),
-                        "operation_format": prompt["request"],
-                        "operations": operations,
-                        "ordered_calls": calls,
-                        "bound_effects": bindings,
-                        "request": (
-                            "Independently reconstruct each required operation from the complete original instruction. "
-                            "Use scene_context only to identify objects, and reuse a proposed role ID only for the same object. "
-                            "Check the proposal and the actual expanded calls against all source actions, order, subjects, "
-                            "targets, relations, mode, orientation, arms, terminal behavior and negative qualifiers. "
-                            "Check every occurrence; a single occurrence cannot cover a repeated action. "
-                            "An acquisition or orientation restoration already performed by a call needs no duplicate call. "
-                            "In particular, reject any unrequested return, placement, release, or liquid transfer. Reject "
-                            "unrepresentable or ambiguous requirements rather than treating them as covered. "
-                            "If there is any mismatch, return {issues:[{quote:verbatim source clause,reason:specific mismatch}]}. "
-                            "Otherwise return {issues:[],source_operations:[independently reconstructed rows in source order]}, "
-                            "including verbatim quote and any terminal_quote as required by operation_format."
-                        ),
-                    },
-                    ensure_ascii=False,
-                ),
+            from embodichain.lab.task_program.language.semantic_contracts import (
+                semantic_planning_catalog,
             )
-            audit_history.append(audit)
-            _validate_source_audit(instruction, operations, audit)
+
+            catalog = semantic_planning_catalog()["calls"]
+            declared_effects = {}
+            for call in calls:
+                kind = call.get("call_id", call["kind"])
+                if kind in catalog:
+                    declared_effects[kind] = catalog[kind]["effect"]
+            review(
+                {
+                    "operation_format": native_format,
+                    "operations": operations,
+                    "ordered_calls": calls,
+                    "declared_call_effects": declared_effects,
+                    "bound_effects": bindings,
+                    "request": (
+                        "Independently reconstruct each required operation from the complete original instruction. "
+                        "Use scene_context only to identify objects, and reuse a proposed role ID only for the same object. "
+                        "Check the proposal and actual expanded calls against all source actions, order, subjects, "
+                        "targets, relations, mode, orientation, arms, terminal behavior and negative qualifiers. "
+                        "Check call effects: a placement releases, and an alignment alone does not provide a measured lift. "
+                        "Check every occurrence; a single occurrence cannot cover a repeated action. "
+                        "An acquisition or orientation restoration already performed by a call needs no duplicate call. "
+                        "Reject unrequested return, placement, release or transfer. Reject requirements not "
+                        "expressed by the actual graph rather than treating them as covered. "
+                        "If there is any mismatch, return {issues:[{quote:verbatim source clause,reason:specific mismatch}]}. "
+                        "Otherwise return {issues:[],source_operations:[independently reconstructed native rows in source order]}, "
+                        "including verbatim quote and any terminal_quote as required by operation_format."
+                    ),
+                },
+                canonical_hash({"calls": calls, "bindings": bindings}),
+                lambda audit: _validate_source_audit(instruction, operations, audit),
+            )
+
+        def audit_intent(plan):
+            nonlocal transfer_observations
+            has_transfer = any(
+                step["verb"] == "transfer_contents" for step in plan["steps"]
+            )
+            if has_transfer and transfer_observations is None:
+                # Identify visible endpoints without the candidate's role labels.
+                transfer_observations = structured_call(
+                    services=run,
+                    role="task_image_grounding",
+                    image_path=image,
+                    schema={"type": "object"},
+                    prompt=json.dumps(
+                        {
+                            "instruction": instruction,
+                            "request": (
+                                "Inspect the original image. For each requested transfer of contents "
+                                "identify the source container and recipient separately. Match each "
+                                "named object type to its visible shape and distinguishing appearance "
+                                "before assigning its function. Do not infer identity from unseen contents. "
+                                "Return {transfers:[{source:visible appearance and kind,"
+                                "recipient:visible appearance and kind}]} in source order. "
+                                "Say ambiguous or not visible if there is insufficient visual evidence."
+                            ),
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+            review(
+                {
+                    "semantic_plan_format": _INTENT_FORMAT,
+                    **(
+                        {"independent_transfer_observations": transfer_observations}
+                        if has_transfer
+                        else {}
+                    ),
+                    "roles": {f"role_{row['id']}": row for row in plan["roles"]},
+                    "steps": {
+                        f"step_{i:02d}": row for i, row in enumerate(plan["steps"], 1)
+                    },
+                    "conditions": {
+                        f"condition_{i:02d}": row
+                        for i, row in enumerate(plan["conditions"], 1)
+                    },
+                    "request": (
+                        "Independently extract the required actions, order, exact object identities, arm use, "
+                        "spatial and quantitative conditions, states that must persist, and terminal obligations "
+                        "from the COMPLETE original instruction. Treat explicit source spatial descriptions "
+                        "as facts in their stated frame. Use the image to identify instances and resolve "
+                        "explicitly image-relative selectors, not to infer a different table frame. "
+                        "Do not reject a source-supported table-relative location because the object "
+                        "looks near the middle of the image crop. "
+                        "If no frame is specified, a consistent natural frame such as table for a "
+                        "tabletop relation is optional; do not reject its presence or absence unless "
+                        "it changes the stated relationship. "
+                        "The side of a center is a lateral offset from it, not a far-depth claim. "
+                        "Do not require invented positions for roles identified "
+                        "by attributes or innate rank. Do not require hidden contents to be visually discernible "
+                        "if their identity is stated by the instruction. Then check each obligation against the "
+                        "structured graph, respecting specific operative directions over a generic summary. "
+                        "Role descriptions may identify instances by attributes and rank, not substitute for "
+                        "dynamic action or state evidence. Do not turn descriptive identity into an extra goal. "
+                        "For an assembled structure's stability, require a state with kind:stable and the "
+                        "actual member roles in subjects. A new aggregate role with only a description "
+                        "is not evidence of those roles' stability. "
+                        "In particular, verify named counts, reference-role operands, support/contact faces, "
+                        "and required spatial slot constraints in the typed fields, not in names or prose. "
+                        "For location relative to a named part, verify the part is the operand and "
+                        "part_of links its owner; do not require a second relation to the owner. "
+                        "Transfer into a container does not prove the earlier positioning above its opening. "
+                        "For a transfer, check the actual visible source and recipient separately against "
+                        "the image and independent_transfer_observations. Correct wrong observations from "
+                        "the image; do not accept reversed visible operands just because their role IDs match. "
+                        "Adjacency plus the matching side relation can express beside a side of an object; "
+                        "do not turn a side into a required end. "
+                        "For operative starting conditions (e.g. relative pose reuse, support to preserve, "
+                        "or a required way to distinguish otherwise similar instances), inspect initial facts. "
+                        "For a purely descriptive initial clause, match a faithful role description or an "
+                        "initial condition. Cite the role ID only for source identity, never as proof of a "
+                        "requested action, outcome, positional anchor or ongoing constraint. "
+                        "For an explicit starting distance comparison between two items and one anchor, "
+                        "check scope:initial and state:{kind:distance_compare,subjects:[item],"
+                        "references:[anchor,comparison item],comparison:gt or lt}. Do not confuse it with "
+                        "a category like near/far or a change compared to the same item's initial distance. "
+                        "For exact on-support centering, require spatial with value:centered_on. "
+                        "Near_center_of alone does not center on a support. For a named long-axis match, "
+                        "require state with kind:orientation, value:aligned_long_axis and the actual "
+                        "reference role, not generic aligned_with. When the source says a part points "
+                        "toward, faces, or points away from a named object, use state with kind:orientation, "
+                        "value:pointing_toward or pointing_away_from, and the named reference role. "
+                        "An axis direction or relative location is not proof of facing the named object. "
+                        "For such a starting direction include scope:initial. Centered_on already implies support. "
+                        "Check the exact face when specified as a contact requirement; for ordinary "
+                        "placement on a flat object's top use on or on_top_faces, without duplicate facts. "
+                        "For conditions that must "
+                        "persist throughout, include scope:always in their check and cite an always condition. "
+                        "A terminal-only posture or separation fact is not a throughout constraint. "
+                        "For a condition requested only during one step, include scope:step and cite the step "
+                        "with maintain or an equivalent always condition. Omit scope for other checks. "
+                        "For a no-touch requirement on all unspecified other objects, use scope:always and "
+                        "a state fact {kind:untouched_except,subjects:[exempt role IDs]}. A named or prose "
+                        "group under untouched does not protect the complement. For pressing a named button "
+                        "or control, include a state fact {kind:actuated,value:pressed,subjects:[site role ID]} "
+                        "and cite the step which presses that site, not a broad parent face. "
+                        "If the source requires an object not to move, cite the applicable invariant "
+                        "or during-step condition and use a state claim of its own initial pose: "
+                        "pose_match with the same object as subject and reference, epoch:initial, "
+                        "and both position and orientation for a fixed pose. If only one component "
+                        "is specified, check only that component. A supporting surface "
+                        "named for the reference frame is not the pose reference. "
+                        "Required effects may be encoded in the verbs, effects or task-wide conditions. "
+                        "An ordinary unquantified pickup is already expressed by pick, even without a "
+                        "separate direction or movement step. Do not demand a second unsupported lift. "
+                        "If a distinct height, target pose or clearance is requested, check that outcome. "
+                        "Check explicit movement directions: lifting away is upward motion, not merely "
+                        "clearance, and do not accept numeric thresholds or counts invented for qualitative instructions. "
+                        "Check source specificity: a named contact or hanging part does not authorize "
+                        "grasped_at that part. Lying on a support does not specify lying on a side. "
+                        "Distinct fixtures do not imply a required physical gap. "
+                        "An established fact persists until a later step changes it; do not demand duplicate "
+                        "final facts or stronger synonyms. An exact placement at a typed slot inherits its "
+                        "stated position and support, but mere nearness does not. A legal acquisition witnesses "
+                        "that the subject is movable; actual fixed attachment needs its own fact. "
+                        "A single concrete role is not evidence of a constraint on every other object. "
+                        "Do not require any physical binding, or a terminal hold, release or gripper state "
+                        "not requested. Reject promoting an unspecified terminal choice into a requirement. "
+                        "Reject concrete semantic gaps, unjustified extra restrictions/actions or wrong "
+                        "identity, not alternative but equivalent encodings. When a source leaves a choice "
+                        "open (such as which interchangeable object occupies which permitted slot), accept "
+                        "specific assignments that meet every explicit constraint. Typed part_of is "
+                        "evidence of ownership; it does not require a second fixed_to assertion. "
+                        "For an operative object-to-object proximity, on-support placement, or "
+                        "direction relative to a named part include a spatial field in its check: "
+                        "{kind:relation,value:one of semantic_plan_format.spatial_claim_values,subjects:[role ID],"
+                        "references:[role ID]}. Cite the step without a spatial field for "
+                        "arm-only gripper_relation or descriptive source roles. Seating implies on; "
+                        "hanging is a distinct state, "
+                        "not an on-support placement. For near_center_of, name the actual reference surface or object. "
+                        "Use the exact near_* region when the source identifies it; do not relabel ends as "
+                        "proximity to a different role. Placement near a surface does not prove support on it. "
+                        "For a temporary put-down before regrasp, check support and location at that "
+                        "placement step, not just the final arrangement. "
+                        "Cite the explicit typed facts establishing the requested relation for every subject. "
+                        "A single-axis middle selector is never proximity to a center. If an exact slot "
+                        "supplies the relation, cite both the placement and the slot's relation; do not "
+                        "treat merely nearby slots as exact. Omit spatial for other checks. "
+                        "A row centered by a specified member does not require the other members "
+                        "to have independent center destinations. Placement with its released fact "
+                        "witnesses release after placement without a second action. "
+                        "Return {issues:[{quote:verbatim source span,reason:specific actual mismatch}]} for any omission, "
+                        "contradiction, unrelated extra action or unjustified claim. Otherwise return "
+                        "{issues:[],checks:[{quote:verbatim source span,requirement:concrete source meaning,"
+                        "evidence:[step_NN, condition_NN, or a declared role ID for identity only]}]}, one check per independent source obligation."
+                    ),
+                },
+                canonical_hash(
+                    {
+                        "roles": sorted(plan["roles"], key=lambda role: role["id"]),
+                        "steps": [
+                            {
+                                k: v
+                                for k, v in row.items()
+                                if k not in {"quote", "release_quote"}
+                            }
+                            for row in plan["steps"]
+                        ],
+                        "conditions": sorted(
+                            [
+                                {k: v for k, v in row.items() if k != "quote"}
+                                for row in plan["conditions"]
+                            ],
+                            key=canonical_hash,
+                        ),
+                    }
+                ),
+                lambda audit: _validate_intent_audit(instruction, plan, audit),
+                visual=True,
+            )
 
         used = 0
-        for attempt in range(2):
+        intent = None
+        saw_intent = False
+        operations = []
+        for attempt in range(4):
+            interpreted = False
             try:
                 used += 1
-                operations = _operation_rows(
-                    _json_response(
-                        VisionFacade(run, "task_image_grounding").complete(
-                            image_path=image,
-                            system_prompt=system_prompt,
-                            user_prompt=json.dumps(prompt, ensure_ascii=False),
-                        )
-                    ),
-                    instruction,
+                proposal = _json_response(
+                    VisionFacade(run, "task_image_grounding").complete(
+                        image_path=image,
+                        system_prompt=system_prompt,
+                        user_prompt=json.dumps(prompt, ensure_ascii=False),
+                    )
                 )
+                if (
+                    allow_intent
+                    and isinstance(proposal, dict)
+                    and "semantic_plan" in proposal
+                ):
+                    saw_intent = True
+                    prompt["previous_semantic_plan"] = proposal["semantic_plan"]
+                    if set(proposal) != {"semantic_plan"}:
+                        raise ValueError(
+                            "Return a semantic_plan without competing native operations"
+                        )
+                    proposed_intent = validate_intent(
+                        proposal["semantic_plan"],
+                        instruction,
+                        scene_objects=scene_objects,
+                    )
+                    spec, graph, intent_clauses, descriptions = compile_intent(
+                        proposed_intent, instruction, task_id, scene_objects
+                    )
+                    interpreted = True
+                    prompt["previous_semantic_plan"] = proposed_intent
+                    audit_intent(proposed_intent)
+                    intent = proposed_intent
+                    break
+                operations = _operation_rows(proposal, instruction)
                 bindings = {}
                 obj, clauses, calls = _supported_program(
                     operations,
@@ -1005,17 +1430,50 @@ def publish_hybrid(
                 audit_calls(operations, calls, bindings)
                 break
             except (KeyError, ValueError, TypeError) as error:
-                if attempt:
+                if attempt == (3 if saw_intent else 1):
                     raise
                 prompt["diagnostic"] = str(error)
-                prompt["previous_operations"] = locals().get("operations")
+                if saw_intent:
+                    prompt["repair_request"] = (
+                        "Return the full corrected semantic_plan. Fix only the findings that "
+                        "still apply; keep the other facts, identities, order and literal quotes. "
+                        "Remove unsupported facts without replacing them with new constraints."
+                    )
+                    prompt["source_audit_findings"] = [
+                        audit["issues"]
+                        for audit in audit_history
+                        if isinstance(audit, dict) and audit.get("issues")
+                    ]
+                    if (attempt == 2 and not interpreted) or str(error).startswith(
+                        "Unchanged rejected graph:"
+                    ):
+                        prompt.pop("previous_semantic_plan", None)
+                        prompt["repair_request"] = (
+                            "Build a fresh complete semantic_plan from the original instruction and image. "
+                            "Use the diagnostics to avoid repeating the rejected interpretation; "
+                            "do not copy a candidate that already failed."
+                        )
+                if operations:
+                    prompt["previous_operations"] = operations
         history = []
         support_targets = {
             op["reference"]: op["reference"]
             for op in operations
-            if op["template"] == "E5"
+            if intent is None and op["template"] == "E5"
         }
-        for attempt in range(3):
+        if intent is not None:
+            bindings = {}
+            coverage = dict(
+                status="source_reviewed",
+                producers={node["id"]: node["id"] for node in graph["nodes"]},
+            )
+            result = dict(
+                task_spec=spec.to_dict(),
+                semantic_task_graph=graph,
+                semantic_intent=intent,
+                deployment_preflight={},
+            )
+        for attempt in range(3 if intent is None else 0):
             try:
                 candidate = author_goal_plan(instruction, task_id, obj, calls)
                 spec = TaskSpec.from_dict(candidate["task_spec"])
@@ -1077,28 +1535,36 @@ def publish_hybrid(
         spec,
         image_sha256=hashlib.sha256(image_bytes).hexdigest(),
         image_ref="source_image" + image.suffix.lower(),
-        role_descriptions={
-            r.name: scene_objects.get(r.name, {}).get("description", r.name)
-            for r in spec.roles
-        },
+        role_descriptions=(
+            descriptions
+            if intent is not None
+            else {
+                r.name: scene_objects.get(r.name, {}).get("description", r.name)
+                for r in spec.roles
+            }
+        ),
         interpretation=[],
         generalization=[],
-        clauses=[
-            dict(
-                id="source." + k,
-                target=k,
-                quote=q,
-                origin="explicit",
-                resolution="resolved",
-            )
-            for k, q in clauses
-        ],
+        clauses=(
+            intent_clauses
+            if intent is not None
+            else [
+                dict(
+                    id="source." + k,
+                    target=k,
+                    quote=q,
+                    origin="explicit",
+                    resolution="resolved",
+                )
+                for k, q in clauses
+            ]
+        ),
     )
     result.update(
         task_spec_v1=doc,
         coverage=coverage,
         planning_history=history,
-        template_sources=operations,
+        template_sources=operations if intent is None else [],
         pending_support_targets=support_targets,
         pending_operation_bindings=bindings,
         source_audits=audit_history,
@@ -1109,7 +1575,13 @@ def publish_hybrid(
         graph_digest=canonical_hash(graph),
         spec_digest=doc["spec_digest"],
         status=(
-            "requires_deployment" if coverage["status"] == "covered" else "uncovered"
+            "authoring_only"
+            if intent is not None
+            else (
+                "requires_deployment"
+                if coverage["status"] == "covered"
+                else "uncovered"
+            )
         ),
     )
     if deployment:
@@ -1196,7 +1668,7 @@ def publish_hybrid(
                 stage=stage,
                 pending_roles=pending_roles,
                 execution_ready=False,
-                instruction=instruction,
+                instruction=doc["inputs"]["instruction"],
                 image_sha256=doc["inputs"]["image"]["sha256"],
                 spec_digest=doc["spec_digest"],
                 semantic_graph_sha256=canonical_hash(graph),
