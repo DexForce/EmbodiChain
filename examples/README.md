@@ -161,3 +161,7 @@ capsules in the browser:
 ```bash
 python -m embodichain run-example sim/demo/cable_viser --num-envs 2 --port 8080 --duration 12
 ```
+
+The [NMG v1 examples](sim/motion/planners/nmg/README.md) download pinned ONNX
+policies for Franka mixed constraints and PiPER pose sequences, then plan,
+retime and replay them without the NMG training package.
