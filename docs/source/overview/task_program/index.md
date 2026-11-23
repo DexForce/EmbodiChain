@@ -34,7 +34,7 @@ supplies the scene, robot, available calls and execution settings.
 The {doc}`quickstart` uses `repeated_pick_place/task.franka.yaml`, a single
 Franka Panda in the Default physics environment, without trajectory expansion.
 The complete original file is available as a
-{download}`download <../../../../extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task_program/program.yaml>`.
+{download}`download <../../../../embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task_program/program.yaml>`.
 
 ## What do I need?
 

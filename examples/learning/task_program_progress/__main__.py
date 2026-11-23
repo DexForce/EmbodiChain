@@ -60,7 +60,7 @@ def main() -> None:
 
     path = (
         Path(__file__).resolve().parents[3]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.policy.cobotmagic.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.policy.cobotmagic.yaml"
     )
     config = load_config(path)
     config.update(

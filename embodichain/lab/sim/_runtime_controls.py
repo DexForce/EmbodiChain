@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import numpy as np
@@ -32,19 +32,19 @@ from dexsim.engine.newton_physics.runtime_control import (
 __all__: list[str] = []
 
 
-class _DexUniFluidJointOwnership(GraphRuntimeControl):
-    """Assign the complete finalized joint topology to the fluid rigid solver."""
+class _DexUniAllJointOwnership(GraphRuntimeControl):
+    """Assign the complete finalized joint topology to DexUni's MuJoCo branch."""
 
     def __init__(self) -> None:
         self._assigned: tuple[int, ...] | None = None
 
     def initialize_model(self, model: Any, result: Any) -> None:
-        """Select all joints before DexUni constructs its coupled solver."""
+        """Select all joints before DexUni constructs its solver."""
         from dexsim.engine.newton_physics.backend_registry import get_newton_backend
 
         backend = get_newton_backend(result.world)
         if backend is None or backend.solver_type != "dexuni":
-            raise RuntimeError("Fluid joint ownership requires a DexUni backend.")
+            raise RuntimeError("All-joint ownership requires a DexUni backend.")
         cfg = backend.cfg.solver_cfg
         if (
             cfg.mujoco_articulations is not None
@@ -52,7 +52,7 @@ class _DexUniFluidJointOwnership(GraphRuntimeControl):
             or (cfg.mujoco_joints is not None and cfg.mujoco_joints != self._assigned)
         ):
             raise RuntimeError(
-                "Fluid joint ownership conflicts with an explicit selector."
+                "All-joint ownership conflicts with an explicit selector."
             )
         self._assigned = tuple(range(model.joint_count))
         cfg.mujoco_joints = self._assigned
@@ -200,8 +200,10 @@ class _InitialJointState:
         *,
         mimic_stabilizer: bool = False,
         has_permanent_attachment: bool = False,
+        joint_names: Sequence[str] | None = None,
     ) -> None:
         self.target = target
+        self._joint_names = None if joint_names is None else tuple(joint_names)
         self.positions = (
             None if positions is None else self.normalize_positions(positions)[None, :]
         )
@@ -229,7 +231,10 @@ class _InitialJointState:
             self._public_positions = source_positions
             return
         positions = map_source_qpos_to_state_order(
-            handle, torch.as_tensor(source_positions), is_spawn_bound=True
+            handle,
+            torch.as_tensor(source_positions),
+            is_spawn_bound=True,
+            joint_names=self._joint_names,
         )
         self._mimic_info = read_state_mimic_info(handle)
         if not self._mimic_stabilizer:

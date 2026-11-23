@@ -1,7 +1,7 @@
 # Robot System
 
 Generic configuration/runtime belongs to `lab/sim`; concrete presets, asset
-identity and calibrated defaults belong to `embodichain_robots`.
+identity and calibrated defaults belong to `embodichain.extensions.robots`.
 
 ## Find the owner
 
@@ -12,18 +12,34 @@ identity and calibrated defaults belong to `embodichain_robots`.
 | Pure parallel-jaw defaults, mounted/existing bindings and standalone hand configs | `embodichain/robot_registry.py` → `resolve_gripper_defaults`; `embodichain/lab/gym/utils/_gripper_composition.py`; `embodichain/lab/sim/cfg/gripper.py` |
 | Explicit hand geometry capture and lazy paired grasp ownership | `embodichain/lab/sim/utility/grasp_geometry.py` |
 | Config decoding, construction hooks, backend alternatives | `embodichain/lab/sim/cfg/robot.py` → `RobotCfg`, `RobotPresetCfg` |
-| Available robot configs and variants | `extensions/embodichain_robots/_catalog.py`; `extensions/embodichain_robots/__init__.py` owns lazy exports |
-| YAM dual-arm defaults and source-aligned FK/IK | `extensions/embodichain_robots/i2rt/yam/cfg.py` → [model and asset usage](../../../docs/source/resources/robot/i2rt/yam.md) |
-| Locomotion assets, standing poses, drives and reference frames | `extensions/embodichain_robots/locomotion_profiles.py` reads each vendor/model's `profile.json`; model packages own `cfg.py` and `assets.py` |
+| Available robot configs and variants | `embodichain/extensions/robots/_catalog.py`; `embodichain/extensions/robots/__init__.py` owns lazy exports |
+| YAM dual-arm defaults and source-aligned FK/IK | `embodichain/extensions/robots/i2rt/yam/cfg.py` → [model and asset usage](../../../docs/source/resources/robot/i2rt/yam.md) |
+| JSON-backed locomotion assets, standing poses, drives and reference frames | `embodichain/extensions/robots/locomotion_profiles.py` reads each vendor/model's `profile.json`; model packages own `cfg.py` and `assets.py` |
+| RoboParty RPO, RP1 variants and standalone RP Hand | `embodichain/extensions/robots/roboparty/` owns source archives and URDF-backed joint defaults |
 | Shared Gym/CLI/dual-arm selection | `embodichain/robot_registry.py` → `list_robot_cfgs`, `resolve_robot_cfg` |
 | Robot listing CLI | `embodichain/cli/list_robot.py` → `embodichain list-robot` |
 | Generic robot preview and standalone RobotCfg files | `embodichain/lab/scripts/preview_robot.py` → `embodichain preview-robot` |
-| Bare Franka arm selection and explicit tool assembly | `extensions/embodichain_robots/franka/cfg.py`, `panda.py` → [catalog contracts](catalogs.md) |
-| W1 variants and serialization | `extensions/embodichain_robots/dexforce/w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
-| Independent Revo1 hand or shared hand asset names | `extensions/embodichain_robots/brainco/revo1/` → `cfg.py`, `_specs.py` |
-| AgiBot G1 preset and pinned GenieSim USD | `extensions/embodichain_robots/agibot/g1/` → `cfg.py`, `assets.py` |
+| Bare Franka arm selection and explicit tool assembly | `embodichain/extensions/robots/franka/cfg.py`, `panda.py` → [catalog contracts](catalogs.md) |
+| W1 variants and serialization | `embodichain/extensions/robots/dexforce/w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
+| Independent Revo1 hand or shared hand asset names | `embodichain/extensions/robots/brainco/revo1/` → `cfg.py`, `_specs.py` |
+| AgiBot G1 preset and pinned GenieSim USD | `embodichain/extensions/robots/agibot/g1/` → `cfg.py`, `assets.py` |
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
 | Shared articulation state and drive properties | `embodichain/lab/sim/objects/articulation.py`, `embodichain/lab/sim/cfg/articulation.py` |
+
+## Reading a robot in an existing DexSim World
+
+Install the same EmbodiChain version in the DexSim host and the stdio server
+environment, with the `mcp` extra on the server. Use `embodichain mcp --session ID`
+and optionally `--session-directory DIR` for a custom discovery directory.
+`embodichain_get_robot_state` takes a finalized scene articulation path,
+registered robot config ID, optional variant and configured control part.
+For a bare UR5, use `robot_cfg=URRobot`, `variant=ur5` and `control_part=arm`.
+The CLI delegates session ownership to `embodichain/mcp/server.py`.
+Robot tools in `embodichain/mcp/tools/robot.py` use the shared measurement type
+in `embodichain/lab/observations/joints.py`. The host adapter in
+`embodichain/lab/sim/dexsim_session/robot_state.py` resolves current DOF spans
+on each read and reports measured positions and velocities with aligned joint names and units, scene topology
+revision and available simulation clock. Disconnecting leaves the World running.
 
 ## Configuration resolution
 
@@ -69,8 +85,10 @@ configured root frame; they do not belong in compute.
 Control-part keys are explicit configuration, not inferred hand capabilities.
 Official conventions live in AGENTS; custom keys and asset-defined link/joint
 names remain valid. Pattern expansion for Spawn-bound robots resolves against
-final batch qpos ordering. Source-ordered initial positions, mimic followers and
-parents are remapped consistently; select independent joints explicitly.
+final batch qpos ordering. Initial positions can declare their exact joint order
+through `init_qpos_joint_names`. Binding and Newton initializer seeds remap
+those positions along with the mimic relations to the state-buffer order.
+Select independent joints explicitly for control groups.
 
 Action terms remove mimic followers and cannot overlap another term's joint
 and command type. A scalar parallel-gripper policy input still maps to the

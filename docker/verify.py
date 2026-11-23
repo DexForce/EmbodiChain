@@ -269,8 +269,12 @@ def _installed_pytest(provenance: str, arguments: list[str]) -> int:
     sys.path.insert(0, str(Path.cwd()))
     installed = distribution("embodichain")
     roots = {
-        name: Path(installed.locate_file(name)).resolve()
-        for name in ("embodichain", "embodichain_tasks", "embodichain_robots")
+        name: Path(installed.locate_file(name.replace(".", "/"))).resolve()
+        for name in (
+            "embodichain",
+            "embodichain.extensions.tasks",
+            "embodichain.extensions.robots",
+        )
     }
 
     def check_imports() -> dict[str, str]:

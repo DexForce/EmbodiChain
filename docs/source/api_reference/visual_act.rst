@@ -16,24 +16,24 @@ Historical EmbodiChain ACT ``.pt`` checkpoints require retraining.
 
 .. autosummary::
 
-   embodichain_models.policy.act.ACTInferencePolicy
-   embodichain_models.policy.act.build_act_train_config
-   embodichain_models.policy.act.dataset_fingerprint
-   embodichain_models.policy.act.load_act_policy
-   embodichain_models.policy.act.policy_fingerprint
-   embodichain_models.policy.act.runtime.ACTInferencePolicy
-   embodichain_models.policy.act.runtime.load_act_policy
-   embodichain_models.policy.act.runtime.policy_fingerprint
-   embodichain_models.policy.act.training.build_act_train_config
-   embodichain_models.policy.act.training.dataset_fingerprint
+   embodichain.extensions.models.policy.act.ACTInferencePolicy
+   embodichain.extensions.models.policy.act.build_act_train_config
+   embodichain.extensions.models.policy.act.dataset_fingerprint
+   embodichain.extensions.models.policy.act.load_act_policy
+   embodichain.extensions.models.policy.act.policy_fingerprint
+   embodichain.extensions.models.policy.act.runtime.ACTInferencePolicy
+   embodichain.extensions.models.policy.act.runtime.load_act_policy
+   embodichain.extensions.models.policy.act.runtime.policy_fingerprint
+   embodichain.extensions.models.policy.act.training.build_act_train_config
+   embodichain.extensions.models.policy.act.training.dataset_fingerprint
 
-.. autoclass:: embodichain_models.policy.act.ACTInferencePolicy
+.. autoclass:: embodichain.extensions.models.policy.act.ACTInferencePolicy
    :members:
 
-.. autofunction:: embodichain_models.policy.act.build_act_train_config
+.. autofunction:: embodichain.extensions.models.policy.act.build_act_train_config
 
-.. autofunction:: embodichain_models.policy.act.dataset_fingerprint
+.. autofunction:: embodichain.extensions.models.policy.act.dataset_fingerprint
 
-.. autofunction:: embodichain_models.policy.act.load_act_policy
+.. autofunction:: embodichain.extensions.models.policy.act.load_act_policy
 
-.. autofunction:: embodichain_models.policy.act.policy_fingerprint
+.. autofunction:: embodichain.extensions.models.policy.act.policy_fingerprint

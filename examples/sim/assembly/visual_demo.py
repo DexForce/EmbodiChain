@@ -39,7 +39,7 @@ from embodichain.toolkits.assembly import (
     build_many_pegs,
     import_mjcf,
 )
-from embodichain_benchmarks.assembly.precision import (
+from embodichain.extensions.benchmarks.assembly.precision import (
     PrecisionRunCfg,
     _run_embodichain,
     _run_mujoco,

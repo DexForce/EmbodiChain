@@ -57,7 +57,7 @@ def benchmark_training(
     import torch
     from examples.learning.nerd._support._reference import reference_identity
     from examples.learning.nerd._support._trainer import normalized_mse
-    from embodichain_models.dynamics.nerd import NeRDModel, NeRDModelCfg
+    from embodichain.extensions.models.dynamics.nerd import NeRDModel, NeRDModelCfg
 
     identity = reference_identity(source)
     if device.startswith("cuda") and not torch.cuda.is_available():

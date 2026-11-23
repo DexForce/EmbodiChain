@@ -224,10 +224,11 @@ materials. Resource definitions and their reset baselines are owned by the
 `RenderCfg.gaussian` configures native CUDA raster before World construction.
 `RenderCfg.for_gaussian()` composes a native renderer and compatible denoising;
 `RenderCfg.from_dict()` also resolves `preset: gaussian` for Gym YAML/JSON.
-`GaussianRenderCfg.apply_display_srgb` preserves the native True default. Set
-False before World construction for display-referred SuperSplat/Inria captures;
-this applies to every Gaussian in the World, not individual assets. Lit mesh and
-background blending stays scene-linear, and tone mapping can change the result.
+`GaussianRenderCfg.apply_display_srgb` sets DexSim's
+`raytrace_config.output_srgb` when Gaussian rendering is enabled. Set False
+before World construction for display-referred SuperSplat/Inria captures. The
+transfer applies to the complete ray-traced frame, including meshes,
+backgrounds and overlays. Tone mapping remains a separate setting.
 The scanned-scene example defaults to False; the synthetic/mixed example keeps
 True and exposes `--no-apply-display-srgb` for scanned inputs. Both expose the
 positive CLI spelling as an override and record the selected setting.
@@ -278,6 +279,9 @@ is invalidated at preparation entry and published only after full success.
 Gym defers manager output and emits one combined summary at initialization
 completion. `startup_summary` controls verbosity; `dexsim_startup_info` controls
 native startup information independently of Newton Warp-log suppression.
+Scene asset counts use manager-registered UIDs across the scene. Both modes
+show sensor details. Full mode also lists object UIDs and shows each registered
+direct light's UID, type, and scope.
 Warnings/errors remain visible. Device names reuse existing Warp metadata;
 diagnostics must not initialize PyTorch CUDA. Requested/resolved Newton solver
 and graph status are separate; pending must never be reported as captured.

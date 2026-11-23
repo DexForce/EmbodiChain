@@ -65,7 +65,7 @@ deployment. The pure `env.yaml` has `environment_id` but no runnable `id` or
 Task Program fields.
 
 Ordinary component references resolve relative to the runnable config.
-References beginning with `embodichain_tasks/configs/` select the imported SDK's
+References beginning with `embodichain/extensions/tasks/configs/` select the imported SDK's
 packaged configurations, so deployments in another repository can reuse the
 same physical environment, embodiment or Task Program components. An existing
 same-named file in the working directory does not override a packaged selection.

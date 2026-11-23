@@ -9,7 +9,7 @@ parts, arm and torso solvers, and local serial chains for all five parts.
 Public import
 -------------
 
-.. currentmodule:: embodichain_robots
+.. currentmodule:: embodichain.extensions.robots
 
 .. py:class:: AlohaMiniCfg
 
@@ -23,9 +23,9 @@ Public import
 Implementation module
 ---------------------
 
-.. currentmodule:: embodichain_robots.alohamini.aloha_mini.cfg
+.. currentmodule:: embodichain.extensions.robots.alohamini.aloha_mini.cfg
 
 .. py:class:: AlohaMiniCfg
    :no-index:
 
-   Implementation of :class:`embodichain_robots.AlohaMiniCfg`.
+   Implementation of :class:`embodichain.extensions.robots.AlohaMiniCfg`.

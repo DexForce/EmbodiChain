@@ -12,13 +12,13 @@ Five USD-native dexterous manipulation tasks inherit from `EmbodiedEnv` (`Dexter
 
 ## Configuration and CLI Usage
 
-Each task directory under `extensions/embodichain_tasks/configs/tasks/manipulation/dexterous/<task>/` provides a single `default` catalog deployment (`env.yaml` and `agents/ppo.yaml`) configured with `physics: newton` and `solver_type: dexuni` (`use_mujoco_cpu: false`, `use_mujoco_contacts: true`, GPU MuJoCo Warp on CUDA with full scene joint ownership).
+Each task directory under `embodichain/extensions/tasks/configs/tasks/manipulation/dexterous/<task>/` provides a single `default` catalog deployment (`env.yaml` and `agents/ppo.yaml`) configured with `physics: newton` and `solver_type: dexuni` (`use_mujoco_cpu: false`, `use_mujoco_contacts: true`, GPU MuJoCo Warp on CUDA with full scene joint ownership).
 
 ```bash
 embodichain data download --name ShadowHandPen
-embodichain show-task embodichain_tasks:shadow_pen_fixed
-embodichain run-task --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/dexterous/shadow_pen_fixed/env.yaml
-embodichain train-rl --config extensions/embodichain_tasks/configs/tasks/manipulation/dexterous/shadow_pen_fixed/agents/ppo.yaml
+embodichain show-task embodichain.extensions.tasks:shadow_pen_fixed
+embodichain run-task --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/dexterous/shadow_pen_fixed/env.yaml
+embodichain train-rl --config embodichain/extensions/tasks/configs/tasks/manipulation/dexterous/shadow_pen_fixed/agents/ppo.yaml
 ```
 
 Continue training from a saved checkpoint with `embodichain train-rl --config CONFIG --resume latest --run RUN_DIRECTORY`, setting `trainer.iterations` to the cumulative update target. Evaluate a saved checkpoint via `embodichain eval-policy RUN_DIRECTORY --checkpoint latest --num-envs 64 --episodes 64 --renderer no-render`.

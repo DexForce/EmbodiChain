@@ -22,8 +22,8 @@ No ODS producer, native simulator or APG learner is constructed.
 
 The emitted `recipe.json` also works with `embodichain train-sl --config FILE`.
 Its installable factory is
-`embodichain_models.dynamics.rwm.sl_recipe:build_rwm_trainer`; the same symbol is
-exported from `embodichain_models.dynamics.rwm`.
+`embodichain.extensions.models.dynamics.rwm.sl_recipe:build_rwm_trainer`; the same symbol is
+exported from `embodichain.extensions.models.dynamics.rwm`.
 Use a fresh output directory for a new run. `--resume FILE` restores the saved
 learning boundary through the shared trainer; GPU replay snapshots are optional,
 and a workflow may explicitly rebuild/refill replay instead.

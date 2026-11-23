@@ -236,6 +236,18 @@ def _canonical_value(value: object) -> object:
             and not value.supports_segment_motion_recovery
         ):
             metadata.pop("supports_segment_motion_recovery")
+        from embodichain.lab.sim.atomic_skills.tracking import TrackingPolicy
+
+        if type(value) is TrackingPolicy and not value.boundary_reference_bridge:
+            metadata.pop("boundary_reference_bridge")
+        if type(value) is TrackingPolicy and not value.boundary_stop:
+            for key in (
+                "boundary_stop",
+                "boundary_position_tolerance",
+                "boundary_velocity_tolerance",
+                "boundary_timeout",
+            ):
+                metadata.pop(key)
         if type(value) is MotionPolicy:
             if value.final_velocity_rejection == "hold":
                 metadata.pop("final_velocity_rejection")
@@ -271,6 +283,8 @@ def _canonical_value(value: object) -> object:
             metadata.pop("cartesian_approach")
         if isinstance(value, PlaceOptions) and value.release_settle_duration == 0.0:
             metadata.pop("release_settle_duration")
+        if isinstance(value, PlaceOptions) and value.approach_lift_height is None:
+            metadata.pop("approach_lift_height")
         if isinstance(value, SlideOptions) and value.push_approach_offset is None:
             metadata.pop("push_approach_offset")
         return {"type": _qualified_name(value), "fields": metadata}

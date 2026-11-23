@@ -862,6 +862,25 @@ def _configure_checkpoint_files(
             if not isinstance(frozen_gym, dict):
                 raise TypeError("resource_export must return a Gym configuration dict.")
         frozen_gym = deepcopy(frozen_gym)
+        effective_cfg = getattr(environment, "cfg", None)
+        if (
+            getattr(getattr(effective_cfg, "rl_task", None), "reward_composition", None)
+            is not None
+        ):
+            from embodichain.lab.gym.envs.managers.reward_composition import (
+                _snapshot_reward_composition,
+            )
+
+            root = frozen_gym.setdefault("rl_task", {})
+            if effective_cfg.rl_task.skill is not None:
+                root["skill"] = deepcopy(
+                    effective_cfg.observations.skill_objective_standalone.params[
+                        "objective"
+                    ]
+                )
+            root["reward_composition"] = _snapshot_reward_composition(
+                effective_cfg, root.get("reward_composition")
+            )
         trainer._checkpoint_gym_snapshot_hash = _gym_snapshot_fingerprint(frozen_gym)
         snapshots[gym_path] = frozen_gym
 
@@ -924,7 +943,7 @@ def cli(argv: Sequence[str] | None = None) -> None:
 
     Task packages are discovered (and init hooks executed) before training so
     that task environments registered in separate packages (e.g.
-    ``embodichain_tasks``) are available to ``build_env``. This mirrors the
+    ``embodichain.extensions.tasks``) are available to ``build_env``. This mirrors the
     ``run_task`` CLI.
     """
     args = parse_args(argv)

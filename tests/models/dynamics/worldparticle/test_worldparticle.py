@@ -23,7 +23,7 @@ import pytest
 import torch
 import warp as wp
 
-from embodichain_models.dynamics.worldparticle._runtime import load_assets
+from embodichain.extensions.models.dynamics.worldparticle._runtime import load_assets
 
 # Tests own their explicit NoRender World when needed; pytest must not
 # preinitialize an unrelated renderer. CUDA bodies remain in the GPU lane.
@@ -104,8 +104,10 @@ def test_public_worldparticle_provider_advances_and_resets(assets, monkeypatch):
     _require_cuda(native_adapter=True)
     import dexsim
     from dexsim.engine.newton_physics import NewtonCfg, ProviderNewtonSolverCfg
-    from embodichain_solvers.physics.worldparticle.provider import WorldParticleProvider
-    from embodichain_models.dynamics.worldparticle import _runtime
+    from embodichain.extensions.solvers.physics.worldparticle.provider import (
+        WorldParticleProvider,
+    )
+    from embodichain.extensions.models.dynamics.worldparticle import _runtime
     from dexsim.spawn import SceneBuilder, FluidRenderMode
 
     monkeypatch.setattr(
@@ -172,7 +174,9 @@ def test_particle_force_units_rotation_buffers_and_invalid_dt():
     _require_cuda(native_adapter=True)
     import newton
     from dexsim.engine.newton_physics.particle_inference import ParticleInferenceSolver
-    from embodichain_models.dynamics.worldparticle.model import WorldParticleModel
+    from embodichain.extensions.models.dynamics.worldparticle.model import (
+        WorldParticleModel,
+    )
 
     builder = newton.ModelBuilder()
     builder.add_particle(
@@ -232,8 +236,10 @@ def test_unsupported_runtime_rejected_before_weights(
     _require_cuda()
     import newton
     from dexsim.engine.newton_physics import NewtonSolverContext
-    from embodichain_solvers.physics.worldparticle.provider import WorldParticleProvider
-    from embodichain_models.dynamics.worldparticle import _runtime
+    from embodichain.extensions.solvers.physics.worldparticle.provider import (
+        WorldParticleProvider,
+    )
+    from embodichain.extensions.models.dynamics.worldparticle import _runtime
 
     def forbidden_load(*_):
         raise AssertionError("Weights allocated before runtime validation")
@@ -273,7 +279,9 @@ def test_runtime_fixed_particle_remains_fixed(mode):
     _require_cuda(native_adapter=True)
     import newton
     from dexsim.engine.newton_physics.particle_inference import ParticleInferenceSolver
-    from embodichain_models.dynamics.worldparticle.model import WorldParticleModel
+    from embodichain.extensions.models.dynamics.worldparticle.model import (
+        WorldParticleModel,
+    )
 
     builder = newton.ModelBuilder()
     builder.add_particle(
@@ -324,7 +332,9 @@ def test_runtime_fixed_particle_remains_fixed(mode):
     ],
 )
 def test_task_specific_feature_semantics(task, raw, expected):
-    from embodichain_models.dynamics.worldparticle._runtime import normalize_features
+    from embodichain.extensions.models.dynamics.worldparticle._runtime import (
+        normalize_features,
+    )
 
     np.testing.assert_allclose(
         normalize_features(task, np.asarray(raw, np.float64)), expected, atol=1e-7
@@ -332,7 +342,9 @@ def test_task_specific_feature_semantics(task, raw, expected):
 
 
 def test_topology_layout_and_capabilities_are_model_scoped(assets):
-    from embodichain_solvers.physics.worldparticle.provider import WorldParticleProvider
+    from embodichain.extensions.solvers.physics.worldparticle.provider import (
+        WorldParticleProvider,
+    )
 
     Path(assets["config"]).write_text(
         "data: cloth_on_ball\ntimestep: .02\ngravity: [0.,0.,0.]\n"
@@ -382,7 +394,9 @@ def test_topology_checkpoint_requires_original_neighbors(assets):
 
 
 def test_legacy_fluid_buffer_migration_does_not_hide_missing_weights():
-    from embodichain_models.dynamics.worldparticle._runtime import load_checkpoint_state
+    from embodichain.extensions.models.dynamics.worldparticle._runtime import (
+        load_checkpoint_state,
+    )
 
     network = torch.nn.Module()
     network.weight = torch.nn.Parameter(torch.ones(1))
@@ -406,7 +420,9 @@ def test_legacy_fluid_buffer_migration_does_not_hide_missing_weights():
 
 def test_explicit_provider_config_does_not_resolve_builtin_solvers():
     from embodichain.lab.sim.cfg import NewtonPhysicsCfg
-    from embodichain_solvers.physics.worldparticle.provider import WorldParticleProvider
+    from embodichain.extensions.solvers.physics.worldparticle.provider import (
+        WorldParticleProvider,
+    )
     from dexsim.engine.newton_physics import ProviderNewtonSolverCfg
 
     provider = ProviderNewtonSolverCfg(
@@ -428,7 +444,7 @@ def test_explicit_provider_config_does_not_resolve_builtin_solvers():
 def test_model_coordinate_transport_stays_fp32_under_ambient_autocast(device):
     if device.startswith("cuda"):
         _require_cuda()
-    from embodichain_models.dynamics.worldparticle import WorldParticleModel
+    from embodichain.extensions.models.dynamics.worldparticle import WorldParticleModel
 
     # An oblique rotation and non-BF16-representable input make an accidental
     # ambient BF16 matmul visible independently of the network implementation.

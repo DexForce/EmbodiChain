@@ -13,27 +13,24 @@ outputs can live outside the source checkout.
 
 Use a source checkout that includes the runtime prerequisites from #836 and the
 motion-tracking changes from #924. FastRT replay also requires #833. From the
-repository root, install the published `dexsim_engine==0.6.0` wheel matching
-Python 3.11 and the host Linux ABI, then install EmbodiChain and its bundled tasks
-and models:
+repository root, install EmbodiChain and its bundled tasks and models in a
+Python 3.11 environment on Linux.
 
 ```bash
 uv venv --python 3.11 .venv-g1
 uv pip install --python .venv-g1/bin/python --torch-backend cu128 \
   'torch>=2.7,<2.8' 'torchvision>=0.22,<0.23'
 uv pip install --python .venv-g1/bin/python \
-  --index http://pyp.open3dv.site:2345/simple \
-  --allow-insecure-host pyp.open3dv.site 'dexsim_engine==0.6.0'
-uv pip install --python .venv-g1/bin/python .
+  --index http://pyp.open3dv.site:2345/simple/ \
+  --index-strategy unsafe-best-match --allow-insecure-host pyp.open3dv.site .
 uv pip check --python .venv-g1/bin/python
 source .venv-g1/bin/activate
 embodichain run-example learning/motion_tracking/train.py --help
 ```
 
-The SDK pin matches `pyproject.toml`. The SDK index provides the published Linux
-wheel for the selected Python ABI; its native libraries require a compatible
-CUDA driver and Linux runtime. Record the source revision and installed SDK
-version with run results.
+Installing EmbodiChain selects its simulator dependency. The native runtime
+requires a compatible CUDA driver. Record the source revision and installed
+simulator build with run results.
 
 The Python 3.11 dependency profile uses PyTorch 2.7, TorchVision 0.22 and
 TorchCodec 0.5. The first install command selects CUDA 12.8 wheels for Torch and
@@ -272,7 +269,7 @@ callbacks own optimizer steps and complete backward passes before returning.
 Configuration paths below resolve through the installed task package:
 
 ```bash
-CONFIGS=extensions/embodichain_tasks/configs/tasks/locomotion/tracking/g1_motion/agents
+CONFIGS=embodichain/extensions/tasks/configs/tasks/locomotion/tracking/g1_motion/agents
 CUDA_VISIBLE_DEVICES=0 embodichain run-example learning/motion_tracking/train.py \
   --config "$CONFIGS/model_based.yaml" --output outputs/functional
 ```

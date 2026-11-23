@@ -84,7 +84,7 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import MarkerCfg, RenderCfg, physics_cfg_for_backend
 from embodichain.lab.sim.objects import Robot
-from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+from embodichain.extensions.benchmarks.motion_generation._atomic_fixtures import (
     _create_franka_native_hand_cfg,
 )
 from embodichain.lab.sim.motion.motion_generator import (

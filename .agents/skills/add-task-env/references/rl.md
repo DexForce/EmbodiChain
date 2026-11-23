@@ -56,7 +56,7 @@ Select it from the training config with:
 
 ```yaml
 trainer:
-  gym_config: extensions/embodichain_tasks/configs/tasks/<category_path>/<task_name>/<deployment>.yaml
+  gym_config: embodichain/extensions/tasks/configs/tasks/<category_path>/<task_name>/<deployment>.yaml
 ```
 
 Simulator environments use standard rollouts. PPO and GRPO are current
@@ -67,7 +67,7 @@ standard examples.
 Keep the task entry point flat:
 
 ```text
-extensions/embodichain_tasks/embodichain_tasks/<category_path>/<task_name>.py
+embodichain/extensions/tasks/<category_path>/<task_name>.py
 ```
 
 Register the factory with `@register_learning_env` and implement the

@@ -143,8 +143,11 @@ Default CPU command gathering shares native numeric reads through a bounded
 World-owner scope in `sim/objects/backends/_numeric_observations.py`. It ends
 before completion callbacks and physical stepping, and starts after reset and
 activation. Checked native writes, physics steps and binding topology changes
-invalidate samples. Derived dynamic rigid poses share the same boundary and invalidation, with
-separate CPU autocast representations. Consumers receive independent output
+invalidate samples. Requests for matrices of a named articulation link can read
+just the selected CPU arenas; the result uses the same arena frame and float32
+rotation conversion as the full link batch. Derived dynamic rigid poses share
+the same boundary and invalidation, with separate CPU autocast representations.
+Consumers receive independent output
 buffers; semantic
 state, episode clocks and validation remain row-owned. CUDA and other backends
 retain native reads. Raw SDK mutation or concurrent World writes inside the
@@ -186,6 +189,23 @@ switch devices.
 
 ## Optional task-pose proposal feedback
 
+For native Task Program jobs, `trajectory.affordance.branch_selection` defaults
+to `round_robin`. With `outcome_guided`, the workload assigns each non-nominal
+grasp rank once before using physical outcomes to rank future choices. Once a failure
+has been observed, ranks are scored by (successes + 1) / (trials + 2).
+If every rank has a physical failure and none has finished successfully, the
+one with the most verified Task Program segments takes priority.
+`scheduling.exploration_fraction` (default 0.25) reserves a fraction of the
+remaining selections for the least-used ranks. Each motion recipe records its
+chosen rank before execution. After a successful branch, exploitation can also
+record its source ordinal and accepted object-relative grasp matrices. Each
+selected call looks for an equivalent non-nominal pose in its freshly generated
+valid candidates and replans against the new scene. Exploration uses fresh
+ranked choices. Selected calls in the recipe reuse its declared branch.
+Only physical outcomes with a recorded plan transform count once per attempt.
+Preparation failures, queue limits, and cancelled rows supply no evidence.
+Feedback is local to one workload run.
+
 Task-facing expansion configs select `scene_sampling.strategy` (`bounded_pose`
 or `workspace_joint`) independently of `scheduling.policy` (`fifo` or
 `task_pose_coverage`). Absent settings preserve the legacy bounded sampler.
@@ -217,7 +237,7 @@ must agree; unsupported dynamic grasp replacement rejects. Normal scene preparat
 planning, measured acceptance and persistence still determine success. Feedback
 checkpoints do not restore a live World or replace job receipt reconciliation.
 The configured acceptance task is
-`extensions/embodichain_tasks/configs/tasks/manipulation/workspace_pose_pick_place`;
+`embodichain/extensions/tasks/configs/tasks/manipulation/workspace_pose_pick_place`;
 its four-way runner is `scripts/benchmark/expansion/task_pose_coverage.py`.
 
 ## Conditional layout proposals and task screening

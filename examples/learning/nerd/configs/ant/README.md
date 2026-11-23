@@ -15,7 +15,7 @@ The SL recipe is bounded to 1,000 updates, with an explicit resident-cache
 budget. Use `--device cpu` for CPU execution. To use `embodichain train-sl`, copy
 `sl.train.yaml`, set `data.path` and `trainer.output_dir`, and resolve relative
 paths from the working directory. The factory is installed under
-`embodichain_models.dynamics.nerd.sl_recipe`, so no example imports are needed.
+`embodichain.extensions.models.dynamics.nerd.sl_recipe`, so no example imports are needed.
 The final SL checkpoint does not imply validation-selected accuracy.
 
 Teacher collection defaults to `dynamics.generate.smoke.yaml`. Prepare assets

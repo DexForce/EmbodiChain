@@ -162,7 +162,7 @@ def _exercise_imported_scene_verified_pick_place(
     (tmp_path / "env.yaml").write_text(yaml.safe_dump(environment))
     task_root = (
         Path(__file__).resolve().parents[4]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place"
     )
     source_task = task_root / "task.dual_ur5_dh_pgi_140_80.yaml"
     config = load_config(source_task)

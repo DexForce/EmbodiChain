@@ -70,7 +70,7 @@ from embodichain.lab.sim.motion.planners import (
     ToppraPlannerCfg,
     TrapezoidalPlannerCfg,
 )
-from embodichain_robots import URRobotCfg
+from embodichain.extensions.robots import URRobotCfg
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
     AntipodalGraspPoseGeneratorCfg,
@@ -2645,7 +2645,7 @@ def create_ur5_gripper_robot_cfg(
 ) -> RobotCfg:
     """Build a UR5 arm + DH_PGI_140_80 gripper robot configuration.
 
-    The arm is taken from :class:`~embodichain_robots.universal_robots.ur_robot.URRobotCfg`
+    The arm is taken from :class:`~embodichain.extensions.robots.universal_robots.ur_robot.URRobotCfg`
     so the URDF, joint names and drive defaults match the canonical UR family
     config. The gripper and tool-center-point offset are added on top to match
     the existing atomic-skill tutorial setups.
@@ -2658,7 +2658,7 @@ def create_ur5_gripper_robot_cfg(
         assembled robot keeps the source URDF's lowercase joint names
         (``joint1``..``joint6`` and ``gripper_finger1_joint_1``), matching the
         control parts produced by
-        :class:`~embodichain_robots.universal_robots.ur_robot.URRobotCfg`.
+        :class:`~embodichain.extensions.robots.universal_robots.ur_robot.URRobotCfg`.
 
     Args:
         init_pos: Initial root position of the robot in the arena.

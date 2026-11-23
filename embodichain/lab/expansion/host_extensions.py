@@ -21,9 +21,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, TYPE_CHECKING
 from .contracts import CandidateIdentity, SceneCase, ValidationResult
 from .recipes import ExpansionRecipe
+
+if TYPE_CHECKING:
+    from .program import ProgramBatchResult
 
 __all__ = ["ExpansionValidator", "ExpansionRowContext", "GymExpansionHostExtensions"]
 
@@ -87,6 +90,8 @@ class GymExpansionHostExtensions:
             scene source and artifact directory; exposes coverage, budget, validate,
             finish and checkpoint without advancing physics or writing episodes.
         require_plan_transform: Reject completed programs without transform records.
+        plan_outcome: Receives the logical ordinal, physical acceptance and
+            single-row program result after a rollout with applied plan evidence.
     """
 
     collection_renderer: str | None = None
@@ -98,6 +103,9 @@ class GymExpansionHostExtensions:
         default=None, kw_only=True
     )
     require_plan_transform: bool = False
+    plan_outcome: Callable[[int, bool, ProgramBatchResult], None] | None = field(
+        default=None, kw_only=True
+    )
 
     def __post_init__(self) -> None:
         if self.collection_renderer is not None and (
@@ -111,6 +119,7 @@ class GymExpansionHostExtensions:
             "validator_factory",
             "recipe_transform",
             "plan_transform_factory",
+            "plan_outcome",
         ):
             value = getattr(self, name)
             if value is not None and not callable(value):

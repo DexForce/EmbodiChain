@@ -38,10 +38,10 @@ import json
 from embodichain.data import dataset
 from embodichain.data.assets import CobotMagicArm, FlexivRizon4S, UnitreeGo2Locomotion, UniversalRobots, PourCupAssets, PourCupDemoData
 from embodichain.data.assets.w1_assets import DexforceW1V030
-from embodichain_robots.agilex.pika.assets import PikaGripper
-from embodichain_robots.sharpa.wave.assets import SharpaWave
-from embodichain_robots.wuji.hand.assets import WujiHand
-from embodichain_robots.i2rt.yam.assets import YamI2rt
+from embodichain.extensions.robots.agilex.pika.assets import PikaGripper
+from embodichain.extensions.robots.sharpa.wave.assets import SharpaWave
+from embodichain.extensions.robots.wuji.hand.assets import WujiHand
+from embodichain.extensions.robots.i2rt.yam.assets import YamI2rt
 
 urls = {}
 

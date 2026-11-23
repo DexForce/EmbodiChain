@@ -21,14 +21,14 @@ from __future__ import annotations
 import pytest
 import torch
 
-from embodichain_benchmarks.motion_generation.scenarios._placement_geometry import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios._placement_geometry import (
     build_flat_object_grasp_pose,
     build_pan_handle_grasp_pose,
     build_placing_object_target_pose,
     build_support_object_target_pose,
     get_pan_basin_vertices,
 )
-from embodichain_benchmarks.motion_generation.scenarios._placement_qualification import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios._placement_qualification import (
     _placement_input_geometry,
 )
 
@@ -177,14 +177,14 @@ def test_settled_placement_requires_full_footprint_and_bounded_surface_gaps(cond
     ],
 )
 def test_suite_pan_frame_matches_actual_native_glb_loading(suite_name, backend):
-    from embodichain_benchmarks.motion_generation.config import (
+    from embodichain.extensions.benchmarks.motion_generation.config import (
         BENCHMARK_ROOT,
         load_suite,
     )
-    from embodichain_benchmarks.motion_generation.scenarios.atomic_objects import (
+    from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_objects import (
         create_atomic_object,
     )
-    from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+    from embodichain.extensions.benchmarks.motion_generation._atomic_fixtures import (
         get_local_vertices,
     )
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg

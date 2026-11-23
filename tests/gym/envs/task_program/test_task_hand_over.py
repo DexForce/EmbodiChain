@@ -99,7 +99,7 @@ def _gym_config_path() -> Path:
     """Return the installed-source dual-UR5 Gym config path."""
     return (
         Path(__file__).parents[4]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/hand_over/"
         "task.dual_ur5_dh_pgi_140_80.yaml"
     )
 
@@ -133,10 +133,13 @@ def test_hand_over_registers_plain_embodied_env_from_config() -> None:
     cfg = _configured_env_cfg()
     spec = REGISTERED_ENVS[_ENV_ID]
 
-    from embodichain_tasks.manipulation import __all__
+    from embodichain.extensions.tasks.manipulation import __all__
 
     assert __all__ == []
-    assert importlib.util.find_spec("embodichain_tasks.manipulation.hand_over") is None
+    assert (
+        importlib.util.find_spec("embodichain.extensions.tasks.manipulation.hand_over")
+        is None
+    )
     assert spec.cls is EmbodiedEnv
     assert spec.max_episode_steps == 3600
     assert spec.task_program_registration is not None

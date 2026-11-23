@@ -19,7 +19,7 @@ alone is not proof of its listed possible causes.
 component paths resolve relative to the deployment file. A physical environment
 component by itself is not a runnable deployment.
 
-**Diagnose:** rerun `embodichain show-task embodichain_tasks:repeated_pick_place`
+**Diagnose:** rerun `embodichain show-task embodichain.extensions.tasks:repeated_pick_place`
 and compare its deployment with the Quickstart's complete package reference.
 Check that the downloaded file is YAML rather than an HTML error page. For a
 local deployment, inspect its `environment`, `embodiment`, and `task_program`

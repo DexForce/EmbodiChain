@@ -35,7 +35,7 @@ from scipy.spatial.transform import Rotation
 
 from embodichain.compute.kinematics._ssik_model import _extract_model
 from embodichain.lab.sim.motion.solvers import SSIKSolver, SSIKSolverCfg
-from embodichain_robots import ARX5Cfg, FlexivRizon4SCfg
+from embodichain.extensions.robots import ARX5Cfg, FlexivRizon4SCfg
 
 
 @pytest.fixture(scope="module")
@@ -52,7 +52,7 @@ def pinned_reference() -> None:
 def _artifact(name: str) -> Path:
     return Path(
         str(
-            importlib.resources.files("embodichain_robots").joinpath(
+            importlib.resources.files("embodichain.extensions.robots").joinpath(
                 "_ssik_artifacts", name + ".py"
             )
         )

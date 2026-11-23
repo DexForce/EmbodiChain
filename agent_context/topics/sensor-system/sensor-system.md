@@ -13,7 +13,7 @@
 | Six-axis parent reaction at a child link | `embodichain/lab/sim/sensors/joint_wrench.py` |
 | Collision/visual ray provider, terrain scan, geometric LiDAR and ray depth | `embodichain/lab/sim/sensors/ray.py` |
 | Curved pad geometry and indentation depth | `embodichain/lab/sim/sensors/tactile_indentation.py` |
-| Official VLP-16 preset | `extensions/embodichain_sensors/vlp16.py` and the `embodichain.sensors` entry point |
+| Official VLP-16 preset | `embodichain/extensions/sensors/vlp16.py` and the `embodichain.sensors` entry point |
 | Image configuration, data flags, extrinsics | `embodichain/lab/sim/sensors/camera.py` → `CameraCfg`, `Camera` |
 | UID-scoped deployment calibration | `embodichain/lab/gym/utils/_component_composition.py`; [configuration ownership](../env-framework/configuration.md#reusable-gym-deployment-components) |
 | Two-eye transforms and attachment | `embodichain/lab/sim/sensors/stereo.py` → `StereoCameraCfg`, `StereoCamera` |
@@ -100,6 +100,14 @@ and per-row validity from `get_sample_metadata()`. Reading does not advance
 sampling. A camera advances only after its own groups render. A failed
 acquisition invalidates the current output and leaves the boundary retryable.
 Legacy Gym-driven camera and contact acquisition keeps its existing ordering.
+
+`BaseSensor.supports_restored_state_sampling` declares whether a zero-duration
+acquisition can read a restored scene without stepping physics. Cameras, joint
+encoders, frame transforms and the geometric `TerrainScan` family (including
+`RayDepthCamera` and `RayLidar`) opt in. Plugins may opt in only when their update
+reads current state without solver outputs or interval history. Replay rearms
+all scheduled clocks, acquires supported physics-phase sensors immediately and
+keeps other measurements invalid until the first completed sampling boundary.
 
 Default and Newton frame state includes the current body-local center-of-mass
 offset as `linear_velocity_offset` for moving rigid bodies and articulation

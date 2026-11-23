@@ -19,7 +19,7 @@ recorded per image. See [EEF rendering conventions](../end_effectors.md#rendered
 Canonical download-class import:
 
 ```python
-from embodichain_robots.agilex.pika.assets import PikaGripper
+from embodichain.extensions.robots.agilex.pika.assets import PikaGripper
 ```
 
 Use the stable asset reference for normal loading:
@@ -84,12 +84,12 @@ new Pika-specific W1 catalog variant.
 
 ## Ownership and provenance
 
-The download class lives in `extensions/embodichain_robots/agilex/pika/assets.py` and registers through the
+The download class lives in `embodichain/extensions/robots/agilex/pika/assets.py` and registers through the
 existing `embodichain.assets` catalog with category `eef`. This asset-only
 package does not introduce a standalone robot preset. Host assembly owns the
 mounting transform, naming prefix, control-group mapping and task-specific TCP.
 
-The [asset provenance record](https://github.com/DexForce/EmbodiChain/blob/main/extensions/embodichain_robots/agilex/pika/README.md)
+The [asset provenance record](https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/robots/agilex/pika/README.md)
 separately records manufacturer affiliation, model matching, asset production,
 archive distribution, modifications and license status. Missing upstream or
 license evidence stays explicitly unverified. The Python implementation's
@@ -103,7 +103,7 @@ and declares no arm IK solver or serial FK chain. Simulation drive values are
 presets rather than manufacturer actuator specifications.
 
 ```python
-from embodichain_robots import PikaGripperCfg
+from embodichain.extensions.robots import PikaGripperCfg
 
 cfg = PikaGripperCfg.from_dict({})
 ```

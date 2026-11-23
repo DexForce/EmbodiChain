@@ -23,12 +23,12 @@ from dataclasses import replace
 import pytest
 import torch
 
-from embodichain_benchmarks.motion_generation.config import SuiteCfg
-from embodichain_benchmarks.motion_generation.scenarios.free_space import (
+from embodichain.extensions.benchmarks.motion_generation.config import SuiteCfg
+from embodichain.extensions.benchmarks.motion_generation.scenarios.free_space import (
     FreeSpaceScenario,
     _start_qpos_for_bin,
 )
-from embodichain_benchmarks.motion_generation.metrics.trajectory import (
+from embodichain.extensions.benchmarks.motion_generation.metrics.trajectory import (
     compute_case_outcomes,
 )
 from embodichain.lab.sim.motion.planners.utils import PlanResult
@@ -267,9 +267,13 @@ def test_conditioning_and_joint_margin_are_measured(near_limit_sampling):
 def test_proposal_chunks_preserve_first_complete_input_and_arena_rows(
     monkeypatch, chunk_size, batch_mode
 ):
-    from embodichain_benchmarks.motion_generation.config import FreeSpaceTrackCfg
-    from embodichain_benchmarks.motion_generation.scenarios import _free_space_sampling
-    from embodichain_benchmarks.motion_generation.scenarios._free_space_proposals import (
+    from embodichain.extensions.benchmarks.motion_generation.config import (
+        FreeSpaceTrackCfg,
+    )
+    from embodichain.extensions.benchmarks.motion_generation.scenarios import (
+        _free_space_sampling,
+    )
+    from embodichain.extensions.benchmarks.motion_generation.scenarios._free_space_proposals import (
         _sample_request_batched,
     )
 
@@ -440,14 +444,16 @@ def test_reference_rotation_is_valid_under_strict_angular_threshold():
 
 
 def test_workload_tables_preserve_modality_batch_semantics_and_uncertainty():
-    from embodichain_benchmarks.motion_generation.aggregation import aggregate_results
-    from embodichain_benchmarks.motion_generation.models import (
+    from embodichain.extensions.benchmarks.motion_generation.aggregation import (
+        aggregate_results,
+    )
+    from embodichain.extensions.benchmarks.motion_generation.models import (
         AlgorithmRole,
         PlannerMetadata,
         TrialPhase,
         TrialRecord,
     )
-    from embodichain_benchmarks.motion_generation.metrics.trajectory import (
+    from embodichain.extensions.benchmarks.motion_generation.metrics.trajectory import (
         make_failure_outcomes,
     )
 
@@ -650,7 +656,7 @@ def test_reference_path_deviation_is_diagnostic_for_cartesian_waypoint_layouts(
 
 
 def test_polyline_deviation_handles_long_degenerate_and_noncontiguous_inputs():
-    from embodichain_benchmarks.motion_generation.metrics.trajectory import (
+    from embodichain.extensions.benchmarks.motion_generation.metrics.trajectory import (
         _reference_path_deviation,
     )
 
@@ -667,7 +673,7 @@ def test_polyline_deviation_handles_long_degenerate_and_noncontiguous_inputs():
 
 
 def test_compact_screening_preserves_arena_frames_and_per_environment_limits():
-    from embodichain_benchmarks.motion_generation.scenarios._free_space_sampling import (
+    from embodichain.extensions.benchmarks.motion_generation.scenarios._free_space_sampling import (
         _RowKinematics,
         _screen_path,
     )
@@ -704,7 +710,7 @@ def test_compact_screening_preserves_arena_frames_and_per_environment_limits():
 
 
 def test_screening_can_select_a_finite_restart_when_another_candidate_is_nonfinite():
-    from embodichain_benchmarks.motion_generation.scenarios._free_space_sampling import (
+    from embodichain.extensions.benchmarks.motion_generation.scenarios._free_space_sampling import (
         _reference_ik,
     )
 

@@ -50,7 +50,7 @@ from embodichain.lab.task_program.semantics.asset_requirements import (
 from embodichain.lab.task_program.semantics.asset_matching import resolve_asset_set
 
 ROOT = Path(__file__).resolve().parents[4]
-CONFIGS = ROOT / "extensions/embodichain_tasks/configs"
+CONFIGS = ROOT / "embodichain/extensions/tasks/configs"
 POUR = CONFIGS / "tasks/manipulation/tableware/pour_water"
 PROFILE_ID = "ur5_dh_pgi_140_80"
 

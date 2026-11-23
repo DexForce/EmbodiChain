@@ -17,7 +17,7 @@ collection belong to their hosts.
 | Sampled Cartesian geometry → timing → robot IK | `embodichain/lab/sim/motion/planners/_cartesian_profiles.py` (internal adapter) |
 | Collision planning and scene conversion | `embodichain/lab/sim/motion/planners/curobo/` |
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
-| Installable evaluation suites and external planner adapters | `extensions/embodichain_benchmarks/motion_generation/api.py`, `planners/base.py` in that package |
+| Installable evaluation suites and external planner adapters | `embodichain/extensions/benchmarks/motion_generation/api.py`, `planners/base.py` in that package |
 | Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
 | Contact-qualified paired grasp sampling and explicit URDF surfaces | `embodichain/toolkits/graspkit/pg_grasp/coordinated.py`, `urdf_surfaces.py` in that directory |
 | Bounded interaction pose refinement before expansion | `embodichain/lab/sim/motion/refinement.py`, with numeric fitting in `compute/trajectory/refinement.py`; [Real2Sim boundary](../data-pipeline/real2sim.md) |
@@ -124,15 +124,15 @@ owns cross-domain collection; [scene expansion](../scene-expansion/scene-expansi
 owns layout proposals and host integration. [Real2Sim](../data-pipeline/real2sim.md)
 owns protected source mapping and retiming.
 
-The installed benchmark host is `embodichain_benchmarks.motion_generation`.
+The installed benchmark host is `embodichain.extensions.benchmarks.motion_generation`.
 It owns scene lifetime, frozen cases, evaluation and artifacts; adapters return
 `PlanResult` and expose `MotionGenerator` for Atomic evaluation. Configuration
 preflight and runtime capability declarations remain separate. Frozen inputs do
 not guarantee identical stochastic outcomes across schedules. Parallel quality
 work uses spawned processes; performance replay stays serial and excludes
 contended timing. Population, masked-constraint, contact-scoring and uncertainty
-rules live in the [benchmark README](../../../extensions/embodichain_benchmarks/motion_generation/README.md)
-and [design contract](../../../extensions/embodichain_benchmarks/motion_generation/BENCHMARK_DESIGN.md).
+rules live in the [benchmark README](../../../embodichain/extensions/benchmarks/motion_generation/README.md)
+and [design contract](../../../embodichain/extensions/benchmarks/motion_generation/BENCHMARK_DESIGN.md).
 
 ## Focused validation
 
@@ -148,9 +148,9 @@ changes inspect normalization and the destination clock before tuning limits.
 Tests target production owners rather than importing tutorial implementations.
 
 For physical single-object grasp evaluation, the installed
-`embodichain_benchmarks.grasp_pose_generator` runner freezes ranked object-local
+`embodichain.extensions.benchmarks.grasp_pose_generator` runner freezes ranked object-local
 TCPs and delegates independent base/X/Y trials to
 `embodichain.lab.sim.grasp_validation.GraspValidator`. The
-[physical suite](../../../extensions/embodichain_benchmarks/grasp_pose_generator/README.md)
+[physical suite](../../../embodichain/extensions/benchmarks/grasp_pose_generator/README.md)
 owns held-out splits, fixed attempt budgets and reports. The legacy CoffeeCup
 sweep measures geometric sampling and selection.

@@ -1,6 +1,6 @@
 # Wuji Hand
 
-`embodichain_robots.WujiHandCfg` configures a standalone left or right
+`embodichain.extensions.robots.WujiHandCfg` configures a standalone left or right
 Wuji Hand. The robot catalog ID is `WujiHand`; `left` and `right` select the
 native models, with right as the default.
 
@@ -31,7 +31,7 @@ Given an existing `SimulationManager` named `sim`:
 
 ```python
 from embodichain.robot_registry import resolve_robot_cfg
-from embodichain_robots import WujiHandCfg
+from embodichain.extensions.robots import WujiHandCfg
 
 cfg = resolve_robot_cfg("WujiHand", variant="left")
 # Equivalent model-local selection:
@@ -48,7 +48,7 @@ embodichain preview-robot --robot WujiHand --variant right --headless --device c
 ```
 
 The model package also lazily exports `WujiHandCfg` from
-`embodichain_robots.wuji.hand`. Listing catalogs does not
+`embodichain.extensions.robots.wuji.hand`. Listing catalogs does not
 import configurations or download assets. Unsupported sides fail before asset
 lookup. `from_dict()` builds defaults and applies isolated overrides through the
 standard `RobotCfg` path. An existing local `fpath` bypasses asset download.
@@ -97,7 +97,7 @@ manipulation or other physics backends.
 
 ```python
 from embodichain.data import get_data_path
-from embodichain_robots.wuji.hand.assets import WujiHand
+from embodichain.extensions.robots.wuji.hand.assets import WujiHand
 
 right_urdf = get_data_path("WujiHand/right.urdf")
 ```
@@ -105,7 +105,7 @@ right_urdf = get_data_path("WujiHand/right.urdf")
 The [published V2 archive](https://huggingface.co/datasets/DexForceAI/embodichain_data/blob/0540f7a2eb383cf3f24e85069f5af2b369890541/eef_assets/WujiHandV2.zip)
 contains both sides and uses the `WujiHandV2` cache. Source:
 [wuji-technology/wuji-description at `5c4dfa169173`](https://github.com/wuji-technology/wuji-description/tree/5c4dfa16917355d073e2e1d7e3d03897b6cf9508).
-The model-owned [provenance record](https://github.com/DexForce/EmbodiChain/blob/main/extensions/embodichain_robots/wuji/hand/README.md)
+The model-owned [provenance record](https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/robots/wuji/hand/README.md)
 records licensing, preparation, archive hashes and native MJCF resources.
 Host assemblies own mount transforms, naming prefixes and task-specific interfaces.
 

@@ -23,16 +23,16 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from embodichain_benchmarks.motion_generation.contracts import (
+from embodichain.extensions.benchmarks.motion_generation.contracts import (
     ExecutionObservation,
     ReplayObservationTrace,
 )
-from embodichain_benchmarks.motion_generation.scenarios._grasp_contacts import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios._grasp_contacts import (
     GraspContacts,
     contact_configuration,
     minimum_target_contact_distances,
 )
-from embodichain_benchmarks.motion_generation.scenarios.atomic_evaluation import (
+from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_evaluation import (
     gripper_holding,
     trace_validity,
 )
@@ -230,8 +230,8 @@ def test_newton_finger_contact_scoring_is_target_and_environment_specific():
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import NewtonPhysicsCfg, RigidObjectCfg
     from embodichain.lab.sim.shapes import CubeCfg
-    from embodichain_benchmarks.motion_generation.config import RobotSpecCfg
-    from embodichain_benchmarks.motion_generation.robots.franka import (
+    from embodichain.extensions.benchmarks.motion_generation.config import RobotSpecCfg
+    from embodichain.extensions.benchmarks.motion_generation.robots.franka import (
         FrankaPgiProvider,
     )
 

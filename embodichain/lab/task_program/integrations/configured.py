@@ -1112,6 +1112,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 "release_settle_duration",
                 "pick_object_part",
                 "lift_height",
+                "approach_lift_height",
                 "pre_grasp_distance",
                 "initial_lift_height",
                 "grasp_commit_fraction",
@@ -1312,6 +1313,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                     "release_settle_steps",
                     "release_settle_duration",
                     "lift_height",
+                    "approach_lift_height",
                     "max_approach_retract_z",
                     "cartesian_waypoint_count",
                     "cartesian_approach",
@@ -1346,6 +1348,12 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
             kwargs["lift_height"] = _real(
                 config["lift_height"],
                 path=f"{path}.lift_height",
+                minimum=0.0,
+            )
+        if "approach_lift_height" in config:
+            kwargs["approach_lift_height"] = _real(
+                config["approach_lift_height"],
+                path=f"{path}.approach_lift_height",
                 minimum=0.0,
             )
         if "max_approach_retract_z" in config:
@@ -1961,6 +1969,27 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
 
 
 def _decode_tracking_policy(value: object, *, path: str) -> TrackingPolicy:
+    from dataclasses import replace
+
+    if not isinstance(value, Mapping):
+        return _decode_tracking_policy_base(value, path=path)
+    config = dict(value)
+    boundary = {
+        name: config.pop(name)
+        for name in tuple(config)
+        if name
+        in {
+            "boundary_reference_bridge",
+            "boundary_stop",
+            "boundary_position_tolerance",
+            "boundary_velocity_tolerance",
+            "boundary_timeout",
+        }
+    }
+    return replace(_decode_tracking_policy_base(config, path=path), **boundary)
+
+
+def _decode_tracking_policy_base(value: object, *, path: str) -> TrackingPolicy:
     """Decode one allowlisted tracking policy."""
     common = _mapping(
         value,
@@ -2424,6 +2453,9 @@ def _decode_grasp_generator(
                 "approach_deviation_angle",
                 "max_candidates",
                 "center_mode",
+                "angle_weight",
+                "center_weight",
+                "opening_weight",
                 "filter_ground_collision",
                 "force_refresh",
                 "point_spacing",
@@ -2490,6 +2522,26 @@ def _decode_grasp_generator(
     center_mode = config.get("center_mode")
     if "center_mode" in config and center_mode not in ("bounds", "centroid"):
         raise ValueError(f"{path}.center_mode must be 'bounds' or 'centroid'.")
+    from embodichain.toolkits.graspkit.pg_grasp._ranking import (
+        _DEFAULT_RANKING_WEIGHTS,
+        _normalized_ranking_weights,
+    )
+
+    weight_names = ("angle_weight", "center_weight", "opening_weight")
+    ranking_weights = {
+        name: _real(config[name], path=f"{path}.{name}", minimum=0)
+        for name in weight_names
+        if name in config
+    }
+    try:
+        _normalized_ranking_weights(
+            *(
+                ranking_weights.get(name, default)
+                for name, default in zip(weight_names, _DEFAULT_RANKING_WEIGHTS)
+            )
+        )
+    except ValueError as exc:
+        raise ValueError(f"{path}: {exc}") from exc
     return _AntipodalGraspPoseGeneratorFactory(
         model_id=defaults["model_id"],
         gripper_json=json.dumps(defaults, sort_keys=True, allow_nan=False),
@@ -2539,6 +2591,7 @@ def _decode_grasp_generator(
             else None
         ),
         center_mode=center_mode,
+        **ranking_weights,
         filter_ground_collision=(
             _boolean(
                 config["filter_ground_collision"],
@@ -3868,7 +3921,15 @@ def _decode_configured_task_program_integration(
                 key: value
                 for key, value in asdict(factory).items()
                 if not (
-                    key in {"approach_deviation_angle", "max_candidates", "center_mode"}
+                    key
+                    in {
+                        "approach_deviation_angle",
+                        "max_candidates",
+                        "center_mode",
+                        "angle_weight",
+                        "center_weight",
+                        "opening_weight",
+                    }
                     and value is None
                 )
             },

@@ -39,7 +39,7 @@ from embodichain.lab.sim.sensors import (
 )
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.sim_manager import SimulationManager, SimulationManagerCfg
-from embodichain_robots import URRobotCfg
+from embodichain.extensions.robots import URRobotCfg
 
 # Queue destruction in the tests and let conftest drain it after the test and
 # fixture frames release borrowed solver and contact buffers.

@@ -115,8 +115,8 @@ collision path.
   limitations.
 - {doc}`newton/runtime_qualification` — solver/device capability matrix and
   post-`prepare()` qualification workflow.
-- {doc}`../../sim_soft_object` and {doc}`../../sim_cloth` — EmbodiChain
-  deformable configuration and runtime state.
+- {doc}`../../sim_volume_deformable_object` and {doc}`../../sim_surface_deformable_object`
+  cover EmbodiChain deformable configuration and runtime state.
 
 For Newton-native solver internals and tuning, refer directly to the
 [official solver documentation](https://newton-physics.github.io/newton/stable/solvers/index.html)

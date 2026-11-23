@@ -1,7 +1,7 @@
 # ARX5 X5A
 
-`embodichain_robots.ARX5Cfg` configures the bundled `ARX5/X5A.urdf` asset.
-Its implementation lives in `extensions/embodichain_robots/arx/arx5/cfg.py`, and the
+`embodichain.extensions.robots.ARX5Cfg` configures the bundled `ARX5/X5A.urdf` asset.
+Its implementation lives in `embodichain/extensions/robots/arx/arx5/cfg.py`, and the
 bundled robot catalog registers it as `ARX5`. The package exports the class
 lazily; listing the catalog does not load the asset or simulation runtime.
 
@@ -41,7 +41,7 @@ There are eight independent controlled joints. `init_qpos` follows source
 order: the six arm joints, then the two fingers.
 
 ```python
-from embodichain_robots import ARX5Cfg
+from embodichain.extensions.robots import ARX5Cfg
 
 cfg = ARX5Cfg.from_dict({})
 robot = sim.add_robot(cfg=cfg)

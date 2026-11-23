@@ -7,7 +7,7 @@ inspect the evidence available for it.
 
 ```bash
 embodichain list-task --category manipulation
-embodichain show-task embodichain_tasks:repeated_pick_place
+embodichain show-task embodichain.extensions.tasks:repeated_pick_place
 ```
 
 `show-task` reports the task description, named deployments, robot embodiment,
@@ -35,7 +35,7 @@ registries:
 
 ```bash
 embodichain list-task \
-  --config-root embodichain_tasks=embodichain_tasks/configs/tasks \
+  --config-root embodichain.extensions.tasks=embodichain/extensions/tasks/configs/tasks \
   --category manipulation \
   --export-html task-gallery.html
 ```
@@ -52,7 +52,7 @@ unavailable.
 
 The repeated-pick-place catalog is authored alongside its deployments:
 
-```{literalinclude} ../../../embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/catalog.yaml
+```{literalinclude} ../../../embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/catalog.yaml
 :language: yaml
 ```
 
@@ -71,7 +71,7 @@ Program completion, segment acceptance and dataset persistence.
 
 ```bash
 python -m embodichain.lab.scripts.evaluate_task_objective \
-  --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.objective.yaml \
+  --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.objective.yaml \
   --output-dir objective-run --seed 0 --num_envs 1 --headless --device cuda
 ```
 

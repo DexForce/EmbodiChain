@@ -61,7 +61,7 @@ FunctorCfg(
 ```
 
 - `func` can be a **string** (resolved via `string_to_callable` at init) or a direct reference.
-- `params` values of type `SceneEntityCfg` are auto-resolved to joint/body indices when the sim starts.
+- `params` values of type `SceneEntityCfg` are resolved to joint/body indices during manager preparation, after scene initialization.
 - Subclass configs add fields such as `EventCfg.mode`, `EventCfg.interval_step`, `RewardCfg.weight`, and `ObservationCfg.name`. `ActionTermCfg` has no mode field and may declare a versioned semantic `contract` resolved by the current action implementation registry.
 
 ---
@@ -93,6 +93,64 @@ named `control_parts`. Named selection resolves current robot joint IDs and
 maps them into `env.active_joint_ids`; observed mimic joints are included.
 Use this selector for reusable arm/gripper observations across robot DOFs and
 state orders. Physical joint IDs are not observation-column indices.
+
+## Composed skill rewards
+
+`managers/reward_composition.py` expands optional `RLTaskCfg.reward_composition`
+and standalone `skill` goals into standard `RewardCfg` terms. Program-authored
+reward defaults are declared in `TaskProgramCfg.rewards`; the deployment may
+explicitly override them. `RewardManager` remains the sole weighting/reset owner.
+Checkpoint declarations freeze all resolved reward scalars, including suppressed
+success defaults, instead of consulting changed program YAML defaults on reload.
+Standalone `skill` declarations require an explicit composition and discount;
+omitting it rejects configuration rather than dropping the objective. Automatic
+milestones respect explicit terms selected by any equivalent stage/call alias.
+Episode-scoped terms suppress only the first authored-name occurrence they can
+pay; later occurrences retain automatic bonuses.
+Metric targets, as well as scales, must be finite before binding.
+Stateful potential shaping consumes one `RewardTransitionContext` from the
+canonical post-step observation after measured termination. Reset acquisition
+initializes baselines without paying rewards; repeated transition reads are cached.
+Dynamic replay resets histories and seeds the final restored frame. Rejected
+stale/foreign frames cannot move the accepted revision watermark.
+Replay invalidates camera samples while preserving randomized extrinsics;
+non-camera sensors still reset their state and history after restoration.
+Replay rearms camera sampling once before rendering the restored scene and seeding
+rewards, so an unchanged simulation timestamp cannot retain the old image.
+Physics-sampled camera plugins acquire explicitly at the restored boundary,
+without advancing dynamics; render-sampled cameras acquire during capture.
+Instantaneous state sensors also acquire before reward initialization when they
+declare [restored-state sampling support](../sensor-system/sensor-system.md#external-sensor-packages).
+Step-dependent sensors remain invalid until a real step; replay rearms their
+clocks so the old sampling period cannot delay that first measurement.
+Unavailable required measurements terminate affected rows and cannot erase a
+negative shaping boundary. True task termination and time truncation remain distinct.
+
+`SkillObjectiveObservation` owns bounded, occurrence-local physical windows.
+Its contact sampling observer measures each physics substep; only canonical
+control-boundary acquisition commits the proposed duration. A first valid
+sample establishes the boundary, and interrupted evidence restarts the window.
+Missing substeps or pose writes after sampling invalidate the affected evidence;
+read-only queries do not commit history. Its contact sensor joins the public
+sensor suite. Capture identities include the objective, avoiding aliasing across
+multiple goals on one robot. Physical success remains independent of reward weights. Positive support witnesses
+may persist through sleeping-body reports only while both physical poses remain
+unchanged; sensor invalidity, geometry motion and reset invalidate that history.
+Single-skill goals and explicit per-call program criteria use the same measurement
+and skill-owned profile. Program object/resource/support bindings reject semantic
+contradictions; `Place(on)` uses the linked destination surface, including object
+shorthand. `compute.rewards` owns numerical transforms and chunk aggregation;
+registered templates live in `sim/atomic_skills/reward_profiles.py` without Gym imports.
+Program hand lists derive from the selected calibrated grasp endpoint; explicit
+lists must match. Named scene-relative call targets freeze per-row references at
+activation, and Place preserves entry orientation according to its effective
+options for both `at` and `on`. Non-rigid measured references and asset replacement
+with physical goals reject preflight; replaced bound handles reject before reads.
+
+See `examples/learning/task_program_progress/README.md` for configuration and
+native qualification commands. Cover numerical identities in `tests/compute/`,
+manager lifecycle in `tests/gym/envs/managers/test_reward_composition.py`, and
+physical-window boundaries in `test_skill_objective.py` in the same directory.
 
 ## Raw observations and consumer views
 

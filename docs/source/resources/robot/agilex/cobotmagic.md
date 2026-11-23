@@ -52,7 +52,7 @@ camera, lighting and joint settings are recorded in the
 
 ```python
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain_robots import CobotMagicCfg
+from embodichain.extensions.robots import CobotMagicCfg
 
 config = SimulationManagerCfg(headless=False, device="cpu", num_envs=2)
 sim = SimulationManager(config)
@@ -79,7 +79,7 @@ sim.update(step=1)
 ### 2. Custom Usage Example
 
 ```python
-from embodichain_robots import CobotMagicCfg
+from embodichain.extensions.robots import CobotMagicCfg
 
 custom_cfg = {
     "init_pos": [0.0, 0.0, 1.0],  # Initial position

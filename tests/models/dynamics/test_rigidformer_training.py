@@ -22,7 +22,7 @@ import os
 import numpy as np
 import pytest
 import torch
-from embodichain_models.dynamics.rigidformer.supervised import (
+from embodichain.extensions.models.dynamics.rigidformer.supervised import (
     RigidFormerObjective,
     rigidformer_batch,
 )
@@ -144,7 +144,9 @@ def test_geometry_missing_from_manifest_is_not_a_verified_source(packed_data):
 
 @pytest.mark.parametrize("missing_cache", ["anchor", "fps_order"])
 def test_missing_prepared_cache_does_not_modify_source(packed_data, missing_cache):
-    from embodichain_models.dynamics.rigidformer.data import MOViSequenceSource
+    from embodichain.extensions.models.dynamics.rigidformer.data import (
+        MOViSequenceSource,
+    )
 
     original = source(packed_data, random_step=False)
     valid = dict(original.config)
@@ -247,7 +249,9 @@ def test_new_manifest_reloads_replaced_per_frame_geometry(tmp_path):
 
 
 def test_fixed_step_and_stride_are_applied(packed_data):
-    from embodichain_models.dynamics.rigidformer.data import MOViSequenceSource
+    from embodichain.extensions.models.dynamics.rigidformer.data import (
+        MOViSequenceSource,
+    )
 
     original = source(packed_data, random_step=False)
     updated = MOViSequenceSource(
@@ -275,7 +279,9 @@ def test_small_dataset_pads_every_distributed_rank(tmp_path, monkeypatch):
 
 
 def test_default_object_padding_counts_toward_memory_limit(packed_data):
-    from embodichain_models.dynamics.rigidformer.data import MOViSequenceSource
+    from embodichain.extensions.models.dynamics.rigidformer.data import (
+        MOViSequenceSource,
+    )
 
     original = source(packed_data, random_step=False)
     config = dict(original.config)
@@ -293,7 +299,7 @@ def test_default_object_padding_counts_toward_memory_limit(packed_data):
 
 
 def test_recipe_rejects_anchor_count_mismatched_with_model(packed_data, tmp_path):
-    from embodichain_models.dynamics.rigidformer.sl_recipe import (
+    from embodichain.extensions.models.dynamics.rigidformer.sl_recipe import (
         build_rigidformer_trainer,
     )
 
@@ -337,7 +343,7 @@ def test_centered_predictions_use_centered_position_targets():
 @pytest.mark.gpu
 def test_centered_model_loss_is_translation_invariant():
     pytest.importorskip("roma")
-    from embodichain_models.dynamics.rigidformer import RigidFormerModel
+    from embodichain.extensions.models.dynamics.rigidformer import RigidFormerModel
 
     cfg = tiny_cfg()
     cfg.architecture["data"]["center_scene_by_t0"] = True
@@ -356,7 +362,7 @@ def test_centered_model_loss_is_translation_invariant():
 
 
 def test_export_accepts_legacy_numpy_rng_pickle(tmp_path, monkeypatch):
-    from embodichain_models.dynamics.rigidformer.checkpoint import (
+    from embodichain.extensions.models.dynamics.rigidformer.checkpoint import (
         export_rigidformer_checkpoint,
     )
 
@@ -395,7 +401,7 @@ def test_export_accepts_legacy_numpy_rng_pickle(tmp_path, monkeypatch):
 @pytest.mark.parametrize("random_sampling", [False, True])
 def test_compact_windows_preserve_scene_stride_and_boundaries(random_sampling):
     from pathlib import Path
-    from embodichain_models.dynamics.rigidformer._native.data._index import (
+    from embodichain.extensions.models.dynamics.rigidformer._native.data._index import (
         _SceneWindows,
     )
 
@@ -423,10 +429,10 @@ def test_compact_windows_preserve_scene_stride_and_boundaries(random_sampling):
 def test_recipe_resume_crosses_epoch_and_warmup_with_exact_ema(tmp_path):
     pytest.importorskip("roma")
     pytest.importorskip("einops")
-    from embodichain_models.dynamics.rigidformer.sl_recipe import (
+    from embodichain.extensions.models.dynamics.rigidformer.sl_recipe import (
         build_rigidformer_trainer,
     )
-    from embodichain_models.dynamics.rigidformer import (
+    from embodichain.extensions.models.dynamics.rigidformer import (
         export_rigidformer_checkpoint,
         load_rigidformer_checkpoint,
     )
@@ -469,8 +475,8 @@ def test_recipe_resume_crosses_epoch_and_warmup_with_exact_ema(tmp_path):
 @pytest.mark.gpu
 def test_fp32_geometry_augmentation_precedes_bf16_model_autocast():
     pytest.importorskip("roma")
-    from embodichain_models.dynamics.rigidformer import RigidFormerModel
-    from embodichain_models.dynamics.rigidformer._native.data.gpu_augmentation import (
+    from embodichain.extensions.models.dynamics.rigidformer import RigidFormerModel
+    from embodichain.extensions.models.dynamics.rigidformer._native.data.gpu_augmentation import (
         GPUAugmentation,
     )
 

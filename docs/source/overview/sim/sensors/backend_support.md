@@ -25,7 +25,7 @@ is unavailable on that backend or solver path.
 | `TerrainScan` | Supported | Supported | Supported | Casts a grid of rays against supported geometry and reports distances, positions, and hit flags. |
 | `RayLidar` | Supported | Supported | Supported | Casts geometric rays against supported static or moving targets. |
 | `RayDepthCamera` | Supported | Supported | Supported | Reports axial depth and radial distance from geometric rays. The query can run with rendering disabled. |
-| `VLP16` | Supported | Supported | Supported | The bundled `embodichain_sensors` extension provides the nominal 16-channel `RayLidar` preset. |
+| `VLP16` | Supported | Supported | Supported | The bundled `embodichain.extensions.sensors` extension provides the nominal 16-channel `RayLidar` preset. |
 | `TactileIndentation` (geometric depth) | Supported | Supported | Supported | Uses probes on a planar, curved, or explicit grid. Targets require supported, closed, consistently wound geometry. |
 | `TactileIndentation` (RGB) | Supported | Supported | Supported | Enable `rgb` to shade the geometric depth sample. The calculation can run with rendering disabled. |
 | `TactileIndentation` (shear and marker displacement) | Supported | Supported | Supported | Enable `shear` to estimate normal load, shear, and marker displacement from sampled indentation and relative motion. |

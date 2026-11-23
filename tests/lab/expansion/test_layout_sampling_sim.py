@@ -40,7 +40,7 @@ def _probe(output: Path, strategy: str) -> None:
     root = Path(__file__).resolve().parents[3]
     fixture = (
         root
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/workspace_pose_pick_place/acceptance/scene_first"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/workspace_pose_pick_place/acceptance/scene_first"
     )
     cfg = yaml.safe_load((fixture / "expansion.yaml").read_text())
     cfg["engine"].update(

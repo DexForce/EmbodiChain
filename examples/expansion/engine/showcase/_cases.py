@@ -46,7 +46,7 @@ def absolute_deployment(path: Path) -> dict:
     def resolve(reference):
         candidate = (path.parent / reference).resolve()
         if not candidate.exists():
-            marker = "extensions/embodichain_tasks/configs/"
+            marker = "embodichain/extensions/tasks/configs/"
             if marker not in reference:
                 raise FileNotFoundError(candidate)
             candidate = resolve_config_path(marker + reference.split(marker, 1)[1])
@@ -86,7 +86,7 @@ def build_cases(root: Path, mode: str, *, preserve: bool = False) -> list[dict]:
     task = absolute_deployment(prepared / "task.measured.yaml")
     task["embodiment"]["component"] = str(
         resolve_config_path(
-            "extensions/embodichain_tasks/configs/components/embodiments/franka_panda_robotiq85_rgbd.yaml"
+            "embodichain/extensions/tasks/configs/components/embodiments/franka_panda_robotiq85_rgbd.yaml"
         )
     )
     task["renderer"] = "hybrid"

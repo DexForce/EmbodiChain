@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 import torch
-from embodichain_models.dynamics.nerd.codec import quat_rotate
+from embodichain.extensions.models.dynamics.nerd.codec import quat_rotate
 from ._scene_assets import reference_profile
 
 __all__: list[str] = []

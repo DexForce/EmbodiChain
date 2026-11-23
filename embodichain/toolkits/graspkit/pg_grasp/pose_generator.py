@@ -32,6 +32,7 @@ from embodichain.toolkits.graspkit import (
 from embodichain.utils import configclass, logger
 
 from ._antipodal_backend import _AntipodalMeshBackend
+from ._ranking import _DEFAULT_RANKING_WEIGHTS, _normalized_ranking_weights
 from .contact_fit import SampledHandGeometry
 from .antipodal_sampler import AntipodalSamplerCfg
 from .gripper_collision_checker import GripperCollisionCfg
@@ -199,7 +200,23 @@ class AntipodalGraspPoseGeneratorCfg:
     center_mode: Literal["bounds", "centroid"] = "bounds"
     """Reference center used for ray sampling, partitioning, and ranking."""
 
+    angle_weight: float = _DEFAULT_RANKING_WEIGHTS[0]
+    """Relative cost weight for closing-axis deviation from perpendicular approach."""
+
+    center_weight: float = _DEFAULT_RANKING_WEIGHTS[1]
+    """Relative cost weight for distance from the selected mesh center."""
+
+    opening_weight: float = _DEFAULT_RANKING_WEIGHTS[2]
+    """Relative reward for larger legal openings; zero disables this preference.
+
+    Ranking weights must be finite, nonnegative and not all zero. Scoring
+    normalizes their sum; configuration snapshots retain the supplied values.
+    """
+
     def __post_init__(self) -> None:
+        _normalized_ranking_weights(
+            self.angle_weight, self.center_weight, self.opening_weight
+        )
         self.sample_count = _positive_int(
             self.sample_count,
             field_name="sample_count",
@@ -483,6 +500,11 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             approach_alignment_angle=algorithm.approach_alignment_angle,
             approach_direction_samples=algorithm.approach_direction_samples,
             max_candidates=algorithm.max_candidates,
+            ranking_weights=(
+                algorithm.angle_weight,
+                algorithm.center_weight,
+                algorithm.opening_weight,
+            ),
             interactive_annotation=annotation.selection_mode == "interactive",
             viser_port=annotation.viser_port,
             use_largest_connected_component=(

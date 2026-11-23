@@ -1363,7 +1363,14 @@ def _decode_task_program(
     _validate_fields(
         mapping,
         allowed=frozenset(
-            {"program_id", "integration", "targets", "program", "instruction"}
+            {
+                "program_id",
+                "integration",
+                "targets",
+                "program",
+                "instruction",
+                "rewards",
+            }
         ),
         required=frozenset({"program_id", "integration", "targets", "program"}),
         path=(),
@@ -1420,6 +1427,7 @@ def _decode_task_program(
             if mapping.get("instruction") is None
             else _expect_identifier(mapping["instruction"], path=("instruction",))
         ),
+        rewards=mapping.get("rewards"),
         integration=integration,
         targets=targets,
         program=program,

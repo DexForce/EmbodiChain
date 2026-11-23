@@ -158,6 +158,9 @@ class PlaceOptions(SkillOptions):
     lift_height: float = 0.1
     """Height (m) to retract the end-effector after opening the gripper."""
 
+    approach_lift_height: float | None = field(default=None, kw_only=True)
+    """Height (m) above the first place pose during approach. Defaults to lift_height."""
+
     max_approach_retract_z: float | None = None
     """Optional maximum world-frame TCP z for approach and retract poses (m)."""
 
@@ -189,6 +192,13 @@ class PlaceOptions(SkillOptions):
             raise ValueError("release_settle_steps must be a non-negative integer.")
         if self.lift_height < 0.0:
             raise ValueError("lift_height must be non-negative.")
+        if self.approach_lift_height is not None and (
+            isinstance(self.approach_lift_height, bool)
+            or not isinstance(self.approach_lift_height, (int, float))
+            or not math.isfinite(self.approach_lift_height)
+            or self.approach_lift_height < 0.0
+        ):
+            raise ValueError("approach_lift_height must be finite and nonnegative.")
         if self.cartesian_waypoint_count < 1:
             raise ValueError("cartesian_waypoint_count must be at least 1.")
         if type(self.preserve_current_object_orientation) is not bool:
@@ -331,7 +341,9 @@ class Place(AtomicSkill[PlaceGoal | AssembleGoal | ContactPlaceGoal, PlaceOption
             third_segment_name="back",
         )
 
-        approach_xpos = self._lifted_pose(place_xpos[:, 0], options)
+        approach_xpos = self._lifted_pose(
+            place_xpos[:, 0], options, height=options.approach_lift_height
+        )
         retract_xpos = self._lifted_pose(place_xpos[:, -1], options)
 
         start_xpos = self.robot.compute_fk(
@@ -827,11 +839,16 @@ class Place(AtomicSkill[PlaceGoal | AssembleGoal | ContactPlaceGoal, PlaceOption
         return torch.bmm(sample.poses, object_to_eef), sample
 
     def _lifted_pose(
-        self, release_xpos: torch.Tensor, options: PlaceOptions
+        self,
+        release_xpos: torch.Tensor,
+        options: PlaceOptions,
+        *,
+        height: float | None = None,
     ) -> torch.Tensor:
         """Build an above-release pose while respecting the optional TCP z cap."""
         lifted_xpos = release_xpos.clone()
-        lifted_z = release_xpos[:, 2, 3] + options.lift_height
+        lift = options.lift_height if height is None else height
+        lifted_z = release_xpos[:, 2, 3] + lift
         if options.max_approach_retract_z is not None:
             max_z = torch.as_tensor(
                 options.max_approach_retract_z,

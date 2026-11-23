@@ -63,8 +63,8 @@ incomplete quality report and no certification; neither packaging nor native
 RGB admission establishes industrial READY or metric Gaussian depth.
 
 Use `RenderCfg.for_gaussian(gaussian={"apply_display_srgb": False})` for these
-display-referred colors. The flag is fixed before World creation and shared
-by all Gaussian assets in that World.
+display-referred colors. The flag sets the sRGB transfer for the entire
+rendered frame before World creation.
 
 The data licenses remain upstream. In particular, DISCOVERSE's model repository
 does not provide an asset license; this package retains `license: null` and does
@@ -92,6 +92,6 @@ converter is deliberately not used because it also generates an enclosing box.
 
 The publication includes actual native render previews in `validation/`.
 The official physical consumer is
-[the Franka dual-camera Pick/Place task](../../../../extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/README.md).
+[the Franka dual-camera Pick/Place task](../../../../embodichain/extensions/tasks/configs/tasks/manipulation/gaussian_pick_place/README.md).
 The [recording example](../../../gym/gaussian_pick_place/README.md) consumes those
 definitions and adds complete RGB capture, video export and offline acceptance.

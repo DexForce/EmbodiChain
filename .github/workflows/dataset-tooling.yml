@@ -14,7 +14,7 @@ on:
       - 'tests/data_pipeline/**'
       - 'tests/test_lerobot_compatibility.py'
       - 'tests/models/policy/**'
-      - 'extensions/embodichain_models/embodichain_models/policy/act/**'
+      - 'embodichain/extensions/models/policy/act/**'
       - 'examples/learning/act/**'
       - 'tests/gym/envs/managers/**'
       - 'embodichain/lab/scripts/preview_lerobot_data.py'
@@ -89,6 +89,11 @@ jobs:
         run: |
           python -m pip install uv==0.12.5
           uv venv --python '${{ matrix.python }}' /tmp/lerobot-compat
+          # uv 0.12.5 cannot unpack the DexSim 0.6.1rc1 CPython 3.12 wheel.
+          if [[ '${{ matrix.python }}' == '3.12' ]] && dexsim_wheel=$(grep -F 'dexsim_engine-0.6.1rc1-cp312-' docker/profiles/py312.in); then
+            python -m pip --python /tmp/lerobot-compat/bin/python --isolated install \
+              --no-deps --trusted-host pyp.open3dv.site "$dexsim_wheel"
+          fi
           uv pip install --python /tmp/lerobot-compat/bin/python \
             --torch-backend cpu --index-strategy unsafe-best-match \
             --index-url https://pypi.org/simple \

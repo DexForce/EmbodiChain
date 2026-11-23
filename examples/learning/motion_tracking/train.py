@@ -50,19 +50,25 @@ from embodichain.learning.rl.runtime import build_learning_policy_runtime
 from embodichain.learning.sl import SupervisedLearner
 from embodichain.utils.config_paths import resolve_config_path
 from embodichain.utils.utility import load_config
-from embodichain_models.dynamics.rwm import (
+from embodichain.extensions.models.dynamics.rwm import (
     KinematicWorldModel,
     KinematicWorldModelCfg,
     TransitionReplay,
     RobotWorldModelObjective,
     replay_supervised_batch,
 )
-from embodichain_models.dynamics.rwm.model import frozen_world_model
-from embodichain_models.dynamics.rwm.robot_state import pack_robot_state
-from embodichain_models.policies import motion_tracking  # Register tracking policy.
+from embodichain.extensions.models.dynamics.rwm.model import frozen_world_model
+from embodichain.extensions.models.dynamics.rwm.robot_state import pack_robot_state
+from embodichain.extensions.models.policies import (
+    motion_tracking,
+)  # Register tracking policy.
 from embodichain.lab.gym.utils.registration import build_env
-from embodichain_tasks.locomotion.tracking import g1_motion  # Register physical task.
-from embodichain_tasks.locomotion.tracking.motion_model import replay_motion_starts
+from embodichain.extensions.tasks.locomotion.tracking import (
+    g1_motion,
+)  # Register physical task.
+from embodichain.extensions.tasks.locomotion.tracking.motion_model import (
+    replay_motion_starts,
+)
 
 from run_metadata import write_run_metadata
 from _configuration import normalize_recipe, recipe_identity, validate_recipe

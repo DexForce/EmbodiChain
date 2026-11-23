@@ -15,7 +15,7 @@ embodichain run-example learning/nerd train --robot cartpole --resource-root ./o
 Use `--robot ant` for Ant. For direct `embodichain train-sl`, copy the robot's
 `../configs/<robot>/sl.train.yaml`, set `data.path` and `trainer.output_dir`, and
 use the installable factory
-`embodichain_models.dynamics.nerd.sl_recipe:build_supervised_trainer`. Common SL
+`embodichain.extensions.models.dynamics.nerd.sl_recipe:build_supervised_trainer`. Common SL
 checkpoints resume with the same recipe through `train-sl --resume` or the
 showcase's default `train --resume`. Export its committed `last.pt` through
 `embodichain run-example learning/nerd export`; common SL does not automatically

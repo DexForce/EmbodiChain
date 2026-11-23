@@ -28,7 +28,7 @@ from types import SimpleNamespace
 import pytest
 import numpy as np
 import torch
-from embodichain_benchmarks.grasp_pose_generator.metrics import summarize
+from embodichain.extensions.benchmarks.grasp_pose_generator.metrics import summarize
 from embodichain.lab.sim.grasp_validation import GraspValidator, _result
 
 
@@ -151,7 +151,7 @@ def test_dexuni_contact_evidence_uses_distance_only_for_unmeasured_rows():
 @pytest.mark.parametrize("physics", ["default", "newton"])
 def test_gpu_cli_isolates_missed_and_held_grasps(tmp_path: Path, physics: str) -> None:
     """Two misses and a centred grasp share a native nine-arena batch."""
-    fixtures = files("embodichain_benchmarks.grasp_pose_generator")
+    fixtures = files("embodichain.extensions.benchmarks.grasp_pose_generator")
     subprocess.run(
         [
             sys.executable,

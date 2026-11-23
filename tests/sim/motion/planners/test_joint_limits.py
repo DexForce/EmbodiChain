@@ -69,6 +69,14 @@ class _Robot:
     def get_joint_ids(self, name: str) -> list[int]:
         return [self.joint_names.index(joint) for joint in self.control_parts[name]]
 
+    def get_qpos_limits(
+        self, *, joint_ids: list[int], env_ids: list[int] | None = None
+    ) -> torch.Tensor:
+        limits = torch.tensor([[-3.0, 3.0]], dtype=torch.float64).expand(
+            self.num_instances, len(self.joint_names), 2
+        )
+        return (limits if env_ids is None else limits[env_ids])[:, joint_ids]
+
     def get_qvel_limits(self, *, joint_ids: list[int]) -> torch.Tensor:
         return self.velocities[:, joint_ids]
 

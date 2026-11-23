@@ -76,3 +76,36 @@ def test_formal_gate_rejects_incomplete_or_incompatible_records(tmp_path, change
         json.loads((tmp_path / "acceptance.json").read_text())["open"]["status"]
         == "unqualified"
     )
+
+
+def test_boundary_report_derivatives_use_recorded_control_grid(tmp_path):
+    import json
+    import numpy as np
+    from scripts.benchmark.expansion.skill_boundaries import _episodes
+
+    folder = tmp_path / "collection/dataset/object_pose/episodes/test"
+    folder.mkdir(parents=True)
+    manifest = {
+        "episode_id": "test",
+        "observations": ["full_joint_positions"],
+        "metadata": {
+            "expert_action_spec": {"joint_names": [f"joint{i}" for i in range(6)]},
+            "program_segments": [{"start_step": 0}, {"start_step": 2, "name": "place"}],
+            "expansion_recipe": {"ordinal": 0},
+            "initial_state": [],
+        },
+    }
+    np.savez(
+        folder / "episode.npz",
+        manifest=np.frombuffer(json.dumps(manifest).encode(), dtype=np.uint8),
+        timestamps=np.arange(5) * 0.04,
+        actions=np.repeat(np.array([0, 0.1, 0.15, 0.2])[:, None], 6, axis=1),
+        observation_0=np.repeat(
+            np.array([0, 0.01, 0.03, 0.06, 0.10])[:, None], 6, axis=1
+        ),
+    )
+    row = _episodes(tmp_path)[0]
+    assert row["command_jump_rad"] == pytest.approx(0.05)
+    assert row["command_difference_speed_rad_s"] == pytest.approx(1.25)
+    assert row["command_difference_acceleration_rad_s2"] == pytest.approx(31.25)
+    assert row["measured_control_speed_rad_s"] == pytest.approx(0.5)

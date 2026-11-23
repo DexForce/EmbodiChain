@@ -16,11 +16,10 @@ Canonical skills live under `.agents/skills/`. `.claude/skills/` and
 ## Package and architecture
 
 The distribution and primary import package are **`embodichain`**, lowercase
-and one word. The repository directory is `EmbodiChain`; the same wheel
-bundles official tasks as **`embodichain_tasks`** and concrete robot presets as
-**`embodichain_robots`**, with the same version and distribution metadata.
-Their sources live under **`extensions/`**, a repository container rather than
-a Python namespace. Keep the `embodichain_` prefix for bundled extension modules.
+and one word. The repository directory is `EmbodiChain`. The same wheel bundles
+the official `tasks`, `robots`, `models`, `solvers`, `sensors`, and
+`benchmarks` packages under `embodichain.extensions`. Put their sources and resources in
+`embodichain/extensions/<name>/` and import them as `embodichain.extensions.<name>`.
 
 | Area | Owner |
 |---|---|
@@ -36,16 +35,17 @@ a Python namespace. Keep the `embodichain_` prefix for bundled extension modules
 | RL algorithms, policies, collectors and trainers | `embodichain/learning/rl/` |
 | Real-device controllers / standalone tools | `embodichain/lab/devices/`, `embodichain/toolkits/` |
 | Shared config and math utilities | `embodichain/utils/` |
-| Official task entry points / components / deployments | `extensions/embodichain_tasks/` |
-| Concrete robot configurations / model-owned asset definitions / calibrated defaults | `extensions/embodichain_robots/` |
+| Official task entry points / components / deployments | `embodichain/extensions/tasks/` |
+| Official sensor presets | `embodichain/extensions/sensors/` |
+| Concrete robot configurations / model-owned asset definitions / calibrated defaults | `embodichain/extensions/robots/` |
 
 Generic robot runtime/configuration and dual-arm composition remain in
 `embodichain/lab/sim/`; lightweight catalog resolution lives in
 `embodichain/robot_registry.py`. Concrete robot presets register
 through the `embodichain.robots` catalog entry point. Concrete presets and migrated model-owned asset definitions use vendor/model
-namespaces in `embodichain_robots`. Shared download/cache machinery stays in
+namespaces in `embodichain.extensions.robots`. Shared download/cache machinery stays in
 `embodichain/data`; the `embodichain.assets` entry point registers robot assets.
-Concrete presets import from `embodichain_robots`; `embodichain.lab.sim.robots` owns only generic
+Concrete presets import from `embodichain.extensions.robots`; `embodichain.lab.sim.robots` owns only generic
 dual-arm composition.
 
 Shared numerical algorithms belong to `compute/<domain>/`, with Warp kernels
@@ -73,8 +73,8 @@ asset-defined spelling. Capabilities come from explicit configuration, not names
 
 Organize official tasks by family, optional subdomain and task identity.
 Keep import registration in the task-named module at
-`extensions/embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`; configs belong
-under `extensions/embodichain_tasks/configs/tasks/<category-path>/<task>/`. Do not add a
+`embodichain/extensions/tasks/<category-path>/<task>.py`; configs belong
+under `embodichain/extensions/tasks/configs/tasks/<category-path>/<task>/`. Do not add a
 same-named Python package for one entry point or `scenario` / `mdp` modules when
 existing config fields and manager functors express the task.
 

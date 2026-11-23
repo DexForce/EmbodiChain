@@ -48,7 +48,7 @@ from embodichain.lab.gym.utils.registration import get_env_spec
 _ROOT = Path(__file__).resolve().parents[3]
 _CONFIG = (
     _ROOT
-    / "extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/env.configured_rl.yaml"
+    / "embodichain/extensions/tasks/configs/tasks/manipulation/push_cube/env.configured_rl.yaml"
 )
 
 
@@ -648,7 +648,7 @@ def test_configured_rl_rejects_mid_episode_virtual_target_resampling():
 
 
 def test_falling_is_failure_only_in_configured_deployment(monkeypatch):
-    from embodichain_tasks.manipulation.push_cube import PushCubeEnv
+    from embodichain.extensions.tasks.manipulation.push_cube import PushCubeEnv
 
     env = _env()
     env.pose[:, 2, 3] = -0.2
@@ -666,3 +666,431 @@ def test_falling_is_failure_only_in_configured_deployment(monkeypatch):
     assert info["fail"].all()
     assert not info["success"].any()
     assert not env.check_truncated({}, info).any()
+
+
+def _program_reward_config():
+    path = (
+        _ROOT
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.policy.cobotmagic.yaml"
+    )
+    raw = yaml.safe_load(path.read_text())
+    raw["rl_task"]["reward_composition"] = {
+        "discount": 0.99,
+        "skills": [
+            {
+                "stage": "lift_block",
+                "objective": {
+                    "skill_id": "pick_up",
+                    "binding": {
+                        "robot": "CobotMagic",
+                        "motion_part": "right_arm",
+                        "object": "block_2",
+                        "support": "table",
+                        "pad_links": ["right_link7", "right_link8"],
+                        "hand_links": [
+                            "right_gripper_base",
+                            "right_link7",
+                            "right_link8",
+                        ],
+                    },
+                    "goal": {"position": [0.75, 0.1, 1.05]},
+                },
+            }
+        ],
+    }
+    return path, raw
+
+
+@pytest.mark.parametrize("explicit_success", [False, True])
+def test_checkpoint_freezes_effective_reward_defaults_when_program_yaml_changes(
+    tmp_path, explicit_success
+):
+    from embodichain.learning.rl.train import (
+        _configure_checkpoint_files,
+        _gym_snapshot_fingerprint,
+    )
+
+    path, raw = _program_reward_config()
+    if explicit_success:
+        physical = yaml.safe_load((path.parent / "env.policy.yaml").read_text())
+        physical["env"].setdefault("rewards", {})["manual_success"] = {
+            "func": "success_reward",
+            "params": {},
+            "mode": "add",
+            "weight": 1.0,
+        }
+        physical_path = tmp_path / "physical.yaml"
+        physical_path.write_text(yaml.safe_dump(physical))
+        raw["environment"]["component"] = str(physical_path)
+    program = yaml.safe_load(
+        (path.parent / "task_program/program.measured.yaml").read_text()
+    )
+    program_path = tmp_path / "program.yaml"
+    program_path.write_text(yaml.safe_dump(program))
+    raw["task_program"]["program"] = str(program_path)
+    cfg = config_to_cfg(raw, source_path=path, _register_env=False)
+    expected_success = 0 if explicit_success else 10
+    assert cfg.rewards.composed_outcome.params["success"] == expected_success
+    trainer = SimpleNamespace(env=SimpleNamespace(cfg=cfg), _checkpoint_config={})
+    run = tmp_path / "run"
+    _configure_checkpoint_files(
+        trainer, tmp_path / "train.yaml", run, gym_config=path, gym_data=raw
+    )
+    checkpoint = run / "checkpoint.pt"
+    checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint.write_bytes(b"checkpoint fixture")
+    trainer._checkpoint_callback(
+        {"latest_checkpoint_path": str(checkpoint), "best_checkpoint_path": None}
+    )
+    snapshot = run / "configs/gym.yaml"
+    frozen = yaml.safe_load(snapshot.read_text())
+    fingerprint = trainer._checkpoint_gym_snapshot_hash
+    assert _gym_snapshot_fingerprint(frozen) == fingerprint
+
+    program["rewards"] = {
+        "success": 70,
+        "failure": -90,
+        "milestone_budget": 4,
+        "time_cost": 3,
+        "weight": 2,
+    }
+    program_path.write_text(yaml.safe_dump(program))
+    changed = config_to_cfg(raw, source_path=path, _register_env=False)
+    assert changed.rewards.composed_outcome.params["success"] == 70
+    restored = config_to_cfg(frozen, source_path=snapshot, _register_env=False)
+    assert _gym_snapshot_fingerprint(frozen) == fingerprint
+    assert (
+        restored.rewards.composed_outcome.params == cfg.rewards.composed_outcome.params
+    )
+    assert (
+        restored.rewards.composed_potential.weight
+        == cfg.rewards.composed_potential.weight
+    )
+    assert {
+        key: frozen["rl_task"]["reward_composition"][key] for key in program["rewards"]
+    } == {
+        "success": expected_success,
+        "failure": -10,
+        "milestone_budget": 1,
+        "time_cost": 0,
+        "weight": 1,
+    }
+
+
+def test_measured_place_accepts_the_linked_object_support_surface():
+    path, raw = _program_reward_config()
+    program = yaml.safe_load(
+        (
+            _ROOT / "examples/learning/task_program_progress/program_rewards.yaml"
+        ).read_text()
+    )
+    raw["task_program"]["program"] = {"inline": program}
+    raw["rl_task"]["reward_composition"] = deepcopy(program["rewards"])
+    explicit = config_to_cfg(raw, source_path=path, _register_env=False)
+    program["program"][1]["steps"]["place"]["on"] = "block_1"
+    by_object = config_to_cfg(raw, source_path=path, _register_env=False)
+    assert (
+        by_object.observations.skill_objective_1.params["objective"]
+        == explicit.observations.skill_objective_1.params["objective"]
+    )
+
+
+def test_call_index_objectives_remain_unambiguous_when_a_stage_name_shadows_an_alias(
+    tmp_path,
+):
+    path, raw = _program_reward_config()
+    program = yaml.safe_load(
+        (path.parent / "task_program/program.measured.yaml").read_text()
+    )
+    program["program"][1]["segment"] = "call:0"
+    raw["task_program"]["program"] = {"inline": program}
+    raw["rl_task"]["success"]["stages"]["params"]["stage"] = "call:0"
+    physical = yaml.safe_load((path.parent / "env.policy.yaml").read_text())
+    for term in physical["env"]["rewards"].values():
+        if term["params"].get("stage") == "stack_block":
+            term["params"]["stage"] = "call:0"
+    physical_path = tmp_path / "physical.yaml"
+    physical_path.write_text(yaml.safe_dump(physical))
+    raw["environment"]["component"] = str(physical_path)
+    goals = yaml.safe_load(
+        (
+            _ROOT / "examples/learning/task_program_progress/program_rewards.yaml"
+        ).read_text()
+    )["rewards"]["skills"]
+    raw["rl_task"]["reward_composition"]["skills"] = [
+        {"call_index": index, "objective": goal["objective"]}
+        for index, goal in enumerate(goals)
+    ]
+    cfg = config_to_cfg(raw, source_path=path, _register_env=False)
+    assert [
+        skill["call_index"] for skill in cfg.rl_task.reward_composition["skills"]
+    ] == [0, 1]
+    raw["rl_task"]["reward_composition"]["skills"][0] = {
+        "stage": ("call", 0),
+        "objective": goals[0]["objective"],
+    }
+    with pytest.raises(ValueError, match="stage must"):
+        config_to_cfg(raw, source_path=path, _register_env=False)
+
+
+def test_program_rewards_bind_to_the_same_semantic_object_and_endpoint():
+    path, raw = _program_reward_config()
+    cfg = config_to_cfg(raw, source_path=path, _register_env=False)
+    assert "composed_potential" in vars(cfg.rewards)
+    objective = raw["rl_task"]["reward_composition"]["skills"][0]["objective"]
+    objective["binding"]["object"] = "block_1"
+    with pytest.raises(ValueError, match="exact object"):
+        config_to_cfg(raw, source_path=path, _register_env=False)
+    objective["binding"]["object"] = "block_2"
+    objective["binding"]["motion_part"] = "left_arm"
+    with pytest.raises(ValueError, match="motion endpoint"):
+        config_to_cfg(raw, source_path=path, _register_env=False)
+
+
+def test_duplicate_program_reward_declarations_cannot_charge_an_occurrence_twice():
+    path, raw = _program_reward_config()
+    cfg = config_to_cfg(raw, source_path=path, _register_env=False)
+    raw["rl_task"]["reward_composition"]["skills"].append(
+        deepcopy(raw["rl_task"]["reward_composition"]["skills"][0])
+    )
+    with pytest.raises(ValueError, match="Duplicate skill shaping|Overlapping"):
+        config_to_cfg(raw, source_path=path, _register_env=False)
+
+
+@pytest.mark.parametrize("selection", ["opposite_hand", "missing_palm"])
+def test_measured_hand_evidence_must_match_the_selected_grasp_endpoint(selection):
+    path, raw = _program_reward_config()
+    binding = raw["rl_task"]["reward_composition"]["skills"][0]["objective"]["binding"]
+    if selection == "opposite_hand":
+        for key in ("pad_links", "hand_links"):
+            binding[key] = [link.replace("right_", "left_") for link in binding[key]]
+    else:
+        binding["hand_links"] = list(binding["pad_links"])
+    with pytest.raises(ValueError, match="selected grasp|collision links"):
+        config_to_cfg(raw, source_path=path, _register_env=False)
+
+
+def test_measured_hand_links_are_resolved_from_the_selected_gripper():
+    path, raw = _program_reward_config()
+    binding = raw["rl_task"]["reward_composition"]["skills"][0]["objective"]["binding"]
+    binding.pop("pad_links")
+    binding.pop("hand_links")
+    cfg = config_to_cfg(raw, source_path=path, _register_env=False)
+    selected = cfg.observations.skill_objective_0.params["objective"]["binding"]
+    assert selected["pad_links"] == ["right_link7", "right_link8"]
+    assert set(selected["hand_links"]) == {
+        "right_gripper_base",
+        "right_link7",
+        "right_link8",
+    }
+
+
+def _target_reward_config(target):
+    path, raw = _program_reward_config()
+    program = yaml.safe_load(
+        (path.parent / "task_program/program.measured.yaml").read_text()
+    )
+    program["targets"] = {"destination": target}
+    program["program"][1]["steps"] = {
+        "place": {"object": "block_2", "at": "destination"}
+    }
+    raw["task_program"]["program"] = {"inline": program}
+    objective = raw["rl_task"]["reward_composition"]["skills"][0]["objective"]
+    objective["skill_id"] = "place"
+    objective["binding"]["support"] = "block_1"
+    objective["goal"] = {"position": list(target["position"])}
+    if target["kind"] == "scene_relative":
+        objective["goal"].update(reference=target["entity"], frame=target["frame"])
+    raw["rl_task"]["reward_composition"]["skills"] = [
+        {"stage": "stack_block", "objective": objective}
+    ]
+    return path, raw
+
+
+@pytest.mark.parametrize("position", [[0, 0, 1], [0.0, 0.0, 1.0]])
+def test_measured_world_targets_accept_equivalent_integer_and_float_coordinates(
+    position,
+):
+    path, raw = _target_reward_config(
+        {
+            "kind": "pose",
+            "frame": "world",
+            "position": [0.0, 0.0, 1.0],
+            "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+        }
+    )
+    raw["rl_task"]["reward_composition"]["skills"][0]["objective"]["goal"][
+        "position"
+    ] = position
+    cfg = config_to_cfg(raw, source_path=path, _register_env=False)
+    assert (
+        cfg.observations.skill_objective_0.params["objective"]["goal"]["position"]
+        == position
+    )
+
+
+@pytest.mark.parametrize("preserve", [True, False])
+def test_place_at_honors_effective_orientation_option(preserve):
+    path, raw = _target_reward_config(
+        {
+            "kind": "pose",
+            "frame": "world",
+            "position": [0.0, 0.0, 1.0],
+            "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+        }
+    )
+    integration = yaml.safe_load(
+        (path.parent / "task_program/integration.yaml").read_text()
+    )
+    integration["profile"]["skill_options"]["place"][
+        "preserve_current_object_orientation"
+    ] = preserve
+    raw["task_program"]["integration"] = {"inline": integration}
+    cfg = config_to_cfg(raw, source_path=path, _register_env=False)
+    goal = cfg.observations.skill_objective_0.params["objective"]["goal"]
+    if preserve:
+        assert goal.get("preserve_orientation") is True
+        assert "quaternion_xyzw" not in goal
+    else:
+        assert not goal.get("preserve_orientation", False)
+        assert goal["quaternion_xyzw"] == [0.0, 0.0, 0.0, 1.0]
+
+
+def test_program_scene_relative_goal_declares_occurrence_local_reference_snapshot():
+    path, raw = _target_reward_config(
+        {
+            "kind": "scene_relative",
+            "entity": "block_1",
+            "frame": "world_axes",
+            "position": [0.0, 0.0, 0.0],
+            "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+        }
+    )
+    cfg = config_to_cfg(raw, source_path=path, _register_env=False)
+    assert cfg.observations.skill_objective_0.params.get("freeze_reference") is True
+
+
+@pytest.mark.parametrize("reference", ["reference_arm", "reference_tcp"])
+def test_measured_scene_relative_goals_reject_unsupported_nonrigid_frames(
+    reference, tmp_path
+):
+    path, raw = _target_reward_config(
+        {
+            "kind": "scene_relative",
+            "entity": reference,
+            "frame": "parent",
+            "position": [0.0, 0.0, 0.0],
+            "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+        }
+    )
+    integration = yaml.safe_load(
+        (path.parent / "task_program/integration.yaml").read_text()
+    )
+    integration["scene_binding"]["articulations"] = [
+        {"entity_id": "reference_arm", "simulation_uid": "reference_fixture"}
+    ]
+    integration["scene_binding"]["links"] = [
+        {
+            "entity_id": "reference_tcp",
+            "articulation_id": "reference_arm",
+            "native_link_name": "right_link6",
+        }
+    ]
+    raw["task_program"]["integration"] = {"inline": integration}
+    urdf = tmp_path / "reference.urdf"
+    urdf.write_text(
+        '<robot name="reference_fixture"><link name="root"/><link name="right_link6"/>'
+        '<joint name="joint" type="revolute"><parent link="root"/><child link="right_link6"/>'
+        '<axis xyz="0 0 1"/><limit lower="-1" upper="1" effort="1" velocity="1"/></joint></robot>'
+    )
+    physical = yaml.safe_load((path.parent / "env.policy.yaml").read_text())
+    physical["simulation"]["articulation"] = [
+        {"uid": "reference_fixture", "fpath": str(urdf)}
+    ]
+    physical_path = tmp_path / "reference.yaml"
+    physical_path.write_text(yaml.safe_dump(physical))
+    raw["environment"]["component"] = str(physical_path)
+    raw["rl_task"]["reward_composition"]["skills"][0]["objective"]["goal"].pop(
+        "reference"
+    )
+    with pytest.raises(ValueError, match="rigid-object reference"):
+        config_to_cfg(raw, source_path=path, _register_env=False)
+
+
+def test_asset_replacement_rejects_measured_goals_before_reset_event(tmp_path):
+    path, raw = _program_reward_config()
+    physical = yaml.safe_load((path.parent / "env.policy.yaml").read_text())
+    physical["env"]["events"]["replace_goal"] = {
+        "func": "replace_assets_from_group",
+        "mode": "reset",
+        "params": {"entity_cfg": {"uid": "block_2"}, "folder_path": "unused"},
+    }
+    physical_path = tmp_path / "replace.yaml"
+    physical_path.write_text(yaml.safe_dump(physical))
+    raw["environment"]["component"] = str(physical_path)
+    with pytest.raises(ValueError, match="replacement.*measured|measured.*replacement"):
+        config_to_cfg(raw, source_path=path, _register_env=False)
+
+
+def test_multicall_parent_segment_id_is_valid_for_success_and_explicit_rewards(
+    tmp_path,
+):
+    from embodichain.lab.gym.envs.managers.cfg import RewardCfg
+    from embodichain.lab.gym.envs.managers.rewards import program_stage_reward
+    from embodichain.lab.task_program.integrations.progress import (
+        _validate_policy_deployment,
+    )
+
+    path, raw = _program_reward_config()
+    raw["id"] = "MultiCallParentRewardFixture-v1"
+    physical = yaml.safe_load((path.parent / "env.policy.yaml").read_text())
+    physical["env"]["rewards"] = {}
+    physical_path = tmp_path / "multicall.yaml"
+    physical_path.write_text(yaml.safe_dump(physical))
+    raw["environment"]["component"] = str(physical_path)
+    program = yaml.safe_load(
+        (path.parent / "task_program/program.measured.yaml").read_text()
+    )
+    pick, place = program["program"]
+    program["program"] = [
+        {**pick, "segment": "cycle", "steps": [pick["steps"], place["steps"]]}
+    ]
+    raw["task_program"]["program"] = {"inline": program}
+    goals = yaml.safe_load(
+        (
+            _ROOT / "examples/learning/task_program_progress/program_rewards.yaml"
+        ).read_text()
+    )["rewards"]["skills"]
+    raw["rl_task"]["reward_composition"]["skills"] = [
+        {"call_index": i, "objective": item["objective"]}
+        for i, item in enumerate(goals)
+    ]
+    cfg = config_to_cfg(raw, source_path=path)
+    registration = get_env_spec(raw["id"]).task_program_adapter_factory.registration
+    compiled = registration.catalog.preflight(cfg.task_program, strict_contracts=True)
+    parent = next(compiled.iter_segments()).segment_id
+    cfg.rl_task.success["stages"].params["stage"] = parent
+    cfg.rewards.explicit_parent = RewardCfg(
+        func=program_stage_reward,
+        mode="add",
+        weight=2.0,
+        params={"stage": parent, "mode": "first_achievement", "scope": "occurrence"},
+    )
+    result = _validate_policy_deployment(cfg, registration)
+    assert len(next(result.iter_segments()).calls) == 2
+
+
+@pytest.mark.parametrize("declaration", ["omitted", "null"])
+def test_standalone_skill_cannot_be_silently_ignored_without_reward_composition(
+    declaration,
+):
+    raw = yaml.safe_load(_CONFIG.read_text())
+    raw["rl_task"]["skill"] = {
+        "skill_id": "move_joints",
+        "binding": {"robot": "robot", "motion_part": "arm"},
+        "goal": {"positions": [0.0] * 7},
+    }
+    if declaration == "null":
+        raw["rl_task"]["reward_composition"] = None
+    with pytest.raises(ValueError, match="skill.*reward_composition"):
+        config_to_cfg(raw, source_path=_CONFIG, _register_env=False)

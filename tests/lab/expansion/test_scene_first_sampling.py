@@ -419,7 +419,7 @@ def test_scene_first_config_accepts_batch_and_rejects_unknown_phase_fields():
     root = Path(__file__).resolve().parents[3]
     path = (
         root
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/workspace_pose_pick_place/acceptance/scene_first/expansion.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/workspace_pose_pick_place/acceptance/scene_first/expansion.yaml"
     )
     cfg = yaml.safe_load(path.read_text())
     cfg["engine"]["batch_size"] = 8
@@ -443,7 +443,7 @@ def test_robot_anchors_reject_invalid_frame_provenance(invalid, error):
 
     root = Path(__file__).resolve().parents[3]
     path = root / (
-        "extensions/embodichain_tasks/configs/tasks/manipulation/workspace_pose_pick_place/"
+        "embodichain/extensions/tasks/configs/tasks/manipulation/workspace_pose_pick_place/"
         "acceptance/scene_first/expansion.yaml"
     )
     cfg = yaml.safe_load(path.read_text())
@@ -552,7 +552,7 @@ def test_legacy_workspace_strategy_cannot_silently_ignore_new_layout():
 
     path = (
         Path(__file__).resolve().parents[3]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/workspace_pose_pick_place/acceptance/scene_first/expansion.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/workspace_pose_pick_place/acceptance/scene_first/expansion.yaml"
     )
     value = yaml.safe_load(path.read_text())
     value["scene_sampling"]["strategy"] = "workspace_joint"

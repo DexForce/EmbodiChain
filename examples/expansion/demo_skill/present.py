@@ -36,7 +36,7 @@ def prepare(output: Path, *, duration_s: float = 2.0) -> Path:
     )
 
     source = resolve_config_path(
-        "embodichain_tasks/configs/tasks/manipulation/carton_stocking/task.panda.yaml"
+        "embodichain/extensions/tasks/configs/tasks/manipulation/carton_stocking/task.panda.yaml"
     ).resolve()
     base = source.parent
     task = yaml.safe_load(source.read_text())

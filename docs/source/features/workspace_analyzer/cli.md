@@ -31,7 +31,7 @@ including when previewing an existing cache.
 ## Predefined robots (`--robot`)
 
 Use `--robot NAME` to select an installed robot catalog ID. Official concrete
-presets live in `embodichain_robots/`; `embodichain list-robot` lists the IDs,
+presets live in `embodichain/extensions/robots/`; `embodichain list-robot` lists the IDs,
 variants, and default control groups. The preset already defines the URDF,
 control parts, and kinematics solver, so pick the part to analyze with
 `--control-part` (optional; defaults to `left_arm`/`right_arm` or the first

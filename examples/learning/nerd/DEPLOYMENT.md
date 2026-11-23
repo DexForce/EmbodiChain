@@ -125,7 +125,7 @@ from dexsim.engine.newton_physics import (
     ProviderNewtonSolverCfg, RegisteredNewtonSolverCfg,
 )
 from embodichain.lab.sim.cfg import NewtonPhysicsCfg
-from embodichain_solvers.physics.nerd.provider import NeRDProvider
+from embodichain.extensions.solvers.physics.nerd.provider import NeRDProvider
 
 options = {"checkpoint": "outputs/nerd-native/models/cartpole"}
 direct = ProviderNewtonSolverCfg(provider_factory=NeRDProvider, options=options)

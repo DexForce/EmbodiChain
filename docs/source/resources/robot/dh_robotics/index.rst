@@ -2,7 +2,7 @@ DH-Robotics
 ===========
 
 Model-owned assets and any standalone configurations live under
-``embodichain_robots.dh_robotics``. Asset availability does not imply a
+``embodichain.extensions.robots.dh_robotics``. Asset availability does not imply a
 standalone robot preset or a grasping capability.
 
 .. list-table::

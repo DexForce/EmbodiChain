@@ -2,7 +2,7 @@ Flexiv
 ======
 
 Official Flexiv robot configurations live in the
-``embodichain_robots.flexiv`` manufacturer namespace.
+``embodichain.extensions.robots.flexiv`` manufacturer namespace.
 
 .. list-table::
    :class: robot-catalog

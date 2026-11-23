@@ -3,7 +3,7 @@ Classic Control Tasks
 
 Classic-control tasks provide compact environments for validating learning
 algorithms and backend behavior. Their configurations live under
-``embodichain_tasks/configs/tasks/classic_control``.
+``embodichain/extensions/tasks/configs/tasks/classic_control``.
 
 .. list-table::
    :header-rows: 1
@@ -35,4 +35,4 @@ Gym configuration file.
 .. code-block:: bash
 
    embodichain run-task \
-       --gym_config embodichain_tasks/configs/tasks/classic_control/cart_pole/env.yaml
+       --gym_config embodichain/extensions/tasks/configs/tasks/classic_control/cart_pole/env.yaml

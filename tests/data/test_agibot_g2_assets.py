@@ -26,7 +26,7 @@ from zipfile import ZipFile
 
 import pytest
 
-from embodichain_robots.agibot.g2 import assets
+from embodichain.extensions.robots.agibot.g2 import assets
 
 pytestmark = pytest.mark.no_sim
 

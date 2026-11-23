@@ -286,7 +286,7 @@
       ],
       "evidence": [
         {
-          "path": "extensions/embodichain_benchmarks/motion_generation/__init__.py",
+          "path": "embodichain/extensions/benchmarks/motion_generation/__init__.py",
           "symbol": "<module>",
           "start_line": 17,
           "end_line": 21,
@@ -573,6 +573,56 @@
       "details": "The unified embodichain command resolves a requested subcommand and loads its handler lazily. Use the CLI reference to find launch options for environments, training, assets, and other tools; task behavior stays in the handler-owned subsystem."
     },
     {
+      "id": "mcp",
+      "label": "EmbodiChain MCP",
+      "kind": "module",
+      "topic_ids": [
+        "robot-system"
+      ],
+      "summary": "Reads measured robot joint positions and velocities from an existing DexSim session over stdio.",
+      "boundaries": [
+        "The DexSim host owns the World and executes queries on the World owner thread."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/mcp/server.py",
+          "symbol": "serve",
+          "start_line": 38,
+          "end_line": 39,
+          "excerpt": "    with Session.connect(\n        session_id, directory=directory, client={\"kind\": \"embodichain-mcp\"}"
+        },
+        {
+          "path": "embodichain/mcp/tools/robot.py",
+          "symbol": "register_robot_tools.embodichain_get_robot_state",
+          "start_line": 48,
+          "end_line": 49,
+          "excerpt": "            return session.invoke(\n                \"embodichain.lab.sim.dexsim_session.robot_state\","
+        },
+        {
+          "path": "embodichain/lab/sim/dexsim_session/robot_state.py",
+          "symbol": "read_robot_state",
+          "start_line": 96,
+          "end_line": 97,
+          "excerpt": "    names, indices, units = _select_dofs(handle.joint_dof_layout, parts[control_part])\n    positions = np.asarray(handle.get_current_qpos()).reshape(-1)[indices]"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "guides/mcp",
+          "label": "Connect a stdio client"
+        },
+        {
+          "docname": "features/mcp/index",
+          "label": "EmbodiChain MCP tool contract"
+        },
+        {
+          "docname": "api_reference/embodichain/embodichain.mcp",
+          "label": "Python API"
+        }
+      ],
+      "details": "The CLI connects to an explicit DexSim Runtime session. The stdio server registers robot tools that invoke the EmbodiChain adapter in the World host. Native DexSim MCP clients can attach separately to the same session. The host resolves the live articulation and returns a detached measurement in control-part order."
+    },
+    {
       "id": "tasks",
       "label": "Official tasks",
       "kind": "module",
@@ -585,7 +635,7 @@
       ],
       "evidence": [
         {
-          "path": "extensions/embodichain_tasks/embodichain_tasks/__init__.py",
+          "path": "embodichain/extensions/tasks/__init__.py",
           "symbol": "<module>",
           "start_line": 17,
           "end_line": 23,
@@ -598,7 +648,7 @@
           "label": "Supported tasks"
         }
       ],
-      "details": "Official tasks are bundled in the same distribution under the embodichain_tasks import package. Import-backed tasks register during discovery, while supported configuration-defined Task Programs register when their Gym configuration is loaded."
+      "details": "Official tasks are bundled in the same distribution under the embodichain.extensions.tasks import package. Import-backed tasks register during discovery, while supported configuration-defined Task Programs register when their Gym configuration is loaded."
     },
     {
       "id": "components",
@@ -3397,14 +3447,14 @@
         "neural-dynamics"
       ],
       "summary": "Bundles the causal NeRD network, physical codec, trajectory windows and supervised recipe in the main wheel.",
-      "details": "embodichain_models.dynamics.nerd owns the concrete model, portable checkpoints, physical representations, HDF5 windows and installable SL recipe. Generic MLP/normalization and supervised orchestration stay in core. The model extension imports neither the showcase nor simulation; collection, historical training and reference research belong to the example.",
+      "details": "embodichain.extensions.models.dynamics.nerd owns the concrete model, portable checkpoints, physical representations, HDF5 windows and installable SL recipe. Generic MLP/normalization and supervised orchestration stay in core. The model extension imports neither the showcase nor simulation; collection, historical training and reference research belong to the example.",
       "boundaries": [
         "The core does not import concrete model implementations.",
         "Data/model/reference-asset payloads are external resources; numerical and physical identities remain explicit."
       ],
       "evidence": [
         {
-          "path": "extensions/embodichain_models/embodichain_models/dynamics/nerd/model.py",
+          "path": "embodichain/extensions/models/dynamics/nerd/model.py",
           "symbol": "NeRDModel",
           "start_line": 201,
           "end_line": 201,
@@ -3488,7 +3538,7 @@
         "robot-world-model"
       ],
       "summary": "Owns action-conditioned robot-state prediction, differentiable rollout objectives and bounded transition replay.",
-      "details": "embodichain_models.dynamics.rwm owns frame-local state increments and SO(3) integration, graph-connected prediction state, autoregressive objectives and fixed-byte-budget replay. Its installable build_rwm_trainer recipe composes these contracts with the shared SL learner and offline trainer. The learning/rwm example owns controlled corpus generation and fitting qualification.",
+      "details": "embodichain.extensions.models.dynamics.rwm owns frame-local state increments and SO(3) integration, graph-connected prediction state, autoregressive objectives and fixed-byte-budget replay. Its installable build_rwm_trainer recipe composes these contracts with the shared SL learner and offline trainer. The learning/rwm example owns controlled corpus generation and fitting qualification.",
       "boundaries": [
         "The model family imports neither simulation nor example helpers; acquisition and execution remain caller-owned.",
         "Fixed control period, action semantics and ordered joints bind model and checkpoint identity.",
@@ -3496,35 +3546,35 @@
       ],
       "evidence": [
         {
-          "path": "extensions/embodichain_models/embodichain_models/dynamics/rwm/model.py",
+          "path": "embodichain/extensions/models/dynamics/rwm/model.py",
           "symbol": "RobotWorldModel",
           "start_line": 73,
           "end_line": 73,
           "excerpt": "class RobotWorldModel(nn.Module):"
         },
         {
-          "path": "extensions/embodichain_models/embodichain_models/dynamics/rwm/predictor.py",
+          "path": "embodichain/extensions/models/dynamics/rwm/predictor.py",
           "symbol": "RWMPredictor",
           "start_line": 31,
           "end_line": 31,
           "excerpt": "class RWMPredictor:"
         },
         {
-          "path": "extensions/embodichain_models/embodichain_models/dynamics/rwm/replay.py",
+          "path": "embodichain/extensions/models/dynamics/rwm/replay.py",
           "symbol": "TransitionReplay",
           "start_line": 35,
           "end_line": 35,
           "excerpt": "class TransitionReplay:"
         },
         {
-          "path": "extensions/embodichain_models/embodichain_models/dynamics/rwm/supervised.py",
+          "path": "embodichain/extensions/models/dynamics/rwm/supervised.py",
           "symbol": "RobotWorldModelObjective",
           "start_line": 59,
           "end_line": 59,
           "excerpt": "class RobotWorldModelObjective:"
         },
         {
-          "path": "extensions/embodichain_models/embodichain_models/dynamics/rwm/sl_recipe.py",
+          "path": "embodichain/extensions/models/dynamics/rwm/sl_recipe.py",
           "symbol": "build_rwm_trainer",
           "start_line": 39,
           "end_line": 39,
@@ -3539,6 +3589,45 @@
         {
           "docname": "features/neural_dynamics/rwm",
           "label": "RWM principles and usage"
+        }
+      ]
+    },
+    {
+      "id": "visual-world-model",
+      "label": "LeWM visual world model",
+      "kind": "package",
+      "topic_ids": [
+        "visual-world-model"
+      ],
+      "summary": "Predicts action-conditioned visual latents for image-goal planning.",
+      "details": "LeWM encodes observed RGB histories and predicts future latents under candidate actions. The CEM planner scores candidates against an encoded goal image. The Cube example owns DexUni simulation, native camera collection and closed-loop evaluation.",
+      "boundaries": [
+        "The model and planner operate on tensors supplied by the caller. The example owns rendering and execution."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/extensions/models/dynamics/lewm/model.py",
+          "symbol": "LeWM",
+          "start_line": 101,
+          "end_line": 101,
+          "excerpt": "class LeWM(nn.Module):"
+        },
+        {
+          "path": "embodichain/extensions/models/dynamics/lewm/planner.py",
+          "symbol": "LeWMCEMPlanner",
+          "start_line": 74,
+          "end_line": 74,
+          "excerpt": "class LeWMCEMPlanner:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/neural_dynamics/lewm",
+          "label": "LeWM model and Cube workflow"
+        },
+        {
+          "docname": "api_reference/lewm",
+          "label": "LeWM API"
         }
       ]
     },
@@ -4113,6 +4202,31 @@
       ]
     },
     {
+      "id": "cli-calls-mcp",
+      "source": "cli",
+      "target": "mcp",
+      "relation": "calls",
+      "description": "Dispatch the mcp subcommand to the stdio MCP server.",
+      "scope": "Lazy command dispatch when the user selects embodichain mcp.",
+      "provenance": "source-reviewed",
+      "evidence": [
+        {
+          "path": "embodichain/cli/main.py",
+          "symbol": "<module>",
+          "start_line": 41,
+          "end_line": 42,
+          "excerpt": "        name=\"mcp\",\n        target=\"embodichain.cli.mcp:main\","
+        },
+        {
+          "path": "embodichain/cli/main.py",
+          "symbol": "main",
+          "start_line": 267,
+          "end_line": 268,
+          "excerpt": "    handler = _load_handler(command.target)\n    handler(arguments[1:])"
+        }
+      ]
+    },
+    {
       "id": "cli-calls-env-launcher",
       "source": "cli",
       "target": "env-launcher",
@@ -4208,7 +4322,7 @@
           "symbol": "<document>",
           "start_line": 79,
           "end_line": 80,
-          "excerpt": "[project.entry-points.\"embodichain.tasks\"]\nembodichain_tasks = \"embodichain_tasks\""
+          "excerpt": "[project.entry-points.\"embodichain.tasks\"]\nofficial_tasks = \"embodichain.extensions.tasks\""
         },
         {
           "path": "embodichain/lab/gym/utils/registration.py",
@@ -4222,14 +4336,7 @@
           "symbol": "discover_task_packages",
           "start_line": 449,
           "end_line": 449,
-          "excerpt": "            _import_task_package(ep)"
-        },
-        {
-          "path": "embodichain/lab/gym/utils/registration.py",
-          "symbol": "_import_task_package",
-          "start_line": 400,
-          "end_line": 402,
-          "excerpt": "    module_name = ep.value\n    top_level = module_name.partition(\".\")[0]\n    mod = importlib.import_module(module_name)"
+          "excerpt": "            importlib.import_module(ep.value)"
         }
       ]
     },
@@ -5927,7 +6034,7 @@
           "symbol": "_run_motion_generation_cli",
           "start_line": 57,
           "end_line": 59,
-          "excerpt": "    from embodichain_benchmarks.motion_generation.cli import run_from_args\n\n    run_from_args(args)"
+          "excerpt": "    from embodichain.extensions.benchmarks.motion_generation.cli import run_from_args\n\n    run_from_args(args)"
         }
       ]
     },
@@ -5941,11 +6048,11 @@
       "scope": "BenchmarkRunner._create_simulation.",
       "evidence": [
         {
-          "path": "extensions/embodichain_benchmarks/motion_generation/runner.py",
+          "path": "embodichain/extensions/benchmarks/motion_generation/runner.py",
           "symbol": "BenchmarkRunner._create_simulation",
           "start_line": 276,
-          "end_line": 286,
-          "excerpt": "        sim = SimulationManager(\n            SimulationManagerCfg(\n                headless=self.headless,\n                sim_device=str(self.device),\n                num_envs=batch_size,\n                arena_space=2.0,\n                physics_cfg=DefaultPhysicsCfg(\n                    num_substeps=self.suite.protocol.physics_substeps\n                ),\n            )\n        )"
+          "end_line": 287,
+          "excerpt": "        sim = SimulationManager(\n            SimulationManagerCfg(\n                headless=self.headless,\n                sim_device=str(self.device),\n                num_envs=batch_size,\n                arena_space=2.0,\n                physics_cfg=DefaultPhysicsCfg(\n                    num_substeps=self.suite.protocol.physics_substeps\n                ),\n            ),\n            requires_native_renderer=not self.headless or self.video.enabled,\n        )"
         }
       ]
     },
@@ -5959,7 +6066,7 @@
       "scope": "The installable NeRD supervised recipe only; the core does not resolve or import model families eagerly.",
       "evidence": [
         {
-          "path": "extensions/embodichain_models/embodichain_models/dynamics/nerd/sl_recipe.py",
+          "path": "embodichain/extensions/models/dynamics/nerd/sl_recipe.py",
           "symbol": "build_supervised_trainer",
           "start_line": 167,
           "end_line": 167,
@@ -5995,14 +6102,14 @@
       "scope": "The installable RWM supervised recipe only; acquisition and simulation are outside this factory, and the core does not import the model family.",
       "evidence": [
         {
-          "path": "extensions/embodichain_models/embodichain_models/dynamics/rwm/sl_recipe.py",
+          "path": "embodichain/extensions/models/dynamics/rwm/sl_recipe.py",
           "symbol": "build_rwm_trainer",
           "start_line": 108,
           "end_line": 108,
           "excerpt": "    learner = SupervisedLearner(model, objective, optimizer, max_grad_norm=maximum_norm)"
         },
         {
-          "path": "extensions/embodichain_models/embodichain_models/dynamics/rwm/sl_recipe.py",
+          "path": "embodichain/extensions/models/dynamics/rwm/sl_recipe.py",
           "symbol": "build_rwm_trainer",
           "start_line": 138,
           "end_line": 138,
@@ -6036,6 +6143,7 @@
       "description": "Module responsibilities and direct dependencies, from task entry points to motion execution.",
       "node_ids": [
         "cli",
+        "mcp",
         "env-launcher",
         "task-discovery",
         "tasks",
@@ -6125,6 +6233,7 @@
         "supervised-learning",
         "nerd-showcase",
         "robot-world-model",
+        "visual-world-model",
         "task-spec",
         "task-engine"
       ],
@@ -6141,6 +6250,7 @@
         "bridge-holds-executor",
         "env-inherits-base",
         "base-constructs-simulation",
+        "cli-calls-mcp",
         "cli-calls-env-launcher",
         "cli-calls-training-assembly",
         "launcher-calls-discovery",
@@ -6224,6 +6334,7 @@
           "label": "Entry points & environments",
           "node_ids": [
             "cli",
+            "mcp",
             "env-launcher",
             "task-discovery",
             "tasks",
@@ -6351,7 +6462,8 @@
             "neural-dynamics",
             "supervised-learning",
             "nerd-showcase",
-            "robot-world-model"
+            "robot-world-model",
+            "visual-world-model"
           ]
         },
         {
@@ -6695,7 +6807,8 @@
         "supervised-learning",
         "neural-dynamics",
         "nerd-showcase",
-        "robot-world-model"
+        "robot-world-model",
+        "visual-world-model"
       ],
       "edge_ids": [
         "cli-calls-training-assembly",
@@ -6769,7 +6882,8 @@
             "supervised-learning",
             "neural-dynamics",
             "nerd-showcase",
-            "robot-world-model"
+            "robot-world-model",
+            "visual-world-model"
           ]
         },
         {

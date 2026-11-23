@@ -66,6 +66,9 @@ _TASK_RUNTIME_SERVICE_FIELDS = _RUNTIME_SERVICE_FIELDS | frozenset(
 )
 _GRASP_GENERATOR_OVERRIDE_FIELDS = frozenset(
     {
+        "angle_weight",
+        "center_weight",
+        "opening_weight",
         "sample_count",
         "approach_direction_samples",
         "point_spacing",

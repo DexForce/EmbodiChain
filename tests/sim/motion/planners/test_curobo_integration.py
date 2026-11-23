@@ -24,6 +24,8 @@ verifies the resulting trajectories and dynamic obstacle updates.
 
 from __future__ import annotations
 
+import math
+
 from collections.abc import Callable
 
 import pytest
@@ -39,7 +41,7 @@ pytestmark = [pytest.mark.requires_sim, pytest.mark.gpu]
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg  # noqa: E402
 from embodichain.lab.sim.objects import RigidObjectCfg  # noqa: E402
-from embodichain_robots import FrankaPandaCfg  # noqa: E402
+from embodichain.extensions.robots import FrankaPandaCfg  # noqa: E402
 from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg  # noqa: E402
 from embodichain.lab.sim.shapes import CubeCfg  # noqa: E402
 from embodichain.lab.sim.motion.motion_generator import (
@@ -50,6 +52,7 @@ from embodichain.lab.sim.motion.motion_generator import (
 from embodichain.lab.sim.motion.planners import PlanState
 from embodichain.lab.sim.motion.planners.utils import MoveType
 from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (  # noqa: E402
+    CuroboPoseConstraintCfg,
     CuroboPlanOptions,
     CuroboPlanner,
     CuroboPlannerCfg,
@@ -67,8 +70,14 @@ DEMO_BLOCK_POS = [0.45, 0.0, 0.18]
 JOINT_1_TARGET_DELTA_RAD = 0.12
 
 
-def _make_sim_robot(num_envs: int = 1, gravity: list[float] | None = None):
-    sim_cfg = SimulationManagerCfg(headless=True, sim_device="cuda", num_envs=num_envs)
+def _make_sim_robot(
+    num_envs: int = 1,
+    gravity: list[float] | None = None,
+    sim_device: str = "cuda",
+):
+    sim_cfg = SimulationManagerCfg(
+        headless=True, sim_device=sim_device, num_envs=num_envs
+    )
     if gravity is not None:
         sim_cfg.physics_cfg.gravity = gravity
     sim = SimulationManager(sim_cfg)
@@ -89,6 +98,170 @@ def _make_sim_robot(num_envs: int = 1, gravity: list[float] | None = None):
     )
     sim.prepare()
     return sim, robot, block
+
+
+@pytest.mark.parametrize(
+    ("num_envs", "frame", "cuda_graph", "sim_device", "kind"),
+    [
+        (1, "goal", False, "cuda", "line"),
+        (2, "base", False, "cuda", "line"),
+        (1, "goal", True, "cuda", "line"),
+        (1, "goal", False, "cpu", "line"),
+        (1, "goal", False, "cuda", "plane"),
+        (1, "base", False, "cuda", "orientation"),
+        (1, "goal", True, "cuda", "offset_tcp"),
+    ],
+)
+def test_curobo_pose_path_checks_geometry_and_restores_cached_planner(
+    num_envs, frame, cuda_graph, sim_device, kind
+):
+    """Native constrained paths meet TCP tolerances without leaking into later calls."""
+    sim, robot, block = _make_sim_robot(num_envs=num_envs, sim_device=sim_device)
+    mg = None
+    try:
+        if kind == "offset_tcp":
+            offset = torch.eye(4)
+            c = math.sqrt(0.5)
+            offset[:3, :3] = torch.tensor([[c, 0.0, c], [0.0, 1.0, 0.0], [-c, 0.0, c]])
+            offset[2, 3] = 0.2
+            robot._solvers[CONTROL_PART].set_tcp(offset.numpy())
+        mg = MotionGenerator(
+            MotionGenCfg(
+                planner_cfg=CuroboPlannerCfg(
+                    robot_uid=ROBOT_UID,
+                    # Isolate the path contract; obstacle routing has separate
+                    # live coverage below and in the comparison example.
+                    world=CuroboWorldCfg(),
+                    preserve_plan_samples=True,
+                    use_cuda_graph=cuda_graph,
+                    warmup_iterations=1 if cuda_graph else 0,
+                )
+            )
+        )
+        start = robot.get_qpos(name=CONTROL_PART)
+        start_pose = robot.compute_fk(qpos=start, name=CONTROL_PART, to_matrix=True)
+        target = start_pose.clone()
+        direction = start_pose[0, :3, 2]
+        target[:, :3, 3] -= direction * 0.08
+        constraint = CuroboPoseConstraintCfg.linear_motion(
+            frame=frame,
+            direction=(0.0, 0.0, 1.0) if frame == "goal" else tuple(direction.tolist()),
+            position_tolerance=0.005,
+            orientation_tolerance=0.05,
+        )
+        if kind == "offset_tcp":
+            constraint.position_scale = 2.0
+            constraint.rotation_scale = 3.0
+        if kind == "plane":
+            constraint = CuroboPoseConstraintCfg(
+                path_position_projector=(
+                    (1.0, 0.0, 0.0),
+                    (0.0, 0.0, 0.0),
+                    (0.0, 0.0, 0.0),
+                ),
+                frame=frame,
+            )
+        elif kind == "orientation":
+            constraint = CuroboPoseConstraintCfg(
+                path_rotation_projector=(
+                    (1.0, 0.0, 0.0),
+                    (0.0, 1.0, 0.0),
+                    (0.0, 0.0, 1.0),
+                ),
+                frame=frame,
+            )
+        result = mg.generate(
+            [PlanState.from_xpos(target)],
+            MotionGenOptions(
+                start_qpos=start,
+                control_part=CONTROL_PART,
+                plan_opts=CuroboPlanOptions(path_constraints=[constraint]),
+            ),
+        )
+        assert result.success.tolist() == [True] * num_envs
+        tcp = robot.compute_batch_fk(
+            qpos=result.positions, name=CONTROL_PART, to_matrix=True
+        )
+        if kind == "offset_tcp":
+            backend = next(iter(mg.planner._backend_cache.values()))
+            assert backend.tool_frame == "embodichain_tcp"
+            assert backend.profile.tool_frame_to_tcp is None
+            state = mg.planner._to_curobo_joint_state(
+                result.positions.reshape(-1, result.positions.shape[-1]), backend
+            )
+            native_tcp = (
+                backend.planner.compute_kinematics(state)
+                .tool_poses.get_link_pose(backend.tool_frame)
+                .get_matrix()
+            )
+            torch.testing.assert_close(
+                native_tcp.reshape_as(tcp), tcp, atol=3e-5, rtol=1e-4
+            )
+        delta = tcp[:, :, :3, 3] - target[:, None, :3, 3]
+        if kind in ("line", "offset_tcp"):
+            lateral = delta - (delta * direction).sum(-1, keepdim=True) * direction
+            assert (
+                float(torch.linalg.vector_norm(lateral, dim=-1).max())
+                <= constraint.position_tolerance
+            )
+        elif kind == "plane":
+            # The target TCP X axis is the authored plane normal.
+            normal_error = (delta * target[:, None, :3, 0]).sum(-1).abs()
+            assert float(normal_error.max()) <= constraint.position_tolerance
+        rotation_cosine = (
+            (tcp[:, :, :3, :3] * target[:, None, :3, :3]).sum((-2, -1)) - 1
+        ) / 2
+        if kind != "plane":
+            assert float(rotation_cosine.min()) >= math.cos(
+                constraint.orientation_tolerance
+            )
+        if num_envs == 2:
+            # Only row one starts outside its requested line. It must retain
+            # its start hold without invalidating row zero's valid trajectory.
+            invalid = target.clone()
+            perpendicular = torch.linalg.cross(
+                direction, direction.new_tensor([1.0, 0.0, 0.0])
+            )
+            invalid[1, :3, 3] += perpendicular * 0.08
+            rejected = mg.generate(
+                [PlanState.from_xpos(invalid)],
+                MotionGenOptions(
+                    start_qpos=start,
+                    control_part=CONTROL_PART,
+                    plan_opts=CuroboPlanOptions(path_constraints=[constraint]),
+                ),
+            )
+            assert rejected.success.tolist() == [True, False]
+            torch.testing.assert_close(
+                rejected.positions[1], start[1].expand_as(rejected.positions[1])
+            )
+        # A subsequent diagonal move is incompatible with the old line. It must
+        # succeed through the same cached backend with ordinary options.
+        target[:, 1, 3] += 0.08
+        yaw = 0.15
+        target[:, :3, :3] = (
+            target.new_tensor(
+                [
+                    [math.cos(yaw), -math.sin(yaw), 0.0],
+                    [math.sin(yaw), math.cos(yaw), 0.0],
+                    [0.0, 0.0, 1.0],
+                ]
+            )
+            @ target[:, :3, :3]
+        )
+        free = mg.generate(
+            [PlanState.from_xpos(target)],
+            MotionGenOptions(
+                start_qpos=start,
+                control_part=CONTROL_PART,
+            ),
+        )
+        assert free.success.tolist() == [True] * num_envs
+    finally:
+        if mg is not None:
+            mg.planner.close()
+        sim.destroy()
+        SimulationManager.flush_cleanup_queue()
 
 
 def test_curobo_v2_plans_around_a_static_cuboid_obstacle():

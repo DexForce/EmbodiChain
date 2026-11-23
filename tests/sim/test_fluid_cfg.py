@@ -444,7 +444,7 @@ def _fluid_manager_for_renderer(renderer):
 
 def test_fluid_joint_ownership_selects_finalized_topology_and_rebuilds(monkeypatch):
     from types import SimpleNamespace
-    from embodichain.lab.sim._runtime_controls import _DexUniFluidJointOwnership
+    from embodichain.lab.sim._runtime_controls import _DexUniAllJointOwnership
 
     cfg = SimpleNamespace(
         mujoco_articulations=None, mujoco_articulation_paths=None, mujoco_joints=None
@@ -454,7 +454,7 @@ def test_fluid_joint_ownership_selects_finalized_topology_and_rebuilds(monkeypat
         "dexsim.engine.newton_physics.backend_registry.get_newton_backend",
         lambda world: backend,
     )
-    control = _DexUniFluidJointOwnership()
+    control = _DexUniAllJointOwnership()
     result = SimpleNamespace(world=object())
     control.initialize_model(SimpleNamespace(joint_count=3), result)
     assert cfg.mujoco_joints == (0, 1, 2)

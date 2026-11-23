@@ -1106,3 +1106,63 @@ def qualified_support_heights(
     from embodichain.compute.geometry.contact_support import contact_support_heights
 
     return contact_support_heights(supported, observation, like)
+
+
+class _BatchedSupportWitness:
+    """Retain measured support while both physical poses remain unchanged.
+
+    This is the batched counterpart of ContactWitness. Empty sleeping-body
+    reports do not revoke a positive patch while its source geometry persists.
+    Evaluation is pure; the host explicitly commits accepted control boundaries.
+    """
+
+    def __init__(
+        self, count: int, device: torch.device | str, tolerance: float = 1e-4
+    ) -> None:
+        self.tolerance = tolerance
+        self.known = torch.zeros(count, device=device, dtype=torch.bool)
+        self.object_pose = torch.zeros(count, 4, 4, device=device)
+        self.reference_pose = torch.zeros_like(self.object_pose)
+
+    def copy_from(self, other: _BatchedSupportWitness) -> None:
+        """Copy a bounded witness proposal without fabricating contact samples."""
+        self.known.copy_(other.known)
+        self.object_pose.copy_(other.object_pose)
+        self.reference_pose.copy_(other.reference_pose)
+
+    def evaluate(
+        self,
+        positive: torch.Tensor,
+        valid: torch.Tensor,
+        object_pose: torch.Tensor,
+        reference_pose: torch.Tensor,
+    ) -> torch.Tensor:
+        finite = torch.isfinite(object_pose).all(dim=(1, 2)) & torch.isfinite(
+            reference_pose
+        ).all(dim=(1, 2))
+        unchanged = (
+            (object_pose - self.object_pose).abs().amax(dim=(1, 2)) <= self.tolerance
+        ) & (
+            (reference_pose - self.reference_pose).abs().amax(dim=(1, 2))
+            <= self.tolerance
+        )
+        return valid & finite & (positive | (self.known & unchanged))
+
+    def advance(
+        self,
+        positive: torch.Tensor,
+        valid: torch.Tensor,
+        object_pose: torch.Tensor,
+        reference_pose: torch.Tensor,
+    ) -> None:
+        self.known.copy_(self.evaluate(positive, valid, object_pose, reference_pose))
+        accept = positive & valid
+        self.object_pose.copy_(
+            torch.where(accept[:, None, None], object_pose, self.object_pose)
+        )
+        self.reference_pose.copy_(
+            torch.where(accept[:, None, None], reference_pose, self.reference_pose)
+        )
+
+    def reset(self, env_ids: Sequence[int] | torch.Tensor | None = None) -> None:
+        self.known[slice(None) if env_ids is None else env_ids] = False

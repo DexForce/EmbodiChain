@@ -174,7 +174,7 @@ def _run_episode() -> dict[str, Any]:
     execute_init_hooks()
     source = (
         _REPOSITORY_ROOT
-        / "extensions/embodichain_tasks/configs/tasks/manipulation"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation"
         / "drawer_storage"
         / "task.ur5.long_horizon.yaml"
     )

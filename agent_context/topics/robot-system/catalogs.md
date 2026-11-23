@@ -1,7 +1,7 @@
 # Robot catalogs
 
 Catalog selection and display metadata are owned by `embodichain/robot_registry.py`,
-`embodichain/cli/list_robot.py` and `extensions/embodichain_robots/_catalog.py`.
+`embodichain/cli/list_robot.py` and `embodichain/extensions/robots/_catalog.py`.
 For runtime configuration, return to [robot-system](robot-system.md).
 
 The `embodichain.robots` entry points provide lightweight catalog mappings from
@@ -69,7 +69,7 @@ existing construction behavior; `default_variant` remains display metadata.
 
 ## Locomotion model profiles
 
-The locomotion catalog IDs are `UnitreeGo1`, `UnitreeGo2`, `UnitreeG1`,
+The JSON-backed locomotion catalog IDs are `UnitreeGo1`, `UnitreeGo2`, `UnitreeG1`,
 `UnitreeH1_2`, `ANYmalC` and `MicroDuck`. They select the bundled simulation
 assets, including the 29-joint G1 and 27-joint H1_2 models, through ordinary
 `RobotCfg` subclasses. Model descriptions and catalog listing remain independent
@@ -93,6 +93,18 @@ ambiguity validation remain unchanged. Keep source-ordered `asset.init_qpos`
 separate from `robot.joint_names` / `robot.default_joint_position`. These are
 simulation PD presets, without external learned actuator implementations.
 
+RoboParty presets read joint metadata from their URDFs or a caller-selected
+USD articulation after resolving the asset path. Exact joint names align
+the reset pose with the finalized backend layout and let caller drive rules
+override selected preset joints. The hand presets constrain thumb travel to
+the range shared with the source follower.
+`RoboPartyRPO` and `RoboPartyRP1` expose floating-base `locomotion` groups.
+The articulated RP1 variant exposes independent `left_eef` and `right_eef`
+commands and preserves passive mimic followers. `RoboPartyRPHand` derives
+standalone hands from the same RP1 archive and uses an `eef` group on each side.
+See the [RoboParty model pages](../../../docs/source/resources/robot/roboparty/index.rst)
+for variant defaults and asset provenance.
+
 ## Model-specific calibration
 
 Concrete defaults remain in each vendor/model package, with asset provenance and
@@ -114,7 +126,7 @@ one. Source URDFs, runtime joint names and PK chains must remain aligned.
 
 AgiBot G2 uses seed-local SRS search with its original 18 mm elbow offset and
 mounting-frame TCPs on CPU/CUDA. Its preset derives geometry from the URDF; see
-the [G2 model notes](../../../extensions/embodichain_robots/agibot/g2/README.md)
+the [G2 model notes](../../../embodichain/extensions/robots/agibot/g2/README.md)
 before introducing a legacy SRS DH calibration.
 
 Marvin catalog configs preserve source mass, inertia and COM. The bundled

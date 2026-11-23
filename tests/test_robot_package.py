@@ -25,17 +25,16 @@ import sys
 from setuptools import Distribution
 from setuptools.command.build_py import build_py
 
-from setup import get_package_data, get_package_dir, get_packages
+from setup import get_package_data, get_packages
 
 
 def test_w1_script_resolves_core_and_robots_without_editable_install(
     tmp_path: Path,
 ) -> None:
-    """Standalone startup finds both source trees without editable finders."""
+    """Standalone startup finds the source package without an editable install."""
     root = Path(__file__).resolve().parents[1]
     script = """
 import importlib.abc
-import importlib.machinery
 from pathlib import Path
 import runpy
 import sys
@@ -49,17 +48,15 @@ class CoreDiscovered(Exception):
 
 class CoreProbe(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname == 'embodichain':
-            spec = importlib.machinery.PathFinder.find_spec(fullname, sys.path)
-            assert spec is not None, 'standalone script cannot find the core package'
-            assert Path(spec.origin) == root / 'embodichain/__init__.py'
-            robot = sys.modules['embodichain_robots']
-            assert Path(robot.__file__) == root / 'extensions/embodichain_robots/__init__.py'
+        if fullname == 'embodichain.lab.sim':
+            assert Path(sys.modules['embodichain'].__file__) == root / 'embodichain/__init__.py'
+            robot = sys.modules['embodichain.extensions.robots']
+            assert Path(robot.__file__) == root / 'embodichain/extensions/robots/__init__.py'
             raise CoreDiscovered
 
 sys.meta_path.insert(0, CoreProbe())
 try:
-    runpy.run_path(str(root / 'extensions/embodichain_robots/dexforce/w1/cfg.py'), run_name='__main__')
+    runpy.run_path(str(root / 'embodichain/extensions/robots/dexforce/w1/cfg.py'), run_name='__main__')
 except CoreDiscovered:
     pass
 else:
@@ -79,15 +76,18 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
     packages = [
         name
         for name in get_packages()
-        if name == "embodichain"
+        if name in {"embodichain", "embodichain.extensions"}
         or name.startswith(
-            ("embodichain_robots", "embodichain.lab.sim.robots", "embodichain.data")
+            (
+                "embodichain.extensions.robots",
+                "embodichain.lab.sim.robots",
+                "embodichain.data",
+            )
         )
     ]
     distribution = Distribution(
         {
             "packages": packages,
-            "package_dir": get_package_dir(),
             "package_data": get_package_data(),
             "include_package_data": False,
             "script_name": "setup.py",
@@ -100,33 +100,38 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
     output = Path(command.build_lib)
 
     for relative in (
-        "embodichain_robots/__init__.py",
-        "embodichain_robots/_catalog.py",
-        "embodichain_robots/_asset_catalog.py",
-        "embodichain_robots/agibot/g2/cfg.py",
-        "embodichain_robots/agibot/g2/assets.py",
-        "embodichain_robots/agibot/g2/g2.urdf",
-        "embodichain_robots/agibot/g2/source.lock.json",
-        "embodichain_robots/agibot/g2/LICENSE",
-        "embodichain_robots/agibot/g2/preview.png",
-        "embodichain_robots/agibot/g2/preview.render.json",
-        "embodichain_robots/i2rt/yam/cfg.py",
-        "embodichain_robots/i2rt/yam/assets.py",
-        "embodichain_robots/_locomotion.py",
-        "embodichain_robots/locomotion_profiles.py",
-        "embodichain_robots/agibot/g1/assets.py",
-        "embodichain_robots/agibot/g1/cfg.py",
-        "embodichain_robots/agibot/g1/README.md",
-        "embodichain_robots/franka/assets.py",
-        "embodichain_robots/universal_robots/assets.py",
-        "embodichain_robots/dexforce/w1/assets.py",
-        "embodichain_robots/the_robot_studio/so101/assets.py",
-        "embodichain_robots/franka/panda.py",
-        "embodichain_robots/universal_robots/ur_robot.py",
-        "embodichain_robots/flexiv/rizon4s/cfg.py",
-        "embodichain_robots/the_robot_studio/so101/cfg.py",
-        "embodichain_robots/dexforce/w1/cfg.py",
-        "embodichain_robots/dexforce/w1/types.py",
+        "embodichain/extensions/robots/__init__.py",
+        "embodichain/extensions/robots/_catalog.py",
+        "embodichain/extensions/robots/_asset_catalog.py",
+        "embodichain/extensions/robots/agibot/g2/cfg.py",
+        "embodichain/extensions/robots/agibot/g2/assets.py",
+        "embodichain/extensions/robots/agibot/g2/g2.urdf",
+        "embodichain/extensions/robots/agibot/g2/source.lock.json",
+        "embodichain/extensions/robots/agibot/g2/LICENSE",
+        "embodichain/extensions/robots/agibot/g2/preview.png",
+        "embodichain/extensions/robots/agibot/g2/preview.render.json",
+        "embodichain/extensions/robots/i2rt/yam/cfg.py",
+        "embodichain/extensions/robots/i2rt/yam/assets.py",
+        "embodichain/extensions/robots/_locomotion.py",
+        "embodichain/extensions/robots/locomotion_profiles.py",
+        "embodichain/extensions/robots/roboparty/rpo/assets.py",
+        "embodichain/extensions/robots/roboparty/rpo/cfg.py",
+        "embodichain/extensions/robots/roboparty/rp1/assets.py",
+        "embodichain/extensions/robots/roboparty/rp1/cfg.py",
+        "embodichain/extensions/robots/roboparty/rp_hand/cfg.py",
+        "embodichain/extensions/robots/agibot/g1/assets.py",
+        "embodichain/extensions/robots/agibot/g1/cfg.py",
+        "embodichain/extensions/robots/agibot/g1/README.md",
+        "embodichain/extensions/robots/franka/assets.py",
+        "embodichain/extensions/robots/universal_robots/assets.py",
+        "embodichain/extensions/robots/dexforce/w1/assets.py",
+        "embodichain/extensions/robots/the_robot_studio/so101/assets.py",
+        "embodichain/extensions/robots/franka/panda.py",
+        "embodichain/extensions/robots/universal_robots/ur_robot.py",
+        "embodichain/extensions/robots/flexiv/rizon4s/cfg.py",
+        "embodichain/extensions/robots/the_robot_studio/so101/cfg.py",
+        "embodichain/extensions/robots/dexforce/w1/cfg.py",
+        "embodichain/extensions/robots/dexforce/w1/types.py",
         "embodichain/lab/sim/robots/dual_arm.py",
         "embodichain/robot_registry.py",
     ):
@@ -141,7 +146,7 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
     assert not (output / "embodichain/data/assets/eef_assets.py").exists()
 
     # Provenance accompanies every migrated archive in the installed package.
-    from embodichain_robots._asset_catalog import ROBOT_ASSETS
+    from embodichain.extensions.robots._asset_catalog import ROBOT_ASSETS
 
     for spec in ROBOT_ASSETS.values():
         if spec["category"] != "eef":
@@ -150,12 +155,14 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
         owner = output.joinpath(*module.split(".")[:-1])
         assert (owner / "assets.py").is_file()
         assert (owner / "README.md").is_file()
-    assert (output / "embodichain_robots/sharpa/wave/cfg.py").is_file()
-    assert (output / "embodichain_robots/wuji/hand/cfg.py").is_file()
+    assert (output / "embodichain/extensions/robots/sharpa/wave/cfg.py").is_file()
+    assert (output / "embodichain/extensions/robots/wuji/hand/cfg.py").is_file()
     for filename in ("cfg.py", "_specs.py"):
-        assert (output / "embodichain_robots/brainco/revo1" / filename).is_file()
+        assert (
+            output / "embodichain/extensions/robots/brainco/revo1" / filename
+        ).is_file()
     for retired in ("franka_panda.py", "ur_robot.py", "so101.py", "dexforce_w1"):
-        assert not (output / "embodichain_robots" / retired).exists()
+        assert not (output / "embodichain/extensions/robots" / retired).exists()
 
     for owner, retired in (
         ("unitree/go1", "unitree_go1"),
@@ -166,13 +173,15 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
         ("pollen_robotics/microduck", "microduck"),
     ):
         for filename in ("__init__.py", "cfg.py", "assets.py", "profile.json"):
-            assert (output / "embodichain_robots" / owner / filename).is_file()
-        assert not (output / "embodichain_robots" / f"{retired}.py").exists()
+            assert (
+                output / "embodichain/extensions/robots" / owner / filename
+            ).is_file()
+        assert not (output / "embodichain/extensions/robots" / f"{retired}.py").exists()
 
     script = """
 import sys
 sys.path.insert(0, sys.argv[1])
-from embodichain_robots.locomotion_profiles import load_locomotion_robot_profile
+from embodichain.extensions.robots.locomotion_profiles import load_locomotion_robot_profile
 for robot, count in (
     ('UnitreeGo1', 12), ('UnitreeGo2', 12), ('UnitreeG1', 29),
     ('UnitreeH1_2', 27), ('ANYmalC', 12), ('MicroDuck', 14),

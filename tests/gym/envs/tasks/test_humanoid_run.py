@@ -19,11 +19,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 import torch
 import pytest
-from embodichain_tasks.classic_control.humanoid.humanoid_run import (
+from embodichain.extensions.tasks.classic_control.humanoid.humanoid_run import (
     HumanoidRunEnv,
     _CONFIG,
 )
-from embodichain_tasks.classic_control.humanoid.mdp import (
+from embodichain.extensions.tasks.classic_control.humanoid.mdp import (
     humanoid_observation,
     humanoid_reward,
 )
@@ -138,7 +138,7 @@ def test_humanoid_deployment_preserves_effort_contract(monkeypatch):
 
     monkeypatch.setattr(sim_cfg, "get_data_path", lambda value: value)
     path = Path(
-        "extensions/embodichain_tasks/configs/tasks/classic_control/humanoid/env.yaml"
+        "embodichain/extensions/tasks/configs/tasks/classic_control/humanoid/env.yaml"
     )
     cfg = config_to_cfg(load_config(str(path)), source_path=path)
     assert cfg.sim_cfg.physics_dt == pytest.approx(1 / 120)

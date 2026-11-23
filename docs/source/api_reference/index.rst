@@ -44,7 +44,7 @@ The core ``embodichain`` framework includes these top-level packages:
     Shared trainable components, supervised updates and offline orchestration,
     plus on-policy RL algorithms (PPO/GRPO), rollout buffers, collectors and
     RL policy builders. Concrete model families live in the bundled
-    ``embodichain_models`` library.
+    ``embodichain.extensions.models`` library.
 
 ``utils``
     Shared utilities: the ``@configclass`` decorator, logging, math/tensor
@@ -84,6 +84,7 @@ documentation. CI runs this same checker after style checks and before tests.
 .. toctree::
    :maxdepth: 1
 
+   embodichain/embodichain.mcp
    public_api
    embodichain/embodichain.gen_sim.task_engine
    benchmarks

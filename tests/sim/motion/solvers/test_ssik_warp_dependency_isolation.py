@@ -70,8 +70,8 @@ import torch
 torch.set_num_threads(1)
 torch.set_num_interop_threads(1)
 from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
-import embodichain_robots
-preset = getattr(embodichain_robots, case["robot"]).from_dict(case["variant"])
+import embodichain.extensions.robots
+preset = getattr(embodichain.extensions.robots, case["robot"]).from_dict(case["variant"])
 source = preset.solver_cfg[case["part"]]
 chain = preset.build_pk_serial_chain(device=torch.device("cpu"))[case["part"]].to(dtype=torch.float64)
 assert chain.device.type == "cpu"

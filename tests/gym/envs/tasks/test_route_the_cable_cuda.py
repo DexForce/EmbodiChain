@@ -30,7 +30,7 @@ from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.envs.demo import execute_demo_episode
 from embodichain.lab.sim import SimulationManager
 import gymnasium as gym
-import embodichain_tasks
+import embodichain.extensions.tasks
 
 pytestmark = [
     pytest.mark.subprocess_sim,
@@ -55,7 +55,7 @@ class _SpoolReleaseCUDAScenario:
             pytest.skip("Cable routing requires CUDA")
         path = (
             Path(__file__).resolve().parents[4]
-            / "extensions/embodichain_tasks/configs/tasks/manipulation/cable/route_the_cable/task.yam.yaml"
+            / "embodichain/extensions/tasks/configs/tasks/manipulation/cable/route_the_cable/task.yam.yaml"
         )
         cfg = config_to_cfg(yaml.safe_load(path.read_text()), source_path=path)
         cfg.seed = 73

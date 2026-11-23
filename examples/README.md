@@ -13,6 +13,7 @@ embodichain run-example --list
 embodichain run-example sim/motion/planners/curobo_planner --help
 embodichain run-example ods/simple_bc_demo/train --help
 embodichain run-example learning/nerd --help
+embodichain run-example learning/lewm/cube --help
 embodichain run-example learning/rwm --help
 embodichain run-example learning/rigidformer demo --help
 embodichain run-example sim/atomic_skill --skill place --variants 8
@@ -50,8 +51,13 @@ The [NeRD showcase](learning/nerd/README.md) prepares pinned external resources,
 trains through the shared SL recipe, exports models and evaluates saved
 transitions. Its private support code owns teacher collection, historical
 training and reference experiments. Reusable models and codecs are installed
-as `embodichain_models`; downloaded datasets, weights and raw reference assets
+as `embodichain.extensions.models`; downloaded datasets, weights and raw reference assets
 are stored outside the repository and wheel.
+
+The [LeWM Cube example](learning/lewm/cube/README.md) prepares the official
+Cube corpus, adapts the published visual encoder to native camera observations,
+and evaluates the fixed queries in DexUni. It exports weights and optional MP4
+previews to caller-owned directories.
 
 The [SL data-source example](learning/sl_data_source/README.md) connects resident
 causal windows to explicit action or state-transition encoders, and describes
@@ -64,7 +70,7 @@ held-out targets, with frozen inference for interactive target edits.
 
 The [RWM fitting example](learning/rwm/README.md) qualifies controlled supervised
 state-transition fitting and state/action gradients. Its generated recipes use
-the installable `embodichain_models.dynamics.rwm` model family and shared SL
+the installable `embodichain.extensions.models.dynamics.rwm` model family and shared SL
 trainer; its corpus generation and acceptance helpers remain private to the example.
 
 The [Sharpa in-hand example](learning/sharpa_inhand/README.md) trains cylinder
@@ -90,6 +96,10 @@ The [Atomic Skill example catalog](sim/atomic_skill/README.md) owns all per-skil
 coordinated-manipulation and recovery demonstrations. The two source-checkout
 walkthroughs under `scripts/tutorials/atomic_skill/` teach single-arm and dual-arm
 API composition; they reuse the canonical example setup.
+
+The RoboCasa365 example tracks recorded PandaOmron joint trajectories across
+six fixed episodes and checks their outcomes in live simulation.
+[RoboCasa365 physical replay](sim/robocasa365/README.md)
 
 The [scene and robot feasibility preview](expansion/scene_robot_feasibility/README.md)
 compares an authored installation with task-conditioned joint layout/deployment
@@ -131,23 +141,13 @@ recovery and portability diagnostics keep their evidence separate from expert da
 
 The [create-cable tutorial](../scripts/tutorials/sim/create_cable.py) creates a
 procedural cable with one fixed segment, steps it under gravity, reads world
-segment state and restores the episode creation state. Run it with the native
-viewer or with two headless environments:
+segment state and restores the episode creation state. Use a CUDA-enabled
+EmbodiChain installation to run it with the native viewer or with two headless
+environments.
 
 ```bash
 python scripts/tutorials/sim/create_cable.py
 python scripts/tutorials/sim/create_cable.py --headless --renderer no-render --num-envs 2
-```
-
-The cable examples use CUDA and the project-pinned DexSim engine. The DexForce
-package index provides Linux x86_64 wheels for Python 3.11 and 3.12. To install
-the engine and check its build, run:
-
-```bash
-python -m pip install --index-url https://pypi.org/simple \
-  --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site \
-  dexsim-engine==0.6.0
-python -c "import dexsim; from dexsim.scene import SpawnedCable; print(dexsim.__version__, dexsim.__commit_id__)"
 ```
 
 EmbodiChain defaults to DexUni when no solver is selected;

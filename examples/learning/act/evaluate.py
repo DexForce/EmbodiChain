@@ -34,7 +34,7 @@ from ._environment import close_env, make_env, task_identity
 def _load_policy(
     path: Path, device: str, *, panel: str, seeds: list[int]
 ) -> tuple[Any, int]:
-    from embodichain_models.policy.act import load_act_policy
+    from embodichain.extensions.models.policy.act import load_act_policy
 
     model = load_act_policy(path, device)
     _validate_policy_identity(model.metadata, path, panel=panel, seeds=seeds)
@@ -291,7 +291,7 @@ def main() -> None:
                 )
                 mode = "policy"
             elif args.baseline == "untrained":
-                from embodichain_models.policy.act import load_act_policy
+                from embodichain.extensions.models.policy.act import load_act_policy
 
                 if args.reference_checkpoint is None:
                     parser.error(

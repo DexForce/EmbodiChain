@@ -626,7 +626,7 @@ def test_default_factory_applies_recording_flag_after_production_config_loading(
     repository = Path(__file__).resolve().parents[3]
     source = (
         repository
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
     )
     config = yaml.safe_load(source.read_text())
     config["id"] = "AssetFactoryRecordingFlagTest-v0"

@@ -49,14 +49,14 @@ In a source checkout, the official repeated Pick/Place example is a complete
 reference. Its physical backends live under ``envs/``; the UR5 deployment additionally
 references ``expansion/repeated_pick_place.yaml`` through ``expansion.config``:
 
-* ``extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/envs/default.yaml``
+* ``embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/envs/default.yaml``
   and ``envs/newton.yaml``;
-* ``extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task_program/``;
-* ``extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml``;
-* ``extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml``;
-* ``extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/expansion/repeated_pick_place.yaml``;
-* ``extensions/embodichain_tasks/configs/components/embodiments/ur5_dh_pgi_140_80.yaml``;
-* ``extensions/embodichain_tasks/configs/components/execution_policies/trajectory_open_loop.yaml``.
+* ``embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task_program/``;
+* ``embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml``;
+* ``embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml``;
+* ``embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/expansion/repeated_pick_place.yaml``;
+* ``embodichain/extensions/tasks/configs/components/embodiments/ur5_dh_pgi_140_80.yaml``;
+* ``embodichain/extensions/tasks/configs/components/execution_policies/trajectory_open_loop.yaml``.
 
 These files have explicit ownership rather than generic deep-merge semantics.
 The deployment must select components that satisfy the task's scene and
@@ -111,13 +111,13 @@ The reusable environment owns physical simulation entities and ordinary
 environment values, including its explicit physics backend. Here is the complete
 Default environment used by the Quickstart:
 
-.. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/envs/default.yaml
+.. literalinclude:: ../../../embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/envs/default.yaml
    :language: yaml
 
 The complete Franka deployment selects environment variants, Task Program
 components and an embodiment. It does not enable expansion:
 
-.. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml
+.. literalinclude:: ../../../embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml
    :language: yaml
 
 During ``config_to_cfg()``, the component resolver expands these selections,
@@ -175,7 +175,7 @@ file decoding before any live environment is constructed. Unlike the CLI,
    )
 
    program = load_task_program(
-       "extensions/embodichain_tasks/configs/tasks/manipulation/"
+       "embodichain/extensions/tasks/configs/tasks/manipulation/"
        "repeated_pick_place/task_program/program.yaml",
        integration=TaskProgramIntegrationCfg(
            robot_profile="ur5_dh_pgi_140_80",
@@ -205,7 +205,7 @@ Run the complete configuration with the normal environment CLI:
 
    embodichain run-task \
      --gym_config \
-     embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
+     embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
      --headless
 
 To select another compatible program while keeping the trusted integration:

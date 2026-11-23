@@ -31,7 +31,9 @@ import statistics
 import time
 import tracemalloc
 from typing import Any
-from embodichain_models.dynamics.rigidformer._native.data._index import _SceneWindows
+from embodichain.extensions.models.dynamics.rigidformer._native.data._index import (
+    _SceneWindows,
+)
 
 
 def _build(scenes: int, compact: bool) -> Any:

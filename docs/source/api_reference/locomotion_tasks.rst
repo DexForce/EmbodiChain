@@ -13,12 +13,12 @@ EmbodiChain manager components configured by these tasks.
 
 .. autosummary::
 
-   embodichain_tasks.classic_control.humanoid.HumanoidRunEnv
+   embodichain.extensions.tasks.classic_control.humanoid.HumanoidRunEnv
    embodichain.lab.gym.envs.managers.actions.DefaultJointPositionAction
    embodichain.lab.gym.envs.managers.randomization.physics.push_articulation_by_setting_velocity
-   embodichain_tasks.locomotion.managers.velocity_locomotion_observation
-   embodichain_tasks.locomotion.managers.velocity_locomotion_reward
-   embodichain_tasks.locomotion.managers.velocity_locomotion_total_reward
+   embodichain.extensions.tasks.locomotion.managers.velocity_locomotion_observation
+   embodichain.extensions.tasks.locomotion.managers.velocity_locomotion_reward
+   embodichain.extensions.tasks.locomotion.managers.velocity_locomotion_total_reward
 
 Robot configuration loaders
 ---------------------------
@@ -29,128 +29,128 @@ action scale, observation dimensions and control timing.
 
 .. autosummary::
 
-   embodichain_tasks.locomotion.velocity.contracts.anymal_c.ANYmalCVelocityConfig
-   embodichain_tasks.locomotion.velocity.contracts.anymal_c.load_config
-   embodichain_tasks.locomotion.velocity.contracts.g1.G1VelocityConfig
-   embodichain_tasks.locomotion.velocity.contracts.g1.load_config
-   embodichain_tasks.locomotion.velocity.contracts.go1.Go1VelocityConfig
-   embodichain_tasks.locomotion.velocity.contracts.go1.load_config
-   embodichain_tasks.locomotion.velocity.contracts.go2.Go2VelocityConfig
-   embodichain_tasks.locomotion.velocity.contracts.go2.load_config
-   embodichain_tasks.locomotion.velocity.contracts.h1_2.H12VelocityConfig
-   embodichain_tasks.locomotion.velocity.contracts.h1_2.load_config
-   embodichain_tasks.locomotion.velocity.contracts.microduck.MicroDuckVelocityConfig
-   embodichain_tasks.locomotion.velocity.contracts.microduck.load_config
+   embodichain.extensions.tasks.locomotion.velocity.contracts.anymal_c.ANYmalCVelocityConfig
+   embodichain.extensions.tasks.locomotion.velocity.contracts.anymal_c.load_config
+   embodichain.extensions.tasks.locomotion.velocity.contracts.g1.G1VelocityConfig
+   embodichain.extensions.tasks.locomotion.velocity.contracts.g1.load_config
+   embodichain.extensions.tasks.locomotion.velocity.contracts.go1.Go1VelocityConfig
+   embodichain.extensions.tasks.locomotion.velocity.contracts.go1.load_config
+   embodichain.extensions.tasks.locomotion.velocity.contracts.go2.Go2VelocityConfig
+   embodichain.extensions.tasks.locomotion.velocity.contracts.go2.load_config
+   embodichain.extensions.tasks.locomotion.velocity.contracts.h1_2.H12VelocityConfig
+   embodichain.extensions.tasks.locomotion.velocity.contracts.h1_2.load_config
+   embodichain.extensions.tasks.locomotion.velocity.contracts.microduck.MicroDuckVelocityConfig
+   embodichain.extensions.tasks.locomotion.velocity.contracts.microduck.load_config
 
 Implementation reference
 ------------------------
 
-.. automodule:: embodichain_tasks.locomotion.managers.observations
+.. automodule:: embodichain.extensions.tasks.locomotion.managers.observations
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: embodichain_tasks.locomotion.managers.rewards
+.. automodule:: embodichain.extensions.tasks.locomotion.managers.rewards
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: embodichain_tasks.locomotion.velocity.anymal_c_flat
+.. automodule:: embodichain.extensions.tasks.locomotion.velocity.anymal_c_flat
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: embodichain_tasks.locomotion.velocity.contracts.anymal_c.config
+.. automodule:: embodichain.extensions.tasks.locomotion.velocity.contracts.anymal_c.config
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: embodichain_tasks.locomotion.velocity.contracts.anymal_c.mdp
+.. automodule:: embodichain.extensions.tasks.locomotion.velocity.contracts.anymal_c.mdp
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: embodichain_tasks.locomotion.velocity.contracts.g1.config
+.. automodule:: embodichain.extensions.tasks.locomotion.velocity.contracts.g1.config
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: embodichain_tasks.locomotion.velocity.contracts.g1.mdp
+.. automodule:: embodichain.extensions.tasks.locomotion.velocity.contracts.g1.mdp
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: embodichain_tasks.locomotion.velocity.contracts.go1.config
+.. automodule:: embodichain.extensions.tasks.locomotion.velocity.contracts.go1.config
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: embodichain_tasks.locomotion.velocity.contracts.go1.mdp
+.. automodule:: embodichain.extensions.tasks.locomotion.velocity.contracts.go1.mdp
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: embodichain_tasks.locomotion.velocity.contracts.go2.config
+.. automodule:: embodichain.extensions.tasks.locomotion.velocity.contracts.go2.config
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: embodichain_tasks.locomotion.velocity.contracts.go2.mdp
+.. automodule:: embodichain.extensions.tasks.locomotion.velocity.contracts.go2.mdp
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: embodichain_tasks.locomotion.velocity.contracts.h1_2.config
+.. automodule:: embodichain.extensions.tasks.locomotion.velocity.contracts.h1_2.config
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: embodichain_tasks.locomotion.velocity.contracts.h1_2.mdp
+.. automodule:: embodichain.extensions.tasks.locomotion.velocity.contracts.h1_2.mdp
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: embodichain_tasks.locomotion.velocity.contracts.microduck.config
+.. automodule:: embodichain.extensions.tasks.locomotion.velocity.contracts.microduck.config
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: embodichain_tasks.locomotion.velocity.contracts.microduck.mdp
+.. automodule:: embodichain.extensions.tasks.locomotion.velocity.contracts.microduck.mdp
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: embodichain_tasks.locomotion.velocity.g1_flat
+.. automodule:: embodichain.extensions.tasks.locomotion.velocity.g1_flat
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: embodichain_tasks.locomotion.velocity.go1_flat
+.. automodule:: embodichain.extensions.tasks.locomotion.velocity.go1_flat
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: embodichain_tasks.locomotion.velocity.go2_flat
+.. automodule:: embodichain.extensions.tasks.locomotion.velocity.go2_flat
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: embodichain_tasks.locomotion.velocity.h1_2_flat
+.. automodule:: embodichain.extensions.tasks.locomotion.velocity.h1_2_flat
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: embodichain_tasks.locomotion.velocity.microduck_flat
+.. automodule:: embodichain.extensions.tasks.locomotion.velocity.microduck_flat
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: embodichain_tasks.classic_control.humanoid.humanoid_run
+.. automodule:: embodichain.extensions.tasks.classic_control.humanoid.humanoid_run
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: embodichain_tasks.classic_control.humanoid.mdp
+.. automodule:: embodichain.extensions.tasks.classic_control.humanoid.mdp
    :members:
    :undoc-members:
    :show-inheritance:

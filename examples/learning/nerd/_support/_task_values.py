@@ -25,7 +25,7 @@ the state codec. These functions do not implement a simulator or reset policy.
 from __future__ import annotations
 import torch
 from torch import Tensor
-from embodichain_models.dynamics.nerd.codec import quat_rotate
+from embodichain.extensions.models.dynamics.nerd.codec import quat_rotate
 
 __all__ = ["reference_task_values"]
 

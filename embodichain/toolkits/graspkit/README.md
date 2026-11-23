@@ -46,6 +46,41 @@ mesh-path mappings when a registered archive requires them. The loader records
 URDF/mesh hashes, resolved joint transforms and the sampled geometry. It does
 not construct a robot or simulator.
 
+## Ranking preferences
+
+`AntipodalGraspPoseGeneratorCfg` exposes relative `angle_weight`,
+`center_weight` and `opening_weight` values. Defaults are `0.5`, `0.5` and
+`0.0`: closing axes closer to perpendicular to the requested approach and
+contact midpoints closer to the selected mesh center receive lower costs.
+Opening width has no default preference. A positive `opening_weight` rewards
+larger legal openings; `(0.25, 0.5, 0.25)` restores the previous scoring policy.
+
+```python
+from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGeneratorCfg
+
+algorithm_cfg = AntipodalGraspPoseGeneratorCfg(
+    angle_weight=0.5,
+    center_weight=0.5,
+    opening_weight=0.0,
+)
+```
+
+Weights must be finite, nonnegative and not all zero. Scoring normalizes their
+sum while configuration snapshots retain the original values. Angle cost uses
+deviation divided by pi/2; center cost uses distance divided by the farthest
+surviving candidate's distance, with an epsilon guard for centered candidates.
+Equal weights therefore specify coefficients, not equal physical tolerances.
+Ranking does not relax opening limits, angle eligibility or collision checks.
+Ordinary candidates and unqualified center proposals share this scoring policy.
+
+Configured Task Program grasp services accept the same three scalar fields
+alongside `center_mode` and `max_candidates`. These are algorithm settings,
+independent of the selected hand's physical description.
+
+Disk annotations contain contact pairs, not ranking costs. Changing weights
+does not require deleting `antipodal_cache_*.npy`; construct a generator with
+the desired algorithm configuration and reuse the annotations.
+
 ## Frames and collision scope
 
 Sampling, candidate ranking and collision checks use a canonical contact frame:
@@ -137,7 +172,7 @@ remain separate, preserving their existing samples and provenance.
 ## Versioned geometry sources
 
 The source archives are the official assets selected by
-the asset registry and `extensions/embodichain_robots/`, pinned here to dataset revision
+the asset registry and `embodichain/extensions/robots/`, pinned here to dataset revision
 `48317bd8733182f36d306cc2a7a60ae5e47ed2c9`. Their MD5 checksums were verified
 against the download registry. These presets
 describe those simulation assets; the CobotMagic V70 variant needs its own ID.
@@ -223,7 +258,7 @@ Collision meshes under `Collision/`:
 
 ### PikaGripper
 
-Source: `PikaGripper/PikaGripper.urdf`, registered by `embodichain_robots.agilex.pika.assets.PikaGripper`.
+Source: `PikaGripper/PikaGripper.urdf`, registered by `embodichain.extensions.robots.agilex.pika.assets.PikaGripper`.
 Archive MD5: `8a9d0779e7dbfa7bf5d4713175df014e`; URDF SHA-256:
 `cb99efefd74f26011c56d5afcf13839c13a5374160fecb02ac02ba9fa172d952`.
 

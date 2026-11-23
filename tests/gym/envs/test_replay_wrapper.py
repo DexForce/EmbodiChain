@@ -186,6 +186,410 @@ def test_control_mode_clamps_scrub_to_last_recorded_state(fake_restore):
     assert wrapper._replay_steps.tolist() == [1]
 
 
+@pytest.mark.parametrize("composition", [None, {"discount": 0.9}])
+def test_dynamic_replay_preserves_randomized_camera_pose(fake_restore, composition):
+    from unittest.mock import Mock
+    from embodichain.lab.sim.sensors.camera import Camera
+
+    env = _FakeEnv()
+    pose = torch.zeros(1, 3)
+    camera = Camera.__new__(Camera)
+    camera.cfg = SimpleNamespace(ground_plane_visible=True, sample_phase=None)
+    camera._device = env.device
+    camera._sample_metadata = {"valid": torch.ones(1, dtype=torch.bool)}
+    camera.set_ground_plane_visibility = lambda *args: None
+    camera._reset_pose = lambda env_ids: pose.zero_()
+    contact = SimpleNamespace(reset=Mock())
+    env.sensors = {"camera": camera, "contact": contact}
+    env.cfg.rl_task = SimpleNamespace(reward_composition=composition)
+    env.reward_manager = SimpleNamespace(
+        reset=lambda **kwargs: None, initialize_observation=lambda *args: None
+    )
+    env.observation_manager = SimpleNamespace(
+        has_history=False, reset=lambda **kwargs: None
+    )
+    env._capture_observation = lambda: SimpleNamespace(
+        policy={"obs": pose[:, :1].clone()}
+    )
+
+    def randomized_reset(**kwargs):
+        pose[:, 0] = 0.25
+        camera._sample_metadata["valid"].fill_(True)
+        return env.get_obs(), {}
+
+    env.reset = randomized_reset
+    wrapper = ReplayWrapper(env, _trajectory(), mode="dynamic")
+    wrapper.reset()
+    torch.testing.assert_close(pose[:, 0], torch.tensor([0.25]))
+    assert contact.reset.call_count == int(composition is not None)
+    assert camera._sample_metadata["valid"].tolist() == [composition is None]
+
+
+@pytest.mark.parametrize("sample_phase", ["render", "physics"])
+def test_dynamic_replay_resamples_scheduled_stereo_before_seeding_rewards(
+    monkeypatch, sample_phase
+):
+    from embodichain.lab.sim import SimulationManager
+    from embodichain.lab.sim.sensors import (
+        BaseSensor,
+        SensorCfg,
+        SensorContext,
+        SensorRegistration,
+        StereoCamera,
+        StereoCameraCfg,
+        register_sensor,
+    )
+    from embodichain.lab.sim.sensors import registry
+    from embodichain.utils import configclass
+
+    env = _FakeEnv()
+    scene = SimpleNamespace(disparity=2.0, published_disparity=2.0, boundary=0)
+    context = SensorContext(
+        device=env.device,
+        num_instances=1,
+        clock=SimpleNamespace(),
+        state=SimpleNamespace(),
+    )
+
+    @configclass
+    class SyntheticStereoCfg(StereoCameraCfg):
+        sensor_type: str = "ReplaySyntheticStereo"
+
+    class SyntheticStereo(StereoCamera):
+        def __init__(self, cfg, *, context):
+            self.randomized_pose = torch.zeros(1, 3)
+            BaseSensor.__init__(self, cfg, context=context)
+
+        def _build_sensor_from_config(self, cfg, device):
+            self._data_buffer = TensorDict(
+                {"disparity": torch.zeros(1, 1, 1, 1)}, batch_size=[1]
+            )
+
+        def update(self, **kwargs):
+            assert kwargs["fetch_only"] == (sample_phase == "render")
+            self._data_buffer["disparity"].fill_(scene.published_disparity)
+
+        def set_ground_plane_visibility(self, *args):
+            pass
+
+        def _reset_pose(self, env_ids):
+            self.randomized_pose.zero_()
+
+    monkeypatch.setattr(registry, "_registrations", registry._registrations.copy())
+    register_sensor(
+        SensorRegistration("ReplaySyntheticStereo", SyntheticStereoCfg, SyntheticStereo)
+    )
+    cfg = SensorCfg.from_dict(
+        {
+            "sensor_type": "ReplaySyntheticStereo",
+            "uid": "stereo",
+            "sample_phase": sample_phase,
+            "sample_period": 0.1,
+            "enable_disparity": True,
+        }
+    )
+    camera = registry.get_sensor_registration(cfg.sensor_type).factory(
+        cfg, context=context
+    )
+    env.sensors = {"stereo": camera}
+    env.sim._sampling_sensors = {sample_phase: {"stereo": camera}}
+    env.sim.simulation_time = 0.01
+    env.sim.physics_step_index = 1
+    seeds = []
+
+    env.sim.sync_render_state = lambda: setattr(
+        scene, "published_disparity", scene.disparity
+    )
+
+    def capture():
+        env.sim.sync_render_state()
+        scene.boundary += 1
+        SimulationManager._sample_managed_sensors(
+            env.sim, "render", scene.boundary, 0.01, rendered_camera_uids={camera.uid}
+        )
+        return SimpleNamespace(
+            policy={"obs": camera.get_data()["disparity"].flatten(1).clone()}
+        )
+
+    def seed(frame, ids):
+        seeds.append(
+            (frame.policy["obs"].item(), camera.get_sample_metadata()["valid"].item())
+        )
+
+    def reset(**kwargs):
+        camera.reset()
+        camera.randomized_pose[:, 0] = 0.25
+        # A reset stabilization step acquires physics-sampled plugins first.
+        SimulationManager._sample_managed_sensors(env.sim, "physics", 1, 0.01)
+        frame = capture()
+        seed(frame, [0])
+        return frame.policy, {}
+
+    env.reset = reset
+    env._capture_observation = capture
+    env.get_obs = lambda: capture().policy
+    env.cfg.rl_task = SimpleNamespace(reward_composition={"discount": 0.9})
+    env.observation_manager = SimpleNamespace(
+        has_history=False, reset=lambda **kw: None
+    )
+    env.reward_manager = SimpleNamespace(
+        reset=lambda **kw: None, initialize_observation=seed
+    )
+    monkeypatch.setattr(
+        replay_module,
+        "restore_trajectory_state",
+        lambda *args: setattr(scene, "disparity", 8.0),
+    )
+    wrapper = ReplayWrapper(env, _trajectory(), mode="dynamic")
+    observation, _ = wrapper.reset()
+    torch.testing.assert_close(observation["obs"], torch.tensor([[8.0]]))
+    assert seeds == [(2.0, True), (8.0, True)]
+    torch.testing.assert_close(camera.randomized_pose[:, 0], torch.tensor([0.25]))
+    sample_id = camera.get_sample_metadata()["sample_id"].clone()
+    SimulationManager._sample_managed_sensors(env.sim, "physics", 1, 0.01)
+    capture()
+    torch.testing.assert_close(camera.get_sample_metadata()["sample_id"], sample_id)
+    assert env.sim.updates == []
+
+
+def test_dynamic_replay_acquires_restored_state_without_fabricating_step_samples(
+    monkeypatch,
+):
+    from embodichain.lab.sim import SimulationManager
+    from embodichain.lab.sim.sensors import (
+        FrameTransform,
+        FrameTransformCfg,
+        JointEncoder,
+        JointEncoderCfg,
+        RayDepthCamera,
+        RayDepthCameraCfg,
+        SensorContext,
+    )
+
+    env = _FakeEnv()
+    qpos, qvel = torch.tensor([[2.0, 3.0]]), torch.tensor([[0.1, 0.2]])
+    pose = torch.tensor([[2.0, 0, 0, 0, 0, 0, 1]])
+    plane_height = torch.tensor([2.0])
+
+    class PlaneRays:
+        def cast(self, origins, directions, max_distance):
+            distance = (plane_height[:, None] - origins[..., 2]) / directions[..., 2]
+            return distance, torch.zeros_like(distance, dtype=torch.int32)
+
+    context = SensorContext(
+        device=env.device,
+        num_instances=1,
+        clock=SimpleNamespace(),
+        state=SimpleNamespace(
+            get_joint_names=lambda uid: ("joint0", "joint1"),
+            get_joint_state=lambda uid: {"qpos": qpos, "qvel": qvel},
+            get_frame_state=lambda *args: {"pose": pose},
+        ),
+        ray_factory=lambda *args: PlaneRays(),
+    )
+
+    class StepBoundEncoder(JointEncoder):
+        @property
+        def supports_restored_state_sampling(self):
+            return False
+
+        def update(self, **kwargs):
+            if kwargs["sample_dt"] <= 0:
+                raise ValueError("This sensor requires a completed physics step.")
+            super().update(**kwargs)
+
+    encoder = JointEncoder(
+        JointEncoderCfg(uid="encoder", asset_uid="robot", sample_period=1.0),
+        context=context,
+    )
+    frame_sensor = FrameTransform(
+        FrameTransformCfg(uid="frame", target_uid="robot", sample_period=1.0),
+        context=context,
+    )
+    stepped = StepBoundEncoder(
+        JointEncoderCfg(uid="stepped", asset_uid="robot", sample_period=1.0),
+        context=context,
+    )
+    depth_camera = RayDepthCamera(
+        RayDepthCameraCfg(uid="depth", width=1, height=1, sample_period=1.0),
+        context=context,
+    )
+    env.sensors = {s.uid: s for s in (encoder, frame_sensor, stepped, depth_camera)}
+    for sensor in env.sensors.values():
+        sensor._bind(
+            0,
+            (lambda: torch.eye(4).unsqueeze(0)) if sensor is depth_camera else None,
+        )
+    env.sim._sampling_sensors = {"physics": env.sensors}
+    env.sim.simulation_time, env.sim.physics_step_index = 0.01, 1
+    seeds = []
+
+    def capture():
+        return SimpleNamespace(
+            policy={
+                "qpos": encoder.get_data()["qpos"].clone(),
+                "qvel": encoder.get_data()["qvel"].clone(),
+                "position": frame_sensor.get_data()["transform"][:, :3, 3].clone(),
+                "depth": depth_camera.get_data()["depth"].clone(),
+            }
+        )
+
+    def seed(frame, ids):
+        seeds.append(frame.policy)
+
+    def reset(**kwargs):
+        for sensor in env.sensors.values():
+            sensor.reset()
+        SimulationManager._sample_managed_sensors(env.sim, "physics", 1, 0.01)
+        frame = capture()
+        seed(frame, [0])
+        return frame.policy, {}
+
+    def restore(*args):
+        qpos.copy_(torch.tensor([[8.0, 9.0]]))
+        qvel.copy_(torch.tensor([[0.5, 0.6]]))
+        pose[:, 0] = 8.0
+        plane_height.fill_(8.0)
+
+    env.reset, env._capture_observation = reset, capture
+    env.cfg.rl_task = SimpleNamespace(reward_composition={"discount": 0.9})
+    env.reward_manager = SimpleNamespace(
+        reset=lambda **kw: None, initialize_observation=seed
+    )
+    monkeypatch.setattr(replay_module, "restore_trajectory_state", restore)
+    observation, _ = ReplayWrapper(env, _trajectory(), mode="dynamic").reset()
+    torch.testing.assert_close(observation["depth"], torch.tensor([[[8.0]]]))
+    torch.testing.assert_close(observation["qpos"], torch.tensor([[8.0, 9.0]]))
+    torch.testing.assert_close(observation["qvel"], torch.tensor([[0.5, 0.6]]))
+    torch.testing.assert_close(observation["position"], torch.tensor([[8.0, 0, 0]]))
+    torch.testing.assert_close(seeds[0]["qpos"], torch.tensor([[2.0, 3.0]]))
+    torch.testing.assert_close(seeds[1]["qpos"], observation["qpos"])
+    torch.testing.assert_close(seeds[0]["depth"], torch.tensor([[[2.0]]]))
+    torch.testing.assert_close(seeds[1]["depth"], observation["depth"])
+    assert encoder.get_sample_metadata()["valid"].tolist() == [True]
+    assert frame_sensor.get_sample_metadata()["valid"].tolist() == [True]
+    assert depth_camera.get_sample_metadata()["valid"].tolist() == [True]
+    assert stepped.get_sample_metadata()["valid"].tolist() == [False]
+    assert env.sim.updates == []
+    sample_id = encoder.get_sample_metadata()["sample_id"].clone()
+    # Step-bound sensors acquire at the first real step, without waiting for
+    # the period from the pre-restore sample. Snapshot cadence remains intact.
+    env.sim.simulation_time, env.sim.physics_step_index = 0.02, 2
+    SimulationManager._sample_managed_sensors(env.sim, "physics", 2, 0.01)
+    assert stepped.get_sample_metadata()["valid"].tolist() == [True]
+    torch.testing.assert_close(stepped.get_data()["qpos"], observation["qpos"])
+    torch.testing.assert_close(encoder.get_sample_metadata()["sample_id"], sample_id)
+
+
+def test_dynamic_replay_seeds_shaping_from_restored_goal_observation(monkeypatch):
+    from embodichain.lab.gym.envs.managers.cfg import ObservationCfg
+    from embodichain.lab.gym.envs.managers.skill_objective import (
+        SkillObjectiveObservation,
+    )
+    from embodichain.lab.gym.envs.managers.reward_composition import (
+        compose_reward_terms,
+    )
+    from embodichain.lab.gym.envs.managers.reward_context import RewardTransitionContext
+    from embodichain.lab.gym.envs.managers.reward_manager import RewardManager
+
+    env = _FakeEnv()
+    env.positions = torch.zeros(1, 2)
+    env.sim.physics_step_index = 0
+    env.robot.get_joint_ids = lambda part: [0, 1]
+    env.robot.get_qpos = lambda part: env.positions
+    env.sim.get_robot = lambda uid: env.robot
+    env.episode_context = SimpleNamespace(episode_ids=(0,))
+    env.cfg.rl_task = SimpleNamespace(reward_composition={"discount": 0.9})
+    cfg = ObservationCfg(
+        name="goal",
+        params={
+            "objective": {
+                "skill_id": "move_joints",
+                "binding": {"robot": "robot", "motion_part": "arm"},
+                "goal": {"positions": [0.0, 0.0]},
+            }
+        },
+    )
+    objective = SkillObjectiveObservation(cfg, env)
+    env.observation_manager = SimpleNamespace(
+        has_history=False,
+        _mode_class_functor_cfgs={"add": [SimpleNamespace(func=objective)]},
+        reset=lambda env_ids: objective.reset(env_ids),
+    )
+    env.reward_manager = RewardManager(
+        compose_reward_terms(
+            {
+                "discount": 0.9,
+                "skills": [
+                    {
+                        "skill_id": "move_joints",
+                        "profile": "measured_potential",
+                        "metrics": {"potential": {"field": "goal", "index": 0}},
+                    }
+                ],
+            },
+            program=False,
+        ),
+        env,
+    )
+    revision = 0
+
+    def capture():
+        nonlocal revision
+        revision += 1
+        sample = objective(env, {})
+        return SimpleNamespace(
+            policy={"obs": sample.values[:, :1]},
+            fields={"goal": sample},
+            episode_ids=(0,),
+            episode_owner=env.episode_context,
+            revision=revision,
+        )
+
+    def reset(**kwargs):
+        env.positions.zero_()
+        env.positions[:, 0] = 0.1 * torch.atanh(torch.tensor(0.8))
+        env.observation_manager.reset([0])
+        env.reward_manager.reset([0])
+        frame = capture()
+        env.reward_manager.initialize_observation(frame, [0])
+        return frame.policy, {}
+
+    def step(action):
+        env.sim.physics_step_index += 1
+        frame = capture()
+        objective.advance_observation()
+        env.reward_manager.transition_context = RewardTransitionContext(
+            frame, torch.zeros(1, dtype=torch.bool)
+        )
+        value, _ = env.reward_manager.compute(frame.policy, action, {})
+        return (
+            frame.policy,
+            value,
+            torch.zeros(1, dtype=torch.bool),
+            torch.zeros(1, dtype=torch.bool),
+            {},
+        )
+
+    env.reset, env.step, env._capture_observation = reset, step, capture
+    env.get_obs = lambda: capture().policy
+    trajectory = _trajectory()
+    trajectory["states"]["robot"]["qpos"].zero_()
+    trajectory["states"]["robot"]["qpos"][:, :, 0] = 0.1 * torch.atanh(
+        torch.tensor(0.2)
+    )
+    monkeypatch.setattr(
+        replay_module,
+        "restore_trajectory_state",
+        lambda host, state: setattr(host, "positions", state["robot"]["qpos"].clone()),
+    )
+    wrapper = ReplayWrapper(env, trajectory, mode="dynamic")
+    wrapper.reset()
+    _, value, _, _, _ = wrapper.step(None)
+    # Holding phi=.8 after restoration earns .9*.8-.8, with no reset-to-restore bonus.
+    torch.testing.assert_close(value, torch.tensor([-0.08]), atol=1e-6, rtol=0)
+
+
 def test_broadcast_replay_preserves_per_env_lengths():
     trajectory = _trajectory(
         num_envs=1,

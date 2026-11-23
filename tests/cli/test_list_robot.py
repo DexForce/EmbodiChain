@@ -91,8 +91,8 @@ def test_list_robot_dispatch_reads_installed_catalogs(
     monkeypatch.setenv("COLUMNS", str(terminal_width))
     catalogs.append(
         metadata.EntryPoint(
-            name="embodichain_robots",
-            value="embodichain_robots._catalog:ROBOT_CONFIGS",
+            name="embodichain.extensions.robots",
+            value="embodichain.extensions.robots._catalog:ROBOT_CONFIGS",
             group="embodichain.robots",
         )
     )
@@ -138,6 +138,9 @@ def test_list_robot_dispatch_reads_installed_catalogs(
         "UnitreeH1_2",
         "ANYmalC",
         "MicroDuck",
+        "RoboPartyRPO",
+        "RoboPartyRP1",
+        "RoboPartyRPHand",
         "DualArmRobot",
         "ur3",
         "ur3e",
@@ -223,7 +226,7 @@ class RejectRuntimeImports(importlib.abc.MetaPathFinder):
             fullname == "torch"
             or fullname.startswith("embodichain.lab")
             or fullname.startswith("embodichain.data")
-            or (fullname.startswith("embodichain_robots.") and fullname != "embodichain_robots._catalog")
+            or (fullname.startswith("embodichain.extensions.robots.") and fullname != "embodichain.extensions.robots._catalog")
         ):
             raise AssertionError("Listing imported runtime module: " + fullname)
 
@@ -231,8 +234,8 @@ sys.meta_path.insert(0, RejectRuntimeImports())
 from embodichain import robot_registry as registry
 registry.metadata.entry_points = lambda **_: [
     metadata.EntryPoint(
-        name="embodichain_robots",
-        value="embodichain_robots._catalog:ROBOT_CONFIGS",
+        name="embodichain.extensions.robots",
+        value="embodichain.extensions.robots._catalog:ROBOT_CONFIGS",
         group="embodichain.robots",
     )
 ]
@@ -310,7 +313,7 @@ def test_dual_arm_variant_rows_use_each_base_dof(catalogs: list[Any]) -> None:
     catalogs.append(
         metadata.EntryPoint(
             name="official",
-            value="embodichain_robots._catalog:ROBOT_CONFIGS",
+            value="embodichain.extensions.robots._catalog:ROBOT_CONFIGS",
             group="embodichain.robots",
         )
     )
@@ -354,7 +357,7 @@ def test_w1_variants_show_body_releases_and_hand_specific_dofs(
     catalogs.append(
         metadata.EntryPoint(
             name="official",
-            value="embodichain_robots._catalog:ROBOT_CONFIGS",
+            value="embodichain.extensions.robots._catalog:ROBOT_CONFIGS",
             group="embodichain.robots",
         )
     )

@@ -41,6 +41,7 @@ _TASK_PROGRAM = "Expert Demo: Task Program"
 _HANDWRITTEN_DEMO = "Expert Demo: Handwritten Trajectory"
 _RL = "RL"
 _CAPABILITY_ORDER = (_TASK_PROGRAM, _HANDWRITTEN_DEMO, _RL)
+_OFFICIAL_TASK_PACKAGE = "embodichain.extensions.tasks"
 
 
 @dataclass
@@ -97,16 +98,6 @@ def _task_config_roots(
     roots: list[Traversable] = []
     visited_packages: set[str] = set()
     for task_package in task_package_modules:
-        if task_package == "embodichain_tasks":
-            # Editable imports can point at a different checkout after task
-            # discovery. Mirror resolve_config_path's co-located precedence.
-            colocated = (
-                Path(__file__).resolve().parents[2]
-                / "extensions/embodichain_tasks/configs/tasks"
-            )
-            if colocated.is_dir():
-                roots.append(colocated)
-                continue
         config_packages = (
             f"{task_package}.configs",
             f"{task_package.partition('.')[0]}.configs",
@@ -329,8 +320,8 @@ def _backend(config: Mapping[str, Any], resource: Traversable) -> str | None:
 
 
 def _reference(package: str, task_path: tuple[str, ...], name: str) -> str:
-    prefix = ("extensions", package) if package == "embodichain_tasks" else (package,)
-    return "/".join((*prefix, "configs", "tasks", *task_path, name))
+    prefix = package.replace(".", "/") if package == _OFFICIAL_TASK_PACKAGE else package
+    return "/".join((prefix, "configs", "tasks", *task_path, name))
 
 
 def _agent_matches(
@@ -355,9 +346,6 @@ def _agent_matches(
         return (
             deployment_path is not None and reference_path.resolve() == deployment_path
         )
-    # Missing repository-style references resolve through packaged resources.
-    if reference.startswith("embodichain_tasks/configs/"):
-        reference = f"extensions/{reference}"
     return reference == deployment.config_ref
 
 
@@ -557,7 +545,7 @@ def _config_environment_entries(
     return _catalog_entries(
         _load_catalog(
             {
-                "embodichain_tasks" if index == 0 else f"package_{index}": root
+                _OFFICIAL_TASK_PACKAGE if index == 0 else f"package_{index}": root
                 for index, root in enumerate(config_roots)
             }
         )

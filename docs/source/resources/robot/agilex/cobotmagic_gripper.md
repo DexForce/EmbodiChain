@@ -8,7 +8,7 @@ and declares no arm IK solver or serial FK chain. Simulation drive values are
 presets rather than manufacturer actuator specifications.
 
 ```python
-from embodichain_robots import CobotMagicV100GripperCfg
+from embodichain.extensions.robots import CobotMagicV100GripperCfg
 
 cfg = CobotMagicV100GripperCfg.from_dict({})
 ```

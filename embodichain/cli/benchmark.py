@@ -180,7 +180,7 @@ def _run_rl_cli(_: argparse.Namespace) -> None:
 
 def _run_motion_generation_cli(args: argparse.Namespace) -> None:
     """Run the shared Motion Planning and Atomic Skills benchmark."""
-    from embodichain_benchmarks.motion_generation.cli import run_from_args
+    from embodichain.extensions.benchmarks.motion_generation.cli import run_from_args
 
     run_from_args(args)
 
@@ -195,7 +195,7 @@ def _run_atomic_skill_profile_cli(_: argparse.Namespace) -> None:
 def _run_grasp_pose_generator_cli(_: argparse.Namespace) -> None:
     """Run grasp pose generator benchmark CLI entrypoint."""
     if sys.argv[1:2] in (["validate"], ["run"]):
-        from embodichain_benchmarks.grasp_pose_generator.cli import main
+        from embodichain.extensions.benchmarks.grasp_pose_generator.cli import main
     else:
         from scripts.benchmark.grasp_pose_generator.run_benchmark import main
 
@@ -253,7 +253,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         ),
     )
     if arguments and arguments[0] == "motion-generation":
-        from embodichain_benchmarks.motion_generation.cli import add_parser_arguments
+        from embodichain.extensions.benchmarks.motion_generation.cli import (
+            add_parser_arguments,
+        )
 
         add_parser_arguments(motion_generation_parser)
     motion_generation_parser.set_defaults(func=_run_motion_generation_cli)

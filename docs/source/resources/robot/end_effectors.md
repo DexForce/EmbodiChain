@@ -1,7 +1,7 @@
 # End-effector assets and migration
 
 Concrete hand and gripper assets live beside other robot models in
-`embodichain_robots`, under their manufacturer/model namespace. `Robot` describes
+`embodichain.extensions.robots`, under their manufacturer/model namespace. `Robot` describes
 an independently controlled runtime entity; EEF describes a role in an assembly.
 The same BrainCo hand model therefore serves its standalone preset and W1 mounts.
 The core continues to own downloads, caches, generic configuration and runtime
@@ -17,20 +17,21 @@ asset ID. No compatibility forwarding module is provided.
 
 | Asset ID / class | Canonical import module | Resource page |
 | --- | --- | --- |
-| `DH_PGC_140_50` | `embodichain_robots.dh_robotics.pgc_140_50.assets` | [PGC-140-50](dh_robotics/pgc_140_50.md) |
-| `DH_PGC_140_50_M` | `embodichain_robots.dh_robotics.pgc_140_50.assets` | [PGC modification](dh_robotics/pgc_140_50.md) |
-| `DH_PGI_140_80` | `embodichain_robots.dh_robotics.pgi_140_80.assets` | [PGI-140-80](dh_robotics/pgi_140_80.md) |
-| `DH_AG95` | `embodichain_robots.dh_robotics.ag95.assets` | [AG95 modification](dh_robotics/ag95.md) |
-| `ZH_CTM2F110` | `embodichain_robots.changingtek.ctm2f110.assets` | [CTM2F110](changingtek/ctm2f110.md) |
-| `BrainCoHandRevo1` | `embodichain_robots.brainco.revo1.assets` | [Revo 1](brainco/revo1.md) |
-| `InspireHand` | `embodichain_robots.inspire.hand.assets` | [INSPIRE hand](inspire/hand.md) |
-| `Robotiq` | `embodichain_robots.robotiq.assets` | [Shared Robotiq archive](robotiq/assets.md) |
-| `Robotiq2F85` | `embodichain_robots.robotiq.robotiq_2f85.assets` | [Separate 2F-85 archive](robotiq/robotiq_2f85.md) |
-| `WheelTecFA2F` | `embodichain_robots.wheeltec.fa2f.assets` | [FA2F asset](wheeltec/fa2f.md) |
-| `AgxGripper` | `embodichain_robots.agilex.agx_gripper.assets` | [AgileX PiPER-X and AGX](agilex/piper_x.md) |
-| `PikaGripper` | `embodichain_robots.agilex.pika.assets` | [AgileX Pika](agilex/pika.md) |
-| `WujiHand` | `embodichain_robots.wuji.hand.assets` | [Wuji Hand](wuji/hand.md) |
-| `SharpaWave` | `embodichain_robots.sharpa.wave.assets` | [Sharpa Wave 01](sharpa/wave.md) |
+| `DH_PGC_140_50` | `embodichain.extensions.robots.dh_robotics.pgc_140_50.assets` | [PGC-140-50](dh_robotics/pgc_140_50.md) |
+| `DH_PGC_140_50_M` | `embodichain.extensions.robots.dh_robotics.pgc_140_50.assets` | [PGC modification](dh_robotics/pgc_140_50.md) |
+| `DH_PGI_140_80` | `embodichain.extensions.robots.dh_robotics.pgi_140_80.assets` | [PGI-140-80](dh_robotics/pgi_140_80.md) |
+| `DH_AG95` | `embodichain.extensions.robots.dh_robotics.ag95.assets` | [AG95 modification](dh_robotics/ag95.md) |
+| `ZH_CTM2F110` | `embodichain.extensions.robots.changingtek.ctm2f110.assets` | [CTM2F110](changingtek/ctm2f110.md) |
+| `BrainCoHandRevo1` | `embodichain.extensions.robots.brainco.revo1.assets` | [Revo 1](brainco/revo1.md) |
+| `InspireHand` | `embodichain.extensions.robots.inspire.hand.assets` | [INSPIRE hand](inspire/hand.md) |
+| `Robotiq` | `embodichain.extensions.robots.robotiq.assets` | [Shared Robotiq archive](robotiq/assets.md) |
+| `Robotiq2F85` | `embodichain.extensions.robots.robotiq.robotiq_2f85.assets` | [Separate 2F-85 archive](robotiq/robotiq_2f85.md) |
+| `WheelTecFA2F` | `embodichain.extensions.robots.wheeltec.fa2f.assets` | [FA2F asset](wheeltec/fa2f.md) |
+| `AgxGripper` | `embodichain.extensions.robots.agilex.agx_gripper.assets` | [AgileX PiPER-X and AGX](agilex/piper_x.md) |
+| `PikaGripper` | `embodichain.extensions.robots.agilex.pika.assets` | [AgileX Pika](agilex/pika.md) |
+| `WujiHand` | `embodichain.extensions.robots.wuji.hand.assets` | [Wuji Hand](wuji/hand.md) |
+| `SharpaWave` | `embodichain.extensions.robots.sharpa.wave.assets` | [Sharpa Wave 01](sharpa/wave.md) |
+| `RoboPartyRPHand` | `embodichain.extensions.robots.roboparty.rp_hand.assets` | [RP Hand](roboparty/rp_hand.md) |
 
 The existing asset IDs, class names, archive URLs, checksum validation and cache
 prefixes are preserved. All entries remain in the `eef` data category and use
@@ -39,7 +40,7 @@ and official Hub fallback order. Catalog discovery does not construct datasets.
 
 ```python
 from embodichain.data import get_data_path
-from embodichain_robots.agilex.pika.assets import PikaGripper
+from embodichain.extensions.robots.agilex.pika.assets import PikaGripper
 
 # Existing references still work; no cache migration is required.
 urdf_path = get_data_path("PikaGripper/PikaGripper.urdf")
@@ -77,6 +78,9 @@ source joints; see [Wuji Hand](wuji/hand.md) for control and physical defaults.
 
 `SharpaWaveCfg` adds a standalone left/right hand with 22 independent
 source joints; see [Sharpa Wave 01](sharpa/wave.md) for control and physical defaults.
+
+`RoboPartyRPHandCfg` provides a standalone left/right hand with six
+independent source joints and five mimic followers per side. [RP Hand](roboparty/rp_hand.md)
 
 `BrainCoRevo1Cfg` is a standalone joint-controlled hand preset. It uses
 six active joints and retains the four source mimic followers. Its native

@@ -195,7 +195,7 @@ def _probe(output):
     root = Path(__file__).resolve().parents[3]
     path = (
         root
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
     )
     discover_task_packages()
     execute_init_hooks()
@@ -566,7 +566,7 @@ def _probe_handover_rows():
     root = Path(__file__).resolve().parents[3]
     path = (
         root
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/task.tianji_marvin.yaml"
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/hand_over/task.tianji_marvin.yaml"
     )
     discover_task_packages()
     execute_init_hooks()

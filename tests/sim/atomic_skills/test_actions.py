@@ -2161,7 +2161,10 @@ def test_ik_smoothing_preserves_contact_and_phase_event_derivatives() -> None:
     assert after < before
 
 
-def test_place_holds_fully_open_before_retracting_when_configured() -> None:
+@pytest.mark.parametrize("approach_lift_height", [None, 0.0])
+def test_place_holds_fully_open_before_retracting_when_configured(
+    approach_lift_height: float | None,
+) -> None:
     generator = _motion_generator()
     generator.generate = Mock(wraps=generator.generate)
     action = _bind_action(generator, Place())
@@ -2177,7 +2180,9 @@ def test_place_holds_fully_open_before_retracting_when_configured() -> None:
         goal=PlaceGoal(SceneEntityPose("destination")),
         binding=_binding(action),
         motion_policy=MotionPolicy(sample_count=sample_count),
-        skill_options=PlaceOptions(release_settle_steps=settle_steps),
+        skill_options=PlaceOptions(
+            release_settle_steps=settle_steps, approach_lift_height=approach_lift_height
+        ),
     )
 
     destination_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
@@ -2208,8 +2213,9 @@ def test_place_holds_fully_open_before_retracting_when_configured() -> None:
     generator.generate.assert_called_once()
     target_states = generator.generate.call_args.args[0]
     assert len(target_states) == 3
+    expected_approach = 0.1 if approach_lift_height is None else 0.0
     assert [state.xpos[0, 2, 3].item() for state in target_states] == pytest.approx(
-        [0.1, 0.0, 0.1]
+        [expected_approach, 0.0, 0.1]
     )
     assert generator.generate.call_args.kwargs["options"].sample_count == (
         sample_count - PlaceOptions().hand_interp_steps
@@ -2959,6 +2965,59 @@ def test_pour_rotates_held_object_about_internal_axis_and_returns() -> None:
         slower_arm[:, (return_start + return_end) // 2],
         slower_arm[:, return_end],
     )
+
+
+def test_pour_reference_preserves_goal_despite_pickup_endpoint_error() -> None:
+    generator = _motion_generator()
+    reference = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    reference[:, :3, 3] = torch.tensor([[0.4, 0.1, 0.3], [0.7, -0.1, 0.5]])
+    observed = reference.clone()
+    observed[:, 0, 3] += 0.009
+    observed[:, :3, :3] = axis_angle_to_rotation_matrix(torch.tensor([0.0, 0.0, 0.09]))
+    generator.robot.compute_fk.return_value = observed
+    generator.robot.compute_fk.side_effect = None
+    generator.robot.compute_ik.side_effect = lambda pose, name, joint_seed, **kw: (
+        torch.ones(NUM_ENVS, dtype=torch.bool),
+        joint_seed + 0.1,
+    )
+    semantics = ObjectSemantics(
+        affordance=AxisAlignAffordance(internal_axis=torch.tensor([1.0, 0.0, 0.0])),
+        geometry={},
+        entity_id="pourable-object",
+        label="pourable-object",
+    )
+    context = _context(
+        TaskState(
+            batch_size=NUM_ENVS, device="cpu", held_objects={"arm": _held(semantics)}
+        )
+    )
+    context.robot.qpos[:, :ARM_DOF] = 0.25
+    action = _bind_action(generator, Pour())
+    plan = _plan_action(
+        action,
+        SkillInvocation(
+            skill_id="pour",
+            goal=PourGoal(reference_object_pose=reference),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(
+                sample_count=10, velocity_limit=100.0, acceleration_limit=1000.0
+            ),
+            skill_options=PourOptions(rotate_angle=math.pi / 2, dwell_duration=0),
+        ),
+        context,
+    )
+    targets = _cartesian_targets(generator)
+    expected = reference.clone()
+    expected[:, :3, :3] = axis_angle_to_rotation_matrix(
+        torch.tensor([math.pi / 2, 0.0, 0.0])
+    )
+    torch.testing.assert_close(targets[0], expected)
+    torch.testing.assert_close(targets[1], reference)
+    torch.testing.assert_close(
+        _joint_trajectory(plan).positions[:, 0, :ARM_DOF],
+        context.robot.qpos[:, :ARM_DOF],
+    )
+    torch.testing.assert_close(generator.robot.compute_fk.return_value, observed)
 
 
 def test_pour_rotation_duration_stretches_each_native_batch_row() -> None:

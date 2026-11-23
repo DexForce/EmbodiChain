@@ -8,7 +8,7 @@ and declares no arm IK solver or serial FK chain. Simulation drive values are
 presets rather than manufacturer actuator specifications.
 
 ```python
-from embodichain_robots import RobotiqArg2F85Cfg
+from embodichain.extensions.robots import RobotiqArg2F85Cfg
 
 cfg = RobotiqArg2F85Cfg.from_dict({})
 ```

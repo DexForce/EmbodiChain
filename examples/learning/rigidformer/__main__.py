@@ -139,7 +139,7 @@ def main() -> None:
 
         run_demo(args)
     elif args.command == "export":
-        from embodichain_models.dynamics.rigidformer.checkpoint import (
+        from embodichain.extensions.models.dynamics.rigidformer.checkpoint import (
             export_rigidformer_checkpoint,
         )
 
@@ -161,8 +161,12 @@ def main() -> None:
 
 
 def evaluate(args: argparse.Namespace) -> None:
-    from embodichain_models.dynamics.rigidformer import load_rigidformer_checkpoint
-    from embodichain_models.dynamics.rigidformer.data import _verified_manifest
+    from embodichain.extensions.models.dynamics.rigidformer import (
+        load_rigidformer_checkpoint,
+    )
+    from embodichain.extensions.models.dynamics.rigidformer.data import (
+        _verified_manifest,
+    )
     from ._support._evidence import evidence
 
     if args.output.exists():
@@ -227,7 +231,7 @@ def evaluate(args: argparse.Namespace) -> None:
         record = {
             **evidence(args.checkpoint, root, args.attention_backend),
             "author_revision": __import__(
-                "embodichain_models.dynamics.rigidformer",
+                "embodichain.extensions.models.dynamics.rigidformer",
                 fromlist=["RIGIDFORMER_REVISION"],
             ).RIGIDFORMER_REVISION,
             "checkpoint_sha256": sha256(args.checkpoint),
