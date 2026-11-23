@@ -35,6 +35,7 @@ _BLACKLIST = ["utils"]
 register_manager_modules(
     [
         "embodichain.extensions.tasks.manipulation.assembly.functors",
+        "embodichain.extensions.tasks.manipulation.assembly.tool_hang",
         "embodichain.extensions.tasks.manipulation.assembly._control",
         "embodichain.extensions.tasks.manipulation.assembly._state",
         "embodichain.extensions.tasks.locomotion.managers.observations",

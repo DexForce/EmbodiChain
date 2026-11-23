@@ -234,6 +234,39 @@ def test_pour_water_assets_are_visible_to_configs_and_download_cli(
 
 
 @pytest.mark.no_sim
+def test_tool_hang_pads_resolve_as_an_eef_asset_with_the_pinned_archive(
+    monkeypatch, tmp_path
+) -> None:
+    from embodichain.data.dataset import EmbodiChainDataset
+    from embodichain.extensions.robots.franka import assets
+
+    name = "RobosuiteToolHangPadsV1"
+    cls = get_data_class(name)
+    assert cls is assets.RobosuiteToolHangPadsV1
+    assert download.find_asset_class(name, download.get_registry()) == ("eef", cls)
+    captured = {}
+
+    def intercept(self, prefix, descriptor, root):
+        captured.update(prefix=prefix, descriptor=descriptor, root=root)
+        raise RuntimeError("intercepted download")
+
+    mirror = "https://hf-mirror.com/datasets/DexForceAI/embodichain_data/resolve/main/"
+    monkeypatch.setattr(assets, "EMBODICHAIN_DOWNLOAD_PREFIX", mirror)
+    monkeypatch.setattr(EmbodiChainDataset, "__init__", intercept)
+    with pytest.raises(RuntimeError, match="intercepted download"):
+        cls(data_root=str(tmp_path))
+    assert captured["root"] == str(tmp_path) and captured["prefix"] == name
+    revision = "883569d6dc614a7773f6e24d5b9b344e0f499956"
+    path = f"scene_assets/robosuite_tool_hang_pads_v1/{name}.zip"
+    archive = mirror.replace("main/", f"{revision}/") + path
+    assert captured["descriptor"].urls == [
+        archive,
+        archive.replace("hf-mirror.com", "huggingface.co"),
+    ]
+    assert captured["descriptor"].md5 == "2a20da805c21cf43d6cb3094a365015f"
+
+
+@pytest.mark.no_sim
 def test_robot_asset_listing_includes_locomotion_and_existing_robots(capsys) -> None:
     """Users see all public robot assets without exposing helper classes."""
     registry = download.get_registry()
@@ -361,7 +394,11 @@ def test_eef_catalog_preserves_ids_without_legacy_exports(monkeypatch, capsys) -
     monkeypatch.setattr(EmbodiChainDataset, "__init__", unexpected_download)
     assert util.find_spec("embodichain.data.assets.eef_assets") is None
     entries = download.get_registry()["eef"]
-    expected_ids = EEF_ARCHIVES.keys() | {"AgxGripper", "RoboPartyRPHand"}
+    expected_ids = EEF_ARCHIVES.keys() | {
+        "AgxGripper",
+        "RoboPartyRPHand",
+        "RobosuiteToolHangPadsV1",
+    }
     assert {name for name, _ in entries} == expected_ids
     assert len(entries) == len(expected_ids)
     for name, cls in entries:

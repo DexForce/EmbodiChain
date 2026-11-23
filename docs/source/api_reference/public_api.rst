@@ -6912,6 +6912,28 @@ embodichain.lab.sim.cfg parallel-jaw facade
    :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :no-index:
 
+Tool Hang assembly
+------------------
+
+The ``RobosuiteToolHang-v1`` deployment uses versioned composite geometry
+and a contact sensor to measure insertion and wrench support. Its stand, frame
+and wrench resolve through the task asset ``RobosuiteToolHangV1``. The Franka
+end-effector asset ``RobosuiteToolHangPadsV1/hand.urdf`` combines the registered
+hand meshes with the two robosuite fingertip pads.
+
+.. autoclass:: embodichain.extensions.robots.franka.assets.RobosuiteToolHangPadsV1
+
+.. autoclass:: embodichain.data.assets.task_assets.RobosuiteToolHangV1
+
+.. autoclass:: embodichain.extensions.tasks.manipulation.assembly.tool_hang.ToolHangExpertEnv
+
+.. autoclass:: embodichain.extensions.tasks.manipulation.assembly.tool_hang.ToolHangSuccess
+
+.. autofunction:: embodichain.extensions.tasks.manipulation.assembly.tool_hang.reset_tool_hang
+
+.. autofunction:: embodichain.extensions.tasks.manipulation.assembly.tool_hang.tool_hang_fallen
+
+
 Fluid task interfaces
 ---------------------
 

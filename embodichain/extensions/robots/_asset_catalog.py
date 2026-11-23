@@ -91,6 +91,10 @@ ROBOT_ASSETS = {
         "class_path": "embodichain.extensions.robots.flexiv.rizon4s.assets:FlexivRizon4S",
         "category": "robot",
     },
+    "RobosuiteToolHangPadsV1": {
+        "class_path": "embodichain.extensions.robots.franka.assets:RobosuiteToolHangPadsV1",
+        "category": "eef",
+    },
     "FrankaPandaArm": {
         "class_path": "embodichain.extensions.robots.franka.assets:FrankaPandaArm",
         "category": "robot",

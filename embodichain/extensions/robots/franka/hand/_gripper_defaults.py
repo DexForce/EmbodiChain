@@ -68,6 +68,27 @@ _DEFAULTS = {
     }
 }
 
+_DEFAULTS["robosuite_tool_hang"] = {
+    **_DEFAULTS["default"],
+    "fpath": "RobosuiteToolHangPadsV1/hand.urdf",
+    "model_id": "franka_panda_hand_robosuite_tool_hang",
+    # At 40 mm per slide the two inner pad faces are 79 mm apart.
+    "max_opening_width": 0.079,
+    "source_sha256": "077ca49a41e0af9f5b5db812fd1ceb45efb21e745895e53f43ba7f9f077078cc",
+    "collision_links": [
+        *_DEFAULTS["default"]["collision_links"],
+        "fr3_leftpad",
+        "fr3_rightpad",
+    ],
+    "pad_links": ["fr3_leftpad", "fr3_rightpad"],
+    "root_from_contact_frame": [
+        [0.0, -1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0934],
+        [0.0, 0.0, 0.0, 1.0],
+    ],
+}
+
 
 def get_gripper_defaults(variant: str | None = None) -> dict[str, object]:
     """Return native model data without asset access or runtime imports.

@@ -26,7 +26,7 @@ from embodichain.data.constants import (
 )
 from embodichain.data.dataset import EmbodiChainDataset
 
-__all__ = ["PourCupAssets", "PourCupDemoData"]
+__all__ = ["PourCupAssets", "PourCupDemoData", "RobosuiteToolHangV1"]
 
 _HUB_PREFIX = (
     "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/"
@@ -37,6 +37,8 @@ class _TaskAsset(EmbodiChainDataset):
     """Download one task archive through the shared locked dataset cache."""
 
     archive_md5: str
+    archive_directory = "task_assets"
+    revision = "main"
 
     def __init__(self, data_root: str | None = None) -> None:
         """Initialize and extract the task bundle.
@@ -45,10 +47,14 @@ class _TaskAsset(EmbodiChainDataset):
             data_root: Optional cache root overriding the EmbodiChain default.
         """
         prefix = type(self).__name__
-        filename = f"task_assets/{prefix}.zip"
-        urls = [f"{EMBODICHAIN_DOWNLOAD_PREFIX}{filename}"]
-        if EMBODICHAIN_DOWNLOAD_PREFIX != _HUB_PREFIX:
-            urls.append(f"{_HUB_PREFIX}{filename}")
+        filename = f"{self.archive_directory}/{prefix}.zip"
+        urls = list(
+            dict.fromkeys(
+                source.replace("/resolve/main/", f"/resolve/{self.revision}/", 1)
+                + filename
+                for source in (EMBODICHAIN_DOWNLOAD_PREFIX, _HUB_PREFIX)
+            )
+        )
         descriptor = o3d.data.DataDescriptor(urls, self.archive_md5)
         super().__init__(
             prefix,
@@ -76,3 +82,15 @@ class PourCupDemoData(_TaskAsset):
     """
 
     archive_md5 = "8eb96cb756ac08efe403417f50ad2bf2"
+
+
+class RobosuiteToolHangV1(_TaskAsset):
+    """Primitive collision and visual URDFs for the stand, frame and wrench.
+
+    Resolve, for example, ``RobosuiteToolHangV1/frame.urdf``. The archive
+    includes the generation source, original MIT license and provenance.
+    """
+
+    archive_md5 = "a3a3a263cb3346ef4be78caa88d35da3"
+    archive_directory = "scene_assets/robosuite_tool_hang_v1"
+    revision = "256a4cb8f6b66db4f3e6722847725f6509aae48c"

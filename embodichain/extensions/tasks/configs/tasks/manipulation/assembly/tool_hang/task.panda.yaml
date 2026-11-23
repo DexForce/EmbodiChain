@@ -1,0 +1,15 @@
+id: RobosuiteToolHang-v1
+max_episode_steps: 200
+headless: true
+device: cuda:0
+environment:
+  component: env.yaml
+embodiment:
+  component: panda.yaml
+rl_task:
+  success:
+    hanging:
+      func: ToolHangSuccess
+  failure:
+    fallen:
+      func: tool_hang_fallen

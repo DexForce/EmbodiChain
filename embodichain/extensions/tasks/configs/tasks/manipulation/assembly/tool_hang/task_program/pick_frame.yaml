@@ -1,0 +1,18 @@
+program_id: tool_hang_pick_frame
+instruction: Pick up the frame with the Panda.
+targets: {}
+program:
+  kind: sequence
+  items:
+    - kind: segment
+      name: approach_frame
+      instruction: Move the open hand above the frame grip.
+      steps:
+        kind: invoke
+        call: {kind: registered, call_id: tool_hang.approach_grip, arguments: {object: frame}}
+    - kind: segment
+      name: pick_frame
+      instruction: Pinch and lift the frame between both pads.
+      steps:
+        kind: invoke
+        call: {kind: registered, call_id: tool_hang.pick, arguments: {object: frame}}

@@ -1851,9 +1851,9 @@ class _SimulationArticulationJointStateProvider:
         qpos = self.entity.get_qpos(target=False)
         if not isinstance(qpos, torch.Tensor):
             raise TypeError("Simulation articulation get_qpos() must return a tensor.")
-        if qpos.dim() != 2 or qpos.shape[0] == 0 or qpos.shape[1] == 0:
+        if qpos.dim() != 2 or qpos.shape[0] == 0:
             raise ValueError(
-                "Simulation articulation qpos must have non-empty shape (N, J)."
+                "Simulation articulation qpos must have shape (N, J) with at least one arena."
             )
         joint_names = tuple(self.entity.joint_names)
         if len(joint_names) != qpos.shape[1]:
