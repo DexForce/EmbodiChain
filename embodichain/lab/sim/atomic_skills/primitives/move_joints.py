@@ -18,12 +18,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import ClassVar
+from dataclasses import dataclass, replace
+from typing import ClassVar, Protocol, runtime_checkable
 
 import torch
 
 from embodichain.lab.sim.atomic_skills.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_skills.continuation import PlanContinuationResult
 from embodichain.lab.sim.atomic_skills.core import AtomicSkill
 from embodichain.lab.sim.atomic_skills.invocation import (
     SkillOptions,
@@ -46,17 +47,90 @@ from embodichain.lab.sim.atomic_skills.primitives._binding_contracts import (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class ObservedJointTrajectory:
+    """One timed joint motion resolved at declared observation boundaries.
+
+    Args:
+        source_id: Engine-local identifier owned by the episode's command source.
+        phase: Source-local name for this motion.
+        chunk_lengths: One positive command count per chunk, in execution order.
+    """
+
+    source_id: str
+    phase: str
+    chunk_lengths: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.source_id, str) or not self.source_id.strip():
+            raise ValueError("An observed trajectory needs a nonempty source ID.")
+        if not isinstance(self.phase, str) or not self.phase.strip():
+            raise ValueError("An observed trajectory needs a nonempty phase name.")
+        if (
+            not isinstance(self.chunk_lengths, tuple)
+            or not 1 <= len(self.chunk_lengths) <= 256
+            or any(
+                type(length) is not int or length < 1 for length in self.chunk_lengths
+            )
+        ):
+            raise ValueError("Observed trajectories need 1–256 positive chunk lengths.")
+
+
+@runtime_checkable
+class ObservedJointTrajectorySource(Protocol):
+    """Episode-owned source of live full-robot commands for MoveJoints."""
+
+    def resolve(
+        self,
+        phase: str,
+        start: int,
+        stop: int,
+        context: PlanningContext,
+        active_mask: torch.Tensor,
+    ) -> TimedTrajectory:
+        """Resolve timed commands without dispatching or advancing the simulation.
+
+        Args:
+            phase: Source-local motion name from the goal.
+            start: First command index, zero-based within the phase.
+            stop: Exclusive end command index.
+            context: Fresh observations, or an isolated nominal preview context.
+            active_mask: Rows eligible to execute the chunk.
+
+        Returns:
+            One full-robot command per requested control step and row.
+        """
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class _JointTrajectoryCursor:
+    """Value-owned progress of an observed trajectory within one invocation."""
+
+    position: int
+    limit: int
+    phase_name: str
+    stop: int
+
+    def snapshot(self) -> _JointTrajectoryCursor:
+        return replace(self)
+
+
 @dataclass(frozen=True, slots=True, eq=False)
 class JointPositionGoal:
     """Explicit or named joint-space goal for a bound robot resource."""
 
-    target: torch.Tensor | str | TimedTrajectory
-    """Joint waypoints, a named command, or an explicitly timed full-joint replay.
+    target: torch.Tensor | str | TimedTrajectory | ObservedJointTrajectory
+    """Joint waypoints, a named command, or a timed full-robot trajectory.
 
-    Authored timed replay requires dynamic collision planning to be disabled.
+    Authored and observed timed motion require dynamic collision planning to be
+    disabled. An observed motion resolves later samples after earlier commands
+    have executed.
     """
 
     def __post_init__(self) -> None:
+        if isinstance(self.target, ObservedJointTrajectory):
+            return
         if isinstance(self.target, TimedTrajectory):
             if self.target.waypoint_count == 0:
                 raise ValueError(
@@ -69,7 +143,8 @@ class JointPositionGoal:
             return
         if not isinstance(self.target, torch.Tensor):
             raise TypeError(
-                "target must be a torch.Tensor, str or TimedTrajectory, "
+                "target must be a torch.Tensor, str, TimedTrajectory or "
+                "ObservedJointTrajectory, "
                 f"got {type(self.target).__name__}."
             )
         if self.target.dim() not in (1, 2, 3) or self.target.shape[-1] == 0:
@@ -121,6 +196,24 @@ class MoveJoints(AtomicSkill[JointPositionGoal, MoveJointsOptions]):
     ) -> SkillPlan:
         """Plan a joint-space goal without mutating the robot or task state."""
         goal = request.goal
+        if isinstance(goal.target, ObservedJointTrajectory):
+            recovery = request.recovery_policy
+            if (
+                recovery.planning_budget
+                or recovery.max_replans
+                or recovery.max_skill_retries
+            ):
+                raise ValueError(
+                    "Observed joint trajectories require a fixed execution grid "
+                    "without planning budgets or skill retries."
+                )
+            active = context.planning_mask
+            if active is None:
+                active = torch.ones_like(context.env_ids, dtype=torch.bool)
+            return self._plan_observed_chunk(
+                request, context, goal.target, 0, 0, active
+            )
+
         motion = request.binding.endpoint("primary", "motion")
         motion_target = motion.require_target(JointPositionTarget)
         control_part = motion_target.control_part
@@ -133,39 +226,7 @@ class MoveJoints(AtomicSkill[JointPositionGoal, MoveJointsOptions]):
                 "Preserving velocity samples requires an explicitly timed velocity trajectory."
             )
         if isinstance(goal.target, TimedTrajectory):
-            trajectory = goal.target
-            if sorted(joint_ids) != list(range(context.robot.robot_dof)):
-                raise ValueError("Timed replay requires a full-robot motion binding.")
-            if not torch.equal(trajectory.env_ids, context.env_ids):
-                raise ValueError(
-                    "Timed replay must match the selected environment rows."
-                )
-            if trajectory.positions.device != context.robot.qpos.device:
-                raise ValueError("Timed replay must be on the bound robot device.")
-            if (
-                request.motion_policy.dynamic_collision_mode
-                is not DynamicCollisionMode.OFF
-            ):
-                raise ValueError(
-                    "Authored replay requires dynamic collision planning to be off."
-                )
-            if not trajectory.dt.is_floating_point() or not torch.allclose(
-                trajectory.dt,
-                torch.full_like(trajectory.dt, context.require_control_dt()),
-                rtol=1e-6,
-                atol=0,
-            ):
-                raise ValueError(
-                    "Each timed replay command must occupy one control step."
-                )
-            return self.build_plan(
-                request,
-                context,
-                success=True,
-                trajectory=trajectory,
-                replannable=False,
-                preserve_velocity_samples=request.skill_options.preserve_velocity_samples,
-            )
+            return self._build_timed_plan(request, context, goal.target, True)
 
         joint_dof = len(motion_target.joint_ids)
         target_qpos = resolve_joint_target(
@@ -229,6 +290,115 @@ class MoveJoints(AtomicSkill[JointPositionGoal, MoveJointsOptions]):
             trajectory=trajectory,
         )
 
+    def _build_timed_plan(
+        self,
+        request: ResolvedSkillRequest[JointPositionGoal, MoveJointsOptions],
+        context: PlanningContext,
+        trajectory: TimedTrajectory,
+        success: bool | torch.Tensor,
+    ) -> SkillPlan:
+        """Apply the same full-robot command grid to authored and observed motion."""
+        motion = request.binding.endpoint("primary", "motion")
+        joint_ids = motion.require_target(JointPositionTarget).joint_ids
+        if sorted(joint_ids) != list(range(context.robot.robot_dof)):
+            raise ValueError("Timed replay requires a full-robot motion binding.")
+        if not torch.equal(trajectory.env_ids, context.env_ids):
+            raise ValueError("Timed replay must match the selected environment rows.")
+        if trajectory.positions.device != context.robot.qpos.device:
+            raise ValueError("Timed replay must be on the bound robot device.")
+        if request.motion_policy.dynamic_collision_mode is not DynamicCollisionMode.OFF:
+            raise ValueError(
+                "Authored replay requires dynamic collision planning to be off."
+            )
+        if not trajectory.dt.is_floating_point() or not torch.allclose(
+            trajectory.dt,
+            torch.full_like(trajectory.dt, context.require_control_dt()),
+            rtol=1e-6,
+            atol=0,
+        ):
+            raise ValueError("Each timed replay command must occupy one control step.")
+        return self.build_plan(
+            request,
+            context,
+            success=success,
+            trajectory=trajectory,
+            replannable=False,
+            preserve_velocity_samples=request.skill_options.preserve_velocity_samples,
+        )
+
+    def _plan_observed_chunk(
+        self,
+        request: ResolvedSkillRequest[JointPositionGoal, MoveJointsOptions],
+        context: PlanningContext,
+        target: ObservedJointTrajectory,
+        chunk: int,
+        start: int,
+        active_mask: torch.Tensor,
+    ) -> SkillPlan:
+        """Resolve the next range after the preceding command is acknowledged."""
+        stop = (
+            sum(target.chunk_lengths)
+            if context.is_preview
+            else start + target.chunk_lengths[chunk]
+        )
+        source = self.planning_services.joint_trajectory_source(target.source_id)
+        trajectory = source.resolve(target.phase, start, stop, context, active_mask)
+        if not isinstance(trajectory, TimedTrajectory):
+            raise TypeError(
+                "An observed joint trajectory source must return TimedTrajectory."
+            )
+        if trajectory.waypoint_count != stop - start:
+            raise ValueError(
+                "An observed trajectory must supply the declared command count."
+            )
+        if (
+            request.skill_options.preserve_velocity_samples
+            and trajectory.velocities is None
+        ):
+            raise ValueError(
+                "Preserving velocity samples requires a timed velocity trajectory."
+            )
+        plan = self._build_timed_plan(request, context, trajectory, active_mask)
+        if context.is_preview or len(target.chunk_lengths) == 1:
+            return plan
+        return replace(
+            plan,
+            continuation=_JointTrajectoryCursor(
+                chunk + 1, len(target.chunk_lengths), target.phase, stop
+            ),
+        )
+
+    def continue_plan(
+        self,
+        request: ResolvedSkillRequest[JointPositionGoal, MoveJointsOptions],
+        context: PlanningContext,
+        plan: SkillPlan,
+        active_mask: torch.Tensor,
+    ) -> PlanContinuationResult:
+        """Resolve another observed range within the existing MoveJoints invocation.
+
+        Args:
+            request: The unchanged grounded invocation.
+            context: Observations from the last acknowledged control step.
+            plan: Completed chunk and its command cursor.
+            active_mask: Rows that executed the completed chunk.
+
+        Returns:
+            Accepted rows and their next timed plan, if more commands remain.
+        """
+        target = request.goal.target
+        if not isinstance(target, ObservedJointTrajectory):
+            return super().continue_plan(request, context, plan, active_mask)
+        cursor = plan.continuation
+        if not isinstance(cursor, _JointTrajectoryCursor):
+            raise TypeError("Expected an observed joint trajectory continuation.")
+        next_plan = None
+        if cursor.position < cursor.limit and bool(active_mask.any()):
+            next_plan = self._plan_observed_chunk(
+                request, context, target, cursor.position, cursor.stop, active_mask
+            )
+        return PlanContinuationResult(active_mask, next_plan)
+
     def _resolve_target_qpos(
         self,
         goal: JointPositionGoal,
@@ -251,4 +421,6 @@ __all__ = [
     "JointPositionGoal",
     "MoveJoints",
     "MoveJointsOptions",
+    "ObservedJointTrajectory",
+    "ObservedJointTrajectorySource",
 ]

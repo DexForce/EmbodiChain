@@ -3357,6 +3357,8 @@ embodichain.lab.sim.atomic_skills
    MoveEndEffectorOptions
    MoveHeldObjectOptions
    MoveJointsOptions
+   ObservedJointTrajectory
+   ObservedJointTrajectorySource
    ObjectSkillGoal
    OPEN_COMMAND
    PickUpOptions

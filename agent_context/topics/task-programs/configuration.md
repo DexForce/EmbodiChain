@@ -306,8 +306,9 @@ after closure and a simultaneous two-finger contact sample. The final
 under `configs/tasks/manipulation/cable/franka_rope_wrap/` in the task extension.
 
 `FrankaRj45Cycle-v1` uses `simulation.franka_rj45_phase` to lower the insertion
-cycle to `MoveJoints`. Each feedback call reads the live plug before its control
-step. The reset event owns pre-roll and attaches the monitor that supplies the
+cycle to one `MoveJoints` invocation per phase. Its episode-owned joint
+trajectory source reads the live plug at the start of each chunk that needs a
+new observation. The reset event owns pre-roll and attaches the monitor that supplies the
 17 checks for `rj45_success`. The cable tail attaches to the articulated plug
 through the physical environment declaration. Benchmark replays consume the
 recorded position and velocity targets for this program.

@@ -60,6 +60,7 @@ from .tracking import (
 
 if TYPE_CHECKING:
     from .primitives.contact import ContactPhaseSource
+    from .primitives.move_joints import ObservedJointTrajectorySource
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.sim_manager import SimulationManager
     from embodichain.lab.sim.motion.motion_generator import MotionGenerator
@@ -110,6 +111,9 @@ class SkillPlanningServices:
         self._contact_sources: WeakValueDictionary[str, ContactPhaseSource] = (
             WeakValueDictionary()
         )
+        self._joint_trajectory_sources: WeakValueDictionary[
+            str, ObservedJointTrajectorySource
+        ] = WeakValueDictionary()
         self._motion_generator = motion_generator
         self._robot: Robot = motion_generator.robot
         self._device = resolve_runtime_device(motion_generator.device)
@@ -181,6 +185,50 @@ class SkillPlanningServices:
         except KeyError as error:
             raise ValueError(
                 "Contact source is expired or belongs to another engine."
+            ) from error
+
+    def register_joint_trajectory_source(
+        self, source_id: str, source: ObservedJointTrajectorySource
+    ) -> None:
+        """Bind an episode-owned source of observed MoveJoints commands.
+
+        Args:
+            source_id: Nonempty identifier local to this engine.
+            source: Command adapter; the episode host retains a strong reference.
+
+        Raises:
+            ValueError: The identifier is already bound to another live source.
+        """
+        from .primitives.move_joints import ObservedJointTrajectorySource
+
+        if not isinstance(source_id, str) or not source_id.strip():
+            raise ValueError("Joint trajectory source IDs must be nonempty strings.")
+        if not isinstance(source, ObservedJointTrajectorySource):
+            raise TypeError("Invalid observed joint trajectory source.")
+        previous = self._joint_trajectory_sources.get(source_id)
+        if previous is not None and previous is not source:
+            raise ValueError(
+                "Joint trajectory source IDs cannot be rebound while live."
+            )
+        self._joint_trajectory_sources[source_id] = source
+
+    def joint_trajectory_source(self, source_id: str) -> ObservedJointTrajectorySource:
+        """Resolve an observed command source registered on this engine.
+
+        Args:
+            source_id: Identifier registered by the episode's composition root.
+
+        Returns:
+            Live command adapter owned by the episode.
+
+        Raises:
+            ValueError: The source expired or was not registered on this engine.
+        """
+        try:
+            return self._joint_trajectory_sources[source_id]
+        except KeyError as error:
+            raise ValueError(
+                "Joint trajectory source is expired or belongs to another engine."
             ) from error
 
     @property

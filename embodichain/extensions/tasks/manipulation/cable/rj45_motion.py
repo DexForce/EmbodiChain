@@ -38,6 +38,19 @@ _JOINT_NAMES = _ARM_NAMES + [
     "fr3_finger_joint1",
     "fr3_finger_joint2",
 ]
+_CARRY_CAPTURE_START_S, _CARRY_CAPTURE_END_S = 9, 10
+_REGRASP_START_S, _REGRASP_CAPTURE_S = 19, 24.8
+_PLACEMENT_CAPTURE_START_S, _PLACEMENT_CAPTURE_END_S = 31, 33
+
+
+def _feedback_observation_steps(hz: int) -> tuple[int, ...]:
+    """Return command arrivals that require observing the preceding control step."""
+    return (
+        *range(_CARRY_CAPTURE_START_S * hz, _CARRY_CAPTURE_END_S * hz + 1),
+        _REGRASP_START_S * hz + 1,
+        round(_REGRASP_CAPTURE_S * hz),
+        *range(_PLACEMENT_CAPTURE_START_S * hz, _PLACEMENT_CAPTURE_END_S * hz + 1),
+    )
 
 
 def _pose(p: Any, r: np.ndarray = _PLUG_R) -> np.ndarray:
@@ -336,9 +349,11 @@ class Rj45Feedback:
             Full-joint command with the measured-pose correction applied.
         """
         target = nominal_tcp.copy()
-        if 1 < time_s < 9:
+        if 1 < time_s < _CARRY_CAPTURE_START_S:
             weight = _smooth_weight(
-                min((time_s - 1) / 2, 1.0) if time_s < 6 else (9 - time_s) / 3
+                min((time_s - 1) / 2, 1.0)
+                if time_s < 6
+                else (_CARRY_CAPTURE_START_S - time_s) / 3
             )
             turn = _interpolate_rotation(np.eye(3), self._pickup_turn, weight)
             origin = self._pickup_origin
@@ -348,7 +363,7 @@ class Rj45Feedback:
                 + turn @ (target[:3, 3] - origin)
                 + weight * (self._settled_plug[:3, 3] - origin)
             )
-        elif 9 <= time_s <= 14 or 19 < time_s <= 34:
+        elif _CARRY_CAPTURE_START_S <= time_s <= 14 or _REGRASP_START_S < time_s <= 34:
             target = self._plug_target(time_s, nominal_tcp, observe)
         else:
             return nominal_q.copy()
@@ -362,12 +377,12 @@ class Rj45Feedback:
         nominal_tcp: np.ndarray,
         observe: Callable[[], tuple[np.ndarray, np.ndarray]],
     ) -> np.ndarray:
-        extracting = time_s > 19
+        extracting = time_s > _REGRASP_START_S
         nominal_grasp = self._vertical_grasp if extracting else self._carry_grasp
-        if 19 < time_s < 24.8:
+        if _REGRASP_START_S < time_s < _REGRASP_CAPTURE_S:
             self._grasp = nominal_grasp
         elif (
-            time_s <= 10
+            time_s <= _CARRY_CAPTURE_END_S
             or (extracting and not self._observed_withdraw_grasp)
             or self._grasp is None
         ):
@@ -385,7 +400,11 @@ class Rj45Feedback:
             weight = _smooth_weight(
                 float(
                     np.clip(
-                        (time_s - 19) / 3 if time_s <= 28 else (31 - time_s) / 3,
+                        (
+                            (time_s - _REGRASP_START_S) / 3
+                            if time_s <= 28
+                            else (_PLACEMENT_CAPTURE_START_S - time_s) / 3
+                        ),
                         0,
                         1,
                     )
@@ -405,7 +424,7 @@ class Rj45Feedback:
 
         grasp = self._grasp
         assert grasp is not None
-        if 31 <= time_s <= 33:
+        if _PLACEMENT_CAPTURE_START_S <= time_s <= _PLACEMENT_CAPTURE_END_S:
             # Update before floor release, then freeze the estimate while opening.
             hand, plug = observe()
             measured = np.linalg.inv(plug) @ hand
