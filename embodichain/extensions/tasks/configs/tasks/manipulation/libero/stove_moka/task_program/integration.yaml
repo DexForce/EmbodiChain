@@ -1,0 +1,69 @@
+integration_id: libero_stove_moka_franka
+program_id: libero_stove_moka
+requires:
+  scene_contract: libero_stove_moka_scene
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: libero_stove_moka_scene
+  registry_id: libero_stove_moka_native
+  rigid_objects:
+  - entity_id: moka
+    dynamics: dynamic
+    semantic_type: moka_pot
+    affordances:
+    - {entity_id: moka_grasp, kind: antipodal_grasp}
+  articulations:
+  - {entity_id: stove, dynamics: dynamic}
+  links:
+  - entity_id: knob
+    articulation_id: stove
+    native_link_name: knob
+    dynamics: dynamic
+    semantic_type: stove_knob
+profile:
+  defaults:
+    twist: {primary: primary_manipulator}
+    pick_up: {primary: primary_manipulator}
+    place: {primary: primary_manipulator}
+  skill_options:
+    simulation.twist:
+      kind: twist
+      twist_angle: -0.69
+      twist_waypoint_count: 14
+      pre_grasp_distance: 0.065
+      hand_interp_steps: 14
+    pick:
+      kind: pick_up
+      initial_lift_height: 0.14
+      pre_grasp_distance: 0.065
+      lift_height: 0.115
+      hand_interp_steps: 12
+      grasp_settle_steps: 8
+      fixed_object_to_eef:
+        position: [0.0, 0.0, 0.051]
+        rotation_matrix: [[0.258819, -0.965926, 0], [-0.965926, -0.258819, 0], [0, 0, -1]]
+    place:
+      kind: place
+      lift_height: 0.045
+      hand_interp_steps: 12
+      release_settle_steps: 8
+      preserve_current_object_orientation: true
+  effect_monitors:
+    pick: &grasp_effect
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params: {consecutive_samples: 2}
+    place: *grasp_effect
+runtime_services:
+  control_part_evidence:
+    kind: joint_position_constraint
+    control_parts: [eef]
+    open_qpos: [0.04, 0.04]
+    minimum_displacement: 0.002
+  registered_semantic_lowerers:
+  - kind: articulation_knob
+    link: knob
+    joint: button
+    grasp_position: [0.0, 0.0, 0.037]
+    approach_sign: -1
+    grasp_roll: 0.0

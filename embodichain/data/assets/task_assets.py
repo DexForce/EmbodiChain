@@ -26,7 +26,7 @@ from embodichain.data.constants import (
 )
 from embodichain.data.dataset import EmbodiChainDataset
 
-__all__ = ["PourCupAssets", "PourCupDemoData"]
+__all__ = ["PourCupAssets", "PourCupDemoData", "LiberoStoveMokaV1"]
 
 _HUB_PREFIX = (
     "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/"
@@ -37,6 +37,8 @@ class _TaskAsset(EmbodiChainDataset):
     """Download one task archive through the shared locked dataset cache."""
 
     archive_md5: str
+    archive_directory = "task_assets"
+    revision = "main"
 
     def __init__(self, data_root: str | None = None) -> None:
         """Initialize and extract the task bundle.
@@ -45,10 +47,14 @@ class _TaskAsset(EmbodiChainDataset):
             data_root: Optional cache root overriding the EmbodiChain default.
         """
         prefix = type(self).__name__
-        filename = f"task_assets/{prefix}.zip"
-        urls = [f"{EMBODICHAIN_DOWNLOAD_PREFIX}{filename}"]
-        if EMBODICHAIN_DOWNLOAD_PREFIX != _HUB_PREFIX:
-            urls.append(f"{_HUB_PREFIX}{filename}")
+        filename = f"{self.archive_directory}/{prefix}.zip"
+        urls = list(
+            dict.fromkeys(
+                source.replace("/resolve/main/", f"/resolve/{self.revision}/", 1)
+                + filename
+                for source in (EMBODICHAIN_DOWNLOAD_PREFIX, _HUB_PREFIX)
+            )
+        )
         descriptor = o3d.data.DataDescriptor(urls, self.archive_md5)
         super().__init__(
             prefix,
@@ -76,3 +82,11 @@ class PourCupDemoData(_TaskAsset):
     """
 
     archive_md5 = "8eb96cb756ac08efe403417f50ad2bf2"
+
+
+class LiberoStoveMokaV1(_TaskAsset):
+    """Primitive URDF for the LIBERO stove housing, burner, and hinged knob."""
+
+    archive_directory = "scene_assets/libero_stove_moka_v1"
+    archive_md5 = "e84a79423974a09d199b5b05e20894a8"
+    revision = "753fa474805f6b6d0a7aad196f8f400ea5f32a1a"

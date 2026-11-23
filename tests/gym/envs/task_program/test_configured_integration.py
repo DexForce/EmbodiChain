@@ -103,7 +103,11 @@ from embodichain.lab.sim.atomic_skills import (
     SceneEntityPose,
     SceneSnapshot,
     TaskState,
+    TwistAffordance,
+    TwistGoal,
+    TwistOptions,
 )
+from embodichain.lab.sim.objects.articulation import ArticulationJointKinematics
 from embodichain.lab.sim.atomic_skills.goals import (
     collect_scene_dependencies,
     resolve_pose_goal,
@@ -122,7 +126,11 @@ from embodichain.extensions.robots import TianjiMarvinCfg
 from embodichain.lab.task_program.semantics import (
     HeldObjectRelation,
     RegisteredSemanticCall,
+    SceneArticulationRef,
+    SceneEntityRegistration,
+    SceneLinkRef,
     SceneObjectRef,
+    SceneRegistry,
     SemanticEffectKind,
 )
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
@@ -947,6 +955,114 @@ def test_pour_water_uses_shared_calibrated_embodiment(
     ).integration.registration.robot_profile_binding.presets[0]
     assert preset.motion_policy.sample_count == 160
     assert preset.effect_assurance.value == "projected"
+
+
+@pytest.mark.parametrize(
+    ("joint_name", "sign", "expected_axis"),
+    [
+        ("hinge", 1, (0.0, -1.0, 0.0)),
+        ("hinge", -1, (0.0, 1.0, 0.0)),
+        ("missing", 1, None),
+    ],
+)
+def test_configured_articulation_knob_uses_the_named_hinge_in_link_coordinates(
+    joint_name: str, sign: int, expected_axis: tuple[float, float, float] | None
+) -> None:
+    factory = _decode_registered_lowerer(
+        {
+            "kind": "articulation_knob",
+            "link": "knob",
+            "joint": joint_name,
+            "grasp_position": [0.0, 0.0, 0.04],
+            "approach_sign": sign,
+            "grasp_roll": 0.2,
+        },
+        path="runtime_services.registered_semantic_lowerers[0]",
+    )
+    origin = torch.eye(4)
+    origin[0, 3] = 0.3
+    joint = ArticulationJointKinematics(
+        name="hinge",
+        joint_type="revolute",
+        parent_link_name="stove_body",
+        child_link_name="native_knob",
+        origin_pose=origin,
+        axis=torch.tensor([1.0, 0.0, 0.0]),
+        joint_limits=(0.0, 1.2),
+    )
+    body_pose = torch.eye(4)
+    body_pose[0, 3] = 1.0
+    knob_pose = torch.tensor(
+        [
+            [0.0, -1.0, 0.0, 1.1],
+            [1.0, 0.0, 0.0, 0.4],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    link_poses = {"stove_body": body_pose, "native_knob": knob_pose}
+    chains = {"native_knob": (joint,)}
+    articulation = SimpleNamespace(
+        get_parent_joint_chain=chains.__getitem__,
+        get_link_pose=lambda name, **_: link_poses[name].unsqueeze(0),
+        get_link_vert_face=lambda _: (torch.eye(3), torch.tensor([[0, 1, 2]])),
+    )
+    articulations = {"stove": articulation}
+    simulation = SimpleNamespace(get_articulation=articulations.get)
+    stove = SceneArticulationRef("stove")
+    provider = SimpleNamespace(
+        observe=lambda **_: pytest.fail("unexpected observation")
+    )
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(stove, state_provider=provider),
+            SceneEntityRegistration(
+                SceneLinkRef("knob"),
+                parent=stove,
+                native_name="native_knob",
+                state_provider=provider,
+            ),
+        )
+    )
+    robot = object()
+    engine = SimpleNamespace(robot=robot)
+    if expected_axis is None:
+        with pytest.raises(ValueError, match="not an ancestor of link"):
+            factory.create(
+                simulation=simulation,
+                robot=robot,
+                scene_registry=registry,
+                engine=engine,
+            )
+        return
+    lowerer = factory.create(
+        simulation=simulation, robot=robot, scene_registry=registry, engine=engine
+    )
+    motion = SimpleNamespace(task_state_key="arm")
+    bound = SimpleNamespace(
+        binding=SimpleNamespace(
+            resources={"primary": SimpleNamespace(endpoints={"motion": motion})}
+        )
+    )
+    lowering = lowerer.lower(
+        RegisteredSemanticCall(
+            call_id="simulation.twist", arguments={"object": "knob"}
+        ),
+        context=SimpleNamespace(task=TaskState(batch_size=1, device="cpu")),
+        bound=bound,
+        option_template=TwistOptions(),
+    )
+    goal = lowering.goal
+    assert isinstance(goal, TwistGoal)
+    assert goal.target_pose.entity_id == "knob"
+    affordance = goal.semantics.affordance
+    assert isinstance(affordance, TwistAffordance)
+    assert affordance.axis_origin == pytest.approx((-0.4, -0.2, 0.0))
+    torch.testing.assert_close(affordance.twist_axis, torch.tensor(expected_axis))
+    assert affordance.joint_name == "hinge"
+    assert affordance.joint_limits == pytest.approx((0.0, 1.2))
+    assert affordance.grasp_position == pytest.approx((0.0, 0.0, 0.04))
+    assert affordance.grasp_roll == pytest.approx(0.2)
 
 
 def test_pour_water_registered_lowerers_build_only_typed_goals() -> None:

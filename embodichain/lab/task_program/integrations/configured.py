@@ -42,6 +42,7 @@ from ._kinematic_replay import _KinematicReplayFactory, _decode_kinematic_replay
 from ._configured_controls import (
     _PressLowererFactory,
     _TwistLowererFactory,
+    _ArticulationKnobLowererFactory,
     _OpenDoorLowererFactory,
 )
 from ._configured_services import (
@@ -2711,6 +2712,7 @@ def _decode_registered_lowerer(
 ) -> (
     _PressLowererFactory
     | _TwistLowererFactory
+    | _ArticulationKnobLowererFactory
     | _OpenDoorLowererFactory
     | _ArticulationLinkSlideLowererFactory
     | _AxisAlignLowererFactory
@@ -2725,6 +2727,27 @@ def _decode_registered_lowerer(
     | _KinematicReplayFactory
 ):
     """Decode one allowlisted registered semantic lowerer factory."""
+    if isinstance(value, Mapping) and value.get("kind") == "articulation_knob":
+        cfg = _mapping(
+            value,
+            path=path,
+            required=frozenset(
+                {"kind", "link", "joint", "grasp_position", "approach_sign"}
+            ),
+            optional=frozenset({"grasp_roll"}),
+        )
+        sign = cfg["approach_sign"]
+        if type(sign) is not int or sign not in (-1, 1):
+            raise ValueError(f"{path}.approach_sign must be -1 or 1.")
+        return _ArticulationKnobLowererFactory(
+            link_entity_id=_identifier(cfg["link"], path=f"{path}.link"),
+            joint_name=_identifier(cfg["joint"], path=f"{path}.joint"),
+            grasp_position=_finite_tuple(
+                cfg["grasp_position"], path=f"{path}.grasp_position", expected_length=3
+            ),
+            approach_sign=sign,
+            grasp_roll=_real(cfg.get("grasp_roll", 0.0), path=f"{path}.grasp_roll"),
+        )
     if isinstance(value, Mapping) and value.get("kind") == "kinematic_joint_replay":
         return _decode_kinematic_replay(value, path=path)
     if isinstance(value, Mapping) and value.get("kind") in {
@@ -3157,7 +3180,7 @@ def _decode_registered_lowerer(
         return _PushObjectLowererFactory(routes=tuple(routes))
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "
-        "['press', 'twist', 'open_door', 'articulation_link_slide', 'axis_align', 'coordinated_transport', "
+        "['press', 'twist', 'open_door', 'articulation_link_slide', 'articulation_knob', 'axis_align', 'coordinated_transport', "
         "'move_end_effector', 'move_held_object', 'park', 'place_relative', 'pour', 'push_object']."
     )
 

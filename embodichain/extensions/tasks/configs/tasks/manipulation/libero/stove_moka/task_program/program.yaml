@@ -1,0 +1,40 @@
+program_id: libero_stove_moka
+instruction: Turn on the stove and put the moka pot on it.
+targets:
+  release_over_burner:
+    kind: pose
+    position: [-0.04, 0.18, 1.044]
+    quaternion_xyzw: [0, 0, 1, 0]
+  burner:
+    kind: pose
+    position: [-0.04, 0.18, 0.999]
+    quaternion_xyzw: [0, 0, 1, 0]
+program:
+- segment: turn_stove_on
+  steps:
+    registered:
+      call_id: simulation.twist
+      arguments: {object: knob}
+  validators:
+  - kind: condition
+    ref: stove_on
+- segment: pick_moka_pot
+  steps:
+    pick: {object: moka}
+  validators:
+  - kind: object_lifted
+    object: moka
+    minimum_lift: 0.055
+- segment: place_on_burner
+  steps:
+    place: {object: moka, at: release_over_burner}
+  post:
+  - {kind: wait_stable, entity: moka}
+  validators:
+  - kind: object_near_target
+    object: moka
+    target: burner
+    position_tolerance: 0.042
+  - {kind: condition, ref: stove_on}
+  - {kind: condition, ref: moka_on_burner}
+  - {kind: condition, ref: moka_upright}

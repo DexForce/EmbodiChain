@@ -1,0 +1,11 @@
+task_key: libero_stove_moka
+title: LIBERO Stove and Moka Pot
+summary: Turn a stove knob and set the moka pot on the burner.
+tags:
+- manipulation
+- articulation
+- task_program
+default_deployment: franka
+deployments:
+  franka:
+    config: task.franka.yaml

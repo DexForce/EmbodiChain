@@ -1,0 +1,18 @@
+graph:
+  roots: [stove_on, moka_on_burner, moka_upright]
+  rules:
+    stove_on:
+      kind: joint_range
+      bindings: {position: articulations/stove/qpos/button}
+      params: {lower: 0.5}
+    moka_on_burner:
+      kind: inside_region
+      bindings: {position: rigid_objects/moka/pose}
+      params:
+        lower: [-0.082, 0.138, 0.974]
+        upper: [0.002, 0.222, 1.018]
+    moka_upright:
+      kind: upright
+      bindings: {pose: rigid_objects/moka/frame}
+      params: {maximum_tilt_degrees: 17.0}
+final_acceptance: [stove_on, moka_on_burner, moka_upright]
