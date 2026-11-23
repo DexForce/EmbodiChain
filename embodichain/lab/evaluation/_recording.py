@@ -289,6 +289,8 @@ def evaluate_recorded_rules(
 
 
 def _matches_field(field, uid, quantity):
+    if field.startswith("measurements/"):
+        return field == f"measurements/{uid}/{quantity}"
     if field.startswith("cables/"):
         return field == f"cables/{uid}/{quantity}"
     if field.startswith("deformables/"):
@@ -365,29 +367,19 @@ def _field_projection(field, descriptor, expected_names=None):
         expected = expected_names[field]
         if expected is None or tuple(names) != tuple(expected):
             return None
-    if field.startswith("cables/"):
+    if field.startswith("measurements/"):
+        from ._episode_reduction import _UNITS
+
+        if len(units) != 1 or units[0] not in _UNITS:
+            return None
+        contract = ("episode", "scalar", tuple(units), (1,))
+    elif field.startswith("cables/"):
         from embodichain.compute.geometry._cable_route import (
             _CABLE_METRICS as _METRICS,
             _CABLE_METRIC_UNITS,
         )
 
-        if quantity.startswith("rj45_"):
-            from embodichain.extensions.tasks.manipulation.cable.rj45_measurements import (
-                RJ45_CHECKS,
-            )
-
-            if quantity.removeprefix("rj45_") not in RJ45_CHECKS:
-                return None
-            contract = ("arena", "scalar", ("1",), (1,))
-        elif quantity.startswith("wrap_"):
-            from embodichain.extensions.tasks.manipulation.cable.wrap_measurements import (
-                WRAP_CHECKS,
-            )
-
-            if quantity.removeprefix("wrap_") not in WRAP_CHECKS:
-                return None
-            contract = ("arena", "scalar", ("1",), (1,))
-        elif quantity not in _METRICS:
+        if quantity not in _METRICS:
             return None
         elif quantity == "end_position":
             contract = ("arena", "xyz", ("m",), (3,))

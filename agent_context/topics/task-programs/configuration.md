@@ -297,21 +297,26 @@ free end and offset Z from that point's observed height. Routing geometry adds
 slot-specific observations to the `cables/<uid>/<measurement>` channels.
 Keep routing acceptance in the deployment's named evaluation rules.
 
-`FrankaRopeWrap-v1` uses `simulation.cable_pickup` to approach, grasp and lift
-the live cable. `simulation.cable_wrap_phase` lowers the wrap trajectory to
-`MoveJoints`. The approach to the post joins the pickup's final command to the
-authored orbit. Scene reset owns pre-roll. The monitor latches its slip reference
-after closure and a simultaneous two-finger contact sample. The final
-`wrap_success` condition reads all 19 measured checks. Task components live
-under `configs/tasks/manipulation/cable/franka_rope_wrap/` in the task extension.
+`FrankaRopeWrap-v1` and `FrankaRj45Cycle-v1` are configuration-only
+deployments. `simulation.joint_trajectory_phase` selects a named control-step
+interval of an integration-relative, content-identified NPZ track. The track
+carries the frame-zero reference, authored joint order and control period.
+The lowerer builds a timed `MoveJoints` goal. A phase can blend from the last
+acknowledged target or resolve observed chunks from declared grasp captures
+and object-frame offsets. Wrap pickup uses `simulation.cable_pickup` and
+joins the loaded grasp to the authored orbit. Connector feedback keeps the
+observed grasp and seated-object offset in the active trajectory source.
 
-`FrankaRj45Cycle-v1` uses `simulation.franka_rj45_phase` to lower the insertion
-cycle to one `MoveJoints` invocation per phase. Its episode-owned joint
-trajectory source reads the live plug at the start of each chunk that needs a
-new observation. The reset event owns pre-roll and attaches the monitor that supplies the
-17 checks for `rj45_success`. The cable tail attaches to the articulated plug
-through the physical environment declaration. Benchmark replays consume the
-recorded position and velocity targets for this program.
+The reset event owns fixed-step pre-roll. Optional `evaluation.measurements`
+binds a physical probe to declared scene entities and selects named reductions
+over inclusive control-frame windows. Winding probes measure the cable and
+bilateral grasp, and connector probes measure relative poses, attachment and
+contact. Contact loss covers the whole control interval. Press observations
+keep insertion depth and latch angle from the same finger-contact sample.
+Terminal scalar observations feed the ordinary evaluation graph and recorder.
+The observation channel identity includes the physical probe and reduction
+declaration. Rule thresholds remain in the graph. Isaac Lab can use the same
+numeric projections with its own freshly simulated state.
 
 The configured lowerer allowlist also exposes profile-owned Park, AxisAlign,
 relative Place and coordinated transport. Their declarations in

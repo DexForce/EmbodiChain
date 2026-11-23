@@ -80,7 +80,10 @@ recording="$run_dir/recording/traj_env0_000000.pt"
 ```
 
 Omit `--record-dir` to run the YAML Task Program without saving a recording.
-The recording stores the actual position and velocity targets for all nine
+The integration selects a packaged nominal trajectory and declares the
+grasp-observation windows and object-frame offsets. The source program applies
+feedback at those windows during execution. The recording stores the actual
+position and velocity targets for all nine
 Franka joints across the accepted 40-second episode. Both replays use this
 recording and freshly solve the calibrated scene at 60 Hz with 32 physics
 substeps per control. The Isaac Lab run uses native Newton VBD for the whole

@@ -353,7 +353,10 @@ def _replay(
         "command_qd": np.empty_like(velocities),
     }
     rows = []
-    measure = load_measurements().measure_rj45_frame
+    measurements = load_measurements()
+    measure = measurements.measure_frame
+    insertion_axis = np.asarray(measurements.parameters["insertion_rotation"])[:, 2]
+    socket_mouth = np.asarray(measurements.parameters["socket_mouth_m"])
     # Sample freshly collided geometry at the same four substep boundaries as
     # the source. The measurement buffer never participates in the solve.
     pipeline = newton.CollisionPipeline(
@@ -385,6 +388,7 @@ def _replay(
         penetration: float,
         dropped: int,
         latch_limit: float,
+        press_samples: list[dict[str, float]],
     ) -> None:
         data["robot_q"][frame] = q[q_indices]
         data["robot_qd"][frame] = qd[dof_indices]
@@ -413,6 +417,7 @@ def _replay(
                 latch_limit_violation_rad=latch_limit,
                 penetration_m=penetration,
                 dropped_contacts=dropped,
+                press_samples=press_samples,
             )
         )
 
@@ -423,13 +428,21 @@ def _replay(
         sim.step(render=False)
     current = observe()
     capture(
-        0, *current, finger=False, socket=False, penetration=0, dropped=0, latch_limit=0
+        0,
+        *current,
+        finger=False,
+        socket=False,
+        penetration=0,
+        dropped=0,
+        latch_limit=0,
+        press_samples=[],
     )
     for index, (q, qd) in enumerate(zip(positions, velocities, strict=True)):
         write_command(q, qd)
         data["command_q"][index] = control.joint_target_q.numpy()[target_indices]
         data["command_qd"][index] = control.joint_target_qd.numpy()[dof_indices]
         finger, socket, penetration, dropped, latch_limit = False, False, 0.0, 0, 0.0
+        press_samples = []
         for _ in range(parts_per_control):
             sim.step(render=False)
             current = observe()
@@ -440,6 +453,16 @@ def _replay(
             penetration = max(penetration, p)
             dropped += d
             angle = float(current[1][latch_q])
+            if f:
+                plug_position = current[0][scene.plug_bodies["plug"], :3]
+                press_samples.append(
+                    {
+                        "depth_m": float(
+                            insertion_axis @ (plug_position - socket_mouth)
+                        ),
+                        "latch_angle_deg": float(np.rad2deg(angle)),
+                    }
+                )
             latch_limit = max(
                 latch_limit,
                 angle - float(limits[1][latch_dof]),
@@ -453,6 +476,7 @@ def _replay(
             penetration=penetration,
             dropped=dropped,
             latch_limit=latch_limit,
+            press_samples=press_samples,
         )
         if (index + 1) % 600 == 0:
             print(f"Completed {index + 1}/{steps} recorded controls", flush=True)
@@ -565,7 +589,7 @@ def main() -> None:
     inputs = scene_inputs(recording, assets)
     output.mkdir(parents=True, exist_ok=False)
     data, rows = _run(args.device, config, env, robot, assets, positions, velocities)
-    acceptance = load_measurements().evaluate_rj45(rows, config)
+    acceptance = load_measurements().evaluate(rows, config)
     save_results(
         output,
         data,

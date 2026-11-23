@@ -1029,7 +1029,7 @@
           "symbol": "cli",
           "start_line": 994,
           "end_line": 994,
-          "excerpt": "def cli(argv: Sequence[str] | None = None) -> None:"
+          "excerpt": "    parser = _create_parser()"
         }
       ],
       "documentation": [

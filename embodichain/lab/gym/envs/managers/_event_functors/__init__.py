@@ -20,4 +20,6 @@ from __future__ import annotations
 
 from .dynamic_settling import wait_for_dynamic_objects_to_settle
 
-__all__ = ["wait_for_dynamic_objects_to_settle"]
+from .pre_roll import pre_roll_with_robot_home
+
+__all__ = ["pre_roll_with_robot_home", "wait_for_dynamic_objects_to_settle"]

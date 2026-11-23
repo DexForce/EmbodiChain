@@ -234,6 +234,12 @@ def _get_evaluation_state(
     env: EmbodiedEnv, obs: EnvObs, *, field: str
 ) -> ObservationSample:
     parts = field.split("/")
+    if parts[0] == "measurements":
+        from embodichain.lab.gym.envs.task_program._episode_measurement import (
+            _measurement_sample,
+        )
+
+        return _measurement_sample(env, parts[1], parts[2])
     if parts[0] == "cables":
         from embodichain.compute.geometry._cable_route import (
             _CABLE_METRICS as _METRICS,
@@ -241,27 +247,6 @@ def _get_evaluation_state(
         )
 
         _, uid, quantity = parts
-        prefix, _, check = quantity.partition("_")
-        if prefix in ("wrap", "rj45") and check:
-            monitor = getattr(env, f"_{prefix}_monitor", None)
-            available = (
-                monitor is not None and monitor.active and monitor.cable.cfg.uid == uid
-            )
-            report = monitor.terminal_report if available else None
-            passed = report is not None and report["checks"][check]
-            values = torch.full((env.num_envs, 1), float(passed), device=env.device)
-            valid = torch.full(
-                (env.num_envs,), available, dtype=torch.bool, device=env.device
-            )
-            return ObservationSample(
-                ObservationDescriptor(
-                    uid, quantity, "arena", "scalar", ("1",), (1,), values.dtype
-                ),
-                values,
-                valid,
-                (None if available else "Cable monitor episode has not started.",)
-                * env.num_envs,
-            )
         if quantity not in _METRICS:
             raise ValueError(f"Unknown cable observation {quantity!r}.")
         bridge = getattr(env, "_active_task_program_bridge", None)

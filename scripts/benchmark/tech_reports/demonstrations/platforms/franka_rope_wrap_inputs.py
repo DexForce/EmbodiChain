@@ -38,6 +38,7 @@ JOINT_NAMES = (
 _WRAP_SKILLS = {
     "simulation.cable_pickup": "pick_up",
     "simulation.cable_wrap_phase": "move_joints",
+    "simulation.joint_trajectory_phase": "move_joints",
 }
 
 

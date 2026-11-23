@@ -6,6 +6,10 @@ requires:
 scene_binding:
   contract_id: cable_post_v1
   registry_id: cable_post
+  rigid_objects:
+  - entity_id: post
+    simulation_uid: post
+    dynamics: static
   cables:
   - entity_id: cable
     simulation_uid: cable
@@ -22,7 +26,7 @@ profile:
       lift_height: 0.0
       hand_interp_steps: 60
       grasp_settle_steps: 15
-    simulation.cable_wrap_phase:
+    simulation.joint_trajectory_phase:
       kind: move_joints
       preserve_velocity_samples: true
   effect_monitors: {}
@@ -70,4 +74,12 @@ runtime_services:
           - kind: check
             target: lifted_free_end
   registered_semantic_lowerers:
-  - kind: cable_wrap_phase
+  - kind: joint_trajectory_phase
+    trajectory: trajectory.npz
+    phases:
+      home: {steps: [0, 60]}
+      approach_post: {steps: [420, 600], join_current: true}
+      orbit: {steps: [600, 1680]}
+      tighten: {steps: [1680, 1920]}
+      settle: {steps: [1920, 2040]}
+      hold_closed: {steps: [2040, 2160]}

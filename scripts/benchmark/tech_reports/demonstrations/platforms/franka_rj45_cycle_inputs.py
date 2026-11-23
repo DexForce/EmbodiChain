@@ -21,6 +21,7 @@ from importlib.util import module_from_spec, spec_from_file_location
 import json
 import math
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -193,15 +194,74 @@ def load_asset_manifest(path: Path) -> dict[str, Path]:
     return paths
 
 
-def load_measurements() -> Any:
-    """Load the task's pure evaluator without importing EmbodiChain in Isaac Lab."""
-    path = _TASK_PACKAGE / "manipulation/cable/rj45_measurements.py"
-    spec = spec_from_file_location("rj45_benchmark_measurements", path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Cannot load the RJ45 measurement module at {path}.")
-    module = module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def load_measurements() -> SimpleNamespace:
+    """Load portable numeric kernels and the deployment's measurement graph."""
+    import yaml
+
+    core = _TASK_PACKAGE.parents[1] / "lab/evaluation"
+
+    def load_module(name: str) -> Any:
+        path = core / f"{name}.py"
+        spec = spec_from_file_location(name, path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Cannot load the measurement module at {path}.")
+        module = module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    geometry = load_module("_episode_geometry")
+    reduction = load_module("_episode_reduction")
+    deployment = yaml.safe_load(TASK_CONFIG.read_text())
+    evaluation = yaml.safe_load(
+        (_TASK / deployment["evaluation"]["component"]).read_text()
+    )
+    measurements = evaluation["measurements"]
+    graph = evaluation["graph"]
+    (root,) = graph["roots"]
+
+    def measure(config, **frame):
+        return geometry._connector_frame(
+            {**measurements["parameters"], "control_hz": config["control_hz"]},
+            **frame,
+        )
+
+    def evaluate(rows, config):
+        values = reduction._reduce_measurements(rows, measurements["reductions"])
+        results = reduction._evaluate_scalar_checks(graph, values)
+        checks = {name: results[name] for name in graph["rules"][root]["refs"]}
+        passed = results[root]
+        pressed = [row for row in rows if 24 <= row["time_s"] <= 25]
+        retained = [row["depth_m"] for row in rows if 18 <= row["time_s"] <= 19]
+        return {
+            "passed": passed,
+            "checks": checks,
+            "quality_status": "floor_cycle_verified" if passed else "demo_candidate",
+            "diagnostic_rate_hz": config["control_hz"]
+            * measurements["samples_per_control"],
+            "peak_penetration_m": values.get("peak_contact_penetration"),
+            "peak_attachment_error_m": values.get("cable_attachment"),
+            "peak_latch_limit_violation_deg": (
+                float(np.rad2deg(values["latch_limits"]))
+                if "latch_limits" in values
+                else None
+            ),
+            "pressed_latch_min_deg": min(
+                (row["latch_angle_deg"] for row in pressed), default=None
+            ),
+            "press_contact_frames": sum(
+                row["finger_latch_contact"] is True for row in pressed
+            ),
+            "final_return_error_m": rows[-1]["return_error_m"] if rows else None,
+            "retained_depth_range_m": (
+                [min(retained), max(retained)] if retained else None
+            ),
+        }
+
+    return SimpleNamespace(
+        measure_frame=measure,
+        evaluate=evaluate,
+        parameters=measurements["parameters"],
+    )
 
 
 def save_results(

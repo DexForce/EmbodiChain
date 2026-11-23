@@ -111,9 +111,7 @@ class SkillPlanningServices:
         self._contact_sources: WeakValueDictionary[str, ContactPhaseSource] = (
             WeakValueDictionary()
         )
-        self._joint_trajectory_sources: WeakValueDictionary[
-            str, ObservedJointTrajectorySource
-        ] = WeakValueDictionary()
+        self._joint_trajectory_sources: dict[str, ObservedJointTrajectorySource] = {}
         self._motion_generator = motion_generator
         self._robot: Robot = motion_generator.robot
         self._device = resolve_runtime_device(motion_generator.device)
@@ -190,11 +188,11 @@ class SkillPlanningServices:
     def register_joint_trajectory_source(
         self, source_id: str, source: ObservedJointTrajectorySource
     ) -> None:
-        """Bind an episode-owned source of observed MoveJoints commands.
+        """Own a source of observed MoveJoints commands for this engine.
 
         Args:
             source_id: Nonempty identifier local to this engine.
-            source: Command adapter; the episode host retains a strong reference.
+            source: Command adapter retained for the lifetime of this engine.
 
         Raises:
             ValueError: The identifier is already bound to another live source.
