@@ -65,6 +65,7 @@ def _register_configured_task_program_integration(
 
     cls = EmbodiedEnv if host is None else host.cls
     default_kwargs = {} if host is None else host.default_kwargs
+    uses_explicit_host = host is not None
     with _REGISTER_LOCK:
         existing = REGISTERED_ENVS.get(selected_env_id)
         if existing is None:
@@ -80,7 +81,9 @@ def _register_configured_task_program_integration(
                 task_program_adapter_factory=integration.adapter_factory,
                 **default_kwargs,
             )
-            return get_env_spec(selected_env_id)
+            spec = get_env_spec(selected_env_id)
+            spec._uses_explicit_task_program_host = uses_explicit_host
+            return spec
 
         existing_factory = existing.task_program_adapter_factory
         existing_fingerprint = getattr(
@@ -90,7 +93,8 @@ def _register_configured_task_program_integration(
         )
         if (
             existing.cls is not cls
-            or (host is not None and existing.default_kwargs != default_kwargs)
+            or existing._uses_explicit_task_program_host != uses_explicit_host
+            or (uses_explicit_host and existing.default_kwargs != default_kwargs)
             or existing.max_episode_steps != selected_max_episode_steps
             or existing_fingerprint != integration.integration_fingerprint
         ):

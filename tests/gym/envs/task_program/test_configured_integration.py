@@ -2652,7 +2652,7 @@ def test_integration_registration_rejects_reusing_an_id_for_changed_config(
         )
 
 
-def test_configured_expert_rejects_changed_explicit_host_defaults(
+def test_configured_expert_rejects_changed_explicit_host_binding(
     registered_test_ids: list[str],
 ) -> None:
     from embodichain.lab.gym.utils.registration import EnvSpec
@@ -2675,10 +2675,11 @@ def test_configured_expert_rejects_changed_explicit_host_defaults(
     )
 
     changed_host = EnvSpec(host_id, EmbodiedEnv, default_kwargs={"variant": "second"})
-    with pytest.raises(ValueError, match="different environment or integration"):
-        _register_configured_task_program_integration(
-            _TEST_ENV_ID, integration, max_episode_steps=321, host=changed_host
-        )
+    for replacement in (None, changed_host):
+        with pytest.raises(ValueError, match="different environment or integration"):
+            _register_configured_task_program_integration(
+                _TEST_ENV_ID, integration, max_episode_steps=321, host=replacement
+            )
     assert REGISTERED_ENVS[_TEST_ENV_ID] is registered
 
 

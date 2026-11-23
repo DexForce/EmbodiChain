@@ -143,6 +143,8 @@ An expert whose physical task owns reset or scoring in a Python subclass can
 set `task_program_host` in the runnable deployment to that registered physical
 Gym ID. The expert uses a distinct ID and the same class and constructor
 defaults, with the configured Task Program supplying demonstration actions.
+Adding or removing `task_program_host` after registration requires a distinct
+expert ID within the same process.
 The CLI may override only the program. Components have closed fields and
 intentionally omit compatibility `version` values.
 
