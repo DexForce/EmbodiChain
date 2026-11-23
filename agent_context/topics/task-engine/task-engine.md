@@ -17,44 +17,24 @@ and twist mode can require occurrence-bound deployment parameters. The hybrid
 validator checks symbolic declaration coverage, including acquisition versus
 release in coordinated transport. Physical evidence and calibrated installation
 remain separate; motion-only pouring never establishes liquid transfer.
-Before freezing the hybrid objective, the independent source audit must agree
-on the ordered, quoted operations and check their expanded calls. This
-distinguishes mode, destination, laterality and terminal intent without
-vocabulary-based dispatch. Revised calls must pass the audit again before
-selection; a failed source interpretation cannot publish a plan.
-With no explicit deployment or scene-grounding input, hybrid can instead
-author typed intent when native E1–E9 calls would lose source requirements.
-`authoring_intent.py` owns typed roles, ordered steps and scoped facts. Effects
-describe step completion; `maintain` describes what holds throughout a step.
-Placement releases: an adjacent equivalent release retains its source clause,
-not a second operation. Logical grasp capacity includes automatic arms.
-Without a separate terminal requirement, completion is the last requested step.
-The audit checks exact source wording against the cited typed facts, including
-scope, reference frame, object parts and quantitative constraints. Descriptions
-identify roles, not action or goal evidence; an exact slot may witness a spatial
-claim, but generic alignment or proximity cannot replace a precise relation.
-The independent visual observations for transfers do not see the candidate graph.
-Repairs retain the last well-formed plan and can fix a malformed positive review
-without replanning. An unchanged graph cannot pass after a source rejection.
-`task_engine.intent.*` nodes stay in an unbound `authoring_only` graph
-(`source_reviewed`, not native call coverage); they are not lowerable
-Task Program calls. Pose binding and all execution remain out of scope.
-Align, pour and handover expand a final hold or return-and-release only from
-an explicit, quoted terminal declaration. When unspecified, no cleanup call
-or terminal hold goal is added. A following operation may reuse the still-held
-object; an incompatible explicit arm remains an error. Pouring restores
-orientation without returning to the original position.
-Hybrid accepts optional `--scene-context FILE` for scene facts, not extra task
-actions. The `embodichain.task-scene-context/v1` JSON has optional `description`
-and `objects` entries (`id`, `description`, optional `asset_kind` of `rigid` or
-`articulated`). Objects default to `rigid`; joint and control operations require
-an explicit `articulated` declaration on the owning object. Native operations
-can link a part to that object with `part_of`. Both authoring paths reject a
-missing or conflicting declaration rather than rewriting the action. Referenced
-objects use their declared IDs; background objects do not become task roles.
-The frozen spec and scene projection publish the resolved `scene_objects`
-requirement with derived `is_articulated` values. The original scene context is
-retained in the plan inventory and does not establish visibility.
+Hybrid compares quoted operations and expanded calls with an independent source
+audit; invalid interpretations cannot publish. Align, pour and handover add
+hold or return-and-release only from explicit terminal instructions. Pouring
+restores orientation, not position.
+
+Without deployment or explicit grounding, `authoring_intent.py` supports scoped
+typed steps when native E1–E9 lose source requirements. Effects hold at step
+end; `maintain` holds during a step. The audit matches source obligations to
+facts in their required scope, not role labels. Repairs preserve candidate
+identity and can correct malformed review citations without replanning.
+`task_engine.intent.*` remains unbound `authoring_only` (`source_reviewed`),
+not executable or lowerable.
+
+`--scene-context FILE` accepts `embodichain.task-scene-context/v1` scene facts and
+object IDs, not additional actions. An object is rigid unless explicitly
+declared `asset_kind: articulated`; joint actions require a declared owner.
+Background objects do not become task roles. The frozen scene requirements
+publish derived `is_articulated`; the retained source context is not visibility evidence.
 For rigid pick/place, named handovers ending in placement and coordinated tray release, hybrid automatically grounds frozen roles in the original image, or verifies a supplied `--scene-grounding FILE`. A null box retains a pending role. Plans outside this deployment scope publish an authoring-only manifest. Qualification and deployment preparation then use the same
 role, geometry, resource and configuration checks as template plans. The same tray identity is retained across fruit landings and the final transport;
 qualification selects non-overlapping landing poses and the terminal segment
@@ -118,21 +98,11 @@ stage-selection flags. `image_planning.py` retains raw provider attempts and
 allows a bounded number of diagnostic repairs per grounding/planning stage (one
 by default). It contains no per-task graph construction templates.
 
-`template` and the default `TaskAgent` use `interpretation.py` to reconstruct
-typed instruction intent from the source in a second model call before
-grounding. A disagreement gets one diagnostic repair and must pass the audit
-again. Dependency reachability, not redundant edges, determines ordering
-agreement. A unique source mention quoted by both passes becomes the grounding
-selector. Different quote boundaries require the same independently declared
-reference to occur verbatim in both excerpts and uniquely in the instruction;
-overlap alone does not resolve a conflict. Without confirmed source evidence,
-labels must match. Other constraints still compare strictly. Image planning
-can freeze explicitly requested arm returns as quoted graph obligations when
-the catalog provides `simulation.park` and both passes agree on the arms.
-Each arm needs its own correctly ordered call; the posture stays pending
-binding. Standalone authoring does not defer requirements.
-Template model-attempt records mark audit responses with `purpose: source_review`;
-older published plans remain readable but their recorded responses lack this audit.
+`template` and default `TaskAgent` independently audit typed intent before
+grounding. Ordering compares reachability, and only a unique shared verbatim
+mention can reconcile reference labels. Agreed explicit arm returns project to
+ordered `simulation.park` calls with pending postures. New default attempts mark
+the audit `purpose: source_review`; older published plans remain readable.
 
 `lab/task_program/language/semantic_contracts.py` owns provider-free call argument,
 resource, precondition/effect and runtime-binding declarations. Configured live

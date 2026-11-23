@@ -233,8 +233,9 @@ def _validate_intent_audit(instruction: str, plan: dict[str, Any], audit: Any) -
     for name in roles:
         evidence.setdefault(name, [])
         evidence.setdefault(f"role_{name}", [])
-    invariants = {ref for ref, row in conditions.items() if row["scope"] == "always"}
-    maintained = invariants | {ref for ref, row in steps.items() if row.get("maintain")}
+    invariants = {
+        ref: row["fact"] for ref, row in conditions.items() if row["scope"] == "always"
+    }
     if not isinstance(checks, list) or not checks:
         raise ValueError("source_audit: no independently reviewed requirements")
     witnessed = False
@@ -274,43 +275,43 @@ def _validate_intent_audit(instruction: str, plan: dict[str, Any], audit: Any) -
                     "An initial source requirement needs an initial condition"
                 )
         witnessed |= bool(graph_evidence.intersection(refs))
-        if "spatial" in check:
+        if scope in {"always", "step"}:
+            facts = [invariants[ref] for ref in refs if ref in invariants]
+            if scope == "step":
+                facts.extend(
+                    fact
+                    for ref in refs
+                    if ref in steps
+                    for fact in steps[ref].get("maintain", ())
+                )
+            if not facts:
+                needed = (
+                    "an always condition"
+                    if scope == "always"
+                    else "maintain or an always condition"
+                )
+                raise AuthoringEvidenceError(
+                    f"A {scope} source requirement needs {needed}"
+                )
+        else:
             facts = [fact for ref in refs for fact in evidence[ref]]
+        if "spatial" in check:
             verify_spatial_claim(check["spatial"], facts, roles)
-        if scope == "always" and not invariants.intersection(refs):
-            raise AuthoringEvidenceError(
-                "A continuous source requirement needs an always condition"
-            )
-        if scope == "step" and not maintained.intersection(refs):
-            raise AuthoringEvidenceError(
-                "A during-step source requirement needs maintain or an always condition"
-            )
         if "state" in check:
             claim = check["state"]
             if not isinstance(claim, dict):
                 raise ValueError("A source state claim must be a typed fact")
             kind = claim.get("kind")
-            if scope == "step":
-                facts = [
-                    fact
-                    for ref in refs
-                    for fact in (
-                        evidence[ref]
-                        if ref in invariants
-                        else steps.get(ref, {}).get("maintain", ())
-                    )
-                ]
-            elif scope == "always" or kind == "untouched_except":
-                facts = [conditions[ref]["fact"] for ref in refs if ref in invariants]
-            elif kind == "actuated":
-                facts = [
-                    fact
-                    for ref in refs
-                    if ref in steps and steps[ref]["verb"] in {"press", "actuate"}
-                    for fact in steps[ref]["effects"]
-                ]
-            else:
-                facts = [fact for ref in refs for fact in evidence[ref]]
+            if scope not in {"always", "step"}:
+                if kind == "untouched_except":
+                    facts = [invariants[ref] for ref in refs if ref in invariants]
+                elif kind == "actuated":
+                    facts = [
+                        fact
+                        for ref in refs
+                        if ref in steps and steps[ref]["verb"] in {"press", "actuate"}
+                        for fact in steps[ref]["effects"]
+                    ]
             verify_state_claim(claim, facts, roles)
     if not witnessed:
         raise ValueError(
@@ -1202,6 +1203,13 @@ def publish_hybrid(
                 lambda audit: _validate_source_audit(instruction, operations, audit),
             )
 
+        def without_quotes(row):
+            return {
+                key: value
+                for key, value in row.items()
+                if key not in {"quote", "release_quote"}
+            }
+
         def audit_intent(plan):
             nonlocal transfer_observations
             has_transfer = any(
@@ -1300,7 +1308,9 @@ def publish_hybrid(
                         "persist throughout, include scope:always in their check and cite an always condition. "
                         "A terminal-only posture or separation fact is not a throughout constraint. "
                         "For a condition requested only during one step, include scope:step and cite the step "
-                        "with maintain or an equivalent always condition. Omit scope for other checks. "
+                        "with maintain or an equivalent always condition. Omit scope for actions, terminal effects and arm-selection requirements. "
+                        "For arm-only requirements, cite the arms of affected steps. "
+                        "Each state or spatial value is one typed fact object, never an array or prose. "
                         "For a no-touch requirement on all unspecified other objects, use scope:always and "
                         "a state fact {kind:untouched_except,subjects:[exempt role IDs]}. A named or prose "
                         "group under untouched does not protect the complement. For pressing a named button "
@@ -1360,20 +1370,9 @@ def publish_hybrid(
                 canonical_hash(
                     {
                         "roles": sorted(plan["roles"], key=lambda role: role["id"]),
-                        "steps": [
-                            {
-                                k: v
-                                for k, v in row.items()
-                                if k not in {"quote", "release_quote"}
-                            }
-                            for row in plan["steps"]
-                        ],
+                        "steps": [without_quotes(row) for row in plan["steps"]],
                         "conditions": sorted(
-                            [
-                                {k: v for k, v in row.items() if k != "quote"}
-                                for row in plan["conditions"]
-                            ],
-                            key=canonical_hash,
+                            map(without_quotes, plan["conditions"]), key=canonical_hash
                         ),
                     }
                 ),

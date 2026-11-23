@@ -395,11 +395,9 @@ def _validate_model_intent(
 ) -> _SourceIntent:
     body = dict(_coerce_instruction_response(response))
     references = _audit_quoted_rows(
-        instruction, body.pop("scene_ref_quotes", []), "scene_ref_quotes", "ref"
+        instruction, body.pop("scene_ref_quotes", []), "ref"
     )
-    parking = _audit_quoted_rows(
-        instruction, body.pop("terminal_park", []), "terminal_park", "arm"
-    )
+    parking = _audit_quoted_rows(instruction, body.pop("terminal_park", []), "arm")
     normalized, normalizations = _normalize_instruction_intent_fields(body)
     intent = validate_instruction_intent(normalized)
     if any(
@@ -416,22 +414,21 @@ def _validate_model_intent(
         for key in ("object", "target")
         if step[key]["kind"] == "scene_ref"
     }
-    scene_ref_quotes = {row["ref"]: row["quote"].strip() for row in references}
+    scene_ref_quotes = dict(references)
     if len(scene_ref_quotes) != len(references) or scene_ref_quotes.keys() - slots:
         raise ValueError("scene_ref_quotes must identify unique scene_ref slots.")
 
     if parking and not allow_terminal_park:
         raise ValueError("terminal_park requires graph planning.")
-    available_arms = _TERMINAL_PARK_KINDS.values()
     terminal_park: dict[str, str] = {}
-    for row in parking:
-        requested = available_arms if row["arm"] == "both" else (row["arm"],)
+    for requested_arm, quote in parking:
+        requested = ("left", "right") if requested_arm == "both" else (requested_arm,)
         for arm in requested:
-            if arm not in available_arms or arm in terminal_park:
+            if arm not in {"left", "right"} or arm in terminal_park:
                 raise ValueError(
                     "terminal_park requires a unique declaration per named left/right arm."
                 )
-            terminal_park[arm] = row["quote"]
+            terminal_park[arm] = quote
     return _SourceIntent(intent, normalizations, scene_ref_quotes, terminal_park)
 
 
@@ -463,12 +460,12 @@ def _review_source_intent(
         },
         model=model,
     )
-    response = dict(_coerce_instruction_response(raw))
+    response = _coerce_instruction_response(raw)
     if set(response) == {"issues"}:
-        issues = _audit_quoted_rows(instruction, response["issues"], "issues", "reason")
+        issues = _audit_quoted_rows(instruction, response["issues"], "reason")
         if not issues:
             raise ValueError("Source audit issues must be a non-empty list.")
-        reasons = [f"{issue['quote']!r}: {issue['reason']}" for issue in issues]
+        reasons = [f"{quote!r}: {reason}" for reason, quote in issues]
         raise ValueError(f"Source audit found unsupported intent: {'; '.join(reasons)}")
 
     reviewed = _validate_model_intent(
@@ -567,25 +564,19 @@ def _dependency_ancestors(steps: Sequence[Mapping[str, Any]]) -> dict[str, set[s
     return ancestors
 
 
-def _audit_quoted_rows(
-    instruction: str, value: Any, field: str, key: str
-) -> list[dict[str, str]]:
+def _audit_quoted_rows(instruction: str, value: Any, key: str) -> list[tuple[str, str]]:
     if not isinstance(value, list):
-        raise ValueError(f"Source audit {field} must be a list.")
+        raise ValueError(f"Source audit {key} evidence must be a list.")
     rows = []
     for row in value:
         if not isinstance(row, Mapping) or set(row) != {key, "quote"}:
-            raise ValueError(
-                f"Source audit {field} rows require exactly {key} and quote."
-            )
+            raise ValueError(f"Source audit rows require exactly {key} and quote.")
         quote = row["quote"]
         if not isinstance(quote, str) or not quote.strip() or quote not in instruction:
             raise ValueError(
-                f"Source audit {field} quote must occur verbatim in the instruction."
+                "Source audit quote must occur verbatim in the instruction."
             )
-        rows.append(
-            {key: _nonempty(row[key], f"Source audit {field}.{key}"), "quote": quote}
-        )
+        rows.append((_nonempty(row[key], f"Source audit {key}"), quote.strip()))
     return rows
 
 

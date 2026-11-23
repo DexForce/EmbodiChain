@@ -22,7 +22,7 @@ import math
 import re
 from typing import Any
 
-from ..task_spec import TaskSpec, validate_task_spec
+from ..task_spec import TaskSpec
 from .scene_context import require_articulation, scene_objects_requirement
 from .semantic_graph import (
     _AUTHORING_INTENT_PREFIX,
@@ -33,19 +33,20 @@ from .semantic_graph import (
 __all__: list[str] = []
 
 _ID = re.compile(r"[a-z][a-z0-9_]*")
-_ROLE_KINDS = {
-    "object",
-    "target",
-    "surface",
-    "container",
-    "tool",
-    "articulation",
-    "button",
-    "robot",
-}
+_ROLE_KINDS = set(
+    "object target surface container tool articulation button robot".split()
+)
 _ARMS = {"left", "right", "auto"}
 _ARM_VERBS = {"return_arms", "open_grippers", "move_gripper"}
 _ACQUIRE_VERBS = {"pick", "grasp"}
+_HELD_VERBS = {
+    "move_held",
+    "place",
+    "release",
+    "handover",
+    "transfer_contents",
+    "articulate",
+}
 _DIRECTIONAL_VERBS = {
     "pick",
     "move_held",
@@ -56,90 +57,42 @@ _DIRECTIONAL_VERBS = {
 }
 _DIRECTIONS = {"up", "down", "toward", "away", "left", "right"}
 _GRIPPER_RELATIONS = {"above", "touching", "clear_of"}
-_VERBS = _ARM_VERBS | {
-    *_ACQUIRE_VERBS,
-    "move_held",
-    "place",
-    "push",
-    "transfer_contents",
-    "orient",
-    "turn",
-    "release",
-    "handover",
-    "actuate",
-    "press",
-    "articulate",
-}
-_RELATIONS = {
-    "at",
-    "on",
-    "inside",
-    "not_inside",
-    "above",
-    "below",
-    "left_of",
-    "right_of",
-    "in_front_of",
-    "behind",
-    "next_to",
-    "near",
-    "near_center_of",
-    "centered_on",
-    "centered_above",
-    "between",
-    "opposite_sides",
-    "opposite_ends",
-    "near_left_end",
-    "near_right_end",
-    "separate_from",
-    "supported_by",
-    "on_top_faces",
-    "spans",
-    "aligned_with",
-    "seated_on",
-    "tightened_on",
-    "compatible_with",
-    "fixed_to",
-    "touching",
-}
-_ORIENTATIONS = {
-    "upright",
-    "vertical",
-    "flat",
-    "level",
-    "opening_up",
-    "opening_down",
-    "tilted",
-    "left_to_right",
-    "front_to_back",
-    "aligned_long_axis",
-    "upright_cross_section",
-    "lying_on_side",
-    "pointing_left",
-    "pointing_right",
-    "pointing_up",
-    "pointing_down",
-    "pointing_forward",
-    "pointing_backward",
-    "pointing_toward",
-    "pointing_away_from",
-}
-_REFERENCED_POINTING = {"pointing_toward", "pointing_away_from"}
+_VERBS = (
+    _ARM_VERBS
+    | _ACQUIRE_VERBS
+    | set(
+        "move_held place push transfer_contents orient turn release handover actuate press articulate".split()
+    )
+)
 _FRAMES = {"head_camera", "table", "robot", "world", "reference"}
 _LATERAL = {"left", "right", "center", "far_left", "far_right"}
 _NEAR_REGIONS = {"near_center_of", "near_left_end", "near_right_end"}
 _AXIS_RELATIONS = {"left_of", "right_of", "in_front_of", "behind", "above", "below"}
-_SLOT_RELATIONS = {
-    "near",
-    "next_to",
-    "on",
-    "inside",
-    "centered_on",
-    "centered_above",
-    *_NEAR_REGIONS,
-    *_AXIS_RELATIONS,
-}
 _GROUP_RELATIONS = {"between", "opposite_sides", "opposite_ends", "spans"}
+_RELATIONS = (
+    _AXIS_RELATIONS
+    | _NEAR_REGIONS
+    | _GROUP_RELATIONS
+    | set(
+        (
+            "at on inside not_inside next_to near centered_on centered_above separate_from "
+            "supported_by on_top_faces aligned_with seated_on tightened_on compatible_with fixed_to touching"
+        ).split()
+    )
+)
+_REFERENCED_POINTING = {"pointing_toward", "pointing_away_from"}
+_ORIENTATIONS = _REFERENCED_POINTING | set(
+    (
+        "upright vertical flat level opening_up opening_down tilted left_to_right "
+        "front_to_back aligned_long_axis upright_cross_section lying_on_side "
+        "pointing_left pointing_right pointing_up pointing_down pointing_forward pointing_backward"
+    ).split()
+)
+_SLOT_RELATIONS = (
+    _NEAR_REGIONS
+    | _AXIS_RELATIONS
+    | {"near", "next_to", "on", "inside", "centered_on", "centered_above"}
+)
 _STRONGER_RELATIONS = {
     "above": ("centered_above",),
     "near": (*_NEAR_REGIONS, "next_to"),
@@ -175,7 +128,23 @@ _FACT_FIELDS = {
     "articulated": ({"subjects", "references", "mechanism", "value"}, set()),
 }
 
-# Predicate vocabulary is shared by the proposing model, validator and audit.
+_FACT_CHOICES = {
+    "relation": {"value": _RELATIONS},
+    "orientation": {"value": _ORIENTATIONS},
+    "view_location": {"lateral": _LATERAL, "depth": ("near", "far", "middle")},
+    "pose_match": {
+        "epoch": ("initial", "current"),
+        "components": ("position", "orientation"),
+    },
+    "vertical_rise": {"comparison": ("eq", "gt", "ge", "lt", "le")},
+    "distance_compare": {"comparison": ("gt", "lt")},
+    "distance_change": {"comparison": ("gt", "lt"), "epoch": ("initial",)},
+    "gripper_relation": {"value": _GRIPPER_RELATIONS},
+    "articulated": {"mechanism": ("hinge", "slide"), "value": ("open", "closed")},
+    "transferred": {"material": ("solid", "liquid")},
+    "actuated": {"value": ("open", "closed", "pressed", "turned")},
+}
+
 _PROMPT = {
     "shape": {
         "roles": [
@@ -216,19 +185,23 @@ _PROMPT = {
         "orientation.value": sorted(_ORIENTATIONS),
         "frame": sorted(_FRAMES),
         "view_location.lateral": sorted(_LATERAL),
-        "view_location.depth": ["near", "far", "middle"],
-        "pose_match.epoch": ["initial", "current"],
-        "pose_match.components": ["position", "orientation"],
-        "vertical_rise.comparison": ["eq", "gt", "ge", "lt", "le"],
-        "distance_compare.comparison": ["gt", "lt"],
-        "distance_change.comparison": ["gt", "lt"],
-        "distance_change.epoch": ["initial"],
+        "view_location.depth": list(_FACT_CHOICES["view_location"]["depth"]),
+        "pose_match.epoch": list(_FACT_CHOICES["pose_match"]["epoch"]),
+        "pose_match.components": list(_FACT_CHOICES["pose_match"]["components"]),
+        "vertical_rise.comparison": list(_FACT_CHOICES["vertical_rise"]["comparison"]),
+        "distance_compare.comparison": list(
+            _FACT_CHOICES["distance_compare"]["comparison"]
+        ),
+        "distance_change.comparison": list(
+            _FACT_CHOICES["distance_change"]["comparison"]
+        ),
+        "distance_change.epoch": list(_FACT_CHOICES["distance_change"]["epoch"]),
         "gripper_relation.value": sorted(_GRIPPER_RELATIONS),
-        "articulated.mechanism": ["hinge", "slide"],
-        "articulated.value": ["open", "closed"],
-        "transferred.material": ["solid", "liquid"],
+        "articulated.mechanism": list(_FACT_CHOICES["articulated"]["mechanism"]),
+        "articulated.value": list(_FACT_CHOICES["articulated"]["value"]),
+        "transferred.material": list(_FACT_CHOICES["transferred"]["material"]),
         "transferred.quantity": "positive integer count, or null only if no item count is specified",
-        "actuated.value": ["open", "closed", "pressed", "turned"],
+        "actuated.value": list(_FACT_CHOICES["actuated"]["value"]),
     },
     "semantics": (
         "A fact is a JSON object with a single kind string and exactly its listed fields. "
@@ -440,6 +413,24 @@ def _expand_fact_shorthand(fact: Any) -> None:
         fact.update(kind="orientation", value=kind)
 
 
+_OPERAND_COUNTS = {
+    "pose_match": (None, 1),
+    "distance_compare": (1, 2),
+    "distance_change": (None, 1),
+    "transferred": (None, 2),
+    "hung_by": (1, 1),
+    "grasped_at": (1, None),
+    "articulated": (1, 1),
+}
+_DISTINCT_OPERANDS = {
+    "relation",
+    "distance_compare",
+    "distance_change",
+    "transferred",
+    "articulated",
+}
+
+
 def _fact(fact: Any, roles: set[str]) -> None:
     if type(fact) is not dict or not isinstance(fact.get("kind"), str):
         raise ValueError(f"A fact requires a kind: {str(fact)[:160]}")
@@ -451,147 +442,81 @@ def _fact(fact: Any, roles: set[str]) -> None:
     for field in ("subjects", "references"):
         if field in fact:
             _values(fact[field], roles, f"{kind}.{field}")
+    for field, values in _FACT_CHOICES.get(kind, {}).items():
+        if field == "components":
+            _values(fact[field], set(values), f"{kind}.{field}")
+        elif field in fact and (
+            not isinstance(fact[field], str) or fact[field] not in values
+        ):
+            raise ValueError(f"Invalid {kind}.{field}: {fact[field]!r}")
     if "arms" in fact:
-        _values(
-            fact["arms"],
-            (
-                _ARMS
-                if kind in {"held", "grasped_at", "gripper_relation"}
-                else _ARMS - {"auto"}
-            ),
-            kind,
+        arms = fact["arms"]
+        allowed = (
+            _ARMS
+            if kind in {"held", "grasped_at", "gripper_relation"}
+            else _ARMS - {"auto"}
         )
-        if "auto" in fact["arms"] and len(fact["arms"]) != 1:
-            raise ValueError("auto cannot accompany an explicit arm")
+        _values(arms, allowed, kind)
+        if "auto" in arms and len(arms) != 1 or kind == "grasped_at" and len(arms) != 1:
+            raise ValueError(
+                f"{kind} requires compatible arms and one arm per grasp site"
+            )
     if "frame" in fact and fact["frame"] not in _FRAMES:
         raise ValueError(f"Invalid reference frame for {kind}")
-    if kind == "relation":
-        if fact["value"] not in _RELATIONS:
-            raise ValueError("Unknown spatial relation")
-        if set(fact["subjects"]) & set(fact["references"]):
-            raise ValueError("Spatial relations must link distinct roles")
-        if fact["value"] in {"opposite_sides", "opposite_ends"} and (
-            len(fact["subjects"]) != 2 or len(fact["references"]) != 1
-        ):
-            raise ValueError(f"{fact['value']} requires two subjects and one reference")
+
+    subjects, refs = fact.get("subjects", []), fact.get("references", [])
+    expected = _OPERAND_COUNTS.get(kind, (None, None))
+    if kind == "relation" and fact["value"] in {"opposite_sides", "opposite_ends"}:
+        expected = (2, 1)
     if kind == "orientation":
-        if fact["value"] not in _ORIENTATIONS:
-            raise ValueError("Unknown orientation intent")
-        if fact["value"] in _REFERENCED_POINTING and (
-            len(fact.get("references", ())) != 1
-            or set(fact["subjects"]) & set(fact["references"])
-        ):
-            raise ValueError(f"{fact['value']} requires one distinct target role")
-        if fact["value"] == "aligned_long_axis" and (
-            not fact.get("references")
-            or set(fact["subjects"]) & set(fact["references"])
-        ):
-            raise ValueError(
-                "aligned_long_axis requires the distinct reference role whose axis is matched"
-            )
-    if kind == "pose_match":
-        _values(
-            fact["components"], {"position", "orientation"}, "pose_match.components"
-        )
-        if (
-            fact["epoch"] not in {"initial", "current"}
-            or len(fact["references"]) != 1
-            or (
-                fact["epoch"] == "current"
-                and set(fact["subjects"]) & set(fact["references"])
-            )
-        ):
-            raise ValueError("pose_match needs a single referenced pose and its epoch")
+        if fact["value"] in _REFERENCED_POINTING:
+            expected = (None, 1)
+        if fact["value"] == "aligned_long_axis" and not refs:
+            raise ValueError("aligned_long_axis requires a distinct reference role")
+    if any(
+        count is not None and len(ids) != count
+        for ids, count in zip((subjects, refs), expected)
+    ):
+        raise ValueError(f"Invalid operand count for {kind}: {expected}")
+    if set(subjects) & set(refs) and (
+        kind in _DISTINCT_OPERANDS
+        or kind == "pose_match"
+        and fact["epoch"] == "current"
+        or kind == "orientation"
+        and fact["value"] in _REFERENCED_POINTING | {"aligned_long_axis"}
+    ):
+        raise ValueError(f"{kind} requires distinct subject and reference roles")
+    if "part" in fact and (
+        fact["part"] not in roles or fact["part"] in subjects + refs
+    ):
+        raise ValueError(f"{kind} needs a distinct part role; declare its part_of link")
     if kind == "vertical_rise" and (
-        fact["comparison"] not in {"eq", "gt", "ge", "lt", "le"}
-        or type(fact["meters"]) not in (int, float)
+        type(fact["meters"]) not in (int, float)
         or not math.isfinite(fact["meters"])
         or fact["meters"] <= 0
     ):
-        raise ValueError(
-            "vertical_rise needs a positive metric threshold and comparison"
-        )
-    if kind == "distance_compare" and (
-        fact["comparison"] not in {"gt", "lt"}
-        or len(fact["subjects"]) != 1
-        or len(fact["references"]) != 2
-        or fact["subjects"][0] in fact["references"]
+        raise ValueError("vertical_rise requires a positive finite threshold")
+    if (
+        kind in {"ordered_row", "mutually_separate", "spaced_apart"}
+        and len(subjects) < 2
     ):
-        raise ValueError(
-            "distance_compare needs distinct subject, anchor and comparison item"
-        )
-    if kind == "distance_change" and (
-        fact["comparison"] not in {"gt", "lt"}
-        or fact["epoch"] != "initial"
-        or len(fact["references"]) != 1
-        or set(fact["subjects"]) & set(fact["references"])
-    ):
-        raise ValueError(
-            "distance_change needs one distinct reference and comparison to the initial distance"
-        )
-    if kind == "ordered_row" and len(fact["subjects"]) < 2:
-        raise ValueError("ordered_row needs multiple distinct ordered subjects")
-    if kind in {"mutually_separate", "spaced_apart"} and len(fact["subjects"]) < 2:
-        raise ValueError(f"{kind} needs at least two distinct subjects")
+        raise ValueError(f"{kind} needs multiple distinct subjects")
     if kind == "view_location" and (
         not {"lateral", "depth"} & fact.keys()
-        or ("lateral" in fact and fact["lateral"] not in _LATERAL)
-        or ("depth" in fact and fact["depth"] not in {"near", "far", "middle"})
-        or ("references" in fact and len(fact["references"]) != 1)
-        or (fact["frame"] == "reference" and "references" not in fact)
+        or ("references" in fact or fact["frame"] == "reference")
+        and len(refs) != 1
     ):
         raise ValueError(
-            "view_location needs a valid side or depth and one role for a reference frame"
+            "view_location requires a side or depth and one role for a reference frame"
         )
-    if kind == "transferred" and (
-        fact["material"] not in {"solid", "liquid"}
-        or len(fact["references"]) != 2
-        or set(fact["subjects"]) & set(fact["references"])
-        or type(fact["all"]) is not bool
-        or (
-            fact["quantity"] is not None
-            and (type(fact["quantity"]) is not int or fact["quantity"] < 1)
-        )
-    ):
-        raise ValueError(
-            "transferred needs distinct contents, source and recipient, with a valid quantity"
-        )
-    if kind == "hung_by" and (
-        len(fact["subjects"]) != 1
-        or len(fact["references"]) != 1
-        or fact["part"] not in roles
-        or fact["part"] in fact["subjects"] + fact["references"]
-    ):
-        raise ValueError("hung_by needs a subject, a distinct part and one hook role")
-    if kind == "grasped_at" and (
-        len(fact["subjects"]) != 1
-        or len(fact["arms"]) != 1
-        or fact["part"] not in roles
-        or fact["part"] in fact["subjects"]
-    ):
-        raise ValueError(
-            "grasped_at needs a subject, one arm and a distinct site role; "
-            f"declare {fact['part']!r} with part_of set to its owner in {fact['subjects']!r}"
-        )
-    if kind == "gripper_relation" and fact["value"] not in _GRIPPER_RELATIONS:
-        raise ValueError("Unknown gripper relation")
-    if kind == "articulated" and (
-        fact["mechanism"] not in {"hinge", "slide"}
-        or fact["value"] not in {"open", "closed"}
-        or len(fact["subjects"]) != 1
-        or len(fact["references"]) != 1
-        or fact["subjects"] == fact["references"]
-    ):
-        raise ValueError(
-            "articulated needs one moving part, one distinct joint and its mechanism and state"
-        )
-    if kind == "actuated" and fact["value"] not in {
-        "open",
-        "closed",
-        "pressed",
-        "turned",
-    }:
-        raise ValueError("Unknown actuation state")
+    if kind == "transferred":
+        quantity = fact["quantity"]
+        if type(fact["all"]) is not bool or (
+            quantity is not None and (type(quantity) is not int or quantity < 1)
+        ):
+            raise ValueError(
+                "transferred requires boolean all and positive quantity or null"
+            )
 
 
 def _relation_pairs(fact: dict[str, Any], value: str) -> set[tuple[str, str]]:
@@ -688,6 +613,26 @@ def verify_state_claim(
             f"Source state claim {claim['kind']!r} lacks matching evidence for "
             f"{claim.get('subjects', claim.get('arms'))!r} in the required scope"
         )
+
+
+def _has_step_effect(step: dict[str, Any], fact: dict[str, Any]) -> bool:
+    verb, kind, subjects = step["verb"], fact["kind"], step["subjects"]
+    if verb == "place":
+        return (
+            kind in {"relation", "pose_match", "hung_by", "view_location"}
+            and subjects[0] in fact["subjects"]
+        )
+    if verb == "transfer_contents":
+        return kind == "transferred" and fact["references"][0] == subjects[0]
+    if verb == "move_gripper":
+        return kind == "gripper_relation" and set(fact["arms"]) == set(step["arms"])
+    if verb == "articulate":
+        return kind == "articulated" and fact["subjects"] == subjects
+    return (
+        kind == "actuated"
+        and fact["value"] == "pressed"
+        and fact["subjects"] == subjects
+    )
 
 
 def validate_intent(
@@ -890,32 +835,26 @@ def validate_intent(
             )
         if verb in _ARM_VERBS and subjects:
             raise ValueError(f"{verb} uses arms, not object subjects")
-        if (
-            verb
-            in {
-                "pick",
-                "grasp",
-                "move_held",
-                "place",
-                "release",
-                "handover",
-                "transfer_contents",
-                "press",
-                "articulate",
-            }
-            and len(subjects) != 1
-        ):
+        if verb in _ACQUIRE_VERBS | _HELD_VERBS | {"press"} and len(subjects) != 1:
             raise ValueError(f"{verb} needs one object identity per occurrence")
-        if type(step["effects"]) is not list:
-            raise ValueError("step.effects must be a list of facts")
-        maintained = step.get("maintain", [])
-        if type(maintained) is not list:
-            raise ValueError("step.maintain must be a list of typed facts")
+        effects, maintained = step["effects"], step.get("maintain", [])
+        if type(effects) is not list or type(maintained) is not list:
+            raise ValueError("step.effects and step.maintain must be lists of facts")
         for fact in maintained:
             check_fact(fact)
             check_fact_state(fact)
-        for fact in step["effects"]:
+        for fact in effects:
             check_fact(fact)
+        if verb in {
+            "place",
+            "transfer_contents",
+            "articulate",
+            "move_gripper",
+            "press",
+        } and not any(_has_step_effect(step, fact) for fact in effects):
+            raise ValueError(
+                f"{verb} requires a matching typed effect for its subject or arms"
+            )
         if verb == "actuate":
             for subject in subjects:
                 require_articulation(subject, scene_objects, parents)
@@ -931,7 +870,7 @@ def validate_intent(
                 and previous["subjects"] == subjects
                 and set(previous["arms"]) == arms
                 and "release_quote" not in previous
-                and all(fact == released for fact in step["effects"])
+                and all(fact == released for fact in effects)
             ):
                 # The preceding placement already releases the same object.
                 if released not in previous["effects"]:
@@ -940,9 +879,9 @@ def validate_intent(
                 continue
         if verb == "place" and "release_quote" in step:
             released = dict(kind="released", subjects=subjects)
-            if released not in step["effects"]:
-                step["effects"].append(released)
-        sites = [fact for fact in step["effects"] if fact["kind"] == "grasped_at"]
+            if released not in effects:
+                effects.append(released)
+        sites = [fact for fact in effects if fact["kind"] == "grasped_at"]
         if sites and (
             verb not in _ACQUIRE_VERBS
             or any(
@@ -959,14 +898,14 @@ def validate_intent(
             seated = {pair for pair in seated if moved.isdisjoint(pair)}
             tightened = {pair for pair in tightened if moved.isdisjoint(pair)}
         new_tightened = set().union(
-            *(_relation_pairs(fact, "tightened_on") for fact in step["effects"])
+            *(_relation_pairs(fact, "tightened_on") for fact in effects)
         )
         if new_tightened and (verb != "turn" or not new_tightened <= seated):
             raise ValueError(
                 "Tightening requires a turn after seating the same part on the same reference"
             )
         tightened.update(new_tightened)
-        seated.update(*(_relation_pairs(fact, "seated_on") for fact in step["effects"]))
+        seated.update(*(_relation_pairs(fact, "seated_on") for fact in effects))
 
         active_arms = arms if "auto" not in arms else _ARMS - {"auto"}
         if verb not in {"return_arms", "open_grippers"}:
@@ -991,14 +930,7 @@ def validate_intent(
                 )
             held[subject] = arms
             grasp_sites[subject] = {fact["arms"][0]: fact["part"] for fact in sites}
-        elif verb in {
-            "move_held",
-            "place",
-            "release",
-            "handover",
-            "transfer_contents",
-            "articulate",
-        }:
+        elif verb in _HELD_VERBS:
             subject = subjects[0]
             owner = held.get(subject)
             required = {step["arms"][0]} if verb == "handover" else arms
@@ -1024,54 +956,24 @@ def validate_intent(
                 if any(arms & other for key, other in held.items() if key != subject):
                     raise ValueError("A specified holding arm is already occupied")
                 held[subject] = arms
-            if verb == "place" and not any(
-                subject in fact.get("subjects", [])
-                and fact["kind"]
-                in {"relation", "pose_match", "hung_by", "view_location"}
-                for fact in step["effects"]
-            ):
-                raise ValueError(
-                    "Place requires a typed destination effect for its subject"
-                )
-            if verb == "transfer_contents" and not any(
-                fact["kind"] == "transferred" and fact["references"][0] == subject
-                for fact in step["effects"]
-            ):
-                raise ValueError(
-                    "Transfer requires a typed effect from the held source"
-                )
-            if verb == "articulate" and not any(
-                fact["kind"] == "articulated" and fact["subjects"] == subjects
-                for fact in step["effects"]
-            ):
-                raise ValueError(
-                    "Articulate requires the moving part's joint and mechanism"
-                )
         else:
             if verb == "push" and held.keys() & set(subjects):
                 raise ValueError("A push cannot move a held object")
-            if "auto" not in arms and any(
-                (key in subjects and "auto" not in owner and owner != arms)
-                or (key not in subjects and arms & owner)
-                for key, owner in held.items()
+            occupied_elsewhere = sum(
+                len(owner) for role, owner in held.items() if role not in subjects
+            )
+            if (
+                occupied_elsewhere + len(arms) > 2
+                or "auto" not in arms
+                and any(
+                    (key in subjects and "auto" not in owner and owner != arms)
+                    or (key not in subjects and arms & owner)
+                    for key, owner in held.items()
+                )
             ):
                 raise ValueError(f"{verb} contradicts the current arm holdings")
-            if verb == "move_gripper" and not any(
-                fact["kind"] == "gripper_relation" and set(fact["arms"]) == arms
-                for fact in step["effects"]
-            ):
-                raise ValueError(
-                    "Move_gripper requires an arm position relative to a declared target"
-                )
-            if verb == "press" and not any(
-                fact["kind"] == "actuated"
-                and fact["value"] == "pressed"
-                and fact["subjects"] == subjects
-                for fact in step["effects"]
-            ):
-                raise ValueError("Press requires a pressed effect at its declared site")
         check_capacity()
-        for fact in (*step["effects"], *invariants):
+        for fact in (*effects, *invariants):
             check_fact_state(fact)
         ordered_steps.append(step)
 
@@ -1099,20 +1001,11 @@ def compile_intent(
     plan: dict[str, Any], instruction: str, task_id: str, scene_objects: dict[str, Any]
 ) -> tuple[TaskSpec, dict[str, Any], list[dict[str, Any]], dict[str, str]]:
     """Project validated intent into a normative TaskSpec and graph-only nodes."""
-    role_rows = []
-    descriptions = {}
-    for role in plan["roles"]:
-        name = role["id"]
-        context = scene_objects.get(name, {})
-        descriptions[name] = context.get("description", role["description"])
-        properties = {"part_of": role["part_of"]} if "part_of" in role else {}
-        role_rows.append(
-            dict(
-                id=name,
-                kind=role["kind"],
-                properties=properties,
-            )
-        )
+    roles = {role["id"]: role for role in plan["roles"]}
+    descriptions = {
+        name: scene_objects.get(name, {}).get("description", role["description"])
+        for name, role in roles.items()
+    }
     definitions = {
         section: [] for section in ("init", "invariants", "goal", "milestones")
     }
@@ -1159,58 +1052,41 @@ def compile_intent(
     prior: list[str] = []
     for index, step in enumerate(plan["steps"], 1):
         identifier = f"step_{index:02d}"
-        verb = step["verb"]
-        arguments = {
-            k: step[k]
-            for k in ("subjects", "arms", "effects", "direction", "maintain")
-            if k in step
-        }
+        arguments = dict(step)
+        verb = arguments.pop("verb")
+        quote = arguments.pop("quote")
+        release_quote = arguments.pop("release_quote", None)
         if verb == "return_arms":
-            arguments["pose_reference"] = "each_arm_initial_pose"
-            arguments["binding_status"] = "pending"
-        arguments["quote"] = step["quote"].strip()
+            arguments.update(
+                pose_reference="each_arm_initial_pose", binding_status="pending"
+            )
+        metadata = dict(id=identifier, task_type=verb, depends_on=prior)
         nodes.append(
             dict(
-                id=identifier,
+                **metadata,
                 call=dict(
                     kind="registered",
                     call_id=f"{_AUTHORING_INTENT_PREFIX}{verb}",
-                    arguments=arguments,
+                    arguments=dict(arguments, quote=quote.strip()),
                     resources={},
                 ),
-                depends_on=prior,
                 task_instance_id=identifier,
-                task_type=verb,
                 role=verb,
             )
         )
-        groups.append(
-            dict(
-                id=identifier,
-                task_type=verb,
-                node_ids=[identifier],
-                depends_on=prior,
-                success={},
-            )
-        )
+        groups.append(dict(**metadata, node_ids=[identifier], success={}))
         definitions["milestones"].append(
             dict(
                 id=identifier,
                 after=prior,
                 achieve=[
-                    predicate(
-                        f"achieve_{identifier}",
-                        dict(
-                            verb=verb,
-                            **{k: v for k, v in arguments.items() if k != "quote"},
-                        ),
-                    )
+                    predicate(f"achieve_{identifier}", dict(verb=verb, **arguments))
                 ],
             )
         )
-        clause(identifier, identifier, step["quote"], pending=verb == "return_arms")
-        if "release_quote" in step:
-            clause(f"{identifier}.release", identifier, step["release_quote"])
+        clause(identifier, identifier, quote, pending=verb == "return_arms")
+        if release_quote:
+            clause(f"{identifier}.release", identifier, release_quote)
         prior = [identifier]
     if not definitions["goal"]:
         completion = "final_step_completed"
@@ -1220,13 +1096,22 @@ def compile_intent(
         dict(
             task_id=task_id,
             instruction=instruction,
-            roles=role_rows,
+            roles=[
+                dict(
+                    id=name,
+                    kind=role["kind"],
+                    properties=(
+                        {"part_of": role["part_of"]} if "part_of" in role else {}
+                    ),
+                )
+                for name, role in roles.items()
+            ],
             requirements=[
                 scene_objects_requirement(
                     scene_objects,
                     {
-                        role["id"]: descriptions[role["id"]]
-                        for role in plan["roles"]
+                        name: descriptions[name]
+                        for name, role in roles.items()
                         if "part_of" not in role
                         and role["kind"] not in {"target", "robot"}
                     },
@@ -1235,7 +1120,6 @@ def compile_intent(
             **definitions,
         )
     )
-    validate_task_spec(spec)
     graph = validate_semantic_task_graph(
         dict(
             schema_version=SEMANTIC_TASK_GRAPH_SCHEMA,

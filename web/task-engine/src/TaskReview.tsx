@@ -34,7 +34,6 @@ import {
   ChevronDown,
   ChevronRight,
   CircleX,
-  FileText,
   GitBranch,
   Layers,
   Maximize2,
@@ -46,9 +45,11 @@ import {
   X,
 } from "lucide-react";
 import {
+  IntentFacts,
   IntentStepDetails,
   intentLabel,
   intentStep,
+  type IntentFact,
 } from "./IntentStepDetails";
 import { createModel } from "./model";
 import type { ViewerData, Predicate, TaskNode } from "./types";
@@ -419,12 +420,7 @@ export default function TaskReview({
     data.graph.task_id
       .replace(/[_-]+/g, " ")
       .replace(/^./, (letter) => letter.toUpperCase());
-  const completion = t("完成条件", "Completion conditions");
-  const finalGoals = spec.objectives.goal;
-  const completionCount = zh
-    ? `${completion}（${finalGoals.length}）`
-    : `${completion} (${finalGoals.length})`;
-  const originalInstruction = t("原指令", "Original instruction");
+  const taskSpecLabel = t("任务规范", "Task specification");
   const unverifiedQualifiers = (review.qualifiers || []).filter(
     (q) => q.status !== "covered",
   );
@@ -490,49 +486,18 @@ export default function TaskReview({
       : "";
   const shortName = (id: string) =>
     review.displayNames?.[id]?.[locale] || model.name(id).replaceAll("_", " ");
-  const roleList = (value: unknown) =>
-    ids(value).map(shortName).join(t("、", ", "));
-  const armList = (value: unknown) =>
-    ids(value)
-      .map((arm) => model.t(arm))
-      .join(t("、", ", "));
   const predicate = (p: Predicate) => {
     const args = p.arguments;
     if (authoredPreview && p.predicate === "semantic_goal" && args) {
-      if (typeof args.verb === "string")
-        return [intentLabel(args.verb, locale), roleList(args.subjects)]
+      const label = args.value ?? args.kind ?? args.verb;
+      if (typeof label === "string")
+        return [
+          intentLabel(label, locale),
+          ids(args.subjects).slice(0, 2).map(shortName).join(", "),
+        ]
           .filter(Boolean)
           .join(" · ");
-      if (args.kind === "arms_at_initial_pose") {
-        const arms = ids(args.arms);
-        if (arms.includes("left") && arms.includes("right"))
-          return t("双臂回位", "Both arms return");
-        if (arms.length)
-          return t(
-            armList(args.arms) + "回位",
-            armList(args.arms) + " returns",
-          );
-      }
-      if (args.kind === "stable" && ids(args.subjects).length) {
-        const count = ids(args.subjects).length;
-        return t(
-          `${count} 件部件保持稳定`,
-          `Keep ${count} ${count === 1 ? "part" : "parts"} stable`,
-        );
-      }
-      if (args.kind === "relation" && args.value === "opposite_sides") {
-        const references = roleList(args.references);
-        return references
-          ? t(`分列 ${references} 两侧`, `Opposite sides of ${references}`)
-          : t("分列两侧", "On opposite sides");
-      }
-      if (typeof args.terminal_step === "string")
-        return t("完成末步骤", "Finish the last step");
-      if (typeof args.kind === "string")
-        return intentLabel(
-          typeof args.value === "string" ? args.value : args.kind,
-          locale,
-        );
+      return t("完成末步骤", "Finish the last step");
     }
     const subject = name(p.subject || String(p.arguments?.subject || "")),
       ref = name(p.reference || String(p.arguments?.reference || ""));
@@ -993,16 +958,7 @@ export default function TaskReview({
             ? t("运行回看", "Recorded attempt")
             : t("计划预览", "Plan preview")}
         </div>
-        {authoredPreview ? (
-          <div className="rv-task-heading">
-            <h1>{taskTitle}</h1>
-            <button onClick={() => show("instruction")}>
-              <FileText size={15} /> {originalInstruction}
-            </button>
-          </div>
-        ) : (
-          <h1>{spec.inputs.instruction}</h1>
-        )}
+        <h1>{authoredPreview ? taskTitle : spec.inputs.instruction}</h1>
         <div className="rv-summary-row">
           <div className="rv-chips">
             {spec.configuration.roles.map((r) => (
@@ -1082,60 +1038,19 @@ export default function TaskReview({
               {groups.length} {t("阶段", "stages")}　/　{calls.length}{" "}
               {t("动作", "actions")}
             </small>
-            <div className="rv-graphbar-actions">
-              {authoredPreview && finalGoals.length > 0 && (
-                <button
-                  className="rv-goals-compact"
-                  aria-label={completionCount}
-                  title={completionCount}
-                  onClick={() => show("goals")}
-                >
-                  <Target size={14} />
-                  <span className="rv-compact-label">{completionCount}</span>
-                  <span className="rv-goal-mini">{finalGoals.length}</span>
-                </button>
-              )}
-              <button
-                aria-label={t("任务规范", "Task specification")}
-                title={t("任务规范", "Task specification")}
-                onClick={() => show("spec")}
-              >
-                <span
-                  className={authoredPreview ? "rv-compact-label" : undefined}
-                >
-                  {t("任务规范", "Task specification")}
-                </span>
-                {authoredPreview ? (
-                  <FileText size={15} />
-                ) : (
-                  <ChevronRight size={14} />
-                )}
-              </button>
-            </div>
+            <button aria-label={taskSpecLabel} onClick={() => show("spec")}>
+              {taskSpecLabel}
+              {authoredPreview &&
+                ` · ${spec.objectives.goal.length} ${t("目标", "goals")}`}
+              <ChevronRight size={14} />
+            </button>
           </div>
-          {authoredPreview
-            ? finalGoals.length > 0 && (
-                <nav className="rv-goal-strip" aria-label={completion}>
-                  <span>
-                    <Target size={14} /> {completionCount}
-                  </span>
-                  {finalGoals.map((p) => (
-                    <button
-                      key={p.id}
-                      title={predicate(p)}
-                      aria-pressed={selectedGoal?.id === p.id}
-                      onClick={() => show("goal:" + p.id)}
-                    >
-                      {predicate(p)}
-                    </button>
-                  ))}
-                </nav>
-              )
-            : shared.map((p) => (
-                <button key={p.id} onClick={() => show("goal:" + p.id)}>
-                  {predicate(p)}
-                </button>
-              ))}
+          {!authoredPreview &&
+            shared.map((p) => (
+              <button key={p.id} onClick={() => show("goal:" + p.id)}>
+                {predicate(p)}
+              </button>
+            ))}
           <div className="rv-canvas">
             <ReactFlow
               nodes={nodes}
@@ -1210,9 +1125,7 @@ export default function TaskReview({
                       step={selectedIntent}
                       verb={selectedCall.task_type}
                       locale={locale}
-                      name={(id) =>
-                        review.displayNames?.[id]?.[locale] || model.name(id)
-                      }
+                      name={shortName}
                       releaseQuote={
                         spec.interpretation.clauses?.find(
                           (clause) =>
@@ -1389,49 +1302,21 @@ export default function TaskReview({
                     </div>
                   ))}
                 </>
-              ) : selected === "instruction" ? (
-                <>
-                  <h2>{originalInstruction}</h2>
-                  <p className="rv-source-text">{spec.inputs.instruction}</p>
-                </>
-              ) : selected === "goals" ? (
-                <>
-                  <h2>{completionCount}</h2>
-                  <ul className="rv-goal-list">
-                    {finalGoals.map((p) => (
-                      <li key={p.id}>
-                        <button onClick={() => show("goal:" + p.id)}>
-                          {predicate(p)} <ChevronRight size={15} />
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </>
               ) : selectedGoal ? (
                 <>
                   <h2>{predicate(selectedGoal)}</h2>
                   <p>
                     {t("最终目标", "Final objective")} · {selectedGoal.id}
                   </p>
-                  {selectedGoalFact &&
-                    [
-                      [
-                        t("涉及对象", "Objects"),
-                        roleList(selectedGoalFact.subjects),
-                      ],
-                      [
-                        t("参照对象", "References"),
-                        roleList(selectedGoalFact.references),
-                      ],
-                      [t("机械臂", "Arms"), armList(selectedGoalFact.arms)],
-                    ].map(
-                      ([label, value]) =>
-                        value && (
-                          <p className="rv-source-text" key={label}>
-                            <strong>{label}</strong>　{value}
-                          </p>
-                        ),
-                    )}
+                  {typeof selectedGoalFact?.kind === "string" && (
+                    <div className="intent-step-details">
+                      <IntentFacts
+                        facts={[selectedGoalFact as IntentFact]}
+                        locale={locale}
+                        name={shortName}
+                      />
+                    </div>
+                  )}
                   {pairing.goal_groups[selectedGoal.id]?.length > 0 && (
                     <p>
                       {t("对应阶段", "Linked stages")}　

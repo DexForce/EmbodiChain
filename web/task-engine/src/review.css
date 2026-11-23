@@ -223,25 +223,10 @@ Licensed under the Apache License, Version 2.0.
 .rv-authored-summary .rv-state {
   flex-shrink: 0;
 }
-.rv-task-heading {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 16px;
-  margin: 4px 0 10px;
-}
-.rv .rv-task-heading h1 {
-  margin: 0;
+.rv .rv-authored-summary h1 {
   font-size: 24px;
   letter-spacing: 0;
   overflow-wrap: anywhere;
-}
-.rv-task-heading button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--quiet);
-  font-size: 13px;
 }
 .rv-summary-row,
 .rv-chips,
@@ -304,72 +289,10 @@ Licensed under the Apache License, Version 2.0.
   gap: 8px;
   font-weight: 550;
 }
+.rv-graphbar button,
 .rv-detailbar button,
 .rv-foot button {
   margin-left: auto;
-}
-.rv-graphbar-actions,
-.rv-goal-strip,
-.rv-goal-strip > span,
-.rv-goal-list button {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.rv-graphbar-actions {
-  margin-left: auto;
-  flex-shrink: 0;
-}
-.rv-graphbar .rv-goals-compact,
-.rv-goal-mini {
-  display: none;
-}
-.rv-goal-strip {
-  flex: none;
-  min-height: 40px;
-  padding: 4px 28px;
-  border-bottom: 1px solid var(--border);
-  background: var(--white);
-  font-size: 13px;
-  overflow-x: auto;
-  white-space: nowrap;
-}
-.rv-goal-strip > span {
-  margin-right: 5px;
-  color: var(--quiet);
-  flex: none;
-}
-.rv-goal-strip button {
-  max-width: 260px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 5px 9px;
-}
-.rv-goal-strip button[aria-pressed="true"],
-.rv-goal-strip button:hover,
-.rv-goal-list button:hover {
-  background: var(--pale);
-}
-.rv-goal-list {
-  list-style: none;
-  margin: 10px 0 0;
-  padding: 0;
-}
-.rv-goal-list button {
-  width: 100%;
-  justify-content: space-between;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-  overflow-wrap: anywhere;
-}
-.rv-goal-list svg {
-  flex: none;
-}
-.rv-source-text {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  line-height: 1.55;
 }
 .rv-canvas {
   flex: 1;
@@ -663,20 +586,6 @@ Licensed under the Apache License, Version 2.0.
   .rv-authored-summary .rv-chips button {
     flex: none;
     white-space: nowrap;
-  }
-  .rv-goal-strip {
-    display: none;
-  }
-  .rv-graphbar .rv-goals-compact {
-    display: inline-flex;
-  }
-}
-@media (max-width: 520px) {
-  .rv-compact-label {
-    display: none;
-  }
-  .rv-goal-mini {
-    display: inline;
   }
 }
 @media (max-width: 760px) {

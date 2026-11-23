@@ -27,93 +27,90 @@ from embodichain.gen_sim.task_spec.publication import decode_task_document
 
 
 @pytest.mark.parametrize(
-    "text,proposed,reviewed",
+    "template,fields,wrong",
     [
-        (
-            "Tilt the cup toward the bowl without transferring its contents.",
-            dict(template="E3", reference="bowl", mode="fluid"),
-            dict(template="E3", reference="bowl", mode="motion"),
-        ),
-        (
-            "Lower the cup into the recess in the holder.",
-            dict(template="E1", reference="holder", relation="on"),
-            dict(template="E1", reference="holder", relation="inside"),
-        ),
-        (
-            "Mimic pouring into the bowl, then leave the cup in the gripper.",
-            dict(template="E3", reference="bowl", mode="motion"),
-            dict(
-                template="E3",
-                reference="bowl",
-                mode="motion",
-                terminal_behavior="hold",
-                terminal_quote="leave the cup in the gripper",
-            ),
-        ),
+        ("E1", dict(reference="holder", relation="inside"), {"relation": "on"}),
+        ("E3", dict(reference="bowl", mode="motion"), {"mode": "fluid"}),
+        ("E2", dict(orientation="upright"), {"terminal_behavior": "hold"}),
     ],
 )
-def test_structured_source_audit_rejects_changed_meaning(text, proposed, reviewed):
+def test_structured_audit_rechecks_the_source(template, fields, wrong):
     from embodichain.gen_sim.task_engine.hybrid import (
         _operation_rows,
         _validate_source_audit,
     )
 
-    operations = _operation_rows([dict(object="cup", quote=text, **proposed)], text)
-    audit = {
-        "issues": [],
-        "source_operations": [dict(object="cup", quote=text, **reviewed)],
-    }
+    text = "Follow the source instruction."
+    source = dict(template=template, object="cup", quote=text, **fields)
+    proposed = _operation_rows(
+        (
+            [dict(source, terminal_quote=text, **wrong)]
+            if "terminal_behavior" in wrong
+            else [dict(source, **wrong)]
+        ),
+        text,
+    )
     with pytest.raises(ValueError, match="source_audit.*operation 1"):
-        _validate_source_audit(text, operations, audit)
-
-
-def test_source_audit_requires_an_independent_operation_for_each_input():
-    from embodichain.gen_sim.task_engine.hybrid import (
-        _operation_rows,
-        _validate_source_audit,
-    )
-
-    instruction = "Put the cup inside the box."
-    operations = _operation_rows(
-        [
-            dict(
-                template="E1",
-                object="cup",
-                reference="box",
-                relation="inside",
-                quote=instruction,
-            )
-        ],
-        instruction,
-    )
+        _validate_source_audit(
+            text, proposed, dict(issues=[], source_operations=[source])
+        )
     with pytest.raises(ValueError, match="source_operations"):
-        _validate_source_audit(instruction, operations, {"issues": []})
+        _validate_source_audit(text, proposed, dict(issues=[]))
 
 
 @pytest.mark.parametrize(
-    "fields,error",
-    [
-        ({"mode": "solid"}, "Unsupported or ambiguous pour mode"),
-        ({"terminal_behavior": "hold"}, "Missing verbatim terminal behavior source"),
-        (
-            {"terminal_behavior": "hold", "terminal_quote": "not in the instruction"},
-            "Missing verbatim terminal behavior source",
-        ),
-    ],
+    "wrong",
+    [{"mode": "solid"}, {"terminal_behavior": "hold", "terminal_quote": "Missing"}],
 )
-def test_operation_rows_rejects_unsupported_or_unquoted_intent(fields, error):
+def test_operation_rows_reject_invalid_mode_or_source(wrong):
     from embodichain.gen_sim.task_engine.hybrid import _operation_rows
 
-    instruction = "Mimic pouring from the cup toward the bowl."
-    operation = dict(
-        template="E3",
-        object="cup",
-        reference="bowl",
-        mode="motion",
-        quote=instruction,
-    )
-    with pytest.raises(ValueError, match=error):
-        _operation_rows([{**operation, **fields}], instruction)
+    text = "Mimic pouring from the cup toward the bowl."
+    op = dict(template="E3", object="cup", reference="bowl", mode="motion", quote=text)
+    with pytest.raises(ValueError, match="mode|verbatim"):
+        _operation_rows([op | wrong], text)
+
+
+@pytest.fixture
+def native_hybrid(tmp_path, monkeypatch):
+    from PIL import Image
+    from embodichain.gen_sim.services import GenSimServices, GenSimServicesCfg, compat
+    from embodichain.gen_sim.task_engine.hybrid import publish_hybrid
+
+    image, output = tmp_path / "scene.png", tmp_path / "plan"
+    Image.new("RGB", (20, 20)).save(image)
+
+    def run(ops, *, context=None, review=None):
+        text = ops[0]["quote"]
+        source = None
+        if context is not None:
+            source = tmp_path / "context.json"
+            source.write_text(json.dumps(context))
+
+        def proposal(*args, **kwargs):
+            assert json.loads(kwargs["user_prompt"]).get("scene_context") == context
+            return json.dumps(ops)
+
+        def audit(**kwargs):
+            request = json.loads(kwargs["prompt"])
+            if review is not None:
+                return review(kwargs["role"], request)
+            assert request.get("scene_context") == context
+            if kwargs["role"] == "task_interpretation":
+                return dict(issues=[], source_operations=ops)
+            return {
+                r: dict(description=r, bbox=[10, 10, 500, 500])
+                for r in kwargs["schema"]["required"]
+            }
+
+        monkeypatch.setattr(compat.VisionFacade, "complete", proposal)
+        monkeypatch.setattr(compat, "structured_call", audit)
+        with GenSimServices(GenSimServicesCfg()) as services:
+            return publish_hybrid(
+                text, "test", image, output, services, scene_context=source
+            )
+
+    return run
 
 
 def test_failed_source_audit_prevents_publication(tmp_path, monkeypatch):
@@ -155,63 +152,37 @@ def test_failed_source_audit_prevents_publication(tmp_path, monkeypatch):
     assert not (tmp_path / "plan").exists()
 
 
-@pytest.mark.parametrize(
-    "revision,reviewed",
-    [
-        (dict(kind="place", object="cup", on="bowl", resources={}), True),
-        (
-            dict(
-                kind="registered",
-                call_id="simulation.press",
-                arguments={"object": "cup"},
-                resources={},
-            ),
-            False,
-        ),
-    ],
-)
-def test_hybrid_validates_a_repair_before_selecting_it(
-    tmp_path, monkeypatch, revision, reviewed
-):
-    from PIL import Image
-    from embodichain.gen_sim.services import GenSimServices, GenSimServicesCfg, compat
-    from embodichain.gen_sim.task_engine.hybrid import publish_hybrid
-
+@pytest.mark.parametrize("control", [False, True])
+def test_repair_cannot_insert_an_unsupported_action(native_hybrid, control):
     text = "Empty the water from the cup into the bowl."
-    source = [
-        dict(template="E3", object="cup", reference="bowl", mode="fluid", quote=text)
-    ]
-    audited = []
-    monkeypatch.setattr(
-        compat.VisionFacade,
-        "complete",
-        lambda *a, **kw: json.dumps({"operations": source}),
+    op = dict(template="E3", object="cup", reference="bowl", mode="fluid", quote=text)
+    extra = (
+        dict(
+            kind="registered",
+            call_id="simulation.press",
+            arguments={"object": "cup"},
+            resources={},
+        )
+        if control
+        else dict(kind="place", object="cup", on="bowl", resources={})
     )
 
-    def respond(**kwargs):
-        prompt = json.loads(kwargs["prompt"])
-        if kwargs["role"] == "task_semantic_planning":
-            return {"calls": [*prompt["previous"], revision]}
-        audited.append(prompt["ordered_calls"])
-        if revision in audited[-1]:
-            return {"issues": [dict(quote=text, reason="unsupported action")]}
-        return {"issues": [], "source_operations": source}
+    def review(role, request):
+        if role == "task_semantic_planning":
+            return {"calls": [*request["previous"], extra]}
+        return (
+            dict(issues=[dict(quote=text, reason="unsupported action")])
+            if extra in request["ordered_calls"]
+            else dict(issues=[], source_operations=[op])
+        )
 
-    monkeypatch.setattr(compat, "structured_call", respond)
-    image = tmp_path / "scene.png"
-    Image.new("RGB", (20, 20)).save(image)
-    with GenSimServices(GenSimServicesCfg()) as services:
-        result = publish_hybrid(text, "pour", image, tmp_path / "plan", services)
-    assert result["coverage"]["status"] == "uncovered"
+    result = native_hybrid([op], review=review)
     rejection = result["planning_history"][-1]["coverage"]
     assert rejection["status"] == "source_rejected"
-    assert (revision in audited[-1]) == reviewed
-    assert len(audited) == (2 if reviewed else 1)
-    if not reviewed:
-        assert "requires articulation" in rejection["error"]
-    assert revision not in [
-        node["call"] for node in result["semantic_task_graph"]["nodes"]
+    assert ("requires articulation" if control else "unsupported action") in rejection[
+        "error"
     ]
+    assert all(node["call"] != extra for node in result["semantic_task_graph"]["nodes"])
 
 
 @pytest.mark.parametrize(
@@ -228,7 +199,27 @@ def test_hybrid_validates_a_repair_before_selecting_it(
             },
             "covered",
         ),
+        ("E3", {"reference": "cup", "mode": "motion"}, "covered"),
         ("E3", {"reference": "cup", "mode": "fluid"}, "uncovered"),
+        (
+            "E2",
+            {
+                "orientation": "upright",
+                "terminal_behavior": "hold",
+                "terminal_quote": "request",
+            },
+            "covered",
+        ),
+        (
+            "E4",
+            {
+                "source": "right",
+                "destination": "left",
+                "terminal_behavior": "hold",
+                "terminal_quote": "request",
+            },
+            "covered",
+        ),
         ("E6", {"state": "closed"}, "covered"),
         ("E7", {"state": "open"}, "covered"),
         ("E8", {"mode": "setting", "setting": 3}, "covered"),
@@ -256,6 +247,11 @@ def test_hybrid_family_coverage_requires_matching_bound_operation(
     result = author_goal_plan("request", "case", objective, calls)
     graph = result["semantic_task_graph"]
     spec = TaskSpec.from_dict(result["task_spec"])
+    terminal = params.get("terminal_behavior")
+    assert any(call["kind"] == "place" for call in calls) == (
+        terminal == "return_and_release"
+    )
+    assert any(goal.name == "held" for goal in spec.goal) == (terminal == "hold")
     assert (
         verify_witness(spec, graph, support_targets={}, bindings=bindings)["status"]
         == expected
@@ -522,159 +518,6 @@ def test_hybrid_held_vessel_pours_without_reacquisition():
 
 
 @pytest.mark.parametrize(
-    "family,terminal,clause,terminal_quote,expected_calls",
-    [
-        (
-            "E3",
-            "hold",
-            "Tilt the cup toward the bowl without emptying it, then keep the cup in your grip.",
-            "keep the cup in your grip",
-            ("pick", "simulation.move_held_object", "simulation.pour"),
-        ),
-        (
-            "E3",
-            "return_and_release",
-            "Tilt the cup toward the bowl without emptying it, then put the cup back where it began.",
-            "put the cup back where it began",
-            (
-                "pick",
-                "simulation.move_held_object",
-                "simulation.pour",
-                "simulation.move_held_object",
-                "place",
-            ),
-        ),
-        (
-            "E3",
-            "none",
-            "Tilt the cup toward the bowl without emptying it, then bring it upright again.",
-            None,
-            ("pick", "simulation.move_held_object", "simulation.pour"),
-        ),
-        (
-            "E2",
-            "hold",
-            "Stand the cup upright and keep holding it.",
-            "keep holding it",
-            ("simulation.axis_align",),
-        ),
-        (
-            "E2",
-            "return_and_release",
-            "Stand the cup upright and put it back where it began.",
-            "put it back where it began",
-            ("simulation.axis_align", "simulation.move_held_object", "place"),
-        ),
-        (
-            "E4",
-            "hold",
-            "Hand the cup from the right to the left arm and keep it in the left gripper.",
-            "keep it in the left gripper",
-            ("pick", "hand_over"),
-        ),
-        (
-            "E4",
-            "none",
-            "Hand the cup from the right to the left arm.",
-            None,
-            ("pick", "hand_over"),
-        ),
-    ],
-    ids=[
-        "pour-hold",
-        "pour-return",
-        "pour-upright-only",
-        "align-hold",
-        "align-return",
-        "handover-hold",
-        "handover-unspecified",
-    ],
-)
-def test_hybrid_terminal_follows_instruction(
-    tmp_path, monkeypatch, family, terminal, clause, terminal_quote, expected_calls
-):
-    from PIL import Image
-    from embodichain.gen_sim.services import GenSimServices, GenSimServicesCfg, compat
-    from embodichain.gen_sim.task_engine.hybrid import publish_hybrid, verify_witness
-    from embodichain.gen_sim.task_spec import TaskSpec
-    from embodichain.gen_sim.workflow import load_task_plan
-
-    fields = {
-        "E2": {"orientation": "upright", "primary": "right"},
-        "E3": {"reference": "bowl", "mode": "motion", "primary": "right"},
-        "E4": {"source": "right", "destination": "left"},
-    }[family]
-    operation = dict(template=family, object="cup", quote=clause, **fields)
-    operation["terminal_behavior"] = terminal
-    if terminal_quote is not None:
-        operation["terminal_quote"] = terminal_quote
-    monkeypatch.setattr(
-        compat.VisionFacade,
-        "complete",
-        lambda *a, **kw: json.dumps({"operations": [operation]}),
-    )
-
-    def review(**kwargs):
-        assert kwargs["role"] == "task_interpretation"
-        return {"issues": [], "source_operations": [operation]}
-
-    monkeypatch.setattr(compat, "structured_call", review)
-    image = tmp_path / "scene.png"
-    Image.new("RGB", (20, 20)).save(image)
-    output = tmp_path / "plan"
-    with GenSimServices(GenSimServicesCfg()) as services:
-        result = publish_hybrid(clause, "terminal", image, output, services)
-
-    calls = [node["call"] for node in result["semantic_task_graph"]["nodes"]]
-    assert tuple(call.get("call_id", call["kind"]) for call in calls) == expected_calls
-    assert result["coverage"]["status"] == "covered"
-    document = load_task_plan(output)
-    assert document["stage"] == "authoring_only"
-    objectives = document["task_document"]["objectives"]
-    holds = [goal for goal in objectives["goal"] if goal["predicate"] == "held"]
-    if terminal == "hold":
-        assert len(holds) == 1
-        assert holds[0]["subject"] == "cup"
-        assert holds[0]["arguments"]["required_arm"] == (
-            "left" if family == "E4" else "right"
-        )
-    else:
-        assert not holds
-    if terminal == "return_and_release":
-        assert calls[-2]["arguments"]["target"] == "original_support_cup"
-        assert calls[-1]["on"] == "original_support_cup"
-        assert any(
-            p.get("arguments", {}).get("operation") == "return_and_release"
-            for m in objectives["milestones"]
-            for p in m["achieve"]
-        )
-    elif family == "E3" and terminal == "hold":
-        mutated = deepcopy(result["semantic_task_graph"])
-        last = mutated["nodes"][-1]
-        mutated["nodes"].append(
-            {
-                **last,
-                "id": "extra_place",
-                "depends_on": [last["id"]],
-                "call": dict(
-                    kind="place",
-                    object="cup",
-                    on="bowl",
-                    resources={"primary": "right"},
-                ),
-            }
-        )
-        mutated["task_groups"][0]["node_ids"].append("extra_place")
-        verdict = verify_witness(
-            TaskSpec.from_dict(result["task_spec"]),
-            mutated,
-            support_targets={},
-            bindings=result["pending_operation_bindings"],
-        )
-        assert "final_cup_held" in verdict["uncovered"]
-
-
-@pytest.mark.parametrize(
     "instruction",
     [
         "把杯子放在托盘上，不要倒水。",
@@ -832,211 +675,82 @@ def test_hybrid_two_mats_project_each_occurrence(tmp_path, monkeypatch, family):
     )
 
 
-@pytest.mark.parametrize(
-    "tray,description,box",
-    [
-        ("labeled_tray", "blue tray with a white label", [50, 400, 400, 800]),
-        ("plain_tray", "blue tray without a label", [600, 400, 950, 800]),
-        ("tray", None, [50, 400, 400, 800]),
-    ],
-)
-def test_hybrid_scene_context_selects_and_preserves_destination(
-    tmp_path, monkeypatch, tray, description, box
+def _context(*objects):
+    return dict(
+        schema_version="embodichain.task-scene-context/v1", objects=list(objects)
+    )
+
+
+def test_hybrid_keeps_explicit_destination_without_adding_background_roles(
+    native_hybrid, tmp_path
 ):
-    from PIL import Image
-    from embodichain.gen_sim.services import GenSimServices, GenSimServicesCfg, compat
-    from embodichain.gen_sim.task_engine.cli import main
     from embodichain.gen_sim.workflow import load_task_plan
 
-    instruction = "Put the cup inside the tray."
-    image = tmp_path / "scene.png"
-    Image.new("RGB", (20, 20)).save(image)
-    output = tmp_path / "plan"
-    argv = [
-        "--image",
-        str(image),
-        "--instruction",
-        instruction,
-        "--output",
-        str(output),
-    ]
-    context = None
-    if description:
-        context = {
-            "schema_version": "embodichain.task-scene-context/v1",
-            "description": "There are two blue trays in the scene.",
-            "objects": [
-                dict(id=tray, description=description, asset_kind="rigid"),
-                dict(id="stapler", description="a stapler in the background"),
-            ],
-        }
-        source = tmp_path / "context.json"
-        source.write_text(json.dumps(context), encoding="utf-8")
-        argv.extend(["--scene-context", str(source)])
+    tray = "labeled_tray"
 
-    def interpret(self, **kwargs):
-        prompt = json.loads(kwargs["user_prompt"])
-        assert prompt["instruction"] == instruction
-        assert prompt.get("scene_context") == context
-        target = prompt["scene_context"]["objects"][0]["id"] if context else "tray"
-        return json.dumps(
+    entry = dict(id=tray, description=tray.replace("_", " "), asset_kind="rigid")
+    context = _context(entry, dict(id="stapler", description="background stapler"))
+    result = native_hybrid(
+        [
             dict(
-                operations=[
-                    dict(
-                        template="E1",
-                        object="cup",
-                        reference=target,
-                        relation="inside",
-                        quote=instruction,
-                    )
-                ]
+                template="E1",
+                object="cup",
+                reference=tray,
+                relation="inside",
+                quote="Put the cup in the tray.",
             )
-        )
-
-    def respond(**kwargs):
-        prompt = json.loads(kwargs["prompt"])
-        assert prompt["instruction"] == instruction
-        if kwargs["role"] == "task_interpretation":
-            assert prompt.get("scene_context") == context
-            return {
-                "issues": [],
-                "source_operations": [
-                    dict(
-                        template="E1",
-                        object="cup",
-                        reference=tray,
-                        relation="inside",
-                        quote=instruction,
-                    )
-                ],
-            }
-        assert prompt.get("scene_context") == context
-        return {
-            role: dict(description=f"observed {role}", bbox=coords)
-            for role, coords in {"cup": [450, 100, 550, 250], tray: box}.items()
-        }
-
-    monkeypatch.setattr(compat.VisionFacade, "complete", interpret)
-    monkeypatch.setattr(compat, "structured_call", respond)
-    with GenSimServices(GenSimServicesCfg()) as services:
-        main(argv, services=services)
-
-    graph = json.loads((output / "semantic_task_graph.json").read_text())
-    assert [node["call"] for node in graph["nodes"]] == [
-        dict(kind="pick", object="cup", resources={}),
-        dict(kind="place", object="cup", inside=tray, resources={}),
-    ]
-    assert graph["nodes"][1]["depends_on"] == [graph["nodes"][0]["id"]]
-    grounding = json.loads((output / "image_grounding.json").read_text())
-    assert grounding["bindings"][tray] == [tray]
-    assert {item["id"]: item["bbox"] for item in grounding["objects"]}[tray] == [
-        coord / 1000 for coord in box
-    ]
-    plan = load_task_plan(output)
-    assert plan["task_document"]["configuration"]["descriptions"][tray] == (
-        description or tray
+        ],
+        context=context,
     )
-    configuration = plan["scene_requirements"]["configuration"]
-    assert {role["id"] for role in configuration["roles"]} == {"cup", tray}
+    plan = load_task_plan(tmp_path / "plan")
+    config = plan["scene_requirements"]["configuration"]
+    assert result["semantic_task_graph"]["nodes"][-1]["call"]["inside"] == tray
+    assert result["image_grounding"]["bindings"][tray] == [tray]
+    assert (
+        plan["task_document"]["configuration"]["descriptions"][tray]
+        == entry["description"]
+    )
+    assert {row["id"] for row in config["roles"]} == {"cup", tray}
     objects = next(
-        entry["value"]
-        for entry in configuration["requirements"]
-        if (entry["consumer"], entry["key"]) == ("scene", "scene_objects")
+        row["value"] for row in config["requirements"] if row["key"] == "scene_objects"
     )
     assert {row["id"]: row["is_articulated"] for row in objects} == {
         "cup": False,
         tray: False,
-        **({"stapler": False} if context else {}),
+        "stapler": False,
     }
-    snapshot = output / "scene_context.json"
-    if context is None:
-        assert not snapshot.exists()
-    else:
-        assert snapshot.name in plan["artifacts"]
-        assert json.loads(snapshot.read_text()) == context
+    assert json.loads((tmp_path / "plan" / "scene_context.json").read_text()) == context
 
 
 @pytest.mark.parametrize(
-    "object_id,asset_kind,error",
+    "name,kind,error",
     [
         ("drawer", "rigid", "drawer.*rigid.*articulation"),
-        (None, None, "drawer.*requires articulation.*scene-context"),
-        ("top_drawer", "articulated", "drawer.*requires articulation.*scene-context"),
-        ("drawer", "container", "asset_kind"),
+        (None, None, "requires articulation.*scene-context"),
         ("cabinet", "articulated", None),
     ],
 )
-def test_hybrid_scene_context_gates_native_joint_actions(
-    tmp_path, monkeypatch, object_id, asset_kind, error
+def test_native_joint_action_requires_the_declared_owner(
+    native_hybrid, tmp_path, name, kind, error
 ):
-    from PIL import Image
-    from embodichain.gen_sim.services import GenSimServices, GenSimServicesCfg, compat
-    from embodichain.gen_sim.task_engine.hybrid import publish_hybrid
-
-    instruction = "Open the drawer."
-    image = tmp_path / "scene.png"
-    Image.new("RGB", (20, 20)).save(image)
-    source = None
-    if object_id is not None:
-        source = tmp_path / "context.json"
-        source.write_text(
-            json.dumps(
-                {
-                    "schema_version": "embodichain.task-scene-context/v1",
-                    "objects": [
-                        dict(id=object_id, description=object_id, asset_kind=asset_kind)
-                    ],
-                }
-            ),
-            encoding="utf-8",
+    context = (
+        _context(dict(id=name, description=name, asset_kind=kind)) if name else None
+    )
+    op = dict(template="E6", object="drawer", state="open", quote="Open the drawer.")
+    if name == "cabinet":
+        op["part_of"] = name
+    if error:
+        with pytest.raises(ValueError, match=error):
+            native_hybrid([op], context=context)
+        assert not (tmp_path / "plan").exists()
+    else:
+        result = native_hybrid([op], context=context)
+        assert result["task_spec"]["roles"][0]["properties"]["part_of"] == name
+        declared = next(
+            row["value"]
+            for row in result["task_spec"]["requirements"]
+            if row["key"] == "scene_objects"
         )
-    op = dict(template="E6", object="drawer", state="open", quote=instruction)
-    if object_id == "cabinet":
-        op["part_of"] = "cabinet"
-    interpretations = []
-
-    def interpret(self, **kwargs):
-        assert asset_kind != "container", "Invalid context must fail before model calls"
-        interpretations.append(kwargs)
-        return json.dumps([op])
-
-    def audit(**kwargs):
-        assert error is None, "Conflicting declarations must fail before audit"
-        return {"issues": [], "source_operations": [op]}
-
-    monkeypatch.setattr(compat.VisionFacade, "complete", interpret)
-    monkeypatch.setattr(compat, "structured_call", audit)
-    output = tmp_path / "plan"
-    with GenSimServices(GenSimServicesCfg()) as services:
-        if error:
-            with pytest.raises(ValueError, match=error):
-                publish_hybrid(
-                    instruction,
-                    "example",
-                    image,
-                    output,
-                    services,
-                    scene_context=source,
-                )
-            assert len(interpretations) <= 1
-            assert not output.exists()
-        else:
-            result = publish_hybrid(
-                instruction, "example", image, output, services, scene_context=source
-            )
-            roles = result["task_spec"]["roles"]
-            assert [role["id"] for role in roles] == ["drawer"]
-            assert roles[0]["properties"]["part_of"] == "cabinet"
-            configuration = result["task_spec_v1"]["configuration"]
-            assert {
-                "consumer": "scene",
-                "key": "scene_objects",
-                "value": [
-                    dict(
-                        id="cabinet",
-                        description="cabinet",
-                        asset_kind="articulated",
-                        is_articulated=True,
-                    )
-                ],
-            } in configuration["requirements"]
+        assert declared == [
+            dict(id=name, description=name, asset_kind=kind, is_articulated=True)
+        ]

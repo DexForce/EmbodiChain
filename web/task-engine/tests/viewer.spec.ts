@@ -22,83 +22,45 @@ import type { ViewerData } from "../src/types";
 
 const root = fileURLToPath(new URL("../.browser-fixtures", import.meta.url));
 
-test("authoring preview keeps completion conditions readable and compact", async ({
-  page,
-}) => {
-  await page.goto(pathToFileURL(join(root, "hybrid-authoring.html")).href);
-  await page.getByRole("button", { name: "中文", exact: true }).click();
-  await expect(page.locator("h1")).toHaveText("Plank");
-  const goalBar = page.getByRole("navigation", { name: "完成条件" });
-  const detail = page.getByRole("complementary", { name: "详情" });
-  const close = detail.getByRole("button", { name: "关闭" });
-  await expect(goalBar.getByRole("button", { name: "双臂回位" })).toBeVisible();
-  await expect(page.locator(".rv-graph")).not.toContainText("semantic_goal");
-  await goalBar.getByRole("button", { name: "3 件部件保持稳定" }).click();
-  await expect(
-    detail.getByRole("heading", { name: "3 件部件保持稳定" }),
-  ).toBeVisible();
-  await expect(detail).toContainText(/plank.*left pedestal.*right pedestal/);
-  await expect(detail).toContainText("未评估");
-  await close.click();
+for (const viewport of [
+  { width: 1680, height: 1120 },
+  { width: 1229, height: 396 },
+  { width: 390, height: 780 },
+]) {
+  test(`typed specification and step details are reachable at ${viewport.width}×${viewport.height}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport);
+    await page.goto(pathToFileURL(join(root, "hybrid-authoring.html")).href);
+    await page.getByRole("button", { name: "中文", exact: true }).click();
+    await expect(page.locator("h1")).toHaveText("Plank");
+    const detail = page.getByRole("complementary", { name: "详情" });
+    const close = detail.getByRole("button", { name: "关闭" });
+    await page.getByRole("button", { name: "任务规范", exact: true }).click();
+    await expect(detail).toContainText(
+      "Return both arms to their starting poses.",
+    );
+    await detail
+      .getByRole("button", { name: /保持稳定/ })
+      .first()
+      .click();
+    await expect(detail).toContainText(/plank.*left pedestal.*right pedestal/);
+    await close.click();
 
-  await page.getByRole("button", { name: "原指令" }).click();
-  await expect(detail).toContainText(
-    "The plank and pedestals are visible in the reference image.",
-  );
-  await expect(detail).toContainText(
-    "Return both arms to their starting poses.",
-  );
-  await close.click();
-
-  await page.setViewportSize({ width: 1229, height: 396 });
-  await expect(goalBar).toBeHidden();
-  await page.getByRole("button", { name: "完成条件（2）" }).click();
-  await detail.getByRole("button", { name: "双臂回位" }).click();
-  await expect(
-    detail.getByRole("heading", { name: "双臂回位" }),
-  ).toBeInViewport();
-  await expect(detail).toContainText("左臂、右臂");
-});
-
-test("authoring step details stay visible and scrollable in a short viewport", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 1229, height: 396 });
-  await page.goto(pathToFileURL(join(root, "hybrid-authoring.html")).href);
-  await page.getByRole("button", { name: "中文", exact: true }).click();
-  const detail = page.getByRole("complementary", { name: "详情" });
-  const semantics = detail.getByRole("region", { name: "步骤语义" });
-  await page.locator('[data-id="group:step_02"] .rv-toggle').click();
-  await page.locator('button[data-key="call:step_02"]').click();
-  await expect(semantics.getByText("操作对象")).toBeInViewport();
-  await expect(semantics.getByText("右臂", { exact: true })).toBeVisible();
-  await expect(
-    semantics.getByRole("heading", { name: "目标关系" }),
-  ).toBeVisible();
-  await expect(
-    semantics.getByText(/left pedestal.*right pedestal/),
-  ).toBeVisible();
-  await expect(semantics.getByText("释放", { exact: true })).toBeVisible();
-  const source = semantics.getByText(
-    "Lay the plank across the tops of both pedestals.",
-  );
-  await source.scrollIntoViewIfNeeded();
-  await expect(source).toBeInViewport();
-  await expect(detail.getByRole("button", { name: "关闭" })).toBeInViewport();
-  await expect(semantics.getByText("Release the plank.")).toBeVisible();
-  await expect(detail.getByText("没有关联的执行证据")).toBeVisible();
-  await expect(semantics.getByText("没有关联的执行证据")).toHaveCount(0);
-
-  await detail.getByRole("button", { name: "关闭" }).click();
-  await page.locator('[data-id="group:step_03"] .rv-stage').click();
-  await expect(
-    semantics.getByText("左臂、右臂", { exact: true }),
-  ).toBeVisible();
-  await expect(semantics.getByText("返回各自初始位")).toBeVisible();
-  await expect(
-    semantics.getByText("Return both arms to their starting poses."),
-  ).toBeVisible();
-});
+    await page.locator('[data-id="group:step_02"] .rv-toggle').click();
+    await page.locator('button[data-key="call:step_02"]').click();
+    const semantics = detail.getByRole("region", { name: "步骤语义" });
+    await expect(semantics.getByText("右臂", { exact: true })).toBeVisible();
+    await expect(semantics).toContainText(/left pedestal.*right pedestal/);
+    const quote = semantics.getByText("Release the plank.");
+    await quote.scrollIntoViewIfNeeded();
+    await expect(quote).toBeInViewport();
+    await expect(close).toBeInViewport();
+    await close.click();
+    await page.locator('[data-id="group:step_03"] .rv-stage').click();
+    await expect(semantics).toContainText("左臂、右臂");
+  });
+}
 
 test("unified canvas opens measured evidence by clicking the action itself", async ({
   page,

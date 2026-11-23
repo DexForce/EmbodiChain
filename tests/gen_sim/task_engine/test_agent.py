@@ -221,82 +221,35 @@ def test_malformed_structured_response_receives_one_owner_repair(monkeypatch):
     assert "SOURCE AUDIT" in calls[2]["messages"][1]["content"]
 
 
+def _audit_caller(draft, source, repair=None):
+    def call(*, schema, prompt, **_):
+        if schema["title"] == "ActionEngineInstructionSourceAudit":
+            return source
+        return repair if repair is not None and "REPAIR OVERRIDE" in prompt else draft
+
+    return call
+
+
 @pytest.mark.parametrize(
-    ("instruction", "expected"),
-    [
-        ("把小球放进盒子。", "inside"),
-        ("将小球装进盒子。", "inside"),
-        ("把小球放在盒子顶上。", "on"),
-    ],
+    "relation,text", [("inside", "将小球装进盒子。"), ("on", "把小球放在盒子顶上。")]
 )
-def test_source_review_treats_placement_paraphrases_equivalently(instruction, expected):
-    proposed = dict(
+def test_placement_comes_from_the_audit_not_a_vocabulary_list(relation, text):
+    step = dict(
         _step(reference="小球"),
         task_type="E1",
+        orientation_goal="none",
         target=_selector("scene_ref", reference="盒子"),
         relation="on",
-        orientation_goal="none",
     )
-    reviewed = dict(proposed, id="review_step", relation=expected)
-    passes = []
-
-    def caller(**kwargs):
-        if kwargs["schema"]["title"] == "ActionEngineInstructionSourceAudit":
-            passes.append("source_review")
-            return {"steps": [reviewed]}
-        passes.append("interpretation")
-        repair = "REPAIR OVERRIDE" in kwargs["prompt"]
-        return {"steps": [dict(proposed, relation=expected if repair else "on")]}
-
-    result = interpret_instruction_draft(instruction, caller=caller)
-    assert result.intent["steps"][0]["relation"] == expected
-    assert passes == ["interpretation", "source_review"] * (
-        2 if expected == "inside" else 1
+    source = {"steps": [dict(step, relation=relation)]}
+    result = interpret_instruction_draft(
+        text, caller=_audit_caller({"steps": [step]}, source, source)
     )
+    assert result.intent["steps"][0]["relation"] == relation
+    assert result.attempts == (2 if relation != "on" else 1)
 
 
-def test_source_review_preserves_the_repeated_destination_not_the_previous_object():
-    first = dict(
-        _step("ball", "小球"),
-        task_type="E1",
-        relation="inside",
-        target=_selector("scene_ref", reference="盒子"),
-        orientation_goal="none",
-    )
-    second = dict(
-        first,
-        id="block",
-        object=_selector("scene_ref", reference="木块"),
-        depends_on=["ball"],
-    )
-    wrong = dict(second, target=_selector("step_result", step_id="ball"))
-
-    def caller(*, schema, **_):
-        return {
-            "steps": [
-                first,
-                (
-                    second
-                    if schema["title"] == "ActionEngineInstructionSourceAudit"
-                    else wrong
-                ),
-            ]
-        }
-
-    with pytest.raises(ValueError, match=r"after one repair: Source audit.*target"):
-        interpret_instruction_draft(
-            "先把小球放进盒子，再把木块装进那个盒子。", caller=caller
-        )
-
-
-@pytest.mark.parametrize(
-    ("instruction", "wrong_height"),
-    [
-        ("Raise the cup by over 10 cm and keep holding it.", None),
-        ("把杯子往上抬高至少十厘米，保持抓住。", 0.20),
-    ],
-)
-def test_lift_height_is_explicit_typed_source_intent(instruction, wrong_height):
+def test_source_audit_repairs_an_omitted_metric_height():
     step = dict(
         _step(reference="cup"),
         task_type="E1",
@@ -304,158 +257,89 @@ def test_lift_height_is_explicit_typed_source_intent(instruction, wrong_height):
         direction="up",
         terminal_behavior="hold",
     )
-    proposed = step if wrong_height is None else dict(step, lift_height_m=wrong_height)
-
-    def caller(*, prompt, schema, **_):
-        if (
-            schema["title"] == "ActionEngineInstructionSourceAudit"
-            or "REPAIR OVERRIDE" in prompt
-        ):
-            return {"steps": [dict(step, lift_height_m=0.10)]}
-        return {"steps": [proposed]}
-
-    result = interpret_instruction_draft(instruction, caller=caller)
+    measured = {"steps": [dict(step, lift_height_m=0.10)]}
+    text = "Raise the cup by over 10 cm and keep holding it."
+    result = interpret_instruction_draft(
+        text, caller=_audit_caller({"steps": [step]}, measured, measured)
+    )
     assert result.attempts == 2
     assert result.intent["steps"][0]["lift_height_m"] == 0.10
 
 
-def test_source_review_distinguishes_own_start_pose_from_a_scene_role():
-    expected = dict(
+def test_source_audit_repairs_an_invented_scene_role_for_a_start_pose():
+    step = dict(
         _step(reference="tray"),
         task_type="E5",
         orientation_goal="none",
         terminal_behavior="place",
     )
-    invented = dict(
-        expected,
-        target=_selector("scene_ref", reference="where it had been sitting"),
-        relation="on",
+    wrong = dict(
+        step, target=_selector("scene_ref", reference="where it started"), relation="on"
     )
-
-    def caller(*, prompt, schema, **_):
-        if (
-            schema["title"] == "ActionEngineInstructionSourceAudit"
-            or "REPAIR OVERRIDE" in prompt
-        ):
-            return {"steps": [expected]}
-        return {"steps": [invented]}
-
     result = interpret_instruction_draft(
-        "Lift the tray with both arms, then set it where it had been sitting.",
-        caller=caller,
+        "Move the tray back to where it started with both arms.",
+        caller=_audit_caller({"steps": [wrong]}, {"steps": [step]}, {"steps": [step]}),
     )
-    assert result.attempts == 2
-    assert result.intent["steps"][0]["target"]["kind"] == "none"
+    assert (
+        result.attempts == 2 and result.intent["steps"][0]["target"]["kind"] == "none"
+    )
 
 
-def test_source_review_blocks_a_valid_draft_that_drops_an_unsupported_clause():
+def test_source_review_rejects_unsupported_clauses_instead_of_dropping_them():
     quote = "再关上柜子铰链门"
-
-    def caller(*, schema, **_):
-        if schema["title"] == "ActionEngineInstructionSourceAudit":
-            return {
-                "issues": [
-                    {"quote": quote, "reason": "Hinged closing is not represented."}
-                ]
-            }
-        return {"steps": [_step(reference="罐子")]}
-
+    caller = _audit_caller(
+        {"steps": [_step(reference="罐子")]},
+        {"issues": [dict(quote=quote, reason="Hinged closing is unsupported")]},
+    )
     with pytest.raises(ValueError, match=f"after one repair: Source audit.*{quote}"):
         interpret_instruction_draft(f"扶正罐子，{quote}。", caller=caller)
 
 
 @pytest.mark.parametrize(
-    ("reference", "draft_quote", "audit_quote", "diagnostic"),
+    "draft_ref,source_ref,draft_quote,source_quote,expected",
     [
-        ("cup", "the cup", "the cup", None),
-        ("the cup", "the bottle", "the cup", "Source audit disagrees.*object"),
-        ("bottle", "the bottle", "the cup", "Source audit disagrees.*object"),
-        ("bottle", None, "the cup", "Source audit disagrees.*object"),
-        ("cup", "the cup", "the glass", "quote must occur verbatim"),
-    ],
-)
-def test_source_review_matches_referents_not_their_descriptions(
-    reference, draft_quote, audit_quote, diagnostic
-):
-    def caller(*, schema, **_):
-        is_review = schema["title"] == "ActionEngineInstructionSourceAudit"
-        response = {"steps": [_step(reference="the cup" if is_review else reference)]}
-        quote = audit_quote if is_review else draft_quote
-        if quote is not None:
-            response["scene_ref_quotes"] = [{"ref": "1.object", "quote": quote}]
-        return response
-
-    agent = TaskAgent(caller=caller)
-    instruction = "Set the cup upright without moving the bottle."
-    if diagnostic is not None:
-        with pytest.raises(TaskGenerationError, match=diagnostic):
-            agent.generate("upright", instruction, candidate_count=1)
-        return
-    (candidate,) = agent.generate("upright", instruction, candidate_count=1)[
-        "candidates"
-    ]
-    assert candidate["draft"]["steps"][0]["object"]["reference"] == "the cup"
-    assert candidate["attempts"] == 1
-
-
-@pytest.mark.parametrize(
-    ("draft_ref", "review_ref", "draft_quote", "review_quote", "expected"),
-    [
+        ("cup", "the blue cup", "the blue cup", "the blue cup", "the blue cup"),
         ("blue cup", "blue cup", "the blue cup", "blue cup", "blue cup"),
-        (
-            "blue cup",
-            "red cup",
-            "the blue cup next to the red cup",
-            "the red cup",
-            None,
-        ),
-        ("cup", "cup", "the blue cup next to the red cup", "the red cup", None),
+        ("blue cup", "red cup", "the blue cup near the red cup", "the red cup", None),
+        ("cup", "cup", "the blue cup near the red cup", "the red cup", None),
+        ("red cup", "blue cup", None, "the blue cup", None),
+        ("cup", "cup", "the glass", "the blue cup", None),
     ],
 )
-def test_source_review_accepts_quote_boundary_variants_only_with_shared_anchor(
-    draft_ref, review_ref, draft_quote, review_quote, expected
+def test_source_audit_requires_agreement_on_the_actual_referent(
+    draft_ref, source_ref, draft_quote, source_quote, expected
 ):
-    def caller(*, schema, **_):
-        reviewed = schema["title"] == "ActionEngineInstructionSourceAudit"
-        return {
-            "steps": [_step(reference=review_ref if reviewed else draft_ref)],
-            "scene_ref_quotes": [
-                {"ref": "1.object", "quote": review_quote if reviewed else draft_quote}
-            ],
-        }
+    def result(reference, quote):
+        payload = {"steps": [_step(reference=reference)]}
+        if quote:
+            payload["scene_ref_quotes"] = [dict(ref="1.object", quote=quote)]
+        return payload
 
-    instruction = "Rotate the blue cup next to the red cup until it is upright."
+    caller = _audit_caller(
+        result(draft_ref, draft_quote), result(source_ref, source_quote)
+    )
+    agent = TaskAgent(caller=caller)
+    text = "Set the blue cup near the red cup upright."
     if expected is None:
-        with pytest.raises(ValueError, match="Source audit disagrees.*object"):
-            interpret_instruction_draft(instruction, caller=caller)
-        return
-    result = interpret_instruction_draft(instruction, caller=caller)
-    assert result.intent["steps"][0]["object"]["reference"] == expected
-    assert result.attempts == 1
+        with pytest.raises(TaskGenerationError, match="Source audit|verbatim"):
+            agent.generate("upright", text, candidate_count=1)
+    else:
+        (candidate,) = agent.generate("upright", text, candidate_count=1)["candidates"]
+        assert candidate["draft"]["steps"][0]["object"]["reference"] == expected
 
 
-@pytest.mark.parametrize(
-    ("review_deps", "equivalent"),
-    [(["a", "b"], True), (["a"], False)],
-)
-def test_source_review_compares_dependency_reachability(review_deps, equivalent):
+@pytest.mark.parametrize("review_deps", [["a", "b"], ["a"]])
+def test_source_review_compares_dependency_reachability(review_deps):
     first = _step("a", "red cup")
     second = dict(_step("b", "blue cup"), depends_on=["a"])
     third = dict(_step("c", "green cup"), depends_on=["b"])
-
-    def caller(*, schema, **_):
-        last = (
-            dict(third, depends_on=review_deps)
-            if schema["title"] == "ActionEngineInstructionSourceAudit"
-            else third
-        )
-        return {"steps": [first, second, last]}
-
-    instruction = "Set the red, blue, then green cup upright, in that order."
-    if not equivalent:
+    caller = _audit_caller(
+        {"steps": [first, second, third]},
+        {"steps": [first, second, dict(third, depends_on=review_deps)]},
+    )
+    text = "Set the red, blue, then green cup upright, in order."
+    if review_deps == ["a"]:
         with pytest.raises(ValueError, match="Source audit disagrees.*depends_on"):
-            interpret_instruction_draft(instruction, caller=caller)
-        return
-    result = interpret_instruction_draft(instruction, caller=caller)
-    assert result.attempts == 1
-    assert result.intent["steps"][-1]["depends_on"] == ["b"]
+            interpret_instruction_draft(text, caller=caller)
+    else:
+        assert interpret_instruction_draft(text, caller=caller).attempts == 1

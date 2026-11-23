@@ -51,10 +51,7 @@ def _image(color: str) -> str:
 
 def _authoring_fixture() -> str:
     from embodichain.gen_sim.task_engine._review import _hybrid_preview
-    from embodichain.gen_sim.task_engine.authoring_intent import (
-        compile_intent,
-        validate_intent,
-    )
+    from embodichain.gen_sim.task_engine.authoring_intent import compile_intent
     from embodichain.gen_sim.task_spec.publication import freeze_task_spec
 
     pickup = "Pick up the plank with the right arm."
@@ -62,64 +59,47 @@ def _authoring_fixture() -> str:
     release = "Release the plank."
     stability = "Leave the plank and both pedestals stable."
     park = "Return both arms to their starting poses."
-    scene = (
-        "The plank and pedestals are visible in the reference image. "
-        "The pedestals are separate supports on the same table. "
-    )
-    instruction = f"{scene * 14}{pickup} {placement} {release} {stability} {park}"
+    scene = "The plank and pedestals are visible in the reference image. "
+    text = f"{scene * 14}{pickup} {placement} {release} {stability} {park}"
+    roles = ["plank", "left_pedestal", "right_pedestal"]
+    both = ["left", "right"]
     support = dict(
-        kind="relation",
-        value="on_top_faces",
-        subjects=["plank"],
-        references=["left_pedestal", "right_pedestal"],
+        kind="relation", value="on_top_faces", subjects=["plank"], references=roles[1:]
     )
-    plan = validate_intent(
-        dict(
-            roles=[
-                dict(id=role, kind="object", description=role.replace("_", " "))
-                for role in ("plank", "left_pedestal", "right_pedestal")
-            ],
-            steps=[
-                dict(
-                    verb=verb,
-                    subjects=subjects,
-                    arms=arms,
-                    quote=quote,
-                    effects=effects,
-                )
-                for verb, subjects, arms, quote, effects in (
-                    ("pick", ["plank"], ["right"], pickup, []),
-                    ("place", ["plank"], ["right"], placement, [support]),
-                    ("release", ["plank"], ["right"], release, []),
-                    (
-                        "return_arms",
-                        [],
-                        ["left", "right"],
-                        park,
-                        [dict(kind="arms_at_initial_pose", arms=["left", "right"])],
-                    ),
-                )
-            ],
-            conditions=[
-                dict(
-                    scope="final",
-                    fact=dict(
-                        kind="stable",
-                        subjects=["plank", "left_pedestal", "right_pedestal"],
-                    ),
-                    quote=stability,
-                ),
-                dict(
-                    scope="final",
-                    fact=dict(kind="arms_at_initial_pose", arms=["left", "right"]),
-                    quote=park,
-                ),
-            ],
-        ),
-        instruction,
-        scene_objects={},
+    parked, stable = dict(kind="arms_at_initial_pose", arms=both), dict(
+        kind="stable", subjects=roles
     )
-    spec, graph, clauses, descriptions = compile_intent(plan, instruction, "plank", {})
+    plan = dict(
+        roles=[
+            dict(id=role, kind="object", description=role.replace("_", " "))
+            for role in roles
+        ],
+        steps=[
+            dict(
+                verb="pick",
+                subjects=["plank"],
+                arms=["right"],
+                quote=pickup,
+                effects=[],
+            ),
+            dict(
+                verb="place",
+                subjects=["plank"],
+                arms=["right"],
+                quote=placement,
+                release_quote=release,
+                effects=[support, dict(kind="released", subjects=["plank"])],
+            ),
+            dict(
+                verb="return_arms", subjects=[], arms=both, quote=park, effects=[parked]
+            ),
+        ],
+        conditions=[
+            dict(scope="final", fact=fact, quote=quote)
+            for fact, quote in ((stable, stability), (parked, park))
+        ],
+    )
+    spec, graph, clauses, descriptions = compile_intent(plan, text, "plank", {})
     image = BytesIO(base64.b64decode(_image("#497ea3").partition(",")[2]))
     frozen = freeze_task_spec(
         spec,
