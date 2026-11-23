@@ -141,23 +141,13 @@ recovery and portability diagnostics keep their evidence separate from expert da
 
 The [create-cable tutorial](../scripts/tutorials/sim/create_cable.py) creates a
 procedural cable with one fixed segment, steps it under gravity, reads world
-segment state and restores the episode creation state. Run it with the native
-viewer or with two headless environments:
+segment state and restores the episode creation state. Use a CUDA-enabled
+EmbodiChain installation to run it with the native viewer or with two headless
+environments.
 
 ```bash
 python scripts/tutorials/sim/create_cable.py
 python scripts/tutorials/sim/create_cable.py --headless --renderer no-render --num-envs 2
-```
-
-The cable examples use CUDA and the project-pinned DexSim engine. The DexForce
-package index provides Linux x86_64 wheels for Python 3.11 and 3.12. To install
-the engine and check its build, run:
-
-```bash
-python -m pip install --index-url https://pypi.org/simple \
-  --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site \
-  dexsim-engine==0.6.1rc1
-python -c "import dexsim; from dexsim.scene import SpawnedCable; print(dexsim.__version__, dexsim.__commit_id__)"
 ```
 
 EmbodiChain defaults to DexUni when no solver is selected;

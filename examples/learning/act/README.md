@@ -8,20 +8,18 @@ EmbodiChain SL trainer remains available for the dynamics model workflows.
 
 ## Environment and control contract
 
-Use Python 3.12 with `lerobot[training]==0.6.1`, DexSim 0.5.1rc1 and the native
-camera renderer. The current Python 3.12 dependency profile uses torch 2.11.0+cu128,
-torchvision 0.26.0+cu128, TorchCodec 0.11.1 and TensorDict 0.15.3. Install the
-main package through the normal resolver using the project's private DexSim index.
-For an existing Python 3.12 checkout environment, select matching CUDA wheels:
+Use Python 3.12 with `lerobot[training]==0.6.1` and the native camera renderer.
+From the repository root, install the matching CUDA wheels, then install
+EmbodiChain with its simulator dependency.
 
 ```bash
-uv venv --python 3.12 /tmp/embodichain-act
+uv venv --seed --python 3.12 /tmp/embodichain-act
 source /tmp/embodichain-act/bin/activate
-uv pip install --torch-backend cu128 -e . \
+uv pip install --torch-backend cu128 \
   'torch==2.11.0+cu128' 'torchvision==0.26.0+cu128' \
-  'torchcodec==0.11.1' 'tensordict==0.15.3' \
-  --index-strategy unsafe-best-match \
-  --extra-index-url http://pyp.open3dv.site:2345/simple/
+  'torchcodec==0.11.1' 'tensordict==0.15.3'
+python -m pip install -e . --index-url https://pypi.org/simple \
+  --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site
 export CUDA_VISIBLE_DEVICES=0
 export OMP_NUM_THREADS=2
 export MKL_NUM_THREADS=2

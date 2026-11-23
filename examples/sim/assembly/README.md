@@ -4,11 +4,9 @@ See the [Precision Assembly guide](../../../docs/source/features/toolkits/precis
 for functional entry points, embedded native recordings, reproducible commands
 and the original mjfit paper citation.
 
-DexSim 0.6.0rc1, 0.6.0rc2, 0.6.0 and 0.6.1rc1 drop child colliders under
-disabled rigid bodies in static compound USD imports. EmbodiChain rejects that loss explicitly.
-Use direct manifests for runtime construction with these versions. Python 3.12
-direct-compound construction, raw-contact checks and native RGB previews were
-verified with rc2.
+Use direct manifests to construct static compounds at runtime. During USD import,
+EmbodiChain rejects a disabled rigid body if the parser drops its authored child
+colliders.
 
 The native path attaches multiple convex collision pieces to one rigid body.
 An independent visual mesh never closes its collision aperture. The generator
@@ -93,9 +91,11 @@ separate, including failures. These assembly profiles require DexUni's measured
 unsupported. Native capacity/precision qualification remains `unverified`.
 
 For the native DexSim rendering window, use a desktop display and a supporting
-SDK runtime. The rc2 RGB recordings below use FastRT, 16 samples per pixel and
-OptiX denoising, with a camera framed around the centimetre-scale part. Hybrid
-is also selectable; its native recording crashed under this remote Xvfb profile.
+SDK runtime. The Python 3.12 reference runs covered direct compound construction,
+raw-contact checks and native RGB previews. The RGB recordings use FastRT,
+16 samples per pixel and OptiX denoising, with a camera framed around the
+centimetre-scale part. Hybrid is also selectable. Its native recording crashed
+under the remote Xvfb profile used for those runs.
 
 ```bash
 embodichain run-example sim/assembly/visual_demo --config circle --clearance .0001 --collision-colors --native-window --native-record --renderer fast-rt --startup-delay 2 --hold-seconds 10 --output outputs/assembly_native_window/circle

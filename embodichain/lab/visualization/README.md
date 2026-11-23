@@ -114,13 +114,10 @@ trigger recording; the Python host starts and stops it.
 ## DexSim boundaries
 
 - Requires Linux/NVIDIA, loadable WebRTC streaming libraries, and NVENC. The
-  pinned SDK is `dexsim_engine==0.6.1rc1`. Its Python API exposes
-  `WebApplication` and startup `WorldConfig.webrtc_*` settings.
-  The published Linux x86_64 Python 3.12 release artifact passes native library
-  loading and browser media acceptance without binary repairs. The manager
-  still checks the selected streaming library before allocating a World and
-  reports loading failures. Qualification must use the exact selected SDK
-  artifact; Python API availability alone does not qualify its native runtime.
+  SDK must expose `WebApplication` and startup `WorldConfig.webrtc_*` settings.
+  The manager checks the selected streaming library before allocating a World
+  and reports loading failures. Browser media qualification applies to the
+  exact installed SDK artifact.
 - The SDK automatically enumerates scene cameras and has no Python video-source
   whitelist. Its video catalog is limited to 16 RGB streams, with even
   dimensions in 32–4096. Stereo/depth-only/large camera catalogs are allowed in

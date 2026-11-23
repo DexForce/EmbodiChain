@@ -4,9 +4,8 @@
 
 Use Linux x86-64 with an NVIDIA GPU that supports Vulkan and OptiX and a
 driver compatible with CUDA 12.8. Training uses CUDA bfloat16. Cube dynamics
-use the DexUni CPU solver from the project-pinned DexSim Engine. Allow about
-138 GiB for the downloaded archive and extracted HDF5, plus space for run
-outputs.
+use the DexUni CPU solver. Allow about 138 GiB for the downloaded archive and
+extracted HDF5, plus space for run outputs.
 
 From the repository root, create a Python 3.12 virtual environment and
 install the CUDA wheels, EmbodiChain with geometry support, and the pinned
