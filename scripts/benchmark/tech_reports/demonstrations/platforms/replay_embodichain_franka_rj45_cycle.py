@@ -63,7 +63,9 @@ def main() -> None:
     )
     from embodichain.lab.sim import SimulationManager
     from embodichain.extensions.robots.franka.rj45_assets import get_rj45_models
-    from embodichain.extensions.tasks.manipulation.cable.rj45_measurements import evaluate_rj45
+    from embodichain.extensions.tasks.manipulation.cable.rj45_measurements import (
+        evaluate_rj45,
+    )
 
     recording = args.recording.expanduser().resolve(strict=True)
     output = args.output.expanduser().resolve()

@@ -103,10 +103,6 @@ ROBOT_ASSETS = {
         "class_path": "embodichain.extensions.robots.franka.rj45_assets:FrankaRj45",
         "category": "robot",
     },
-    "Rj45Fixture": {
-        "class_path": "embodichain.extensions.robots.franka.rj45_assets:Rj45Fixture",
-        "category": "task",
-    },
     "Franka": {
         "class_path": "embodichain.extensions.robots.franka.assets:Franka",
         "category": "robot",

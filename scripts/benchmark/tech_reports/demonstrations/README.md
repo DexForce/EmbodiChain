@@ -50,8 +50,9 @@ Isaac Lab 17.0.2, isaaclab-newton 5.4.1, Newton 1.5.2, Warp 1.16.0,
 TensorDict and PyYAML.
 
 The source task resolves the calibrated Franka, plug and socket through the
-EmbodiChain asset cache, including the pinned RJ45 fixture archive from NAS.
-Use these commands to prepare the cache in advance.
+EmbodiChain asset cache. The `Rj45Fixture` ID resolves to the
+`Rj45FixtureV1` cache entry. Use these commands to prepare both assets before
+running offline. [Pinned RJ45 fixture archive](https://huggingface.co/datasets/DexForceAI/embodichain_data/blob/dcb448da52ea3df5df5a249e9ff977acafead0e4/task_assets/Rj45FixtureV1.zip)
 
 ```bash
 "$EMBODICHAIN_PYTHON" -m embodichain data download --name FrankaRj45

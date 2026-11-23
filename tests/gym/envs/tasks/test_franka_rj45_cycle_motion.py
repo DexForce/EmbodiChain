@@ -37,7 +37,10 @@ from embodichain.extensions.tasks.manipulation.cable.rj45_integration import (
     _FrankaRj45PhaseLowerer,
     _Rj45JointTrajectorySource,
 )
-from embodichain.extensions.tasks.manipulation.cable.rj45_motion import Rj45Feedback, Rj45Motion
+from embodichain.extensions.tasks.manipulation.cable.rj45_motion import (
+    Rj45Feedback,
+    Rj45Motion,
+)
 from embodichain.extensions.tasks.manipulation.cable.rj45_scene import (
     load_config as load_rj45_config,
     task_directory,
