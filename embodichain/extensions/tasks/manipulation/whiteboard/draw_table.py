@@ -52,6 +52,7 @@ _GRID = 0.001
 _TIP = 0.063
 _TCP_FROM_MARKER_ORIGIN = 0.0355
 _PRESSURE = 0.052
+_WITHDRAWAL_CLEARANCE = 0.010
 
 
 def _distance_to_line(points: np.ndarray, start, end) -> np.ndarray:
@@ -73,6 +74,7 @@ class _Ink:
             for _, start, end, _ in _LINES
         ]
         self.last: np.ndarray | None = None
+        self._measurement: tuple[list[float], list[float], float] | None = None
 
     def stamp(self, point: np.ndarray | None) -> None:
         if point is None:
@@ -85,11 +87,21 @@ class _Ink:
                 path = np.linspace(
                     self.last, point, max(2, int(np.ceil(distance / _GRID)) + 1)
                 )
+        previous_size = len(self.cells)
         for p in path:
             index = np.rint(p / _GRID).astype(int)
             for a, b in ((0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)):
                 self.cells.add((int(index[0]) + a, int(index[1]) + b))
+        if len(self.cells) != previous_size:
+            self._measurement = None
         self.last = point
+
+    def measure(self) -> tuple[list[float], list[float], float]:
+        """Reuse the drawing measurements until new raster cells are stamped."""
+        if self._measurement is None:
+            coverage, gaps = self.line_results()
+            self._measurement = (coverage, gaps, self.stray_area())
+        return self._measurement
 
     def line_results(self) -> tuple[list[float], list[float]]:
         coverages, gaps = [], []
@@ -150,7 +162,7 @@ class _WhiteboardDrawTableEnv(EmbodiedEnv):
         self._pressure = 0.0
         self._previous_sample = -1
         self._ready = False
-        self._finished_strokes = False
+        self._withdrawn = False
         self._dropped = False
         self._last_drawing_goal = None
         self._drawing_offset = torch.zeros(2, device=self.device)
@@ -167,7 +179,7 @@ class _WhiteboardDrawTableEnv(EmbodiedEnv):
         super()._initialize_episode(env_ids, **kwargs)
         self._ink = _Ink()
         self._previous_sample = -1
-        self._finished_strokes = False
+        self._withdrawn = False
         self._pressure = 0.0
         self._dropped = False
         self._last_drawing_goal = None
@@ -219,6 +231,7 @@ class _WhiteboardDrawTableEnv(EmbodiedEnv):
         tcp = self._tcp()[0]
         axis = marker[:3, 2]
         tip = self._marker_tip()[0]
+        self._withdrawn = bool(tip[0] <= _CENTER[0] - _WITHDRAWAL_CLEARANCE)
         held_origin = tcp[:3, 3] + _TCP_FROM_MARKER_ORIGIN * tcp[:3, 2]
         translation_error = (marker[:3, 3] - held_origin).norm()
         axis_alignment = axis @ tcp[:3, 2]
@@ -246,8 +259,7 @@ class _WhiteboardDrawTableEnv(EmbodiedEnv):
         self._ink.stamp(point)
 
     def _acceptance(self) -> tuple[bool, dict[str, Any]]:
-        coverage, gaps = self._ink.line_results()
-        stray = self._ink.stray_area()
+        coverage, gaps, stray = self._ink.measure()
         accepted = (
             min(coverage) >= 0.9 and max(gaps) <= 0.010 and stray <= 0.0001 + 1e-12
         )
@@ -260,24 +272,23 @@ class _WhiteboardDrawTableEnv(EmbodiedEnv):
     def compute_task_state(
         self, **kwargs: Any
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
-        """Grade measured markings after the last stroke and withdrawal."""
+        """Grade measured markings once the held tip clears the drawing surface."""
         if not getattr(self, "_ready", False):
             return super().compute_task_state(**kwargs)
         self._sample_ink()
-        done = self._finished_strokes
-        accepted, metrics = self._acceptance() if done else (False, {})
+        accepted, metrics = (
+            self._acceptance() if self._withdrawn and self._ink.cells else (False, {})
+        )
         metrics["nib_force"] = torch.tensor([self._pressure], device=self.device)
         return (
-            torch.tensor([done and accepted and not self._dropped], device=self.device),
-            torch.tensor(
-                [self._dropped or (done and not accepted)], device=self.device
-            ),
+            torch.tensor([accepted and not self._dropped], device=self.device),
+            torch.tensor([self._dropped], device=self.device),
             metrics,
         )
 
     def _accepted_drawing(self) -> bool:
-        accepted, _ = self._acceptance()
-        return self._finished_strokes and accepted and not self._dropped
+        success, _, _ = self.compute_task_state()
+        return bool(success[0])
 
     def _action(
         self, at: tuple[float, float, float], *, drawing: bool = False
@@ -340,7 +351,6 @@ class _WhiteboardDrawTableEnv(EmbodiedEnv):
         for depth in np.linspace(depth, -0.025, 16):
             yield self._action((depth, *end))
         if last:
-            self._finished_strokes = True
             yield self._action((-0.025, *end))
 
     def create_demo_segments(self, **kwargs: Any) -> Iterable[DemoSegment]:
