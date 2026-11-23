@@ -91,7 +91,13 @@ def _model_path(robot_name: str, args: argparse.Namespace) -> Path:
     return path
 
 
-def run(robot_name: str) -> None:
+def run(
+    robot_name: str,
+    *,
+    offsets: list[list[float]],
+    modalities: list[str],
+    look_at: tuple[tuple[float, float, float], ...],
+) -> None:
     """Download the release and run one free-space robot demonstration."""
     args = _parse_args(robot_name)
     if args.video and not args.download_only:
@@ -141,7 +147,7 @@ def run(robot_name: str) -> None:
             width=1280,
             height=720,
             device=str(device),
-            num_envs=args.num_envs,
+            num_envs=1,
             arena_space=args.arena_space,
             gpu_id=device.index if device.type == "cuda" else args.gpu_id,
             render_cfg=RenderCfg(renderer=args.renderer),
@@ -153,7 +159,7 @@ def run(robot_name: str) -> None:
         cfg = make_robot_cfg(robot_name)
         robot = sim.add_robot(cfg=cfg)
         sim.prepare()
-        if not args.headless or getattr(args, "web", False):
+        if not args.headless or args.web:
             sim.open_viewer()
         joints = robot.get_joint_ids("arm")
         joint_names = list(cfg.control_parts["arm"])
@@ -166,27 +172,12 @@ def run(robot_name: str) -> None:
             raise ValueError("Robot joint order differs from the published NMG policy.")
         start = torch.tensor(
             cfg.init_qpos[: len(joints)], device=robot.device, dtype=torch.float32
-        ).repeat(args.num_envs, 1)
+        ).unsqueeze(0)
         robot.set_qpos(start, joint_ids=joints, target=False)
         robot.set_qpos(start, joint_ids=joints)
 
         # FK constructs reachable targets. These are authored demonstration
         # cases, not training data, a benchmark or a success-rate estimate.
-        if robot_name == "franka":
-            offsets = [
-                [0.20, -0.12, 0.08, -0.08, 0, 0.08, 0],
-                [-0.15, 0.08, -0.12, 0.10, 0.08, -0.06, 0.10],
-                [0.12, -0.06, 0.10, 0, -0.15, 0.05, -0.12],
-                [-0.10, -0.10, -0.08, -0.10, 0.12, 0.10, 0.08],
-            ]
-            modalities = ["joint", "position", "orientation", "pose"]
-        else:
-            offsets = [
-                [0.20, -0.08, 0.10, 0.10, -0.05, 0.10],
-                [-0.20, 0.08, -0.10, -0.10, 0.08, -0.10],
-                [0.10, -0.12, 0.08, 0.12, -0.08, 0.15],
-            ]
-            modalities = ["pose"] * len(offsets)
         goal_qpos = (
             start[:, None]
             + torch.tensor(offsets, dtype=start.dtype, device=start.device)[None]
@@ -214,13 +205,13 @@ def run(robot_name: str) -> None:
             )
             for i, kind in enumerate(modalities)
         ]
-        display_poses = goal_poses.detach().cpu().numpy().copy()
-        display_poses[:, :, :3, 3] += sim.arena_offsets.detach().cpu().numpy()[:, None]
+        display_poses = goal_poses[0].detach().cpu().numpy().copy()
+        display_poses[:, :3, 3] += sim.arena_offsets[0].detach().cpu().numpy()
         sim.draw_marker(
             MarkerCfg(
                 name="nmg_goals",
                 marker_type="axis",
-                axis_xpos=list(display_poses.reshape(-1, 4, 4)),
+                axis_xpos=list(display_poses),
                 axis_len=0.04,
                 axis_size=0.003,
                 arena_index=-1,
@@ -272,41 +263,35 @@ def run(robot_name: str) -> None:
         }
         raw = result.policy_rollout_positions
         arrivals = result.policy_waypoint_indices
-        for env in range(args.num_envs):
-            for slot, kind in enumerate(modalities):
-                index = int(arrivals[env, slot])
-                entry = {
-                    "environment": env,
-                    "waypoint": slot,
-                    "modality": kind,
-                    "rollout_index": index,
-                }
-                if index >= 0:
-                    q = raw[env : env + 1, index]
-                    pose = robot.compute_fk(qpos=q, name="arm", to_matrix=True)
-                    entry["position_error_m"] = float(
-                        torch.linalg.vector_norm(
-                            pose[0, :3, 3] - goal_poses[env, slot, :3, 3]
-                        )
+        for slot, kind in enumerate(modalities):
+            index = int(arrivals[0, slot])
+            entry = {
+                "environment": 0,
+                "waypoint": slot,
+                "modality": kind,
+                "rollout_index": index,
+            }
+            if index >= 0:
+                q = raw[:, index]
+                pose = robot.compute_fk(qpos=q, name="arm", to_matrix=True)
+                entry["position_error_m"] = float(
+                    torch.linalg.vector_norm(
+                        pose[0, :3, 3] - goal_poses[0, slot, :3, 3]
                     )
-                    entry["rotation_error_rad"] = float(
-                        quat_error_magnitude(
-                            quat_from_matrix(pose[:, :3, :3]),
-                            quat_from_matrix(goal_poses[env : env + 1, slot, :3, :3]),
-                        )[0]
-                    )
-                    entry["joint_max_error_rad"] = float(
-                        (q[0] - goal_qpos[env, slot]).abs().max()
-                    )
-                report["arrivals"].append(entry)
+                )
+                entry["rotation_error_rad"] = float(
+                    quat_error_magnitude(
+                        quat_from_matrix(pose[:, :3, :3]),
+                        quat_from_matrix(goal_poses[:, slot, :3, :3]),
+                    )[0]
+                )
+                entry["joint_max_error_rad"] = float(
+                    (q[0] - goal_qpos[0, slot]).abs().max()
+                )
+            report["arrivals"].append(entry)
         # A geometric failure is reported, never passed off as a completed motion.
         if result.is_all_success() and not args.no_playback:
             if args.video:
-                look_at = (
-                    ((1.35, -1.35, 1.10), (0.30, 0.0, 0.40), (0.0, 0.0, 1.0))
-                    if robot_name == "franka"
-                    else ((1.0, -1.0, 0.85), (0.20, 0.0, 0.27), (0.0, 0.0, 1.0))
-                )
                 if not sim.start_window_record(
                     save_path=str(args.video),
                     fps=25,
@@ -358,14 +343,14 @@ def run(robot_name: str) -> None:
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(text + "\n")
-        if args.keep_open:
-            while True:
-                sim.update()
-                time.sleep(0.02)
         if not result.is_all_success():
             raise RuntimeError(
                 "NMG did not reach every demo target; see the arrival report."
             )
+        if args.keep_open:
+            while True:
+                sim.update()
+                time.sleep(0.02)
     finally:
         if sim.is_window_recording():
             sim.stop_window_record()

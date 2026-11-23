@@ -1,92 +1,69 @@
 # NMG v1: Franka and PiPER
 
-Download the released ONNX policies from
-[DexForceAI/neural_motion_generator](https://huggingface.co/DexForceAI/neural_motion_generator/tree/main/v1)
-and run them through EmbodiChain's existing `NeuralPlanner`. No NMG source checkout,
-PyTorch actor implementation, training checkpoint or ONNX conversion is needed.
-The ONNX files contain the actor weights, computation graph and observation
-normalization. ONNX is an inference format, not encryption; this path does not
-provide PyTorch autograd.
+Download the released [ONNX policies](https://huggingface.co/DexForceAI/neural_motion_generator/tree/main/v1)
+and run them with EmbodiChain's `NeuralPlanner`. The files include weights and
+observation normalization; no NMG checkout, actor code or checkpoint conversion
+is needed.
 
-Use an EmbodiChain installation with ONNX Runtime and TOPP-RA. From a source
-checkout, install the optional dependencies with
-`python -m pip install -e '.[policy-deploy]' toppra`. CPU-only environments may
-install `onnxruntime` instead of `onnxruntime-gpu` (do not install both).
-Robot assets use the normal EmbodiChain data cache.
+## Run
+
+Install ONNX Runtime and TOPP-RA in the EmbodiChain environment:
 
 ```bash
+python -m pip install -e '.[policy-deploy]' toppra
 embodichain run-example sim/motion/planners/nmg/franka --headless --device cpu
 embodichain run-example sim/motion/planners/nmg/piper --headless --device cpu
 ```
 
-For the browser viewer, replace `--headless` with `--web --keep-open`; Ctrl+C
-closes the demo. A native viewer uses `--keep-open` without `--headless`.
-Use `--device cuda:0` for a compatible CUDA simulation/ONNX Runtime stack.
-These demonstrations use one robot (`--num-envs 1`). The released models accept
-dynamic batches; the single-robot restriction belongs to this example.
+CPU-only installations can use `onnxruntime` instead of `onnxruntime-gpu` (do not
+install both). Use `--device cuda:0` for a compatible CUDA stack. For a browser
+viewer, replace `--headless` with `--web --keep-open`; a native viewer uses
+`--keep-open` without `--headless`. Ctrl+C exits.
 
-| Demo | Robot and policy TCP | Constraints |
+| Entry | Robot and policy TCP | Targets |
 | --- | --- | --- |
-| `franka` | FR3 + Robotiq 2F-140, TCP 0.20 m along the flange with the gripper rotation | Joint, position only, orientation only, full pose |
-| `piper` | PiPER V100 + parallel gripper, TCP 0.143 m along link6 with the gripper rotation | Three full-pose waypoints |
+| `franka.py` | FR3 + Robotiq 2F-140; flange offset 0.20 m with gripper rotation | Joint, position, orientation, full pose |
+| `piper.py` | PiPER V100 + parallel gripper; link6 offset 0.143 m with gripper rotation | Three full poses |
 
-The robot assembly and solver TCP in `_robots.py` match the model. Do not swap
-the native Franka hand or another PiPER variant without adapting the TCP and
-checking joint/control semantics. Goals are deterministic reachable FK poses.
-They illustrate integration and are not a benchmark or training data.
+Each entry defines its joint offsets, constraint types and recording camera.
+`_robots.py` matches robot joint order and TCP to the policies; `_common.py`
+shares model loading, planning and playback. These are single-robot integration
+demos with authored reachable FK goals, not training data or benchmark cases.
 
-Both policies have capacity 12, relative observations, xyzw quaternions and
-0.2-radian action scaling. Each demo uses a 30-step-per-constraint planning
-budget. Arrival tolerances are 0.01 m for position, 0.1 rad for orientation and
-0.01 rad for maximum absolute joint error. Only the selected modality is
-scored; a position-only target does not require the displayed orientation.
-The report prints all errors for diagnosis, including unconstrained dimensions.
+## Record
 
-The raw geometric path is retimed at 0.6 rad/s and 1.5 rad/s². Playback regrids
-individual rest-to-rest phases to the existing physics period, preserving each
-constraint arrival as a phase endpoint. Half-second settling holds are added.
-The report distinguishes geometric convergence, playback completion and measured
-joint tracking error. Playback completion is not a physical task-success claim.
-There are no obstacle or self-collision guarantees. A failed plan is reported
-and is not played back.
-
-## Record a video
-
-Record actual simulated playback with a fixed overview camera:
+Add `--video` to record simulated playback with a fixed camera:
 
 ```bash
-embodichain run-example sim/motion/planners/nmg/franka --headless --device cpu --video /tmp/nmg-franka.mp4
-embodichain run-example sim/motion/planners/nmg/piper --headless --device cpu --video /tmp/nmg-piper.mp4
+embodichain run-example sim/motion/planners/nmg/franka --headless --device cpu --video /tmp/franka.mp4
+embodichain run-example sim/motion/planners/nmg/piper --headless --device cpu --video /tmp/piper.mp4
 ```
 
-The recorder writes 1280×720 MP4 at 25 fps, using simulation time. A rendering
-GPU is required even when physics and ONNX inference use `--device cpu`.
-`--video` selects Fast-RT when `--renderer auto`; it cannot be combined with
-`--no-playback` or `--renderer no-render`. The process waits for encoding before
-exiting. Camera capture and encoding use EmbodiChain's existing recorder.
+Recording uses simulation time at 1280×720, 25 fps, and waits for encoding before
+exit. It requires a rendering GPU even with CPU physics. `--video` selects
+Fast-RT for `--renderer auto` and rejects `--no-playback` or `--renderer no-render`.
 
-## Download and reproducibility
+## Options and model contract
 
-The demos pin commit `ddca0e456e097ba42c05e1269febf73fa2835541`, use the Hugging Face
-cache and verify SHA256 before loading. Public downloads require no token.
-
-```bash
-embodichain run-example sim/motion/planners/nmg/franka --download-only
-embodichain run-example sim/motion/planners/nmg/piper --download-only
-embodichain run-example sim/motion/planners/nmg/franka --offline --headless --device cpu
-embodichain run-example sim/motion/planners/nmg/piper --model-path /path/to/piper.onnx --headless
-embodichain run-example sim/motion/planners/nmg/franka --headless --no-playback --output /tmp/franka-report.json
-```
-
-`--offline` applies to the model cache; robot assets must also be cached for a
-fully offline simulation. `--model-path` accepts the same released model bytes
-and performs the same hash check. `--download-only` does not start simulation.
-
-| File | SHA256 |
+| Option | Use |
 | --- | --- |
-| `v1/franka.onnx` | `2361954fda7b6f0d21445ebfb5099d31bdd67199bdadcecba71e0835f2157ad5` |
-| `v1/piper.onnx` | `223a02d7f1c3db1ea96352404f623ebfde7e1b00f3bc3d7a186a634dfea5ecf0` |
+| `--download-only` | Cache and verify the model without starting simulation |
+| `--offline` | Use the cached model; robot assets must also be cached |
+| `--model-path PATH` | Use a local copy of the same published ONNX bytes |
+| `--no-playback` | Plan and report geometric arrivals only |
+| `--output PATH` | Save the printed JSON report |
 
-For a new release, export and verify in the NMG repository, publish new model
-files, then update the revision, hashes and matched robot contract here.
-EmbodiChain consumes deployment files and does not convert training checkpoints.
+`_common.py` pins the Hugging Face commit and verifies SHA256. Public downloads
+need no token; robot assets use the standard EmbodiChain cache. For a new release,
+export and verify in NMG, then update the pin, hashes and robot contract here.
+
+The policies use capacity 12, relative observations, xyzw quaternions and
+0.2-radian action scaling, with a 30-step budget per target. Arrival tolerances
+are 0.01 m, 0.1 rad and 0.01 rad maximum joint error, applied to the selected
+modality. The report also includes unconstrained errors for diagnosis.
+
+Paths are retimed at 0.6 rad/s and 1.5 rad/s², then replayed phase by phase on the
+control grid with 0.5-second settling holds. Reports distinguish geometric
+convergence, playback completion and measured joint tracking error. Failed plans
+are not replayed. Playback does not certify physical task success or collision
+avoidance.
