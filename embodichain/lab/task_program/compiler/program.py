@@ -159,6 +159,7 @@ def _snapshot_semantic_call(call: SemanticCallSpec) -> SemanticCallSpec:
         return Pick(
             object=_copy_scene_ref(call.object),
             grasp=(None if call.grasp is None else _copy_scene_ref(call.grasp)),
+            at=None if call.at is None else call.at.snapshot(),
             resources=dict(call.resources),
         )
     if type(call) is MoveHeldObjectCall:
@@ -967,7 +968,14 @@ def _instantiate_call(
     selections: list[CompiledTargetSelection] = []
     if template.kind == "pick":
         assert template.object is not None
+        at = None
+        if template.at_target_id is not None:
+            at, selection = _resolve_target(
+                template.at_target_id, targets=targets, repeat_frames=repeat_frames
+            )
+            selections.append(selection)
         call: SemanticCallSpec = Pick(
+            at=at,
             object=_copy_scene_ref(template.object),
             grasp=(None if template.grasp is None else _copy_scene_ref(template.grasp)),
             resources=resources,
@@ -1766,6 +1774,11 @@ class TaskProgramCompiler:
                 source_path=path,
                 object=object_ref,
                 grasp=grasp_ref,
+                at_target_id=(
+                    None
+                    if cfg.at is None
+                    else self._target_id(cfg.at, targets=targets, path=(*path, "at"))
+                ),
                 resources=tuple(sorted(cfg.resources.items())),
             )
         if type(cfg) is MoveHeldObjectCfg:

@@ -386,17 +386,50 @@ def test_explicit_policy_rollout_rejects_invalid_request_before_processing(
     assert env.get_raw_action_history(0).shape == (0, 0)
 
 
-def test_policy_trajectory_uses_policy_action_space() -> None:
-    """Action-managed trajectories allocate the flat policy width."""
-    policy_space = object()
-    expert_space = object()
+@pytest.mark.parametrize(
+    ("adapter", "managed_expert", "raw_policy", "expected_kind"),
+    [
+        (None, False, False, "policy"),
+        (object(), False, False, "expert"),
+        (object(), True, False, "policy"),
+        (object(), False, True, "policy"),
+    ],
+)
+def test_trajectory_uses_deployment_action_layout(
+    adapter, managed_expert, raw_policy, expected_kind
+) -> None:
     env = SimpleNamespace(
         action_manager=object(),
-        action_space=policy_space,
-        _expert_action_space=expert_space,
+        action_space=object(),
+        _expert_action_space=object(),
+        _task_program_adapter=adapter,
+        _record_raw_actions=raw_policy,
+        cfg=SimpleNamespace(
+            expert_trajectory=SimpleNamespace(use_action_manager=managed_expert)
+        ),
     )
+    kind, space = EmbodiedEnv._trajectory_action_layout(env)
+    assert kind == expected_kind
+    assert space is (env.action_space if kind == "policy" else env._expert_action_space)
 
-    assert EmbodiedEnv._trajectory_action_space(env) is policy_space
+
+def test_task_program_trajectory_records_controller_targets_with_policy_terms() -> None:
+    env = _controller_action_env()
+    env._task_program_adapter = object()
+    env.cfg = EmbodiedEnvCfg()
+    env._record_raw_actions = False
+    env._expert_action_space = object()
+    env._trajectory_action_kind, _ = env._trajectory_action_layout()
+    env._traj_buffer = object()
+    env.expert_action_spec = build_expert_action_spec(
+        joint_names=["joint_0", "joint_1", "joint_2"], joint_command_mode="position"
+    )
+    command = torch.arange(6, dtype=torch.float32).reshape(2, 3)
+    env._preprocess_action(ControllerAction(command))
+    torch.testing.assert_close(env._traj_raw_action, command)
+    env.action_manager.process_action.assert_not_called()
+    with pytest.raises(ValueError, match="policy_request"):
+        env._preprocess_action(command)
 
 
 def test_policy_trajectory_metadata_uses_action_descriptors() -> None:

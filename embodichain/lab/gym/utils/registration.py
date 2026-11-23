@@ -138,6 +138,7 @@ class EnvSpec:
         self.supports_handwritten_demo = supports_handwritten_demo
         self.task_program_registration = task_program_registration
         self.task_program_adapter_factory = task_program_adapter_factory
+        self._uses_explicit_task_program_host = False
 
     def make(self, **kwargs):
         _kwargs = self.default_kwargs.copy()

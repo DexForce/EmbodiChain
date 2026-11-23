@@ -335,6 +335,9 @@ class PickCfg:
     grasp: str | None = None
     resources: dict[str, str] = field(default_factory=dict)
     kind: str = "pick"
+    at: TargetRefCfg | None = field(
+        default=None, metadata={"omit_none_from_provenance": True}
+    )
 
     def __post_init__(self) -> None:
         """Validate object, optional affordance, resources, and kind."""
@@ -342,6 +345,8 @@ class PickCfg:
         if self.grasp is not None:
             _validate_identifier(self.grasp, field_name="grasp")
         self.resources = _validate_resources(self.resources, field_name="resources")
+        if self.at is not None and type(self.at) is not TargetRefCfg:
+            raise TypeError("PickCfg.at must be a TargetRefCfg.")
         _validate_kind(self.kind, expected="pick", field_name="kind")
 
 
@@ -995,7 +1000,7 @@ def _validate_program(
         raise ValueError(f"Program exceeds node limit {MAX_PROGRAM_NODES}.")
     if type(node) is InvokeCfg:
         call = node.call
-        if type(call) in (PlaceCfg, MoveHeldObjectCfg) and call.at is not None:
+        if type(call) in (PickCfg, PlaceCfg, MoveHeldObjectCfg) and call.at is not None:
             _validate_target_reference(call.at.target, targets)
         if type(call) is HandOverCfg and call.final_target is not None:
             _validate_target_reference(call.final_target.target, targets)

@@ -1,0 +1,65 @@
+program_id: polaris_pan_clean
+instruction: Use the yellow sponge to scrub the blue handle frying pan
+targets:
+  near_stroke_end:
+    kind: scene_relative
+    entity: frying_pan
+    frame: parent
+    position: [0.069484, 0.000856, 0.0075]
+    quaternion_xyzw: [0.0, 0.0, 0.899635, -0.436642]
+  far_stroke_end:
+    kind: scene_relative
+    entity: frying_pan
+    frame: parent
+    position: [0.094484, 0.000856, 0.0075]
+    quaternion_xyzw: [0.0, 0.0, 0.899635, -0.436642]
+program:
+- segment: pick_sponge
+  steps:
+    pick:
+      object: sponge
+      grasp: sponge_grasp
+  validators:
+  - kind: object_lifted
+    object: sponge
+    minimum_lift: 0.03
+- segment: lower_sponge
+  steps:
+    registered:
+      call_id: simulation.move_held_object
+      arguments:
+        object: sponge
+        target: near_stroke_end
+- segment: scrub_out
+  steps:
+    registered:
+      call_id: simulation.move_held_object
+      arguments:
+        object: sponge
+        target: far_stroke_end
+  validators:
+  - kind: object_relative_position
+    object: sponge
+    reference: frying_pan
+    reference_frame: parent
+    position_offset: [0.094484, 0.000856, 0.0075]
+    position_tolerance: [0.012, 0.026, 0.012]
+- segment: scrub_back
+  steps:
+    registered:
+      call_id: simulation.move_held_object
+      arguments:
+        object: sponge
+        target: near_stroke_end
+  validators:
+  - kind: object_relative_position
+    object: sponge
+    reference: frying_pan
+    reference_frame: parent
+    position_offset: [0.069484, 0.000856, 0.0075]
+    position_tolerance: [0.012, 0.026, 0.012]
+- segment: release_sponge
+  steps:
+    place:
+      object: sponge
+      'on': frying_pan_surface

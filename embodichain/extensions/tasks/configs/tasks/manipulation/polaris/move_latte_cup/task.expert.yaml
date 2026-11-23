@@ -1,0 +1,17 @@
+id: PolarisDroidMoveLatteCupExpert-v1
+headless: true
+enable_sensor: true
+environment:
+  component: env.yaml
+embodiment:
+  component: ../../../../components/embodiments/polaris_droid.yaml
+task_program_host: PolarisDroidMoveLatteCup-v1
+task_program:
+  program: task_program/program.yaml
+  integration: task_program/integration.yaml
+  execution_policy:
+    component: ../../../../components/execution_policies/franka_gs_verified.yaml
+    overrides:
+      motion:
+        sample_count: 68
+        ik_seed_mode: sequential

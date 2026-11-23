@@ -1,0 +1,72 @@
+integration_id: polaris_move_latte_cup
+program_id: polaris_move_latte_cup
+requires:
+  scene_contract: move_latte_cup_scene
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: move_latte_cup_scene
+  registry_id: move_latte_cup_native
+  rigid_objects:
+  - entity_id: latte_art_cup
+    dynamics: dynamic
+    semantic_type: latte_art_cup
+    affordances:
+    - entity_id: latte_art_cup_grasp
+      kind: antipodal_grasp
+  - entity_id: cutting_board
+    dynamics: dynamic
+    semantic_type: cutting_board
+    affordances:
+    - entity_id: cutting_board_surface
+      kind: support_surface
+      native_name: top
+      object_target_frame: parent
+      object_target_pose:
+        position: [0.000148, -0.003413, 0.072178]
+        quaternion_xyzw: [0.0, 0.0, 0.833332, 0.552773]
+profile:
+  defaults:
+    pick_up:
+      primary: primary_manipulator
+    place:
+      primary: primary_manipulator
+  skill_options:
+    pick:
+      kind: pick_up
+      lift_height: 0.14
+      pre_grasp_distance: 0.095
+      hand_interp_steps: 12
+      grasp_settle_steps: 10
+      fixed_object_to_eef:
+        position: [-0.004346, -0.044423, 0.031474]
+        rotation_matrix:
+        - [1.0, 0.0, 0.0]
+        - [0.0, -1.0, 0.0]
+        - [0.0, 0.0, -1.0]
+      cartesian_lift: true
+    place:
+      kind: place
+      lift_height: 0.085
+      hand_interp_steps: 12
+      release_settle_steps: 10
+      preserve_current_object_orientation: true
+  effect_monitors:
+    pick:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 2
+    place:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 2
+        attached_translation_threshold: 0.01
+        detached_translation_threshold: 0.015
+runtime_services:
+  control_part_evidence:
+    kind: joint_position_constraint
+    control_parts:
+    - eef
+    open_qpos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    minimum_displacement: 0.02

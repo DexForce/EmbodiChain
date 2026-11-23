@@ -1,0 +1,46 @@
+program_id: polaris_food_bussing
+instruction: Put all the foods in the bowl
+targets:
+  ice_cream_tcp:
+    kind: scene_relative
+    entity: ice_cream
+    frame: parent
+    position: [0.000887, -0.000928, 0.005966]
+    quaternion_xyzw: [1.0, 0.0, 0.0, 0.0]
+  grapes_tcp:
+    kind: scene_relative
+    entity: grapes
+    frame: parent
+    position: [-0.00782, -0.001205, 0.041042]
+    quaternion_xyzw: [0.538297, 0.608231, -0.360632, -0.458516]
+program:
+- segment: pick_ice_cream
+  steps:
+    pick:
+      object: ice_cream
+      grasp: ice_cream_grasp
+      at: ice_cream_tcp
+  validators:
+  - kind: object_lifted
+    object: ice_cream
+    minimum_lift: 0.03
+- segment: place_ice_cream
+  steps:
+    place:
+      object: ice_cream
+      inside: yellow_bowl_for_ice_cream
+- segment: pick_grapes
+  steps:
+    pick:
+      object: grapes
+      grasp: grapes_grasp
+      at: grapes_tcp
+  validators:
+  - kind: object_lifted
+    object: grapes
+    minimum_lift: 0.03
+- segment: place_grapes
+  steps:
+    place:
+      object: grapes
+      inside: yellow_bowl_for_grapes

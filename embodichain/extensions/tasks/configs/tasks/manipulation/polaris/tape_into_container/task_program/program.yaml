@@ -1,0 +1,18 @@
+program_id: polaris_tape_into_container
+instruction: put the tape into the container
+targets: {}
+program:
+- segment: pick_tape_00
+  steps:
+    pick:
+      object: tape_00
+      grasp: tape_00_grasp
+  validators:
+  - kind: object_lifted
+    object: tape_00
+    minimum_lift: 0.03
+- segment: place_tape_00
+  steps:
+    place:
+      object: tape_00
+      inside: container_02_for_tape_00

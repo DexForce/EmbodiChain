@@ -1,0 +1,61 @@
+program_id: polaris_block_stack_kitchen
+instruction: Place and stack the blocks on top of the green tray
+targets:
+  wood_cube_tcp:
+    kind: scene_relative
+    entity: wood_cube
+    frame: parent
+    position: [0.0001, -0.0001, 0.0234]
+    quaternion_xyzw: [-0.70710678, 0.70710678, 0.0, 0.0]
+  green_cube_tcp:
+    kind: scene_relative
+    entity: green_cube
+    frame: parent
+    position: [-0.0073, -0.0002, 0.0249]
+    quaternion_xyzw: [0.70710678, 0.70710678, 0.0, 0.0]
+program:
+- segment: pick_wood_cube
+  steps:
+    pick:
+      object: wood_cube
+      grasp: wood_cube_grasp
+      at: wood_cube_tcp
+  validators:
+  - kind: object_lifted
+    object: wood_cube
+    minimum_lift: 0.03
+- segment: place_wood_cube
+  steps:
+    place:
+      object: wood_cube
+      'on': green_tray_for_wood_cube
+- segment: pick_green_cube
+  steps:
+    pick:
+      object: green_cube
+      grasp: green_cube_grasp
+      at: green_cube_tcp
+  validators:
+  - kind: object_lifted
+    object: green_cube
+    minimum_lift: 0.03
+- segment: place_green_cube
+  steps:
+    place:
+      object: green_cube
+      'on': wood_cube_for_green_cube
+  post:
+  - kind: wait_stable
+    entity: wood_cube
+  - kind: wait_stable
+    entity: green_cube
+  validators:
+  - kind: object_relative_position
+    object: green_cube
+    reference: wood_cube
+    reference_frame: world_axes
+    position_offset: [0, 0, 0.060]
+    position_tolerance: [0.027, 0.027, 0.009]
+  - kind: object_upright
+    object: green_cube
+    maximum_tilt_degrees: 25

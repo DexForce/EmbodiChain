@@ -475,6 +475,7 @@ def test_execution_policy_overrides_reach_runtime_without_changing_the_base(
                 "recovery": {
                     override_key: 90.0,
                     "goal_rotation_threshold": 0.75,
+                    "goal_translation_threshold": 0.035,
                 },
             },
         },
@@ -490,6 +491,7 @@ def test_execution_policy_overrides_reach_runtime_without_changing_the_base(
     assert preset.motion_policy.acceleration_limit == 0.4
     assert preset.motion_policy.dynamic_collision_mode.value == "off"
     assert preset.recovery_policy.skill_timeout == 90.0
+    assert preset.recovery_policy.goal_translation_threshold == 0.035
     assert preset.recovery_policy.goal_rotation_threshold == 0.75
     assert preset.recovery_policy.max_replans == 3
     assert preset.effect_assurance.value == "verified"
@@ -2648,6 +2650,37 @@ def test_integration_registration_rejects_reusing_an_id_for_changed_config(
             changed_integration,
             max_episode_steps=321,
         )
+
+
+def test_configured_expert_rejects_changed_explicit_host_binding(
+    registered_test_ids: list[str],
+) -> None:
+    from embodichain.lab.gym.utils.registration import EnvSpec
+
+    registered_test_ids.append(_TEST_ENV_ID)
+    integration = _decode_configured_task_program_integration(
+        _integration_payload("repeated_pick_place")
+    )
+    host_id = "ConfiguredTestPhysicalHost-v1"
+    original_host = EnvSpec(host_id, EmbodiedEnv, default_kwargs={"variant": "first"})
+    registered = _register_configured_task_program_integration(
+        _TEST_ENV_ID, integration, max_episode_steps=321, host=original_host
+    )
+    assert registered.default_kwargs == {"variant": "first"}
+    assert (
+        _register_configured_task_program_integration(
+            _TEST_ENV_ID, integration, max_episode_steps=321, host=original_host
+        )
+        is registered
+    )
+
+    changed_host = EnvSpec(host_id, EmbodiedEnv, default_kwargs={"variant": "second"})
+    for replacement in (None, changed_host):
+        with pytest.raises(ValueError, match="different environment or integration"):
+            _register_configured_task_program_integration(
+                _TEST_ENV_ID, integration, max_episode_steps=321, host=replacement
+            )
+    assert REGISTERED_ENVS[_TEST_ENV_ID] is registered
 
 
 def test_examples_have_no_importable_task_environment_modules() -> None:
