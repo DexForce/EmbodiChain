@@ -87,13 +87,13 @@ def _resolve_config_reference(
     *,
     base_dir: str | Path | None = None,
 ) -> Path:
-    """Resolve a Gym config from its owner, CWD or the installed task package."""
+    """Locate the Gym config while retaining its filename and component directory."""
     path = Path(value).expanduser()
     if not path.is_absolute() and base_dir is not None:
         candidate = Path(base_dir).expanduser() / path
         if candidate.exists():
-            return candidate.resolve()
-    return resolve_config_path(path).resolve()
+            return candidate.absolute()
+    return resolve_config_path(path).absolute()
 
 
 def _build_learning_environment(
