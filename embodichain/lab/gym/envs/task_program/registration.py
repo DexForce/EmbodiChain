@@ -90,7 +90,7 @@ def _register_configured_task_program_integration(
         )
         if (
             existing.cls is not cls
-            or existing.default_kwargs != default_kwargs
+            or (host is not None and existing.default_kwargs != default_kwargs)
             or existing.max_episode_steps != selected_max_episode_steps
             or existing_fingerprint != integration.integration_fingerprint
         ):
