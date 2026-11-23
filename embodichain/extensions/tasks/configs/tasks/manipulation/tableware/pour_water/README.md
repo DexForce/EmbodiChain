@@ -24,15 +24,19 @@ inactive rows still hold their measured positions.
 
 Use `task.cobotmagic.fluid.yaml` (Gym ID `PourWater-CobotMagic-Fluid-v1`) for Newton fluid simulation. The original `task.cobotmagic.yaml` (`PourWater-v1`) uses Default physics for bottle motion and return, with no liquid.
 
-Single-arena, seed-0 runs used DexSim 0.6.0, CUDA on an RTX 5090, NoRender,
-100 Hz controls and 1.5 mm particle spacing. The received volume is measured
-after release and settling. The current CobotMagic scene fills the bottle using
-its inner profile and advances the fluid every 0.833 ms. The
-[containment report](validation/cobotmagic.fluid.json) records the upright particle
-count outside the bottle and the final received volume.
+The current CobotMagic scene fills the bottle using its inner profile and
+advances the fluid every 0.833 ms. DFSPH starts each step without cached
+pressure multipliers to prevent the upright fill from jetting through the neck.
+A single-arena seed-0 run on DexSim 0.6.1rc1 and an RTX 5090 with NoRender
+measured zero particles outside the bottle envelope at one second and
+64.93 mL in the cup after the bottle returned. Moving the liquid out of the
+receiver changed final success to false. The
+[containment report](validation/cobotmagic.fluid.json) records the measurement
+and the earlier warm-start comparisons.
 
-The following trials used the earlier fill and 2.5 ms fluid step. Each
-completed all four motion segments.
+The historical trials below used DexSim 0.6.0 on the same GPU, 100 Hz
+controls, 1.5 mm particles, the earlier fill and a 2.5 ms fluid step.
+Each completed all four motion segments.
 
 | Aim relative to nominal | Tilt dwell | Final received volume | Episode accepted |
 | --- | --- | --- | --- |
