@@ -114,6 +114,11 @@ def _hybrid_preview(result, image, attempt):
     spec = result["task_spec_v1"]
     coverage = result["coverage"]
     group = {n["id"]: n["task_instance_id"] for n in graph["nodes"]}
+    # Authoring coverage stores a node ID; native coverage stores a node/group pair.
+    producer_groups = {
+        identifier: group[producer if isinstance(producer, str) else producer[0]]
+        for identifier, producer in coverage["producers"].items()
+    }
     data = _graph_data(graph, task_spec=result["task_spec"])
     with Image.open(image) as picture:
         picture = picture.convert("RGB")
@@ -134,14 +139,14 @@ def _hybrid_preview(result, image, attempt):
                 r["id"]: [r["id"]] for r in spec["configuration"]["roles"]
             },
             "milestone_groups": {
-                m["id"]: group[coverage["producers"][m["id"]][0]]
+                m["id"]: producer_groups[m["id"]]
                 for m in spec["objectives"]["milestones"]
-                if m["id"] in coverage["producers"]
+                if m["id"] in producer_groups
             },
             "goal_groups": {
-                g["id"]: [group[coverage["producers"][g["id"]][0]]]
+                g["id"]: [producer_groups[g["id"]]]
                 for g in spec["objectives"]["goal"]
-                if g["id"] in coverage["producers"]
+                if g["id"] in producer_groups
             },
         },
     }

@@ -21,6 +21,85 @@ import { join } from "node:path";
 import type { ViewerData } from "../src/types";
 
 const root = fileURLToPath(new URL("../.browser-fixtures", import.meta.url));
+
+test("authoring preview keeps completion conditions readable and compact", async ({
+  page,
+}) => {
+  await page.goto(pathToFileURL(join(root, "hybrid-authoring.html")).href);
+  await page.getByRole("button", { name: "中文", exact: true }).click();
+  await expect(page.locator("h1")).toHaveText("Plank");
+  const goalBar = page.getByRole("navigation", { name: "完成条件" });
+  const detail = page.getByRole("complementary", { name: "详情" });
+  const close = detail.getByRole("button", { name: "关闭" });
+  await expect(goalBar.getByRole("button", { name: "双臂回位" })).toBeVisible();
+  await expect(page.locator(".rv-graph")).not.toContainText("semantic_goal");
+  await goalBar.getByRole("button", { name: "3 件部件保持稳定" }).click();
+  await expect(
+    detail.getByRole("heading", { name: "3 件部件保持稳定" }),
+  ).toBeVisible();
+  await expect(detail).toContainText(/plank.*left pedestal.*right pedestal/);
+  await expect(detail).toContainText("未评估");
+  await close.click();
+
+  await page.getByRole("button", { name: "原指令" }).click();
+  await expect(detail).toContainText(
+    "The plank and pedestals are visible in the reference image.",
+  );
+  await expect(detail).toContainText(
+    "Return both arms to their starting poses.",
+  );
+  await close.click();
+
+  await page.setViewportSize({ width: 1229, height: 396 });
+  await expect(goalBar).toBeHidden();
+  await page.getByRole("button", { name: "完成条件（2）" }).click();
+  await detail.getByRole("button", { name: "双臂回位" }).click();
+  await expect(
+    detail.getByRole("heading", { name: "双臂回位" }),
+  ).toBeInViewport();
+  await expect(detail).toContainText("左臂、右臂");
+});
+
+test("authoring step details stay visible and scrollable in a short viewport", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1229, height: 396 });
+  await page.goto(pathToFileURL(join(root, "hybrid-authoring.html")).href);
+  await page.getByRole("button", { name: "中文", exact: true }).click();
+  const detail = page.getByRole("complementary", { name: "详情" });
+  const semantics = detail.getByRole("region", { name: "步骤语义" });
+  await page.locator('[data-id="group:step_02"] .rv-toggle').click();
+  await page.locator('button[data-key="call:step_02"]').click();
+  await expect(semantics.getByText("操作对象")).toBeInViewport();
+  await expect(semantics.getByText("右臂", { exact: true })).toBeVisible();
+  await expect(
+    semantics.getByRole("heading", { name: "目标关系" }),
+  ).toBeVisible();
+  await expect(
+    semantics.getByText(/left pedestal.*right pedestal/),
+  ).toBeVisible();
+  await expect(semantics.getByText("释放", { exact: true })).toBeVisible();
+  const source = semantics.getByText(
+    "Lay the plank across the tops of both pedestals.",
+  );
+  await source.scrollIntoViewIfNeeded();
+  await expect(source).toBeInViewport();
+  await expect(detail.getByRole("button", { name: "关闭" })).toBeInViewport();
+  await expect(semantics.getByText("Release the plank.")).toBeVisible();
+  await expect(detail.getByText("没有关联的执行证据")).toBeVisible();
+  await expect(semantics.getByText("没有关联的执行证据")).toHaveCount(0);
+
+  await detail.getByRole("button", { name: "关闭" }).click();
+  await page.locator('[data-id="group:step_03"] .rv-stage').click();
+  await expect(
+    semantics.getByText("左臂、右臂", { exact: true }),
+  ).toBeVisible();
+  await expect(semantics.getByText("返回各自初始位")).toBeVisible();
+  await expect(
+    semantics.getByText("Return both arms to their starting poses."),
+  ).toBeVisible();
+});
+
 test("unified canvas opens measured evidence by clicking the action itself", async ({
   page,
 }) => {
@@ -307,8 +386,12 @@ test("selection, goal highlighting, raw data and search/status/reset controls", 
   const card = page.locator(
     '.task-graph-node[data-key="call:step_01__call_01"]',
   );
-  await card.focus();
-  await page.keyboard.press("Space");
+  await expect(card).toBeVisible();
+  await expect(page.locator(".task-canvas")).toHaveAttribute(
+    "aria-busy",
+    "false",
+  );
+  await card.press("Space");
   await page.keyboard.press("Backspace");
   await expect(page.locator(".task-graph-node")).toHaveCount(6);
   await expect(page.locator("#detail .sub-id")).toHaveText("step_01__call_01");

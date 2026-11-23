@@ -26,6 +26,7 @@ import argparse
 import base64
 from copy import deepcopy
 from io import BytesIO
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -48,6 +49,99 @@ def _image(color: str) -> str:
     return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode()
 
 
+def _authoring_fixture() -> str:
+    from embodichain.gen_sim.task_engine._review import _hybrid_preview
+    from embodichain.gen_sim.task_engine.authoring_intent import (
+        compile_intent,
+        validate_intent,
+    )
+    from embodichain.gen_sim.task_spec.publication import freeze_task_spec
+
+    pickup = "Pick up the plank with the right arm."
+    placement = "Lay the plank across the tops of both pedestals."
+    release = "Release the plank."
+    stability = "Leave the plank and both pedestals stable."
+    park = "Return both arms to their starting poses."
+    scene = (
+        "The plank and pedestals are visible in the reference image. "
+        "The pedestals are separate supports on the same table. "
+    )
+    instruction = f"{scene * 14}{pickup} {placement} {release} {stability} {park}"
+    support = dict(
+        kind="relation",
+        value="on_top_faces",
+        subjects=["plank"],
+        references=["left_pedestal", "right_pedestal"],
+    )
+    plan = validate_intent(
+        dict(
+            roles=[
+                dict(id=role, kind="object", description=role.replace("_", " "))
+                for role in ("plank", "left_pedestal", "right_pedestal")
+            ],
+            steps=[
+                dict(
+                    verb=verb,
+                    subjects=subjects,
+                    arms=arms,
+                    quote=quote,
+                    effects=effects,
+                )
+                for verb, subjects, arms, quote, effects in (
+                    ("pick", ["plank"], ["right"], pickup, []),
+                    ("place", ["plank"], ["right"], placement, [support]),
+                    ("release", ["plank"], ["right"], release, []),
+                    (
+                        "return_arms",
+                        [],
+                        ["left", "right"],
+                        park,
+                        [dict(kind="arms_at_initial_pose", arms=["left", "right"])],
+                    ),
+                )
+            ],
+            conditions=[
+                dict(
+                    scope="final",
+                    fact=dict(
+                        kind="stable",
+                        subjects=["plank", "left_pedestal", "right_pedestal"],
+                    ),
+                    quote=stability,
+                ),
+                dict(
+                    scope="final",
+                    fact=dict(kind="arms_at_initial_pose", arms=["left", "right"]),
+                    quote=park,
+                ),
+            ],
+        ),
+        instruction,
+        scene_objects={},
+    )
+    spec, graph, clauses, descriptions = compile_intent(plan, instruction, "plank", {})
+    image = BytesIO(base64.b64decode(_image("#497ea3").partition(",")[2]))
+    frozen = freeze_task_spec(
+        spec,
+        image_sha256=hashlib.sha256(image.getvalue()).hexdigest(),
+        image_ref="source.png",
+        role_descriptions=descriptions,
+        interpretation=[],
+        clauses=clauses,
+        generalization=[],
+    )
+    return _hybrid_preview(
+        dict(
+            semantic_task_graph=graph,
+            task_spec=spec.to_dict(),
+            task_spec_v1=frozen,
+            coverage={"producers": {node["id"]: node["id"] for node in graph["nodes"]}},
+        ),
+        image,
+        None,
+    )
+
+
 def build_fixtures(output: Path, reference: Path | None = None) -> None:
     """Write deterministic HTML and expected display facts for browser checks.
 
@@ -56,6 +150,9 @@ def build_fixtures(output: Path, reference: Path | None = None) -> None:
         reference: Optional frozen HTML containing the previous frontend.
     """
     output.mkdir(parents=True, exist_ok=True)
+    (output / "hybrid-authoring.html").write_text(
+        _authoring_fixture(), encoding="utf-8"
+    )
     fixture = json.loads(
         Path(__file__)
         .with_name("data")

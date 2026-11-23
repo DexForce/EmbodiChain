@@ -2,7 +2,7 @@
 Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 Licensed under the Apache License, Version 2.0.
 */
-.rv-detail:has(.rv-spec-summary) {
+.rv-detail:has(.rv-spec-summary, .intent-step-details) {
   width: min(440px, 40vw);
 }
 .rv-spec-summary section {
@@ -56,7 +56,7 @@ Licensed under the Apache License, Version 2.0.
   text-decoration: underline;
 }
 @media (max-width: 760px) {
-  .rv-detail:has(.rv-spec-summary) {
+  .rv-detail:has(.rv-spec-summary, .intent-step-details) {
     width: 100%;
   }
 }
@@ -87,7 +87,7 @@ Licensed under the Apache License, Version 2.0.
   display: flex;
   flex-direction: column;
   height: 100dvh;
-  min-height: 440px;
+  min-height: 520px;
   background: var(--paper);
   color: var(--ink);
   font-family: "Inter Variable", "DV Plex SC", sans-serif;
@@ -186,6 +186,8 @@ Licensed under the Apache License, Version 2.0.
   background: var(--pale);
 }
 .rv-summary {
+  min-height: 0;
+  overflow: auto;
   padding: 22px 32px 21px;
   border-bottom: 1px solid var(--border);
   background: var(--white);
@@ -208,6 +210,38 @@ Licensed under the Apache License, Version 2.0.
   letter-spacing: -1px;
   line-height: 1.2;
   font-weight: 600;
+}
+.rv-authored-summary {
+  padding-block: 12px;
+}
+.rv-authored-summary .rv-summary-row {
+  flex-wrap: nowrap;
+}
+.rv-authored-summary .rv-chips {
+  min-width: 0;
+}
+.rv-authored-summary .rv-state {
+  flex-shrink: 0;
+}
+.rv-task-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 4px 0 10px;
+}
+.rv .rv-task-heading h1 {
+  margin: 0;
+  font-size: 24px;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+.rv-task-heading button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--quiet);
+  font-size: 13px;
 }
 .rv-summary-row,
 .rv-chips,
@@ -249,12 +283,13 @@ Licensed under the Apache License, Version 2.0.
 .rv-work {
   display: flex;
   min-height: 0;
-  flex: 1;
+  flex: 1 0 320px;
   position: relative;
 }
 .rv-graph {
   flex: 1;
   min-width: 0;
+  overflow: auto;
   display: flex;
   flex-direction: column;
 }
@@ -269,10 +304,72 @@ Licensed under the Apache License, Version 2.0.
   gap: 8px;
   font-weight: 550;
 }
-.rv-graphbar button,
 .rv-detailbar button,
 .rv-foot button {
   margin-left: auto;
+}
+.rv-graphbar-actions,
+.rv-goal-strip,
+.rv-goal-strip > span,
+.rv-goal-list button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rv-graphbar-actions {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.rv-graphbar .rv-goals-compact,
+.rv-goal-mini {
+  display: none;
+}
+.rv-goal-strip {
+  flex: none;
+  min-height: 40px;
+  padding: 4px 28px;
+  border-bottom: 1px solid var(--border);
+  background: var(--white);
+  font-size: 13px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.rv-goal-strip > span {
+  margin-right: 5px;
+  color: var(--quiet);
+  flex: none;
+}
+.rv-goal-strip button {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 5px 9px;
+}
+.rv-goal-strip button[aria-pressed="true"],
+.rv-goal-strip button:hover,
+.rv-goal-list button:hover {
+  background: var(--pale);
+}
+.rv-goal-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+}
+.rv-goal-list button {
+  width: 100%;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.rv-goal-list svg {
+  flex: none;
+}
+.rv-source-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.55;
 }
 .rv-canvas {
   flex: 1;
@@ -421,6 +518,14 @@ Licensed under the Apache License, Version 2.0.
   border-top: 1px solid var(--border);
   font-weight: 550;
 }
+.rv-conditions button > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rv-conditions button svg {
+  flex: none;
+}
 .rv-conditions small {
   margin-left: auto;
   font-size: 10px;
@@ -443,6 +548,10 @@ Licensed under the Apache License, Version 2.0.
   overflow: auto;
 }
 .rv-detailbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--white);
   height: 48px;
   padding: 0 17px;
   gap: 8px;
@@ -458,6 +567,48 @@ Licensed under the Apache License, Version 2.0.
 .rv-content h3 {
   margin: 24px 0 6px;
   font-size: 13px;
+}
+.intent-step-details {
+  margin-top: 14px;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.intent-step-details dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 7px 16px;
+  margin: 0;
+}
+.intent-step-details dd {
+  margin: 0;
+}
+.intent-step-details h3 {
+  margin: 14px 0 5px;
+}
+.intent-step-details p,
+.intent-step-details ul {
+  margin: 0;
+  padding: 0;
+}
+.intent-step-details li {
+  list-style: none;
+  margin: 5px 0;
+}
+.intent-step-details li span,
+.intent-step-details li small {
+  display: block;
+}
+.intent-step-details blockquote {
+  margin: 6px 0 0;
+  padding-inline-start: 10px;
+  border-inline-start: 2px solid var(--border, currentColor);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.rv-intent-execution {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
 }
 .rv-event,
 .rv-result,
@@ -491,6 +642,7 @@ Licensed under the Apache License, Version 2.0.
 }
 .rv-foot {
   height: 32px;
+  flex: none;
   padding: 0 24px;
   border-top: 1px solid var(--border);
   font-size: 10px;
@@ -501,6 +653,31 @@ Licensed under the Apache License, Version 2.0.
   right: 0;
   z-index: 25;
   background: white;
+}
+@media (max-width: 900px), (max-height: 680px) {
+  .rv-authored-summary .rv-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+  .rv-authored-summary .rv-chips button {
+    flex: none;
+    white-space: nowrap;
+  }
+  .rv-goal-strip {
+    display: none;
+  }
+  .rv-graphbar .rv-goals-compact {
+    display: inline-flex;
+  }
+}
+@media (max-width: 520px) {
+  .rv-compact-label {
+    display: none;
+  }
+  .rv-goal-mini {
+    display: inline;
+  }
 }
 @media (max-width: 760px) {
   .rv-bar {

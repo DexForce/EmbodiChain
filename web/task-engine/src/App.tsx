@@ -56,6 +56,11 @@ import {
   Workflow,
   X,
 } from "lucide-react";
+import {
+  IntentStepDetails,
+  intentLabel,
+  intentStep,
+} from "./IntentStepDetails";
 import { createModel, good, layoutGraph, type Model } from "./model";
 import { tr, type Locale } from "./i18n";
 import { TaskNodeCard, TaskLane } from "./TaskNodes";
@@ -369,6 +374,8 @@ function Inspector({
   if (!group) return null;
   const ids = isGroup ? group.node_ids : [node!.id],
     state = isGroup ? model.groupStatus(group) : model.callStatus(node!);
+  const intentNode = ids.length === 1 ? model.calls.get(ids[0]) : undefined;
+  const intent = intentStep(intentNode?.call);
   const control = isGroup ? model.groupLane(group) : model.lane(node!);
   const window = model.eventWindow(ids);
   const related = (data.task_spec?.goal || []).filter((goal) =>
@@ -381,8 +388,25 @@ function Inspector({
       <span className="eyebrow">
         {isGroup ? "STAGE" : "CALL"} / {group.task_type}
       </span>
-      <h2>{isGroup ? model.groupLabel(group) : model.callLabel(node!)}</h2>
+      <h2>
+        {intent && intentNode
+          ? intentLabel(intentNode.task_type, locale)
+          : isGroup
+            ? model.groupLabel(group)
+            : model.callLabel(node!)}
+      </h2>
       <code className="sub-id">{isGroup ? group.id : node!.id}</code>
+      {intent && intentNode && (
+        <>
+          <IntentStepDetails
+            step={intent}
+            verb={intentNode.task_type}
+            locale={locale}
+            name={model.name}
+          />
+          <h3>{t("runRecord")}</h3>
+        </>
+      )}
       <Badge status={state}>
         {t(isGroup ? "stagePassed" : "callEvidence")} · {t(state)}
       </Badge>
