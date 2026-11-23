@@ -40,7 +40,8 @@ embodichain run-example sim/motion/planners/nmg/piper --headless --device cpu --
 ```
 
 Recording uses simulation time at 1280×720, 25 fps, and waits for encoding before
-exit. It requires a rendering GPU even with CPU physics. `--video` selects
+exit. The output suffix is normalized to `.mp4`, including for `.MP4` inputs.
+It requires a rendering GPU even with CPU physics. `--video` selects
 Fast-RT for `--renderer auto` and rejects `--no-playback` or `--renderer no-render`.
 
 ## Options and model contract

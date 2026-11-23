@@ -103,6 +103,7 @@ def run(
     if args.video and not args.download_only:
         if args.video.suffix.lower() != ".mp4":
             raise ValueError("--video must end in .mp4.")
+        args.video = args.video.with_suffix(".mp4")
         if args.no_playback:
             raise ValueError("--video requires playback; omit --no-playback.")
         if args.renderer == "no-render":
