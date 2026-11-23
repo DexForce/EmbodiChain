@@ -38,6 +38,11 @@ class Command:
 
 COMMANDS = (
     Command(
+        name="mcp",
+        target="embodichain.cli.mcp:main",
+        help="Serve read-only robot state from an existing DexSim session over stdio.",
+    ),
+    Command(
         name="gensim",
         target="embodichain.cli.gensim:main",
         help="Prepare assets, generate scenes, plan tasks and run GenSim workflows.",

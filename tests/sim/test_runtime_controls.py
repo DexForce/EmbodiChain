@@ -183,18 +183,30 @@ def test_initial_joint_seed_uses_source_order_and_never_drives_runtime(monkeypat
 
 
 @pytest.mark.parametrize(
-    ("stabilizer", "solver_supports_stabilizer", "initial_qpos", "expected"),
+    (
+        "stabilizer",
+        "solver_supports_stabilizer",
+        "initial_qpos",
+        "joint_names",
+        "expected",
+    ),
     [
-        (False, True, [0.02, 0.0], [0.06, 0.02]),
-        (True, True, [0.02, 0.0], [0.0, 0.02]),
-        (True, False, [0.02, 0.0], [0.06, 0.02]),
-        (False, True, None, [0.1, 0.0]),
-        (True, True, None, [0.0, 0.0]),
-        (True, False, None, [0.1, 0.0]),
+        (False, True, [0.02, 0.0], None, [0.06, 0.02]),
+        (True, True, [0.02, 0.0], None, [0.0, 0.02]),
+        (True, False, [0.02, 0.0], None, [0.06, 0.02]),
+        (False, True, None, None, [0.1, 0.0]),
+        (True, True, None, None, [0.0, 0.0]),
+        (True, False, None, None, [0.1, 0.0]),
+        (False, True, [0.0, 0.02], ["follower", "leader"], [0.06, 0.02]),
     ],
 )
 def test_initial_mimic_defaults_and_targets_match_articulation_reset(
-    monkeypatch, stabilizer, solver_supports_stabilizer, initial_qpos, expected
+    monkeypatch,
+    stabilizer,
+    solver_supports_stabilizer,
+    initial_qpos,
+    joint_names,
+    expected,
 ) -> None:
     from embodichain.lab.sim._runtime_controls import _InitialJointState
     from embodichain.lab.sim.cfg import ArticulationCfg
@@ -229,7 +241,7 @@ def test_initial_mimic_defaults_and_targets_match_articulation_reset(
         ),
     )
     control = _InitialJointState(
-        "arena/tool", initial_qpos, mimic_stabilizer=stabilizer
+        "arena/tool", initial_qpos, mimic_stabilizer=stabilizer, joint_names=joint_names
     )
     control.initialize_model(object(), result)
     seeded_positions = factory.call_args.args[1].copy()
@@ -247,7 +259,8 @@ def test_initial_mimic_defaults_and_targets_match_articulation_reset(
     articulation = object.__new__(Articulation)
     # Binding resolves omitted initial positions to zeros before reset.
     articulation.cfg = ArticulationCfg(
-        init_qpos=[0.0, 0.0] if initial_qpos is None else initial_qpos
+        init_qpos=[0.0, 0.0] if initial_qpos is None else initial_qpos,
+        init_qpos_joint_names=joint_names,
     )
     articulation.device = torch.device("cpu")
     articulation._all_indices = np.array([0])
@@ -265,7 +278,6 @@ def test_initial_mimic_defaults_and_targets_match_articulation_reset(
     articulation._newton_mimic_compliance_configured = (
         stabilizer and solver_supports_stabilizer
     )
-    articulation._source_qpos_to_state_order = lambda qpos: qpos[:, [1, 0]]
     articulation.restore_visual_material = MagicMock()
     articulation._restore_default_physical_properties = MagicMock()
     articulation.set_local_pose = MagicMock()

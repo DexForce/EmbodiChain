@@ -61,6 +61,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+mcp = ["mcp>=2,<3"]
 geometry = [
   # Optional mesh inputs for pure numerical geometry; no simulation/FCL backend.
   "trimesh>=4.9",
