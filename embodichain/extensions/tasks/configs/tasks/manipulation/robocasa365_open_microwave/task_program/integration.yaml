@@ -1,0 +1,41 @@
+integration_id: robocasa365_open_microwave_franka_v1
+program_id: robocasa365_open_microwave
+requires:
+  scene_contract: robocasa365_open_microwave_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: robocasa365_open_microwave_scene_v1
+  registry_id: task_program_robocasa365_open_microwave
+  articulations:
+    - entity_id: microwave
+      dynamics: dynamic
+  links:
+    - entity_id: door
+      articulation_id: microwave
+      native_link_name: microwave_right_group_1_door
+      dynamics: dynamic
+      semantic_type: door_handle
+profile:
+  defaults:
+    open_door: {primary: primary_manipulator}
+  skill_options:
+    simulation.open_door:
+      kind: open_door
+      hand_interp_steps: 12
+      door_waypoint_count: 140
+      approach_distance: 0.12
+      retract_distance: 0.03
+  effect_monitors: {}
+runtime_services:
+  registered_semantic_lowerers:
+  - kind: articulation_door_handle
+    articulation_id: microwave
+    articulation_simulation_uid: microwave
+    link_entity_id: door
+    hinge_joint: microwave_right_group_1_microjoint
+    opening_direction: -1
+    # A point in the middle of the physical bar, expressed in metres in the door frame.
+    handle_point: [0.194508, -0.264068, -0.009596]
+    handle_to_grasp:
+      position: [0.0, 0.010, 0.0]
+      rotation_matrix: [[0, -0.9396926208, 0.3420201433], [0, 0.3420201433, 0.9396926208], [-1, 0, 0]]

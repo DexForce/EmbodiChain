@@ -1,0 +1,33 @@
+id: RoboCasa365OpenMicrowave-TaskProgram-Franka-v1
+scene:
+  component: scene.yaml
+physics: default
+max_episodes: 1
+max_episode_steps: 300
+num_envs: 1
+arena_space: 3.0
+evaluation:
+  component: task_program/evaluation.yaml
+task_program:
+  program: task_program/program.yaml
+  integration: task_program/integration.yaml
+  execution_policy: task_program/execution_policy.franka.yaml
+collection:
+  max_attempts: 1
+embodiment:
+  component: ../../../components/embodiments/franka_panda_cartesian.yaml
+  camera_overrides:
+    cam_high:
+      extrinsics:
+        eye: [-1.28, -1.76, 1.55]
+        target: [-0.08, -0.48, 0.48]
+        up: [0, 0, 1]
+  overrides:
+    init_pos: [-0.10, -1.00, 0.32]
+    init_rot: [0, 0, 93]
+    # Keep a continuous seventh-joint branch during the 90-degree hinge arc.
+    init_qpos: [0, -0.569, 0, -2.81, 0, 3.037, -0.85, 0.04, 0.04]
+env:
+  sim_steps_per_control: 4
+  rewards:
+    opened: {func: success_reward, mode: add, weight: 1.0, params: {}}

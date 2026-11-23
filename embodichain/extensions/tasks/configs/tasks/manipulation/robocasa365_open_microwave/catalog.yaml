@@ -1,0 +1,10 @@
+task_key: robocasa365_open_microwave
+title: RoboCasa365 Open Microwave
+summary: Open the door of the episode-86 RoboCasa365 microwave with a Franka robot.
+tags: [manipulation, articulation]
+default_deployment: franka
+deployments:
+  franka:
+    config: task.franka.yaml
+  franka_policy:
+    config: task.policy.franka.yaml

@@ -1,0 +1,81 @@
+program_id: calvin_drawer_storage
+instruction: Open the drawer, put the red block inside, release it and close the drawer.
+targets: {}
+program:
+  kind: sequence
+  items:
+  - kind: segment
+    name: open_drawer
+    instruction: open drawer.
+    steps:
+      kind: invoke
+      call:
+        kind: registered
+        call_id: simulation.articulation_link_slide
+        arguments:
+          handle: drawer_handle
+          position: 0.19
+    validators:
+    - kind: articulation_joint_position
+      articulation: drawer
+      joint: base__drawer
+      minimum_position: 0.17
+      maximum_position: 0.22
+    post:
+    - kind: wait_stable
+      entity: drawer
+      preset: open_rail
+  - kind: segment
+    name: pick_cube
+    instruction: Pick the red block from the tabletop.
+    steps:
+      kind: invoke
+      call:
+        kind: pick
+        object: block_red
+        grasp: cube_grasp
+    validators:
+    - kind: object_lifted
+      object: block_red
+      minimum_lift: 0.04
+  - kind: segment
+    name: store_cube
+    instruction: Place the red block inside the open drawer and release it.
+    steps:
+      kind: invoke
+      call:
+        kind: place
+        object: block_red
+        inside: drawer_interior
+    post:
+    - kind: wait_stable
+      entity: block_red
+      preset: stored_cube
+    validators:
+    - kind: condition
+      ref: cube_contained
+    - kind: condition
+      ref: hand_open
+    - kind: condition
+      ref: fingers_clear
+  - kind: segment
+    name: close_drawer
+    instruction: close drawer.
+    steps:
+      kind: invoke
+      call:
+        kind: registered
+        call_id: simulation.articulation_link_slide
+        arguments:
+          handle: drawer_handle
+          position: 0.0
+    validators:
+    - kind: articulation_joint_position
+      articulation: drawer
+      joint: base__drawer
+      minimum_position: 0.0
+      maximum_position: 0.01
+    post:
+    - kind: wait_stable
+      entity: block_red
+      preset: stored_cube

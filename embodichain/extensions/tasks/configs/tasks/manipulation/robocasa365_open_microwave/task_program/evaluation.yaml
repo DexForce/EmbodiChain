@@ -1,0 +1,9 @@
+graph:
+  roots: [door_open]
+  rules:
+    door_open:
+      kind: joint_range
+      bindings: {position: articulations/microwave/qpos/microwave_right_group_1_microjoint}
+      # At least 90% travel along the original 90-degree hinge, towards negative q.
+      params: {upper: -1.413716694115407}
+final_acceptance: [door_open]

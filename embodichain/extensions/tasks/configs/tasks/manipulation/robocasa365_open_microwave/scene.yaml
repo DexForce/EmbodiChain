@@ -1,0 +1,24 @@
+scene_id: robocasa365_open_microwave
+simulation:
+  light:
+    direct:
+    - uid: workcell_light
+      light_type: sun
+      color: [1.0, 1.0, 1.0]
+      intensity: 3.0
+      direction: [-0.3, 0.5, -1.0]
+  articulation:
+  - uid: microwave
+    fpath: RoboCasa365Microwave048/Microwave048.usdc
+    init_pos: [0, 0, 0.64363]
+    root_props: {fixed_base: true}
+
+  background:
+  - uid: robot_pedestal
+    body_type: static
+    shape: {shape_type: Cube, size: [0.22, 0.22, 0.32]}
+    init_pos: [-0.10, -1.00, 0.16]
+  - uid: counter
+    body_type: static
+    shape: {shape_type: Cube, size: [0.80, 0.55, 0.40]}
+    init_pos: [0, 0, 0.2]

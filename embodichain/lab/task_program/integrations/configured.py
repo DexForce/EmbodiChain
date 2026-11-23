@@ -43,6 +43,7 @@ from ._configured_controls import (
     _PressLowererFactory,
     _TwistLowererFactory,
     _OpenDoorLowererFactory,
+    _DoorHandleLowererFactory,
 )
 from ._configured_services import (
     _AntipodalGraspPoseGeneratorFactory,
@@ -2712,6 +2713,7 @@ def _decode_registered_lowerer(
     _PressLowererFactory
     | _TwistLowererFactory
     | _OpenDoorLowererFactory
+    | _DoorHandleLowererFactory
     | _ArticulationLinkSlideLowererFactory
     | _AxisAlignLowererFactory
     | _CoordinatedTransportLowererFactory
@@ -2727,6 +2729,45 @@ def _decode_registered_lowerer(
     """Decode one allowlisted registered semantic lowerer factory."""
     if isinstance(value, Mapping) and value.get("kind") == "kinematic_joint_replay":
         return _decode_kinematic_replay(value, path=path)
+    if isinstance(value, Mapping) and value.get("kind") == "articulation_door_handle":
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset(
+                {
+                    "kind",
+                    "articulation_id",
+                    "articulation_simulation_uid",
+                    "link_entity_id",
+                    "hinge_joint",
+                    "opening_direction",
+                    "handle_point",
+                    "handle_to_grasp",
+                }
+            ),
+        )
+        direction = config["opening_direction"]
+        if type(direction) is not int or direction not in (-1, 1):
+            raise ValueError(f"{path}.opening_direction must be -1 or 1.")
+        return _DoorHandleLowererFactory(
+            **{
+                k: _identifier(config[k], path=f"{path}.{k}")
+                for k in (
+                    "articulation_id",
+                    "articulation_simulation_uid",
+                    "link_entity_id",
+                    "hinge_joint",
+                )
+            },
+            opening_direction=direction,
+            handle_point=_finite_tuple(
+                config["handle_point"], path=f"{path}.handle_point", expected_length=3
+            ),
+            handle_to_grasp=_pose_matrix(
+                config["handle_to_grasp"], path=f"{path}.handle_to_grasp"
+            ),
+        )
+
     if isinstance(value, Mapping) and value.get("kind") in {
         "press",
         "twist",

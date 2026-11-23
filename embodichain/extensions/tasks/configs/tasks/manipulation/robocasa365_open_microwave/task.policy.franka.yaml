@@ -1,0 +1,41 @@
+id: RoboCasa365OpenMicrowave-Franka-v1
+scene:
+  component: scene.yaml
+physics: default
+max_episodes: 1
+max_episode_steps: 300
+num_envs: 1
+arena_space: 3.0
+embodiment:
+  component: ../../../components/embodiments/franka_panda.yaml
+  camera_overrides:
+    cam_high:
+      extrinsics:
+        eye: [0.82, -1.22, 1.00]
+        target: [0.0, -0.12, 0.42]
+        up: [0, 0, 1]
+  overrides:
+    init_pos: [-0.10, -1.00, 0.32]
+    init_rot: [0, 0, 93]
+env:
+  task_instruction: Open the microwave door.
+  sim_steps_per_control: 4
+  actions:
+    arm:
+      func: RelativeJointPositionAction
+      params: {part_name: arm, scale: 0.05}
+    hand:
+      contract: gripper.parallel@1
+      params:
+        part_name: eef
+        command_mode: continuous
+        lower_command: {".*": 0.0}
+        upper_command: {".*": 0.04}
+  observations:
+    fixture_joints:
+      func: get_entity_state
+      mode: add
+      name: fixture/qpos
+      params: {entity_cfg: {uid: microwave}, quantity: qpos}
+  rewards:
+    opened: {func: success_reward, mode: add, weight: 1.0, params: {}}

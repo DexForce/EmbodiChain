@@ -296,6 +296,8 @@ respect the configured download host, with the official Hub as fallback.
 .. autosummary::
 
    SceneData
+   CalvinPlayTableD
+   RoboCasa365Microwave048
    EmptyRoom
    WoodLab
    IndustrialWorkshop
@@ -303,6 +305,8 @@ respect the configured download host, with the official Hub as fallback.
    CleanLab
 
 .. autoclass:: SceneData
+.. autoclass:: CalvinPlayTableD
+.. autoclass:: RoboCasa365Microwave048
 .. autoclass:: EmptyRoom
 .. autoclass:: WoodLab
 .. autoclass:: IndustrialWorkshop
@@ -5312,6 +5316,22 @@ joint-position action variants.
 
 .. autosummary::
 
+
+embodichain.extensions.tasks.manipulation.robocasa365_open_microwave
+--------------------------------------------------------------------
+
+The fixture workcell exposes the original microwave hinge position, an arm and
+gripper action space, and a per-arena measurement of the opening fraction.
+The catalog also supplies an expert Task Program that binds the existing
+OpenDoor skill to the physical handle box and negative-opening hinge.
+
+.. currentmodule:: embodichain.extensions.tasks.manipulation.robocasa365_open_microwave
+
+.. autosummary::
+
+   RoboCasa365OpenMicrowaveEnv
+
+.. autoclass:: RoboCasa365OpenMicrowaveEnv
 
 embodichain.extensions.tasks.manipulation.tableware.blocks_ranking_size
 -----------------------------------------------------------------------
