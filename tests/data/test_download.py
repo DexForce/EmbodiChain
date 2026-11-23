@@ -69,7 +69,13 @@ def test_migrated_robot_assets_keep_legacy_class_identity() -> None:
                 else "so101_assets" if name == "SO101FollowerAssets" else "robot_assets"
             )
         )
-        if name in {"AgibotG1", "AgilexPiperX", "FlexivRizon4SMenagerie"}:
+        if name in {
+            "AgibotG1",
+            "AgilexPiperX",
+            "FlexivRizon4SMenagerie",
+            "RoboPartyRP1",
+            "RoboPartyRPO",
+        }:
             assert not hasattr(import_module("embodichain.data.assets." + legacy), name)
             assert not hasattr(assets, name)
         else:
@@ -155,6 +161,7 @@ def test_asset_resolution_preserves_explicit_extra_modules(monkeypatch) -> None:
         "embodichain.extensions.robots.unitree.go2.assets",
         "embodichain.extensions.robots.anybotics.anymal_c.assets",
         "embodichain.extensions.robots.pollen_robotics.microduck.assets",
+        "embodichain.extensions.robots.roboparty.rp_hand.assets",
     ],
 )
 def test_asset_imports_do_not_load_robot_configuration(first_module: str) -> None:
@@ -274,6 +281,8 @@ def test_robot_asset_listing_includes_locomotion_and_existing_robots(capsys) -> 
         "FlexivRizon4SMenagerie",
         "SO101FollowerAssets",
         "AgibotG2",
+        "RoboPartyRP1",
+        "RoboPartyRPO",
     }.issubset(names)
     assert names == sorted(set(names))
     assert all(not name.startswith("_") for name in names)
@@ -385,7 +394,11 @@ def test_eef_catalog_preserves_ids_without_legacy_exports(monkeypatch, capsys) -
     monkeypatch.setattr(EmbodiChainDataset, "__init__", unexpected_download)
     assert util.find_spec("embodichain.data.assets.eef_assets") is None
     entries = download.get_registry()["eef"]
-    expected_ids = EEF_ARCHIVES.keys() | {"AgxGripper", "RobosuiteToolHangPadsV1"}
+    expected_ids = EEF_ARCHIVES.keys() | {
+        "AgxGripper",
+        "RoboPartyRPHand",
+        "RobosuiteToolHangPadsV1",
+    }
     assert {name for name, _ in entries} == expected_ids
     assert len(entries) == len(expected_ids)
     for name, cls in entries:

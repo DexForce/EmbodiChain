@@ -1,0 +1,44 @@
+{
+  "seed": 42,
+  "world": {
+    "env_type": "single",
+    "ob_type": "states",
+    "multiview": false,
+    "width": 224,
+    "height": 224,
+    "visualize_info": false,
+    "terminate_at_goal": true
+  },
+  "physics": {
+    "timestep": 0.002,
+    "control_timestep": 0.05,
+    "sim_steps_per_control": 25
+  },
+  "model": {
+    "action_dim": 25,
+    "action_block": 5,
+    "history_size": 3
+  },
+  "planner": {
+    "horizon": 5,
+    "num_samples": 300,
+    "iterations": 30,
+    "topk": 30,
+    "candidate_batch_size": 300,
+    "min_std": 0.0,
+    "sampling_distribution": "normalized",
+    "action_selection": "mean",
+    "clip_candidates": false,
+    "include_mean": true,
+    "std_correction": 1
+  },
+  "evaluation": {
+    "num_eval": 50,
+    "goal_offset_steps": 25,
+    "eval_budget": 50,
+    "max_episode_steps": 100,
+    "receding_horizon": 5,
+    "history_len": 1,
+    "dataset": "ogbench/cube_single_expert"
+  }
+}
