@@ -24,11 +24,14 @@ from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import numpy as np
 import torch
 from embodichain.extensions.benchmarks.grasp_pose_generator.metrics import summarize
+from embodichain.lab.sim import grasp_validation
+from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.grasp_validation import GraspValidator, _result
 
 
@@ -144,6 +147,21 @@ def test_dexuni_contact_evidence_uses_distance_only_for_unmeasured_rows():
     assert not support.item() and not lost.item()
     data["distance"][0, 1] = float("nan")
     assert validator._contacts()[2].item()
+
+
+@pytest.mark.parametrize(
+    ("options", "headless"), [({}, True), ({"headless": False}, False)]
+)
+def test_validator_configures_rendering_for_window_mode(
+    monkeypatch: pytest.MonkeyPatch, options: dict[str, bool], headless: bool
+) -> None:
+    manager = Mock(side_effect=RuntimeError("stop before native startup"))
+    monkeypatch.setattr(grasp_validation, "SimulationManager", manager)
+    with pytest.raises(RuntimeError, match="stop before native startup"):
+        GraspValidator(RigidObjectCfg(uid="target"), "FrankaPandaHand", **options)
+    (cfg,) = manager.call_args.args
+    assert cfg.headless is headless
+    assert (cfg.render_cfg.renderer == "no-render") is headless
 
 
 @pytest.mark.gpu

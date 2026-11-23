@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import time
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -134,6 +135,8 @@ class GraspValidator:
         num_envs: Number of independent trial arenas.
         physics: GPU backend, either ``default`` or ``newton``. Newton runs
             DexUni with two-way coupling between the hand and target.
+        headless: Set to False to watch arena 0 in a native window, with
+            trial playback paced to real time.
     """
 
     def __init__(
@@ -143,6 +146,7 @@ class GraspValidator:
         num_envs: int = 1,
         *,
         physics: str = "default",
+        headless: bool = True,
     ) -> None:
         if object_cfg.env_variants:
             raise ValueError("Each validator batch requires a single target geometry")
@@ -162,9 +166,13 @@ class GraspValidator:
         self.sim = SimulationManager(
             SimulationManagerCfg(
                 num_envs=num_envs,
-                headless=True,
+                headless=headless,
+                width=1280,
+                height=720,
                 enable_ground_plane=False,
-                render_cfg=RenderCfg(renderer="no-render"),
+                enable_entity_gizmo=False,
+                robot_ik_gizmo=None,
+                render_cfg=RenderCfg(renderer="no-render" if headless else "fast-rt"),
                 physics_cfg=physics_cfg,
             )
         )
@@ -220,6 +228,16 @@ class GraspValidator:
             if not settled.all().item():
                 raise ValueError("Target did not settle")
             self.initial = self.obj.get_local_pose(to_matrix=True)[0].clone()
+            if not headless:
+                viewer = self.sim.viewer
+                if viewer is None:
+                    raise RuntimeError(
+                        "Could not open the native grasp benchmark window"
+                    )
+                target = (self.initial[:3, 3] + self.sim.arena_offsets[0]).cpu().numpy()
+                target = target + [0, 0, 0.05]  # Frame both the pickup and the lift.
+                eye = target + [0.36, -0.42, 0.25]
+                viewer.set_look_at(eye.tolist(), target.tolist(), [0, 0, 1])
             self.com = self.obj.body_data.com_pose[0, :3].clone()
             self.cfg = cfg
             self.root_tcp = self._tensor(cfg.default_root_from_tcp)
@@ -367,8 +385,16 @@ class GraspValidator:
         end = _HOLD_END + (
             2 * _LEG_STEPS if any(d != "base" for d in directions) else 0
         )
+        deadline = None if self.sim.sim_config.headless else time.monotonic()
         previous = velocity = None
         for step in range(1, end + 1):
+            if deadline is not None:
+                if not self.sim.is_viewer_open:
+                    raise KeyboardInterrupt("Grasp benchmark window closed")
+                delay = deadline - time.monotonic()
+                if delay > 0:
+                    time.sleep(delay)
+                deadline = time.monotonic() + DT
             position = 0.08 * axis * _smooth(step / _APPROACH_END) + up * _smooth(
                 (step - _CLOSE_END) / (_LIFT_END - _CLOSE_END)
             )

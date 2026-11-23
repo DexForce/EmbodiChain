@@ -8,6 +8,19 @@ embodichain benchmark grasp-pose-generator validate --case "$d/block.yaml" --pos
 embodichain benchmark grasp-pose-generator run --suite "$d/suite.yaml" --num-envs 30 --output outputs/benchmarks/grasp-suite --resume
 ```
 
+Add `--no-headless` to either command to watch the trials in the native
+EmbodiChain window. The camera starts on the target in arena 0, and the
+terminal shows its candidate rank and trial condition. With `--num-envs 1`,
+every candidate and condition plays there in sequence. Playback follows the
+physics clock when rendering can keep up.
+
+```bash
+embodichain benchmark grasp-pose-generator validate --case "$d/block.yaml" --poses "$d/candidates.jsonl" --no-headless --num-envs 1 --output outputs/benchmarks/grasp-view
+```
+
+To watch a completed case again, omit `--resume` and use a fresh output
+directory. Use the default headless mode when comparing execution times.
+
 Both commands accept `--physics default` (the default GPU backend) and
 `--physics newton` (Newton with the DexUni solver). Each invocation evaluates
 one backend. Use distinct output directories to keep both aggregate reports.

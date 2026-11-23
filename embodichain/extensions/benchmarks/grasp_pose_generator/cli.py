@@ -204,7 +204,13 @@ def _run_case(spec, method, source, root, out, args):
     initial_gpu = torch.cuda.memory_allocated(device)
     torch.cuda.reset_peak_memory_stats(device)
     cfg = RigidObjectCfg.from_dict(rigid)
-    v = GraspValidator(cfg, spec["gripper"], args.num_envs, physics=args.physics)
+    v = GraspValidator(
+        cfg,
+        spec["gripper"],
+        args.num_envs,
+        physics=args.physics,
+        headless=args.headless,
+    )
     try:
         if args.resume and path.exists():
             case = json.loads(path.read_text())
@@ -248,6 +254,13 @@ def _run_case(spec, method, source, root, out, args):
         ]
         for start in range(0, len(work), args.num_envs):
             batch = work[start : start + args.num_envs]
+            if not args.headless:
+                rank, condition = batch[0]
+                print(
+                    f"Viewing {spec['object']} with {spec['gripper']} in arena 0 "
+                    f"(candidate {rank}, {condition})",
+                    flush=True,
+                )
             padded = batch + [batch[-1]] * (args.num_envs - len(batch))
             results = v.validate(
                 np.stack([poses[i - 1] for i, _ in padded]), [d for _, d in padded]
@@ -288,6 +301,12 @@ def main(argv: list[str] | None = None) -> None:
             help="Select Default physics or Newton with the DexUni solver.",
         )
         p.add_argument("--num-envs", type=int, default=1)
+        p.add_argument(
+            "--headless",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help="Run headlessly by default. Use --no-headless to open the simulator viewer.",
+        )
         p.add_argument("--output", type=Path, required=True)
         p.add_argument("--resume", action="store_true")
     args = parser.parse_args(argv)
