@@ -21,9 +21,13 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 import yaml
 from dexsim.kit.usd import parse_usd
 
+from embodichain.lab.task_program.integrations._configured_composition import (
+    _resolve_task_program_components,
+)
 from embodichain.extensions.tasks.manipulation.cable.franka_rope_wrap import (
     cable_points,
     load_config,
@@ -37,6 +41,16 @@ def test_default_deployment_matches_materialized_scene(tmp_path: Path) -> None:
     defaults = load_config()
     urdf = tmp_path / "derived.urdf"
     alternate = materialize_deployment(defaults, urdf, tmp_path)
+    _, default_integration, default_policy = _resolve_task_program_components(
+        yaml.safe_load((root / "task.franka.yaml").read_text())["task_program"],
+        base_dir=root,
+    )
+    _, integration, policy = _resolve_task_program_components(
+        yaml.safe_load(alternate.read_text())["task_program"],
+        base_dir=alternate.parent,
+    )
+    assert integration == default_integration
+    assert policy == default_policy
     stored = yaml.safe_load((root / "env.yaml").read_text())
     compiled = yaml.safe_load((alternate.parent / "env.yaml").read_text())
     event = compiled["env"]["events"]["settle_rope"]
@@ -81,19 +95,30 @@ def test_custom_scene_rescales_windows_and_uses_requested_assets(
     tmp_path: Path,
 ) -> None:
     scenario = load_config()
-    scenario.update(duration_s=72.0, floor_height_m=0.013, cable_segments=64)
+    scenario.update(
+        duration_s=72.0, floor_height_m=0.013, cable_segments=64, control_hz=30
+    )
     custom = tmp_path / "custom.json"
     custom.write_text(json.dumps(scenario))
     effective = load_config(custom)
     assert (effective["grasp_complete_s"], effective["lift_complete_s"]) == (10.0, 14.0)
     urdf = tmp_path / "padded_franka.urdf"
     deployment = materialize_deployment(effective, urdf, tmp_path)
-    policy = yaml.safe_load(deployment.read_text())["task_program"]["execution_policy"]
-    # 20–56 s is a single continuous orbit, plus two control ticks to acknowledge it.
-    np.testing.assert_allclose(
-        policy["overrides"]["recovery"]["skill_timeout"], 36 + 2 / 60
+    _, integration, policy = _resolve_task_program_components(
+        yaml.safe_load(deployment.read_text())["task_program"],
+        base_dir=deployment.parent,
     )
+    pickup = integration["profile"]["skill_options"]["simulation.cable_pickup"]
+    assert pickup["hand_interp_steps"] == 30
+    assert pickup["grasp_settle_steps"] == 8
+    settle = integration["runtime_services"]["cable_material"]["targets"]["settle_lift"]
+    assert settle["samples"] == 4
+    assert policy["motion"]["sample_count"] == 20
+    # 20–56 s is a single continuous orbit, plus two control ticks to acknowledge it.
+    np.testing.assert_allclose(policy["recovery"]["skill_timeout"], 36 + 2 / 30)
     env = yaml.safe_load(deployment.with_name("env.yaml").read_text())
+    dt = env["physics_config"]["physics_dt"] * env["env"]["sim_steps_per_control"]
+    np.testing.assert_allclose(dt, 1 / 30)
     cylinder = next(
         body for body in env["simulation"]["background"] if body["uid"] == "post"
     )
@@ -106,3 +131,11 @@ def test_custom_scene_rescales_windows_and_uses_requested_assets(
     embodiment = yaml.safe_load(deployment.with_name("embodiment.yaml").read_text())
     assert embodiment["simulation"]["fpath"] == str(urdf)
     assert embodiment["simulation"]["init_pos"] == [0, 0, 0.013]
+
+
+def test_custom_deployment_rejects_unrepresentable_pickup_hold(tmp_path: Path) -> None:
+    scenario = load_config()
+    scenario["control_hz"] = 1
+    with pytest.raises(ValueError, match="control_hz.*pickup settle hold"):
+        materialize_deployment(scenario, tmp_path / "derived.urdf", tmp_path)
+    assert not (tmp_path / "deployment").exists()
