@@ -16,6 +16,9 @@ not identify ground.
 once with an `after_substep` observer. The manager invokes the observer after
 each world update, preserving its preparation, profiling and camera-capture
 boundary. Observation reads reuse the sampled sensor buffer.
+Task subclasses can pass an `after_substep` observer through the Gym host's
+`_advance_physics()`. It runs after legacy sensor updates and before any
+substep action refresh.
 
 `ContactSensor` deduplicates raw reads and history reductions separately using
 `SimulationManager.physics_step_index` and the query's current actor binding.

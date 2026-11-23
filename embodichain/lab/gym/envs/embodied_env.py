@@ -3521,17 +3521,19 @@ class EmbodiedEnv(BaseEnv):
             raise ValueError(f"No physical replay source {source_id!r} is bound.")
         return replay.snapshot
 
-    def _advance_physics(self) -> None:
-        """Connect manager callbacks to physics and sensor sampling."""
+    def _advance_physics(
+        self, *, after_substep: Callable[[float], None] | None = None
+    ) -> None:
+        """Connect manager callbacks to physics and substep observations."""
         replay = getattr(self, "_physical_replay", None)
         if replay is not None and replay.hold:
             return
         manager = getattr(self, "action_manager", None)
         if not getattr(self, "_step_uses_action_manager", False) or manager is None:
-            return super()._advance_physics()
+            return super()._advance_physics(after_substep=after_substep)
         refresh_actions = manager.get_substep_callback(self.cfg.sim_steps_per_control)
         if refresh_actions is None:
-            return super()._advance_physics()
+            return super()._advance_physics(after_substep=after_substep)
 
         sensors = [
             sensor
@@ -3545,6 +3547,8 @@ class EmbodiedEnv(BaseEnv):
         def observe_substep(dt: float) -> None:
             for sensor in sensors:
                 sensor.update_physics_step(dt)
+            if after_substep is not None:
+                after_substep(dt)
             refresh_actions(dt)
 
         self.sim.update(

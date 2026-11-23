@@ -6923,12 +6923,15 @@ live one-way rigid-to-fluid simulation.
 
    embodichain.data.assets.task_assets.PourCupAssets
    embodichain.data.assets.task_assets.PourCupDemoData
+   embodichain.data.assets.task_assets.WhiteboardMarkerV1
    embodichain.lab.gym.envs.fluid_replay.FluidReplayEnv
    embodichain.lab.scripts.run_fluid_task_program.main
 
 .. autoclass:: embodichain.data.assets.task_assets.PourCupAssets
 
 .. autoclass:: embodichain.data.assets.task_assets.PourCupDemoData
+
+.. autoclass:: embodichain.data.assets.task_assets.WhiteboardMarkerV1
 
 .. autoclass:: embodichain.lab.gym.envs.fluid_replay.FluidReplayEnv
    :members:

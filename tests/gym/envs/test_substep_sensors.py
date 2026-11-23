@@ -101,20 +101,8 @@ def test_substep_action_updates_interleave_with_physics_and_sensor_observation(
             update_physics_step=lambda dt: calls.append("sensor"),
         )
     }
-    env._advance_physics()
-    expected = (
-        ["physics", "sensor"] * 3
-        if not refreshes
-        else [
-            "physics",
-            "sensor",
-            "control",
-            "physics",
-            "sensor",
-            "control",
-            "physics",
-            "sensor",
-        ]
-    )
+    env._advance_physics(after_substep=lambda dt: calls.append("task"))
+    sample = ["physics", "sensor", "task"]
+    expected = (sample + ["control"]) * 2 + sample if refreshes else sample * 3
     assert calls == expected
     assert updates == [3]

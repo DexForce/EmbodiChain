@@ -1,0 +1,7 @@
+task_key: whiteboard_draw_table
+title: Whiteboard Draw Table
+summary: Draw a seven-line table with a physically held dry-erase pen.
+tags: [manipulation, tool_use, contact]
+default_deployment: franka
+deployments:
+  franka: {config: task.franka.yaml}
