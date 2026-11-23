@@ -40,10 +40,11 @@ JSON/YAML accepts the same mapping/null. `enable_gizmo()` can override one part,
 and `disable_gizmo()` prevents automatic recreation (all parts when omitted).
 The explicit `create_robot_ik_gizmo_controller()` factory still returns
 caller-owned controllers; a weak registry prevents automatic duplicates.
-Both robot paths
-default to native Newton IK; `GizmoCfg(ik_solver="embodichain")` adapts the
-control part's existing solver, such as PinkSolver. Both support one environment
-and write only selected non-mimic joint drive targets through `Robot`.
+Both robot paths use DexSim's `RobotIK.from_newton_model()` and `InteractiveIK`
+by default. The adapter uses the reduced model's root FK to follow the live
+chain root. `GizmoCfg(ik_solver="embodichain")` adapts the control part's
+existing solver, such as PinkSolver. Both support one environment and write
+only selected non-mimic joint drive targets through `Robot`.
 
 `SimulationManagerCfg` owns window size, headless mode, rendering, GPU/CPU
 selection, arena count and spacing, physics timestep, physics and GPU-memory

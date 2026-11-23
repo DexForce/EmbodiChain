@@ -173,8 +173,10 @@ region at the same minimum depth. The X bounds account for the 3.5 mm cable
 radius between the channel's inner walls. Merely crossing the channel mouth
 does not stop the remaining corrections. Release also requires sampled cable
 penetration no greater than 1 mm. These release and final acceptance bounds are
-unchanged. Ordinary measured TCP tracking remains required until the endpoint
-is seated inside the strict channel.
+unchanged. The channel side walls use a 0.1 mm contact margin so the solver's
+resting contact keeps the cable centre inside the geometric bounds. Ordinary
+measured TCP tracking remains required until the endpoint is seated inside
+the strict channel.
 
 The left hand releases toward an 8 mm joint target per finger over 28 control
 samples, then holds the arm stationary for 30 samples. It withdraws vertically

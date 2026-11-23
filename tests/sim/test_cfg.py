@@ -1327,7 +1327,7 @@ def test_gaussian_render_preset_applies_native_configuration(
     cfg.apply_to_dexsim_config(world_config)
     assert world_config.renderer == Renderer.HYBRID
     assert world_config.gaussian_config.enabled is True
-    assert world_config.gaussian_config.apply_display_srgb is apply_display_srgb
+    assert world_config.raytrace_config.output_srgb is apply_display_srgb
     assert world_config.rt_pipeline_config.window.mode == RTRenderMode.RAW
     assert world_config.rt_pipeline_config.offscreen.mode == RTRenderMode.OPTIX_DENOISE
     assert world_config.raytrace_config.render_iterations_per_frame == 4
@@ -1403,12 +1403,14 @@ def test_default_physics_rejects_invalid_integration_substeps(substeps) -> None:
 def test_render_cfg_defaults_to_dlss_rr_without_tone_mapping() -> None:
     """Default rendering enables DLSS RR and bypasses tone mapping."""
     world_config = dexsim.WorldConfig()
+    world_config.raytrace_config.output_srgb = False
 
     RenderCfg(renderer="hybrid").apply_to_dexsim_config(world_config)
 
     assert world_config.rt_pipeline_config.window.mode == RTRenderMode.DLSS_RR
     assert world_config.rt_pipeline_config.offscreen.mode == RTRenderMode.DLSS_RR
     assert world_config.postprocess_config.tone_mapping_enabled is False
+    assert world_config.raytrace_config.output_srgb is False
 
 
 @pytest.mark.parametrize(

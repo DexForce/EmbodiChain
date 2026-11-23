@@ -103,6 +103,9 @@ Held-object guards and phase-effect gates are observational:
 - neither mechanism creates constraints, freezes objects, or overwrites poses.
 
 Pick gates attachment before lift. Place gates detachment before retract.
+For placement after a separate supported lowering step, set
+`PlaceOptions.approach_lift_height=0` to approach the release pose directly.
+`lift_height` still sets the retract clearance.
 HandOver owns independent source/destination transfer boundaries.
 
 ## Row-local state

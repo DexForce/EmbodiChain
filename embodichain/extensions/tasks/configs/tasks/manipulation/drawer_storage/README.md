@@ -142,10 +142,10 @@ and lower onto the floor, with verified retention guards and the grasp command
 retained. Empty-hand clearance and closing routes use `MoveEndEffector`.
 A separate support segment checks its measured position relative to the live
 drawer floor, with a 3 mm vertical tolerance. Failure stops the program
-before Place can open the hand. Place uses the same floor target, preserves the
-transported orientation, opens at rest, and retracts 70 mm. The pre-retract
-effect gate checks that the grip is released; terminal verification checks
-separation after retreat. Release occurs at the supported floor height.
+before Place can open the hand. Place approaches the same floor target at floor
+height, preserves the transported orientation, opens at rest, and retracts
+70 mm. The pre-retract effect gate checks that the grip is released. Terminal
+verification checks separation after retreat.
 
 The last Cartesian route contacts the handle with the fingertips,
 tracks the handle inward, withdraws outward, then lifts away. The rail has zero
