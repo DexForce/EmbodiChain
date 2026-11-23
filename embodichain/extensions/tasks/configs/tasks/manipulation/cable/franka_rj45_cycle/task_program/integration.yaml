@@ -1,0 +1,28 @@
+integration_id: franka_rj45_cycle_v1
+program_id: franka_rj45_cycle
+requires:
+  scene_contract: rj45_cycle_v1
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: rj45_cycle_v1
+  registry_id: rj45_cycle
+  articulations:
+  - entity_id: plug
+    simulation_uid: plug
+    dynamics: dynamic
+    semantic_type: rj45_plug
+  cables:
+  - entity_id: cable
+    simulation_uid: cable
+profile:
+  defaults:
+    move_joints:
+      primary: arm_and_hand
+  skill_options:
+    simulation.franka_rj45_phase:
+      kind: move_joints
+      preserve_velocity_samples: true
+  effect_monitors: {}
+runtime_services:
+  registered_semantic_lowerers:
+  - kind: franka_rj45_phase

@@ -1,0 +1,92 @@
+graph:
+  roots: [rj45_success]
+  rules:
+    starts_on_floor:
+      kind: scalar_range
+      bindings: {value: cables/cable/rj45_starts_on_floor}
+      params: {minimum: 1, maximum: 1}
+    insertion_without_finger_latch_press:
+      kind: scalar_range
+      bindings: {value: cables/cable/rj45_insertion_without_finger_latch_press}
+      params: {minimum: 1, maximum: 1}
+    vertical_withdrawal_grasp:
+      kind: scalar_range
+      bindings: {value: cables/cable/rj45_vertical_withdrawal_grasp}
+      params: {minimum: 1, maximum: 1}
+    complete:
+      kind: scalar_range
+      bindings: {value: cables/cable/rj45_complete}
+      params: {minimum: 1, maximum: 1}
+    pickup_and_lift:
+      kind: scalar_range
+      bindings: {value: cables/cable/rj45_pickup_and_lift}
+      params: {minimum: 1, maximum: 1}
+    seated_while_robot_home:
+      kind: scalar_range
+      bindings: {value: cables/cable/rj45_seated_while_robot_home}
+      params: {minimum: 1, maximum: 1}
+    latch_locked_while_robot_home:
+      kind: scalar_range
+      bindings: {value: cables/cable/rj45_latch_locked_while_robot_home}
+      params: {minimum: 1, maximum: 1}
+    physical_latch_press_before_withdrawal:
+      kind: scalar_range
+      bindings: {value: cables/cable/rj45_physical_latch_press_before_withdrawal}
+      params: {minimum: 1, maximum: 1}
+    latch_limits:
+      kind: scalar_range
+      bindings: {value: cables/cable/rj45_latch_limits}
+      params: {minimum: 1, maximum: 1}
+    latch_returns_after_release:
+      kind: scalar_range
+      bindings: {value: cables/cable/rj45_latch_returns_after_release}
+      params: {minimum: 1, maximum: 1}
+    unplugged:
+      kind: scalar_range
+      bindings: {value: cables/cable/rj45_unplugged}
+      params: {minimum: 1, maximum: 1}
+    placed_on_floor:
+      kind: scalar_range
+      bindings: {value: cables/cable/rj45_placed_on_floor}
+      params: {minimum: 1, maximum: 1}
+    final_home:
+      kind: scalar_range
+      bindings: {value: cables/cable/rj45_final_home}
+      params: {minimum: 1, maximum: 1}
+    fixed_end:
+      kind: scalar_range
+      bindings: {value: cables/cable/rj45_fixed_end}
+      params: {minimum: 1, maximum: 1}
+    cable_attachment:
+      kind: scalar_range
+      bindings: {value: cables/cable/rj45_cable_attachment}
+      params: {minimum: 1, maximum: 1}
+    contacts:
+      kind: scalar_range
+      bindings: {value: cables/cable/rj45_contacts}
+      params: {minimum: 1, maximum: 1}
+    finite_state:
+      kind: scalar_range
+      bindings: {value: cables/cable/rj45_finite_state}
+      params: {minimum: 1, maximum: 1}
+    rj45_success:
+      kind: all
+      refs:
+      - starts_on_floor
+      - insertion_without_finger_latch_press
+      - vertical_withdrawal_grasp
+      - complete
+      - pickup_and_lift
+      - seated_while_robot_home
+      - latch_locked_while_robot_home
+      - physical_latch_press_before_withdrawal
+      - latch_limits
+      - latch_returns_after_release
+      - unplugged
+      - placed_on_floor
+      - final_home
+      - fixed_end
+      - cable_attachment
+      - contacts
+      - finite_state
+final_acceptance: [rj45_success]

@@ -144,6 +144,9 @@ from embodichain.lab.task_program.semantics import (
 )
 
 if TYPE_CHECKING:
+    from embodichain.extensions.tasks.manipulation.cable.rj45_integration import (
+        FrankaRj45PhaseFactory,
+    )
     from embodichain.extensions.tasks.manipulation.cable.wrap_integration import (
         CableWrapPhaseFactory,
     )
@@ -2731,6 +2734,7 @@ def _decode_registered_lowerer(
     | _RelativePlaceLowererFactory
     | _KinematicReplayFactory
     | CableWrapPhaseFactory
+    | FrankaRj45PhaseFactory
 ):
     """Decode one allowlisted registered semantic lowerer factory."""
     if isinstance(value, Mapping) and value.get("kind") == "cable_wrap_phase":
@@ -2740,6 +2744,13 @@ def _decode_registered_lowerer(
 
         _mapping(value, path=path, required=frozenset({"kind"}))
         return CableWrapPhaseFactory()
+    if isinstance(value, Mapping) and value.get("kind") == "franka_rj45_phase":
+        from embodichain.extensions.tasks.manipulation.cable.rj45_integration import (
+            FrankaRj45PhaseFactory,
+        )
+
+        _mapping(value, path=path, required=frozenset({"kind"}))
+        return FrankaRj45PhaseFactory()
     if isinstance(value, Mapping) and value.get("kind") == "kinematic_joint_replay":
         return _decode_kinematic_replay(value, path=path)
     if isinstance(value, Mapping) and value.get("kind") in {
@@ -3246,7 +3257,8 @@ class _DecodedRuntimeServices:
         | _PushObjectLowererFactory
         | _RelativePlaceLowererFactory
         | _KinematicReplayFactory
-        | CableWrapPhaseFactory,
+        | CableWrapPhaseFactory
+        | FrankaRj45PhaseFactory,
         ...,
     ] = ()
     control_part_evidence: _JointPositionConstraintEvidenceProviderFactory | None = None
@@ -3680,6 +3692,7 @@ def _decode_evaluation(
     registry: PredicateRegistry | None = None,
     cable_material: object | None = None,
     cable_wrap: bool = False,
+    rj45_cycle: bool = False,
     transport_targets: Mapping[str, _MoveHeldObjectLowererFactory] | None = None,
 ) -> tuple[dict[str, CompiledEvaluation], tuple[str, ...], tuple[str, ...]]:
     if value is None:
@@ -3710,6 +3723,14 @@ def _decode_evaluation(
             for name in WRAP_CHECKS:
                 channels[f"cables/{binding.entity_id}/wrap_{name}"] = (
                     f"cables/{binding.simulation_uid}/wrap_{name}"
+                )
+    if rj45_cycle:
+        from embodichain.extensions.tasks.manipulation.cable.rj45_measurements import RJ45_CHECKS
+
+        for binding in scene.cables:
+            for name in RJ45_CHECKS:
+                channels[f"cables/{binding.entity_id}/rj45_{name}"] = (
+                    f"cables/{binding.simulation_uid}/rj45_{name}"
                 )
     articulations = {
         binding.entity_id: binding.simulation_uid for binding in scene.articulations
@@ -3911,6 +3932,10 @@ def _decode_configured_task_program_integration(
         cable_material=services.cable_material,
         cable_wrap=any(
             factory.call_id == "simulation.cable_wrap_phase"
+            for factory in services.registered_semantic_lowerers
+        ),
+        rj45_cycle=any(
+            factory.call_id == "simulation.franka_rj45_phase"
             for factory in services.registered_semantic_lowerers
         ),
         transport_targets={

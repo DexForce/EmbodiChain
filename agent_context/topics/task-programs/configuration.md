@@ -305,6 +305,13 @@ after closure and a simultaneous two-finger contact sample. The final
 `wrap_success` condition reads all 19 measured checks. Task components live
 under `configs/tasks/manipulation/cable/franka_rope_wrap/` in the task extension.
 
+`FrankaRj45Cycle-v1` uses `simulation.franka_rj45_phase` to lower the insertion
+cycle to `MoveJoints`. Each feedback call reads the live plug before its control
+step. The reset event owns pre-roll and attaches the monitor that supplies the
+17 checks for `rj45_success`. The cable tail attaches to the articulated plug
+through the physical environment declaration. Benchmark replays consume the
+recorded position and velocity targets for this program.
+
 The configured lowerer allowlist also exposes profile-owned Park, AxisAlign,
 relative Place and coordinated transport. Their declarations in
 `integrations/_configured_services.py` select exact Atomic Skill descriptors;

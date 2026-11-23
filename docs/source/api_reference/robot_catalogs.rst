@@ -639,6 +639,31 @@ and cache prefixes while using the shared core download and locking services.
 .. autofunction:: embodichain.extensions.robots.robotiq.two_finger.robotiq85_joint_positions
 
 
+embodichain.extensions.robots.franka.rj45_assets
+------------------------------------------------
+
+Both replay backends use the same derived Franka, plug and socket models.
+The Franka derivative retains the original joints and inertias and replaces
+the finger geometry with the narrow jaws calibrated for the RJ45 cycle.
+The fixture derives the GLB appearance and fixed socket mount from the
+verified archive while preserving the plug's passive latch and collision
+geometry.
+
+.. currentmodule:: embodichain.extensions.robots.franka.rj45_assets
+
+.. autosummary::
+
+   FrankaRj45
+   Rj45Fixture
+   get_rj45_models
+
+.. autoclass:: FrankaRj45
+
+.. autoclass:: Rj45Fixture
+
+.. autofunction:: get_rj45_models
+
+
 embodichain.extensions.robots.i2rt.yam
 --------------------------------------
 
