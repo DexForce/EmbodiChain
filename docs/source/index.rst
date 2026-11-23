@@ -45,6 +45,7 @@ Table of Contents
    :caption: Features
    :glob:
 
+   features/mcp/index
    features/online_data.md
    features/neural_dynamics.md
    features/generative_sim/index*

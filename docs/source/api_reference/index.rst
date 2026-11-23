@@ -84,6 +84,7 @@ documentation. CI runs this same checker after style checks and before tests.
 .. toctree::
    :maxdepth: 1
 
+   embodichain/embodichain.mcp
    public_api
    embodichain/embodichain.gen_sim.task_engine
    benchmarks
