@@ -376,7 +376,7 @@ def _field_projection(field, descriptor, expected_names=None):
         )
 
         if quantity.startswith("rj45_"):
-            from embodichain_tasks.manipulation.cable.rj45_measurements import (
+            from embodichain.extensions.tasks.manipulation.cable.rj45_measurements import (
                 RJ45_CHECKS,
             )
 
@@ -384,7 +384,7 @@ def _field_projection(field, descriptor, expected_names=None):
                 return None
             contract = ("arena", "scalar", ("1",), (1,))
         elif quantity.startswith("wrap_"):
-            from embodichain_tasks.manipulation.cable.wrap_measurements import (
+            from embodichain.extensions.tasks.manipulation.cable.wrap_measurements import (
                 WRAP_CHECKS,
             )
 
