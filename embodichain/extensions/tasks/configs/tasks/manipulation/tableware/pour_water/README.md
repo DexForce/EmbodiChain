@@ -49,11 +49,18 @@ change. These are individual trials.
 
 ## Run locally
 
-From the repository root, using the project's simulation Python environment:
+The first command launches the original CobotMagic rigid-body demonstration
+on Default physics. The second launches the Newton fluid deployment and
+checks the volume received by the cup.
 
 ```bash
 python -m embodichain run-task \
-  --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml
+  --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml \
+  --physics default
+
+python -m embodichain run-task \
+  --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.fluid.yaml \
+  --physics newton
 ```
 
 The registered `PourWaterAssets` bundle downloads and extracts automatically
@@ -116,10 +123,18 @@ planner. The pour segment reports motion completion. Final acceptance counts sim
 cup position validators and both settling policies. Physical attachment and
 release evidence are also reported as unavailable by this deployment.
 
-Check structure with `inspect_deployment.py --strict-contracts` for
-`task.cobotmagic.yaml`. The episode instruction, each stage instruction,
-resolved evidence and acceptance are retained in segment reports and
-dataset fragments.
+From the repository root, inspect the fluid deployment's strict segment contracts.
+
+```bash
+PYTHONPATH=. python .agents/skills/add-task-program/scripts/inspect_deployment.py --strict-contracts \
+  embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.fluid.yaml
+```
+
+The final `water_received` rule is defined in
+[evaluation.fluid.yaml](task_program/evaluation.fluid.yaml).
+
+Segment reports and dataset fragments retain the episode and stage instructions,
+resolved evidence and acceptance.
 
 ## Tianji Marvin deployment
 

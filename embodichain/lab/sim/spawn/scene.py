@@ -84,6 +84,7 @@ class SpawnScene:
             collision_policy="isolated",
         )
         self._assets: dict[str, _AssetDeclaration] = {}
+        self._reserved_visual_names: set[str] = set()
         self._usd_texture_files = _UsdTextureFiles()
         self._usd_source_files = ExitStack()
         if renderer is None:
@@ -210,10 +211,14 @@ class SpawnScene:
         return uid in self._assets
 
     def _require_available_uid(self, uid: str) -> None:
-        if uid in self._assets or any(
-            item.name == uid
-            for collection in ("mesh_objects", "scene_entities")
-            for item in getattr(self.builder, collection, ())
+        if (
+            uid in self._assets
+            or uid in getattr(self, "_reserved_visual_names", ())
+            or any(
+                item.name == uid
+                for collection in ("mesh_objects", "scene_entities")
+                for item in getattr(self.builder, collection, ())
+            )
         ):
             raise ValueError(f"Spawn asset uid is already declared: {uid!r}.")
 
@@ -711,6 +716,7 @@ class SpawnScene:
             )
             if binding is not None:
                 binding.handles.clear()
+                binding._scene_gaussian_handles.clear()
                 binding.gaussian_batch = None
                 binding.materials.clear()
                 binding.default_materials.clear()
@@ -721,6 +727,7 @@ class SpawnScene:
         finally:
             self.builder.result = None
             self._assets.clear()
+            getattr(self, "_reserved_visual_names", set()).clear()
             self._usd_texture_files.close()
             self._usd_source_files.close()
             getattr(self, "_no_render_material_definitions", {}).clear()

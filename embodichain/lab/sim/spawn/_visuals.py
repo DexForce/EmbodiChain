@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from pathlib import Path
 import numpy as np
 import torch
@@ -32,6 +32,9 @@ from ..cfg.visuals import (
     _file_visual_binding_elements,
     _resolve_visual_path,
 )
+
+if TYPE_CHECKING:
+    from dexsim.scene import SpawnedGaussianSplat
 
 
 def _semantic_mesh_arrays(shape: Any) -> tuple[np.ndarray, np.ndarray]:
@@ -90,6 +93,7 @@ class _VisualBinding:
         self.elements: list[_Element] = []
         self.revision = -1
         self.handles: list[tuple[Any, ...]] = []
+        self._scene_gaussian_handles: dict[str, SpawnedGaussianSplat] = {}
         self.gaussian_batch = None
         self.gaussian_rows: list[tuple[int, int]] = []
         self.semantic: tuple[torch.Tensor, torch.Tensor] | None = None
@@ -222,15 +226,18 @@ class _VisualBinding:
                     f"Unknown visual links on {self.owner.uid!r}: {sorted(missing)}"
                 )
         existing = {desc.name for desc in self.spawn.builder.scene_desc.iter_entities()}
+        existing.update(getattr(self.spawn, "_reserved_visual_names", ()))
         conflicts = existing.intersection(element.name for element in self.elements)
         if conflicts:
             raise ValueError(
                 f"Visual resource names already exist: {sorted(conflicts)}"
             )
         added = []
+        deferred = []
         try:
             for element in self.elements:
                 if self._uses_finalized_scene(element):
+                    deferred.append(element.name)
                     continue
                 method = (
                     self.spawn.builder.add_gaussian_splat
@@ -248,18 +255,24 @@ class _VisualBinding:
                 )
                 method(element.name)
             raise
+        if deferred:
+            self.spawn._reserved_visual_names.update(deferred)
+
+    def _remove_scene_gaussian(self, scene: Any, path: str) -> None:
+        handle = self._scene_gaussian_handles[path]
+        if scene is not None and scene.handles.get(path) is handle:
+            scene.remove_gaussian_splat(path)
+        del self._scene_gaussian_handles[path]
 
     def remove(self) -> None:
         self.gaussian_batch = None
         self.handles.clear()
+        scene = self.spawn.builder.result
+        for path in reversed(tuple(self._scene_gaussian_handles)):
+            self._remove_scene_gaussian(scene, path)
         for element in reversed(self.elements):
             if self._uses_finalized_scene(element):
-                scene = self.spawn.builder.result
-                if scene is not None:
-                    for arena in self.spawn.arena_names:
-                        path = f"{arena}/{element.name}"
-                        if path in scene.handles:
-                            scene.remove_gaussian_splat(path)
+                self.spawn._reserved_visual_names.discard(element.name)
                 continue
             method = (
                 self.spawn.builder.remove_gaussian_splat
@@ -270,27 +283,43 @@ class _VisualBinding:
 
     def _materialize_scene_gaussians(self, scene: Any) -> None:
         """Bind render-only splats through the finalized Newton scene."""
+        from dexsim.scene import SpawnedGaussianSplat
+
         added = []
         try:
             for element in self.elements:
                 if not self._uses_finalized_scene(element):
                     continue
                 source = None
+                missing = []
                 for arena in self.spawn.arena_names:
-                    handle = scene.handles.get(f"{arena}/{element.name}")
+                    path = f"{arena}/{element.name}"
+                    handle = scene.handles.get(path)
                     if handle is None:
-                        if source is None:
-                            handle = scene.add_gaussian_splat(element.descriptor, arena)
-                        else:
-                            handle = scene.clone_gaussian_splat(
-                                source.path, element.name, arena
-                            )
-                        added.append(handle.path)
-                    if source is None:
+                        missing.append((arena, path))
+                    elif (
+                        not isinstance(handle, SpawnedGaussianSplat)
+                        or self._scene_gaussian_handles.get(path) is not handle
+                    ):
+                        raise ValueError(
+                            f"Gaussian companion path already exists: {path}"
+                        )
+                    elif source is None:
                         source = handle
+                for arena, path in missing:
+                    if source is None:
+                        source = handle = scene.add_gaussian_splat(
+                            element.descriptor, arena
+                        )
+                    else:
+                        handle = scene.clone_gaussian_splat(
+                            source.path, element.name, arena
+                        )
+                    self._scene_gaussian_handles[path] = handle
+                    added.append(path)
         except Exception:
             for path in reversed(added):
-                scene.remove_gaussian_splat(path)
+                self._remove_scene_gaussian(scene, path)
             raise
 
     def bind(self, scene: Any) -> None:
@@ -333,10 +362,10 @@ class _VisualBinding:
                     np.asarray(faces), dtype=torch.int32, device=owner.device
                 ),
             )
+        self._materialize_scene_gaussians(scene)
         for handle in owner._entities:
             for link in self.groups:
                 scene.clear_visual_meshes(handle.path, link_name=link)
-        self._materialize_scene_gaussians(scene)
         self.handles = [
             tuple(
                 scene.handles[f"{arena}/{e.name}"] for arena in self.spawn.arena_names

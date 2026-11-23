@@ -36,6 +36,8 @@ Dimensions are checked against built batched spaces. Policies live under
 
 `trainer.gym_config` discovers installed task packages/init hooks, decodes the
 Gym config, applies explicit runtime overrides and builds a registered env.
+The resolved Gym file supplies the base directory for its components, including
+when a packaged training recipe runs from outside the checkout.
 Omitted renderer preserves file selection. Recording/eval camera demand is
 resolved before the first World. Simulator tasks use standard rollouts and
 reject differentiable algorithms. Supported task IDs declare RL capability or

@@ -56,6 +56,7 @@ program:
   - kind: object_relative_position
     object: block_1
     reference: block_2
+    reference_frame: parent
     position_offset:
     - -0.09
     - 0.0
@@ -91,6 +92,7 @@ program:
   - kind: object_relative_position
     object: block_3
     reference: block_2
+    reference_frame: parent
     position_offset:
     - 0.09
     - 0.0
@@ -102,6 +104,7 @@ program:
   - kind: object_relative_position
     object: block_1
     reference: block_2
+    reference_frame: parent
     position_offset:
     - -0.09
     - 0.0

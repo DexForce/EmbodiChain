@@ -256,8 +256,10 @@ Gaussian appearance cannot be replaced by an explicit `visuals` list. The
 standalone `GaussianSplatCfg` path retains its per-instance randomization API.
 A render-only `VisualObjectCfg` can use explicit Gaussian elements with
 Newton physics. Spawn borrows the finalized Scene to create and replicate
-the render handles, independently of Newton's physics model. Gaussian
-replacements on physical objects still require Default.
+the render handles, independently of Newton's physics model. Declaring the
+owner reserves companion names for the lifetime of the declaration. The
+binding reuses and removes only the handles it created. Gaussian replacements
+on physical objects still require Default.
 NoRender omits the USD Gaussian render resource but keeps its authored physics
 and collision descriptions, including replicated bodies. Type queries retain
 the authored visual reference without allocating Gaussian points.

@@ -652,14 +652,32 @@ def test_carton_source_and_ordinary_rgbd_deployments_without_loading_assets(
     assert "--dataset-dir" not in deployments["panda_rgbd"].command
 
 
-def test_grouped_runtime_deployments_keep_identity_and_purpose(task_root, monkeypatch):
+@pytest.mark.parametrize("variant", [False, True], ids=["primary", "variant"])
+def test_grouped_runtime_deployments_keep_identity_and_purpose(
+    task_root, monkeypatch, variant: bool
+) -> None:
     from types import SimpleNamespace
     from embodichain.lab.gym.utils import registration
     from embodichain.learning.rl import env
 
     path = task_root / "manipulation/pick/catalog.yaml"
     write(path, {**json.loads(path.read_text()), "group": "pick_place"})
-    cls = type("PickEnv", (), {"__module__": "demo.manipulation.pick"})
+    if variant:
+        directory = task_root / "manipulation/alternate"
+        write(directory / "task.yaml", {"id": "Alternate-v1", "physics": "default"})
+        write(
+            directory / "catalog.yaml",
+            {
+                "task_key": "alternate",
+                "variant_of": "pick",
+                "title": "Alternate Pick",
+                "summary": "An additional deployment for picking.",
+                "default_deployment": "alternate",
+                "deployments": {"alternate": {"config": "task.yaml"}},
+            },
+        )
+    module = "demo.manipulation.alternate" if variant else "demo.manipulation.pick"
+    cls = type("PickEnv", (), {"__module__": module})
     spec = SimpleNamespace(
         cls=cls,
         supports_handwritten_demo=False,
@@ -683,16 +701,21 @@ def test_grouped_runtime_deployments_keep_identity_and_purpose(task_root, monkey
     )
     roots = {"demo": task_root}
     static = catalog._load_catalog(roots)
-    assert {d.name for d in catalog._select_task(static, "pick").deployments} == {
-        "a",
-        "b",
-    }
+    configured = {"a", "b", "alternate"} if variant else {"a", "b"}
+    assert {
+        d.name for d in catalog._select_task(static, "pick").deployments
+    } == configured
     tasks = catalog._load_catalog(roots, runtime_packages=["demo"])
     (pick,) = tasks
     assert catalog._select_task(tasks, "demo:pick") is pick
     assert pick.task_path == ("manipulation", "pick_place", "pick")
+    if variant:
+        alias = catalog._select_task(tasks, "demo:alternate")
+        assert alias.key == pick.key
+        assert alias.default_deployment == "alternate"
+        assert [d.env_id for d in alias.deployments] == ["Alternate-v1"]
     training = catalog._portfolio_view(tasks, "training", False)
-    assert {d.name for d in training[0].deployments} == {"a", "b", "PickAlt"}
+    assert {d.name for d in training[0].deployments} == configured | {"PickAlt"}
     assert [
         d.name for d in catalog._portfolio_view(tasks, None, True)[0].deployments
     ] == ["PickAlt"]

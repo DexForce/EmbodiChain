@@ -65,19 +65,7 @@ def pouring(tmp_path):
     source.mkdir()
     integration = yaml.safe_load((POUR / "task_program/integration.yaml").read_text())
     program = yaml.safe_load((POUR / "task_program/program.yaml").read_text())
-    # The synthetic rigid scene uses a calibrated tilt within the adapter's domain.
-    integration["profile"]["skill_options"]["simulation.pour"] = {
-        "kind": "pour",
-        "rotate_angle": -math.pi / 3,
-    }
-    graph = yaml.safe_load((POUR / "task_program/evaluation.yaml").read_text())["graph"]
-    rules = ("bottle_lifted", "bottle_above_cup")
-    evaluation = {
-        "graph": {
-            "roots": list(rules),
-            "rules": {name: graph["rules"][name] for name in rules},
-        }
-    }
+    evaluation = yaml.safe_load((POUR / "task_program/evaluation.yaml").read_text())
     requirements = AssetRequirements(
         roles={
             "bottle": AssetRoleRequirement(

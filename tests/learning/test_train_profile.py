@@ -110,6 +110,37 @@ def test_training_passes_only_explicit_renderer_override(
     assert build_runtime.call_args.kwargs["renderer"] == renderer
 
 
+def test_training_resolves_packaged_gym_components_from_outside_checkout(
+    tmp_path, monkeypatch
+) -> None:
+    from embodichain.lab.sim.cfg.physics import NewtonPhysicsCfg
+    from embodichain.utils.utility import load_config
+
+    module = importlib.import_module("embodichain.learning.rl.train")
+    monkeypatch.chdir(tmp_path)
+    recipe = load_config(
+        "embodichain/extensions/tasks/configs/tasks/manipulation/assembly/"
+        "gear_meshing/agents/ppo.study.nominal.dexuni.yaml"
+    )
+    recipe["trainer"].update(device="cpu", num_envs=1)
+    config_path = tmp_path / "agent.json"
+    config_path.write_text(json.dumps(recipe), encoding="utf-8")
+    monkeypatch.setattr(module, "SummaryWriter", Mock())
+
+    def stop_at_simulator(env_id, *, base_env_cfg):
+        assert env_id == "BlindGearMeshingRL-StudyNominal-DexUni-v1"
+        physics = base_env_cfg.sim_cfg.physics_cfg
+        assert isinstance(physics, NewtonPhysicsCfg)
+        assert physics.solver_cfg["solver_type"] == "dexuni"
+        raise RuntimeError("resolved deployment reached the simulator boundary")
+
+    monkeypatch.setattr("embodichain.learning.rl.runtime.build_env", stop_at_simulator)
+    with pytest.raises(
+        RuntimeError, match="resolved deployment reached the simulator boundary"
+    ):
+        train_from_config(str(config_path))
+
+
 def test_camera_recording_defaults_to_the_run_directory(tmp_path):
     params = _event_params(
         {"func": "record_camera_data_async", "params": {"name": "main"}},

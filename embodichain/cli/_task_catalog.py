@@ -241,7 +241,7 @@ class _Task:
     deployments: list[_Deployment]
     readme: Traversable | None = None
     aliases: dict[str, _Deployment] = field(default_factory=dict)
-    source_path: tuple[str, ...] = ()
+    source_paths: set[tuple[str, ...]] = field(default_factory=set)
 
     @property
     def qualified_key(self) -> str:
@@ -548,7 +548,7 @@ def _load_catalog(
                 deployments,
                 readme if readme.is_file() else None,
                 aliases,
-                source_path=task_path,
+                source_paths={task_path},
             )
             if "variant_of" in metadata:
                 variants.append((task, _text(metadata["variant_of"], "variant_of")))
@@ -572,6 +572,7 @@ def _load_catalog(
                 f"Duplicate deployment in {parent.qualified_key}: {deployment.name}"
             )
         parent.deployments.append(deployment)
+        parent.source_paths.update(variant.source_paths)
         parent.aliases.update(variant.aliases)
         parent.aliases[variant.key.casefold()] = deployment
     for task in tasks:
@@ -738,8 +739,7 @@ def _augment_runtime(tasks: list[_Task], task_packages: Sequence[str]) -> None:
                 (
                     t
                     for t in tasks
-                    if t.package == package
-                    and (t.source_path or t.task_path) == task_path
+                    if t.package == package and task_path in t.source_paths
                 ),
                 None,
             )
@@ -753,6 +753,7 @@ def _augment_runtime(tasks: list[_Task], task_packages: Sequence[str]) -> None:
                     (),
                     None,
                     [],
+                    source_paths={task_path},
                 )
                 tasks.append(task)
             deployment = _Deployment(env_id, env_id, None, None, None, (), set())

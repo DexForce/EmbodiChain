@@ -370,8 +370,9 @@ capabilities remain deployment-specific. An optional `group` inserts a browsing
 subdomain. Runtime registration matches the original module path, which stays
 independent of that browsing subdomain. A single-deployment catalog may use
 `variant_of` to publish its deployment under another primary task in the same
-package. Its original key selects that deployment in `show-task`. A deployment can also declare an `alias` for a
-previously inferred task key. Package-owned `configs/tasks/portfolio.yaml` assigns
+package. Runtime registrations from the variant module join the primary task.
+The variant key still selects its declared deployment in `show-task`. A
+deployment can also declare an `alias` for a previously inferred task key. Package-owned `configs/tasks/portfolio.yaml` assigns
 browsing purposes by logical key, with deployment overrides and featured
 selections. Runtime discovery applies these after merging registered and packaged
 deployments. Static discovery shows only config-backed or inferred agent entries
