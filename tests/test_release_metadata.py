@@ -218,12 +218,11 @@ def test_project_metadata_has_no_direct_dependencies() -> None:
         ("0.6.0.dev11491", False),
         ("0.6.0rc1", False),
         ("0.6.0rc2", False),
-        ("0.6.0", True),
+        ("0.6.0", False),
+        ("0.6.1rc1", True),
     ],
 )
-def test_dexsim_dependency_selects_cable_release_wheel(
-    version: str, supported: bool
-) -> None:
+def test_dexsim_dependency_pins_rc1(version: str, supported: bool) -> None:
     requirements = [
         Requirement(value)
         for value in _read_project_metadata()["project"]["dependencies"]

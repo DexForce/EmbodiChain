@@ -114,7 +114,7 @@ trigger recording; the Python host starts and stops it.
 ## DexSim boundaries
 
 - Requires Linux/NVIDIA, loadable WebRTC streaming libraries, and NVENC. The
-  pinned SDK is `dexsim_engine==0.6.0`. Its Python API exposes
+  pinned SDK is `dexsim_engine==0.6.1rc1`. Its Python API exposes
   `WebApplication` and startup `WorldConfig.webrtc_*` settings.
   The published Linux x86_64 Python 3.12 release artifact passes native library
   loading and browser media acceptance without binary repairs. The manager

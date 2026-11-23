@@ -4,8 +4,8 @@ See the [Precision Assembly guide](../../../docs/source/features/toolkits/precis
 for functional entry points, embedded native recordings, reproducible commands
 and the original mjfit paper citation.
 
-DexSim 0.6.0, 0.6.0rc1 and 0.6.0rc2 drop child colliders under disabled rigid
-bodies in static compound USD imports. EmbodiChain rejects that loss explicitly.
+DexSim 0.6.0rc1, 0.6.0rc2, 0.6.0 and 0.6.1rc1 drop child colliders under
+disabled rigid bodies in static compound USD imports. EmbodiChain rejects that loss explicitly.
 Use direct manifests for runtime construction with these versions. Python 3.12
 direct-compound construction, raw-contact checks and native RGB previews were
 verified with rc2.

@@ -156,7 +156,7 @@ the engine and check its build, run:
 ```bash
 python -m pip install --index-url https://pypi.org/simple \
   --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site \
-  dexsim-engine==0.6.0
+  dexsim-engine==0.6.1rc1
 python -c "import dexsim; from dexsim.scene import SpawnedCable; print(dexsim.__version__, dexsim.__commit_id__)"
 ```
 
