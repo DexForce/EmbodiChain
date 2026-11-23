@@ -5311,6 +5311,75 @@ before the motion clock starts.
    settle_franka_rope
    task_directory
 
+embodichain.extensions.tasks.manipulation.cable.rj45_evaluation
+---------------------------------------------------------------
+
+Capture the settled state and observe the live contacts and poses on the
+control sampling clock. The monitor is replaced on each full reset.
+
+.. currentmodule:: embodichain.extensions.tasks.manipulation.cable.rj45_evaluation
+
+.. autosummary::
+
+   attach_rj45_monitor
+
+embodichain.extensions.tasks.manipulation.cable.rj45_integration
+----------------------------------------------------------------
+
+Bind a YAML RJ45 phase and the live plug state to the position and velocity
+targets executed by ``MoveJoints``.
+
+.. currentmodule:: embodichain.extensions.tasks.manipulation.cable.rj45_integration
+
+.. autosummary::
+
+   FrankaRj45PhaseFactory
+
+embodichain.extensions.tasks.manipulation.cable.rj45_measurements
+-----------------------------------------------------------------
+
+Measure plug, latch, robot and cable states and evaluate the original 17
+physical acceptance conditions from the measured frames.
+
+.. currentmodule:: embodichain.extensions.tasks.manipulation.cable.rj45_measurements
+
+.. autosummary::
+
+   RJ45_CHECKS
+   evaluate_rj45
+   measure_rj45_frame
+
+embodichain.extensions.tasks.manipulation.cable.rj45_motion
+-----------------------------------------------------------
+
+Build the calibrated full-joint path and tool-pose references, including the
+frame-zero position. Feedback retains the measured grasp transforms for
+tracking the plug during the operation.
+
+.. currentmodule:: embodichain.extensions.tasks.manipulation.cable.rj45_motion
+
+.. autosummary::
+
+   Rj45Feedback
+   Rj45Motion
+   plan_rj45_motion
+
+embodichain.extensions.tasks.manipulation.cable.rj45_scene
+----------------------------------------------------------
+
+Load the configured physical scene and the original 97-point centerline.
+The reset functor settles the scene before starting the program clock and
+registers the contact and pose monitor.
+
+.. currentmodule:: embodichain.extensions.tasks.manipulation.cable.rj45_scene
+
+.. autosummary::
+
+   cable_points
+   load_config
+   settle_franka_rj45
+   task_directory
+
 embodichain.extensions.tasks.manipulation.cable.route_the_cable
 ---------------------------------------------------------------
 

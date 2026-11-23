@@ -25,10 +25,18 @@ __all__ = ["apply_rope_pads"]
 def apply_rope_pads(
     root: ET.Element,
     *,
+    stem_size: Sequence[float] = (0.018, 0.008, 0.04),
     center: Sequence[float] = (0, 0.002, 0.04175),
     size: Sequence[float] = (0.028, 0.004, 0.0135),
 ) -> None:
-    """Replace finger geometry, preserving the original inertias and joint frames."""
+    """Replace finger geometry, preserving the original inertias and joint frames.
+
+    Args:
+        root: FR3 URDF robot element containing both finger links.
+        stem_size: XYZ dimensions of each finger stem in metres.
+        center: XYZ position of each pad in its finger frame, in metres.
+        size: XYZ dimensions of each pad in metres.
+    """
     for name in ("fr3_leftfinger", "fr3_rightfinger"):
         link = root.find(f"link[@name='{name}']")
         if link is None:
@@ -40,7 +48,7 @@ def apply_rope_pads(
             link,
             name + "_stem",
             (0, 0.004, 0.02),
-            (0.018, 0.008, 0.04),
+            stem_size,
             ".08 .09 .11 1",
         )
         _box(link, name + "_tip", center, size, ".16 .18 .21 1")

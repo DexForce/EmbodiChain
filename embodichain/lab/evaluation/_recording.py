@@ -375,7 +375,15 @@ def _field_projection(field, descriptor, expected_names=None):
             _CABLE_METRIC_UNITS,
         )
 
-        if quantity.startswith("wrap_"):
+        if quantity.startswith("rj45_"):
+            from embodichain_tasks.manipulation.cable.rj45_measurements import (
+                RJ45_CHECKS,
+            )
+
+            if quantity.removeprefix("rj45_") not in RJ45_CHECKS:
+                return None
+            contract = ("arena", "scalar", ("1",), (1,))
+        elif quantity.startswith("wrap_"):
             from embodichain_tasks.manipulation.cable.wrap_measurements import (
                 WRAP_CHECKS,
             )
