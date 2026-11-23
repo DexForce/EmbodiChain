@@ -63,8 +63,8 @@ incomplete quality report and no certification; neither packaging nor native
 RGB admission establishes industrial READY or metric Gaussian depth.
 
 Use `RenderCfg.for_gaussian(gaussian={"apply_display_srgb": False})` for these
-display-referred colors. The flag is fixed before World creation and shared
-by all Gaussian assets in that World.
+display-referred colors. The flag sets the sRGB transfer for the entire
+rendered frame before World creation.
 
 The data licenses remain upstream. In particular, DISCOVERSE's model repository
 does not provide an asset license; this package retains `license: null` and does

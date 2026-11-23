@@ -4,8 +4,8 @@
 
 Use Linux x86-64 with an NVIDIA GPU that supports Vulkan and OptiX and a
 driver compatible with CUDA 12.8. Training uses CUDA bfloat16. Cube dynamics
-use the DexUni CPU solver from DexSim Engine 0.6.0. Allow about 138 GiB for the
-downloaded archive and extracted HDF5, plus space for run outputs.
+use the DexUni CPU solver. Allow about 138 GiB for the downloaded archive and
+extracted HDF5, plus space for run outputs.
 
 From the repository root, create a Python 3.12 virtual environment and
 install the CUDA wheels, EmbodiChain with geometry support, and the pinned
@@ -40,7 +40,7 @@ listed GPUs. Eval uses `--gpu-id` for the camera and `--device` for CEM.
 
 To run Cube under Python 3.11, use `python3.11` in the setup above and
 install `torch==2.7.0` and `torchvision==0.22.0` from the same CUDA 12.8
-index. The Cube requirements pin MuJoCo 3.15.0 for the runtime.
+index. The Cube requirements pin MuJoCo 3.17.0 for the runtime.
 
 To compile assets with the original MuJoCo 3.11.0 version, repeat the Python
 3.11 setup in a separate virtual environment named `.venv-cube-reference`.

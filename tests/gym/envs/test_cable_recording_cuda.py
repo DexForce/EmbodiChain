@@ -288,7 +288,17 @@ def _run_recording(urdf: str, usd: str) -> None:
             expected_final[..., :3] -= source_origin
             observed = env.sim.get_cable_object(uid).data.segment_state_w.cpu()
             observed[..., :3] -= env.sim.arena_offsets.cpu()[:, None, :]
-            torch.testing.assert_close(observed, expected_final, atol=2e-6, rtol=1e-5)
+            torch.testing.assert_close(
+                observed[..., :7], expected_final[..., :7], atol=2e-6, rtol=1e-5
+            )
+            # Across arena origins, FP32 position rounding can change the
+            # recomputed linear velocity by a few micrometres per second.
+            torch.testing.assert_close(
+                observed[..., 7:10], expected_final[..., 7:10], atol=5e-6, rtol=1e-5
+            )
+            torch.testing.assert_close(
+                observed[..., 10:], expected_final[..., 10:], atol=2e-6, rtol=1e-5
+            )
     finally:
         if env is not None:
             env.close(exit_process=False)

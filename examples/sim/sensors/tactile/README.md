@@ -1,9 +1,9 @@
 # Geometric tactile indentation
 
-Run from the root of an installed EmbodiChain checkout with DexSim 0.6.0rc1
-(or a compatible SDK), Torch, Warp, and Matplotlib. The tested path is the
-Default physics backend on CPU with DexSim offscreen rendering. Install FFmpeg
-with an H.264 encoder for the optional video.
+Run from the root of an installed EmbodiChain checkout with Torch, Warp, and
+Matplotlib. The tested path uses the Default physics backend on CPU with DexSim
+offscreen rendering. Install FFmpeg with an H.264 encoder for the optional
+video.
 
 The scene panel is a DexSim Hybrid camera capture of the sampled state.
 It requires an NVIDIA GPU with native camera rendering support, even when
@@ -67,10 +67,9 @@ geometric-model parameters. For physical use, calibrate them for the pad.
 
 Use a CUDA-enabled DexSim SDK that exposes
 `Scene.get_hydroelastic_contact_capabilities()` and
-`Scene.get_hydroelastic_contact_surface()`. The preview was recorded with the
-DexSim 0.6.0 completed-surface candidate (Python 3.11). Use the
-Newton MuJoCo Warp solver with `use_mujoco_contacts=False`, collision
-`update_interval=1`, and `output_contact_surface=True`. Install `trimesh`
+`Scene.get_hydroelastic_contact_surface()`. Use the Newton MuJoCo Warp solver
+with `use_mujoco_contacts=False`, collision `update_interval=1`, and
+`output_contact_surface=True`. Install `trimesh`
 alongside the plotting dependencies above.
 
 ```bash
@@ -85,3 +84,6 @@ record `surface_complete`, collision generation and substep. An empty
 complete snapshot is labeled “Complete · no faces”. Missing or truncated
 snapshots mask the surface panels. The other demo modes use only geometric
 queries and run without the completed-surface SDK.
+
+The reference preview was recorded with the DexSim 0.6.0 completed-surface
+candidate on Python 3.11.
