@@ -53,6 +53,7 @@ from embodichain.lab.sim.cfg import (
 from embodichain.lab.sim.material import VisualMaterialCfg
 from embodichain.lab.sim.sensors import CameraCfg
 from embodichain.lab.sim.shapes import CubeCfg, PlaneCfg
+from embodichain.lab.visualization.cfg import VisualizationCfg
 from embodichain.utils import configclass
 from embodichain.utils.math import matrix_from_quat
 
@@ -169,6 +170,7 @@ class OGBenchCubeCfg(EnvCfg):
             },
         ),
         headless=True,
+        visualization=VisualizationCfg(backend="none"),
         enable_ground_plane=False,
     )
     max_episode_steps: int = 100
