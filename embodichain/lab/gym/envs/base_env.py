@@ -20,7 +20,7 @@ import zlib
 
 import inspect
 from copy import deepcopy
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from numbers import Real
 
 import torch
@@ -610,15 +610,17 @@ class BaseEnv(gym.Env):
         """Initialize the simulation state at the beginning of scene creation."""
         pass
 
-    def _advance_physics(self) -> None:
-        """Advance physics and sample opted-in sensors after each substep."""
+    def _advance_physics(
+        self, *, after_substep: Callable[[float], None] | None = None
+    ) -> None:
+        """Advance physics and run sensors and task observations after each substep."""
         sensors = [
             sensor
             for sensor in self.sensors.values()
             if sensor.requires_substep_update
             and getattr(getattr(sensor, "cfg", None), "sample_phase", None) is None
         ]
-        if not sensors:
+        if not sensors and after_substep is None:
             self.sim.update(
                 self.physics_dt,
                 self.cfg.sim_steps_per_control,
@@ -631,6 +633,8 @@ class BaseEnv(gym.Env):
         def sample_substep(dt: float) -> None:
             for sensor in sensors:
                 sensor.update_physics_step(dt)
+            if after_substep is not None:
+                after_substep(dt)
 
         self.sim.update(
             self.physics_dt,

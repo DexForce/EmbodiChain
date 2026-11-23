@@ -160,7 +160,6 @@ class _WhiteboardDrawTableEnv(EmbodiedEnv):
         )
         self._ink = _Ink()
         self._pressure = 0.0
-        self._previous_sample = -1
         self._ready = False
         self._withdrawn = False
         self._dropped = False
@@ -178,7 +177,6 @@ class _WhiteboardDrawTableEnv(EmbodiedEnv):
     def _initialize_episode(self, env_ids=None, **kwargs: Any) -> None:
         super()._initialize_episode(env_ids, **kwargs)
         self._ink = _Ink()
-        self._previous_sample = -1
         self._withdrawn = False
         self._pressure = 0.0
         self._dropped = False
@@ -222,41 +220,49 @@ class _WhiteboardDrawTableEnv(EmbodiedEnv):
         nib = self._pen.get_link_pose("nib", to_matrix=True)
         return nib[:, :3, 3] + 0.00375 * nib[:, :3, 2]
 
-    def _sample_ink(self) -> None:
-        step = int(self._elapsed_steps[0])
-        if step == self._previous_sample:
+    def _advance_physics(self) -> None:
+        samples: list[torch.Tensor] = []
+
+        def observe(dt: float) -> None:
+            samples.append(self._sample_nib(dt))
+
+        super()._advance_physics(after_substep=observe)
+        if not samples:
             return
-        self._previous_sample = step
+        # Transfer only the compact samples to the CPU raster, once per control step.
+        measured = torch.stack(samples).cpu().numpy()
+        tip_x, _, _, pressure, _, dropped = measured[-1]
+        self._withdrawn = bool(tip_x <= _CENTER[0] - _WITHDRAWAL_CLEARANCE)
+        self._pressure = float(pressure)
+        self._dropped = bool(dropped)
+        for _, y, z, _, writes, _ in measured:
+            point = (
+                np.array((_CENTER[1] - float(y), float(z) - _CENTER[2]))
+                if writes
+                else None
+            )
+            self._ink.stamp(point)
+
+    def _sample_nib(self, dt: float) -> torch.Tensor:
         marker = self._pen.get_local_pose(to_matrix=True)[0]
         tcp = self._tcp()[0]
         axis = marker[:3, 2]
         tip = self._marker_tip()[0]
-        self._withdrawn = bool(tip[0] <= _CENTER[0] - _WITHDRAWAL_CLEARANCE)
         held_origin = tcp[:3, 3] + _TCP_FROM_MARKER_ORIGIN * tcp[:3, 2]
         translation_error = (marker[:3, 3] - held_origin).norm()
         axis_alignment = axis @ tcp[:3, 2]
-        self._dropped = bool(translation_error > 0.025 or axis_alignment < 0.85)
+        dropped = (translation_error > 0.025) | (axis_alignment < 0.85)
         self._sensor.update()
         sample = self._sensor.get_data()
         contacts = sample["position"][0]
         near_tip = (contacts - tip).norm(dim=-1) <= 0.012
         loaded = sample["is_valid"][0] & sample["impulse_valid"][0] & near_tip
-        force = (
-            sample["impulse"][0, loaded] * sample["normal"][0, loaded, 0].abs()
+        impulse = torch.where(
+            loaded, sample["impulse"][0] * sample["normal"][0, :, 0].abs(), 0.0
         ).sum()
-        self._pressure = float(force) / (self.step_dt / self.cfg.sim_steps_per_control)
-        writes = (
-            bool(loaded.any())
-            and self._pressure > 0
-            and float(axis[0]) > 0.20
-            and not self._dropped
-        )
-        point = (
-            np.array((_CENTER[1] - float(tip[1]), float(tip[2]) - _CENTER[2]))
-            if writes
-            else None
-        )
-        self._ink.stamp(point)
+        pressure = impulse / self._sensor.get_impulse_duration(dt)
+        writes = (pressure > 0) & (axis[0] > 0.20) & ~dropped
+        return torch.cat((tip, torch.stack((pressure, writes, dropped))))
 
     def _acceptance(self) -> tuple[bool, dict[str, Any]]:
         coverage, gaps, stray = self._ink.measure()
@@ -275,7 +281,6 @@ class _WhiteboardDrawTableEnv(EmbodiedEnv):
         """Grade measured markings once the held tip clears the drawing surface."""
         if not getattr(self, "_ready", False):
             return super().compute_task_state(**kwargs)
-        self._sample_ink()
         accepted, metrics = (
             self._acceptance() if self._withdrawn and self._ink.cells else (False, {})
         )

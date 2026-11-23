@@ -6,7 +6,8 @@ feedback from the measured nib pose, and a pressure loop. The marker is a
 free articulation with a spring-loaded nib. Its mechanical collars help keep
 it in the gripper.
 
-Ink is stamped into a 1 mm raster from measured nib-to-board contacts.
+Ink is stamped into a 1 mm raster from measured nib-to-board contacts at every
+physics step.
 Success requires at least 90% coverage on each of the seven lines, no gap
 longer than 10 mm, and at most 1 cm² outside the prescribed line bands. The
 environment checks the same measured ink during expert execution and dynamic
