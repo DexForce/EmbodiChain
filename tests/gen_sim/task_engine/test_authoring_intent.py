@@ -17,12 +17,14 @@
 from __future__ import annotations
 
 import json
+import re
 from copy import deepcopy
 
 from PIL import Image
 import pytest
 
 from embodichain.gen_sim.services import GenSimServices, GenSimServicesCfg, compat
+from embodichain.gen_sim.task_engine._review import write_review
 from embodichain.gen_sim.task_engine.authoring_intent import (
     AuthoringEvidenceError,
     compile_intent,
@@ -51,8 +53,8 @@ def _fact(kind, subjects, references="", **fields):
     return fact
 
 
-def _relation(value, subjects, references):
-    return _fact("relation", subjects, references, value=value)
+def _relation(value, subjects, references, **fields):
+    return _fact("relation", subjects, references, value=value, **fields)
 
 
 def _step(verb, subjects, *effects, arms="auto", quote=_SOURCE, **fields):
@@ -107,6 +109,40 @@ def test_auto_grasps_reserve_capacity_until_release():
         )
     plan["steps"].insert(2, _step("release", "a"))
     assert len(_validate(plan)["steps"]) == 4
+
+
+@pytest.mark.parametrize("release_other", [False, True])
+def test_auto_owner_cannot_change_without_a_handover(release_other):
+    plan = _plan("a b", _step("pick", "a"), _step("pick", "b", arms="left"))
+    if release_other:
+        plan["steps"].append(_step("release", "b", arms="left"))
+    plan["steps"].append(_step("release", "a", arms="left"))
+    with pytest.raises(ValueError, match="same arm"):
+        _validate(plan)
+    plan["steps"][-1]["arms"] = ["right"]
+    assert _validate(plan)["steps"][0]["arms"] == ["auto"]
+
+
+def test_auto_owner_is_constrained_by_free_arm_actions_and_terminal_hold():
+    def reach(arm):
+        return _step(
+            "move_gripper",
+            "",
+            dict(
+                kind="gripper_relation", arms=[arm], references=["site"], value="above"
+            ),
+            arms=arm,
+        )
+
+    plan = _plan("a site", _step("pick", "a"), reach("left"), reach("right"))
+    with pytest.raises(ValueError, match="arm holdings"):
+        _validate(plan)
+    plan["steps"].pop()
+    plan["conditions"] = [_condition("final", _fact("held", "a", arms=["right"]))]
+    assert _validate(plan)["conditions"] == plan["conditions"]
+    plan["steps"].append(_step("handover", "a", arms="right left"))
+    plan["conditions"][0]["fact"]["arms"] = ["left"]
+    assert _validate(plan)["conditions"] == plan["conditions"]
 
 
 def test_release_merges_only_for_the_same_arm_and_preserves_quotes():
@@ -175,6 +211,29 @@ def test_spatial_claim_through_slot_needs_typed_exact_center():
     )
 
 
+@pytest.mark.parametrize("through_slot", [False, True])
+def test_spatial_claim_preserves_an_explicit_reference_frame(through_slot):
+    roles = dict(item="object", base="surface", slot="target")
+    evidence_subject = "slot" if through_slot else "item"
+    prefix = [_relation("at", "item", "slot")] if through_slot else []
+    claim = _relation("left_of", "item", "base", frame="robot")
+    relation = _relation("left_of", evidence_subject, "base")
+    verify_spatial_claim(claim, [*prefix, {**relation, "frame": "robot"}], roles)
+    for wrong in (relation, {**relation, "frame": "world"}):
+        with pytest.raises(AuthoringEvidenceError, match="matching typed relations"):
+            verify_spatial_claim(claim, [*prefix, wrong], roles)
+    if through_slot:
+        with pytest.raises(AuthoringEvidenceError, match="matching typed relations"):
+            verify_spatial_claim(
+                claim,
+                [{**prefix[0], "frame": "world"}, {**relation, "frame": "robot"}],
+                roles,
+            )
+    verify_spatial_claim(
+        _relation("left_of", "item", "base"), [*prefix, relation], roles
+    )
+
+
 def test_joint_relation_cannot_be_assembled_from_separate_groups():
     roles = dict.fromkeys("abcd", "object")
     claim = _relation("between", "a", "b c")
@@ -227,6 +286,172 @@ def test_audit_keeps_scope_and_does_not_accept_identity_as_action_evidence():
     with pytest.raises(ValueError, match="not roles alone"):
         _validate_intent_audit(_SOURCE, plan, _audit(_check("role_item")))
     _validate_intent_audit(_SOURCE, plan, _audit(_check("item"), _check("step_01")))
+    _validate_intent_audit(_SOURCE, plan, _audit(_check("step_01", scope="action")))
+    with pytest.raises(ValueError, match="scope"):
+        _validate_intent_audit(
+            _SOURCE, plan, _audit(_check("condition_01", scope="action"))
+        )
+
+
+def test_typed_action_uses_cited_step_effects_without_becoming_final():
+    left = _relation("left_of", "item", "base", frame="robot")
+    right = _relation("right_of", "item", "base", frame="robot")
+    plan = _validate(
+        _plan(
+            "item base",
+            _step("push", "item", left),
+            _step("push", "item", right, maintain=[left]),
+            conditions=[_condition("initial", left)],
+        )
+    )
+    action = _check("step_01", scope="action", spatial=left)
+    _validate_intent_audit(_SOURCE, plan, _audit(action))
+
+    with pytest.raises(AuthoringEvidenceError, match="step producing it"):
+        _validate_intent_audit(
+            _SOURCE, plan, _audit({**action, "evidence": ["condition_01"]})
+        )
+    for wrong in (
+        {**action, "evidence": ["step_02", "condition_01"]},
+        {**action, "spatial": {**left, "frame": "world"}},
+        {**action, "scope": "final"},
+    ):
+        with pytest.raises(AuthoringEvidenceError):
+            _validate_intent_audit(_SOURCE, plan, _audit(wrong))
+
+
+def test_plain_initial_role_check_is_identity_only():
+    plan = _validate(_plan("item", _step("pick", "item")))
+    identity = _check("item", "role_item", scope="initial")
+    action = _check("step_01", scope="action")
+    _validate_intent_audit(_SOURCE, plan, _audit(identity, action))
+
+    with pytest.raises(ValueError, match="not roles alone"):
+        _validate_intent_audit(_SOURCE, plan, _audit(identity))
+    for wrong in (
+        {**identity, "state": _fact("held", "item", arms=["auto"])},
+        {**identity, "evidence": ["item", "step_01"]},
+    ):
+        with pytest.raises(AuthoringEvidenceError, match="initial condition"):
+            _validate_intent_audit(_SOURCE, plan, _audit(wrong, action))
+
+
+def test_before_audit_checks_the_position_at_start_of_regrasp():
+    center = _relation("centered_on", "item", "table", frame="table")
+    plan = _validate(
+        _plan(
+            "item table",
+            _step("pick", "item", arms="left"),
+            _step("place", "item", center, arms="left"),
+            _step("pick", "item", arms="right"),
+            conditions=[_condition("initial", center)],
+        )
+    )
+    check = _check("step_02", "step_03", scope="before", spatial=center)
+    _validate_intent_audit(_SOURCE, plan, _audit(check))
+    _validate_intent_audit(
+        _SOURCE,
+        plan,
+        _audit(_check("condition_01", "step_01", scope="before", spatial=center)),
+    )
+
+    for wrong in (
+        {**check, "evidence": ["step_02"]},
+        {**check, "evidence": ["condition_01", "step_03"]},
+        {**check, "scope": "effect"},
+        {**check, "scope": "final"},
+        {**check, "spatial": {**center, "frame": "head_camera"}},
+    ):
+        with pytest.raises(AuthoringEvidenceError):
+            _validate_intent_audit(_SOURCE, plan, _audit(wrong))
+
+
+def test_released_audit_combines_only_live_per_subject_facts():
+    plan = _validate(
+        _plan(
+            "a b table",
+            _step("pick", "a"),
+            _step("place", "a", _relation("on", "a", "table"), _fact("released", "a")),
+            _step("pick", "b"),
+            _step("place", "b", _relation("on", "b", "table"), _fact("released", "b")),
+            _step("pick", "a"),
+        )
+    )
+    check = _check("step_02", "step_04", scope="effect", state=_fact("released", "a b"))
+    _validate_intent_audit(_SOURCE, plan, _audit(check))
+
+    for wrong in (
+        {**check, "evidence": ["step_04"]},
+        {**check, "evidence": ["step_02", "step_04", "step_05"]},
+        {**check, "scope": "final"},
+    ):
+        with pytest.raises(AuthoringEvidenceError, match="released"):
+            _validate_intent_audit(_SOURCE, plan, _audit(wrong))
+    plan["steps"][2]["maintain"] = [_fact("released", "a")]
+    plan["steps"][4]["maintain"] = [_fact("released", "b")]
+    with pytest.raises(AuthoringEvidenceError, match="released"):
+        _validate_intent_audit(
+            _SOURCE,
+            _validate(plan),
+            _audit({**check, "scope": "step", "evidence": ["step_03", "step_05"]}),
+        )
+
+
+@pytest.mark.parametrize(
+    "source", ["initial", "maintain", "stale_effect", "final", "stale_final"]
+)
+def test_terminal_audit_rejects_nonterminal_or_conflicting_evidence(source):
+    left = _relation("left_of", "item", "base")
+    right = _relation("right_of", "item", "base")
+    moved = _step("push", "item", right)
+    plan = _plan("item base", moved)
+    reference = "step_01"
+    if source in {"initial", "final"}:
+        plan["conditions"] = [_condition(source, left)]
+        reference = "condition_01"
+    elif source == "stale_final":
+        plan["conditions"] = [_condition("initial", left), _condition("final", left)]
+        moved["effects"] = []
+        reference = "condition_02"
+    elif source == "maintain":
+        moved["maintain"] = [left]
+    else:
+        plan["steps"].insert(0, _step("push", "item", left))
+    with pytest.raises(AuthoringEvidenceError):
+        _validate_intent_audit(
+            _SOURCE,
+            _validate(plan),
+            _audit(_check(reference, scope="final", spatial=left)),
+        )
+
+
+def test_final_effect_persists_until_an_operand_moves():
+    claim = _relation("left_of", "item", "base")
+    plan = _plan(
+        "item base",
+        _step("pick", "item"),
+        _step("place", "item", claim),
+        _step("return_arms", "", arms="left right"),
+    )
+    final = _audit(_check("step_02", scope="final", spatial=claim))
+    _validate_intent_audit(_SOURCE, _validate(plan), final)
+    with pytest.raises(ValueError, match="typed claim") as error:
+        _validate_intent_audit(
+            _SOURCE, _validate(plan), _audit(_check("step_02", scope="final"))
+        )
+    assert not isinstance(error.value, AuthoringEvidenceError)
+    plan["steps"].append(_step("push", "base"))
+    with pytest.raises(AuthoringEvidenceError):
+        _validate_intent_audit(_SOURCE, _validate(plan), final)
+    _validate_intent_audit(
+        _SOURCE,
+        _validate(plan),
+        _audit(_check("step_02", scope="effect", spatial=claim)),
+    )
+    with pytest.raises(ValueError, match="scope"):
+        _validate_intent_audit(
+            _SOURCE, _validate(plan), _audit(_check("step_02", spatial=claim))
+        )
 
 
 @pytest.mark.parametrize(
@@ -251,9 +476,7 @@ def test_audit_requires_the_complement_invariant_or_actual_actuation(
             _condition("always" if mode else "final", wrong if mode else claim)
         ],
     )
-    check = _check("condition_01", "step_01", state=claim)
-    if mode:
-        check["scope"] = mode
+    check = _check("condition_01", "step_01", state=claim, scope=mode or "effect")
     with pytest.raises(AuthoringEvidenceError, match="matching evidence"):
         _validate_intent_audit(_SOURCE, plan, _audit(check))
     if mode:
@@ -355,7 +578,7 @@ def test_contents_transfer_preserves_count_and_independent_visual_observation(hy
             return dict(
                 issues=[dict(quote=_SOURCE, reason="Source and recipient are reversed")]
             )
-        return _audit(_check("step_02", state=transfer))
+        return _audit(_check("step_02", state=transfer, scope="effect"))
 
     result, proposals, reviews = hybrid([wrong, plan], review)
     assert proposals[-1]["previous_semantic_plan"] == wrong and len(reviews) == 3
@@ -418,7 +641,22 @@ def test_authoring_publication_is_readable_without_execution(hybrid, tmp_path):
     assert {**background, "is_articulated": True} in published["scene_requirements"][
         "configuration"
     ]["requirements"][0]["value"]
-    assert (tmp_path / "plan/semantic_task_graph.html").is_file()
+    preview = tmp_path / "review.html"
+    write_review(tmp_path / "plan", preview)
+    for html in (tmp_path / "plan/semantic_task_graph.html", preview):
+        data = re.search(
+            r'<script id="graph-data" type="application/json">(.*?)</script>',
+            html.read_text(),
+            re.S,
+        )
+        assert data is not None
+        pairing = json.loads(data[1])["review"]["pairing"]
+        assert pairing["milestone_groups"] == {
+            "step_01": "step_01",
+            "step_02": "step_02",
+            "step_03": "step_03",
+        }
+        assert pairing["goal_groups"] == {"final_step_completed": ["step_03"]}
     graph = result["semantic_task_graph"]
     assert graph["nodes"][1]["call"]["arguments"]["effects"] == [support]
     terminal = graph["nodes"][-1]
@@ -448,6 +686,28 @@ def test_invalid_positive_review_citation_is_repaired_without_replanning(hybrid)
     assert len(proposals) == 1 and len(reviews) == 2
     assert reviews[0]["steps"] == reviews[1]["steps"]
     assert result["source_audits"][-1]["checks"][0]["quote"] == _SOURCE
+
+
+def test_citation_repair_cannot_downgrade_final_scope(hybrid, tmp_path):
+    left = _relation("left_of", "item", "base")
+    plan = _plan("item base", _step("push", "item", left), _step("push", "item"))
+    reviews = []
+
+    def review(request):
+        repairs = "review_format_feedback" in request
+        reviews.append(repairs)
+        return _audit(
+            _check(
+                "step_01",
+                spatial=left,
+                scope="effect" if repairs else "final",
+                quote=_SOURCE if repairs else "Not the source",
+            )
+        )
+
+    with pytest.raises(ValueError, match="Unchanged rejected graph"):
+        hybrid([plan] * 4, review)
+    assert reviews == [False, True] and not (tmp_path / "plan").exists()
 
 
 def test_quote_only_repair_cannot_clear_a_source_rejection(hybrid, tmp_path):

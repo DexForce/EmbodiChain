@@ -103,6 +103,29 @@ def _attempt(plan: dict[str, Any], root: Path, nodes: set[str]) -> dict[str, Any
     }
 
 
+def _producer_pairing(
+    graph: dict[str, Any], spec: dict[str, Any], coverage: dict[str, Any]
+) -> dict[str, Any]:
+    group = {n["id"]: n["task_instance_id"] for n in graph["nodes"]}
+    # Authoring coverage stores a node ID; native coverage stores a node/group pair.
+    producer_groups = {
+        identifier: group[producer if isinstance(producer, str) else producer[0]]
+        for identifier, producer in coverage["producers"].items()
+    }
+    return {
+        "milestone_groups": {
+            m["id"]: producer_groups[m["id"]]
+            for m in spec["objectives"]["milestones"]
+            if m["id"] in producer_groups
+        },
+        "goal_groups": {
+            g["id"]: [producer_groups[g["id"]]]
+            for g in spec["objectives"]["goal"]
+            if g["id"] in producer_groups
+        },
+    }
+
+
 def _hybrid_preview(result, image, attempt):
     """Render verified hybrid contracts without template candidate metadata."""
     import base64
@@ -112,13 +135,6 @@ def _hybrid_preview(result, image, attempt):
 
     graph = result["semantic_task_graph"]
     spec = result["task_spec_v1"]
-    coverage = result["coverage"]
-    group = {n["id"]: n["task_instance_id"] for n in graph["nodes"]}
-    # Authoring coverage stores a node ID; native coverage stores a node/group pair.
-    producer_groups = {
-        identifier: group[producer if isinstance(producer, str) else producer[0]]
-        for identifier, producer in coverage["producers"].items()
-    }
     data = _graph_data(graph, task_spec=result["task_spec"])
     with Image.open(image) as picture:
         picture = picture.convert("RGB")
@@ -138,16 +154,7 @@ def _hybrid_preview(result, image, attempt):
             "role_entities": {
                 r["id"]: [r["id"]] for r in spec["configuration"]["roles"]
             },
-            "milestone_groups": {
-                m["id"]: producer_groups[m["id"]]
-                for m in spec["objectives"]["milestones"]
-                if m["id"] in producer_groups
-            },
-            "goal_groups": {
-                g["id"]: [producer_groups[g["id"]]]
-                for g in spec["objectives"]["goal"]
-                if g["id"] in producer_groups
-            },
+            **_producer_pairing(graph, spec, result["coverage"]),
         },
     }
     return _viewer_document(data)

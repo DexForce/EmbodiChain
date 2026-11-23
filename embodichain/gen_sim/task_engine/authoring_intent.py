@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 import math
 import re
 from typing import Any
@@ -461,7 +462,9 @@ def _fact(fact: Any, roles: set[str]) -> None:
             raise ValueError(
                 f"{kind} requires compatible arms and one arm per grasp site"
             )
-    if "frame" in fact and fact["frame"] not in _FRAMES:
+    if "frame" in fact and (
+        not isinstance(fact["frame"], str) or fact["frame"] not in _FRAMES
+    ):
         raise ValueError(f"Invalid reference frame for {kind}")
 
     subjects, refs = fact.get("subjects", []), fact.get("references", [])
@@ -538,20 +541,27 @@ def verify_spatial_claim(
     if type(claim) is dict:
         claim = dict(claim)
         _expand_fact_shorthand(claim)
-    _shape(claim, {"kind", "value", "subjects", "references"}, set(), "spatial claim")
+    _shape(
+        claim, {"kind", "value", "subjects", "references"}, {"frame"}, "spatial claim"
+    )
     _fact(claim, set(roles))
     if claim["kind"] != "relation":
         raise ValueError("Source spatial claim must be a typed relation")
     value = claim["value"]
+    frame = claim.get("frame")
     expected = _relation_pairs(claim, value)
     relations = [fact for fact in facts if fact["kind"] == "relation"]
+    matching_frame = [
+        fact for fact in relations if frame is None or fact.get("frame") == frame
+    ]
     locations = {
         (subject, slot)
         for fact in relations
+        if frame is None or fact.get("frame") in {None, frame}
         for subject, slot in _relation_pairs(fact, "at")
         if value in _SLOT_RELATIONS and roles[slot] == "target"
     }
-    matches = [_relation_pairs(fact, value) for fact in relations]
+    matches = [_relation_pairs(fact, value) for fact in matching_frame]
     # One joint relationship cannot be assembled from different groups.
     if value in _GROUP_RELATIONS:
         direct = expected if expected in matches else set()
@@ -560,13 +570,19 @@ def verify_spatial_claim(
     direct.update(
         pair
         for relation in _STRONGER_RELATIONS.get(value, ())
-        for fact in relations
+        for fact in matching_frame
         for pair in _relation_pairs(fact, relation)
     )
     if value == "near_center_of":
-        near = set().union(*(_relation_pairs(fact, "near") for fact in relations))
+        near = set().union(
+            *(
+                _relation_pairs(fact, "near")
+                for fact in relations
+                if frame is None or fact.get("frame") in {None, frame}
+            )
+        )
         centers = set().union(
-            *(_relation_pairs(fact, "centered_on") for fact in relations)
+            *(_relation_pairs(fact, "centered_on") for fact in matching_frame)
         )
         direct.update(
             (subject, reference)
@@ -584,15 +600,30 @@ def verify_spatial_claim(
     ):
         raise AuthoringEvidenceError(
             f"Source spatial claim {value!r} needs matching typed relations for "
-            f"{claim['subjects']} and {claim['references']}; view_location or labels are not enough"
+            f"{claim['subjects']} and {claim['references']}"
+            + (f" in the {frame!r} frame" if frame else "")
+            + "; view_location or labels are not enough"
         )
 
 
 def verify_state_claim(
-    claim: dict[str, Any], facts: list[dict[str, Any]], roles: dict[str, str]
+    claim: dict[str, Any],
+    facts: list[dict[str, Any]],
+    roles: dict[str, str],
+    *,
+    combine_released: bool = False,
 ) -> None:
     """Match a typed source state to the graph facts cited for its scope."""
     _fact(claim, set(roles))
+    candidates = [fact for fact in facts if fact["kind"] == claim["kind"]]
+    # Unheld subjects are independent, but only combine facts at one snapshot.
+    if (
+        combine_released
+        and claim["kind"] == "released"
+        and set(claim["subjects"])
+        <= {subject for fact in candidates for subject in fact["subjects"]}
+    ):
+        return
     unordered = {"subjects", "arms", "references", "components"}
     if claim["kind"] == "ordered_row":
         unordered.remove("subjects")
@@ -608,7 +639,7 @@ def verify_state_claim(
             for key, value in claim.items()
         )
 
-    if not any(matches(fact) for fact in facts if fact["kind"] == claim["kind"]):
+    if not any(matches(fact) for fact in candidates):
         raise AuthoringEvidenceError(
             f"Source state claim {claim['kind']!r} lacks matching evidence for "
             f"{claim.get('subjects', claim.get('arms'))!r} in the required scope"
@@ -632,6 +663,61 @@ def _has_step_effect(step: dict[str, Any], fact: dict[str, Any]) -> bool:
         kind == "actuated"
         and fact["value"] == "pressed"
         and fact["subjects"] == subjects
+    )
+
+
+@dataclass(frozen=True)
+class _ArmState:
+    grips: frozenset[tuple[str, str]] = frozenset()
+    parked: frozenset[str] = frozenset()
+    opened: frozenset[str] = frozenset()
+
+    def holders(self, subject: str) -> set[str]:
+        return {arm for arm, role in self.grips if role == subject}
+
+
+def _arm_options(arms: list[str]) -> tuple[tuple[str, ...], ...]:
+    return (("left",), ("right",)) if arms == ["auto"] else (tuple(arms),)
+
+
+def _advance_arms(
+    state: _ArmState, verb: str, subjects: list[str], choice: tuple[str, ...]
+) -> _ArmState | None:
+    arms = set(choice)
+    occupied = dict(state.grips)
+    grips, parked, opened = state.grips, state.parked, state.opened
+    if verb == "return_arms":
+        return _ArmState(grips, parked | arms, opened)
+    if verb == "open_grippers":
+        return (
+            None if arms & occupied.keys() else _ArmState(grips, parked, opened | arms)
+        )
+    if verb in _ACQUIRE_VERBS:
+        subject = subjects[0]
+        if subject in occupied.values() or arms & occupied.keys():
+            return None
+        grips |= {(arm, subject) for arm in arms}
+    elif verb in _HELD_VERBS:
+        subject = subjects[0]
+        required = {choice[0]} if verb == "handover" else arms
+        if state.holders(subject) != required:
+            return None
+        if verb in {"place", "release", "handover"}:
+            grips -= {(arm, subject) for arm in required}
+        if verb == "handover":
+            if len(choice) != 2 or choice[1] in occupied:
+                return None
+            grips |= {(choice[1], subject)}
+    else:
+        held_subjects = set(occupied.values()) & set(subjects)
+        if (
+            (verb == "push" and held_subjects)
+            or any(state.holders(subject) != arms for subject in held_subjects)
+            or any(arm in occupied and occupied[arm] not in subjects for arm in arms)
+        ):
+            return None
+    return _ArmState(
+        grips, parked - arms, opened if verb in _ARM_VERBS else opened - arms
     )
 
 
@@ -693,52 +779,62 @@ def validate_intent(
                 f"Use scene-context ID {name!r} for its corresponding role"
             )
 
-    held: dict[str, set[str]] = {}
+    # Keep each feasible concrete assignment until release or handover. Do not
+    # rewrite the authored auto arms in the returned plan.
+    arm_states = {_ArmState()}
     grasp_sites: dict[str, dict[str, str]] = {}
-    parked: set[str] = set()
-    opened: set[str] = set()
     seated: set[tuple[str, str]] = set()
     tightened: set[tuple[str, str]] = set()
     invariants = []
 
-    def check_capacity() -> None:
-        explicit = [arm for owner in held.values() for arm in owner if arm != "auto"]
-        if sum(map(len, held.values())) > len(_ARMS - {"auto"}):
-            raise ValueError(
-                "More simultaneous grasps than available arms, including auto. "
-                "Release an earlier item before acquiring another if no arm is free."
-            )
-        if len(explicit) != len(set(explicit)):
-            raise ValueError("One explicit arm is holding more than one role")
-
     def check_fact_state(fact: dict[str, Any]) -> None:
+        nonlocal arm_states
         kind = fact["kind"]
-        if kind == "held" and any(
-            subject not in held
-            or ("auto" not in fact["arms"] and not set(fact["arms"]) <= held[subject])
-            for subject in fact["subjects"]
-        ):
-            raise ValueError(
+        message = None
+        if kind == "held":
+            required = set(fact["arms"]) - {"auto"}
+            arm_states = {
+                state
+                for state in arm_states
+                if all(
+                    (owners := state.holders(s)) and required <= owners
+                    for s in fact["subjects"]
+                )
+            }
+            message = (
                 "Held fact contradicts ordered acquisition/release or arm identity"
             )
-        if kind == "released" and held.keys() & set(fact["subjects"]):
-            raise ValueError("Released fact contradicts ordered holdings")
-        if kind == "grasped_at":
+        elif kind == "released":
+            arm_states = {
+                state
+                for state in arm_states
+                if not any(state.holders(s) for s in fact["subjects"])
+            }
+            message = "Released fact contradicts ordered holdings"
+        elif kind == "grasped_at":
             subject, arm = fact["subjects"][0], fact["arms"][0]
-            owner = held.get(subject, set())
             sites = grasp_sites.get(subject, {})
-            if (
-                not owner
-                or (arm != "auto" and arm not in owner)
-                or sites.get(arm, sites.get("auto")) != fact["part"]
-            ):
-                raise ValueError(
-                    "Grasp site is not witnessed by the acquisition of that arm"
+            arm_states = {
+                state
+                for state in arm_states
+                if any(
+                    (arm == "auto" or side == arm)
+                    and sites.get(side, sites.get("auto")) == fact["part"]
+                    for side in state.holders(subject)
                 )
-        if kind in {"arms_at_initial_pose", "grippers_open"} and not set(
-            fact["arms"]
-        ) <= (parked if kind == "arms_at_initial_pose" else opened):
-            raise ValueError(f"{kind} requires its explicit arm step")
+            }
+            message = "Grasp site is not witnessed by the acquisition of that arm"
+        elif kind in {"arms_at_initial_pose", "grippers_open"}:
+            required = set(fact["arms"])
+            arm_states = {
+                state
+                for state in arm_states
+                if required
+                <= (state.parked if kind == "arms_at_initial_pose" else state.opened)
+            }
+            message = f"{kind} requires its explicit arm step"
+        if message is not None and not arm_states:
+            raise ValueError(message)
         if not _relation_pairs(fact, "tightened_on") <= tightened:
             raise ValueError(
                 "Tightened state has no prior seating and turn for the same role pair"
@@ -789,15 +885,25 @@ def validate_intent(
             seated.update(_relation_pairs(fact, "seated_on"))
             tightened.update(_relation_pairs(fact, "tightened_on"))
             if fact["kind"] == "held":
-                owner = set(fact["arms"])
                 for subject in fact["subjects"]:
-                    if subject in held and held[subject] != owner:
+                    feasible = set()
+                    for state in arm_states:
+                        owners = state.holders(subject)
+                        for choice in _arm_options(fact["arms"]):
+                            if owners == set(choice):
+                                feasible.add(state)
+                            elif not owners:
+                                acquired = _advance_arms(
+                                    state, "pick", [subject], choice
+                                )
+                                if acquired is not None:
+                                    feasible.add(acquired)
+                    if not feasible:
                         raise ValueError(
-                            "Initial held conditions disagree on arm ownership"
+                            "Initial held conditions disagree on arm ownership or capacity"
                         )
-                    held[subject] = owner
+                    arm_states = feasible
     seated.update(tightened)
-    check_capacity()
     for fact in invariants:
         try:
             check_fact_state(fact)
@@ -907,72 +1013,41 @@ def validate_intent(
         tightened.update(new_tightened)
         seated.update(*(_relation_pairs(fact, "seated_on") for fact in effects))
 
-        active_arms = arms if "auto" not in arms else _ARMS - {"auto"}
-        if verb not in {"return_arms", "open_grippers"}:
-            parked -= active_arms
-        if verb not in _ARM_VERBS:
-            opened -= active_arms
-        if verb == "return_arms":
-            parked |= arms
-        elif verb == "open_grippers":
-            if any(arms & owner or "auto" in owner for owner in held.values()):
-                raise ValueError(
-                    "Opening grippers with a held object requires a preceding release or placement"
-                )
-            opened |= arms
-        elif verb in _ACQUIRE_VERBS:
-            subject = subjects[0]
-            if subject in held or any(
-                (arms - {"auto"}) & owner for owner in held.values()
-            ):
+        advanced = {
+            next_state
+            for state in arm_states
+            for choice in _arm_options(step["arms"])
+            if (next_state := _advance_arms(state, verb, subjects, choice)) is not None
+        }
+        if not advanced:
+            if verb in _ACQUIRE_VERBS:
+                if all(len(state.grips) + len(arms) > 2 for state in arm_states):
+                    raise ValueError(
+                        "More simultaneous grasps than available arms, including auto. "
+                        "Release an earlier item before acquiring another if no arm is free."
+                    )
                 raise ValueError(
                     "Pick would reacquire a held subject or occupy an already holding arm"
                 )
-            held[subject] = arms
-            grasp_sites[subject] = {fact["arms"][0]: fact["part"] for fact in sites}
-        elif verb in _HELD_VERBS:
-            subject = subjects[0]
-            owner = held.get(subject)
-            required = {step["arms"][0]} if verb == "handover" else arms
-            if (
-                owner is None
-                or len(required) != len(owner)
-                or ({"auto"} not in (required, owner) and required != owner)
-            ):
+            if verb == "open_grippers":
                 raise ValueError(
-                    f"{verb} requires an earlier acquisition of {subject!r} by the same arm(s)"
+                    "Opening grippers with a held object requires a preceding release or placement"
                 )
-            if verb in {"place", "release"}:
-                del held[subject]
-                grasp_sites.pop(subject, None)
-            elif verb == "handover":
-                if len(arms) != 2 or any(key != subject for key in held):
-                    raise ValueError(
-                        "Handover needs two distinct arms and an unoccupied destination"
-                    )
-                held[subject] = {step["arms"][1]}
-                grasp_sites.pop(subject, None)
-            elif owner == {"auto"} and arms != {"auto"}:
-                if any(arms & other for key, other in held.items() if key != subject):
-                    raise ValueError("A specified holding arm is already occupied")
-                held[subject] = arms
-        else:
-            if verb == "push" and held.keys() & set(subjects):
-                raise ValueError("A push cannot move a held object")
-            occupied_elsewhere = sum(
-                len(owner) for role, owner in held.items() if role not in subjects
-            )
-            if (
-                occupied_elsewhere + len(arms) > 2
-                or "auto" not in arms
-                and any(
-                    (key in subjects and "auto" not in owner and owner != arms)
-                    or (key not in subjects and arms & owner)
-                    for key, owner in held.items()
+            if verb in _HELD_VERBS:
+                raise ValueError(
+                    f"{verb} requires an earlier acquisition of {subjects[0]!r} by the same arm(s)"
+                    + (" and a free destination arm" if verb == "handover" else "")
                 )
+            if verb == "push" and any(
+                role in subjects for state in arm_states for _, role in state.grips
             ):
-                raise ValueError(f"{verb} contradicts the current arm holdings")
-        check_capacity()
+                raise ValueError("A push cannot move a held object")
+            raise ValueError(f"{verb} contradicts the current arm holdings")
+        arm_states = advanced
+        if verb in _ACQUIRE_VERBS:
+            grasp_sites[subjects[0]] = {fact["arms"][0]: fact["part"] for fact in sites}
+        elif verb in {"place", "release", "handover"}:
+            grasp_sites.pop(subjects[0], None)
         for fact in (*effects, *invariants):
             check_fact_state(fact)
         ordered_steps.append(step)

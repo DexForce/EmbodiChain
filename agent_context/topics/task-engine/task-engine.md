@@ -25,8 +25,14 @@ restores orientation, not position.
 Without deployment or explicit grounding, `authoring_intent.py` supports scoped
 typed steps when native E1–E9 lose source requirements. Effects hold at step
 end; `maintain` holds during a step. The audit matches source obligations to
-facts in their required scope, not role labels. Repairs preserve candidate
-identity and can correct malformed review citations without replanning.
+facts in their required scope, not role labels. A `before` check uses cited
+facts still valid at the start of its latest cited step, not that step's effects.
+Final checks use a compatible final condition or a cited effect that survives
+subsequent actions. Separate release facts can prove a group was released only
+when they are valid at the same checkpoint. A stated spatial frame must match the
+evidence, including slot relations. The validator tracks feasible arm assignments
+across the sequence without replacing authored `auto` arms. Citation repairs can
+fix malformed evidence without changing the graph or weakening its final checks.
 `task_engine.intent.*` remains unbound `authoring_only` (`source_reviewed`),
 not executable or lowerable.
 

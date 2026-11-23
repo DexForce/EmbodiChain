@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 import hashlib
 import json
 import re
@@ -213,6 +214,162 @@ def _validate_source_audit(
             )
 
 
+_AUDIT_SCOPES = ("action", "initial", "always", "before", "step", "effect", "final")
+_INTENT_AUDIT_SCHEMA = {
+    "type": "object",
+    "required": ["issues"],
+    "properties": {
+        "issues": {"type": "array"},
+        "checks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["quote", "requirement", "scope", "evidence"],
+                "properties": {
+                    "quote": {"type": "string"},
+                    "requirement": {"type": "string"},
+                    "scope": {"enum": list(_AUDIT_SCOPES)},
+                    "evidence": {"type": "array", "items": {"type": "string"}},
+                    "state": {"type": "object"},
+                    "spatial": {"type": "object"},
+                },
+            },
+        },
+    },
+}
+
+_POSITION_FACTS = {
+    "relation",
+    "pose_match",
+    "view_location",
+    "vertical_rise",
+    "distance_compare",
+    "distance_change",
+    "ordered_row",
+    "hung_by",
+    "spaced_apart",
+    "mutually_separate",
+}
+_OPPOSITE_VALUES = {
+    "relation": {
+        frozenset(pair.split())
+        for pair in (
+            "left_of right_of",
+            "in_front_of behind",
+            "above below",
+            "inside not_inside",
+        )
+    },
+    "orientation": {
+        frozenset(pair.split())
+        for pair in (
+            "opening_up opening_down",
+            "upright tilted",
+            "upright flat",
+            "upright lying_on_side",
+            "pointing_left pointing_right",
+            "pointing_up pointing_down",
+            "pointing_forward pointing_backward",
+            "pointing_toward pointing_away_from",
+        )
+    },
+    "articulated": {frozenset({"open", "closed"})},
+    "actuated": {frozenset({"open", "closed"})},
+}
+
+
+def _opposes(fact: dict[str, Any], effect: dict[str, Any]) -> bool:
+    kind = fact["kind"]
+    if (
+        kind not in _OPPOSITE_VALUES
+        or kind != effect["kind"]
+        or fact.get("frame") != effect.get("frame")
+        or not set(fact.get("subjects", ())).intersection(effect.get("subjects", ()))
+        or frozenset({fact.get("value"), effect.get("value")})
+        not in _OPPOSITE_VALUES.get(kind, ())
+    ):
+        return False
+    refs, other = set(fact.get("references", ())), set(effect.get("references", ()))
+    return bool(refs & other) if kind == "relation" else refs == other
+
+
+def _carried_facts(
+    steps: dict[str, Any],
+    seed: dict[str, list[dict[str, Any]]],
+    parents: dict[str, str],
+) -> dict[str, list[dict[str, Any]]]:
+    """Keep declaration evidence only until an operation invalidates it."""
+    current = dict(seed)
+
+    def affected(fact: dict[str, Any], subjects: set[str]) -> bool:
+        roles = set(fact.get("subjects", ()))
+        if fact.get("epoch") != "initial" or fact["kind"] != "pose_match":
+            roles.update(fact.get("references", ()))
+        if "part" in fact:
+            roles.add(fact["part"])
+        for role in tuple(roles):
+            while role in parents:
+                role = parents[role]
+                roles.add(role)
+        return bool(roles & subjects)
+
+    for ref, step in steps.items():
+        verb, subjects, effects = step["verb"], set(step["subjects"]), step["effects"]
+        displaced = (
+            subjects
+            if verb in {"pick", "place", "move_held", "push", "articulate"}
+            else set()
+        )
+        displaced = displaced | {
+            role
+            for fact in effects
+            if fact["kind"] == "transferred"
+            for role in fact["subjects"]
+        }
+
+        def invalidates(fact: dict[str, Any]) -> bool:
+            kind = fact["kind"]
+            if any(_opposes(fact, effect) for effect in effects):
+                return True
+            if kind in _POSITION_FACTS and not (
+                kind == "relation" and fact["value"] in {"compatible_with", "fixed_to"}
+            ):
+                return affected(fact, displaced)
+            if kind == "orientation" and verb in {"orient", "turn", "articulate"}:
+                return affected(fact, subjects)
+            if kind in {"held", "grasped_at", "released"}:
+                changes = (
+                    {"pick", "grasp"}
+                    if kind == "released"
+                    else {"place", "release", "handover"}
+                )
+                return verb in changes and bool(subjects.intersection(fact["subjects"]))
+            if kind in {"arms_at_initial_pose", "grippers_open", "gripper_relation"}:
+                preserves = (
+                    {"return_arms", "open_grippers"}
+                    if kind == "arms_at_initial_pose"
+                    else (
+                        {"return_arms", "open_grippers", "move_gripper"}
+                        if kind == "grippers_open"
+                        else set()
+                    )
+                )
+                step_arms = set(step["arms"])
+                return verb not in preserves and (
+                    "auto" in step_arms
+                    or "auto" in fact["arms"]
+                    or bool(step_arms.intersection(fact["arms"]))
+                )
+            return False
+
+        current = {
+            origin: [fact for fact in facts if not invalidates(fact)]
+            for origin, facts in current.items()
+        }
+        current[ref] = effects
+    return current
+
+
 def _validate_intent_audit(instruction: str, plan: dict[str, Any], audit: Any) -> None:
     """Require an independent source review tied to typed facts and steps."""
     _validate_audit_issues(instruction, audit, "checks")
@@ -221,21 +378,57 @@ def _validate_intent_audit(instruction: str, plan: dict[str, Any], audit: Any) -
     conditions = {
         f"condition_{i:02d}": row for i, row in enumerate(plan["conditions"], 1)
     }
-    evidence = {
-        **{
-            ref: [*row["effects"], *row.get("maintain", [])]
-            for ref, row in steps.items()
-        },
-        **{ref: [row["fact"]] for ref, row in conditions.items()},
-    }
-    graph_evidence = set(evidence)
+    graph_evidence = steps.keys() | conditions.keys()
     roles = {row["id"]: row["kind"] for row in plan["roles"]}
-    for name in roles:
-        evidence.setdefault(name, [])
-        evidence.setdefault(f"role_{name}", [])
+    evidence_ids = graph_evidence | roles.keys() | {f"role_{name}" for name in roles}
+    parents = {row["id"]: row["part_of"] for row in plan["roles"] if "part_of" in row}
     invariants = {
         ref: row["fact"] for ref, row in conditions.items() if row["scope"] == "always"
     }
+    seed = {
+        ref: [row["fact"]] for ref, row in conditions.items() if row["scope"] != "final"
+    }
+    end = _carried_facts(steps, seed, parents)
+    final = {
+        ref: row["fact"] for ref, row in conditions.items() if row["scope"] == "final"
+    }
+    surviving = [fact for facts in end.values() for fact in facts]
+    earlier = [fact for facts in seed.values() for fact in facts]
+    earlier.extend(fact for step in steps.values() for fact in step["effects"])
+
+    def matches(fact: dict[str, Any], facts: list[dict[str, Any]]) -> bool:
+        verify = (
+            verify_spatial_claim if fact["kind"] == "relation" else verify_state_claim
+        )
+        try:
+            verify(fact, facts, roles)
+        except AuthoringEvidenceError:
+            return False
+        return True
+
+    for fact in final.values():
+        if any(_opposes(fact, other) for other in (*surviving, *final.values())) or (
+            fact["kind"] in _POSITION_FACTS | {"orientation"}
+            and fact in earlier
+            and not matches(fact, surviving)
+        ):
+            raise AuthoringEvidenceError(
+                f"A final condition contradicts or outlives its ordered effects: {fact}"
+            )
+
+    def slot_facts(
+        refs: list[str], carried: dict[str, list[dict[str, Any]]], claim: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        return [
+            fact
+            for ref in refs
+            if ref in seed
+            for fact in carried.get(ref, ())
+            if fact["kind"] == "relation"
+            and all(roles[role] == "target" for role in fact["subjects"])
+            and not set(fact["subjects"]).intersection(claim.get("subjects", ()))
+        ]
+
     if not isinstance(checks, list) or not checks:
         raise ValueError("source_audit: no independently reviewed requirements")
     witnessed = False
@@ -246,7 +439,11 @@ def _validate_intent_audit(instruction: str, plan: dict[str, Any], audit: Any) -
             or set(check)
             - {"quote", "requirement", "evidence", "spatial", "scope", "state"}
             or (
-                "scope" in check and check["scope"] not in {"initial", "always", "step"}
+                "scope" in check
+                and (
+                    not isinstance(check["scope"], str)
+                    or check["scope"] not in _AUDIT_SCOPES
+                )
             )
             or not _source_quote(check["quote"], instruction)
             or not isinstance(check["requirement"], str)
@@ -260,12 +457,27 @@ def _validate_intent_audit(instruction: str, plan: dict[str, Any], audit: Any) -
         unknown = [
             ref
             for ref in check["evidence"]
-            if not isinstance(ref, str) or ref not in evidence
+            if not isinstance(ref, str) or ref not in evidence_ids
         ]
         if unknown:
             raise ValueError(f"source_audit: unknown evidence IDs {unknown!r}")
         refs = check["evidence"]
         scope = check.get("scope")
+        typed = "spatial" in check or "state" in check
+        # Normalize the phase label without promoting role or step evidence.
+        if typed and scope == "action":
+            scope = "effect"
+        elif scope == "initial" and not typed and graph_evidence.isdisjoint(refs):
+            scope = "action"
+        if typed and scope is None:
+            raise ValueError("source_audit: a typed check needs an explicit scope")
+        if scope in {None, "action"}:
+            if not any(ref not in conditions for ref in refs):
+                raise ValueError(
+                    "source_audit: a condition check needs an explicit scope"
+                )
+            witnessed |= not steps.keys().isdisjoint(refs)
+            continue
         if scope == "initial":
             refs = [
                 ref for ref in refs if conditions.get(ref, {}).get("scope") == "initial"
@@ -274,8 +486,8 @@ def _validate_intent_audit(instruction: str, plan: dict[str, Any], audit: Any) -
                 raise AuthoringEvidenceError(
                     "An initial source requirement needs an initial condition"
                 )
-        witnessed |= bool(graph_evidence.intersection(refs))
-        if scope in {"always", "step"}:
+            facts = [conditions[ref]["fact"] for ref in refs]
+        elif scope in {"always", "step"}:
             facts = [invariants[ref] for ref in refs if ref in invariants]
             if scope == "step":
                 facts.extend(
@@ -293,30 +505,109 @@ def _validate_intent_audit(instruction: str, plan: dict[str, Any], audit: Any) -
                 raise AuthoringEvidenceError(
                     f"A {scope} source requirement needs {needed}"
                 )
+        elif scope in {"before", "effect"}:
+            cited = {ref for ref in refs if ref in steps}
+            if not cited:
+                raise AuthoringEvidenceError(
+                    "A before check needs the step whose incoming state is reviewed"
+                    if scope == "before"
+                    else "An effect check needs the step producing it"
+                )
+            if scope == "before" and not typed:
+                raise ValueError("A before check needs a typed state or spatial claim")
+            last_step = max(int(ref.removeprefix("step_")) for ref in cited)
+            cutoff = last_step - 1 if scope == "before" else last_step
+            at_step = _carried_facts(dict(list(steps.items())[:cutoff]), seed, parents)
+            sources = refs if scope == "before" else cited
+            facts = [fact for ref in sources for fact in at_step.get(ref, ())]
+            if scope == "effect" and isinstance(check.get("spatial"), dict):
+                facts += slot_facts(refs, at_step, check["spatial"])
         else:
-            facts = [fact for ref in refs for fact in evidence[ref]]
+            facts = [final[ref] for ref in refs if ref in final]
+            surviving_effects = [
+                fact for ref in refs if ref in steps for fact in end.get(ref, ())
+            ]
+            if not facts and not typed and surviving_effects:
+                raise ValueError(
+                    "A final check citing a step effect needs a typed claim"
+                )
+            if typed:
+                facts += surviving_effects
+                facts += [
+                    fact
+                    for ref in refs
+                    if ref in invariants
+                    for fact in end.get(ref, ())
+                ]
+                if isinstance(check.get("spatial"), dict):
+                    facts += slot_facts(refs, end, check["spatial"])
+            if not facts:
+                raise AuthoringEvidenceError(
+                    "A final check needs a final condition or an effect still valid at the end"
+                )
+        witnessed |= bool(graph_evidence.intersection(refs))
         if "spatial" in check:
-            verify_spatial_claim(check["spatial"], facts, roles)
+            claim = check["spatial"]
+            verify_spatial_claim(claim, facts, roles)
+            if (
+                scope == "final"
+                and claim.get("kind") == "relation"
+                and any(_opposes(claim, other) for other in surviving)
+            ):
+                raise AuthoringEvidenceError(
+                    "A final spatial check conflicts with an ordered effect"
+                )
         if "state" in check:
             claim = check["state"]
             if not isinstance(claim, dict):
                 raise ValueError("A source state claim must be a typed fact")
             kind = claim.get("kind")
-            if scope not in {"always", "step"}:
-                if kind == "untouched_except":
-                    facts = [invariants[ref] for ref in refs if ref in invariants]
-                elif kind == "actuated":
-                    facts = [
-                        fact
-                        for ref in refs
-                        if ref in steps and steps[ref]["verb"] in {"press", "actuate"}
-                        for fact in steps[ref]["effects"]
-                    ]
-            verify_state_claim(claim, facts, roles)
+            if kind == "untouched_except" and scope == "final":
+                facts = [
+                    f for ref in refs if ref in invariants for f in end.get(ref, ())
+                ]
+            if kind == "actuated" and scope == "effect":
+                facts = [
+                    fact
+                    for ref in refs
+                    if ref in steps and steps[ref]["verb"] in {"press", "actuate"}
+                    for fact in at_step[ref]
+                ]
+            verify_state_claim(
+                claim,
+                facts,
+                roles,
+                combine_released=scope in {"before", "effect", "final"},
+            )
+            if scope == "final" and any(_opposes(claim, other) for other in surviving):
+                raise AuthoringEvidenceError(
+                    "A final state check conflicts with an ordered effect"
+                )
     if not witnessed:
         raise ValueError(
             "A source audit needs at least one step or condition, not roles alone"
         )
+
+
+def _review_scope_guards(audit: Any) -> Counter[str]:
+    """Retain terminal and framed claims when repairing malformed citations."""
+    guards: Counter[str] = Counter()
+    checks = audit.get("checks") if isinstance(audit, dict) else None
+    for check in checks if isinstance(checks, list) else ():
+        if not isinstance(check, dict):
+            continue
+        final = check.get("scope") == "final"
+        if final:
+            guards["final"] += 1
+        for name in ("spatial", "state"):
+            fact = check.get(name)
+            if (
+                isinstance(fact, dict)
+                and isinstance(fact.get("kind"), str)
+                and (final or isinstance(fact.get("frame"), str))
+            ):
+                guards[canonical_hash([final, name, fact])] += 1
+    return guards
 
 
 def _supported_program(operations, *, bindings=None, scene_objects=None):
@@ -1109,12 +1400,13 @@ def publish_hybrid(
                 **payload,
             }
             span_quotes = {}
+            scope_guards: Counter[str] = Counter()
             for attempt in range(2 if visual else 1):
                 audit = structured_call(
                     services=run,
                     role="task_image_grounding" if visual else "task_interpretation",
                     image_path=image if visual else None,
-                    schema={"type": "object"},
+                    schema=_INTENT_AUDIT_SCHEMA if visual else {"type": "object"},
                     prompt=json.dumps(request, ensure_ascii=False),
                 )
                 if span_quotes and isinstance(audit, dict):
@@ -1129,6 +1421,10 @@ def publish_hybrid(
                                     row["quote"] = span_quotes[quote]
                 audit_history.append(audit)
                 try:
+                    if scope_guards - _review_scope_guards(audit):
+                        raise AuthoringEvidenceError(
+                            "A citation repair cannot discard or weaken a final or framed check"
+                        )
                     validate(audit)
                     return
                 except ValueError as error:
@@ -1146,13 +1442,15 @@ def publish_hybrid(
                         raise
                     # Repair the positive review's citations, not the candidate.
                     span_quotes = spans
+                    scope_guards = _review_scope_guards(audit)
                     request["review_format_feedback"] = {
                         "previous_review": audit,
                         "diagnostic": str(error),
                         "request": (
                             "Recheck this same graph. Correct malformed fields or citations, "
                             "using an exact source quote or a source_spans key in quote. "
-                            "Use existing evidence IDs."
+                            "Use existing evidence IDs; keep each final and framed claim. "
+                            "Put scope in the check's own JSON field, never in requirement text."
                         ),
                         "source_spans": span_quotes,
                     }
@@ -1287,8 +1585,8 @@ def publish_hybrid(
                         "do not turn a side into a required end. "
                         "For operative starting conditions (e.g. relative pose reuse, support to preserve, "
                         "or a required way to distinguish otherwise similar instances), inspect initial facts. "
-                        "For a purely descriptive initial clause, match a faithful role description or an "
-                        "initial condition. Cite the role ID only for source identity, never as proof of a "
+                        "For a purely descriptive initial clause, match a faithful role description with scope:action "
+                        "or an initial condition with scope:initial. Cite the role ID only for source identity, never as proof of a "
                         "requested action, outcome, positional anchor or ongoing constraint. "
                         "For an explicit starting distance comparison between two items and one anchor, "
                         "check scope:initial and state:{kind:distance_compare,subjects:[item],"
@@ -1307,10 +1605,13 @@ def publish_hybrid(
                         "For conditions that must "
                         "persist throughout, include scope:always in their check and cite an always condition. "
                         "A terminal-only posture or separation fact is not a throughout constraint. "
-                        "For a condition requested only during one step, include scope:step and cite the step "
-                        "with maintain or an equivalent always condition. Omit scope for actions, terminal effects and arm-selection requirements. "
-                        "For arm-only requirements, cite the arms of affected steps. "
-                        "Each state or spatial value is one typed fact object, never an array or prose. "
+                        "Use scope:before for the state just before the latest cited step; cite that step and the earlier effect or condition that establishes the state. "
+                        "Use scope:step only for during-step maintain, and scope:effect for immediately after the latest cited step. "
+                        "For a state requested at task completion use scope:final and cite its final condition, or cite "
+                        "the step with a typed state/spatial claim that survives the later actions. Initial and maintain facts "
+                        "do not prove a final result. Every check has a separate scope field, not text in requirement. "
+                        "Use scope:action for actions, identity and arm-selection with step or role evidence. Cite affected step arms. "
+                        "Each state or spatial value is one typed fact object, never an array or prose. Split checks across scopes. "
                         "For a no-touch requirement on all unspecified other objects, use scope:always and "
                         "a state fact {kind:untouched_except,subjects:[exempt role IDs]}. A named or prose "
                         "group under untouched does not protect the complement. For pressing a named button "
@@ -1346,14 +1647,18 @@ def publish_hybrid(
                         "For an operative object-to-object proximity, on-support placement, or "
                         "direction relative to a named part include a spatial field in its check: "
                         "{kind:relation,value:one of semantic_plan_format.spatial_claim_values,subjects:[role ID],"
-                        "references:[role ID]}. Cite the step without a spatial field for "
+                        "references:[role ID],frame:the explicitly requested viewpoint if any}. A reference object or "
+                        "surface is not a coordinate frame: on the table or centered on the table names the reference, not a viewpoint. "
+                        "Omit frame unless explicitly specified; preserve it when specified. A lateral/depth selector is "
+                        "a state:{kind:view_location,...} check, not a spatial relation. "
+                        "Cite the step without a spatial field for "
                         "arm-only gripper_relation or descriptive source roles. Seating implies on; "
                         "hanging is a distinct state, "
                         "not an on-support placement. For near_center_of, name the actual reference surface or object. "
                         "Use the exact near_* region when the source identifies it; do not relabel ends as "
                         "proximity to a different role. Placement near a surface does not prove support on it. "
-                        "For a temporary put-down before regrasp, check support and location at that "
-                        "placement step, not just the final arrangement. "
+                        "Check a temporary placement with scope:effect at the placement. For the location the next pick starts from, "
+                        "use scope:before and cite both the placement and the pick; picking changes the location. "
                         "Cite the explicit typed facts establishing the requested relation for every subject. "
                         "A single-axis middle selector is never proximity to a center. If an exact slot "
                         "supplies the relation, cite both the placement and the slot's relation; do not "
@@ -1364,7 +1669,8 @@ def publish_hybrid(
                         "Return {issues:[{quote:verbatim source span,reason:specific actual mismatch}]} for any omission, "
                         "contradiction, unrelated extra action or unjustified claim. Otherwise return "
                         "{issues:[],checks:[{quote:verbatim source span,requirement:concrete source meaning,"
-                        "evidence:[step_NN, condition_NN, or a declared role ID for identity only]}]}, one check per independent source obligation."
+                        "scope:action|initial|always|before|step|effect|final,evidence:[step_NN, condition_NN, or a role ID],"
+                        "state:optional typed fact,spatial:optional typed relation}]}, one check per independent source obligation."
                     ),
                 },
                 canonical_hash(
@@ -1465,9 +1771,12 @@ def publish_hybrid(
         }
         if intent is not None:
             bindings = {}
+            producers = {node["id"]: node["id"] for node in graph["nodes"]}
+            if not graph["success"]["conditions"]["final"]:
+                producers["final_step_completed"] = graph["success"]["terminal_step"]
             coverage = dict(
                 status="source_reviewed",
-                producers={node["id"]: node["id"] for node in graph["nodes"]},
+                producers=producers,
             )
             result = dict(
                 task_spec=spec.to_dict(),
@@ -1627,6 +1936,7 @@ def publish_hybrid(
                 execution_ready=False,
             ),
         )
+        from ._review import _producer_pairing
         from .semantic_graph_html import _graph_data, _viewer_document
 
         data = _graph_data(graph)
@@ -1636,16 +1946,7 @@ def publish_hybrid(
             attempt=None,
             pairing=dict(
                 role_entities=result.get("plan_coverage", {}).get("role_entities", {}),
-                milestone_groups={
-                    m.id: graph["task_groups"][0]["id"]
-                    for m in spec.milestones
-                    if m.id in coverage["producers"]
-                },
-                goal_groups={
-                    p.id: [graph["task_groups"][0]["id"]]
-                    for p in spec.goal
-                    if p.id in coverage["producers"]
-                },
+                **_producer_pairing(graph, doc, coverage),
             ),
         )
         (output / "semantic_task_graph.html").write_text(
