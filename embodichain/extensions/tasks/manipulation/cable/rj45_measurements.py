@@ -17,37 +17,31 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from scipy.spatial.transform import Rotation
 
+if TYPE_CHECKING:
+    from embodichain.lab.evaluation._cable_checks import RJ45_CHECKS
+
 __all__ = ["RJ45_CHECKS", "evaluate_rj45", "measure_rj45_frame"]
 
-RJ45_CHECKS = (
-    "starts_on_floor",
-    "insertion_without_finger_latch_press",
-    "vertical_withdrawal_grasp",
-    "complete",
-    "pickup_and_lift",
-    "seated_while_robot_home",
-    "latch_locked_while_robot_home",
-    "physical_latch_press_before_withdrawal",
-    "latch_limits",
-    "latch_returns_after_release",
-    "unplugged",
-    "placed_on_floor",
-    "final_home",
-    "fixed_end",
-    "cable_attachment",
-    "contacts",
-    "finite_state",
-)
 _PLUG_ROTATION = np.array([[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
 _RETURN_ROTATION = (
     _PLUG_ROTATION @ Rotation.from_euler("z", 90, degrees=True).as_matrix()
 )
 _PLUG_ATTACHMENT = np.array([0, 0, -0.031, 1])
+
+
+def __getattr__(name: str) -> tuple[str, ...]:
+    """Keep the check-name export available to package consumers."""
+    if name == "RJ45_CHECKS":
+        # Isaac Lab loads this file directly for the measurement functions.
+        from embodichain.lab.evaluation._cable_checks import RJ45_CHECKS
+
+        return RJ45_CHECKS
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def measure_rj45_frame(

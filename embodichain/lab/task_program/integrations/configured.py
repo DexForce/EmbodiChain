@@ -27,6 +27,7 @@ from embodichain.lab.evaluation import (
 )
 
 from embodichain.lab.evaluation.observations import _raw_field_kind
+from embodichain.lab.evaluation._cable_checks import RJ45_CHECKS, WRAP_CHECKS
 from embodichain.lab.evaluation._recording import _is_segment_start_field
 
 from collections.abc import Mapping, Sequence
@@ -3715,20 +3716,12 @@ def _decode_evaluation(
                 f"cables/{cable_material.simulation_uid}/{quantity}"
             )
     if cable_wrap:
-        from embodichain.extensions.tasks.manipulation.cable.wrap_measurements import (
-            WRAP_CHECKS,
-        )
-
         for binding in scene.cables:
             for name in WRAP_CHECKS:
                 channels[f"cables/{binding.entity_id}/wrap_{name}"] = (
                     f"cables/{binding.simulation_uid}/wrap_{name}"
                 )
     if rj45_cycle:
-        from embodichain.extensions.tasks.manipulation.cable.rj45_measurements import (
-            RJ45_CHECKS,
-        )
-
         for binding in scene.cables:
             for name in RJ45_CHECKS:
                 channels[f"cables/{binding.entity_id}/rj45_{name}"] = (

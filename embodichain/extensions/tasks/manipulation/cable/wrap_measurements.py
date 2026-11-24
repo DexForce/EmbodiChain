@@ -21,29 +21,9 @@ from typing import Any
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-__all__ = ["evaluate_wrap"]
+from embodichain.lab.evaluation._cable_checks import WRAP_CHECKS as WRAP_CHECKS
 
-WRAP_CHECKS = (
-    "completed",
-    "finite",
-    "joint_limits",
-    "direct_floor_pickup",
-    "grasp_retained",
-    "material_grasp_slip",
-    "bilateral_finger_contact",
-    "actual_winding",
-    "post_contact_arc",
-    "hold_stable",
-    "rope_below_post_top",
-    "post_nonpenetration",
-    "robot_post_clearance",
-    "anchor_points_toward_post",
-    "smooth_anchor_exit",
-    "anchor_fixed",
-    "length_preserved",
-    "contacts_not_dropped",
-    "floor_nonpenetration",
-)
+__all__ = ["evaluate_wrap"]
 
 
 def _capsule_pad_gap(

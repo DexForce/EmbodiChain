@@ -22,6 +22,7 @@ from collections.abc import Mapping, Sequence
 from os import PathLike
 from typing import TYPE_CHECKING, Any
 
+from ._cable_checks import RJ45_CHECKS, WRAP_CHECKS
 from ._graph import CompiledEvaluation
 from ._session import EvaluationSnapshot, RuleSession
 
@@ -372,18 +373,10 @@ def _field_projection(field, descriptor, expected_names=None):
         )
 
         if quantity.startswith("rj45_"):
-            from embodichain.extensions.tasks.manipulation.cable.rj45_measurements import (
-                RJ45_CHECKS,
-            )
-
             if quantity.removeprefix("rj45_") not in RJ45_CHECKS:
                 return None
             contract = ("arena", "scalar", ("1",), (1,))
         elif quantity.startswith("wrap_"):
-            from embodichain.extensions.tasks.manipulation.cable.wrap_measurements import (
-                WRAP_CHECKS,
-            )
-
             if quantity.removeprefix("wrap_") not in WRAP_CHECKS:
                 return None
             contract = ("arena", "scalar", ("1",), (1,))
