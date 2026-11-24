@@ -64,7 +64,6 @@ class ExpansionRunCfg:
     export_lerobot: bool = False
     visual_profile_file: str | None = None
     visual_profile: str | None = None
-    render_profiles: tuple[str, ...] = ()
     observation_independent: bool = False
     motion_profile: str | None = None
     demo_skill_duration_scale: float = 1.0
@@ -154,23 +153,11 @@ class ExpansionRunCfg:
             raise ValueError("retry_interrupted must be bool")
         if type(self.observation_independent) is not bool:
             raise ValueError("observation_independent must be bool")
-        if not isinstance(self.render_profiles, (list, tuple)) or any(
-            not isinstance(value, str) or not value for value in self.render_profiles
-        ):
-            raise ValueError("render_profiles must contain profile IDs")
-        self.render_profiles = tuple(self.render_profiles)
-        if len(set(self.render_profiles)) != len(self.render_profiles):
-            raise ValueError("render_profiles must be unique")
-        if self.render_profiles and (
-            not self.observation_independent or not self.capture_media
-        ):
-            raise ValueError(
-                "state rerendering requires capture_media and explicit observation_independent"
-            )
-        if (
-            self.render_profiles or self.visual_profile is not None
-        ) and self.visual_profile_file is None:
-            raise ValueError("visual profiles require a registry file")
+        if self.visual_profile is not None:
+            if not isinstance(self.visual_profile, str) or not self.visual_profile:
+                raise ValueError("visual_profile must be one nonempty profile ID")
+            if self.visual_profile_file is None:
+                raise ValueError("visual profiles require a registry file")
         for name in (
             "mass_scale",
             "friction",
@@ -445,12 +432,8 @@ def preflight_expansion_job(cfg: ExpansionRunCfg) -> dict[str, object]:
         from .visual import load_visual_profiles
 
         profiles = load_visual_profiles(cfg.visual_profile_file)
-        for name in (
-            *cfg.render_profiles,
-            *((cfg.visual_profile,) if cfg.visual_profile else ()),
-        ):
-            if name not in profiles:
-                raise ValueError(f"unknown visual profile {name!r}")
+        if cfg.visual_profile is not None and cfg.visual_profile not in profiles:
+            raise ValueError(f"unknown visual profile {cfg.visual_profile!r}")
     if cfg.scene_atlas is not None:
         if cfg.source != "task_program":
             raise ValueError(
@@ -560,7 +543,6 @@ def preflight_expansion_job(cfg: ExpansionRunCfg) -> dict[str, object]:
         "episode_byte_budget",
         "media_buffer_bytes",
         "export_lerobot",
-        "render_profiles",
         "retry_interrupted",
     }
     semantic = {
@@ -592,22 +574,10 @@ def preflight_expansion_job(cfg: ExpansionRunCfg) -> dict[str, object]:
             runtime_versions[package] = version(package)
         except PackageNotFoundError:
             runtime_versions[package] = "uninstalled"
-    postprocessing_revision = (
-        hashlib.sha256(
-            json.dumps(
-                {name: profiles[name] for name in cfg.render_profiles},
-                sort_keys=True,
-                allow_nan=False,
-            ).encode()
-        ).hexdigest()
-        if cfg.render_profiles
-        else None
-    )
     execution_id = hashlib.sha256(
         json.dumps(
             {
                 "resources": {key: payload[key] for key in execution_fields},
-                "postprocessing_revision": postprocessing_revision,
                 "runtime_versions": runtime_versions,
             },
             sort_keys=True,
@@ -619,21 +589,6 @@ def preflight_expansion_job(cfg: ExpansionRunCfg) -> dict[str, object]:
         "semantic_id": recipe_revision,
         "execution_id": execution_id,
         "runtime_versions": runtime_versions,
-        "postprocessing_revision": postprocessing_revision,
-        "render_profile_snapshots": {
-            name: {
-                "revision": hashlib.sha256(
-                    json.dumps(
-                        profiles[name],
-                        sort_keys=True,
-                        separators=(",", ":"),
-                        allow_nan=False,
-                    ).encode()
-                ).hexdigest(),
-                "profile": profiles[name],
-            }
-            for name in cfg.render_profiles
-        },
         "task_runtime": "task_program",
         "motion_source": cfg.motion_source,
         "recipe_revision": recipe_revision,
@@ -649,7 +604,6 @@ def preflight_expansion_job(cfg: ExpansionRunCfg) -> dict[str, object]:
             "joint_parameters": ["stiffness", "damping"],
             "single_body_damping": False,
             "media": ["rgb", "depth", "mask", "normal", "position"],
-            "state_rerender": "complete-state and observation-independent only",
         },
         "grouping": [
             "one fixed deployment topology",

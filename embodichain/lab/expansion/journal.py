@@ -114,6 +114,12 @@ class ExpansionJournal:
                 record.update(state="interrupted", time_uncertain=True)
                 _atomic_json(path, record)
         self.run_id = uuid4().hex
+        # Export-only recovery carries archived render evidence for inspection.
+        legacy = (
+            {"render_profile_snapshots": report["render_profile_snapshots"]}
+            if operation == "export" and report.get("render_profile_snapshots")
+            else {}
+        )
         _atomic_json(
             self.root / "runs" / self.run_id / "configuration.json",
             {
@@ -121,7 +127,7 @@ class ExpansionJournal:
                 "execution_id": report["execution_id"],
                 "operation": operation,
                 "semantic_id": report["semantic_id"],
-                "render_profile_snapshots": report.get("render_profile_snapshots"),
+                **legacy,
             },
         )
         _atomic_json(
@@ -129,20 +135,10 @@ class ExpansionJournal:
             {
                 "config": dict(config),
                 "run_id": self.run_id,
-                "render_profile_snapshots": report.get("render_profile_snapshots"),
+                **legacy,
                 "execution_id": report["execution_id"],
             },
         )
-        if report.get("render_profile_snapshots") is not None:
-            _atomic_json(
-                self.root / "runs" / self.run_id / "render_profiles.json",
-                {
-                    "profiles": {
-                        name: value["profile"]
-                        for name, value in report["render_profile_snapshots"].items()
-                    }
-                },
-            )
         self._started = time.monotonic()
         self.checkpoint(force=True)
 

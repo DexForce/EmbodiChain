@@ -109,15 +109,27 @@ def test_example_preflight_resolves_owned_backend_and_budget(name, tmp_path):
     assert not report["capabilities"]["single_body_damping"]
 
 
-def test_native_media_requires_complete_decision_contract():
+def test_visual_profile_requires_media_capture():
     path = (
         Path(__file__).resolve().parents[3]
         / "examples/expansion/engine/job.default.yaml"
     )
     cfg = load_expansion_job(path)
-    cfg.render_profiles = ("blue",)
-    with pytest.raises(ValueError, match="observation_independent"):
-        ExpansionEngine.from_job(cfg)
+    cfg.visual_profile_file = str(path.with_name("visual.yaml"))
+    cfg.visual_profile = "blue"
+    with pytest.raises(
+        ValueError, match="visual_profile requires native media capture"
+    ):
+        ExpansionEngine.from_job(cfg).preflight()
+
+
+def test_removed_render_profiles_are_rejected_at_job_load(tmp_path):
+    path = tmp_path / "job.yaml"
+    path.write_text(
+        "deployment: task.yaml\noutput_dir: output\nrender_profiles: [blue]\n"
+    )
+    with pytest.raises(ValueError, match="unknown fields"):
+        load_expansion_job(path)
 
 
 def test_resource_changes_preserve_semantics_but_record_new_execution(tmp_path):

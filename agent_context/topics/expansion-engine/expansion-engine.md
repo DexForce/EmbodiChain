@@ -14,7 +14,7 @@ algorithms stay in `sim.motion.expansion`; scene and workspace algorithms stay i
 | Native workload World, source/evidence assembly and bounded export | `embodichain/lab/expansion/gym_workloads.py` |
 | Declarative scene/motion jobs and pure configuration validation | `embodichain/lab/expansion/task_program_jobs.py`, `_task_program_config.py` |
 | Owned result-preview launch, wait and stop | `embodichain/lab/expansion/preview.py` |
-| Job assembly, stage recovery and inspect | `embodichain/lab/expansion/workflow.py`, `stages.py` |
+| Job assembly, export recovery and inspect | `embodichain/lab/expansion/workflow.py` |
 | Native World ownership and compatibility facade | `embodichain/lab/expansion/host.py` |
 | Task-owned render/source/transform/acceptance ports | `embodichain/lab/expansion/host_extensions.py` |
 | Measured geometry, native substeps and sustained-contact acceptance | `embodichain/lab/expansion/acceptance.py` |
@@ -25,7 +25,7 @@ algorithms stay in `sim.motion.expansion`; scene and workspace algorithms stay i
 | Source-pinned sampling and joint scene candidates | `embodichain/lab/expansion/recipes.py`, `scene.py` |
 | Artifact staging, checks and dataset export | `embodichain/lab/expansion/persistence.py`, `export.py` |
 | Portable one-episode dataset export | `embodichain/lab/expansion/episode_export.py` |
-| Native appearance and state rerender | `embodichain/lab/expansion/visual.py` |
+| Rollout appearance and archived variant verification | `embodichain/lab/expansion/visual.py` |
 | Bounded media blocks | `embodichain/data_pipeline/recording/media.py` |
 
 `ExpansionEngine.from_job` resolves a deployment-owned backend and sensor suite.
@@ -55,14 +55,14 @@ source/backend/phase/scope and shared-resource compatibility; the host checks th
 before mutating the World.
 
 Semantic IDs pin sampling inputs, while execution IDs describe mutable resource
-budgets and postprocessing. Recipe IDs survive interrupted retries and B changes;
+budgets and export requests. Recipe IDs survive interrupted retries and B changes;
 new attempt IDs distinguish physical executions, and persistent job-instance IDs
 separate independently collected episodes. Native scene-case identity includes the
 logical recipe: independently prepared recipes must not share trajectory-only
 coverage admission merely because their sampled physical values match. Frozen writes are recovered before
 allocating new attempts. A hard-loss time budget is an explicit lower bound.
 
-Confirmed parents may render/export before the collection target is met. Stage
+Confirmed episodes may export before the collection target is met. Stage
 failures remain independent; export-only recovery opens no World and needs no
 source configuration. Version 2 manifests use contained relative hashed references;
 export includes media, calibration and source evidence in a portable dataset bundle.
@@ -197,11 +197,11 @@ reconstruct checked, independently owned numerical tensors; source/receipt/media
 inspection remains required. Immutable JSON nodes can be shared internally, while
 public mutable projections own separate containers.
 
-Pure visual replay requires complete scene state and an explicit observation-independent
-expert contract. Physics is disabled across the entire World; render-state publication
-preserves measured joint excursions while restoring physical limits. Each child owns
-new images/calibration but retains the original actions, times and parent ancestry.
-It increases observation-variant counts, not physical-success counts.
+Configured cohort jobs apply one shared World appearance from `visual_profile`
+before the rollout. The selected material, light and camera settings are pinned
+by the recipe. Calibrated RGB-D is captured at the initial and post-control
+boundaries of that physical episode. Inspection and export retain support for
+visual variants in historical artifacts.
 
 Unsupported parameter, sensor and planner combinations are errors, not silent B=1
 fallbacks. The native physical operators admit measured mass/inertia, friction and CoM

@@ -13,7 +13,8 @@ The tested Newton DROID carton run was rejected by physical-effect/segment check
 it is **not qualified**, and no thresholds or source protections were relaxed.
 Complete source/backend matrices and broader atlas/motion recipe qualification
 remain follow-up work. Portable calibration/attachment export and independent
-postprocessing recovery are implemented and validated. The CLI rejects unsupported combinations rather than claiming full coverage.
+export recovery are implemented and validated. The CLI checks the supported source,
+backend and sensor combinations during preflight.
 
 ## Interactive acceptance showcase
 
@@ -59,12 +60,12 @@ embodichain expansion resume --job examples/expansion/engine/job.default.yaml
 ```
 
 The output must be unused for `run`. `resume` checks pinned source/recipe semantics and commit receipts. Batch size,
-resource budgets and postprocessing requests may change without resampling a recipe. It retries frozen writes without another
+resource budgets and export requests may change without resampling a recipe. It retries frozen writes without another
 rollout, and, with `retry_interrupted: true`, starts a new attempt of the same immutable
 recipe for an interrupted physical episode. Disabling this policy skips interrupted
 recipes when admitting new work. A bounded
 run that misses its target exits with status 2. Inspect reports physical commits,
-per-attempt outcomes and separate observation-variant counts.
+per-attempt outcomes and any archived observation variants.
 
 `job.newton.yaml` selects a separate Newton environment component. A job cannot
 switch the physical backend of a selected environment. Both example deployments
@@ -125,16 +126,15 @@ or parameter mutation. The supplied host has a closed supported operation catalo
 custom operators need an adapter, rather than arbitrary imperative callbacks.
 
 A semantic job ID pins recipe inputs. Execution IDs describe capacity, budgets,
-postprocessing requests and runtime versions. A persistent job-instance ID separates
+export requests and runtime versions. A persistent job-instance ID separates
 physical episode/commit identities of independent runs of the same recipe. Each
 retry has a new attempt number, while its recipe ID stays fixed. Journals retain
 invocation history and cumulative observed time; a hard process loss marks elapsed
 time as an uncertain lower bound instead of charging offline downtime.
 
-Confirmed parents are eligible for rendering/export even before the collection
-reaches its target. Render failure does not prevent parent export. Each stage has
-its own status/history; `inspect` derives pending visual children from the current
-confirmed parents and pinned profile definitions. Retry only an export using:
+Confirmed episodes are eligible for export before collection reaches its target.
+Collection and export have independent status and history. You can retry the
+export with the frozen episodes.
 
 ```bash
 embodichain expansion resume --output /tmp/embodichain-expansion/default --stage export
@@ -142,7 +142,7 @@ embodichain expansion resume --output /tmp/embodichain-expansion/default --stage
 
 This path opens no World and does not resolve the original deployment or source
 files. `stage_complete` reports the selected export, while `complete` still reports
-the whole job. Ordinary `resume --job ...` can retry collection and rendering.
+the whole job. Ordinary `resume --job ...` can continue collection.
 
 Version 2 artifacts store typed manifests with relative, hashed numeric/media/source
 references. Export includes a self-contained `embodichain_artifacts` directory with
@@ -153,22 +153,18 @@ the original committed evidence. Resuming legacy collection requires unchanged
 resolved deployment evidence; interrupted legacy attempts without replayable recipes
 are abandoned, with their original records preserved.
 
-## Native RGB-D and observation variants
+## Native RGB-D and rollout appearance
 
 ```bash
 embodichain expansion run --job examples/expansion/engine/job.rgbd.yaml
 ```
 
-This selects a reusable RGB-D embodiment, captures actual frames and calibration,
-then produces material/camera variants from complete recorded scene states.
-`observation_independent: true` is an explicit assertion about expert decision
-semantics: changing rendered images must not invalidate the parent's actions.
-It is inappropriate for an expert whose decisions depend on those images.
-
-The World pauses dynamics for the entire rerender cohort. Every child keeps the
-parent's actions and T+1 state timestamps; a child does not count as a new physical
-success. The original scene and parameters are restored afterward. Old qpos-only
-files cannot be used as complete render sources.
+This job selects a reusable RGB-D embodiment and the `combined` appearance
+from `visual.yaml`. The engine applies the material, light and camera settings
+before the rollout and records T+1 calibrated observations on the physical
+control clock. Each confirmed episode owns the images captured during its
+execution. One appearance is shared by the World for the job. Collect separate
+jobs to cover additional appearances.
 
 `media_buffer_bytes` bounds raw frame storage across the active cohort. Each spool
 writes owned NPZ blocks and a final hashed manifest. Encoding/stacking needs an
@@ -176,8 +172,9 @@ additional bounded transient copy. Numeric evidence has a separate per-episode
 budget and a 128 MiB serialized archive ceiling. No full dense image trajectory is
 kept for every candidate in RAM. Sensor schema changes within a job are rejected.
 
-`export_lerobot: true` streams both physical parents and visual children through
-LeRobotRecorder, including the existing lossless depth-video sidecar. The published
+`export_lerobot: true` streams confirmed episodes through LeRobotRecorder,
+including the existing lossless depth-video sidecar. Previously archived visual
+variants are also readable and exportable. The published
 `lerobot-export.json` identifies a finalized dataset with verified recording journals.
 An interrupted export remains private and can be retried from frozen source artifacts.
 The reader streams individual frames from stored blocks under a frame-byte budget;
@@ -257,7 +254,7 @@ python scripts/benchmark/expansion/offline_collection.py \
 The harness runs B=1,8,32 in state and RGB-D modes, records fresh-process wall time,
 confirmed episodes/second, success rate, RSS, process GPU memory and native timing
 sections. `runtime.json` separates startup, preparation, execution/validation,
-commit, rerender and export. Physics, render and sensor-fetch timings remain in the
+commit and export. Physics, render and sensor-fetch timings remain in the
 nested native profiler. Atomic planning has a separate native profiler section. The common engine reports
 preparation, admission, execution, staging and submission; the host separates state
 capture, source binding, media buffering and acceptance. Nested times must not be
@@ -288,7 +285,7 @@ independent acceptance and confirmed writes are included. Thread settings are in
 The revised scheduler was exercised with Default native motion (B=2), Default
 Real2Sim prototype motion (B=2), and Newton native motion (B=2): each confirmed two
 physical episodes. The prototype job resumed at B=8 with no duplicate attempts.
-A Default RGB-D run confirmed two parents, generated four visual children and
+A historical Default RGB-D run confirmed two parents, generated four visual children and
 exported six episodes / 2,382 frames. After moving that dataset and hiding its
 original job directory, validation reported zero errors/warnings; actions, states
 and endpoint RGB frames matched the frozen evidence. These probes establish the

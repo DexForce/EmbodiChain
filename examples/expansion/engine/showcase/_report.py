@@ -307,6 +307,9 @@ def audit(root: Path) -> dict:
             visual_checks = (
                 visual_difference_checks(receipts, variants) if variants else []
             )
+            capture_profile = read(directory / "job.json")["config"].get(
+                "visual_profile"
+            )
             recipes = []
             parameters = []
             expansion = []
@@ -330,6 +333,17 @@ def audit(root: Path) -> dict:
                     np.diff(episode.timestamps.numpy()) > 0
                 ), "nonmonotonic clock"
                 assert episode.validation.accepted, "receipt for rejected evidence"
+                if capture_profile:
+                    assert episode.metadata["visual_profile"] == capture_profile
+                    media = read(Path(episode.metadata["media_manifest"]))
+                    assert media["frame_count"] == len(episode.timestamps)
+                    visual_checks.append(
+                        {
+                            "episode_id": episode.episode_id,
+                            "profile": capture_profile,
+                            "frame_count": media["frame_count"],
+                        }
+                    )
                 parameters.append(dict(episode.metadata.get("physics_parameters", {})))
                 records = episode.metadata.get("expansion", ())
                 expansion.append(records)

@@ -22,6 +22,7 @@ import fcntl
 import hashlib
 import json
 import resource
+import time
 import numpy as np
 import torch
 from embodichain.data_pipeline.recording.media import _atomic_json, _digest, _mkdir
@@ -102,14 +103,15 @@ class _RecipeSource:
 
 
 def inspect_expansion_job(directory: str | Path) -> dict[str, object]:
-    """Audit physical commits and independently report collection/render/export progress."""
+    """Audit confirmed episodes, archived observation variants, and export progress."""
     root = Path(directory).resolve()
     job = json.loads((root / "job.json").read_text())
-    cfg = (
-        json.loads((root / "execution.json").read_text())["config"]
+    execution = (
+        json.loads((root / "execution.json").read_text())
         if (root / "execution.json").exists()
-        else job["config"]
+        else job
     )
+    cfg = execution["config"]
     receipts = ArtifactEpisodeSink(root).inspect()
     records = ExpansionJournal(root).attempts()
     outcomes = {
@@ -138,43 +140,34 @@ def inspect_expansion_job(directory: str | Path) -> dict[str, object]:
 
     variants = inspect_observation_variants(root)
     result["observation_variants"] = len(variants)
-    plan = (
-        json.loads((root / "postprocessing.json").read_text())
-        if (root / "postprocessing.json").exists()
-        else None
-    )
-    requested = set(cfg.get("render_profiles", ()))
-    known = {variant["variant_id"] for variant in variants}
-    profiles = {} if plan is None else plan.get("profiles", {})
-    if (root / "execution.json").exists():
-        profiles = (
-            json.loads((root / "execution.json").read_text()).get(
-                "render_profile_snapshots"
-            )
-            or profiles
-        )
-    from .visual import _variant_key
-
-    render_pending = []
-    for parent in receipts:
-        for name in requested:
-            if name in profiles:
-                key = _variant_key(parent.commit_id, name, profiles[name]["revision"])
-                if key not in known:
-                    render_pending.append(key)
-            elif not any(
-                v["parent_commit_id"] == parent.commit_id and v["profile_id"] == name
-                for v in variants
-            ):
-                render_pending.append((parent.commit_id, name))
     result["stages"] = {
         "collection": {"complete": result["collection_complete"]},
-        "render": {"complete": not render_pending, "pending": len(render_pending)},
         "export": {
             "complete": not cfg.get("export_lerobot", False),
             "pending": int(bool(receipts) and cfg.get("export_lerobot", False)),
         },
     }
+    # Retain progress readback for previously written visual archives.
+    requested = set(cfg.get("render_profiles", ()))
+    if requested:
+        from .visual import _variant_key
+
+        plan_path = root / "postprocessing.json"
+        plan = json.loads(plan_path.read_text()) if plan_path.exists() else {}
+        profiles = execution.get("render_profile_snapshots") or plan.get("profiles", {})
+        known = {variant["variant_id"] for variant in variants}
+        available = {(v["parent_commit_id"], v["profile_id"]) for v in variants}
+        pending = sum(
+            (
+                _variant_key(parent.commit_id, name, profiles[name]["revision"])
+                not in known
+                if name in profiles
+                else (parent.commit_id, name) not in available
+            )
+            for parent in receipts
+            for name in requested
+        )
+        result["stages"]["render"] = {"complete": pending == 0, "pending": pending}
     if cfg.get("export_lerobot") and (root / "lerobot-export.json").exists():
         from .export import export_expansion_lerobot
 
@@ -187,7 +180,7 @@ def inspect_expansion_job(directory: str | Path) -> dict[str, object]:
     for path in (root / "stages").glob("*/*.json"):
         stage = json.loads(path.read_text())
         requested = (
-            bool(cfg.get("render_profiles"))
+            bool(requested)
             if stage["stage"] == "render"
             else bool(cfg.get("export_lerobot")) if stage["stage"] == "export" else True
         )
@@ -216,6 +209,33 @@ def inspect_expansion_job(directory: str | Path) -> dict[str, object]:
     return result
 
 
+def _collection_config(saved: dict) -> dict:
+    """Project historical job settings onto the current collection schema."""
+    return {
+        key: value
+        for key, value in saved.items()
+        if key not in {"render_profiles", "capture_camera_variants"}
+    }
+
+
+def _export_confirmed_artifacts(root: Path, journal: ExpansionJournal) -> None:
+    from .export import export_expansion_lerobot
+
+    journal.stage("export", "running")
+    try:
+        exported = export_expansion_lerobot(None, root)
+        journal.stage(
+            "export",
+            "complete",
+            dataset_path=exported["dataset_path"],
+            episode_ids=exported["episode_ids"],
+        )
+    except Exception as error:
+        journal.stage("export", "failed", error=str(error))
+    finally:
+        journal.checkpoint(force=True)
+
+
 def _migrate_legacy(root, cfg, report):
     path = root / "job.json"
     if not path.exists():
@@ -223,7 +243,9 @@ def _migrate_legacy(root, cfg, report):
     previous = json.loads(path.read_text())
     if previous.get("schema_version") == 2:
         return
-    old_cfg = resolve_expansion_job(ExpansionRunCfg(**previous["config"]))
+    old_cfg = resolve_expansion_job(
+        ExpansionRunCfg(**_collection_config(previous["config"]))
+    )
     old_report = preflight_expansion_job(old_cfg)
     if previous.get("resolved_deployment") != old_report["resolved_deployment"]:
         raise ValueError(
@@ -288,7 +310,7 @@ def run_expansion_job(
     """Assemble one native host, shared scheduler and durable stage coordinator.
 
     Resource budgets may change on resume; physical recipe semantics remain pinned.
-    Accepted parents are postprocessed even when collection exhausts its budget.
+    Confirmed episodes remain exportable when collection exhausts its budget.
     """
     cfg = resolve_expansion_job(cfg)
     report = preflight_expansion_job(cfg)
@@ -307,9 +329,6 @@ def run_expansion_job(
             journal.reconcile(sink)
             completed = len(sink.inspect())
             prior = journal.attempts()
-            from .stages import plan_postprocessing, render_pending, run_postprocessing
-
-            plan = plan_postprocessing(cfg, root, sink.inspect())
             status = inspect_expansion_job(root)
             if not status["complete"]:
                 source_artifacts = {
@@ -337,20 +356,13 @@ def run_expansion_job(
                     and len(prior) < cfg.max_attempts
                     and journal.time_usage()[0] < cfg.max_wall_time_s
                 )
-                needs_render = bool(render_pending(root, plan))
-                render_startup_error = None
-                if needs_collection or needs_render:
+                if needs_collection:
                     try:
                         host = GymExpansionHost(
                             cfg, report, root, journal, source_artifacts
                         )
                     except Exception as error:
-                        render_startup_error = str(error)
-                        journal.stage(
-                            "collection" if needs_collection else "render",
-                            "failed",
-                            error=render_startup_error,
-                        )
+                        journal.stage("collection", "failed", error=str(error))
                 remaining = max(0, cfg.max_attempts - len(prior))
                 if needs_collection and host is not None:
                     journal.stage("collection", "running")
@@ -400,9 +412,14 @@ def run_expansion_job(
                             else "budget_exhausted"
                         ),
                     )
-                run_postprocessing(
-                    cfg, host, sink, journal, render_startup_error=render_startup_error
-                )
+                if cfg.export_lerobot:
+                    if sink.inspect():
+                        started = time.monotonic()
+                        _export_confirmed_artifacts(root, journal)
+                        if host is not None:
+                            host.timings["export"] += time.monotonic() - started
+                    else:
+                        journal.stage("export", "empty")
                 from .reporting import build_expansion_report
 
                 build_expansion_report(root, write=True)
@@ -445,42 +462,31 @@ def resume_expansion_export(directory: str | Path) -> dict[str, object]:
     """
     root = Path(directory).resolve()
     job = json.loads((root / "job.json").read_text())
-    saved = (
-        json.loads((root / "execution.json").read_text())["config"]
+    execution = (
+        json.loads((root / "execution.json").read_text())
         if (root / "execution.json").exists()
-        else job["config"]
+        else job
     )
-    cfg = ExpansionRunCfg(**{**saved, "output_dir": str(root), "export_lerobot": True})
+    saved = execution["config"]
+    cfg = ExpansionRunCfg(
+        **{**_collection_config(saved), "output_dir": str(root), "export_lerobot": True}
+    )
     report = {
         **job,
         "semantic_id": job.get("semantic_id", job["job_id"]),
         "execution_id": _hash(("frozen-export/v2", cfg.media_buffer_bytes)),
+        "render_profile_snapshots": execution.get("render_profile_snapshots"),
     }
-    if (root / "execution.json").exists():
-        report["render_profile_snapshots"] = json.loads(
-            (root / "execution.json").read_text()
-        ).get("render_profile_snapshots", job.get("render_profile_snapshots"))
     with (root / ".owner.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         journal = ExpansionJournal(root)
-        journal.open_run(report, cfg.to_dict(), resume=True, operation="export")
+        journal.open_run(
+            report, {**saved, **cfg.to_dict()}, resume=True, operation="export"
+        )
         try:
             sink = ArtifactEpisodeSink(root)
             journal.reconcile(sink)
-            journal.stage("export", "running")
-            from .export import export_expansion_lerobot
-
-            try:
-                exported = export_expansion_lerobot(None, root)
-                journal.stage(
-                    "export",
-                    "complete",
-                    dataset_path=exported["dataset_path"],
-                    episode_ids=exported["episode_ids"],
-                )
-            except Exception as error:
-                journal.stage("export", "failed", error=str(error))
-                raise
+            _export_confirmed_artifacts(root, journal)
         finally:
             journal.checkpoint(force=True, state="closed")
         result = inspect_expansion_job(root)

@@ -126,8 +126,13 @@ def build_cases(root: Path, mode: str, *, preserve: bool = False) -> list[dict]:
                 }
             },
         }
+        combined = (
+            ("material", "light", "camera")
+            if source == "ur5"
+            else ("material", "camera")
+        )
         profiles[source]["combined"] = {
-            k: v for p in profiles[source].values() for k, v in p.items()
+            k: v for name in combined for k, v in profiles[source][name].items()
         }
         profiles[source]["capture"] = {
             "materials": {
@@ -211,11 +216,7 @@ def build_cases(root: Path, mode: str, *, preserve: bool = False) -> list[dict]:
                 "target": job["target_episodes"],
                 "batch_size": job["batch_size"],
                 "timeout_s": int(job["max_wall_time_s"])
-                + (
-                    900
-                    if job.get("render_profiles") or job.get("export_lerobot")
-                    else 300
-                ),
+                + (900 if job.get("export_lerobot") else 300),
             }
         )
 
@@ -275,37 +276,38 @@ def build_cases(root: Path, mode: str, *, preserve: bool = False) -> list[dict]:
             )
         add(
             f"{backend}-visual",
-            "原生视觉采集与观测重渲染",
+            "原生视觉采集与导出",
             backend=backend,
-            tags=("visual", "rerender", "export"),
+            tags=("visual", "export"),
             visual_profile_file=str(configs / "visual.ur5.yaml"),
             visual_profile="capture",
-            render_profiles=["material", "light", "camera", "combined"],
-            observation_independent=True,
             export_lerobot=True,
         )
-        add(
-            f"{backend}-rerender-controls",
-            "规范基线 · 视觉单项对照",
-            backend=backend,
-            tags=("visual", "rerender", "controlled_visual"),
-            visual_profile_file=str(configs / "visual.ur5.yaml"),
-            render_profiles=["material", "light", "camera"],
-            observation_independent=True,
-            target_episodes=1,
-        )
+        for profile, title in (
+            ("material", "材质"),
+            ("light", "灯光"),
+            ("camera", "相机"),
+        ):
+            add(
+                f"{backend}-visual-{profile}",
+                f"原生视觉 · {title}",
+                backend=backend,
+                tags=("visual", "controlled_visual"),
+                visual_profile_file=str(configs / "visual.ur5.yaml"),
+                visual_profile=profile,
+                target_episodes=1,
+            )
         params = {k: v for p in physics.values() for k, v in p.items()}
         add(
             f"{backend}-combined",
             "多领域组合 · " + backend,
             backend=backend,
-            tags=("combined", "scene", "motion", "physics", "visual", "rerender"),
+            tags=("combined", "scene", "motion", "physics", "visual"),
             quick=backend == "default",
             scene_atlas=str(root / "inputs/atlas/atlas.json"),
             motion_profile=str(configs / "motion.combined.yaml"),
             visual_profile_file=str(configs / "visual.ur5.yaml"),
-            render_profiles=["material", "light", "camera", "combined"],
-            observation_independent=True,
+            visual_profile="combined",
             target_episodes=2 if mode == "quick" else 8,
             max_attempts=32,
             max_wall_time_s=1200.0,
@@ -327,13 +329,12 @@ def build_cases(root: Path, mode: str, *, preserve: bool = False) -> list[dict]:
         "carton-combined",
         "真实示范 · 运动／物理／视觉组合",
         source="carton",
-        tags=("prototype", "combined", "physics", "visual", "rerender", "export"),
+        tags=("prototype", "combined", "physics", "visual", "export"),
         quick=True,
         source_profile=str(configs / "prototype.combined.yaml"),
         mass_scale={"carton": [0.99, 1.01]},
         visual_profile_file=str(configs / "visual.carton.yaml"),
-        render_profiles=["material", "camera"],
-        observation_independent=True,
+        visual_profile="combined",
         export_lerobot=True,
         target_episodes=2 if mode == "quick" else 8,
         max_attempts=32,
