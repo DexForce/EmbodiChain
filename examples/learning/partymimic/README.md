@@ -20,9 +20,8 @@ python -m pip install onnxruntime imageio imageio-ffmpeg
 ~~~
 
 Run from the EmbodiChain checkout. The preparation command downloads the
-demo's converted ONNX at a pinned revision and supplies the matching YAML
-and parity fixture from this example.
-[RP1 sparse5 ONNX](https://huggingface.co/DexForceAI/embodichain_model/blob/90f1dc20d5d574d948a942e831e798aa9e1398c1/policies/rp1-partymimic-sparse5/rp1_sparse5.onnx)
+demo ONNX and its matching deployment YAML from one pinned Hub revision.
+[RP1 sparse5 model files](https://huggingface.co/DexForceAI/embodichain_model/tree/0a5bf9a5ad1e89061bf68d25d769407f79ca5492/policies/rp1-partymimic-sparse5)
 
 ~~~bash
 embodichain run-example learning/partymimic/prepare \
@@ -35,14 +34,15 @@ embodichain run-example learning/partymimic \
 ~~~
 
 Preparation caches the pinned PartyMimic checkout, RP1 meshes and converter
-in `~/.cache/embodichain/partymimic`. It writes the ONNX, deployment YAML,
-`.check.npz` and a provenance receipt with hashes to the output directory.
-The bundled deployment YAML and parity fixture were generated with the
-pinned PartyMimic exporter and the MIT-licensed RP1 kneeling and crawling
-clips. [PartyMimic MIT notice](resources/LICENSE.PartyMimic)
+in `~/.cache/embodichain/partymimic`. It writes the ONNX, deployment YAML and
+a provenance receipt with hashes to the output directory. The published files
+were generated with the pinned PartyMimic exporter and the MIT-licensed RP1
+kneeling and crawling clips. [PartyMimic MIT notice](resources/LICENSE.PartyMimic)
 
 To export a local sparse5 checkpoint, pass `--checkpoint /path/to/checkpoint.pt`
-to the preparation command. [Official exporter](https://github.com/Roboparty/PartyMimic/blob/c3da040573cb9ce06dfa6a2ee007873dcec0c076/tools/export_deploy_onnx.py)
+to the preparation command. When ONNX Runtime is installed, preparation checks
+the export using the temporary `.check.npz` and records the error in its receipt.
+[Official exporter](https://github.com/Roboparty/PartyMimic/blob/c3da040573cb9ce06dfa6a2ee007873dcec0c076/tools/export_deploy_onnx.py)
 
 Select `walk` or `step-up` to run one scene. Use `--no-video` for a physics
 check and `--unloaded` to evaluate the same reference with zero payload.
@@ -77,9 +77,11 @@ the robot. `--step-reference baseline` selects the left-lead reference.
 ## Evidence
 
 Each rollout writes a USD scene and, with capture enabled, a third-person MP4.
-The combined `metrics.json` records export parity, hashes, Newton's measured payload mass,
+The combined `metrics.json` records hashes, Newton's measured payload mass,
 displacement, falls, maximum weld position error, support contacts and control
-loop latency. The walk must travel 3.50 ± 0.15 m in 400 commands. The step must
+loop latency. `onnx_max_abs_error` contains the measured export error when
+present in the provenance receipt and `null` otherwise. The walk must travel
+3.50 ± 0.15 m in 400 commands. The step must
 finish with at least 0.50 s of simultaneous foot contact on the platform top.
 Both must finish upright with each weld within 3 cm of its configured position.
 The clearance check measures the wrist and hand geometry in the crate frame at

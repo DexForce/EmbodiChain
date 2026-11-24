@@ -53,25 +53,6 @@ def _sha256(path: Path) -> str:
         return file_digest(stream, "sha256").hexdigest()
 
 
-def _check_export(path: Path) -> float:
-    import numpy as np
-    import onnxruntime as ort
-
-    options = ort.SessionOptions()
-    options.intra_op_num_threads = 1
-    session = ort.InferenceSession(
-        str(path), sess_options=options, providers=["CPUExecutionProvider"]
-    )
-    with np.load(path.with_suffix(".check.npz"), allow_pickle=False) as vector:
-        (actual,) = session.run(
-            ["action"], {item.name: vector[item.name] for item in session.get_inputs()}
-        )
-        error = float(np.max(np.abs(actual - vector["action"])))
-    if not np.isfinite(error) or error > 1e-4:
-        raise RuntimeError(f"Official ONNX fixture error {error} exceeds 1e-4.")
-    return error
-
-
 def _run(
     args: argparse.Namespace, scenario: str, policy: PartyMimicPolicy
 ) -> dict[str, Any]:
@@ -728,7 +709,6 @@ def main(argv: list[str] | None = None) -> None:
     from embodichain.lab.sim import SimulationManager
 
     policy = PartyMimicPolicy.from_onnx(args.policy)
-    error = _check_export(args.policy)
     provenance_path = args.policy.with_suffix(".provenance.json")
     provenance = (
         json.loads(provenance_path.read_text(encoding="utf-8"))
@@ -738,13 +718,12 @@ def main(argv: list[str] | None = None) -> None:
     hashes = {
         "onnx": _sha256(args.policy),
         "yaml": _sha256(args.policy.with_suffix(".yaml")),
-        "check.npz": _sha256(args.policy.with_suffix(".check.npz")),
     }
     recorded = provenance.get("artifacts", {})
-    if recorded and recorded != {
-        args.policy.with_suffix(f".{suffix}").name: digest
+    if recorded and any(
+        recorded.get(args.policy.with_suffix(f".{suffix}").name) != digest
         for suffix, digest in hashes.items()
-    }:
+    ):
         raise RuntimeError("The ONNX artifacts differ from their export provenance.")
     scenarios = _SCENARIOS if args.scenario == "all" else (args.scenario,)
     results = []
@@ -781,7 +760,7 @@ def main(argv: list[str] | None = None) -> None:
         "rp1_description_revision": provenance.get("rp1_description_revision"),
         "onnxruntime": ort.__version__,
         "execution_provider": "CPUExecutionProvider",
-        "onnx_max_abs_error": error,
+        "onnx_max_abs_error": provenance.get("onnx_max_abs_error"),
         "physics_backend": physics_backend,
         "physics_device": args.device,
         "hand_model": args.hand,

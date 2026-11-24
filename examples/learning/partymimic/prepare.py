@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from hashlib import file_digest
 import json
 import os
@@ -38,13 +39,15 @@ _RP1 = "19081d6f9fd5b613a304a7749f5886b30eb7a022"
 _ROBOT_DIR = Path("data/rp1_28dof_mjlab")
 _XML = "rp1_28dof.xml"
 _MODEL = "rp1_sparse5"
-_MODEL_FILES = tuple(f"{_MODEL}{suffix}" for suffix in (".onnx", ".yaml", ".check.npz"))
+_MODEL_FILES = (f"{_MODEL}.onnx", f"{_MODEL}.yaml")
 _RECEIPT = f"{_MODEL}.provenance.json"
 _HUB_REPO = "DexForceAI/embodichain_model"
-_HUB_FILENAME = "policies/rp1-partymimic-sparse5/rp1_sparse5.onnx"
-_HUB_REVISION = "90f1dc20d5d574d948a942e831e798aa9e1398c1"
-_DEMO_ONNX_SHA256 = "aa30fd54a1a2601aa9e4c9b6e81fb4700cac2810a00f5e133c1710c8f2213688"
-_DEMO_METADATA = Path(__file__).with_name("resources")
+_HUB_DIRECTORY = "policies/rp1-partymimic-sparse5"
+_HUB_REVISION = "0a5bf9a5ad1e89061bf68d25d769407f79ca5492"
+_DEMO_SHA256 = {
+    f"{_MODEL}.onnx": "aa30fd54a1a2601aa9e4c9b6e81fb4700cac2810a00f5e133c1710c8f2213688",
+    f"{_MODEL}.yaml": "5ac442ce2ec67ad323d91afbdc4f0fc2b684c432b962669ed31173a1da21cc26",
+}
 _CONVERTER_REQUIREMENTS = (
     "mujoco-usd-converter==0.10.0",
     "mujoco-core==4.0.1",
@@ -58,7 +61,9 @@ def _sha256(path: Path) -> str:
         return file_digest(stream, "sha256").hexdigest()
 
 
-def _publish_policy(temporary: Path, output: Path, provenance: dict[str, str]) -> None:
+def _publish_policy(
+    temporary: Path, output: Path, provenance: Mapping[str, str | float]
+) -> None:
     receipt = {
         **provenance,
         "artifacts": {name: _sha256(temporary / name) for name in _MODEL_FILES},
@@ -73,23 +78,9 @@ def _publish_policy(temporary: Path, output: Path, provenance: dict[str, str]) -
 def _download_policy(output: Path, upstream: Path) -> None:
     from huggingface_hub import hf_hub_download
 
-    source = Path(
-        hf_hub_download(
-            repo_id=_HUB_REPO,
-            filename=_HUB_FILENAME,
-            revision=_HUB_REVISION,
-            endpoint="https://huggingface.co",
-            token=False,
-        )
-    )
-    if _sha256(source) != _DEMO_ONNX_SHA256:
-        raise RuntimeError(
-            "The downloaded PartyMimic demo ONNX has an unexpected hash."
-        )
-
     provenance = {
         "hub_repo_id": _HUB_REPO,
-        "hub_filename": _HUB_FILENAME,
+        "hub_filename": f"{_HUB_DIRECTORY}/{_MODEL_FILES[0]}",
         "hub_revision": _HUB_REVISION,
         "partymimic_revision": _PARTYMIMIC,
         "rp1_description_revision": _RP1,
@@ -98,9 +89,21 @@ def _download_policy(output: Path, upstream: Path) -> None:
     }
     with TemporaryDirectory(dir=output) as directory:
         temporary = Path(directory)
-        shutil.copyfile(source, temporary / _MODEL_FILES[0])
-        for name in _MODEL_FILES[1:]:
-            shutil.copyfile(_DEMO_METADATA / name, temporary / name)
+        for name in _MODEL_FILES:
+            source = Path(
+                hf_hub_download(
+                    repo_id=_HUB_REPO,
+                    filename=f"{_HUB_DIRECTORY}/{name}",
+                    revision=_HUB_REVISION,
+                    endpoint="https://huggingface.co",
+                    token=False,
+                )
+            )
+            if _sha256(source) != _DEMO_SHA256[name]:
+                raise RuntimeError(
+                    f"The downloaded PartyMimic demo file {name} has an unexpected hash."
+                )
+            shutil.copyfile(source, temporary / name)
         _publish_policy(temporary, output, provenance)
 
 
@@ -206,9 +209,32 @@ def _converter(cache: Path) -> None:
     )
 
 
+def _check_export(path: Path) -> float | None:
+    try:
+        import onnxruntime as ort
+    except ImportError:
+        return None
+
+    import numpy as np
+
+    options = ort.SessionOptions()
+    options.intra_op_num_threads = 1
+    session = ort.InferenceSession(
+        str(path), sess_options=options, providers=["CPUExecutionProvider"]
+    )
+    with np.load(path.with_suffix(".check.npz"), allow_pickle=False) as vector:
+        (actual,) = session.run(
+            ["action"], {item.name: vector[item.name] for item in session.get_inputs()}
+        )
+        error = float(np.max(np.abs(actual - vector["action"])))
+    if not np.isfinite(error) or error > 1e-4:
+        raise RuntimeError(f"Official ONNX fixture error {error} exceeds 1e-4.")
+    return error
+
+
 def _export(checkpoint: Path, upstream: Path, output: Path) -> None:
     receipt = output / _RECEIPT
-    provenance = {
+    provenance: dict[str, str | float] = {
         "checkpoint_sha256": _sha256(checkpoint),
         "partymimic_revision": _PARTYMIMIC,
         "rp1_description_revision": _RP1,
@@ -217,10 +243,10 @@ def _export(checkpoint: Path, upstream: Path, output: Path) -> None:
     }
     if receipt.is_file() and all((output / name).is_file() for name in _MODEL_FILES):
         previous = json.loads(receipt.read_text(encoding="utf-8"))
-        if previous == {
-            **provenance,
-            "artifacts": {name: _sha256(output / name) for name in _MODEL_FILES},
-        }:
+        if all(previous.get(key) == value for key, value in provenance.items()) and all(
+            previous.get("artifacts", {}).get(name) == _sha256(output / name)
+            for name in _MODEL_FILES
+        ):
             return
     env = {
         **os.environ,
@@ -249,6 +275,8 @@ def _export(checkpoint: Path, upstream: Path, output: Path) -> None:
             env=env,
             check=True,
         )
+        if (error := _check_export(temporary / _MODEL_FILES[0])) is not None:
+            provenance["onnx_max_abs_error"] = error
         _publish_policy(temporary, output, provenance)
 
 
