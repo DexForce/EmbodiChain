@@ -168,11 +168,11 @@ callers reuse a raw TensorDict without `Buffer.start_rollout`.
 
 Policies own an optional private `_training_input_spec()` contract declaring
 consumed transition fields and whether action evaluation mutates inputs.
-`algo/common.py` resolves it once per PPO update, merges algorithm-owned fields and
+`algo/common.py` resolves it once per update, merges algorithm-owned fields and
 selects before flattening/minibatch gathers without identifying concrete policy
-classes. Undeclared consumers retain the full payload. Field selection and
-reference-target copying are independent guarantees. Built-in policy
-declarations guard subclass/instance
+classes. GRPO includes its KL reference policy's fields; any undeclared consumer
+retains the full payload. Field selection and reference-target copying are
+independent guarantees. Built-in policy declarations guard subclass/instance
 and auxiliary overrides; custom policies default to full payload and defensive
 target copies unless explicitly opting in. Declarations are read afresh each
 update, and transition-derived `next_value` keeps its existing precedence.
@@ -181,7 +181,7 @@ normalization. Disabled built-in normalizers skip preparation; custom updater
 overrides retain the complete flattened observation payload.
 Actor/critic observations, auxiliary labels and adaptive-KL parameters remain
 aligned. This contract does not make arbitrary auxiliary input mutation safe.
-PPO accumulates reporting metrics on device until the update ends.
+PPO and GRPO accumulate reporting metrics on device until the update ends.
 Adaptive learning-rate decisions and non-finite-gradient checks remain at their
 existing optimizer boundaries.
 PPO reads parameter groups afresh and deduplicates shared parameters each call.
@@ -196,6 +196,11 @@ Distributed ranks exchange only new completions at each rollout boundary;
 rank zero merges them in step, rank, then row order into one bounded window.
 Other ranks retain local histories. Metric steps use the summed environment
 count across ranks rather than the pre-rollout global counter.
+`DifferentiableTrainer` batches built-in CUDA episode statistics in bounded
+chunks, flushing by the collection boundary and on collection failure. Completed
+episodes retain step-then-row order and integer-length precision; CPU and custom
+step callbacks keep immediate reporting. Action-adjoint diagnostics transfer
+together after backward without moving gradient-safety decisions.
 Both trainers share scalar sink writes and evaluation score comparison in
 `embodichain/learning/rl/_trainer_reporting.py`; their callers retain history,
 rank filtering, distributed reduction, scheduling and checkpoint ownership.
@@ -209,6 +214,16 @@ Differentiable collection clones retained initial/current/successor observations
 before environment buffer reuse. Inference preparation also owns a snapshot
 because custom transforms and
 normalizers may modify their inputs in place.
+
+The differentiable collector uses a private built-in sampling path that retains
+actions and entropy without building unused likelihood/value graphs. Public
+`get_differentiable_action` keeps full outputs, and custom sampling overrides use
+that public path. APG actor-critic evaluates values at its own update boundary.
+APG batches CUDA reporting scalars at each segment's existing pre-backward
+boundary and combines ordinary same-device gradient finite checks into one
+host read. Every segment still backpropagates and validates before the next;
+an invalid accumulation window discards subsequent gradients. Other gradient
+layouts/devices retain sequential checks.
 
 ## Official Examples
 

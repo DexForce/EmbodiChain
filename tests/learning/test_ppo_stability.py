@@ -166,7 +166,11 @@ def test_custom_evaluator_cannot_replace_ppo_reference_targets(
     torch.testing.assert_close(custom.state_dict(), policy.state_dict(), rtol=0, atol=0)
 
 
-def test_declared_policy_inputs_preserve_updates_and_refresh_between_rollouts() -> None:
+@pytest.mark.parametrize("algorithm_name", ["ppo", "grpo"])
+def test_declared_policy_inputs_preserve_updates_and_refresh_between_rollouts(
+    algorithm_name: str,
+) -> None:
+    from embodichain.learning.rl.algo import GRPO, GRPOCfg
     from embodichain.learning.rl.policies.policy import _TrainingInputSpec
 
     reference = _policy()
@@ -203,8 +207,12 @@ def test_declared_policy_inputs_preserve_updates_and_refresh_between_rollouts() 
         )
 
     declared._training_input_spec = input_spec
-    expected = _algorithm(reference, n_epochs=2, batch_size=2)
-    actual = _algorithm(declared, n_epochs=2, batch_size=2)
+    if algorithm_name == "ppo":
+        expected = _algorithm(reference, n_epochs=2, batch_size=2)
+        actual = _algorithm(declared, n_epochs=2, batch_size=2)
+    else:
+        cfg = GRPOCfg(device="cpu", group_size=2, n_epochs=2, batch_size=2, kl_coef=0.0)
+        expected, actual = GRPO(cfg.copy(), reference), GRPO(cfg.copy(), declared)
 
     for selected_field in ("extra", "next_value"):
         torch.random.default_generator.manual_seed(31)

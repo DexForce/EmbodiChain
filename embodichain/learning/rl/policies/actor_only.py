@@ -23,16 +23,44 @@ import torch.nn as nn
 from torch.distributions.normal import Normal
 from tensordict import TensorDict
 
-from .policy import Policy
+from .policy import Policy, _TrainingInputSpec
 
 __all__ = ["ActorOnly"]
+
+
+def _validate_normal_action(distribution: Normal, action: torch.Tensor) -> Normal:
+    """Check ordinary tensor inputs together, retaining Normal's error path."""
+    if not Normal._validate_args:
+        return distribution
+    tensors = (distribution.loc, distribution.scale, action)
+    if all(
+        type(value) is torch.Tensor
+        and value.device == distribution.loc.device
+        and value.layout == torch.strided
+        and value.is_floating_point()
+        for value in tensors
+    ) and all(
+        actual == 1 or expected == 1 or actual == expected
+        for actual, expected in zip(
+            reversed(action.shape), reversed(distribution.batch_shape)
+        )
+    ):
+        valid = (
+            distribution.arg_constraints["loc"].check(distribution.loc).all()
+            & distribution.arg_constraints["scale"].check(distribution.scale).all()
+            & distribution.support.check(action).all()
+        )
+        if bool(valid):
+            return distribution
+    # Let Torch retain parameter-before-sample validation, broadcasting errors
+    # and its original exception messages. Failed/unsupported inputs are cold.
+    return Normal(distribution.loc, distribution.scale)
 
 
 class ActorOnly(Policy):
     """Actor-only policy for algorithms that do not use a value function (e.g., GRPO).
 
-    Same interface as ActorCritic: get_action and evaluate_actions return (action, log_prob, value),
-    but value is always zeros since no critic is used.
+    Returns TensorDict policy outputs with zero values in place of a critic.
     """
 
     def __init__(
@@ -59,11 +87,22 @@ class ActorOnly(Policy):
         self.log_std_min = -5.0
         self.log_std_max = 2.0
 
-    def _distribution(self, obs: torch.Tensor) -> Normal:
+    def _training_input_spec(self) -> _TrainingInputSpec:
+        if (
+            type(self) is not ActorOnly
+            or getattr(self.evaluate_actions, "__func__", None)
+            is not ActorOnly.evaluate_actions
+        ):
+            return _TrainingInputSpec()
+        return _TrainingInputSpec(fields=("obs", "action"), mutates_inputs=False)
+
+    def _distribution(
+        self, obs: torch.Tensor, *, validate_args: bool | None = None
+    ) -> Normal:
         mean = self.actor(obs)
         log_std = self.log_std.clamp(self.log_std_min, self.log_std_max)
         std = log_std.exp().expand(mean.shape[0], -1)
-        return Normal(mean, std)
+        return Normal(mean, std, validate_args=validate_args)
 
     def forward(
         self, tensordict: TensorDict, deterministic: bool = False
@@ -84,12 +123,33 @@ class ActorOnly(Policy):
             reparameterized=True,
         )
 
+    def _collect_differentiable_action(
+        self, tensordict: TensorDict, deterministic: bool = False
+    ) -> TensorDict:
+        """Collect pathwise actions without unused likelihood or value outputs."""
+        if (
+            getattr(self.get_differentiable_action, "__func__", None)
+            is not ActorOnly.get_differentiable_action
+            or getattr(self._sample_action, "__func__", None)
+            is not ActorOnly._sample_action
+        ):
+            return self.get_differentiable_action(
+                tensordict, deterministic=deterministic
+            )
+        return self._sample_action(
+            tensordict,
+            deterministic=deterministic,
+            reparameterized=True,
+            action_only=True,
+        )
+
     def _sample_action(
         self,
         tensordict: TensorDict,
         *,
         deterministic: bool,
         reparameterized: bool,
+        action_only: bool = False,
     ) -> TensorDict:
         obs = tensordict["obs"]
         dist = self._distribution(obs)
@@ -101,12 +161,13 @@ class ActorOnly(Policy):
         else:
             action = dist.sample()
         tensordict["action"] = action
-        tensordict["sample_log_prob"] = dist.log_prob(action).sum(dim=-1)
         if reparameterized:
             tensordict["entropy"] = dist.entropy().sum(dim=-1)
-        tensordict["value"] = torch.zeros(
-            obs.shape[0], device=self.device, dtype=obs.dtype
-        )
+        if not action_only:
+            tensordict["sample_log_prob"] = dist.log_prob(action).sum(dim=-1)
+            tensordict["value"] = torch.zeros(
+                obs.shape[0], device=self.device, dtype=obs.dtype
+            )
         return tensordict
 
     def get_value(self, tensordict: TensorDict) -> TensorDict:
@@ -119,7 +180,19 @@ class ActorOnly(Policy):
     def evaluate_actions(self, tensordict: TensorDict) -> TensorDict:
         obs = tensordict["obs"]
         action = tensordict["action"]
-        dist = self._distribution(obs)
+        if (
+            type(self) is ActorOnly
+            and type(obs) is torch.Tensor
+            and obs.device.type == "cuda"
+            and getattr(self._distribution, "__func__", None) is ActorOnly._distribution
+        ):
+            # CUDA minibatches otherwise read loc, scale and action validity
+            # separately. Sampling keeps its existing validation/RNG boundary.
+            dist = _validate_normal_action(
+                self._distribution(obs, validate_args=False), action
+            )
+        else:
+            dist = self._distribution(obs)
         return TensorDict(
             {
                 "sample_log_prob": dist.log_prob(action).sum(dim=-1),

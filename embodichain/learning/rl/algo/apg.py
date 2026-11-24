@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Dict
 from contextlib import AbstractContextManager, nullcontext
 
@@ -108,7 +109,8 @@ def complete_discounted_return(
 class APGCfg(AlgorithmCfg):
     """Analytic policy-gradient config.
 
-    ``gamma`` applies within each TBPTT segment and restarts after done.
+    ``gamma`` carries across TBPTT segments within an update and restarts after
+    done. Complete rollouts stop accumulating rewards after the first done.
     """
 
     ent_coef: float = 0.0
@@ -266,14 +268,22 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         entropy: torch.Tensor,
     ) -> None:
         """Validate and backpropagate one contribution to the active update."""
-        self._loss_total += float(loss.detach())
-        self._objective_total += float(objective.detach())
-        self._entropy_total += float(entropy.detach())
+        scalars = (loss.detach(), objective.detach(), entropy.detach())
+        if loss.is_cuda and all(value.device == loss.device for value in scalars):
+            # Read reporting scalars at the existing pre-backward safety boundary.
+            loss_value, objective_value, entropy_value = (
+                torch.stack(scalars).cpu().tolist()
+            )
+        else:
+            loss_value, objective_value, entropy_value = map(float, scalars)
+        self._loss_total += loss_value
+        self._objective_total += objective_value
+        self._entropy_total += entropy_value
         self._num_accumulated_steps += rollout.num_steps
         if rollout.action_gradient_stats is not None:
             self._action_gradient_stats.append(rollout.action_gradient_stats)
 
-        loss_is_finite = bool(torch.isfinite(loss))
+        loss_is_finite = math.isfinite(loss_value)
         if not loss_is_finite and not self.cfg.skip_nonfinite_updates:
             raise FloatingPointError("APG produced a non-finite loss.")
 
@@ -281,11 +291,31 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         # simulator steps. Invoke it even when this accumulation window is
         # already invalid so every rollout can release its retained graph/tape.
         loss.backward()
-        parameters = self._optimization_parameters()
-        gradients_are_finite = all(
-            parameter.grad is None or bool(torch.isfinite(parameter.grad).all())
-            for parameter in parameters
-        )
+        gradients = [
+            parameter.grad
+            for parameter in self._optimization_parameters()
+            if parameter.grad is not None
+        ]
+        if (
+            len(gradients) > 1
+            and gradients[0].is_cuda
+            and all(
+                type(gradient) is torch.Tensor
+                and gradient.layout == torch.strided
+                and gradient.device == gradients[0].device
+                for gradient in gradients
+            )
+        ):
+            # Every segment must reject non-finite gradients before the next one.
+            gradients_are_finite = bool(
+                torch.stack(
+                    [torch.isfinite(gradient).all() for gradient in gradients]
+                ).all()
+            )
+        else:
+            gradients_are_finite = all(
+                bool(torch.isfinite(gradient).all()) for gradient in gradients
+            )
         if not loss_is_finite or not gradients_are_finite or not self._update_valid:
             if not self.cfg.skip_nonfinite_updates:
                 raise FloatingPointError("APG produced a non-finite policy gradient.")
@@ -309,18 +339,20 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
             )
             self._update_active = False
             return metrics
-        grad_norm = torch.nn.utils.clip_grad_norm_(
-            parameters,
-            self.cfg.max_grad_norm,
+        grad_norm = float(
+            torch.nn.utils.clip_grad_norm_(
+                parameters,
+                self.cfg.max_grad_norm,
+            ).detach()
         )
-        excessive_gradient = not bool(torch.isfinite(grad_norm)) or (
+        excessive_gradient = not math.isfinite(grad_norm) or (
             self.cfg.max_grad_norm_before_clip > 0.0
-            and float(grad_norm) > self.cfg.max_grad_norm_before_clip
+            and grad_norm > self.cfg.max_grad_norm_before_clip
         )
         if excessive_gradient:
             self.optimizer.zero_grad(set_to_none=True)
             metrics = self._accumulated_metrics(
-                grad_norm=float(grad_norm.detach()),
+                grad_norm=grad_norm,
                 skipped_update=1.0,
                 skipped_excessive_gradient=1.0,
             )
@@ -330,7 +362,7 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         self.optimizer.step()
         self._step_scheduler()
         metrics = self._accumulated_metrics(
-            grad_norm=float(grad_norm.detach()),
+            grad_norm=grad_norm,
             skipped_update=0.0,
             skipped_excessive_gradient=0.0,
         )
@@ -387,39 +419,48 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
             "learning_rate": self.current_learning_rate(),
         }
         if self._action_gradient_stats:
-            rows = sum(float(stats.rows) for stats in self._action_gradient_stats)
-            finite_rows = sum(
-                float(stats.finite_rows) for stats in self._action_gradient_stats
-            )
+            fields = [
+                (
+                    stats.rows,
+                    stats.finite_rows,
+                    stats.norm_sum,
+                    stats.norm_max,
+                    stats.clipped_rows,
+                    stats.nonfinite_rows,
+                )
+                for stats in self._action_gradient_stats
+            ]
+            scalars = [value for values in fields for value in values]
+            if scalars[0].is_cuda and all(
+                value.device == scalars[0].device for value in scalars
+            ):
+                # Hooks have finished. Transfer once, retaining the original
+                # Python sum/max order and precision across rollout segments.
+                values = torch.stack(scalars).cpu().tolist()
+                snapshots = [
+                    values[index : index + 6] for index in range(0, len(values), 6)
+                ]
+            else:
+                snapshots = [list(map(float, values)) for values in fields]
+            rows = sum(values[0] for values in snapshots)
+            finite_rows = sum(values[1] for values in snapshots)
             metrics.update(
                 {
                     "action_adjoint_preclip_mean_norm": (
-                        sum(
-                            float(stats.norm_sum)
-                            for stats in self._action_gradient_stats
-                        )
-                        / finite_rows
+                        sum(values[2] for values in snapshots) / finite_rows
                         if finite_rows > 0.0
                         else 0.0
                     ),
                     "action_adjoint_preclip_max_norm": max(
-                        float(stats.norm_max) for stats in self._action_gradient_stats
+                        values[3] for values in snapshots
                     ),
                     "action_adjoint_clipped_fraction": (
-                        sum(
-                            float(stats.clipped_rows)
-                            for stats in self._action_gradient_stats
-                        )
-                        / rows
+                        sum(values[4] for values in snapshots) / rows
                         if rows > 0.0
                         else 0.0
                     ),
                     "action_adjoint_nonfinite_fraction": (
-                        sum(
-                            float(stats.nonfinite_rows)
-                            for stats in self._action_gradient_stats
-                        )
-                        / rows
+                        sum(values[5] for values in snapshots) / rows
                         if rows > 0.0
                         else 0.0
                     ),

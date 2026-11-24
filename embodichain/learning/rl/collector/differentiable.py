@@ -222,6 +222,11 @@ class DifferentiableCollector:
             if self.action_adjoint_max_norm > 0.0
             else None
         )
+        sample_action = getattr(
+            self.policy,
+            "_collect_differentiable_action",
+            self.policy.get_differentiable_action,
+        )
 
         for _ in range(num_steps):
             observation = self._flatten_observation(self._observation).clone()
@@ -241,7 +246,7 @@ class DifferentiableCollector:
                 else policy_observation
             ).clone()
             policy_input["critic_obs"] = critic_observation
-            policy_output = self.policy.get_differentiable_action(
+            policy_output = sample_action(
                 policy_input,
                 deterministic=deterministic,
             )

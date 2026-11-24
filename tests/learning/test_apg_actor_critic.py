@@ -316,8 +316,10 @@ def test_rollout_context_freezes_critic_statistics_and_restores_training_mode():
         def __init__(self):
             super().__init__(1, 1, bias=False)
             self.register_buffer("calls_in_training", torch.zeros(()))
+            self.calls = 0
 
         def forward(self, value):
+            self.calls += 1
             if self.training:
                 self.calls_in_training.add_(1)
             return super().forward(value)
@@ -329,6 +331,7 @@ def test_rollout_context_freezes_critic_statistics_and_restores_training_mode():
     with algo.rollout_context():
         rollout = collector.collect(3, deterministic=True)
     assert p.critic.training
+    assert p.critic.calls == 0
     assert p.critic.calls_in_training == 0
     algo.begin_update()
     algo.accumulate_complete_rollout(rollout)

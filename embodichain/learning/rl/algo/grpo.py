@@ -17,16 +17,18 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from typing import Any, Dict
 
 import torch
 from embodichain.learning.rl.checkpoint import _validate_state_layout
 from tensordict import TensorDict
 
-from embodichain.learning.rl.buffer import iterate_minibatches, transition_view
+from embodichain.learning.rl.buffer import iterate_minibatches
 from embodichain.learning.rl.utils import AlgorithmCfg
 from embodichain.utils import configclass
 from .base import BaseAlgorithm
+from .common import _resolve_training_input_spec, _training_transition_view
 
 __all__ = ["GRPO", "GRPOCfg"]
 
@@ -162,7 +164,7 @@ class GRPO(BaseAlgorithm[TensorDict]):
         return advantages.view(num_envs, t_steps) * seq_mask
 
     def update(self, rollout: TensorDict) -> Dict[str, float]:
-        rollout = rollout.clone()
+        rollout = rollout.clone(recurse=False)
         num_envs = rollout.batch_size[0]
         if num_envs % self.cfg.group_size != 0:
             raise ValueError(
@@ -182,7 +184,18 @@ class GRPO(BaseAlgorithm[TensorDict]):
         rollout["seq_return"] = torch.zeros_like(rollout["reward"], dtype=torch.float32)
         rollout["seq_return"][:, :-1] = step_returns
 
-        flat_rollout = transition_view(rollout, flatten=True)
+        input_spec = _resolve_training_input_spec(self.policy)
+        if self.ref_policy is not None:
+            reference_spec = _resolve_training_input_spec(self.ref_policy)
+            if reference_spec.fields is None:
+                input_spec = replace(input_spec, fields=None)
+            elif input_spec.fields is not None:
+                input_spec = replace(
+                    input_spec, fields=(*input_spec.fields, *reference_spec.fields)
+                )
+        flat_rollout = _training_transition_view(
+            rollout, input_spec, ("sample_log_prob", "advantage", "seq_mask")
+        )
         flat_rollout = flat_rollout[flat_rollout["seq_mask"].bool()]
         distributed = isinstance(self.policy, torch.nn.parallel.DistributedDataParallel)
         max_transitions = flat_rollout.batch_size[0]
@@ -192,9 +205,7 @@ class GRPO(BaseAlgorithm[TensorDict]):
             max_transitions = int(count.item())
         batch_count = (max_transitions + self.cfg.batch_size - 1) // self.cfg.batch_size
 
-        total_actor_loss = 0.0
-        total_entropy = 0.0
-        total_kl = 0.0
+        total_metrics = torch.zeros(4, dtype=torch.float64, device=self.device)
         total_weight = 0.0
 
         for _ in range(self.cfg.n_epochs):
@@ -218,7 +229,9 @@ class GRPO(BaseAlgorithm[TensorDict]):
                     # gradients, without evaluating an empty policy batch.
                     self._step_optimizer(None)
                     continue
-                old_logprobs = batch["sample_log_prob"].clone()
+                old_logprobs = batch["sample_log_prob"]
+                if input_spec.mutates_inputs:
+                    old_logprobs = old_logprobs.clone()
                 advantages = batch["advantage"].detach()
                 seq_mask_batch = batch["seq_mask"].float()
 
@@ -258,20 +271,18 @@ class GRPO(BaseAlgorithm[TensorDict]):
 
                 self._step_optimizer(loss * loss_scale)
 
-                total_actor_loss += actor_loss.item() * weight
-                masked_entropy = (entropy * seq_mask_batch).sum() / denom
-                total_entropy += masked_entropy.item() * weight
-                total_kl += kl.item() * weight
+                total_metrics[:3].add_(
+                    torch.stack(
+                        (actor_loss.detach(), -entropy_loss.detach(), kl.detach())
+                    ).to(torch.float64),
+                    alpha=weight,
+                )
                 total_weight += weight
 
+        total_metrics[3] = total_weight
         if distributed:
-            totals = torch.tensor(
-                [total_actor_loss, total_entropy, total_kl, total_weight],
-                dtype=torch.float64,
-                device=self.device,
-            )
-            torch.distributed.all_reduce(totals)
-            total_actor_loss, total_entropy, total_kl, total_weight = totals.tolist()
+            torch.distributed.all_reduce(total_metrics)
+        total_actor_loss, total_entropy, total_kl, total_weight = total_metrics.tolist()
         self._step_scheduler()
         return {
             "actor_loss": total_actor_loss / max(1.0, total_weight),

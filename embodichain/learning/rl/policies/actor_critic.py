@@ -359,15 +359,36 @@ class ActorCritic(Policy):
             reparameterized=True,
         )
 
+    def _collect_differentiable_action(
+        self, tensordict: TensorDict, deterministic: bool = False
+    ) -> TensorDict:
+        """Collect pathwise actions without unused value or likelihood graphs."""
+        if (
+            getattr(self.get_differentiable_action, "__func__", None)
+            is not ActorCritic.get_differentiable_action
+            or getattr(self._sample_action, "__func__", None)
+            is not ActorCritic._sample_action
+        ):
+            return self.get_differentiable_action(
+                tensordict, deterministic=deterministic
+            )
+        return self._sample_action(
+            tensordict,
+            deterministic=deterministic,
+            reparameterized=True,
+            action_only=True,
+        )
+
     def _sample_action(
         self,
         tensordict: TensorDict,
         *,
         deterministic: bool,
         reparameterized: bool,
+        action_only: bool = False,
     ) -> TensorDict:
         actor_obs = tensordict["obs"]
-        critic_obs = self._critic_observation(tensordict)
+        critic_obs = None if action_only else self._critic_observation(tensordict)
         dist = self._distribution(actor_obs)
         mean = dist.mean
         if deterministic:
@@ -377,12 +398,13 @@ class ActorCritic(Policy):
         else:
             action = dist.sample()
         tensordict["action"] = action
-        tensordict["sample_log_prob"] = dist.log_prob(action).sum(dim=-1)
-        tensordict["action_mean"] = dist.mean
-        tensordict["action_std"] = dist.stddev
         if reparameterized:
             tensordict["entropy"] = dist.entropy().sum(dim=-1)
-        tensordict["value"] = self._value(critic_obs)
+        if not action_only:
+            tensordict["sample_log_prob"] = dist.log_prob(action).sum(dim=-1)
+            tensordict["action_mean"] = dist.mean
+            tensordict["action_std"] = dist.stddev
+            tensordict["value"] = self._value(critic_obs)
         return tensordict
 
     def get_value(self, tensordict: TensorDict) -> TensorDict:

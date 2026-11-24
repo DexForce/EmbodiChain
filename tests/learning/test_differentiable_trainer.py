@@ -106,6 +106,31 @@ class _ScheduledCompleteRolloutEnv(_QuadraticActionEnv):
         return super().reset(seed=seed, options=options)
 
 
+class _EpisodeStatsEnv(_QuadraticActionEnv):
+    def __init__(self, device: str = "cpu") -> None:
+        super().__init__(num_envs=3)
+        self.device = torch.device(device)
+        self.horizons = torch.tensor([2, 3, 5], device=self.device)
+        self.steps = 0
+        self.fail_at = None
+
+    def reset(self, *, seed=None, options=None):
+        self.steps = 0
+        super().reset(seed=seed, options=options)
+        self._state = self._state.to(self.device)
+        return self._state, {}
+
+    def step(self, action):
+        if self.steps + 1 == self.fail_at:
+            raise RuntimeError("collection interrupted")
+        self.steps += 1
+        reward = (
+            torch.tensor([1.0, 10.0, 100.0], device=self.device) + action.sum(-1) * 0.0
+        )
+        done = self.steps % self.horizons == 0
+        return self._state, reward, done, torch.zeros_like(done), {}
+
+
 def _make_components(
     ent_coef: float = 0.0,
 ) -> tuple[_QuadraticActionEnv, ActorOnly, APG]:
@@ -300,6 +325,117 @@ def test_trainer_updates_policy_and_detaches_each_segment(monkeypatch) -> None:
         if call.args[0] == "charts/SPS"
     ]
     assert logged_sps == [entry["charts/SPS"] for entry in summary["train_history"]]
+
+
+@pytest.mark.parametrize("rollout_mode", ["segmented", "complete"])
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_episode_statistics_preserve_completion_order_and_bounded_history(
+    rollout_mode: str,
+    device: str,
+) -> None:
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA is unavailable")
+    env = _EpisodeStatsEnv(device)
+    policy = ActorOnly(1, 1, env.device, actor=nn.Linear(1, 1))
+    trainer = DifferentiableTrainer(
+        DifferentiableTrainerCfg(
+            rollout_mode=rollout_mode,
+            segment_length=112,
+            update_horizon=224 if rollout_mode == "segmented" else 112,
+            gradient_accumulation_steps=2,
+            deterministic_actions=True,
+        ),
+        env,
+        policy,
+        APG(APGCfg(device=device), policy),
+    )
+    trainer.update_once()
+
+    # Complete-mode microbatches reset the environment at control 112. Statistics
+    # retain their existing unfinished totals across that explicit reset.
+    expected = []
+    returns, lengths = [0.0] * 3, [0] * 3
+    for control in range(1, 225):
+        env_step = (control - 1) % 112 + 1 if rollout_mode == "complete" else control
+        for row, (reward, horizon) in enumerate(((1.0, 2), (10.0, 3), (100.0, 5))):
+            returns[row] += reward
+            lengths[row] += 1
+            if env_step % horizon == 0:
+                expected.append((returns[row], float(lengths[row])))
+                returns[row], lengths[row] = 0.0, 0
+    assert len(expected) > 100
+    assert list(zip(trainer.ret_window, trainer.len_window)) == expected[-100:]
+    torch.testing.assert_close(
+        trainer._episode_return, torch.tensor(returns, device=device)
+    )
+    torch.testing.assert_close(
+        trainer._episode_length, torch.tensor(lengths, device=device)
+    )
+    assert not trainer._episode_return.requires_grad
+
+
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_episode_statistics_survive_collection_failure_without_replaying_records(
+    device,
+) -> None:
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA is unavailable")
+    env = _EpisodeStatsEnv(device)
+    policy = ActorOnly(1, 1, env.device, actor=nn.Linear(1, 1))
+    algorithm = APG(APGCfg(device=device), policy)
+    trainer = DifferentiableTrainer(
+        DifferentiableTrainerCfg(segment_length=8, deterministic_actions=True),
+        env,
+        policy,
+        algorithm,
+    )
+    trainer.collector.reset()
+    # Packing int64 lengths with FP32 returns must not round through FP32.
+    initial_length = 2**24 + 3
+    trainer._episode_length.fill_(initial_length)
+    env.fail_at = 4
+    with pytest.raises(RuntimeError, match="collection interrupted"):
+        trainer.update_once()
+    assert list(trainer.ret_window) == [2.0, 30.0]
+    assert list(trainer.len_window) == [
+        float(initial_length + 2),
+        float(initial_length + 3),
+    ]
+    assert all(parameter.grad is None for parameter in policy.parameters())
+
+    env.fail_at = None
+    trainer.update_once(num_steps=2)
+    assert list(trainer.ret_window) == [2.0, 30.0, 2.0, 500.0]
+    assert list(trainer.len_window) == [
+        float(initial_length + 2),
+        float(initial_length + 3),
+        2.0,
+        float(initial_length + 5),
+    ]
+
+
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_episode_statistics_keep_custom_step_callback_observable(
+    monkeypatch, device: str
+) -> None:
+    env = _EpisodeStatsEnv(device)
+    policy = ActorOnly(1, 1, env.device, actor=nn.Linear(1, 1))
+    trainer = DifferentiableTrainer(
+        DifferentiableTrainerCfg(segment_length=3, deterministic_actions=True),
+        env,
+        policy,
+        APG(APGCfg(device=device), policy),
+    )
+    callback = trainer._on_step
+    observed = []
+
+    def on_step(transition):
+        callback(transition)
+        observed.append(list(trainer.ret_window))
+
+    monkeypatch.setattr(trainer, "_on_step", on_step)
+    trainer.update_once()
+    assert observed == [[], [2.0], [2.0, 30.0]]
 
 
 def test_complete_rollout_mode_resets_each_scheduled_microbatch() -> None:

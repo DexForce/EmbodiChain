@@ -323,12 +323,7 @@ class DifferentiableTrainer:
                     self.cfg.segment_length,
                     update_steps - collected_steps,
                 )
-                with self.algorithm.rollout_context():
-                    rollout = self.collector.collect(
-                        segment_steps,
-                        deterministic=self.cfg.deterministic_actions,
-                        on_step_callback=self._on_step,
-                    )
+                rollout = self._collect_rollout(segment_steps)
                 self.algorithm.accumulate_segment(rollout)
                 self._update_observation_normalizer(rollout)
                 self.collector.detach_state()
@@ -355,12 +350,7 @@ class DifferentiableTrainer:
                 )
                 seed = self.cfg.rollout_seed if self._rollout_index == 0 else None
                 self.collector.reset(seed=seed)
-                with self.algorithm.rollout_context():
-                    rollout = self.collector.collect(
-                        spec.num_steps,
-                        deterministic=self.cfg.deterministic_actions,
-                        on_step_callback=self._on_step,
-                    )
+                rollout = self._collect_rollout(spec.num_steps)
                 self.algorithm.accumulate_complete_rollout(
                     rollout,
                     objective_scale=spec.objective_scale,
@@ -447,6 +437,82 @@ class DifferentiableTrainer:
             "latest_checkpoint_path": self.latest_checkpoint_path,
             "best_checkpoint_path": self.best_checkpoint_path,
         }
+
+    def _collect_rollout(self, num_steps: int) -> DifferentiableRollout:
+        """Collect with bounded episode snapshots and preserve custom callbacks."""
+        callback = self._on_step
+        if (
+            not self._episode_return.is_cuda
+            or getattr(callback, "__func__", None) is not DifferentiableTrainer._on_step
+        ):
+            with self.algorithm.rollout_context():
+                return self.collector.collect(
+                    num_steps,
+                    deterministic=self.cfg.deterministic_actions,
+                    on_step_callback=callback,
+                )
+
+        # At most 100 controls are retained, even for a scheduled full trajectory.
+        # FP32 returns, int64 lengths and bool masks cost 13 * capacity * N bytes.
+        capacity = min(num_steps, 100)
+        returns = self._episode_return.new_empty((capacity, self.env.num_envs))
+        lengths = self._episode_length.new_empty((capacity, self.env.num_envs))
+        dones = torch.empty_like(lengths, dtype=torch.bool)
+        count = 0
+
+        def flush() -> None:
+            nonlocal count
+            if count == 0:
+                return
+            completed = dones[:count].reshape(-1).nonzero().flatten()
+            completed = completed[-self.ret_window.maxlen :]
+            # Convert lengths to the same Python-float precision as _on_step,
+            # without first rounding them through FP32 when packing both fields.
+            records = (
+                torch.stack(
+                    (
+                        returns[:count].reshape(-1)[completed].to(torch.float64),
+                        lengths[:count].reshape(-1)[completed].to(torch.float64),
+                    ),
+                    dim=-1,
+                )
+                .cpu()
+                .tolist()
+            )
+            count = 0
+            self.ret_window.extend(record[0] for record in records)
+            self.len_window.extend(record[1] for record in records)
+
+        def on_step(transition: Any) -> None:
+            nonlocal count
+            done = transition.done.detach()
+            self._episode_return += transition.reward.detach()
+            self._episode_length += 1
+            returns[count].copy_(self._episode_return)
+            lengths[count].copy_(self._episode_length)
+            dones[count].copy_(done)
+            self._episode_return.masked_fill_(done, 0.0)
+            self._episode_length.masked_fill_(done, 0)
+            count += 1
+            if count == capacity:
+                flush()
+
+        try:
+            with self.algorithm.rollout_context():
+                rollout = self.collector.collect(
+                    num_steps,
+                    deterministic=self.cfg.deterministic_actions,
+                    on_step_callback=on_step,
+                )
+        except BaseException as error:
+            # Completed controls were observable before a later collection error.
+            try:
+                flush()
+            except Exception as cleanup_error:
+                error.add_note(f"Episode statistics also failed: {cleanup_error!r}")
+            raise
+        flush()
+        return rollout
 
     def _on_step(self, transition: Any) -> None:
         reward = transition.reward.detach()
