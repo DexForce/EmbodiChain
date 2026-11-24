@@ -222,8 +222,10 @@ actions from NMG model artifacts. The ORT backend loads `.onnx` and uses the
 `policy-deploy` extra. The native PyTorch backend loads a tensor-only `.pt`
 deployment checkpoint with `from_checkpoint()`, freezes actor weights and
 retains gradients with respect to continuous observations. The two backends
-share the model observation layout. `NeuralPlanner` uses ORT and validates
-the layout metadata and fingerprint against the configured robot before rollout.
+share the model observation layout. `NeuralPlanner` uses ORT, reads the
+joint count and constraint capacity from the ONNX metadata, and verifies
+the observation layout and fingerprint before rollout. Explicit dimension
+fields only assert compatibility with the export.
 The CUDA ORT path binds Torch observation and action buffers on the same
 device. CPU inputs continue through the host ORT interface.
 Canonicalized XYZW observations use the first significant X/Y/Z component

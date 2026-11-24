@@ -295,8 +295,6 @@ def run(
                     sim_instance_id=sim.instance_id,
                     control_part="arm",
                     onnx_model_path=str(model_path),
-                    num_arm_joints=len(joints),
-                    num_waypoints=12,
                     max_steps=30 * len(modalities),
                     action_scale=0.2,
                     dt=control_dt,

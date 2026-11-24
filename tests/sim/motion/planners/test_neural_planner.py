@@ -195,7 +195,6 @@ def test_ur5_periodic_observation_matches_nmg_export(tmp_path, monkeypatch):
             robot_uid="fake_robot",
             onnx_model_path=_create_fake_onnx_model(tmp_path),
             control_part="main_arm",
-            num_arm_joints=6,
             joint_periodic_features=True,
         )
     )
@@ -221,10 +220,53 @@ def test_ur5_periodic_observation_matches_nmg_export(tmp_path, monkeypatch):
     torch.testing.assert_close(obs[:, layout.slices["joint_cos"]], joint.cos())
 
 
-def test_neural_planner_default_observation_width_matches_k5_nmg_export():
-    assert NeuralPlannerCfg().num_waypoints == NUM_WAYPOINTS
+def test_neural_planner_observation_width_matches_k5_nmg_export():
     assert neural_planner_module._waypoint_obs_dim(5, use_relative_obs=True) == 186
     assert neural_planner_module._waypoint_obs_dim(5, use_relative_obs=False) == 116
+
+
+def test_neural_planner_reads_joint_count_and_capacity_from_onnx(tmp_path, monkeypatch):
+    """The released six-joint, twelve-slot layout needs no dimension config."""
+    layout = neural_planner_module._WaypointObservationLayout(12, 6, True)
+
+    class ReleasedPolicy(FakeOnnxPolicy):
+        output_dim = 6
+        obs_dim = 391
+        observation_metadata = layout.onnx_metadata
+
+    monkeypatch.setattr(neural_planner_module, "NeuralMotionGenerator", ReleasedPolicy)
+    monkeypatch.setattr(
+        SimulationManager, "get_instance", lambda *args: FakeSimulationManager()
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=_create_fake_onnx_model(tmp_path),
+        )
+    )
+    targets = [PlanState.from_qpos(torch.zeros(1, 6)) for _ in range(8)]
+    _, _, joint_waypoints, valid_mask, *_ = planner._parse_waypoints(targets)
+
+    assert joint_waypoints.shape == (1, 12, 6)
+    assert valid_mask.tolist() == [[1.0] * 8 + [0.0] * 4]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"), [("num_arm_joints", 6), ("num_waypoints", 12)]
+)
+def test_neural_planner_checks_explicit_dimensions_against_metadata(
+    tmp_path, monkeypatch, field, value
+):
+    monkeypatch.setattr(
+        SimulationManager, "get_instance", lambda *args: FakeSimulationManager()
+    )
+    cfg = NeuralPlannerCfg(
+        robot_uid="fake_robot",
+        onnx_model_path=_create_fake_onnx_model(tmp_path),
+        **{field: value},
+    )
+    with pytest.raises(ValueError, match=f"Configured {field}"):
+        NeuralPlanner(cfg)
 
 
 def test_neural_planner_rejects_mismatched_observation_metadata(tmp_path, monkeypatch):
@@ -258,7 +300,17 @@ def test_neural_planner_rejects_mismatched_observation_metadata(tmp_path, monkey
         )
 
 
-def test_neural_planner_rejects_missing_observation_metadata(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("nmg.num_controlled_joints", None),
+        ("nmg.num_waypoints", "invalid"),
+        ("nmg.num_waypoints", "0"),
+    ],
+)
+def test_neural_planner_rejects_invalid_observation_dimensions(
+    tmp_path, monkeypatch, key, value
+):
     model_path = _create_fake_onnx_model(tmp_path)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
@@ -267,14 +319,22 @@ def test_neural_planner_rejects_missing_observation_metadata(tmp_path, monkeypat
         classmethod(lambda cls, instance_id=0: fake_sim),
     )
 
-    class MissingMetadataPolicy(FakeOnnxPolicy):
-        observation_metadata = {}
+    metadata = dict(FakeOnnxPolicy.observation_metadata)
+    if value is None:
+        metadata.pop(key)
+    else:
+        metadata[key] = value
+
+    class InvalidMetadataPolicy(FakeOnnxPolicy):
+        observation_metadata = metadata
 
     monkeypatch.setattr(
-        neural_planner_module, "NeuralMotionGenerator", MissingMetadataPolicy
+        neural_planner_module, "NeuralMotionGenerator", InvalidMetadataPolicy
     )
 
-    with pytest.raises(ValueError, match="observation layout metadata mismatch"):
+    with pytest.raises(
+        ValueError, match=f"observation layout metadata mismatch: {key}"
+    ):
         NeuralPlanner(
             NeuralPlannerCfg(
                 robot_uid="fake_robot",

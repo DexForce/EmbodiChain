@@ -103,10 +103,12 @@ On a Linux server without a display, run the recording command under `xvfb-run -
 need no token; robot assets use the standard EmbodiChain cache. For a new release,
 export and verify in NMG, then update the pin, hashes and robot contract here.
 
-The policies use capacity 12, relative observations, xyzw quaternions and
-0.2-radian action scaling, with a 30-step budget per target. Arrival tolerances
-are 0.01 m, 0.1 rad and 0.01 rad maximum joint error, applied to the selected
-modality. The report also includes unconstrained errors for diagnosis.
+The planner reads the arm joint count and waypoint capacity from the ONNX
+metadata. The published policies use capacity 12, relative observations, xyzw
+quaternions and 0.2-radian action scaling, with a 30-step budget per target.
+Arrival tolerances are 0.01 m, 0.1 rad and 0.01 rad maximum joint error, applied
+to the selected modality. The report also includes unconstrained errors for
+diagnosis.
 
 Free-motion paths are retimed at 0.6 rad/s and 1.5 rad/s², then replayed phase by phase on the
 control grid with 0.5-second settling holds. Reports distinguish geometric

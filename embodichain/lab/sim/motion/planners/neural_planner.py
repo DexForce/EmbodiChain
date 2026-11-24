@@ -120,11 +120,11 @@ class NeuralPlannerCfg(BasePlannerCfg):
     action_scale: float = 0.2
     """Delta joint scaling factor in radians."""
 
-    num_arm_joints: int = 7
-    """Number of arm joints controlled by the APG policy."""
+    num_arm_joints: int | None = None
+    """Optional expected joint count, checked against the ONNX export."""
 
-    num_waypoints: int = 5
-    """Number of constraint slots encoded by the ONNX policy."""
+    num_waypoints: int | None = None
+    """Optional expected constraint-slot capacity, checked against the ONNX export."""
 
     use_relative_obs: bool = True
     """Whether the exported policy uses the unified relative-observation blocks."""
@@ -286,13 +286,9 @@ class NeuralPlanner(BasePlanner):
         return options
 
     def _load_onnx_model(self, model_path: Path) -> None:
-        self._num_waypoints = int(self.cfg.num_waypoints)
         self._use_relative_obs = bool(self.cfg.use_relative_obs)
         self._canonicalize_quat_obs = bool(self.cfg.canonicalize_quat_obs)
         self._joint_periodic_features = bool(self.cfg.joint_periodic_features)
-        self._action_dim = int(self.cfg.num_arm_joints)
-        if self._action_dim < 1:
-            raise ValueError("num_arm_joints must be positive.")
         self._max_steps = int(self.cfg.max_steps)
         self._pos_eps = float(self.cfg.pos_eps)
         self._rot_eps = float(self.cfg.rot_eps)
@@ -305,6 +301,22 @@ class NeuralPlanner(BasePlanner):
             cuda_use_tf32=self.cfg.onnx_cuda_use_tf32,
             device=self.device,
         )
+        metadata = self._policy.observation_metadata
+        self._action_dim = self._read_observation_dimension(
+            metadata, "nmg.num_controlled_joints"
+        )
+        self._num_waypoints = self._read_observation_dimension(
+            metadata, "nmg.num_waypoints"
+        )
+        for name, configured, exported in (
+            ("num_arm_joints", self.cfg.num_arm_joints, self._action_dim),
+            ("num_waypoints", self.cfg.num_waypoints, self._num_waypoints),
+        ):
+            if configured is not None and configured != exported:
+                raise ValueError(
+                    f"Configured {name}={configured!r} does not match the "
+                    f"ONNX export value {exported}."
+                )
         self._obs_dim = self._policy.obs_dim
         output_dim = getattr(self._policy, "output_dim", self._action_dim)
         if output_dim != self._action_dim:
@@ -344,7 +356,21 @@ class NeuralPlanner(BasePlanner):
                 f"ONNX input has obs dim {self._obs_dim}, but the configured "
                 f"unified constraint layout requires {expected_obs_dim}."
             )
-        self._validate_observation_metadata(self._policy.observation_metadata)
+        self._validate_observation_metadata(metadata)
+
+    @staticmethod
+    def _read_observation_dimension(metadata: Mapping[str, str], key: str) -> int:
+        raw_value = metadata.get(key)
+        try:
+            value = int(raw_value) if raw_value is not None else 0
+        except (TypeError, ValueError):
+            value = 0
+        if value < 1:
+            raise ValueError(
+                f"ONNX observation layout metadata mismatch: {key} must be a "
+                f"positive integer, got {raw_value!r}."
+            )
+        return value
 
     def _validate_observation_metadata(self, metadata: Mapping[str, str]) -> None:
         """Require an exact observation contract from the NMG export."""
