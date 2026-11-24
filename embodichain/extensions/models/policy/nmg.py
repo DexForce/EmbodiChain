@@ -82,6 +82,7 @@ class NeuralMotionGenerator(nn.Module):
 
         device = torch.device(device)
         self._session: InferenceSession | None = None
+        self._ort_cuda_device: torch.device | None = None
         self._torch_model: nn.Module | None = None
         if enable_grad:
             self._load_torch(path, device)
@@ -187,9 +188,13 @@ class NeuralMotionGenerator(nn.Module):
         self._input_name = inputs[0].name
         self._output_name = outputs[0].name
         self._session = session
-        logger.log_info(
-            "NMG ONNX execution providers: " + ", ".join(session.get_providers())
-        )
+        session_providers = session.get_providers()
+        if session_providers and session_providers[0] == "CUDAExecutionProvider":
+            cuda_options = session.get_provider_options()["CUDAExecutionProvider"]
+            self._ort_cuda_device = torch.device(
+                "cuda", int(cuda_options.get("device_id", "0"))
+            )
+        logger.log_info("NMG ONNX execution providers: " + ", ".join(session_providers))
 
     def _load_torch(self, path: Path, device: torch.device) -> None:
         try:
@@ -301,6 +306,40 @@ class NeuralMotionGenerator(nn.Module):
                 return self._torch_model(obs)
 
         assert self._session is not None
+        if obs.device == self._ort_cuda_device and obs.shape[0] > 0:
+            return self._forward_ort_cuda(obs)
+
         obs_np = np.ascontiguousarray(obs.detach().cpu().numpy())
         action = self._session.run([self._output_name], {self._input_name: obs_np})[0]
         return torch.as_tensor(action, dtype=torch.float32, device=obs.device)
+
+    def _forward_ort_cuda(self, obs: torch.Tensor) -> torch.Tensor:
+        assert self._session is not None
+        obs = obs.detach().resolve_neg().contiguous()
+        action = torch.empty(
+            (obs.shape[0], self.output_dim), dtype=obs.dtype, device=obs.device
+        )
+        device_id = obs.get_device()
+        binding = self._session.io_binding()
+        # ORT can read on a different CUDA stream, starting at bind_input.
+        # Wait for the Torch producer. The synchronous ORT run finishes writing
+        # the action before this method returns it to the caller.
+        torch.cuda.current_stream(obs.device).synchronize()
+        binding.bind_input(
+            self._input_name,
+            "cuda",
+            device_id,
+            np.float32,
+            tuple(obs.shape),
+            obs.data_ptr(),
+        )
+        binding.bind_output(
+            self._output_name,
+            "cuda",
+            device_id,
+            np.float32,
+            tuple(action.shape),
+            action.data_ptr(),
+        )
+        self._session.run_with_iobinding(binding)
+        return action

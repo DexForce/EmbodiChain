@@ -223,6 +223,8 @@ extra. Its frozen PyTorch backend uses `nmg` and retains gradients of the
 single-step action with respect to continuous observations. `NeuralPlanner` uses
 the ORT backend and validates the full observation-layout metadata and
 fingerprint against the configured robot before rollout.
+The CUDA ORT path binds Torch observation and action buffers on the same
+device. CPU inputs continue through the host ORT interface.
 Canonicalized XYZW observations use the first significant X/Y/Z component
 around a half-turn to keep float32 FK roundoff from flipping their sign.
 

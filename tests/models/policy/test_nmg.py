@@ -173,6 +173,7 @@ def test_onnx_precision_is_explicit_and_provider_scoped(
         ],
         get_modelmeta=lambda: SimpleNamespace(custom_metadata_map={}),
         get_providers=lambda: expected_providers or ["CPUExecutionProvider"],
+        get_provider_options=lambda: {"CUDAExecutionProvider": {"device_id": "2"}},
     )
     received = {}
 
@@ -233,6 +234,46 @@ def _linear_policy(tmp_path: Path, batch: int | str) -> tuple[Path, torch.Tensor
     path = tmp_path / "linear.onnx"
     onnx.save(model, path)
     return path, weight
+
+
+@pytest.mark.gpu
+def test_ort_cuda_binding_handles_strided_batches_and_retained_outputs(
+    tmp_path, monkeypatch
+):
+    path, weight = _linear_policy(tmp_path, "batch")
+    ort = pytest.importorskip("onnxruntime")
+    if (
+        not torch.cuda.is_available()
+        or "CUDAExecutionProvider" not in ort.get_available_providers()
+    ):
+        pytest.skip("ORT CUDA execution is required.")
+    device = torch.device("cuda", torch.cuda.current_device())
+    policy = NeuralMotionGenerator.from_onnx(
+        path, device=device, providers=["CUDAExecutionProvider"], cuda_use_tf32=False
+    )
+    assert policy._session.get_providers()[0] == "CUDAExecutionProvider"
+
+    def reject_host_run(*args, **kwargs):
+        pytest.fail("A device-local CUDA input must use I/O Binding.")
+
+    monkeypatch.setattr(policy._session, "run", reject_host_run)
+    observations = torch.arange(12, dtype=torch.float32).reshape(2, 6)[:, ::2]
+    stream = torch.cuda.Stream(device=device)
+    with torch.cuda.stream(stream):
+        strided = torch.arange(12, dtype=torch.float32, device=device).reshape(2, 6)[
+            :, ::2
+        ]
+        first = policy(strided.requires_grad_())
+        second = policy(strided + 2)
+        singleton = policy(strided[:1])
+
+    for action, expected in (
+        (first, observations @ weight),
+        (second, (observations + 2) @ weight),
+        (singleton, observations[:1] @ weight),
+    ):
+        assert action.device == device and not action.requires_grad
+        torch.testing.assert_close(action.cpu(), expected)
 
 
 @pytest.mark.parametrize("enable_grad", [False, True], ids=["ort", "torch"])
