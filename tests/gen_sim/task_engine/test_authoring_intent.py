@@ -397,6 +397,123 @@ def test_released_audit_combines_only_live_per_subject_facts():
         )
 
 
+def test_grouped_facts_keep_unaffected_subjects_and_references():
+    plan = _validate(
+        _plan(
+            "a b table marker",
+            _step("pick", "a", _fact("orientation", "a", value="left_to_right")),
+            _step("return_arms", "", arms="left right"),
+            conditions=[
+                _condition("initial", _relation("on", "a b", "table")),
+                _condition("initial", _fact("released", "a b")),
+                _condition("initial", _relation("left_of", "b", "a marker")),
+                _condition("initial", _relation("on_top_faces", "b", "a marker")),
+                _condition("initial", _fact("orientation", "a b", value="upright")),
+            ],
+        )
+    )
+    _validate_intent_audit(
+        _SOURCE,
+        plan,
+        _audit(
+            _check(
+                "step_02",
+                "condition_01",
+                scope="before",
+                spatial=_relation("on", "b", "table"),
+            ),
+            _check(
+                "step_02", "condition_02", scope="before", state=_fact("released", "b")
+            ),
+            _check(
+                "step_02",
+                "condition_03",
+                scope="before",
+                spatial=_relation("left_of", "b", "marker"),
+            ),
+            _check(
+                "step_02",
+                "condition_05",
+                scope="before",
+                state=_fact("orientation", "b", value="upright"),
+            ),
+        ),
+    )
+    for index, field, fact in (
+        (1, "spatial", _relation("on", "a", "table")),
+        (2, "state", _fact("released", "a")),
+        (3, "spatial", _relation("left_of", "b", "a")),
+        (4, "spatial", _relation("on_top_faces", "b", "marker")),
+        (5, "state", _fact("orientation", "a", value="upright")),
+    ):
+        with pytest.raises(AuthoringEvidenceError):
+            _validate_intent_audit(
+                _SOURCE,
+                plan,
+                _audit(
+                    _check(
+                        "step_02",
+                        f"condition_{index:02d}",
+                        scope="before",
+                        **{field: fact},
+                    )
+                ),
+            )
+
+
+@pytest.mark.parametrize("verb", ["place", "move_held"])
+@pytest.mark.parametrize(
+    "previous,current,frame,supersedes",
+    [
+        ("left_to_right", "front_to_back", "table", True),
+        ("upright", "left_to_right", "table", True),
+        ("vertical", "flat", "table", True),
+        ("pointing_up", "pointing_left", "table", True),
+        ("upright_cross_section", "left_to_right", "table", False),
+        ("left_to_right", "front_to_back", "head_camera", False),
+    ],
+)
+def test_later_explicit_orientation_supersedes_the_same_axis(
+    verb, previous, current, frame, supersedes
+):
+    old = _fact("orientation", "rod", value=previous, frame="table")
+    updated = dict(old, value=current, frame=frame)
+    plan = _validate(
+        _plan(
+            "rod table",
+            _step("pick", "rod"),
+            _step("orient", "rod", old),
+            _step(verb, "rod", _relation("on", "rod", "table"), updated),
+        )
+    )
+    _validate_intent_audit(
+        _SOURCE, plan, _audit(_check("step_03", scope="final", state=updated))
+    )
+    previous_claim = _audit(_check("step_02", scope="final", state=old))
+    if supersedes:
+        with pytest.raises(
+            AuthoringEvidenceError, match="effect still valid at the end"
+        ):
+            _validate_intent_audit(_SOURCE, plan, previous_claim)
+    else:
+        _validate_intent_audit(_SOURCE, plan, previous_claim)
+
+
+def test_invariant_rejects_a_conflicting_effect_even_if_restored_later():
+    upright = _fact("orientation", "vase", value="upright")
+    plan = _plan(
+        "vase other",
+        _step("push", "other", _fact("orientation", "other", value="flat")),
+        _step("push", "vase", upright),
+        conditions=[_condition("always", upright)],
+    )
+    audit = _audit(_check("condition_01", scope="always", state=upright))
+    _validate_intent_audit(_SOURCE, _validate(plan), audit)
+    plan["steps"].insert(1, _step("push", "vase", dict(upright, value="flat")))
+    with pytest.raises(AuthoringEvidenceError, match="always condition"):
+        _validate_intent_audit(_SOURCE, _validate(plan), audit)
+
+
 @pytest.mark.parametrize(
     "source", ["initial", "maintain", "stale_effect", "final", "stale_final"]
 )
@@ -510,6 +627,63 @@ def test_articulation_uses_declared_owner_and_a_distinct_joint():
         _validate(plan, context)
 
 
+@pytest.mark.parametrize(
+    "kind,subject,valid",
+    [
+        ("untouched", "device", False),
+        ("untouched", "sibling", True),
+        ("untouched_except", "device", True),
+        ("untouched_except", "sibling", False),
+    ],
+)
+def test_untouched_contract_respects_nested_part_ownership(kind, subject, valid):
+    plan = _plan(
+        [
+            _role("device"),
+            _role("panel", part_of="device"),
+            _role("button", part_of="panel"),
+            _role("sibling", part_of="device"),
+        ],
+        _step(
+            "press", "button", _fact("actuated", "button", value="pressed"), arms="left"
+        ),
+        conditions=[_condition("always", _fact(kind, subject))],
+    )
+    context = {"device": dict(description="device", asset_kind="articulated")}
+    if valid:
+        _validate(plan, context)
+    else:
+        with pytest.raises(ValueError, match="protected roles.*button"):
+            _validate(plan, context)
+
+
+@pytest.mark.parametrize(
+    "site,kind,subject,move,valid",
+    [
+        ("handle", "untouched", "rim", False, True),
+        ("handle", "untouched", "rim", True, True),
+        ("rim", "untouched", "rim", False, False),
+        (None, "untouched", "rim", False, False),
+        ("handle", "untouched", "mug", False, False),
+        ("handle", "untouched_except", "handle", False, True),
+    ],
+)
+def test_untouched_uses_explicit_grasp_sites(site, kind, subject, move, valid):
+    roles = [_role("mug"), _role("handle", part_of="mug"), _role("rim", part_of="mug")]
+    effects = [_fact("grasped_at", "mug", part=site, arms=["left"])] if site else []
+    steps = [_step("pick", "mug", *effects, arms="left")]
+    if move:
+        steps.append(_step("move_held", "mug", arms="left"))
+    plan = _plan(roles, *steps, conditions=[_condition("always", _fact(kind, subject))])
+    if valid:
+        _validate(plan)
+    else:
+        with pytest.raises(
+            ValueError, match="Ordered operations touch protected roles"
+        ):
+            _validate(plan)
+
+
 def test_bimanual_sites_and_terminal_hold_match_acquisition():
     arms = "left right"
     roles = [
@@ -615,14 +789,33 @@ def hybrid(tmp_path, monkeypatch):
     return run
 
 
-def test_authoring_publication_is_readable_without_execution(hybrid, tmp_path):
+@pytest.mark.parametrize("terminal", ["implicit", "audited_effect", "declaration_only"])
+def test_authoring_publication_is_readable_without_execution(
+    hybrid, tmp_path, terminal
+):
     support = _relation("supported_by", "board", "short tall")
+    parked = dict(kind="arms_at_initial_pose", arms=["left", "right"])
     plan = _plan(
         "board short tall",
         _step("pick", "board"),
         _step("place", "board", support),
-        _step("return_arms", "", arms="left right"),
+        _step("return_arms", "", parked, arms="left right"),
     )
+    expected_goals = {"final_step_completed": ["step_03"]}
+    checks = [_check("step_02", "step_03")]
+    if terminal == "audited_effect":
+        plan["conditions"] = [_condition("final", fact) for fact in (support, parked)]
+        checks = [
+            _check(
+                "condition_01", "step_02", "step_03", spatial=support, scope="final"
+            ),
+            _check("condition_02", "step_03", state=parked, scope="final"),
+        ]
+        expected_goals = {"condition_01": ["step_02"], "condition_02": ["step_03"]}
+    elif terminal == "declaration_only":
+        plan["conditions"] = [_condition("final", parked)]
+        checks = [_check("condition_01", state=parked, scope="final")]
+        expected_goals = {}
     background = dict(id="stapler", description="stapler", asset_kind="articulated")
     context = tmp_path / "context.json"
     context.write_text(
@@ -632,9 +825,7 @@ def test_authoring_publication_is_readable_without_execution(hybrid, tmp_path):
             )
         )
     )
-    result, _, _ = hybrid(
-        [plan], lambda _: _audit(_check("step_02", "step_03")), scene_context=context
-    )
+    result, _, _ = hybrid([plan], lambda _: _audit(*checks), scene_context=context)
     published = load_task_plan(tmp_path / "plan")
     assert published["stage"] == "authoring_only" and not published["execution_ready"]
     assert "stapler" not in {row["id"] for row in result["task_spec"]["roles"]}
@@ -662,7 +853,7 @@ def test_authoring_publication_is_readable_without_execution(hybrid, tmp_path):
             "step_02": "step_02",
             "step_03": "step_03",
         }
-        assert pairing["goal_groups"] == {"final_step_completed": ["step_03"]}
+        assert pairing["goal_groups"] == expected_goals
     graph = result["semantic_task_graph"]
     assert graph["nodes"][1]["call"]["arguments"]["effects"] == [support]
     terminal = graph["nodes"][-1]

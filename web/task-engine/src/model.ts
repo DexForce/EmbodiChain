@@ -15,6 +15,7 @@
 // ----------------------------------------------------------------------------
 
 import { tr, type Locale } from "./i18n";
+import { intentStep } from "./IntentStepDetails";
 import type {
   Control,
   Mode,
@@ -72,7 +73,10 @@ export function createModel(
     ),
   ];
   const lane = (node: TaskNode): Control => {
-    const values = Object.values(node.call.resources || {});
+    const authored = intentStep(node.call)?.arms;
+    const values = Array.isArray(authored)
+      ? authored
+      : Object.values(node.call.resources || {});
     return values.includes("left") && values.includes("right")
       ? "coordinated"
       : values.includes("left")

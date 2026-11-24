@@ -29,6 +29,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 from time import perf_counter
 from typing import Any, TypeAlias
 
@@ -400,6 +401,7 @@ def _validate_model_intent(
     parking = _audit_quoted_rows(instruction, body.pop("terminal_park", []), "arm")
     normalized, normalizations = _normalize_instruction_intent_fields(body)
     intent = validate_instruction_intent(normalized)
+    _validate_explicit_lift_height(instruction, intent)
     if any(
         step["task_type"] == "E3" and "pour_goal_mode" not in step
         for step in intent["steps"]
@@ -430,6 +432,54 @@ def _validate_model_intent(
                 )
             terminal_park[arm] = quote
     return _SourceIntent(intent, normalizations, scene_ref_quotes, terminal_park)
+
+
+_LIFT_MEASUREMENT = re.compile(
+    r"\b(?:lift|raise)\b(?:(?!\b(?:and|or|then)\b)[^.!?;,\n])*?"
+    r"\s+(?:\bby\s+(?:(?:more than|at least|over|exactly)\s+)?|"
+    r"\b(?:more than|at least|over|exactly)\s+)"
+    r"([0-9]+(?:\.[0-9]+)?)\s*(mm|cm|m|millimet(?:er|re)s?|"
+    r"centimet(?:er|re)s?|met(?:er|re)s?)\b",
+    re.IGNORECASE,
+)
+
+
+def _validate_explicit_lift_height(instruction: str, intent: InstructionIntent) -> None:
+    """Independently check a uniquely attributable metric lift in the source."""
+    lifts = [
+        step
+        for step in intent["steps"]
+        if step["task_type"] == "E1"
+        and step["direction"] == "up"
+        and step["terminal_behavior"] == "hold"
+        and step["target"]["kind"] == "none"
+    ]
+    if len(lifts) != 1:
+        return
+    measurements = []
+    for match in _LIFT_MEASUREMENT.finditer(instruction):
+        prefix = re.split(r"[.!?;,\n]", instruction[: match.start()])[-1]
+        if re.search(
+            r"\b(?:not|never|without)\b|n['’]t\b", prefix + match[0], re.IGNORECASE
+        ):
+            continue
+        measurements.append(match.groups())
+    if len(measurements) != 1:
+        return
+    amount, units = measurements[0]
+    unit = units.lower()
+    scale = 1.0
+    if unit == "mm" or unit.startswith("milli"):
+        scale = 0.001
+    elif unit == "cm" or unit.startswith("centi"):
+        scale = 0.01
+    height = float(amount) * scale
+    if "lift_height_m" not in lifts[0] or not math.isclose(
+        lifts[0]["lift_height_m"], height
+    ):
+        raise ValueError(
+            f"lift_height_m must match the explicit source height of {height:g} m."
+        )
 
 
 def _review_source_intent(

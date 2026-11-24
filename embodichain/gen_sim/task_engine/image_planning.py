@@ -158,30 +158,18 @@ def generate_semantic_task_graph_from_image(
             for c in candidates["candidates"]
             if c["candidate_id"] == spec.metadata["candidate_id"]
         )
-        terminal_park = [
-            dict(row, subject=f"terminal_park_{row['arm']}")
-            for row in reviewed.terminal_park
-        ]
+        terminal_park = reviewed.terminal_park
         park_payload = {"terminal_park": terminal_park} if terminal_park else {}
         park_clauses = [
             dict(
-                id=row["subject"],
+                id=f"terminal_park_{row['arm']}",
                 quote=row["quote"],
                 target=candidate["draft"]["steps"][-1]["id"],
                 origin="explicit",
                 resolution="pending_binding",
-                constraint={"kind": row["subject"]},
+                constraint={"kind": f"terminal_park_{row['arm']}"},
             )
             for row in terminal_park
-        ]
-        park_entities = [
-            dict(
-                id=park["subject"],
-                description=f"Logical {park['arm']} arm",
-                bbox=None,
-                provenance="runtime_required",
-            )
-            for park in terminal_park
         ]
         artifacts.update(task_candidates=candidates, task_spec=spec.to_dict())
         image_caller = (
@@ -203,7 +191,7 @@ def generate_semantic_task_graph_from_image(
                 system_prompt=_GROUNDING_PROMPT
                 + (
                     "\nDo not duplicate terminal_park quotes as visual clauses or create "
-                    "entities for their subjects; Task Engine supplies them for graph planning."
+                    "entities for them; their subjects are arm resources, not scene objects."
                     if terminal_park
                     else ""
                 ),
@@ -231,11 +219,10 @@ def generate_semantic_task_graph_from_image(
                 clauses = grounding.pop("clauses", [])
                 properties = grounding.pop("role_properties", {})
                 entities = {obj["id"]: obj for obj in grounding["objects"]}
-                if any(park["id"] in entities for park in park_entities):
+                if any(clause["id"] in entities for clause in park_clauses):
                     raise ValueError(
                         "Grounding must not declare a reserved terminal park subject"
                     )
-                grounding["objects"].extend(park_entities)
                 from .task_spec import _project_candidate
 
                 projected_spec = _project_candidate(candidate, grounding=grounding)
@@ -344,8 +331,8 @@ def generate_semantic_task_graph_from_image(
                     _PLANNING_PROMPT
                     + (
                         f"\nFor each terminal_park row add exactly one {_TERMINAL_PARK_CALL} "
-                        "with empty arguments, resources.primary=arm and semantic.object=subject. "
-                        "Use null reference/relation and empty intent. Attach each to the final "
+                        "with empty arguments, resources.primary=arm and a resource-only semantic annotation: "
+                        "null object/reference/relation and empty intent. Attach each to the final "
                         "source step and make it depend on all other task actions, directly or "
                         "transitively. Link its given verbatim quote to its node. Do not claim "
                         "that the pending park posture equals a measured initial pose."
@@ -476,7 +463,23 @@ def _assemble(
             raise ValueError(
                 "semantic requires object, reference, relation and a dictionary intent"
             )
-        annotations[item["id"]] = item["semantic"]
+        park = item["call"].get("call_id") == _TERMINAL_PARK_CALL
+        if park:
+            arm = item["call"].get("resources", {}).get("primary")
+            if arm not in _TERMINAL_PARK_KINDS.values() or semantic not in (
+                dict(object=None, reference=None, relation=None, intent={}),
+                dict(
+                    object=f"terminal_park_{arm}",
+                    reference=None,
+                    relation=None,
+                    intent={},
+                ),
+            ):
+                raise ValueError(
+                    "Terminal park must name only its declared arm resource"
+                )
+            semantic = dict(semantic, object=None)
+        annotations[item["id"]] = semantic
         nodes.append(
             {
                 "id": item["id"],
@@ -494,8 +497,8 @@ def _assemble(
                     "node_id": item["id"],
                     "kind": kind,
                     "parameter": "runtime." + kind,
-                    "subject": item["semantic"]["object"],
-                    "value": item["semantic"],
+                    "subject": arm if park else semantic["object"],
+                    "value": semantic,
                     "source": step["id"],
                 }
             )

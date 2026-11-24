@@ -518,6 +518,89 @@ def test_hybrid_held_vessel_pours_without_reacquisition():
 
 
 @pytest.mark.parametrize(
+    "template,replace", [("E2", False), ("E3", False), ("E4", False), ("E4", True)]
+)
+def test_hybrid_reacquisition_does_not_leave_an_intermediate_placement_as_a_goal(
+    template, replace
+):
+    from embodichain.gen_sim.task_engine.hybrid import (
+        _supported_program,
+        verify_witness,
+    )
+    from embodichain.gen_sim.task_spec import TaskSpec
+
+    place = dict(
+        template="E1",
+        object="cup",
+        reference="tray",
+        relation="on",
+        primary="left",
+        quote="Put the cup on the tray",
+    )
+    held = dict(
+        object="cup",
+        primary="left",
+        terminal_behavior="hold",
+        terminal_quote="Keep holding the cup",
+    )
+    if template == "E2":
+        next_step = dict(
+            template=template,
+            orientation="upright",
+            quote="Pick up the cup and set it upright",
+            **held,
+        )
+    elif template == "E3":
+        next_step = dict(
+            template=template,
+            reference="bowl",
+            mode="motion",
+            quote="Make a pouring motion with the cup over the bowl",
+            **held,
+        )
+    else:
+        next_step = dict(
+            template=template,
+            object="cup",
+            source="left",
+            destination="right",
+            quote="Hand the cup from left to right",
+        )
+    operations = [place, next_step]
+    if replace:
+        operations.append(
+            dict(
+                operations[0],
+                reference="pad",
+                primary="right",
+                quote="Place the cup on the pad",
+            )
+        )
+    text = ". ".join(
+        op[key] for op in operations for key in ("quote", "terminal_quote") if key in op
+    )
+    bindings = {}
+    objective, _, calls = _supported_program(operations, bindings=bindings)
+    plan = author_goal_plan(text, "reacquire_after_placement", objective, calls)
+    spec = TaskSpec.from_dict(plan["task_spec"])
+    assert spec.milestones[0].achieve[0].arguments["reference"] == "tray"
+    coverage = verify_witness(
+        spec, plan["semantic_task_graph"], support_targets={}, bindings=bindings
+    )
+    assert coverage["status"] == "covered", coverage
+    if replace:
+        assert len(spec.goal) == 1
+        assert spec.goal[0].arguments["reference"] == "pad"
+    elif template == "E4":
+        assert [goal.name for goal in spec.goal] == ["handover_complete"]
+    else:
+        assert {goal.name for goal in spec.goal} == {
+            "held",
+            "object_upright" if template == "E2" else "pour_motion",
+        }
+
+
+@pytest.mark.parametrize(
     "instruction",
     [
         "把杯子放在托盘上，不要倒水。",

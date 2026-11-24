@@ -721,6 +721,14 @@ def _advance_arms(
     )
 
 
+def _role_ancestry(role: str, parents: dict[str, str]) -> set[str]:
+    lineage = {role}
+    while role in parents:
+        role = parents[role]
+        lineage.add(role)
+    return lineage
+
+
 def validate_intent(
     plan: Any, instruction: str, *, scene_objects: dict[str, Any]
 ) -> dict[str, Any]:
@@ -783,6 +791,7 @@ def validate_intent(
     # rewrite the authored auto arms in the returned plan.
     arm_states = {_ArmState()}
     grasp_sites: dict[str, dict[str, str]] = {}
+    manipulated: set[str] = set()
     seated: set[tuple[str, str]] = set()
     tightened: set[tuple[str, str]] = set()
     invariants = []
@@ -1046,26 +1055,48 @@ def validate_intent(
         arm_states = advanced
         if verb in _ACQUIRE_VERBS:
             grasp_sites[subjects[0]] = {fact["arms"][0]: fact["part"] for fact in sites}
-        elif verb in {"place", "release", "handover"}:
+        # A fully specified grasp does not imply contact with sibling parts.
+        contacts = (
+            grasp_sites.get(subjects[0], {})
+            if len(subjects) == 1
+            and (
+                verb in _ACQUIRE_VERBS
+                or verb in {"move_held", "orient", "transfer_contents", "release"}
+            )
+            else {}
+        )
+        manipulated.update(
+            contacts.values() if len(contacts) == len(arms) else subjects
+        )
+        if verb in {"place", "release", "handover"}:
             grasp_sites.pop(subjects[0], None)
         for fact in (*effects, *invariants):
             check_fact_state(fact)
         ordered_steps.append(step)
 
     plan["steps"] = ordered_steps
-    manipulated = {subject for step in plan["steps"] for subject in step["subjects"]}
     for condition in plan["conditions"]:
         scope, fact = condition["scope"], condition["fact"]
         if scope == "final":
             check_fact_state(fact)
-        if fact["kind"] in {"untouched", "untouched_except"}:
+        if scope != "initial" and fact["kind"] in {"untouched", "untouched_except"}:
             protected = set(fact["subjects"])
-            conflict = (
-                manipulated & protected
-                if fact["kind"] == "untouched"
-                else manipulated - protected
-            )
-            if scope != "initial" and conflict:
+            if fact["kind"] == "untouched":
+                owners = set().union(
+                    *(_role_ancestry(role, parents) for role in protected)
+                )
+                conflict = {
+                    role
+                    for role in manipulated
+                    if role in owners or _role_ancestry(role, parents) & protected
+                }
+            else:
+                conflict = {
+                    role
+                    for role in manipulated
+                    if not _role_ancestry(role, parents) & protected
+                }
+            if conflict:
                 raise ValueError(
                     f"Ordered operations touch protected roles: {sorted(conflict)}"
                 )

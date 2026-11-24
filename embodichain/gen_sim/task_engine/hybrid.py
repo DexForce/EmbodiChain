@@ -18,15 +18,19 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Iterator
 import hashlib
+from itertools import combinations
 import json
 import re
 from pathlib import Path
 from typing import Any
 
 from .authoring_intent import (
+    _GROUP_RELATIONS,
     _PROMPT as _INTENT_FORMAT,
     AuthoringEvidenceError,
+    _role_ancestry,
     compile_intent,
     source_spans,
     validate_intent,
@@ -260,19 +264,38 @@ _OPPOSITE_VALUES = {
             "inside not_inside",
         )
     },
-    "orientation": {
-        frozenset(pair.split())
-        for pair in (
-            "opening_up opening_down",
-            "upright tilted",
-            "upright flat",
-            "upright lying_on_side",
-            "pointing_left pointing_right",
-            "pointing_up pointing_down",
-            "pointing_forward pointing_backward",
-            "pointing_toward pointing_away_from",
-        )
-    },
+    "orientation": (
+        {
+            frozenset(pair.split())
+            for pair in (
+                "opening_up opening_down",
+                "left_to_right front_to_back",
+                "pointing_toward pointing_away_from",
+            )
+        }
+        # Main-axis alignment does not replace a separate cross-section or opening fact.
+        | {
+            frozenset((vertical, other))
+            for vertical in ("upright", "vertical")
+            for other in (
+                "tilted",
+                "flat",
+                "lying_on_side",
+                "left_to_right",
+                "front_to_back",
+            )
+        }
+        | {
+            frozenset(pair)
+            for pair in combinations(
+                (
+                    "pointing_left pointing_right pointing_up pointing_down "
+                    "pointing_forward pointing_backward"
+                ).split(),
+                2,
+            )
+        }
+    ),
     "articulated": {frozenset({"open", "closed"})},
     "actuated": {frozenset({"open", "closed"})},
 }
@@ -307,11 +330,7 @@ def _carried_facts(
             roles.update(fact.get("references", ()))
         if "part" in fact:
             roles.add(fact["part"])
-        for role in tuple(roles):
-            while role in parents:
-                role = parents[role]
-                roles.add(role)
-        return bool(roles & subjects)
+        return any(_role_ancestry(role, parents) & subjects for role in roles)
 
     for ref, step in steps.items():
         verb, subjects, effects = step["verb"], set(step["subjects"]), step["effects"]
@@ -362,16 +381,48 @@ def _carried_facts(
                 )
             return False
 
+        def retained(fact: dict[str, Any]) -> Iterator[dict[str, Any]]:
+            if not invalidates(fact):
+                yield fact
+                return
+            if fact["kind"] == "released":
+                for subject in fact["subjects"]:
+                    member = dict(fact, subjects=[subject])
+                    if not invalidates(member):
+                        yield member
+            elif fact["kind"] == "orientation":
+                survivors = [
+                    subject
+                    for subject in fact["subjects"]
+                    if not invalidates(dict(fact, subjects=[subject]))
+                ]
+                if survivors:
+                    yield dict(fact, subjects=survivors)
+            elif fact["kind"] == "relation" and fact["value"] not in _GROUP_RELATIONS:
+                # Multiple supporting faces prove a joint contact, not separate placements.
+                if (
+                    fact["value"] in {"supported_by", "on_top_faces"}
+                    and len(fact["references"]) > 1
+                ):
+                    return
+                for subject in fact["subjects"]:
+                    for reference in fact["references"]:
+                        pair = dict(fact, subjects=[subject], references=[reference])
+                        if not invalidates(pair):
+                            yield pair
+
         current = {
-            origin: [fact for fact in facts if not invalidates(fact)]
+            origin: [part for fact in facts for part in retained(fact)]
             for origin, facts in current.items()
         }
         current[ref] = effects
     return current
 
 
-def _validate_intent_audit(instruction: str, plan: dict[str, Any], audit: Any) -> None:
-    """Require an independent source review tied to typed facts and steps."""
+def _validate_intent_audit(
+    instruction: str, plan: dict[str, Any], audit: Any
+) -> dict[str, list[str]]:
+    """Validate cited evidence and return witnessed terminal goal producers."""
     _validate_audit_issues(instruction, audit, "checks")
     checks = audit.get("checks")
     steps = {f"step_{i:02d}": row for i, row in enumerate(plan["steps"], 1)}
@@ -385,6 +436,12 @@ def _validate_intent_audit(instruction: str, plan: dict[str, Any], audit: Any) -
     invariants = {
         ref: row["fact"] for ref, row in conditions.items() if row["scope"] == "always"
     }
+    for ref, step in steps.items():
+        for fact in invariants.values():
+            if any(_opposes(fact, effect) for effect in step["effects"]):
+                raise AuthoringEvidenceError(
+                    f"{ref} effect contradicts an always condition: {fact}"
+                )
     seed = {
         ref: [row["fact"]] for ref, row in conditions.items() if row["scope"] != "final"
     }
@@ -397,11 +454,11 @@ def _validate_intent_audit(instruction: str, plan: dict[str, Any], audit: Any) -
     earlier.extend(fact for step in steps.values() for fact in step["effects"])
 
     def matches(fact: dict[str, Any], facts: list[dict[str, Any]]) -> bool:
-        verify = (
-            verify_spatial_claim if fact["kind"] == "relation" else verify_state_claim
-        )
         try:
-            verify(fact, facts, roles)
+            if fact["kind"] == "relation":
+                verify_spatial_claim(fact, facts, roles)
+            else:
+                verify_state_claim(fact, facts, roles, combine_released=True)
         except AuthoringEvidenceError:
             return False
         return True
@@ -432,6 +489,7 @@ def _validate_intent_audit(instruction: str, plan: dict[str, Any], audit: Any) -
     if not isinstance(checks, list) or not checks:
         raise ValueError("source_audit: no independently reviewed requirements")
     witnessed = False
+    goal_producers: dict[str, set[str]] = {}
     for check in checks:
         if (
             not isinstance(check, dict)
@@ -583,10 +641,39 @@ def _validate_intent_audit(instruction: str, plan: dict[str, Any], audit: Any) -
                 raise AuthoringEvidenceError(
                     "A final state check conflicts with an ordered effect"
                 )
+        if scope == "final":
+            cited_steps = [step for step in steps if step in refs and end[step]]
+            for goal_id in dict.fromkeys(refs):
+                if goal_id not in final or not cited_steps:
+                    continue
+                goal = final[goal_id]
+                slots = (
+                    slot_facts(refs, end, goal) if goal["kind"] == "relation" else []
+                )
+                proof = {step: end[step] for step in cited_steps}
+                if not matches(
+                    goal, slots + [f for facts in proof.values() for f in facts]
+                ):
+                    continue
+                # Remove witnesses that do not contribute to the surviving goal.
+                for step in cited_steps:
+                    remaining = {
+                        key: facts for key, facts in proof.items() if key != step
+                    }
+                    if matches(
+                        goal, slots + [f for facts in remaining.values() for f in facts]
+                    ):
+                        proof = remaining
+                if proof:
+                    goal_producers.setdefault(goal_id, set()).update(proof)
     if not witnessed:
         raise ValueError(
             "A source audit needs at least one step or condition, not roles alone"
         )
+    return {
+        goal: [step for step in steps if step in proven]
+        for goal, proven in goal_producers.items()
+    }
 
 
 def _review_scope_guards(audit: Any) -> Counter[str]:
@@ -667,6 +754,9 @@ def _supported_program(operations, *, bindings=None, scene_objects=None):
         resource = {} if side == "auto" else {"primary": side}
         if side != "auto":
             requirements.add(side)
+        if template in {"E2", "E3", "E4"} and obj not in holder:
+            # Reacquisition ends the earlier placement, not its milestone.
+            goals.pop(obj, None)
         if template in {"E2", "E3", "E6", "E7", "E8", "E9"}:
             reuse = template == "E3" and obj in holder and holder[obj] == side
             if (obj in holder or side in holder.values()) and not reuse:
@@ -1425,8 +1515,7 @@ def publish_hybrid(
                         raise AuthoringEvidenceError(
                             "A citation repair cannot discard or weaken a final or framed check"
                         )
-                    validate(audit)
-                    return
+                    return validate(audit)
                 except ValueError as error:
                     if isinstance(error, AuthoringEvidenceError) or (
                         isinstance(audit, dict) and audit.get("issues")
@@ -1536,7 +1625,7 @@ def publish_hybrid(
                         ensure_ascii=False,
                     ),
                 )
-            review(
+            return review(
                 {
                     "semantic_plan_format": _INTENT_FORMAT,
                     **(
@@ -1607,8 +1696,9 @@ def publish_hybrid(
                         "A terminal-only posture or separation fact is not a throughout constraint. "
                         "Use scope:before for the state just before the latest cited step; cite that step and the earlier effect or condition that establishes the state. "
                         "Use scope:step only for during-step maintain, and scope:effect for immediately after the latest cited step. "
-                        "For a state requested at task completion use scope:final and cite its final condition, or cite "
-                        "the step with a typed state/spatial claim that survives the later actions. Initial and maintain facts "
+                        "For a state requested at task completion use scope:final. Cite its final condition if present, "
+                        "and cite producing steps when their effects still prove it after later actions. Include a typed "
+                        "state/spatial claim when citing a step. Initial and maintain facts "
                         "do not prove a final result. Every check has a separate scope field, not text in requirement. "
                         "Use scope:action for actions, identity and arm-selection with step or role evidence. Cite affected step arms. "
                         "Each state or spatial value is one typed fact object, never an array or prose. Split checks across scopes. "
@@ -1688,6 +1778,7 @@ def publish_hybrid(
 
         used = 0
         intent = None
+        goal_producers = {}
         saw_intent = False
         operations = []
         for attempt in range(4):
@@ -1722,7 +1813,7 @@ def publish_hybrid(
                     )
                     interpreted = True
                     prompt["previous_semantic_plan"] = proposed_intent
-                    audit_intent(proposed_intent)
+                    goal_producers = audit_intent(proposed_intent)
                     intent = proposed_intent
                     break
                 operations = _operation_rows(proposal, instruction)
@@ -1778,6 +1869,8 @@ def publish_hybrid(
                 status="source_reviewed",
                 producers=producers,
             )
+            if goal_producers:
+                coverage["goal_producers"] = goal_producers
             result = dict(
                 task_spec=spec.to_dict(),
                 semantic_task_graph=graph,

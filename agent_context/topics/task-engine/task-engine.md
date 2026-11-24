@@ -28,8 +28,10 @@ end; `maintain` holds during a step. The audit matches source obligations to
 facts in their required scope, not role labels. A `before` check uses cited
 facts still valid at the start of its latest cited step, not that step's effects.
 Final checks use a compatible final condition or a cited effect that survives
-subsequent actions. Separate release facts can prove a group was released only
-when they are valid at the same checkpoint. A stated spatial frame must match the
+subsequent actions. Independent facts keep unaffected members; joint spatial
+facts are not split. Known effect conflicts with `always` conditions are rejected
+even if a later step restores the state. Separate release facts prove a group was
+released only when valid at the same checkpoint. A stated spatial frame must match the
 evidence, including slot relations. The validator tracks feasible arm assignments
 across the sequence without replacing authored `auto` arms. Citation repairs can
 fix malformed evidence without changing the graph or weakening its final checks.
@@ -106,9 +108,11 @@ by default). It contains no per-task graph construction templates.
 
 `template` and default `TaskAgent` independently audit typed intent before
 grounding. Ordering compares reachability, and only a unique shared verbatim
-mention can reconcile reference labels. Agreed explicit arm returns project to
-ordered `simulation.park` calls with pending postures. New default attempts mark
-the audit `purpose: source_review`; older published plans remain readable.
+mention can reconcile reference labels. A uniquely stated metric lift height
+is also checked against the source for a targetless upward hold. Agreed explicit
+arm returns project to ordered `simulation.park` calls with pending resource
+postures, not extra image-grounding entities. New default attempts mark the audit
+`purpose: source_review`; older published plans remain readable.
 
 `lab/task_program/language/semantic_contracts.py` owns provider-free call argument,
 resource, precondition/effect and runtime-binding declarations. Configured live
@@ -169,7 +173,8 @@ semantic review and never qualify physical execution.
 
 Version-2 plans and revisions embed the frozen v1 specification and its pairing
 report in the offline viewer. The grouped action canvas links milestones, final
-goals and roles. Native run review is published separately at `task_review.html`;
+goals and roles. Typed final goals link only to cited steps with surviving
+effects that prove them. Native run review is published separately at `task_review.html`;
 `gensim task view --plan PLAN [--run RUN] --output NEW.html` also renders
 existing artifacts. Only matching attempt identities, complete plan identities and
 execution-report digests supply native call evidence. Per-environment details

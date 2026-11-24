@@ -112,6 +112,7 @@ def _producer_pairing(
         identifier: group[producer if isinstance(producer, str) else producer[0]]
         for identifier, producer in coverage["producers"].items()
     }
+    audited = coverage.get("goal_producers", {})
     return {
         "milestone_groups": {
             m["id"]: producer_groups[m["id"]]
@@ -122,6 +123,11 @@ def _producer_pairing(
             g["id"]: [producer_groups[g["id"]]]
             for g in spec["objectives"]["goal"]
             if g["id"] in producer_groups
+        }
+        | {
+            g["id"]: list(dict.fromkeys(group[node] for node in audited[g["id"]]))
+            for g in spec["objectives"]["goal"]
+            if g["id"] in audited
         },
     }
 

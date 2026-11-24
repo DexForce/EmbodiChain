@@ -266,6 +266,47 @@ def test_source_audit_repairs_an_omitted_metric_height():
     assert result.intent["steps"][0]["lift_height_m"] == 0.10
 
 
+@pytest.mark.parametrize(
+    "measurement", ["by 100 mm", "more than 10 cm", "by more than 0.1 metres"]
+)
+def test_explicit_lift_height_is_checked_even_when_both_models_agree(measurement):
+    step = dict(
+        _step(reference="figurine"),
+        task_type="E1",
+        orientation_goal="none",
+        direction="up",
+        terminal_behavior="hold",
+        lift_height_m=0.01,
+    )
+    text = f"Lift the figurine {measurement} and keep holding it."
+    wrong = {"steps": [step]}
+    with pytest.raises(ValueError, match="lift_height_m.*explicit source height"):
+        interpret_instruction_draft(text, caller=_audit_caller(wrong, wrong))
+    correct = {"steps": [dict(step, lift_height_m=0.1)]}
+    assert (
+        interpret_instruction_draft(
+            text, caller=_audit_caller(correct, correct)
+        ).attempts
+        == 1
+    )
+
+
+def test_lift_height_does_not_borrow_another_actions_distance():
+    from embodichain.gen_sim.task_engine.interpretation import (
+        _validate_explicit_lift_height,
+    )
+
+    step = dict(
+        _step(reference="figurine"),
+        task_type="E1",
+        direction="up",
+        terminal_behavior="hold",
+    )
+    _validate_explicit_lift_height(
+        "Lift the figurine and advance the platform by 10 cm.", {"steps": [step]}
+    )
+
+
 def test_source_audit_repairs_an_invented_scene_role_for_a_start_pose():
     step = dict(
         _step(reference="tray"),
