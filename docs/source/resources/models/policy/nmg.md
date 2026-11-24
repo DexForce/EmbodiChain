@@ -60,8 +60,8 @@ embodichain run-example sim/motion/planners/nmg/franka --headless --device cpu \
 
 | Supported configuration | Policy TCP | FP32 observation → raw action | ONNX inference | Native PyTorch |
 | --- | --- | --- | --- | --- |
-| Franka FR3 (7 DoF) with Robotiq 2F-140 | 0.20 m flange offset with gripper rotation | `[B, 417] → [B, 7]` | [`v1/franka.onnx`](https://huggingface.co/DexForceAI/neural_motion_generator/resolve/1f7398d2539fdc9c54d5e5c81590c784f34146ca/v1/franka.onnx) | [`v1/franka.pt`](https://huggingface.co/DexForceAI/neural_motion_generator/resolve/1f7398d2539fdc9c54d5e5c81590c784f34146ca/v1/franka.pt) |
-| PiPER V100 (6 DoF) with parallel gripper | 0.143 m `link6` offset with gripper rotation | `[B, 391] → [B, 6]` | [`v1/piper.onnx`](https://huggingface.co/DexForceAI/neural_motion_generator/resolve/1f7398d2539fdc9c54d5e5c81590c784f34146ca/v1/piper.onnx) | [`v1/piper.pt`](https://huggingface.co/DexForceAI/neural_motion_generator/resolve/1f7398d2539fdc9c54d5e5c81590c784f34146ca/v1/piper.pt) |
+| Franka FR3 (7 DoF) with Robotiq 2F-140 | 0.20 m flange offset with gripper rotation | `[B, 417] → [B, 7]` | [`v1/franka.onnx`](https://huggingface.co/DexForceAI/neural_motion_generator/resolve/47b67542bb20dc612acb78a6ac329b3b4fdd088f/v1/franka.onnx) | [`v1/franka.pt2`](https://huggingface.co/DexForceAI/neural_motion_generator/resolve/47b67542bb20dc612acb78a6ac329b3b4fdd088f/v1/franka.pt2) |
+| PiPER V100 (6 DoF) with parallel gripper | 0.143 m `link6` offset with gripper rotation | `[B, 391] → [B, 6]` | [`v1/piper.onnx`](https://huggingface.co/DexForceAI/neural_motion_generator/resolve/47b67542bb20dc612acb78a6ac329b3b4fdd088f/v1/piper.onnx) | [`v1/piper.pt2`](https://huggingface.co/DexForceAI/neural_motion_generator/resolve/47b67542bb20dc612acb78a6ac329b3b4fdd088f/v1/piper.pt2) |
 
 Both model formats are pinned to the same release. The simulation examples
 download the ONNX file and verify its SHA256.
@@ -86,13 +86,15 @@ on the loaded model for its layout and fingerprint.
 
 Use `NeuralMotionGenerator` with an encoded FP32 observation. ONNX inference
 loads `.onnx` with `from_onnx()` and uses the `policy-deploy` extra.
-Input gradients load a matching native `.pt` with `from_checkpoint()` and use
-PyTorch from the base installation.
+Input gradients load a matching `.pt2` program with `from_checkpoint()` and
+use PyTorch from the base installation.
 
-The native `nmg.actor.v1` deployment checkpoint contains the actor state dict,
-network configuration, observation metadata and normalization buffers. Its
-`nmg.checkpoint_sha256` metadata identifies the source training checkpoint.
-Use the deployment checkpoint paired with the ONNX export by policy identity.
+The `nmg.actor.pt2.v1` archive contains the upstream actor graph, frozen
+weights, observation metadata and normalization. Its `nmg.checkpoint_sha256`
+identifies the training checkpoint. Use the program paired with the ONNX
+export by policy identity. Released `.pt2` files and their `.pt` URL aliases
+use the same graph archive and built-in SHA256. Pass a trusted `sha256` to
+`from_checkpoint()` for a custom graph archive.
 
 ```python
 from pathlib import Path
@@ -116,8 +118,8 @@ def compare_step(
     return inference(obs), action, d_obs
 ```
 
-Load each model once for repeated steps. The native backend freezes policy
-weights and follows the caller's PyTorch autograd context. Keep the waypoint
+Load each model once for repeated steps. The exported actor freezes weights and follows the caller's PyTorch
+autograd context. Keep the waypoint
 masks and active slot fixed when differentiating continuous observation
 features. CPU and CUDA actions and input gradients are compared against the
 paired ONNX exports and directional finite differences.

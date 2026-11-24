@@ -18,7 +18,7 @@ Neural Motion Generator
 
 ``embodichain.extensions.models.policy.nmg`` evaluates standalone NMG models
 with a batched FP32 observation-to-action interface. ONNX Runtime evaluates an
-ONNX export for inference. A native PyTorch deployment checkpoint retains
+ONNX export for inference. An exported PyTorch program retains
 first-order observation gradients with frozen actor weights. Both formats
 carry normalization and observation metadata. See the :doc:`NMG model guide
 </resources/models/policy/nmg>` for supported configurations, weight downloads and examples.

@@ -219,9 +219,9 @@ heterogeneous limits. Validate reports, geometry and padding together in
 
 `embodichain.extensions.models.policy.nmg.NeuralMotionGenerator` returns raw
 actions from NMG model artifacts. The ORT backend loads `.onnx` and uses the
-`policy-deploy` extra. The native PyTorch backend loads a tensor-only `.pt`
-deployment checkpoint with `from_checkpoint()`, freezes actor weights and
-retains gradients with respect to continuous observations. The two backends
+`policy-deploy` extra. The PyTorch backend loads a trusted `.pt2`
+archive with `from_checkpoint()`, verifies its digest and preserves input
+autograd through the upstream graph with frozen actor weights. The two backends
 share the model observation layout. `NeuralPlanner` uses ORT, reads the
 joint count and constraint capacity from the ONNX metadata, and verifies
 the observation layout and fingerprint before rollout. Explicit dimension

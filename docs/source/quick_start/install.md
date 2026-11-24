@@ -286,10 +286,10 @@ For an editable checkout, use `-e ".[policy-deploy]"` in the second command.
 
 ## NMG input gradients
 
-The standard EmbodiChain installation includes PyTorch for native NMG actor
-checkpoints. Load a local deployment `.pt` with
-`NeuralMotionGenerator.from_checkpoint(checkpoint, device=...)`. The checkpoint
-provides model weights, observation normalization and the observation contract.
+The standard EmbodiChain installation includes PyTorch for exported NMG
+actor programs. Load a verified `.pt2` with
+`NeuralMotionGenerator.from_checkpoint(checkpoint, device=...)`. The archive
+provides the actor graph, weights, normalization and observation contract.
 Install `policy-deploy` when the same environment also runs an ONNX policy
 through ONNX Runtime.
 

@@ -251,7 +251,7 @@ topics:
   - embodichain/lab/sim/motion/planners/base_planner.py
   - embodichain/lab/sim/motion/motion_generator.py
   - embodichain/extensions/models/policy/nmg.py
-  - embodichain/extensions/models/policy/_nmg_checkpoint.py
+  - embodichain/extensions/models/policy/_nmg_exported.py
   - embodichain/extensions/models/policy/_nmg_observation.py
   - embodichain/lab/sim/motion/ik.py
   - embodichain/lab/sim/motion/_cartesian.py

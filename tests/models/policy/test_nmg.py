@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
 import sys
@@ -28,10 +29,6 @@ import pytest
 import torch
 
 from embodichain.extensions.models.policy import nmg as nmg_module
-from embodichain.extensions.models.policy._nmg_checkpoint import (
-    _NativeActor,
-    _NormalizedActor,
-)
 from embodichain.extensions.models.policy._nmg_observation import (
     _WaypointObservationLayout,
 )
@@ -340,11 +337,26 @@ def test_checkpoint_backend_rejects_ort_provider_options(tmp_path):
         )
 
 
-def test_checkpoint_requires_exported_actor_state(tmp_path):
+def test_checkpoint_rejects_weights_without_a_graph(tmp_path):
     path = tmp_path / "training.pt"
     torch.save({"agent": {}}, path)
-    with pytest.raises(ValueError, match=r"nmg\.actor\.v1"):
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    with pytest.raises(ValueError, match=r"PT2 policy archive"):
+        NeuralMotionGenerator.from_checkpoint(path, sha256=digest)
+
+
+def test_untrusted_checkpoint_is_rejected_before_deserialization(tmp_path, monkeypatch):
+    path = tmp_path / "unverified.pt2"
+    path.write_bytes(b"an untrusted payload")
+
+    def reject(*args, **kwargs):
+        pytest.fail("The archive reader must not run before verifying the digest.")
+
+    monkeypatch.setattr(torch.export, "load", reject)
+    with pytest.raises(ValueError, match="trusted sha256"):
         NeuralMotionGenerator.from_checkpoint(path)
+    with pytest.raises(ValueError, match="SHA256 mismatch"):
+        NeuralMotionGenerator.from_checkpoint(path, sha256="0" * 64)
 
 
 _RELEASE_MODELS = {
@@ -355,7 +367,7 @@ _RELEASE_MODELS = {
             "2361954fda7b6f0d21445ebfb5099d31bdd67199bdadcecba71e0835f2157ad5",
             "59efcf225381d04ca511519207c634370fd75564e07ae6b332b4f54a66e2b90a",
         ),
-        "a8548c3f2a469b789186bbc51cf67504e6e2275eaf2a199b2d7be4ba58a88bba",
+        "07ae3c861bbe7cc599fd12cecd0c0909d06c032c73623d7e36ceb798f48e2c87",
     ),
     "piper": (
         6,
@@ -364,7 +376,7 @@ _RELEASE_MODELS = {
             "223a02d7f1c3db1ea96352404f623ebfde7e1b00f3bc3d7a186a634dfea5ecf0",
             "88e7559799829cfcc15efc2efa3a14b2eb8ca19be2da0d4f89be925260b2bf2b",
         ),
-        "85617136ec904db13df67b46c6f7dca83c04b41fc2cc31cc36659d594b05e686",
+        "b0f027ba7010f84be917ce83fa60d97745c0fbe03e9e554982cae9d2d5e7afec",
     ),
 }
 
@@ -409,45 +421,36 @@ def _release_observation(batch: int, joints: int) -> torch.Tensor:
     )
 
 
-def test_native_checkpoint_evaluates_batched_inputs_and_input_vjp(
+def test_exported_checkpoint_evaluates_batched_inputs_and_input_vjp(
     tmp_path, monkeypatch
 ):
-    """The .pt path loads a frozen native actor without an ONNX runtime."""
-    for package in ("onnx", "onnxruntime", "onnx2pytorch"):
+    """A trusted exported graph runs with PyTorch and retains input autograd."""
+    for package in ("onnx", "onnxruntime", "onnx2pytorch", "nmg"):
         monkeypatch.setitem(sys.modules, package, None)
 
     joints = 2
     layout = _WaypointObservationLayout(12, joints, True)
-    config = dict(
-        hidden_dim=8,
-        nhead=2,
-        num_layers=1,
-        ff_dim=16,
-        future_context=True,
-        disable_future_residual=False,
+    model = torch.nn.Sequential(torch.nn.Linear(layout.dim, joints), torch.nn.Tanh())
+    model.eval().requires_grad_(False)
+    example = _release_observation(3, joints).requires_grad_()
+    program = getattr(torch.export, "export_for_training", torch.export.export)(
+        model,
+        (example,),
+        dynamic_shapes=({0: torch.export.Dim("batch", min=1, max=32)},),
     )
-    with torch.random.fork_rng(devices=[]):
-        torch.manual_seed(42)
-        actor = _NativeActor(layout, **config)
-        torch.nn.init.zeros_(actor.action_token)
-        torch.nn.init.zeros_(actor.waypoint_index_embedding)
-        model = _NormalizedActor(actor, layout.dim)
-    path = tmp_path / "policy.pt"
-    metadata = {
-        **layout.onnx_metadata,
-        "nmg.future_context": "true",
-        "nmg.disable_future_residual": "false",
-    }
-    torch.save(
-        dict(
-            format="nmg.actor.v1",
-            actor_config=config,
-            state_dict=model.state_dict(),
-            metadata=metadata,
-        ),
+    path = tmp_path / "policy.pt2"
+    metadata = layout.onnx_metadata
+    torch.export.save(
+        program,
         path,
+        extra_files={
+            "metadata.json": json.dumps(metadata),
+            "deployment.json": json.dumps({"format": "nmg.actor.pt2.v1"}),
+        },
     )
-    policy = NeuralMotionGenerator.from_checkpoint(path)
+    policy = NeuralMotionGenerator.from_checkpoint(
+        path, sha256=hashlib.sha256(path.read_bytes()).hexdigest()
+    ).eval()
     assert policy.observation_metadata == metadata
     assert policy.obs_dim == layout.dim and policy.output_dim == joints
     for batch in (1, 3):
@@ -455,17 +458,10 @@ def test_native_checkpoint_evaluates_batched_inputs_and_input_vjp(
         action = policy(obs)
         assert action.shape == (batch, joints)
         (grad,) = torch.autograd.grad(action.sum(), obs)
-        direction = torch.zeros_like(obs)
-        direction[:, 0] = 1.0
-        step = 1.0e-3
-        with torch.no_grad():
-            ref = (
-                policy(obs + step * direction) - policy(obs - step * direction)
-            ).sum() / (2 * step)
-        torch.testing.assert_close((grad * direction).sum(), ref, rtol=1e-2, atol=2e-4)
-        assert grad.isfinite().all() and grad.abs().max() > 0
+        expected = (1 - action.detach().square()) @ model[0].weight
+        torch.testing.assert_close(grad, expected, atol=1e-6, rtol=1e-5)
+        torch.testing.assert_close(action, model(obs))
         assert all(not parameter.requires_grad for parameter in policy.parameters())
-        assert all(parameter.grad is None for parameter in policy.parameters())
 
 
 @pytest.fixture
@@ -495,7 +491,7 @@ def test_release_policy_vjp_matches_onnx_central_difference(
     path = Path(directory) / f"{robot}.onnx"
     with path.open("rb") as stream:
         assert hashlib.file_digest(stream, "sha256").hexdigest() in onnx_digests
-    checkpoint = Path(checkpoint_dir) / f"{robot}.pt"
+    checkpoint = Path(checkpoint_dir) / f"{robot}.pt2"
     with checkpoint.open("rb") as stream:
         assert hashlib.file_digest(stream, "sha256").hexdigest() == checkpoint_digest
     inference = NeuralMotionGenerator.from_onnx(

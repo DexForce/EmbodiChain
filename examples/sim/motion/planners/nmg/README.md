@@ -120,8 +120,8 @@ avoidance.
 
 For raw policy actions, load the local `.onnx` with
 `NeuralMotionGenerator.from_onnx()`. For observation gradients, load the
-matching native actor `.pt` with `NeuralMotionGenerator.from_checkpoint()`.
-Install `embodichain[policy-deploy]` for the ONNX backend. Native checkpoints
+matching exported actor `.pt2` with `NeuralMotionGenerator.from_checkpoint()`.
+Install `embodichain[policy-deploy]` for the ONNX backend. Exported PyTorch actors
 use PyTorch from the base installation.
 
 Pass a batched FP32 tensor in the model's observation layout. Franka maps
@@ -133,7 +133,7 @@ import torch
 
 from embodichain.extensions.models.policy.nmg import NeuralMotionGenerator
 
-# obs is an encoded FP32 observation and checkpoint_path points to a native .pt.
+# obs is an encoded FP32 observation and checkpoint_path points to a verified .pt2.
 policy = NeuralMotionGenerator.from_checkpoint(checkpoint_path, device=obs.device)
 obs = obs.requires_grad_(True)
 action = policy(obs)
@@ -141,11 +141,11 @@ action = policy(obs)
 ```
 
 `NeuralPlanner` uses ONNX inference for closed-loop rollout, action scaling
-and retiming. For paired local `.onnx` and `.pt` deployment files, run the
+and retiming. For paired local `.onnx` and `.pt2` deployment files, run the
 numeric checks from the repository checkout.
 
 ```bash
 EMBODICHAIN_NMG_MODEL_DIR=/path/to/v1 python -m pytest tests/models/policy/test_nmg.py --run-gpu
 ```
 
-Set `EMBODICHAIN_NMG_CHECKPOINT_DIR` when the native files are stored separately.
+Set `EMBODICHAIN_NMG_CHECKPOINT_DIR` when the PT2 archives are stored separately.

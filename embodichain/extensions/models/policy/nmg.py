@@ -28,7 +28,7 @@ from torch import nn
 
 from embodichain.utils import logger
 
-from ._nmg_checkpoint import _load_native_actor
+from ._nmg_exported import _load_exported_actor
 
 if TYPE_CHECKING:
     from onnxruntime import InferenceSession
@@ -39,8 +39,8 @@ __all__ = ["NeuralMotionGenerator"]
 class NeuralMotionGenerator(nn.Module):
     """Evaluate batched observations with a deployed NMG policy.
 
-    An ONNX export uses ONNX Runtime for detached actions. A native actor
-    checkpoint uses PyTorch with frozen weights and follows the caller's
+    An ONNX export uses ONNX Runtime for detached actions. An exported PyTorch
+    program contains the actor graph and frozen weights and follows the caller's
     autograd context for first-order gradients of actions with respect to
     continuous observations. Keep the active waypoint and masks fixed
     when differentiating.
@@ -60,6 +60,7 @@ class NeuralMotionGenerator(nn.Module):
         device: str | torch.device = "cpu",
         providers: Sequence[str] | None = None,
         cuda_use_tf32: bool | None = None,
+        sha256: str | None = None,
     ) -> None:
         super().__init__()
         if type(cuda_use_tf32) is not bool and cuda_use_tf32 is not None:
@@ -69,11 +70,11 @@ class NeuralMotionGenerator(nn.Module):
 
         path = Path(path)
         if not path.is_file():
-            raise FileNotFoundError(f"ONNX policy not found: {path}")
-        suffix = ".pt" if enable_grad else ".onnx"
-        if path.suffix.lower() != suffix:
+            raise FileNotFoundError(f"NMG policy not found: {path}")
+        valid_suffixes = {".pt2", ".pt"} if enable_grad else {".onnx"}
+        if path.suffix.lower() not in valid_suffixes:
             message = (
-                "Input gradients require a native .pt deployment checkpoint. "
+                "Input gradients require an exported PyTorch actor (.pt2). "
                 "Call NeuralMotionGenerator.from_checkpoint()."
                 if enable_grad
                 else f"NeuralMotionGenerator only accepts standalone .onnx policies, got {path}."
@@ -85,7 +86,7 @@ class NeuralMotionGenerator(nn.Module):
         self._ort_cuda_device: torch.device | None = None
         self._torch_model: nn.Module | None = None
         if enable_grad:
-            self._load_torch(path, device)
+            self._load_torch(path, device, sha256)
         else:
             self._load_ort(path, device, providers, cuda_use_tf32)
         self.eval()
@@ -122,7 +123,7 @@ class NeuralMotionGenerator(nn.Module):
         """
         if enable_grad:
             raise ValueError(
-                "Input gradients require a native .pt deployment checkpoint. "
+                "Input gradients require an exported PyTorch actor (.pt2). "
                 "Call NeuralMotionGenerator.from_checkpoint()."
             )
         return cls(
@@ -134,19 +135,30 @@ class NeuralMotionGenerator(nn.Module):
 
     @classmethod
     def from_checkpoint(
-        cls, path: str | Path, *, device: str | torch.device = "cpu"
+        cls,
+        path: str | Path,
+        *,
+        device: str | torch.device = "cpu",
+        sha256: str | None = None,
     ) -> NeuralMotionGenerator:
-        """Load a native NMG actor checkpoint for differentiable evaluation.
+        """Load a graph-bearing NMG checkpoint for differentiable evaluation.
 
         Args:
-            path: Path to a local NMG actor deployment checkpoint.
+            path: Path to a local PT2 archive. Published .pt aliases use
+                the same archive format.
             device: Device on which to evaluate the policy.
+            sha256: Trusted digest for an unpublished policy. The published
+                v1 artifacts are recognized by their built-in SHA256.
 
         Returns:
             A policy with frozen weights and input gradients controlled by
             the caller's PyTorch autograd context.
+
+        Raises:
+            ValueError: If the digest, archive format, or observation contract
+                is incompatible.
         """
-        return cls(path, enable_grad=True, device=device)
+        return cls(path, enable_grad=True, device=device, sha256=sha256)
 
     def _load_ort(
         self,
@@ -216,12 +228,12 @@ class NeuralMotionGenerator(nn.Module):
             )
         logger.log_info("NMG ONNX execution providers: " + ", ".join(session_providers))
 
-    def _load_torch(self, path: Path, device: torch.device) -> None:
-        model, layout, metadata = _load_native_actor(path)
-        self._set_signature(
-            [(None, layout.dim)], [(None, layout.num_controlled_joints)], metadata
+    def _load_torch(self, path: Path, device: torch.device, sha256: str | None) -> None:
+        model, inputs, outputs, metadata = _load_exported_actor(
+            path, device=device, sha256=sha256
         )
-        self._torch_model = model.requires_grad_(False).to(device)
+        self._set_signature([inputs], [outputs], metadata)
+        self._torch_model = model
 
     def _set_signature(
         self,
