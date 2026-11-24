@@ -1556,6 +1556,25 @@ def test_configured_handover_decodes_source_retreat_clearance() -> None:
     assert options.retreat_steps == 28
 
 
+def test_configured_handover_accepts_calibrated_receiving_grasp_for_transfer_only():
+    declaration = {
+        "kind": "hand_over",
+        "fixed_receive_object_to_eef": {
+            "position": [0.02, 0.0, 0.05],
+            "quaternion_xyzw": [0, 0, 0, 1],
+        },
+    }
+    options = _decode_skill_options(
+        {**declaration, "release_at_target": False}, path="options"
+    )
+    expected = torch.eye(4)
+    expected[:3, 3] = torch.tensor([0.02, 0.0, 0.05])
+    torch.testing.assert_close(options.fixed_receive_object_to_eef, expected)
+
+    with pytest.raises(ValueError, match="transfer-only"):
+        _decode_skill_options(declaration, path="options")
+
+
 @pytest.mark.parametrize(
     "kind,key",
     [

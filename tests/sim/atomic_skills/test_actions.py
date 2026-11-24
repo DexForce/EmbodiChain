@@ -7635,6 +7635,74 @@ def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
     )
 
 
+def test_handover_plans_a_fixed_receiving_grasp_without_sampling() -> None:
+    action = _bind_action(_dual_motion_generator(), HandOver())
+    semantics, _ = _handover_semantics()
+    held = _held(semantics, env_mask=torch.ones(NUM_ENVS, dtype=torch.bool))
+    source_grasp = torch.tensor(
+        [
+            [0.0, 1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    task = TaskState(
+        batch_size=NUM_ENVS,
+        device="cpu",
+        held_objects={"left_arm": replace(held, object_to_eef=source_grasp)},
+    )
+    fixed_grasp = torch.tensor(
+        [
+            [1.0, 0.0, 0.0, 0.12],
+            [0.0, 0.0, -1.0, 0.04],
+            [0.0, 1.0, 0.0, 0.05],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    target = torch.eye(4)
+    target[2, 3] = 0.35
+    action._resolve_grasp = Mock(
+        side_effect=AssertionError("unexpected grasp sampling")
+    )
+
+    plan = _plan_action(
+        action,
+        SkillInvocation(
+            skill_id="hand_over",
+            goal=HandOverGoal(semantics, target_pose=target),
+            binding=_dual_binding(action, "source", "destination"),
+            motion_policy=MotionPolicy(sample_count=60, strategy="ik_interp"),
+            skill_options=HandOverOptions(
+                release_at_target=False, fixed_receive_object_to_eef=fixed_grasp
+            ),
+        ),
+        _handover_context(torch.eye(4).repeat(NUM_ENVS, 1, 1), task),
+    )
+
+    assert plan.plan_success.all()
+    action._resolve_grasp.assert_not_called()
+    assert plan.expected_effects.held_object_updates["left_arm"] is None
+    received = plan.expected_effects.held_object_updates["right_arm"]
+    assert isinstance(received, HeldObjectState)
+    # A quarter turn about the world Z axis maps the local X offset to +Y and
+    # the local Y offset to -X. The exchange raises the object to 0.35 m.
+    expected_tcp = torch.tensor(
+        [
+            [0.0, 0.0, 1.0, -0.04],
+            [1.0, 0.0, 0.0, 0.12],
+            [0.0, 1.0, 0.0, 0.40],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    torch.testing.assert_close(
+        received.grasp_xpos, expected_tcp.expand(NUM_ENVS, -1, -1)
+    )
+    torch.testing.assert_close(
+        received.object_to_eef, fixed_grasp.expand(NUM_ENVS, -1, -1)
+    )
+
+
 @pytest.mark.parametrize("sampling_enabled", [False, True])
 def test_handover_center_grasp_rejects_lower_cost_outer_candidates(
     sampling_enabled: bool,

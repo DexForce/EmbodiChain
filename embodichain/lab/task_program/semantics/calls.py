@@ -354,6 +354,10 @@ class SemanticCallSpec:
             data_field.name: _call_value_to_metadata(getattr(self, data_field.name))
             for data_field in fields(self)
             if data_field.name != "resources"
+            and not (
+                data_field.metadata.get("omit_none_from_provenance")
+                and getattr(self, data_field.name) is None
+            )
         }
         return {
             "semantic_id": self.semantic_id,
@@ -370,6 +374,7 @@ class Pick(SemanticCallSpec):
 
     Args:
         object: Authoritative semantic object reference.
+        at: Optional calibrated TCP grasp pose in world or scene-relative coordinates.
         grasp: Optional explicit grasp affordance. Omission requests deterministic
             registry selection.
         resources: Optional skill-local resource overrides.
@@ -379,6 +384,9 @@ class Pick(SemanticCallSpec):
 
     object: SceneObjectRef
     grasp: SceneAffordanceRef | None = None
+    at: SemanticPose | SemanticRelativePose | None = field(
+        default=None, metadata={"omit_none_from_provenance": True}
+    )
 
     def __post_init__(self) -> None:
         SemanticCallSpec.__post_init__(self)
@@ -386,6 +394,10 @@ class Pick(SemanticCallSpec):
             raise TypeError("Pick.object must be a SceneObjectRef.")
         if self.grasp is not None and type(self.grasp) is not SceneAffordanceRef:
             raise TypeError("Pick.grasp must be a SceneAffordanceRef or None.")
+        if self.at is not None:
+            if type(self.at) not in (SemanticPose, SemanticRelativePose):
+                raise TypeError("Pick.at requires a typed pose target.")
+            object.__setattr__(self, "at", self.at.snapshot())
 
 
 @dataclass(frozen=True, slots=True)

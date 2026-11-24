@@ -1,0 +1,11 @@
+task_key: robosuite_two_arm_transport
+title: Robosuite Two-Arm Transport
+summary: Remove the lid, clear the destination bin, then pass the hammer across and put it inside.
+tags:
+- manipulation
+- bimanual
+- task_program
+default_deployment: dual_franka
+deployments:
+  dual_franka:
+    config: task.dual_franka.yaml

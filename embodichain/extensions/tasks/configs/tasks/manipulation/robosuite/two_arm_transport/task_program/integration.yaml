@@ -1,0 +1,103 @@
+integration_id: robosuite_two_arm_transport_dual_franka
+program_id: robosuite_two_arm_transport
+requires:
+  scene_contract: robosuite_transport_scene
+  embodiment_contract: dual_arm_parallel_gripper
+scene_binding:
+  contract_id: robosuite_transport_scene
+  registry_id: robosuite_transport_native
+  rigid_objects:
+  - entity_id: lid
+    dynamics: dynamic
+    semantic_type: bin_lid
+    affordances:
+    - {entity_id: lid_grasp, kind: antipodal_grasp}
+  - entity_id: trash
+    dynamics: dynamic
+    semantic_type: cube
+    affordances:
+    - {entity_id: trash_grasp, kind: antipodal_grasp}
+  - entity_id: payload
+    dynamics: dynamic
+    semantic_type: hammer
+    affordances:
+    - {entity_id: payload_grasp, kind: antipodal_grasp}
+  - {entity_id: target_bin_floor, dynamics: static, semantic_type: bin_floor}
+  - {entity_id: trash_bin_floor, dynamics: static, semantic_type: bin_floor}
+profile:
+  defaults:
+    pick_up: {primary: left}
+    place: {primary: left}
+    hand_over: {source: left, destination: right}
+  skill_options:
+    simulation.park: {kind: move_joints}
+    pick:
+      kind: pick_up
+      pre_grasp_distance: 0.09
+      lift_height: 0.18
+      hand_interp_steps: 14
+      grasp_settle_steps: 10
+      approach_alignment_max_angle: 0.40
+    place:
+      kind: place
+      preserve_current_object_orientation: true
+      lift_height: 0.20
+      hand_interp_steps: 14
+      release_settle_steps: 10
+    hand_over:
+      kind: hand_over
+      release_at_target: false
+      fixed_receive_object_to_eef:
+        position: [0.0290483, -0.0173566, 0.0449536]
+        quaternion_xyzw: [0.57876152, 0.43264008, 0.37820031, 0.57863822]
+      pre_grasp_distance: 0.08
+      lift_height: 0.02
+      hand_interp_steps: 26
+      arm_selection: bound
+      grasp_retract_distance: 0.0
+      retreat_distance: 0.057
+      hold_steps: 15
+  effect_monitors:
+    pick: &verified
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params: {consecutive_samples: 2, attached_translation_threshold: 0.041, attached_rotation_threshold: 0.72, detached_rotation_threshold: 1.0}
+    place: *verified
+    hand_over:
+      monitor_id: builtin.composite_effect
+      revision: "1"
+      params:
+        consecutive_samples: 2
+        attached_translation_threshold: 0.053
+        detached_translation_threshold: 0.063
+        attached_rotation_threshold: 0.72
+        detached_rotation_threshold: 1.0
+  grounding_providers:
+    hand_over: simulation.configured_handover_pose
+runtime_services:
+  registered_semantic_lowerers:
+  - {kind: park}
+  handover_pose_providers:
+  - kind: configured_pose
+    final_position: [0.0, 0.0, 1.03]
+    final_quaternion_xyzw: [0.70710678, 0.0, 0.0, 0.70710678]
+  settle_presets:
+    rigid_object: {}
+    hammer_in_target_bin:
+      kind: supported_region
+      entity: payload
+      reference: target_bin_floor
+      duration: 0.30
+      timeout: 3.0
+      support_contract_revision: 1
+      com_tolerance: 0.020
+      support_sensor: {uid: hammer_target_support}
+    trash_in_trash_bin:
+      kind: supported_region
+      entity: trash
+      reference: trash_bin_floor
+      duration: 0.30
+      timeout: 3.0
+      support_contract_revision: 1
+      com_tolerance: 0.024
+      support_sensor: {uid: trash_bin_support}

@@ -596,7 +596,7 @@ def _decode_call(
     if kind == "pick":
         _validate_fields(
             mapping,
-            allowed=frozenset({"kind", "object", "grasp", "resources"}),
+            allowed=frozenset({"kind", "object", "grasp", "at", "resources"}),
             required=frozenset({"kind", "object"}),
             path=path,
         )
@@ -609,6 +609,13 @@ def _decode_call(
             kind=kind,
             object=_expect_identifier(mapping["object"], path=(*path, "object")),
             grasp=grasp,
+            at=(
+                None
+                if mapping.get("at") is None
+                else _decode_target_ref(
+                    mapping["at"], path=(*path, "at"), target_ids=target_ids
+                )
+            ),
             resources=resources,
         )  # type: ignore[return-value]
     if kind == "move_held_object":
