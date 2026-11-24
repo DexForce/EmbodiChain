@@ -21,7 +21,7 @@ Its two backends share a batched FP32 observation-to-action interface. ONNX
 Runtime runs inference, and the optional PyTorch backend retains first-order
 observation gradients with frozen weights. The export supplies its own
 normalization and observation metadata. See the :doc:`NMG model guide
-</resources/models/nmg>` for supported configurations, weight downloads and examples.
+</resources/models/policy/nmg>` for supported configurations, weight downloads and examples.
 
 .. currentmodule:: embodichain.extensions.models.policy.nmg
 
@@ -114,7 +114,7 @@ objectives may continue using measured contact features.
 Optional native NeRD deployment
 -------------------------------
 
-The :doc:`NeRD guide </features/neural_dynamics/nerd>` distinguishes measured
+The :doc:`NeRD guide </resources/models/neural_dynamics/nerd>` distinguishes measured
 window prediction, online rollout, learning-env training and native inference.
 Its native quickstart links model preparation with step/reset/close and records
 the verified physical domain and execution environment.
@@ -348,7 +348,7 @@ conversion. The optional native Provider belongs to the solver extension and
 uses the SDK particle inference adapter. Operator/runtime qualification is
 separate from discovery; main's Torch/SDK pins are unchanged.
 
-The :doc:`WorldParticle guide </features/neural_dynamics/worldparticle>` links
+The :doc:`WorldParticle guide </resources/models/neural_dynamics/worldparticle>` links
 the complete native quickstart, standalone call, NPZ/frame contract, operator
 installation/preflight and measured execution record. Frozen inference does not
 establish a learning-env or functional-gradient contract.

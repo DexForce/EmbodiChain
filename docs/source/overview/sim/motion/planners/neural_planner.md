@@ -10,7 +10,7 @@ and default parameters may change without a deprecation cycle.
 `NeuralPlanner` uses a standalone NMG ONNX policy to plan an ordered sequence of joint
 and Cartesian constraints through `MotionGenerator`. The published Franka FR3
 and PiPER V100 policies include observation normalization. See the
-[NMG model guide](../../../../resources/models/nmg.md) for runnable demos, supported
+[NMG model guide](../../../../resources/models/policy/nmg.md) for runnable demos, supported
 configurations, weight downloads and single-step inference and differentiation.
 
 ## Configuration

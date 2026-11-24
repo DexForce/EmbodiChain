@@ -119,9 +119,9 @@ differentiating continuous features. The released files have been checked in
 FP32 on CPU and CUDA at batch sizes 1 and 3 using ORT forward values and
 central differences along joint-observation directions.
 
-For a complete trajectory, [NeuralPlanner](../../overview/sim/motion/planners/neural_planner.md)
+For a complete trajectory, [NeuralPlanner](../../../overview/sim/motion/planners/neural_planner.md)
 assembles the observations, checks the fingerprint and runs the policy in
 inference mode through `MotionGenerator`. The single-step gradient contract
-ends at the raw action. See the [model API](../../api_reference/model_catalogs.rst)
-for loader arguments and the [installation guide](../../quick_start/install.md#optional-nmg-input-gradients-nmg)
+ends at the raw action. See the [model API](../../../api_reference/model_catalogs.rst)
+for loader arguments and the [installation guide](../../../quick_start/install.md#optional-nmg-input-gradients-nmg)
 for the backend dependencies.

@@ -7,6 +7,6 @@ neural dynamics model to predict how a state evolves under a control input.
 ```{toctree}
 :maxdepth: 1
 
-policy_models
-/features/neural_dynamics
+policy/index
+neural_dynamics/index
 ```

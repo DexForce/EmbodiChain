@@ -352,8 +352,7 @@ topics:
   - embodichain/extensions/models/dynamics/worldparticle/
   - embodichain/extensions/solvers/physics/worldparticle/
   - examples/learning/worldparticle/
-  watch_paths: [embodichain/extensions/models/, examples/learning/nerd/, docs/source/features/neural_dynamics.md,
-    docs/source/features/neural_dynamics/, docs/source/guides/neural_dynamics.md, docs/source/api_reference/model_catalogs.rst,
+  watch_paths: [embodichain/extensions/models/, examples/learning/nerd/, docs/source/resources/models/neural_dynamics/, docs/source/guides/neural_dynamics.md, docs/source/api_reference/model_catalogs.rst,
     docs/source/api_reference/model_rigidformer.rst]
   related_topics: [supervised-learning, robot-world-model, learning-layers, data-pipeline, data-assets]
   status: active
@@ -757,7 +756,7 @@ topics:
   - embodichain/extensions/models/policies/motion_tracking.py
   - embodichain/extensions/tasks/locomotion/tracking/motion_model.py
   watch_paths: [tests/models/dynamics/rwm/, embodichain/learning/dynamics/, tests/learning/test_online_schedule.py,
-    tests/gym/envs/tasks/test_motion_model.py, docs/source/features/neural_dynamics/rwm.md,
+    tests/gym/envs/tasks/test_motion_model.py, docs/source/resources/models/neural_dynamics/rwm.md,
     docs/source/api_reference/rwm.rst]
   related_topics: [supervised-learning, learning-layers, neural-dynamics]
   status: active
