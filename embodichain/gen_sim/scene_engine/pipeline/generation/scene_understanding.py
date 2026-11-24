@@ -25,7 +25,7 @@ import re
 import shutil
 from typing import Any, NamedTuple
 
-from PIL import Image
+from PIL import Image, ImageChops
 
 from embodichain.gen_sim.services.compat import SegmentationClient
 from embodichain.gen_sim.scene_engine.core.scene import Scene
@@ -40,6 +40,7 @@ from embodichain.gen_sim.services.compat import VisionClient
 from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils import (
     MaskCandidate,
     build_mask_candidates,
+    decode_rle_mask,
     render_asset_mask_id_overlay,
     render_image_without_masks,
     render_numbered_mask_candidates,
@@ -50,52 +51,32 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils im
 
 _SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 _CATEGORY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
-# Segmentation models are less reliable for compound object names than their
-# visual nouns; aliases improve recall without changing semantic IDs.
-_SEGMENTATION_PROMPT_ALIASES: dict[str, tuple[str, ...]] = {
-    "bell": ("hotel bell",),
-    "service_bell": ("bell", "desk bell", "call bell", "hotel bell"),
-    "call_bell": ("bell", "desk bell", "service bell", "hotel bell"),
-    "desk_bell": ("bell", "service bell", "call bell", "hotel bell"),
-    "water_dispenser": ("dispenser",),
-    "placemat": ("blue placemat", "table mat"),
-    "folder": ("placemat", "blue placemat", "table mat"),
-    "mat": ("placemat", "blue placemat", "table mat"),
-    "button_device": ("button", "push button", "emergency stop button"),
-    "push_button": ("button", "push button", "emergency stop button"),
-    "hot_plate": (
-        "hot plate",
-        "electric hot plate",
-        "cooktop",
-        "stove",
-        "stainless steel stove",
-    ),
-    "electric_hot_plate": ("hot plate", "electric hot plate", "cooktop"),
-    "button_box": ("button", "push button", "button box"),
-    "sheet": ("sheet of paper", "paper sheet", "blue placemat"),
-    "paper_cup": ("cup", "paper cup", "disposable cup"),
-    "drawer": ("drawer", "cabinet drawer", "storage drawer"),
-    "laptop": ("square device", "gray tablet", "electronic panel"),
-}
 _VISIBLE_RGBA_IMAGE_SIZE = (512, 512)
 _SYSTEM_PROMPT = """You inspect one tabletop-scene image.
 Identify the main table and every visible, physically distinct object that should
 be segmented and later generated as an independent 3D asset.
 
 Rules:
-1. Ignore people, floor, carpet, walls, ceiling, doors, tiny incidental items,
-   and objects cut off by the image border when listing independent assets.
-   Ignore incidental robot arms, grippers, fingers, and mounting hardware,
-   especially cropped fragments at image edges. Do not reinterpret those
-   fragments as independent scene objects. Robot shadows and reflections on
-   the tabletop are appearance effects, not additional assets or table legs.
+1. Ignore people, floor, carpet, walls, ceiling, doors, and indistinguishable
+   specks when listing independent assets. Partial robot grippers, fingers,
+   wrists, or arms may enter from either side or the lower corners. Treat
+   robot hardware as an occluder and never list it as an independent asset.
+   Keep distinguishable tabletop objects even if the image border cuts them
+   off or a gripper touches or occludes them. Describe only their visible parts.
+   Robot shadows and reflections on the tabletop are appearance effects, not
+   additional assets or table legs.
    Evaluate the main table or scene support plane separately: image borders
    cutting it off do not make that support surface absent.
 2. Merge visually or functionally unified units, such as a potted plant, a vase
    with flowers, or one built-in cabinet system.
 3. Do not merge objects merely resting on another object. A mug on a table and
    the table are separate entries.
-4. List every visible physical instance separately. If two objects look alike,
+4. List every independently distinguishable visible physical instance separately,
+   including small recognizable objects. Do not guess an object category from
+   a round silhouette alone; use a conservative visible-geometry category when
+   its function is uncertain. Do not list invisible container contents or count
+   severely occluded fragments as separate instances when their identity and
+   individual extent cannot be reliably distinguished. If two objects look alike,
    keep the same category and name. Do not encode location or spatial context
    in any semantic field.
 5. category is a lower-case singular snake_case class, such as mug, book,
@@ -173,6 +154,11 @@ Do not invent missing objects, hidden details, or future scene states.
 A task mention of container contents does not establish their visible count.
 List individual contents only when each instance is visually distinguishable;
 do not infer extra instances from plural task wording.
+Task entities are identity hints, not a required inventory or mask/count quota.
+An entity inside another object or container, absent from view, or too severely
+occluded to distinguish as an individual may remain unmatched with no asset or
+mask. Do not add entries just to cover IDs. Conversely, do not omit a clearly
+distinguishable visible instance merely because it is small or not task-related.
 
 Keep generating complete independent assets. A task reference to a door,
 button, lid edge, or rack branch may identify its uniquely visible owning
@@ -182,11 +168,9 @@ it unmatched. At most one task entity ID may be bound to each asset, and each
 entity ID may be used at most once. Table/plane regions are reserved support
 references and cannot be bound to independent assets.
 
-The border exclusion in rule 1 does not exclude a task-relevant asset whose
-visible portion uniquely identifies it. Keep unrelated clipped objects excluded.
-This exception does not turn incidental robot hardware or its shadows and
-reflections into task assets.
-Do not complete missing geometry in the image description.
+Apply the same visibility rule to task entities at the image border or partly
+occluded by robot hardware. Do not complete missing geometry in the image
+description.
 
 For this task-aware mode only, every assets entry must contain exactly:
 category, name, description, task_entity_id, and instance_hint.
@@ -274,67 +258,75 @@ Examples:
 - Every candidate covers a small mat on the support plane:
   {"selected_mask_index": null, "reason": "The candidates cover only a small mat and omit the main support plane."}
 """
-_VISUAL_SEGMENTATION_PROMPT_SYSTEM_PROMPT = """You write prompts for an open-vocabulary text-prompted image segmenter.
-The segmenter found no mask for the listed objects using their category and names.
-Look at the image and return JSON only: {"prompts": ["..."]}.
-Give up to 6 distinct short noun phrases (2-5 words) that describe how these objects
-look from this exact viewpoint: color, material, shape or a visible part, such as
-"tool with black handle" or "red cube". Do not repeat prompts that found nothing.
-Describe only the listed physical targets. Ignore incidental robot hardware at
-image edges and robot shadows or reflections on the tabletop; do not use them
-as substitute targets or propose prompts for them.
+_VISUAL_SEGMENTATION_PROMPT_SYSTEM_PROMPT = """You prepare retrieval queries for an
+open-vocabulary image segmenter. You see the original RGB and only unresolved
+observed targets, with previous queries and per-object mask-critic feedback.
+Return JSON only: {"prompts": ["..."]}, with up to 3 distinct untried short
+English phrases. Prefer an image-grounded appearance phrase, then a common
+category or alias, then a concise visible locator when needed. Cover every
+requested target, including less prominent instances. Read the critic's reason:
+a sufficient candidate count does not mean those masks depict the target.
+If remaining_candidate_count is 0, make the first query a short phrase based on
+the target's visible color, outline, or parts. Use the original image to check
+the shape and avoid the failed category and its synonyms in that query.
+If the proposed category is doubtful, use the target's visible color, material,
+shape, or part rather than repeating that category. Queries may use simpler
+visual nouns but must preserve the same physical instance. Do not invent or
+relabel assets, IDs, counts, or unseen geometry. Retrieve the whole visible
+unit including its own lid/body/handles; never query only a lid when its pot
+body is also visible. Never request already accepted objects. Use partial robot
+hardware only to orient yourself in the image. Keep hardware, its shadows, and
+reflections out of the retrieval queries.
 """
 
-_ASSET_ASSIGNMENT_SYSTEM_PROMPT = """You assign mask candidates to a group of scene assets.
-The image is one selection sheet: a scene overview with numbered colored mask
-outlines, plus a separate card for every candidate. Each card shows original
-RGB pixels inside that exact mask, with excluded pixels gray. Its number and
-color match the overview outline. Numbers and gray backgrounds are annotations,
-not scene content. Use the overview for identity and location, and each card
-to check which visible parts its mask actually includes; overlapping outlines
-or bounding extents do not establish mask membership.
+_ASSET_ASSIGNMENT_SYSTEM_PROMPT = """You review masks for observed physical assets.
+The selection sheet shows the original scene with colored candidate outlines
+and leader lines to the RIGHT-side numbered legend, plus separate candidate
+cards. Cards show original RGB inside the exact mask and gray excluded pixels.
+Annotations are not scene content. Use the scene for identity/location and
+cards for actual pixel membership. A right-side label or bounding box alone
+does not establish membership. With no candidates, still inspect the original
+scene and assess the requested object's visibility.
 
-Use the provided category, name, and description of every asset to match each
-asset to exactly one candidate. When instance_hint is supplied, use its current-image
-position or relations to distinguish similar instances. These hints locate
-objects only; they do not prescribe a future task state. IDs are opaque labels,
-not visual descriptions.
+Use each asset's category, name, description, and current-image instance_hint.
+IDs are opaque. Hints refer to the observed state, never a requested future state.
+Category can be uncertain: explain a visually questionable classification so
+retrieval can use shape/appearance instead. Preserve the target's identity.
+Select the entire visible unit including attached or seated lid, base, handles,
+door, and body. Independent contents/neighbors are separate. Reject masks that
+merge independent objects or omit substantial visible target parts. Hidden
+pixels are not required; clipping and minor boundary flaws are acceptable.
+Partial robot grippers, fingers, wrists, or arms may enter from either side or
+the lower corners and overlap real objects. Judge the target's visible pixels
+separately and reject candidates that merge it with robot hardware. Exclude
+robot shadows and reflections from the object mask.
 
-Select the complete visible target unit, including its own attached or seated
-parts such as a lid, base, door, or drawer when they are visible. An articulated
-object includes its visible body and moving parts. Independent contents or
-neighboring objects are separate assets. Reject a candidate that identifies
-the right instance but omits a substantial visible part, or merges independent
-objects. Prefer a candidate covering the whole visible unit over a part-only
-candidate. Occlusion, clipped image boundaries, and small boundary defects are
-acceptable; never require hidden pixels or invented geometry.
+Return exactly one decision for every requested unresolved asset:
+- accept: a correct mask exists; give its integer mask_index and a visual reason.
+  Each candidate can be accepted for at most one asset. Extra masks may be ignored.
+- retry: no correct mask exists for a distinguishable visible target, or its
+  category/mask identity is uncertain; mask_index:null. Explain what is missing
+  or wrong to guide a new targeted query. Even when candidates are fewer than
+  assets, preserve any correct individual matches.
+- skip: the original scene clearly establishes that this claimed instance is
+  not visible (including fully enclosed contents), is only a robot fragment,
+  or is so severely occluded that its individual identity/extent cannot be
+  reliably distinguished; mask_index:null.
+  Describe that specific visual evidence. No candidates, an incorrect category,
+  a difficult mask, an image-edge crop alone, or exhausted retries NEVER justify
+  skip. A clearly distinguishable visible object must be accept or retry.
 
-Ignore extra candidates for incidental robot arms, grippers, fingers, or mounts
-at image edges. Cast shadows and reflections are not physical asset instances;
-never assign those candidates to a listed object merely because their outline
-looks similar. Prefer the mask of the actual object's visible body.
-
-Extra candidate masks are normal and may be ignored. Never force a candidate
-onto an asset. If any listed asset has no correct candidate, return
-{"assignments": null}.
-Candidate number labels can cover the center of small objects. They are an
-annotation, not part of the object: use its visible contour and surrounding
-color to match it. Do not reject an otherwise matching object merely because
-its center is covered by its candidate number.
-
-Examples:
-- Two listed paper cups match candidate 1 and candidate 3:
-  {"assignments": [{"asset_id": "paper_cup_001", "mask_index": 1}, {"asset_id": "paper_cup_002", "mask_index": 3}]}
-- A listed asset is absent from every candidate:
-  {"assignments": null}
-- For one laptop, candidate 1 includes the visible upper lid and base while
-  candidates 2 and 3 contain only one of those parts: assign candidate 1.
-
-Return JSON only, with exactly one key: assignments. It must be null or an
-array of asset_id and mask_index objects. Do not include Markdown or any other
-text."""
+TaskSpec IDs are identification context, not an inventory/count quota. Do not
+invent objects/masks to cover IDs or require hidden container contents. Already
+accepted IDs are locked and not requested: do not reassign them or their masks.
+Return JSON only with exactly one key, decisions. Each item has exactly
+asset_id, status, mask_index, reason. For example:
+{"decisions":[{"asset_id":"cup_001","status":"accept","mask_index":2,"reason":"The mask covers the blue cup and handle."},{"asset_id":"can_001","status":"retry","mask_index":null,"reason":"The only other candidate covers the pot; the silver can is at the right edge."}]}
+"""
 _INITIAL_SCENE_GRAPH_SYSTEM_PROMPT = """You inspect an outlined tabletop-scene image.
-Each visible asset has an outline and an ID label. Build a support graph for the
+Each visible object has an outline and a leader line to its ID and name in the
+right-side legend. Short display numbers are not business IDs: use the full
+IDs from the legend and supplied JSON. The table outline is context. Build a support graph for the
 listed assets and determine each asset's image-observed self-pose description.
 
 Every asset must have exactly one direct support parent with relation "on".
@@ -422,14 +414,33 @@ def understand_scene(
         )
 
     # Receive the validated whole-scene mask, for VLM output the scene graph.
-    asset_mask_id_overlay_path = _segment_scene(
-        image_path=resolved_image_path,
-        stage_output_root=stage_output_root,
-        scene=scene,
-        vlm_client=vlm_client,
-        image_segmentation_client=image_segmentation_client,
-        instance_hints=instance_hints,
-    )
+    try:
+        asset_mask_id_overlay_path = _segment_scene(
+            image_path=resolved_image_path,
+            stage_output_root=stage_output_root,
+            scene=scene,
+            vlm_client=vlm_client,
+            image_segmentation_client=image_segmentation_client,
+            instance_hints=instance_hints,
+        )
+    finally:
+        if task_input is not None and task_input.entities:
+            masked_ids = {asset.id for asset in scene.assets if asset.mask_path}
+            (stage_output_root / "task_entity_mask_matches.json").write_text(
+                json.dumps(
+                    {
+                        "stage": "asset_segmentation",
+                        "entity_to_scene": {
+                            entity.id: entity.id if entity.id in masked_ids else None
+                            for entity in task_input.entities
+                        },
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
 
     # Build the support graph from masks already carrying their final IDs.
     scene_graph = _initialize_scene_graph_from_segmented_scene(
@@ -876,7 +887,7 @@ def _segment_scene(
     image_segmentation_client: SegmentationClient,
     instance_hints: dict[str, str] | None = None,
 ) -> Path:
-    """Add validated masks and return an asset-only ID overlay image."""
+    """Add validated masks and return a table-and-assets ID overview."""
     debug_output_root = (
         Path(stage_output_root) / "debug"
     )  # Keeps the mask debug images.
@@ -930,13 +941,14 @@ def _segment_scene(
         scene=scene,
     )
     asset_masks: list[tuple[str, str]] = []
-    for asset in scene.assets:
-        if asset.mask_path is None:
-            raise ValueError(f"Asset {asset.id!r} has no validated mask path.")
-        asset_masks.append((asset.id, asset.mask_path))
+    for obj in scene.objects:
+        if obj.mask_path is None:
+            raise ValueError(f"Object {obj.id!r} has no validated mask path.")
+        asset_masks.append((obj.id, obj.mask_path))
     return render_asset_mask_id_overlay(
         image_path=image_path,
         asset_masks=asset_masks,
+        asset_names={obj.id: obj.name for obj in scene.objects},
         output_path=Path(masks_output_root) / "asset_masks_with_ids.png",
     )
 
@@ -1149,6 +1161,42 @@ def _image_size(image_path: str | Path) -> tuple[int, int]:
         return image.size
 
 
+class _AssetMaskDecision(NamedTuple):
+    """One scoped critic decision; accepted pixels are locked by the caller."""
+
+    status: str
+    mask_index: int | None
+    reason: str
+
+
+def _unlocked_mask_candidates(
+    mask_rles: list[dict[str, Any]],
+    locked: list[MaskCandidate],
+) -> list[MaskCandidate]:
+    """Merge only unresolved candidates and exclude already accepted instances."""
+    locked_masks = [decode_rle_mask(candidate.mask_rle) for candidate in locked]
+    candidates = union_overlapping_mask_candidates(
+        build_mask_candidates(mask_rles), min_iou=0.8
+    )
+    available = []
+    for candidate in candidates:
+        mask = decode_rle_mask(candidate.mask_rle)
+        if mask.getbbox() is None:
+            continue
+        duplicate = False
+        for accepted_mask in locked_masks:
+            if mask.size != accepted_mask.size:
+                raise ValueError("Segmentation candidate sizes must match the image.")
+            intersection = ImageChops.darker(mask, accepted_mask).histogram()[255]
+            union = ImageChops.lighter(mask, accepted_mask).histogram()[255]
+            if union and intersection / union >= 0.8:
+                duplicate = True
+                break
+        if not duplicate:
+            available.append(MaskCandidate(len(available) + 1, candidate.mask_rle))
+    return available
+
+
 def _segment_assets(
     image_path: str | Path,
     debug_output_root: str | Path,
@@ -1158,86 +1206,165 @@ def _segment_assets(
     vlm_client: VisionClient,
     image_segmentation_client: SegmentationClient,
     instance_hints: dict[str, str] | None = None,
+    max_repair_rounds: int = 2,
 ) -> None:
-
-    # Group the assets by their categories.
+    """Lock accepted masks and repair only unresolved observed instances."""
+    if max_repair_rounds < 0:
+        raise ValueError("max_repair_rounds must be non-negative.")
     assets_by_category: dict[str, list[SceneObject]] = {}
     for asset in scene.assets:
         assets_by_category.setdefault(asset.category, []).append(asset)
 
     image_size = _image_size(image_path)
-    for category, assets in assets_by_category.items():
-        mask_rles: list[dict[str, Any]] = []
-        # Use categories and names as segmentation prompt.
-        # Use category to segment first, then use each assets' name to segment.
-        prompts = [
-            category,
-            *dict.fromkeys(asset.name for asset in assets),
-            *_SEGMENTATION_PROMPT_ALIASES.get(category, ()),
-        ]
-        for prompt in prompts:
-            mask_rles.extend(
-                image_segmentation_client.segment_single_object(
+    locked: dict[str, MaskCandidate] = {}
+    skipped: dict[str, str] = {}
+    attempts: list[dict[str, Any]] = []
+    audit_path = Path(debug_output_root) / "asset_segmentation.json"
+    audit_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        for category, assets in assets_by_category.items():
+            pending = list(assets)
+            mask_rles: list[dict[str, Any]] = []
+            tried_prompts: list[str] = []
+            feedback: dict[str, str] = {}
+            for round_index in range(max_repair_rounds + 1):
+                candidates = _unlocked_mask_candidates(mask_rles, list(locked.values()))
+                if round_index == 0:
+                    # Names are concise image-grounded appearances. A broad noun
+                    # remains a fallback, not a category-specific alias table.
+                    prompts = list(
+                        dict.fromkeys(
+                            [
+                                *(asset.name for asset in pending),
+                                category.replace("_", " "),
+                            ]
+                        )
+                    )
+                else:
+                    prompts = _visual_segmentation_prompts(
+                        image_path,
+                        pending,
+                        tried_prompts,
+                        vlm_client=vlm_client,
+                        remaining_candidate_count=len(candidates),
+                        feedback=feedback,
+                        instance_hints=instance_hints,
+                        max_prompts=3,
+                    )
+                attempt: dict[str, Any] = {
+                    "category": category,
+                    "round": round_index,
+                    "target_ids": [asset.id for asset in pending],
+                    "queries": [],
+                }
+                attempts.append(attempt)
+                for prompt in prompts:
+                    tried_prompts.append(prompt)
+                    attempt["queries"].append(prompt)
+                    mask_rles.extend(
+                        image_segmentation_client.segment_single_object(
+                            image_path=image_path,
+                            prompt=prompt,
+                        )
+                    )
+                    candidates = _unlocked_mask_candidates(
+                        mask_rles, list(locked.values())
+                    )
+                    # Initial count sufficiency only stops retrieval, NEVER
+                    # bypasses the critic. Repairs try all bounded fresh phrases.
+                    if round_index == 0 and len(candidates) >= len(pending):
+                        break
+
+                candidates_image_path = render_numbered_mask_candidates(
                     image_path=image_path,
-                    prompt=prompt,
+                    candidates=candidates,
+                    output_path=Path(debug_output_root)
+                    / f"asset_candidates_{category}.png",
+                    mask_style="outline",
+                    include_candidate_details=True,
                 )
-            )
-        # Union duplicated mask candidates.
-        candidates = union_overlapping_mask_candidates(
-            build_mask_candidates(mask_rles),
-            min_iou=0.8,
-        )
-        if len(candidates) < len(assets):
-            # Category and name prompts can miss an unusual viewpoint; ask the
-            # VLM for appearance phrases once. Assignment validation is unchanged.
-            for prompt in _visual_segmentation_prompts(
-                image_path, assets, prompts, vlm_client=vlm_client
-            ):
-                mask_rles.extend(
-                    image_segmentation_client.segment_single_object(
-                        image_path=image_path,
-                        prompt=prompt,
+                # Keep the exact numbered sheet for every critic decision.
+                round_image_path = (
+                    Path(debug_output_root)
+                    / f"asset_candidates_{category}_round_{round_index}.png"
+                )
+                shutil.copyfile(candidates_image_path, round_image_path)
+                decisions = _validate_asset_candidates_with_vlm(
+                    assets=pending,
+                    candidates=candidates,
+                    candidates_image_path=round_image_path,
+                    vlm_client=vlm_client,
+                    instance_hints=instance_hints,
+                    locked_asset_ids=list(locked),
+                )
+                attempt["candidate_count"] = len(candidates)
+                attempt["decisions"] = {
+                    asset_id: decision._asdict()
+                    for asset_id, decision in decisions.items()
+                }
+                unresolved = []
+                feedback = {}
+                for asset in pending:
+                    decision = decisions[asset.id]
+                    if decision.status == "accept":
+                        assert decision.mask_index is not None
+                        candidate = _candidate_by_index(candidates, decision.mask_index)
+                        asset.mask_path = str(
+                            save_binary_mask(
+                                candidate,
+                                image_size=image_size,
+                                output_path=Path(masks_output_root)
+                                / f"{asset.id}_mask.png",
+                            )
+                        )
+                        locked[asset.id] = candidate
+                    elif decision.status == "skip":
+                        skipped[asset.id] = decision.reason
+                        scene.objects = [
+                            obj for obj in scene.objects if obj.id != asset.id
+                        ]
+                    else:
+                        unresolved.append(asset)
+                        feedback[asset.id] = decision.reason
+                pending = unresolved
+                if not pending:
+                    break
+                # Remove locked pixels before adding repair candidates. Never
+                # re-union an accepted mask: doing so can expand its pixels.
+                mask_rles = [
+                    candidate.mask_rle
+                    for candidate in _unlocked_mask_candidates(
+                        mask_rles, list(locked.values())
+                    )
+                ]
+            if pending:
+                raise ValueError(
+                    f"Unresolved visible assets after {max_repair_rounds} repair rounds: "
+                    + "; ".join(
+                        f"{asset.id}: {feedback[asset.id]}" for asset in pending
                     )
                 )
-            candidates = union_overlapping_mask_candidates(
-                build_mask_candidates(mask_rles),
-                min_iou=0.8,
+    finally:
+        audit_path.write_text(
+            json.dumps(
+                {
+                    "attempts": attempts,
+                    "accepted": {
+                        asset.id: asset.mask_path
+                        for asset in scene.assets
+                        if asset.id in locked
+                    },
+                    "skipped": skipped,
+                    "unresolved": [
+                        asset.id for asset in scene.assets if asset.id not in locked
+                    ],
+                },
+                indent=2,
+                ensure_ascii=False,
             )
-        # If the number of candidate is less than the grouped assets,
-        # raise error directly.
-        if len(candidates) < len(assets):
-            raise ValueError(
-                f"Asset category {category!r} has {len(assets)} assets but only "
-                f"{len(candidates)} segmentation candidates."
-            )
-
-        candidates_image_path = render_numbered_mask_candidates(
-            image_path=image_path,
-            candidates=candidates,
-            output_path=Path(debug_output_root) / f"asset_candidates_{category}.png",
-            mask_style="outline",
-            include_candidate_details=True,
+            + "\n",
+            encoding="utf-8",
         )
-        assignments = _validate_asset_candidates_with_vlm(
-            assets=assets,
-            candidates=candidates,
-            candidates_image_path=candidates_image_path,
-            vlm_client=vlm_client,
-            instance_hints=instance_hints,
-        )
-        if assignments is None:
-            raise ValueError(
-                f"VLM could not assign every {category!r} asset to a segmentation candidate."
-            )
-        # Save results.
-        for asset in assets:
-            asset.mask_path = str(
-                save_binary_mask(
-                    _candidate_by_index(candidates, assignments[asset.id]),
-                    image_size=image_size,
-                    output_path=Path(masks_output_root) / f"{asset.id}_mask.png",
-                )
-            )
 
 
 def _visual_segmentation_prompts(
@@ -1246,18 +1373,32 @@ def _visual_segmentation_prompts(
     tried_prompts: list[str],
     *,
     vlm_client: VisionClient,
-    max_prompts: int = 6,
+    remaining_candidate_count: int,
+    max_prompts: int = 3,
+    feedback: dict[str, str] | None = None,
+    instance_hints: dict[str, str] | None = None,
 ) -> list[str]:
-    """Return VLM appearance phrases not yet tried for one asset group."""
-    assets_text = "\n".join(
-        f"- name: {asset.name}; description: {asset.description}" for asset in assets
-    )
+    """Plan bounded fresh queries from original RGB and scoped critic feedback."""
     response_text = vlm_client.complete(
         image_path=image_path,
         system_prompt=_VISUAL_SEGMENTATION_PROMPT_SYSTEM_PROMPT,
-        user_prompt=(
-            f"Objects:\n{assets_text}\n\n"
-            f"Prompts that found nothing: {json.dumps(tried_prompts)}"
+        user_prompt=json.dumps(
+            {
+                "unresolved_assets": [
+                    {
+                        "id": asset.id,
+                        "category": asset.category,
+                        "name": asset.name,
+                        "description": asset.description,
+                        "instance_hint": (instance_hints or {}).get(asset.id),
+                        "critic_feedback": (feedback or {}).get(asset.id),
+                    }
+                    for asset in assets
+                ],
+                "remaining_candidate_count": remaining_candidate_count,
+                "tried_prompts": tried_prompts,
+            },
+            ensure_ascii=False,
         ),
     )
     try:
@@ -1267,13 +1408,16 @@ def _visual_segmentation_prompts(
     values = payload.get("prompts") if isinstance(payload, dict) else None
     if not isinstance(values, list):
         return []
-    tried = {prompt.strip().casefold() for prompt in tried_prompts}
+    seen = {prompt.strip().casefold() for prompt in tried_prompts}
     prompts = []
     for value in values:
-        if not isinstance(value, str) or not value.strip():
-            continue
-        prompt = value.strip()
-        if prompt.casefold() not in tried and prompt not in prompts:
+        if (
+            isinstance(value, str)
+            and value.strip()
+            and value.strip().casefold() not in seen
+        ):
+            prompt = value.strip()
+            seen.add(prompt.casefold())
             prompts.append(prompt)
     return prompts[:max_prompts]
 
@@ -1284,28 +1428,29 @@ def _validate_asset_candidates_with_vlm(
     candidates: list[MaskCandidate],
     candidates_image_path: Path,
     vlm_client: VisionClient,
-    json_max_attempts: int = 3,
+    json_max_attempts: int = 2,
     instance_hints: dict[str, str] | None = None,
-) -> dict[str, int] | None:
-    """Ask the VLM for a complete one-to-one asset-to-candidate assignment."""
+    locked_asset_ids: list[str] | None = None,
+) -> dict[str, _AssetMaskDecision]:
+    """Review every unresolved target, even if there are no mask candidates."""
     if json_max_attempts < 1:
         raise ValueError("json_max_attempts must be at least 1.")
-
-    assets_text = "\n".join(
-        "- "
-        f"id: {asset.id}; category: {asset.category}; name: {asset.name}; "
-        f"description: {asset.description}"
-        + (
-            f"; instance_hint: {instance_hints[asset.id]}"
-            if instance_hints and asset.id in instance_hints
-            else ""
-        )
-        for asset in assets
-    )
-    user_prompt = (
-        "Asset group:\n"
-        f"{assets_text}\n\n"
-        f"Supplied candidate indices: {[candidate.index for candidate in candidates]}."
+    user_prompt = json.dumps(
+        {
+            "unresolved_assets": [
+                {
+                    "id": asset.id,
+                    "category": asset.category,
+                    "name": asset.name,
+                    "description": asset.description,
+                    "instance_hint": (instance_hints or {}).get(asset.id),
+                }
+                for asset in assets
+            ],
+            "candidate_indices": [candidate.index for candidate in candidates],
+            "locked_asset_ids": locked_asset_ids or [],
+        },
+        ensure_ascii=False,
     )
     last_error: ValueError | None = None
     for _ in range(json_max_attempts):
@@ -1318,10 +1463,11 @@ def _validate_asset_candidates_with_vlm(
             return _parse_asset_assignment_response(response_text, assets, candidates)
         except ValueError as exc:
             last_error = exc
-
-    assert last_error is not None
+            user_prompt += (
+                "\nInvalid previous JSON: " + str(exc) + " Return the required schema."
+            )
     raise ValueError(
-        "VLM returned invalid asset-segmentation assignment JSON after "
+        "VLM returned invalid asset-segmentation decisions after "
         f"{json_max_attempts} attempts: {last_error}"
     ) from last_error
 
@@ -1330,48 +1476,50 @@ def _parse_asset_assignment_response(
     response_text: str,
     assets: list[SceneObject],
     candidates: list[MaskCandidate],
-) -> dict[str, int] | None:
-    """Parse a strict complete assignment, or a valid missing-asset result."""
+) -> dict[str, _AssetMaskDecision]:
+    """Validate complete per-target decisions without imposing a mask quota."""
     try:
         payload = json.loads(_strip_json_code_fence(response_text))
     except json.JSONDecodeError as exc:
-        raise ValueError("VLM asset assignment response is not valid JSON.") from exc
-    if not isinstance(payload, dict) or set(payload) != {"assignments"}:
-        raise ValueError("VLM asset assignment JSON must contain only assignments.")
-
-    assignment_values = payload["assignments"]
-    if assignment_values is None:
-        return None
-    if not isinstance(assignment_values, list):
-        raise ValueError("assignments must be an array or null.")
-
-    expected_asset_ids = {asset.id for asset in assets}
-    assignments: dict[str, int] = {}
-    assigned_mask_indices: set[int] = set()
-    for assignment in assignment_values:
-        if not isinstance(assignment, dict) or set(assignment) != {
+        raise ValueError("VLM asset decision response is not valid JSON.") from exc
+    if not isinstance(payload, dict) or set(payload) != {"decisions"}:
+        raise ValueError("VLM asset decision JSON must contain only decisions.")
+    values = payload["decisions"]
+    if not isinstance(values, list):
+        raise ValueError("decisions must be an array.")
+    decisions: dict[str, _AssetMaskDecision] = {}
+    assigned_indices: set[int] = set()
+    for value in values:
+        if not isinstance(value, dict) or set(value) != {
             "asset_id",
+            "status",
             "mask_index",
+            "reason",
         }:
             raise ValueError(
-                "Each assignment must contain only asset_id and mask_index."
+                "Each decision needs exactly asset_id, status, mask_index, reason."
             )
-        asset_id = assignment["asset_id"]
-        mask_index = assignment["mask_index"]
-        if not isinstance(asset_id, str) or not asset_id:
-            raise ValueError("assignment asset_id must be a non-empty string.")
-        if isinstance(mask_index, bool) or not isinstance(mask_index, int):
-            raise ValueError("assignment mask_index must be an integer.")
-        if asset_id in assignments:
-            raise ValueError(f"VLM assigned asset {asset_id!r} more than once.")
-        if mask_index in assigned_mask_indices:
-            raise ValueError(
-                f"VLM assigned candidate {mask_index} to more than one asset."
-            )
-        _candidate_by_index(candidates, mask_index)
-        assignments[asset_id] = mask_index
-        assigned_mask_indices.add(mask_index)
-
-    if set(assignments) != expected_asset_ids:
-        raise ValueError("VLM assignments must cover every asset in the group.")
-    return assignments
+        asset_id, status, mask_index, reason = (
+            value[key] for key in ("asset_id", "status", "mask_index", "reason")
+        )
+        if not isinstance(asset_id, str) or not asset_id or asset_id in decisions:
+            raise ValueError("Decision asset_id must be non-empty and unique.")
+        if status not in ("accept", "retry", "skip"):
+            raise ValueError("Decision status must be accept, retry, or skip.")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("Decision reason must be non-empty visual evidence.")
+        if status == "accept":
+            if type(mask_index) is not int:
+                raise ValueError("Accepted mask_index must be an integer.")
+            _candidate_by_index(candidates, mask_index)
+            if mask_index in assigned_indices:
+                raise ValueError(
+                    "A candidate cannot be assigned to more than one asset."
+                )
+            assigned_indices.add(mask_index)
+        elif mask_index is not None:
+            raise ValueError("Retry/skip mask_index must be null.")
+        decisions[asset_id] = _AssetMaskDecision(status, mask_index, reason.strip())
+    if set(decisions) != {asset.id for asset in assets}:
+        raise ValueError("Decisions must cover every requested asset exactly once.")
+    return decisions

@@ -69,16 +69,6 @@ def test_image_object_analysis_parses_code_fence_and_assigns_stable_ids(
     assert scene.assets[0].is_articulated is False
 
 
-@pytest.mark.parametrize(
-    ("category", "required_alias"),
-    [("bell", "hotel bell"), ("water_dispenser", "dispenser")],
-)
-def test_segmentation_aliases_cover_observed_service_vocabulary(
-    category: str, required_alias: str
-) -> None:
-    assert required_alias in scene_understanding._SEGMENTATION_PROMPT_ALIASES[category]
-
-
 @pytest.mark.parametrize("category", ["bell", "drawer", "box"])
 def test_image_analysis_defaults_to_rigid_without_task_spec(
     tmp_path: Path, category: str
@@ -484,9 +474,19 @@ def test_same_appearance_assets_keep_instance_hints_through_mask_assignment(
                 assert hint in user_prompt
             return json.dumps(
                 {
-                    "assignments": [
-                        {"asset_id": "evidence_001", "mask_index": 2},
-                        {"asset_id": "cup_001", "mask_index": 1},
+                    "decisions": [
+                        {
+                            "asset_id": "evidence_001",
+                            "status": "accept",
+                            "mask_index": 2,
+                            "reason": "The left blue cup.",
+                        },
+                        {
+                            "asset_id": "cup_001",
+                            "status": "accept",
+                            "mask_index": 1,
+                            "reason": "The right blue cup.",
+                        },
                     ]
                 }
             )
@@ -520,7 +520,7 @@ def test_opaque_task_id_uses_visual_prompts_for_segmentation(tmp_path: Path) -> 
 
     class VLM:
         def complete(self, **_: object) -> str:
-            return '{"assignments":[{"asset_id":"evidence_002","mask_index":1}]}'
+            return _mask_decisions(("evidence_002", "accept", 1))
 
     scene_understanding._segment_assets(
         image,
@@ -530,7 +530,7 @@ def test_opaque_task_id_uses_visual_prompts_for_segmentation(tmp_path: Path) -> 
         vlm_client=VLM(),
         image_segmentation_client=segmentation,
     )
-    assert segmentation.prompts == ["cup", "blue cup"]
+    assert segmentation.prompts == ["blue cup", "cup"]
     assert cup.mask_path == str(tmp_path / "evidence_002_mask.png")
     assert Image.open(cup.mask_path).getbbox() == (8, 8, 25, 21)
 
@@ -762,12 +762,15 @@ def test_unsegmented_asset_retries_with_vlm_appearance_prompts(
     segmentation = _PromptedSegmentation((48, 32), {"tool with black handle"})
 
     class VLM:
-        def complete(self, *, system_prompt: str, **_: object) -> str:
-            if "found no mask" in system_prompt:
+        def complete(self, *, system_prompt: str, user_prompt: str, **_: object) -> str:
+            if (
+                system_prompt
+                == scene_understanding._VISUAL_SEGMENTATION_PROMPT_SYSTEM_PROMPT
+            ):
                 return json.dumps({"prompts": ["tool", "tool with black handle"]})
-            return json.dumps(
-                {"assignments": [{"asset_id": "tool_001", "mask_index": 1}]}
-            )
+            if not json.loads(user_prompt)["candidate_indices"]:
+                return _mask_decisions(("tool_001", "retry", None))
+            return _mask_decisions(("tool_001", "accept", 1))
 
     scene_understanding._segment_assets(
         image_path,
@@ -778,11 +781,11 @@ def test_unsegmented_asset_retries_with_vlm_appearance_prompts(
         image_segmentation_client=segmentation,  # type: ignore[arg-type]
     )
 
-    assert segmentation.prompts == ["tool", "hammer", "tool with black handle"]
+    assert segmentation.prompts == ["hammer", "tool", "tool with black handle"]
     assert hammer.mask_path is not None
 
 
-def test_asset_mask_id_overlay_excludes_the_table_mask(tmp_path: Path) -> None:
+def test_asset_mask_id_overlay_includes_table_and_assets(tmp_path: Path) -> None:
     image_path = tmp_path / "scene.png"
     table_mask_path = tmp_path / "table_mask.png"
     asset_mask_path = tmp_path / "bottle_mask.png"
@@ -799,13 +802,14 @@ def test_asset_mask_id_overlay_excludes_the_table_mask(tmp_path: Path) -> None:
 
     rendered_path = render_asset_mask_id_overlay(
         image_path=image_path,
-        asset_masks=[("bottle_001", asset_mask_path)],
+        asset_masks=[("table", table_mask_path), ("bottle_001", asset_mask_path)],
         output_path=output_path,
     )
 
     with Image.open(rendered_path) as overlay:
-        assert overlay.getpixel((10, 10)) == (0, 0, 0)
-        assert overlay.getpixel((377, 180)) != (0, 0, 0)
+        assert overlay.getpixel((8, 40)) != (0, 0, 0)
+        # Width adapts to preview resolution; the known boundary stays visible.
+        assert overlay.crop((376, 178, 381, 183)).getbbox() is not None
 
 
 def test_visible_rgba_crop_preserves_object_pixels_on_a_fixed_canvas(
@@ -1348,3 +1352,260 @@ def test_initial_scene_graph_places_a_lying_asset_on_an_asset(tmp_path: Path) ->
     assert pen.parent_id == "book_001"
     assert pen.parent_relation == "on"
     assert pen.pose_description == "Lie flat on the support surface."
+
+
+def _mask_decisions(*items: tuple[str, str, int | None]) -> str:
+    return json.dumps(
+        {
+            "decisions": [
+                {
+                    "asset_id": asset_id,
+                    "status": status,
+                    "mask_index": index,
+                    "reason": (
+                        "The visible target needs a better mask."
+                        if status == "retry"
+                        else (
+                            "The target is severely occluded inside the container."
+                            if status == "skip"
+                            else "The mask covers the intended visible object."
+                        )
+                    ),
+                }
+                for asset_id, status, index in items
+            ]
+        }
+    )
+
+
+def _rect_rle(size: tuple[int, int], box: tuple[int, int, int, int]) -> dict:
+    mask = Image.new("L", size)
+    ImageDraw.Draw(mask).rectangle(box, fill=255)
+    return image_segmentation_utils._encode_binary_mask_rle(mask)
+
+
+def test_count_sufficient_wrong_candidate_is_repaired_and_accepted_pixels_stay_locked(
+    tmp_path: Path,
+) -> None:
+    image = tmp_path / "scene.png"
+    size = (80, 40)
+    Image.new("RGB", size, "white").save(image)
+    assets = [
+        SceneObject(
+            id=key,
+            kind="asset",
+            category="cup",
+            name="blue cup",
+            description="Blue cup.",
+        )
+        for key in ("left", "right")
+    ]
+    left = _rect_rle(size, (5, 10, 18, 29))
+    wrong = _rect_rle(size, (30, 10, 40, 29))
+    # A repair result overlaps the approved left cup and would enlarge it if
+    # accepted masks were re-unioned. It must never replace the saved pixels.
+    enlarged_left = _rect_rle(size, (4, 10, 19, 29))
+    right = _rect_rle(size, (55, 10, 69, 29))
+    queries = []
+    critic_calls = 0
+
+    class Segmentation:
+        def segment_single_object(self, *, prompt: str, **_: object) -> list:
+            queries.append(prompt)
+            return [left, wrong] if prompt == "blue cup" else [enlarged_left, right]
+
+    class VLM:
+        def complete(self, *, system_prompt: str, user_prompt: str, **_: object) -> str:
+            nonlocal critic_calls
+            payload = json.loads(user_prompt)
+            if (
+                system_prompt
+                == scene_understanding._VISUAL_SEGMENTATION_PROMPT_SYSTEM_PROMPT
+            ):
+                assert [asset["id"] for asset in payload["unresolved_assets"]] == [
+                    "right"
+                ]
+                assert payload["unresolved_assets"][0]["critic_feedback"]
+                # The approved left mask no longer counts toward the repair pool.
+                assert payload["remaining_candidate_count"] == 1
+                return '{"prompts":["blue cup on the right"]}'
+            critic_calls += 1
+            if critic_calls == 1:
+                assert len(payload["candidate_indices"]) == 2
+                return _mask_decisions(("left", "accept", 1), ("right", "retry", None))
+            assert payload["locked_asset_ids"] == ["left"]
+            assert [asset["id"] for asset in payload["unresolved_assets"]] == ["right"]
+            # Wrong middle candidate remains 1; the approved left cup is gone.
+            return _mask_decisions(("right", "accept", 2))
+
+    scene_understanding._segment_assets(
+        image,
+        tmp_path,
+        tmp_path,
+        Scene(objects=assets),
+        vlm_client=VLM(),
+        image_segmentation_client=Segmentation(),
+    )
+    assert queries == ["blue cup", "blue cup on the right"]
+    with Image.open(assets[0].mask_path) as actual:
+        assert (
+            actual.tobytes() == image_segmentation_utils.decode_rle_mask(left).tobytes()
+        )
+    with Image.open(assets[1].mask_path) as actual:
+        assert (
+            actual.tobytes()
+            == image_segmentation_utils.decode_rle_mask(right).tobytes()
+        )
+
+
+@pytest.mark.parametrize("skip", [False, True])
+def test_no_candidates_needs_visibility_decision_and_has_bounded_repairs(
+    tmp_path: Path,
+    skip: bool,
+) -> None:
+    image = tmp_path / "scene.png"
+    Image.new("RGB", (48, 32), "white").save(image)
+    asset = SceneObject(
+        id="hidden",
+        kind="asset",
+        category="ball",
+        name="red ball",
+        description="Red ball.",
+    )
+    scene = Scene(objects=[asset])
+    queries = []
+    critics = []
+
+    class Segmentation:
+        def segment_single_object(self, *, prompt: str, **_: object) -> list:
+            queries.append(prompt)
+            return []
+
+    class VLM:
+        def complete(self, *, system_prompt: str, user_prompt: str, **_: object) -> str:
+            if (
+                system_prompt
+                == scene_understanding._VISUAL_SEGMENTATION_PROMPT_SYSTEM_PROMPT
+            ):
+                assert json.loads(user_prompt)["remaining_candidate_count"] == 0
+                return '{"prompts":["small red sphere"]}'
+            assert json.loads(user_prompt)["candidate_indices"] == []
+            critics.append(1)
+            return _mask_decisions(("hidden", "skip" if skip else "retry", None))
+
+    def segment() -> None:
+        scene_understanding._segment_assets(
+            image,
+            tmp_path,
+            tmp_path,
+            scene,
+            vlm_client=VLM(),
+            image_segmentation_client=Segmentation(),
+            max_repair_rounds=1,
+        )
+
+    if skip:
+        segment()
+        assert scene.assets == []
+        assert len(critics) == 1
+    else:
+        with pytest.raises(
+            ValueError, match="Unresolved visible assets after 1 repair"
+        ):
+            segment()
+        assert scene.assets == [asset]
+        assert len(critics) == 2
+    audit = json.loads((tmp_path / "asset_segmentation.json").read_text())
+    assert ("hidden" in audit["skipped"]) is skip
+    assert queries == (
+        ["red ball", "ball"] if skip else ["red ball", "ball", "small red sphere"]
+    )
+
+
+@pytest.mark.parametrize(
+    "error", ["missing", "duplicate", "reuse", "boolean", "retry_index", "status"]
+)
+def test_mask_decisions_reject_incomplete_or_conflicting_assignments(
+    error: str,
+) -> None:
+    assets = [
+        SceneObject(
+            id=key, kind="asset", category="cup", name="cup", description="Cup."
+        )
+        for key in ("a", "b")
+    ]
+    candidates = image_segmentation_utils.build_mask_candidates(
+        [_rect_rle((40, 30), box) for box in ((2, 5, 10, 20), (20, 5, 28, 20))]
+    )
+    payload = json.loads(_mask_decisions(("a", "accept", 1), ("b", "accept", 2)))
+    values = payload["decisions"]
+    if error == "missing":
+        values.pop()
+    elif error == "duplicate":
+        values[1]["asset_id"] = "a"
+    elif error == "reuse":
+        values[1]["mask_index"] = 1
+    elif error == "boolean":
+        values[0]["mask_index"] = True
+    elif error == "retry_index":
+        values[0]["status"] = "retry"
+    else:
+        values[0]["status"] = "unknown"
+    with pytest.raises(ValueError):
+        scene_understanding._parse_asset_assignment_response(
+            json.dumps(payload), assets, candidates
+        )
+
+
+def test_occluded_task_entity_keeps_analysis_binding_but_not_final_mask_binding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    image = tmp_path / "scene.png"
+    Image.new("RGB", (48, 32), "white").save(image)
+    payload = json.loads(_response())
+    payload["assets"][0].update(
+        task_entity_id="e1", instance_hint="Inside the opaque container."
+    )
+    task_input = TaskSpecInput(
+        instruction="Pick up the cup.", entities=(TaskEntity("e1", "cup", False),)
+    )
+
+    class VLM:
+        def complete(self, *, system_prompt: str, **_: object) -> str:
+            if system_prompt.startswith(scene_understanding._SYSTEM_PROMPT):
+                return json.dumps(payload)
+            if system_prompt == scene_understanding._ASSET_ASSIGNMENT_SYSTEM_PROMPT:
+                return _mask_decisions(("e1", "skip", None))
+            return '{"nodes":[]}'
+
+    class Segmentation:
+        def segment_single_object(self, **_: object) -> list:
+            return []
+
+    def segment_table(*, scene: Scene, masks_output_root: Path, **_: object) -> None:
+        scene.table.mask_path = str(masks_output_root / "table_mask.png")
+        Image.new("L", (48, 32), 255).save(scene.table.mask_path)
+
+    monkeypatch.setattr(scene_understanding, "_segment_table", segment_table)
+    scene, graph = scene_understanding.understand_scene(
+        Scene(),
+        image,
+        tmp_path / "out",
+        vlm_client=VLM(),
+        image_segmentation_client=Segmentation(),
+        task_input=task_input,
+    )
+    stage = tmp_path / "out" / "scene_understanding"
+    assert scene.assets == []
+    assert set(graph.node_by_id()) == {"table"}
+    assert json.loads((stage / "task_entity_matches.json").read_text())[
+        "entity_to_scene"
+    ] == {"e1": "e1"}
+    assert json.loads((stage / "task_entity_mask_matches.json").read_text())[
+        "entity_to_scene"
+    ] == {"e1": None}
+    assert (
+        "e1"
+        in json.loads((stage / "debug/asset_segmentation.json").read_text())["skipped"]
+    )

@@ -26,6 +26,19 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 from embodichain.utils.logger import log_warning
 
+__all__ = [
+    "MaskCandidate",
+    "build_mask_candidates",
+    "decode_rle_mask",
+    "invert_mask_if_foreground_is_off_center",
+    "union_overlapping_mask_candidates",
+    "save_binary_mask",
+    "save_visible_rgba_crop",
+    "render_image_without_masks",
+    "render_numbered_mask_candidates",
+    "render_asset_mask_id_overlay",
+]
+
 
 @dataclass(frozen=True)
 class MaskCandidate:
@@ -279,7 +292,7 @@ def render_numbered_mask_candidates(
     include_candidate_details: bool = False,
     detail_image_path: str | Path | None = None,
 ) -> Path:
-    """Render candidate numbers over an image, optionally with exact-pixel cards.
+    """Render candidate IDs, optionally with right-side leaders and pixel cards.
 
     Args:
         image_path: Source image used for the overview. It may have known assets
@@ -288,8 +301,10 @@ def render_numbered_mask_candidates(
             renumbered by this renderer.
         output_path: Destination PNG path.
         mask_style: Either ``"fill"`` or ``"outline"`` for the overview.
-        label_avoid_mask: Regions to avoid when placing overview labels.
-        include_candidate_details: Append one independently labeled card per
+        label_avoid_mask: Regions to avoid when placing legacy in-image labels.
+            Detail sheets use an external legend instead of in-image labels.
+        include_candidate_details: Connect every mask to a right-side numbered
+            legend and append one independently labeled card per
             mask. Included source pixels retain their RGB appearance; excluded
             regions, including holes, are uniformly gray. Cards preserve nearby
             context so missing visible parts remain apparent.
@@ -405,6 +420,24 @@ _SELECTION_COLORS = (
 _SELECTION_GRAY = (200, 203, 208)
 
 
+def _preview_typography(image_size: tuple[int, int]) -> dict[str, int]:
+    """Derive readable preview dimensions from the rendered overview, as AgenTable does."""
+    number = min(40, max(24, round(max(image_size) * 0.035)))
+    legend = max(18, round(number * 0.7))
+    padding = number // 2
+    return {
+        "number": number,
+        "legend": legend,
+        "title": max(20, round(number * 0.8)),
+        "padding": padding,
+        "line_height": math.ceil(legend * 1.35),
+        "line_width": max(1, round(number / 10)),
+        "badge_padding": max(4, round(number / 5)),
+        "card_width": 12 * number,
+        "card_height": 8 * number,
+    }
+
+
 def _render_mask_selection_sheet(
     *,
     image_path: str | Path,
@@ -444,8 +477,8 @@ def _render_mask_selection_sheet(
         overview_width,
         max(1, round(image.height * overview_width / image.width)),
     )
-    overview = image.resize(overview_size, Image.Resampling.LANCZOS).convert("RGBA")
-    overlay = Image.new("RGBA", overview_size, (0, 0, 0, 0))
+    typography = _preview_typography(overview_size)
+    overview = image.resize(overview_size, Image.Resampling.LANCZOS)
     overview_masks = []
     for candidate, mask in decoded_masks:
         visible_mask = mask.resize(overview_size, Image.Resampling.NEAREST)
@@ -467,55 +500,21 @@ def _render_mask_selection_sheet(
                 255,
             )
         overview_masks.append((candidate, visible_mask))
-        color = _SELECTION_COLORS[(candidate.index - 1) % len(_SELECTION_COLORS)]
-        rendered_mask = (
-            visible_mask
-            if mask_style == "fill"
-            else _mask_outer_outline(visible_mask, overview_size)
-        )
-        overlay.alpha_composite(
-            Image.composite(
-                Image.new("RGBA", overview_size, (*color, 110)),
-                Image.new("RGBA", overview_size),
-                rendered_mask,
-            )
-        )
-    overview = Image.alpha_composite(overview, overlay).convert("RGB")
-
-    blocked = None
     if label_avoid_mask is not None:
         _require_image_size(label_avoid_mask, image.size)
-        blocked = label_avoid_mask.convert("L").resize(
-            overview_size, Image.Resampling.NEAREST
-        )
-    overview_draw = ImageDraw.Draw(overview)
-    label_font = _load_label_font_at_size(22)
-    occupied: list[tuple[int, int, int, int]] = []
-    for candidate, mask in overview_masks:
-        color = _SELECTION_COLORS[(candidate.index - 1) % len(_SELECTION_COLORS)]
-        anchor = _selection_mask_anchor(mask)
-        bounds = _selection_label_bounds(
-            image_size=overview_size,
-            anchor=anchor,
-            label=str(candidate.index),
-            font=label_font,
-            occupied=occupied,
-            blocked=blocked,
-        )
-        occupied.append(bounds)
-        center = ((bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2)
-        overview_draw.line((anchor, center), fill="white", width=5)
-        overview_draw.line((anchor, center), fill=color, width=3)
-        overview_draw.ellipse(
-            (anchor[0] - 3, anchor[1] - 3, anchor[0] + 3, anchor[1] + 3),
-            fill=color,
-            outline="white",
-        )
-        _draw_selection_label(
-            overview_draw, bounds, str(candidate.index), color, label_font
-        )
+    overview = _render_mask_overview_with_legend(
+        image=overview,
+        masks=[(candidate.index, mask) for candidate, mask in overview_masks],
+        labels={
+            candidate.index: [f"Mask {candidate.index}"] for candidate in candidates
+        },
+        mask_style=mask_style,
+        color_labels=True,
+    )
 
-    header_height, card_width, card_height = 64, 360, 224
+    padding, line_height = typography["padding"], typography["line_height"]
+    header_height = 3 * padding + 2 * line_height
+    card_width, card_height = typography["card_width"], typography["card_height"]
     columns = (
         0
         if not candidates
@@ -525,43 +524,43 @@ def _render_mask_selection_sheet(
     canvas = Image.new(
         "RGB",
         (
-            overview_width + columns * card_width,
-            header_height + max(overview_size[1], rows * card_height),
+            overview.width + columns * card_width,
+            header_height + max(overview.height, rows * card_height),
         ),
         (245, 246, 248),
     )
     canvas.paste(overview, (0, header_height))
     draw = ImageDraw.Draw(canvas)
     draw.text(
-        (12, 8),
+        (padding, padding),
         "Candidate overview",
         fill=(23, 33, 45),
-        font=_load_label_font_at_size(22),
+        font=_load_label_font_at_size(typography["title"]),
     )
     if candidates:
         draw.text(
-            (overview_width + 10, 8),
+            (overview.width + padding, padding),
             "Mask cards: RGB = included",
             fill=(23, 33, 45),
-            font=_load_label_font_at_size(17),
+            font=_load_label_font_at_size(typography["legend"]),
         )
         draw.text(
-            (overview_width + 10, 32),
+            (overview.width + padding, 2 * padding + line_height),
             "Gray = excluded pixels",
             fill=(23, 33, 45),
-            font=_load_label_font_at_size(17),
+            font=_load_label_font_at_size(typography["legend"]),
         )
     else:
         draw.text(
-            (12, 36),
+            (padding, 2 * padding + line_height),
             "No candidate masks returned.",
             fill=(23, 33, 45),
-            font=_load_label_font_at_size(17),
+            font=_load_label_font_at_size(typography["legend"]),
         )
     for position, (candidate, mask) in enumerate(decoded_masks):
         column, row = position % columns, position // columns
         origin = (
-            overview_width + column * card_width,
+            overview.width + column * card_width,
             header_height + row * card_height,
         )
         _draw_candidate_detail_card(
@@ -571,6 +570,7 @@ def _render_mask_selection_sheet(
             candidate_index=candidate.index,
             origin=origin,
             card_size=(card_width, card_height),
+            typography=typography,
         )
 
     resolved_output_path = Path(output_path).expanduser().resolve()
@@ -599,46 +599,155 @@ def _selection_mask_anchor(mask: Image.Image) -> tuple[int, int]:
     return selected_x, selected_y
 
 
-def _selection_label_bounds(
+def _render_mask_overview_with_legend(
     *,
-    image_size: tuple[int, int],
-    anchor: tuple[int, int],
-    label: str,
-    font: ImageFont.ImageFont,
-    occupied: list[tuple[int, int, int, int]],
-    blocked: Image.Image | None,
-) -> tuple[int, int, int, int]:
-    """Prefer nearby non-overlapping callouts over stacked labels on one object."""
-    text_bounds = font.getbbox(label)
-    width = min(image_size[0], text_bounds[2] - text_bounds[0] + 20)
-    height = min(image_size[1], text_bounds[3] - text_bounds[1] + 16)
-    offsets = (
-        (30, -36),
-        (-30 - width, -36),
-        (30, 12),
-        (-30 - width, 12),
-        (40, -80),
-        (-40 - width, -80),
-        (40, 60),
-        (-40 - width, 60),
-        (0, 0),
+    image: Image.Image,
+    masks: list[tuple[int, Image.Image]],
+    labels: dict[int, list[str]],
+    mask_style: str,
+    color_labels: bool = False,
+) -> Image.Image:
+    """Keep source scale and connect every included-pixel anchor to a right legend."""
+    typography = _preview_typography(image.size)
+    overlay = Image.new("RGBA", image.size)
+    anchors = {}
+    for display_id, mask in masks:
+        anchors[display_id] = _selection_mask_anchor(mask)
+        color = _SELECTION_COLORS[(display_id - 1) % len(_SELECTION_COLORS)]
+        rendered_mask = (
+            mask
+            if mask_style == "fill"
+            else _mask_outer_outline(
+                mask, image.size, outline_width=typography["line_width"]
+            )
+        )
+        overlay.alpha_composite(
+            Image.composite(
+                Image.new(
+                    "RGBA", image.size, (*color, 110 if mask_style == "fill" else 255)
+                ),
+                Image.new("RGBA", image.size),
+                rendered_mask,
+            )
+        )
+
+    font = _load_label_font_at_size(typography["legend"])
+    badge_font = _load_label_font_at_size(typography["number"])
+    padding, line_height = typography["padding"], typography["line_height"]
+    badge_padding = typography["badge_padding"]
+    badge_width = (
+        max(
+            typography["number"],
+            math.ceil(
+                max((badge_font.getlength(str(key)) for key in anchors), default=0)
+            ),
+        )
+        + 2 * badge_padding
     )
-    options = []
-    for x_offset, y_offset in offsets:
-        left = max(0, min(image_size[0] - width, anchor[0] + x_offset))
-        top = max(0, min(image_size[1] - height, anchor[1] + y_offset))
-        bounds = (left, top, left + width, top + height)
-        overlap = sum(
-            max(0, min(bounds[2], other[2]) - max(bounds[0], other[0]))
-            * max(0, min(bounds[3], other[3]) - max(bounds[1], other[1]))
-            for other in occupied
+    badge_height = typography["number"] + 2 * badge_padding
+    if color_labels:
+        label_width = math.ceil(
+            max(
+                (font.getlength(line) for lines in labels.values() for line in lines),
+                default=0,
+            )
         )
-        blocked_count = (
-            _foreground_pixel_count(blocked.crop(bounds)) if blocked is not None else 0
+        legend_width = badge_width + 3 * padding + label_width
+    else:
+        legend_width = max(12 * typography["number"], badge_width + 7 * padding)
+    # Sorting by anchor height reduces crossing while preserving selectable IDs.
+    display_order = sorted(
+        anchors, key=lambda key: (anchors[key][1], anchors[key][0], key)
+    )
+    rows = []
+    next_y = padding
+    text_width = legend_width - badge_width - 3 * padding
+    for display_id in display_order:
+        lines = []
+        for label in labels[display_id]:
+            lines.extend(_wrap_legend_text(label, font=font, maximum_width=text_width))
+        height = max(badge_height, len(lines) * line_height)
+        rows.append([display_id, next_y, height, lines])
+        next_y += height + padding
+
+    body_height = max(image.height, next_y)
+    # Keep labels near their masks when room allows. Resolve collisions in
+    # vertical order, then shift overflowing rows back into the fixed legend.
+    previous_bottom = padding
+    for row in rows:
+        row[1] = max(previous_bottom, anchors[row[0]][1] - badge_height // 2)
+        previous_bottom = row[1] + row[2] + padding
+    next_top = body_height
+    for row in reversed(rows):
+        row[1] = min(row[1], next_top - row[2] - padding)
+        next_top = row[1]
+
+    canvas = Image.new(
+        "RGB", (image.width + legend_width, body_height), (245, 246, 248)
+    )
+    canvas.paste(Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB"))
+    draw = ImageDraw.Draw(canvas)
+    # Draw all leaders before badges so lines never obscure another legend ID.
+    for display_id, top, _, _ in rows:
+        color = _SELECTION_COLORS[(display_id - 1) % len(_SELECTION_COLORS)]
+        anchor = anchors[display_id]
+        destination = (image.width + padding, top + badge_height // 2)
+        line_width = typography["line_width"]
+        draw.line((anchor, destination), fill="white", width=line_width + 2)
+        draw.line((anchor, destination), fill=color, width=line_width)
+        radius = max(2, round(typography["number"] / 12))
+        draw.ellipse(
+            (
+                anchor[0] - radius,
+                anchor[1] - radius,
+                anchor[0] + radius,
+                anchor[1] + radius,
+            ),
+            fill=color,
+            outline="white",
         )
-        distance = abs(left + width / 2 - anchor[0]) + abs(top + height / 2 - anchor[1])
-        options.append(((overlap, blocked_count, distance), bounds))
-    return min(options, key=lambda option: option[0])[1]
+    for display_id, top, _, lines in rows:
+        color = _SELECTION_COLORS[(display_id - 1) % len(_SELECTION_COLORS)]
+        _draw_selection_label(
+            draw,
+            (
+                image.width + padding,
+                top,
+                image.width + padding + badge_width,
+                top + badge_height,
+            ),
+            str(display_id),
+            color,
+            badge_font,
+        )
+        for line_index, line in enumerate(lines):
+            draw.text(
+                (
+                    image.width + badge_width + 2 * padding,
+                    top + line_index * line_height,
+                ),
+                line,
+                font=font,
+                fill=color if color_labels else (23, 33, 45),
+            )
+    return canvas
+
+
+def _wrap_legend_text(
+    label: str, *, font: ImageFont.ImageFont, maximum_width: int
+) -> list[str]:
+    """Wrap full IDs instead of truncating them or shrinking them over objects."""
+    text = " ".join(label.split())
+    lines: list[str] = []
+    while text:
+        split = len(text)
+        while split > 1 and font.getlength(text[:split]) > maximum_width:
+            split -= 1
+        if split < len(text) and " " in text[:split]:
+            split = text.rfind(" ", 0, split) or split
+        lines.append(text[:split])
+        text = text[split:].lstrip()
+    return lines or [""]
 
 
 def _draw_selection_label(
@@ -648,7 +757,14 @@ def _draw_selection_label(
     color: tuple[int, int, int],
     font: ImageFont.ImageFont,
 ) -> None:
-    draw.rounded_rectangle(bounds, radius=4, fill=color, outline="white", width=2)
+    font_size = getattr(font, "size", 24)
+    draw.rounded_rectangle(
+        bounds,
+        radius=max(3, round(font_size / 6)),
+        fill=color,
+        outline="white",
+        width=max(1, round(font_size / 12)),
+    )
     text_bounds = draw.textbbox((0, 0), label, font=font)
     center_x, center_y = (bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2
     draw.text(
@@ -670,11 +786,14 @@ def _draw_candidate_detail_card(
     candidate_index: int,
     origin: tuple[int, int],
     card_size: tuple[int, int],
+    typography: dict[str, int],
 ) -> None:
     """Composite after resizing so excluded holes retain an exact uniform gray."""
     bounds = mask.getbbox()
     assert bounds is not None
-    margin = max(16, round(max(bounds[2] - bounds[0], bounds[3] - bounds[1]) / 4))
+    padding = typography["padding"]
+    header_height = typography["line_height"] + 2 * padding
+    margin = max(padding, round(max(bounds[2] - bounds[0], bounds[3] - bounds[1]) / 4))
     crop_bounds = (
         max(0, bounds[0] - margin),
         max(0, bounds[1] - margin),
@@ -682,7 +801,10 @@ def _draw_candidate_detail_card(
         min(image.height, bounds[3] + margin),
     )
     crop, crop_mask = image.crop(crop_bounds), mask.crop(crop_bounds)
-    available_size = (card_size[0] - 20, card_size[1] - 44)
+    available_size = (
+        card_size[0] - 2 * padding,
+        card_size[1] - header_height - padding,
+    )
     scale = min(1.0, available_size[0] / crop.width, available_size[1] / crop.height)
     detail_size = (
         max(1, round(crop.width * scale)),
@@ -697,19 +819,25 @@ def _draw_candidate_detail_card(
         detail,
         (
             origin[0] + (card_size[0] - detail.width) // 2,
-            origin[1] + 36 + (available_size[1] - detail.height) // 2,
+            origin[1] + header_height + (available_size[1] - detail.height) // 2,
         ),
     )
     draw = ImageDraw.Draw(canvas)
     color = _SELECTION_COLORS[(candidate_index - 1) % len(_SELECTION_COLORS)]
+    border, bar_width = max(2, padding // 3), max(3, round(typography["number"] / 5))
     draw.rectangle(
-        (origin[0] + 4, origin[1] + 4, origin[0] + 10, origin[1] + card_size[1] - 4),
+        (
+            origin[0] + border,
+            origin[1] + border,
+            origin[0] + border + bar_width,
+            origin[1] + card_size[1] - border,
+        ),
         fill=color,
     )
     draw.text(
-        (origin[0] + 18, origin[1] + 5),
+        (origin[0] + padding + bar_width, origin[1] + border),
         f"Mask {candidate_index} | selected pixels",
-        font=_load_label_font_at_size(19),
+        font=_load_label_font_at_size(typography["legend"]),
         fill=color,
     )
 
@@ -719,11 +847,23 @@ def render_asset_mask_id_overlay(
     image_path: str | Path,
     asset_masks: list[tuple[str, str | Path]],
     output_path: str | Path,
+    asset_names: dict[str, str] | None = None,
 ) -> Path:
-    """Overlay outlined asset masks and stable asset IDs on a scene image.
+    """Show all supplied scene masks with leaders to full IDs on the right.
 
-    The table mask is intentionally omitted so its large contour does not
-    obscure the asset labels or their visual context in the source image.
+    Short display numbers do not replace business IDs. The source image keeps
+    its original pixel dimensions within the enlarged canvas, including small
+    objects. Callers may supply the table alongside assets in ``asset_masks``.
+
+    Args:
+        image_path: Unmodified scene image.
+        asset_masks: Ordered business-ID/mask-path pairs, including the table
+            when its outline should appear in the overall scene view.
+        output_path: Destination image path.
+        asset_names: Optional readable names keyed by the same business IDs.
+
+    Returns:
+        Absolute path to the annotated scene image.
     """
     asset_ids = [asset_id for asset_id, _ in asset_masks]
     if any(not asset_id for asset_id in asset_ids):
@@ -731,52 +871,31 @@ def render_asset_mask_id_overlay(
     if len(asset_ids) != len(set(asset_ids)):
         raise ValueError("Asset mask ids must be unique.")
 
-    image = Image.open(image_path).convert("RGBA")
-    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    colors = (
-        (239, 83, 80, 255),
-        (66, 165, 245, 255),
-        (102, 187, 106, 255),
-        (255, 202, 40, 255),
-        (171, 71, 188, 255),
-        (38, 198, 218, 255),
-    )
-    decoded_masks: list[tuple[str, Image.Image]] = []
-    for index, (asset_id, mask_path) in enumerate(asset_masks):
-        mask = Image.open(mask_path).convert("L")
+    with Image.open(image_path) as loaded_image:
+        image = loaded_image.convert("RGB")
+    decoded_masks: list[tuple[int, Image.Image]] = []
+    labels = {}
+    for display_id, (asset_id, mask_path) in enumerate(asset_masks, start=1):
+        with Image.open(mask_path) as loaded_mask:
+            mask = loaded_mask.convert("L")
         _require_image_size(mask, image.size)
-        decoded_masks.append((asset_id, mask))
-        color_layer = Image.new("RGBA", image.size, colors[index % len(colors)])
-        transparent_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
-        overlay.alpha_composite(
-            Image.composite(
-                color_layer,
-                transparent_layer,
-                _mask_outer_outline(mask, image.size),
-            )
-        )
-
-    draw = ImageDraw.Draw(overlay)
-    for asset_id, mask in decoded_masks:
-        bbox = mask.getbbox()
-        if bbox is None:
+        if mask.getbbox() is None:
             raise ValueError(f"Asset mask {asset_id!r} is empty.")
-        font = _load_asset_id_label_font(
-            image_size=image.size,
-            mask_bbox=bbox,
-            label=asset_id,
+        decoded_masks.append((display_id, mask))
+        name = (asset_names or {}).get(asset_id)
+        labels[display_id] = (
+            [asset_id, name] if name and name != asset_id else [asset_id]
         )
-        _draw_number_label(
-            draw=draw,
-            label=asset_id,
-            center=((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2),
-            font=font,
-            minimum_padding=2,
-        )
+    canvas = _render_mask_overview_with_legend(
+        image=image,
+        masks=decoded_masks,
+        labels=labels,
+        mask_style="outline",
+    )
 
     resolved_output_path = Path(output_path).expanduser().resolve()
     resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
-    Image.alpha_composite(image, overlay).convert("RGB").save(resolved_output_path)
+    canvas.save(resolved_output_path)
     return resolved_output_path
 
 
@@ -844,11 +963,17 @@ def _find_label_center_inside_bbox(
     return None
 
 
-def _mask_outer_outline(mask: Image.Image, image_size: tuple[int, int]) -> Image.Image:
+def _mask_outer_outline(
+    mask: Image.Image,
+    image_size: tuple[int, int],
+    *,
+    outline_width: int | None = None,
+) -> Image.Image:
     """Use dilation and subtraction to get the outer outline of a binary mask."""
     # Asset-candidate images use outlines only; keep them visible at common
     # image resolutions without obscuring the original object appearance.
-    outline_width = max(2, round(min(image_size) / 200))
+    if outline_width is None:
+        outline_width = max(2, round(min(image_size) / 200))
     dilated_mask = mask.filter(ImageFilter.MaxFilter(outline_width * 2 + 1))
     return ImageChops.subtract(dilated_mask, mask)
 

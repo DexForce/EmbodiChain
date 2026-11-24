@@ -88,14 +88,23 @@ def test_every_sparse_id_has_its_own_card_and_matching_overview_color(
     candidates = [_candidate(index, mask) for index in candidate_ids]
     titles: dict[int, tuple[int, int, int]] = {}
     labels: dict[int, tuple[int, int, int]] = {}
+    leaders: list[tuple[tuple[int, int], tuple[int, int]]] = []
+    badges: list[tuple[int, int, int, int]] = []
     current_badge_color: tuple[int, int, int] | None = None
     original_text = ImageDraw.ImageDraw.text
     original_rectangle = ImageDraw.ImageDraw.rounded_rectangle
+    original_line = ImageDraw.ImageDraw.line
 
     def record_rectangle(self, xy, radius=0, fill=None, **kwargs):
         nonlocal current_badge_color
+        assert xy[0] >= image_size[0]
+        badges.append(xy)
         current_badge_color = fill
         return original_rectangle(self, xy, radius=radius, fill=fill, **kwargs)
+
+    def record_line(self, xy, **kwargs):
+        leaders.append(xy)
+        return original_line(self, xy, **kwargs)
 
     def record_text(self, xy, text, fill=None, **kwargs):
         if str(text).isdecimal():
@@ -109,6 +118,7 @@ def test_every_sparse_id_has_its_own_card_and_matching_overview_color(
 
     monkeypatch.setattr(ImageDraw.ImageDraw, "rounded_rectangle", record_rectangle)
     monkeypatch.setattr(ImageDraw.ImageDraw, "text", record_text)
+    monkeypatch.setattr(ImageDraw.ImageDraw, "line", record_line)
     segmentation.render_numbered_mask_candidates(
         image_path=source,
         candidates=candidates,
@@ -120,6 +130,181 @@ def test_every_sparse_id_has_its_own_card_and_matching_overview_color(
     assert titles == labels
     assert titles[2] != titles[5]
     assert [candidate.index for candidate in candidates] == candidate_ids
+    assert leaders
+    assert all(start[0] < image_size[0] <= end[0] for start, end in leaders)
+    assert len(badges) == len(candidate_ids)
+    assert all(
+        first[3] <= second[1] or second[3] <= first[1]
+        for position, first in enumerate(badges)
+        for second in badges[position + 1 :]
+    )
+
+
+@pytest.mark.parametrize(
+    ("image_size", "number_size", "legend_size"),
+    [((320, 240), 24, 18), ((1920, 1080), 40, 28)],
+)
+def test_scene_overview_keeps_full_ids_and_names_outside_the_image(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    image_size: tuple[int, int],
+    number_size: int,
+    legend_size: int,
+) -> None:
+    source = tmp_path / "source.png"
+    Image.new("RGB", image_size, "black").save(source)
+    table, asset = tmp_path / "table.png", tmp_path / "asset.png"
+    table_mask = Image.new("L", image_size)
+    table_mask.paste(
+        255, (10, image_size[1] // 2, image_size[0] - 10, image_size[1] - 10)
+    )
+    table_mask.save(table)
+    asset_mask = Image.new("L", image_size)
+    asset_mask.putpixel((40, 60), 255)
+    asset_mask.save(asset)
+    long_id = "opaque_task_entity_" + "x" * 65
+    texts: list[tuple[tuple[int, int], str]] = []
+    number_fonts: list[int] = []
+    legend_fonts: list[int] = []
+    glyph_bounds: list[tuple[int, int, int, int]] = []
+    original_text = ImageDraw.ImageDraw.text
+
+    def record_text(self, xy, text, **kwargs):
+        texts.append((xy, str(text)))
+        (number_fonts if str(text).isdecimal() else legend_fonts).append(
+            kwargs["font"].size
+        )
+        glyph_bounds.append(self.textbbox(xy, text, font=kwargs["font"]))
+        return original_text(self, xy, text, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", record_text)
+    result = segmentation.render_asset_mask_id_overlay(
+        image_path=source,
+        asset_masks=[("table", table), (long_id, asset)],
+        asset_names={"table": "workbench", long_id: "metal_can"},
+        output_path=tmp_path / "scene_overview.png",
+    )
+    with Image.open(result) as image:
+        assert image.width > image_size[0]
+        assert image.height >= image_size[1]
+        # Both the broad table and a one-pixel asset remain visible at their
+        # original coordinates; neither is downsampled to fit the legend.
+        assert image.getpixel((8, image_size[1] // 2 + 20)) != (0, 0, 0)
+        assert image.getpixel((40, 60)) != (0, 0, 0)
+        assert all(
+            0 <= left < right <= image.width and 0 <= top < bottom <= image.height
+            for left, top, right, bottom in glyph_bounds
+        )
+    assert all(position[0] >= image_size[0] for position, _ in texts)
+    rendered_text = "".join(text for _, text in texts)
+    assert long_id in rendered_text
+    assert "workbench" in rendered_text
+    assert "metal_can" in rendered_text
+    assert set(number_fonts) == {number_size}
+    assert set(legend_fonts) == {legend_size}
+
+
+@pytest.mark.parametrize(
+    ("image_size", "number_size"),
+    [((320, 240), 24), ((1920, 1080), 34)],
+)
+def test_candidate_typography_uses_the_rendered_overview_resolution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    image_size: tuple[int, int],
+    number_size: int,
+) -> None:
+    source = tmp_path / "source.png"
+    Image.new("RGB", image_size, "white").save(source)
+    mask = Image.new("L", image_size)
+    mask.paste(255, (40, 40, 80, 100))
+    fonts = []
+    original_text = ImageDraw.ImageDraw.text
+
+    def record_text(self, xy, text, **kwargs):
+        if str(text).isdecimal():
+            fonts.append(kwargs["font"].size)
+        return original_text(self, xy, text, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", record_text)
+    segmentation.render_numbered_mask_candidates(
+        image_path=source,
+        candidates=[_candidate(7, mask)],
+        output_path=tmp_path / "candidate.png",
+        include_candidate_details=True,
+    )
+    # The 1920px source becomes a 960px overview. Source-based sizing would
+    # incorrectly choose 40px, while the rendered reference calls for 34px.
+    assert fonts == [number_size]
+
+
+def test_dense_legend_rows_preserve_long_ids_without_overlap_or_clipping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    image_size = (320, 240)
+    source = tmp_path / "source.png"
+    Image.new("RGB", image_size, "black").save(source)
+    asset_masks = []
+    for index in range(12):
+        mask = Image.new("L", image_size)
+        mask.paste(255, (10 + 25 * index, 100, 20 + 25 * index, 110))
+        mask_path = tmp_path / f"mask_{index}.png"
+        mask.save(mask_path)
+        asset_masks.append((f"task_entity_{index:02d}_" + "x" * 60, mask_path))
+    badges, texts, glyph_bounds = [], [], []
+    original_rectangle = ImageDraw.ImageDraw.rounded_rectangle
+    original_text = ImageDraw.ImageDraw.text
+
+    def record_rectangle(self, xy, **kwargs):
+        badges.append(xy)
+        return original_rectangle(self, xy, **kwargs)
+
+    def record_text(self, xy, text, **kwargs):
+        texts.append(str(text))
+        glyph_bounds.append(self.textbbox(xy, text, font=kwargs["font"]))
+        return original_text(self, xy, text, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "rounded_rectangle", record_rectangle)
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", record_text)
+    result = segmentation.render_asset_mask_id_overlay(
+        image_path=source,
+        asset_masks=asset_masks,
+        output_path=tmp_path / "dense.png",
+    )
+    with Image.open(result) as image:
+        assert image.height > image_size[1]
+        assert all(
+            image_size[0] <= left < right <= image.width
+            and 0 <= top < bottom <= image.height
+            for left, top, right, bottom in glyph_bounds
+        )
+    assert len(badges) == len(asset_masks)
+    assert all(first[3] < second[1] for first, second in zip(badges, badges[1:]))
+    assert all(asset_id in "".join(texts) for asset_id, _ in asset_masks)
+
+
+def test_empty_candidate_sheet_keeps_the_source_for_visibility_review(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.png"
+    source_color = (37, 91, 143)
+    image_size = (240, 180)
+    Image.new("RGB", image_size, source_color).save(source)
+    result = segmentation.render_numbered_mask_candidates(
+        image_path=source,
+        candidates=[],
+        output_path=tmp_path / "empty.png",
+        include_candidate_details=True,
+    )
+    with Image.open(result) as image:
+        # The header may grow, but the image remains intact underneath it.
+        source_region = image.crop(
+            (0, image.height - image_size[1], image_size[0], image.height)
+        )
+        assert (
+            source_region.tobytes()
+            == Image.new("RGB", image_size, source_color).tobytes()
+        )
 
 
 @pytest.mark.parametrize("indices", [[1, 1], [0], [True]])
