@@ -116,39 +116,34 @@ avoidance.
 
 ## Single-step actions and observation gradients
 
-`NeuralMotionGenerator` loads the same local ONNX files and evaluates raw
-policy actions. Install `embodichain[policy-deploy,nmg]` to use both
-backends. Use `--download-only` to find the verified model path.
+For raw policy actions, load the local `.onnx` with
+`NeuralMotionGenerator.from_onnx()`. For observation gradients, load the
+matching native actor `.pt` with `NeuralMotionGenerator.from_checkpoint()`.
+Install `embodichain[policy-deploy]` for the ONNX backend. Native checkpoints
+use PyTorch from the base installation.
 
-Pass a batched FP32 tensor in the export's observation layout. Franka maps
-`[B, 417]` to `[B, 7]` and PiPER maps `[B, 391]` to `[B, 6]`. The graph
-applies observation normalization. Keep the active waypoint and masks fixed
-when differentiating continuous features.
+Pass a batched FP32 tensor in the model's observation layout. Franka maps
+`[B, 417]` to `[B, 7]` and PiPER maps `[B, 391]` to `[B, 6]`. Keep the active
+waypoint and masks fixed when differentiating continuous features.
 
 ```python
 import torch
 
 from embodichain.extensions.models.policy.nmg import NeuralMotionGenerator
 
-# obs is an encoded NMG observation with requires_grad=True.
-inference = NeuralMotionGenerator.from_onnx(model_path, device=obs.device)
-differentiable = NeuralMotionGenerator.from_onnx(
-    model_path, device=obs.device, enable_grad=True
-)
-
-inference_action = inference(obs)
-action = differentiable(obs)
+# obs is an encoded FP32 observation and checkpoint_path points to a native .pt.
+policy = NeuralMotionGenerator.from_checkpoint(checkpoint_path, device=obs.device)
+obs = obs.requires_grad_(True)
+action = policy(obs)
 (d_obs,) = torch.autograd.grad(action.square().mean(), obs)
 ```
 
-The default backend returns detached actions. The PyTorch backend freezes
-the weights and records input gradients under the caller's autograd context.
-`NeuralPlanner` uses the inference backend for closed-loop rollout, action
-scaling and retiming.
-
-To check the published weights against ONNX Runtime and finite differences,
-point the test at a local directory with both verified files.
+`NeuralPlanner` uses ONNX inference for closed-loop rollout, action scaling
+and retiming. For paired local `.onnx` and `.pt` deployment files, run the
+numeric checks from the repository checkout.
 
 ```bash
 EMBODICHAIN_NMG_MODEL_DIR=/path/to/v1 python -m pytest tests/models/policy/test_nmg.py --run-gpu
 ```
+
+Set `EMBODICHAIN_NMG_CHECKPOINT_DIR` when the native files are stored separately.

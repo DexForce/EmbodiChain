@@ -28,6 +28,13 @@ import pytest
 import torch
 
 from embodichain.extensions.models.policy import nmg as nmg_module
+from embodichain.extensions.models.policy._nmg_checkpoint import (
+    _NativeActor,
+    _NormalizedActor,
+)
+from embodichain.extensions.models.policy._nmg_observation import (
+    _WaypointObservationLayout,
+)
 from embodichain.extensions.models.policy.nmg import NeuralMotionGenerator
 
 pytestmark = pytest.mark.no_sim
@@ -276,45 +283,25 @@ def test_ort_cuda_binding_handles_strided_batches_and_retained_outputs(
         torch.testing.assert_close(action.cpu(), expected)
 
 
-@pytest.mark.parametrize("enable_grad", [False, True], ids=["ort", "torch"])
-def test_dynamic_batch_and_analytic_input_vjp(tmp_path, monkeypatch, enable_grad):
+def test_ort_dynamic_batch_returns_detached_actions(tmp_path, monkeypatch):
     path, weight = _linear_policy(tmp_path, "batch")
-    if enable_grad:
-        monkeypatch.setitem(sys.modules, "onnxruntime", None)
-        pytest.importorskip("onnx2pytorch")
-    else:
-        pytest.importorskip("onnxruntime")
-        monkeypatch.setitem(sys.modules, "onnx", None)
-        monkeypatch.setitem(sys.modules, "onnx2pytorch", None)
-    policy = NeuralMotionGenerator.from_onnx(path, enable_grad=enable_grad)
+    pytest.importorskip("onnxruntime")
+    monkeypatch.setitem(sys.modules, "onnx", None)
+    policy = NeuralMotionGenerator.from_onnx(path)
     assert (policy.obs_dim, policy.output_dim, policy.fixed_batch_size) == (3, 2, None)
     assert policy.observation_metadata == {"nmg.observation_layout": "linear-test"}
 
-    source = torch.arange(9, dtype=torch.float32).reshape(3, 3).requires_grad_()
-    scale = torch.tensor([2.0, -1.0, 0.5])
-    obs = source * scale + 1.0
-    batch_one = policy(obs[:1])
-    batch_three = policy(obs)
-    torch.testing.assert_close(batch_one, obs[:1].detach() @ weight)
-    torch.testing.assert_close(batch_three, obs.detach() @ weight)
-    if enable_grad:
-        seed = torch.tensor([[-1.0, 0.5], [2.0, 1.0], [0.25, -3.0]])
-        batch_three.backward(seed)
-        torch.testing.assert_close(source.grad, (seed @ weight.T) * scale)
-        assert all(not parameter.requires_grad for parameter in policy.parameters())
-        assert all(parameter.grad is None for parameter in policy.parameters())
-        with torch.no_grad():
-            assert not policy(obs).requires_grad
-    else:
-        assert not batch_one.requires_grad
-        assert batch_three.grad_fn is None
+    obs = torch.arange(9, dtype=torch.float32).reshape(3, 3).requires_grad_()
+    for batch in (1, 3):
+        action = policy(obs[:batch])
+        torch.testing.assert_close(action, obs[:batch].detach() @ weight)
+        assert action.grad_fn is None and not action.requires_grad
 
 
-@pytest.mark.parametrize("enable_grad", [False, True], ids=["ort", "torch"])
-def test_validates_observation_signature(tmp_path, enable_grad):
+def test_ort_validates_observation_signature(tmp_path):
     path, weight = _linear_policy(tmp_path, 2)
-    pytest.importorskip("onnx2pytorch" if enable_grad else "onnxruntime")
-    policy = NeuralMotionGenerator.from_onnx(path, enable_grad=enable_grad)
+    pytest.importorskip("onnxruntime")
+    policy = NeuralMotionGenerator.from_onnx(path)
     assert policy.fixed_batch_size == 2
     obs = torch.arange(6, dtype=torch.float32).reshape(2, 3)
     torch.testing.assert_close(policy(obs), obs @ weight)
@@ -326,44 +313,58 @@ def test_validates_observation_signature(tmp_path, enable_grad):
         policy(obs.double())
 
 
-@pytest.mark.parametrize(
-    ("enable_grad", "package", "extra"),
-    [(False, "onnxruntime", "policy-deploy"), (True, "onnx2pytorch", "nmg")],
-)
-def test_missing_backend_names_its_optional_extra(
-    tmp_path, monkeypatch, enable_grad, package, extra
-):
+def test_missing_ort_names_its_optional_extra(tmp_path, monkeypatch):
     path = tmp_path / "local.onnx"
     path.touch()
-    monkeypatch.setitem(sys.modules, package, None)
-    with pytest.raises(ImportError, match=extra):
-        NeuralMotionGenerator.from_onnx(path, enable_grad=enable_grad)
+    monkeypatch.setitem(sys.modules, "onnxruntime", None)
+    with pytest.raises(ImportError, match="policy-deploy"):
+        NeuralMotionGenerator.from_onnx(path)
 
 
-def test_requires_a_local_onnx_file(tmp_path):
+def test_requires_a_local_model_file(tmp_path):
     with pytest.raises(FileNotFoundError):
         NeuralMotionGenerator.from_onnx(tmp_path / "missing.onnx")
+    with pytest.raises(FileNotFoundError):
+        NeuralMotionGenerator.from_checkpoint(tmp_path / "missing.pt")
 
 
-def test_torch_backend_rejects_ort_provider_options(tmp_path):
+def test_onnx_grad_request_names_the_native_loader(tmp_path):
+    with pytest.raises(ValueError, match="from_checkpoint"):
+        NeuralMotionGenerator.from_onnx(tmp_path / "policy.onnx", enable_grad=True)
+
+
+def test_checkpoint_backend_rejects_ort_provider_options(tmp_path):
     with pytest.raises(ValueError, match="provider options require enable_grad=False"):
-        NeuralMotionGenerator.from_onnx(
-            tmp_path / "policy.onnx",
-            enable_grad=True,
-            providers=["CPUExecutionProvider"],
+        NeuralMotionGenerator(
+            tmp_path / "policy.pt", enable_grad=True, providers=["CPUExecutionProvider"]
         )
+
+
+def test_checkpoint_requires_exported_actor_state(tmp_path):
+    path = tmp_path / "training.pt"
+    torch.save({"agent": {}}, path)
+    with pytest.raises(ValueError, match=r"nmg\.actor\.v1"):
+        NeuralMotionGenerator.from_checkpoint(path)
 
 
 _RELEASE_MODELS = {
     "franka": (
         7,
         417,
-        "2361954fda7b6f0d21445ebfb5099d31bdd67199bdadcecba71e0835f2157ad5",
+        (
+            "2361954fda7b6f0d21445ebfb5099d31bdd67199bdadcecba71e0835f2157ad5",
+            "59efcf225381d04ca511519207c634370fd75564e07ae6b332b4f54a66e2b90a",
+        ),
+        "a8548c3f2a469b789186bbc51cf67504e6e2275eaf2a199b2d7be4ba58a88bba",
     ),
     "piper": (
         6,
         391,
-        "223a02d7f1c3db1ea96352404f623ebfde7e1b00f3bc3d7a186a634dfea5ecf0",
+        (
+            "223a02d7f1c3db1ea96352404f623ebfde7e1b00f3bc3d7a186a634dfea5ecf0",
+            "88e7559799829cfcc15efc2efa3a14b2eb8ca19be2da0d4f89be925260b2bf2b",
+        ),
+        "85617136ec904db13df67b46c6f7dca83c04b41fc2cc31cc36659d594b05e686",
     ),
 }
 
@@ -408,6 +409,65 @@ def _release_observation(batch: int, joints: int) -> torch.Tensor:
     )
 
 
+def test_native_checkpoint_evaluates_batched_inputs_and_input_vjp(
+    tmp_path, monkeypatch
+):
+    """The .pt path loads a frozen native actor without an ONNX runtime."""
+    for package in ("onnx", "onnxruntime", "onnx2pytorch"):
+        monkeypatch.setitem(sys.modules, package, None)
+
+    joints = 2
+    layout = _WaypointObservationLayout(12, joints, True)
+    config = dict(
+        hidden_dim=8,
+        nhead=2,
+        num_layers=1,
+        ff_dim=16,
+        future_context=True,
+        disable_future_residual=False,
+    )
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(42)
+        actor = _NativeActor(layout, **config)
+        torch.nn.init.zeros_(actor.action_token)
+        torch.nn.init.zeros_(actor.waypoint_index_embedding)
+        model = _NormalizedActor(actor, layout.dim)
+    path = tmp_path / "policy.pt"
+    metadata = {
+        **layout.onnx_metadata,
+        "nmg.future_context": "true",
+        "nmg.disable_future_residual": "false",
+    }
+    torch.save(
+        dict(
+            format="nmg.actor.v1",
+            actor_config=config,
+            state_dict=model.state_dict(),
+            metadata=metadata,
+        ),
+        path,
+    )
+    policy = NeuralMotionGenerator.from_checkpoint(path)
+    assert policy.observation_metadata == metadata
+    assert policy.obs_dim == layout.dim and policy.output_dim == joints
+    for batch in (1, 3):
+        obs = _release_observation(batch, joints).requires_grad_()
+        action = policy(obs)
+        assert action.shape == (batch, joints)
+        (grad,) = torch.autograd.grad(action.sum(), obs)
+        direction = torch.zeros_like(obs)
+        direction[:, 0] = 1.0
+        step = 1.0e-3
+        with torch.no_grad():
+            ref = (
+                policy(obs + step * direction) - policy(obs - step * direction)
+            ).sum() / (2 * step)
+        torch.testing.assert_close((grad * direction).sum(), ref, rtol=1e-2, atol=2e-4)
+        assert grad.isfinite().all() and grad.abs().max() > 0
+        assert all(not parameter.requires_grad for parameter in policy.parameters())
+        assert all(parameter.grad is None for parameter in policy.parameters())
+
+
 @pytest.fixture
 def _full_precision_matmul():
     previous = torch.get_float32_matmul_precision()
@@ -425,24 +485,25 @@ def test_release_policy_vjp_matches_onnx_central_difference(
 ):
     """Use the pinned v1 files from a local directory for numeric qualification."""
     directory = os.environ.get("EMBODICHAIN_NMG_MODEL_DIR")
-    if not directory:
-        pytest.skip("Set EMBODICHAIN_NMG_MODEL_DIR to the pinned v1 model directory.")
+    checkpoint_dir = os.environ.get("EMBODICHAIN_NMG_CHECKPOINT_DIR", directory)
+    if not directory or not checkpoint_dir:
+        pytest.skip("Set EMBODICHAIN_NMG_MODEL_DIR to the pinned v1 artifacts.")
     if device == "cuda" and not torch.cuda.is_available():
         pytest.skip("CUDA is required for this NMG gradient check.")
     pytest.importorskip("onnxruntime")
-    pytest.importorskip("onnx2pytorch")
-    joints, obs_dim, sha256 = _RELEASE_MODELS[robot]
+    joints, obs_dim, onnx_digests, checkpoint_digest = _RELEASE_MODELS[robot]
     path = Path(directory) / f"{robot}.onnx"
     with path.open("rb") as stream:
-        assert hashlib.file_digest(stream, "sha256").hexdigest() == sha256
+        assert hashlib.file_digest(stream, "sha256").hexdigest() in onnx_digests
+    checkpoint = Path(checkpoint_dir) / f"{robot}.pt"
+    with checkpoint.open("rb") as stream:
+        assert hashlib.file_digest(stream, "sha256").hexdigest() == checkpoint_digest
     inference = NeuralMotionGenerator.from_onnx(
         path, providers=["CPUExecutionProvider"]
     )
-    policy = NeuralMotionGenerator.from_onnx(path, enable_grad=True, device=device)
+    policy = NeuralMotionGenerator.from_checkpoint(checkpoint, device=device)
     cpu_policy = (
-        NeuralMotionGenerator.from_onnx(path, enable_grad=True)
-        if device == "cuda"
-        else None
+        NeuralMotionGenerator.from_checkpoint(checkpoint) if device == "cuda" else None
     )
     assert policy.observation_metadata == inference.observation_metadata
     assert (policy.obs_dim, policy.output_dim, policy.fixed_batch_size) == (

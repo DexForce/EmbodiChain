@@ -16,11 +16,11 @@ generation and original-repository comparison runners belong to the
 Neural Motion Generator
 -----------------------
 
-``embodichain.extensions.models.policy.nmg`` loads a standalone NMG ONNX export.
-Its two backends share a batched FP32 observation-to-action interface. ONNX
-Runtime runs inference, and the optional PyTorch backend retains first-order
-observation gradients with frozen weights. The export supplies its own
-normalization and observation metadata. See the :doc:`NMG model guide
+``embodichain.extensions.models.policy.nmg`` evaluates standalone NMG models
+with a batched FP32 observation-to-action interface. ONNX Runtime evaluates an
+ONNX export for inference. A native PyTorch deployment checkpoint retains
+first-order observation gradients with frozen actor weights. Both formats
+carry normalization and observation metadata. See the :doc:`NMG model guide
 </resources/models/policy/nmg>` for supported configurations, weight downloads and examples.
 
 .. currentmodule:: embodichain.extensions.models.policy.nmg
@@ -30,7 +30,7 @@ normalization and observation metadata. See the :doc:`NMG model guide
    NeuralMotionGenerator
 
 .. autoclass:: NeuralMotionGenerator
-   :members: from_onnx, forward
+   :members: from_onnx, from_checkpoint, forward
 
 NeRD public entry points
 -------------------------

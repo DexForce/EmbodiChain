@@ -83,14 +83,15 @@ on the loaded model for its layout and fingerprint.
 
 ## Single-step inference and input gradients
 
-Use `NeuralMotionGenerator` when you already have an encoded observation
-and want a single action. The following function evaluates the same input
-with both backends. Install the optional PyTorch conversion dependencies
-alongside the inference runtime for this example.
+Use `NeuralMotionGenerator` with an encoded FP32 observation. ONNX inference
+loads `.onnx` with `from_onnx()` and uses the `policy-deploy` extra.
+Input gradients load a matching native `.pt` with `from_checkpoint()` and use
+PyTorch from the base installation.
 
-```bash
-python -m pip install -e '.[policy-deploy,nmg]'
-```
+The native `nmg.actor.v1` deployment checkpoint contains the actor state dict,
+network configuration, observation metadata and normalization buffers. Its
+`nmg.checkpoint_sha256` metadata identifies the source training checkpoint.
+Use the deployment checkpoint paired with the ONNX export by policy identity.
 
 ```python
 from pathlib import Path
@@ -99,29 +100,28 @@ import torch
 from embodichain.extensions.models.policy.nmg import NeuralMotionGenerator
 
 
-def compare_step(path: Path, obs: torch.Tensor, action_weights: torch.Tensor):
-    # obs: FP32 [B, obs_dim]. action_weights: FP32 [B, output_dim], same device.
-    inference = NeuralMotionGenerator.from_onnx(path, device=obs.device)
-    policy = NeuralMotionGenerator.from_onnx(path, device=obs.device, enable_grad=True)
+def compare_step(
+    onnx_path: Path,
+    checkpoint_path: Path,
+    obs: torch.Tensor,
+    action_weights: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    inference = NeuralMotionGenerator.from_onnx(onnx_path, device=obs.device)
+    policy = NeuralMotionGenerator.from_checkpoint(checkpoint_path, device=obs.device)
 
-    reference = inference(obs)
     obs = obs.requires_grad_(True)
     action = policy(obs)
     (d_obs,) = torch.autograd.grad(action, obs, grad_outputs=action_weights)
-    return reference, action, d_obs
+    return inference(obs), action, d_obs
 ```
 
-For repeated steps, load each model once and reuse it. ONNX Runtime returns
-detached actions. With `enable_grad=True`, PyTorch evaluates the converted
-graph with frozen weights and computes the vector-Jacobian product
-`d_obs = Jᵀ action_weights`. Keep the masks and active slot fixed when
-differentiating continuous features. The released files have been checked in
-FP32 on CPU and CUDA at batch sizes 1 and 3 using ORT forward values and
-central differences along joint-observation directions.
+Load each model once for repeated steps. The native backend freezes policy
+weights and follows the caller's PyTorch autograd context. Keep the waypoint
+masks and active slot fixed when differentiating continuous observation
+features. CPU and CUDA actions and input gradients are compared against the
+paired ONNX exports and directional finite differences.
 
-For a complete trajectory, [NeuralPlanner](../../../overview/sim/motion/planners/neural_planner.md)
-assembles the observations, checks the fingerprint and runs the policy in
-inference mode through `MotionGenerator`. The single-step gradient contract
-ends at the raw action. See the [model API](../../../api_reference/model_catalogs.rst)
-for loader arguments and the [installation guide](../../../quick_start/install.md#optional-nmg-input-gradients-nmg)
-for the backend dependencies.
+[NeuralPlanner](../../../overview/sim/motion/planners/neural_planner.md)
+assembles observations, checks the fingerprint and runs ONNX inference for
+complete trajectories. See the [model API](../../../api_reference/model_catalogs.rst)
+and [installation guide](../../../quick_start/install.md#nmg-input-gradients).

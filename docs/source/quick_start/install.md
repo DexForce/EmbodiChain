@@ -273,11 +273,9 @@ and cuDNN libraries using the
 [CUDA provider requirements](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html#requirements).
 Installing the extra does not override a policy's execution-provider selection.
 
-If you previously installed `nmg` for ORT inference, switch to `policy-deploy`.
-The current [`nmg` extra](#optional-nmg-input-gradients-nmg) enables input
-gradients. If the old extra installed the CPU package or both ORT packages are
-present, remove the existing runtime packages before installing the shared GPU
-runtime to avoid overlapping files.
+Use `policy-deploy` for ORT inference. If both ORT distributions are present,
+remove the existing runtime packages before installing the shared GPU runtime
+to avoid overlapping files.
 
 ```bash
 python -m pip uninstall -y onnxruntime onnxruntime-gpu
@@ -286,23 +284,17 @@ python -m pip install "embodichain[policy-deploy]" ${PIP_EXTRA_ARGS}
 
 For an editable checkout, use `-e ".[policy-deploy]"` in the second command.
 
-## Optional NMG input gradients (`nmg`)
+## NMG input gradients
 
-Install the `nmg` extra to use
-`NeuralMotionGenerator.from_onnx(..., enable_grad=True)`. It includes `onnx` to
-read the local model and `onnx2pytorch` to convert it into a PyTorch module with
-frozen weights. PyTorch autograd computes gradients of a single policy step's
-actions with respect to continuous observations.
+The standard EmbodiChain installation includes PyTorch for native NMG actor
+checkpoints. Load a local deployment `.pt` with
+`NeuralMotionGenerator.from_checkpoint(checkpoint, device=...)`. The checkpoint
+provides model weights, observation normalization and the observation contract.
+Install `policy-deploy` when the same environment also runs an ONNX policy
+through ONNX Runtime.
 
-Use the index variables from [Package indexes](#package-indexes).
-
-```bash
-python -m pip install "embodichain[nmg]" ${PIP_EXTRA_ARGS}
-```
-
-For an editable checkout, use `python -m pip install -e ".[nmg]" ${PIP_EXTRA_ARGS}`.
-For both ORT inference and NMG input gradients, install
-`embodichain[policy-deploy,nmg]` or `.[policy-deploy,nmg]` from a checkout.
+See the [NMG model guide](../resources/models/policy/nmg.md) for the checkpoint
+format and a single-step gradient example.
 
 ## Newton planning geometry
 

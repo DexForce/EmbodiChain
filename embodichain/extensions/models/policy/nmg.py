@@ -28,33 +28,28 @@ from torch import nn
 
 from embodichain.utils import logger
 
+from ._nmg_checkpoint import _load_native_actor
+
 if TYPE_CHECKING:
     from onnxruntime import InferenceSession
 
 __all__ = ["NeuralMotionGenerator"]
 
 
-class _DeviceRange(nn.Module):
-    def forward(
-        self, start: torch.Tensor, limit: torch.Tensor, delta: torch.Tensor
-    ) -> torch.Tensor:
-        return torch.arange(start, limit, delta, dtype=start.dtype, device=start.device)
-
-
 class NeuralMotionGenerator(nn.Module):
-    """Run a standalone NMG ONNX policy on batched observations.
+    """Evaluate batched observations with a deployed NMG policy.
 
-    The model includes observation normalization and returns unscaled actions.
-    The default ONNX Runtime backend returns detached actions. With
-    ``enable_grad=True``, the ONNX graph becomes a frozen PyTorch model whose
-    first-order input gradients follow the caller's autograd context. Keep
-    discrete masks and the active waypoint fixed when differentiating.
+    An ONNX export uses ONNX Runtime for detached actions. A native actor
+    checkpoint uses PyTorch with frozen weights and follows the caller's
+    autograd context for first-order gradients of actions with respect to
+    continuous observations. Keep the active waypoint and masks fixed
+    when differentiating.
 
     Attributes:
         obs_dim: Width of the exported observation.
         output_dim: Number of output joint actions.
         fixed_batch_size: Required batch size, or ``None`` for dynamic batches.
-        observation_metadata: Metadata carried by the ONNX export.
+        observation_metadata: Observation contract carried by the model artifact.
     """
 
     def __init__(
@@ -75,10 +70,15 @@ class NeuralMotionGenerator(nn.Module):
         path = Path(path)
         if not path.is_file():
             raise FileNotFoundError(f"ONNX policy not found: {path}")
-        if path.suffix.lower() != ".onnx":
-            raise ValueError(
-                f"NeuralMotionGenerator only accepts standalone .onnx policies, got {path}."
+        suffix = ".pt" if enable_grad else ".onnx"
+        if path.suffix.lower() != suffix:
+            message = (
+                "Input gradients require a native .pt deployment checkpoint. "
+                "Call NeuralMotionGenerator.from_checkpoint()."
+                if enable_grad
+                else f"NeuralMotionGenerator only accepts standalone .onnx policies, got {path}."
             )
+            raise ValueError(message)
 
         device = torch.device(device)
         self._session: InferenceSession | None = None
@@ -100,33 +100,53 @@ class NeuralMotionGenerator(nn.Module):
         providers: Sequence[str] | None = None,
         cuda_use_tf32: bool | None = None,
     ) -> NeuralMotionGenerator:
-        """Load the selected backend from a local ONNX file.
+        """Load a local ONNX policy for ONNX Runtime inference.
 
         Args:
             path: Path to the standalone policy export.
-            enable_grad: Enable first-order observation gradients with PyTorch.
-            device: Initial PyTorch model device or CUDA ordinal for ORT.
+            enable_grad: Deprecated selector. Observation gradients use :meth:`from_checkpoint`.
+            device: CPU or CUDA device for ONNX Runtime.
                 Reload the model to bind an ORT session to a different device.
             providers: Optional ORT execution providers in priority order.
             cuda_use_tf32: Optional TF32 setting for the ORT CUDA provider.
 
         Returns:
-            A policy ready to evaluate with the selected backend.
+            A policy ready for inference.
 
         Raises:
             FileNotFoundError: If the local model file is missing.
-            ImportError: If the selected backend's optional dependencies are absent.
+            ImportError: If ONNX Runtime is unavailable.
             TypeError: If ``cuda_use_tf32`` is neither a bool nor ``None``.
             ValueError: If the file suffix, model signature or backend options
                 are incompatible.
         """
+        if enable_grad:
+            raise ValueError(
+                "Input gradients require a native .pt deployment checkpoint. "
+                "Call NeuralMotionGenerator.from_checkpoint()."
+            )
         return cls(
             path,
-            enable_grad=enable_grad,
             device=device,
             providers=providers,
             cuda_use_tf32=cuda_use_tf32,
         )
+
+    @classmethod
+    def from_checkpoint(
+        cls, path: str | Path, *, device: str | torch.device = "cpu"
+    ) -> NeuralMotionGenerator:
+        """Load a native NMG actor checkpoint for differentiable evaluation.
+
+        Args:
+            path: Path to a local NMG actor deployment checkpoint.
+            device: Device on which to evaluate the policy.
+
+        Returns:
+            A policy with frozen weights and input gradients controlled by
+            the caller's PyTorch autograd context.
+        """
+        return cls(path, enable_grad=True, device=device)
 
     def _load_ort(
         self,
@@ -197,44 +217,11 @@ class NeuralMotionGenerator(nn.Module):
         logger.log_info("NMG ONNX execution providers: " + ", ".join(session_providers))
 
     def _load_torch(self, path: Path, device: torch.device) -> None:
-        try:
-            import onnx
-            from onnx2pytorch import ConvertModel
-            from onnx2pytorch.operations import Range
-        except ImportError as exc:
-            raise ImportError(
-                "NMG input gradients require ONNX and onnx2pytorch. Install them with "
-                "pip install 'embodichain[nmg]'."
-            ) from exc
-
-        def float_shape(value: onnx.ValueInfoProto) -> list[int | None] | None:
-            tensor = value.type.tensor_type
-            if tensor.elem_type != onnx.TensorProto.FLOAT or not tensor.HasField(
-                "shape"
-            ):
-                return None
-            return [
-                dim.dim_value if dim.HasField("dim_value") else None
-                for dim in tensor.shape.dim
-            ]
-
-        model = onnx.load(path, load_external_data=False)
-        initializers = {value.name for value in model.graph.initializer}
+        model, layout, metadata = _load_native_actor(path)
         self._set_signature(
-            [
-                float_shape(value)
-                for value in model.graph.input
-                if value.name not in initializers
-            ],
-            [float_shape(value) for value in model.graph.output],
-            {item.key: item.value for item in model.metadata_props},
+            [(None, layout.dim)], [(None, layout.num_controlled_joints)], metadata
         )
-        converted = ConvertModel(model)
-        # onnx2pytorch 0.6.0 creates Range results on CPU by default.
-        for name, child in list(converted.named_children()):
-            if isinstance(child, Range):
-                converted.set_submodule(name, _DeviceRange())
-        self._torch_model = converted.requires_grad_(False).to(device)
+        self._torch_model = model.requires_grad_(False).to(device)
 
     def _set_signature(
         self,
