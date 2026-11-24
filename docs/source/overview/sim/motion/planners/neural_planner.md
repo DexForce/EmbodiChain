@@ -4,17 +4,18 @@
 :class: warning
 
 `NeuralPlanner` is an **experimental** feature. The API, ONNX model contract,
-and default parameters may change without a deprecation cycle. It is currently
-only validated on the **Franka Panda** robot.
+and default parameters may change without a deprecation cycle.
 ````
 
-`NeuralPlanner` is a learning-based EEF waypoint planner. It rolls out a
-standalone NMG ONNX policy through `MotionGenerator` to reach Cartesian targets.
-The ONNX graph must include raw-observation normalization.
+`NeuralPlanner` uses a standalone NMG ONNX policy to plan an ordered sequence of joint
+and Cartesian constraints through `MotionGenerator`. The published Franka FR3
+and PiPER V100 policies include observation normalization. See the
+[NMG model guide](../../../../resources/models/nmg.md) for recordings, compatible
+weights, and single-step inference and differentiation.
 
 ## Configuration
 
-Install the optional runtime and export the trained policy to ONNX before use:
+Install the runtime and select a compatible ONNX policy before constructing the planner.
 
 ```bash
 pip install -e '.[policy-deploy]'
@@ -33,14 +34,17 @@ from embodichain.lab.sim.motion.motion_generator import (
 from embodichain.lab.sim.motion.planners import MoveType, NeuralPlannerCfg, PlanState
 from embodichain.lab.sim.motion.planners.neural_planner import NeuralPlanOptions
 
-onnx_model_path = "/path/to/best_mean.onnx"
+# This configuration uses the released Franka FR3 model and its matching embodiment.
+onnx_model_path = "/path/to/v1/franka.onnx"
 
 motion_generator = MotionGenerator(
     cfg=MotionGenCfg(
         planner_cfg=NeuralPlannerCfg(
             robot_uid=robot.uid,
             onnx_model_path=onnx_model_path,
-            control_part="main_arm",
+            control_part="arm",
+            num_arm_joints=7,
+            num_waypoints=12,
         )
     )
 )
@@ -52,7 +56,7 @@ result = motion_generator.generate(
     ],
     options=MotionGenOptions(
         plan_opts=NeuralPlanOptions(
-            control_part="main_arm",
+            control_part="arm",
             start_qpos=start_qpos,
         ),
     ),
@@ -62,9 +66,7 @@ result = motion_generator.generate(
 ## Example
 
 ```bash
-python examples/sim/motion/planners/neural_planner.py \
-  --headless --device cuda \
-  --onnx-model-path /path/to/best_mean.onnx
+embodichain run-example sim/motion/planners/nmg/franka --headless --device cpu
 ```
 
 The NMG exporter produces a dynamic-batch ONNX policy, so one graph can serve

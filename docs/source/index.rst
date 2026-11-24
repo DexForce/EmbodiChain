@@ -47,7 +47,6 @@ Table of Contents
 
    features/mcp/index
    features/online_data.md
-   features/neural_dynamics.md
    features/generative_sim/index*
    features/workspace_analyzer/index*
    features/toolkits/index*
@@ -57,6 +56,7 @@ Table of Contents
    :caption: Resources
    :glob:
 
+   resources/models/index
    resources/assets.md
    resources/robot/index*
    resources/task/index*
