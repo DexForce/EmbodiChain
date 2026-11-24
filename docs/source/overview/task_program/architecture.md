@@ -54,15 +54,15 @@ are public for integration authors:
 
 | Contract family | Main types | Responsibility |
 |---|---|---|
-| Semantic Calls | {class}`~embodichain.lab.task_program.semantics.Pick`, {class}`~embodichain.lab.task_program.semantics.Place`, {class}`~embodichain.lab.task_program.semantics.HandOver`, {class}`~embodichain.lab.task_program.semantics.RegisteredSemanticCall` | Immutable object-centric task intent. |
+| Semantic Calls | {class}`~embodichain.lab.task_program.semantics.Pick`, {class}`~embodichain.lab.task_program.semantics.Place`, {class}`~embodichain.lab.task_program.semantics.HandOver`, {class}`~embodichain.lab.task_program.semantics.MoveHeldObjectCall`, {class}`~embodichain.lab.task_program.semantics.RegisteredSemanticCall` | Immutable object-centric task intent. |
 | Scene semantics | {class}`~embodichain.lab.task_program.semantics.SceneRegistry`, {class}`~embodichain.lab.task_program.semantics.SceneManifest` | Canonical identity, topology, affordances, and provider-free snapshots. |
 | Robot semantics | {class}`~embodichain.lab.task_program.semantics.RobotSkillProfile`, {class}`~embodichain.lab.task_program.semantics.SkillPolicyPreset` | Embodiment resources, Atomic Skill bindings, policies, and effect assurance. |
 | Effects and evidence | {class}`~embodichain.lab.task_program.semantics.SemanticEffectSpec`, {class}`~embodichain.lab.task_program.semantics.EffectMonitorRef`, {class}`~embodichain.lab.task_program.semantics.EffectEvidenceCollector` | Typed postconditions and measured-evidence routing. |
 
-The built-in call catalog contains `Pick`, `Place`, and `HandOver`. Extensions
-use a declarative `RegisteredSemanticCall`; the trusted integration, never the
-program payload, owns the corresponding lowerer. See {doc}`scene_registry` and
-{doc}`robot_profiles` for the two main integration contracts.
+The built-in call catalog contains `Pick`, `Place`, `HandOver`, and
+`MoveHeldObjectCall`. Extensions use a declarative `RegisteredSemanticCall`
+and get their lowerers from the trusted integration. See {doc}`scene_registry`
+and {doc}`robot_profiles` for the two main integration contracts.
 
 ## Program schema
 
@@ -78,8 +78,10 @@ embodiments.
 Supported program nodes are {class}`SequenceCfg`, {class}`RepeatCfg`,
 {class}`SegmentCfg`, {class}`InvokeCfg`, and {class}`ParallelCfg`. A
 {class}`BarrierCfg` belongs to its enclosing parallel node. Built-in call
-configs are {class}`PickCfg`, {class}`PlaceCfg`, and {class}`HandOverCfg`;
-{class}`RegisteredSemanticCallCfg` is the allowlisted extension form.
+configs are {class}`PickCfg`, {class}`PlaceCfg`, {class}`HandOverCfg`, and
+{class}`MoveHeldObjectCfg`. Use {class}`RegisteredSemanticCallCfg` for an
+allowlisted extension. See {doc}`authoring` for both YAML forms and the
+arguments of each call.
 
 The complete official program (also used by the Quickstart):
 
@@ -117,6 +119,7 @@ registration still matches the compiled scene/profile/catalog snapshots.
 
 ## Configure a simulation environment
 
+See {doc}`deployment` for component selection, ownership, and validation.
 Configuration-defined Task Programs separate the reusable physical environment
 from the runnable task deployment. An augmented deployment can add a
 task-facing expansion declaration alongside the core owners:
@@ -261,6 +264,10 @@ deployment.
 
 ## Runtime lifecycle
 
+The lifecycle below describes expert execution. In
+[policy mode](deployment.md#choose-expert-execution-or-policy-progress),
+policy actions drive the robot and post-step evidence advances program stages.
+
 The environment adapter compiles or accepts a trusted {class}`CompiledTaskProgram`,
 assembles fresh live providers, and creates one `TaskProgramDemoBridge`.
 `EmbodiedEnv.create_demo_segments()` exposes lazy actions; the bridge never
@@ -335,16 +342,17 @@ runtime.
 
 | Environment | Assurance | What it demonstrates |
 |---|---|---|
-| `TaskProgramRepeatedPickPlace-v1` | projected | Bounded repeat and cyclic targets over Pick and Place. |
-| `TaskProgramRepeatedPickPlace-Newton-v1` | projected | Newton companion using a scoped grasp/contact profile selected from the Default comparison. |
-| `TaskProgramRepeatedPickPlace-Franka-Newton-v1` | projected | Newton companion for the Franka embodiment. |
+| `TaskProgramRepeatedPickPlace-Franka-v1` | projected | The Quickstart's bounded repeat and cyclic targets over Pick and Place. |
+| `TaskProgramRepeatedPickPlace-v1` | projected | The UR5 deployment with reusable scene, embodiment, and expansion components. |
 | `TaskProgramOpenDrawer-v1` | projected | An allowlisted registered call lowered to atomic Slide. |
-| `TaskProgramOpenDrawer-Newton-v1` | projected | Newton companion using the scoped drawer-handle contact profile selected from the Default comparison. |
 | `HandOver-v1` | verified | Coordinated dual-resource HandOver with measured evidence, settling, and final-target validation. |
 | `PourWater-v1` | projected | Registered held-object transport and Pour calls composed after Pick. |
 
-Projected examples demonstrate planning and command generation only. They must
-not be presented as physically qualified task-success integrations.
+Repeated Pick/Place and Open Drawer select separate Default and Newton physical
+environment files under the same deployment ID. See
+[select a task and environment](deployment.md#select-a-task-and-environment)
+for backend selection. Use the [run verification steps](deployment.md#verify-the-run)
+to inspect command completion and measured acceptance for the selected task.
 
 ## Recommended change sites
 

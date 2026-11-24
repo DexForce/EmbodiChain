@@ -58,9 +58,11 @@ The repeated-pick-place catalog is authored alongside its deployments:
 
 `default_deployment` names a declared deployment. Each `config` references a
 task-relative JSON, YAML or YML runnable configuration; optional `validation`
-references a task-relative JSON report. Select a different deployment to change
-physics backends: launcher `--physics` does not override the backend owned by
-the physical environment component.
+references a task-relative JSON report. For a deployment with an
+`environment.default/newton` mapping, use `--physics` to select one of the
+declared environment files. For a deployment with a single environment
+component, choose a deployment whose component declares the desired backend.
+See {doc}`run_task` for the selection rules.
 
 ## Measure an independent physical objective
 

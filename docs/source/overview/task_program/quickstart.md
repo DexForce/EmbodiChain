@@ -25,10 +25,10 @@ embodichain show-task embodichain.extensions.tasks:repeated_pick_place
 
 Find `franka: TaskProgramRepeatedPickPlace-Franka-v1` in the detailed output.
 It selects a Franka Panda, `envs/default.yaml` for Default physics, and
-`task_program/program.yaml`. The deployment also supports a separate Newton
-environment; this walkthrough explicitly selects Default. At this baseline,
-`show-task` displays `Physics: unavailable` for a deployment with a backend
-mapping; that does not mean the selected environment has no physics.
+`task_program/program.yaml`. The same deployment can select `envs/newton.yaml`
+with `--physics newton`. This walkthrough sets `--physics default` to match
+the run in {doc}`validation`. See {doc}`deployment` for the component selection
+and backend rules.
 
 The following commands use the **installed package reference**, so you do not
 need the source checkout or the absolute install path printed by `show-task`.

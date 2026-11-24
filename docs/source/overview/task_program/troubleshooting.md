@@ -7,6 +7,9 @@ program and full log together. For the Quickstart, reproduce with seed 7,
 `--num_envs 1 --max_episodes 1`, Default physics, and data saving disabled.
 If the failure occurs during execution, add `--debug-mode` to the complete
 Quickstart command to print the failed demo result and per-segment diagnostics.
+For configuration failures, begin with the
+[resolved deployment report](deployment.md#inspect-the-resolved-deployment)
+to identify the selected files, backend, and effective bindings.
 
 The two errors explicitly marked **reproduced** below were observed on the
 {doc}`validation` baseline. Other entries describe diagnostic branches; a symptom
@@ -29,6 +32,17 @@ references in that order.
 Do not copy only `task.franka.yaml` into an empty directory while retaining
 relative component paths. Python `load_task_program()` takes a filesystem path;
 it does not implement the launcher's package-resource lookup.
+
+## The requested physics backend does not match the deployment
+
+**First check** the runnable deployment's `environment` selector. A
+`default`/`newton` mapping can select either declared variant with `--physics`.
+A single `environment.component` declares one backend in the selected file.
+
+**Repair** by using the backend declared by the component, or by selecting a
+deployment with a component for the requested backend. The selected environment
+file supplies its own physics settings. See
+[select a task and environment](deployment.md#select-a-task-and-environment).
 
 ## A scene object is unknown
 
@@ -63,6 +77,17 @@ one configuration owner is not automatically valid in another.
 **Repair:** remove the field. Use the full downloadable programs as structural
 references, and consult [motion timing](recipes.md#change-motion-timing) for
 execution-policy changes. This reproduced error also occurred before stepping.
+
+## The MLLM response fails at a `call` path
+
+With `mllm_payload_mismatch`, check the original JSON at the reported path.
+The MLLM frontend looks up each `call` in its original position under the
+explicit program tree. For example, a sequential call can be at
+`program.items[0].call`.
+
+Emit an `invoke` node with a nested `call` object at that position. See
+[choosing a form](authoring.md#choosing-a-form) for the recommended JSON shape
+and the call subset accepted by the MLLM frontend.
 
 ## A call is unknown or has no lowerer
 
