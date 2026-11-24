@@ -163,6 +163,15 @@ class Camera(BaseSensor):
 
     SUPPORTED_DATA_TYPES = ["color", "depth", "mask", "normal", "position"]
 
+    @property
+    def supports_restored_state_sampling(self) -> bool:
+        """Allow image acquisition after publishing the restored render state.
+
+        Returns:
+            True; acquisition renders the current scene without a physics step.
+        """
+        return True
+
     def __init__(
         self,
         config: CameraCfg,

@@ -1,0 +1,156 @@
+environment_id: cobot_joint_reward
+physics: default
+max_episodes: 5
+max_episode_steps: 64
+simulation:
+  light:
+    direct:
+    - uid: light_1
+      light_type: sun
+      color:
+      - 1.0
+      - 1.0
+      - 1.0
+      intensity: 5.0
+      direction:
+      - 0.0
+      - 0.0
+      - -1.0
+  background:
+  - uid: table
+    shape:
+      shape_type: Mesh
+      fpath: CircleTableSimple/circle_table_simple.ply
+    attrs:
+      mass_props:
+        mass: 10.0
+      material_props:
+        static_friction: 0.95
+        dynamic_friction: 0.9
+        restitution: 0.01
+    body_scale:
+    - 1
+    - 1
+    - 1
+    body_type: kinematic
+    init_pos:
+    - 0.725
+    - 0.0
+    - 0.825
+    init_rot:
+    - 0
+    - 90
+    - 0
+  rigid_object:
+  - uid: block_1
+    shape:
+      shape_type: Cube
+      size:
+      - 0.05
+      - 0.05
+      - 0.05
+    attrs:
+      mass_props:
+        mass: 0.05
+      rigid_props:
+        max_depenetration_velocity: 10.0
+        min_position_iters: 32
+        min_velocity_iters: 8
+      collision_props:
+        contact_offset: 0.003
+        rest_offset: 0.001
+      material_props:
+        static_friction: 0.5
+        dynamic_friction: 0.5
+        restitution: 0.0
+    init_pos:
+    - 0.75
+    - -0.1
+    - 0.9
+    body_scale:
+    - 1
+    - 1
+    - 1
+  - uid: block_2
+    shape:
+      shape_type: Cube
+      size:
+      - 0.05
+      - 0.05
+      - 0.05
+    attrs:
+      mass_props:
+        mass: 0.05
+      rigid_props:
+        max_depenetration_velocity: 10.0
+        min_position_iters: 32
+        min_velocity_iters: 8
+      collision_props:
+        contact_offset: 0.003
+        rest_offset: 0.001
+      material_props:
+        static_friction: 0.5
+        dynamic_friction: 0.5
+        restitution: 0.0
+    init_pos:
+    - 0.75
+    - 0.1
+    - 0.9
+    body_scale:
+    - 1
+    - 1
+    - 1
+env:
+  task_instruction: Stack the two blocks into a stable tower with block 2 on top of
+    block 1.
+  events: {}
+  observations:
+    norm_robot_eef_joint:
+      func: normalize_robot_joint_data
+      mode: modify
+      name: robot/qpos
+      params:
+        control_parts:
+        - left_eef
+        - right_eef
+    block_1_pose:
+      func: get_rigid_object_pose
+      mode: add
+      name: block_1_pose
+      params:
+        entity_cfg:
+          uid: block_1
+    block_2_pose:
+      func: get_rigid_object_pose
+      mode: add
+      name: block_2_pose
+      params:
+        entity_cfg:
+          uid: block_2
+  actions:
+    left_arm:
+      func: RelativeJointPositionAction
+      params:
+        part_name: left_arm
+        scale: 0.01
+    left_eef:
+      func: RelativeJointPositionAction
+      params:
+        part_name: left_eef
+        scale: 0.01
+    right_arm:
+      func: RelativeJointPositionAction
+      params:
+        part_name: right_arm
+        scale: 0.01
+    right_eef:
+      func: RelativeJointPositionAction
+      params:
+        part_name: right_eef
+        scale: 0.01
+  rewards:
+    success:
+      func: success_reward
+      mode: add
+      weight: 10.0
+      params: {}

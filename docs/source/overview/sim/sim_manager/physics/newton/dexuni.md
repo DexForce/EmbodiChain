@@ -54,7 +54,7 @@ scene combinations are summarized at the end of this page.
 | :--- | :--- | :--- |
 | Garment and cloth manipulation | Grasping, lifting, dragging, folding, and self-contact | [Cloth pickup](https://github.com/DexForce/EmbodiChain/blob/main/examples/sim/demo/pick_up_cloth.py), [T-shirt folding](https://github.com/DexForce/EmbodiChain/blob/main/examples/sim/demo/fold_tshirt.py) |
 | Soft-object interaction | Pressing, deformation, and recovery after release | [Soft-body pressing](https://github.com/DexForce/EmbodiChain/blob/main/examples/sim/demo/press_softbody.py) |
-| Flexible packaging and inflatable structures | Bag deformation, object loading, and sealed-cavity pressure response | [Surface and cloth configuration](../../../sim_cloth.md) |
+| Flexible packaging and inflatable structures | Bag deformation, object loading, and sealed-cavity pressure response | [Surface and cloth configuration](../../../sim_surface_deformable_object.md) |
 | Cable interaction | Bending, pulling, external loads, and fixed endpoint motion | [Cable creation](https://github.com/DexForce/EmbodiChain/blob/main/scripts/tutorials/sim/create_cable.py) |
 | Robot pouring | Moving containers and transferring liquid | [Franka pouring demo](https://github.com/DexForce/EmbodiChain/blob/main/examples/sim/demo/franka_dexuni_pour_demo.py) |
 
@@ -82,8 +82,8 @@ advance the simulation and read object states through `SimulationManager`.
 Keep `collision_cfg=None` when selecting DexUni explicitly to use its contact
 handling.
 
-For asset setup and state access, see [volume soft bodies](../../../sim_soft_object.md)
-and [surface cloth](../../../sim_cloth.md). The
+For asset setup and state access, see [volume soft bodies](../../../sim_volume_deformable_object.md)
+and [surface cloth](../../../sim_surface_deformable_object.md). The
 [Newton Solver Guide](https://newton-physics.github.io/newton/stable/solvers/index.html)
 describes Newton's native solver options.
 

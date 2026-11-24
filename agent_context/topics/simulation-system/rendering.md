@@ -278,6 +278,9 @@ is invalidated at preparation entry and published only after full success.
 Gym defers manager output and emits one combined summary at initialization
 completion. `startup_summary` controls verbosity; `dexsim_startup_info` controls
 native startup information independently of Newton Warp-log suppression.
+Scene asset counts use manager-registered UIDs across the scene. Both modes
+show sensor details. Full mode also lists object UIDs and shows each registered
+direct light's UID, type, and scope.
 Warnings/errors remain visible. Device names reuse existing Warp metadata;
 diagnostics must not initialize PyTorch CUDA. Requested/resolved Newton solver
 and graph status are separate; pending must never be reported as captured.

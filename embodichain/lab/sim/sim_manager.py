@@ -3912,9 +3912,9 @@ class SimulationManager:
             is None
             for name in selectors
         ):
-            from embodichain.lab.sim._runtime_controls import _DexUniFluidJointOwnership
+            from embodichain.lab.sim._runtime_controls import _DexUniAllJointOwnership
 
-            self._fluid_joint_ownership_control = _DexUniFluidJointOwnership()
+            self._fluid_joint_ownership_control = _DexUniAllJointOwnership()
             self.add_runtime_control(self._fluid_joint_ownership_control)
         self._fluid_objects[cfg.uid] = fluid
         self.notify_visualization_topology_changed()

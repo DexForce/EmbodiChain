@@ -367,3 +367,14 @@ establish a learning-env or functional-gradient contract.
 .. autofunction:: embodichain.extensions.models.dynamics.worldparticle.data.load_sample
 
 .. autoclass:: embodichain.extensions.solvers.physics.worldparticle.provider.WorldParticleProvider
+
+
+LeWM visual dynamics
+--------------------
+
+The :doc:`lewm` reference covers visual dynamics, training and planning.
+
+.. toctree::
+   :hidden:
+
+   lewm

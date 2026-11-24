@@ -81,6 +81,8 @@ class RLTaskCfg:
     success: dict[str, ConditionCfg] = dict()
     failure: dict[str, ConditionCfg] = dict()
     truncation: dict[str, ConditionCfg] = dict()
+    reward_composition: dict[str, Any] | None = None
+    skill: dict[str, Any] | None = None
 
 
 @configclass

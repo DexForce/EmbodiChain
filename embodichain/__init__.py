@@ -15,6 +15,7 @@
 # ----------------------------------------------------------------------------
 
 import os
+import sys
 
 embodichain_dir = os.path.dirname(__file__)
 
@@ -26,7 +27,7 @@ def _get_version():
         with open(version_file, "r") as f:
             return f.read().strip()
     except FileNotFoundError:
-        print("VERSION file not found.")
+        print("VERSION file not found.", file=sys.stderr)
         return "unknown"
 
 

@@ -245,7 +245,7 @@ def scene_is_ready(sim: SimulationManager) -> bool:
 
 
 def scene_rows(sim: SimulationManager) -> list[Row]:
-    """Read the current scene snapshot, with counts per replicated environment."""
+    """Read the prepared scene snapshot, counting registered asset UIDs."""
     if not scene_is_ready(sim):
         return [("Scene", "State", "PENDING (not prepared)")]
     rows = []
@@ -260,36 +260,46 @@ def scene_rows(sim: SimulationManager) -> list[Row]:
                 ),
             ]
         )
-    rows.extend(
-        [
-            ("Scene / env", "Robots", str(len(sim._robots))),
-            ("Scene / env", "Articulations", str(len(sim._articulations))),
-            ("Scene / env", "Rigid objects", str(len(sim._rigid_objects))),
-            (
-                "Scene / env",
-                "Visual objects",
-                str(len(getattr(sim, "_visual_objects", {}))),
-            ),
-            ("Scene / env", "Object groups", str(len(sim._rigid_object_groups))),
-            ("Scene / env", "Deformables", str(len(sim._deformable_objects))),
-            ("Scene / env", "Fluids", str(len(getattr(sim, "_fluid_objects", {})))),
-            ("Scene / env", "Sensors", str(len(sim._sensors))),
-            (
-                "Scene",
-                "Default ground",
-                "GLOBAL" if sim._default_plane is not None else "NONE",
-            ),
-            ("Scene", "Native window", "OPEN" if sim.is_window_opened else "CLOSED"),
-        ]
+    asset_registries = (
+        ("Robots", sim._robots),
+        ("Articulations", sim._articulations),
+        ("Rigid objects", sim._rigid_objects),
+        ("Rigid object groups", sim._rigid_object_groups),
+        ("Particle deformables", sim._deformable_objects),
+        ("Cable objects", sim._cable_objects),
+        ("Fluid objects", sim._fluid_objects),
+        ("Visual objects", sim._visual_objects),
     )
+    full = sim.sim_config.startup_summary == "full"
+    for label, registry in asset_registries:
+        count = str(len(registry))
+        if full and registry:
+            count += f" ({', '.join(registry)})"
+        rows.append(("Scene assets", label, count))
+    rows.append(("Scene assets", "Direct lights", str(len(sim._lights))))
+    rows.append(("Scene assets", "Sensors", str(len(sim._sensors))))
     for uid, sensor in sim._sensors.items():
         sensor_cfg = sensor.cfg
         description = type(sensor).__name__
         if hasattr(sensor_cfg, "width"):
             description += f" · {sensor_cfg.width} × {sensor_cfg.height}"
             description += " · " + "/".join(sensor_cfg.get_data_types())
-        rows.append(("Sensors / env", uid, description))
-    rows.append(("Scene", "State", "READY"))
+        rows.append(("Sensor details", uid, description))
+    if full:
+        for uid, light in sim._lights.items():
+            scope = "global" if light.is_global else "per env"
+            rows.append(("Light details", uid, f"{light.cfg.light_type} · {scope}"))
+    rows.extend(
+        [
+            (
+                "Scene",
+                "Default ground",
+                "GLOBAL" if sim._default_plane is not None else "NONE",
+            ),
+            ("Scene", "Native window", "OPEN" if sim.is_window_opened else "CLOSED"),
+            ("Scene", "State", "READY"),
+        ]
+    )
     return rows
 
 

@@ -123,6 +123,8 @@ doc_redirects = {
     "features/interaction/gizmo": "overview/sim/visualization/gizmo",
     "features/interaction/preview_asset": "guides/preview_asset",
     "overview/sim/viser_visualization": "overview/sim/visualization/viser",
+    "overview/sim/sim_soft_object": "overview/sim/sim_volume_deformable_object",
+    "overview/sim/sim_cloth": "overview/sim/sim_surface_deformable_object",
     "resources/robot/anymal_c": "resources/robot/anybotics/anymal_c",
     "resources/robot/microduck": "resources/robot/pollen_robotics/microduck",
     "resources/robot/unitree_g1": "resources/robot/unitree/g1",
