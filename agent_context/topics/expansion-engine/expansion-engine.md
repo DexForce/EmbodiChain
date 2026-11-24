@@ -59,8 +59,10 @@ budgets and export requests. Recipe IDs survive interrupted retries and B change
 new attempt IDs distinguish physical executions, and persistent job-instance IDs
 separate independently collected episodes. Native scene-case identity includes the
 logical recipe: independently prepared recipes must not share trajectory-only
-coverage admission merely because their sampled physical values match. Frozen writes are recovered before
-allocating new attempts. A hard-loss time budget is an explicit lower bound.
+coverage admission merely because their sampled physical values match. Frozen
+writes are recovered before allocating new attempts. The single writer indexes
+attempt IDs and statuses from durable records and updates the index at record
+publication. A hard-loss time budget is an explicit lower bound.
 
 Confirmed episodes may export before the collection target is met. Stage
 failures remain independent; export-only recovery opens no World and needs no
@@ -188,8 +190,9 @@ checks reject unsupported geometry, source violations and parameter drift.
 
 Media spools own copies, bound raw buffering and publish hashed manifests. Encoding
 has bounded transient copies; no per-candidate dense full-episode image array is held.
-Frame readers stream selected frames from stored blocks; full artifact audits still
-validate bounded blocks. LeRobot export streams confirmed parents and visual children through the existing
+Frame readers stream selected frames from stored blocks. Submission compares
+numeric fields against the frozen archive and verifies its media before publishing
+the receipt. LeRobot export streams confirmed parents and visual children through the existing
 recorder and checks the exact final journal identity set. ODS remains unchanged.
 `export_expansion_episodes` additionally publishes one portable LeRobot dataset
 per confirmed parent. Cached evidence reads still hash every file byte and
@@ -209,8 +212,10 @@ changes, plus explicit robot joint stiffness/damping scales. Single-body Newton 
 See the runnable jobs and qualification instructions in `examples/expansion/engine/`.
 
 Geometry, actual physics, visual and source coverage remain separate diagnostic
-channels. Native calibration/state readout is batched once per frame; per-row checks
-use the captured evidence. Engine and host timing phases are nested, not additive.
+channels. The frame collector and built-in validators share owned batched state
+fields. Custom validators receive portable scene snapshots. Pose-sampling
+diagnostics checkpoint at growing event counts and record full history on
+completion. Engine and host timing phases are nested, not additive.
 
 Focused coverage lives in `tests/lab/expansion/`, `tests/data_pipeline/test_media_spool.py`,
 `tests/sim/scene/` and the existing Task Program/Real2Sim suites. Native qualification

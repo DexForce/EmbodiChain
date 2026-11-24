@@ -44,6 +44,47 @@ class RecipeAttempt:
     directory: Path
 
 
+class _AttemptIndex:
+    """Small writer-owned index rebuilt from durable attempt records on open."""
+
+    _IN_FLIGHT = {"proposed", "prepared", "running", "accepted", "pending_write"}
+
+    def __init__(self, records):
+        self.count = 0
+        self.max_ordinal = -1
+        self.latest: dict[str, tuple[int, int]] = {}
+        self.interrupted: set[str] = set()
+        self.active: set[int] = set()
+        self.committed: set[int] = set()
+        for record in records:
+            self.append(record)
+
+    def append(self, record):
+        sequence, recipe = record["sequence"], record["recipe_id"]
+        first, _ = self.latest.get(recipe, (sequence, sequence))
+        self.latest[recipe] = first, sequence
+        self.count += 1
+        self.max_ordinal = max(self.max_ordinal, record["ordinal"])
+        self.update(record)
+
+    def update(self, record):
+        sequence, status = record["sequence"], record["status"]
+        if status in self._IN_FLIGHT:
+            self.active.add(sequence)
+        else:
+            self.active.discard(sequence)
+        if status == "committed":
+            self.committed.add(sequence)
+        else:
+            self.committed.discard(sequence)
+        recipe = record["recipe_id"]
+        if self.latest[recipe][1] == sequence:
+            if status == "interrupted":
+                self.interrupted.add(recipe)
+            else:
+                self.interrupted.discard(recipe)
+
+
 class ExpansionJournal:
     """Single-writer job ledger; the caller must hold the job's process lock.
 
@@ -59,13 +100,15 @@ class ExpansionJournal:
         self.operation = "all"
         self._started = 0.0
         self._last_checkpoint = 0.0
+        self._index: _AttemptIndex | None = None
 
     def attempts(self) -> list[dict]:
         """Read ordered durable attempt records without inferring success."""
-        return [
-            json.loads(p.read_text())
-            for p in sorted((self.root / "attempts").glob("*/attempt.json"))
-        ]
+        return list(self._iter_attempts())
+
+    def _iter_attempts(self):
+        for path in sorted((self.root / "attempts").glob("*/attempt.json")):
+            yield json.loads(path.read_text())
 
     def open_run(
         self,
@@ -78,6 +121,7 @@ class ExpansionJournal:
         """Pin semantic inputs while allowing new execution capacity and budgets."""
         if operation not in {"all", "export"}:
             raise ValueError("invalid run operation")
+        self._index = None
         self.operation = operation
         manifest = self.root / "job.json"
         if manifest.exists():
@@ -177,14 +221,62 @@ class ExpansionJournal:
         )
         self._last_checkpoint = now
 
+    def _attempt_index(self) -> _AttemptIndex:
+        if self._index is None:
+            self._index = _AttemptIndex(self._iter_attempts())
+        return self._index
+
+    def _attempt_directory(self, sequence: int) -> Path:
+        return self.root / "attempts" / f"{sequence:08d}"
+
+    def _write_attempt(
+        self, directory: Path, record: Mapping[str, object], *, new: bool = False
+    ) -> None:
+        try:
+            _atomic_json(directory / "attempt.json", record)
+        except BaseException:
+            # A failed directory sync can follow a successful rename.
+            self._index = None
+            raise
+        if self._index is not None:
+            if new:
+                self._index.append(record)
+            else:
+                self._index.update(record)
+
     def update(self, attempt: RecipeAttempt | Path, **values: object) -> dict:
         """Atomically update one existing attempt, retaining its recipe identity."""
         directory = attempt.directory if isinstance(attempt, RecipeAttempt) else attempt
-        path = directory / "attempt.json"
-        record = json.loads(path.read_text())
+        record = json.loads((directory / "attempt.json").read_text())
+        if any(
+            key in values and values[key] != record.get(key)
+            for key in ("sequence", "recipe_id", "ordinal")
+        ):
+            self._index = None
         record.update(values)
-        _atomic_json(path, record)
+        self._write_attempt(directory, record)
         return record
+
+    def _allocate(self, recipe: ExpansionRecipe, number: int) -> RecipeAttempt:
+        sequence = self._attempt_index().count
+        directory = self._attempt_directory(sequence)
+        if directory.exists():
+            raise FileExistsError("attempt sequence already exists")
+        self._write_attempt(
+            directory,
+            {
+                "sequence": sequence,
+                "ordinal": recipe.context.ordinal,
+                "recipe_id": recipe.recipe_id,
+                "recipe_spec": recipe.to_dict(),
+                "attempt_id": number,
+                "run_id": self.run_id,
+                "status": "proposed",
+                "steps": 0,
+            },
+            new=True,
+        )
+        return RecipeAttempt(recipe, number, sequence, directory)
 
     def allocate_recipe(self, recipe: ExpansionRecipe) -> RecipeAttempt:
         """Allocate one fresh rolling attempt while independent peers are active.
@@ -195,30 +287,13 @@ class ExpansionJournal:
         """
         if self.run_id is None or self.operation != "all":
             raise RuntimeError("rolling allocation requires an open collection run")
-        records = self.attempts()
-        if records and recipe.context.ordinal <= max(r["ordinal"] for r in records):
+        if recipe.context.ordinal <= self._attempt_index().max_ordinal:
             raise ValueError("rolling recipe ordinals must increase")
-        sequence = len(records)
-        directory = self.root / "attempts" / f"{sequence:08d}"
-        if directory.exists():
-            raise FileExistsError("attempt sequence already exists")
-        _atomic_json(
-            directory / "attempt.json",
-            {
-                "sequence": sequence,
-                "ordinal": recipe.context.ordinal,
-                "recipe_id": recipe.recipe_id,
-                "recipe_spec": recipe.to_dict(),
-                "attempt_id": 0,
-                "run_id": self.run_id,
-                "status": "proposed",
-                "steps": 0,
-            },
-        )
-        return RecipeAttempt(recipe, 0, sequence, directory)
+        return self._allocate(recipe, 0)
 
     def reconcile(self, sink: object) -> None:
         """Repair frozen writes before admitting any physical retry."""
+        self._index = None
         confirmed = {r.commit_id: r for r in sink.inspect()}
         for path in sorted((self.root / "attempts").glob("*/attempt.json")):
             record = json.loads(path.read_text())
@@ -263,59 +338,38 @@ class ExpansionJournal:
         """Allocate bounded attempts, retrying interrupted recipes before new ones."""
         if self.operation != "all":
             raise RuntimeError("export-only recovery cannot allocate physical attempts")
-        records = self.attempts()
-        if any(
-            record["status"]
-            in {"proposed", "prepared", "running", "accepted", "pending_write"}
-            for record in records
-        ):
+        index = self._attempt_index()
+        if index.active:
             raise RuntimeError(
                 "reconcile in-flight attempts before allocating another cohort"
             )
-        committed = sum(record["status"] == "committed" for record in records)
         count = min(
-            capacity, max(0, target - committed), max(0, max_attempts - len(records))
+            capacity,
+            max(0, target - len(index.committed)),
+            max(0, max_attempts - index.count),
         )
-        latest = {record["recipe_id"]: record for record in records}
         retries = (
-            [record for record in latest.values() if record["status"] == "interrupted"]
-            if retry_interrupted
+            sorted(index.interrupted, key=lambda key: index.latest[key][0])[:count]
+            if retry_interrupted and count > 0
             else []
         )
-        ordinal = max((r["ordinal"] for r in records), default=-1) + 1
+        ordinal = index.max_ordinal + 1
         result = []
-        for index in range(count):
-            if retries:
-                prior = retries.pop(0)
-                recipe = ExpansionRecipe.from_dict(prior["recipe_spec"])
-                if (
-                    recipe.recipe_id != prior["recipe_id"]
-                    or recipe.recipe_id != factory(prior["ordinal"]).recipe_id
-                ):
-                    raise ValueError("stored recipe differs from its pinned source")
-                number = prior["attempt_id"] + 1
-            else:
-                recipe = factory(ordinal)
-                ordinal += 1
-                number = 0
-            sequence = len(records) + index
-            directory = self.root / "attempts" / f"{sequence:08d}"
-            if directory.exists():
-                raise FileExistsError("attempt sequence already exists")
-            _atomic_json(
-                directory / "attempt.json",
-                {
-                    "sequence": sequence,
-                    "ordinal": recipe.context.ordinal,
-                    "recipe_id": recipe.recipe_id,
-                    "recipe_spec": recipe.to_dict(),
-                    "attempt_id": number,
-                    "run_id": self.run_id,
-                    "status": "proposed",
-                    "steps": 0,
-                },
+        for key in retries:
+            prior = json.loads(
+                (
+                    self._attempt_directory(index.latest[key][1]) / "attempt.json"
+                ).read_text()
             )
-            result.append(RecipeAttempt(recipe, number, sequence, directory))
+            recipe = ExpansionRecipe.from_dict(prior["recipe_spec"])
+            if (
+                recipe.recipe_id != prior["recipe_id"]
+                or recipe.recipe_id != factory(prior["ordinal"]).recipe_id
+            ):
+                raise ValueError("stored recipe differs from its pinned source")
+            result.append(self._allocate(recipe, prior["attempt_id"] + 1))
+        for offset in range(count - len(retries)):
+            result.append(self._allocate(factory(ordinal + offset), 0))
         return tuple(result)
 
     def stage(

@@ -21,8 +21,10 @@ import time
 import torch
 from embodichain.data_pipeline.recording.media import MediaSpool
 
-from embodichain.lab.sim.scene import capture_state
+from embodichain.lab.sim.scene.state import _capture_state_fields
 
+from .acceptance import MeasuredExpansionValidator
+from .collision import _MeasuredCollision
 from ._gym_context import GymHostContext
 
 from .visual import _calibrated_frames, _calibration_batch
@@ -123,40 +125,19 @@ class GymFrameCollector:
         records, spools = self.records, self.spools
         ctx.journal.checkpoint()
         stamp = time.monotonic()
-        frame_state = capture_state(view)
-        robot_states = [
-            next(entity for entity in batch if entity.uid == env.robot.uid)
-            for batch in frame_state.batches
-        ]
-        measured_qpos = torch.tensor(
-            [state.qpos for state in robot_states], dtype=torch.float32
-        )
-        measured_qvel = torch.tensor(
-            [state.qvel for state in robot_states], dtype=torch.float32
-        )
-        measured_qf = torch.tensor(
-            [state.qf for state in robot_states], dtype=torch.float32
-        )
-        measured_objects = {
-            uid: torch.tensor(
-                [
-                    (
-                        *next(e for e in batch if e.uid == uid).pose,
-                        *next(e for e in batch if e.uid == uid).velocity,
-                    )
-                    for batch in frame_state.batches
-                ],
-                dtype=torch.float32,
-            )
-            for uid in env.sim.get_rigid_object_uid_list()
-        }
+        frame_state = _capture_state_fields(view)
+        fields = frame_state.fields
+        robot = env.robot.uid
         calibrations = _calibration_batch(env) if cfg.capture_media else ()
         timings["state_capture"] = (
             timings.get("state_capture", 0.0) + time.monotonic() - stamp
         )
         stamp = time.monotonic()
         if collision is not None:
-            collision.sample(ids, action, frame_state)
+            if type(collision) in (_MeasuredCollision, MeasuredExpansionValidator):
+                collision._sample_captured(ids, action, frame_state)
+            else:
+                collision.sample(ids, action, frame_state.to_scene_state())
         timings["sampled_validation"] = (
             timings.get("sampled_validation", 0.0) + time.monotonic() - stamp
         )
@@ -180,20 +161,17 @@ class GymFrameCollector:
         commands = commands.detach().cpu()
         for row in ids:
             record = records[row]
-            entity_states = {entity.uid: entity for entity in frame_state.batches[row]}
-            for (uid, field), values in record["scene"].items():
-                values.append(
-                    torch.tensor(
-                        getattr(entity_states[uid], field),
-                        dtype=torch.float32,
-                    )
-                )
+            for key, values in record["scene"].items():
+                values.append(fields[key][row].to(dtype=torch.float32, copy=True))
             record["actions"].append(commands[row].clone())
-            record["qpos"].append(measured_qpos[row].clone())
-            record["qvel"].append(measured_qvel[row].clone())
-            record["qf"].append(measured_qf[row].clone())
+            for name in ("qpos", "qvel", "qf"):
+                record[name].append(
+                    fields[robot, name][row].to(dtype=torch.float32, copy=True)
+                )
             for uid, values in record["objects"].items():
-                values.append(measured_objects[uid][row].clone())
+                values.append(
+                    frame_state.rigid[uid][row].to(dtype=torch.float32, copy=True)
+                )
             if row in spools:
                 stamp = time.monotonic()
                 spools[row].append(
