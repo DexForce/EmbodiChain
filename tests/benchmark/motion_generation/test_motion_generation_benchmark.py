@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import json
 import math
+import sys
 from dataclasses import replace
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -1322,44 +1324,59 @@ def test_nmg_model_revision_is_derived_from_runtime_model_path():
     assert adapter.metadata.model_revision == "unified-k3"
 
 
-def test_nmg_over_capacity_case_is_explicitly_unsupported_without_truncation():
-    from embodichain.extensions.benchmarks.motion_generation.config import (
-        PlannerSpecCfg,
-    )
-    from embodichain.extensions.benchmarks.motion_generation.planners.base import (
-        PlannerContext,
-    )
-    from embodichain.extensions.benchmarks.motion_generation.planners.nmg_onnx import (
-        NmgOnnxAdapter,
-    )
+def test_nmg_uses_onnx_dimensions_for_case_selection_and_retimed_construction(
+    tmp_path, monkeypatch
+):
+    from embodichain.extensions.benchmarks.motion_generation.planners import nmg_onnx
 
-    adapter = NmgOnnxAdapter(
-        PlannerSpecCfg(
-            id="nmg",
-            adapter="nmg_onnx",
-            role="candidate",
-            config={"num_waypoints": 5},
+    model = tmp_path / "policy.onnx"
+    model.touch()
+    session = Mock()
+    session.get_modelmeta.return_value = SimpleNamespace(
+        custom_metadata_map={
+            "nmg.num_controlled_joints": "6",
+            "nmg.num_waypoints": "12",
+        }
+    )
+    load_session = Mock(return_value=session)
+    monkeypatch.setitem(
+        sys.modules,
+        "onnxruntime",
+        SimpleNamespace(
+            SessionOptions=SimpleNamespace,
+            GraphOptimizationLevel=SimpleNamespace(ORT_DISABLE_ALL=0),
+            InferenceSession=load_session,
         ),
-        PlannerContext(
-            robot=Mock(),
-            control_part="arm",
-            device=torch.device("cpu"),
-            sample_interval=1,
-        ),
     )
-    over_capacity = replace(
-        _case(),
-        num_waypoints=6,
-        target_waypoints=torch.eye(4).reshape(1, 1, 4, 4).repeat(1, 6, 1, 1),
-        reference_qpos=torch.zeros(1, 6, 7),
-    )
+    build_motion_generator = Mock()
+    monkeypatch.setattr(nmg_onnx, "MotionGenerator", build_motion_generator)
+    adapter = _nmg_adapter(onnx_model_path=str(model), retime=True)
+    adapter.context.robot.get_qvel_limits.return_value = torch.full((1, 6), 2.62)
 
-    supported, reason = adapter.supports_case(over_capacity)
+    def case_with_waypoints(count: int) -> BenchmarkCase:
+        return replace(
+            _case(),
+            num_waypoints=count,
+            start_qpos=torch.zeros(1, 6),
+            target_waypoints=torch.eye(4).reshape(1, 1, 4, 4).repeat(1, count, 1, 1),
+            reference_qpos=torch.zeros(1, count, 6),
+        )
 
+    assert adapter.supports_case(case_with_waypoints(12)) == (True, None)
+    supported, reason = adapter.supports_case(case_with_waypoints(13))
     assert supported is False
     assert reason is not None
-    assert "at most 5" in reason
+    assert "at most 12" in reason
     assert "not truncated or split" in reason
+
+    assert adapter.availability() == (True, None)
+    adapter.build()
+    load_session.assert_called_once()
+    assert load_session.call_args.kwargs["providers"] == ["CPUExecutionProvider"]
+    planner_cfg = build_motion_generator.call_args.args[0].planner_cfg
+    assert planner_cfg.num_arm_joints is None
+    assert planner_cfg.num_waypoints is None
+    assert planner_cfg.constraints["velocity"] == pytest.approx([2.62] * 6)
 
 
 @pytest.mark.parametrize(

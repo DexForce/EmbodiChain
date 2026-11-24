@@ -21,6 +21,7 @@ from typing import Mapping
 import torch
 
 from embodichain.extensions.models.policy._nmg_observation import (
+    _OnnxObservationDimensions,
     _WaypointObservationLayout,
 )
 from embodichain.extensions.models.policy.nmg import NeuralMotionGenerator
@@ -302,21 +303,12 @@ class NeuralPlanner(BasePlanner):
             device=self.device,
         )
         metadata = self._policy.observation_metadata
-        self._action_dim = self._read_observation_dimension(
-            metadata, "nmg.num_controlled_joints"
+        dimensions = _OnnxObservationDimensions.from_metadata(metadata)
+        dimensions.check_expectations(
+            num_arm_joints=self.cfg.num_arm_joints, num_waypoints=self.cfg.num_waypoints
         )
-        self._num_waypoints = self._read_observation_dimension(
-            metadata, "nmg.num_waypoints"
-        )
-        for name, configured, exported in (
-            ("num_arm_joints", self.cfg.num_arm_joints, self._action_dim),
-            ("num_waypoints", self.cfg.num_waypoints, self._num_waypoints),
-        ):
-            if configured is not None and configured != exported:
-                raise ValueError(
-                    f"Configured {name}={configured!r} does not match the "
-                    f"ONNX export value {exported}."
-                )
+        self._action_dim = dimensions.num_controlled_joints
+        self._num_waypoints = dimensions.num_waypoints
         self._obs_dim = self._policy.obs_dim
         output_dim = getattr(self._policy, "output_dim", self._action_dim)
         if output_dim != self._action_dim:
@@ -357,20 +349,6 @@ class NeuralPlanner(BasePlanner):
                 f"unified constraint layout requires {expected_obs_dim}."
             )
         self._validate_observation_metadata(metadata)
-
-    @staticmethod
-    def _read_observation_dimension(metadata: Mapping[str, str], key: str) -> int:
-        raw_value = metadata.get(key)
-        try:
-            value = int(raw_value) if raw_value is not None else 0
-        except (TypeError, ValueError):
-            value = 0
-        if value < 1:
-            raise ValueError(
-                f"ONNX observation layout metadata mismatch: {key} must be a "
-                f"positive integer, got {raw_value!r}."
-            )
-        return value
 
     def _validate_observation_metadata(self, metadata: Mapping[str, str]) -> None:
         """Require an exact observation contract from the NMG export."""

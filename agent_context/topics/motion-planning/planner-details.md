@@ -226,6 +226,11 @@ share the model observation layout. `NeuralPlanner` uses ORT, reads the
 joint count and constraint capacity from the ONNX metadata, and verifies
 the observation layout and fingerprint before rollout. Explicit dimension
 fields only assert compatibility with the export.
+The NMG benchmark adapter reads the same metadata before case selection. Its
+CPU preflight caches the exported dimensions per adapter, uses the capacity
+to classify oversized cases and checks retiming against the exported joint
+count. The timed construction loads the execution backend through
+`MotionGenerator`, which Atomic Skill scenarios also use.
 The CUDA ORT path binds Torch observation and action buffers on the same
 device. CPU inputs continue through the host ORT interface.
 Canonicalized XYZW observations use the first significant X/Y/Z component

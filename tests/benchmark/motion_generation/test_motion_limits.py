@@ -135,9 +135,7 @@ def test_adapter_records_common_limits_and_rejects_private_budget() -> None:
 
 def test_nmg_retime_uses_conservative_common_budgets() -> None:
     """Retiming uses stricter batch caps instead of the first environment."""
-    limits = _adapter(
-        NmgOnnxAdapter, velocity=2.0, config={"num_arm_joints": 2}
-    )._retiming_constraints()
+    limits = _adapter(NmgOnnxAdapter, velocity=2.0)._retiming_constraints()
     assert limits["velocity"] == pytest.approx([2.0, 0.3])
     assert limits["acceleration"] == [8.0, 6.0]
 

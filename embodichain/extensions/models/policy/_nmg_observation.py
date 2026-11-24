@@ -45,6 +45,50 @@ _MASKED_VALUE_SEMANTICS = {
 
 
 @dataclass(frozen=True)
+class _OnnxObservationDimensions:
+    """Joint count and waypoint capacity declared by the policy export."""
+
+    num_controlled_joints: int
+    num_waypoints: int
+
+    @classmethod
+    def from_metadata(cls, metadata: Mapping[str, str]) -> _OnnxObservationDimensions:
+        """Read the two required dimensions from an NMG ONNX export."""
+        return cls(
+            _read_observation_dimension(metadata, "nmg.num_controlled_joints"),
+            _read_observation_dimension(metadata, "nmg.num_waypoints"),
+        )
+
+    def check_expectations(
+        self, *, num_arm_joints: int | None, num_waypoints: int | None
+    ) -> None:
+        """Validate optional caller expectations against the policy export."""
+        for name, configured, exported in (
+            ("num_arm_joints", num_arm_joints, self.num_controlled_joints),
+            ("num_waypoints", num_waypoints, self.num_waypoints),
+        ):
+            if configured is not None and configured != exported:
+                raise ValueError(
+                    f"Configured {name}={configured!r} does not match the "
+                    f"ONNX export value {exported}."
+                )
+
+
+def _read_observation_dimension(metadata: Mapping[str, str], key: str) -> int:
+    raw_value = metadata.get(key)
+    try:
+        value = int(raw_value) if raw_value is not None else 0
+    except (TypeError, ValueError):
+        value = 0
+    if value < 1:
+        raise ValueError(
+            f"ONNX observation layout metadata mismatch: {key} must be a "
+            f"positive integer, got {raw_value!r}."
+        )
+    return value
+
+
+@dataclass(frozen=True)
 class _WaypointObservationLayout:
     """Concrete NMG observation layout derived from planner configuration."""
 
