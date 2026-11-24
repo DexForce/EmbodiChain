@@ -1,4 +1,4 @@
-# Online Data Streaming (ODS)
+# Online Data Streaming
 
 ODS supplies owned, causally aligned training batches from continuously
 generated trajectories through a bounded CPU shared cache. The producer and

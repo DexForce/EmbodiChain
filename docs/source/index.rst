@@ -45,12 +45,12 @@ Table of Contents
    :caption: Features
    :glob:
 
-   features/mcp/index
    features/online_data.md
    features/neural_dynamics.md
    features/generative_sim/index*
    features/workspace_analyzer/index*
    features/toolkits/index*
+   features/mcp/index
 
 .. toctree::
    :maxdepth: 1
