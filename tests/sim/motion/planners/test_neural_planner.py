@@ -2168,3 +2168,63 @@ def test_retimed_rollout_retains_limit_waypoints_on_a_coarse_clock(
     assert result.dt[0, 1:].min() > 0
     assert result.velocities.abs().max() <= 2.0 + 1e-8
     assert result.accelerations.abs().max() <= 4.0 + 1e-8
+
+
+def test_static_batch_onnx_module_matches_onnxruntime(tmp_path):
+    import numpy as np
+    import onnx
+    from onnx import TensorProto, helper, numpy_helper
+    import onnxruntime as ort
+    from embodichain.lab.sim.motion.planners._compiled_nmg import (
+        StaticBatchOnnxModule,
+        _rewrite_bool_scatter,
+    )
+
+    rng = np.random.default_rng(42)
+    w1 = rng.standard_normal((12, 16)).astype(np.float32)
+    b1 = rng.standard_normal((12,)).astype(np.float32)
+    ln_w = np.ones((12,), dtype=np.float32)
+    ln_b = np.zeros((12,), dtype=np.float32)
+    w2 = rng.standard_normal((7, 12)).astype(np.float32)
+    b2 = rng.standard_normal((7,)).astype(np.float32)
+
+    graph = helper.make_graph(
+        [
+            helper.make_node("Gemm", ["obs", "w1", "b1"], ["h1"], transB=1),
+            helper.make_node(
+                "LayerNormalization",
+                ["h1", "ln_w", "ln_b"],
+                ["h2"],
+                axis=-1,
+                epsilon=1e-5,
+            ),
+            helper.make_node("Tanh", ["h2"], ["h3"]),
+            helper.make_node("Gemm", ["h3", "w2", "b2"], ["act"], transB=1),
+        ],
+        "test_policy",
+        [helper.make_tensor_value_info("obs", TensorProto.FLOAT, ["batch", 16])],
+        [helper.make_tensor_value_info("act", TensorProto.FLOAT, ["batch", 7])],
+        [
+            numpy_helper.from_array(w1, "w1"),
+            numpy_helper.from_array(b1, "b1"),
+            numpy_helper.from_array(ln_w, "ln_w"),
+            numpy_helper.from_array(ln_b, "ln_b"),
+            numpy_helper.from_array(w2, "w2"),
+            numpy_helper.from_array(b2, "b2"),
+        ],
+    )
+    model = helper.make_model(
+        graph, ir_version=9, opset_imports=[helper.make_opsetid("", 17)]
+    )
+    model_path = str(tmp_path / "real_policy.onnx")
+    onnx.save(model, model_path)
+
+    sess = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+    for batch_size in (1, 4):
+        mod = StaticBatchOnnxModule(model_path, batch_size, torch.device("cpu")).eval()
+        obs = torch.randn(batch_size, 16, dtype=torch.float32)
+        expected = torch.from_numpy(sess.run(None, {"obs": obs.numpy()})[0])
+        with torch.no_grad():
+            actual = mod(obs)
+        torch.testing.assert_close(actual, expected, atol=1e-5, rtol=1e-5)
+    assert isinstance(_rewrite_bool_scatter(list(model.graph.node)), list)

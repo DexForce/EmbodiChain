@@ -15,11 +15,13 @@
 # ----------------------------------------------------------------------------
 from __future__ import annotations
 
-from dataclasses import MISSING, dataclass
 import hashlib
 import json
+import os
+from collections.abc import Mapping
+from dataclasses import MISSING, dataclass
 from pathlib import Path
-from typing import Mapping
+
 import numpy as np
 import torch
 
@@ -27,8 +29,8 @@ from embodichain.lab.sim.motion.planners.base_planner import (
     BasePlanner,
     BasePlannerCfg,
     PlanOptions,
-    _infer_batch_size,
     _check_batch_consistency,
+    _infer_batch_size,
     validate_plan_options,
 )
 from embodichain.lab.sim.motion.planners.utils import (
@@ -45,9 +47,9 @@ from embodichain.utils.math import (
 )
 
 __all__ = [
+    "NeuralPlanOptions",
     "NeuralPlanner",
     "NeuralPlannerCfg",
-    "NeuralPlanOptions",
 ]
 
 
@@ -389,6 +391,9 @@ class NeuralPlannerCfg(BasePlannerCfg):
 
     The CUDA provider follows the runtime robot's local CUDA device ordinal.
     """
+
+    use_cuda_graph: bool = False
+    """Fuse closed-loop observation, ONNX policy, serial FK, and arrival checks into a per-batch CUDA Graph on CUDA devices."""
 
     onnx_cuda_use_tf32: bool | None = None
     """Optional explicit TF32 setting for the ONNX CUDA execution provider.
@@ -820,70 +825,297 @@ class NeuralPlanner(BasePlanner):
             ]
             return torch.cat(world), torch.cat(local)
 
-        last_action = torch.zeros(actor_batch, self._action_dim, device=self.device)
-        active_idx = torch.zeros(actor_batch, dtype=torch.long, device=self.device)
-        arrival_indices = torch.full(
-            (actor_batch, self._num_waypoints), -1, dtype=torch.long, device=self.device
+        use_cg = bool(getattr(self.cfg, "use_cuda_graph", False))
+        get_solver = getattr(self.robot, "get_solver", None)
+        solver_0 = (
+            get_solver(groups[0][0])
+            if (use_cg and len(groups) == 1 and callable(get_solver))
+            else None
         )
-        positions = [qpos.clone()]
-        world_pose, ee_pose = forward_kinematics(qpos)
-        xpos_list = [world_pose]
-        converged = torch.zeros(actor_batch, dtype=torch.bool, device=self.device)
-        path_lengths = torch.ones(actor_batch, dtype=torch.int32, device=self.device)
-        forward_calls = 0
-        for step in range(max(budgets)):
-            obs = self._build_obs(
-                qpos[:, : self._action_dim],
-                ee_pose,
-                waypoints_pos,
-                waypoints_quat,
-                waypoints_joint,
-                valid_mask,
-                pos_mask,
-                rot_mask,
-                joint_mask,
-                active_idx,
-                last_action,
+        if (
+            use_cg
+            and len(groups) == 1
+            and self.device.type == "cuda"
+            and getattr(solver_0, "pk_serial_chain", None) is not None
+        ):
+            from ._compiled_nmg import (
+                CompiledStepModule,
+                FastSerialFK,
+                _canonicalize_quat_xyzw,
+                _quat_from_rotmat_xyzw,
+                load_compiled_onnx_actor,
             )
-            action = self._policy(obs).clamp(-1.0, 1.0)
-            forward_calls += 1
-            active = ~converged & (step < step_limits)
-            action = torch.where(active.unsqueeze(-1), action, torch.zeros_like(action))
-            qpos[:, : self._action_dim] += action * float(self.cfg.action_scale)
-            qpos[:, : self._action_dim] = torch.clamp(
-                qpos[:, : self._action_dim], lower, upper
-            )
-            last_action = torch.where(active.unsqueeze(-1), action, last_action)
-            positions.append(qpos.clone())
-            world_pose, ee_pose = forward_kinematics(qpos)
-            xpos_list.append(world_pose)
-            path_lengths += active.to(path_lengths.dtype)
-            reached = active & self._is_active_reached(
-                qpos[:, : self._action_dim],
-                ee_pose,
-                waypoints_pos,
-                waypoints_quat,
-                waypoints_joint,
-                pos_mask,
-                rot_mask,
-                joint_mask,
-                active_idx,
-            )
-            arrival_slot = active_idx.clamp(max=self._num_waypoints - 1)[:, None]
-            arrival_indices.scatter_(
-                1,
-                arrival_slot,
-                torch.where(
-                    reached[:, None], step + 1, arrival_indices.gather(1, arrival_slot)
-                ),
-            )
-            active_idx = torch.where(reached, active_idx + 1, active_idx)
-            converged |= active_idx >= episode_k
-            if (converged | (step + 1 >= step_limits)).all():
-                break
 
-        positions_t = torch.stack(positions, dim=1)
-        xpos_t = torch.stack(xpos_list, dim=1)
+            part = groups[0][0]
+            cache = getattr(self, "_compiled_step_cache", None)
+            if cache is None:
+                cache = {}
+                self._compiled_step_cache = cache
+            cache_key = (part, actor_batch)
+            if cache_key not in cache:
+                actor = load_compiled_onnx_actor(
+                    str(self.cfg.onnx_model_path),
+                    actor_batch,
+                    self.device,
+                )
+                solver = self.robot.get_solver(part)
+                tcp_mat = getattr(solver, "tcp", None)
+                if tcp_mat is not None and not torch.is_tensor(tcp_mat):
+                    tcp_mat = torch.as_tensor(
+                        tcp_mat, device=self.device, dtype=torch.float32
+                    )
+                fast_fk = FastSerialFK(
+                    solver.pk_serial_chain, tcp_mat, self.device
+                ).eval()
+                step_mod = (
+                    CompiledStepModule(
+                        actor,
+                        fast_fk,
+                        num_waypoints=self._num_waypoints,
+                        action_dim=self._action_dim,
+                        action_scale=float(self.cfg.action_scale),
+                        use_relative_obs=bool(self._use_relative_obs),
+                        canonicalize_quat_obs=bool(
+                            getattr(self, "_canonicalize_quat_obs", False)
+                        ),
+                        joint_periodic_features=bool(
+                            getattr(self, "_joint_periodic_features", False)
+                        ),
+                        pos_eps=float(self._pos_eps),
+                        rot_eps=float(self._rot_eps),
+                        joint_eps=float(self._joint_eps),
+                        tcp_origin=self._policy_tcp_to_runtime_origin,
+                    )
+                    .to(self.device)
+                    .eval()
+                )
+                torch._dynamo.config.cache_size_limit = max(
+                    int(torch._dynamo.config.cache_size_limit), 64
+                )
+                compiled_fn = torch.compile(
+                    step_mod, mode="reduce-overhead", fullgraph=True, dynamic=False
+                )
+                step_tensors = [
+                    torch.tensor(s, dtype=torch.long, device=self.device)
+                    for s in range(max(int(self._max_steps), 360) + 1)
+                ]
+                ident_quat = torch.tensor(
+                    [0.0, 0.0, 0.0, 1.0], dtype=torch.float32, device=self.device
+                )
+                cache[cache_key] = (compiled_fn, fast_fk, step_tensors, ident_quat)
+            compiled_fn, fast_fk, step_tensors, ident_quat = cache[cache_key]
+
+            solver = self.robot.get_solver(part)
+            base_pose = self.robot.get_link_pose(
+                link_name=solver.root_link_name, to_matrix=True
+            ).to(device=self.device, dtype=torch.float32)
+            if base_pose.shape[0] == 1 and actor_batch > 1:
+                base_pose = base_pose.expand(actor_batch, 4, 4).contiguous()
+            else:
+                base_pose = base_pose[:actor_batch].contiguous()
+
+            frames = getattr(self, "_policy_frames_by_control_part", {})
+            p_left = (
+                (frames[part] if frames else self._policy_frame_from_world)
+                .expand(actor_batch, 4, 4)
+                .contiguous()
+            )
+            p_right = self._runtime_tcp_from_policy_tcp.expand(
+                actor_batch, 4, 4
+            ).contiguous()
+
+            pos_block = (waypoints_pos * pos_mask.unsqueeze(-1)).contiguous()
+            joint_block = (waypoints_joint * joint_mask.unsqueeze(-1)).contiguous()
+            quat_block = torch.where(
+                rot_mask.unsqueeze(-1) > 0.5,
+                waypoints_quat,
+                ident_quat.view(1, 1, 4),
+            ).contiguous()
+
+            max_budget = int(max(budgets))
+            positions_t = torch.empty(
+                (actor_batch, max_budget + 1, qpos.shape[-1]),
+                dtype=qpos.dtype,
+                device=self.device,
+            )
+            xpos_t = torch.empty(
+                (actor_batch, max_budget + 1, 4, 4),
+                dtype=torch.float32,
+                device=self.device,
+            )
+            qpos = qpos.contiguous()
+            positions_t[:, 0].copy_(qpos)
+            world_pose = torch.bmm(base_pose, fast_fk(qpos[:, : self._action_dim]))
+            xpos_t[:, 0].copy_(world_pose)
+            pol_mat = torch.bmm(torch.bmm(p_left, world_pose), p_right)
+            pol_quat = _quat_from_rotmat_xyzw(pol_mat[:, :3, :3])
+            if getattr(self, "_canonicalize_quat_obs", False):
+                pol_quat = _canonicalize_quat_xyzw(pol_quat)
+            ee_pose = torch.cat([pol_mat[:, :3, 3], pol_quat], dim=-1).contiguous()
+
+            last_action = torch.zeros(actor_batch, self._action_dim, device=self.device)
+            active_idx = torch.zeros(actor_batch, dtype=torch.long, device=self.device)
+            arrival_indices = torch.full(
+                (actor_batch, self._num_waypoints),
+                -1,
+                dtype=torch.long,
+                device=self.device,
+            )
+            converged = torch.zeros(actor_batch, dtype=torch.bool, device=self.device)
+            path_lengths = torch.ones(
+                actor_batch, dtype=torch.int32, device=self.device
+            )
+            lower_c = lower.contiguous()
+            upper_c = upper.contiguous()
+            valid_c = valid_mask.contiguous()
+            pos_m_c = pos_mask.contiguous()
+            rot_m_c = rot_mask.contiguous()
+            joint_m_c = joint_mask.contiguous()
+            ep_k_c = episode_k.contiguous()
+            lim_c = step_limits.contiguous()
+
+            qpos_buf = qpos.clone()
+            ee_pose_buf = ee_pose.clone()
+            last_action_buf = last_action.clone()
+            active_idx_buf = active_idx.clone()
+            converged_buf = converged.clone()
+            path_lengths_buf = path_lengths.clone()
+            arrival_indices_buf = arrival_indices.clone()
+
+            forward_calls = 0
+            check_interval = int(os.environ.get("NMG_COMPILED_CHECK_INTERVAL", "4"))
+            for step in range(max_budget):
+                torch.compiler.cudagraph_mark_step_begin()
+                (
+                    out_qpos,
+                    out_world_pose,
+                    out_ee_pose,
+                    out_last_action,
+                    out_active_idx,
+                    out_converged,
+                    out_path_lengths,
+                    out_arrival_indices,
+                    out_done_all,
+                ) = compiled_fn(
+                    qpos_buf,
+                    ee_pose_buf,
+                    last_action_buf,
+                    active_idx_buf,
+                    converged_buf,
+                    path_lengths_buf,
+                    arrival_indices_buf,
+                    pos_block,
+                    quat_block,
+                    joint_block,
+                    valid_c,
+                    pos_m_c,
+                    rot_m_c,
+                    joint_m_c,
+                    ep_k_c,
+                    lim_c,
+                    lower_c,
+                    upper_c,
+                    base_pose,
+                    p_left,
+                    p_right,
+                    step_tensors[step],
+                )
+                qpos_buf.copy_(out_qpos)
+                ee_pose_buf.copy_(out_ee_pose)
+                last_action_buf.copy_(out_last_action)
+                active_idx_buf.copy_(out_active_idx)
+                converged_buf.copy_(out_converged)
+                path_lengths_buf.copy_(out_path_lengths)
+                arrival_indices_buf.copy_(out_arrival_indices)
+                positions_t[:, step + 1].copy_(out_qpos)
+                xpos_t[:, step + 1].copy_(out_world_pose)
+                forward_calls += 1
+                if (
+                    (step + 1) % check_interval == 0 or step + 1 == max_budget
+                ) and bool(out_done_all.item()):
+                    break
+            converged = converged_buf
+            path_lengths = path_lengths_buf
+            arrival_indices = arrival_indices_buf
+            converged = converged.clone()
+            path_lengths = path_lengths.clone()
+            arrival_indices = arrival_indices.clone()
+            positions_t = positions_t[:, : forward_calls + 1]
+            xpos_t = xpos_t[:, : forward_calls + 1]
+        else:
+            last_action = torch.zeros(actor_batch, self._action_dim, device=self.device)
+            active_idx = torch.zeros(actor_batch, dtype=torch.long, device=self.device)
+            arrival_indices = torch.full(
+                (actor_batch, self._num_waypoints),
+                -1,
+                dtype=torch.long,
+                device=self.device,
+            )
+            positions = [qpos.clone()]
+            world_pose, ee_pose = forward_kinematics(qpos)
+            xpos_list = [world_pose]
+            converged = torch.zeros(actor_batch, dtype=torch.bool, device=self.device)
+            path_lengths = torch.ones(
+                actor_batch, dtype=torch.int32, device=self.device
+            )
+            forward_calls = 0
+            for step in range(max(budgets)):
+                obs = self._build_obs(
+                    qpos[:, : self._action_dim],
+                    ee_pose,
+                    waypoints_pos,
+                    waypoints_quat,
+                    waypoints_joint,
+                    valid_mask,
+                    pos_mask,
+                    rot_mask,
+                    joint_mask,
+                    active_idx,
+                    last_action,
+                )
+                action = self._policy(obs).clamp(-1.0, 1.0)
+                forward_calls += 1
+                active = ~converged & (step < step_limits)
+                action = torch.where(
+                    active.unsqueeze(-1), action, torch.zeros_like(action)
+                )
+                qpos[:, : self._action_dim] += action * float(self.cfg.action_scale)
+                qpos[:, : self._action_dim] = torch.clamp(
+                    qpos[:, : self._action_dim], lower, upper
+                )
+                last_action = torch.where(active.unsqueeze(-1), action, last_action)
+                positions.append(qpos.clone())
+                world_pose, ee_pose = forward_kinematics(qpos)
+                xpos_list.append(world_pose)
+                path_lengths += active.to(path_lengths.dtype)
+                reached = active & self._is_active_reached(
+                    qpos[:, : self._action_dim],
+                    ee_pose,
+                    waypoints_pos,
+                    waypoints_quat,
+                    waypoints_joint,
+                    pos_mask,
+                    rot_mask,
+                    joint_mask,
+                    active_idx,
+                )
+                arrival_slot = active_idx.clamp(max=self._num_waypoints - 1)[:, None]
+                arrival_indices.scatter_(
+                    1,
+                    arrival_slot,
+                    torch.where(
+                        reached[:, None],
+                        step + 1,
+                        arrival_indices.gather(1, arrival_slot),
+                    ),
+                )
+                active_idx = torch.where(reached, active_idx + 1, active_idx)
+                converged |= active_idx >= episode_k
+                if (converged | (step + 1 >= step_limits)).all():
+                    break
+
+            positions_t = torch.stack(positions, dim=1)
+            xpos_t = torch.stack(xpos_list, dim=1)
         batching = {
             "scene_batch_size": b,
             "control_part_count": len(groups),

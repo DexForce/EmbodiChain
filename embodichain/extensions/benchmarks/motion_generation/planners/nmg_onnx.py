@@ -52,6 +52,7 @@ class NmgOnnxAdapter(PlannerAdapter):
             "policy_frame_from_world_by_control_part",
             "batch_control_parts",
             "onnx_cuda_use_tf32",
+            "use_cuda_graph",
             "preserve_waypoint_arrivals",
         }
     )
@@ -179,6 +180,7 @@ class NmgOnnxAdapter(PlannerAdapter):
             rot_eps=float(values.get("rot_eps", 0.1)),
             joint_eps=float(values.get("joint_eps", 0.01)),
             onnx_providers=list(providers) if providers is not None else None,
+            use_cuda_graph=bool(values.get("use_cuda_graph", False)),
             onnx_cuda_use_tf32=values.get("onnx_cuda_use_tf32"),
             policy_frame_from_world=values.get("policy_frame_from_world"),
             policy_frame_from_world_by_control_part=values.get(
