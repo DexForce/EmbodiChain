@@ -104,6 +104,13 @@ class FakeRobot:
     uid = "fake_robot"
     device = torch.device("cpu")
     num_instances = 1
+    joint_names = [f"joint{i}" for i in range(NUM_ARM_JOINTS)]
+
+    def get_joint_ids(self, name: str) -> list[int]:
+        return list(range(NUM_ARM_JOINTS))
+
+    def get_qvel_limits(self, *, joint_ids: list[int]) -> torch.Tensor:
+        return torch.full((self.num_instances, len(joint_ids)), 4.0)
 
     def get_qpos(self, name: str | None = None, target: bool = False) -> torch.Tensor:
         return torch.zeros(1, NUM_ARM_JOINTS)
@@ -559,6 +566,67 @@ def test_neural_planner_constraints_replace_timing_and_bound_dynamics(
     assert float(retimed.dt.sum()) > float(nominal.dt.sum())
     # Retiming resamples the path, so poses must track the returned positions.
     assert retimed.xpos_list.shape[:2] == retimed.positions.shape[:2]
+
+
+def test_neural_request_limits_are_capped_and_isolated(tmp_path, monkeypatch):
+    from embodichain.compute.trajectory import retime_to_control_grid
+
+    manager = FakeSimulationManager()
+    robot_caps = torch.tensor([[0.5] + [3.0] * (NUM_ARM_JOINTS - 1)])
+    monkeypatch.setattr(
+        manager.robot, "get_qvel_limits", lambda *, joint_ids: robot_caps[:, joint_ids]
+    )
+    monkeypatch.setattr(SimulationManager, "get_instance", lambda *args: manager)
+    monkeypatch.setattr(
+        neural_planner_module, "NeuralMotionGenerator", SaturatingOnnxPolicy
+    )
+    generator = MotionGenerator(
+        MotionGenCfg(
+            planner_cfg=NeuralPlannerCfg(
+                robot_uid="fake_robot",
+                onnx_model_path=_create_fake_onnx_model(tmp_path),
+                control_part="main_arm",
+            )
+        )
+    )
+    goal = [PlanState.from_qpos(torch.ones(1, NUM_ARM_JOINTS))]
+    request = NeuralPlanOptions(constraints={"velocity": 3.0, "acceleration": 1.0})
+    capped = generator.planner.plan(goal, request)
+    slower_request = NeuralPlanOptions(
+        constraints={
+            "velocity": [3.0] * (NUM_ARM_JOINTS - 1) + [0.2],
+            "acceleration": 1.0,
+        }
+    )
+    slower = generator.generate(
+        goal,
+        MotionGenOptions(
+            plan_opts=slower_request,
+            velocity_limit=0.3,
+            acceleration_limit=0.4,
+        ),
+    )
+    raw = generator.generate(goal, MotionGenOptions(acceleration_limit=0.5))
+
+    assert all(plan.is_all_success() for plan in (capped, slower, raw))
+    torch.testing.assert_close(capped.policy_rollout_positions, raw.positions)
+    torch.testing.assert_close(slower.policy_rollout_positions, raw.positions)
+    # A 1-rad rest-to-rest move with v=0.5 and a=1 takes at least 2.5 s.
+    assert capped.duration.item() >= 2.5 - 1e-6
+    assert capped.velocities.abs().max().item() == pytest.approx(0.5, abs=1e-5)
+    assert capped.accelerations.abs().max().item() <= 1.0 + 1e-6
+    assert slower.velocities.abs().max().item() == pytest.approx(0.2, abs=1e-5)
+    assert slower.accelerations.abs().max().item() == pytest.approx(0.4, abs=1e-5)
+    assert slower.duration.item() > capped.duration.item() > raw.duration.item()
+    assert raw.velocities.abs().max().item() == pytest.approx(20.0)
+    assert request.constraints == {"velocity": 3.0, "acceleration": 1.0}
+    assert slower_request.constraints["acceleration"] == 1.0
+    assert generator.planner.cfg.constraints is None
+
+    command_dt = 0.02
+    q, qd, _, _ = retime_to_control_grid(capped.positions, capped.dt, command_dt)
+    assert (q.diff(dim=1) / command_dt).abs().max().item() <= 0.5 + 1e-6
+    assert (qd.diff(dim=1) / command_dt).abs().max().item() <= 1.0 + 1e-3
 
 
 def test_retime_joint_paths_rejects_malformed_input():
@@ -1843,6 +1911,20 @@ def test_packed_arms_share_inference_and_match_independent_rollouts(
 
     class MountedRobot(FakeRobot):
         num_instances = 2
+        joint_names = [
+            f"{part}_{index}" for part in bases for index in range(NUM_ARM_JOINTS)
+        ]
+
+        def get_joint_ids(self, name):
+            return [
+                i for i, joint in enumerate(self.joint_names) if joint.startswith(name)
+            ]
+
+        def get_qvel_limits(self, *, joint_ids):
+            caps = torch.full((self.num_instances, len(self.joint_names)), 4.0)
+            # Only the second scene's right shoulder has this lower speed cap.
+            caps[1, NUM_ARM_JOINTS] = 0.16
+            return caps[:, joint_ids]
 
         def compute_fk(self, qpos, name=None, **kwargs):
             # The simulator has two scene rows, not four packed actor rows.
@@ -1886,13 +1968,21 @@ def test_packed_arms_share_inference_and_match_independent_rollouts(
     }
     options = {
         "left_arm": NeuralPlanOptions(
-            control_part="left_arm", start_qpos=torch.zeros(2, 7), max_steps=2
+            control_part="left_arm",
+            start_qpos=torch.zeros(2, 7),
+            max_steps=2,
+            constraints={"velocity": 0.08} if retime else None,
         ),
         "right_arm": NeuralPlanOptions(
             control_part="right_arm", start_qpos=torch.zeros(2, 7), max_steps=4
         ),
     }
     packed = planner.plan_multi_part(targets, options)
+    if retime:
+        assert packed["left_arm"].velocities.abs().max().item() <= 0.08 + 1e-6
+        assert (
+            0.08 < packed["right_arm"].velocities[0].abs().max().item() <= 0.16 + 1e-6
+        )
     observed = planner._policy.observations
     assert len(observed) == 4
     assert all(obs.shape == (4, OBS_DIM) for obs in observed)
@@ -2030,6 +2120,7 @@ def test_retimed_rollout_retains_limit_waypoints_on_a_coarse_clock(
         torch.tensor([True]),
         positions,
         "main_arm",
+        constraints=planner.cfg.constraints,
         path_lengths=torch.tensor([3]),
         arrival_indices=torch.tensor([[1, 2]]),
         waypoints=waypoints,

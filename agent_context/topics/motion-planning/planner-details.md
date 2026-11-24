@@ -86,7 +86,8 @@ Both it and `max_acceleration` accept a scalar or a vector in `active_joint_ids`
 order. The default acceleration budget remains 15.0; CPU timing planners retain
 their 0.5 default. Its YAML and backend caches include resolved speed and
 acceleration vectors; changing either a request or robot limits closes and
-rebuilds the affected backend. Neural policy rollout retains its configured timing. The
+rebuilds the affected backend. Neural planning applies generic scalar limits to
+explicitly retimed requests. The
 `ik_interp` path resolves robot speed caps and generic motion limits in the
 facade independently of the selected planner backend.
 
@@ -266,13 +267,13 @@ Grouping a request does not imply a packed backend. Atomic benchmark
 record groups actually planned, so an enabled flag alone does not prove batching
 ran when a prior stage failed.
 
-`NeuralPlannerCfg.dt` is bookkeeping, not solved timing: the rollout integrates
-a joint delta per step, so a saturated step implies `action_scale / dt` rad/s
-and overshoots a typical arm's velocity limit several times over. Setting
-`constraints` swaps that nominal timing for a TOPPRA parameterization through
-the shared entry point below; it resamples the path, so positions and poses
-change with the timing, and it cannot reduce the path's own jerk. Default
-remains `None`, which preserves the nominal-timing behavior.
+Raw rollouts integrate one joint delta per policy step on the nominal
+`NeuralPlannerCfg.dt`. A `constraints` mapping on `NeuralPlanOptions` or
+`NeuralPlannerCfg` selects TOPPRA timing. Each control part intersects its
+request with configured limits, generic motion budgets, and the effective
+robot speed caps in joint order. The solve resamples the path and recomputes
+poses. With both mappings omitted, the planner returns the nominal rollout
+even when an Atomic Skill supplies a default acceleration budget.
 
 `PlanResult.policy_rollout_positions` and `policy_rollout_lengths` retain the
 original policy states and per-row valid prefixes before retiming. Sample zero

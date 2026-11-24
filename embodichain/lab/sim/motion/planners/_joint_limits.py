@@ -175,7 +175,9 @@ def _merge_limit(
         raise ValueError("Joint limits must contain finite positive values.")
     if requested.shape == (len(caps), 2):
         lower, upper = requested.unbind(dim=-1)
-        if bool(((lower > 0) | (upper < 0) | (lower >= upper)).any()):
+        if bool(((lower > 0) | (upper < 0)).any()):
+            raise ValueError("Signed joint limits must contain zero.")
+        if not allow_zero and bool((lower >= upper).any()):
             raise ValueError(
                 "Signed joint limits must contain zero and have lower < upper."
             )
@@ -191,6 +193,21 @@ def _merge_limit(
     return torch.minimum(requested, caps)
 
 
+def _cap_request_limit(
+    value: object, cap: float, *, allow_zero: bool
+) -> float | list[float] | list[list[float]]:
+    """Tighten a request with a scalar budget before the control part is bound."""
+    if value is None:
+        return cap
+    requested = torch.as_tensor(value, dtype=torch.float64)
+    width = requested.shape[0] if requested.ndim else 1
+    caps = _merge_limit(
+        cap, requested.new_full((width,), torch.inf), cap, allow_zero=allow_zero
+    )
+    bounded = _merge_limit(requested, caps, cap, allow_zero=allow_zero)
+    return bounded.tolist() if requested.ndim else bounded.item()
+
+
 def _resolve_joint_constraints(
     robot: Robot,
     constraints: Mapping[str, object],
@@ -199,22 +216,37 @@ def _resolve_joint_constraints(
     control_part: str | None = None,
     batch_size: int | None = None,
     env_ids: tuple[int, ...] | None = None,
+    request_constraints: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    """Resolve robot speed caps and planner-owned acceleration requests."""
+    """Intersect requested limits with one another and with robot speed caps."""
     ids = _plan_joint_ids(robot, control_part, dof)
-    limits = _joint_velocity_limits(robot)
+    speeds = _joint_velocity_limits(robot)
     if env_ids is not None:
-        limits = limits[list(env_ids)]
-    if batch_size is not None and limits.shape[0] < batch_size:
+        speeds = speeds[list(env_ids)]
+    if batch_size is not None and speeds.shape[0] < batch_size:
         raise ValueError("Robot velocity limits do not cover the planning batch.")
     resolved = dict(constraints)
-    caps = limits[:batch_size, ids].amin(dim=0)
-    resolved["velocity"] = _merge_limit(
-        constraints.get("velocity"), caps, _DEFAULT_VELOCITY, allow_zero=True
-    )
-    resolved["acceleration"] = _merge_limit(
-        constraints.get("acceleration"),
-        torch.full_like(caps, torch.inf),
-        _DEFAULT_ACCELERATION,
-    )
+    caps = speeds[:batch_size, ids].amin(dim=0)
+    sources = (constraints, request_constraints or {})
+    for key, ceiling, fallback in (
+        ("velocity", caps, _DEFAULT_VELOCITY),
+        ("acceleration", torch.full_like(caps, torch.inf), _DEFAULT_ACCELERATION),
+    ):
+        limits = [
+            _merge_limit(source[key], ceiling, fallback, allow_zero=key == "velocity")
+            for source in sources
+            if source.get(key) is not None
+        ]
+        if not limits:
+            resolved[key] = _merge_limit(None, ceiling, fallback)
+        elif len(limits) == 1:
+            resolved[key] = limits[0]
+        elif all(limit.ndim == 1 for limit in limits):
+            resolved[key] = torch.stack(limits).amin(0)
+        else:
+            lower = [limit[:, 0] if limit.ndim == 2 else -limit for limit in limits]
+            upper = [limit[:, 1] if limit.ndim == 2 else limit for limit in limits]
+            resolved[key] = torch.stack(
+                (torch.stack(lower).amax(0), torch.stack(upper).amin(0)), dim=-1
+            )
     return resolved

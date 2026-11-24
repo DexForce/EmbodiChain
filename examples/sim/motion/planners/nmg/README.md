@@ -11,10 +11,11 @@ sequence, TCP motion, and the response to a joint disturbance.
 
 ## Run
 
-Install ONNX Runtime and TOPP-RA from the EmbodiChain checkout.
+Install the ONNX Runtime extra from the EmbodiChain checkout. The joint retimer
+uses EmbodiChain's built-in Warp TOPPRA implementation.
 
 ```bash
-python -m pip install -e '.[policy-deploy]' toppra
+python -m pip install -e '.[policy-deploy]'
 ```
 
 Run the default free-motion scenario on either arm. Headless runs use
@@ -23,6 +24,15 @@ no-render when the renderer is automatic and there is no video or web viewer.
 ```bash
 embodichain run-example sim/motion/planners/nmg/franka --headless --device cpu
 embodichain run-example sim/motion/planners/nmg/piper --headless --device cpu
+```
+
+Set limits on the planning request with either a scalar or one value per arm
+joint. For example, use a single speed budget on Franka or distinct speed
+budgets for the six PiPER joints.
+
+```bash
+embodichain run-example sim/motion/planners/nmg/franka --headless --device cpu --velocity-limit 0.4 --acceleration-limit 1.0
+embodichain run-example sim/motion/planners/nmg/piper --headless --device cpu --velocity-limit 0.3 0.4 0.4 0.5 0.5 0.6 --acceleration-limit 1.0
 ```
 
 CPU-only installations can use `onnxruntime` instead of `onnxruntime-gpu` (do not
@@ -93,10 +103,12 @@ On a Linux server without a display, run the recording command under `xvfb-run -
 | Option | Use |
 | --- | --- |
 | `--scenario` | `free-motion` (default) or `closed-loop-perturbation` |
+| `--velocity-limit` | Planned speed magnitude(s) in arm joint order, default 0.6 rad/s |
+| `--acceleration-limit` | Planned acceleration magnitude(s) in arm joint order, default 1.5 rad/s² |
 | `--download-only` | Cache and verify the model without starting simulation |
 | `--offline` | Use the cached model; robot assets must also be cached |
 | `--model-path PATH` | Use a local copy of the same published ONNX bytes |
-| `--no-playback` | Plan and report geometric arrivals only |
+| `--no-playback` | Report planned arrivals, timing and joint derivatives without playback |
 | `--output PATH` | Save the printed JSON report |
 
 `_common.py` pins the Hugging Face commit and verifies SHA256. Public downloads
@@ -110,8 +122,16 @@ Arrival tolerances are 0.01 m, 0.1 rad and 0.01 rad maximum joint error, applied
 to the selected modality. The report also includes unconstrained errors for
 diagnosis.
 
-Free-motion paths are retimed at 0.6 rad/s and 1.5 rad/s², then replayed phase by phase on the
-control grid with 0.5-second settling holds. Reports distinguish geometric
+Both examples pass `NeuralPlanOptions(constraints=...)` to each planning call.
+The planner intersects requested speeds with the current robot limits.
+The JSON report includes the requested bounds, planned peak speed and acceleration
+for each joint, and the solved duration. These values describe the reference
+plan in both scenarios. The perturbation controller issues its own live commands.
+Before free-motion playback, the demo checks the position and velocity commands
+on the control grid, including the transition to each 0.5-second settling hold.
+It lengthens a phase if resampling exceeds a joint limit. `duration_s` is
+the planner's duration and `playback_duration_s` includes the grid adjustment
+and holds. Reports distinguish geometric
 convergence, playback completion and measured joint tracking error. Failed plans
 are not replayed. Playback does not certify physical task success or collision
 avoidance.

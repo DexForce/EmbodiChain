@@ -15,9 +15,9 @@
 # ----------------------------------------------------------------------------
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import MISSING
 from pathlib import Path
-from typing import Mapping
 import torch
 
 from embodichain.extensions.models.policy._nmg_observation import (
@@ -25,6 +25,7 @@ from embodichain.extensions.models.policy._nmg_observation import (
     _WaypointObservationLayout,
 )
 from embodichain.extensions.models.policy.nmg import NeuralMotionGenerator
+from embodichain.lab.sim.motion.planners._joint_limits import _resolve_joint_constraints
 from embodichain.lab.sim.motion.planners.base_planner import (
     BasePlanner,
     BasePlannerCfg,
@@ -51,6 +52,8 @@ __all__ = [
     "NeuralPlannerCfg",
     "NeuralPlanOptions",
 ]
+
+_JointLimit = float | Sequence[float] | Sequence[Sequence[float]] | torch.Tensor
 
 
 def _waypoint_obs_dim(
@@ -185,29 +188,14 @@ class NeuralPlannerCfg(BasePlannerCfg):
     """
 
     dt: float = 0.01
-    """Output sampling period in seconds.
+    """Nominal seconds per raw policy step or maximum sample interval after retiming."""
 
-    Without :attr:`constraints` this is bookkeeping rather than executable
-    timing.
+    constraints: dict[str, _JointLimit] | None = None
+    """Planner-wide joint limits for TOPPRA, intersected with each request.
 
-    The rollout integrates a joint delta per step and never solves a duration,
-    so this value is bookkeeping rather than executable timing: at the default
-    ``action_scale`` a saturated step implies ``action_scale / dt`` rad/s,
-    which exceeds a typical arm's joint velocity limit several times over. Set
-    :attr:`constraints` to replace it with a solved time parameterization, in
-    which case this becomes the period that trajectory is sampled on.
-    """
-
-    constraints: dict[str, float | list[float]] | None = None
-    """Optional ``velocity`` and ``acceleration`` limits for output retiming.
-
-    ``None`` keeps the rollout's nominal timing and current behavior. When set,
-    the closed-loop samples are treated as a geometric path and re-parameterized
-    under these limits, so the returned timing and derivatives are executable.
-    Keys and value shapes match :class:`ToppraPlanOptions`: a scalar or one
-    value per controlled joint. Retiming resamples the path, so it changes the
-    reported positions and poses as well as the timing, and it cannot reduce
-    the path's own jerk -- only the duration over which it is traversed.
+    Both this field and :attr:`NeuralPlanOptions.constraints` default to
+    ``None``, which selects the raw rollout. A mapping on either enables
+    retiming. Velocity is also capped by the robot's effective joint limits.
     """
 
     preserve_waypoint_arrivals: bool = False
@@ -226,15 +214,24 @@ class NeuralPlanOptions(PlanOptions):
     waypoint_modalities: list[str] | None = None
     """Optional explicit joint/position/orientation/pose semantics per waypoint."""
 
+    constraints: dict[str, _JointLimit] | None = None
+    """Request TOPPRA with joint ``velocity`` (rad/s) and ``acceleration`` (rad/s²).
+
+    Values may be scalar magnitudes, per-joint magnitudes or signed intervals
+    containing zero, in control-part order. Limits may tighten configured
+    bounds. An omitted velocity uses the robot's speed caps (0.2 rad/s for
+    unknown caps), and an omitted acceleration budget defaults to 0.5 rad/s²
+    when no other source supplies that limit. ``None`` inherits the planner mode.
+    """
+
 
 class NeuralPlanner(BasePlanner):
     r"""Neural motion planner based on an APG waypoint transformer policy.
 
     The planner loads a standalone ONNX waypoint policy and rolls it out in
     closed loop to drive the arm toward a sequence of end-effector and/or
-    joint-position waypoints. Velocities and accelerations in the returned
-    :class:`PlanResult` are estimated via finite differences over the generated
-    position trajectory.
+    joint-position waypoints. Raw rollouts estimate derivatives by finite
+    differences. Retimed trajectories return TOPPRA velocities and accelerations.
 
     Args:
         cfg: Configuration for the neural planner.
@@ -409,15 +406,14 @@ class NeuralPlanner(BasePlanner):
                 :attr:`MoveType.EEF_MOVE` with ``xpos`` shape ``(B, 4, 4)`` or
                 :attr:`MoveType.JOINT_MOVE` with ``qpos`` shape ``(B, num_arm_joints)``.
             options: :class:`NeuralPlanOptions` with ``control_part``,
-                ``start_qpos``, and ``max_steps`` overrides.
+                ``start_qpos``, rollout budget, and optional joint timing limits.
 
         Returns:
             :class:`PlanResult` containing the planned trajectory. All tensor
             fields are env-batched with leading dim ``B``: ``success`` ``(B,)``,
             ``positions``/``velocities``/``accelerations`` ``(B, N, DOF)``,
             ``xpos_list`` ``(B, N, 4, 4)``, ``dt`` ``(B, N)``, and
-            ``duration`` ``(B,)``. Velocities and accelerations are computed
-            via finite differences and are therefore approximate.
+            ``duration`` ``(B,)``. Retimed samples use solved arrival intervals.
 
         Raises:
             ValueError: If ``control_part`` is not provided, a target state is
@@ -494,6 +490,25 @@ class NeuralPlanner(BasePlanner):
             groups.append((part, targets, option))
         return self._plan_groups(groups)
 
+    def _retiming_constraints(
+        self, options: NeuralPlanOptions, part: str, dof: int, batch_size: int
+    ) -> dict[str, object] | None:
+        if self.cfg.constraints is None and options.constraints is None:
+            return None
+        configured = self.cfg.constraints or {}
+        requested = options.constraints or {}
+        unknown = (configured.keys() | requested.keys()) - {"velocity", "acceleration"}
+        if unknown:
+            raise ValueError(f"Unknown neural retiming constraints: {sorted(unknown)}")
+        return _resolve_joint_constraints(
+            self.robot,
+            configured,
+            request_constraints=requested,
+            control_part=part,
+            dof=dof,
+            batch_size=batch_size,
+        )
+
     def _plan_groups(
         self, groups: list[tuple[str, list[PlanState], NeuralPlanOptions]]
     ) -> dict[str, PlanResult]:
@@ -501,6 +516,7 @@ class NeuralPlanner(BasePlanner):
         parsed = []
         initial = []
         bounds = []
+        timing_limits = []
         budgets = []
         batch_size = None
         robot_batch = getattr(self.robot, "num_instances", None)
@@ -519,6 +535,9 @@ class NeuralPlanner(BasePlanner):
                 raise ValueError(
                     "Packed control parts must match the policy joint count."
                 )
+            timing_limits.append(
+                self._retiming_constraints(option, part, qpos.shape[-1], size)
+            )
             limits = self.robot.get_qpos_limits(name=part)[0].to(self.device)
             lower = limits[: self._action_dim, 0]
             upper = limits[: self._action_dim, 1]
@@ -682,11 +701,12 @@ class NeuralPlanner(BasePlanner):
                     rotation_mask=parsed[index][5],
                     joint_mask=parsed[index][6],
                 )
-            if self.cfg.constraints is not None:
+            if timing_limits[index] is not None:
                 result = self._retimed_result(
                     success,
                     arm_positions,
                     part,
+                    constraints=timing_limits[index],
                     path_lengths=lengths,
                     waypoints=(
                         parsed[index][0],
@@ -743,6 +763,7 @@ class NeuralPlanner(BasePlanner):
         positions: torch.Tensor,
         control_part: str,
         *,
+        constraints: Mapping[str, object],
         path_lengths: torch.Tensor,
         waypoints: tuple[torch.Tensor, ...],
         episode_k: int,
@@ -759,6 +780,7 @@ class NeuralPlanner(BasePlanner):
             success: Per-env rollout convergence of shape ``(B,)``.
             positions: Rollout joint samples of shape ``(B, N, DOF)``.
             control_part: Robot control part used for forward kinematics.
+            constraints: Effective joint velocity and acceleration bounds.
             path_lengths: Valid rollout prefix length for each environment.
                 Samples after that prefix only hold an already-converged row
                 while other rows continue and must not affect spline fitting.
@@ -775,7 +797,7 @@ class NeuralPlanner(BasePlanner):
 
         retimed = retime_joint_paths(
             positions,
-            constraints=dict(self.cfg.constraints),
+            constraints=constraints,
             path_lengths=path_lengths,
             sample_method=TrajectorySampleMethod.TIME,
             sample_interval=float(self.cfg.dt),

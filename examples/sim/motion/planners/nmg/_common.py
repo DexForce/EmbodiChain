@@ -31,6 +31,8 @@ from embodichain.cli.sim import add_sim_args_to_parser
 from embodichain.data.assets import download_neural_planner_checkpoint
 
 if TYPE_CHECKING:
+    import torch
+
     from embodichain.lab.sim import SimulationManager
     from embodichain.lab.sim.motion.planners import PlanResult
     from embodichain.lab.sim.objects import Robot
@@ -57,6 +59,22 @@ def _parse_args(robot_name: str) -> argparse.Namespace:
         help="Replay a timed free-space plan or drive the arm with live NMG feedback.",
     )
     parser.add_argument(
+        "--velocity-limit",
+        type=float,
+        nargs="+",
+        default=[0.6],
+        metavar="RAD/S",
+        help="Planned joint speed limit, one value or one per arm joint (default 0.6).",
+    )
+    parser.add_argument(
+        "--acceleration-limit",
+        type=float,
+        nargs="+",
+        default=[1.5],
+        metavar="RAD/S²",
+        help="Planned joint acceleration limit, one value or one per arm joint (default 1.5).",
+    )
+    parser.add_argument(
         "--model-path",
         type=Path,
         help="Use a local copy of the published v1 ONNX file.",
@@ -72,7 +90,7 @@ def _parse_args(robot_name: str) -> argparse.Namespace:
     parser.add_argument(
         "--no-playback",
         action="store_true",
-        help="Plan and report geometric arrival errors only.",
+        help="Report planned arrivals, timing and joint derivatives without playback.",
     )
     parser.add_argument(
         "--keep-open",
@@ -108,34 +126,84 @@ def _model_path(robot_name: str, args: argparse.Namespace) -> Path:
     return path
 
 
-def _play_free_motion(
-    sim: SimulationManager,
+def _free_motion_commands(
     robot: Robot,
     result: PlanResult,
     waypoint_indices: Sequence[int],
+    control_dt: float,
+    constraints: dict[str, float | list[float]],
+) -> list[tuple[torch.Tensor, torch.Tensor]]:
+    """Prepare each rest-to-rest phase on the simulation command clock."""
+    import torch
+
+    from embodichain.compute.trajectory import retime_to_control_grid
+    from embodichain.compute.trajectory.limits import joint_velocity_validity
+    from embodichain.lab.sim.motion.planners._joint_limits import (
+        _resolve_joint_constraints,
+    )
+
+    limits = _resolve_joint_constraints(
+        robot,
+        constraints,
+        dof=result.positions.shape[-1],
+        control_part="arm",
+        batch_size=1,
+    )
+    speed, accel = (
+        limits[key].to(result.positions)[None] for key in ("velocity", "acceleration")
+    )
+    target_dtype = robot.get_qpos(name="arm").dtype
+    phases = []
+    previous = 0
+    for end in waypoint_indices:
+        phase_dt = result.dt[:, previous : end + 1].clone()
+        phase_dt[:, 0] = 0
+        phase_positions = result.positions[:, previous : end + 1]
+        for _ in range(8):
+            q, qd, dt, _ = retime_to_control_grid(phase_positions, phase_dt, control_dt)
+            # Check both drive targets at the receiver's precision, and the
+            # changes in interval speed across the neighboring settling holds.
+            q_cmd, qd_cmd = (value.to(target_dtype).double() for value in (q, qd))
+            rest = torch.zeros_like(q_cmd[:, :1])
+            slopes = torch.cat((rest, q_cmd.diff(dim=1) / control_dt, rest), dim=1)
+            slope_dt = torch.cat((dt, dt.new_full((1, 1), control_dt)), dim=1)
+            valid = (
+                joint_velocity_validity(q_cmd, dt, speed)
+                & joint_velocity_validity(qd_cmd, dt, accel)
+                & joint_velocity_validity(slopes, slope_dt, accel)
+            )
+            if valid.item():
+                phases.append((q, dt))
+                break
+            # Resample the original phase with at least one extra control tick.
+            growth = ((dt.sum() + control_dt) / phase_dt.sum()).clamp_min(1.1)
+            phase_dt = phase_dt * growth
+        else:
+            raise RuntimeError(
+                f"Free-motion commands exceed their joint limits before target {len(phases) + 1}."
+            )
+        previous = end
+    return phases
+
+
+def _play_free_motion(
+    sim: SimulationManager,
+    robot: Robot,
+    phases: Sequence[tuple[torch.Tensor, torch.Tensor]],
     joint_ids: Sequence[int],
     control_dt: float,
     markers: TrajectoryMarkers | None,
 ) -> dict[str, object]:
-    """Replay rest-to-rest phases and sample the measured TCP for display."""
-    from embodichain.compute.trajectory import retime_to_control_grid
+    """Replay the prepared phases and sample the measured TCP for display."""
     from embodichain.lab.sim.motion.execution import (
         JointTrajectoryPlaybackCfg,
         play_joint_trajectory,
     )
 
-    previous = 0
     playback_seconds = 0.0
     tracking_errors = []
-    for slot, end in enumerate(waypoint_indices):
-        phase_dt = result.dt[:, previous : end + 1].clone()
-        phase_dt[:, 0] = 0
-        phase_positions = result.positions[:, previous : end + 1]
+    for slot, (phase_positions, phase_dt) in enumerate(phases):
         if markers is not None:
-            # Regrid once so the source callback samples actual control steps.
-            phase_positions, _, phase_dt, _ = retime_to_control_grid(
-                phase_positions, phase_dt, control_dt
-            )
             markers.show_targets(slot, active=slot)
         executed = play_joint_trajectory(
             sim,
@@ -146,7 +214,7 @@ def _play_free_motion(
             cfg=JointTrajectoryPlaybackCfg(
                 control_dt=control_dt,
                 joint_command_mode="position_velocity",
-                preserve_source_grid=markers is not None,
+                preserve_source_grid=True,
             ),
             on_step=markers.observe if markers is not None else None,
         )
@@ -158,9 +226,8 @@ def _play_free_motion(
         measured = robot.get_qpos(name="arm")
         if markers is not None:
             markers.record_tip(measured)
-        tracking_errors.append(float((measured - result.positions[:, end]).abs().max()))
+        tracking_errors.append(float((measured - phase_positions[:, -1]).abs().max()))
         playback_seconds += float(executed.dt.sum()) + _PHASE_HOLD_SECONDS
-        previous = end
     return {
         "simulation_playback": "completed",
         "playback_duration_s": playback_seconds,
@@ -305,10 +372,16 @@ def run(
                     ),
                     onnx_cuda_use_tf32=False,
                     preserve_waypoint_arrivals=True,
-                    constraints={"velocity": 0.6, "acceleration": 1.5},
                 )
             )
         )
+        constraints = {
+            key: values[0] if len(values) == 1 else values
+            for key, values in (
+                ("velocity", args.velocity_limit),
+                ("acceleration", args.acceleration_limit),
+            )
+        }
         result = generator.generate(
             target_states=targets,
             options=MotionGenOptions(
@@ -316,6 +389,7 @@ def run(
                     control_part="arm",
                     start_qpos=start,
                     waypoint_modalities=modalities,
+                    constraints=constraints,
                 )
             ),
         )
@@ -326,6 +400,12 @@ def run(
             "sha256": _SHA256[robot_name],
             "modalities": modalities,
             "geometric_success": result.success.cpu().tolist(),
+            "requested_joint_limits": constraints,
+            "planned_peak_velocity_rad_s": result.velocities[0].abs().amax(0).tolist(),
+            "planned_peak_acceleration_rad_s2": result.accelerations[0]
+            .abs()
+            .amax(0)
+            .tolist(),
             "simulation_playback": "not_run",
             "arrivals": [],
         }
@@ -377,14 +457,21 @@ def run(
         # A geometric failure is reported, never passed off as a completed motion.
         if succeeded and not args.no_playback:
             feedback = args.scenario == "closed-loop-perturbation"
+            phases = (
+                []
+                if feedback
+                else _free_motion_commands(
+                    robot, result, waypoint_indices, control_dt, constraints
+                )
+            )
             if args.video:
                 if feedback:
                     recording_seconds = (
                         MAX_STEPS_PER_TARGET * len(targets) + 1
                     ) * control_dt + FINAL_HOLD_SECONDS
                 else:
-                    recording_seconds = float(result.duration[0]) + len(targets) * (
-                        _PHASE_HOLD_SECONDS + control_dt
+                    recording_seconds = sum(
+                        float(dt.sum()) + _PHASE_HOLD_SECONDS for _, dt in phases
                     )
                 # The recorder holds RGB frames in memory. Budget for the full
                 # sequence, including the control-grid rounding and settles.
@@ -416,7 +503,7 @@ def run(
                 )
             else:
                 playback = _play_free_motion(
-                    sim, robot, result, waypoint_indices, joints, control_dt, markers
+                    sim, robot, phases, joints, control_dt, markers
                 )
             report.update(playback)
             if args.video:
