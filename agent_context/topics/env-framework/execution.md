@@ -422,8 +422,6 @@ sample. Demo provenance is created when recording metadata is requested;
 episode initialization refreshes it once it has been used. Ordinary RL resets
 do not enumerate empty recording histories on the host. Metadata snapshots
 retain deep-copy and episode-context ownership.
-Reset skips the trajectory/camera eligibility snapshot when saving is disabled,
-or when no auto-saving trajectory buffer or event manager can consume it. With
-consumers present, eligibility is captured before save callbacks run; camera
+Recording eligibility is captured before save callbacks run; camera
 functors are still resolved after those callbacks. Dataset commits filter their
 own row subset, including explicit commits with `save_data=False`.

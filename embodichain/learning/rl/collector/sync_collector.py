@@ -41,8 +41,6 @@ class SyncCollector(BaseCollector):
         device: Device owning the rollout tensors.
         reset_every_rollout: Reset all environments before each collection.
         bootstrap_timeouts: Collect terminal values for algorithms using GAE.
-        on_reset_callback: Initialize external collector-side state after each
-            full environment reset, including construction and checkpoint resume.
     """
 
     def __init__(
@@ -53,14 +51,12 @@ class SyncCollector(BaseCollector):
         reset_every_rollout: bool = False,
         *,
         bootstrap_timeouts: bool = True,
-        on_reset_callback: Callable[[], object] | None = None,
     ) -> None:
         self.env = env
         self.policy = policy
         self.device = device
         self.reset_every_rollout = reset_every_rollout
         self.bootstrap_timeouts = bootstrap_timeouts
-        self._on_reset_callback = on_reset_callback
         policy_module = getattr(policy, "module", policy)
         self.actor_obs_groups = getattr(policy_module, "actor_obs_groups", None)
         self.critic_obs_groups = getattr(policy_module, "critic_obs_groups", None)
@@ -244,8 +240,6 @@ class SyncCollector(BaseCollector):
 
     def _reset_env(self) -> TensorDict:
         obs, _ = self.env.reset()
-        if self._on_reset_callback is not None:
-            self._on_reset_callback()
         return dict_to_tensordict(obs, self.device)
 
     def _model_observations(

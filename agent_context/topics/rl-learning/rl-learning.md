@@ -2,8 +2,8 @@
 
 RL orchestration lives in `embodichain/learning/rl/`; shared MLPs, normalization
 and layers live in `learning/models` and `learning/layers`. Package exports stay
-lazy; training/runtime helpers defer simulator imports to Gym construction and
-event-manager creation so lightweight learning environments remain independent.
+lazy; simulator imports stay in native Gym construction and lifecycle paths so
+lightweight learning environments remain independent.
 
 ## Entry Points
 

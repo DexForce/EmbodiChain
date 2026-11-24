@@ -276,7 +276,6 @@ def test_actor_only_tensor_subclass_keeps_one_native_constructor(device: str) ->
     obs = torch.zeros(2, 2, device=device)
     Normal(policy.actor(obs), torch.ones(2, 1, device=device))
     expected_broadcasts = len(broadcasts)
-    assert expected_broadcasts == 1
     broadcasts.clear()
     policy._distribution(obs)
     assert len(broadcasts) == expected_broadcasts

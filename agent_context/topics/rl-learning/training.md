@@ -28,20 +28,16 @@ restores each submodule's prior mode, including frozen normalization layers.
 The viewer adapter captures these modes at setup and restores them once on close.
 
 `Trainer(event_cfg=..., eval_event_cfg=...)` attaches each phase to its own
-native environment through `EmbodiedEnv.add_events` before the collector's
-initial reset. The host owns startup, interval and reset execution; the trainer
-does not execute these terms a second time. Plain vector environments retain
-post-step interval callbacks, but cannot host episode camera recorders or other
-lifecycle modes. Their class functors initialize through a collector reset
-callback at construction, full-rollout resets and checkpoint resume; row-level
-auto-reset lifecycle remains the native host's responsibility.
+environment through `add_events()` before the collector's initial reset.
+The host owns startup, interval and reset execution; the trainer
+does not execute these terms a second time. Enabled event declarations require
+this host lifecycle, including for interval-only events; plain vector environments
+accept empty or disabled declarations without an event API. Host reset owns event
+state at collector construction, full-rollout resets and checkpoint resume.
 Before and after evaluation (including failure), the trainer
 uses `flush_recordings()` to discard unfinished frames and wait for committed
 videos, leaving recorders open for the next evaluation. See the
 [camera lifecycle contract](../manager-functor/manager-functor.md#camera-recording).
-External interval functors retain their post-evaluation `flush` / `finalize`
-hooks, including the legacy output-path argument; these hooks are not invoked
-for environment-owned functors.
 The launcher resolves train and active eval camera demand before creating the
 first World. Direct Python callers must likewise select rendering before adding
 camera events. Phase event names must not collide with task event names.

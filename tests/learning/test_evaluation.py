@@ -343,53 +343,27 @@ def test_training_episode_windows_preserve_completion_order_across_rollouts(
     )
 
 
-@pytest.mark.parametrize("rank", [0, 1])
-def test_trainer_without_eval_env_ignores_empty_eval_events(
-    tmp_path: Path, rank: int
+@pytest.mark.parametrize(
+    "event_cfg",
+    [None, {}, SimpleNamespace(), {"unused": None}, SimpleNamespace(unused=None)],
+)
+@pytest.mark.parametrize("enable_eval", [False, True])
+def test_plain_trainer_accepts_empty_events(
+    tmp_path: Path, event_cfg: object, enable_eval: bool
 ) -> None:
-    """Disabled evaluation and non-evaluating ranks need no eval manager."""
-    trainer = Trainer(
-        policy=_DeterministicPolicy(),
-        env=_AsyncAutoResetEnv(),
-        algorithm=SimpleNamespace(device=torch.device("cpu")),
-        buffer_size=2,
-        writer=None,
-        eval_freq=0,
-        save_freq=0,
-        checkpoint_dir=str(tmp_path),
-        exp_name="no_eval",
-        use_wandb=False,
-        event_cfg={},
-        eval_event_cfg={},
-        distributed=True,
-        rank=rank,
-        world_size=2,
-    )
-
-    assert trainer.eval_env is None
-    assert not hasattr(trainer, "eval_event_manager")
-    assert trainer.event_manager._env is trainer.env
-
-
-def test_trainer_with_eval_env_creates_eval_event_manager(tmp_path: Path) -> None:
-    """An enabled evaluation environment retains its own event manager."""
-    eval_env = _AsyncAutoResetEnv()
-    trainer = Trainer(
-        policy=_DeterministicPolicy(),
-        env=_AsyncAutoResetEnv(),
-        algorithm=SimpleNamespace(device=torch.device("cpu")),
-        buffer_size=2,
-        writer=None,
-        eval_freq=10,
-        save_freq=0,
-        checkpoint_dir=str(tmp_path),
-        exp_name="with_eval",
-        use_wandb=False,
+    """Plain hosts train and evaluate without an event lifecycle when unused."""
+    eval_env = _AsyncAutoResetEnv() if enable_eval else None
+    trainer = _event_trainer(
+        tmp_path,
+        _AsyncAutoResetEnv(),
         eval_env=eval_env,
-        eval_event_cfg={},
+        event_cfg=event_cfg,
+        eval_event_cfg=event_cfg,
     )
-
-    assert trainer.eval_event_manager._env is eval_env
+    trainer._collect_rollout()
+    assert trainer.global_step == 6
+    if enable_eval:
+        assert trainer._eval_once(num_episodes=1)["eval/avg_reward"] == 1.0
 
 
 @pytest.mark.parametrize("explicit_legacy", [False, True])
@@ -582,16 +556,15 @@ def test_policy_action_moves_to_environment_device_before_preprocessing() -> Non
     assert converted.device == env.device
 
 
-@pytest.mark.parametrize("managed", [False, True])
 @pytest.mark.parametrize("reset_each_rollout", [False, True])
 def test_trainer_training_dispatches_interval_events_once(
-    tmp_path: Path, managed: bool, reset_each_rollout: bool
+    tmp_path: Path, reset_each_rollout: bool
 ) -> None:
-    """Plain callbacks and host-owned callbacks each run once per control step."""
+    """Host-owned callbacks reset with the environment and run once per step."""
     from embodichain.lab.gym.envs.managers.cfg import EventCfg
     from embodichain.lab.gym.envs.managers.manager_base import Functor
 
-    env = _ManagedEventEnv() if managed else _AsyncAutoResetEnv()
+    env = _ManagedEventEnv()
     calls = []
 
     class Record(Functor):
@@ -616,13 +589,10 @@ def test_trainer_training_dispatches_interval_events_once(
     counts = [1, 2, 1, 2] if reset_each_rollout else [1, 2, 3, 4]
     assert calls == [(count, [0, 1, 2]) for count in counts]
     assert trainer.global_step == 12
-    if managed:
-        assert trainer.event_manager is env.event_manager
 
 
-@pytest.mark.parametrize("managed", [False, True])
 def test_trainer_rewinds_eval_events_and_preserves_host_lifecycle(
-    tmp_path: Path, managed: bool
+    tmp_path: Path,
 ) -> None:
     """Repeated evaluation rewinds interval/term state and deterministic streams."""
     from embodichain.lab.gym.envs.managers.cfg import EventCfg
@@ -636,18 +606,12 @@ def test_trainer_rewinds_eval_events_and_preserves_host_lifecycle(
             self.calls += 1
             env.records.append((self.calls, env_ids.tolist(), torch.rand(()).item()))
 
-        def flush(self, save_path=None) -> None:
-            assert save_path == (None if managed else str(tmp_path))
-            self._env.flush_count += 1
-
         def finalize(self, save_path) -> None:
-            assert not managed, "The host retains its reusable event functors."
-            self._env.finalized_paths.append(save_path)
+            pytest.fail("The host retains its reusable event functors.")
 
-    eval_env = _ManagedEventEnv() if managed else _AsyncAutoResetEnv()
+    eval_env = _ManagedEventEnv()
     eval_env.records = []
     eval_env.flush_count = 0
-    eval_env.finalized_paths = []
     events = {
         "record": EventCfg(
             func=Record,
@@ -661,7 +625,7 @@ def test_trainer_rewinds_eval_events_and_preserves_host_lifecycle(
         _AsyncAutoResetEnv(),
         eval_env=eval_env,
         eval_seed=123,
-        eval_event_cfg=events if managed else SimpleNamespace(**events),
+        eval_event_cfg=SimpleNamespace(**events),
     )
     first = trainer._eval_once(num_episodes=8)
     first_records = list(eval_env.records)
@@ -675,10 +639,7 @@ def test_trainer_rewinds_eval_events_and_preserves_host_lifecycle(
     ]
     assert eval_env.records == first_records
     assert first == second
-    assert eval_env.flush_count == (4 if managed else 2)
-    assert eval_env.finalized_paths == ([] if managed else [str(tmp_path)] * 2)
-    if managed:
-        assert trainer.eval_event_manager is eval_env.event_manager
+    assert eval_env.flush_count == 4
 
 
 @pytest.mark.parametrize("cleanup_fails", [False, True])
@@ -715,24 +676,24 @@ def test_trainer_eval_failure_drains_host_recordings(
         assert any("drain failed" in note for note in failure.value.__notes__)
 
 
-@pytest.mark.parametrize("unsupported", ["reset", "camera"])
-def test_plain_trainer_events_reject_host_lifecycle_requirements(
-    tmp_path: Path, unsupported: str
+@pytest.mark.parametrize("phase", ["train", "eval"])
+def test_nonempty_trainer_events_require_host_lifecycle(
+    tmp_path: Path, phase: str
 ) -> None:
-    """Plain environments reject events whose lifecycle they cannot execute."""
+    """Even interval-only declarations require a host that owns their lifecycle."""
     from embodichain.lab.gym.envs.managers.cfg import EventCfg
-    from embodichain.lab.gym.envs.managers.record import record_camera_data
 
-    event = (
-        EventCfg(func=record_camera_data, mode="interval", interval_step=1)
-        if unsupported == "camera"
-        else EventCfg(func=lambda env, env_ids: None, mode="reset")
+    events = {"interval": EventCfg(func=lambda env, env_ids: None, mode="interval")}
+    kwargs = (
+        {"event_cfg": events}
+        if phase == "train"
+        else {
+            "eval_env": _AsyncAutoResetEnv(),
+            "eval_event_cfg": SimpleNamespace(**events),
+        }
     )
-    message = (
-        "recording lifecycle" if unsupported == "camera" else "only supports interval"
-    )
-    with pytest.raises(ValueError, match=message):
-        _event_trainer(tmp_path, _AsyncAutoResetEnv(), event_cfg={"unsupported": event})
+    with pytest.raises(ValueError, match=r"environment with add_events\(\)"):
+        _event_trainer(tmp_path, _AsyncAutoResetEnv(), **kwargs)
 
 
 @pytest.mark.parametrize("trainer_kind", ["standard", "differentiable"])
@@ -762,7 +723,6 @@ def test_trainer_evaluation_reporting_preserves_best_selection(
         trainer.best_eval_metric = "eval/avg_reward"
         trainer.best_eval_mode = best_mode
         trainer._pending_best = False
-        trainer._eval_step_events = None
         evaluate = trainer._eval_once
     else:
         trainer = object.__new__(DifferentiableTrainer)

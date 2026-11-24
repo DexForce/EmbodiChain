@@ -16,13 +16,12 @@
 
 from __future__ import annotations
 
-import inspect
 import math
 import time
 from collections.abc import Mapping
 from collections import deque
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 import torch
@@ -40,14 +39,16 @@ from embodichain.learning.rl.buffer import RolloutBuffer
 from embodichain.learning.rl.collector import SyncCollector
 from embodichain.learning.rl.evaluation import evaluate_episodes
 
-if TYPE_CHECKING:
-    from embodichain.lab.gym.envs.managers.event_manager import EventManager
-
 __all__ = ["Trainer"]
 
 
 class Trainer:
-    """Algorithm-agnostic trainer that coordinates training loop, logging, and evaluation."""
+    """Coordinate algorithm training, logging and evaluation.
+
+    Enabled ``event_cfg`` and ``eval_event_cfg`` declarations require the
+    corresponding environment's ``add_events()`` lifecycle. Environments own
+    event dispatch, reset and cleanup; empty or disabled events require no event API.
+    """
 
     def __init__(
         self,
@@ -97,16 +98,9 @@ class Trainer:
         self.best_eval_value: float | None = None
         self.best_checkpoint_path: str | None = None
 
-        self._train_step_events = None
-        self._eval_step_events = None
-        if event_cfg is not None:
-            self.event_manager, self._train_step_events = self._bind_events(
-                self.env, event_cfg
-            )
-        if self.eval_env is not None and eval_event_cfg is not None:
-            self.eval_event_manager, self._eval_step_events = self._bind_events(
-                self.eval_env, eval_event_cfg
-            )
+        self._bind_events(self.env, event_cfg)
+        if self.eval_env is not None:
+            self._bind_events(self.eval_env, eval_event_cfg)
 
         self.device = self.algorithm.device
         self.global_step = 0
@@ -161,11 +155,6 @@ class Trainer:
                 )
             ),
             bootstrap_timeouts=getattr(self.algorithm, "uses_value_bootstrap", True),
-            on_reset_callback=(
-                self._train_step_events.reset
-                if self._train_step_events is not None
-                else None
-            ),
         )
 
         self.curr_ret = torch.zeros(num_envs, dtype=torch.float32, device=self.device)
@@ -180,49 +169,22 @@ class Trainer:
         )
 
     @staticmethod
-    def _bind_events(
-        env: Any, event_cfg: object
-    ) -> tuple[EventManager | None, EventManager | None]:
-        """Use the host lifecycle, or post-step callbacks for lightweight hosts."""
-        from embodichain.lab.gym.envs.managers.event_manager import EventManager
-
+    def _bind_events(env: Any, event_cfg: object) -> None:
+        """Attach event declarations to their environment's lifecycle."""
+        if event_cfg is None:
+            return
+        declarations = event_cfg if isinstance(event_cfg, Mapping) else vars(event_cfg)
+        if not declarations:
+            return
         add_events = getattr(env, "add_events", None)
-        if callable(add_events):
-            add_events(event_cfg)
-            return env.event_manager, None
-
-        # Plain vector environments have no reset/close event hooks. Preserve
-        # their interval callbacks without pretending to own episode recording.
-        if event_cfg:
-            from embodichain.lab.gym.envs.managers.record import record_camera_data
-            from embodichain.utils.string import string_to_callable
-
-            declarations = (
-                event_cfg if isinstance(event_cfg, Mapping) else vars(event_cfg)
+        if not callable(add_events):
+            if not any(cfg is not None for cfg in declarations.values()):
+                return
+            raise ValueError(
+                "Trainer events require an environment with add_events() "
+                "that owns event execution, reset and cleanup."
             )
-            for name, cfg in declarations.items():
-                if cfg is None:
-                    continue
-                if cfg.mode != "interval":
-                    raise ValueError(
-                        f"Trainer event '{name}' uses mode '{cfg.mode}'; "
-                        "this environment only supports interval callbacks. "
-                        "Use an environment with add_events for lifecycle events."
-                    )
-                func = (
-                    string_to_callable(cfg.func)
-                    if isinstance(cfg.func, str)
-                    else cfg.func
-                )
-                if isinstance(func, record_camera_data) or (
-                    isinstance(func, type) and issubclass(func, record_camera_data)
-                ):
-                    raise ValueError(
-                        f"Trainer event '{name}' records episodes and requires "
-                        "an environment with add_events and recording lifecycle hooks."
-                    )
-        manager = EventManager(event_cfg, env=env)
-        return manager, manager
+        add_events(event_cfg)
 
     @staticmethod
     def _reduce_log_dicts(
@@ -356,9 +318,6 @@ class Trainer:
 
         def on_step(tensordict: TensorDict, info: dict):
             nonlocal step_index
-            if self._train_step_events is not None:
-                if "interval" in self._train_step_events.available_modes:
-                    self._train_step_events.apply(mode="interval")
             reward = tensordict["reward"]
             done = tensordict["done"]
             self.curr_ret += reward
@@ -514,21 +473,9 @@ class Trainer:
     def _eval_once(self, num_episodes: int = 5) -> dict[str, float]:
         """Evaluate ``num_episodes`` completed asynchronous episodes."""
 
-        step_events = self._eval_step_events
-        if step_events is not None and self.eval_seed is not None:
-            step_events.set_seed(self.eval_seed)
-        if step_events is not None:
-            step_events.reset()
-
-        def on_step(_: dict[str, Any]) -> None:
-            if step_events is not None and "interval" in step_events.available_modes:
-                step_events.apply(mode="interval")
-
         # The first reset must not commit an unfinished preceding evaluation.
         # Completed episodes were already submitted before the host auto-reset.
-        flush_recordings = getattr(self.eval_env, "flush_recordings", None)
-        if callable(flush_recordings):
-            flush_recordings()
+        self._flush_eval_recordings()
         try:
             metrics = evaluate_episodes(
                 policy=self.policy,
@@ -536,18 +483,17 @@ class Trainer:
                 num_episodes=num_episodes,
                 device=self.device,
                 seed=self.eval_seed,
-                on_step=on_step if step_events is not None else None,
             )
         except BaseException as error:
             try:
-                self._finish_eval_events()
+                self._flush_eval_recordings()
             except Exception as cleanup_error:
                 error.add_note(
                     f"Evaluation event cleanup also failed: {cleanup_error!r}"
                 )
             raise
         else:
-            self._finish_eval_events()
+            self._flush_eval_recordings()
         summary = {"global_step": float(self.global_step), **metrics}
         self.eval_history.append(summary)
         self.last_eval_metrics = summary
@@ -563,30 +509,11 @@ class Trainer:
             self._pending_best = True
         return summary
 
-    def _finish_eval_events(self) -> None:
-        """Drain host recordings or finish legacy external event outputs."""
+    def _flush_eval_recordings(self) -> None:
+        """Drain host recordings without closing reusable event functors."""
         flush_recordings = getattr(self.eval_env, "flush_recordings", None)
         if callable(flush_recordings):
             flush_recordings()
-            return
-        if self._eval_step_events is not None:
-            for functor_cfg in self._eval_step_events._mode_functor_cfgs.get(
-                "interval", []
-            ):
-                save_path = functor_cfg.params.get("save_path", "./outputs/videos/eval")
-                for name in ("flush", "finalize"):
-                    hook = getattr(functor_cfg.func, name, None)
-                    if not callable(hook):
-                        continue
-                    # External callbacks historically received the configured
-                    # output path. Bind before calling so an internal TypeError
-                    # is never mistaken for a signature mismatch or retried.
-                    try:
-                        inspect.signature(hook).bind(save_path)
-                    except TypeError:
-                        hook()
-                    else:
-                        hook(save_path)
 
     def save_checkpoint(self, path: str | Path | None = None) -> str:
         """Save complete learning state; every distributed rank must participate.
