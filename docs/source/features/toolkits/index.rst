@@ -1,10 +1,8 @@
-Toolkits
-========
+Tools
+=====
 
-The :mod:`embodichain.toolkits` package provides standalone utilities for
-preparing robot assets and generating manipulation data. These tools complement
-the simulation APIs: they can be used in preprocessing scripts, from the
-command line, or as part of an EmbodiChain workflow.
+The :mod:`embodichain.toolkits` package provides standalone tools that you can
+use in scripts, from the command line, or as part of an EmbodiChain workflow.
 
 Available Toolkits
 ------------------
