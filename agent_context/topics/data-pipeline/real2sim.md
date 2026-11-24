@@ -42,6 +42,24 @@ for explicitly selected occurrences when a program mixes source families.
 See `examples/expansion/demo_skill/` for migration of the existing real DROID
 carton case, with original state and prepared nominal commands stored separately.
 
+## Reconstructed-scene adaptation
+
+`data_pipeline.real2sim.adaptation` owns prepared recording contracts, calibrated
+scene registration, same-camera pixel recovery, trajectory/evidence helpers and
+bounded numerical corrections. `prepared.load_prepared_source()` preserves source
+joints and explicit camera/frame mappings; `registration.register_scene()` fits
+one shared scene similarity rather than changing individual objects.
+`trajectory_corrections.apply_trajectory_corrections()` converts structured
+Cartesian/gripper residuals into commands on the recorded sample grid. Its
+approximate IK is isolated in `_real2sim_ik.py`; finite output and joint-limit
+diagnostics are not physical task acceptance.
+
+Model inference and native replay composition belong to
+[GenSim Real2Sim](../gen-sim/gen-sim.md), not this data layer. The
+[example guide](../../../examples/real2sim/README.md) owns service configuration,
+prepared input layout, staged commands and output paths. These interfaces are
+separate from the normalized source/prototype integrations below.
+
 ## Standard manipulation prototypes
 
 Normalization preflights output sample count and estimated numeric working

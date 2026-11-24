@@ -1,0 +1,4 @@
+# Install EmbodiChain with its gensim and geometry extras first.
+# Optional real-recording decoding and trajectory geometry queries.
+av>=12
+open3d>=0.18
