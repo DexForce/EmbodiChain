@@ -343,12 +343,39 @@ class Trainer:
                     )
                 )
 
+        def flush_metrics(steps_per_frame: int) -> None:
+            for frame, log_dict in zip(
+                metric_steps, self._materialize_log_dicts(metric_snapshots)
+            ):
+                step = start_step + frame * steps_per_frame
+                if self.writer:
+                    _write_tensorboard_scalars(
+                        self.writer, log_dict, step, ignore_errors=True
+                    )
+                if self.use_wandb and log_dict:
+                    wandb.log(log_dict, step=step)
+
         rollout = self.buffer.start_rollout()
-        rollout = self.collector.collect(
-            num_steps=self.buffer_size,
-            rollout=rollout,
-            on_step_callback=on_step,
-        )
+        try:
+            rollout = self.collector.collect(
+                num_steps=self.buffer_size,
+                rollout=rollout,
+                on_step_callback=on_step,
+            )
+        except BaseException as error:
+            if step_index:
+                try:
+                    self._record_episode_stats(
+                        rollout[:, : step_index + 1], synchronize=False
+                    )
+                except Exception as cleanup_error:
+                    error.add_note(f"Episode statistics also failed: {cleanup_error!r}")
+                try:
+                    # A failed rank cannot safely synchronize the global advance.
+                    flush_metrics(0 if self.distributed else self.env.num_envs)
+                except Exception as cleanup_error:
+                    error.add_note(f"Metric reporting also failed: {cleanup_error!r}")
+            raise
         self.buffer.add(rollout)
         if self.distributed:
             if not torch.distributed.is_available():
@@ -374,19 +401,11 @@ class Trainer:
             )
             self.global_step += int(delta_tensor.item())
         self._record_episode_stats(rollout)
-        steps_per_frame = (self.global_step - start_step) // self.buffer_size
-        for frame, log_dict in zip(
-            metric_steps, self._materialize_log_dicts(metric_snapshots)
-        ):
-            step = start_step + frame * steps_per_frame
-            if self.writer:
-                _write_tensorboard_scalars(
-                    self.writer, log_dict, step, ignore_errors=True
-                )
-            if self.use_wandb and log_dict:
-                wandb.log(log_dict, step=step)
+        flush_metrics((self.global_step - start_step) // self.buffer_size)
 
-    def _record_episode_stats(self, rollout: TensorDict) -> None:
+    def _record_episode_stats(
+        self, rollout: TensorDict, *, synchronize: bool = True
+    ) -> None:
         """Append new completions in step, rank, then row order.
 
         Rank zero owns the distributed history. Only this rollout's completions
@@ -396,7 +415,7 @@ class Trainer:
         completed = done.nonzero(as_tuple=False).squeeze(-1)
         # Earlier completions cannot survive either bounded history window.
         completed = completed[-self.ret_window.maxlen :]
-        if self.distributed:
+        if self.distributed and synchronize:
             # Fixed-size messages also let ranks without completions participate.
             # FP64 preserves FP32 returns and integer episode lengths/indices.
             stats = torch.zeros(

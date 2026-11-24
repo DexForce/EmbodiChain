@@ -185,13 +185,17 @@ Each group uses sequential native gradient clipping, and non-finite gradients
 reject the optimizer step.
 
 `Trainer` snapshots per-step metric means and episode completions on device,
-then transfers them at the rollout boundary. TensorBoard/W&B still receive each
-step's tags and recorded global step; this is deferred reporting, not temporal
-averaging. Completed episodes retain step-then-row order and bounded history.
+then transfers them at the rollout boundary or on collection failure.
+Failure flushing preserves the collection exception and excludes unwritten slots.
+TensorBoard/W&B still receive each step's tags and recorded global step; this is
+deferred reporting, not temporal averaging. Completed episodes retain step-then-row
+order and bounded history.
 Distributed ranks exchange only new completions at each rollout boundary;
 rank zero merges them in step, rank, then row order into one bounded window.
 Other ranks retain local histories. Metric steps use the summed environment
 count across ranks rather than the pre-rollout global counter.
+Failed distributed collection flushes only local records, without collectives;
+metrics use the last synchronized global step because the global advance is unknown.
 `DifferentiableTrainer` batches built-in CUDA episode statistics in bounded
 chunks, flushing by the collection boundary and on collection failure. Completed
 episodes retain step-then-row order and integer-length precision; CPU and custom

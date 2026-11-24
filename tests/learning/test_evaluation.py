@@ -298,6 +298,112 @@ def test_trainer_rollout_logging_reuses_means_for_both_sinks(
         wandb_log.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "error_type,flush_fails,distributed,completed_steps",
+    [
+        pytest.param(RuntimeError, False, False, 2, id="runtime-error"),
+        pytest.param(KeyboardInterrupt, False, False, 2, id="keyboard-interrupt"),
+        pytest.param(RuntimeError, True, False, 2, id="metric-flush-error"),
+        pytest.param(RuntimeError, False, True, 2, id="distributed-local-flush"),
+        pytest.param(RuntimeError, False, False, 4, id="final-value-error"),
+    ],
+)
+def test_interrupted_rollout_preserves_completed_statistics_and_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    error_type: type[BaseException],
+    flush_fails: bool,
+    distributed: bool,
+    completed_steps: int,
+) -> None:
+    """Completed controls remain observable even when collection cannot finish."""
+    trainer = Trainer(
+        policy=_DeterministicPolicy(),
+        env=SimpleNamespace(num_envs=3, reset=lambda: (torch.zeros(3, 1), {})),
+        algorithm=SimpleNamespace(device=torch.device("cpu")),
+        buffer_size=4,
+        writer=MagicMock(),
+        eval_freq=0,
+        save_freq=0,
+        checkpoint_dir=str(tmp_path),
+        exp_name="interrupted",
+        use_wandb=True,
+        distributed=distributed,
+        world_size=2 if distributed else 1,
+    )
+    trainer.global_step = 10
+    trainer.ret_window.append(50.0)
+    trainer.len_window.append(5)
+    # Reused storage may retain terminal flags and statistics beyond this prefix.
+    trainer._episode_returns.fill_(999.0)
+    trainer._episode_lengths.fill_(999)
+    collection_error = error_type(
+        "final value failed" if completed_steps == 4 else "collection interrupted"
+    )
+    wandb_log = MagicMock(
+        side_effect=OSError("metric flush failed") if flush_fails else None
+    )
+    monkeypatch.setattr("embodichain.learning.rl.utils.trainer.wandb.log", wandb_log)
+    collectives = [MagicMock(), MagicMock()]
+    for name, collective in zip(("all_reduce", "all_gather"), collectives):
+        collective.side_effect = AssertionError("Failure cleanup must remain local")
+        monkeypatch.setattr(torch.distributed, name, collective)
+
+    def collect(*, num_steps, rollout, on_step_callback):
+        rollout["done"].fill_(True)
+        reused_metric = torch.tensor([1.0, 3.0, 5.0])
+        completions = (
+            [True, False, False],
+            [True, True, False],
+            [True, False, True],
+            [True, True, False],
+        )
+        for step, done in enumerate(completions[:completed_steps]):
+            rollout["reward"][:, step] = torch.tensor([1.0, 10.0, 100.0])
+            rollout["done"][:, step] = torch.tensor(done)
+            on_step_callback(rollout[:, step], {"metrics": {"progress": reused_metric}})
+            reused_metric.add_(2)
+        # Final-value inference can fail after every transition callback succeeded.
+        raise collection_error
+
+    trainer.collector = SimpleNamespace(collect=collect)
+    with pytest.raises(error_type, match=str(collection_error)) as failure:
+        trainer._collect_rollout()
+
+    assert failure.value is collection_error
+    assert trainer.global_step == (10 if distributed else 10 + 3 * completed_steps)
+    assert not trainer.buffer.is_full()
+    for collective in collectives:
+        collective.assert_not_called()
+    # Tied completions retain row order; no records come from the stale tail.
+    expected_returns, expected_lengths = (
+        ([50.0, 1.0, 1.0, 20.0], [5, 1, 1, 2])
+        if completed_steps == 2
+        else ([50.0, 1.0, 1.0, 20.0, 1.0, 300.0, 1.0, 20.0], [5, 1, 1, 2, 1, 3, 1, 2])
+    )
+    assert list(trainer.ret_window) == expected_returns
+    assert list(trainer.len_window) == expected_lengths
+    unfinished_steps = 2 if completed_steps == 2 else 1
+    torch.testing.assert_close(
+        trainer.curr_ret, torch.tensor([0.0, 0.0, 100.0 * unfinished_steps])
+    )
+    torch.testing.assert_close(
+        trainer.curr_len, torch.tensor([0, 0, unfinished_steps], dtype=torch.int32)
+    )
+    if flush_fails:
+        assert any("metric flush failed" in note for note in failure.value.__notes__)
+    else:
+        log_steps = [10] * completed_steps if distributed else [13, 16, 19, 22]
+        expected_logs = list(zip([3.0, 5.0, 7.0, 9.0], log_steps))[:completed_steps]
+        assert trainer.writer.add_scalar.call_args_list == [
+            call("metrics/progress", value, step) for value, step in expected_logs
+        ]
+        assert wandb_log.call_args_list == [
+            call({"metrics/progress": value}, step=step)
+            for value, step in expected_logs
+        ]
+
+
 def test_training_episode_windows_preserve_completion_order_across_rollouts(
     tmp_path: Path,
 ) -> None:
