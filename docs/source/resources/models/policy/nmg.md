@@ -58,12 +58,13 @@ embodichain run-example sim/motion/planners/nmg/franka --headless --device cpu \
 
 ## Supported configurations and weights
 
-| Supported configuration | Policy TCP | FP32 observation → raw action | Hugging Face download |
-| --- | --- | --- | --- |
-| Franka FR3 (7 DoF) with Robotiq 2F-140 | 0.20 m flange offset with gripper rotation | `[B, 417] → [B, 7]` | [`v1/franka.onnx`](https://huggingface.co/DexForceAI/neural_motion_generator/resolve/ddca0e456e097ba42c05e1269febf73fa2835541/v1/franka.onnx) |
-| PiPER V100 (6 DoF) with parallel gripper | 0.143 m `link6` offset with gripper rotation | `[B, 391] → [B, 6]` | [`v1/piper.onnx`](https://huggingface.co/DexForceAI/neural_motion_generator/resolve/ddca0e456e097ba42c05e1269febf73fa2835541/v1/piper.onnx) |
+| Supported configuration | Policy TCP | FP32 observation → raw action | ONNX inference | Native PyTorch |
+| --- | --- | --- | --- | --- |
+| Franka FR3 (7 DoF) with Robotiq 2F-140 | 0.20 m flange offset with gripper rotation | `[B, 417] → [B, 7]` | [`v1/franka.onnx`](https://huggingface.co/DexForceAI/neural_motion_generator/resolve/1f7398d2539fdc9c54d5e5c81590c784f34146ca/v1/franka.onnx) | [`v1/franka.pt`](https://huggingface.co/DexForceAI/neural_motion_generator/resolve/1f7398d2539fdc9c54d5e5c81590c784f34146ca/v1/franka.pt) |
+| PiPER V100 (6 DoF) with parallel gripper | 0.143 m `link6` offset with gripper rotation | `[B, 391] → [B, 6]` | [`v1/piper.onnx`](https://huggingface.co/DexForceAI/neural_motion_generator/resolve/1f7398d2539fdc9c54d5e5c81590c784f34146ca/v1/piper.onnx) | [`v1/piper.pt`](https://huggingface.co/DexForceAI/neural_motion_generator/resolve/1f7398d2539fdc9c54d5e5c81590c784f34146ca/v1/piper.pt) |
 
-The links use the same pinned revision as the examples, which check each file's SHA256.
+Both model formats are pinned to the same release. The simulation examples
+download the ONNX file and verify its SHA256.
 Use `--download-only` to print its verified local path, `--offline` to
 use the cache, or `--model-path` to supply a local copy.
 

@@ -37,10 +37,10 @@ if TYPE_CHECKING:
     from examples.sim.motion.planners.nmg._visuals import TrajectoryMarkers
 
 # Pin immutable model bytes; a moving main branch must not change a demo.
-_REVISION = "ddca0e456e097ba42c05e1269febf73fa2835541"
+_REVISION = "1f7398d2539fdc9c54d5e5c81590c784f34146ca"
 _SHA256 = {
-    "franka": "2361954fda7b6f0d21445ebfb5099d31bdd67199bdadcecba71e0835f2157ad5",
-    "piper": "223a02d7f1c3db1ea96352404f623ebfde7e1b00f3bc3d7a186a634dfea5ecf0",
+    "franka": "59efcf225381d04ca511519207c634370fd75564e07ae6b332b4f54a66e2b90a",
+    "piper": "88e7559799829cfcc15efc2efa3a14b2eb8ca19be2da0d4f89be925260b2bf2b",
 }
 _FPS = 25
 _PHASE_HOLD_SECONDS = 0.5
