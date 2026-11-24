@@ -47,7 +47,7 @@ def _connector_frame(
 
     Poses are world transforms. Cable states contain segment centers and
     xyzw rotations, with each capsule aligned with its local positive z axis.
-    Contact inputs describe the four substep samples in the control interval.
+    Contact inputs describe the substep samples in the control interval.
     A missing contact measurement is represented by None.
     """
     insertion_rotation = np.asarray(config["insertion_rotation"])

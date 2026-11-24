@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+import pytest
 import yaml
 
 from embodichain.extensions.tasks.configs import get_config_path
@@ -29,12 +30,19 @@ from embodichain.lab.evaluation._episode_reduction import (
 )
 
 
-def test_rj45_acceptance_requires_simultaneous_press_and_final_placement() -> None:
+@pytest.mark.parametrize("wrap_depth_check", [False, True])
+def test_rj45_acceptance_requires_simultaneous_press_and_final_placement(
+    wrap_depth_check: bool,
+) -> None:
     path = get_config_path(
         "tasks/manipulation/cable/franka_rj45_cycle/task_program/evaluation.yaml"
     )
     evaluation = yaml.safe_load(path.read_text())
     graph = evaluation["graph"]
+    if wrap_depth_check:
+        rules = graph["rules"]
+        rules["seat_depth_min_range"] = rules["seat_depth_min"]
+        rules["seat_depth_min"] = {"kind": "any", "refs": ["seat_depth_min_range"]}
     check_names = graph["rules"]["rj45_success"]["refs"]
     assert len(check_names) == 17
     reductions = evaluation["measurements"]["reductions"]

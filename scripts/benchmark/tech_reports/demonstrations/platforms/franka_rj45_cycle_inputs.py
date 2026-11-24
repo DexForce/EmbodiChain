@@ -17,7 +17,7 @@
 
 from __future__ import annotations
 
-from importlib.util import module_from_spec, spec_from_file_location
+from collections.abc import Sequence
 import json
 import math
 from pathlib import Path
@@ -194,40 +194,38 @@ def load_asset_manifest(path: Path) -> dict[str, Path]:
     return paths
 
 
-def load_measurements() -> SimpleNamespace:
-    """Load portable numeric kernels and the deployment's measurement graph."""
+def load_measurements(config: dict[str, Any]) -> SimpleNamespace:
+    """Load the shared rule graph and contact cadence for this replay."""
     import yaml
 
-    core = _TASK_PACKAGE.parents[1] / "lab/evaluation"
+    from embodichain.lab.evaluation._episode_geometry import _connector_frame
+    from embodichain.lab.evaluation._episode_reduction import (
+        _evaluate_scalar_checks,
+        _reduce_measurements,
+    )
 
-    def load_module(name: str) -> Any:
-        path = core / f"{name}.py"
-        spec = spec_from_file_location(name, path)
-        if spec is None or spec.loader is None:
-            raise ImportError(f"Cannot load the measurement module at {path}.")
-        module = module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
-
-    geometry = load_module("_episode_geometry")
-    reduction = load_module("_episode_reduction")
     deployment = yaml.safe_load(TASK_CONFIG.read_text())
     evaluation = yaml.safe_load(
-        (_TASK / deployment["evaluation"]["component"]).read_text()
+        (TASK_CONFIG.parent / deployment["evaluation"]["component"]).read_text()
     )
     measurements = evaluation["measurements"]
+    samples = measurements["samples_per_control"]
+    substeps = config["substeps"]
+    if type(samples) is not int or samples < 1 or substeps % samples:
+        raise ValueError(
+            "RJ45 samples_per_control must be a positive integer that divides the physics substeps."
+        )
+    diagnostic_rate_hz = config["control_hz"] * samples
+    parameters = {**measurements["parameters"], "control_hz": config["control_hz"]}
     graph = evaluation["graph"]
     (root,) = graph["roots"]
 
-    def measure(config, **frame):
-        return geometry._connector_frame(
-            {**measurements["parameters"], "control_hz": config["control_hz"]},
-            **frame,
-        )
+    def measure(**frame: Any) -> dict[str, Any]:
+        return _connector_frame(parameters, **frame)
 
-    def evaluate(rows, config):
-        values = reduction._reduce_measurements(rows, measurements["reductions"])
-        results = reduction._evaluate_scalar_checks(graph, values)
+    def evaluate(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        values = _reduce_measurements(rows, measurements["reductions"])
+        results = _evaluate_scalar_checks(graph, values)
         checks = {name: results[name] for name in graph["rules"][root]["refs"]}
         passed = results[root]
         pressed = [row for row in rows if 24 <= row["time_s"] <= 25]
@@ -236,8 +234,7 @@ def load_measurements() -> SimpleNamespace:
             "passed": passed,
             "checks": checks,
             "quality_status": "floor_cycle_verified" if passed else "demo_candidate",
-            "diagnostic_rate_hz": config["control_hz"]
-            * measurements["samples_per_control"],
+            "diagnostic_rate_hz": diagnostic_rate_hz,
             "peak_penetration_m": values.get("peak_contact_penetration"),
             "peak_attachment_error_m": values.get("cable_attachment"),
             "peak_latch_limit_violation_deg": (
@@ -260,7 +257,10 @@ def load_measurements() -> SimpleNamespace:
     return SimpleNamespace(
         measure_frame=measure,
         evaluate=evaluate,
-        parameters=measurements["parameters"],
+        parameters=parameters,
+        samples_per_control=samples,
+        substeps_per_sample=substeps // samples,
+        diagnostic_rate_hz=diagnostic_rate_hz,
     )
 
 

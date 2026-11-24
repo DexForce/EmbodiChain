@@ -21,6 +21,8 @@ import argparse
 from dataclasses import dataclass
 from importlib.metadata import version
 from pathlib import Path
+import sys
+from types import SimpleNamespace
 from typing import Any
 from xml.etree import ElementTree
 
@@ -46,8 +48,6 @@ from isaaclab_franka_rope_wrap import (
 )
 
 __all__: list[str] = []
-
-_CONTACT_SAMPLES = 4
 
 
 @dataclass(frozen=True)
@@ -325,6 +325,8 @@ def _replay(
     home: np.ndarray,
     positions: np.ndarray,
     velocities: np.ndarray,
+    *,
+    measurements: SimpleNamespace,
 ) -> tuple[dict[str, np.ndarray], list[dict[str, Any]]]:
     model, control = manager.get_model(), manager.get_control()
     q_indices = model.joint_q_start.numpy()[scene.joints]
@@ -335,7 +337,7 @@ def _replay(
     latch_dof = model.joint_qd_start.numpy()[scene.latch_joint]
     targets, speeds = control.joint_target_q.numpy(), control.joint_target_qd.numpy()
     measured_q, measured_qd = wp.clone(model.joint_q), wp.clone(model.joint_qd)
-    parts_per_control = _CONTACT_SAMPLES
+    parts_per_control = measurements.samples_per_control
     steps = len(positions)
     frames = steps + 1
     data = {
@@ -353,12 +355,11 @@ def _replay(
         "command_qd": np.empty_like(velocities),
     }
     rows = []
-    measurements = load_measurements()
     measure = measurements.measure_frame
     insertion_axis = np.asarray(measurements.parameters["insertion_rotation"])[:, 2]
     socket_mouth = np.asarray(measurements.parameters["socket_mouth_m"])
-    # Sample freshly collided geometry at the same four substep boundaries as
-    # the source. The measurement buffer never participates in the solve.
+    # Match the source's declared contact sampling boundaries. The measurement
+    # buffer never participates in the solve.
     pipeline = newton.CollisionPipeline(
         model, broad_phase="explicit", rigid_contact_max=4096, reduce_contacts=False
     )
@@ -403,7 +404,6 @@ def _replay(
             )
         rows.append(
             measure(
-                config,
                 frame=frame,
                 plug_pose=_matrix(data["plug_pose"][frame]),
                 tcp_pose=_matrix(poses[scene.tcp_body]) @ scene.tcp_local,
@@ -493,6 +493,8 @@ def _run(
     assets: dict[str, Path],
     positions: np.ndarray,
     velocities: np.ndarray,
+    *,
+    measurements: SimpleNamespace,
 ) -> tuple[dict[str, np.ndarray], list[dict[str, Any]]]:
     from isaaclab.app import launch_simulation
     from isaaclab.physics import PhysicsCfg
@@ -520,18 +522,14 @@ def _run(
     launch_args = {"physics": "newton_vbd", "visualizer": [], "device": device}
     newton.use_coord_layout_targets = True
     with launch_simulation(PhysicsCfg(), launch_args) as physics:
-        if config["substeps"] % _CONTACT_SAMPLES:
-            raise ValueError(
-                "The RJ45 physics substeps must support four contact samples."
-            )
-        physics.num_substeps = config["substeps"] // _CONTACT_SAMPLES
+        physics.num_substeps = measurements.substeps_per_sample
         physics.collision_decimation = 1
         physics.use_cuda_graph = wp.get_device(device).is_cuda
         physics.solver_cfg = SolverCfg(iterations=config["iterations"])
         physics.collision_cfg = CollisionCfg()
         sim = SimulationContext(
             SimulationCfg(
-                dt=1 / (config["control_hz"] * _CONTACT_SAMPLES),
+                dt=1 / measurements.diagnostic_rate_hz,
                 device=device,
                 physics=physics,
             )
@@ -568,6 +566,7 @@ def _run(
                 np.asarray(robot["init_qpos"], dtype=np.float32),
                 positions,
                 velocities,
+                measurements=measurements,
             )
         finally:
             sim.clear_instance()
@@ -585,11 +584,23 @@ def main() -> None:
     output = args.output.expanduser().resolve()
     assets = load_asset_manifest(args.asset_manifest)
     config, env, robot = load_scene()
+    # Use the evaluator from the checkout that owns this scene and its YAML.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[5]))
+    measurements = load_measurements(config)
     positions, velocities, source = load_commands(recording, config)
     inputs = scene_inputs(recording, assets)
     output.mkdir(parents=True, exist_ok=False)
-    data, rows = _run(args.device, config, env, robot, assets, positions, velocities)
-    acceptance = load_measurements().evaluate(rows, config)
+    data, rows = _run(
+        args.device,
+        config,
+        env,
+        robot,
+        assets,
+        positions,
+        velocities,
+        measurements=measurements,
+    )
+    acceptance = measurements.evaluate(rows)
     save_results(
         output,
         data,
@@ -615,7 +626,7 @@ def main() -> None:
             "control_hz": config["control_hz"],
             "control_steps": len(positions),
             "physics_steps_per_control": config["substeps"],
-            "contact_samples_per_control": _CONTACT_SAMPLES,
+            "contact_samples_per_control": measurements.samples_per_control,
             "pre_roll_s": config["pre_roll_s"],
             "solver_iterations": config["iterations"],
             "robot_drive": "Native VBD position and velocity targets with authored PD gains",

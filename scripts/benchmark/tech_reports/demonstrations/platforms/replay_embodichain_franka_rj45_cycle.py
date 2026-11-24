@@ -68,7 +68,7 @@ def main() -> None:
     recording = args.recording.expanduser().resolve(strict=True)
     output = args.output.expanduser().resolve()
     config, environment, _ = load_scene()
-    measurements = load_measurements()
+    measurements = load_measurements(config)
     positions, velocities, source = load_commands(recording, config)
     models = get_rj45_models()
     inputs = scene_inputs(recording, models)
@@ -138,7 +138,7 @@ def main() -> None:
             raise RuntimeError(
                 f"Expected {steps + 1} measured RJ45 frames, got {len(rows)}."
             )
-        acceptance = measurements.evaluate(rows, config)
+        acceptance = measurements.evaluate(rows)
         report = {
             "status": "completed",
             "backend": "EmbodiChain DexSim Newton (DexUni)",

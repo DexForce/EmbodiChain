@@ -325,8 +325,10 @@ contact. Contact loss covers the whole control interval. Press observations
 keep insertion depth and latch angle from the same finger-contact sample.
 Terminal scalar observations feed the ordinary evaluation graph and recorder.
 The observation channel identity includes the physical probe and reduction
-declaration. Rule thresholds remain in the graph. Isaac Lab can use the same
-numeric projections with its own freshly simulated state.
+declaration. Rule thresholds remain in the graph. The RJ45 replay tools use
+the same reductions and rules on freshly simulated state. Isaac Lab groups
+its physics substeps by `samples_per_control`, which also determines the
+reported diagnostic rate.
 
 The configured lowerer allowlist also exposes profile-owned Park, AxisAlign,
 relative Place and coordinated transport. Their declarations in

@@ -91,7 +91,10 @@ scene. EmbodiChain uses the configured Newton/DexUni coupling.
 
 Each replay writes measured robot, cable and plug states with target readbacks
 to `trajectory.npz` and its own frame measurements to `metrics.json`.
-`result.json` records input hashes and the original 17 gate results, including
-seating, latch contact, cable attachment and final return. A completed replay
-can report failed acceptance gates. The EmbodiChain result also reports the
-largest differences from the recorded state after its fresh pre-roll.
+`result.json` records input hashes and the gate results from the configured
+Task Program evaluation graph, including seating, latch contact, cable
+attachment and final return. Isaac Lab uses `samples_per_control` from that
+configuration for both stepping and the reported contact diagnostic rate.
+A completed replay can report failed acceptance gates. The EmbodiChain
+result also reports the largest differences from the recorded state after
+its fresh pre-roll.

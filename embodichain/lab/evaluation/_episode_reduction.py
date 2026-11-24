@@ -82,37 +82,19 @@ def _reduce_measurements(
 def _evaluate_scalar_checks(
     graph: Mapping[str, Any], measurements: Mapping[str, float]
 ) -> dict[str, bool]:
-    """Evaluate scalar report rules in replay hosts that only load measured data."""
+    """Evaluate reduced replay observations with the standard rule graph."""
+    import torch
 
-    results: dict[str, bool] = {}
+    from . import EvaluationSpec, EvaluationStatus, builtin_predicates
 
-    def evaluate(name: str) -> bool:
-        if name in results:
-            return results[name]
-        rule = graph["rules"][name]
-        if rule["kind"] == "all":
-            passed = all([evaluate(ref) for ref in rule["refs"]])
-        elif rule["kind"] == "scalar_range":
-            value = measurements.get(rule["bindings"]["value"].split("/")[-1])
-            params = rule["params"]
-            passed = (
-                value is not None
-                and (
-                    params["minimum"] <= value
-                    if params.get("minimum_inclusive", True)
-                    else params["minimum"] < value
-                )
-                and (
-                    value <= params["maximum"]
-                    if params.get("maximum_inclusive", True)
-                    else value < params["maximum"]
-                )
-            )
-        else:
-            raise ValueError(f"Unsupported scalar report rule {rule['kind']!r}.")
-        results[name] = bool(passed)
-        return results[name]
-
-    for root in graph["roots"]:
-        evaluate(root)
-    return results
+    compiled = builtin_predicates().compile(EvaluationSpec.from_dict(graph))
+    observations = {
+        f"measurements/{name}": torch.tensor(
+            [[value]], dtype=torch.float64, device="cpu"
+        )
+        for name, value in measurements.items()
+    }
+    return {
+        name: rule.status.item() == EvaluationStatus.SATISFIED
+        for name, rule in compiled.evaluate(observations, batch_size=1).items()
+    }
