@@ -1,6 +1,6 @@
 # Installation
 
-EmbodiChain is a Python framework built on the [DexSim](https://github.com/DexForce) simulation engine (`dexsim_engine` on PyPI). This guide covers system requirements, package indexes, Docker and local install paths, optional policy deployment and generative-simulation dependencies, and verification.
+EmbodiChain is a Python framework built on the [DexSim](https://github.com/DexForce) simulation engine (`dexsim_engine` on PyPI). This guide covers system requirements, package indexes, Docker and local install paths, optional policy deployment, NMG input gradients, generative-simulation dependencies, and verification.
 
 After installation, continue with the [Quick Start Tutorial](../tutorial/index.rst).
 
@@ -273,10 +273,11 @@ and cuDNN libraries using the
 [CUDA provider requirements](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html#requirements).
 Installing the extra does not override a policy's execution-provider selection.
 
-The former `nmg` extra has been replaced by `policy-deploy`. Update existing
-install commands accordingly. If the old extra installed the CPU package,
-remove it before installing the shared GPU runtime. If both ORT packages are
-already installed, remove both first to avoid overlapping package files:
+If you previously installed `nmg` for ORT inference, switch to `policy-deploy`.
+The current [`nmg` extra](#optional-nmg-input-gradients-nmg) enables input
+gradients. If the old extra installed the CPU package or both ORT packages are
+present, remove the existing runtime packages before installing the shared GPU
+runtime to avoid overlapping files.
 
 ```bash
 python -m pip uninstall -y onnxruntime onnxruntime-gpu
@@ -284,6 +285,24 @@ python -m pip install "embodichain[policy-deploy]" ${PIP_EXTRA_ARGS}
 ```
 
 For an editable checkout, use `-e ".[policy-deploy]"` in the second command.
+
+## Optional NMG input gradients (`nmg`)
+
+Install the `nmg` extra to use
+`NeuralMotionGenerator.from_onnx(..., enable_grad=True)`. It includes `onnx` to
+read the local model and `onnx2pytorch` to convert it into a PyTorch module with
+frozen weights. PyTorch autograd computes gradients of a single policy step's
+actions with respect to continuous observations.
+
+Use the index variables from [Package indexes](#package-indexes).
+
+```bash
+python -m pip install "embodichain[nmg]" ${PIP_EXTRA_ARGS}
+```
+
+For an editable checkout, use `python -m pip install -e ".[nmg]" ${PIP_EXTRA_ARGS}`.
+For both ORT inference and NMG input gradients, install
+`embodichain[policy-deploy,nmg]` or `.[policy-deploy,nmg]` from a checkout.
 
 ## Newton planning geometry
 

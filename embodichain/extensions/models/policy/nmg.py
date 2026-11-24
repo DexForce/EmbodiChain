@@ -199,7 +199,7 @@ class NeuralMotionGenerator(nn.Module):
         except ImportError as exc:
             raise ImportError(
                 "NMG input gradients require ONNX and onnx2pytorch. Install them with "
-                "pip install 'embodichain[nmg-grad]'."
+                "pip install 'embodichain[nmg]'."
             ) from exc
 
         def float_shape(value: onnx.ValueInfoProto) -> list[int | None] | None:

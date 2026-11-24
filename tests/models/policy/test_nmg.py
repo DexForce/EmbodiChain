@@ -287,7 +287,7 @@ def test_validates_observation_signature(tmp_path, enable_grad):
 
 @pytest.mark.parametrize(
     ("enable_grad", "package", "extra"),
-    [(False, "onnxruntime", "policy-deploy"), (True, "onnx2pytorch", "nmg-grad")],
+    [(False, "onnxruntime", "policy-deploy"), (True, "onnx2pytorch", "nmg")],
 )
 def test_missing_backend_names_its_optional_extra(
     tmp_path, monkeypatch, enable_grad, package, extra

@@ -117,7 +117,7 @@ avoidance.
 ## Single-step actions and observation gradients
 
 `NeuralMotionGenerator` loads the same local ONNX files and evaluates raw
-policy actions. Install `embodichain[policy-deploy,nmg-grad]` to use both
+policy actions. Install `embodichain[policy-deploy,nmg]` to use both
 backends. Use `--download-only` to find the verified model path.
 
 Pass a batched FP32 tensor in the export's observation layout. Franka maps

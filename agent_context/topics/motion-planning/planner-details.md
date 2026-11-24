@@ -219,7 +219,7 @@ heterogeneous limits. Validate reports, geometry and padding together in
 
 `embodichain.extensions.models.policy.nmg.NeuralMotionGenerator` loads standalone
 NMG ONNX exports and returns raw actions. Its ORT backend uses the `policy-deploy`
-extra. Its frozen PyTorch backend uses `nmg-grad` and retains gradients of the
+extra. Its frozen PyTorch backend uses `nmg` and retains gradients of the
 single-step action with respect to continuous observations. `NeuralPlanner` uses
 the ORT backend and validates the full observation-layout metadata and
 fingerprint against the configured robot before rollout.
