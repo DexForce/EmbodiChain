@@ -650,7 +650,13 @@ def test_authoring_publication_is_readable_without_execution(hybrid, tmp_path):
             re.S,
         )
         assert data is not None
-        pairing = json.loads(data[1])["review"]["pairing"]
+        payload = json.loads(data[1])
+        assert payload["task_spec"] == result["task_spec"]
+        assert payload["review"]["source_image"].startswith("data:image/jpeg;base64,")
+        pairing = payload["review"]["pairing"]
+        assert pairing["role_entities"] == {
+            r["id"]: [r["id"]] for r in result["task_spec"]["roles"]
+        }
         assert pairing["milestone_groups"] == {
             "step_01": "step_01",
             "step_02": "step_02",

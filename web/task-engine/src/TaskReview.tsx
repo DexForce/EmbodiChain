@@ -32,10 +32,10 @@ import {
   Box,
   Check,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   CircleX,
   GitBranch,
-  Layers,
   Maximize2,
   Moon,
   MousePointer2,
@@ -47,8 +47,11 @@ import {
 import {
   IntentFacts,
   IntentStepDetails,
+  intentArmBadge,
+  intentFactChip,
   intentLabel,
   intentStep,
+  intentStepRoleIds,
   type IntentFact,
 } from "./IntentStepDetails";
 import { createModel } from "./model";
@@ -353,9 +356,13 @@ function SpecSummary({
 function ReviewPart({ data }: NodeProps<Part>) {
   return (
     <>
-      <Handle type="target" position={Position.Left} />
+      <Handle id="l-in" type="target" position={Position.Left} />
+      <Handle id="r-in" type="target" position={Position.Right} />
+      <Handle id="t-in" type="target" position={Position.Top} />
       {data.content}
-      <Handle type="source" position={Position.Right} />
+      <Handle id="r-out" type="source" position={Position.Right} />
+      <Handle id="l-out" type="source" position={Position.Left} />
+      <Handle id="b-out" type="source" position={Position.Bottom} />
     </>
   );
 }
@@ -440,7 +447,17 @@ export default function TaskReview({
   const [selected, select] = useState(() =>
       location.hash === "#spec" ? "spec" : "",
     ),
-    [env, setEnv] = useState("all");
+    [env, setEnv] = useState("all"),
+    [wrappedLayout, setWrappedLayout] = useState(true),
+    [imageLightbox, setImageLightbox] = useState(false);
+  const canWrapGroups =
+    groups.length >= 5 &&
+    groups.every(
+      (g, i) =>
+        i === 0 ||
+        (g.depends_on.length === 1 && g.depends_on[0] === groups[i - 1].id),
+    );
+  const serpentine = canWrapGroups && wrappedLayout;
   const opener = useRef<HTMLElement | null>(null),
     closeButton = useRef<HTMLButtonElement>(null);
   const show = (key: string, source?: HTMLElement) => {
@@ -461,14 +478,17 @@ export default function TaskReview({
     });
   };
   useEffect(() => {
-    if (!selected) return;
-    closeButton.current?.focus();
+    if (!selected && !imageLightbox) return;
+    if (selected && !imageLightbox) closeButton.current?.focus();
     const fn = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
+      if (e.key === "Escape") {
+        if (imageLightbox) setImageLightbox(false);
+        else close();
+      }
     };
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
-  }, [selected]);
+  }, [selected, imageLightbox]);
   useEffect(() => {
     document.documentElement.lang = zh ? "zh-CN" : "en";
     document.title = authoredPreview ? taskTitle : spec.inputs.instruction;
@@ -624,14 +644,39 @@ export default function TaskReview({
       else next.add(id);
       return next;
     });
+  const verbTone = (taskType: string) => {
+    if (taskType === "pick" || taskType === "grasp") return "tone-pick";
+    if (taskType === "place" || taskType === "release") return "tone-place";
+    if (taskType === "return_arms" || taskType === "open_grippers")
+      return "tone-return";
+    if (
+      [
+        "actuate",
+        "articulate",
+        "press",
+        "turn",
+        "push",
+        "transfer_contents",
+        "handover",
+      ].includes(taskType)
+    )
+      return "tone-action";
+    if (["move_held", "move_gripper", "orient"].includes(taskType))
+      return "tone-move";
+    return "tone-default";
+  };
   const nodes: Part[] = [],
     edges: Edge[] = [];
   const groupLevels = new Map<string, number>(),
     groupSizes = new Map<string, { w: number; h: number }>(),
     colWidths: number[] = [],
-    nextY: number[] = [];
+    nextY: number[] = [],
+    serpCols = 4,
+    serpMeta = new Map<string, { band: number; gridCol: number }>(),
+    serpColWidths: number[] = [],
+    serpBandHeights: number[] = [];
   const local = new Map<string, { x: number; y: number }>();
-  for (const g of groups) {
+  for (const [gIndex, g] of groups.entries()) {
     const levels = new Map<string, number>(),
       rows: number[] = [];
     for (const id of g.node_ids) {
@@ -665,17 +710,23 @@ export default function TaskReview({
       spec.objectives.goal.filter((p) =>
         pairing.goal_groups[p.id]?.includes(g.id),
       ).length;
+    const singleIntent =
+      authoredPreview && g.node_ids.length === 1
+        ? intentStep(model.calls.get(g.node_ids[0])?.call)
+        : undefined;
+    const baseCollapsedH = singleIntent ? 136 : 100;
+    const collapsedW = serpentine ? 332 : 370;
     const size = {
       w: open.has(g.id)
         ? Math.max(
             420,
             Math.max(...g.node_ids.map((id) => local.get(id)!.x)) + 246,
           )
-        : 370,
+        : collapsedW,
       h:
         (open.has(g.id)
           ? Math.max(...g.node_ids.map((id) => local.get(id)!.y)) + 132
-          : 100) +
+          : baseCollapsedH) +
         Math.max(1, count) * 34,
     };
     const col = Math.max(
@@ -685,17 +736,61 @@ export default function TaskReview({
     groupLevels.set(g.id, col);
     groupSizes.set(g.id, size);
     colWidths[col] = Math.max(colWidths[col] || 0, size.w);
+    const band = Math.floor(gIndex / serpCols);
+    const slot = gIndex % serpCols;
+    const gridCol = band % 2 === 0 ? slot : serpCols - 1 - slot;
+    serpMeta.set(g.id, { band, gridCol });
+    serpColWidths[gridCol] = Math.max(serpColWidths[gridCol] || 0, size.w);
+    serpBandHeights[band] = Math.max(serpBandHeights[band] || 0, size.h);
   }
-  const edge = (source: string, target: string) =>
+  const groupIdForKey = (key: string) =>
+    key.startsWith("group:")
+      ? key.slice(6)
+      : model.calls.get(key.slice(5))?.task_instance_id;
+  const activeGroupId =
+    selectedGroup?.id || selectedCall?.task_instance_id || "";
+  const edge = (source: string, target: string) => {
+    const sg = groupIdForKey(source);
+    const tg = groupIdForKey(target);
+    let sourceHandle = "r-out";
+    let targetHandle = "l-in";
+    if (serpentine && sg && tg && sg !== tg) {
+      const sp = serpMeta.get(sg);
+      const tp = serpMeta.get(tg);
+      if (sp && tp) {
+        if (sp.band === tp.band) {
+          if (tp.gridCol < sp.gridCol) {
+            sourceHandle = "l-out";
+            targetHandle = "r-in";
+          }
+        } else {
+          sourceHandle = "b-out";
+          targetHandle = "t-in";
+        }
+      }
+    }
+    const isActive =
+      !!activeGroupId && (sg === activeGroupId || tg === activeGroupId);
+    const strokeColor = isActive
+      ? dark
+        ? "#38bdf8"
+        : "#2563eb"
+      : dark
+        ? "#334155"
+        : "#94a3b8";
     edges.push({
       id: JSON.stringify([source, target]),
       source,
       target,
+      sourceHandle,
+      targetHandle,
       type: "smoothstep",
-      zIndex: 1,
-      markerEnd: { type: MarkerType.ArrowClosed, color: "#68857b" },
-      style: { stroke: "#68857b", strokeWidth: 1.8 },
+      animated: isActive,
+      zIndex: isActive ? 3 : 1,
+      markerEnd: { type: MarkerType.ArrowClosed, color: strokeColor },
+      style: { stroke: strokeColor, strokeWidth: isActive ? 2.4 : 1.65 },
     });
+  };
   const part = (
     id: string,
     x: number,
@@ -724,10 +819,17 @@ export default function TaskReview({
   );
   for (const [index, g] of groups.entries()) {
     const col = groupLevels.get(g.id)!,
-      x = colWidths.slice(0, col).reduce((a, b) => a + b + 80, 0),
-      y = nextY[col] || 0,
       size = groupSizes.get(g.id)!;
-    nextY[col] = y + size.h + 48;
+    let x: number, y: number;
+    if (serpentine) {
+      const sm = serpMeta.get(g.id)!;
+      x = serpColWidths.slice(0, sm.gridCol).reduce((a, b) => a + b + 54, 0);
+      y = serpBandHeights.slice(0, sm.band).reduce((a, b) => a + b + 44, 0);
+    } else {
+      x = colWidths.slice(0, col).reduce((a, b) => a + b + 80, 0);
+      y = nextY[col] || 0;
+      nextY[col] = y + size.h + 48;
+    }
     const milestones = spec.objectives.milestones.filter(
       (m) => pairing.milestone_groups[m.id] === g.id,
     );
@@ -756,6 +858,24 @@ export default function TaskReview({
         g.node_ids.map((id) => armLabel(model.calls.get(id)!)).filter(Boolean),
       ),
     ];
+    const previewNode =
+      authoredPreview && g.node_ids.length === 1
+        ? model.calls.get(g.node_ids[0])
+        : undefined;
+    const previewIntent = intentStep(previewNode?.call);
+    const groupRoleMatch =
+      !selectedRole ||
+      g.node_ids.some((id) => {
+        const node = model.calls.get(id);
+        const iStep = intentStep(node?.call);
+        if (iStep) return intentStepRoleIds(iStep).has(selectedRole.id);
+        return pairing.role_entities[selectedRole.id]?.some((uid) =>
+          [anns[id]?.object, anns[id]?.reference].includes(uid),
+        );
+      });
+    const isFrameSelected =
+      activeGroupId === g.id ||
+      (selectedGoal && pairing.goal_groups[selectedGoal.id]?.includes(g.id));
     part(
       "group:" + g.id,
       x,
@@ -765,16 +885,19 @@ export default function TaskReview({
       <div
         className={
           "rv-frame " +
-          (selectedGoal && pairing.goal_groups[selectedGoal.id]?.includes(g.id)
-            ? "highlight"
-            : "")
+          (authoredPreview ? verbTone(g.task_type) + " " : "") +
+          (isFrameSelected ? "highlight " : "") +
+          (selectedRole && groupRoleMatch ? "role-match " : "") +
+          (groupRoleMatch ? "" : "faded")
         }
       >
         <div className="rv-frame-head">
           <button className="rv-stage" onClick={() => show("group:" + g.id)}>
-            <Layers size={17} />
-            {t("阶段", "Stage")} {index + 1}
-            <span>
+            <span className="rv-stage-index">
+              {String(index + 1).padStart(2, "0")}
+            </span>
+            <span className="rv-stage-verb">
+              <i className="rv-verb-dot" />
               {authoredPreview
                 ? intentLabel(g.task_type, locale)
                 : model.groupLabel(g)}
@@ -793,6 +916,38 @@ export default function TaskReview({
           <div className="rv-arm-line" title={assignments.join(" · ")}>
             {assignments.join(" · ")}
           </div>
+        )}
+        {previewIntent && !open.has(g.id) && (
+          <button
+            type="button"
+            className="rv-frame-preview nodrag nopan"
+            onClick={(event) => show("group:" + g.id, event.currentTarget)}
+          >
+            <div className="rv-preview-top">
+              <strong className="rv-preview-subject">
+                {previewIntent.subjects.length
+                  ? previewIntent.subjects.map(shortName).join(zh ? "、" : ", ")
+                  : intentLabel(g.task_type, locale)}
+              </strong>
+              <span className="rv-preview-arm">
+                {intentArmBadge(previewIntent.arms, locale)}
+              </span>
+            </div>
+            <div className="rv-preview-chips">
+              {previewIntent.effects.slice(0, 3).map((fact, fi) => {
+                const chip = intentFactChip(fact, locale, shortName);
+                return (
+                  <span
+                    key={fi}
+                    className={"rv-preview-chip chip-" + chip.tone}
+                    title={chip.text}
+                  >
+                    {chip.text}
+                  </span>
+                );
+              })}
+            </div>
+          </button>
         )}
         <div className="rv-conditions">
           {milestones.flatMap((m) =>
@@ -952,84 +1107,109 @@ export default function TaskReview({
           authoredPreview ? "rv-summary rv-authored-summary" : "rv-summary"
         }
       >
-        <div className="rv-kicker">
-          <span />
-          {run
-            ? t("运行回看", "Recorded attempt")
-            : t("计划预览", "Plan preview")}
-        </div>
-        <h1>{authoredPreview ? taskTitle : spec.inputs.instruction}</h1>
-        <div className="rv-summary-row">
-          <div className="rv-chips">
-            {spec.configuration.roles.map((r) => (
-              <button
-                key={r.id}
-                title={authoredPreview ? name(r.id) : undefined}
-                aria-pressed={selectedRole?.id === r.id}
-                onClick={() => show("role:" + r.id)}
-              >
-                <Box size={14} />
-                {authoredPreview ? shortName(r.id) : name(r.id)}{" "}
-                <small>
-                  × {r.cardinality === "one" ? 1 : r.count || r.cardinality}
-                </small>
-              </button>
-            ))}
-            {spec.generalization.map((v, i) => (
-              <button key={i} onClick={() => show("variation:" + i)}>
-                {v.mode === "cover"
-                  ? t("必须覆盖", "Required coverage")
-                  : t("允许变化", "Allowed variation")}{" "}
-                · {v.dimension}
-                {v.count ? " × " + v.count : ""}
-              </button>
-            ))}
-          </div>
-          <div className="rv-state">
-            {run ? (
-              <>
-                <span className={run.status === "failed" ? "bad" : "good"}>
-                  {run.status === "failed" ? (
-                    <CircleX size={14} />
-                  ) : (
-                    <Check size={14} />
-                  )}{" "}
-                  {t("执行", "Execution")} · {model.t(run.status)}
-                </span>
-                <span>
-                  {t("任务验收", "Acceptance")} ·{" "}
-                  {run.verdict === "not_evaluated"
-                    ? t("未评估", "Not evaluated")
-                    : model.t(run.physical)}
-                </span>
-              </>
-            ) : (
-              <>
-                <span className={unverifiedQualifiers.length ? "bad" : "good"}>
-                  {unverifiedQualifiers.length ? (
-                    <CircleX size={14} />
-                  ) : (
-                    <Check size={14} />
-                  )}
-                  {unverifiedQualifiers.length
-                    ? t("限定要求待核实", "Qualifiers unverified")
-                    : t("计划已校验", "Plan validated")}
-                </span>
-                {review.pending > 0 && (
-                  <button onClick={() => show("bindings")}>
-                    {review.pending} {t("项待绑定", "pending bindings")}
+        <div className="rv-summary-layout">
+          <div className="rv-summary-main">
+            <div className="rv-title-line">
+              <h1>{authoredPreview ? taskTitle : spec.inputs.instruction}</h1>
+              <div className="rv-kicker">
+                <span />
+                {run
+                  ? t("运行回看", "Recorded attempt")
+                  : t("计划预览", "Plan preview")}
+              </div>
+            </div>
+            <div className="rv-summary-row">
+              <div className="rv-chips">
+                {spec.configuration.roles.map((r) => (
+                  <button
+                    key={r.id}
+                    className={"rv-role-chip kind-" + r.kind}
+                    title={authoredPreview ? name(r.id) : undefined}
+                    aria-pressed={selectedRole?.id === r.id}
+                    onClick={() =>
+                      selectedRole?.id === r.id ? close() : show("role:" + r.id)
+                    }
+                  >
+                    <Box size={13} />
+                    {authoredPreview ? shortName(r.id) : name(r.id)}{" "}
+                    <small>
+                      × {r.cardinality === "one" ? 1 : r.count || r.cardinality}
+                    </small>
                   </button>
+                ))}
+                {spec.generalization.map((v, i) => (
+                  <button key={i} onClick={() => show("variation:" + i)}>
+                    {v.mode === "cover"
+                      ? t("必须覆盖", "Required coverage")
+                      : t("允许变化", "Allowed variation")}{" "}
+                    · {v.dimension}
+                    {v.count ? " × " + v.count : ""}
+                  </button>
+                ))}
+              </div>
+              <div className="rv-state">
+                {run ? (
+                  <>
+                    <span className={run.status === "failed" ? "bad" : "good"}>
+                      {run.status === "failed" ? (
+                        <CircleX size={14} />
+                      ) : (
+                        <Check size={14} />
+                      )}{" "}
+                      {t("执行", "Execution")} · {model.t(run.status)}
+                    </span>
+                    <span>
+                      {t("任务验收", "Acceptance")} ·{" "}
+                      {run.verdict === "not_evaluated"
+                        ? t("未评估", "Not evaluated")
+                        : model.t(run.physical)}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span
+                      className={unverifiedQualifiers.length ? "bad" : "good"}
+                    >
+                      {unverifiedQualifiers.length ? (
+                        <CircleX size={14} />
+                      ) : (
+                        <Check size={14} />
+                      )}
+                      {unverifiedQualifiers.length
+                        ? t("限定要求待核实", "Qualifiers unverified")
+                        : t("计划已校验", "Plan validated")}
+                    </span>
+                    {review.pending > 0 && (
+                      <button onClick={() => show("bindings")}>
+                        {review.pending} {t("项待绑定", "pending bindings")}
+                      </button>
+                    )}
+                  </>
                 )}
-              </>
-            )}
+              </div>
+            </div>
           </div>
+          {review.source_image && (
+            <button
+              type="button"
+              className="rv-scene-thumb"
+              aria-label={t("查看输入场景原图", "View source scene image")}
+              onClick={() => setImageLightbox(true)}
+            >
+              <img
+                src={review.source_image}
+                alt={t("任务来源图", "Source image")}
+              />
+              <span>{t("原图", "RGB")}</span>
+            </button>
+          )}
         </div>
       </section>
       <div className="rv-work">
         <section className="rv-graph">
           <div className="rv-graphbar">
             <strong>
-              <GitBranch size={17} />
+              <GitBranch size={16} />
               {authoredPreview
                 ? t("任务流程", "Task flow")
                 : t("动作与达成条件", "Actions & objectives")}
@@ -1038,12 +1218,61 @@ export default function TaskReview({
               {groups.length} {t("阶段", "stages")}　/　{calls.length}{" "}
               {t("动作", "actions")}
             </small>
-            <button aria-label={taskSpecLabel} onClick={() => show("spec")}>
-              {taskSpecLabel}
-              {authoredPreview &&
-                ` · ${spec.objectives.goal.length} ${t("目标", "goals")}`}
-              <ChevronRight size={14} />
-            </button>
+            {authoredPreview && spec.objectives.goal.length > 0 && (
+              <div className="rv-goals-inline">
+                <span className="rv-goals-label">
+                  <Target size={13} />
+                  {t("完成条件", "Goals")}
+                </span>
+                {spec.objectives.goal.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className={
+                      "rv-goal-pill" +
+                      (selectedGoal?.id === p.id ? " active" : "")
+                    }
+                    onClick={() => show("goal:" + p.id)}
+                  >
+                    {predicate(p)}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="rv-graphbar-actions">
+              {canWrapGroups && (
+                <div
+                  className="rv-layout-switch"
+                  role="group"
+                  aria-label={t("画布排布", "Graph layout")}
+                >
+                  <button
+                    type="button"
+                    aria-pressed={wrappedLayout}
+                    onClick={() => setWrappedLayout(true)}
+                  >
+                    {t("折返全览", "Wrapped")}
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={!wrappedLayout}
+                    onClick={() => setWrappedLayout(false)}
+                  >
+                    {t("单行横排", "Linear")}
+                  </button>
+                </div>
+              )}
+              <button
+                className="rv-spec-trigger"
+                aria-label={taskSpecLabel}
+                onClick={() => show("spec")}
+              >
+                {taskSpecLabel}
+                {authoredPreview &&
+                  ` · ${spec.objectives.goal.length} ${t("目标", "goals")}`}
+                <ChevronRight size={14} />
+              </button>
+            </div>
           </div>
           {!authoredPreview &&
             shared.map((p) => (
@@ -1073,14 +1302,38 @@ export default function TaskReview({
                 )}
               />
               <Background
-                gap={21}
-                size={1}
-                color={dark ? "#40504f" : "#d5dfdc"}
+                gap={22}
+                size={1.1}
+                color={dark ? "#1e293b" : "#cbd5e1"}
               />
             </ReactFlow>
             <div className="rv-controls">
               <GraphViewportControls />
             </div>
+            {authoredPreview && (
+              <div className="rv-legend" aria-hidden="true">
+                <span className="rv-leg-item">
+                  <i className="swatch-pick" />
+                  {t("抓取", "Pick")}
+                </span>
+                <span className="rv-leg-item">
+                  <i className="swatch-place" />
+                  {t("放置", "Place")}
+                </span>
+                <span className="rv-leg-item">
+                  <i className="swatch-move" />
+                  {t("移动", "Move")}
+                </span>
+                <span className="rv-leg-item">
+                  <i className="swatch-action" />
+                  {t("精操", "Actuate")}
+                </span>
+                <span className="rv-leg-item">
+                  <i className="swatch-return" />
+                  {t("回位", "Return")}
+                </span>
+              </div>
+            )}
           </div>
           {failure ? (
             <button
@@ -1107,13 +1360,54 @@ export default function TaskReview({
                 : selectedCall
                   ? t("动作证据", "Action evidence")
                   : t("任务详情", "Task details")}
-              <button
-                ref={closeButton}
-                aria-label={t("关闭", "Close")}
-                onClick={close}
-              >
-                <X size={17} />
-              </button>
+              <div className="rv-detailbar-right">
+                {selectedCall &&
+                  calls.length > 1 &&
+                  (() => {
+                    const callIdx = calls.findIndex(
+                      (c) => c.id === selectedCall.id,
+                    );
+                    const stepKey = (c: TaskNode) =>
+                      intentStep(c.call) &&
+                      groups.find((g) => g.id === c.task_instance_id)?.node_ids
+                        .length === 1
+                        ? "group:" + c.task_instance_id
+                        : "call:" + c.id;
+                    return (
+                      <>
+                        <button
+                          type="button"
+                          aria-label={t("上一步", "Previous step")}
+                          disabled={callIdx <= 0}
+                          onClick={() =>
+                            callIdx > 0 && select(stepKey(calls[callIdx - 1]))
+                          }
+                        >
+                          <ChevronLeft size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={t("下一步", "Next step")}
+                          disabled={callIdx < 0 || callIdx >= calls.length - 1}
+                          onClick={() =>
+                            callIdx >= 0 &&
+                            callIdx < calls.length - 1 &&
+                            select(stepKey(calls[callIdx + 1]))
+                          }
+                        >
+                          <ChevronRight size={16} />
+                        </button>
+                      </>
+                    );
+                  })()}
+                <button
+                  ref={closeButton}
+                  aria-label={t("关闭", "Close")}
+                  onClick={close}
+                >
+                  <X size={17} />
+                </button>
+              </div>
             </div>
             <div className="rv-content">
               {selectedCall ? (
@@ -1450,6 +1744,34 @@ export default function TaskReview({
           <Maximize2 size={12} /> {t("适应画布", "Fit canvas")}
         </button>
       </footer>
+      {imageLightbox && review.source_image && (
+        <div
+          className="rv-lightbox"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("输入场景原图", "Source scene image")}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setImageLightbox(false);
+          }}
+        >
+          <div className="rv-lightbox-card">
+            <div className="rv-lightbox-head">
+              <span>{t("输入场景原图", "Source scene image")}</span>
+              <button
+                type="button"
+                aria-label={t("关闭预览", "Close preview")}
+                onClick={() => setImageLightbox(false)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <img
+              src={review.source_image}
+              alt={t("任务来源图", "Source image")}
+            />
+          </div>
+        </div>
+      )}
     </main>
   );
 }

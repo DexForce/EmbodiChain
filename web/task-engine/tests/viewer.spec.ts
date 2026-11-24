@@ -59,6 +59,24 @@ for (const viewport of [
     await close.click();
     await page.locator('[data-id="group:step_03"] .rv-stage').click();
     await expect(semantics).toContainText("左臂、右臂");
+    if (viewport.width === 1680) {
+      const thumb = page.locator(".rv-scene-thumb");
+      await expect(thumb).toBeVisible();
+      await thumb.click();
+      const lightbox = page.getByRole("dialog", { name: "输入场景原图" });
+      await expect(lightbox).toBeVisible();
+      await expect
+        .poll(() =>
+          lightbox
+            .locator("img")
+            .evaluate(
+              (img: HTMLImageElement) => img.complete && img.naturalWidth > 0,
+            ),
+        )
+        .toBe(true);
+      await page.keyboard.press("Escape");
+      await expect(lightbox).toHaveCount(0);
+    }
   });
 }
 

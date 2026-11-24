@@ -1936,21 +1936,11 @@ def publish_hybrid(
                 execution_ready=False,
             ),
         )
-        from ._review import _producer_pairing
-        from .semantic_graph_html import _graph_data, _viewer_document
+        from ._review import _hybrid_preview
 
-        data = _graph_data(graph)
-        data["review"] = dict(
-            spec=doc,
-            pending=len(pending_roles),
-            attempt=None,
-            pairing=dict(
-                role_entities=result.get("plan_coverage", {}).get("role_entities", {}),
-                **_producer_pairing(graph, doc, coverage),
-            ),
-        )
         (output / "semantic_task_graph.html").write_text(
-            _viewer_document(data), encoding="utf-8"
+            _hybrid_preview(result, output / doc["inputs"]["image"]["ref"], None),
+            encoding="utf-8",
         )
         if "scene_grounding" not in result:
             from ..task_spec.publication import project_scene_requirements
