@@ -49,6 +49,7 @@ deployment satisfies its semantic scene and resource contracts. See
 | Goal | Entry point | Result |
 |---|---|---|
 | Run a configured expert task | `embodichain run-task --gym_config path/to/task.yaml` | Selects an environment, composes its integration, and runs the program through the Gym demo executor. |
+| Run the Franka expert program with direct Sim stepping | `embodichain run-example sim/task_program/franka_pick_place` | Creates a `SimulationManager` and runs the [standalone action and acceptance loop](#standalone-simulation). |
 | Load YAML or decode a mapping | `load_task_program()` or `decode_task_program()` from `embodichain.lab.task_program` | An owned `TaskProgramCfg` that can be checked against a supplied validation context. |
 | Compile against static scene identities | `TaskProgramCompiler(scene_manifest).compile(program)` | A `CompiledTaskProgram` with typed references and stable occurrence indices. Use the configured catalog's `preflight()` to also check available calls, resources, and policies. |
 | Compose the semantic deployment from Python | `load_configured_task_program_deployment()` from `embodichain.lab.task_program.integrations` | A `ConfiguredTaskProgramDeployment` with trusted IDs, a validated catalog, and a lazy adapter factory. Pass the resolved `skill_profile` and the deployment's `task_program` selectors, then call `load_program()` for static preflight. |
@@ -192,6 +193,47 @@ observation. `AtomicSkillEngine` plans the invocation and `ExecutionRunner`
 advances its command and feedback lifecycle. The bridge encodes command frames
 for Gym, then advances its clock after the action is consumed. Configured
 recovery handles failed attempts using the same execution lifecycle.
+
+### Standalone simulation
+
+With a CUDA installation, run the packaged Franka Pick/Place Task Program in
+headless Default physics.
+
+```bash
+embodichain run-example sim/task_program/franka_pick_place
+```
+
+The example resolves the existing `task.franka.yaml` components, creates a
+`SimulationManager`, spawns the configured Franka and cube, and calls
+`sim.prepare()`. It binds the configured adapter to the simulation, robot,
+and control interval. The adapter compiles the program and creates the bridge.
+The example owns the command loop and calls `sim.update()` directly.
+
+```{literalinclude} ../../../../examples/sim/task_program/franka_pick_place.py
+:language: python
+:pyobject: _run_program
+```
+
+Each yielded action sets the robot's joint position targets. The example then
+advances `sim_steps_per_control` physics intervals. Resuming the action iterator
+after those intervals acknowledges the action and advances the bridge clock
+once. The example exhausts each segment's actions, including any post-policies,
+and calls its validator before requesting the next segment. It prints the
+per-segment masks and returns a nonzero exit status if the program's final
+`completion_mask` rejects the run.
+
+The packaged program uses projected effects. To also measure the cube's
+resting position after each Place, download the existing
+{download}`two_moves_checked.yaml <examples/two_moves_checked.yaml>` and select
+it from the working directory.
+
+```bash
+embodichain run-example sim/task_program/franka_pick_place --program two_moves_checked.yaml
+```
+
+This variant waits for settling and checks the measured cube position against
+`rest_pose` for both Place segments. See the {doc}`quickstart` for the target
+definitions and acceptance tolerance.
 
 ### Policy progress
 
