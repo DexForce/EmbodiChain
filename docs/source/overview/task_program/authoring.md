@@ -1,9 +1,89 @@
 # Configuration authoring
 
-Task Programs accept both the explicit `kind` AST and concise action mappings.
-The loader expands shorthand before strict decoding; unknown fields, bounded
-repeats, references and resource requirements retain their normal checks.
-An action item contains exactly one action name. Objects are always explicit.
+Task Programs accept shorthand and explicit forms for the `program` tree. The
+loader expands shorthand into a canonical abstract syntax tree (AST) before
+strict decoding. Both forms use the same validation for fields, repeat bounds,
+references and resource requirements.
+
+## Shorthand and explicit forms
+
+Both excerpts pick up `book` and place it at `presentation`, a named target
+declared under `targets`.
+
+### Shorthand YAML
+
+A list gives the order of operations, and each action name is a key.
+
+```yaml
+program:
+  - pick:
+      object: book
+  - place:
+      object: book
+      at: presentation
+```
+
+### Explicit YAML
+
+Each node declares its `kind`. An `invoke` node contains a `call` with its own
+`kind`, and the placement target is a `target_ref` object.
+
+```yaml
+program:
+  kind: sequence
+  items:
+    - kind: invoke
+      call:
+        kind: pick
+        object: book
+    - kind: invoke
+      call:
+        kind: place
+        object: book
+        at:
+          kind: target_ref
+          target: presentation
+```
+
+## Choosing a form
+
+- Prefer **shorthand YAML** for new task files and examples so readers can
+  scan action names and segment labels directly. Follow the file's existing
+  form for local edits, including agent-assisted edits. Individual nodes in
+  one YAML program can use either form.
+- Use **explicit JSON** when an agent sends a model response to
+  `decode_mllm_task_program()`. A schema can select a node type using `kind`,
+  and tools can address calls through paths such as `program.items[0].call`.
+  The MLLM frontend looks up `call` at its canonical path in the original
+  response, so emit explicit `invoke` nodes with `call` objects. The host
+  supplies `integration`, and the frontend accepts sequential programs with
+  `pick`, `place` or `hand_over` calls.
+- Work with the **normalized AST** when inspecting or transforming a program
+  in code. Use `normalize_task_program()` before traversing the tree so the
+  tool can handle both forms through the same node structure.
+
+## Implement a task with repository skills
+
+In a source checkout, name the skill in your coding agent's prompt and provide
+the runnable deployment path plus the outcome you want to observe. The agent
+instructions live under `.agents/skills/`. Start with `$add-task-program` when
+the deployment already supplies the scene, robot, and actions you need.
+
+> Use `$add-task-program` with the repeated Pick/Place Franka deployment.
+> Change the repeat count to two and check the cube's resting position after
+> each Place. Show which four segment occurrences the inspector resolves.
+
+| Implementation task | Skill and inputs |
+|---|---|
+| Write or change the program | Give `$add-task-program` the subgoals, scene entity IDs, and acceptance checks. Its authoring, integration, and deployment workflows cover the program, semantic bindings, and runnable YAML. |
+| Create the physical task environment | Give `$add-task-env` the scene requirements and select the Task Program expert trajectory route. Then use `$add-task-program` to bind the flow. |
+| Deploy the flow on another robot | Give `$add-embodiment-component` the robot preset, sensors, and required resource endpoints. Use the resulting skill profile in the deployment. |
+| Expose an existing Atomic Skill to program authors | Give `$add-semantic-call` the intended call arguments and the Atomic Skill they should lower to. |
+| Implement a new motion primitive | Give `$add-atomic-skill` the typed goal, planning behavior, and expected effect. Use `$add-semantic-call` when the program also needs a new call for it. |
+
+For an existing failure, use the [debug workflow](troubleshooting.md#debug-with-a-repository-skill).
+
+## Example with a measured hold
 
 ```yaml
 program_id: present_book
@@ -40,21 +120,76 @@ position tolerances are in metres; orientation tolerances are in radians.
 
 ## Structure and identity
 
-Lists express sequences. A single item expands directly to that item. An
-explicit `sequence: {items: [...]}` retains an intentional sequence wrapper.
-Use `segment: name` with `steps`, optional `instruction`, `post` and `validators`.
-`repeat: {count: 3, body: ...}` keeps bounded lexical repeat semantics.
-`parallel: {branches: [...], barrier: ...}` keeps the existing explicit safety
-and barrier requirements. Registered extensions use `registered: {call_id: ...,
-arguments: ...}`. String `at` and `final_target` values expand to `target_ref`.
+| Explicit `kind` | Purpose | Shorthand |
+|---|---|---|
+| `sequence` | Run children in order. | A list or `sequence: {items: [...]}` |
+| `repeat` | Run an entire body a fixed number of times. | `repeat: {count: 3, body: ...}` |
+| `segment` | Label a subgoal and attach checks to its boundary. | `segment: name` with `steps` and optional `instruction`, `contract`, `post` and `validators` |
+| `invoke` | Run one Semantic Call. | One action key, such as `pick: {object: book}` |
+| `parallel` | Run compatible branches and join at a barrier. | `parallel: {branches: [...], barrier: ...}` |
+
+Lists with multiple items expand to a `sequence`. A single-item list expands
+directly to that item. Use `sequence: {items: [...]}` to keep a single-item
+sequence node. Each shorthand action mapping has exactly one action name and
+includes its required fields. The barrier still declares `kind: barrier`, and
+target definitions and segment contract entries also require `kind`. Check the
+[parallel execution requirements](architecture.md#parallel-programs) before
+binding a parallel block to a deployment.
 
 The normalizer retains canonical node locations for compilation and maps errors
 back to authored locations. Equivalent shorthand and explicit ASTs have the
 same compiled identity. Historical explicit inputs retain their fingerprints.
 
+## Choose a Semantic Call
+
+| Action key | What to declare |
+|---|---|
+| `pick` | Name the object. Set `grasp` to select a particular grasp affordance. |
+| `place` | Name the held object and choose one destination using `at`, `on`, or `inside`. `at` selects a named pose target. `on` and `inside` select support and container destinations in the semantic scene. |
+| `hand_over` | Name the object to transfer. Optionally set `final_target` to deliver it to a named target after transfer. |
+| `move_held_object` | Name the held object and its target with `at`. The verified transport call preserves the grasp. |
+| `registered` | Specify the integration's `call_id` and its declared `arguments`. |
+
+Use the scene's `entity_id` values and the logical resources declared by the
+selected robot profile. Built-in calls accept a `resources` mapping to select
+configured resource bindings explicitly. If a slot is omitted, the selected
+integration can supply its default. The [deployment inspection](deployment.md#inspect-the-resolved-deployment)
+shows the available call contracts and effective bindings.
+
+## Define segments and their outcomes
+
+Use a segment for a subgoal you can describe and check given its incoming
+state, such as lifting a block clear of the table. Its `steps` can contain one
+call or a sequence of calls. The root `instruction` describes the episode,
+and each segment's `instruction` describes its subgoal for recorded data.
+
+- Put actions that run after motion, such as waiting for stability, in `post`.
+- Put acceptance checks at the end of the segment in `validators`.
+- Use `contract.prerequisites` for conditions needed at entry and
+  `contract.outcomes` to identify the results that establish the subgoal.
+  A `validator` outcome refers to a zero-based index in that segment's
+  `validators` list.
+
+The Stack Two Blocks example refers to the named `lifted` condition from its
+selected evaluation component. Its contract makes the validator result an
+outcome of `lift_block`.
+
+```{literalinclude} ../../../../embodichain/extensions/tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task_program/program.measured.yaml
+:language: yaml
+:start-at: - segment: lift_block
+:end-before: - segment: stack_block
+```
+
+Select reusable named conditions with `evaluation.component` in the runnable
+deployment. For episode-level checks and the distinction between call effects
+and segment acceptance, see [verify the run](deployment.md#verify-the-run).
+
 ## Shared targets and transport
 
-`pose` is a single world pose; `cyclic_pose` retains repeat-local selection.
+`pose` is a single world pose. `cyclic_pose` selects from its pose list using the
+iteration of the nearest enclosing `repeat`, cycling back to the first pose
+after the last. String `at` and `final_target` values expand to `target_ref`
+objects.
 A `scene_relative` target declares `entity`, `frame`, `position` and
 `quaternion_xyzw`. `frame: parent` composes the full reference transform;
 `world_axes` follows its position while keeping offset and orientation in world
@@ -149,15 +284,10 @@ continues to wait for its existing stability condition; it is not a duration hol
 
 ## Inspect before execution
 
-```bash
-python .agents/skills/add-task-program/scripts/inspect_deployment.py \
-  path/to/task.yaml --json --explain
-```
-
-The report includes normalized input, authored locations, effective contracts,
-resolved default resource IDs, targets, generated sources and execution limits.
-Static checks establish configuration consistency; measured effects and task
-validators establish physical success during normal execution.
+Use the [deployment inspector](deployment.md#inspect-the-resolved-deployment)
+to check the authored program against its integration. Compare
+`normalized_program` with the intended node structure and use the authored
+paths in `calls` to locate expanded occurrences in the source YAML.
 
 The {download}`validation record <../../../architecture/task-program-authoring-validation.json>`
 separates unchanged program identities, execution outcomes, measured acceptance,

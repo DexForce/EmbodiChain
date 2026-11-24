@@ -36,8 +36,8 @@ Table of Contents
 
    overview/architecture/index
    overview/sim/index
-   overview/task_program/index
    overview/gym/index
+   overview/task_program/index
    overview/learning/index
 
 .. toctree::
