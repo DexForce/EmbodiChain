@@ -166,7 +166,7 @@ These contracts apply to the FK and IK layers.
   IK retains the `kinematics` constructor argument and child name for existing
   state dicts.
 
-## Differentiable TOPPRA
+## Differentiable Retiming
 
 `DifferentiableRetimingLayer` fits a cubic spline through the retained joint
 waypoints and uses TOPPRA (time-optimal path parameterization by reachability
