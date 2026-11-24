@@ -62,6 +62,27 @@ program:
   in code. Use `normalize_task_program()` before traversing the tree so the
   tool can handle both forms through the same node structure.
 
+## Implement a task with repository skills
+
+In a source checkout, name the skill in your coding agent's prompt and provide
+the runnable deployment path plus the outcome you want to observe. The agent
+instructions live under `.agents/skills/`. Start with `$add-task-program` when
+the deployment already supplies the scene, robot, and actions you need.
+
+> Use `$add-task-program` with the repeated Pick/Place Franka deployment.
+> Change the repeat count to two and check the cube's resting position after
+> each Place. Show which four segment occurrences the inspector resolves.
+
+| Implementation task | Skill and inputs |
+|---|---|
+| Write or change the program | Give `$add-task-program` the subgoals, scene entity IDs, and acceptance checks. Its authoring, integration, and deployment workflows cover the program, semantic bindings, and runnable YAML. |
+| Create the physical task environment | Give `$add-task-env` the scene requirements and select the Task Program expert trajectory route. Then use `$add-task-program` to bind the flow. |
+| Deploy the flow on another robot | Give `$add-embodiment-component` the robot preset, sensors, and required resource endpoints. Use the resulting skill profile in the deployment. |
+| Expose an existing Atomic Skill to program authors | Give `$add-semantic-call` the intended call arguments and the Atomic Skill they should lower to. |
+| Implement a new motion primitive | Give `$add-atomic-skill` the typed goal, planning behavior, and expected effect. Use `$add-semantic-call` when the program also needs a new call for it. |
+
+For an existing failure, use the [debug workflow](troubleshooting.md#debug-with-a-repository-skill).
+
 ## Example with a measured hold
 
 ```yaml

@@ -15,6 +15,29 @@ The two errors explicitly marked **reproduced** below were observed on the
 {doc}`validation` baseline. Other entries describe diagnostic branches; a symptom
 alone is not proof of its listed possible causes.
 
+## Debug with a repository skill
+
+Invoke `$add-task-program` in its **Validate/repair** mode. Supply the runnable
+deployment, any `--task-program` override, and the first error or failed segment.
+The detailed workflow lives in `.agents/skills/add-task-program/references/validation.md`.
+
+1. **Check the configuration offline.** Run the [deployment inspector](deployment.md#inspect-the-resolved-deployment)
+   with `--json --explain`. Use `normalized_program` to check the flow,
+   `calls[].authored_path` to find the failing occurrence in YAML, and
+   `resolved_configuration` to identify which component supplied a value.
+2. **Trace the first failed binding.** Check the physical UID and semantic ID,
+   then the embodiment resource and the selected call catalog. For an unknown
+   call, check its spelling and availability first. Use `$add-semantic-call`
+   when the intended operation needs a new registered lowering.
+3. **Reproduce execution failures.** Keep the deployment and seed fixed, run
+   one environment with `--debug-mode`, and inspect the first failed call.
+   Compare the planning or effect result with the segment's
+   `metadata.post_policies` and `metadata.validation` to locate the failure.
+
+> Use `$add-task-program` to diagnose this deployment. Static preflight passes,
+> but the first Place fails its position validator at seed 7. Trace the selected
+> target and compare it with the measured resting pose in the attached log.
+
 ## The program or a component file cannot be found
 
 **First check:** the path named by the exception and the current working directory.
