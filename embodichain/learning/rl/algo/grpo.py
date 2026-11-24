@@ -125,16 +125,14 @@ class GRPO(BaseAlgorithm[TensorDict]):
             (num_envs, t_steps), dtype=torch.float32, device=self.device
         )
 
-        alive = torch.ones(num_envs, dtype=torch.float32, device=self.device)
-        for t in range(t_steps):
-            seq_mask[:, t] = alive
-            if self.cfg.truncate_at_first_done:
-                alive = alive * (~dones[:, t]).float()
+        not_done = (~dones).float()
+        if self.cfg.truncate_at_first_done:
+            seq_mask[:, 1:] = not_done[:, :-1].cumprod(dim=1)
 
         running_return = torch.zeros(num_envs, dtype=torch.float32, device=self.device)
         for t in reversed(range(t_steps)):
             running_return = (
-                rewards[:, t] + self.cfg.gamma * running_return * (~dones[:, t]).float()
+                rewards[:, t] + self.cfg.gamma * running_return * not_done[:, t]
             )
             step_returns[:, t] = running_return
 

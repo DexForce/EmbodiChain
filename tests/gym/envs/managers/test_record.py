@@ -209,18 +209,26 @@ def test_sync_video_io_failure_retains_owned_job_for_retry(
     assert len(list(tmp_path.rglob("*.mp4"))) == 1
 
 
+@pytest.mark.parametrize(
+    "source", ["cpu", "numpy", pytest.param("cuda", marks=pytest.mark.gpu)]
+)
 def test_async_writer_owns_frames_and_provenance_before_partial_reset(
-    camera_env, tmp_path, monkeypatch
+    camera_env, tmp_path, monkeypatch, source
 ):
     from embodichain.lab.gym.envs.managers import record
 
     env, rgb = camera_env
+    rgb = rgb.numpy() if source == "numpy" else rgb.to(source)
     entered, release = threading.Event(), threading.Event()
 
     def save(frames, directory, name, fps):
         entered.set()
         assert release.wait(timeout=5)
-        assert [int(frame[0, 0, 0]) for frame in frames] == [1, 7]
+        assert len(frames) == 2
+        for frame, expected in zip(frames, [1, 7]):
+            np.testing.assert_array_equal(
+                frame, np.full((4, 6, 3), expected, dtype=np.uint8)
+            )
         (Path(directory) / (name + ".mp4")).write_bytes(b"video")
 
     monkeypatch.setattr(record, "images_to_video", save)
@@ -231,18 +239,19 @@ def test_async_writer_owns_frames_and_provenance_before_partial_reset(
         ),
         env,
     )
+    recorder.camera.get_data = lambda: {"color": rgb}
     recorder(env, [1], name="camera")
-    rgb[1].fill_(7)
+    rgb[1] = 7
     recorder(env, [1], name="camera")
     recorder.save_and_clear([1])
     try:
         assert entered.wait(timeout=5)
         env.episode_context._begin_episode([1])
         env.episode_context._finish_initialization([1])
-        rgb[1].fill_(9)
+        rgb[1] = 9
         recorder(env, [1], name="camera")
         recorder.discard_and_clear([1])
-        rgb.fill_(99)
+        rgb[:] = 99
     finally:
         release.set()
         recorder.finalize()

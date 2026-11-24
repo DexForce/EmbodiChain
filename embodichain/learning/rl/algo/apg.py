@@ -237,17 +237,21 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
             raise ValueError("objective_scale must contain only finite values.")
 
         entropy_returns = torch.zeros_like(returns)
-        discount = torch.ones_like(returns)
-        alive = torch.ones_like(returns, dtype=torch.bool)
-        for transition in rollout.transitions:
-            if "entropy" in transition.policy_output.keys():
-                entropy_returns = entropy_returns + (
-                    discount
-                    * transition.policy_output["entropy"]
-                    * alive.to(discount.dtype)
-                )
-            alive = alive & ~transition.done
-            discount = discount * self.cfg.gamma
+        if any(
+            "entropy" in transition.policy_output.keys()
+            for transition in rollout.transitions
+        ):
+            discount = torch.ones_like(returns)
+            alive = torch.ones_like(returns, dtype=torch.bool)
+            for transition in rollout.transitions:
+                if "entropy" in transition.policy_output.keys():
+                    entropy_returns = entropy_returns + (
+                        discount
+                        * transition.policy_output["entropy"]
+                        * alive.to(discount.dtype)
+                    )
+                alive = alive & ~transition.done
+                discount = discount * self.cfg.gamma
 
         objective = (returns * scale).mean()
         entropy = (entropy_returns * scale).mean()

@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import math
+import sys
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
@@ -28,6 +29,54 @@ if TYPE_CHECKING:
     from torch.utils.tensorboard import SummaryWriter
 
 __all__: list[str] = []
+
+
+def _write_tensorboard_scalars(
+    writer: SummaryWriter,
+    metrics: Mapping[str, float],
+    step: int,
+    *,
+    ignore_errors: bool = False,
+) -> None:
+    """Use native batching for plain payloads, retaining scalar-call fallback."""
+    if type(metrics) is dict and not metrics:
+        return
+    writer_module = sys.modules.get("torch.utils.tensorboard.writer")
+    if (
+        writer_module is not None
+        and type(writer) is writer_module.SummaryWriter
+        and "add_scalar" not in writer.__dict__
+        and type(metrics) is dict
+        and all(
+            type(tag) is str and type(value) is float for tag, value in metrics.items()
+        )
+    ):
+        from tensorboard.compat.proto.summary_pb2 import Summary
+
+        try:
+            summary = Summary(
+                value=[
+                    Summary.Value(tag=tag, simple_value=value)
+                    for tag, value in metrics.items()
+                ]
+            )
+        except Exception:
+            # No writer call occurred: the old loop retains prefix/error behavior.
+            pass
+        else:
+            # Submission can enqueue before raising; never retry through the loop.
+            try:
+                writer._get_file_writer().add_summary(summary, step)
+            except Exception:
+                if not ignore_errors:
+                    raise
+            return
+    for tag, value in metrics.items():
+        try:
+            writer.add_scalar(tag, value, step)
+        except Exception:
+            if not ignore_errors:
+                raise
 
 
 def _write_scalars(
@@ -40,8 +89,7 @@ def _write_scalars(
 ) -> None:
     """Write prepared scalars; the caller owns rank and filtering decisions."""
     if writer is not None:
-        for key, value in metrics.items():
-            writer.add_scalar(key, value, step)
+        _write_tensorboard_scalars(writer, metrics, step)
     if use_wandb:
         wandb.log(dict(metrics if wandb_metrics is None else wandb_metrics), step=step)
 

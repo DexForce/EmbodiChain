@@ -331,21 +331,26 @@ def test_apg_skips_gradient_above_preclip_safety_limit() -> None:
     assert torch.equal(policy.actor.weight, initial_weight)
 
 
-def test_apg_entropy_uses_reward_discount_and_done_reset_semantics() -> None:
+@pytest.mark.parametrize("complete", [False, True])
+def test_apg_entropy_uses_reward_discount_and_done_reset_semantics(
+    complete: bool,
+) -> None:
     policy = _make_policy()
     observation = torch.zeros((1, 1))
     transitions = []
-    for entropy, done in ((1.0, True), (2.0, False), (4.0, False)):
+    entropy_steps = (
+        ((None, False), (2.0, True), (4.0, False))
+        if complete
+        else ((1.0, True), (2.0, False), (4.0, False))
+    )
+    for entropy, done in entropy_steps:
+        policy_output = TensorDict({"action": torch.zeros((1, 1))}, batch_size=[1])
+        if entropy is not None:
+            policy_output["entropy"] = torch.tensor([entropy]) + policy.log_std[0]
         transitions.append(
             DifferentiableTransition(
                 observation=observation,
-                policy_output=TensorDict(
-                    {
-                        "action": torch.zeros((1, 1)),
-                        "entropy": torch.tensor([entropy]) + policy.log_std[0],
-                    },
-                    batch_size=[1],
-                ),
+                policy_output=policy_output,
                 reward=policy.actor.weight.sum().reshape(1) * 0.0,
                 terminated=torch.tensor([done]),
                 truncated=torch.tensor([False]),
@@ -359,9 +364,15 @@ def test_apg_entropy_uses_reward_discount_and_done_reset_semantics() -> None:
         policy,
     )
 
-    metrics = algorithm.update(rollout)
+    if complete:
+        algorithm.begin_update()
+        algorithm.accumulate_complete_rollout(rollout)
+        metrics = algorithm.finish_update()
+    else:
+        metrics = algorithm.update(rollout)
 
-    assert metrics["entropy"] == pytest.approx(5.0)
+    assert metrics["entropy"] == pytest.approx(1.0 if complete else 5.0)
+    assert policy.log_std.grad.item() == pytest.approx(-0.05 if complete else -0.25)
 
 
 def test_apg_gradient_matches_central_finite_difference() -> None:

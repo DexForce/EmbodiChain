@@ -418,3 +418,170 @@ def test_environment_action_clipping_defaults_and_overrides(
     term._store_raw = MethodType(DefaultJointPositionAction._store_raw, term)
     DefaultJointPositionAction.process_actions(term, torch.tensor([[2.0]]))
     assert term._processed_actions.item() == expected
+
+
+@pytest.fixture
+def velocity_state_host():
+    from dataclasses import fields
+    from types import SimpleNamespace
+
+    from embodichain.extensions.tasks.locomotion.velocity._embodichain import (
+        EmbodiChainVelocityEnv,
+    )
+
+    quarter_turn = 2**-0.5
+    joints = torch.arange(24, dtype=torch.float32).reshape(2, 12)
+    body = SimpleNamespace(
+        fetch_state=lambda: {
+            "qpos": joints,
+            "qvel": joints + 100,
+            "root_pose": torch.tensor(
+                [
+                    [1, 2, 3, 0, 0, quarter_turn, quarter_turn],
+                    [4, 5, 6, 0, 0, 0, 1],
+                ]
+            ),
+            "root_lin_vel": torch.tensor([[1.0, 2, 3], [4.0, 5, 6]]),
+            "root_ang_vel": torch.tensor([[4.0, 5, 6], [7.0, 8, 9]]),
+        },
+        qpos_limits=torch.tensor([-2.0, 2.0]).repeat(2, 12, 1),
+        body_link_pose=torch.tensor(
+            [
+                [1, 2, 3, 0, 0, 0, 1],
+                [4, 5, 6, 0, 0, quarter_turn, quarter_turn],
+                [7, 8, 9, 0, 0, quarter_turn, quarter_turn],
+            ]
+        ).repeat(2, 1, 1),
+        body_link_vel=torch.tensor(
+            [[1.0, 2, 3, 0, 0, 2], [2.0, 5, 6, 0, 0, 3], [7.0, 8, 9, 0, 0, 4]]
+        ).repeat(2, 1, 1),
+    )
+    host = object.__new__(EmbodiChainVelocityEnv)
+    host._num_envs = 2
+    host.sim = SimpleNamespace(device=torch.device("cpu"))
+    host.robot = SimpleNamespace(
+        body_data=body,
+        get_qf=lambda: joints + 200,
+        default_link_masses=torch.tensor([[1.0, 2, 3]]).repeat(2, 1),
+    )
+    host.state_type = anymal_mdp.ANYmalCState
+    host._state_fields = frozenset(field.name for field in fields(host.state_type))
+    host._state_cache = None
+    host.velocity_task_config = anymal_config.load_config()
+    host.policy_joint_ids = torch.arange(11, -1, -1)
+    host.foot_link_ids = [2, 0]
+    host.orientation_link_id = 1
+    host._foot_offsets = torch.tensor([[1.0, 0, 0], [0.0, 0, 1]])
+    host._imu_offset = None
+    host._foot_contacts = SimpleNamespace(
+        found=torch.tensor([[True, False], [False, True]]),
+        peak_force=torch.zeros(2, 2, 3),
+        first_contact=torch.tensor([[False, True], [True, False]]),
+        current_air_time=torch.tensor([[0.0, 0.2], [0.3, 0.0]]),
+        last_air_time=torch.tensor([[0.4, 0.5], [0.6, 0.7]]),
+    )
+    host._illegal_contacts = SimpleNamespace(
+        peak_force=torch.tensor([[[3.0, 4, 0]], [[0.0, 0, 6]]])
+    )
+    host._filtered_base_lin_vel_b = torch.zeros(2, 3)
+    host._filtered_base_ang_vel_b = torch.zeros(2, 3)
+    host.command = torch.tensor([[1.0, 2, 3], [4.0, 5, 6]])
+    host.reward_command = host.command.clone()
+    host._gait_frequency = torch.ones(2)
+    host._gait_process = torch.zeros(2)
+    host._joint_acceleration = torch.ones(2, 12)
+    host.locomotion_action = torch.full((2, 12), 0.1)
+    host.last_locomotion_action = torch.full((2, 12), 0.2)
+    host._episode_step = torch.tensor([2, 3])
+    host._root_acceleration_w = torch.zeros(2, 6)
+    host.encoder_bias = torch.zeros(2, 12)
+    host._foot_swing_height_cost = torch.zeros(2, 2)
+    return host
+
+
+def test_anymal_state_reads_only_consumed_articulation_fields(velocity_state_host):
+    """ANYmal retains its complete state without requiring link-state reads."""
+    host = velocity_state_host
+    del host.robot.body_data.body_link_pose
+    del host.robot.body_data.body_link_vel
+
+    state = host.get_velocity_locomotion_state()
+
+    expected = anymal_mdp.ANYmalCState(
+        base_lin_vel_b=torch.tensor([[2.0, -1, 3], [4.0, 5, 6]]),
+        base_ang_vel_b=torch.tensor([[5.0, -4, 6], [7.0, 8, 9]]),
+        projected_gravity_b=torch.tensor([[0.0, 0, -1], [0.0, 0, -1]]),
+        command=torch.tensor([[1.0, 2, 3], [4.0, 5, 6]]),
+        joint_pos=torch.tensor(
+            [list(range(11, -1, -1)), list(range(23, 11, -1))], dtype=torch.float32
+        ),
+        joint_vel=torch.tensor(
+            [list(range(111, 99, -1)), list(range(123, 111, -1))], dtype=torch.float32
+        ),
+        joint_acc=torch.ones(2, 12),
+        joint_torque=torch.tensor(
+            [list(range(211, 199, -1)), list(range(223, 211, -1))], dtype=torch.float32
+        ),
+        action=torch.full((2, 12), 0.1),
+        last_action=torch.full((2, 12), 0.2),
+        episode_step=torch.tensor([2, 3]),
+        root_height=torch.tensor([3.0, 6]),
+        foot_air_time=torch.tensor([[0.0, 0.2], [0.3, 0.0]]),
+        last_foot_air_time=torch.tensor([[0.4, 0.5], [0.6, 0.7]]),
+        first_foot_contact=torch.tensor([[0.0, 1], [1.0, 0]]),
+        illegal_contact_force_by_body=torch.tensor([[5.0], [6.0]]),
+    )
+    for name, value in vars(expected).items():
+        torch.testing.assert_close(getattr(state, name), value)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "foot_pos_w",
+        "foot_quat_w",
+        "foot_height",
+        "foot_vel_w",
+        "reward_body_ang_vel_w",
+        "orientation_projected_gravity_b",
+        "angular_momentum_w",
+    ],
+)
+def test_locomotion_state_keeps_link_frame_quantities(velocity_state_host, field_name):
+    """Declared link fields keep policy order, site offsets and world frames."""
+    from dataclasses import make_dataclass
+
+    expected = {
+        "foot_pos_w": torch.tensor([[7.0, 9, 9], [1.0, 2, 4]]).repeat(2, 1, 1),
+        "foot_quat_w": torch.tensor(
+            [[0.0, 0, 2**-0.5, 2**-0.5], [0.0, 0, 0, 1]]
+        ).repeat(2, 1, 1),
+        "foot_height": torch.tensor([[9.0, 4]]).repeat(2, 1),
+        "foot_vel_w": torch.tensor([[3.0, 8, 9], [1.0, 2, 3]]).repeat(2, 1, 1),
+        "reward_body_ang_vel_w": torch.tensor([[0.0, 0, 3]]).repeat(2, 1),
+        "orientation_projected_gravity_b": torch.tensor([[0.0, 0, -1]]).repeat(2, 1),
+        "angular_momentum_w": torch.tensor([[0.0, 4, -4]]).repeat(2, 1),
+    }
+    host = velocity_state_host
+    host.state_type = make_dataclass("LinkState", [(field_name, torch.Tensor)])
+    host._state_fields = frozenset({field_name})
+
+    state = host.get_velocity_locomotion_state()
+
+    torch.testing.assert_close(getattr(state, field_name), expected[field_name])
+
+
+def test_locomotion_state_imu_offset_requires_link_velocity(velocity_state_host):
+    """An IMU site changes base velocity even without explicit link-state fields."""
+    host = velocity_state_host
+    host._imu_offset = torch.tensor([1.0, 0, 0]).expand(2, -1)
+
+    state = host.get_velocity_locomotion_state()
+
+    # The +X site rotates to +Y; omega cross offset adds [-3, 0, 0].
+    torch.testing.assert_close(
+        state.base_lin_vel_b, torch.tensor([[5.0, 1, 6]]).repeat(2, 1)
+    )
+    torch.testing.assert_close(
+        state.base_ang_vel_b, torch.tensor([[0.0, 0, 3]]).repeat(2, 1)
+    )

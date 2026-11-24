@@ -24,7 +24,7 @@ Physical next states must be captured before environment auto-reset.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import torch
@@ -266,6 +266,7 @@ class TransitionReplay:
         history_length: int,
         *,
         generator: torch.Generator | None = None,
+        fields: Sequence[str] | None = None,
     ) -> dict[str, Any]:
         """Gather imagination starts and oldest-first boundary-padded history.
 
@@ -273,6 +274,9 @@ class TransitionReplay:
             batch_size: Number of starts.
             history_length: Number of states including the selected current one.
             generator: Optional sampling RNG on the replay device.
+            fields: Optional field names for both start and history. Names are
+                deduplicated and returned in declared schema order. None includes
+                all fields; an empty sequence returns only validity metadata.
 
         Returns:
             ``start`` fields, ``history`` fields and Boolean ``history_valid``.
@@ -289,6 +293,14 @@ class TransitionReplay:
             or history_length < 1
         ):
             raise ValueError("Need nonempty replay and positive start/history sizes")
+        selected = self._data
+        if fields is not None:
+            names = set(fields)
+            if not names.issubset(self._data):
+                raise ValueError("Unknown replay sample fields")
+            selected = {
+                name: value for name, value in self._data.items() if name in names
+            }
         ages = self._draw(batch_size, self.size, generator)
         envs = self._draw(batch_size, self.num_envs, generator)
         rows = self._row(ages)
@@ -298,10 +310,10 @@ class TransitionReplay:
         valid = back <= available
         history_rows = self._row(ages[:, None] - torch.minimum(back, available))
         return {
-            "start": {name: value[rows, envs] for name, value in self._data.items()},
+            "start": {name: value[rows, envs] for name, value in selected.items()},
             "history": {
                 name: value[history_rows, envs[:, None]]
-                for name, value in self._data.items()
+                for name, value in selected.items()
             },
             "history_valid": valid,
             "history_complete": (ages >= history_length - 1) | (steps <= ages),

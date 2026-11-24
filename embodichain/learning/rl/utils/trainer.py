@@ -33,6 +33,7 @@ from torch.utils.tensorboard import SummaryWriter
 from embodichain.learning.rl._trainer_reporting import (
     _evaluation_improved,
     _write_scalars,
+    _write_tensorboard_scalars,
 )
 from embodichain.learning.rl.checkpoint import _load, _save, _sync_errors
 from embodichain.learning.rl.buffer import RolloutBuffer
@@ -420,11 +421,9 @@ class Trainer:
         ):
             step = start_step + frame * steps_per_frame
             if self.writer:
-                for tag, value in log_dict.items():
-                    try:
-                        self.writer.add_scalar(tag, value, step)
-                    except Exception:
-                        continue
+                _write_tensorboard_scalars(
+                    self.writer, log_dict, step, ignore_errors=True
+                )
             if self.use_wandb and log_dict:
                 wandb.log(log_dict, step=step)
 

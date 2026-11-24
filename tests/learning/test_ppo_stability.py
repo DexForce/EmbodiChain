@@ -24,6 +24,7 @@ import torch.nn as nn
 from gymnasium import spaces
 from tensordict import TensorDict
 
+from embodichain.learning.models.normalizer import EmpiricalNormalizer
 from embodichain.learning.rl.algo import PPO, PPOCfg, compute_gae
 from embodichain.learning.rl.buffer import RolloutBuffer
 from embodichain.learning.rl.collector import SyncCollector
@@ -227,23 +228,34 @@ def test_declared_policy_inputs_preserve_updates_and_refresh_between_rollouts(
 
 
 @pytest.mark.parametrize(
-    "policy_type,instance_override,normalization",
+    "policy_type,instance_override,normalization,mutating_normalizer",
     [
-        (ActorCritic, False, (False, False)),
-        (ActorCritic, False, (True, False)),
-        (ActorCritic, False, (False, True)),
-        (ActorCritic, False, (True, True)),
-        (_ExtraFieldPolicy, False, (True, True)),
-        (ActorCritic, True, (True, True)),
+        (ActorCritic, False, (False, False), False),
+        (ActorCritic, False, (True, False), False),
+        (ActorCritic, False, (False, True), False),
+        (ActorCritic, False, (True, True), False),
+        (_ExtraFieldPolicy, False, (True, True), False),
+        (ActorCritic, True, (True, True), False),
+        (ActorCritic, False, (True, True), True),
     ],
 )
 def test_ppo_updates_normalizers_after_using_the_rollout_distribution(
     policy_type: type[ActorCritic],
     instance_override: bool,
     normalization: tuple[bool, bool],
+    mutating_normalizer: bool,
 ) -> None:
     env = _NormalizationEnv()
     policy = _policy(normalize=normalization, policy_type=policy_type)
+    if mutating_normalizer:
+
+        class MutatingNormalizer(EmpiricalNormalizer):
+            def update(self, value: torch.Tensor) -> None:
+                super().update(value)
+                value.add_(1000.0)
+
+        policy.actor_obs_normalizer = MutatingNormalizer(policy.actor_obs_dim)
+        policy.critic_obs_normalizer = MutatingNormalizer(policy.critic_obs_dim)
     if instance_override:
         policy.evaluate_actions = _ExtraFieldPolicy.evaluate_actions.__get__(policy)
     buffer = RolloutBuffer(
@@ -756,6 +768,60 @@ def test_gae_handles_episode_boundaries(
     _, returns = compute_gae(rollout, gamma=0.99, gae_lambda=0.95)
 
     torch.testing.assert_close(returns, torch.tensor([[expected_return]]))
+
+
+@pytest.mark.parametrize("horizon", [1, 4])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.float64])
+@pytest.mark.parametrize("strided", [False, True])
+def test_gae_mixed_boundaries_preserve_recurrence_and_inputs(
+    horizon: int, dtype: torch.dtype, strided: bool
+) -> None:
+    """Known discounted returns retain timeout and per-row episode boundaries."""
+    fields = {
+        "reward": torch.tensor([[1, 2, 3, 4, 0], [2, 4, 6, 8, 0]], dtype=dtype),
+        "value": torch.tensor([[2, 4, 6, 8, 10], [1, 3, 5, 7, 9]], dtype=dtype),
+        "done": torch.tensor(
+            [[False, True, False, True, False], [False, True, True, False, False]]
+        ),
+        "terminated": torch.tensor(
+            [[False, True, False, False, False], [False, False, True, False, False]]
+        ),
+        "truncated": torch.tensor(
+            [[False, False, False, True, False], [False, True, True, False, False]]
+        ),
+        "timeout_value": torch.tensor(
+            [[float("nan")] * 3 + [20, 0], [float("nan")] * 2 + [20, 0, 0]],
+            dtype=dtype,
+        ),
+    }
+    fields = {name: value[:, : horizon + 1] for name, value in fields.items()}
+    if strided:
+        fields = {
+            name: value.repeat_interleave(2, dim=1)[:, ::2]
+            for name, value in fields.items()
+        }
+    rollout = TensorDict(fields, batch_size=[2, horizon + 1])
+    original = rollout.clone()
+
+    advantages, returns = compute_gae(rollout, gamma=0.5, gae_lambda=0.5)
+
+    # At horizon four, row 0's TD residuals are [1, -2, 1, 6]; row 1's
+    # are [2.5, 2.5, 1, 5.5]. Only nonterminal steps carry 1/4 of the next
+    # advantage. A missing timeout value uses the current value; termination
+    # takes precedence when both flags are set.
+    expected = torch.tensor(
+        [[3.0], [3.5]]
+        if horizon == 1
+        else [[2.5, 2.0, 8.5, 14.0], [4.125, 5.5, 6.0, 12.5]]
+    )
+    torch.testing.assert_close(returns, expected, rtol=0, atol=0)
+    torch.testing.assert_close(
+        advantages, expected - original["value"][:, :-1].float(), rtol=0, atol=0
+    )
+    for name, value in original.items():
+        torch.testing.assert_close(rollout[name], value, equal_nan=True)
+    for name in ("advantage", "return"):
+        torch.testing.assert_close(rollout[name][:, -1], torch.zeros(2))
 
 
 @pytest.mark.parametrize("next_ending", ["running", "timeout_without_observation"])

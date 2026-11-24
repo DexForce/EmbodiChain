@@ -28,29 +28,43 @@ from .policy import Policy, _TrainingInputSpec
 __all__ = ["ActorOnly"]
 
 
-def _validate_normal_action(distribution: Normal, action: torch.Tensor) -> Normal:
-    """Check ordinary tensor inputs together, retaining Normal's error path."""
+def _validate_normal(
+    distribution: Normal, action: torch.Tensor | None = None
+) -> Normal:
+    """Validate an unchecked Normal, optionally including an existing action."""
     if not Normal._validate_args:
+        if action is None:
+            del distribution._validate_args
         return distribution
-    tensors = (distribution.loc, distribution.scale, action)
+    tensors = (distribution.loc, distribution.scale)
+    if action is not None:
+        tensors += (action,)
     if all(
         type(value) is torch.Tensor
         and value.device == distribution.loc.device
         and value.layout == torch.strided
         and value.is_floating_point()
         for value in tensors
-    ) and all(
-        actual == 1 or expected == 1 or actual == expected
-        for actual, expected in zip(
-            reversed(action.shape), reversed(distribution.batch_shape)
+    ) and (
+        action is None
+        or all(
+            actual == 1 or expected == 1 or actual == expected
+            for actual, expected in zip(
+                reversed(action.shape), reversed(distribution.batch_shape)
+            )
         )
     ):
         valid = (
             distribution.arg_constraints["loc"].check(distribution.loc).all()
             & distribution.arg_constraints["scale"].check(distribution.scale).all()
-            & distribution.support.check(action).all()
         )
+        if action is not None:
+            valid &= distribution.support.check(action).all()
         if bool(valid):
+            if action is None:
+                # Restore Normal's inherited default, including future changes,
+                # so log_prob still validates actions generated after this check.
+                del distribution._validate_args
             return distribution
     # Let Torch retain parameter-before-sample validation, broadcasting errors
     # and its original exception messages. Failed/unsupported inputs are cold.
@@ -102,6 +116,15 @@ class ActorOnly(Policy):
         mean = self.actor(obs)
         log_std = self.log_std.clamp(self.log_std_min, self.log_std_max)
         std = log_std.exp().expand(mean.shape[0], -1)
+        if (
+            type(self) is ActorOnly
+            and type(obs) is torch.Tensor
+            and obs.device.type == "cuda"
+            and type(mean) is torch.Tensor
+            and type(std) is torch.Tensor
+            and validate_args is None
+        ):
+            return _validate_normal(Normal(mean, std, validate_args=False))
         return Normal(mean, std, validate_args=validate_args)
 
     def forward(
@@ -188,7 +211,7 @@ class ActorOnly(Policy):
         ):
             # CUDA minibatches otherwise read loc, scale and action validity
             # separately. Sampling keeps its existing validation/RNG boundary.
-            dist = _validate_normal_action(
+            dist = _validate_normal(
                 self._distribution(obs, validate_args=False), action
             )
         else:

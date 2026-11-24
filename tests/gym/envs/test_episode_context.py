@@ -157,15 +157,22 @@ def test_missing_duplicate_late_and_overlapping_reports():
     assert context.filter_recordable().tolist() == [0, 2, 3]
 
 
-@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
-def test_report_and_snapshots_are_owned(device):
+@pytest.mark.parametrize(
+    ("device", "selection_device", "selection_dtype"),
+    [
+        ("cpu", "cpu", torch.int32),
+        pytest.param("cuda", "cpu", torch.int32, marks=pytest.mark.gpu),
+        pytest.param("cuda", "cuda", torch.int64, marks=pytest.mark.gpu),
+    ],
+)
+def test_report_and_snapshots_are_owned(device, selection_device, selection_dtype):
     context = ready_context(device=device)
     value = {"ids": ["source"]}
-    # A CPU selection must remain owned when used by a CUDA context, too.
-    selection = torch.tensor([1], dtype=torch.int32)
+    selection = torch.tensor([1], device=selection_device, dtype=selection_dtype)
     selected = context.filter_recordable(selection)
     with context.check("layout", selection) as finish:
         selection.fill_(2)
+        assert context.filter_recordable().tolist() == [0, 2, 3]
         finish(accepted=torch.tensor([True]), metadata=value)
         value["ids"].append("mutated")
     row = context.snapshot([1])[0]
@@ -199,9 +206,11 @@ def test_invalid_reports_never_publish_success(metadata):
         ([1.0], "cpu"),
         (torch.tensor([[1]]), "cpu"),
         (torch.tensor([1, 1]), "cpu"),
+        (torch.tensor([-1]), "cpu"),
         (torch.tensor([4]), "cpu"),
         (torch.tensor([True]), "cpu"),
         pytest.param(torch.tensor([1, 1]), "cuda", marks=pytest.mark.gpu),
+        pytest.param(torch.tensor([-1]), "cuda", marks=pytest.mark.gpu),
         pytest.param(torch.tensor([4]), "cuda", marks=pytest.mark.gpu),
     ],
 )

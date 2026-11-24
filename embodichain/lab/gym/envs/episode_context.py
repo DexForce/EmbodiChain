@@ -94,13 +94,22 @@ class EpisodeContext:
                 env_ids.device if env_ids.device.type == "cpu" else self._device
             )
             ids = env_ids.to(device=copy_device, dtype=torch.long, copy=True)
-            validation_ids = ids.cpu() if include_rows else ids
-            if len(torch.unique(validation_ids)) != len(validation_ids) or bool(
-                ((validation_ids < 0) | (validation_ids >= self._count)).any()
+            if ids.device.type == "cpu" and not include_rows:
+                # Keep large CPU selections tensor-only when no host rows are
+                # needed. This validation does not synchronize a device.
+                if len(torch.unique(ids)) != len(ids) or bool(
+                    ((ids < 0) | (ids >= self._count)).any()
+                ):
+                    raise ValueError("Environment IDs must be unique valid rows.")
+                return ids.to(self._device), None
+            # One host read validates both uniqueness and bounds, without GPU
+            # sorting or scalar reductions that each synchronize the stream.
+            rows = ids.cpu().tolist()
+            if len(set(rows)) != len(rows) or (
+                rows and (min(rows) < 0 or max(rows) >= self._count)
             ):
                 raise ValueError("Environment IDs must be unique valid rows.")
-            rows = validation_ids.tolist() if include_rows else None
-            return ids.to(self._device), rows
+            return ids.to(self._device), rows if include_rows else None
         rows = list(env_ids)
         if any(type(value) is not int for value in rows):
             raise ValueError("Environment IDs must be integers.")

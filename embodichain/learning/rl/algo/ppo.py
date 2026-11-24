@@ -190,7 +190,9 @@ class PPO(BaseAlgorithm[TensorDict]):
                 total_steps += bs
 
         self._step_scheduler()
-        _update_observation_normalization(self.policy, rollout, input_spec)
+        _update_observation_normalization(
+            self.policy, rollout, input_spec, flat_rollout
+        )
         actor, value, action_bound, entropy, auxiliary = (
             total_metrics / max(1, total_steps)
         ).tolist()

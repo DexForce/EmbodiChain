@@ -267,8 +267,10 @@ class record_camera_data(Functor):
                 continue
             frame = rgb[row, ..., :3]
             if isinstance(frame, torch.Tensor):
-                frame = frame.detach().cpu().numpy()
-            self._frames_list[row].append(np.array(frame, copy=True))
+                frame = frame.detach().to(device="cpu", copy=True).numpy()
+            else:
+                frame = np.array(frame, copy=True)
+            self._frames_list[row].append(frame)
 
 
 class record_camera_data_async(record_camera_data):

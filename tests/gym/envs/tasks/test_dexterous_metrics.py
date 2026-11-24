@@ -414,3 +414,175 @@ def test_face_turn_freejoint_velocity_uses_body_origin(
     )
     torch.testing.assert_close(state["qvel"][:, 22], torch.full((2,), 0.5))
     torch.testing.assert_close(env._cube_art.body_data.root_lin_vel, com_velocity)
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("task_id", ["M1", "M4"])
+@pytest.mark.parametrize("newton", [True, False])
+def test_dexterous_link_geometry_and_storage(
+    env_factory: Callable[[str], DexterousManipulationEnv],
+    task_id: str,
+    newton: bool,
+) -> None:
+    """Local palm/site geometry retains source ownership and fresh reads."""
+    env = env_factory(task_id)
+    env.sim.is_newton_backend = newton
+    env.sim.arena_offsets = torch.tensor([[0.0, 0.0, 0.0], [5.0, -3.0, 0.0]])
+    base = torch.tensor([[0.5, -0.25, 1.0], [1.5, 0.5, 2.0]])
+    offsets = torch.tensor(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [2.0, 0.0, 0.0],
+        ]
+    )
+    poses = torch.zeros(2, 5, 7)
+    poses[:, :, :3] = base[:, None, :] + offsets
+    # A quarter turn about Z maps each site's local +X offset to arena +Y.
+    poses[:, :, 5:] = math.sqrt(0.5)
+    root_pose = poses[:, 0].clone()
+    if not newton:
+        # Retain the existing fallback for a world-frame backend read.
+        poses[:, :, :3] += env.sim.arena_offsets[:, None, :]
+    env.robot.body_data = SimpleNamespace(body_link_pose=poses)
+    env.robot.get_local_pose = lambda: root_pose
+    env._object.body_data = SimpleNamespace(
+        lin_vel=torch.zeros(2, 3), ang_vel=torch.zeros(2, 3)
+    )
+    env._palm_link_idx = 0
+    env._site_link_indices = torch.arange(5)
+    env._site_local_pos = torch.tensor([[0.25, 0.0, 0.0]] * 5)
+    original = poses.clone()
+
+    state = DexterousManipulationEnv._read_physical_state(env)
+    palm = state.palm_pos if env.is_shadow else state["palm_pos"]
+    expected_palm = base if env.is_shadow else base + torch.tensor([0.0, 0.25, 0.0])
+    torch.testing.assert_close(palm, expected_palm)
+    if not env.is_shadow:
+        expected_tips = torch.tensor(
+            [[0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, -2.0, 0.0]] * 2
+        )
+        torch.testing.assert_close(state["fingertip_pos"], expected_tips)
+    torch.testing.assert_close(poses, original, rtol=0, atol=0)
+
+    poses[:, :, :3] += 0.5
+    root_pose[:, :3] += 0.5
+    # Shadow keeps its borrowed palm view for local native reads; LEAP's
+    # selected/rotated site geometry and the fallback's rebased poses are owned.
+    retained_palm = expected_palm + 0.5 if env.is_shadow and newton else expected_palm
+    torch.testing.assert_close(palm, retained_palm)
+    if not env.is_shadow:
+        torch.testing.assert_close(state["fingertip_pos"], expected_tips)
+    refreshed = DexterousManipulationEnv._read_physical_state(env)
+    refreshed_palm = refreshed.palm_pos if env.is_shadow else refreshed["palm_pos"]
+    torch.testing.assert_close(refreshed_palm, expected_palm + 0.5)
+
+
+def _leap_observation_case(task_id: str, device: str):
+    from embodichain.extensions.tasks.manipulation.dexterous._leap_tasks import LeapTask
+
+    count = 5
+    width = 24 if task_id == "M3" else 23
+    qpos0 = torch.zeros(width, device=device)
+    qpos0[19] = 1
+    task = LeapTask(
+        task_id,
+        count,
+        qpos0,
+        torch.zeros(16, device=device),
+        -torch.ones(16, device=device),
+        torch.ones(16, device=device),
+        device=device,
+    )
+    widths = {
+        "qpos": width,
+        "qvel": width - 1,
+        "hand_qpos": 16,
+        "hand_qvel": 16,
+        "actuator_force": 16,
+        "cube_pos": 3,
+        "cube_quat": 4,
+        "cube_linvel": 3,
+        "cube_angvel": 3,
+        "palm_pos": 3,
+        "fingertip_pos": 12,
+    }
+    # Strided inputs model the views exposed by the native physics bridge.
+    state = {
+        key: torch.arange(count * width * 2, device=device, dtype=torch.float32)
+        .reshape(count, width * 2)[:, ::2]
+        .div_(100)
+        for key, width in widths.items()
+    }
+    state["qpos"][:, 19:23] = torch.tensor([1, 0, 0, 0], device=device)
+    state["cube_quat"][:] = torch.tensor([1, 0, 0, 0], device=device)
+    return task, state
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "task_id,device",
+    [
+        ("M3", "cpu"),
+        ("M4", "cpu"),
+        ("M5", "cpu"),
+        pytest.param("M4", "cuda", marks=pytest.mark.gpu),
+    ],
+)
+def test_leap_full_observations_preserve_selection_rng_and_ownership(
+    task_id: str, device: str
+) -> None:
+    """Full observations equal explicit ordered selection and own returned data."""
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
+    task, state = _leap_observation_case(task_id, device)
+    source_before = {key: value.clone() for key, value in state.items()}
+    rng = task.generator.get_state()
+    with torch.no_grad():
+        full = task.observe(state)
+        after_full = task.generator.get_state()
+        task.generator.set_state(rng)
+        explicit = task.observe(state, torch.arange(task.num_envs, device=device))
+        assert torch.equal(task.generator.get_state(), after_full)
+        for key in full:
+            torch.testing.assert_close(full[key], explicit[key], rtol=0, atol=0)
+        for key in state:
+            torch.testing.assert_close(state[key], source_before[key], rtol=0, atol=0)
+
+        task.noise_level = 0
+        clean = task.observe(state)
+        for rows in ([3, 1, 3], []):
+            ids = torch.tensor(rows, device=device, dtype=torch.long)
+            selected = task.observe(state, ids)
+            for key in clean:
+                torch.testing.assert_close(
+                    selected[key], clean[key][ids], rtol=0, atol=0
+                )
+
+        saved = {key: value.clone() for key, value in full.items()}
+        for value in state.values():
+            value.zero_()
+        task.last_action.fill_(10)
+        task.motor_targets.fill_(20)
+        task.goal_quat.fill_(30)
+        for key in full:
+            torch.testing.assert_close(full[key], saved[key], rtol=0, atol=0)
+
+
+@pytest.mark.no_sim
+def test_leap_grad_observations_keep_forward_values_for_backward() -> None:
+    """Direct differentiable callers retain isolation from later source writes."""
+    task, state = _leap_observation_case("M4", "cpu")
+    quat = state["cube_quat"].requires_grad_()
+    goal = task.goal_quat.requires_grad_()
+    result = task.observe(state)
+    weights = torch.arange(task.critic_dim, dtype=torch.float32)
+    loss = (result["privileged_state"] * weights).sum()
+    expected = torch.autograd.grad(loss, (quat, goal), retain_graph=True)
+    with torch.no_grad():
+        quat.fill_(0.25)
+    loss.backward()
+    for value, gradient in zip((quat, goal), expected, strict=True):
+        torch.testing.assert_close(value.grad, gradient, rtol=0, atol=0)

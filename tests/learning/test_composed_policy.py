@@ -116,6 +116,43 @@ def test_actor_does_not_read_privileged_values_and_export_matches() -> None:
     torch.testing.assert_close(restored.export_actor()(td["obs"]), original["action"])
 
 
+@pytest.mark.parametrize("history_length", [30, 32])
+def test_temporal_actor_matches_adaptive_pool_outputs_and_gradients(
+    history_length: int,
+) -> None:
+    # H30 already has three temporal bins; H32 still needs pooling to three.
+    actor = _policy(contact_points=0, history_length=history_length).actor
+    reference = deepcopy(actor)
+    reference.encoder.pool = torch.nn.AdaptiveAvgPool1d(3)
+    observation = torch.randn(2, actor.input_dim, requires_grad=True)
+    reference_observation = observation.detach().clone().requires_grad_(True)
+
+    action, features = actor.forward_with_features(observation)
+    expected_action, expected_features = reference.forward_with_features(
+        reference_observation
+    )
+    torch.testing.assert_close(action, expected_action, rtol=0, atol=0)
+    torch.testing.assert_close(
+        features["latent"], expected_features["latent"], rtol=0, atol=0
+    )
+    (action.square().sum() + features["latent"].square().sum()).backward()
+    (
+        expected_action.square().sum() + expected_features["latent"].square().sum()
+    ).backward()
+    assert observation.grad is not None
+    assert reference_observation.grad is not None
+    torch.testing.assert_close(
+        observation.grad, reference_observation.grad, rtol=0, atol=0
+    )
+    expected_parameters = dict(reference.named_parameters())
+    for name, parameter in actor.named_parameters():
+        assert parameter.grad is not None
+        assert expected_parameters[name].grad is not None
+        torch.testing.assert_close(
+            parameter.grad, expected_parameters[name].grad, rtol=0, atol=0
+        )
+
+
 def test_weighted_contact_loss_matches_independent_logsumexp_and_backpropagates() -> (
     None
 ):

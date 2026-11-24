@@ -97,6 +97,7 @@ def test_property_read_reports_batch_failure() -> None:
 
 def test_other_backend_keeps_one_scalar_read_per_link() -> None:
     data = make_data(False)
+    original = data._mass, data._inertia, data._com_pose
     getter = Mock(
         return_value=SimpleNamespace(
             mass=3.0,
@@ -106,13 +107,83 @@ def test_other_backend_keeps_one_scalar_read_per_link() -> None:
         )
     )
     data._entity_link_properties = getter
-    mass, inertia, pose = data.read_physical_properties()
+    result = data.read_physical_properties()
+    assert all(a is b for a, b in zip(result, original, strict=True))
+    mass, inertia, pose = result
     assert getter.call_count == 4
     torch.testing.assert_close(mass, torch.full((2, 2), 3.0))
     torch.testing.assert_close(inertia, torch.tensor([1.0, 2.0, 3.0]).expand(2, 2, 3))
     torch.testing.assert_close(
         pose, torch.tensor([4.0, 5.0, 6.0, 0.0, 0.0, 0.0, 1.0]).expand(2, 2, 7)
     )
+    getter.return_value.mass = 5.0
+    result = data.read_physical_properties()
+    assert all(a is b for a, b in zip(result, original, strict=True))
+    torch.testing.assert_close(mass, torch.full((2, 2), 5.0))
+    assert getter.call_count == 8
+
+
+@pytest.mark.parametrize("newton", [False, True])
+@pytest.mark.parametrize("env_ids", [(1, 0, 1), (1,), ()])
+def test_selected_property_read_preserves_order_freshness_and_ownership(
+    newton: bool, env_ids: tuple[int, ...]
+) -> None:
+    data = make_data(newton)
+    batch = data.articulation_view.batch
+    buffers = data._mass, data._inertia, data._com_pose
+    for buffer in buffers:
+        buffer.fill_(-1.0)
+
+    def read_link(entity: object, link_name: str) -> SimpleNamespace:
+        row = data.entities.index(entity)
+        link = data.link_names.index(link_name)
+        native_pose = batch.pose[row, link]
+        return SimpleNamespace(
+            mass=batch.mass[row, link].item(),
+            inertia=batch.inertia[row, link].numpy(),
+            com_position=native_pose[4:].numpy(),
+            com_quaternion=native_pose[[3, 0, 1, 2]].numpy(),
+        )
+
+    data._entity_link_properties = Mock(side_effect=read_link)
+    expected = (
+        batch.mass.clone(),
+        batch.inertia.clone(),
+        torch.cat((batch.pose[..., 4:], batch.pose[..., :4]), dim=-1),
+    )
+    selected = list(env_ids)
+    result = data.read_physical_properties(env_ids)
+    for actual, values, buffer in zip(result, expected, buffers, strict=True):
+        torch.testing.assert_close(actual, values[selected])
+        if newton:
+            torch.testing.assert_close(buffer, values)
+        else:
+            for row in range(data.num_instances):
+                torch.testing.assert_close(
+                    buffer[row],
+                    (
+                        values[row]
+                        if row in selected
+                        else torch.full_like(buffer[row], -1)
+                    ),
+                )
+        actual.add_(100.0)
+        torch.testing.assert_close(buffer[selected], values[selected])
+
+    getter = data._entity_link_properties
+    if newton or not selected:
+        getter.assert_not_called()
+    else:
+        assert {call.args[0] for call in getter.call_args_list} == {
+            data.entities[row] for row in selected
+        }
+    batch.mass.add_(10.0)
+    batch.inertia.add_(10.0)
+    batch.pose.add_(10.0)
+    refreshed = data.read_physical_properties(env_ids)
+    for actual, previous, values in zip(refreshed, result, expected, strict=True):
+        torch.testing.assert_close(actual, values[selected] + 10.0)
+        torch.testing.assert_close(previous, values[selected] + 100.0)
 
 
 @pytest.mark.parametrize("status", [2, -1, -2])

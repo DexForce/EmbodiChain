@@ -426,3 +426,140 @@ def test_configured_model_policy_update_shares_workflow_resources():
         torch.testing.assert_close(old, new, rtol=0, atol=0)
         assert new.grad is None
     runtime.close()
+
+
+@pytest.mark.parametrize("failed_draws", [0, 3, 4])
+def test_replay_motion_starts_preserves_order_history_and_draw_budget(
+    failed_draws: int,
+) -> None:
+    from types import SimpleNamespace
+
+    from embodichain.extensions.tasks.locomotion.tracking.motion_model import (
+        replay_motion_starts,
+    )
+
+    env, _ = make_env()
+    task = env.task
+    batch, candidates, history_length = 2, 8, 2
+    row = torch.arange(candidates, dtype=torch.float32)[:, None]
+    age = torch.arange(history_length, dtype=torch.float32)[None, :]
+    q = row * 10 + age
+    bias = (row + 1) / 8 + age / 16
+    state = {
+        "pos": torch.zeros(candidates, history_length, 3),
+        "rot": torch.eye(3).expand(candidates, history_length, 3, 3).clone(),
+        "v": torch.zeros(candidates, history_length, 3),
+        "w": torch.stack((q + 0.25, q + 0.5, q + 0.75), -1),
+        "q": q[..., None],
+        "qd": (-q - 1)[..., None],
+    }
+    context = torch.zeros(candidates, history_length, 5)
+    context[..., 0] = 9  # Distinct from the encoder bias at context[..., 1].
+    context[..., 1] = bias
+    context[..., 2:] = -7
+    packed_state = pack_robot_state(state)
+    frame = (
+        1000
+        + torch.arange(candidates, dtype=torch.int64)[:, None]
+        + torch.arange(history_length, dtype=torch.int64)[None, :]
+        - 1
+    )
+    template = {
+        "state": packed_state,
+        "next_state": packed_state + 1,
+        "action": torch.full((candidates, history_length, 1), -100.0),
+        "context": context,
+        "terminated": torch.zeros(candidates, history_length, dtype=torch.bool),
+        "truncated": torch.zeros(candidates, history_length, dtype=torch.bool),
+        "episode_id": torch.arange(candidates)[:, None]
+        .expand(-1, history_length)
+        .clone(),
+        "episode_step": torch.arange(history_length)[None]
+        .expand(candidates, -1)
+        .clone(),
+        "frame": frame,
+        "previous_action": (2 * q + 0.5)[..., None],
+        "policy_action": torch.full((candidates, history_length, 1), 100.0),
+        "usable": torch.ones(candidates, history_length, dtype=torch.bool),
+    }
+    template["usable"][2, -1] = False  # Current transition is unusable.
+    template["usable"][4, 0] = False  # Only older history is unusable.
+    complete = torch.tensor([False, True, True, True, True, False, True, True])
+    requests = []
+    supplied = []
+
+    def sample_starts(count, length, *, fields=None):
+        requests.append((count, length))
+        history = {
+            name: value.clone()
+            for name, value in template.items()
+            if fields is None or name in fields
+        }
+        start = {name: value[:, -1].clone() for name, value in history.items()}
+        if len(requests) <= failed_draws:
+            # One valid row is insufficient; rows must not accumulate across draws.
+            history["usable"].zero_()
+            history["usable"][1] = True
+            start["usable"].zero_()
+            start["usable"][1] = True
+        data = {
+            "start": start,
+            "history": history,
+            "history_valid": torch.ones(candidates, history_length, dtype=torch.bool),
+            "history_complete": complete.clone(),
+        }
+        supplied.append(data)
+        return data
+
+    replay = SimpleNamespace(sample_starts=sample_starts)
+    if failed_draws == 4:
+        with pytest.raises(RuntimeError, match="too few usable starts"):
+            replay_motion_starts(replay, batch, task)
+        assert requests == [(candidates, history_length)] * 4
+        return
+
+    actual = replay_motion_starts(replay, batch, task)
+    assert requests == [(candidates, history_length)] * (failed_draws + 1)
+
+    # The first valid rows are explicitly 1 and 3; 6 and 7 are surplus.
+    selected_rows = [1, 3]
+    expected_history = torch.tensor(
+        [
+            [
+                [
+                    10 * row_id + t + (row_id + 1) / 8 + t / 16,
+                    -(10 * row_id + t) - 1,
+                    10 * row_id + t + 0.25,
+                    10 * row_id + t + 0.5,
+                    10 * row_id + t + 0.75,
+                    0.0,
+                    0.0,
+                    -1.0,
+                    2 * (10 * row_id + t) + 0.5,
+                ]
+                for t in range(history_length)
+            ]
+            for row_id in selected_rows
+        ]
+    )
+    expected = {
+        "state": packed_state[selected_rows, -1],
+        "context": context[selected_rows, -1],
+        "frame": torch.tensor([1001, 1003]),
+        "previous_action": torch.tensor([[22.5], [62.5]]),
+        "valid": torch.tensor([True, True]),
+        "history": expected_history,
+    }
+    for name, value in expected.items():
+        torch.testing.assert_close(getattr(actual, name), value, rtol=0, atol=0)
+        assert not getattr(actual, name).requires_grad
+
+    # A retained draw may be overwritten after return without changing the starts.
+    for data in supplied:
+        for group in ("start", "history"):
+            for value in data[group].values():
+                value.zero_()
+        data["history_complete"].zero_()
+        data["history_valid"].zero_()
+    for name, value in expected.items():
+        torch.testing.assert_close(getattr(actual, name), value, rtol=0, atol=0)

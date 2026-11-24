@@ -63,7 +63,10 @@ def _training_transition_view(
 
 @torch.no_grad()
 def _update_observation_normalization(
-    policy, rollout: TensorDict, input_spec: _TrainingInputSpec
+    policy,
+    rollout: TensorDict,
+    input_spec: _TrainingInputSpec,
+    flat_transitions: TensorDict | None = None,
 ) -> None:
     """Update policy normalizers after the rollout optimization is complete."""
     policy_module = getattr(policy, "module", policy)
@@ -73,10 +76,15 @@ def _update_observation_normalization(
 
     fields = {}
     names = input_spec.normalization_fields
+    reuse_flat = (
+        names is not None
+        and flat_transitions is not None
+        and all(name in flat_transitions.keys() for name in names)
+    )
     for name in ("obs", "critic_obs") if names is None else names:
         if name not in rollout.keys():
             continue
-        observations = rollout[name][:, :-1]
+        observations = flat_transitions[name] if reuse_flat else rollout[name][:, :-1]
         fields[name] = observations.reshape(-1, observations.shape[-1])
     observations = fields["obs"] if names is None else next(iter(fields.values()))
     update_normalization(
@@ -133,11 +141,12 @@ def compute_gae(
         )
     advantages = torch.zeros_like(rollout["reward"].float())
     last_advantage = torch.zeros(num_envs, device=rewards.device, dtype=rewards.dtype)
+    not_done = (~dones).float()
+    deltas = rewards + gamma * values[:, 1:] * not_done - values[:, :-1]
+    continuation = gamma * gae_lambda * not_done
 
     for t in reversed(range(time_dim)):
-        not_done = (~dones[:, t]).float()
-        delta = rewards[:, t] + gamma * values[:, t + 1] * not_done - values[:, t]
-        last_advantage = delta + gamma * gae_lambda * not_done * last_advantage
+        last_advantage = deltas[:, t] + continuation[:, t] * last_advantage
         advantages[:, t] = last_advantage
 
     returns = torch.zeros_like(advantages)

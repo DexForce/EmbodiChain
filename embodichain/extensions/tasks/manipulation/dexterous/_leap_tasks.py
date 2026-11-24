@@ -272,8 +272,11 @@ class LeapTask:
         cube_angvel, palm_pos, and fingertip_pos. Fingertips are flattened
         thumb/index/middle/ring positions expressed in the grasp-site frame.
         """
-        ids = self._ids(env_ids)
-        selected = {key: value[ids] for key, value in state.items()}
+        full_batch = env_ids is None and not torch.is_grad_enabled()
+        ids = slice(None) if full_batch else self._ids(env_ids)
+        selected = (
+            state if full_batch else {key: value[ids] for key, value in state.items()}
+        )
         if self.face_turn:
             qpos, qvel = selected["qpos"], selected["qvel"]
             delta = self.goal_angle[ids] - qpos[:, 23]
@@ -320,9 +323,9 @@ class LeapTask:
                 dim=-1,
             )
             perturbation = selected.get(
-                "perturbation_direction", q.new_zeros((len(ids), 6))
+                "perturbation_direction", q.new_zeros((q.shape[0], 6))
             )
-            applied = selected.get("cube_external_force", q.new_zeros((len(ids), 6)))
+            applied = selected.get("cube_external_force", q.new_zeros((q.shape[0], 6)))
             critic = torch.cat(
                 (
                     obs,

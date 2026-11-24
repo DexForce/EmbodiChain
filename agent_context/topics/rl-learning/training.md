@@ -204,6 +204,11 @@ together after backward without moving gradient-safety decisions.
 Both trainers share scalar sink writes and evaluation score comparison in
 `embodichain/learning/rl/_trainer_reporting.py`; their callers retain history,
 rank filtering, distributed reduction, scheduling and checkpoint ownership.
+Native TensorBoard combines a step's prepared float scalars into one event:
+tag/value/step/order remain intact, while walltime and partial-I/O failure
+granularity follow that event. Custom scalar writers retain individual calls.
+Collection suppresses sink errors; update/evaluation reporting propagates them.
+A failed native submission is never replayed because it may already be queued.
 
 `utils/helper.py` owns observation-group resolution for both public flattening
 helpers and standard collection's snapshots into owned rollout slots. Both paths

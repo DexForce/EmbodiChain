@@ -302,7 +302,9 @@ def _write_root_pose_with_pending_gpu_selection(
 
 @pytest.mark.parametrize("device", ["cpu", "cuda:0"])
 @pytest.mark.parametrize("env_ids", [None, [0]], ids=["all", "selected"])
-@pytest.mark.parametrize("operation", ["reset", "root_pose", "qpos"])
+@pytest.mark.parametrize(
+    "operation", ["reset", "reset_without_clear", "root_pose", "qpos"]
+)
 def test_reset_root_and_joint_pose_writes_preserve_physics_state(
     tmp_path: Path,
     device: str,
@@ -373,10 +375,32 @@ def test_reset_root_and_joint_pose_writes_preserve_physics_state(
         expected_qpos = changed_qpos.clone()
         expected_qvel = changed_qvel.clone()
         selected_rows = [0, 1] if env_ids is None else env_ids
-        if operation == "reset":
-            art.reset(env_ids=env_ids)
+        if operation in {"reset", "reset_without_clear"}:
+            # Distinct commands make reset's hold targets and clearing observable.
+            changed_target_qpos = torch.tensor([[-0.7], [-0.9]], device=sim.device)
+            changed_target_qvel = torch.tensor([[0.4], [0.6]], device=sim.device)
+            changed_qf = torch.tensor([[0.5], [0.7]], device=sim.device)
+            art.set_qpos(changed_target_qpos, target=True)
+            art.set_qvel(changed_target_qvel, target=True)
+            art.set_qf(changed_qf)
+            expected_target_qpos = changed_target_qpos.clone()
+            expected_target_qvel = changed_target_qvel.clone()
+            expected_qf = changed_qf.clone()
+            clear_dynamics = operation == "reset"
+            art.reset(env_ids=env_ids, clear_dynamics=clear_dynamics)
             expected_qpos[selected_rows] = initial_angle
-            expected_qvel[selected_rows] = 0.0
+            expected_target_qpos[selected_rows] = initial_angle
+            if clear_dynamics:
+                expected_qvel[selected_rows] = 0.0
+                expected_target_qvel[selected_rows] = 0.0
+                expected_qf[selected_rows] = 0.0
+            torch.testing.assert_close(
+                art.get_qpos(target=True), expected_target_qpos, rtol=0, atol=1e-7
+            )
+            torch.testing.assert_close(
+                art.get_qvel(target=True), expected_target_qvel, rtol=0, atol=1e-7
+            )
+            torch.testing.assert_close(art.get_qf(), expected_qf, rtol=0, atol=1e-7)
         elif operation == "qpos":
             expected_qpos[selected_rows] = 0.6
             art.set_qpos(expected_qpos[selected_rows], env_ids=env_ids, target=False)
