@@ -24,6 +24,7 @@ from importlib.resources import files
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from embodichain.lab.gym.envs.expert_trajectory import ExpertTrajectoryCfg
 from embodichain.lab.gym.utils.composition import resolve_gym_components
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.sim import SimulationManager
@@ -34,6 +35,7 @@ from embodichain.utils import set_seed
 from embodichain.utils.utility import load_config
 
 if TYPE_CHECKING:
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnvCfg
     from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
     from embodichain.lab.sim.objects.robot import Robot
 
@@ -47,6 +49,7 @@ class _SimulationHost:
     sim: SimulationManager
     robot: Robot
     step_dt: float
+    cfg: EmbodiedEnvCfg
 
 
 def _run_program(
@@ -56,7 +59,9 @@ def _run_program(
     env_ids = bridge.env_ids.tolist()
     for segment in bridge.iter_segments():
         for action in segment.actions:
-            host.robot.set_qpos(qpos=action.value, env_ids=env_ids, target=True)
+            targets = action.value
+            host.robot.set_qpos(qpos=targets["qpos"], env_ids=env_ids, target=True)
+            host.robot.set_qvel(qvel=targets["qvel"], env_ids=env_ids, target=True)
             host.sim.update(physics_dt=physics_dt, step=sim_steps_per_control)
         # Validate the segment before requesting the next one from the bridge.
         accepted = segment.validator()
@@ -98,7 +103,10 @@ def main() -> int:
     config = components.config
     config.pop("task_program")
     config.update(headless=True, enable_sensor=False, device="cuda:0")
+    # Refine contact integration during position–velocity placement.
+    config.setdefault("physics_config", {})["num_substeps"] = 2
     cfg = config_to_cfg(config, source_path=path, _register_env=False)
+    cfg.expert_trajectory = ExpertTrajectoryCfg(joint_command_mode="position_velocity")
     sim = SimulationManager(cfg.sim_cfg, requires_native_renderer=False)
     try:
         robot = sim.add_robot(cfg.robot)
@@ -108,7 +116,10 @@ def main() -> int:
         robot.reset()
 
         host = _SimulationHost(
-            sim, robot, sim.sim_config.physics_dt * cfg.sim_steps_per_control
+            sim=sim,
+            robot=robot,
+            step_dt=sim.sim_config.physics_dt * cfg.sim_steps_per_control,
+            cfg=cfg,
         )
         adapter = deployment.integration.adapter_factory.create_adapter(host)
         try:

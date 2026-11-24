@@ -214,13 +214,18 @@ The example owns the command loop and calls `sim.update()` directly.
 :pyobject: _run_program
 ```
 
-Each yielded action sets the robot's joint position targets. The example then
-advances `sim_steps_per_control` physics intervals. Resuming the action iterator
-after those intervals acknowledges the action and advances the bridge clock
-once. The example exhausts each segment's actions, including any post-policies,
-and calls its validator before requesting the next segment. It prints the
-per-segment masks and returns a nonzero exit status if the program's final
-`completion_mask` rejects the run.
+The host selects `joint_command_mode: position_velocity`, so each yielded
+action carries `qpos` and `qvel`. The deployment's `velocity_targets: auto`
+preserves planned velocities or derives them from the final joint samples.
+The example uses two native physics substeps per 10 ms manager interval to
+refine contact integration during release. One controller action covers four
+manager intervals, or 40 ms of simulation time.
+The loop applies both targets before the same `sim.update()` call and advances
+`sim_steps_per_control` physics intervals. Resuming the iterator after those
+intervals acknowledges the action and advances the bridge clock once. The
+example exhausts each segment's actions, including post-policies, and calls its
+validator before requesting the next segment. It prints the per-segment masks
+and returns a nonzero exit status if the final `completion_mask` rejects the run.
 
 The packaged program uses projected effects. To also measure the cube's
 resting position after each Place, download the existing
