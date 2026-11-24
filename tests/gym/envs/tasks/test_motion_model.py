@@ -466,20 +466,9 @@ def test_replay_motion_starts_preserves_order_history_and_draw_budget(
     )
     template = {
         "state": packed_state,
-        "next_state": packed_state + 1,
-        "action": torch.full((candidates, history_length, 1), -100.0),
         "context": context,
-        "terminated": torch.zeros(candidates, history_length, dtype=torch.bool),
-        "truncated": torch.zeros(candidates, history_length, dtype=torch.bool),
-        "episode_id": torch.arange(candidates)[:, None]
-        .expand(-1, history_length)
-        .clone(),
-        "episode_step": torch.arange(history_length)[None]
-        .expand(candidates, -1)
-        .clone(),
         "frame": frame,
         "previous_action": (2 * q + 0.5)[..., None],
-        "policy_action": torch.full((candidates, history_length, 1), 100.0),
         "usable": torch.ones(candidates, history_length, dtype=torch.bool),
     }
     template["usable"][2, -1] = False  # Current transition is unusable.

@@ -151,11 +151,16 @@ def test_camera_recording_defaults_to_the_run_directory(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "phase,enabled,expected",
-    [("train", False, 1), ("eval", True, 1), ("eval", False, 0)],
+    "phases,enabled,active_phases",
+    [
+        (("train",), False, ("train",)),
+        (("eval",), True, ("eval",)),
+        (("eval",), False, ()),
+        (("train", "eval"), True, ("train", "eval")),
+    ],
 )
 def test_active_recording_events_are_resolved_before_first_environment(
-    tmp_path, monkeypatch, phase, enabled, expected
+    tmp_path, monkeypatch, phases, enabled, active_phases
 ) -> None:
     from embodichain.lab.gym.envs.managers.record import record_camera_data_async
 
@@ -164,7 +169,9 @@ def test_active_recording_events_are_resolved_before_first_environment(
         "gym_config": "task.yaml",
         "device": "cpu",
         "enable_eval": enabled,
-        "events": {phase: {"record": {"func": "record_camera_data_async"}}},
+        "events": {
+            phase: {"record": {"func": "record_camera_data_async"}} for phase in phases
+        },
     }
     config_path = tmp_path / "train.json"
     config_path.write_text(
@@ -177,9 +184,10 @@ def test_active_recording_events_are_resolved_before_first_environment(
     with pytest.raises(RuntimeError, match="environment boundary"):
         train_from_config(str(config_path))
     events = build.call_args.kwargs["trainer_events"]
-    assert len(events) == expected
-    if expected:
-        assert events[0].func is record_camera_data_async
+    assert len(events) == len(active_phases)
+    for event, phase in zip(events, active_phases):
+        assert event.func is record_camera_data_async
+        assert Path(event.params["save_path"]).parts[-2:] == ("videos", phase)
 
 
 @pytest.mark.parametrize("failure_stage", ["evaluation", "algorithm", "trainer"])

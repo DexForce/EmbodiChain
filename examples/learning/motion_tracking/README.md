@@ -232,12 +232,10 @@ clip layout, timing and joint order, before restoring learning state. A changed
 motion archive or an older checkpoint without this identity is rejected; start
 a new run for those inputs.
 
-### Replay and ODS ownership
+### Replay ownership
 
 | Component | Responsibility |
 | --- | --- |
-| ODS `OnlineDataEngine` and data sources | Production, shared storage, sample selection, validity and producer lifecycle |
-| ODS `ODSFlowController` | Refill, bounded waits, delivery limits and data-supply pacing |
 | `OnlineModelBasedSchedule` | Collection/model/policy ordering and ratios, model-only warmup, update credit and progress |
 | `TransitionReplay` | Device-resident measured transitions, episode-local windows/history and imagination starts |
 
@@ -259,12 +257,6 @@ frame and previous action retain reference progress and observation history.
 The supplied G1 configurations use a 0.02 s control period (50 Hz), checked against
 the task and motion library. Imagined clip suffixes expose `valid` and `next_valid`
 separately from differentiable continuation probabilities.
-
-A future ODS-fed model learner can adapt `BatchSource` / `SequenceBatchSource` to
-`SupervisedBatch` with these sequence and control semantics. The schedule remains
-the owner of collection triggers and update accounting; ODS supply pacing must use
-that trigger rather than schedule an additional collection. Learners and trainer
-callbacks own optimizer steps and complete backward passes before returning.
 
 Configuration paths below resolve through the installed task package:
 

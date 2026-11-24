@@ -306,14 +306,6 @@ storage. The caller serializes writers, pairs replay with model/RNG receipts,
 and closes sampler sequences across simulator restarts. Restoring replay alone
 does not restore the physical trajectory or justify exact-resume claims.
 
-The Sharpa example's `_native_checkpoint.py` owns synchronous file persistence,
-model/replay pairing checks and resume provenance; `native_full.py` owns the
-fresh simulator and collection schedule. A resumed run uses saved learning
-settings and rejects changed physical sources or adapter snapshots.
-
-The Sharpa native `reference_host` example retains full learning batches and
-capacity, constructs only a small unused GPU replay during learner setup, then
-uses the host store. PyTorch's nonreentrant checkpoint wrapper recomputes only
-the world-model MLP, preserving state-dict keys and optimizer parameter identity.
-It is an eager, single-threaded research path; it does not add distributed
-training or asynchronous shared-buffer ownership.
+The [Sharpa example](../../../examples/learning/sharpa_inhand/README.md) owns
+resource profiles and resume requirements. Its `_native_checkpoint.py` owns
+synchronous persistence, model/replay pairing checks and resume provenance.

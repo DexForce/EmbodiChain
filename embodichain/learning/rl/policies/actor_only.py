@@ -209,8 +209,7 @@ class ActorOnly(Policy):
             and obs.device.type == "cuda"
             and getattr(self._distribution, "__func__", None) is ActorOnly._distribution
         ):
-            # CUDA minibatches otherwise read loc, scale and action validity
-            # separately. Sampling keeps its existing validation/RNG boundary.
+            # Combine CUDA checks for loc, scale and action validity.
             dist = _validate_normal(
                 self._distribution(obs, validate_args=False), action
             )

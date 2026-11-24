@@ -279,12 +279,10 @@ class SyncCollector(BaseCollector):
                 out=rollout["critic_obs"][:, step_idx],
             )
 
-    def _to_env_action(self, action: torch.Tensor) -> TensorDict | torch.Tensor:
+    def _to_env_action(self, action: torch.Tensor) -> torch.Tensor:
         """Move a policy action to the environment device without preprocessing it.
 
-        The environment owns the ActionManager lifecycle.  Preprocessing here
-        would either call a removed legacy conversion API or process a flat
-        action twice before :meth:`env.step` applies it.
+        Action preprocessing belongs to :meth:`env.step`.
         """
         env_device = getattr(self.env, "device", self.device)
         return action.to(env_device)

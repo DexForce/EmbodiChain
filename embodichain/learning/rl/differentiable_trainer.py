@@ -314,7 +314,7 @@ class DifferentiableTrainer:
         return metrics
 
     def _segmented_update(self, update_steps: int) -> tuple[int, dict[str, float]]:
-        """Run one backward-compatible TBPTT optimizer update."""
+        """Run one TBPTT optimizer update."""
         collected_steps = 0
         self.algorithm.begin_update()
         try:

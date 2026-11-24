@@ -581,31 +581,18 @@ def train_from_config(
         events_dict = trainer_cfg.get("events", {})
         train_event_cfg = {}
         eval_event_cfg = {}
-        for event_name, event_info in events_dict.get("train", {}).items():
-            event_func_str = event_info.get("func")
-            mode = event_info.get("mode", "interval")
-            params = _event_params(event_info, run_base=run_base, phase="train")
-            interval_step = event_info.get("interval_step", 1)
-            event_func = find_function_from_modules(
-                event_func_str, event_modules, raise_if_not_found=True
-            )
-            train_event_cfg[event_name] = EventCfg(
-                func=event_func,
-                mode=mode,
-                params=params,
-                interval_step=interval_step,
-                is_global=event_info.get("is_global", False),
-            )
-        if enable_eval and rank == 0:
-            for event_name, event_info in events_dict.get("eval", {}).items():
+        for phase, event_cfg in (("train", train_event_cfg), ("eval", eval_event_cfg)):
+            if phase == "eval" and not (enable_eval and rank == 0):
+                continue
+            for event_name, event_info in events_dict.get(phase, {}).items():
                 event_func_str = event_info.get("func")
                 mode = event_info.get("mode", "interval")
-                params = _event_params(event_info, run_base=run_base, phase="eval")
+                params = _event_params(event_info, run_base=run_base, phase=phase)
                 interval_step = event_info.get("interval_step", 1)
                 event_func = find_function_from_modules(
                     event_func_str, event_modules, raise_if_not_found=True
                 )
-                eval_event_cfg[event_name] = EventCfg(
+                event_cfg[event_name] = EventCfg(
                     func=event_func,
                     mode=mode,
                     params=params,
@@ -658,8 +645,7 @@ def train_from_config(
                 f"Evaluation environment created (num_envs={num_eval_envs}, headless=True)"
             )
 
-        # Environment construction intentionally uses task/evaluation seeds. Reset
-        # the trainer stream so policy initialization is independent of scene work.
+        # Start training draws from the rank seed after environment/policy setup.
         _seed_training_rng(effective_seed, device)
 
         policy_name = policy_block["name"]
@@ -685,13 +671,13 @@ def train_from_config(
             algorithm=algo,
             buffer_size=buffer_size,
             writer=writer,
-            eval_freq=eval_freq if enable_eval else 0,  # Disable eval if not enabled
+            eval_freq=eval_freq if enable_eval else 0,
             save_freq=save_freq,
             save_frequency_updates=int(trainer_cfg.get("save_frequency_updates", 0)),
             checkpoint_dir=checkpoint_dir,
             exp_name=exp_name,
             use_wandb=use_wandb,
-            eval_env=eval_env,  # None if enable_eval=False
+            eval_env=eval_env,
             event_cfg=train_event_cfg,
             eval_event_cfg=eval_event_cfg if (enable_eval and rank == 0) else {},
             num_eval_episodes=num_eval_episodes,
