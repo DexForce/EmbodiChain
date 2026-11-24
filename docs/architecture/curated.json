@@ -1027,9 +1027,9 @@
         {
           "path": "embodichain/lab/scripts/run_task.py",
           "symbol": "cli",
-          "start_line": 994,
-          "end_line": 994,
-          "excerpt": "    parser = _create_parser()"
+          "start_line": 2083,
+          "end_line": 2087,
+          "excerpt": "def cli(\n    argv: Sequence[str] | None = None,\n    *,\n    replay_observer: Callable[[Any, int, int], None] | None = None,\n) -> None:"
         }
       ],
       "documentation": [

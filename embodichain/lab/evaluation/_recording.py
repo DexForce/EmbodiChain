@@ -22,6 +22,7 @@ from collections.abc import Mapping, Sequence
 from os import PathLike
 from typing import TYPE_CHECKING, Any
 
+from ._cable_checks import RJ45_CHECKS, WRAP_CHECKS
 from ._graph import CompiledEvaluation
 from ._session import EvaluationSnapshot, RuleSession
 
@@ -379,7 +380,15 @@ def _field_projection(field, descriptor, expected_names=None):
             _CABLE_METRIC_UNITS,
         )
 
-        if quantity not in _METRICS:
+        if quantity.startswith("rj45_"):
+            if quantity.removeprefix("rj45_") not in RJ45_CHECKS:
+                return None
+            contract = ("arena", "scalar", ("1",), (1,))
+        elif quantity.startswith("wrap_"):
+            if quantity.removeprefix("wrap_") not in WRAP_CHECKS:
+                return None
+            contract = ("arena", "scalar", ("1",), (1,))
+        elif quantity not in _METRICS:
             return None
         elif quantity == "end_position":
             contract = ("arena", "xyz", ("m",), (3,))
