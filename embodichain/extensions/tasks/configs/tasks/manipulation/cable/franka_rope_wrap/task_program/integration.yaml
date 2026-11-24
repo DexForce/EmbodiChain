@@ -75,7 +75,51 @@ runtime_services:
             target: lifted_free_end
   registered_semantic_lowerers:
   - kind: joint_trajectory_phase
-    trajectory: trajectory.npz
+    motion:
+      control_hz: 60
+      arm: arm
+      gripper: eef
+      tool_link: fr3_hand_tcp
+      constraints: {position_tolerance_m: 1.0e-05, rotation_tolerance_rad: 0.0001}
+      targets:
+        pickup_reference:
+          kind: pose
+          position: [0.495, -0.25, 0.006]
+          quaternion_xyzw: [1.0, 0.0, 0.0, 0.0]
+        lifted_reference:
+          kind: pose
+          position: [0.495, -0.25, 0.096]
+          quaternion_xyzw: [1.0, 0.0, 0.0, 0.0]
+        orbit_entry: {kind: arc_endpoint, arc: around_post, end: false}
+        orbit_exit: {kind: arc_endpoint, arc: around_post, end: true}
+        tightened:
+          kind: arc_endpoint
+          arc: around_post
+          end: true
+          radial_offset_m: 0.018
+          tangent_offset_m: 0.02
+      arcs:
+        around_post:
+          axis: {kind: scene_entity, entity_id: post}
+          radius_m: 0.16
+          start_deg: -90.0
+          sweep_deg: 465
+          height_m: [0.0030000000000000027, 0.023000000000000007]
+          tool_offset: [-0.025, 0.0, 0.0]
+          tool_orientation_xyzw: [1.0, 0.0, 0.0, 0.0]
+      # Pickup reference poses seed IK. The pickup call grasps the observed cable.
+      keyframes:
+      - {step: 0, target: home, grip: 0.0395}
+      - {step: 60, target: home, grip: 0.0395}
+      - {step: 180, target: lifted_reference, grip: 0.0395}
+      - {step: 240, target: pickup_reference, grip: 0.0395}
+      - {step: 300, target: pickup_reference, grip: 0.0018}
+      - {step: 420, target: lifted_reference, grip: 0.0018}
+      - {step: 600, target: orbit_entry, grip: 0.0018}
+      - {step: 1680, target: orbit_exit, grip: 0.0018, interpolation: arc}
+      - {step: 1920, target: tightened, grip: 0.0018}
+      - {step: 2040, target: tightened, grip: 0.0018}
+      - {step: 2160, target: tightened, grip: 0.0018}
     phases:
       home: {steps: [0, 60]}
       approach_post: {steps: [420, 600], join_current: true}

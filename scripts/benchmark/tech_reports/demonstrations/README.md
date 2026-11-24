@@ -80,9 +80,9 @@ recording="$run_dir/recording/traj_env0_000000.pt"
 ```
 
 Omit `--record-dir` to run the YAML Task Program without saving a recording.
-The integration selects a packaged nominal trajectory and declares the
-grasp-observation windows and object-frame offsets. The source program applies
-feedback at those windows during execution. The recording stores the actual
+The integration declares connector targets relative to the socket mount,
+tracking tolerances, and grasp-observation windows. The source program plans
+the nominal joint path at runtime and applies feedback at those windows. The recording stores the actual
 position and velocity targets for all nine
 Franka joints across the accepted 40-second episode. Both replays use this
 recording and freshly solve the calibrated scene at 60 Hz with 32 physics

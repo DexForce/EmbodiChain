@@ -19,18 +19,18 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 
 import numpy as np
 from scipy.spatial.transform import Rotation, Slerp
-import torch
+
+from .solvers._trajectory_ik import _TrajectoryIK
 
 __all__: list[str] = []
 
 
 @dataclass(frozen=True, slots=True)
 class _PoseOffset:
-    reference: tuple[tuple[float, ...], ...]
+    reference: tuple[tuple[float, ...], ...] | str
     rise: tuple[float, float]
     fall: tuple[float, float]
 
@@ -69,36 +69,15 @@ class _GraspTrajectoryFeedback:
 
     def __init__(
         self,
-        urdf: Path,
-        tool_link: str,
+        kinematics: _TrajectoryIK,
         joint_indices: tuple[int, ...],
-        joint_names: tuple[str, ...],
-        root_position: tuple[float, ...],
-        root_rotation: tuple[float, ...],
         initial_object: np.ndarray,
         initial_offset: _PoseOffset | None,
         tracks: tuple[_GraspTrack, ...],
         hz: float,
     ) -> None:
-        import pytorch_kinematics as pk
-
-        self._chain = pk.build_serial_chain_from_urdf(urdf.read_bytes(), tool_link).to(
-            dtype=torch.float64, device="cpu"
-        )
-        if tuple(self._chain.get_joint_parameter_names()) != tuple(
-            joint_names[index] for index in joint_indices
-        ):
-            raise ValueError(
-                "The trajectory's feedback joints differ from its tool chain."
-            )
-        limits = np.array(self._chain.get_joint_limits()).T
-        self._lower = limits[:, 0] + 1e-5
-        self._upper = limits[:, 1] - 1e-5
+        self._kinematics = kinematics
         self._joint_indices = list(joint_indices)
-        self._root_position = np.asarray(root_position, dtype=float)
-        self._root_rotation = Rotation.from_euler(
-            "xyz", root_rotation, degrees=True
-        ).as_matrix()
         self._initial_object = initial_object
         self._initial_offset = initial_offset
         self._tracks = tracks
@@ -115,30 +94,6 @@ class _GraspTrajectoryFeedback:
             for capture in track.captures
             for step in range(capture.first, capture.last + 1)
         }
-
-    def _solve(self, target: np.ndarray, seed: np.ndarray) -> np.ndarray:
-        q = seed.astype(float)
-        for _ in range(20):
-            joints = torch.as_tensor(q, dtype=torch.float64)
-            current = self._chain.forward_kinematics(joints).get_matrix()[0].numpy()
-            current[:3, :3] = self._root_rotation @ current[:3, :3]
-            current[:3, 3] = self._root_rotation @ current[:3, 3] + self._root_position
-            error = np.r_[
-                target[:3, 3] - current[:3, 3],
-                0.15
-                * Rotation.from_matrix(target[:3, :3] @ current[:3, :3].T).as_rotvec(),
-            ]
-            if np.linalg.norm(error) < 1e-7:
-                break
-            jacobian = self._chain.jacobian(joints)[0].numpy()
-            jacobian[:3] = self._root_rotation @ jacobian[:3]
-            jacobian[3:] = self._root_rotation @ jacobian[3:]
-            jacobian[3:] *= 0.15
-            delta = jacobian.T @ np.linalg.solve(
-                jacobian @ jacobian.T + np.eye(6) * 1e-8, error
-            )
-            q = np.clip(q + delta, self._lower, self._upper)
-        return q.astype(np.float32)
 
     @staticmethod
     def _apply_offset(
@@ -208,7 +163,7 @@ class _GraspTrajectoryFeedback:
                 return nominal_q.copy()
 
         result = nominal_q.copy()
-        result[self._joint_indices] = self._solve(
+        result[self._joint_indices] = self._kinematics.feedback_sample(
             target, nominal_q[self._joint_indices]
         )
         return result

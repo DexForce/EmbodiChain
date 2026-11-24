@@ -210,8 +210,7 @@ def _canonical_value(value: object) -> object:
         metadata = {
             data_field.name: _canonical_value(getattr(value, data_field.name))
             for data_field in fields(value)
-            if not data_field.metadata.get("omit_from_provenance")
-            and not (
+            if not (
                 getattr(value, data_field.name) is None
                 and (
                     data_field.metadata.get("omit_none_from_provenance")

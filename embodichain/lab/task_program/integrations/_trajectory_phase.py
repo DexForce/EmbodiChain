@@ -17,11 +17,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from hashlib import sha256
-from io import BytesIO
+from dataclasses import dataclass, replace
 import math
-from pathlib import Path
 from typing import ClassVar, TYPE_CHECKING
 from uuid import uuid4
 from weakref import proxy
@@ -39,6 +36,7 @@ from embodichain.lab.sim.atomic_skills import (
     SkillOptions,
     TimedTrajectory,
 )
+from embodichain.lab.sim.motion._cartesian_track import _TrackLimits
 from embodichain.lab.sim.motion._grasp_trajectory_feedback import (
     _GraspCapture,
     _GraspTrack,
@@ -58,7 +56,15 @@ from embodichain.lab.task_program.semantics import (
     SceneRegistry,
 )
 
+from ._configured_track import (
+    _CartesianTrack,
+    _decode_cartesian_track,
+    _PlannedTrack,
+    _resolve_and_plan_track,
+)
+
 if TYPE_CHECKING:
+    from embodichain.lab.task_program.semantics import SceneManifest
     from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
     from embodichain.lab.sim import SimulationManager
     from embodichain.lab.sim.objects import Articulation, Robot
@@ -79,62 +85,18 @@ class _Phase:
 class _Feedback:
     articulation_uid: str
     link: str
-    tool_link: str
-    arm: str
     initial_offset: _PoseOffset | None
     tracks: tuple[_GraspTrack, ...]
 
 
-def _read_track(
-    payload: bytes,
-) -> tuple[np.ndarray, np.ndarray, tuple[str, ...], float]:
-    with np.load(BytesIO(payload), allow_pickle=False) as track:
-        if set(track.files) != {"qpos", "tcp", "joint_names", "step_dt"}:
-            raise ValueError(
-                "Trajectory assets require qpos, tcp, joint_names and step_dt."
-            )
-        qpos, tcp = track["qpos"], track["tcp"]
-        names, dt = track["joint_names"], track["step_dt"]
-    if (
-        names.ndim != 1
-        or names.dtype.kind != "U"
-        or not len(names)
-        or len(set(names.tolist())) != len(names)
-        or any(not name or name.strip() != name for name in names)
-        or dt.shape != ()
-        or dt.dtype.kind != "f"
-        or not math.isfinite(float(dt))
-        or float(dt) <= 0
-        or qpos.ndim != 2
-        or len(qpos) < 2
-        or qpos.shape[1] != len(names)
-        or qpos.dtype != np.float32
-        or tcp.shape != (len(qpos), 4, 4)
-        or tcp.dtype.kind != "f"
-        or not np.isfinite(qpos).all()
-        or not np.isfinite(tcp).all()
-        or not np.allclose(tcp[:, 3], [0, 0, 0, 1])
-    ):
-        raise ValueError(
-            "Invalid authored trajectory layout, joint names or control grid."
-        )
-    rotation = tcp[:, :3, :3]
-    if not np.allclose(
-        np.swapaxes(rotation, -1, -2) @ rotation, np.eye(3), atol=1e-6
-    ) or not np.allclose(np.linalg.det(rotation), 1.0):
-        raise ValueError("Authored tool poses require proper rigid rotations.")
-    return qpos, tcp, tuple(names.tolist()), float(dt)
-
-
 @dataclass(frozen=True, slots=True)
 class _TrajectoryPhaseFactory:
-    trajectory: str = field(metadata={"omit_from_provenance": True})
-    digest: str
+    motion: _CartesianTrack
     phases: tuple[_Phase, ...]
     feedback: _Feedback | None
 
     call_id: ClassVar[str] = "simulation.joint_trajectory_phase"
-    revision: ClassVar[str] = "1"
+    revision: ClassVar[str] = "2"
     target_descriptor: ClassVar[SkillDescriptor] = MoveJoints.descriptor()
 
     @property
@@ -142,6 +104,10 @@ class _TrajectoryPhaseFactory:
         return SemanticCallContract(
             required={"phase": tuple(phase.id for phase in self.phases)}, optional={}
         )
+
+    def validate_scene_declaration(self, scene: SceneManifest) -> None:
+        """Validate the trajectory's bound pose references before assembly."""
+        self.motion.validate_scene(scene)
 
     def create(
         self,
@@ -170,17 +136,19 @@ class _TrajectoryPhaseFactory:
             raise ValueError(
                 "An authored joint trajectory requires its bound single-arena robot."
             )
-        payload = Path(self.trajectory).read_bytes()
-        if sha256(payload).hexdigest() != self.digest:
-            raise ValueError("Authored joint trajectory changed after declaration.")
-        positions, poses, names, dt = _read_track(payload)
-        if tuple(robot.joint_names) != names or not math.isclose(
-            environment.step_dt, dt, rel_tol=1e-8
-        ):
+        dt = environment.step_dt
+        if not math.isclose(dt, self.motion.step_dt, rel_tol=1e-8):
             raise ValueError(
-                "Authored trajectory joint order or cadence differs from the environment."
+                "Trajectory planning requires the declared environment cadence."
             )
-        source = _TrajectorySource(robot, self.phases, positions, poses, dt)
+        if self.motion.steps > environment.max_episode_steps:
+            raise ValueError(
+                "The planned path exceeds the environment episode horizon."
+            )
+        plan = _resolve_and_plan_track(self.motion, robot, scene_registry)
+        source = _TrajectorySource(
+            robot, self.phases, plan.positions, plan.poses, dt, limits=plan.limits
+        )
         if self.feedback is not None:
             feedback = self.feedback
             obj = simulation.get_articulation(feedback.articulation_uid)
@@ -188,7 +156,7 @@ class _TrajectoryPhaseFactory:
                 raise ValueError(
                     f"Trajectory feedback articulation {feedback.articulation_uid!r} is missing."
                 )
-            source.set_feedback(feedback, obj, names)
+            source.set_feedback(feedback, obj, self.motion.tool_link, plan)
         source_id = uuid4().hex
         engine.planning_services.register_joint_trajectory_source(source_id, source)
         # Registrations retain lowerer identities. The engine owns each source.
@@ -240,32 +208,42 @@ class _TrajectorySource:
         positions: np.ndarray,
         poses: np.ndarray,
         dt: float,
+        *,
+        limits: _TrackLimits | None = None,
     ) -> None:
         self._robot = proxy(robot)
         self.phases = {phase.id: phase for phase in phases}
         self._positions = positions
         self._poses = poses
         self._dt = dt
+        self._limits = limits
         self._hz = 1 / dt
         self._feedback: _GraspTrajectoryFeedback | None = None
         self.observation_steps: tuple[int, ...] = ()
         self._last_chunk: tuple[int, int, TimedTrajectory] | None = None
 
     def set_feedback(
-        self, spec: _Feedback, obj: Articulation, names: tuple[str, ...]
+        self, spec: _Feedback, obj: Articulation, tool_link: str, plan: _PlannedTrack
     ) -> None:
+        def resolve_offset(offset: _PoseOffset | None) -> _PoseOffset | None:
+            if offset is None or not isinstance(offset.reference, str):
+                return offset
+            reference = tuple(
+                tuple(row) for row in plan.targets[offset.reference].tolist()
+            )
+            return replace(offset, reference=reference)
+
         self._object = proxy(obj)
-        self._tool_link, self._object_link = spec.tool_link, spec.link
+        self._tool_link, self._object_link = tool_link, spec.link
         self._feedback = _GraspTrajectoryFeedback(
-            Path(self._robot.cfg.fpath),
-            spec.tool_link,
-            tuple(self._robot.get_joint_ids(spec.arm)),
-            names,
-            tuple(self._robot.cfg.init_pos),
-            tuple(self._robot.cfg.init_rot),
+            plan.kinematics,
+            plan.arm_ids,
             obj.get_link_pose(spec.link, to_matrix=True)[0].cpu().numpy(),
-            spec.initial_offset,
-            spec.tracks,
+            resolve_offset(spec.initial_offset),
+            tuple(
+                replace(track, object_offset=resolve_offset(track.object_offset))
+                for track in spec.tracks
+            ),
             self._hz,
         )
         self.observation_steps = tuple(sorted(self._feedback.observation_steps()))
@@ -305,9 +283,10 @@ class _TrajectorySource:
             )
             weight = (1 - u) ** 3 * (1 + 3 * u + 6 * u.square())
             joined = nominal[:, 1:] + weight[None, 1:, None] * (last - nominal[:, :1])
-            return self._trajectory(
-                torch.cat((last.expand(-1, pad + 1, -1), joined), dim=1), context
-            )
+            joined = torch.cat((last.expand(-1, pad + 1, -1), joined), dim=1)
+            if self._limits is not None:
+                self._limits.validate(joined[0].cpu().numpy())
+            return self._trajectory(joined, context)
         if bounds.feedback and not context.is_preview:
             if current + 1 != first:
                 raise ValueError(
@@ -342,6 +321,8 @@ class _TrajectorySource:
                 corrected[i] = feedback.correct(
                     frame, positions[i], self._poses[frame], observe
                 )
+            if self._limits is not None:
+                self._limits.validate(corrected)
             targets = self._trajectory(
                 torch.as_tensor(corrected, device=context.robot.qpos.device)[None],
                 context,
@@ -353,6 +334,8 @@ class _TrajectorySource:
             positions = np.concatenate(
                 (self._robot.get_qpos(target=True).cpu().numpy(), positions[1:])
             )
+            if self._limits is not None:
+                self._limits.validate(positions)
         return self._trajectory(
             torch.as_tensor(positions.copy(), device=context.robot.qpos.device)[None],
             context,
@@ -381,12 +364,10 @@ def _decode_trajectory_phase(value: object, *, path: str) -> _TrajectoryPhaseFac
     cfg = _mapping(
         value,
         path=path,
-        required=frozenset({"kind", "trajectory", "phases"}),
+        required=frozenset({"kind", "motion", "phases"}),
         optional=frozenset({"feedback"}),
     )
-    filename = _identifier(cfg["trajectory"], path=f"{path}.trajectory")
-    payload = Path(filename).read_bytes()
-    positions, _, _, _ = _read_track(payload)
+    motion = _decode_cartesian_track(cfg["motion"], path=f"{path}.motion")
     if not isinstance(cfg["phases"], dict) or not cfg["phases"]:
         raise ValueError(f"{path}.phases must be a nonempty mapping.")
     phases = []
@@ -403,7 +384,7 @@ def _decode_trajectory_phase(value: object, *, path: str) -> _TrajectoryPhaseFac
         if len(steps) != 2:
             raise ValueError(f"{key}.steps must provide start and end control indices.")
         start, end = (_integer(step, path=f"{key}.steps", minimum=0) for step in steps)
-        if not previous <= start < end < len(positions):
+        if not previous <= start < end <= motion.steps:
             raise ValueError(
                 f"{key} is outside the trajectory or overlaps a previous phase."
             )
@@ -416,16 +397,21 @@ def _decode_trajectory_phase(value: object, *, path: str) -> _TrajectoryPhaseFac
     feedback = (
         None
         if "feedback" not in cfg
-        else _decode_feedback(cfg["feedback"], f"{path}.feedback", len(positions))
+        else _decode_feedback(
+            cfg["feedback"],
+            f"{path}.feedback",
+            motion.steps + 1,
+            {"home", *(name for name, _ in motion.targets)},
+        )
     )
     if feedback is None and any(phase.feedback for phase in phases):
         raise ValueError(f"{path} declares feedback phases with no feedback source.")
-    return _TrajectoryPhaseFactory(
-        filename, sha256(payload).hexdigest(), tuple(phases), feedback
-    )
+    return _TrajectoryPhaseFactory(motion, tuple(phases), feedback)
 
 
-def _decode_feedback(value: object, path: str, frames: int) -> _Feedback:
+def _decode_feedback(
+    value: object, path: str, frames: int, targets: set[str]
+) -> _Feedback:
     from .configured import (
         _finite_tuple,
         _identifier,
@@ -457,12 +443,18 @@ def _decode_feedback(value: object, path: str, frames: int) -> _Feedback:
         fall = _finite_tuple(spec["fall"], path=f"{key}.fall", expected_length=2)
         if not 0 <= rise[0] < rise[1] <= fall[0] < fall[1]:
             raise ValueError(f"{key} needs ordered, nonzero blend intervals.")
-        return _PoseOffset(transform(spec["reference"], f"{key}.reference"), rise, fall)
+        reference = spec["reference"]
+        if isinstance(reference, str):
+            if reference not in targets:
+                raise ValueError(f"{key}.reference must name a declared target.")
+        else:
+            reference = transform(reference, f"{key}.reference")
+        return _PoseOffset(reference, rise, fall)
 
     cfg = _mapping(
         value,
         path=path,
-        required=frozenset({"articulation_uid", "link", "tool_link", "arm", "tracks"}),
+        required=frozenset({"articulation_uid", "link", "tracks"}),
         optional=frozenset({"initial_offset"}),
     )
     tracks = []
@@ -526,7 +518,7 @@ def _decode_feedback(value: object, path: str, frames: int) -> _Feedback:
     return _Feedback(
         *(
             _identifier(cfg[name], path=f"{path}.{name}")
-            for name in ("articulation_uid", "link", "tool_link", "arm")
+            for name in ("articulation_uid", "link")
         ),
         (
             offset(cfg["initial_offset"], f"{path}.initial_offset")

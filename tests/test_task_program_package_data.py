@@ -275,7 +275,6 @@ _RESOURCE_PATHS = frozenset(
                 "task_program/evaluation.yaml",
                 "task_program/integration.yaml",
                 "task_program/program.yaml",
-                "task_program/trajectory.npz",
             )
         ),
         Path("components/embodiments/franka_rj45.yaml"),
@@ -290,7 +289,6 @@ _RESOURCE_PATHS = frozenset(
                 "task_program/execution_policy.yaml",
                 "task_program/integration.yaml",
                 "task_program/program.yaml",
-                "task_program/trajectory.npz",
             )
         ),
         Path("tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"),

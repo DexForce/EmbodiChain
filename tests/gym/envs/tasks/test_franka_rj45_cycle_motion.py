@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -28,11 +27,7 @@ import torch
 from embodichain.extensions.tasks.configs import get_config_path
 from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
 from embodichain.lab.sim.atomic_skills import ObservedJointTrajectory
-from embodichain.lab.sim.motion._grasp_trajectory_feedback import (
-    _GraspTrajectoryFeedback,
-)
 from embodichain.lab.task_program.integrations._trajectory_phase import (
-    _read_track,
     _TrajectoryPhaseFactory,
     _TrajectoryPhaseLowerer,
     _TrajectorySource,
@@ -85,7 +80,10 @@ def test_rj45_feedback_samples_once_at_the_declared_arrivals() -> None:
     (factory,) = (
         _deployment().integration.registration.registered_semantic_lowerer_factories
     )
-    positions, poses, _, dt = _read_track(Path(factory.trajectory).read_bytes())
+    frames = factory.motion.steps + 1
+    dt = factory.motion.step_dt
+    positions = np.linspace(0, 0.1, frames, dtype=np.float32)[:, None].repeat(9, axis=1)
+    poses = np.broadcast_to(np.eye(4), (frames, 4, 4))
     robot, plug = Mock(), Mock()
     robot.get_qpos.return_value = torch.from_numpy(positions[:1])
     context = SimpleNamespace(
@@ -110,24 +108,17 @@ def test_rj45_feedback_samples_once_at_the_declared_arrivals() -> None:
     robot.get_link_pose.side_effect = lambda *_, **__: observed_pose(0)
     plug.get_link_pose.side_effect = lambda *_, **__: observed_pose(1)
 
-    # The production feedback controller retains the measured transforms.
-    # Use an analytic pose-to-joint projection instead of an external URDF.
-    feedback = object.__new__(_GraspTrajectoryFeedback)
-    feedback._initial_offset = factory.feedback.initial_offset
-    feedback._initial_object = np.eye(4)
-    feedback._tracks = factory.feedback.tracks
-    feedback._grasps = [np.array(track.tool_in_object) for track in feedback._tracks]
-    feedback._reference_objects = {}
-    feedback._hz = 60
-    feedback._joint_indices = list(range(7))
-    feedback._solve = lambda target, seed: seed + target[0, 3]
-
+    # Preserve the feedback scheduling test without requiring an external URDF.
+    plan = SimpleNamespace(
+        kinematics=SimpleNamespace(
+            feedback_sample=lambda target, seed: seed + target[0, 3]
+        ),
+        arm_ids=tuple(range(7)),
+        targets={name: np.eye(4) for name in ("initial_plug", "seated_plug")},
+    )
     source = _TrajectorySource(robot, factory.phases, positions, poses, dt)
-    source._feedback = feedback
-    source._object = plug
-    source._tool_link = factory.feedback.tool_link
-    source._object_link = factory.feedback.link
-    source.observation_steps = tuple(sorted(feedback.observation_steps()))
+    source.set_feedback(factory.feedback, plug, factory.motion.tool_link, plan)
+    plug.get_link_pose.reset_mock()
     lowerer = _TrajectoryPhaseLowerer("fixture", source)
 
     context.is_preview = True

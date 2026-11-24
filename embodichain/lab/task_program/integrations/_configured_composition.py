@@ -584,15 +584,6 @@ def _resolve_integration(value: object, *, base_dir: Path) -> dict[str, object]:
                 field = {
                     "demo_skill": "asset_manifest",
                 }.get(lowerer.get("kind"))
-                if lowerer.get("kind") == "joint_trajectory_phase":
-                    lowerer["trajectory"] = str(
-                        _component_path(
-                            lowerer.get("trajectory"),
-                            base_dir=integration_base,
-                            path="integration.runtime_services.joint_trajectory_phase.trajectory",
-                            suffixes=frozenset({".npz"}),
-                        )
-                    )
                 if field is not None and field in lowerer:
                     from embodichain.data._references import _resolve_data_reference
 

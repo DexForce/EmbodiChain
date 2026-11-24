@@ -298,14 +298,24 @@ slot-specific observations to the `cables/<uid>/<measurement>` channels.
 Keep routing acceptance in the deployment's named evaluation rules.
 
 `FrankaRopeWrap-v1` and `FrankaRj45Cycle-v1` are configuration-only
-deployments. `simulation.joint_trajectory_phase` selects a named control-step
-interval of an integration-relative, content-identified NPZ track. The track
-carries the frame-zero reference, authored joint order and control period.
-The lowerer builds a timed `MoveJoints` goal. A phase can blend from the last
-acknowledged target or resolve observed chunks from declared grasp captures
-and object-frame offsets. Wrap pickup uses `simulation.cable_pickup` and
-joins the loaded grasp to the authored orbit. Connector feedback keeps the
-observed grasp and seated-object offset in the active trajectory source.
+deployments. `simulation.joint_trajectory_phase` selects an interval of a
+runtime-planned fixed-grid trajectory. Its `motion` declaration identifies
+the arm, gripper, and TCP. It supplies named poses, keyframe control steps and
+gripper positions, and TCP position and rotation tolerances. The planner
+resolves scene-relative poses through the assembled registry, samples
+Cartesian transitions and declared axis-relative arcs, and solves ordered IK
+before dispatch. Joint-space return-to-home segments use the embodiment's
+configured home. TCP errors are checked against the emitted samples, while
+joint position and velocity limits also cover feedback and handoff commands.
+
+An arc declares its observed axis, radius, signed sweep, endpoint heights,
+and arena-frame tool offset and orientation. Arc keyframes reference that
+arc's unshifted endpoints. Wrap pickup uses `simulation.cable_pickup`; the
+phase approaching the post blends from the last acknowledged pickup target
+at the configured handoff. Connector feedback resolves declared reference
+targets from the same runtime scene poses, then retains the observed grasp
+and object offset in the active trajectory source. The engine owns the
+planned samples and the live feedback source for the episode.
 
 The reset event owns fixed-step pre-roll. Optional `evaluation.measurements`
 binds a physical probe to declared scene entities and selects named reductions

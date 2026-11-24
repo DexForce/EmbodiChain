@@ -137,7 +137,7 @@ def get_package_data() -> dict[str, list[str]]:
             "_graph_assets/*",
         ],
         "embodichain.extensions": [
-            "tasks/configs/**/task_program/trajectory.npz",
+            "tasks/configs/tasks/manipulation/cloth_fold/task_program/trajectory.npz",
             "tasks/configs/**/*.usda",
             "**/*.json",
             "**/*.yaml",
