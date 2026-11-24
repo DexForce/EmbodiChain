@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Prepare the pinned RP1, USD converter and official PartyMimic ONNX."""
+"""Prepare the pinned RP1 assets, USD converter and PartyMimic ONNX."""
 
 from __future__ import annotations
 
@@ -38,6 +38,13 @@ _RP1 = "19081d6f9fd5b613a304a7749f5886b30eb7a022"
 _ROBOT_DIR = Path("data/rp1_28dof_mjlab")
 _XML = "rp1_28dof.xml"
 _MODEL = "rp1_sparse5"
+_MODEL_FILES = tuple(f"{_MODEL}{suffix}" for suffix in (".onnx", ".yaml", ".check.npz"))
+_RECEIPT = f"{_MODEL}.provenance.json"
+_HUB_REPO = "DexForceAI/embodichain_model"
+_HUB_FILENAME = "policies/rp1-partymimic-sparse5/rp1_sparse5.onnx"
+_HUB_REVISION = "90f1dc20d5d574d948a942e831e798aa9e1398c1"
+_DEMO_ONNX_SHA256 = "aa30fd54a1a2601aa9e4c9b6e81fb4700cac2810a00f5e133c1710c8f2213688"
+_DEMO_METADATA = Path(__file__).with_name("resources")
 _CONVERTER_REQUIREMENTS = (
     "mujoco-usd-converter==0.10.0",
     "mujoco-core==4.0.1",
@@ -49,6 +56,52 @@ _CONVERTER_REQUIREMENTS = (
 def _sha256(path: Path) -> str:
     with path.open("rb") as stream:
         return file_digest(stream, "sha256").hexdigest()
+
+
+def _publish_policy(temporary: Path, output: Path, provenance: dict[str, str]) -> None:
+    receipt = {
+        **provenance,
+        "artifacts": {name: _sha256(temporary / name) for name in _MODEL_FILES},
+    }
+    (temporary / _RECEIPT).write_text(
+        json.dumps(receipt, indent=2) + "\n", encoding="utf-8"
+    )
+    for name in (*_MODEL_FILES, _RECEIPT):
+        (temporary / name).replace(output / name)
+
+
+def _download_policy(output: Path, upstream: Path) -> None:
+    from huggingface_hub import hf_hub_download
+
+    source = Path(
+        hf_hub_download(
+            repo_id=_HUB_REPO,
+            filename=_HUB_FILENAME,
+            revision=_HUB_REVISION,
+            endpoint="https://huggingface.co",
+            token=False,
+        )
+    )
+    if _sha256(source) != _DEMO_ONNX_SHA256:
+        raise RuntimeError(
+            "The downloaded PartyMimic demo ONNX has an unexpected hash."
+        )
+
+    provenance = {
+        "hub_repo_id": _HUB_REPO,
+        "hub_filename": _HUB_FILENAME,
+        "hub_revision": _HUB_REVISION,
+        "partymimic_revision": _PARTYMIMIC,
+        "rp1_description_revision": _RP1,
+        "export_check_clips": "assets/motions/kneel_crawl/rp1",
+        "robot_xml_sha256": _sha256(upstream / _ROBOT_DIR / _XML),
+    }
+    with TemporaryDirectory(dir=output) as directory:
+        temporary = Path(directory)
+        shutil.copyfile(source, temporary / _MODEL_FILES[0])
+        for name in _MODEL_FILES[1:]:
+            shutil.copyfile(_DEMO_METADATA / name, temporary / name)
+        _publish_policy(temporary, output, provenance)
 
 
 def _upstream(path: Path) -> None:
@@ -154,8 +207,7 @@ def _converter(cache: Path) -> None:
 
 
 def _export(checkpoint: Path, upstream: Path, output: Path) -> None:
-    names = tuple(f"{_MODEL}{suffix}" for suffix in (".onnx", ".yaml", ".check.npz"))
-    receipt = output / f"{_MODEL}.provenance.json"
+    receipt = output / _RECEIPT
     provenance = {
         "checkpoint_sha256": _sha256(checkpoint),
         "partymimic_revision": _PARTYMIMIC,
@@ -163,11 +215,11 @@ def _export(checkpoint: Path, upstream: Path, output: Path) -> None:
         "export_check_clips": "assets/motions/kneel_crawl/rp1",
         "robot_xml_sha256": _sha256(upstream / _ROBOT_DIR / _XML),
     }
-    if receipt.is_file() and all((output / name).is_file() for name in names):
+    if receipt.is_file() and all((output / name).is_file() for name in _MODEL_FILES):
         previous = json.loads(receipt.read_text(encoding="utf-8"))
         if previous == {
             **provenance,
-            "artifacts": {name: _sha256(output / name) for name in names},
+            "artifacts": {name: _sha256(output / name) for name in _MODEL_FILES},
         }:
             return
     env = {
@@ -191,29 +243,26 @@ def _export(checkpoint: Path, upstream: Path, output: Path) -> None:
                 "python",
                 "tools/export_deploy_onnx.py",
                 str(checkpoint),
-                str(temporary / names[0]),
+                str(temporary / _MODEL_FILES[0]),
             ],
             cwd=upstream,
             env=env,
             check=True,
         )
-        provenance["artifacts"] = {name: _sha256(temporary / name) for name in names}
-        prepared_receipt = temporary / receipt.name
-        prepared_receipt.write_text(
-            json.dumps(provenance, indent=2) + "\n", encoding="utf-8"
-        )
-        for name in names:
-            (temporary / name).replace(output / name)
-        prepared_receipt.replace(receipt)
+        _publish_policy(temporary, output, provenance)
 
 
 def main() -> None:
-    """Prepare the assets and export a local RP1 sparse5 checkpoint."""
+    """Prepare the assets and a runnable RP1 sparse5 deployment."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--checkpoint", required=True, type=Path)
+    parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        help="Export a local sparse5 checkpoint. Omit to download the demo ONNX.",
+    )
     parser.add_argument("--output-dir", required=True, type=Path)
     args = parser.parse_args()
-    checkpoint = args.checkpoint.resolve(strict=True)
+    checkpoint = args.checkpoint.resolve(strict=True) if args.checkpoint else None
     output = args.output_dir.resolve()
     output.mkdir(parents=True, exist_ok=True)
 
@@ -225,7 +274,10 @@ def main() -> None:
         _upstream(upstream)
         _robot(upstream)
         _converter(_CACHE)
-        _export(checkpoint, upstream, output)
+        if checkpoint is None:
+            _download_policy(output, upstream)
+        else:
+            _export(checkpoint, upstream, output)
     print(output / f"{_MODEL}.onnx")
 
 

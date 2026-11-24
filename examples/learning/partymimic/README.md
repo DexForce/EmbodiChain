@@ -13,18 +13,19 @@ a checkerboard floor, a brown crate and a gray platform.
 
 Use an EmbodiChain Python environment with DexSim's Newton and USD support.
 The recommended command uses CUDA for DexUni and offscreen capture. The
-preparation command requires Git, `uv` and a local RP1 sparse5 checkpoint.
-Install the runtime packages if needed.
+preparation command requires Git and `uv`. Install the runtime packages if needed.
 
 ~~~bash
 python -m pip install onnxruntime imageio imageio-ffmpeg
 ~~~
 
-Run from the EmbodiChain checkout with the local RP1 sparse5 checkpoint.
+Run from the EmbodiChain checkout. The preparation command downloads the
+demo's converted ONNX at a pinned revision and supplies the matching YAML
+and parity fixture from this example.
+[RP1 sparse5 ONNX](https://huggingface.co/DexForceAI/embodichain_model/blob/90f1dc20d5d574d948a942e831e798aa9e1398c1/policies/rp1-partymimic-sparse5/rp1_sparse5.onnx)
 
 ~~~bash
 embodichain run-example learning/partymimic/prepare \
-  --checkpoint /absolute/path/to/ckpt_200000.pt \
   --output-dir outputs/partymimic
 
 embodichain run-example learning/partymimic \
@@ -33,12 +34,15 @@ embodichain run-example learning/partymimic \
   --output-dir outputs/partymimic-dexuni-rp-hand
 ~~~
 
-Preparation pins PartyMimic and the RP1 mesh revision and caches the upstream
-checkout and converter in `~/.cache/embodichain/partymimic`. It runs the official
-`tools/export_deploy_onnx.py` in the upstream environment. The bundled RP1
-kneeling and crawling clips supply the export checks. The output contains
-the ONNX, adjacent deployment YAML, `.check.npz` and an export provenance
-receipt with hashes. [Official exporter](https://github.com/Roboparty/PartyMimic/blob/c3da040573cb9ce06dfa6a2ee007873dcec0c076/tools/export_deploy_onnx.py)
+Preparation caches the pinned PartyMimic checkout, RP1 meshes and converter
+in `~/.cache/embodichain/partymimic`. It writes the ONNX, deployment YAML,
+`.check.npz` and a provenance receipt with hashes to the output directory.
+The bundled deployment YAML and parity fixture were generated with the
+pinned PartyMimic exporter and the MIT-licensed RP1 kneeling and crawling
+clips. [PartyMimic MIT notice](resources/LICENSE.PartyMimic)
+
+To export a local sparse5 checkpoint, pass `--checkpoint /path/to/checkpoint.pt`
+to the preparation command. [Official exporter](https://github.com/Roboparty/PartyMimic/blob/c3da040573cb9ce06dfa6a2ee007873dcec0c076/tools/export_deploy_onnx.py)
 
 Select `walk` or `step-up` to run one scene. Use `--no-video` for a physics
 check and `--unloaded` to evaluate the same reference with zero payload.
