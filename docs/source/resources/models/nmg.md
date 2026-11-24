@@ -8,7 +8,7 @@ joint increment and advances the active slot when its constraint is satisfied.
 For the Transformer architecture and training through differentiable forward
 kinematics, see the [NMG project page](https://gs-world.github.io/nmg/).
 
-## Watch the policy
+## Demo scenarios
 
 Both arms visit eight goals in the default EmbodiChain scene. A cube marks the
 TCP associated with a joint goal. A sphere marks a Cartesian position, and RGB
@@ -22,13 +22,6 @@ The planner generates the joint path, retimes it under velocity and acceleration
 limits, and replays each phase up to its waypoint. Franka mixes all four goal
 types. PiPER mixes joint, position and full-pose goals.
 
-```{raw} html
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:1rem">
-<figure style="margin:0"><video controls playsinline preload="none" width="1280" height="720" style="width:100%;height:auto" poster="../../_static/nmg/franka-free-motion.jpg" aria-label="Franka FR3 free motion"><source src="../../_static/nmg/franka-free-motion.mp4" type="video/mp4"></video><figcaption>Franka FR3</figcaption></figure>
-<figure style="margin:0"><video controls playsinline preload="none" width="1280" height="720" style="width:100%;height:auto" poster="../../_static/nmg/piper-free-motion.jpg" aria-label="PiPER V100 free motion"><source src="../../_static/nmg/piper-free-motion.mp4" type="video/mp4"></video><figcaption>PiPER V100</figcaption></figure>
-</div>
-```
-
 ### Closed-loop perturbation
 
 During the second goal, the simulator displaces the first joint by 0.55 rad.
@@ -37,16 +30,9 @@ At each control interval the controller reads the measured joints, rebuilds
 the observation and queries the policy again. It advances the goal after
 three consecutive measurements satisfy the active constraints.
 
-In these recordings the TCP moved about 28 cm on Franka and 14 cm on PiPER
+In the CPU demos the TCP moved about 28 cm on Franka and 14 cm on PiPER
 at injection. The arms reached the disturbed goal after 37 and 13 further
 policy updates, respectively, then finished the sequence.
-
-```{raw} html
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:1rem">
-<figure style="margin:0"><video controls playsinline preload="none" width="1280" height="720" style="width:100%;height:auto" poster="../../_static/nmg/franka-closed-loop-perturbation.jpg" aria-label="Franka FR3 closed loop perturbation"><source src="../../_static/nmg/franka-closed-loop-perturbation.mp4" type="video/mp4"></video><figcaption>Franka FR3</figcaption></figure>
-<figure style="margin:0"><video controls playsinline preload="none" width="1280" height="720" style="width:100%;height:auto" poster="../../_static/nmg/piper-closed-loop-perturbation.jpg" aria-label="PiPER V100 closed loop perturbation"><source src="../../_static/nmg/piper-closed-loop-perturbation.mp4" type="video/mp4"></video><figcaption>PiPER V100</figcaption></figure>
-</div>
-```
 
 ## Run and record
 
@@ -70,21 +56,23 @@ embodichain run-example sim/motion/planners/nmg/franka --headless --device cpu \
     --scenario closed-loop-perturbation --video franka-recovery.mp4
 ```
 
-## Select a model and prepare the observation
+## Supported configurations and weights
 
-| Published v1 file | Matching embodiment | FP32 observation → raw action |
-| --- | --- | --- |
-| `v1/franka.onnx` | Franka FR3 with Robotiq 2F-140 | `[B, 417] → [B, 7]` |
-| `v1/piper.onnx` | PiPER V100 with parallel gripper | `[B, 391] → [B, 6]` |
+| Supported configuration | Policy TCP | FP32 observation → raw action | Hugging Face download |
+| --- | --- | --- | --- |
+| Franka FR3 (7 DoF) with Robotiq 2F-140 | 0.20 m flange offset with gripper rotation | `[B, 417] → [B, 7]` | [`v1/franka.onnx`](https://huggingface.co/DexForceAI/neural_motion_generator/resolve/ddca0e456e097ba42c05e1269febf73fa2835541/v1/franka.onnx) |
+| PiPER V100 (6 DoF) with parallel gripper | 0.143 m `link6` offset with gripper rotation | `[B, 391] → [B, 6]` | [`v1/piper.onnx`](https://huggingface.co/DexForceAI/neural_motion_generator/resolve/ddca0e456e097ba42c05e1269febf73fa2835541/v1/piper.onnx) |
 
-The example downloads a pinned revision and checks the file's SHA256.
+The links use the same pinned revision as the examples, which check each file's SHA256.
 Use `--download-only` to print its verified local path, `--offline` to
 use the cache, or `--model-path` to supply a local copy.
-[Published model files](https://huggingface.co/DexForceAI/neural_motion_generator/tree/ddca0e456e097ba42c05e1269febf73fa2835541/v1)
 
 ```bash
 embodichain run-example sim/motion/planners/nmg/franka --download-only
+embodichain run-example sim/motion/planners/nmg/piper --download-only
 ```
+
+### Prepare the observation
 
 Both exports have 12 waypoint slots. The observation packs current joint
 positions and TCP pose, waypoint positions, xyzw quaternions and joints,

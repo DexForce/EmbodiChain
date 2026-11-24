@@ -21,7 +21,7 @@ Its two backends share a batched FP32 observation-to-action interface. ONNX
 Runtime runs inference, and the optional PyTorch backend retains first-order
 observation gradients with frozen weights. The export supplies its own
 normalization and observation metadata. See the :doc:`NMG model guide
-</resources/models/nmg>` for examples and recordings.
+</resources/models/nmg>` for supported configurations, weight downloads and examples.
 
 .. currentmodule:: embodichain.extensions.models.policy.nmg
 
