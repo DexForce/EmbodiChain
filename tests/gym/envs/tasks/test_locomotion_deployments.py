@@ -138,6 +138,7 @@ def test_packaged_deployment_and_agent_config_agree(
 
         assert cfg.observations.policy.func is velocity_locomotion_observation
         assert cfg.observations.critic.func is velocity_locomotion_observation
+        assert cfg.episode_context_in_info is False
         assert "renderer" not in raw
         assert "renderer" not in raw.get("render_cfg", {})
         assert "renderer" not in agent["trainer"]

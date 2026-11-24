@@ -27,8 +27,8 @@ from embodichain.lab.gym.envs.episode_context import EpisodeContext
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 
 
-def ready_context(count=4):
-    context = EpisodeContext(count)
+def ready_context(count=4, device="cpu"):
+    context = EpisodeContext(count, device=device)
     context._begin_episode(list(range(count)))
     context._finish_initialization(list(range(count)))
     return context
@@ -41,6 +41,52 @@ def test_initialization_and_partial_row_reset():
     context._finish_initialization([3, 1])
     assert context.filter_recordable([3, 2, 1]).tolist() == [3, 1]
     assert [row["episode"] for row in context.snapshot()] == [-1, 0, -1, 0]
+
+
+@pytest.mark.parametrize(
+    ("selection", "rows"),
+    [
+        (None, [0, 1, 2, 3]),
+        ([3, 1], [3, 1]),
+        (torch.tensor([3, 1], dtype=torch.int32), [3, 1]),
+        (torch.tensor([3, 0, 1, 0])[::2], [3, 1]),
+        (slice(None, None, -1), [3, 2, 1, 0]),
+        ([], []),
+    ],
+)
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_selection_forms_preserve_snapshot_order_and_eligibility(
+    selection, rows, device
+):
+    context = ready_context(device=device)
+    if isinstance(selection, torch.Tensor):
+        selection = selection.to(device)
+    context._begin_episode([2])
+    with context.check("rejected", [1]) as finish:
+        finish(accepted=False)
+    with context.check("pending", [3]) as finish:
+        snapshots = context.snapshot(selection)
+        assert [row["env_id"] for row in snapshots] == rows
+        assert [row["initialized"] for row in snapshots] == [row != 2 for row in rows]
+        assert [row["recordable"] for row in snapshots] == [row == 0 for row in rows]
+        assert context.filter_recordable(selection).tolist() == [
+            row for row in rows if row == 0
+        ]
+        finish(accepted=True)
+
+
+def test_snapshot_preserves_custom_recordable_filter():
+    class EvenRows(EpisodeContext):
+        def filter_recordable(self, env_ids=None):
+            ids = super().filter_recordable(env_ids)
+            return ids[ids % 2 == 0]
+
+    context = EvenRows(4)
+    context._begin_episode([0, 1, 2, 3])
+    context._finish_initialization([0, 1, 2, 3])
+    snapshots = context.snapshot([3, 2, 0])
+    assert [row["env_id"] for row in snapshots] == [3, 2, 0]
+    assert [row["recordable"] for row in snapshots] == [False, True, True]
 
 
 def test_checks_combine_without_overwriting_other_sources():
@@ -111,10 +157,15 @@ def test_missing_duplicate_late_and_overlapping_reports():
     assert context.filter_recordable().tolist() == [0, 2, 3]
 
 
-def test_report_and_snapshots_are_owned():
-    context = ready_context()
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_report_and_snapshots_are_owned(device):
+    context = ready_context(device=device)
     value = {"ids": ["source"]}
-    with context.check("layout", [1]) as finish:
+    # A CPU selection must remain owned when used by a CUDA context, too.
+    selection = torch.tensor([1], dtype=torch.int32)
+    selected = context.filter_recordable(selection)
+    with context.check("layout", selection) as finish:
+        selection.fill_(2)
         finish(accepted=torch.tensor([True]), metadata=value)
         value["ids"].append("mutated")
     row = context.snapshot([1])[0]
@@ -122,6 +173,9 @@ def test_report_and_snapshots_are_owned():
     assert context.snapshot([1])[0]["sources"]["layout"]["metadata"] == {
         "ids": ["source"]
     }
+    assert context.snapshot([2])[0]["sources"] == {}
+    assert selected.tolist() == [1]
+    assert context.filter_recordable().tolist() == [0, 1, 2, 3]
 
 
 @pytest.mark.parametrize(
@@ -136,14 +190,31 @@ def test_invalid_reports_never_publish_success(metadata):
 
 
 @pytest.mark.parametrize(
-    "selection", [[1, 1], [-1], [4], [True], [1.0], torch.tensor([[1]])]
+    ("selection", "device"),
+    [
+        ([1, 1], "cpu"),
+        ([-1], "cpu"),
+        ([4], "cpu"),
+        ([True], "cpu"),
+        ([1.0], "cpu"),
+        (torch.tensor([[1]]), "cpu"),
+        (torch.tensor([1, 1]), "cpu"),
+        (torch.tensor([4]), "cpu"),
+        (torch.tensor([True]), "cpu"),
+        pytest.param(torch.tensor([1, 1]), "cuda", marks=pytest.mark.gpu),
+        pytest.param(torch.tensor([4]), "cuda", marks=pytest.mark.gpu),
+    ],
 )
-def test_invalid_rows_fail_before_state_changes(selection):
-    context = ready_context()
+def test_invalid_rows_fail_before_state_changes(selection, device):
+    context = ready_context(device=device)
+    if isinstance(selection, torch.Tensor):
+        selection = selection.to(device)
     before = context.snapshot()
     with pytest.raises(ValueError):
         with context.check("layout", selection):
             pass
+    with pytest.raises(ValueError):
+        context.filter_recordable(selection)
     assert context.snapshot() == before
 
 

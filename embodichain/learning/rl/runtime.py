@@ -21,9 +21,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from embodichain.lab.gym.envs.managers.cfg import EventCfg
+    from embodichain.lab.gym.utils.profiler import EnvProfilerCfg
     from embodichain.lab.visualization import VisualizationCfg
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from contextlib import ExitStack
+from types import TracebackType
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -31,12 +35,6 @@ from typing import Any
 from gymnasium import spaces
 import torch
 
-from embodichain.lab.gym.envs.managers.cfg import EventCfg
-from embodichain.lab.gym.utils.gym_utils import config_to_cfg, get_manager_modules
-from embodichain.lab.gym.utils.profiler import EnvProfilerCfg
-from embodichain.lab.gym.utils.registration import build_env
-from embodichain.lab.sim import SimulationManagerCfg
-from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.learning.rl.env import build_learning_env
 from embodichain.learning.models import build_mlp_from_cfg
 from embodichain.learning.rl.policies import build_policy, resolve_policy_obs_groups
@@ -44,6 +42,7 @@ from embodichain.learning.rl.utils import (
     dict_to_tensordict,
     flatten_observation_groups,
 )
+from embodichain.utils import logger
 from embodichain.utils.utility import load_config
 
 __all__ = [
@@ -79,6 +78,31 @@ class PolicyRuntime:
     def close(self) -> None:
         """Close the Environment without terminating the current process."""
         _close_environment(self.env)
+
+
+def _manage_resource(
+    resources: ExitStack,
+    close: Callable[[], object],
+    name: str,
+    *,
+    ignore_failure: bool = False,
+) -> None:
+    """Register owned cleanup without hiding an existing construction/run error."""
+
+    def release(
+        exc_type: type[BaseException] | None,
+        _error: BaseException | None,
+        _traceback: TracebackType | None,
+    ) -> bool:
+        try:
+            close()
+        except Exception as exc:
+            if exc_type is None and not ignore_failure:
+                raise
+            logger.log_warning(f"Failed to close {name}: {exc}")
+        return False
+
+    resources.push(release)
 
 
 def _resolve_config_reference(
@@ -178,12 +202,14 @@ def build_learning_policy_runtime(
         num_envs=num_envs,
         resources=resources,
     )
-    try:
+    with ExitStack() as resources:
+        _manage_resource(
+            resources, lambda: _close_environment(env), "learning environment"
+        )
         policy = _build_learning_policy(config["policy"], env, device)
-    except Exception:
-        env.close()
-        raise
-    return PolicyRuntime(env, policy, device, env_name)
+        runtime = PolicyRuntime(env, policy, device, env_name)
+        resources.pop_all()
+        return runtime
 
 
 def _trainer_events_need_renderer(events: Sequence[EventCfg]) -> bool:
@@ -219,6 +245,11 @@ def _build_gym_environment(
     trainer_events: Sequence[EventCfg] = (),
 ) -> _GymEnvironmentRuntime:
     """Build a Gym environment for training or policy-only inference."""
+    from embodichain.lab.gym.utils.gym_utils import config_to_cfg, get_manager_modules
+    from embodichain.lab.gym.utils.registration import build_env
+    from embodichain.lab.sim import SimulationManagerCfg
+    from embodichain.lab.sim.cfg import RenderCfg
+
     trainer_cfg = config["trainer"]
     gym_config_path = _resolve_config_reference(
         trainer_cfg["gym_config"],
@@ -334,7 +365,10 @@ def build_gym_policy_runtime(
         trainer_events=trainer_events,
     )
     env = task.env
-    try:
+    with ExitStack() as resources:
+        _manage_resource(
+            resources, lambda: _close_environment(env), "simulation environment"
+        )
         sample_observation, _ = env.reset()
         sample_observation_td = dict_to_tensordict(sample_observation, device)
         actor_obs_groups, critic_obs_groups = resolve_policy_obs_groups(
@@ -367,18 +401,17 @@ def build_gym_policy_runtime(
             uses_separate_critic_obs=uses_separate_critic_obs,
             action_dim=environment_action_dim,
         )
-    except Exception:
-        _close_environment(env)
-        raise
-    return PolicyRuntime(
-        env=env,
-        policy=policy,
-        device=device,
-        env_id=task.env_id,
-        env_cfg=task.env_cfg,
-        gym_config=task.gym_config,
-        gym_config_path=task.gym_config_path,
-    )
+        runtime = PolicyRuntime(
+            env=env,
+            policy=policy,
+            device=device,
+            env_id=task.env_id,
+            env_cfg=task.env_cfg,
+            gym_config=task.gym_config,
+            gym_config_path=task.gym_config_path,
+        )
+        resources.pop_all()
+        return runtime
 
 
 def _build_gym_policy(

@@ -12,15 +12,48 @@ The standard trainer repeats:
 4. evaluate when the configured step boundary is reached;
 5. save periodic and best-evaluation checkpoints.
 
+The training entry owns its acquired environments, writer, tracking run and
+process group from construction onward, including initialization failures.
+`runtime.py` protects environments until a `PolicyRuntime` is returned; its
+caller then owns `close()`. Cleanup runs in reverse acquisition order and keeps
+an existing error intact. A writer flush failure on otherwise successful exit
+still propagates. Existing W&B runs and distributed process groups are borrowed:
+the entry neither reinitializes nor closes them. Simulator cleanup does not exit
+the host process.
+
 Evaluation uses an independent environment and
 `evaluate_episodes()`. It counts completed asynchronous episodes, reports
 terminal metrics, temporarily switches the policy to evaluation mode, and
-restores its prior mode.
+restores each submodule's prior mode, including frozen normalization layers.
+The viewer adapter captures these modes at setup and restores them once on close.
+
+`Trainer(event_cfg=..., eval_event_cfg=...)` attaches each phase to its own
+native environment through `EmbodiedEnv.add_events` before the collector's
+initial reset. The host owns startup, interval and reset execution; the trainer
+does not execute these terms a second time. Plain vector environments retain
+post-step interval callbacks, but cannot host episode camera recorders or other
+lifecycle modes. Their class functors initialize through a collector reset
+callback at construction, full-rollout resets and checkpoint resume; row-level
+auto-reset lifecycle remains the native host's responsibility.
+Before and after evaluation (including failure), the trainer
+uses `flush_recordings()` to discard unfinished frames and wait for committed
+videos, leaving recorders open for the next evaluation. See the
+[camera lifecycle contract](../manager-functor/manager-functor.md#camera-recording).
+External interval functors retain their post-evaluation `flush` / `finalize`
+hooks, including the legacy output-path argument; these hooks are not invoked
+for environment-owned functors.
+The launcher resolves train and active eval camera demand before creating the
+first World. Direct Python callers must likewise select rendering before adding
+camera events. Phase event names must not collide with task event names.
+
+### Checkpoints and resume
 
 Checkpoints include policy parameters, trainer and complete-rollout counters,
 best-evaluation state, observation-normalizer state when enabled, and optimizer
-or LR-scheduler state when present. Schema v2 also stores compatibility metadata
-and rank-local RNG/normalization state; GRPO includes its fixed KL reference.
+or LR-scheduler state when present. The loader requires schema v2 with complete
+compatibility metadata and rank-local RNG/normalization state; GRPO includes its
+fixed KL reference. Older schemas and incomplete required metadata are rejected
+before model mutation; missing fields are not filled from defaults.
 Both trainers expose `load_checkpoint(path, resume_scheduler="restore")`.
 CLI `--resume` selects a file or `latest/best` from `--run`; the source and new
 output run remain separate. Selectors follow the exact manifest entry, fail when
@@ -37,18 +70,20 @@ optimizer momentum and binds the configured curve to remaining updates.
 Zero-ending linear curves cannot resume beyond their horizon in restore mode.
 The loader checks semantic and structural compatibility before updating state,
 including effective APG rollout, gradient-accumulation and action settings.
-CLI and Python API checkpoints interoperate; absent shared CLI context or older
-v2 APG settings produce a warning while available runtime metadata is checked.
+Native CLI training-event declarations also participate in this check; generated
+run output paths and evaluation-only event settings do not.
+CLI and Python API checkpoints interoperate; absent shared CLI context produces
+a warning while available runtime metadata is checked.
 Variable-horizon APG transition budgets use the actual update count to check
 an explicit restored LR horizon.
-Legacy standard/APG-v1 files restore available fields and report missing metadata
-or RNG. `checkpoint.py` owns shared validation and atomic persistence.
+`checkpoint.py` owns shared validation and atomic persistence.
 Optional environment training state uses the same v2 file and is collected per
 rank. Environments implement `get_training_state`, side-effect-free
 `validate_training_state`, and `load_training_state`; validation runs before
 learning state changes, and restoration precedes the fresh episode reset.
-Missing state in older files produces a warning for environments with these
-hooks. G1 Rough uses them for terrain assignments and its task generator,
+Every checkpoint includes a per-rank environment-state list; stateless
+environments store `None`. G1 Rough uses these hooks for terrain assignments and
+its task generator,
 requiring the original terrain map and per-rank environment count. Its first
 reset preserves the restored assignments; physical episodes still restart.
 Configuration snapshots are frozen from loaded data on the first save; later
@@ -56,9 +91,9 @@ saves update the run manifest without rewriting those snapshots. Final saves
 reuse the current update's periodic or best checkpoint. Subsequent saves and final
 reuse verify the previous saved file and active run manifest references; missing
 artifacts raise errors instead of being recreated. Unreferenced historical files
-are not required. Interrupted updates retain
-the previous complete checkpoint. Evaluation reuses the frozen training
-normalizer without updating its statistics.
+are not required. Interrupted updates retain the previous complete checkpoint.
+
+### Update semantics
 
 `trainer.seed` seeds Python, NumPy, Torch, CUDA, and Warp before environment
 construction. Set `trainer.torch_deterministic: true` when a reference run
@@ -66,8 +101,9 @@ also requires deterministic PyTorch algorithms.
 
 Complete APG mode resets before every independent microbatch and preserves one
 graph across the entire environment-provided horizon. It masks rewards after
-the first done, applies the rollout's objective scale, and averages
-`gradient_accumulation_steps` full trajectories before one optimizer step. It
+the first done, freezes observation statistics through backward, applies the
+rollout's objective scale, and averages `gradient_accumulation_steps` full
+trajectories before one optimizer step. It
 never shortens a scheduled horizon to satisfy `total_timesteps`; without an
 explicit timestep budget, CLI `iterations` maps to an exact optimizer-update
 budget.
@@ -87,8 +123,9 @@ PPO supports adaptive learning rates from Gaussian KL, clipped value loss,
 configurable minibatch counts, and optional action-mean bounds. Adaptive KL
 scheduling cannot be combined with `algorithm.cfg.lr_scheduler`. The actor and
 critic can maintain independent observation statistics in
-`models/normalizer.py`; collection updates these buffers and evaluation keeps
-them frozen. A restored policy must use the original normalization settings.
+`models/normalizer.py`; these stay frozen through collection and PPO epochs,
+then update for the next rollout. Evaluation keeps them frozen. A restored
+policy must use the original normalization settings.
 Time-limit truncations bootstrap rewards with the value stored for the
 transition before GAE masks the episode boundary.
 See the [PPO configuration options](../../../docs/source/overview/rl/config.md)
@@ -113,6 +150,65 @@ Resume requires the same world size and restores each rank's RNG and local
 normalization statistics alongside common policy/optimizer state.
 Differentiable algorithms and lightweight learning environments do not
 currently support this distributed path.
+
+## Execution and storage boundaries
+
+`SyncCollector` owns standard transition writes. Native `EmbodiedEnv` lends only
+previous action/done views through a private collection scope; it does not bind
+the learner TensorDict or advance a training cursor. The scope covers reset,
+steps and bootstrap, releases borrowed views on failure, and restarts reward
+history each rollout. Legacy environments and explicitly bound recording
+buffers retain `set_rollout_buffer` and their environment-side writer. Expert
+episode storage remains separate. The [Gym execution contract](../env-framework/execution.md)
+owns pre-reset return-value preservation and episode metadata.
+
+When a finite terminal value is unavailable, timeout bootstrapping retains the
+current-state value fallback. Collection clears stale terminal values even when
+callers reuse a raw TensorDict without `Buffer.start_rollout`.
+
+Policies own an optional private `_training_input_spec()` contract declaring
+consumed transition fields and whether action evaluation mutates inputs.
+`algo/common.py` resolves it once per PPO update, merges algorithm-owned fields and
+selects before flattening/minibatch gathers without identifying concrete policy
+classes. Undeclared consumers retain the full payload. Field selection and
+reference-target copying are independent guarantees. Built-in policy
+declarations guard subclass/instance
+and auxiliary overrides; custom policies default to full payload and defensive
+target copies unless explicitly opting in. Declarations are read afresh each
+update, and transition-derived `next_value` keeps its existing precedence.
+The same declaration identifies observation fields consumed by post-update
+normalization. Disabled built-in normalizers skip preparation; custom updater
+overrides retain the complete flattened observation payload.
+Actor/critic observations, auxiliary labels and adaptive-KL parameters remain
+aligned. This contract does not make arbitrary auxiliary input mutation safe.
+PPO accumulates reporting metrics on device until the update ends.
+Adaptive learning-rate decisions and non-finite-gradient checks remain at their
+existing optimizer boundaries.
+PPO reads parameter groups afresh and deduplicates shared parameters each call.
+Each group uses sequential native gradient clipping, and non-finite gradients
+reject the optimizer step.
+
+`Trainer` snapshots per-step metric means and episode completions on device,
+then transfers them at the rollout boundary. TensorBoard/W&B still receive each
+step's tags and recorded global step; this is deferred reporting, not temporal
+averaging. Completed episodes retain step-then-row order and bounded history.
+Distributed ranks exchange only new completions at each rollout boundary;
+rank zero merges them in step, rank, then row order into one bounded window.
+Other ranks retain local histories. Metric steps use the summed environment
+count across ranks rather than the pre-rollout global counter.
+Both trainers share scalar sink writes and evaluation score comparison in
+`embodichain/learning/rl/_trainer_reporting.py`; their callers retain history,
+rank filtering, distributed reduction, scheduling and checkpoint ownership.
+
+`utils/helper.py` owns observation-group resolution for both public flattening
+helpers and standard collection's snapshots into owned rollout slots. Both paths
+preserve configured group ordering, sorted nested leaves and grouped dtype
+promotion. Flattening without a destination may return borrowed storage for one
+tensor leaf.
+Differentiable collection clones retained initial/current/successor observations
+before environment buffer reuse. Inference preparation also owns a snapshot
+because custom transforms and
+normalizers may modify their inputs in place.
 
 ## Official Examples
 
@@ -173,8 +269,7 @@ Optional `update_critic_normalization` runs after actor backward and before
 lambda targets; default leaves statistics unchanged. Weighted current states
 and valid bootstrap successors contribute, while complete-rollout post-terminal
 suffixes do not. Critic minibatches contain only positive-weight samples. An
-empty valid set leaves parameters and optimizer momentum unchanged. Evaluate
-with the frozen training normalizer.
+empty valid set leaves parameters and optimizer momentum unchanged.
 
 ## Experimental host replay
 

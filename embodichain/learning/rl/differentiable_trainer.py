@@ -25,8 +25,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import torch
-import wandb
 
+from embodichain.learning.rl._trainer_reporting import (
+    _evaluation_improved,
+    _write_scalars,
+)
 from embodichain.learning.rl.algo import APG
 from embodichain.learning.rl.collector import (
     DifferentiableCollector,
@@ -307,7 +310,7 @@ class DifferentiableTrainer:
             **{f"train/{key}": value for key, value in metrics.items()},
         }
         self.train_history.append(entry)
-        self._log(metrics)
+        self._log(entry)
         return metrics
 
     def _segmented_update(self, update_steps: int) -> tuple[int, dict[str, float]]:
@@ -345,7 +348,11 @@ class DifferentiableTrainer:
         self.algorithm.begin_update()
         try:
             for _ in range(accumulation_steps):
-                spec = self._prepare_complete_rollout()
+                spec = (
+                    self.env.prepare_differentiable_rollout(self._rollout_index)
+                    if isinstance(self.env, ScheduledDifferentiableEnvProtocol)
+                    else DifferentiableRolloutSpec(num_steps=self.update_horizon)
+                )
                 seed = self.cfg.rollout_seed if self._rollout_index == 0 else None
                 self.collector.reset(seed=seed)
                 with self.algorithm.rollout_context():
@@ -374,11 +381,6 @@ class DifferentiableTrainer:
         for key, values in metadata.items():
             metrics[f"rollout_{key}_mean"] = sum(values) / len(values)
         return collected_steps, metrics
-
-    def _prepare_complete_rollout(self) -> DifferentiableRolloutSpec:
-        if isinstance(self.env, ScheduledDifferentiableEnvProtocol):
-            return self.env.prepare_differentiable_rollout(self._rollout_index)
-        return DifferentiableRolloutSpec(num_steps=self.update_horizon)
 
     def _update_observation_normalizer(
         self,
@@ -415,12 +417,12 @@ class DifferentiableTrainer:
         """Validate and restore learning state, starting with a fresh rollout.
 
         Args:
-            path: Checkpoint file, including existing APG schema-v1 files.
+            path: Checkpoint file using the current schema.
             resume_scheduler: Restore the saved LR curve or restart the
                 configured curve while preserving optimizer momentum.
         """
         checkpoint = _load(self, path, resume_scheduler)
-        self._rollout_index = int(checkpoint.get("rollout_index", self.num_updates))
+        self._rollout_index = int(checkpoint["rollout_index"])
         frequency = self.cfg.eval_frequency_steps
         self._next_eval_step = (
             (self.global_step // frequency + 1) * frequency if frequency > 0 else None
@@ -481,52 +483,45 @@ class DifferentiableTrainer:
         entry = {"global_step": float(self.global_step), **metrics}
         self.eval_history.append(entry)
         self.last_eval_metrics = entry
-        if self.writer is not None:
-            for key, value in metrics.items():
-                if math.isfinite(value):
-                    self.writer.add_scalar(key, value, self.global_step)
-        if self.cfg.use_wandb:
-            wandb.log(
-                {key: value for key, value in metrics.items() if math.isfinite(value)},
-                step=self.global_step,
-            )
+        _write_scalars(
+            {key: value for key, value in metrics.items() if math.isfinite(value)},
+            step=self.global_step,
+            writer=self.writer,
+            use_wandb=self.cfg.use_wandb,
+        )
         candidate = metrics.get(self.cfg.best_eval_metric)
-        if candidate is not None and math.isfinite(candidate):
-            improved = self.best_eval_value is None or (
-                candidate > self.best_eval_value
-                if self.cfg.best_eval_mode == "max"
-                else candidate < self.best_eval_value
+        if _evaluation_improved(
+            candidate, self.best_eval_value, self.cfg.best_eval_mode
+        ):
+            self.best_eval_value = candidate
+            path = (
+                Path(self.cfg.checkpoint_dir)
+                / f"{self.cfg.experiment_name}_best_step_{self.global_step}.pt"
             )
-            if improved:
-                self.best_eval_value = candidate
-                path = (
-                    Path(self.cfg.checkpoint_dir)
-                    / f"{self.cfg.experiment_name}_best_step_{self.global_step}.pt"
-                )
-                previous_best = self.best_checkpoint_path
-                self.best_checkpoint_path = str(path)
-                try:
-                    self.save_checkpoint(path)
-                except Exception:
-                    self.best_checkpoint_path = previous_best
-                    raise
+            previous_best = self.best_checkpoint_path
+            self.best_checkpoint_path = str(path)
+            try:
+                self.save_checkpoint(path)
+            except Exception:
+                self.best_checkpoint_path = previous_best
+                raise
         return metrics
 
-    def _log(self, metrics: dict[str, float]) -> None:
-        elapsed = max(time.time() - self.start_time, 1e-6)
+    def _log(self, entry: dict[str, float]) -> None:
+        """Write the update's existing scalar snapshot to enabled sinks."""
         values = {
-            **{f"train/{key}": value for key, value in metrics.items()},
-            "charts/SPS": (self.global_step - self._start_step) / elapsed,
+            key: value for key, value in entry.items() if key.startswith("train/")
         }
+        values["charts/SPS"] = entry["charts/SPS"]
         if self.ret_window:
-            values["charts/episode_reward_avg_100"] = sum(self.ret_window) / len(
-                self.ret_window
-            )
-            values["charts/episode_length_avg_100"] = sum(self.len_window) / len(
-                self.len_window
-            )
-        if self.writer is not None:
-            for key, value in values.items():
-                self.writer.add_scalar(key, value, self.global_step)
-        if self.cfg.use_wandb:
-            wandb.log(values, step=self.global_step)
+            for key in (
+                "charts/episode_reward_avg_100",
+                "charts/episode_length_avg_100",
+            ):
+                values[key] = entry[key]
+        _write_scalars(
+            values,
+            step=self.global_step,
+            writer=self.writer,
+            use_wandb=self.cfg.use_wandb,
+        )

@@ -424,6 +424,7 @@ class RoughVelocityEnv(EmbodiChainVelocityEnv):
             and not any(
                 (
                     getattr(self, "rollout_buffer", None) is not None,
+                    getattr(self, "_action_history_active", False),
                     getattr(self, "dataset_manager", None) is not None,
                     getattr(self, "_traj_buffer", None) is not None,
                     bool(

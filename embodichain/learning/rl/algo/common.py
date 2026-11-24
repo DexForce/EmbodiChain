@@ -19,24 +19,66 @@ from __future__ import annotations
 import torch
 from tensordict import TensorDict
 
+from embodichain.learning.rl.buffer import transition_view
+from embodichain.learning.rl.policies.policy import _TrainingInputSpec
+
 __all__ = ["compute_gae"]
 
 
+def _resolve_training_input_spec(policy: torch.nn.Module) -> _TrainingInputSpec:
+    """Read the policy's optional contract once for the current learner update."""
+    policy_module = getattr(policy, "module", policy)
+    get_spec = getattr(policy_module, "_training_input_spec", None)
+    spec = _TrainingInputSpec() if get_spec is None else get_spec()
+    if not isinstance(spec, _TrainingInputSpec):
+        raise TypeError("_training_input_spec() must return _TrainingInputSpec.")
+    return spec
+
+
+def _training_transition_view(
+    rollout: TensorDict, input_spec: _TrainingInputSpec, fields: tuple[str, ...]
+) -> TensorDict:
+    """Flatten declared policy/algorithm fields, preserving undeclared payloads.
+
+    Removing the bootstrap slot makes environment-major storage noncontiguous;
+    flattening therefore copies each field. Select before that copy and before
+    subsequent minibatch gathers. Policies without a field declaration retain
+    the complete historical payload, including derived transition fields.
+    """
+    if input_spec.fields is None:
+        return transition_view(rollout, flatten=True)
+    names = {*input_spec.fields, *fields}
+    if "next_value" in names:
+        # The transition API owns this derived field, including precedence over
+        # any same-named rollout extra. Select before flattening its views.
+        transitions = transition_view(rollout)
+        return transitions.select(
+            *(name for name in transitions.keys() if name in names)
+        ).reshape(-1)
+    # Keep source order for deterministic field traversal and retain missing-key
+    # checks at their existing consumers.
+    selected = rollout.select(*(name for name in rollout.keys() if name in names))
+    return selected[:, :-1].reshape(-1)
+
+
 @torch.no_grad()
-def _update_observation_normalization(policy, rollout: TensorDict) -> None:
+def _update_observation_normalization(
+    policy, rollout: TensorDict, input_spec: _TrainingInputSpec
+) -> None:
     """Update policy normalizers after the rollout optimization is complete."""
     policy_module = getattr(policy, "module", policy)
     update_normalization = getattr(policy_module, "update_normalization", None)
-    if update_normalization is None:
+    if update_normalization is None or input_spec.normalization_fields == ():
         return
 
     fields = {}
-    for name in ("obs", "critic_obs"):
+    names = input_spec.normalization_fields
+    for name in ("obs", "critic_obs") if names is None else names:
         if name not in rollout.keys():
             continue
         observations = rollout[name][:, :-1]
         fields[name] = observations.reshape(-1, observations.shape[-1])
-    observations = fields["obs"]
+    observations = fields["obs"] if names is None else next(iter(fields.values()))
     update_normalization(
         TensorDict(
             fields,

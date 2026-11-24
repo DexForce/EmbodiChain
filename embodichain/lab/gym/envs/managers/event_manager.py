@@ -18,8 +18,9 @@ from __future__ import annotations
 import hashlib
 import inspect
 import random
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from copy import deepcopy
 from numbers import Integral
 from typing import TYPE_CHECKING, Union
 
@@ -143,6 +144,7 @@ class EventManager(ManagerBase):
         self._mode_class_functor_cfgs: dict[str, list[EventCfg]] = dict()
         self._functor_invocation_counts: dict[tuple[str, str, str], int] = {}
         self._seed_revision = 0
+        self._interval_functor_step_count: list[torch.Tensor] = []
 
         cfg_seed = getattr(getattr(env, "cfg", None), "seed", None)
         self._seed = (
@@ -366,6 +368,48 @@ class EventManager(ManagerBase):
     Operations - Functor settings.
     """
 
+    def add_events(self, named_cfg: object) -> None:
+        """Append named events without rebuilding existing functors or streams.
+
+        Args:
+            named_cfg: Mapping or configuration object containing named
+                :class:`EventCfg` declarations. ``None`` and empty inputs do
+                nothing; ``None`` entries reserve disabled names.
+
+        Raises:
+            ValueError: If a name is already declared, including disabled names.
+            TypeError: If an entry is neither an EventCfg nor None.
+
+        Names and entry types are checked before constructing any functor.
+        Declarations are copied. If a later constructor fails, earlier appended
+        events remain owned by this manager for environment cleanup.
+        """
+        if named_cfg is None:
+            return
+        additions = dict(
+            named_cfg if isinstance(named_cfg, Mapping) else vars(named_cfg)
+        )
+        existing = (
+            self.cfg
+            if isinstance(self.cfg, Mapping)
+            else vars(self.cfg) if self.cfg is not None else {}
+        )
+        overlap = existing.keys() & additions.keys()
+        if overlap:
+            raise ValueError(f"Event names are already declared: {sorted(overlap)}")
+        for name, cfg in additions.items():
+            if cfg is not None and not isinstance(cfg, EventCfg):
+                raise TypeError(f"Event '{name}' must be an EventCfg or None.")
+        additions = deepcopy(additions)
+        if self.cfg is None:
+            self.cfg = {}
+        for name, cfg in additions.items():
+            self._prepare_event(name, cfg)
+            if isinstance(self.cfg, dict):
+                self.cfg[name] = cfg
+            else:
+                setattr(self.cfg, name, cfg)
+
     def set_functor_cfg(self, functor_name: str, cfg: EventCfg):
         """Sets the configuration of the specified functor into the manager.
 
@@ -436,10 +480,6 @@ class EventManager(ManagerBase):
     """
 
     def _prepare_functors(self):
-        # buffer to store the time left for "interval" mode
-        # if interval is global, then it is a single value, otherwise it is per environment
-        self._interval_functor_step_count: list[torch.Tensor] = list()
-
         # check if config is dict already
         if isinstance(self.cfg, dict):
             cfg_items = self.cfg.items()
@@ -447,52 +487,45 @@ class EventManager(ManagerBase):
             cfg_items = self.cfg.__dict__.items()
         # iterate over all the functors
         for functor_name, functor_cfg in cfg_items:
-            # check for non config
-            if functor_cfg is None:
-                continue
-            # check for valid config type
-            if not isinstance(functor_cfg, EventCfg):
-                raise TypeError(
-                    f"Configuration for the functor '{functor_name}' is not of type EventCfg."
-                    f" Received: '{type(functor_cfg)}'."
-                )
+            self._prepare_event(functor_name, functor_cfg)
 
-            # Resolve class functors in their own deterministic stream because
-            # constructors may build random palettes or other random state.
-            with self._functor_seed_scope(
-                phase="initialize",
-                mode=functor_cfg.mode,
-                functor_name=functor_name,
-            ):
-                self._resolve_common_functor_cfg(functor_name, functor_cfg, min_argc=2)
+    def _prepare_event(self, functor_name: str, functor_cfg: EventCfg | None) -> None:
+        """Prepare one new declaration while retaining every existing term."""
+        if functor_cfg is None:
+            return
+        if not isinstance(functor_cfg, EventCfg):
+            raise TypeError(
+                f"Configuration for the functor '{functor_name}' is not of type EventCfg."
+                f" Received: '{type(functor_cfg)}'."
+            )
+        count = (
+            torch.zeros(
+                1 if functor_cfg.is_global else self.num_envs,
+                dtype=torch.int32,
+                device=self.device,
+            )
+            if functor_cfg.mode == "interval"
+            else None
+        )
+        # Constructors have an independent named stream, including late additions.
+        with self._functor_seed_scope(
+            phase="initialize",
+            mode=functor_cfg.mode,
+            functor_name=functor_name,
+        ):
+            self._resolve_common_functor_cfg(functor_name, functor_cfg, min_argc=2)
 
-            # check if mode is a new mode
-            if functor_cfg.mode not in self._mode_functor_names:
-                # add new mode
-                self._mode_functor_names[functor_cfg.mode] = list()
-                self._mode_functor_cfgs[functor_cfg.mode] = list()
-                self._mode_class_functor_cfgs[functor_cfg.mode] = list()
-            # add functor name and parameters
-            self._mode_functor_names[functor_cfg.mode].append(functor_name)
-            self._mode_functor_cfgs[functor_cfg.mode].append(functor_cfg)
+        if functor_cfg.mode not in self._mode_functor_names:
+            self._mode_functor_names[functor_cfg.mode] = []
+            self._mode_functor_cfgs[functor_cfg.mode] = []
+            self._mode_class_functor_cfgs[functor_cfg.mode] = []
+        self._mode_functor_names[functor_cfg.mode].append(functor_name)
+        self._mode_functor_cfgs[functor_cfg.mode].append(functor_cfg)
 
-            # Resolution replaces class-style functors (including string
-            # references to classes) with initialized Functor instances.
-            if isinstance(functor_cfg.func, Functor):
-                self._mode_class_functor_cfgs[functor_cfg.mode].append(functor_cfg)
-
-            # resolve the mode of the events
-            # -- interval mode
-            if functor_cfg.mode == "interval":
-                # sample the time left for global
-                if functor_cfg.is_global:
-                    count = torch.zeros(1, dtype=torch.int32, device=self.device)
-                    self._interval_functor_step_count.append(count)
-                else:
-                    count = torch.zeros(
-                        self.num_envs, dtype=torch.int32, device=self.device
-                    )
-                    self._interval_functor_step_count.append(count)
+        if isinstance(functor_cfg.func, Functor):
+            self._mode_class_functor_cfgs[functor_cfg.mode].append(functor_cfg)
+        if count is not None:
+            self._interval_functor_step_count.append(count)
 
     def _call_event_functor(
         self,

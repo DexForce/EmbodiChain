@@ -454,6 +454,35 @@ def test_discard_reset_clears_camera_frames_without_saving() -> None:
     assert recorder._frames_list[0] == []
 
 
+def test_camera_selection_precedes_dataset_callback_changes() -> None:
+    env, manager = make_env_for_episode_selection(
+        save_failed_episodes=True, successful_env_ids=[]
+    )
+    recorder = record_camera_data.__new__(record_camera_data)
+    recorder.save_and_clear = MagicMock()
+    recorder.discard_and_clear = MagicMock()
+    env.cfg.events = object()
+    env.event_manager = SimpleNamespace(
+        _mode_functor_cfgs={"interval": [SimpleNamespace(func=recorder)]},
+        reset=MagicMock(),
+        available_modes=[],
+    )
+    with env.episode_context.check("initial", [1]) as finish:
+        finish(accepted=False)
+
+    def save_and_reject(mode, env_ids):
+        assert env_ids.tolist() == [0, 2]
+        with env.episode_context.check("dataset", [2]) as finish:
+            finish(accepted=False)
+
+    manager.apply = save_and_reject
+    reset_recording_rows(env)
+
+    # Camera dispatch retains the selection captured before dataset callbacks.
+    assert recorder.save_and_clear.call_args.kwargs["env_ids"].tolist() == [0, 2]
+    assert recorder.discard_and_clear.call_args.kwargs["env_ids"].tolist() == [1]
+
+
 def test_pending_discard_attempts_every_camera_and_clears_trajectory() -> None:
     """One camera failure cannot skip later durability barriers or live cleanup."""
     first = record_camera_data.__new__(record_camera_data)

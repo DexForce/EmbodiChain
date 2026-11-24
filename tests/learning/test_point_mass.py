@@ -32,7 +32,8 @@ from embodichain.learning.rl.env import (
 )
 from embodichain.learning.rl.policies import ActorCritic
 from embodichain.learning.rl.policy_evaluation.manifest import RunManifest
-from embodichain.learning.rl.train import _build_learning_policy, train_from_config
+from embodichain.learning.rl.runtime import _build_learning_policy
+from embodichain.learning.rl.train import train_from_config
 from embodichain.learning.rl.utils import OptimizerCfg
 from embodichain.learning.rl.utils.trainer import Trainer
 from embodichain.extensions.tasks.classic_control.point_mass import PointMassEnv
@@ -260,7 +261,6 @@ def test_trainer_saves_best_checkpoint_from_eval(tmp_path: Path) -> None:
         env=env,
         algorithm=algorithm,
         buffer_size=4,
-        batch_size=8,
         writer=None,
         eval_freq=8,
         save_freq=0,
@@ -305,7 +305,6 @@ def test_trainer_saves_checkpoint_by_update_count(tmp_path: Path) -> None:
         env=env,
         algorithm=algorithm,
         buffer_size=4,
-        batch_size=8,
         writer=None,
         eval_freq=0,
         save_freq=0,

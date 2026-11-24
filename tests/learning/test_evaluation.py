@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-from collections import deque
 from contextlib import nullcontext
 import json
 import math
@@ -32,6 +31,7 @@ from tensordict import TensorDict
 from embodichain.learning.rl.evaluation import (
     convert_policy_action_for_env,
     evaluate_episodes,
+    infer_policy_action,
 )
 from embodichain.learning.rl.utils.trainer import Trainer
 
@@ -104,6 +104,87 @@ class _MixedDeviceEnv:
         self.action_manager = _DeviceCheckingActionManager(self.device)
 
 
+class _ManagedEventEnv(_AsyncAutoResetEnv):
+    """CPU host that owns event dispatch and reusable recording drains."""
+
+    def __init__(self) -> None:
+        from embodichain.lab.gym.envs.managers.event_manager import EventManager
+
+        super().__init__()
+        self.event_manager = EventManager({}, env=self)
+        self.flush_count = 0
+
+    def add_events(self, event_cfg) -> None:
+        self.event_manager.add_events(event_cfg)
+
+    def reset(self, *, seed=None, options=None):
+        observation = super().reset(seed=seed, options=options)
+        self.event_manager.set_seed(seed)
+        self.event_manager.reset()
+        return observation
+
+    def step(self, action):
+        transition = super().step(action)
+        if "interval" in self.event_manager.available_modes:
+            self.event_manager.apply(mode="interval")
+        return transition
+
+    def flush_recordings(self) -> None:
+        self.flush_count += 1
+
+
+def _event_trainer(tmp_path: Path, env, **kwargs) -> Trainer:
+    from embodichain.learning.rl.policies import ActorCritic
+
+    return Trainer(
+        policy=ActorCritic(
+            1, 1, torch.device("cpu"), torch.nn.Linear(1, 1), torch.nn.Linear(1, 1)
+        ),
+        env=env,
+        algorithm=SimpleNamespace(device=torch.device("cpu")),
+        buffer_size=2,
+        writer=None,
+        eval_freq=0,
+        save_freq=0,
+        checkpoint_dir=str(tmp_path),
+        exp_name="events",
+        use_wandb=False,
+        **kwargs,
+    )
+
+
+@pytest.mark.parametrize("preprocessing", ["transform", "normalizer"])
+def test_inference_preprocessing_preserves_environment_observation(preprocessing):
+    """Custom in-place preprocessing owns its input, including reused buffers."""
+    from embodichain.learning.rl.policies import ActorCritic
+
+    policy = ActorCritic(
+        1,
+        1,
+        torch.device("cpu"),
+        torch.nn.Identity(),
+        torch.nn.Linear(1, 1),
+        actor_normalizer=(
+            torch.nn.ReLU(inplace=True) if preprocessing == "normalizer" else None
+        ),
+    )
+    observation = torch.tensor([[-2.0], [2.0]])
+    action = infer_policy_action(
+        policy,
+        observation,
+        device="cpu",
+        num_envs=2,
+        observation_transform=(
+            (lambda obs: obs.add_(1.0)) if preprocessing == "transform" else None
+        ),
+    )
+    expected_action = (
+        [[-1.0], [3.0]] if preprocessing == "transform" else [[0.0], [2.0]]
+    )
+    torch.testing.assert_close(action, torch.tensor(expected_action))
+    torch.testing.assert_close(observation, torch.tensor([[-2.0], [2.0]]))
+
+
 @pytest.mark.parametrize("default_device_context", [False, True])
 def test_trainer_metric_means_transfer_only_one_scalar_batch(
     monkeypatch: pytest.MonkeyPatch, default_device_context: bool
@@ -128,7 +209,7 @@ def test_trainer_metric_means_transfer_only_one_scalar_batch(
     monkeypatch.setattr(torch.Tensor, "cpu", counted_cpu)
     trainer = Trainer.__new__(Trainer)
     with torch.device("cpu") if default_device_context else nullcontext():
-        values = trainer._pack_log_dicts(
+        snapshot = trainer._reduce_log_dicts(
             {
                 "rewards": {
                     "progress": torch.tensor([1.0, 3.0], requires_grad=True),
@@ -143,6 +224,7 @@ def test_trainer_metric_means_transfer_only_one_scalar_batch(
                 },
             }
         )
+        values = trainer._materialize_log_dicts([snapshot])[0]
     assert list(values) == [
         "rewards/progress",
         "rewards/other",
@@ -157,65 +239,108 @@ def test_trainer_metric_means_transfer_only_one_scalar_batch(
     # A subsequent real batch remains a separate request: redispatch handling
     # must not hide another transfer or retain its reentrancy state.
     with torch.device("cpu") if default_device_context else nullcontext():
-        assert trainer._pack_log_dicts({"metrics": {"next": torch.ones(2)}}) == {
-            "metrics/next": 1.0
-        }
+        snapshot = trainer._reduce_log_dicts({"metrics": {"next": torch.ones(2)}})
+        assert trainer._materialize_log_dicts([snapshot])[0] == {"metrics/next": 1.0}
     assert transferred_shapes == [(5,), (1,)]
 
 
 @pytest.mark.parametrize("logging_enabled", [True, False])
 def test_trainer_rollout_logging_reuses_means_for_both_sinks(
-    monkeypatch: pytest.MonkeyPatch, logging_enabled: bool
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, logging_enabled: bool
 ) -> None:
     """Each control step retains its tags/global step and shares scalar means."""
-    trainer = Trainer.__new__(Trainer)
-    trainer.curr_ret = torch.zeros(2)
-    trainer.curr_len = torch.zeros(2, dtype=torch.int32)
-    trainer.ret_window, trainer.len_window = deque(), deque()
+    trainer = Trainer(
+        policy=_DeterministicPolicy(),
+        env=SimpleNamespace(num_envs=2, reset=lambda: (torch.zeros(2, 1), {})),
+        algorithm=SimpleNamespace(device=torch.device("cpu")),
+        buffer_size=2,
+        writer=MagicMock() if logging_enabled else None,
+        eval_freq=0,
+        save_freq=0,
+        checkpoint_dir=str(tmp_path),
+        exp_name="logging",
+        use_wandb=logging_enabled,
+    )
     trainer.global_step = 10
-    trainer.distributed, trainer.rank = False, 0
-    trainer.writer = MagicMock() if logging_enabled else None
-    trainer.use_wandb = logging_enabled
-    trainer.buffer_size = 2
-    rollout = object()
-    trainer.buffer = SimpleNamespace(start_rollout=lambda: rollout, add=MagicMock())
-    scalar_means = MagicMock(wraps=trainer._pack_log_dicts)
-    monkeypatch.setattr(trainer, "_pack_log_dicts", scalar_means)
     wandb_log = MagicMock()
     monkeypatch.setattr("embodichain.learning.rl.utils.trainer.wandb.log", wandb_log)
 
     def collect(*, num_steps, rollout, on_step_callback):
-        for _ in range(num_steps):
+        reused_metric = torch.tensor([1.0, 3.0])
+        rollout["done"].zero_()
+        for step in range(num_steps):
+            rollout["reward"][:, step] = torch.tensor([1.0, 3.0])
             on_step_callback(
-                TensorDict(
-                    {"reward": torch.tensor([1.0, 3.0]), "done": torch.zeros(2).bool()},
-                    batch_size=[2],
-                ),
+                rollout[:, step],
                 {
-                    "rewards": {"progress": torch.tensor([1.0, 3.0])},
+                    "rewards": {"progress": reused_metric},
                     "metrics": {"grasped": torch.tensor([True, False])},
                 },
             )
+            reused_metric.add_(2)
         return rollout
 
     trainer.collector = SimpleNamespace(collect=collect)
     trainer._collect_rollout()
     assert trainer.global_step == 14
     if logging_enabled:
-        assert scalar_means.call_count == 2
         assert trainer.writer.add_scalar.call_args_list == [
             call("rewards/progress", 2.0, 12),
             call("metrics/grasped", 0.5, 12),
-            call("rewards/progress", 2.0, 14),
+            call("rewards/progress", 4.0, 14),
             call("metrics/grasped", 0.5, 14),
         ]
         assert wandb_log.call_args_list == [
             call({"rewards/progress": 2.0, "metrics/grasped": 0.5}, step=12),
-            call({"rewards/progress": 2.0, "metrics/grasped": 0.5}, step=14),
+            call({"rewards/progress": 4.0, "metrics/grasped": 0.5}, step=14),
         ]
     else:
-        scalar_means.assert_not_called()
         wandb_log.assert_not_called()
+
+
+def test_training_episode_windows_preserve_completion_order_across_rollouts(
+    tmp_path: Path,
+) -> None:
+    """Bounded histories retain the latest completions, including tied rows."""
+    from embodichain.learning.rl.policies import ActorCritic
+
+    class Env(_AsyncAutoResetEnv):
+        def step(self, action):
+            obs, _, terminated, truncated, info = super().step(action)
+            return obs, torch.tensor([1.0, 10.0, 100.0]), terminated, truncated, info
+
+    trainer = Trainer(
+        policy=ActorCritic(
+            1, 1, torch.device("cpu"), torch.nn.Linear(1, 1), torch.nn.Linear(1, 1)
+        ),
+        env=Env(),
+        algorithm=SimpleNamespace(device=torch.device("cpu")),
+        buffer_size=4,
+        writer=None,
+        eval_freq=0,
+        save_freq=0,
+        checkpoint_dir=str(tmp_path),
+        exp_name="episode_order",
+        use_wandb=False,
+    )
+    for _ in range(17):
+        trainer._collect_rollout()
+        trainer.buffer.get(flatten=False)
+
+    # Each row finishes at exact multiples of its horizon. Ties retain row order;
+    # the 68-step run exceeds the history capacity and crosses 17 rollout edges.
+    episodes = [
+        (reward * horizon, horizon)
+        for step in range(1, 69)
+        for reward, horizon in ((1, 1), (10, 2), (100, 3))
+        if step % horizon == 0
+    ][-100:]
+    assert list(trainer.ret_window) == [reward for reward, _ in episodes]
+    assert list(trainer.len_window) == [length for _, length in episodes]
+    torch.testing.assert_close(trainer.curr_ret, torch.tensor([0.0, 0.0, 200.0]))
+    torch.testing.assert_close(
+        trainer.curr_len, torch.tensor([0, 0, 2], dtype=torch.int32)
+    )
 
 
 @pytest.mark.parametrize("rank", [0, 1])
@@ -228,7 +353,6 @@ def test_trainer_without_eval_env_ignores_empty_eval_events(
         env=_AsyncAutoResetEnv(),
         algorithm=SimpleNamespace(device=torch.device("cpu")),
         buffer_size=2,
-        batch_size=2,
         writer=None,
         eval_freq=0,
         save_freq=0,
@@ -255,7 +379,6 @@ def test_trainer_with_eval_env_creates_eval_event_manager(tmp_path: Path) -> Non
         env=_AsyncAutoResetEnv(),
         algorithm=SimpleNamespace(device=torch.device("cpu")),
         buffer_size=2,
-        batch_size=2,
         writer=None,
         eval_freq=10,
         save_freq=0,
@@ -275,8 +398,14 @@ def test_evaluate_episodes_counts_actual_completions_and_restores_mode(
 ) -> None:
     policy = _DeterministicPolicy()
     policy.train()
+    policy.normalizer = torch.nn.BatchNorm1d(1).eval()
+    policy.dropout = torch.nn.Dropout()
     env = _AsyncAutoResetEnv()
     episodes = []
+
+    def record_episode(record):
+        assert not any(module.training for module in policy.modules())
+        episodes.append(record)
 
     result = evaluate_episodes(
         policy=policy,
@@ -284,11 +413,13 @@ def test_evaluate_episodes_counts_actual_completions_and_restores_mode(
         num_episodes=4,
         device="cpu",
         seed=123,
-        on_scored_episode=episodes.append,
+        on_scored_episode=record_episode,
         **({"episode_allocation": "first_completed"} if explicit_legacy else {}),
     )
 
     assert policy.training
+    assert not policy.normalizer.training
+    assert policy.dropout.training
     assert env.last_seed == 123
     assert result["eval/avg_reward"] == 1.25
     assert result["eval/avg_length"] == 1.25
@@ -405,10 +536,12 @@ def test_episode_callback_omits_absent_success_and_restores_mode_on_failure() ->
             return observation, reward, done, truncated, info
 
     policy = _DeterministicPolicy()
-    policy.train()
+    policy.eval()
+    policy.normalizer = torch.nn.BatchNorm1d(1)
     records = []
 
     def reject(record: dict) -> None:
+        assert not any(module.training for module in policy.modules())
         records.append(record)
         raise OSError("episode sink unavailable")
 
@@ -420,7 +553,8 @@ def test_episode_callback_omits_absent_success_and_restores_mode_on_failure() ->
             device="cpu",
             on_scored_episode=reject,
         )
-    assert policy.training
+    assert not policy.training
+    assert policy.normalizer.training
     assert len(records) == 1
     assert records[0]["global_episode_index"] == 0
     assert "success" not in records[0]
@@ -448,33 +582,235 @@ def test_policy_action_moves_to_environment_device_before_preprocessing() -> Non
     assert converted.device == env.device
 
 
-def test_trainer_rewinds_external_eval_event_manager() -> None:
-    """Repeated model validation starts external event functors from eval_seed."""
-    trainer = object.__new__(Trainer)
+@pytest.mark.parametrize("managed", [False, True])
+@pytest.mark.parametrize("reset_each_rollout", [False, True])
+def test_trainer_training_dispatches_interval_events_once(
+    tmp_path: Path, managed: bool, reset_each_rollout: bool
+) -> None:
+    """Plain callbacks and host-owned callbacks each run once per control step."""
+    from embodichain.lab.gym.envs.managers.cfg import EventCfg
+    from embodichain.lab.gym.envs.managers.manager_base import Functor
+
+    env = _ManagedEventEnv() if managed else _AsyncAutoResetEnv()
+    calls = []
+
+    class Record(Functor):
+        def reset(self, env_ids=None) -> None:
+            self.calls = 0
+
+        def __call__(self, env, env_ids):
+            self.calls += 1
+            calls.append((self.calls, env_ids.tolist()))
+
+    trainer = _event_trainer(
+        tmp_path,
+        env,
+        event_cfg={"record": EventCfg(func=Record, mode="interval", interval_step=1)},
+    )
+    trainer.collector.reset_every_rollout = reset_each_rollout
+    for _ in range(2):
+        trainer._collect_rollout()
+        trainer.buffer.get(flatten=False)
+
+    # Two 2-step rollouts, with all three rows selected on every invocation.
+    counts = [1, 2, 1, 2] if reset_each_rollout else [1, 2, 3, 4]
+    assert calls == [(count, [0, 1, 2]) for count in counts]
+    assert trainer.global_step == 12
+    if managed:
+        assert trainer.event_manager is env.event_manager
+
+
+@pytest.mark.parametrize("managed", [False, True])
+def test_trainer_rewinds_eval_events_and_preserves_host_lifecycle(
+    tmp_path: Path, managed: bool
+) -> None:
+    """Repeated evaluation rewinds interval/term state and deterministic streams."""
+    from embodichain.lab.gym.envs.managers.cfg import EventCfg
+    from embodichain.lab.gym.envs.managers.manager_base import Functor
+
+    class Record(Functor):
+        def reset(self, env_ids=None) -> None:
+            self.calls = 0
+
+        def __call__(self, env, env_ids, save_path):
+            self.calls += 1
+            env.records.append((self.calls, env_ids.tolist(), torch.rand(()).item()))
+
+        def flush(self, save_path=None) -> None:
+            assert save_path == (None if managed else str(tmp_path))
+            self._env.flush_count += 1
+
+        def finalize(self, save_path) -> None:
+            assert not managed, "The host retains its reusable event functors."
+            self._env.finalized_paths.append(save_path)
+
+    eval_env = _ManagedEventEnv() if managed else _AsyncAutoResetEnv()
+    eval_env.records = []
+    eval_env.flush_count = 0
+    eval_env.finalized_paths = []
+    events = {
+        "record": EventCfg(
+            func=Record,
+            mode="interval",
+            interval_step=2,
+            params={"save_path": str(tmp_path)},
+        )
+    }
+    trainer = _event_trainer(
+        tmp_path,
+        _AsyncAutoResetEnv(),
+        eval_env=eval_env,
+        eval_seed=123,
+        eval_event_cfg=events if managed else SimpleNamespace(**events),
+    )
+    first = trainer._eval_once(num_episodes=8)
+    first_records = list(eval_env.records)
+    eval_env.records.clear()
+    second = trainer._eval_once(num_episodes=8)
+
+    # Eight completions take five controls, so the interval fires at 2 and 4.
+    assert [(index, rows) for index, rows, _ in first_records] == [
+        (1, [0, 1, 2]),
+        (2, [0, 1, 2]),
+    ]
+    assert eval_env.records == first_records
+    assert first == second
+    assert eval_env.flush_count == (4 if managed else 2)
+    assert eval_env.finalized_paths == ([] if managed else [str(tmp_path)] * 2)
+    if managed:
+        assert trainer.eval_event_manager is eval_env.event_manager
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_trainer_eval_failure_drains_host_recordings(
+    tmp_path: Path, cleanup_fails: bool
+) -> None:
+    """Host cleanup runs after an event error without hiding the original error."""
+    from embodichain.lab.gym.envs.managers.cfg import EventCfg
+
+    class FailingHost(_ManagedEventEnv):
+        def flush_recordings(self) -> None:
+            super().flush_recordings()
+            if cleanup_fails and self.flush_count == 2:
+                raise RuntimeError("drain failed")
+
+    def reject(env, env_ids):
+        raise OSError("interval sink unavailable")
+
+    eval_env = FailingHost()
+    trainer = _event_trainer(
+        tmp_path,
+        _AsyncAutoResetEnv(),
+        eval_env=eval_env,
+        eval_event_cfg={
+            "reject": EventCfg(func=reject, mode="interval", interval_step=1)
+        },
+    )
+    with pytest.raises(OSError, match="interval sink unavailable") as failure:
+        trainer._eval_once(num_episodes=1)
+
+    assert eval_env.flush_count == 2
+    assert trainer.eval_history == []
+    if cleanup_fails:
+        assert any("drain failed" in note for note in failure.value.__notes__)
+
+
+@pytest.mark.parametrize("unsupported", ["reset", "camera"])
+def test_plain_trainer_events_reject_host_lifecycle_requirements(
+    tmp_path: Path, unsupported: str
+) -> None:
+    """Plain environments reject events whose lifecycle they cannot execute."""
+    from embodichain.lab.gym.envs.managers.cfg import EventCfg
+    from embodichain.lab.gym.envs.managers.record import record_camera_data
+
+    event = (
+        EventCfg(func=record_camera_data, mode="interval", interval_step=1)
+        if unsupported == "camera"
+        else EventCfg(func=lambda env, env_ids: None, mode="reset")
+    )
+    message = (
+        "recording lifecycle" if unsupported == "camera" else "only supports interval"
+    )
+    with pytest.raises(ValueError, match=message):
+        _event_trainer(tmp_path, _AsyncAutoResetEnv(), event_cfg={"unsupported": event})
+
+
+@pytest.mark.parametrize("trainer_kind", ["standard", "differentiable"])
+@pytest.mark.parametrize("best_mode", ["min", "max"])
+def test_trainer_evaluation_reporting_preserves_best_selection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    trainer_kind: str,
+    best_mode: str,
+) -> None:
+    """Both trainers retain raw history, finite logs, and their save boundary."""
+    from embodichain.learning.rl import DifferentiableTrainer, DifferentiableTrainerCfg
+
+    score = 8.0 if best_mode == "min" else 12.0
+    reports = [
+        {"eval/avg_reward": score, "eval/absent": float("nan")},
+        {"eval/avg_reward": score},
+        {"eval/avg_reward": float("nan")},
+    ]
+    if trainer_kind == "standard":
+        trainer = object.__new__(Trainer)
+        module = "embodichain.learning.rl.utils.trainer"
+        trainer.device = torch.device("cpu")
+        trainer.eval_seed = None
+        trainer.rank = 0
+        trainer.use_wandb = True
+        trainer.best_eval_metric = "eval/avg_reward"
+        trainer.best_eval_mode = best_mode
+        trainer._pending_best = False
+        trainer._eval_step_events = None
+        evaluate = trainer._eval_once
+    else:
+        trainer = object.__new__(DifferentiableTrainer)
+        module = "embodichain.learning.rl.differentiable_trainer"
+        trainer.cfg = DifferentiableTrainerCfg(
+            checkpoint_dir=str(tmp_path), use_wandb=True, best_eval_mode=best_mode
+        )
+        trainer.algorithm = SimpleNamespace(device=torch.device("cpu"))
+        trainer.observation_normalizer = None
+        evaluate = trainer._evaluate
     trainer.policy = _DeterministicPolicy()
     trainer.eval_env = _AsyncAutoResetEnv()
-    trainer.device = torch.device("cpu")
-    trainer.eval_seed = 123
-    trainer.eval_event_manager = MagicMock()
-    trainer.eval_event_manager.available_modes = []
-    trainer.global_step = 0
+    trainer.global_step = 24
     trainer.eval_history = []
     trainer.last_eval_metrics = {}
-    trainer.writer = None
-    trainer.rank = 1
-    trainer.use_wandb = False
-    trainer.best_eval_metric = "missing"
-    trainer.best_eval_value = None
-    trainer.best_eval_mode = "max"
-    trainer._finalize_eval_events = MagicMock()
+    trainer.best_eval_value = 10.0
+    trainer.best_checkpoint_path = None
+    trainer.writer = MagicMock()
+    trainer.save_checkpoint = MagicMock()
+    monkeypatch.setattr(f"{module}.evaluate_episodes", MagicMock(side_effect=reports))
+    wandb_log = MagicMock()
+    monkeypatch.setattr(
+        "embodichain.learning.rl._trainer_reporting.wandb.log", wandb_log
+    )
 
-    trainer._eval_once(num_episodes=1)
-    trainer._eval_once(num_episodes=1)
+    for _ in reports:
+        evaluate()
 
-    assert trainer.eval_event_manager.set_seed.call_args_list == [
-        call(123),
-        call(123),
+    assert trainer.best_eval_value == score
+    assert len(trainer.eval_history) == 3
+    assert trainer.eval_history[0]["global_step"] == 24
+    assert math.isnan(trainer.eval_history[0]["eval/absent"])
+    assert math.isnan(trainer.last_eval_metrics["eval/avg_reward"])
+    assert trainer.writer.add_scalar.call_args_list == [
+        call("eval/avg_reward", score, 24),
+        call("eval/avg_reward", score, 24),
     ]
+    assert wandb_log.call_args_list == [
+        call({"eval/avg_reward": score}, step=24),
+        call({"eval/avg_reward": score}, step=24),
+        call({}, step=24),
+    ]
+    if trainer_kind == "standard":
+        assert trainer._pending_best
+        trainer.save_checkpoint.assert_not_called()
+    else:
+        trainer.save_checkpoint.assert_called_once()
+        assert trainer.best_checkpoint_path.endswith("_best_step_24.pt")
 
 
 def test_evaluation_preserves_separate_actor_and_critic_inputs() -> None:

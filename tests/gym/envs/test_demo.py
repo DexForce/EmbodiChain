@@ -23,9 +23,11 @@ from tensordict import TensorDict
 from embodichain.lab.gym.envs.episode_context import EpisodeContext
 
 import threading
+from contextlib import nullcontext
 from types import MethodType, SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
+from uuid import UUID
 
 import pytest
 import torch
@@ -40,6 +42,13 @@ from embodichain.lab.gym.envs.demo import (
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.envs.expert_trajectory import build_expert_action_spec
 from embodichain.lab.gym.envs.types import ControllerAction
+from embodichain.lab.gym.envs.managers import (
+    DatasetFunctorCfg,
+    DatasetManager,
+    EventCfg,
+    Functor,
+)
+from embodichain.lab.gym.envs.managers.record import record_camera_data
 
 
 def test_demo_segment_result_owns_json_safe_lifecycle_metadata() -> None:
@@ -1800,7 +1809,7 @@ def test_legacy_metadata_reports_consistent_episode_success() -> None:
 
 
 @pytest.mark.parametrize("seed", (None, 0, 12))
-@pytest.mark.parametrize("recorder", ("rollout", "trajectory"))
+@pytest.mark.parametrize("recorder", ("rollout", "trajectory", "action_history"))
 def test_demo_metadata_exposes_the_effective_environment_seed(
     seed: int | None, recorder: str
 ) -> None:
@@ -1810,8 +1819,9 @@ def test_demo_metadata_exposes_the_effective_environment_seed(
         seed=seed, events=None, observations=None, rewards=None, dataset=None
     )
     env.dataset_manager = None
-    if recorder == "trajectory":
-        env._traj_buffer = env.rollout_buffer
+    if recorder != "rollout":
+        if recorder == "trajectory":
+            env._traj_buffer = env.rollout_buffer
         env.rollout_buffer = None
         env._demo_steps = env.rollout_steps.clone()
     env._demo_metadata_initialized = False
@@ -1819,14 +1829,38 @@ def test_demo_metadata_exposes_the_effective_environment_seed(
     env._new_demo_episode_metadata = MethodType(
         EmbodiedEnv._new_demo_episode_metadata, env
     )
-    EmbodiedEnv._initialize_episode(env)
-    env.cfg.seed = 35
-    metadata = EmbodiedEnv.get_demo_episode_metadata(env, 1)
-    assert metadata["seed"] == seed
-    assert metadata["env_id"] == 1
-    EmbodiedEnv._initialize_episode(env, [1])
-    assert EmbodiedEnv.get_demo_episode_metadata(env, 1)["seed"] == 35
-    assert EmbodiedEnv.get_demo_episode_metadata(env, 0)["seed"] == seed
+    if recorder == "action_history":
+        env.set_rollout_buffer = MethodType(EmbodiedEnv.set_rollout_buffer, env)
+    scope = (
+        EmbodiedEnv._action_history_scope(env)
+        if recorder == "action_history"
+        else nullcontext()
+    )
+    with scope:
+        EmbodiedEnv._initialize_episode(env)
+        env._elapsed_steps = env.rollout_steps.clone()
+        env._seal_episode_outcome = MethodType(EmbodiedEnv._seal_episode_outcome, env)
+        info = {"success": torch.tensor([False, True])}
+        EmbodiedEnv._seal_step_outcomes(
+            env,
+            torch.tensor([1]),
+            torch.tensor([False, True]),
+            torch.zeros(2, dtype=torch.bool),
+            info,
+        )
+        # Terminal reports must already have identities before the metadata
+        # getter can lazily initialize a missing recording identity.
+        identity = info["terminal_outcomes"][1]["identity"]
+        assert str(UUID(identity["episode_uuid"])) == identity["episode_uuid"]
+        assert identity["seed"] == seed
+        assert identity["env_id"] == 1
+        env.cfg.seed = 35
+        metadata = EmbodiedEnv.get_demo_episode_metadata(env, 1)
+        assert metadata["seed"] == seed
+        assert metadata["env_id"] == 1
+        EmbodiedEnv._initialize_episode(env, [1])
+        assert EmbodiedEnv.get_demo_episode_metadata(env, 1)["seed"] == 35
+        assert EmbodiedEnv.get_demo_episode_metadata(env, 0)["seed"] == seed
 
     env.rollout_buffer = None
     env._traj_buffer = None
@@ -1887,6 +1921,144 @@ class _CloseDependencyStub:
         self.calls.append((args, kwargs))
         if self.error is not None:
             raise self.error
+
+
+class _EventRecorder(record_camera_data):
+    """Camera-free recorder exposing the native ownership boundary."""
+
+    def __init__(self, cfg, env):
+        Functor.__init__(self, cfg, env)
+        self.label = cfg.params["label"]
+        self.fail = cfg.params.get("fail", False)
+
+    def __call__(self, env, env_ids, *, label, fail=False):
+        env.calls.append((label, "capture"))
+
+    def discard_and_clear(self, env_ids=None):
+        self._env.calls.append((self.label, "discard"))
+
+    def flush(self):
+        self._env.calls.append((self.label, "flush"))
+        if self.fail:
+            raise OSError("write failed")
+
+    def finalize(self):
+        self._env.calls.append((self.label, "finalize"))
+
+
+def _event_env():
+    return SimpleNamespace(
+        cfg=SimpleNamespace(events=None, seed=12),
+        event_manager=None,
+        num_envs=1,
+        device=torch.device("cpu"),
+        calls=[],
+        _traj_steps=None,
+        rollout_buffer=None,
+    )
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_flush_recordings_is_reusable_and_attempts_every_recorder(fail) -> None:
+    env = _event_env()
+    EmbodiedEnv.add_events(
+        env,
+        {
+            "first": EventCfg(
+                func=_EventRecorder, params={"label": "first", "fail": fail}
+            ),
+            "second": EventCfg(func=_EventRecorder, params={"label": "second"}),
+        },
+    )
+    for _ in range(2):
+        if fail:
+            with pytest.raises(RuntimeError, match="write failed"):
+                EmbodiedEnv.flush_recordings(env)
+        else:
+            EmbodiedEnv.flush_recordings(env)
+    assert env.calls == [
+        (name, operation)
+        for _ in range(2)
+        for name in ("first", "second")
+        for operation in ("discard", "flush")
+    ]
+    assert env.cfg.events["first"].func is _EventRecorder
+    EmbodiedEnv._discard_pending_recordings(env)
+    assert env.calls[-4:] == [
+        ("first", "discard"),
+        ("first", "finalize"),
+        ("second", "discard"),
+        ("second", "finalize"),
+    ]
+
+
+def test_failed_event_addition_keeps_created_recorders_owned_for_cleanup() -> None:
+    env = _event_env()
+
+    class BrokenEvent(Functor):
+        def __init__(self, cfg, env):
+            raise OSError("constructor failed")
+
+        def __call__(self, env, env_ids):
+            pass
+
+    with pytest.raises(RuntimeError, match="constructor failed"):
+        EmbodiedEnv.add_events(
+            env,
+            {
+                "recorder": EventCfg(func=_EventRecorder, params={"label": "kept"}),
+                "invalid": EventCfg(func=BrokenEvent),
+            },
+        )
+    assert list(env.cfg.events) == ["recorder"]
+    assert env.cfg.events["recorder"].func is _EventRecorder
+    EmbodiedEnv._discard_pending_recordings(env)
+    assert env.calls == [("kept", "discard"), ("kept", "finalize")]
+
+
+def test_reset_keeps_recording_eligibility_before_dataset_adds_first_event() -> None:
+    """Save callbacks may attach recorders and change the live eligibility state."""
+    env = _event_env()
+    env.num_envs = 3
+    env.add_events = MethodType(EmbodiedEnv.add_events, env)
+    env.episode_success_status = torch.ones(3, dtype=torch.bool)
+    env.episode_context = EpisodeContext(3)
+    env.episode_context._begin_episode([0, 1, 2])
+    env.episode_context._finish_initialization([0, 1, 2])
+    env._profiler = SimpleNamespace(section=lambda _: nullcontext())
+    with env.episode_context.check("initial", [1]) as finish:
+        finish(accepted=False)
+
+    class SavingRecorder(_EventRecorder):
+        def save_and_clear(self, env_ids=None):
+            self._env.calls.append(("save", env_ids.tolist()))
+
+        def discard_and_clear(self, env_ids=None):
+            self._env.calls.append(("discard", env_ids.tolist()))
+
+    def save_dataset(env, env_ids):
+        assert env_ids.tolist() == [2, 0]
+        env.add_events(
+            {
+                "camera": EventCfg(
+                    func=SavingRecorder,
+                    mode="interval",
+                    params={"label": "added"},
+                )
+            }
+        )
+        with env.episode_context.check("dataset", [2]) as finish:
+            finish(accepted=False)
+
+    env.dataset_manager = DatasetManager(
+        {"save": DatasetFunctorCfg(func=save_dataset, save_failed_episodes=True)},
+        env,
+    )
+
+    EmbodiedEnv._before_episode_reset(env, [2, 0, 1])
+
+    assert env.calls == [("save", [2, 0]), ("discard", [1])]
+    assert env.episode_context.filter_recordable().tolist() == [0]
 
 
 class _CloseEnvStub:

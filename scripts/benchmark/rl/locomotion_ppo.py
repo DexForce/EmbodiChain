@@ -70,7 +70,6 @@ def _build_trainer(runtime: Any, config: dict, output: Path) -> Any:
         env=runtime.env,
         algorithm=algorithm,
         buffer_size=config["trainer"]["buffer_size"],
-        batch_size=algorithm.cfg.batch_size,
         writer=None,
         eval_freq=0,
         save_freq=0,
@@ -225,6 +224,14 @@ def _write_report(output: Path, result: dict) -> None:
         "",
         "This workload measures short training throughput; episode success is not evaluated.",
     ]
+    if result.get("profile"):
+        lines += [
+            "",
+            "Diagnostic profiling synchronizes CUDA at every section boundary. "
+            "These timings include instrumentation overhead and must not be "
+            "compared with normal throughput runs. Hierarchical section times "
+            "are saved in profile.json; parent totals include their children.",
+        ]
     (output / "report.md").write_text("\n".join(lines) + "\n")
 
 
@@ -237,6 +244,7 @@ def _run(args: argparse.Namespace, result: dict) -> None:
         execute_init_hooks,
     )
     from embodichain.learning.rl.runtime import build_gym_policy_runtime
+    from embodichain.lab.gym.utils.profiler import EnvProfiler, EnvProfilerCfg
     from scripts.benchmark.rl.resource_usage import ProcessResources
     from scripts.benchmark.rl.runtime import set_random_seed
 
@@ -301,6 +309,18 @@ def _run(args: argparse.Namespace, result: dict) -> None:
         for index in range(args.warmup + args.updates):
             warming = index < args.warmup
             if index == args.warmup:
+                if getattr(args, "profile", False):
+                    # Start a fresh shared profiler at the measured boundary;
+                    # construction resets must not consume rollout warmup steps.
+                    env = runtime.env.unwrapped
+                    env._profiler = env.sim.profiler = EnvProfiler(
+                        EnvProfilerCfg(
+                            sync_cuda=True,
+                            warmup_steps=0,
+                            output_path=str(args.output / "profile.json"),
+                        ),
+                        device,
+                    )
                 before = [p.detach().clone() for p in runtime.policy.parameters()]
                 resources.sample("after_warmup")
                 if backend is not None and backend.cuda_graph_status != "captured":
@@ -369,6 +389,11 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--cpu-threads", type=int, default=4)
     parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="Save synchronized environment/physics section timings (diagnostic only)",
+    )
+    parser.add_argument(
         "--solver-iterations",
         type=int,
         default=20,
@@ -400,6 +425,7 @@ def main() -> None:
         "warmup": args.warmup,
         "measured_updates": args.updates,
         "seed": args.seed,
+        "profile": args.profile,
         "status": "failed",
         "updates": [],
     }

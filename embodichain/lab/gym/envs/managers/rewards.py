@@ -167,8 +167,9 @@ def action_smoothness_penalty(
     """Penalize large action changes between consecutive timesteps.
 
     Encourages smooth control commands by penalizing sudden changes in actions.
-    Reads the previous action from the RL ``rollout_buffer`` (``action`` / ``done``).
-    Returns zeros when that buffer is unavailable (e.g. evaluation).
+    Reads the collector's previous action/done views, or a legacy explicitly
+    bound RL buffer. History starts fresh for each rollout. Returns zeros when
+    no collection history is available (e.g. evaluation).
 
     Returns:
         Penalty tensor of shape (num_envs,). Zero on first step (no previous action),
@@ -188,18 +189,23 @@ def action_smoothness_penalty(
     else:
         current_action = action["qpos"]
 
-    buffer = getattr(env, "rollout_buffer", None)
-    has_rl_prev_step = (
-        env.current_rollout_step > 0
-        and buffer is not None
-        and "done" in buffer.keys()
-        and "action" in buffer.keys()
-    )
-    if not has_rl_prev_step:
-        return torch.zeros(env.num_envs, device=env.device)
-
-    dones = buffer["done"][: env.num_envs, env.current_rollout_step - 1]
-    pre_action = buffer["action"][: env.num_envs, env.current_rollout_step - 1]
+    if getattr(env, "_action_history_active", False):
+        previous = env._previous_transition
+        if previous is None:
+            return torch.zeros(env.num_envs, device=env.device)
+        pre_action, dones = previous
+    else:
+        buffer = getattr(env, "rollout_buffer", None)
+        has_rl_prev_step = (
+            env.current_rollout_step > 0
+            and buffer is not None
+            and "done" in buffer.keys()
+            and "action" in buffer.keys()
+        )
+        if not has_rl_prev_step:
+            return torch.zeros(env.num_envs, device=env.device)
+        dones = buffer["done"][: env.num_envs, env.current_rollout_step - 1]
+        pre_action = buffer["action"][: env.num_envs, env.current_rollout_step - 1]
     penalty = -torch.norm(current_action - pre_action, dim=-1)
     penalty[dones] = 0.0
     return penalty

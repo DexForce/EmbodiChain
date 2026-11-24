@@ -78,11 +78,15 @@ class EmbodiChainTaskPolicyAdapter:
     def __init__(self, policy: torch.nn.Module, device: torch.device):
         self.policy = policy
         self.device = device
-        self._previous_training = policy.training
+        self._previous_modes: list[tuple[torch.nn.Module, bool]] | None = None
 
     def setup(self, context: PolicyContext) -> None:
         """Select deterministic inference for this evaluation."""
         del context
+        if self._previous_modes is None:
+            self._previous_modes = [
+                (module, module.training) for module in self.policy.modules()
+            ]
         self.policy.eval()
 
     def reset(self, frame: EvaluationFrame) -> None:
@@ -108,8 +112,11 @@ class EmbodiChainTaskPolicyAdapter:
         return {}
 
     def close(self) -> None:
-        """Restore the Policy mode used before evaluation."""
-        self.policy.train(self._previous_training)
+        """Restore each module's mode from before evaluation, once."""
+        if self._previous_modes is not None:
+            for module, training in self._previous_modes:
+                module.training = training
+            self._previous_modes = None
 
 
 class EmbodiChainTaskEnvironment:

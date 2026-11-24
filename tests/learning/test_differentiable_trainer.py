@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Mapping
+from unittest.mock import MagicMock
 
 import pytest
 import torch
@@ -266,7 +267,7 @@ def test_resume_rejects_missing_apg_configuration(tmp_path: Path) -> None:
     assert trainer.num_updates == 2
 
 
-def test_trainer_updates_policy_and_detaches_each_segment() -> None:
+def test_trainer_updates_policy_and_detaches_each_segment(monkeypatch) -> None:
     env, policy, algorithm = _make_components()
     trainer = DifferentiableTrainer(
         DifferentiableTrainerCfg(
@@ -276,6 +277,12 @@ def test_trainer_updates_policy_and_detaches_each_segment() -> None:
         env,
         policy,
         algorithm,
+        writer=MagicMock(),
+    )
+    # History and output sinks must use one throughput snapshot per update.
+    ticks = iter(range(100, 200))
+    monkeypatch.setattr(
+        "embodichain.learning.rl.differentiable_trainer.time.time", lambda: next(ticks)
     )
     initial_weight = policy.actor.weight.detach().abs().item()
     policy.eval()
@@ -287,6 +294,12 @@ def test_trainer_updates_policy_and_detaches_each_segment() -> None:
     assert summary["global_step"] == 8
     assert summary["num_updates"] == 2
     assert env.detach_calls == 2
+    logged_sps = [
+        call.args[1]
+        for call in trainer.writer.add_scalar.call_args_list
+        if call.args[0] == "charts/SPS"
+    ]
+    assert logged_sps == [entry["charts/SPS"] for entry in summary["train_history"]]
 
 
 def test_complete_rollout_mode_resets_each_scheduled_microbatch() -> None:
@@ -530,7 +543,7 @@ def test_checkpoint_restores_lr_scheduler_state(tmp_path: Path) -> None:
     )
 
 
-def test_checkpoint_load_falls_back_for_older_torch(
+def test_checkpoint_load_requires_weights_only_support(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

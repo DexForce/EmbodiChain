@@ -101,3 +101,41 @@ def test_collector_preserves_caller_selected_policy_mode(training: bool) -> None
     collector.collect(num_steps=1, deterministic=True)
 
     assert policy.training is training
+
+
+def test_observation_snapshots_survive_reused_environment_buffers() -> None:
+    class ReusedObservationEnv(LinearDifferentiableEnv):
+        def __init__(self):
+            super().__init__()
+            self.observation_buffer = torch.empty_like(self._state)
+
+        def observation(self):
+            self.observation_buffer.copy_(self._state)
+            return TensorDict({"state": self.observation_buffer}, [self.num_envs])
+
+        def reset(self, **kwargs):
+            _, info = super().reset(**kwargs)
+            return self.observation(), info
+
+        def step(self, action):
+            _, reward, terminated, truncated, info = super().step(action)
+            return self.observation(), reward, terminated, truncated, info
+
+    env = ReusedObservationEnv()
+    policy = _make_policy(env.device)
+    collector = DifferentiableCollector(env, policy, env.device)
+    rollout = collector.collect(2, deterministic=True)
+    collector.collect(1, deterministic=True)
+
+    # For x[t + 1] = x[t] + 0.25 * x[t], each owned snapshot has a
+    # distinct value even after the environment overwrites its single leaf.
+    torch.testing.assert_close(rollout.initial_observation, torch.ones(2, 1))
+    for index, step in enumerate(rollout.transitions):
+        torch.testing.assert_close(
+            step.next_observation, torch.full((2, 1), 1.25 ** (index + 1))
+        )
+    rollout.rewards.sum().backward()
+    expected_gradient = -env.num_envs * (2 * 1.25 + 4 * 1.25**3)
+    torch.testing.assert_close(
+        policy.actor.weight.grad, torch.full((1, 1), expected_gradient)
+    )

@@ -17,6 +17,9 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from contextlib import ExitStack
+from unittest.mock import Mock
+import importlib
 
 import gymnasium as gym
 import pytest
@@ -87,11 +90,11 @@ def test_gym_environment_applies_runtime_overrides(
     )
     built = GymEnvironment()
     monkeypatch.setattr(
-        "embodichain.learning.rl.runtime.config_to_cfg",
+        "embodichain.lab.gym.utils.gym_utils.config_to_cfg",
         lambda value, manager_modules, source_path=None: env_cfg,
     )
     monkeypatch.setattr(
-        "embodichain.learning.rl.runtime.build_env",
+        "embodichain.lab.gym.utils.registration.build_env",
         lambda env_id, base_env_cfg: built,
     )
 
@@ -130,11 +133,11 @@ def test_gym_runtime_preserves_task_renderer_when_override_is_omitted(
     )
     original_render_cfg = env_cfg.sim_cfg.render_cfg
     monkeypatch.setattr(
-        "embodichain.learning.rl.runtime.config_to_cfg",
+        "embodichain.lab.gym.utils.gym_utils.config_to_cfg",
         lambda value, manager_modules, source_path=None: env_cfg,
     )
     monkeypatch.setattr(
-        "embodichain.learning.rl.runtime.build_env",
+        "embodichain.lab.gym.utils.registration.build_env",
         lambda env_id, base_env_cfg: GymEnvironment(),
     )
 
@@ -226,7 +229,7 @@ def test_active_trainer_cameras_reserve_renderer_before_environment_build(
         "embodichain.learning.rl.runtime.load_config", lambda _: {"id": "Example"}
     )
     monkeypatch.setattr(
-        "embodichain.learning.rl.runtime.config_to_cfg",
+        "embodichain.lab.gym.utils.gym_utils.config_to_cfg",
         lambda *_args, **_kwargs: env_cfg,
     )
 
@@ -236,7 +239,7 @@ def test_active_trainer_cameras_reserve_renderer_before_environment_build(
         )
         return object()
 
-    monkeypatch.setattr("embodichain.learning.rl.runtime.build_env", build)
+    monkeypatch.setattr("embodichain.lab.gym.utils.registration.build_env", build)
     monkeypatch.setattr(
         "embodichain.lab.sim.utility.render_utils.select_default_renderer",
         lambda _: "hybrid",
@@ -272,13 +275,10 @@ def test_learning_environment_rejects_config_resource_collision():
 def test_reward_discount_mismatch_rejects_before_simulator_construction(
     tmp_path, monkeypatch
 ):
-    from embodichain.learning.rl import runtime
-
     source = tmp_path / "gym.yaml"
     source.write_text("id: Example\n")
     monkeypatch.setattr(
-        runtime,
-        "config_to_cfg",
+        "embodichain.lab.gym.utils.gym_utils.config_to_cfg",
         lambda *args, **kwargs: SimpleNamespace(
             rl_task=SimpleNamespace(reward_composition={"discount": 0.9})
         ),
@@ -287,7 +287,7 @@ def test_reward_discount_mismatch_rejects_before_simulator_construction(
     def forbidden(*args, **kwargs):
         pytest.fail("Simulator must not be built for inconsistent reward discounts")
 
-    monkeypatch.setattr(runtime, "build_env", forbidden)
+    monkeypatch.setattr("embodichain.lab.gym.utils.registration.build_env", forbidden)
     with pytest.raises(ValueError, match="algorithm gamma"):
         _build_gym_environment(
             {
@@ -300,3 +300,48 @@ def test_reward_discount_mismatch_rejects_before_simulator_construction(
             renderer=None,
             gpu_id=0,
         )
+
+
+@pytest.mark.parametrize("kind", ["learning", "gym"])
+@pytest.mark.parametrize("error_type", [ValueError, KeyboardInterrupt])
+def test_runtime_construction_failure_closes_environment(monkeypatch, kind, error_type):
+    runtime = importlib.import_module("embodichain.learning.rl.runtime")
+    env = GymEnvironment()
+    fail_policy = Mock(side_effect=error_type("policy construction failed"))
+    if kind == "learning":
+        monkeypatch.setattr(
+            runtime, "_build_learning_environment", Mock(return_value=("example", env))
+        )
+        monkeypatch.setattr(runtime, "_build_learning_policy", fail_policy)
+        build = lambda: runtime.build_learning_policy_runtime(
+            {"policy": {}}, device=torch.device("cpu"), num_envs=1
+        )
+    else:
+        task = _GymEnvironmentRuntime(env, "example", None, {}, None)
+        monkeypatch.setattr(runtime, "_build_gym_environment", Mock(return_value=task))
+        monkeypatch.setattr(runtime, "_build_gym_policy", fail_policy)
+        build = lambda: runtime.build_gym_policy_runtime(
+            {"policy": _policy_config()},
+            device=torch.device("cpu"),
+            num_envs=1,
+            headless=True,
+            renderer=None,
+            gpu_id=0,
+        )
+
+    with pytest.raises(error_type, match="policy construction failed"):
+        build()
+    assert env.closed == 1
+
+
+def test_resource_flush_failure_propagates_after_other_cleanup():
+    from embodichain.learning.rl.runtime import _manage_resource
+
+    close_environment = Mock()
+    close_writer = Mock(side_effect=OSError("flush failed"))
+    with pytest.raises(OSError, match="flush failed"):
+        with ExitStack() as resources:
+            _manage_resource(resources, close_environment, "environment")
+            _manage_resource(resources, close_writer, "writer")
+    close_environment.assert_called_once_with()
+    close_writer.assert_called_once_with()

@@ -20,6 +20,19 @@ control the training seed and PyTorch CPU thread count.
 Newton uses 20 solver iterations (`--solver-iterations`) and the task's 50 line-search
 iterations. The selected environment configuration is saved as `env.yaml`.
 
+For environment/physics diagnosis, add `--profile` in a separate run:
+
+```bash
+python -m scripts.benchmark.rl.locomotion_ppo --backend default \
+  --profile --output outputs/g1-ppo/default-profile
+```
+
+This enables CUDA synchronization at each profiler section boundary and saves
+hierarchical timings to `profile.json`; parent totals include child sections.
+The extra synchronization changes execution timing, so profiled SPS and phase
+latencies must not be compared with normal throughput runs. Use profiling to
+locate costs, then rerun without `--profile` to measure their impact.
+
 `result.json` contains synchronized rollout/optimizer timings, losses, backend and
 runtime details, environment/policy creation time, and memory samples. PPO SPS is
 total measured transitions divided by total rollout plus optimizer time. Creation

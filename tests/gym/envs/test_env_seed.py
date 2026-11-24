@@ -123,6 +123,46 @@ def test_reset_seed_replays_gym_rng_and_reseeds_event_manager(monkeypatch) -> No
     assert torch.backends.cudnn.deterministic is True
 
 
+@pytest.mark.parametrize("initial_events", [None, {}])
+def test_environment_adds_events_without_replaying_existing_startup(
+    initial_events,
+) -> None:
+    """Native attachment runs each startup once and preserves raw declarations."""
+    from embodichain.lab.gym.envs.managers import EventCfg
+
+    env = _ResetEnv()
+    env.cfg.events = initial_events
+    env.event_manager = None
+    calls = []
+
+    def event(env, env_ids, *, label):
+        calls.append(label)
+
+    original = EventCfg(func=event, mode="startup", params={"label": "original"})
+    EmbodiedEnv.add_events(env, {"original": original})
+    manager = env.event_manager
+    additions = SimpleNamespace(
+        added=EventCfg(func=event, mode="startup", params={"label": "added"}),
+        reset=EventCfg(func=event, mode="reset", params={"label": "reset"}),
+    )
+    EmbodiedEnv.add_events(env, additions)
+    additions.added.params["label"] = "caller changed"
+    assert env.event_manager is manager
+    assert calls == ["original", "added"]
+    assert env.cfg.events["added"].params == {"label": "added"}
+    env.event_manager.apply("reset", torch.tensor([0]))
+    assert calls == ["original", "added", "reset"]
+
+    for rejected in (
+        {"original": original},
+        {"too_late": EventCfg(func=event, mode="prestartup", params={"label": "late"})},
+    ):
+        with pytest.raises(ValueError):
+            EmbodiedEnv.add_events(env, rejected)
+    assert calls == ["original", "added", "reset"]
+    assert list(env.cfg.events) == ["original", "added", "reset"]
+
+
 def test_reset_publishes_episode_state_before_visual_observation() -> None:
     """Reset state must reach render consumers before capture and observations."""
     env = _ResetEnv()
@@ -296,7 +336,11 @@ def test_lazy_metadata_retains_each_rows_reset_seed(recording, read_order):
     )
     env.reset(seed=12)
     original_hash = stable_config_hash(env.cfg)
+    env._raw_action_history = [["old action 0"], ["old action 1"]]
+    env._expert_controller_qpos_history = [["old qpos 0"], ["old qpos 1"]]
     env.reset(seed=35, options={"reset_ids": [0]})
+    assert env._raw_action_history == [[], ["old action 1"]]
+    assert env._expert_controller_qpos_history == [[], ["old qpos 1"]]
     if not recording:
         env._new_demo_episode_metadata.assert_not_called()
     records = {i: EmbodiedEnv.get_demo_episode_metadata(env, i) for i in read_order}

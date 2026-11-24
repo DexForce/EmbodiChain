@@ -44,10 +44,14 @@ def prepare_policy_observation(
     device: torch.device | str,
     groups: tuple[str, ...] | None = None,
 ) -> torch.Tensor:
-    """Flatten one Environment observation in the configured input order."""
+    """Snapshot one Environment observation in the configured input order.
+
+    Custom transforms and policy modules may preprocess their input in place;
+    their writes must not reach an environment's reusable observation buffers.
+    """
     device = torch.device(device)
     tensor_dict = dict_to_tensordict(observation, device)
-    return flatten_observation_groups(tensor_dict, groups)
+    return flatten_observation_groups(tensor_dict, groups).clone()
 
 
 def infer_policy_action(
@@ -199,9 +203,6 @@ def evaluate_episodes(
         )
         targets[: num_episodes % num_envs] += 1
         completed_per_env = torch.zeros_like(targets)
-    previous_training = policy.training
-    policy.eval()
-
     returns: list[float] = []
     lengths: list[float] = []
     successes: list[float] = []
@@ -209,7 +210,9 @@ def evaluate_episodes(
     current_return = torch.zeros(num_envs, dtype=torch.float32, device=device)
     current_length = torch.zeros(num_envs, dtype=torch.long, device=device)
 
+    previous_modes = [(module, module.training) for module in policy.modules()]
     try:
+        policy.eval()
         observation, _ = env.reset(seed=seed)
         while len(returns) < num_episodes:
             action = infer_policy_action(
@@ -292,7 +295,8 @@ def evaluate_episodes(
             current_return[done_indices] = 0.0
             current_length[done_indices] = 0
     finally:
-        policy.train(previous_training)
+        for module, training in previous_modes:
+            module.training = training
 
     result = {
         "eval/avg_reward": float(np.mean(returns)),

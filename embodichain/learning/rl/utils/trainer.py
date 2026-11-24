@@ -16,11 +16,13 @@
 
 from __future__ import annotations
 
+import inspect
 import math
 import time
+from collections.abc import Mapping
 from collections import deque
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
@@ -28,11 +30,17 @@ import wandb
 from tensordict import TensorDict
 from torch.utils.tensorboard import SummaryWriter
 
-from embodichain.lab.gym.envs.managers.event_manager import EventManager
+from embodichain.learning.rl._trainer_reporting import (
+    _evaluation_improved,
+    _write_scalars,
+)
 from embodichain.learning.rl.checkpoint import _load, _save, _sync_errors
 from embodichain.learning.rl.buffer import RolloutBuffer
 from embodichain.learning.rl.collector import SyncCollector
 from embodichain.learning.rl.evaluation import evaluate_episodes
+
+if TYPE_CHECKING:
+    from embodichain.lab.gym.envs.managers.event_manager import EventManager
 
 __all__ = ["Trainer"]
 
@@ -46,7 +54,6 @@ class Trainer:
         env,
         algorithm,
         buffer_size: int,
-        batch_size: int,
         writer: SummaryWriter | None,
         eval_freq: int,
         save_freq: int,
@@ -75,7 +82,6 @@ class Trainer:
         self.eval_env = eval_env
         self.algorithm = algorithm
         self.buffer_size = buffer_size
-        self.batch_size = batch_size
         self.writer = writer
         self.eval_freq = eval_freq
         self.save_freq = save_freq
@@ -90,10 +96,16 @@ class Trainer:
         self.best_eval_value: float | None = None
         self.best_checkpoint_path: str | None = None
 
+        self._train_step_events = None
+        self._eval_step_events = None
         if event_cfg is not None:
-            self.event_manager = EventManager(event_cfg, env=self.env)
+            self.event_manager, self._train_step_events = self._bind_events(
+                self.env, event_cfg
+            )
         if self.eval_env is not None and eval_event_cfg is not None:
-            self.eval_event_manager = EventManager(eval_event_cfg, env=self.eval_env)
+            self.eval_event_manager, self._eval_step_events = self._bind_events(
+                self.eval_env, eval_event_cfg
+            )
 
         self.device = self.algorithm.device
         self.global_step = 0
@@ -148,58 +160,128 @@ class Trainer:
                 )
             ),
             bootstrap_timeouts=getattr(self.algorithm, "uses_value_bootstrap", True),
+            on_reset_callback=(
+                self._train_step_events.reset
+                if self._train_step_events is not None
+                else None
+            ),
         )
 
         self.curr_ret = torch.zeros(num_envs, dtype=torch.float32, device=self.device)
         self.curr_len = torch.zeros(num_envs, dtype=torch.int32, device=self.device)
+        # Keep completion snapshots on device until the rollout boundary. The
+        # time-major layout preserves completion order when several rows finish.
+        self._episode_returns = torch.empty(
+            (self.buffer_size, num_envs), dtype=self.curr_ret.dtype, device=self.device
+        )
+        self._episode_lengths = torch.empty(
+            (self.buffer_size, num_envs), dtype=self.curr_len.dtype, device=self.device
+        )
 
     @staticmethod
-    def _mean_scalar(x) -> float:
-        if hasattr(x, "detach"):
-            x = x.detach().cpu().numpy()
-        else:
-            x = np.asarray(x)
-        return float(np.mean(x))
+    def _bind_events(
+        env: Any, event_cfg: object
+    ) -> tuple[EventManager | None, EventManager | None]:
+        """Use the host lifecycle, or post-step callbacks for lightweight hosts."""
+        from embodichain.lab.gym.envs.managers.event_manager import EventManager
 
-    def _pack_log_dicts(self, groups: dict[str, dict | None]) -> dict[str, float]:
-        """Reduce on the source device and copy one scalar batch per device.
+        add_events = getattr(env, "add_events", None)
+        if callable(add_events):
+            add_events(event_cfg)
+            return env.event_manager, None
 
-        Both logging sinks consume the same means. This preserves per-step
-        logging without transferring every environment value, or synchronizing
-        separately for each metric and sink.
-        """
-        out: dict[str, float] = {}
-        tag_order: list[str] = []
-        pending: dict[torch.device, list[tuple[str, torch.Tensor]]] = {}
+        # Plain vector environments have no reset/close event hooks. Preserve
+        # their interval callbacks without pretending to own episode recording.
+        if event_cfg:
+            from embodichain.lab.gym.envs.managers.record import record_camera_data
+            from embodichain.utils.string import string_to_callable
+
+            declarations = (
+                event_cfg if isinstance(event_cfg, Mapping) else vars(event_cfg)
+            )
+            for name, cfg in declarations.items():
+                if cfg is None:
+                    continue
+                if cfg.mode != "interval":
+                    raise ValueError(
+                        f"Trainer event '{name}' uses mode '{cfg.mode}'; "
+                        "this environment only supports interval callbacks. "
+                        "Use an environment with add_events for lifecycle events."
+                    )
+                func = (
+                    string_to_callable(cfg.func)
+                    if isinstance(cfg.func, str)
+                    else cfg.func
+                )
+                if isinstance(func, record_camera_data) or (
+                    isinstance(func, type) and issubclass(func, record_camera_data)
+                ):
+                    raise ValueError(
+                        f"Trainer event '{name}' records episodes and requires "
+                        "an environment with add_events and recording lifecycle hooks."
+                    )
+        manager = EventManager(event_cfg, env=env)
+        return manager, manager
+
+    @staticmethod
+    def _reduce_log_dicts(
+        groups: dict[str, dict | None],
+    ) -> dict[str, float | torch.Tensor]:
+        """Snapshot means before the environment can reuse its metric buffers."""
+        out: dict[str, float | torch.Tensor] = {}
         for prefix, data in groups.items():
             if not isinstance(data, dict):
                 continue
             for key, value in data.items():
                 tag = f"{prefix}/{key}"
                 try:
-                    if isinstance(value, torch.Tensor):
+                    if isinstance(value, torch.Tensor) and not value.is_complex():
                         value = value.detach()
-                        if value.is_complex():
-                            out[tag] = self._mean_scalar(value)
-                        else:
-                            mean = (
-                                value.mean()
-                                if value.is_floating_point()
-                                else value.mean(dtype=torch.float64)
-                            )
-                            pending.setdefault(value.device, []).append((tag, mean))
+                        out[tag] = (
+                            value.mean()
+                            if value.is_floating_point()
+                            else value.mean(dtype=torch.float64)
+                        )
                     else:
-                        out[tag] = self._mean_scalar(value)
-                    tag_order.append(tag)
+                        array = (
+                            value.detach().cpu().numpy()
+                            if hasattr(value, "detach")
+                            else np.asarray(value)
+                        )
+                        out[tag] = float(np.mean(array))
                 except Exception:
                     continue
+        return out
+
+    @staticmethod
+    def _materialize_log_dicts(
+        snapshots: list[dict[str, float | torch.Tensor]],
+    ) -> list[dict[str, float]]:
+        """Copy rollout metric scalars together, retaining every step and tag.
+
+        Both sinks consume identical per-step means without a host read between
+        environment steps. Scalar reductions own their storage, so a later
+        environment step cannot change an earlier log record.
+        """
+        result: list[dict[str, float]] = [{} for _ in snapshots]
+        pending: dict[torch.device, list[tuple[int, str, torch.Tensor]]] = {}
+        for index, snapshot in enumerate(snapshots):
+            for tag, value in snapshot.items():
+                if isinstance(value, torch.Tensor):
+                    pending.setdefault(value.device, []).append((index, tag, value))
+                else:
+                    result[index][tag] = value
         for values in pending.values():
             try:
-                means = torch.stack([mean for _, mean in values]).cpu().tolist()
+                means = torch.stack([mean for _, _, mean in values]).cpu().tolist()
             except Exception:
                 continue
-            out.update((tag, float(mean)) for (tag, _), mean in zip(values, means))
-        return {tag: out[tag] for tag in tag_order if tag in out}
+            for (index, tag, _), mean in zip(values, means):
+                result[index][tag] = float(mean)
+        return [
+            {tag: values[tag] for tag in snapshot if tag in values}
+            for snapshot, values in zip(snapshots, result)
+        ]
 
     def train(self, total_timesteps: int) -> dict[str, Any]:
         self._training_start_step = self.global_step
@@ -266,20 +348,25 @@ class Trainer:
     @torch.no_grad()
     def _collect_rollout(self):
         """Collect a rollout with the synchronous collector."""
+        start_step = self.global_step
+        step_index = 0
+        metric_steps: list[int] = []
+        metric_snapshots: list[dict[str, float | torch.Tensor]] = []
 
         def on_step(tensordict: TensorDict, info: dict):
+            nonlocal step_index
+            if self._train_step_events is not None:
+                if "interval" in self._train_step_events.available_modes:
+                    self._train_step_events.apply(mode="interval")
             reward = tensordict["reward"]
             done = tensordict["done"]
             self.curr_ret += reward
             self.curr_len += 1
-            done_idx = torch.nonzero(done, as_tuple=False).squeeze(-1)
-            if done_idx.numel() > 0:
-                finished_ret = self.curr_ret[done_idx].detach().cpu().tolist()
-                finished_len = self.curr_len[done_idx].detach().cpu().tolist()
-                self.ret_window.extend(finished_ret)
-                self.len_window.extend(finished_len)
-                self.curr_ret[done_idx] = 0
-                self.curr_len[done_idx] = 0
+            self._episode_returns[step_index].copy_(self.curr_ret)
+            self._episode_lengths[step_index].copy_(self.curr_len)
+            self.curr_ret.masked_fill_(done, 0)
+            self.curr_len.masked_fill_(done, 0)
+            step_index += 1
 
             if not self.distributed:
                 self.global_step += tensordict.batch_size[0]
@@ -289,17 +376,12 @@ class Trainer:
                 and isinstance(info, dict)
                 and (self.writer or self.use_wandb)
             ):
-                log_dict = self._pack_log_dicts(
-                    {"rewards": info.get("rewards"), "metrics": info.get("metrics")}
+                metric_steps.append(step_index)
+                metric_snapshots.append(
+                    self._reduce_log_dicts(
+                        {"rewards": info.get("rewards"), "metrics": info.get("metrics")}
+                    )
                 )
-                if self.writer:
-                    for tag, value in log_dict.items():
-                        try:
-                            self.writer.add_scalar(tag, value, self.global_step)
-                        except Exception:
-                            continue
-                if self.use_wandb and log_dict:
-                    wandb.log(log_dict, step=self.global_step)
 
         rollout = self.buffer.start_rollout()
         rollout = self.collector.collect(
@@ -308,7 +390,6 @@ class Trainer:
             on_step_callback=on_step,
         )
         self.buffer.add(rollout)
-
         if self.distributed:
             if not torch.distributed.is_available():
                 raise RuntimeError(
@@ -332,54 +413,64 @@ class Trainer:
                 delta_tensor, op=torch.distributed.ReduceOp.SUM
             )
             self.global_step += int(delta_tensor.item())
-            self._sync_episode_stats()
+        self._record_episode_stats(rollout)
+        steps_per_frame = (self.global_step - start_step) // self.buffer_size
+        for frame, log_dict in zip(
+            metric_steps, self._materialize_log_dicts(metric_snapshots)
+        ):
+            step = start_step + frame * steps_per_frame
+            if self.writer:
+                for tag, value in log_dict.items():
+                    try:
+                        self.writer.add_scalar(tag, value, step)
+                    except Exception:
+                        continue
+            if self.use_wandb and log_dict:
+                wandb.log(log_dict, step=step)
 
-    def _sync_episode_stats(self) -> None:
-        """Sync ret_window and len_window across ranks; rank 0 gets merged stats."""
-        if not self.distributed or not torch.distributed.is_initialized():
+    def _record_episode_stats(self, rollout: TensorDict) -> None:
+        """Append new completions in step, rank, then row order.
+
+        Rank zero owns the distributed history. Only this rollout's completions
+        cross ranks; a previously merged window must never become local input.
+        """
+        done = rollout["done"][:, :-1].transpose(0, 1).reshape(-1)
+        completed = done.nonzero(as_tuple=False).squeeze(-1)
+        # Earlier completions cannot survive either bounded history window.
+        completed = completed[-self.ret_window.maxlen :]
+        if self.distributed:
+            # Fixed-size messages also let ranks without completions participate.
+            # FP64 preserves FP32 returns and integer episode lengths/indices.
+            stats = torch.zeros(
+                (self.ret_window.maxlen, 4), dtype=torch.float64, device=self.device
+            )
+            stats[:, 0] = -1
+            n = completed.numel()
+            stats[:n, 0] = completed // self.env.num_envs
+            stats[:n, 1] = completed % self.env.num_envs
+            stats[:n, 2] = self._episode_returns.reshape(-1)[completed]
+            stats[:n, 3] = self._episode_lengths.reshape(-1)[completed]
+            gathered = [torch.empty_like(stats) for _ in range(self.world_size)]
+            torch.distributed.all_gather(gathered, stats)
+            if self.rank == 0:
+                episodes = [
+                    (step, rank, row, reward, length)
+                    for rank, values in enumerate(torch.stack(gathered).cpu().tolist())
+                    for step, row, reward, length in values
+                    if step >= 0
+                ]
+                episodes.sort(key=lambda episode: episode[:3])
+                self.ret_window.extend(episode[3] for episode in episodes)
+                self.len_window.extend(int(episode[4]) for episode in episodes)
+                return
+        if completed.numel() == 0:
             return
-        maxlen = 100
-        ret_list = list(self.ret_window)
-        len_list = list(self.len_window)
-        n = min(len(ret_list), maxlen)
-        if n > 0:
-            ret_list = ret_list[-n:]
-            len_list = len_list[-n:]
-
-        ret_tensor = torch.zeros(maxlen, dtype=torch.float32, device=self.device)
-        len_tensor = torch.zeros(maxlen, dtype=torch.float32, device=self.device)
-        if n > 0:
-            ret_tensor[:n] = torch.tensor(
-                ret_list, dtype=torch.float32, device=self.device
-            )
-            len_tensor[:n] = torch.tensor(
-                len_list, dtype=torch.float32, device=self.device
-            )
-        count_tensor = torch.tensor([n], dtype=torch.int64, device=self.device)
-
-        ret_list_all = [torch.zeros_like(ret_tensor) for _ in range(self.world_size)]
-        len_list_all = [torch.zeros_like(len_tensor) for _ in range(self.world_size)]
-        count_list_all = [
-            torch.zeros_like(count_tensor) for _ in range(self.world_size)
-        ]
-        torch.distributed.all_gather(ret_list_all, ret_tensor)
-        torch.distributed.all_gather(len_list_all, len_tensor)
-        torch.distributed.all_gather(count_list_all, count_tensor)
-
-        if self.rank == 0:
-            all_ret = []
-            all_len = []
-            for r in range(self.world_size):
-                c = int(count_list_all[r].item())
-                if c > 0:
-                    all_ret.extend(ret_list_all[r][:c].cpu().tolist())
-                    all_len.extend(len_list_all[r][:c].cpu().tolist())
-            self.ret_window.clear()
-            self.len_window.clear()
-            n_total = len(all_ret)
-            start = max(0, n_total - maxlen)
-            self.ret_window.extend(all_ret[start:])
-            self.len_window.extend(all_len[start:])
+        self.ret_window.extend(
+            self._episode_returns.reshape(-1)[completed].cpu().tolist()
+        )
+        self.len_window.extend(
+            self._episode_lengths.reshape(-1)[completed].cpu().tolist()
+        )
 
     def _log_train(self, losses: dict[str, float]):
         elapsed = max(1e-6, time.time() - self.start_time)
@@ -396,93 +487,107 @@ class Trainer:
         self.train_history.append(history_entry)
         self.last_train_metrics = history_entry
 
-        if self.writer:
-            for k, v in losses.items():
-                self.writer.add_scalar(f"train/{k}", v, self.global_step)
-            self.writer.add_scalar("charts/SPS", sps, self.global_step)
-            if len(self.ret_window) > 0:
-                self.writer.add_scalar(
-                    "charts/episode_reward_avg_100",
-                    float(np.mean(self.ret_window)),
-                    self.global_step,
-                )
-            if len(self.len_window) > 0:
-                self.writer.add_scalar(
-                    "charts/episode_length_avg_100",
-                    float(np.mean(self.len_window)),
-                    self.global_step,
-                )
+        values = {f"train/{k}": v for k, v in losses.items()}
+        values["charts/SPS"] = sps
+        if self.ret_window:
+            values["charts/episode_reward_avg_100"] = float(avgR)
+        if self.len_window:
+            values["charts/episode_length_avg_100"] = float(avgL)
+        # TensorBoard retains NaN episode means; W&B historically omits them.
+        wandb_values = {
+            key: value
+            for key, value in values.items()
+            if not (key.startswith("charts/episode_") and np.isnan(value))
+        }
+        _write_scalars(
+            values,
+            step=self.global_step,
+            writer=self.writer,
+            use_wandb=self.rank == 0 and self.use_wandb,
+            wandb_metrics=wandb_values,
+        )
         if self.rank == 0:
             print(
                 f"[train] step={self.global_step} sps={sps:.0f} avgReward(100)={avgR:.3f} avgLength(100)={avgL:.1f}"
             )
-            if self.use_wandb:
-                log_dict = {f"train/{k}": v for k, v in losses.items()}
-                log_dict["charts/SPS"] = sps
-                if not np.isnan(avgR):
-                    log_dict["charts/episode_reward_avg_100"] = float(avgR)
-                if not np.isnan(avgL):
-                    log_dict["charts/episode_length_avg_100"] = float(avgL)
-                wandb.log(log_dict, step=self.global_step)
 
     @torch.no_grad()
     def _eval_once(self, num_episodes: int = 5) -> dict[str, float]:
         """Evaluate ``num_episodes`` completed asynchronous episodes."""
 
-        if hasattr(self, "eval_event_manager") and self.eval_seed is not None:
-            self.eval_event_manager.set_seed(self.eval_seed)
+        step_events = self._eval_step_events
+        if step_events is not None and self.eval_seed is not None:
+            step_events.set_seed(self.eval_seed)
+        if step_events is not None:
+            step_events.reset()
 
         def on_step(_: dict[str, Any]) -> None:
-            if hasattr(self, "eval_event_manager"):
-                if "interval" in self.eval_event_manager.available_modes:
-                    self.eval_event_manager.apply(mode="interval")
+            if step_events is not None and "interval" in step_events.available_modes:
+                step_events.apply(mode="interval")
 
-        metrics = evaluate_episodes(
-            policy=self.policy,
-            env=self.eval_env,
-            num_episodes=num_episodes,
-            device=self.device,
-            seed=self.eval_seed,
-            on_step=on_step,
-        )
+        # The first reset must not commit an unfinished preceding evaluation.
+        # Completed episodes were already submitted before the host auto-reset.
+        flush_recordings = getattr(self.eval_env, "flush_recordings", None)
+        if callable(flush_recordings):
+            flush_recordings()
+        try:
+            metrics = evaluate_episodes(
+                policy=self.policy,
+                env=self.eval_env,
+                num_episodes=num_episodes,
+                device=self.device,
+                seed=self.eval_seed,
+                on_step=on_step if step_events is not None else None,
+            )
+        except BaseException as error:
+            try:
+                self._finish_eval_events()
+            except Exception as cleanup_error:
+                error.add_note(
+                    f"Evaluation event cleanup also failed: {cleanup_error!r}"
+                )
+            raise
+        else:
+            self._finish_eval_events()
         summary = {"global_step": float(self.global_step), **metrics}
         self.eval_history.append(summary)
         self.last_eval_metrics = summary
-        if self.writer:
-            for key, value in metrics.items():
-                if np.isfinite(value):
-                    self.writer.add_scalar(key, value, self.global_step)
-        if self.rank == 0 and self.use_wandb:
-            wandb.log(
-                {key: value for key, value in metrics.items() if np.isfinite(value)},
-                step=self.global_step,
-            )
+        _write_scalars(
+            {key: value for key, value in metrics.items() if np.isfinite(value)},
+            step=self.global_step,
+            writer=self.writer,
+            use_wandb=self.rank == 0 and self.use_wandb,
+        )
         candidate = metrics.get(self.best_eval_metric)
-        if candidate is not None and np.isfinite(candidate):
-            improved = self.best_eval_value is None or (
-                candidate > self.best_eval_value
-                if self.best_eval_mode == "max"
-                else candidate < self.best_eval_value
-            )
-            if improved:
-                self.best_eval_value = candidate
-                self._pending_best = True
-        self._finalize_eval_events()
+        if _evaluation_improved(candidate, self.best_eval_value, self.best_eval_mode):
+            self.best_eval_value = candidate
+            self._pending_best = True
         return summary
 
-    def _finalize_eval_events(self) -> None:
-        """Flush evaluation event functors such as video recorders."""
-        if not hasattr(self, "eval_event_manager"):
+    def _finish_eval_events(self) -> None:
+        """Drain host recordings or finish legacy external event outputs."""
+        flush_recordings = getattr(self.eval_env, "flush_recordings", None)
+        if callable(flush_recordings):
+            flush_recordings()
             return
-        for functor_cfg in self.eval_event_manager._mode_functor_cfgs.get(
-            "interval", []
-        ):
-            functor = functor_cfg.func
-            save_path = functor_cfg.params.get("save_path", "./outputs/videos/eval")
-            if hasattr(functor, "flush"):
-                functor.flush(save_path)
-            if hasattr(functor, "finalize"):
-                functor.finalize(save_path)
+        if self._eval_step_events is not None:
+            for functor_cfg in self._eval_step_events._mode_functor_cfgs.get(
+                "interval", []
+            ):
+                save_path = functor_cfg.params.get("save_path", "./outputs/videos/eval")
+                for name in ("flush", "finalize"):
+                    hook = getattr(functor_cfg.func, name, None)
+                    if not callable(hook):
+                        continue
+                    # External callbacks historically received the configured
+                    # output path. Bind before calling so an internal TypeError
+                    # is never mistaken for a signature mismatch or retried.
+                    try:
+                        inspect.signature(hook).bind(save_path)
+                    except TypeError:
+                        hook()
+                    else:
+                        hook(save_path)
 
     def save_checkpoint(self, path: str | Path | None = None) -> str:
         """Save complete learning state; every distributed rank must participate.

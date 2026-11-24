@@ -2,7 +2,8 @@
 
 RL orchestration lives in `embodichain/learning/rl/`; shared MLPs, normalization
 and layers live in `learning/models` and `learning/layers`. Package exports stay
-lazy so lightweight APG imports do not initialize the simulator-backed Trainer.
+lazy; training/runtime helpers defer simulator imports to Gym construction and
+event-manager creation so lightweight learning environments remain independent.
 
 ## Entry Points
 
@@ -83,17 +84,18 @@ The standard store reserves a bootstrap slot beyond its transition count and
 admits one unconsumed rollout. Actor/critic groups may differ; collection and
 evaluation retain the declared ordering and statistics. PPO preserves old
 Gaussian parameters for KL. Throughput uses transitions collected by the current
-train call, separately from restored cumulative counters.
+train call, separately from restored cumulative counters. [Execution and storage
+boundaries](training.md#execution-and-storage-boundaries) own training-field
+selection and batched metric reporting.
 
 Differentiable collection does not detach into the standard buffer. Segmented
-TBPTT and complete rollouts have different graph lifetimes. Complete mode resets
-each independent microbatch, retains the full scheduled horizon, excludes
-post-terminal rewards and freezes observation statistics until backward.
-`detach_state()` neither resets nor resamples a task. Semantic mask/type fields
-remain unnormalized. Actor-critic parameters are disjoint; time truncation needs
-the full pre-reset terminal-observation batch, while hard termination suppresses
-bootstrap. [Gradient details](training.md#actor-critic-gradients) own critic
-normalization and empty-sample behavior.
+TBPTT and complete rollouts have different graph lifetimes; [update
+semantics](training.md#update-semantics) own horizon, reset and normalization
+boundaries. `detach_state()` neither resets nor resamples a task. Semantic
+mask/type fields remain unnormalized. Actor-critic parameters are disjoint;
+time truncation needs the full pre-reset terminal-observation batch, while hard
+termination suppresses bootstrap. [Gradient details](training.md#actor-critic-gradients)
+own critic normalization and empty-sample behavior.
 
 `DifferentiableTrainer.update_once` exposes one collection/update boundary for
 online workflows; its caller owns evaluation and persistence. Native locomotion
@@ -147,11 +149,9 @@ followed by chronological history including current, with the matching input
 normalizer. Environment observation producers use that same layout. There is no
 separate proprioceptive policy adapter or historical encoder/history branch.
 Component contracts record semantic settings, including parameterless objectives,
-so equal neural tensor shapes cannot silently change training semantics on resume.
-The checkpoint loader accepts only the current full schema and metadata; older
-schemas and incomplete historical metadata are rejected before model mutation.
-Within schema v2, an omitted optional PPO auxiliary coefficient means zero; an
-explicitly different coefficient remains incompatible.
+so equal neural tensor shapes cannot silently change training semantics on
+resume. [Checkpoint validation](training.md#checkpoints-and-resume) owns schema
+and configuration compatibility.
 
 Named training fields travel with the observation that produced each action.
 Collectors preserve declared feature axes after combining configured observation
@@ -160,10 +160,9 @@ nested groups. Logical actor/critic parameter
 groups retain overlap so APG can reject shared trunks; PPO deduplicates shared
 parameters at gradient clipping.
 PPO's optional auxiliary decoder loss recomputes the latent in each minibatch
-so encoder gradients remain connected. Normalization statistics remain frozen
-through collection and PPO epochs, then update for the next rollout. Actor
-export excludes critic and contact decoder; inference alignment does not
-qualify task learning or simulator throughput.
+so encoder gradients remain connected. Actor export excludes critic and contact
+decoder; inference alignment does not qualify task learning or simulator
+throughput.
 
 Blind-assembly producers and manager functors live in the official task
 extension's `manipulation/assembly/functors.py`. The generic observation package

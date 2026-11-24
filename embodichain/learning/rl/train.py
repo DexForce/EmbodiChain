@@ -22,6 +22,7 @@ import os
 import random
 import time
 from collections.abc import Sequence
+from contextlib import ExitStack
 from copy import deepcopy
 from pathlib import Path
 
@@ -53,23 +54,16 @@ from embodichain.learning.rl.differentiable_trainer import (
 )
 from embodichain.learning.rl.runtime import (
     _close_environment,
+    _manage_resource,
     _build_learning_environment,
-    _build_learning_policy,
     build_gym_policy_runtime,
     build_learning_policy_runtime,
 )
 from embodichain.learning.rl.routing import get_trainer_class
 from embodichain.learning.rl.utils.trainer import Trainer
 from embodichain.utils import logger, set_seed
-from embodichain.lab.gym.utils.registration import (
-    build_env,
-    discover_task_packages,
-    execute_init_hooks,
-)
-from embodichain.lab.gym.utils.profiler import EnvProfilerCfg
 from embodichain.utils.utility import load_config
 from embodichain.utils.module_utils import find_function_from_modules
-from embodichain.lab.gym.envs.managers.cfg import EventCfg
 
 _CAMERA_RECORDERS = {"record_camera_data", "record_camera_data_async"}
 
@@ -205,6 +199,11 @@ def _train_learning_env(
             "Learning environments do not yet support distributed training."
         )
 
+    from embodichain.lab.gym.utils.registration import (
+        discover_task_packages,
+        execute_init_hooks,
+    )
+
     discover_task_packages()
     execute_init_hooks()
     seed = int(trainer_cfg.get("seed", 1))
@@ -219,51 +218,66 @@ def _train_learning_env(
     )
 
     num_envs = int(trainer_cfg.get("num_envs", 64))
-    runtime = build_learning_policy_runtime(
-        cfg_data,
-        num_envs=num_envs,
-        device=device,
-    )
-    env = runtime.env
-    policy = runtime.policy
-    env_name = runtime.env_id
-
-    enable_eval = bool(trainer_cfg.get("enable_eval", False))
-    eval_env = None
-    if enable_eval:
-        _eval_name, eval_env = _build_learning_environment(
+    with ExitStack() as resources:
+        runtime = build_learning_policy_runtime(
             cfg_data,
-            num_envs=int(trainer_cfg.get("num_eval_envs", 16)),
+            num_envs=num_envs,
             device=device,
         )
+        _manage_resource(resources, runtime.close, "training environment")
+        env = runtime.env
+        policy = runtime.policy
+        env_name = runtime.env_id
 
-    algorithm = build_algo(
-        algorithm_block["name"],
-        dict(algorithm_block.get("cfg", {})),
-        policy,
-        device,
-    )
-    trainer_class = get_trainer_class(algorithm)
+        enable_eval = bool(trainer_cfg.get("enable_eval", False))
+        eval_env = None
+        if enable_eval:
+            _eval_name, eval_env = _build_learning_environment(
+                cfg_data,
+                num_envs=int(trainer_cfg.get("num_eval_envs", 16)),
+                device=device,
+            )
+            _manage_resource(
+                resources,
+                lambda: _close_environment(eval_env),
+                "evaluation environment",
+            )
 
-    exp_name = trainer_cfg.get("exp_name", f"{env_name}_{algorithm_block['name']}")
-    run_stamp = f"{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns() % 1_000_000_000:09d}"
-    run_base = Path("outputs") / f"{exp_name}_{run_stamp}"
-    log_dir = run_base / "logs" / exp_name
-    checkpoint_dir = run_base / "checkpoints"
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    writer = SummaryWriter(str(log_dir))
-    use_wandb = bool(trainer_cfg.get("use_wandb", False))
-    if use_wandb:
-        wandb.init(
-            project=trainer_cfg.get("wandb_project_name", "embodichain-generic"),
-            name=exp_name,
-            config=cfg_data,
+        algorithm = build_algo(
+            algorithm_block["name"],
+            dict(algorithm_block.get("cfg", {})),
+            policy,
+            device,
         )
+        trainer_class = get_trainer_class(algorithm)
 
-    eval_freq = int(trainer_cfg.get("eval_freq", 0)) if enable_eval else 0
-    eval_seed = int(trainer_cfg.get("eval_seed", seed + 10_000))
-    iterations = int(trainer_cfg.get("iterations", 250))
-    try:
+        exp_name = trainer_cfg.get("exp_name", f"{env_name}_{algorithm_block['name']}")
+        run_stamp = (
+            f"{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns() % 1_000_000_000:09d}"
+        )
+        run_base = Path("outputs") / f"{exp_name}_{run_stamp}"
+        log_dir = run_base / "logs" / exp_name
+        checkpoint_dir = run_base / "checkpoints"
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        writer = SummaryWriter(str(log_dir))
+        _manage_resource(resources, writer.close, "summary writer")
+        use_wandb = bool(trainer_cfg.get("use_wandb", False))
+        if use_wandb:
+            tracking_run = wandb.run
+            if tracking_run is None:
+                tracking_run = wandb.init(
+                    project=trainer_cfg.get(
+                        "wandb_project_name", "embodichain-generic"
+                    ),
+                    name=exp_name,
+                    config=cfg_data,
+                )
+                if tracking_run is not None:
+                    _manage_resource(resources, tracking_run.finish, "WandB run")
+
+        eval_freq = int(trainer_cfg.get("eval_freq", 0)) if enable_eval else 0
+        eval_seed = int(trainer_cfg.get("eval_seed", seed + 10_000))
+        iterations = int(trainer_cfg.get("iterations", 250))
         if trainer_class is DifferentiableTrainer:
             segment_length = int(trainer_cfg.get("segment_length", 16))
             update_horizon = int(trainer_cfg.get("update_horizon", segment_length))
@@ -322,7 +336,6 @@ def _train_learning_env(
                 env=env,
                 algorithm=algorithm,
                 buffer_size=buffer_size,
-                batch_size=int(algorithm.cfg.batch_size),
                 writer=writer,
                 eval_freq=eval_freq,
                 save_freq=int(trainer_cfg.get("save_freq", 0)),
@@ -352,14 +365,7 @@ def _train_learning_env(
             trainer.train(total_timesteps)
         _save_final_checkpoint(trainer)
         summary = trainer.get_summary()
-    finally:
-        writer.close()
-        if use_wandb:
-            wandb.finish()
-        env.close()
-        if eval_env is not None:
-            eval_env.close()
-    return summary
+        return summary
 
 
 def train_from_config(
@@ -410,327 +416,324 @@ def train_from_config(
             run=run,
             resume_scheduler=resume_scheduler,
         )
+    from embodichain.lab.gym.envs.managers.cfg import EventCfg
+    from embodichain.lab.gym.utils.profiler import EnvProfilerCfg
+    from embodichain.lab.gym.utils.registration import build_env
+
     policy_block = cfg_data["policy"]
     algo_block = cfg_data["algorithm"]
 
     if distributed is None:
         distributed = bool(trainer_cfg.get("distributed", False))
 
-    rank = 0
-    world_size = 1
-    local_rank = 0
-    if distributed:
-        if not torch.distributed.is_available():
-            raise RuntimeError(
-                "Distributed training requested but torch.distributed is not available."
-            )
-        if not torch.cuda.is_available():
-            raise RuntimeError(
-                "Distributed training with NCCL backend requires CUDA, "
-                "but torch.cuda.is_available() is False."
-            )
-        local_rank = int(os.environ.get("LOCAL_RANK", 0))
-        if local_rank < 0 or local_rank >= torch.cuda.device_count():
-            raise ValueError(
-                f"LOCAL_RANK {local_rank} is out of range "
-                f"(available GPUs: {torch.cuda.device_count()})."
-            )
-        torch.cuda.set_device(local_rank)
-        if not torch.distributed.is_initialized():
-            torch.distributed.init_process_group(backend="nccl")
-        rank = torch.distributed.get_rank()
-        world_size = torch.distributed.get_world_size()
+    with ExitStack() as resources:
+        rank = 0
+        world_size = 1
+        local_rank = 0
+        if distributed:
+            if not torch.distributed.is_available():
+                raise RuntimeError(
+                    "Distributed training requested but torch.distributed is not available."
+                )
+            if not torch.cuda.is_available():
+                raise RuntimeError(
+                    "Distributed training with NCCL backend requires CUDA, "
+                    "but torch.cuda.is_available() is False."
+                )
+            local_rank = int(os.environ.get("LOCAL_RANK", 0))
+            if local_rank < 0 or local_rank >= torch.cuda.device_count():
+                raise ValueError(
+                    f"LOCAL_RANK {local_rank} is out of range "
+                    f"(available GPUs: {torch.cuda.device_count()})."
+                )
+            torch.cuda.set_device(local_rank)
+            if not torch.distributed.is_initialized():
+                torch.distributed.init_process_group(backend="nccl")
+                _manage_resource(
+                    resources,
+                    torch.distributed.destroy_process_group,
+                    "distributed process group",
+                )
+            rank = torch.distributed.get_rank()
+            world_size = torch.distributed.get_world_size()
 
-    exp_name = trainer_cfg.get("exp_name", "generic_exp")
-    seed = int(trainer_cfg.get("seed", 1))
-    device_str = trainer_cfg.get("device", "cpu")
-    if distributed:
-        device_str = f"cuda:{local_rank}"
-    iterations = int(trainer_cfg.get("iterations", 250))
-    buffer_size = int(
-        trainer_cfg.get("buffer_size", trainer_cfg.get("rollout_steps", 2048))
-    )
-    enable_eval = bool(trainer_cfg.get("enable_eval", False))
-    eval_freq = int(trainer_cfg.get("eval_freq", 10000))
-    save_freq = int(
-        trainer_cfg.get(
-            "save_freq", 0 if "save_frequency_updates" in trainer_cfg else 50000
+        exp_name = trainer_cfg.get("exp_name", "generic_exp")
+        seed = int(trainer_cfg.get("seed", 1))
+        device_str = trainer_cfg.get("device", "cpu")
+        if distributed:
+            device_str = f"cuda:{local_rank}"
+        iterations = int(trainer_cfg.get("iterations", 250))
+        buffer_size = int(
+            trainer_cfg.get("buffer_size", trainer_cfg.get("rollout_steps", 2048))
         )
-    )
-    num_eval_episodes = int(trainer_cfg.get("num_eval_episodes", 5))
-    eval_seed = int(trainer_cfg.get("eval_seed", seed + 10_000))
-    headless = bool(trainer_cfg.get("headless", True))
-    renderer = trainer_cfg.get("renderer")
-    gpu_id = int(trainer_cfg.get("gpu_id", 0))
-    num_envs = trainer_cfg.get("num_envs", None)
-    wandb_project_name = trainer_cfg.get("wandb_project_name", "embodichain-generic")
-
-    if not isinstance(device_str, str):
-        raise ValueError(
-            f"runtime.device must be a string such as 'cpu' or 'cuda:0'. Got: {device_str!r}"
-        )
-    try:
-        device = torch.device(device_str)
-    except RuntimeError as exc:
-        raise ValueError(
-            f"Failed to parse runtime.device='{device_str}': {exc}"
-        ) from exc
-
-    if device.type == "cuda":
-        if not torch.cuda.is_available():
-            raise ValueError(
-                "CUDA device requested but torch.cuda.is_available() is False."
+        enable_eval = bool(trainer_cfg.get("enable_eval", False))
+        eval_freq = int(trainer_cfg.get("eval_freq", 10000))
+        save_freq = int(
+            trainer_cfg.get(
+                "save_freq", 0 if "save_frequency_updates" in trainer_cfg else 50000
             )
-        index = (
-            device.index if device.index is not None else torch.cuda.current_device()
         )
-        device_count = torch.cuda.device_count()
-        if index < 0 or index >= device_count:
+        num_eval_episodes = int(trainer_cfg.get("num_eval_episodes", 5))
+        eval_seed = int(trainer_cfg.get("eval_seed", seed + 10_000))
+        headless = bool(trainer_cfg.get("headless", True))
+        renderer = trainer_cfg.get("renderer")
+        gpu_id = int(trainer_cfg.get("gpu_id", 0))
+        num_envs = trainer_cfg.get("num_envs", None)
+        wandb_project_name = trainer_cfg.get(
+            "wandb_project_name", "embodichain-generic"
+        )
+
+        if not isinstance(device_str, str):
             raise ValueError(
-                f"CUDA device index {index} is out of range (available devices: {device_count})."
+                f"runtime.device must be a string such as 'cpu' or 'cuda:0'. Got: {device_str!r}"
             )
-        torch.cuda.set_device(index)
-        device = torch.device(f"cuda:{index}")
-    elif device.type != "cpu":
-        raise ValueError(f"Unsupported device type: {device}")
-    if rank == 0:
-        logger.log_info(f"Device: {device}")
-    if distributed and rank == 0:
-        logger.log_info(f"Distributed training: world_size={world_size}")
+        try:
+            device = torch.device(device_str)
+        except RuntimeError as exc:
+            raise ValueError(
+                f"Failed to parse runtime.device='{device_str}': {exc}"
+            ) from exc
 
-    # Seeds
-    effective_seed = seed + rank
-    _seed_training_rng(effective_seed, device)
-    torch.backends.cudnn.deterministic = True
+        if device.type == "cuda":
+            if not torch.cuda.is_available():
+                raise ValueError(
+                    "CUDA device requested but torch.cuda.is_available() is False."
+                )
+            index = (
+                device.index
+                if device.index is not None
+                else torch.cuda.current_device()
+            )
+            device_count = torch.cuda.device_count()
+            if index < 0 or index >= device_count:
+                raise ValueError(
+                    f"CUDA device index {index} is out of range (available devices: {device_count})."
+                )
+            torch.cuda.set_device(index)
+            device = torch.device(f"cuda:{index}")
+        elif device.type != "cpu":
+            raise ValueError(f"Unsupported device type: {device}")
+        if rank == 0:
+            logger.log_info(f"Device: {device}")
+        if distributed and rank == 0:
+            logger.log_info(f"Distributed training: world_size={world_size}")
 
-    # Outputs
-    if distributed:
-        run_stamp = (
-            f"{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns() % 1_000_000_000:09d}"
-            if rank == 0
+        effective_seed = seed + rank
+        _seed_training_rng(effective_seed, device)
+        torch.backends.cudnn.deterministic = True
+
+        if distributed:
+            run_stamp = (
+                f"{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns() % 1_000_000_000:09d}"
+                if rank == 0
+                else None
+            )
+            run_stamp_list = [run_stamp]
+            torch.distributed.broadcast_object_list(run_stamp_list, src=0)
+            run_stamp = run_stamp_list[0]
+        else:
+            run_stamp = (
+                f"{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns() % 1_000_000_000:09d}"
+            )
+        run_base = os.path.join("outputs", f"{exp_name}_{run_stamp}")
+        log_dir = os.path.join(run_base, "logs")
+        checkpoint_dir = os.path.join(run_base, "checkpoints")
+        if rank == 0:
+            os.makedirs(log_dir, exist_ok=True)
+            os.makedirs(checkpoint_dir, exist_ok=True)
+        writer = SummaryWriter(f"{log_dir}/{exp_name}") if rank == 0 else None
+        if writer is not None:
+            _manage_resource(resources, writer.close, "summary writer")
+
+        use_wandb = trainer_cfg.get("use_wandb", False)
+        if use_wandb and rank == 0:
+            tracking_run = wandb.run
+            if tracking_run is None:
+                tracking_run = wandb.init(
+                    project=wandb_project_name, name=exp_name, config=cfg_data
+                )
+                if tracking_run is not None:
+                    _manage_resource(
+                        resources, tracking_run.finish, "WandB run", ignore_failure=True
+                    )
+
+        if rank == 0:
+            logger.log_info(f"Current working directory: {Path.cwd()}")
+
+        profiler = (
+            EnvProfilerCfg(
+                enable_time=True,
+                output_path=_resolve_profile_output(
+                    profile_output,
+                    rank=rank,
+                    world_size=world_size,
+                ),
+            )
+            if profile
             else None
         )
-        run_stamp_list = [run_stamp]
-        torch.distributed.broadcast_object_list(run_stamp_list, src=0)
-        run_stamp = run_stamp_list[0]
-    else:
-        run_stamp = (
-            f"{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns() % 1_000_000_000:09d}"
-        )
-    run_base = os.path.join("outputs", f"{exp_name}_{run_stamp}")
-    log_dir = os.path.join(run_base, "logs")
-    checkpoint_dir = os.path.join(run_base, "checkpoints")
-    if rank == 0:
-        os.makedirs(log_dir, exist_ok=True)
-        os.makedirs(checkpoint_dir, exist_ok=True)
-    writer = SummaryWriter(f"{log_dir}/{exp_name}") if rank == 0 else None
-
-    # Initialize Weights & Biases (optional)
-    use_wandb = trainer_cfg.get("use_wandb", False)
-    if use_wandb and rank == 0:
-        wandb.init(project=wandb_project_name, name=exp_name, config=cfg_data)
-
-    if rank == 0:
-        logger.log_info(f"Current working directory: {Path.cwd()}")
-
-    profiler = (
-        EnvProfilerCfg(
-            enable_time=True,
-            output_path=_resolve_profile_output(
-                profile_output,
-                rank=rank,
-                world_size=world_size,
-            ),
-        )
-        if profile
-        else None
-    )
-    # Resolve active event callables before constructing the first World.
-    event_modules = [
-        "embodichain.lab.gym.envs.managers.randomization",
-        "embodichain.lab.gym.envs.managers.record",
-        "embodichain.lab.gym.envs.managers.events",
-    ]
-    events_dict = trainer_cfg.get("events", {})
-    train_event_cfg = {}
-    eval_event_cfg = {}
-    # Parse train events
-    for event_name, event_info in events_dict.get("train", {}).items():
-        event_func_str = event_info.get("func")
-        mode = event_info.get("mode", "interval")
-        params = _event_params(event_info, run_base=run_base, phase="train")
-        interval_step = event_info.get("interval_step", 1)
-        event_func = find_function_from_modules(
-            event_func_str, event_modules, raise_if_not_found=True
-        )
-        train_event_cfg[event_name] = EventCfg(
-            func=event_func,
-            mode=mode,
-            params=params,
-            interval_step=interval_step,
-            is_global=event_info.get("is_global", False),
-        )
-    # Parse eval events (only if evaluation is enabled)
-    if enable_eval and rank == 0:
-        for event_name, event_info in events_dict.get("eval", {}).items():
+        # Resolve active event callables before constructing the first World.
+        event_modules = [
+            "embodichain.lab.gym.envs.managers.randomization",
+            "embodichain.lab.gym.envs.managers.record",
+            "embodichain.lab.gym.envs.managers.events",
+        ]
+        events_dict = trainer_cfg.get("events", {})
+        train_event_cfg = {}
+        eval_event_cfg = {}
+        for event_name, event_info in events_dict.get("train", {}).items():
             event_func_str = event_info.get("func")
             mode = event_info.get("mode", "interval")
-            params = _event_params(event_info, run_base=run_base, phase="eval")
+            params = _event_params(event_info, run_base=run_base, phase="train")
             interval_step = event_info.get("interval_step", 1)
             event_func = find_function_from_modules(
                 event_func_str, event_modules, raise_if_not_found=True
             )
-            eval_event_cfg[event_name] = EventCfg(
+            train_event_cfg[event_name] = EventCfg(
                 func=event_func,
                 mode=mode,
                 params=params,
                 interval_step=interval_step,
                 is_global=event_info.get("is_global", False),
             )
-    runtime = build_gym_policy_runtime(
-        cfg_data,
-        device=device,
-        num_envs=num_envs,
-        headless=headless,
-        renderer=renderer,
-        gpu_id=gpu_id,
-        seed=effective_seed,
-        config_dir=Path(config_path).expanduser().resolve().parent,
-        profiler=profiler,
-        trainer_events=(*train_event_cfg.values(), *eval_event_cfg.values()),
-    )
-    env = runtime.env
-    policy = runtime.policy
-    gym_config_path = runtime.gym_config_path
-    gym_config_data = runtime.gym_config
-    gym_env_cfg = runtime.env_cfg
-    if gym_config_path is None or gym_config_data is None or gym_env_cfg is None:
-        raise RuntimeError("Simulator Policy runtime is missing task configuration")
-    if rank == 0:
-        logger.log_info(
-            f"Loaded gym_config from {gym_config_path} (env_id={gym_config_data['id']}, num_envs={gym_env_cfg.num_envs}, headless={gym_env_cfg.sim_cfg.headless}, renderer={gym_env_cfg.sim_cfg.render_cfg.renderer}, device={gym_env_cfg.sim_cfg.device})"
-        )
-
-    # Create evaluation environment only if enabled
-    eval_env = None
-    num_eval_envs = trainer_cfg.get("num_eval_envs", 4)
-    if enable_eval and rank == 0:
-        eval_gym_env_cfg = deepcopy(gym_env_cfg)
-        eval_gym_env_cfg.num_envs = int(num_eval_envs)
-        eval_gym_env_cfg.seed = eval_seed
-        eval_gym_env_cfg.sim_cfg.headless = True
-        eval_gym_env_cfg.profiler = None
-        eval_env = build_env(gym_config_data["id"], base_env_cfg=eval_gym_env_cfg)
-        logger.log_info(
-            f"Evaluation environment created (num_envs={num_eval_envs}, headless=True)"
-        )
-
-    # Environment construction intentionally uses task/evaluation seeds. Reset
-    # the trainer stream so policy initialization is independent of scene work.
-    _seed_training_rng(effective_seed, device)
-
-    policy_name = policy_block["name"]
-
-    # Build Algorithm via factory
-    algo_name = algo_block["name"].lower()
-    algo_cfg = algo_block["cfg"]
-    algo = build_algo(
-        algo_name,
-        algo_cfg,
-        policy,
-        device,
-        distributed=distributed,
-    )
-    if algo.rollout_kind is RolloutKind.DIFFERENTIABLE:
-        raise ValueError(
-            "Differentiable algorithms require trainer.learning_env; "
-            "simulator gym_config environments use standard rollouts."
-        )
-
-    # Build Trainer
-    trainer = Trainer(
-        policy=policy,
-        env=env,
-        algorithm=algo,
-        buffer_size=buffer_size,
-        batch_size=int(algo.cfg.batch_size),
-        writer=writer,
-        eval_freq=eval_freq if enable_eval else 0,  # Disable eval if not enabled
-        save_freq=save_freq,
-        save_frequency_updates=int(trainer_cfg.get("save_frequency_updates", 0)),
-        checkpoint_dir=checkpoint_dir,
-        exp_name=exp_name,
-        use_wandb=use_wandb,
-        eval_env=eval_env,  # None if enable_eval=False
-        event_cfg=train_event_cfg,
-        eval_event_cfg=eval_event_cfg if (enable_eval and rank == 0) else {},
-        num_eval_episodes=num_eval_episodes,
-        distributed=distributed,
-        rank=rank,
-        world_size=world_size,
-        eval_seed=eval_seed,
-        best_eval_metric=trainer_cfg.get("best_eval_metric", "eval/avg_reward"),
-        best_eval_mode=trainer_cfg.get("best_eval_mode", "max"),
-    )
-
-    if rank == 0:
-        logger.log_info("Generic training initialized")
-        logger.log_info(f"Task: {type(env).__name__}")
-        logger.log_info(
-            f"Policy: {policy_name} (available: {get_registered_policy_names()})"
-        )
-        logger.log_info(
-            f"Algorithm: {algo_name} (available: {get_registered_algo_names()})"
-        )
-
-    total_steps = int(iterations * buffer_size * env.num_envs * world_size)
-    if rank == 0:
-        logger.log_info(
-            f"Total steps: {total_steps} (iterations≈{iterations}, world_size={world_size})"
-        )
-
-    try:
-        _configure_checkpoints(
-            trainer,
+        if enable_eval and rank == 0:
+            for event_name, event_info in events_dict.get("eval", {}).items():
+                event_func_str = event_info.get("func")
+                mode = event_info.get("mode", "interval")
+                params = _event_params(event_info, run_base=run_base, phase="eval")
+                interval_step = event_info.get("interval_step", 1)
+                event_func = find_function_from_modules(
+                    event_func_str, event_modules, raise_if_not_found=True
+                )
+                eval_event_cfg[event_name] = EventCfg(
+                    func=event_func,
+                    mode=mode,
+                    params=params,
+                    interval_step=interval_step,
+                    is_global=event_info.get("is_global", False),
+                )
+        runtime = build_gym_policy_runtime(
             cfg_data,
-            config_path,
-            run_base,
-            gym_config=gym_config_path,
-            gym_data=gym_config_data,
+            device=device,
+            num_envs=num_envs,
+            headless=headless,
+            renderer=renderer,
+            gpu_id=gpu_id,
+            seed=effective_seed,
+            config_dir=Path(config_path).expanduser().resolve().parent,
+            profiler=profiler,
+            trainer_events=(*train_event_cfg.values(), *eval_event_cfg.values()),
         )
-        _resume_training(trainer, resume, run, resume_scheduler)
-        trainer.train(total_steps)
-        _save_final_checkpoint(trainer)
-    except KeyboardInterrupt:
+        _manage_resource(
+            resources, runtime.close, "training environment", ignore_failure=True
+        )
+        env = runtime.env
+        policy = runtime.policy
+        gym_config_path = runtime.gym_config_path
+        gym_config_data = runtime.gym_config
+        gym_env_cfg = runtime.env_cfg
+        if gym_config_path is None or gym_config_data is None or gym_env_cfg is None:
+            raise RuntimeError("Simulator Policy runtime is missing task configuration")
         if rank == 0:
-            logger.log_info("Training interrupted by user")
-    finally:
-        if writer is not None:
-            writer.close()
-        if use_wandb and rank == 0:
-            try:
-                wandb.finish()
-            except Exception:
-                pass
+            logger.log_info(
+                f"Loaded gym_config from {gym_config_path} (env_id={gym_config_data['id']}, num_envs={gym_env_cfg.num_envs}, headless={gym_env_cfg.sim_cfg.headless}, renderer={gym_env_cfg.sim_cfg.render_cfg.renderer}, device={gym_env_cfg.sim_cfg.device})"
+            )
 
-        # Clean up environments to prevent resource leaks
+        eval_env = None
+        num_eval_envs = trainer_cfg.get("num_eval_envs", 4)
+        if enable_eval and rank == 0:
+            eval_gym_env_cfg = deepcopy(gym_env_cfg)
+            eval_gym_env_cfg.num_envs = int(num_eval_envs)
+            eval_gym_env_cfg.seed = eval_seed
+            eval_gym_env_cfg.sim_cfg.headless = True
+            eval_gym_env_cfg.profiler = None
+            eval_env = build_env(gym_config_data["id"], base_env_cfg=eval_gym_env_cfg)
+            _manage_resource(
+                resources,
+                lambda: _close_environment(eval_env),
+                "evaluation environment",
+                ignore_failure=True,
+            )
+            logger.log_info(
+                f"Evaluation environment created (num_envs={num_eval_envs}, headless=True)"
+            )
+
+        # Environment construction intentionally uses task/evaluation seeds. Reset
+        # the trainer stream so policy initialization is independent of scene work.
+        _seed_training_rng(effective_seed, device)
+
+        policy_name = policy_block["name"]
+
+        algo_name = algo_block["name"].lower()
+        algo_cfg = algo_block["cfg"]
+        algo = build_algo(
+            algo_name,
+            algo_cfg,
+            policy,
+            device,
+            distributed=distributed,
+        )
+        if algo.rollout_kind is RolloutKind.DIFFERENTIABLE:
+            raise ValueError(
+                "Differentiable algorithms require trainer.learning_env; "
+                "simulator gym_config environments use standard rollouts."
+            )
+
+        trainer = Trainer(
+            policy=policy,
+            env=env,
+            algorithm=algo,
+            buffer_size=buffer_size,
+            writer=writer,
+            eval_freq=eval_freq if enable_eval else 0,  # Disable eval if not enabled
+            save_freq=save_freq,
+            save_frequency_updates=int(trainer_cfg.get("save_frequency_updates", 0)),
+            checkpoint_dir=checkpoint_dir,
+            exp_name=exp_name,
+            use_wandb=use_wandb,
+            eval_env=eval_env,  # None if enable_eval=False
+            event_cfg=train_event_cfg,
+            eval_event_cfg=eval_event_cfg if (enable_eval and rank == 0) else {},
+            num_eval_episodes=num_eval_episodes,
+            distributed=distributed,
+            rank=rank,
+            world_size=world_size,
+            eval_seed=eval_seed,
+            best_eval_metric=trainer_cfg.get("best_eval_metric", "eval/avg_reward"),
+            best_eval_mode=trainer_cfg.get("best_eval_mode", "max"),
+        )
+
+        if rank == 0:
+            logger.log_info("Generic training initialized")
+            logger.log_info(f"Task: {type(env).__name__}")
+            logger.log_info(
+                f"Policy: {policy_name} (available: {get_registered_policy_names()})"
+            )
+            logger.log_info(
+                f"Algorithm: {algo_name} (available: {get_registered_algo_names()})"
+            )
+
+        total_steps = int(iterations * buffer_size * env.num_envs * world_size)
+        if rank == 0:
+            logger.log_info(
+                f"Total steps: {total_steps} (iterations≈{iterations}, world_size={world_size})"
+            )
+
         try:
-            if env is not None:
-                runtime.close()
-        except Exception as e:
+            _configure_checkpoints(
+                trainer,
+                cfg_data,
+                config_path,
+                run_base,
+                gym_config=gym_config_path,
+                gym_data=gym_config_data,
+            )
+            _resume_training(trainer, resume, run, resume_scheduler)
+            trainer.train(total_steps)
+            _save_final_checkpoint(trainer)
+        except KeyboardInterrupt:
             if rank == 0:
-                logger.log_warning(f"Failed to close training environment: {e}")
-
-        try:
-            if eval_env is not None:
-                _close_environment(eval_env)
-        except Exception as e:
-            if rank == 0:
-                logger.log_warning(f"Failed to close evaluation environment: {e}")
-
-        if distributed and torch.distributed.is_initialized():
-            torch.distributed.destroy_process_group()
-
+                logger.log_info("Training interrupted by user")
     if rank == 0:
         logger.log_info("Training finished")
 
@@ -742,6 +745,11 @@ def _checkpoint_context(cfg_data: dict, gym_data: dict | None = None) -> dict:
     result = {"policy": policy, "learning_env": trainer.get("learning_env")}
     if gym_data is not None:
         result["gym"] = gym_data
+        train_events = trainer.get("events", {}).get("train", {})
+        if train_events:
+            # Raw declarations are stable across runs; resolved recorder output
+            # directories and instantiated functors are runtime-owned state.
+            result["train_events"] = train_events
     result["best_eval_metric"] = trainer.get("best_eval_metric", "eval/avg_reward")
     result["best_eval_mode"] = trainer.get("best_eval_mode", "max")
     return result
@@ -950,6 +958,11 @@ def cli(argv: Sequence[str] | None = None) -> None:
 
     # Discover all installed task packages and run init hooks (register custom
     # manager modules / asset resolvers) before building any environment.
+    from embodichain.lab.gym.utils.registration import (
+        discover_task_packages,
+        execute_init_hooks,
+    )
+
     discover_task_packages()
     execute_init_hooks()
 

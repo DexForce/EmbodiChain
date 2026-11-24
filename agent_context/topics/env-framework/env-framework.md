@@ -130,8 +130,10 @@ use the qualified synchronous receipt owner, not the ordinary reset recorder.
 `episode_prepare` callback runs after reset events and before physical objectives
 and final observations; it is not a functor parameter. Recording starts from
 that final observation. Optional info snapshots may be disabled for batched RL
-without disabling context lifecycle or recorder metadata. Row UUIDs/segments
-remain independently owned; see [scene expansion](../scene-expansion/scene-expansion.md).
+without disabling context lifecycle or recorder metadata. Official flat-velocity
+RL deployments set `episode_context_in_info: false` in their environment configs;
+explicit `episode_context.snapshot()` remains available. Row UUIDs/segments remain
+independently owned; see [scene expansion](../scene-expansion/scene-expansion.md).
 
 Failed constructors defer native cleanup and preserve the original error.
 Finalize initialized dataset managers first, release scene locals/tracebacks,

@@ -569,7 +569,6 @@ def test_composed_checkpoint_continues_optimizer_state(tmp_path):
             env,
             algorithm,
             buffer_size=3,
-            batch_size=6,
             writer=None,
             eval_freq=0,
             save_freq=0,
@@ -646,7 +645,7 @@ def test_custom_auxiliary_override_remains_supported_without_registered_tasks(
 ):
     class CustomObjective(ActorCritic):
         def auxiliary_loss(self, batch, evaluated):
-            return evaluated["action_mean"].square().mean()
+            return (evaluated["action_mean"] - batch["custom_target"]).square().mean()
 
     def policy(cls):
         return cls(
@@ -656,14 +655,32 @@ def test_custom_auxiliary_override_remains_supported_without_registered_tasks(
     custom = policy(CustomObjective if override_style == "subclass" else ActorCritic)
     if override_style == "instance":
         custom.auxiliary_loss = (
-            lambda batch, evaluated: evaluated["action_mean"].square().mean()
+            lambda batch, evaluated: (evaluated["action_mean"] - batch["custom_target"])
+            .square()
+            .mean()
         )
-    PPO(PPOCfg(device="cpu", auxiliary_coef=1.0), custom)
-    td = TensorDict({"obs": torch.ones(2, 3)}, batch_size=[2])
+    algorithm = PPO(PPOCfg(device="cpu", auxiliary_coef=1.0, n_epochs=1), custom)
+    td = TensorDict(
+        {"obs": torch.ones(2, 3), "custom_target": torch.ones(2, 2)}, batch_size=[2]
+    )
     custom.get_action(td)
     evaluated = custom.evaluate_actions(td)
     custom.auxiliary_loss(td, evaluated).backward()
     assert custom.actor.weight.grad.abs().sum() > 0
+    rollout = RolloutBuffer(2, 2, 3, 2, custom.device).start_rollout()
+    rollout["obs"].fill_(1.0)
+    rollout["reward"].fill_(1.0)
+    rollout["custom_target"] = torch.ones(2, 3, 2)
+    for name in (
+        "action",
+        "sample_log_prob",
+        "value",
+        "done",
+        "terminated",
+        "truncated",
+    ):
+        rollout[name].zero_()
+    assert algorithm.update(rollout)["auxiliary_loss"] > 0
     with pytest.raises(ValueError, match="configured tasks"):
         PPO(PPOCfg(device="cpu", auxiliary_coef=1.0), policy(ActorCritic))
 
@@ -723,7 +740,6 @@ def test_component_checkpoint_contract_rejects_shape_preserving_objective_change
             _LabelEnv(93),
             algorithm,
             buffer_size=3,
-            batch_size=6,
             writer=None,
             eval_freq=0,
             save_freq=0,

@@ -28,7 +28,6 @@ from tensordict import TensorDict
 
 from embodichain.learning.rl.collector import DifferentiableRollout
 from embodichain.learning.rl.utils import (
-    LRSchedulerCfg,
     OptimizerCfg,
     build_optimizer,
     coerce_optimizer_cfg,

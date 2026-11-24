@@ -22,10 +22,14 @@ from typing import Dict
 import torch
 from tensordict import TensorDict
 
-from embodichain.learning.rl.buffer import transition_view
 from embodichain.learning.rl.utils import AlgorithmCfg, coerce_lr_scheduler_cfg
 from embodichain.utils import configclass
-from .common import _update_observation_normalization, compute_gae
+from .common import (
+    _resolve_training_input_spec,
+    _training_transition_view,
+    _update_observation_normalization,
+    compute_gae,
+)
 from .base import BaseAlgorithm
 
 __all__ = ["PPO", "PPOCfg"]
@@ -103,7 +107,11 @@ class PPO(BaseAlgorithm[TensorDict]):
         # clone isolates those fields without copying the entire GPU rollout.
         rollout = rollout.clone(recurse=False)
         compute_gae(rollout, gamma=self.cfg.gamma, gae_lambda=self.cfg.gae_lambda)
-        flat_rollout = transition_view(rollout, flatten=True)
+        fields = ("sample_log_prob", "return", "advantage", "value")
+        if self.cfg.schedule == "adaptive":
+            fields += ("action_mean", "action_std")
+        input_spec = _resolve_training_input_spec(self.policy)
+        flat_rollout = _training_transition_view(rollout, input_spec, fields)
 
         if not self.cfg.normalize_advantage_per_mini_batch:
             advantages = flat_rollout["advantage"]
@@ -113,19 +121,20 @@ class PPO(BaseAlgorithm[TensorDict]):
                 advantages.std(unbiased=advantages.numel() > 1) + 1e-8
             )
 
-        total_actor_loss = 0.0
-        total_value_loss = 0.0
-        total_action_bound_loss = 0.0
-        total_entropy = 0.0
+        # Match Python scalar accumulation precision without synchronizing each
+        # minibatch merely to report metrics.
+        total_metrics = torch.zeros(5, dtype=torch.float64, device=self.device)
         total_kl = 0.0
-        total_auxiliary_loss = 0.0
         total_steps = 0
 
         for _ in range(self.cfg.n_epochs):
             for indices in self._minibatch_indices(flat_rollout.batch_size[0]):
                 batch = flat_rollout[indices]
-                old_logprobs = batch["sample_log_prob"].clone()
-                returns = batch["return"].clone()
+                old_logprobs = batch["sample_log_prob"]
+                returns = batch["return"]
+                if input_spec.mutates_inputs:
+                    old_logprobs = old_logprobs.clone()
+                    returns = returns.clone()
                 batch_advantages = batch["advantage"]
                 if self.cfg.normalize_advantage_per_mini_batch:
                     batch_advantages = (batch_advantages - batch_advantages.mean()) / (
@@ -165,24 +174,34 @@ class PPO(BaseAlgorithm[TensorDict]):
                 self.optimizer.step()
 
                 bs = batch.batch_size[0]
-                total_actor_loss += actor_loss.item() * bs
-                total_value_loss += value_loss.item() * bs
-                total_action_bound_loss += action_bound_loss.item() * bs
-                total_entropy += (-entropy_loss.item()) * bs
+                total_metrics.add_(
+                    torch.stack(
+                        (
+                            actor_loss.detach(),
+                            value_loss.detach(),
+                            action_bound_loss.detach(),
+                            -entropy_loss.detach(),
+                            auxiliary_loss.detach(),
+                        )
+                    ).to(torch.float64),
+                    alpha=bs,
+                )
                 total_kl += kl * bs
-                total_auxiliary_loss += auxiliary_loss.item() * bs
                 total_steps += bs
 
         self._step_scheduler()
-        _update_observation_normalization(self.policy, rollout)
+        _update_observation_normalization(self.policy, rollout, input_spec)
+        actor, value, action_bound, entropy, auxiliary = (
+            total_metrics / max(1, total_steps)
+        ).tolist()
         return {
-            "actor_loss": total_actor_loss / max(1, total_steps),
-            "value_loss": total_value_loss / max(1, total_steps),
-            "action_bound_loss": total_action_bound_loss / max(1, total_steps),
-            "entropy": total_entropy / max(1, total_steps),
+            "actor_loss": actor,
+            "value_loss": value,
+            "action_bound_loss": action_bound,
+            "entropy": entropy,
             "kl": total_kl / max(1, total_steps),
             "learning_rate": self.current_learning_rate(),
-            "auxiliary_loss": total_auxiliary_loss / max(1, total_steps),
+            "auxiliary_loss": auxiliary,
         }
 
     def _minibatch_indices(self, total: int) -> tuple[torch.Tensor, ...]:

@@ -22,6 +22,10 @@ import random
 import json
 from unittest.mock import Mock
 import importlib
+from pathlib import Path
+from types import SimpleNamespace
+import subprocess
+import sys
 
 import numpy as np
 import pytest
@@ -34,6 +38,31 @@ from embodichain.learning.rl.train import (
     parse_args,
     train_from_config,
 )
+
+
+def test_learning_entry_imports_do_not_load_simulator() -> None:
+    script = """
+import importlib.abc
+import sys
+
+class RejectSimulation(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in {"embodichain.lab.gym", "embodichain.lab.sim"}:
+            raise AssertionError(f"Unexpected simulator import: {fullname}")
+
+sys.meta_path.insert(0, RejectSimulation())
+from embodichain.learning.rl.runtime import build_learning_policy_runtime
+from embodichain.learning.rl.train import parse_args
+assert parse_args(["--config", "learning.yaml"]).config == "learning.yaml"
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_parse_args_profile_flags():
@@ -108,6 +137,7 @@ def test_training_passes_only_explicit_renderer_override(
         train_from_config(str(config_path))
 
     assert build_runtime.call_args.kwargs["renderer"] == renderer
+    module.SummaryWriter.return_value.close.assert_called_once_with()
 
 
 def test_camera_recording_defaults_to_the_run_directory(tmp_path):
@@ -150,3 +180,130 @@ def test_active_recording_events_are_resolved_before_first_environment(
     assert len(events) == expected
     if expected:
         assert events[0].func is record_camera_data_async
+
+
+@pytest.mark.parametrize("failure_stage", ["evaluation", "algorithm", "trainer"])
+def test_learning_setup_failure_releases_acquired_resources(
+    tmp_path, monkeypatch, failure_stage
+):
+    module = importlib.import_module("embodichain.learning.rl.train")
+    config = {
+        "trainer": {"learning_env": "example", "enable_eval": True, "use_wandb": True},
+        "policy": {},
+        "algorithm": {"name": "ppo"},
+    }
+    config_path = tmp_path / "train.json"
+    config_path.write_text(json.dumps(config))
+    monkeypatch.chdir(tmp_path)
+    runtime = SimpleNamespace(
+        env=object(), policy=object(), env_id="example", close=Mock()
+    )
+    evaluation = SimpleNamespace(close=Mock())
+    build_eval = Mock(return_value=("example", evaluation))
+    build_algorithm = Mock(
+        return_value=SimpleNamespace(cfg=SimpleNamespace(batch_size=4))
+    )
+    build_trainer = Mock(side_effect=ValueError("setup failed"))
+    monkeypatch.setattr(
+        module, "build_learning_policy_runtime", Mock(return_value=runtime)
+    )
+    monkeypatch.setattr(module, "_build_learning_environment", build_eval)
+    monkeypatch.setattr(module, "build_algo", build_algorithm)
+    monkeypatch.setattr(module, "get_trainer_class", lambda _: build_trainer)
+    monkeypatch.setattr(module, "Trainer", build_trainer)
+    writer = Mock()
+    # A failing teardown must neither hide the setup error nor skip the environments.
+    writer.close.side_effect = RuntimeError("writer cleanup failed")
+    monkeypatch.setattr(module, "SummaryWriter", Mock(return_value=writer))
+    tracking = SimpleNamespace(run=None, init=Mock(return_value=Mock()))
+    monkeypatch.setattr(module, "wandb", tracking)
+    warn = Mock()
+    monkeypatch.setattr(module.logger, "log_warning", warn)
+    if failure_stage == "evaluation":
+        build_eval.side_effect = ValueError("setup failed")
+    elif failure_stage == "algorithm":
+        build_algorithm.side_effect = ValueError("setup failed")
+
+    with pytest.raises(ValueError, match="setup failed"):
+        train_from_config(str(config_path))
+
+    runtime.close.assert_called_once_with()
+    assert evaluation.close.call_count == (failure_stage != "evaluation")
+    assert writer.close.call_count == (failure_stage == "trainer")
+    assert tracking.init.return_value.finish.call_count == (failure_stage == "trainer")
+    if failure_stage == "trainer":
+        assert "writer cleanup failed" in warn.call_args.args[0]
+
+
+@pytest.mark.parametrize("borrowed", [False, True])
+def test_training_only_finishes_its_own_tracking_run(tmp_path, monkeypatch, borrowed):
+    module = importlib.import_module("embodichain.learning.rl.train")
+    config_path = tmp_path / "train.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "trainer": {"gym_config": "task.yaml", "use_wandb": True},
+                "policy": {},
+                "algorithm": {},
+            }
+        )
+    )
+    monkeypatch.chdir(tmp_path)
+    tracking_run = Mock()
+    tracking = SimpleNamespace(
+        run=tracking_run if borrowed else None, init=Mock(return_value=tracking_run)
+    )
+    monkeypatch.setattr(module, "wandb", tracking)
+    monkeypatch.setattr(module, "SummaryWriter", Mock())
+    monkeypatch.setattr(
+        module, "build_gym_policy_runtime", Mock(side_effect=ValueError("setup failed"))
+    )
+
+    with pytest.raises(ValueError, match="setup failed"):
+        train_from_config(str(config_path))
+
+    assert tracking_run.finish.call_count == (not borrowed)
+    assert tracking.init.call_count == (not borrowed)
+    module.SummaryWriter.return_value.close.assert_called_once_with()
+
+
+@pytest.mark.parametrize("borrowed", [False, True])
+def test_training_only_destroys_its_own_process_group(tmp_path, monkeypatch, borrowed):
+    module = importlib.import_module("embodichain.learning.rl.train")
+    config_path = tmp_path / "train.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "trainer": {"gym_config": "task.yaml", "distributed": True},
+                "policy": {},
+                "algorithm": {},
+            }
+        )
+    )
+    monkeypatch.setenv("LOCAL_RANK", "0")
+    for name, value in (
+        ("is_available", True),
+        ("device_count", 1),
+        ("current_device", 0),
+    ):
+        monkeypatch.setattr(torch.cuda, name, Mock(return_value=value))
+    monkeypatch.setattr(torch.cuda, "set_device", Mock())
+    for name, value in (
+        ("is_available", True),
+        ("is_initialized", borrowed),
+        ("get_rank", 0),
+        ("get_world_size", 1),
+    ):
+        monkeypatch.setattr(torch.distributed, name, Mock(return_value=value))
+    initialize, destroy = Mock(), Mock()
+    monkeypatch.setattr(torch.distributed, "init_process_group", initialize)
+    monkeypatch.setattr(torch.distributed, "destroy_process_group", destroy)
+    monkeypatch.setattr(
+        module, "_seed_training_rng", Mock(side_effect=ValueError("setup failed"))
+    )
+
+    with pytest.raises(ValueError, match="setup failed"):
+        train_from_config(str(config_path))
+
+    assert initialize.call_count == (not borrowed)
+    assert destroy.call_count == (not borrowed)

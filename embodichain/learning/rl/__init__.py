@@ -14,9 +14,9 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""On-policy reinforcement learning pipeline.
+"""Standard and differentiable reinforcement-learning pipelines.
 
-Algorithms (PPO/GRPO), rollout buffers, collectors, and the training entry point; rollout data flows as ``TensorDict`` objects.
+PPO/GRPO use TensorDict buffers; APG variants use graph-connected rollouts.
 """
 
 from __future__ import annotations

@@ -33,7 +33,9 @@ Read this when the request needs these details. [Topic overview](env-framework.m
   `_initialize_episode()` for reset events and managers, and `_after_episode_reset()`
   to seed the authoritative first recording frame.
 - Overrides `_update_sim_state()` to run event-manager `interval` mode.
-- Manages rollout buffer (expert or RL mode) via `_hook_after_sim_step()`.
+- Writes expert or explicitly bound legacy RL buffers via `_hook_after_sim_step()`.
+  Standard RL collection owns its training storage and only lends action history;
+  see [RL storage boundaries](../rl-learning/training.md#execution-and-storage-boundaries).
 - Owns per-row demonstration metadata and dense segment acceptance, attempt,
   and causal-continuity annotations.
 - `extensions` dict entries are set as attributes on both cfg and env instance.
@@ -240,9 +242,15 @@ step(action)
   ├── _postprocess_action(action)     # BaseEnv no-op; no action post mode
   ├── elapsed_steps += 1
   ├── compute terminateds (success | fail), truncateds (time limit)
-  ├── _hook_after_sim_step()         # rollout buffer write
+  ├── _hook_after_sim_step()         # expert / explicitly bound legacy writes
   └── auto-reset done envs → reset(reset_ids)
 ```
+
+Before auto-reset, `BaseEnv.step()` preserves reward and termination tensors
+even when task implementations return reset-owned views. Terminal observations
+describe the completed rows, while returned live observations describe reset
+states. Collector action-history scopes activate the same lazy episode identity
+metadata as explicit buffers; metadata survives the scope for later outcomes.
 
 ---
 
@@ -355,7 +363,7 @@ not orchestrate multiple experiments or qualify kinematic playback.
   and control replay restore complete particle states at each recorded boundary;
   dynamic replay restores only the initial particle state and recomputes later
   fluid motion from recorded actions.
-- **Policy projection**: `rollout_buffer` retains actual policy observations,
+- **Policy projection**: explicit `rollout_buffer` bindings retain policy observations,
   including sampled noise, and its existing obs/action/reward alignment for
   LeRobot/RL. It shares the acquisition boundary with raw history, rather than
   being used as a substitute for physical state. Learner-owned rollout storage
@@ -395,6 +403,11 @@ are strict JSON copies for async writers. Neither eligibility nor geometry evide
 changes task success. Save/discard failure leaves the old episode and scene intact;
 initialization/first-frame failure blocks the selected new rows.
 
+Row selections are owned snapshots. Operations that need Python row bookkeeping
+reuse that host selection for validation instead of uploading and reading it back
+again. Context snapshots transfer selected eligibility/initialization states
+together; custom `filter_recordable` overrides retain their eligibility rule.
+
 `commit_env_ids` retains dataset-only selection, including with `save_data=False`.
 All normal output selections also intersect context eligibility. Explicit
 `purpose="diagnostic"` trajectory/camera exports retain failure evidence separately
@@ -409,3 +422,8 @@ sample. Demo provenance is created when recording metadata is requested;
 episode initialization refreshes it once it has been used. Ordinary RL resets
 do not enumerate empty recording histories on the host. Metadata snapshots
 retain deep-copy and episode-context ownership.
+Reset skips the trajectory/camera eligibility snapshot when saving is disabled,
+or when no auto-saving trajectory buffer or event manager can consume it. With
+consumers present, eligibility is captured before save callbacks run; camera
+functors are still resolved after those callbacks. Dataset commits filter their
+own row subset, including explicit commits with `save_data=False`.
