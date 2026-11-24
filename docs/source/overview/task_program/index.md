@@ -57,7 +57,7 @@ checkout is only needed for the separate maintainer checks.
 | Select components, validate a deployment, or track policy progress | {doc}`deployment` | {doc}`troubleshooting` for failures |
 | Learn the language without starting simulation | {doc}`/tutorial/task_program_python` | {doc}`architecture` |
 | Bind a new scene, robot or skill | {doc}`/tutorial/task_program` | {doc}`scene_registry`, {doc}`robot_profiles` |
-| Understand the compiler and runtime | {doc}`architecture` | {doc}`/api_reference/embodichain/embodichain.lab.task_program` |
+| Trace the system architecture, callable modules, and execution workflow | {doc}`architecture` | {doc}`/api_reference/embodichain/embodichain.lab.task_program` |
 
 ## How do I know it worked?
 
@@ -104,7 +104,7 @@ links remain available below.
 
 <a id="semantic-layer"></a>
 
-[Semantic layer](architecture.md#semantic-layer)
+[Available calls and services](architecture.md#what-a-program-can-call)
 
 <a id="program-schema"></a>
 
