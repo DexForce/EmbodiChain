@@ -20,9 +20,9 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Mapping
-import numpy as np
 import torch
 
+from embodichain.extensions.models.policy.nmg import NeuralMotionGenerator
 from embodichain.lab.sim.motion.planners.base_planner import (
     BasePlanner,
     BasePlannerCfg,
@@ -194,106 +194,6 @@ class _WaypointObservationLayout:
         return torch.cat(values, dim=-1)
 
 
-class _OnnxPolicy:
-    """Small ONNX Runtime wrapper that keeps NMG model code out of EmbodiChain."""
-
-    def __init__(
-        self,
-        path: Path,
-        providers: list[str] | None = None,
-        *,
-        cuda_use_tf32: bool | None = None,
-        device: torch.device | None = None,
-    ) -> None:
-        if cuda_use_tf32 is not None and type(cuda_use_tf32) is not bool:
-            raise TypeError("onnx_cuda_use_tf32 must be a bool or None.")
-        try:
-            import onnxruntime as ort
-        except ImportError as exc:
-            raise ImportError(
-                "NeuralPlanner requires ONNX Runtime. Install it with "
-                "pip install 'embodichain[policy-deploy]'."
-            ) from exc
-
-        options = ort.SessionOptions()
-        # Respect the host's CPU budget, including isolated benchmark workers;
-        # ORT's default otherwise creates its own machine-sized thread pool.
-        options.intra_op_num_threads = torch.get_num_threads()
-        options.inter_op_num_threads = 1
-        options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        cuda_options = {}
-        if device is not None and device.type == "cuda":
-            # ORT otherwise defaults to device 0 independently of Torch's
-            # current device. These are process-local CUDA ordinals.
-            cuda_options["device_id"] = str(
-                torch.cuda.current_device() if device.index is None else device.index
-            )
-        if cuda_use_tf32 is not None:
-            cuda_options["use_tf32"] = "1" if cuda_use_tf32 else "0"
-        provider_kwargs = {}
-        if cuda_options:
-            if providers is None:
-                # Explicit CUDA settings use the CUDA/CPU path; do not enable
-                # every available EP (for example TensorRT).
-                available = ort.get_available_providers()
-                providers = [
-                    name
-                    for name in ("CUDAExecutionProvider", "CPUExecutionProvider")
-                    if name in available
-                ]
-            provider_kwargs["provider_options"] = [
-                dict(cuda_options) if name == "CUDAExecutionProvider" else {}
-                for name in providers
-            ]
-        self.session = ort.InferenceSession(
-            str(path), sess_options=options, providers=providers, **provider_kwargs
-        )
-        logger.log_info(
-            "NMG ONNX execution providers: " + ", ".join(self.session.get_providers())
-        )
-        inputs = self.session.get_inputs()
-        outputs = self.session.get_outputs()
-        if len(inputs) != 1 or len(outputs) != 1:
-            raise ValueError(
-                "NMG ONNX policy must expose exactly one input and one output; "
-                f"got {len(inputs)} inputs and {len(outputs)} outputs."
-            )
-        self.input_name = inputs[0].name
-        self.output_name = outputs[0].name
-        input_shape = inputs[0].shape
-        output_shape = outputs[0].shape
-        if len(input_shape) != 2 or not isinstance(input_shape[1], int):
-            raise ValueError(
-                f"Expected ONNX input shape [batch, obs], got {input_shape}."
-            )
-        if (
-            len(output_shape) != 2
-            or not isinstance(output_shape[1], int)
-            or output_shape[1] < 1
-        ):
-            raise ValueError(
-                f"Expected ONNX output shape [batch, joints], got {output_shape}."
-            )
-        self.obs_dim = int(input_shape[1])
-        self.output_dim = int(output_shape[1])
-        self.observation_metadata = dict(
-            self.session.get_modelmeta().custom_metadata_map
-        )
-        self.fixed_batch_size = (
-            int(input_shape[0]) if isinstance(input_shape[0], int) else None
-        )
-
-    def __call__(self, obs: torch.Tensor) -> torch.Tensor:
-        if self.fixed_batch_size is not None and obs.shape[0] != self.fixed_batch_size:
-            raise ValueError(
-                f"ONNX policy has fixed batch size {self.fixed_batch_size}, "
-                f"but received {obs.shape[0]}."
-            )
-        obs_np = np.ascontiguousarray(obs.detach().cpu().numpy(), dtype=np.float32)
-        action = self.session.run([self.output_name], {self.input_name: obs_np})[0]
-        return torch.as_tensor(action, dtype=torch.float32, device=obs.device)
-
-
 def _waypoint_obs_dim(
     num_waypoints: int,
     use_relative_obs: bool,
@@ -330,8 +230,13 @@ def _quat_mul_xyzw(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
 
 
 def _canonicalize_quat_xyzw(q: torch.Tensor) -> torch.Tensor:
-    """Map equivalent quaternion signs to the training-time ``w >= 0`` half."""
-    return torch.where(q[..., 3:4] < 0.0, -q, q)
+    """Choose a consistent XYZW sign near a half-turn in float32."""
+    eps = 1.0e-6
+    x, y, z, w = q.split(1, dim=-1)
+    # Extend NMG's X/Y/Z tie-break around w=0 to absorb FK roundoff.
+    axis = torch.where(x.abs() > eps, x, torch.where(y.abs() > eps, y, z))
+    sign_source = torch.where(w.abs() <= eps, axis, w)
+    return torch.where(sign_source < 0.0, -q, q)
 
 
 @configclass
@@ -523,14 +428,6 @@ class NeuralPlanner(BasePlanner):
         return options
 
     def _load_onnx_model(self, model_path: Path) -> None:
-        if not model_path.exists():
-            logger.log_error(f"ONNX policy not found: {model_path}", FileNotFoundError)
-        if model_path.suffix.lower() != ".onnx":
-            raise ValueError(
-                "NeuralPlanner only accepts standalone .onnx policies; "
-                f"got {model_path}."
-            )
-
         self._num_waypoints = int(self.cfg.num_waypoints)
         self._use_relative_obs = bool(self.cfg.use_relative_obs)
         self._canonicalize_quat_obs = bool(self.cfg.canonicalize_quat_obs)
@@ -543,9 +440,10 @@ class NeuralPlanner(BasePlanner):
         self._rot_eps = float(self.cfg.rot_eps)
         self._joint_eps = float(self.cfg.joint_eps)
         self._intermediate_orientation = bool(self.cfg.intermediate_orientation)
-        self._policy = _OnnxPolicy(
+        self._policy = NeuralMotionGenerator.from_onnx(
             model_path,
-            self.cfg.onnx_providers,
+            enable_grad=False,
+            providers=self.cfg.onnx_providers,
             cuda_use_tf32=self.cfg.onnx_cuda_use_tf32,
             device=self.device,
         )
@@ -845,7 +743,7 @@ class NeuralPlanner(BasePlanner):
                 active_idx,
                 last_action,
             )
-            action = self._policy(obs).clamp(-1.0, 1.0)
+            action = self._policy(obs.to(dtype=torch.float32)).clamp(-1.0, 1.0)
             forward_calls += 1
             active = ~converged & (step < step_limits)
             action = torch.where(active.unsqueeze(-1), action, torch.zeros_like(action))

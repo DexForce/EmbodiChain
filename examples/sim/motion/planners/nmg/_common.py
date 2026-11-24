@@ -19,13 +19,22 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 import hashlib
 import json
+import math
 from pathlib import Path
 import time
+from typing import TYPE_CHECKING
 
 from embodichain.cli.sim import add_sim_args_to_parser
 from embodichain.data.assets import download_neural_planner_checkpoint
+
+if TYPE_CHECKING:
+    from embodichain.lab.sim import SimulationManager
+    from embodichain.lab.sim.motion.planners import PlanResult
+    from embodichain.lab.sim.objects import Robot
+    from examples.sim.motion.planners.nmg._visuals import TrajectoryMarkers
 
 # Pin immutable model bytes; a moving main branch must not change a demo.
 _REVISION = "ddca0e456e097ba42c05e1269febf73fa2835541"
@@ -33,12 +42,20 @@ _SHA256 = {
     "franka": "2361954fda7b6f0d21445ebfb5099d31bdd67199bdadcecba71e0835f2157ad5",
     "piper": "223a02d7f1c3db1ea96352404f623ebfde7e1b00f3bc3d7a186a634dfea5ecf0",
 }
+_FPS = 25
+_PHASE_HOLD_SECONDS = 0.5
 
 
 def _parse_args(robot_name: str) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=f"NMG v1 {robot_name} example")
     add_sim_args_to_parser(parser)
     parser.set_defaults(arena_space=2.0)
+    parser.add_argument(
+        "--scenario",
+        choices=["free-motion", "closed-loop-perturbation"],
+        default="free-motion",
+        help="Replay a timed free-space plan or drive the arm with live NMG feedback.",
+    )
     parser.add_argument(
         "--model-path",
         type=Path,
@@ -91,6 +108,66 @@ def _model_path(robot_name: str, args: argparse.Namespace) -> Path:
     return path
 
 
+def _play_free_motion(
+    sim: SimulationManager,
+    robot: Robot,
+    result: PlanResult,
+    waypoint_indices: Sequence[int],
+    joint_ids: Sequence[int],
+    control_dt: float,
+    markers: TrajectoryMarkers | None,
+) -> dict[str, object]:
+    """Replay rest-to-rest phases and sample the measured TCP for display."""
+    from embodichain.compute.trajectory import retime_to_control_grid
+    from embodichain.lab.sim.motion.execution import (
+        JointTrajectoryPlaybackCfg,
+        play_joint_trajectory,
+    )
+
+    previous = 0
+    playback_seconds = 0.0
+    tracking_errors = []
+    for slot, end in enumerate(waypoint_indices):
+        phase_dt = result.dt[:, previous : end + 1].clone()
+        phase_dt[:, 0] = 0
+        phase_positions = result.positions[:, previous : end + 1]
+        if markers is not None:
+            # Regrid once so the source callback samples actual control steps.
+            phase_positions, _, phase_dt, _ = retime_to_control_grid(
+                phase_positions, phase_dt, control_dt
+            )
+            markers.show_targets(slot, active=slot)
+        executed = play_joint_trajectory(
+            sim,
+            robot,
+            positions=phase_positions,
+            dt=phase_dt,
+            joint_ids=joint_ids,
+            cfg=JointTrajectoryPlaybackCfg(
+                control_dt=control_dt,
+                joint_command_mode="position_velocity",
+                preserve_source_grid=markers is not None,
+            ),
+            on_step=markers.observe if markers is not None else None,
+        )
+        if markers is not None:
+            markers.show_targets(slot + 1)
+        # Advance holds at the physics cadence so recording covers the settle.
+        for _ in range(round(_PHASE_HOLD_SECONDS / sim.sim_config.physics_dt)):
+            sim.update(step=1)
+        measured = robot.get_qpos(name="arm")
+        if markers is not None:
+            markers.record_tip(measured)
+        tracking_errors.append(float((measured - result.positions[:, end]).abs().max()))
+        playback_seconds += float(executed.dt.sum()) + _PHASE_HOLD_SECONDS
+        previous = end
+    return {
+        "simulation_playback": "completed",
+        "playback_duration_s": playback_seconds,
+        "measured_tracking_error_rad": tracking_errors,
+    }
+
+
 def run(
     robot_name: str,
     *,
@@ -110,6 +187,8 @@ def run(
             raise ValueError("--video requires a renderer; omit --renderer no-render.")
         if args.renderer == "auto":
             args.renderer = "fast-rt"
+    elif args.headless and not args.web and args.renderer == "auto":
+        args.renderer = "no-render"
     model_path = _model_path(robot_name, args)
     if args.download_only:
         return
@@ -119,12 +198,8 @@ def run(
     import torch
 
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-    from embodichain.lab.sim.cfg import MarkerCfg, RenderCfg, physics_cfg_for_backend
+    from embodichain.lab.sim.cfg import RenderCfg, physics_cfg_for_backend
     from embodichain.lab.visualization import visualization_cfg_from_args
-    from embodichain.lab.sim.motion.execution import (
-        JointTrajectoryPlaybackCfg,
-        play_joint_trajectory,
-    )
     from embodichain.lab.sim.motion.motion_generator import (
         MotionGenCfg,
         MotionGenOptions,
@@ -133,7 +208,13 @@ def run(
     from embodichain.lab.sim.motion.planners import NeuralPlannerCfg, PlanState
     from embodichain.lab.sim.motion.planners.neural_planner import NeuralPlanOptions
     from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
+    from examples.sim.motion.planners.nmg._closed_loop import (
+        FINAL_HOLD_SECONDS,
+        MAX_STEPS_PER_TARGET,
+        play_closed_loop,
+    )
     from examples.sim.motion.planners.nmg._robots import make_robot_cfg
+    from examples.sim.motion.planners.nmg._visuals import TrajectoryMarkers
 
     # Avoid machine-sized Torch/ORT thread pools for the small actor batch.
     torch.set_num_threads(min(torch.get_num_threads(), 4))
@@ -206,19 +287,6 @@ def run(
             )
             for i, kind in enumerate(modalities)
         ]
-        display_poses = goal_poses[0].detach().cpu().numpy().copy()
-        display_poses[:, :3, 3] += sim.arena_offsets[0].detach().cpu().numpy()
-        sim.draw_marker(
-            MarkerCfg(
-                name="nmg_goals",
-                marker_type="axis",
-                axis_xpos=list(display_poses),
-                axis_len=0.04,
-                axis_size=0.003,
-                arena_index=-1,
-            )
-        )
-
         control_dt = 4 * sim.sim_config.physics_dt
         generator = MotionGenerator(
             MotionGenCfg(
@@ -255,6 +323,7 @@ def run(
         )
         report = {
             "robot": robot_name,
+            "scenario": args.scenario,
             "revision": _REVISION,
             "sha256": _SHA256[robot_name],
             "modalities": modalities,
@@ -290,47 +359,68 @@ def run(
                     (q[0] - goal_qpos[0, slot]).abs().max()
                 )
             report["arrivals"].append(entry)
+        succeeded = result.is_all_success()
+        waypoint_indices = (
+            result.waypoint_indices[0].cpu().tolist() if succeeded else []
+        )
+        markers = None
+        if waypoint_indices and (
+            args.video or args.web or (not args.headless and sim.has_native_renderer)
+        ):
+            markers = TrajectoryMarkers(
+                sim,
+                robot,
+                goal_poses[0],
+                result.xpos_list[0],
+                waypoint_indices,
+                modalities,
+            )
+
         # A geometric failure is reported, never passed off as a completed motion.
-        if result.is_all_success() and not args.no_playback:
+        if succeeded and not args.no_playback:
+            feedback = args.scenario == "closed-loop-perturbation"
             if args.video:
+                if feedback:
+                    recording_seconds = (
+                        MAX_STEPS_PER_TARGET * len(targets) + 1
+                    ) * control_dt + FINAL_HOLD_SECONDS
+                else:
+                    recording_seconds = float(result.duration[0]) + len(targets) * (
+                        _PHASE_HOLD_SECONDS + control_dt
+                    )
+                # The recorder holds RGB frames in memory. Budget for the full
+                # sequence, including the control-grid rounding and settles.
+                frame_count = math.ceil(recording_seconds * _FPS) + 1
+                memory_mb = math.ceil(
+                    frame_count
+                    * sim.sim_config.width
+                    * sim.sim_config.height
+                    * 3
+                    / 2**20
+                )
                 if not sim.start_window_record(
                     save_path=str(args.video),
-                    fps=25,
-                    max_memory=1024,
+                    fps=_FPS,
+                    max_memory=memory_mb,
                     look_at=look_at,
                     use_sim_time=True,
                 ):
                     raise RuntimeError("Could not start the demo video recorder.")
-            # Regrid each rest-to-rest phase separately so intermediate
-            # constraint arrivals remain exact endpoints during playback.
-            previous = 0
-            playback_seconds = 0.0
-            report["measured_tracking_error_rad"] = []
-            for end in result.waypoint_indices[0].cpu().tolist():
-                phase_dt = result.dt[:, previous : end + 1].clone()
-                phase_dt[:, 0] = 0
-                executed = play_joint_trajectory(
+            if feedback:
+                playback = play_closed_loop(
                     sim,
-                    robot,
-                    positions=result.positions[:, previous : end + 1],
-                    dt=phase_dt,
-                    joint_ids=joints,
-                    cfg=JointTrajectoryPlaybackCfg(
-                        control_dt=control_dt, joint_command_mode="position_velocity"
-                    ),
+                    generator.planner,
+                    targets,
+                    modalities,
+                    joints,
+                    control_dt,
+                    markers,
                 )
-                # Advance settling holds in small increments so the recorder
-                # samples simulation time instead of skipping the whole hold.
-                for _ in range(round(0.5 / sim.sim_config.physics_dt)):
-                    sim.update(step=1)
-                measured = robot.get_qpos(name="arm")
-                report["measured_tracking_error_rad"].append(
-                    float((measured - result.positions[:, end]).abs().max())
+            else:
+                playback = _play_free_motion(
+                    sim, robot, result, waypoint_indices, joints, control_dt, markers
                 )
-                playback_seconds += float(executed.dt.sum()) + 0.5
-                previous = end
-            report["simulation_playback"] = "completed"
-            report["playback_duration_s"] = playback_seconds
+            report.update(playback)
             if args.video:
                 if not sim.stop_window_record():
                     raise RuntimeError("No video frames were captured.")
@@ -344,10 +434,12 @@ def run(
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(text + "\n")
-        if not result.is_all_success():
+        if not succeeded:
             raise RuntimeError(
                 "NMG did not reach every demo target; see the arrival report."
             )
+        if report["simulation_playback"] == "failed":
+            raise RuntimeError("NMG feedback did not reach every demo target.")
         if args.keep_open:
             while True:
                 sim.update()

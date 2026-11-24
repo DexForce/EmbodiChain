@@ -75,6 +75,10 @@ policy-deploy = [
   # ORT 1.27+ defaults to CUDA 13; EmbodiChain's supported stack uses CUDA 12.
   "onnxruntime-gpu>=1.20,<1.27",
 ]
+nmg-grad = [
+  "onnx>=1.21,<2",
+  "onnx2pytorch==0.6.0",
+]
 gensim = [
   # Blender runs in a separate Python 3.11 runtime; see docker/README.md.
   "gradio>=6.17.3,<6.18",

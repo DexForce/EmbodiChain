@@ -195,10 +195,14 @@ heterogeneous limits. Validate reports, geometry and padding together in
 
 ### Neural policy adapter
 
-`neural_planner.py` consumes a standalone NMG ONNX export with normalization in
-the graph. Validate complete observation-layout metadata/fingerprint before
-rollout; model dimensions and waypoint capacity belong to the export contract.
-Inspect the `policy-deploy` package extra for runtime dependencies.
+`embodichain.extensions.models.policy.nmg.NeuralMotionGenerator` loads standalone
+NMG ONNX exports and returns raw actions. Its ORT backend uses the `policy-deploy`
+extra. Its frozen PyTorch backend uses `nmg-grad` and retains gradients of the
+single-step action with respect to continuous observations. `NeuralPlanner` uses
+the ORT backend and validates the full observation-layout metadata and
+fingerprint against the configured robot before rollout.
+Canonicalized XYZW observations use the first significant X/Y/Z component
+around a half-turn to keep float32 FK roundoff from flipping their sign.
 
 With `batch_control_parts=True`, `MotionGenerator.generate_multi_part()` can
 route independent named-arm requests to `NeuralPlanner.plan_multi_part()`.

@@ -18,6 +18,7 @@ from __future__ import annotations
 import torch
 import pytest
 
+from embodichain.extensions.models.policy.nmg import NeuralMotionGenerator
 from embodichain.lab.sim.motion.motion_generator import (
     MotionGenCfg,
     MotionGenOptions,
@@ -62,7 +63,6 @@ NMG_OBSERVATION_BLOCKS = (
     "waypoint_rel_quat",
     "waypoint_joint_err",
 )
-_REAL_ONNX_POLICY = neural_planner_module._OnnxPolicy
 
 
 def _create_fake_onnx_model(tmp_path) -> str:
@@ -78,6 +78,11 @@ class FakeOnnxPolicy:
         NUM_WAYPOINTS, NUM_ARM_JOINTS, True, True
     ).onnx_metadata
 
+    @classmethod
+    def from_onnx(cls, path, *, enable_grad=False, **kwargs):
+        assert enable_grad is False
+        return cls(path, **kwargs)
+
     def __init__(self, path, providers=None, *, cuda_use_tf32=None, device=None):
         self.path = path
         self.providers = providers
@@ -92,7 +97,7 @@ class FakeOnnxPolicy:
 
 @pytest.fixture(autouse=True)
 def _mock_onnx_policy(monkeypatch):
-    monkeypatch.setattr(neural_planner_module, "_OnnxPolicy", FakeOnnxPolicy)
+    monkeypatch.setattr(neural_planner_module, "NeuralMotionGenerator", FakeOnnxPolicy)
 
 
 class FakeRobot:
@@ -179,7 +184,7 @@ def test_ur5_periodic_observation_matches_nmg_export(tmp_path, monkeypatch):
         output_dim = 6
         observation_metadata = layout.onnx_metadata
 
-    monkeypatch.setattr(neural_planner_module, "_OnnxPolicy", FakeUr5Policy)
+    monkeypatch.setattr(neural_planner_module, "NeuralMotionGenerator", FakeUr5Policy)
     monkeypatch.setattr(
         SimulationManager,
         "get_instance",
@@ -222,55 +227,6 @@ def test_neural_planner_default_observation_width_matches_k5_nmg_export():
     assert neural_planner_module._waypoint_obs_dim(5, use_relative_obs=False) == 116
 
 
-def test_neural_onnx_policy_preserves_distinct_dynamic_batch_rows(tmp_path):
-    """The ONNX consumer keeps numerical parity for batch one and batch three."""
-    onnx = pytest.importorskip("onnx")
-    pytest.importorskip("onnxruntime")
-    weight = torch.zeros(OBS_DIM, NUM_ARM_JOINTS, dtype=torch.float32)
-    weight[:NUM_ARM_JOINTS] = torch.eye(NUM_ARM_JOINTS)
-    graph = onnx.helper.make_graph(
-        [onnx.helper.make_node("MatMul", ["obs", "weight"], ["action"])],
-        "nmg-dynamic-batch-contract",
-        [
-            onnx.helper.make_tensor_value_info(
-                "obs", onnx.TensorProto.FLOAT, ["batch", OBS_DIM]
-            )
-        ],
-        [
-            onnx.helper.make_tensor_value_info(
-                "action", onnx.TensorProto.FLOAT, ["batch", NUM_ARM_JOINTS]
-            )
-        ],
-        [onnx.numpy_helper.from_array(weight.numpy(), name="weight")],
-    )
-    model = onnx.helper.make_model(
-        graph,
-        opset_imports=[onnx.helper.make_opsetid("", 17)],
-    )
-    layout = neural_planner_module._WaypointObservationLayout(5, 7, True)
-    onnx.helper.set_model_props(model, layout.onnx_metadata)
-    model.ir_version = 10
-    model_path = tmp_path / "dynamic_batch_contract.onnx"
-    onnx.save(model, model_path)
-    policy = _REAL_ONNX_POLICY(model_path)
-    observation = torch.zeros(3, OBS_DIM)
-    observation[:, :NUM_ARM_JOINTS] = torch.tensor(
-        [
-            [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
-            [2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0],
-            [-1.0, -2.0, -3.0, -4.0, -5.0, -6.0, -7.0],
-        ]
-    )
-
-    batch_one = policy(observation[:1])
-    batch_three = policy(observation)
-
-    torch.testing.assert_close(batch_one, observation[:1, :NUM_ARM_JOINTS])
-    torch.testing.assert_close(batch_three, observation[:, :NUM_ARM_JOINTS])
-    torch.testing.assert_close(batch_three[:1], batch_one)
-    assert policy.observation_metadata == layout.onnx_metadata
-
-
 def test_neural_planner_rejects_mismatched_observation_metadata(tmp_path, monkeypatch):
     model_path = _create_fake_onnx_model(tmp_path)
     fake_sim = FakeSimulationManager()
@@ -288,7 +244,9 @@ def test_neural_planner_rejects_mismatched_observation_metadata(tmp_path, monkey
             "nmg.canonicalize_quat_obs": "false",
         }
 
-    monkeypatch.setattr(neural_planner_module, "_OnnxPolicy", MismatchedMetadataPolicy)
+    monkeypatch.setattr(
+        neural_planner_module, "NeuralMotionGenerator", MismatchedMetadataPolicy
+    )
 
     with pytest.raises(ValueError, match="observation layout metadata mismatch"):
         NeuralPlanner(
@@ -312,7 +270,9 @@ def test_neural_planner_rejects_missing_observation_metadata(tmp_path, monkeypat
     class MissingMetadataPolicy(FakeOnnxPolicy):
         observation_metadata = {}
 
-    monkeypatch.setattr(neural_planner_module, "_OnnxPolicy", MissingMetadataPolicy)
+    monkeypatch.setattr(
+        neural_planner_module, "NeuralMotionGenerator", MissingMetadataPolicy
+    )
 
     with pytest.raises(ValueError, match="observation layout metadata mismatch"):
         NeuralPlanner(
@@ -487,7 +447,7 @@ def _rollout(tmp_path, monkeypatch, *, policy=None, **cfg_overrides):
         classmethod(lambda cls, instance_id=0: fake_sim),
     )
     if policy is not None:
-        monkeypatch.setattr(neural_planner_module, "_OnnxPolicy", policy)
+        monkeypatch.setattr(neural_planner_module, "NeuralMotionGenerator", policy)
     motion_generator = MotionGenerator(
         cfg=MotionGenCfg(
             planner_cfg=NeuralPlannerCfg(
@@ -1064,6 +1024,31 @@ def test_neural_planner_fk_preserves_xyzw_for_asymmetric_rotation(
     torch.testing.assert_close(fk_pose[:, 3:7], quaternion)
 
 
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_neural_planner_fk_keeps_quaternion_sign_near_half_turn(device):
+    """FK roundoff across a half-turn keeps the same observation hemisphere."""
+    from embodichain.utils.math import matrix_from_quat
+
+    planner = NeuralPlanner.__new__(NeuralPlanner)
+    planner._canonicalize_quat_obs = True
+    planner._policy_frame_from_world = torch.eye(4, device=device)
+    planner._runtime_tcp_from_policy_tcp = torch.eye(4, device=device)
+
+    # Positive and negative w model float32 FK evaluating the same half-turn.
+    axis = torch.tensor([0.8, 0.0, 0.6], device=device)
+    quaternion = torch.cat(
+        (axis.expand(2, -1), torch.tensor([[2.0e-7], [-2.0e-7]], device=device)),
+        dim=-1,
+    )
+    pose = torch.eye(4, device=device).repeat(2, 1, 1)
+    pose[:, :3, :3] = matrix_from_quat(quaternion)
+
+    observed = planner._policy_pose_xyzw(pose)[:, 3:7]
+
+    torch.testing.assert_close(observed[:, :3], axis.expand(2, -1))
+    torch.testing.assert_close(matrix_from_quat(observed), pose[:, :3, :3])
+
+
 def test_neural_planner_reach_check_passes_xyzw_to_math(monkeypatch):
     """The XYZW math API should receive planner quaternions unchanged."""
     planner = NeuralPlanner.__new__(NeuralPlanner)
@@ -1422,7 +1407,9 @@ def test_motion_generator_neural_preserves_failed_rollout_positions(
             action[:, 0] = 1.0
             return action
 
-    monkeypatch.setattr(neural_planner_module, "_OnnxPolicy", MovingFakeOnnxPolicy)
+    monkeypatch.setattr(
+        neural_planner_module, "NeuralMotionGenerator", MovingFakeOnnxPolicy
+    )
     model_path = _create_fake_onnx_model(tmp_path)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
@@ -1462,6 +1449,9 @@ def test_motion_generator_neural_preserves_failed_rollout_positions(
 def test_neural_planner_rejects_pytorch_checkpoint(tmp_path, monkeypatch):
     pytorch_checkpoint_path = tmp_path / "checkpoint.pt"
     pytorch_checkpoint_path.write_bytes(b"not-an-onnx-model")
+    monkeypatch.setattr(
+        neural_planner_module, "NeuralMotionGenerator", NeuralMotionGenerator
+    )
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
         SimulationManager,
@@ -1469,7 +1459,7 @@ def test_neural_planner_rejects_pytorch_checkpoint(tmp_path, monkeypatch):
         classmethod(lambda cls, instance_id=0: fake_sim),
     )
 
-    with pytest.raises(ValueError, match="only accepts standalone .onnx"):
+    with pytest.raises(ValueError, match=r"only accepts standalone \.onnx"):
         NeuralPlanner(
             NeuralPlannerCfg(
                 robot_uid="fake_robot",
@@ -1683,41 +1673,6 @@ def test_joint_reach_uses_inclusive_maximum_error(error, expected):
     assert reached.item() is expected
 
 
-@pytest.mark.no_sim
-def test_onnx_runtime_respects_host_thread_budget(monkeypatch, tmp_path):
-    import sys
-    from types import SimpleNamespace
-
-    session = SimpleNamespace(
-        get_inputs=lambda: [SimpleNamespace(name="obs", shape=[None, 32])],
-        get_outputs=lambda: [SimpleNamespace(name="action", shape=[None, 7])],
-        get_modelmeta=lambda: SimpleNamespace(custom_metadata_map={}),
-        get_providers=lambda: ["CPUExecutionProvider"],
-    )
-    received = {}
-
-    def create_session(path, *, sess_options, providers):
-        received["options"] = sess_options
-        return session
-
-    monkeypatch.setitem(
-        sys.modules,
-        "onnxruntime",
-        SimpleNamespace(
-            SessionOptions=SimpleNamespace,
-            GraphOptimizationLevel=SimpleNamespace(ORT_ENABLE_ALL="all"),
-            InferenceSession=create_session,
-        ),
-    )
-    messages = []
-    monkeypatch.setattr(neural_planner_module.logger, "log_info", messages.append)
-    monkeypatch.setattr(torch, "get_num_threads", lambda: 3)
-    _REAL_ONNX_POLICY(tmp_path / "policy.onnx")
-    assert messages == ["NMG ONNX execution providers: CPUExecutionProvider"]
-    assert received["options"].intra_op_num_threads == 3
-    assert received["options"].inter_op_num_threads == 1
-
-
 @pytest.mark.parametrize("retime", [False, True])
 def test_shared_policy_uses_each_arms_frame_for_targets_and_rollout(
     tmp_path, monkeypatch, retime
@@ -1842,7 +1797,7 @@ def test_packed_arms_share_inference_and_match_independent_rollouts(
             local[..., :3, 3] = qpos[..., :3]
             return bases[name] @ local
 
-    monkeypatch.setattr(neural_planner_module, "_OnnxPolicy", StepPolicy)
+    monkeypatch.setattr(neural_planner_module, "NeuralMotionGenerator", StepPolicy)
     manager = FakeSimulationManager()
     manager.robot = MountedRobot()
     monkeypatch.setattr(SimulationManager, "get_instance", lambda *args: manager)
@@ -1940,147 +1895,6 @@ def test_packed_arms_reject_fixed_single_row_policy(tmp_path, monkeypatch):
     }
     with pytest.raises(ValueError, match="Export a dynamic-batch policy"):
         planner.plan_multi_part(targets, options)
-
-
-@pytest.mark.no_sim
-@pytest.mark.parametrize(
-    "providers,use_tf32,device,expected_providers,expected_options",
-    [
-        (None, None, None, None, None),
-        (
-            ["CUDAExecutionProvider", "CPUExecutionProvider"],
-            None,
-            None,
-            ["CUDAExecutionProvider", "CPUExecutionProvider"],
-            None,
-        ),
-        (
-            ["CUDAExecutionProvider", "CPUExecutionProvider"],
-            False,
-            None,
-            ["CUDAExecutionProvider", "CPUExecutionProvider"],
-            [{"use_tf32": "0"}, {}],
-        ),
-        (
-            ["CPUExecutionProvider", "CUDAExecutionProvider"],
-            True,
-            None,
-            ["CPUExecutionProvider", "CUDAExecutionProvider"],
-            [{}, {"use_tf32": "1"}],
-        ),
-        (
-            ["CPUExecutionProvider"],
-            False,
-            None,
-            ["CPUExecutionProvider"],
-            [{}],
-        ),
-        (
-            None,
-            False,
-            None,
-            ["CUDAExecutionProvider", "CPUExecutionProvider"],
-            [{"use_tf32": "0"}, {}],
-        ),
-        (
-            ["CUDAExecutionProvider", "CPUExecutionProvider"],
-            False,
-            torch.device("cuda:0"),
-            ["CUDAExecutionProvider", "CPUExecutionProvider"],
-            [{"device_id": "0", "use_tf32": "0"}, {}],
-        ),
-        (
-            ["CPUExecutionProvider", "CUDAExecutionProvider"],
-            False,
-            torch.device("cuda:3"),
-            ["CPUExecutionProvider", "CUDAExecutionProvider"],
-            [{}, {"device_id": "3", "use_tf32": "0"}],
-        ),
-        (
-            None,
-            False,
-            torch.device("cuda:2"),
-            ["CUDAExecutionProvider", "CPUExecutionProvider"],
-            [{"device_id": "2", "use_tf32": "0"}, {}],
-        ),
-        (
-            None,
-            None,
-            torch.device("cuda:4"),
-            ["CUDAExecutionProvider", "CPUExecutionProvider"],
-            [{"device_id": "4"}, {}],
-        ),
-        (
-            ["CPUExecutionProvider"],
-            False,
-            torch.device("cuda:2"),
-            ["CPUExecutionProvider"],
-            [{}],
-        ),
-        (
-            None,
-            False,
-            torch.device("cuda"),
-            ["CUDAExecutionProvider", "CPUExecutionProvider"],
-            [{"device_id": "2", "use_tf32": "0"}, {}],
-        ),
-        (None, None, torch.device("cpu"), None, None),
-    ],
-)
-def test_onnx_precision_is_explicit_and_provider_scoped(
-    monkeypatch,
-    tmp_path,
-    providers,
-    use_tf32,
-    device,
-    expected_providers,
-    expected_options,
-):
-    """Freeze CUDA arithmetic without changing CPU options or historical defaults."""
-    import sys
-    from types import SimpleNamespace
-
-    session = SimpleNamespace(
-        get_inputs=lambda: [SimpleNamespace(name="obs", shape=[None, 32])],
-        get_outputs=lambda: [SimpleNamespace(name="action", shape=[None, 7])],
-        get_modelmeta=lambda: SimpleNamespace(custom_metadata_map={}),
-        get_providers=lambda: expected_providers or ["CPUExecutionProvider"],
-    )
-    received = {}
-
-    def create_session(path, **kwargs):
-        received.update(kwargs)
-        return session
-
-    monkeypatch.setitem(
-        sys.modules,
-        "onnxruntime",
-        SimpleNamespace(
-            SessionOptions=SimpleNamespace,
-            GraphOptimizationLevel=SimpleNamespace(ORT_ENABLE_ALL="all"),
-            InferenceSession=create_session,
-            get_available_providers=lambda: [
-                "TensorrtExecutionProvider",
-                "CUDAExecutionProvider",
-                "CPUExecutionProvider",
-            ],
-        ),
-    )
-    monkeypatch.setattr(torch.cuda, "current_device", lambda: 2)
-    _REAL_ONNX_POLICY(
-        tmp_path / "policy.onnx", providers, cuda_use_tf32=use_tf32, device=device
-    )
-    assert received["providers"] == expected_providers
-    assert received.get("provider_options") == expected_options
-    if expected_options is None:
-        assert "provider_options" not in received
-
-
-@pytest.mark.no_sim
-@pytest.mark.parametrize("invalid", [0, 1, "false", 1.0])
-def test_onnx_precision_rejects_non_boolean_values(tmp_path, invalid):
-    with pytest.raises(TypeError, match="onnx_cuda_use_tf32 must be a bool or None"):
-        _REAL_ONNX_POLICY(tmp_path / "policy.onnx", cuda_use_tf32=invalid)
 
 
 @pytest.mark.no_sim

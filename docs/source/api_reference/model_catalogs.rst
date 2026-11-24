@@ -13,6 +13,24 @@ load every model or initialize simulation. NeRD's raw teacher assets, data
 generation and original-repository comparison runners belong to the
 ``learning/nerd`` showcase, outside the runtime model package.
 
+Neural Motion Generator
+-----------------------
+
+``embodichain.extensions.models.policy.nmg`` loads a standalone NMG ONNX export.
+Its two backends share a batched FP32 observation-to-action interface. ONNX
+Runtime runs inference, and the optional PyTorch backend retains first-order
+observation gradients with frozen weights. The export supplies its own
+normalization and observation metadata.
+
+.. currentmodule:: embodichain.extensions.models.policy.nmg
+
+.. autosummary::
+
+   NeuralMotionGenerator
+
+.. autoclass:: NeuralMotionGenerator
+   :members: from_onnx, forward
+
 NeRD public entry points
 -------------------------
 
