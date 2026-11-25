@@ -1,0 +1,53 @@
+{
+  "source": {"file":"outputs/task-engine-robotwin50-1287/runs/after/scan_object/exchanges.jsonl","sha256":"a4703af30c9847c412bd2517f41dda78a69688cc8d7df92811d9df186936e3a4","proposal_line":5,"audit_line":6},
+  "instruction": "There is a barcode scanner lying on the left side of the table, close to the robot, and a small teal box standing on the table to the right of the middle. Use the left arm to pick up the scanner and the right arm to pick up the box. Lift both above the table and point the head of the scanner at the box to scan it. Keep holding the scanner and the box at the end; do not release them.",
+  "proposal": {
+    "semantic_plan": {
+      "roles": [
+        {"id":"robot","kind":"robot","description":"the robot"},
+        {"id":"table","kind":"surface","description":"the table"},
+        {"id":"scanner","kind":"tool","description":"the barcode scanner on the left side of the table, close to the robot"},
+        {"id":"scanner_head","kind":"tool","description":"the scanner's head","part_of":"scanner"},
+        {"id":"box","kind":"object","description":"the small teal box standing on the table to the right of the middle"}
+      ],
+      "steps": [
+        {"verb":"pick","subjects":["scanner"],"arms":["left"],"effects":[{"kind":"held","arms":["left"],"subjects":["scanner"]}],"quote":"Use the left arm to pick up the scanner and the right arm to pick up the box."},
+        {"verb":"pick","subjects":["box"],"arms":["right"],"effects":[{"kind":"held","arms":["right"],"subjects":["box"]}],"quote":"Use the left arm to pick up the scanner and the right arm to pick up the box."},
+        {"verb":"move_held","subjects":["scanner"],"arms":["left"],"direction":"up","effects":[{"kind":"relation","references":["table"],"subjects":["scanner"],"value":"above"}],"quote":"Lift both above the table and point the head of the scanner at the box to scan it."},
+        {"verb":"move_held","subjects":["box"],"arms":["right"],"direction":"up","effects":[{"kind":"relation","references":["table"],"subjects":["box"],"value":"above"}],"quote":"Lift both above the table and point the head of the scanner at the box to scan it."},
+        {"verb":"orient","subjects":["scanner"],"arms":["left"],"effects":[{"kind":"orientation","references":["box"],"subjects":["scanner_head"],"value":"pointing_toward"}],"quote":"Lift both above the table and point the head of the scanner at the box to scan it."}
+      ],
+      "conditions": [
+        {"scope":"initial","fact":{"kind":"relation","references":["table"],"subjects":["scanner"],"value":"on"},"quote":"There is a barcode scanner lying on the left side of the table, close to the robot, and a small teal box standing on the table to the right of the middle."},
+        {"scope":"initial","fact":{"kind":"view_location","frame":"table","lateral":"left","subjects":["scanner"]},"quote":"There is a barcode scanner lying on the left side of the table, close to the robot, and a small teal box standing on the table to the right of the middle."},
+        {"scope":"initial","fact":{"kind":"relation","references":["robot"],"subjects":["scanner"],"value":"near"},"quote":"There is a barcode scanner lying on the left side of the table, close to the robot, and a small teal box standing on the table to the right of the middle."},
+        {"scope":"initial","fact":{"kind":"orientation","frame":"table","subjects":["scanner"],"value":"flat"},"quote":"There is a barcode scanner lying on the left side of the table, close to the robot, and a small teal box standing on the table to the right of the middle."},
+        {"scope":"initial","fact":{"kind":"relation","references":["table"],"subjects":["box"],"value":"on"},"quote":"There is a barcode scanner lying on the left side of the table, close to the robot, and a small teal box standing on the table to the right of the middle."},
+        {"scope":"initial","fact":{"kind":"view_location","frame":"table","lateral":"right","subjects":["box"]},"quote":"There is a barcode scanner lying on the left side of the table, close to the robot, and a small teal box standing on the table to the right of the middle."},
+        {"scope":"initial","fact":{"kind":"orientation","frame":"table","subjects":["box"],"value":"upright"},"quote":"There is a barcode scanner lying on the left side of the table, close to the robot, and a small teal box standing on the table to the right of the middle."},
+        {"scope":"final","fact":{"kind":"held","arms":["left"],"subjects":["scanner"]},"quote":"Keep holding the scanner and the box at the end; do not release them."},
+        {"scope":"final","fact":{"kind":"held","arms":["right"],"subjects":["box"]},"quote":"Keep holding the scanner and the box at the end; do not release them."}
+      ]
+    }
+  },
+  "audit": {
+    "issues": [],
+    "checks": [
+      {"quote":"barcode scanner","requirement":"The identified scanner is the barcode scanner.","scope":"action","evidence":["scanner"]},
+      {"quote":"scanner lying on the left side of the table","requirement":"Initially, the scanner lies on the table.","scope":"initial","evidence":["condition_01"],"spatial":{"kind":"relation","value":"on","subjects":["scanner"],"references":["table"]}},
+      {"quote":"on the left side of the table","requirement":"Initially, the scanner is on the left side of the table.","scope":"initial","evidence":["condition_02"],"state":{"kind":"view_location","frame":"table","lateral":"left","subjects":["scanner"]}},
+      {"quote":"close to the robot","requirement":"Initially, the scanner is near the robot.","scope":"initial","evidence":["condition_03"],"spatial":{"kind":"relation","value":"near","subjects":["scanner"],"references":["robot"]}},
+      {"quote":"scanner lying","requirement":"Initially, the scanner has a flat lying posture.","scope":"initial","evidence":["condition_04"],"state":{"kind":"orientation","frame":"table","subjects":["scanner"],"value":"flat"}},
+      {"quote":"small teal box","requirement":"The identified box is small and teal.","scope":"action","evidence":["box"]},
+      {"quote":"box standing on the table","requirement":"Initially, the box stands on the table.","scope":"initial","evidence":["condition_05","condition_07"],"spatial":{"kind":"relation","value":"on","subjects":["box"],"references":["table"]},"state":{"kind":"orientation","frame":"table","subjects":["box"],"value":"upright"}},
+      {"quote":"to the right of the middle","requirement":"Initially, the box is to the right of the middle of the table.","scope":"initial","evidence":["condition_06"],"state":{"kind":"view_location","frame":"table","lateral":"right","subjects":["box"]}},
+      {"quote":"Use the left arm to pick up the scanner","requirement":"Pick up the scanner with the left arm.","scope":"action","evidence":["step_01"]},
+      {"quote":"Use the right arm to pick up the box","requirement":"Pick up the box with the right arm.","scope":"action","evidence":["step_02"]},
+      {"quote":"Lift both above the table","requirement":"Lift the scanner upward to above the table while holding it.","scope":"effect","evidence":["step_03"],"spatial":{"kind":"relation","value":"above","subjects":["scanner"],"references":["table"]}},
+      {"quote":"Lift both above the table","requirement":"Lift the box upward to above the table while holding it.","scope":"effect","evidence":["step_04"],"spatial":{"kind":"relation","value":"above","subjects":["box"],"references":["table"]}},
+      {"quote":"point the head of the scanner at the box","requirement":"Orient the scanner head to point toward the box.","scope":"effect","evidence":["step_05"],"state":{"kind":"orientation","subjects":["scanner_head"],"value":"pointing_toward","references":["box"]}},
+      {"quote":"Keep holding the scanner and the box at the end; do not release them.","requirement":"At the end, the left arm still holds the scanner.","scope":"final","evidence":["condition_08","step_01"],"state":{"kind":"held","arms":["left"],"subjects":["scanner"]}},
+      {"quote":"Keep holding the scanner and the box at the end; do not release them.","requirement":"At the end, the right arm still holds the box.","scope":"final","evidence":["condition_09","step_02"],"state":{"kind":"held","arms":["right"],"subjects":["box"]}}
+    ]
+  }
+}

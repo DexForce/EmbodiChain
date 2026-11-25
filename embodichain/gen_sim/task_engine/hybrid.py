@@ -23,6 +23,7 @@ import hashlib
 from itertools import combinations
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 from .authoring_intent import (
@@ -33,6 +34,8 @@ from .authoring_intent import (
     _advance_arms,
     _ArmState,
     _expand_fact_shorthand,
+    _intent_phases,
+    _is_control_transition,
     _relation_pairs,
     _role_ancestry,
     compile_intent,
@@ -111,6 +114,57 @@ def _load_scene_context(path: Path) -> dict[str, Any]:
 
 def _source_quote(value: Any, instruction: str) -> bool:
     return isinstance(value, str) and bool(value.strip()) and value in instruction
+
+
+_TIMING_CUE = re.compile(
+    r"\b(?:simultaneously|concurrently|synchronously|at (?:the )?same time|at once|in (?:parallel|unison))\b|同时|同步|并行",
+    re.IGNORECASE,
+)
+_PICK_CUE = re.compile(r"\b(?:pick|grab|grasp|acquir)\w*\b|抓|拿起", re.IGNORECASE)
+_NEGATED_CUE = re.compile(r"\b(?:not|never|avoid)\b|不要|不得|别", re.IGNORECASE)
+_FUTURE_SIDES = re.compile(
+    r"\b(?:one on (?:each|either) side|opposite sides) of (?:(?:the|a) )?"
+    r"(?:future|eventual|later[- ]placed)\b",
+    re.IGNORECASE,
+)
+_STABILITY_CUE = re.compile(
+    r"\b(?:stabl\w*|steady|balanc\w*|toppl\w*|tipp?ing|falling)\b|稳定|稳固|平衡|倾倒",
+    re.IGNORECASE,
+)
+
+
+def _explicit_pick_timing(quote: str, spans: Iterable[str]) -> bool:
+    if not _TIMING_CUE.search(quote):
+        return False
+    contexts = [span for span in spans if quote in span] or [quote]
+    for context in contexts:
+        for clause in re.split(
+            r"[.!?;]|\b(?:then|afterwards|before)\b", context, flags=re.IGNORECASE
+        ):
+            if not _PICK_CUE.search(clause):
+                continue
+            if any(
+                cue.group() in quote and not _NEGATED_CUE.search(clause[: cue.start()])
+                for cue in _TIMING_CUE.finditer(clause)
+            ):
+                return True
+    return False
+
+
+def _unrequested_stability_issue(instruction: str, audit: Any) -> bool:
+    issues = audit.get("issues") if isinstance(audit, dict) else None
+    return (
+        isinstance(issues, list)
+        and bool(issues)
+        and not _STABILITY_CUE.search(instruction)
+        and all(
+            isinstance(issue, dict)
+            and _source_quote(issue.get("quote"), instruction)
+            and isinstance(issue.get("reason"), str)
+            and _STABILITY_CUE.search(issue["reason"])
+            for issue in issues
+        )
+    )
 
 
 def _operation_rows(response: Any, instruction: str) -> list[dict[str, Any]]:
@@ -239,6 +293,7 @@ _INTENT_AUDIT_SCHEMA = {
                     "evidence": {"type": "array", "items": {"type": "string"}},
                     "state": {"type": "object"},
                     "spatial": {"type": "object"},
+                    "parallel_picks": {"type": "object"},
                 },
             },
         },
@@ -355,6 +410,14 @@ def _carried_facts(
             kind = fact["kind"]
             if any(_opposes(fact, effect) for effect in effects):
                 return True
+            if _is_control_transition(fact):
+                return verb in {
+                    "actuate",
+                    "press",
+                    "push",
+                    "turn",
+                    "articulate",
+                } and affected(fact, subjects)
             if (
                 kind == "pose_match"
                 and "orientation" in fact["components"]
@@ -443,7 +506,16 @@ def _validate_intent_audit(
     """Validate evidence and return terminal producers and proven undeclared goals."""
     _validate_audit_issues(instruction, audit, "checks")
     checks = audit.get("checks")
+    spans = tuple(source_spans(instruction).values())
+    future_sides = {span for span in spans if _FUTURE_SIDES.search(span)}
+    witnessed_future_sides: set[str] = set()
     steps = {f"step_{i:02d}": row for i, row in enumerate(plan["steps"], 1)}
+    order = {ref: index for index, ref in enumerate(steps)}
+    phases = {
+        index: (start, end)
+        for start, end in _intent_phases(plan["steps"])
+        for index in range(start, end)
+    }
     conditions = {
         f"condition_{i:02d}": row for i, row in enumerate(plan["conditions"], 1)
     }
@@ -499,6 +571,10 @@ def _validate_intent_audit(
             raise AuthoringEvidenceError(
                 f"A final condition contradicts or outlives its ordered effects: {fact}"
             )
+        if _is_control_transition(fact) and not matches(fact, surviving):
+            raise AuthoringEvidenceError(
+                "A final control transition needs its surviving action effect"
+            )
 
     def slot_facts(
         refs: list[str], carried: dict[str, list[dict[str, Any]]], claim: dict[str, Any]
@@ -528,14 +604,23 @@ def _validate_intent_audit(
     if not isinstance(checks, list) or not checks:
         raise ValueError("source_audit: no independently reviewed requirements")
     witnessed = False
+    reviewed_parallel_groups = set()
     goal_producers: dict[str, set[str]] = {}
     added_conditions: list[dict[str, Any]] = []
-    for check in checks:
+    for index, check in enumerate(checks):
         if (
             not isinstance(check, dict)
             or not {"quote", "requirement", "evidence"} <= set(check)
             or set(check)
-            - {"quote", "requirement", "evidence", "spatial", "scope", "state"}
+            - {
+                "quote",
+                "requirement",
+                "evidence",
+                "spatial",
+                "scope",
+                "state",
+                "parallel_picks",
+            }
             or (
                 "scope" in check
                 and (
@@ -543,7 +628,6 @@ def _validate_intent_audit(
                     or check["scope"] not in _AUDIT_SCOPES
                 )
             )
-            or not _source_quote(check["quote"], instruction)
             or not isinstance(check["requirement"], str)
             or not check["requirement"].strip()
             or not isinstance(check["evidence"], list)
@@ -551,6 +635,11 @@ def _validate_intent_audit(
         ):
             raise ValueError(
                 "source_audit: each reviewed requirement needs source and graph evidence"
+            )
+        if not _source_quote(check["quote"], instruction):
+            raise ValueError(
+                f"source_audit: checks[{index}].quote is not a verbatim source span: "
+                f"{repr(check['quote'])[:160]}"
             )
         unknown = [
             ref
@@ -562,6 +651,40 @@ def _validate_intent_audit(
         refs = check["evidence"]
         scope = check.get("scope")
         typed = "spatial" in check or "state" in check
+        if "parallel_picks" in check:
+            if not _explicit_pick_timing(check["quote"], spans):
+                raise AuthoringEvidenceError(
+                    "Parallel picks need explicit source timing for acquisition; "
+                    "separate hand-object assignments alone do not request synchrony"
+                )
+            pairs = check["parallel_picks"]
+            if (
+                scope != "action"
+                or typed
+                or not isinstance(pairs, dict)
+                or pairs.keys() != {"left", "right"}
+                or any(
+                    not isinstance(role, str) or role not in roles
+                    for role in pairs.values()
+                )
+            ):
+                raise ValueError(
+                    "A parallel pick check needs explicit left and right subjects in action scope"
+                )
+            branches = [steps[ref] for ref in refs if ref in steps]
+            if (
+                len(refs) != 2
+                or len(branches) != 2
+                or not (group := branches[0].get("parallel_group"))
+                or branches[1].get("parallel_group") != group
+                or {row["arms"][0]: row["subjects"][0] for row in branches} != pairs
+            ):
+                raise AuthoringEvidenceError(
+                    "Simultaneous acquisition needs the correct paired parallel picks"
+                )
+            reviewed_parallel_groups.add(group)
+            witnessed = True
+            continue
         # Normalize the phase label without promoting role or step evidence.
         if typed and scope == "action":
             scope = "effect"
@@ -613,8 +736,9 @@ def _validate_intent_audit(
                 )
             if scope == "before" and not typed:
                 raise ValueError("A before check needs a typed state or spatial claim")
-            last_step = max(int(ref.removeprefix("step_")) for ref in cited)
-            cutoff = last_step - 1 if scope == "before" else last_step
+            latest = max(int(ref.removeprefix("step_")) for ref in cited) - 1
+            start, end_of_phase = phases[latest]
+            cutoff = start if scope == "before" else end_of_phase
             at_step = _carried_facts(dict(list(steps.items())[:cutoff]), seed, parents)
             sources = refs if scope == "before" else cited
             facts = [fact for ref in sources for fact in at_step.get(ref, ())]
@@ -652,6 +776,34 @@ def _validate_intent_audit(
             _expand_fact_shorthand(claim)
             claims.append(claim)
             if (
+                claim.get("value") == "opposite_sides"
+                and scope in {"effect", "final"}
+                and _FUTURE_SIDES.search(check["quote"])
+            ):
+                reference = _role_ancestry(claim["references"][0], parents)
+                placed = max(
+                    (
+                        order[ref]
+                        for ref, step in steps.items()
+                        if step["verb"] == "place"
+                        and reference.intersection(step["subjects"])
+                    ),
+                    default=None,
+                )
+                if placed is not None:
+                    proof = [
+                        fact
+                        for ref in refs
+                        if ref in order and order[ref] >= placed
+                        for fact in end[ref]
+                    ]
+                    if matches(claim, proof):
+                        witnessed_future_sides.update(
+                            span
+                            for span in future_sides
+                            if check["quote"] in span or span in check["quote"]
+                        )
+            if (
                 scope == "final"
                 and claim.get("kind") == "relation"
                 and any(_opposes(claim, other) for other in surviving)
@@ -668,11 +820,18 @@ def _validate_intent_audit(
                 facts = [
                     f for ref in refs if ref in invariants for f in end.get(ref, ())
                 ]
+            if _is_control_transition(claim) and scope == "final":
+                facts = surviving_effects
             if kind == "actuated" and scope == "effect":
+                actions = (
+                    {"push", "actuate"}
+                    if _is_control_transition(claim)
+                    else {"press", "actuate"}
+                )
                 facts = [
                     fact
                     for ref in refs
-                    if ref in steps and steps[ref]["verb"] in {"press", "actuate"}
+                    if ref in steps and steps[ref]["verb"] in actions
                     for fact in at_step[ref]
                 ]
             verify_state_claim(
@@ -732,6 +891,17 @@ def _validate_intent_audit(
                         proof = remaining
                 if proof:
                     goal_producers.setdefault(goal_id, set()).update(proof)
+    if {
+        row["parallel_group"] for row in steps.values() if "parallel_group" in row
+    } - reviewed_parallel_groups:
+        raise AuthoringEvidenceError(
+            "Every parallel pick group needs independently reviewed hand-object pairs"
+        )
+    if future_sides - witnessed_future_sides:
+        raise AuthoringEvidenceError(
+            "Opposite sides of a future reference need a surviving opposite_sides effect "
+            "after the reference is placed; cite that effect and the future-reference source clause"
+        )
     if not witnessed:
         raise ValueError(
             "A source audit needs at least one step or condition, not roles alone"
@@ -743,7 +913,7 @@ def _validate_intent_audit(
 
 
 def _review_scope_guards(audit: Any) -> Counter[str]:
-    """Retain terminal and framed claims when repairing malformed citations."""
+    """Retain terminal, framed and simultaneous claims during citation repair."""
     guards: Counter[str] = Counter()
     checks = audit.get("checks") if isinstance(audit, dict) else None
     for check in checks if isinstance(checks, list) else ():
@@ -752,6 +922,8 @@ def _review_scope_guards(audit: Any) -> Counter[str]:
         final = check.get("scope") == "final"
         if final:
             guards["final"] += 1
+        if isinstance(check.get("parallel_picks"), dict):
+            guards[canonical_hash(["parallel_picks", check["parallel_picks"]])] += 1
         for name in ("spatial", "state"):
             fact = check.get(name)
             if (
@@ -1639,9 +1811,9 @@ def publish_hybrid(
             request = {
                 "instruction": instruction,
                 **({"scene_context": context} if context is not None else {}),
+                **({"source_spans": spans} if visual else {}),
                 **payload,
             }
-            span_quotes = {}
             scope_guards: Counter[str] = Counter()
             for attempt in range(2 if visual else 1):
                 audit = structured_call(
@@ -1651,7 +1823,7 @@ def publish_hybrid(
                     schema=_INTENT_AUDIT_SCHEMA if visual else {"type": "object"},
                     prompt=json.dumps(request, ensure_ascii=False),
                 )
-                if span_quotes and isinstance(audit, dict):
+                if visual and isinstance(audit, dict):
                     for key in ("issues", "checks"):
                         rows = audit.get(key)
                         if isinstance(rows, list):
@@ -1659,16 +1831,33 @@ def publish_hybrid(
                                 quote = (
                                     row.get("quote") if isinstance(row, dict) else None
                                 )
-                                if isinstance(quote, str) and quote in span_quotes:
-                                    row["quote"] = span_quotes[quote]
+                                if isinstance(quote, str) and quote in spans:
+                                    row["quote"] = spans[quote]
                 audit_history.append(audit)
                 try:
                     if scope_guards - _review_scope_guards(audit):
                         raise AuthoringEvidenceError(
-                            "A citation repair cannot discard or weaken a final or framed check"
+                            "A citation repair cannot discard or weaken a final, framed or simultaneous check"
                         )
                     return validate(audit)
                 except ValueError as error:
+                    if (
+                        visual
+                        and not attempt
+                        and _unrequested_stability_issue(instruction, audit)
+                    ):
+                        # A fresh review must still validate; do not waive the first finding.
+                        request["review_format_feedback"] = {
+                            "previous_review": audit,
+                            "diagnostic": str(error),
+                            "request": (
+                                "Re-audit this unchanged graph against the complete original instruction. "
+                                "Accept stability as a separate obligation only if the source explicitly "
+                                "asks for it. Stacking, nesting and releasing alone do not request stable. "
+                                "Still report any actual mismatch; otherwise return the complete set of checks."
+                            ),
+                        }
+                        continue
                     if isinstance(error, AuthoringEvidenceError) or (
                         isinstance(audit, dict) and audit.get("issues")
                     ):
@@ -1682,18 +1871,16 @@ def publish_hybrid(
                     ):
                         raise
                     # Repair the positive review's citations, not the candidate.
-                    span_quotes = spans
                     scope_guards = _review_scope_guards(audit)
                     request["review_format_feedback"] = {
                         "previous_review": audit,
                         "diagnostic": str(error),
                         "request": (
-                            "Recheck this same graph. Correct malformed fields or citations, "
-                            "using an exact source quote or a source_spans key in quote. "
-                            "Use existing evidence IDs; keep each final and framed claim. "
+                            "Recheck this same graph. Correct the diagnosed field or citation. "
+                            "For quote use a source_spans key directly, not a rewritten fragment. "
+                            "Use existing evidence IDs; keep all final, framed and parallel claims. "
                             "Put scope in the check's own JSON field, never in requirement text."
                         ),
-                        "source_spans": span_quotes,
                     }
 
         def audit_calls(operations, calls, bindings):
@@ -1811,9 +1998,14 @@ def publish_hybrid(
                         "structured graph, respecting specific operative directions over a generic summary. "
                         "Role descriptions may identify instances by attributes and rank, not substitute for "
                         "dynamic action or state evidence. Do not turn descriptive identity into an extra goal. "
-                        "For an assembled structure's stability, require a state with kind:stable and the "
-                        "actual member roles in subjects. A new aggregate role with only a description "
-                        "is not evidence of those roles' stability. "
+                        "Require kind:stable only when the original source explicitly asks for stability, "
+                        "balance or preventing toppling. Stacking, nesting, support, and releasing do not "
+                        "on their own require a separate stability claim. When requested, the fact must "
+                        "name the actual members, not a new aggregate role. "
+                        "For objects requested one on each side of a future reference placement, return "
+                        "a spatial opposite_sides check scoped to effect or final. Quote the future-reference "
+                        "clause itself and cite the placement of the reference, or a later effect that "
+                        "establishes the relation. Earlier left/right facts are not evidence after the reference moves. "
                         "In particular, verify named counts, reference-role operands, support/contact faces, "
                         "and required spatial slot constraints in the typed fields, not in names or prose. "
                         "For location relative to a named part, verify the part is the operand and "
@@ -1843,6 +2035,9 @@ def publish_hybrid(
                         "For such a starting direction include scope:initial. Centered_on already implies support. "
                         "Check the exact face when specified as a contact requirement; for ordinary "
                         "placement on a flat object's top use on or on_top_faces, without duplicate facts. "
+                        "For pressing a held tool against a target, cite the held motion and its "
+                        "spatial touching effect with the exact tool part and target. Button actuation "
+                        "and placement after release do not prove that contact. "
                         "For conditions that must "
                         "persist throughout, include scope:always in their check and cite an always condition. "
                         "A terminal-only posture or separation fact is not a throughout constraint. "
@@ -1853,12 +2048,22 @@ def publish_hybrid(
                         "state/spatial claim when citing a step. Initial and maintain facts "
                         "do not prove a final result. Every check has a separate scope field, not text in requirement. "
                         "Use scope:action for actions, identity and arm-selection with step or role evidence. Cite affected step arms. "
+                        "When two different objects must be picked simultaneously, include a separate "
+                        "scope:action check with parallel_picks:{left:left object ID,right:right object ID} "
+                        "and cite exactly the two pick steps in the same parallel_group. The quote must "
+                        "contain the explicit acquisition timing cue. 'Use both arms' or naming each hand's "
+                        "object does not require synchrony; reject an unrequested parallel_group. "
+                        "Two arms picking the same object instead use one bimanual pick without parallel_picks. "
                         "Each state or spatial value is one typed fact object, never an array or prose. Split checks across scopes. "
                         "For a no-touch requirement on all unspecified other objects, use scope:always and "
                         "a state fact {kind:untouched_except,subjects:[exempt role IDs]}. A named or prose "
                         "group under untouched does not protect the complement. For pressing a named button "
                         "or control, include a state fact {kind:actuated,value:pressed,subjects:[site role ID]} "
                         "and cite the step which presses that site, not a broad parent face. "
+                        "For a control requested to end in its other stable position, instead check "
+                        "scope:final and state {kind:actuated,value:other_from_initial,subjects:[control part ID]}. "
+                        "Cite the push or actuation on that specific control. A press, an unspecific "
+                        "turn, and a final declaration without a producing action are not evidence. "
                         "If the source requires an object not to move, cite the applicable invariant "
                         "or during-step condition and use a state claim of its own initial pose: "
                         "pose_match with the same object as subject and reference, epoch:initial, "
@@ -1869,6 +2074,10 @@ def publish_hybrid(
                         "An ordinary unquantified pickup is already expressed by pick, even without a "
                         "separate direction or movement step. Do not demand a second unsupported lift. "
                         "If a distinct height, target pose or clearance is requested, check that outcome. "
+                        "For an explicit lift followed by moving the same held object away, verify two "
+                        "ordered move_held steps: direction:up then direction:away. A single upward step "
+                        "with an increased distance from the start does not express the later motion. "
+                        "Check extent:short on that later step when a short displacement is requested. "
                         "Check explicit movement directions: lifting away is upward motion, not merely "
                         "clearance, and do not accept numeric thresholds or counts invented for qualitative instructions. "
                         "Check source specificity: a named contact or hanging part does not authorize "
@@ -1908,11 +2117,15 @@ def publish_hybrid(
                         "A row centered by a specified member does not require the other members "
                         "to have independent center destinations. Placement with its released fact "
                         "witnesses release after placement without a second action. "
-                        "Return {issues:[{quote:verbatim source span,reason:specific actual mismatch}]} for any omission, "
+                        "For every quote prefer the exact key from source_spans. Reuse one key for "
+                        "different requirements in the same sentence. If copying a shorter quote, "
+                        "copy a contiguous substring verbatim without expanding any shared wording. "
+                        "Return {issues:[{quote:source_spans key or verbatim span,reason:specific actual mismatch}]} for any omission, "
                         "contradiction, unrelated extra action or unjustified claim. Otherwise return "
-                        "{issues:[],checks:[{quote:verbatim source span,requirement:concrete source meaning,"
+                        "{issues:[],checks:[{quote:source_spans key or verbatim span,requirement:concrete source meaning,"
                         "scope:action|initial|always|before|step|effect|final,evidence:[step_NN, condition_NN, or a role ID],"
-                        "state:optional typed fact,spatial:optional typed relation}]}, one check per independent source obligation."
+                        "state:optional typed fact,spatial:optional typed relation,"
+                        "parallel_picks:optional paired subject map}]}, one check per independent source obligation."
                     ),
                 },
                 canonical_hash(
@@ -2031,7 +2244,14 @@ def publish_hybrid(
             bindings = {}
             producers = {node["id"]: node["id"] for node in graph["nodes"]}
             if not graph["success"]["conditions"]["final"]:
-                producers["final_step_completed"] = graph["success"]["terminal_step"]
+                if "terminal_steps" in graph["success"]:
+                    goal_producers["final_step_completed"] = graph["success"][
+                        "terminal_steps"
+                    ]
+                else:
+                    producers["final_step_completed"] = graph["success"][
+                        "terminal_step"
+                    ]
             coverage = dict(
                 status="source_reviewed",
                 producers=producers,

@@ -34,6 +34,22 @@ for (const viewport of [
     await page.goto(pathToFileURL(join(root, "hybrid-authoring.html")).href);
     await page.getByRole("button", { name: "中文", exact: true }).click();
     await expect(page.locator("h1")).toHaveText("Plank");
+    await expect(page.getByRole("button", { name: "依赖图" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(
+      page.locator('.rv-lane-action[data-key="call:step_03"]'),
+    ).toHaveAttribute("data-lane", "shared");
+    await expect(
+      page.locator('.rv-lane-edges [data-from="step_01"][data-to="step_02"]'),
+    ).toHaveCount(1);
+    await expect(page.locator(".rv-review-scene")).toContainText(
+      "Return both arms to their starting poses.",
+    );
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(viewport.width);
     const detail = page.getByRole("complementary", { name: "详情" });
     const close = detail.getByRole("button", { name: "关闭" });
     await page.getByRole("button", { name: "任务规范", exact: true }).click();
@@ -47,6 +63,7 @@ for (const viewport of [
     await expect(detail).toContainText(/plank.*left pedestal.*right pedestal/);
     await close.click();
 
+    await page.getByRole("button", { name: "步骤列表" }).click();
     await page.locator('[data-id="group:step_02"] .rv-toggle').click();
     await page.locator('button[data-key="call:step_02"]').click();
     const semantics = detail.getByRole("region", { name: "步骤语义" });
@@ -104,6 +121,7 @@ for (const [role, step] of [
   }) => {
     await page.setViewportSize({ width: 1680, height: 1120 });
     await page.goto(pathToFileURL(join(root, "hybrid-authoring.html")).href);
+    await page.locator(".rv-view-switch button").first().click();
     const stage = page.locator(`[data-id="group:${step}"]`);
     await stage.locator(".rv-toggle").click();
     await page.locator(`.rv-role-chip[title="${role}"]`).click();

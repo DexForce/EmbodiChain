@@ -40,8 +40,21 @@ and step-end phases, even if a later step restores the state. Separate release f
 released only when valid at the same checkpoint. A stated spatial frame must match the
 evidence, including slot relations; inverse axis relations can match in a shared
 frame but not when swapping a reference-local anchor. The validator tracks feasible arm assignments
-across the sequence without replacing authored `auto` arms. Citation repairs can
-fix malformed evidence without changing the graph or weakening its final checks.
+across the sequence without replacing authored `auto` arms. Two independent
+single-arm picks can share a `parallel_group` only with explicit timing for
+the acquisitions; naming both arms is not timing evidence. The audit verifies
+the hand-object pairs, and following steps depend on both branches. Both arms
+acquiring the same object remain one pick. A held tool making contact is a held
+motion with a contact-part relation, not a button actuation. A requested lift
+then move away has separate upward and departure steps; a requested short
+displacement has a qualitative extent, not an invented metric. Opposite sides
+of a future reference require a surviving relation from its placement or later.
+Nesting, stacking and release alone do not require a separate stability claim.
+A bistable
+control's other position requires an explicit action effect relative to its
+initial position, not `pressed`. A typed source audit may cite indexed source
+spans on its first pass or bounded citation repair; they resolve to verbatim
+instruction text without changing the graph or weakening its reviewed constraints.
 `task_engine.intent.*` remains unbound `authoring_only` (`source_reviewed`),
 not executable or lowerable.
 

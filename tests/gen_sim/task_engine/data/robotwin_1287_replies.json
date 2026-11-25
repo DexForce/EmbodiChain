@@ -1,0 +1,103 @@
+{
+  "source": "https://github.com/DexForce/EmbodiChain/tree/93ee267b486e74bb8114f4be2d4f8855b73b6d9a/pr1279-authoring",
+  "cases": {
+    "stamp_seal": {
+      "instruction": "There is a wooden stamp standing to the right of the middle of the table and a purple mat on the right side of the table. Use the right arm only. Pick up the stamp, move it above the purple mat and press its base down onto the mat. Then release the stamp, leaving it standing on the mat.",
+      "proposal": {
+        "semantic_plan": {
+          "roles": [
+            {"id":"table","kind":"surface","description":"The table referenced as the spatial frame."},
+            {"id":"stamp","kind":"tool","description":"The wooden stamp, initially standing to the right of the middle of the table."},
+            {"id":"stamp_base","kind":"object","description":"The base of the wooden stamp; the part pressed onto the mat.","part_of":"stamp"},
+            {"id":"purple_mat","kind":"surface","description":"The purple mat on the right side of the table."}
+          ],
+          "steps": [
+            {"verb":"pick","subjects":["stamp"],"arms":["right"],"effects":[{"kind":"held","arms":["right"],"subjects":["stamp"]}],"quote":"source_span_03"},
+            {"verb":"move_held","subjects":["stamp"],"arms":["right"],"effects":[{"kind":"relation","references":["purple_mat"],"subjects":["stamp"],"value":"above"}],"quote":"source_span_03"},
+            {"verb":"press","subjects":["stamp_base"],"arms":["right"],"direction":"down","maintain":[{"kind":"held","arms":["right"],"subjects":["stamp"]}],"effects":[{"kind":"relation","references":["purple_mat"],"subjects":["stamp_base"],"value":"touching"},{"kind":"actuated","subjects":["stamp_base"],"value":"pressed"}],"quote":"source_span_03"},
+            {"verb":"release","subjects":["stamp"],"arms":["right"],"effects":[{"kind":"released","subjects":["stamp"]}],"quote":"source_span_04"}
+          ],
+          "conditions": [
+            {"scope":"initial","fact":{"kind":"view_location","frame":"table","lateral":"right","subjects":["stamp"]},"quote":"source_span_01"},
+            {"scope":"initial","fact":{"kind":"orientation","subjects":["stamp"],"value":"upright"},"quote":"source_span_01"},
+            {"scope":"initial","fact":{"kind":"view_location","frame":"table","lateral":"right","subjects":["purple_mat"]},"quote":"source_span_01"},
+            {"scope":"final","fact":{"kind":"relation","references":["purple_mat"],"subjects":["stamp"],"value":"on"},"quote":"source_span_04"},
+            {"scope":"final","fact":{"kind":"orientation","subjects":["stamp"],"value":"upright"},"quote":"source_span_04"}
+          ]
+        }
+      },
+      "rejection": {"event":"rejected","check":"validate_intent","message":"ArticulationDeclarationError: Scene object 'stamp' requires articulation; declare it with asset_kind: articulated in --scene-context"}
+    },
+    "turn_switch": {
+      "instruction": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face. Use the right arm only. Move the gripper to the switch and push the switch to flip it to the other position. Then move the gripper away. Do not grasp or move the panel.",
+      "proposal": {
+        "semantic_plan": {
+          "roles": [
+            {"id":"table","kind":"surface","description":"The table supporting the switch panel."},
+            {"id":"switch_panel","kind":"object","description":"White switch panel, standing on the table to the right of the middle and far from the robot."},
+            {"id":"switch","kind":"button","description":"The switch on the panel’s front face.","part_of":"switch_panel"}
+          ],
+          "steps": [
+            {"verb":"move_gripper","subjects":[],"arms":["right"],"effects":[{"kind":"gripper_relation","arms":["right"],"references":["switch"],"value":"above"}],"quote":"Move the gripper to the switch"},
+            {"verb":"push","subjects":["switch"],"arms":["right"],"effects":[{"kind":"actuated","subjects":["switch"],"value":"pressed"}],"quote":"push the switch to flip it to the other position"},
+            {"verb":"move_gripper","subjects":[],"arms":["right"],"direction":"away","effects":[{"kind":"gripper_relation","arms":["right"],"references":["switch"],"value":"clear_of"}],"quote":"Then move the gripper away"}
+          ],
+          "conditions": [
+            {"scope":"initial","fact":{"kind":"relation","references":["table"],"subjects":["switch_panel"],"value":"on"},"quote":"There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face."},
+            {"scope":"initial","fact":{"kind":"orientation","subjects":["switch_panel"],"value":"upright"},"quote":"There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face."},
+            {"scope":"initial","fact":{"kind":"view_location","frame":"table","lateral":"right","subjects":["switch_panel"]},"quote":"There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face."},
+            {"scope":"initial","fact":{"kind":"view_location","frame":"robot","depth":"far","subjects":["switch_panel"]},"quote":"There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face."},
+            {"scope":"always","fact":{"kind":"pose_match","components":["position","orientation"],"epoch":"initial","references":["switch_panel"],"subjects":["switch_panel"]},"quote":"Do not grasp or move the panel."}
+          ]
+        }
+      },
+      "scene_context": {"schema_version":"embodichain.task-scene-context/v1","objects":[{"id":"switch_panel","description":"white panel with a rocker switch on its front face","asset_kind":"articulated"}]},
+      "audit": {
+        "issues": [],
+        "checks": [
+          {"quote":"There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face.","requirement":"The identified switch panel is the white panel in the scene.","scope":"initial","evidence":["switch_panel"]},
+          {"quote":"standing on the table","requirement":"The switch panel is on the table.","scope":"initial","evidence":["condition_01"],"spatial":{"kind":"relation","value":"on","subjects":["switch_panel"],"references":["table"]}},
+          {"quote":"standing","requirement":"The switch panel is upright initially.","scope":"initial","evidence":["condition_02"],"state":{"kind":"orientation","subjects":["switch_panel"],"value":"upright"}},
+          {"quote":"to the right of the middle","requirement":"The switch panel is to the right in the table frame.","scope":"initial","evidence":["condition_03"],"state":{"kind":"view_location","frame":"table","lateral":"right","subjects":["switch_panel"]}},
+          {"quote":"far from the robot","requirement":"The switch panel is far from the robot initially.","scope":"initial","evidence":["condition_04"],"state":{"kind":"view_location","frame":"robot","depth":"far","subjects":["switch_panel"]}},
+          {"quote":"with a switch on its front face","requirement":"The switch is the control on the front face of this panel.","scope":"initial","evidence":["switch"]},
+          {"quote":"Use the right arm only.","requirement":"Use the right arm for the switch interaction.","scope":"action","evidence":["step_01","step_02","step_03"]},
+          {"quote":"Move the gripper to the switch","requirement":"Move the right gripper to above the switch before pushing it.","scope":"action","evidence":["step_01"],"state":{"kind":"gripper_relation","arms":["right"],"references":["switch"],"value":"above"}},
+          {"quote":"push the switch to flip it to the other position","requirement":"Push the switch with the right arm to actuate it.","scope":"action","evidence":["step_02"]},
+          {"quote":"push the switch to flip it to the other position","requirement":"The switch is actuated by the push.","scope":"effect","evidence":["step_02"],"state":{"kind":"actuated","subjects":["switch"],"value":"pressed"}},
+          {"quote":"Then move the gripper away","requirement":"After pushing, move the right gripper away so it is clear of the switch.","scope":"action","evidence":["step_03"],"state":{"kind":"gripper_relation","arms":["right"],"references":["switch"],"value":"clear_of"}},
+          {"quote":"Do not grasp or move the panel.","requirement":"Do not grasp the panel during the task.","scope":"action","evidence":["step_01","step_02","step_03"]},
+          {"quote":"Do not grasp or move the panel.","requirement":"Keep the panel at its initial position and orientation throughout the task.","scope":"always","evidence":["condition_05"],"state":{"kind":"pose_match","components":["position","orientation"],"epoch":"initial","references":["switch_panel"],"subjects":["switch_panel"]}}
+        ]
+      },
+      "rejection": {"event":"rejected","check":"_validate_intent_audit","message":"AuthoringEvidenceError: Source state claim 'actuated' lacks matching evidence for ['switch'] in the required scope"}
+    },
+    "place_bread_basket": {
+      "instruction": "There are two pieces of bread on the table, one on the far left and one on the far right, and a wicker basket in the middle of the table, close to the robot. Use both arms: the left arm picks up the left piece of bread and the right arm picks up the right piece of bread at the same time. Then place both pieces of bread inside the basket and release them.",
+      "proposal": {
+        "semantic_plan": {
+          "roles": [
+            {"id":"bread_left","kind":"object","description":"Piece of bread initially on the far left of the table."},
+            {"id":"bread_right","kind":"object","description":"Piece of bread initially on the far right of the table."},
+            {"id":"basket","kind":"container","description":"Wicker basket initially in the middle of the table, close to the robot."},
+            {"id":"table","kind":"surface","description":"Table supporting the bread and basket."},
+            {"id":"robot","kind":"robot","description":"Robot near the basket."}
+          ],
+          "steps": [
+            {"verb":"pick","subjects":["bread_left","bread_right"],"arms":["left","right"],"direction":"up","effects":[{"kind":"held","arms":["left"],"subjects":["bread_left"]},{"kind":"held","arms":["right"],"subjects":["bread_right"]}],"quote":"source_span_02"},
+            {"verb":"place","subjects":["bread_left","bread_right"],"arms":["left","right"],"effects":[{"kind":"relation","references":["basket"],"subjects":["bread_left","bread_right"],"value":"inside"},{"kind":"released","subjects":["bread_left","bread_right"]}],"quote":"source_span_03"}
+          ],
+          "conditions": [
+            {"scope":"initial","fact":{"kind":"relation","references":["table"],"subjects":["bread_left","bread_right"],"value":"on"},"quote":"source_span_01"},
+            {"scope":"initial","fact":{"kind":"view_location","frame":"table","lateral":"far_left","subjects":["bread_left"]},"quote":"source_span_01"},
+            {"scope":"initial","fact":{"kind":"view_location","frame":"table","lateral":"far_right","subjects":["bread_right"]},"quote":"source_span_01"},
+            {"scope":"initial","fact":{"kind":"relation","references":["table"],"subjects":["basket"],"value":"on"},"quote":"source_span_01"},
+            {"scope":"initial","fact":{"kind":"view_location","frame":"table","lateral":"center","depth":"middle","subjects":["basket"]},"quote":"source_span_01"},
+            {"scope":"initial","fact":{"kind":"relation","references":["robot"],"subjects":["basket"],"value":"near"},"quote":"source_span_01"}
+          ]
+        }
+      },
+      "rejection": {"event":"rejected","check":"validate_intent","message":"ValueError: pick needs one object identity per occurrence"}
+    }
+  }
+}

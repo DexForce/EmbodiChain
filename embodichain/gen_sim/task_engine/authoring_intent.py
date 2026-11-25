@@ -17,8 +17,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from copy import deepcopy
 from dataclasses import dataclass
+from itertools import groupby
 import math
 import re
 from typing import Any
@@ -60,7 +62,20 @@ _DIRECTIONAL_VERBS = {
     "articulate",
 }
 _DIRECTIONS = {"up", "down", "toward", "away", "left", "right"}
+_LIFT_AND_DEPART = re.compile(
+    r"(?P<lift>\b(?:lift|raise)\b[^.!?;,]*?)"
+    r"(?:\s*,?\s*(?:and(?:\s+then)?|then)\s+|[.!?;]\s+then\s+)"
+    r"(?P<depart>(?:move|shift|carry|translate)\s+it\b[^.!?;,]*?\baway\b)",
+    re.IGNORECASE,
+)
+_NEGATED_ACTION_PREFIX = re.compile(
+    r"\b(?:not|never|avoid|don['’]t)\s+(?:\w+\s+){0,3}$", re.IGNORECASE
+)
+_SHORT_DISTANCE = re.compile(
+    r"\b(?:(?:short|small)\s+distance|slightly)\b", re.IGNORECASE
+)
 _GRIPPER_RELATIONS = {"above", "touching", "clear_of"}
+_OTHER_CONTROL_POSITION = "other_from_initial"
 _VERBS = (
     _ARM_VERBS
     | _ACQUIRE_VERBS
@@ -154,7 +169,9 @@ _FACT_CHOICES = {
     "gripper_relation": {"value": _GRIPPER_RELATIONS},
     "articulated": {"mechanism": ("hinge", "slide"), "value": ("open", "closed")},
     "transferred": {"material": ("solid", "liquid")},
-    "actuated": {"value": ("open", "closed", "pressed", "turned")},
+    "actuated": {
+        "value": ("open", "closed", "pressed", "turned", _OTHER_CONTROL_POSITION)
+    },
 }
 
 _PROMPT = {
@@ -174,6 +191,8 @@ _PROMPT = {
                 "arms": ["auto"],
                 "effects": ["fact"],
                 "quote": "source span ID or exact source span",
+                "parallel_group": "omit except for explicitly simultaneous independent picks",
+                "extent": "short only for a source-requested short move_held displacement; otherwise omit",
             }
         ],
         "conditions": [
@@ -245,6 +264,8 @@ _PROMPT = {
         "Use directional pointing (on a part_of role) when the orientation specifies which end points where. "
         "For pointing toward, facing, or pointing away from a named object, use pointing_toward or "
         "pointing_away_from with that role in references, not a forward/backward axis guess. "
+        "When pointing a rigid part of a held object, orient the held owner with its holding arm; "
+        "the orientation effect names the part, not the owner. Link the part with part_of. "
         "Flat describes a lying posture on a support without choosing a particular resting face. "
         "Use lying_on_side only when the source specifies a side-lying posture; "
         "lying on top of a support identifies the support, not which face of the object rests on it. "
@@ -296,8 +317,13 @@ _PROMPT = {
         "Do not turn appearance/identity selectors into additional task constraints. "
         "Give all requested simultaneous relations, orientations, quantitative constraints, retention, order and "
         "negations structured facts. An exact quote or role description alone does not express a fact. "
-        "For stability of a structure assembled by the task, list the actual assembled roles "
-        "in stable.subjects; do not substitute a new role describing the finished structure. "
+        "Declare stable only when the source asks for stability or balance. Stacking, nesting "
+        "or release alone does not add a separate stability requirement. If it is requested, "
+        "list the actual assembled roles in stable.subjects. "
+        "For two objects requested on opposite sides of a future placement, the reference is the "
+        "other object's installed pose, not its initial/current pose before placement. Add the "
+        "opposite_sides effect on the step that places the reference (or completes the relationship "
+        "afterward); do not use initial or earlier side facts as the only evidence. "
         "Untouched_except protects all other scene objects; intact excludes disassembly; mutually_separate "
         "means the listed subjects do not intersect, contain or nest within one another. Use untouched_except "
         "for every other unspecified object; untouched only protects named individual roles, "
@@ -309,25 +335,43 @@ _PROMPT = {
         "Use grasp to acquire an attached part without detaching it. Use grasped_at on pick/grasp only "
         "for a grip site specified by the source. A named part used for contact, placement, or hanging "
         "is not thereby a grip site; use held alone for an unspecified grip. "
-        "A simultaneous acquisition is one pick with both arms "
-        "and separate grasped_at facts for each specified site. Keep both arms on a bimanual hold/move. "
+        "For two arms acquiring the SAME object at once, use one pick with both arms and separate "
+        "grasped_at facts for each specified site. Keep both arms on a bimanual hold/move. When the "
+        "source explicitly requires simultaneous acquisition of DIFFERENT objects, use two adjacent "
+        "pick steps with the same parallel_group ID. Each has one explicit arm, its own distinct "
+        "subject, and only its own held or grasped_at effects. Both complete before the next step. "
+        "'Use both arms' and separate hand-object assignments do not specify simultaneous timing; "
+        "without explicit timing language, omit parallel_group and use ordinary independent picks. "
+        "A later place still has one object per step; do not make it simultaneous unless required. "
+        "For distinct held objects, use one move_held step per object with its actual holding arm. "
+        "Do not combine their subjects in one step or silently serialize an explicit timing constraint. "
         "For articulated movement, grasp the moving part at the specified site, articulate that same held "
         "part with articulated referencing a distinct articulation role for its joint, part_of the "
         "moving part or its owner, plus the mechanism, then release if requested. "
         "Reuse the owning asset's scene_context ID when it is supplied. A turn of a free object is not joint actuation. "
+        "For a bistable control explicitly moved to its other position, use a push or actuate action "
+        "on that specific control part, with an actuated effect valued other_from_initial. This means "
+        "the other stable position relative to the same control's initial position, not just pressed or "
+        "turned. Link the control part to its caller-declared articulated owner. "
         "For a press without grasping, move_gripper with gripper_relation:above at the actual site, "
         "press that site (actuated:pressed), then move_gripper with gripper_relation:clear_of if requested. "
         "When the source describes a button on a surface, the press effect names that button, "
         "not the whole surface used for approach. "
         "Use optional step direction on move_held, move_gripper, press, push or articulate when the "
         "source specifies a direction. Lifting away has direction up; clear_of describes leaving contact, "
-        "not its direction. Move_gripper has no object subjects. A held tool can touch a "
-        "specific face with relation:touching between its part and the contact target; this is not place. "
+        "not its direction. Move_gripper has no object subjects. For pressing a held rigid tool against "
+        "a surface, use move_held with the whole held tool as subject and relation:touching from its "
+        "specified contact part to the surface. Preserve the grasp during contact; do not use "
+        "press, actuated, or place for that contact. "
         "For non-displacement while pressing, keep the parent object's initial pose instead of claiming it is untouched. "
         "a transfer has the held source container as its step subject. Place moves a held subject to its "
         "declared destination and releases it "
         "(including seating, nesting or hanging); its released effect can witness release after placement. "
-        "Use move_held for a held destination or lift. "
+        "Use move_held for a held destination or lift. When told to lift an object and then move "
+        "it away, emit two ordered move_held steps with the same held subject and arm(s): first "
+        "direction:up, then direction:away. Cite the whole source clause or the respective action "
+        "phrases. Put extent:short on the second motion for an explicitly short displacement; do not "
+        "invent a metric threshold. Keep any stated distance reference on that second step. "
         "Transferring contents does not restore the source container's orientation unless requested. "
         "Push does not pick up. To tighten a part against a fixed reference, first seat it with a "
         "seated_on effect while held, then turn with tightened_on for the same pair, then release if requested. "
@@ -492,6 +536,8 @@ def _fact(fact: Any, roles: set[str]) -> None:
         for ids, count in zip((subjects, refs), expected)
     ):
         raise ValueError(f"Invalid operand count for {kind}: {expected}")
+    if _is_control_transition(fact) and len(subjects) != 1:
+        raise ValueError("A control transition needs exactly one control part")
     if set(subjects) & set(refs) and (
         kind in _DISTINCT_OPERANDS
         or kind == "pose_match"
@@ -685,6 +731,12 @@ def _has_step_effect(step: dict[str, Any], fact: dict[str, Any]) -> bool:
     )
 
 
+def _is_control_transition(fact: dict[str, Any]) -> bool:
+    return (
+        fact.get("kind") == "actuated" and fact.get("value") == _OTHER_CONTROL_POSITION
+    )
+
+
 @dataclass(frozen=True)
 class _ArmState:
     grips: frozenset[tuple[str, str]] = frozenset()
@@ -746,6 +798,85 @@ def _role_ancestry(role: str, parents: dict[str, str]) -> set[str]:
         role = parents[role]
         lineage.add(role)
     return lineage
+
+
+def _intent_phases(steps: list[dict[str, Any]]) -> Iterator[tuple[int, int]]:
+    """Return the inclusive start and exclusive end of each authoring phase."""
+    for _, phase in groupby(
+        enumerate(steps), key=lambda row: row[1].get("parallel_group", row[0])
+    ):
+        indices = [index for index, _ in phase]
+        yield indices[0], indices[-1] + 1
+
+
+def _verify_lift_then_depart(instruction: str, steps: list[dict[str, Any]]) -> None:
+    for match in _LIFT_AND_DEPART.finditer(instruction):
+        if _NEGATED_ACTION_PREFIX.search(instruction[: match.start()]):
+            continue
+        lift, depart = (phrase.strip() for phrase in match.groups())
+        short = bool(_SHORT_DISTANCE.search(depart))
+        lifted: set[tuple[str, tuple[str, ...]]] = set()
+        for step in steps:
+            verb = step["verb"]
+            if verb in {"release", "place", "handover"}:
+                lifted = {key for key in lifted if key[0] != step["subjects"][0]}
+            if verb != "move_held":
+                continue
+            key = (step["subjects"][0], tuple(sorted(step["arms"])))
+            direction, quote = step.get("direction"), step["quote"]
+            if direction == "up" and lift in quote:
+                lifted.add(key)
+            if (
+                direction == "away"
+                and key in lifted
+                and depart in quote
+                and (not short or step.get("extent") == "short")
+            ):
+                break
+        else:
+            raise ValueError(
+                "The quoted lift and move away require separate move_held steps: up, then away "
+                "with the same held object and arms, each citing its source action or the full clause"
+                + (
+                    "; mark the requested short displacement with extent:short"
+                    if short
+                    else ""
+                )
+            )
+
+
+def _normalize_held_contact(
+    step: dict[str, Any],
+    parents: dict[str, str],
+    role_kinds: dict[str, str],
+    scene_objects: dict[str, Any],
+) -> None:
+    # Some proposals already state the exact contact, but also label it as joint actuation.
+    part = step["subjects"][0]
+    owner = parents.get(part)
+    if (
+        owner is None
+        or role_kinds[part] in {"button", "articulation"}
+        or any(
+            scene_objects.get(role, {}).get("asset_kind") == "articulated"
+            for role in _role_ancestry(part, parents)
+        )
+        or dict(kind="held", subjects=[owner], arms=step["arms"])
+        not in step.get("maintain", ())
+    ):
+        return
+    effects = step["effects"]
+    press = dict(kind="actuated", subjects=[part], value="pressed")
+    if len(effects) != 2 or press not in effects:
+        return
+    contact = effects[1] if effects[0] == press else effects[0]
+    if (
+        isinstance(contact, dict)
+        and contact.get("kind") == "relation"
+        and contact.get("value") == "touching"
+        and contact.get("subjects") == [part]
+    ):
+        step.update(verb="move_held", subjects=[owner], effects=[contact])
 
 
 def validate_intent(
@@ -896,6 +1027,8 @@ def validate_intent(
         if fact["kind"] in {"articulated", "actuated"}:
             for subject in fact["subjects"]:
                 require_articulation(subject, scene_objects, parents)
+        if _is_control_transition(fact) and fact["subjects"][0] not in parents:
+            raise ValueError("Link the specific control part to its articulated owner")
 
     for condition in plan["conditions"]:
         _shape(condition, {"scope", "fact", "quote"}, set(), "condition")
@@ -904,6 +1037,10 @@ def validate_intent(
         if scope not in {"initial", "always", "final"}:
             raise ValueError("Condition scope must be initial, always or final")
         check_fact(fact)
+        if _is_control_transition(fact) and scope != "final":
+            raise ValueError(
+                "A transition from the initial position is an effect or final goal"
+            )
         if scope == "always":
             invariants.append(fact)
         if scope == "initial":
@@ -946,7 +1083,7 @@ def validate_intent(
         _shape(
             step,
             {"verb", "subjects", "arms", "effects", "quote"},
-            {"direction", "maintain", "release_quote"},
+            {"direction", "extent", "maintain", "release_quote", "parallel_group"},
             "step",
         )
         verb = step["verb"]
@@ -958,6 +1095,10 @@ def validate_intent(
             or (verb == "pick" and step["direction"] != "up")
         ):
             raise ValueError(f"Invalid movement direction for {verb}")
+        if "extent" in step and (
+            verb != "move_held" or step["extent"] != "short" or "direction" not in step
+        ):
+            raise ValueError("extent:short requires a directed move_held")
         step["quote"] = _quote(step["quote"], instruction, spans)
         _values(step["subjects"], roles, f"{verb}.subjects", empty=verb in _ARM_VERBS)
         _values(step["arms"], _ARMS, f"{verb}.arms")
@@ -971,15 +1112,53 @@ def validate_intent(
         if verb in _ARM_VERBS and subjects:
             raise ValueError(f"{verb} uses arms, not object subjects")
         if verb in _ACQUIRE_VERBS | _HELD_VERBS | {"press"} and len(subjects) != 1:
-            raise ValueError(f"{verb} needs one object identity per occurrence")
+            hint = (
+                "; explicitly simultaneous picks of different objects use a shared parallel_group"
+                if verb == "pick"
+                else ""
+            )
+            raise ValueError(f"{verb} needs one object identity per occurrence{hint}")
         effects, maintained = step["effects"], step.get("maintain", [])
         if type(effects) is not list or type(maintained) is not list:
             raise ValueError("step.effects and step.maintain must be lists of facts")
+        grouped = "parallel_group" in step
+        if grouped and (
+            not isinstance(step["parallel_group"], str)
+            or not _SCENE_ROLE_ID.fullmatch(step["parallel_group"])
+            or verb != "pick"
+            or len(arms) != 1
+            or "auto" in arms
+            or maintained
+        ):
+            raise ValueError(
+                "A parallel group contains independent single-arm picks with explicit arms"
+            )
         for fact in maintained:
             check_fact(fact)
+            if _is_control_transition(fact):
+                raise ValueError("A control transition must be produced as an effect")
             check_fact_state(fact)
+        if verb == "press":
+            _normalize_held_contact(step, parents, role_kinds, scene_objects)
+            verb, subjects, effects = step["verb"], step["subjects"], step["effects"]
         for fact in effects:
             check_fact(fact)
+            if grouped and (
+                fact["kind"] not in {"held", "grasped_at"}
+                or fact["subjects"] != subjects
+                or fact["arms"] != step["arms"]
+            ):
+                raise ValueError(
+                    "A parallel pick can only establish its own held or grasped_at effect"
+                )
+            if _is_control_transition(fact) and (
+                verb not in {"push", "actuate"}
+                or fact["subjects"] != subjects
+                or len(arms) != 1
+            ):
+                raise ValueError(
+                    "Only a single-arm push or actuate on the same control can produce its transition"
+                )
         if verb in {
             "place",
             "transfer_contents",
@@ -1094,6 +1273,22 @@ def validate_intent(
             check_fact_state(fact)
         ordered_steps.append(step)
 
+    seen_groups = set()
+    for start, end in _intent_phases(ordered_steps):
+        group = ordered_steps[start].get("parallel_group")
+        if group is None:
+            continue
+        if group in seen_groups or end - start != 2:
+            raise ValueError("A parallel group must contain exactly two adjacent picks")
+        first, second = ordered_steps[start:end]
+        if first["arms"] == second["arms"] or not _role_ancestry(
+            first["subjects"][0], parents
+        ).isdisjoint(_role_ancestry(second["subjects"][0], parents)):
+            raise ValueError(
+                "A parallel group must use distinct arms and independent objects"
+            )
+        seen_groups.add(group)
+    _verify_lift_then_depart(instruction, ordered_steps)
     plan["steps"] = ordered_steps
     for condition in plan["conditions"]:
         scope, fact = condition["scope"], condition["fact"]
@@ -1176,6 +1371,11 @@ def compile_intent(
         )
 
     prior: list[str] = []
+    predecessors = {}
+    for start, end in _intent_phases(plan["steps"]):
+        members = [f"step_{index + 1:02d}" for index in range(start, end)]
+        predecessors.update(dict.fromkeys(members, prior))
+        prior = members
     for index, step in enumerate(plan["steps"], 1):
         identifier = f"step_{index:02d}"
         arguments = dict(step)
@@ -1186,7 +1386,8 @@ def compile_intent(
             arguments.update(
                 pose_reference="each_arm_initial_pose", binding_status="pending"
             )
-        metadata = dict(id=identifier, task_type=verb, depends_on=prior)
+        incoming = predecessors[identifier]
+        metadata = dict(id=identifier, task_type=verb, depends_on=incoming)
         nodes.append(
             dict(
                 **metadata,
@@ -1204,7 +1405,7 @@ def compile_intent(
         definitions["milestones"].append(
             dict(
                 id=identifier,
-                after=prior,
+                after=incoming,
                 achieve=[
                     predicate(f"achieve_{identifier}", dict(verb=verb, **arguments))
                 ],
@@ -1213,10 +1414,12 @@ def compile_intent(
         clause(identifier, identifier, quote, pending=verb == "return_arms")
         if release_quote:
             clause(f"{identifier}.release", identifier, release_quote)
-        prior = [identifier]
+    terminal = (
+        {"terminal_step": prior[0]} if len(prior) == 1 else {"terminal_steps": prior}
+    )
     if not definitions["goal"]:
         completion = "final_step_completed"
-        definitions["goal"].append(predicate(completion, {"terminal_step": prior[0]}))
+        definitions["goal"].append(predicate(completion, terminal))
         clause(completion, completion, plan["steps"][-1]["quote"])
     spec = TaskSpec.from_dict(
         dict(
@@ -1256,9 +1459,7 @@ def compile_intent(
             targets={},
             nodes=nodes,
             task_groups=groups,
-            success=dict(
-                authoring_only=True, conditions=graph_conditions, terminal_step=prior[0]
-            ),
+            success=dict(authoring_only=True, conditions=graph_conditions, **terminal),
         )
     )
     return spec, graph, clauses, descriptions

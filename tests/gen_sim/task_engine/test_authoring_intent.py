@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import re
 from copy import deepcopy
+from pathlib import Path
 
 from PIL import Image
 import pytest
@@ -95,6 +96,233 @@ def _audit(*checks):
 
 def _validate(plan, context=None, text=_SOURCE):
     return validate_intent(plan, text, scene_objects=context or {})
+
+
+@pytest.fixture(scope="module")
+def robotwin_1287():
+    path = Path(__file__).with_name("data") / "robotwin_1287_replies.json"
+    return json.loads(path.read_text(encoding="utf-8"))["cases"]
+
+
+def test_recorded_held_tool_press_preserves_the_explicit_contact(robotwin_1287):
+    case = robotwin_1287["stamp_seal"]
+    original = case["proposal"]["semantic_plan"]
+    source = case["instruction"]
+    parsed = _validate(original, text=source)
+    contact = parsed["steps"][2]
+    assert contact["verb"] == "move_held" and contact["subjects"] == ["stamp"]
+    assert contact["arms"] == ["right"] and contact["direction"] == "down"
+    assert contact["effects"] == [_relation("touching", "stamp_base", "purple_mat")]
+    assert parsed["steps"][3]["verb"] == "release"
+    spec, graph, _, _ = compile_intent(parsed, source, "stamp_seal", {})
+    assert not any(entry["is_articulated"] for entry in spec.requirements[0].value)
+    assert (
+        _fact("orientation", "stamp", value="upright")
+        in graph["success"]["conditions"]["final"]
+    )
+
+    incomplete = deepcopy(original)
+    incomplete["steps"][2]["effects"].pop(0)
+    with pytest.raises(ValueError, match="stamp.*requires articulation"):
+        _validate(incomplete, text=source)
+
+
+def test_recorded_switch_press_does_not_prove_the_other_position(robotwin_1287):
+    case = robotwin_1287["turn_switch"]
+    context = {obj["id"]: obj for obj in case["scene_context"]["objects"]}
+    source = case["instruction"]
+    plan = deepcopy(case["proposal"]["semantic_plan"])
+    audit = deepcopy(case["audit"])
+    transition = _fact("actuated", "switch", value="other_from_initial")
+    state_check = next(
+        row for row in audit["checks"] if row.get("state", {}).get("kind") == "actuated"
+    )
+    state_check.update(
+        scope="final",
+        requirement="Leave the switch in its other position.",
+        state=transition,
+    )
+    pressed = _validate(plan, context, source)
+    with pytest.raises(AuthoringEvidenceError, match="actuated.*matching evidence"):
+        _validate_intent_audit(source, pressed, audit)
+    pressed["conditions"].append(
+        dict(scope="final", fact=transition, quote=state_check["quote"])
+    )
+    with pytest.raises(AuthoringEvidenceError, match="surviving action effect"):
+        _validate_intent_audit(source, pressed, audit)
+
+    plan["steps"][1]["effects"] = [transition]
+    parsed = _validate(plan, context, source)
+    producers, new_goals = _validate_intent_audit(source, parsed, audit)
+    assert new_goals == [
+        dict(scope="final", fact=transition, quote=state_check["quote"])
+    ]
+    assert list(producers.values()) == [["step_02"]]
+    with pytest.raises(ValueError, match="requires articulation"):
+        _validate(plan, text=source)
+
+
+def test_recorded_two_object_pick_needs_independent_parallel_branches(robotwin_1287):
+    case = robotwin_1287["place_bread_basket"]
+    source = case["instruction"]
+    original = case["proposal"]["semantic_plan"]
+    with pytest.raises(ValueError, match="one object identity per occurrence"):
+        _validate(original, text=source)
+
+    plan = deepcopy(original)
+    pick, place = plan["steps"]
+    plan["steps"] = [
+        dict(
+            pick,
+            subjects=[subject],
+            arms=[arm],
+            effects=[grip],
+            parallel_group="pickup",
+        )
+        for subject, arm, grip in zip(pick["subjects"], pick["arms"], pick["effects"])
+    ] + [
+        dict(
+            place,
+            subjects=[subject],
+            arms=[arm],
+            effects=[dict(fact, subjects=[subject]) for fact in place["effects"]],
+        )
+        for subject, arm in zip(place["subjects"], place["arms"])
+    ]
+    audit = _audit(
+        _check(
+            "step_01",
+            "step_02",
+            scope="action",
+            quote="the left arm picks up the left piece of bread and the right arm picks up the right piece of bread at the same time",
+            parallel_picks={"left": "bread_left", "right": "bread_right"},
+        )
+    )
+    parsed = _validate(plan, text=source)
+    _validate_intent_audit(source, parsed, audit)
+    _, graph, _, _ = compile_intent(parsed, source, "place_bread_basket", {})
+    assert [node["depends_on"] for node in graph["nodes"]] == [
+        [],
+        [],
+        ["step_01", "step_02"],
+        ["step_03"],
+    ]
+    assert graph["success"]["authoring_only"] is True
+    hold_source = source.rsplit(" Then place", 1)[0]
+    completed_together = _validate(
+        dict(plan, steps=plan["steps"][:2]), text=hold_source
+    )
+    _, terminal_graph, _, _ = compile_intent(
+        completed_together, hold_source, "hold_both", {}
+    )
+    assert terminal_graph["success"]["terminal_steps"] == ["step_01", "step_02"]
+
+    swapped = deepcopy(audit)
+    swapped["checks"][0]["parallel_picks"] = {
+        "left": "bread_right",
+        "right": "bread_left",
+    }
+    with pytest.raises(AuthoringEvidenceError, match="parallel"):
+        _validate_intent_audit(source, parsed, swapped)
+
+    for step in plan["steps"][:2]:
+        del step["parallel_group"]
+    sequential = _validate(plan, text=source)
+    with pytest.raises(AuthoringEvidenceError, match="parallel"):
+        _validate_intent_audit(source, sequential, audit)
+
+
+@pytest.mark.parametrize("ending", [".", ", but not at the same time."])
+def test_bilateral_assignments_do_not_authorize_parallel_picks(ending):
+    source = (
+        "Use both arms: the left arm picks up the cup and the right arm picks up the card"
+        + ending
+    )
+    plan = _validate(
+        _plan(
+            "cup card",
+            _step("pick", "cup", arms="left", quote=source, parallel_group="pair"),
+            _step("pick", "card", arms="right", quote=source, parallel_group="pair"),
+        ),
+        text=source,
+    )
+    unsupported = _check(
+        "step_01",
+        "step_02",
+        quote=source,
+        scope="action",
+        parallel_picks={"left": "cup", "right": "card"},
+    )
+    with pytest.raises(AuthoringEvidenceError, match="explicit.*timing"):
+        _validate_intent_audit(source, plan, _audit(unsupported))
+    for step in plan["steps"]:
+        del step["parallel_group"]
+    _validate_intent_audit(
+        source, plan, _audit(_check("step_01", "step_02", quote=source, scope="action"))
+    )
+
+
+def test_departure_requires_a_distinct_held_motion_after_lifting():
+    source = "Grasp the container, lift it and move it a short distance away from where it was."
+    moved = _fact(
+        "distance_change", "container", "origin", comparison="gt", epoch="initial"
+    )
+    grasp = _step("grasp", "container", arms="right", quote=source)
+    lift = _step(
+        "move_held", "container", moved, arms="right", quote=source, direction="up"
+    )
+    plan = _plan("container origin", grasp, lift)
+    with pytest.raises(ValueError, match="separate.*move_held"):
+        _validate(plan, text=source)
+    depart = dict(lift, direction="away", extent="short")
+    plan["steps"].append(depart)
+    checked = _validate(plan, text=source)
+    _, graph, _, _ = compile_intent(checked, source, "held_motion", {})
+    assert graph["nodes"][2]["depends_on"] == ["step_02"]
+    assert graph["nodes"][2]["call"]["arguments"]["extent"] == "short"
+    with pytest.raises(ValueError, match="separate.*move_held"):
+        _validate(dict(plan, steps=[grasp, depart, lift]), text=source)
+
+
+def test_negated_lift_and_depart_does_not_require_motion():
+    grasp = "Grasp the container."
+    source = grasp + " Do not lift it and move it away."
+    plan = _plan("container", _step("grasp", "container", arms="right", quote=grasp))
+    assert _validate(plan, text=source)["steps"] == plan["steps"]
+
+
+def test_future_side_relation_needs_evidence_after_reference_is_placed():
+    relation_quote = "Put the two supports one on each side of the future crosspiece."
+    source = relation_quote + " Put the crosspiece down."
+    sides = _relation("opposite_sides", "left_base right_base", "crosspiece")
+    plan = _validate(
+        _plan(
+            "left_base right_base crosspiece table",
+            _step("pick", "crosspiece", quote="Put the crosspiece down."),
+            _step(
+                "place",
+                "crosspiece",
+                _relation("on", "crosspiece", "table"),
+                quote="Put the crosspiece down.",
+            ),
+            conditions=[dict(scope="initial", fact=sides, quote=relation_quote)],
+        ),
+        text=source,
+    )
+    placement = _check("step_02", scope="action", quote="Put the crosspiece down.")
+    initial = _check(
+        "condition_01", scope="initial", quote=relation_quote, spatial=sides
+    )
+    with pytest.raises(AuthoringEvidenceError, match="after.*placed"):
+        _validate_intent_audit(source, plan, _audit(placement, initial))
+    plan["conditions"] = [dict(scope="final", fact=sides, quote=relation_quote)]
+    final = _check("condition_01", scope="final", quote=relation_quote, spatial=sides)
+    with pytest.raises(AuthoringEvidenceError, match="after.*placed"):
+        _validate_intent_audit(source, plan, _audit(placement, final))
+    plan["steps"][1]["effects"].append(sides)
+    final["evidence"].append("step_02")
+    producers, _ = _validate_intent_audit(source, plan, _audit(placement, final))
+    assert producers == {"condition_01": ["step_02"]}
 
 
 def test_auto_grasps_reserve_capacity_until_release():
@@ -901,7 +1129,7 @@ def hybrid(tmp_path, monkeypatch):
     Image.new("RGB", (10, 10)).save(image)
     output = tmp_path / "plan"
 
-    def run(plans, review, **options):
+    def run(plans, review, *, instruction=_SOURCE, **options):
         candidates = iter(plans)
         proposals, reviews = [], []
 
@@ -917,7 +1145,9 @@ def hybrid(tmp_path, monkeypatch):
         monkeypatch.setattr(compat.VisionFacade, "complete", propose)
         monkeypatch.setattr(compat, "structured_call", audit)
         with GenSimServices(GenSimServicesCfg()) as services:
-            result = publish_hybrid(_SOURCE, "test", image, output, services, **options)
+            result = publish_hybrid(
+                instruction, "test", image, output, services, **options
+            )
         return result, proposals, reviews
 
     return run
@@ -1056,6 +1286,79 @@ def test_invalid_positive_review_citation_is_repaired_without_replanning(hybrid)
     assert len(proposals) == 1 and len(reviews) == 2
     assert reviews[0]["steps"] == reviews[1]["steps"]
     assert result["source_audits"][-1]["checks"][0]["quote"] == _SOURCE
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_assembly_stability_is_only_required_when_requested(hybrid, explicit):
+    clause = "Nest the small bowl in the large bowl and release it."
+    source = clause + (" Leave the stack stable." if explicit else "")
+    inside = _relation("inside", "small", "large")
+    plan = _plan(
+        "small large",
+        _step("pick", "small", quote=clause),
+        _step("place", "small", inside, quote=clause),
+    )
+    issue = dict(
+        quote="Leave the stack stable." if explicit else clause,
+        reason="The graph establishes the nesting order but does not encode that the assembled stack is stable.",
+    )
+    requests = []
+
+    def review(request):
+        requests.append(request)
+        if "review_format_feedback" in request:
+            return _audit(
+                _check("step_02", quote=clause, scope="effect", spatial=inside)
+            )
+        return dict(issues=[issue])
+
+    if explicit:
+        with pytest.raises(ValueError, match="stable"):
+            hybrid([plan] * 4, review, instruction=source)
+        assert len(requests) == 1
+    else:
+        result, proposals, reviews = hybrid([plan] * 4, review, instruction=source)
+        assert len(proposals) == 1 and len(reviews) == 2
+        assert reviews[0]["steps"] == reviews[1]["steps"]
+        assert result["source_audits"][0]["issues"] == [issue]
+        assert result["source_audits"][-1]["issues"] == []
+
+
+@pytest.mark.parametrize("repair", [False, True])
+def test_recorded_scan_review_uses_the_original_clause(hybrid, repair):
+    path = Path(__file__).with_name("data") / "robotwin_scan_object_reply.json"
+    packet = json.loads(path.read_text(encoding="utf-8"))
+    plan = packet["proposal"]["semantic_plan"]
+    checks = packet["audit"]["checks"]
+    bad_index = next(
+        i for i, row in enumerate(checks) if row["evidence"] == ["step_02"]
+    )
+    exact = plan["steps"][1]["quote"]
+
+    def review(request):
+        audit = deepcopy(packet["audit"])
+        if (not repair or "review_format_feedback" in request) and (
+            request.get("source_spans", {}).get("source_span_02") == exact
+        ):
+            audit["checks"][bad_index]["quote"] = "source_span_02"
+        return audit
+
+    result, proposals, reviews = hybrid(
+        [plan] * 4, review, instruction=packet["instruction"]
+    )
+    assert len(proposals) == 1 and len(reviews) == 1 + repair
+    if repair:
+        feedback = reviews[1]["review_format_feedback"]
+        assert f"checks[{bad_index}].quote" in feedback["diagnostic"]
+        assert checks[bad_index]["quote"] in feedback["diagnostic"]
+    assert result["source_audits"][-1]["checks"][bad_index]["quote"] == exact
+    assert result["semantic_intent"]["steps"][-1]["effects"] == [
+        _fact("orientation", "scanner_head", "box", value="pointing_toward")
+    ]
+    assert result["coverage"]["goal_producers"] == {
+        "condition_08": ["step_01"],
+        "condition_09": ["step_02"],
+    }
 
 
 def test_citation_repair_cannot_downgrade_final_scope(hybrid, tmp_path):
