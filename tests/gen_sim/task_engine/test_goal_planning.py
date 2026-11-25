@@ -20,6 +20,7 @@ import pytest
 import json
 from copy import deepcopy
 from pathlib import Path
+import re
 
 from embodichain.gen_sim.task_engine.goal_planning import author_goal_plan
 from embodichain.gen_sim.task_engine.goal_planning import publish
@@ -980,6 +981,7 @@ def test_hybrid_archive_with_named_resource_can_be_loaded_and_viewed(
 def test_hybrid_keeps_explicit_destination_without_adding_background_roles(
     native_hybrid, tmp_path
 ):
+    from embodichain.gen_sim.task_engine._review import write_review
     from embodichain.gen_sim.workflow import load_task_plan
 
     tray = "labeled_tray"
@@ -1016,6 +1018,20 @@ def test_hybrid_keeps_explicit_destination_without_adding_background_roles(
         "stapler": False,
     }
     assert json.loads((tmp_path / "plan" / "scene_context.json").read_text()) == context
+    reopened = tmp_path / "native-view.html"
+    write_review(tmp_path / "plan", reopened)
+    for page in (tmp_path / "plan" / "semantic_task_graph.html", reopened):
+        match = re.search(
+            r'<script id="graph-data" type="application/json">(.*?)</script>',
+            page.read_text(encoding="utf-8"),
+            re.S,
+        )
+        assert match is not None
+        review = json.loads(match[1])["review"]
+        assert review["source_boxes"] == {
+            r: [0.01, 0.01, 0.5, 0.5] for r in ("cup", tray)
+        }
+        assert review["spec"] == result["task_spec_v1"]
 
 
 @pytest.mark.parametrize(

@@ -106,6 +106,8 @@ export type Review = {
   replayVideo?: boolean;
   displayNames?: Record<string, { zh: string; en: string }>;
   source_image?: string;
+  source_boxes?: Record<string, number[]>;
+  preview_boxes?: Record<string, number[] | null>;
   spec: {
     inputs: { instruction: string };
     configuration: {
@@ -421,9 +423,11 @@ export default function TaskReview({
       "dependencies",
     ),
     [linkedGoal, setLinkedGoal] = useState(""),
-    [imageLightbox, setImageLightbox] = useState(false);
+    [imageLightbox, setImageLightbox] = useState(false),
+    [imageRatio, setImageRatio] = useState(4 / 3);
   const opener = useRef<HTMLElement | null>(null),
     closeButton = useRef<HTMLButtonElement>(null),
+    flow = useRef<HTMLElement>(null),
     imageOpener = useRef<HTMLElement>(null),
     imageDialog = useRef<HTMLDialogElement>(null);
   const show = (key: string, source?: HTMLElement, goalId = "") => {
@@ -454,7 +458,8 @@ export default function TaskReview({
   };
   useEffect(() => {
     if (!selected) return;
-    if (!selected.startsWith("call:") || run) closeButton.current?.focus();
+    if (!selected.startsWith("role:") && (!selected.startsWith("call:") || run))
+      closeButton.current?.focus();
     const fn = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !imageDialog.current?.open) close();
     };
@@ -589,30 +594,56 @@ export default function TaskReview({
   const anns = (review.annotations ??
     data.validation?.source?.annotations ??
     {}) as NonNullable<Review["annotations"]>;
-  const matchesRole = (id: string) => {
-    if (!selectedRole) return true;
-    const call = model.calls.get(id)?.call;
-    const step = intentStep(call);
-    if (step) return intentStepRoleIds(step).has(selectedRole.id);
-    const roleIds = new Set([
-      selectedRole.id,
-      ...(pairing.role_entities[selectedRole.id] || []),
-    ]);
-    const args = call?.arguments;
-    const operands = [
-      anns[id]?.object,
-      anns[id]?.reference,
-      call?.object,
-      call?.on,
-      call?.inside,
-      call?.at,
-      args?.object,
-      args?.handle,
-      args?.reference,
-      args?.target,
-    ];
-    return operands.some((id) => typeof id === "string" && roleIds.has(id));
+  const partsByOwner = useMemo(() => {
+    const parts = new Map<string, string[]>();
+    for (const role of spec.configuration.roles) {
+      const owner = role.properties.part_of;
+      if (typeof owner !== "string") continue;
+      const children = parts.get(owner) ?? [];
+      children.push(role.id);
+      parts.set(owner, children);
+    }
+    return parts;
+  }, [spec.configuration.roles]);
+  const callsForRole = (roleId: string) => {
+    // Selecting an object includes its parts, but not the reverse.
+    const members = new Set([roleId]);
+    for (const id of members) {
+      for (const part of partsByOwner.get(id) ?? []) members.add(part);
+    }
+    const entities = new Set(
+      [...members].flatMap((id) => [id, ...(pairing.role_entities[id] ?? [])]),
+    );
+    return calls.filter(({ id, call }) => {
+      const step = intentStep(call);
+      if (step)
+        return [...intentStepRoleIds(step)].some((id) => members.has(id));
+      const args = call.arguments;
+      return [
+        anns[id]?.object,
+        anns[id]?.reference,
+        call.object,
+        call.on,
+        call.inside,
+        call.at,
+        args?.object,
+        args?.handle,
+        args?.reference,
+        args?.target,
+      ].some((id) => typeof id === "string" && entities.has(id));
+    });
   };
+  const roleCalls = selectedRole ? callsForRole(selectedRole.id) : [];
+  const roleCallIds = new Set(roleCalls.map(({ id }) => id));
+  const matchesRole = (id: string) => !selectedRole || roleCallIds.has(id);
+  const firstRoleCall = roleCalls[0]?.id;
+  useEffect(() => {
+    if (!firstRoleCall) return;
+    const key = CSS.escape("call:" + firstRoleCall);
+    flow.current
+      ?.querySelector(`button[data-key="${key}"]`)
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [selectedRole?.id, firstRoleCall, reviewView]);
   const armName = (id: string) =>
     id === "left"
       ? t("左臂", "Left arm")
@@ -700,9 +731,11 @@ export default function TaskReview({
       : [selectedGroup?.id || selectedCall?.task_instance_id || ""],
   );
   const selectedForGraph = (node: TaskNode) =>
-    selectedCall
-      ? selectedCall.id === node.id
-      : activeGroups.has(node.task_instance_id);
+    selectedRole
+      ? roleCallIds.has(node.id)
+      : selectedCall
+        ? selectedCall.id === node.id
+        : activeGroups.has(node.task_instance_id);
   const stepNumber = (number: number) =>
     t("第 " + number + " 步", "Step " + number);
   const renderStages = () =>
@@ -881,34 +914,107 @@ export default function TaskReview({
     row.hit ||= check.id === selectedGoal?.id;
     stepChecks.set(label, row);
   }
-  const sceneBoxes = spec.interpretation.references.flatMap((reference) =>
-    reference.entities.flatMap((entity) => {
-      const box = entity.bbox;
-      if (
-        !box ||
-        box.length !== 4 ||
-        box.some((v) => !Number.isFinite(v) || v < 0 || v > 1)
-      )
-        return [];
-      const [left, top, right, bottom] = box;
-      if (left >= right || top >= bottom) return [];
-      return [
-        {
-          role: reference.role_id,
-          id: reference.role_id + ":" + entity.id,
-          style: {
-            left: left * 100 + "%",
-            top: top * 100 + "%",
-            width: (right - left) * 100 + "%",
-            height: (bottom - top) * 100 + "%",
-          },
+  const sourceBoxes = new Map(Object.entries(review.source_boxes ?? {}));
+  const previewBoxes = new Map(Object.entries(review.preview_boxes ?? {}));
+  const sceneBoxes = [
+    ...spec.interpretation.references
+      .filter(({ role_id }) => !sourceBoxes.has(role_id))
+      .flatMap(({ role_id, entities }) =>
+        entities.map(({ id, bbox }) => ({
+          role: role_id,
+          id: role_id + ":" + id,
+          bbox,
+          preview: false,
+        })),
+      ),
+    ...Array.from(sourceBoxes, ([role, bbox]) => ({
+      role,
+      id: "source:" + role,
+      bbox,
+      preview: false,
+    })),
+    ...Array.from(previewBoxes, ([role, bbox]) => ({
+      role,
+      id: "preview:" + role,
+      bbox,
+      preview: true,
+    })),
+  ].flatMap(({ role, id, bbox: box, preview }) => {
+    if (
+      !box ||
+      box.length !== 4 ||
+      box.some((v) => !Number.isFinite(v) || v < 0 || v > 1)
+    )
+      return [];
+    const [left, top, right, bottom] = box;
+    if (left >= right || top >= bottom) return [];
+    const width = right - left;
+    const height = bottom - top;
+    return [
+      {
+        role,
+        id,
+        preview,
+        labelInside: top < 0.07,
+        area: width * height,
+        style: {
+          left: left * 100 + "%",
+          top: top * 100 + "%",
+          width: width * 100 + "%",
+          height: height * 100 + "%",
         },
-      ];
-    }),
+      },
+    ];
+  });
+  const markedRoles = new Set(
+    sceneBoxes.filter((box) => !box.preview).map((box) => box.role),
   );
-  const markedRoles = new Set(sceneBoxes.map((box) => box.role));
-  const toggleRole = (id: string, source: HTMLElement) =>
-    selectedRole?.id === id ? close() : show("role:" + id, source);
+  // Keep smaller roles clickable when a support or owner box encloses them.
+  const displayedBoxes = sceneBoxes
+    .filter((box) => box.preview || !previewBoxes.has(box.role))
+    .sort((a, b) => b.area - a.area);
+  const displayedRoles = new Set(displayedBoxes.map((box) => box.role));
+  const toggleRole = (id: string, source: HTMLElement) => {
+    if (selectedRole?.id === id) {
+      close();
+      return;
+    }
+    const first = callsForRole(id)[0];
+    if (first) setOpen(new Set([first.task_instance_id]));
+    show("role:" + id, source);
+  };
+  const renderBoxes = (interactive: boolean) =>
+    displayedBoxes
+      .filter((box) => !selectedRole || box.role === selectedRole.id)
+      .map(({ id, role, style, labelInside }) =>
+        interactive ? (
+          <button
+            key={id}
+            type="button"
+            style={style}
+            className={
+              "rv-scene-box" +
+              (selectedRole?.id === role ? " active" : "") +
+              (labelInside ? " rv-box-top" : "")
+            }
+            aria-label={t("定位", "Locate ") + shortName(role)}
+            aria-pressed={selectedRole?.id === role}
+            onClick={(event) => toggleRole(role, event.currentTarget)}
+          >
+            {selectedRole?.id === role && <span>{shortName(role)}</span>}
+          </button>
+        ) : (
+          <span
+            key={id}
+            className={
+              "rv-scene-box active" + (labelInside ? " rv-box-top" : "")
+            }
+            style={style}
+          >
+            <span>{shortName(role)}</span>
+          </span>
+        ),
+      );
   return (
     <main
       className="rv rv-reviewer graph-ui"
@@ -1039,7 +1145,11 @@ export default function TaskReview({
       </section>
       <div className="rv-work">
         <div className="rv-flow-column">
-          <section className="rv-graph" aria-labelledby="rv-flow-heading">
+          <section
+            ref={flow}
+            className="rv-graph"
+            aria-labelledby="rv-flow-heading"
+          >
             <div className="rv-graphbar">
               <h2 id="rv-flow-heading">{t("任务流程", "Task flow")}</h2>
               <small>
@@ -1676,32 +1786,13 @@ export default function TaskReview({
                   <img
                     src={review.source_image}
                     alt={t("任务来源图", "Source image")}
+                    onLoad={({ currentTarget: image }) =>
+                      image.naturalHeight &&
+                      setImageRatio(image.naturalWidth / image.naturalHeight)
+                    }
                   />
                 </button>
-                {sceneBoxes
-                  .filter(
-                    (box) => !selectedRole || box.role === selectedRole.id,
-                  )
-                  .map((box) => (
-                    <button
-                      key={box.id}
-                      type="button"
-                      style={box.style}
-                      className={
-                        "rv-scene-box" +
-                        (selectedRole?.id === box.role ? " active" : "")
-                      }
-                      aria-label={t("定位", "Locate ") + shortName(box.role)}
-                      aria-pressed={selectedRole?.id === box.role}
-                      onClick={(event) =>
-                        toggleRole(box.role, event.currentTarget)
-                      }
-                    >
-                      {selectedRole?.id === box.role && (
-                        <span>{shortName(box.role)}</span>
-                      )}
-                    </button>
-                  ))}
+                {renderBoxes(true)}
               </div>
             )}
             <div className="rv-role-area">
@@ -1732,9 +1823,19 @@ export default function TaskReview({
                   </button>
                 ))}
               </div>
+              {selectedRole && (
+                <small className="rv-role-note" role="status">
+                  {roleCalls.length
+                    ? t(
+                        `${roleCalls.length} 个关联动作`,
+                        `${roleCalls.length} related ${roleCalls.length === 1 ? "action" : "actions"}`,
+                      )
+                    : t("无关联动作", "No related actions")}
+                </small>
+              )}
               {selectedRole &&
                 review.source_image &&
-                !markedRoles.has(selectedRole.id) && (
+                !displayedRoles.has(selectedRole.id) && (
                   <small className="rv-role-note">
                     {t(
                       "该对象尚无图像标注框",
@@ -1783,10 +1884,18 @@ export default function TaskReview({
                 <X size={16} />
               </button>
             </div>
-            <img
-              src={review.source_image}
-              alt={t("任务来源图", "Source image")}
-            />
+            <div
+              className="rv-lightbox-photo"
+              style={{
+                width: `min(100%, ${78 * imageRatio}dvh, calc((100dvh - 96px) * ${imageRatio}))`,
+              }}
+            >
+              <img
+                src={review.source_image}
+                alt={t("任务来源图", "Source image")}
+              />
+              {renderBoxes(false)}
+            </div>
           </div>
         </dialog>
       )}

@@ -212,6 +212,18 @@ retain row reasons, step ranges and event masks. Source images come from the
 verified input reference or legacy inventory. Archived graph-only views retain
 their existing renderer.
 
+`task view --preview-boxes FILE` optionally overlays role-keyed rectangles from
+JSON with `image_sha256` and `boxes`. Keys must be frozen role IDs and values
+are normalized `[x0, y0, x1, y1]` or `null` to hide a role's box. These
+display annotations do not change the TaskSpec, graph, grounding or execution
+readiness; reopening a grounded Hybrid plan also displays its stored boxes.
+Selecting a box or its object label locates the related calls, including those
+that reference the object's declared parts.
+`task view --auto-preview-boxes` is an opt-in call to the configured
+`task_image_grounding` service on the frozen source image. Unknown, hidden,
+ambiguous and abstract roles have no box. Automatic boxes are display hints,
+not grounding or execution evidence; plain `task view` stays offline.
+
 `semantic_graph_html.py` renders an existing graph and optional TaskSpec,
 recomputed coverage and recorded execution report. `reporting.py` owns the
 read-only report validator; `bundle_spec.py` recognizes explicit TaskSpec absence.

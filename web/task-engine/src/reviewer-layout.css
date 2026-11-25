@@ -672,6 +672,27 @@
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+.rv-scene-box.rv-box-top > span {
+  top: 0;
+  bottom: auto;
+  left: 0;
+}
+.rv-reviewer .rv-lightbox-card {
+  width: min(820px, 100%);
+}
+.rv-lightbox-photo {
+  position: relative;
+  isolation: isolate;
+  margin-inline: auto;
+  overflow: hidden;
+}
+.rv-reviewer .rv-lightbox-photo img {
+  height: auto;
+  max-height: none;
+}
+.rv-lightbox-photo .rv-scene-box {
+  pointer-events: none;
+}
 .rv-role-area {
   margin-top: 12px;
 }

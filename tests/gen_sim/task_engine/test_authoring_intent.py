@@ -25,7 +25,7 @@ from PIL import Image
 import pytest
 
 from embodichain.gen_sim.services import GenSimServices, GenSimServicesCfg, compat
-from embodichain.gen_sim.task_engine._review import write_review
+from embodichain.gen_sim.task_engine._review import main as review_main, write_review
 from embodichain.gen_sim.task_engine.authoring_intent import (
     AuthoringEvidenceError,
     compile_intent,
@@ -1242,6 +1242,125 @@ def hybrid(tmp_path, monkeypatch):
         return result, proposals, reviews
 
     return run
+
+
+@pytest.mark.parametrize(
+    "invalid_field,diagnostic",
+    [
+        (None, None),
+        ("image_sha256", "different source image"),
+        ("role", "Unknown preview box role"),
+        ("bbox", "normalized bbox"),
+    ],
+)
+def test_preview_boxes_are_bound_to_the_source_without_rewriting_the_plan(
+    hybrid, tmp_path, invalid_field, diagnostic
+):
+    plan_dir = tmp_path / "plan"
+    intent = _plan(
+        "board shelf",
+        _step("pick", "board"),
+        _step("place", "board", _relation("on", "board", "shelf")),
+    )
+    result, _, _ = hybrid([intent], lambda _: _audit(_check("step_02")))
+    sealed = {path.name: path.read_bytes() for path in plan_dir.iterdir()}
+    sha256 = load_task_plan(plan_dir)["image_sha256"]
+    boxes = {"board": [0.1, 0.2, 0.8, 0.6], "shelf": None}
+    packet = {"image_sha256": sha256, "boxes": boxes}
+    if invalid_field == "image_sha256":
+        packet["image_sha256"] = "0" * 64
+    elif invalid_field == "role":
+        boxes["undeclared"] = boxes["board"]
+    elif invalid_field == "bbox":
+        boxes["board"] = [0.8, 0.2, 0.1, 0.6]
+    sidecar = tmp_path / "boxes.json"
+    sidecar.write_text(json.dumps(packet), encoding="utf-8")
+    output = tmp_path / "overlay.html"
+    argv = [
+        "--plan",
+        str(plan_dir),
+        "--output",
+        str(output),
+        "--preview-boxes",
+        str(sidecar),
+    ]
+    if diagnostic:
+        with pytest.raises(ValueError, match=diagnostic):
+            review_main(argv)
+        assert not output.exists()
+    else:
+        review_main(argv)
+        match = re.search(
+            r'<script id="graph-data" type="application/json">(.*?)</script>',
+            output.read_text(encoding="utf-8"),
+            re.S,
+        )
+        assert match is not None
+        payload = json.loads(match[1])
+        assert payload["review"]["preview_boxes"] == boxes
+        assert "source_boxes" not in payload["review"]
+        assert payload["review"]["spec"] == result["task_spec_v1"]
+        assert payload["graph"] == result["semantic_task_graph"]
+    assert {path.name: path.read_bytes() for path in plan_dir.iterdir()} == sealed
+    assert not load_task_plan(plan_dir)["execution_ready"]
+
+
+@pytest.mark.parametrize(
+    "invalid", [False, True], ids=["visible-and-missing", "invalid-box"]
+)
+def test_auto_preview_boxes_localize_frozen_roles_without_rewriting_plan(
+    hybrid, tmp_path, monkeypatch, invalid
+):
+    plan_dir = tmp_path / "plan"
+    intent = _plan(
+        "board shelf",
+        _step("pick", "board"),
+        _step("place", "board", _relation("on", "board", "shelf")),
+    )
+    result, _, _ = hybrid([intent], lambda _: _audit(_check("step_02")))
+    sealed = {path.name: path.read_bytes() for path in plan_dir.iterdir()}
+    spec = result["task_spec_v1"]
+    requests = []
+
+    def localize(**kwargs):
+        requests.append(kwargs)
+        assert kwargs["role"] == "task_image_grounding"
+        assert kwargs["image_path"] == plan_dir / spec["inputs"]["image"]["ref"]
+        assert set(json.loads(kwargs["prompt"])["roles"]) == {"board", "shelf"}
+        return {
+            "board": [700, 200, 200, 900] if invalid else [100, 200, 750, 900],
+            "shelf": None,
+        }
+
+    monkeypatch.setattr(compat, "structured_call", localize)
+    output = tmp_path / "auto-preview.html"
+    argv = ["--plan", str(plan_dir), "--output", str(output), "--auto-preview-boxes"]
+    if invalid:
+        with pytest.raises(ValueError, match="preview bbox"):
+            review_main(argv)
+        assert not output.exists()
+    else:
+        review_main(argv)
+        match = re.search(
+            r'<script id="graph-data" type="application/json">(.*?)</script>',
+            output.read_text(encoding="utf-8"),
+            re.S,
+        )
+        assert match is not None
+        review = json.loads(match[1])["review"]
+        assert review["preview_boxes"] == {
+            "board": [0.1, 0.2, 0.75, 0.9],
+            "shelf": None,
+        }
+        assert "source_boxes" not in review
+        assert review["spec"] == spec
+        original = output.read_bytes()
+        with pytest.raises(FileExistsError):
+            review_main(argv)
+        assert output.read_bytes() == original
+    assert len(requests) == 1
+    assert {path.name: path.read_bytes() for path in plan_dir.iterdir()} == sealed
+    assert not load_task_plan(plan_dir)["execution_ready"]
 
 
 @pytest.mark.parametrize(

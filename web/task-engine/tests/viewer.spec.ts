@@ -116,13 +116,14 @@ for (const viewport of [
       await expect(lightbox).toHaveCount(0);
       await expect(thumb).toBeFocused();
       await expect(detail).toBeVisible();
-      await thumb.click();
+      const enlarge = page.getByRole("button", { name: "放大", exact: true });
+      await enlarge.click();
       await dismiss.click();
-      await expect(thumb).toBeFocused();
-      await thumb.click();
+      await expect(enlarge).toBeFocused();
+      await enlarge.click();
       await lightbox.click({ position: { x: 5, y: 5 } });
       await expect(lightbox).toHaveCount(0);
-      await expect(thumb).toBeFocused();
+      await expect(enlarge).toBeFocused();
     }
   });
 }
@@ -138,14 +139,62 @@ for (const [role, step] of [
     await page.goto(pathToFileURL(join(root, "hybrid-authoring.html")).href);
     await page.locator(".rv-view-switch button").first().click();
     const stage = page.locator(`[data-id="group:${step}"]`);
-    await stage.locator(".rv-toggle").click();
     await page.locator(`.rv-role-chip[title="${role}"]`).click();
+    await expect(stage.locator(".rv-toggle")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
     await expect(stage.locator(".rv-frame")).toHaveClass(/role-match/);
+    await expect(page.locator(".rv-frame.role-match")).toHaveCount(1);
     await expect(
       page.locator(`button[data-key="call:${step}"]`),
-    ).not.toHaveClass(/faded/);
+    ).toHaveAttribute("aria-pressed", "true");
   });
 }
+
+test("a parent object's box locates a part action and follows the enlarged image", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1229, height: 396 });
+  await page.goto(pathToFileURL(join(root, "hybrid-authoring.html")).href);
+  const boxes = page.locator("button.rv-scene-box");
+  await expect(boxes).toHaveCount(2);
+  const box = page.locator('button.rv-scene-box[aria-label$="pedestal stand"]');
+  await expect(page.locator(".rv-state")).toContainText(/仅计划|Plan only/);
+  await box.click();
+  await expect(box).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".rv-role-chip[aria-pressed=true]")).toHaveText(
+    "pedestal stand",
+  );
+  await expect(
+    page.locator('.rv-lane-action[data-key="call:step_01"]'),
+  ).toHaveClass(/faded/);
+  await expect(
+    page.locator('.rv-lane-action[data-key="call:step_02"]'),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page.locator('.rv-lane-action[data-key="call:step_02"]'),
+  ).toBeInViewport();
+
+  await page.locator(".rv-enlarge").click();
+  const dialog = page.locator("dialog.rv-lightbox");
+  const outline = dialog.locator(".rv-scene-box");
+  await expect(outline).toHaveText("pedestal stand");
+  const actual = await outline.evaluate((box) => {
+    const image = box.parentElement!.querySelector("img")!;
+    const rect = image.getBoundingClientRect();
+    const marked = box.getBoundingClientRect();
+    return [
+      (marked.left - rect.left) / rect.width,
+      (marked.top - rect.top) / rect.height,
+      (marked.right - rect.left) / rect.width,
+      (marked.bottom - rect.top) / rect.height,
+    ];
+  });
+  [0.1, 0.25, 0.4, 0.75].forEach((edge, index) =>
+    expect(actual[index]).toBeCloseTo(edge, 2),
+  );
+});
 
 test("advanced view highlights the published terminal goal producer", async ({
   page,

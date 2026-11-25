@@ -75,10 +75,18 @@ def _authoring_fixture() -> str:
     )
     plan = dict(
         roles=[
-            dict(id=role, kind="object", description=role.replace("_", " "))
+            dict(
+                id=role,
+                kind="object",
+                description=role.replace("_", " "),
+                **({"part_of": "pedestal_stand"} if role == "left_pedestal" else {}),
+            )
             for role in roles
         ]
-        + [dict(id="handle", kind="object", description="handle", part_of="plank")],
+        + [
+            dict(id="handle", kind="object", description="handle", part_of="plank"),
+            dict(id="pedestal_stand", kind="object", description="pedestal stand"),
+        ],
         steps=[
             dict(
                 verb="pick",
@@ -151,6 +159,11 @@ def _authoring_fixture() -> str:
         ),
         image,
         None,
+        preview_boxes={
+            "pedestal_stand": [0.1, 0.25, 0.4, 0.75],
+            "plank": [0.0, 0.0, 0.95, 0.95],
+            "handle": None,
+        },
     )
 
 
