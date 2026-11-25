@@ -346,6 +346,10 @@ Reward Functions
 Event Functions
 ---------------
 
+The fixed-step scene pre-roll event applies the configured robot home targets
+before advancing physics. It can restore the measured robot state to home before
+frame-zero observations are acquired.
+
 .. automodule:: embodichain.lab.gym.envs.managers.events
     :members:
 

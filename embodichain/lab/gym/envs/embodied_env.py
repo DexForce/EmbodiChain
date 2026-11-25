@@ -712,6 +712,10 @@ class EmbodiedEnv(BaseEnv):
             cfg.objective,
             getattr(registration, "evaluation_conditions", {}),
         )
+        self._episode_measurement_plan = getattr(
+            registration, "episode_measurement", None
+        )
+        self._episode_measurements = None
         self._final_acceptance_rules = _deployment_final_rules(registration)
         self._final_program_completion: tuple[tuple[int, ...], torch.Tensor] | None = (
             None
@@ -2343,11 +2347,33 @@ class EmbodiedEnv(BaseEnv):
         action_manager = getattr(self, "action_manager", None)
         if action_manager is not None:
             action_manager.reset(env_ids=env_ids)
+        measurement_plan = getattr(self, "_episode_measurement_plan", None)
+        anchor = None
+        if measurement_plan is not None:
+            if self.num_envs != 1 or len(env_ids_to_process) != 1:
+                raise ValueError(
+                    "Episode cable measurements require a full single-arena reset."
+                )
+            if self._episode_measurements is not None:
+                self._episode_measurements.close()
+                self._episode_measurements = None
+            if measurement_plan.anchor_at_reset:
+                cable = self.sim.get_cable_object(measurement_plan.cable_uid)
+                if cable is None:
+                    raise ValueError("The measurement cable is missing during reset.")
+                anchor = cable.data.segment_state_w[0, 0, :3].cpu().numpy().copy()
         if self.cfg.events:
             self.event_manager.reset(env_ids=env_ids)
             if "reset" in self.event_manager.available_modes:
                 with self._profiler.section("event_reset"):
                     self.event_manager.apply(mode="reset", env_ids=env_ids)
+
+        if measurement_plan is not None:
+            from .task_program._episode_measurement import _EpisodeMeasurements
+
+            self._episode_measurements = _EpisodeMeasurements(
+                self, measurement_plan, anchor
+            )
 
         # reset observation manager for environments that need a reset
         # This clears any cached data in observation functors (e.g., physics attributes)
@@ -4879,6 +4905,14 @@ class EmbodiedEnv(BaseEnv):
             if self.dataset_manager:
                 try:
                     self.dataset_manager.finalize()
+                except Exception as error:
+                    errors.append(error)
+
+            measurements = getattr(self, "_episode_measurements", None)
+            if measurements is not None:
+                self._episode_measurements = None
+                try:
+                    measurements.close()
                 except Exception as error:
                     errors.append(error)
 
