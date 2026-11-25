@@ -524,6 +524,20 @@ Simulation-independent camera dimensions used to reconstruct recording features 
 
    RecordedCamera
 
+embodichain.extensions.models.policies.partymimic
+------------------------------------------------
+
+Runtime adapter for the official RP1 PartyMimic sparse5 ONNX export. It
+assembles observation histories and maps actor output into joint targets.
+
+.. currentmodule:: embodichain.extensions.models.policies.partymimic
+
+.. autosummary::
+
+   PartyMimicPolicy
+   PartyMimicState
+   sparse5_window
+
 .. _simready_asset_api:
 
 embodichain.gen_sim.asset_engine.cli.start

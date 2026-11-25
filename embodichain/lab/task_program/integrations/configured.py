@@ -1112,6 +1112,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 "release_settle_duration",
                 "pick_object_part",
                 "lift_height",
+                "approach_lift_height",
                 "pre_grasp_distance",
                 "initial_lift_height",
                 "grasp_commit_fraction",
@@ -1312,6 +1313,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                     "release_settle_steps",
                     "release_settle_duration",
                     "lift_height",
+                    "approach_lift_height",
                     "max_approach_retract_z",
                     "cartesian_waypoint_count",
                     "cartesian_approach",
@@ -1346,6 +1348,12 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
             kwargs["lift_height"] = _real(
                 config["lift_height"],
                 path=f"{path}.lift_height",
+                minimum=0.0,
+            )
+        if "approach_lift_height" in config:
+            kwargs["approach_lift_height"] = _real(
+                config["approach_lift_height"],
+                path=f"{path}.approach_lift_height",
                 minimum=0.0,
             )
         if "max_approach_retract_z" in config:

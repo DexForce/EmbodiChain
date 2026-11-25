@@ -14,8 +14,8 @@ layers. For FK/IK usage, pose losses and gradient contracts, see
 .. toctree::
    :maxdepth: 1
 
-   /overview/rl/index
    supervised_learning
+   /overview/rl/index
    differentiable_kinematics
 
 Related Workflows

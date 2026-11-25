@@ -59,6 +59,10 @@ Cube corpus, adapts the published visual encoder to native camera observations,
 and evaluates the fixed queries in DexUni. It exports weights and optional MP4
 previews to caller-owned directories.
 
+The [RP1 PartyMimic example](learning/partymimic/README.md) runs an official
+sparse5 ONNX export to carry a crate along level ground and onto a platform.
+It records the DexUni rollouts, payload welds, and foot contacts.
+
 The [SL data-source example](learning/sl_data_source/README.md) connects resident
 causal windows to explicit action or state-transition encoders, and describes
 caller-owned online sampling and the limits of exact recovery.
@@ -141,23 +145,13 @@ recovery and portability diagnostics keep their evidence separate from expert da
 
 The [create-cable tutorial](../scripts/tutorials/sim/create_cable.py) creates a
 procedural cable with one fixed segment, steps it under gravity, reads world
-segment state and restores the episode creation state. Run it with the native
-viewer or with two headless environments:
+segment state and restores the episode creation state. Use a CUDA-enabled
+EmbodiChain installation to run it with the native viewer or with two headless
+environments.
 
 ```bash
 python scripts/tutorials/sim/create_cable.py
 python scripts/tutorials/sim/create_cable.py --headless --renderer no-render --num-envs 2
-```
-
-The cable examples use CUDA and the project-pinned DexSim engine. The DexForce
-package index provides Linux x86_64 wheels for Python 3.11 and 3.12. To install
-the engine and check its build, run:
-
-```bash
-python -m pip install --index-url https://pypi.org/simple \
-  --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site \
-  dexsim-engine==0.6.0
-python -c "import dexsim; from dexsim.scene import SpawnedCable; print(dexsim.__version__, dexsim.__commit_id__)"
 ```
 
 EmbodiChain defaults to DexUni when no solver is selected;

@@ -345,13 +345,12 @@ class GaussianRenderCfg:
     lod_target_pixel_size: float = 2.0
     lod_max_nodes_per_camera: int = 0
     apply_display_srgb: bool = True
-    """Apply the shared sRGB display transfer, preserving existing behavior.
+    """Apply the sRGB display transfer to the rendered frame.
 
     Set False for display-referred captures such as SuperSplat/Inria PLYs to
-    avoid encoding their colors twice. This is a World-construction snapshot,
-    shared by all Gaussian assets in that World. Lit mesh/background blending
-    remains scene-linear; tone mapping can still change the displayed colors.
-    DexSim 0.6.0 provides this as a temporary option.
+    avoid encoding their colors twice. When Gaussian rendering is enabled, this
+    sets the World-construction default for the entire ray-traced frame, including
+    meshes, backgrounds and overlays. Tone mapping remains a separate setting.
     """
 
     def __post_init__(self) -> None:
@@ -397,7 +396,7 @@ class GaussianRenderCfg:
         native = dexsim.GaussianSplatConfig()
         world_config.enable_render_profiler = self.enable_render_profiler
         native.enabled = True
-        native.apply_display_srgb = self.apply_display_srgb
+        world_config.raytrace_config.output_srgb = self.apply_display_srgb
         native.approach = dexsim.GaussianRenderApproach.RASTER_CUDA
         native.lod_mode = (
             dexsim.GaussianLodMode.DISABLED

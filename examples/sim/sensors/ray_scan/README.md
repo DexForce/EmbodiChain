@@ -1,9 +1,9 @@
 # Geometric ray scans
 
-Run from the root of an installed EmbodiChain checkout with DexSim 0.6.0rc2
-(or a compatible SDK), Torch, Warp, and Matplotlib. This example uses the
-Default physics backend on CPU with DexSim offscreen rendering. Install FFmpeg
-with an H.264 encoder for the optional video.
+Run from the root of an installed EmbodiChain checkout with Torch, Warp, and
+Matplotlib. This example uses the Default physics backend on CPU with DexSim
+offscreen rendering. Install FFmpeg with an H.264 encoder for the optional
+video.
 
 The scene panel is a DexSim Hybrid camera capture of the sampled state.
 It requires an NVIDIA GPU with native camera rendering support, even when

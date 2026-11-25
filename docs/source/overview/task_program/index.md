@@ -2,10 +2,11 @@
 
 # Task Program
 
-Task Program lets you customize an expert demonstration by describing **what
-objects to pick, where to place them, and in what order**. Reuse an existing
-scene and robot, edit a YAML program, and run it through the normal environment
-launcher. You do not need to write a motion planner or an integration to start.
+Task Program describes **what a robot should do and what counts as success**.
+A program declares Semantic Calls, their order, named targets, and the checks
+on each segment. A deployment binds the program to a physical scene, a robot,
+and an execution policy. Start by reusing an existing deployment and changing
+its program YAML.
 
 **Start with {doc}`quickstart`: run a Franka example, change two moves, check the
 cube's resting position, and save one trajectory.**
@@ -16,6 +17,7 @@ cube's resting position, and save one trajectory.**
 quickstart
 authoring
 recipes
+deployment
 troubleshooting
 validation
 architecture
@@ -50,10 +52,13 @@ checkout is only needed for the separate maintainer checks.
 | Your goal | Start here | Continue with |
 |---|---|---|
 | Interpret an instruction and photograph into an unbound semantic task graph | {doc}`/features/generative_sim/task_engine` | {doc}`scene_registry` and {doc}`robot_profiles` for runtime binding |
-| Customize a trajectory in an existing task | {doc}`quickstart` | {doc}`recipes`, then {doc}`troubleshooting` |
+| Customize a trajectory in an existing task | {doc}`quickstart` | {doc}`recipes` for common changes |
+| Write or generate a program | {doc}`authoring` | [Choose a YAML or JSON form](authoring.md#choosing-a-form) and [define segment checks](authoring.md#define-segments-and-their-outcomes) |
+| Use a coding agent to implement or debug a task | [Choose a repository skill](authoring.md#implement-a-task-with-repository-skills) | [Diagnose a failing deployment](troubleshooting.md#debug-with-a-repository-skill) |
+| Select components, validate a deployment, or track policy progress | {doc}`deployment` | {doc}`troubleshooting` for failures |
 | Learn the language without starting simulation | {doc}`/tutorial/task_program_python` | {doc}`architecture` |
 | Bind a new scene, robot or skill | {doc}`/tutorial/task_program` | {doc}`scene_registry`, {doc}`robot_profiles` |
-| Understand the compiler and runtime | {doc}`architecture` | {doc}`/api_reference/embodichain/embodichain.lab.task_program` |
+| Trace the system architecture, callable modules, and execution workflow | {doc}`architecture` | {doc}`/api_reference/embodichain/embodichain.lab.task_program` |
 
 ## How do I know it worked?
 
@@ -70,9 +75,8 @@ See [assurance and acceptance](architecture.md#effect-assurance-is-mandatory).
 
 ## Concise programs and demonstration skills
 
-See [configuration authoring](authoring.md) for the list/action shorthand,
-shared world and scene-relative targets, measured duration holds, and named
-Demo Skill registrations with automatic occurrence-bound sources.
+See {doc}`authoring` for shorthand and explicit forms, named targets, measured
+holds, and named Demo Skills with automatic occurrence-bound sources.
 
 ## What stays with the integration?
 
@@ -101,7 +105,7 @@ links remain available below.
 
 <a id="semantic-layer"></a>
 
-[Semantic layer](architecture.md#semantic-layer)
+[Available calls and services](architecture.md#what-a-program-can-call)
 
 <a id="program-schema"></a>
 

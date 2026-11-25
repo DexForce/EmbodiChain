@@ -8,6 +8,8 @@ calls are declarative language instructions, not an independent execution API.
 This page is for **integration authors** who bind scenes, robot profiles and
 execution policies. To customize an existing task by editing only its program,
 start with :doc:`/overview/task_program/quickstart`.
+See :doc:`/overview/task_program/deployment` for the component ownership table,
+the static inspector, and the checks to perform after a run.
 
 The optional :doc:`task_program_python` introduces the typed language without
 starting simulation; it is not a prerequisite for the Quickstart.
@@ -254,10 +256,11 @@ boundaries.
 Use registered semantic calls carefully
 ---------------------------------------
 
-Use ``RegisteredSemanticCallCfg`` only when a task needs an allowlisted shared
-lowering that is not one of Pick, Place, or HandOver. Its arguments remain
-declarative. The trusted simulation registration owns the matching lowerer
-factory and fingerprints its call ID, revision, and target atomic descriptor.
+Use ``RegisteredSemanticCallCfg`` to select an allowlisted shared lowerer with
+declarative arguments. The trusted simulation registration owns the matching
+lowerer factory and fingerprints its call ID, revision, and target atomic
+descriptor. Built-in calls and their arguments are listed in
+:doc:`/overview/task_program/authoring`.
 
 Do not place a callable, dotted import, simulator object, or task-local motion
 generator in the program. If a reusable behavior is fundamentally a new motion
@@ -271,7 +274,7 @@ Next steps
   and live providers;
 * :doc:`/overview/task_program/robot_profiles` — resource graphs,
   command presets, and effect assurance;
-* :doc:`/overview/task_program/index` — schema, compilation,
+* :doc:`/overview/task_program/architecture` — schema, compilation,
   parallel safety, and adapter lifecycle;
 * :doc:`/overview/sim/atomic_skills/builtin_skills` — the atomic primitives
   reached after lowering.

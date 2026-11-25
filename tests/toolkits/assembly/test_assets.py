@@ -196,7 +196,7 @@ def test_usd_static_compound_has_one_body_not_one_body_per_collider(tmp_path) ->
     if not parsed.mesh_objects[0].collisions:
         # These published parsers drop disabled-body child colliders. Verify
         # the production geometry gate refuses the loss rather than waiving it.
-        assert version("dexsim-engine") in {"0.6.0rc1", "0.6.0rc2", "0.6.0"}
+        assert version("dexsim-engine") in {"0.6.0rc1", "0.6.0rc2", "0.6.0", "0.6.1rc1"}
         with pytest.raises(
             ValueError, match="USD parser changed body/collider ownership"
         ):
