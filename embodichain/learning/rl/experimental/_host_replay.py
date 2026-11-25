@@ -140,18 +140,36 @@ class _HostReplayAdapter:
     @torch.no_grad()
     def add(self, transition: dict[str, torch.Tensor]) -> None:
         """Complete host copies before the storage consumes a transition."""
-        self.storage.add(
-            {
-                key: value.detach().to("cpu", non_blocking=False)
-                for key, value in transition.items()
-            }
-        )
+        self.storage.add(self._transfer(transition, torch.device("cpu"), copy=False))
 
     def _move(self, values: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        return {
-            key: value.detach().to(self.device, copy=True, non_blocking=False)
-            for key, value in values.items()
-        }
+        return self._transfer(values, self.device, copy=True)
+
+    @staticmethod
+    def _transfer(
+        values: dict[str, torch.Tensor], device: torch.device, *, copy: bool
+    ) -> dict[str, torch.Tensor]:
+        sources = {value.device for value in values.values()}
+        source = next(iter(sources)) if len(sources) == 1 else None
+        if source is not None and source.type == "cuda" and device.type == "cpu":
+            stream_device = source
+        elif source is not None and source.type == "cpu" and device.type == "cuda":
+            stream_device = device
+        else:
+            return {
+                key: value.detach().to(device, copy=copy, non_blocking=False)
+                for key, value in values.items()
+            }
+        stream = torch.cuda.current_stream(stream_device)
+        moved = {}
+        try:
+            for key, value in values.items():
+                moved[key] = value.detach().to(device, copy=copy, non_blocking=True)
+        finally:
+            # Retain source and partial outputs through completion, even if a
+            # later field fails conversion.
+            stream.synchronize()
+        return moved
 
     @torch.no_grad()
     def sample_windows(self, batch: int, window: int) -> dict[str, torch.Tensor]:

@@ -498,6 +498,7 @@ class ArticulationData:
 
     def read_physical_properties(
         self,
+        env_ids: Sequence[int] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Refresh current mass, inertia diagonal, and local COM pose buffers.
 
@@ -505,17 +506,38 @@ class ArticulationData:
         tensors use the public link ordering. Legacy DexSim physical attributes
         use ``wxyz`` and are converted at this boundary. Newton
         reads use the Scene batch to avoid per-link device-to-host transfers.
+
+        Args:
+            env_ids: Environment rows to read, in the requested order. ``None``
+                reads every environment. Default reads only selected entities;
+                Newton retains its batched read before selecting rows.
+
+        Returns:
+            Mass, inertia, and COM pose tensors with shapes ``(N, L)``,
+            ``(N, L, 3)``, and ``(N, L, 7)``. A selection returns owned tensors;
+            ``None`` returns borrowed buffers refreshed by later reads. Selected
+            reads refresh the corresponding buffer rows as well.
         """
+        if env_ids is not None:
+            env_ids = list(env_ids)
         if self.is_newton_backend:
             self.articulation_view.fetch_link_physical_properties(
                 self._mass, self._inertia, self._com_pose
             )
-            return self._mass, self._inertia, self._com_pose
+            buffers = self._mass, self._inertia, self._com_pose
+            if env_ids is None:
+                return buffers
+            return tuple(value[env_ids] for value in buffers)
 
         masses: list[list[float]] = []
         inertias: list[list[np.ndarray]] = []
         com_poses: list[list[np.ndarray]] = []
-        for entity in self.entities:
+        entities = (
+            self.entities
+            if env_ids is None
+            else [self.entities[index] for index in env_ids]
+        )
+        for entity in entities:
             mass_row: list[float] = []
             inertia_row: list[np.ndarray] = []
             com_row: list[np.ndarray] = []
@@ -537,28 +559,36 @@ class ArticulationData:
             inertias.append(inertia_row)
             com_poses.append(com_row)
 
-        self._mass.copy_(
+        values = (
             torch.as_tensor(
-                np.asarray(masses, dtype=np.float32),
+                np.asarray(masses, dtype=np.float32).reshape(
+                    len(entities), self.num_links
+                ),
                 dtype=torch.float32,
                 device=self.device,
-            )
-        )
-        self._inertia.copy_(
+            ),
             torch.as_tensor(
-                np.asarray(inertias, dtype=np.float32),
+                np.asarray(inertias, dtype=np.float32).reshape(
+                    len(entities), self.num_links, 3
+                ),
                 dtype=torch.float32,
                 device=self.device,
-            )
-        )
-        self._com_pose.copy_(
+            ),
             torch.as_tensor(
-                np.asarray(com_poses, dtype=np.float32),
+                np.asarray(com_poses, dtype=np.float32).reshape(
+                    len(entities), self.num_links, 7
+                ),
                 dtype=torch.float32,
                 device=self.device,
-            )
+            ),
         )
-        return self._mass, self._inertia, self._com_pose
+        buffers = self._mass, self._inertia, self._com_pose
+        for buffer, value in zip(buffers, values):
+            if env_ids is None:
+                buffer.copy_(value)
+            else:
+                buffer[env_ids] = value
+        return buffers if env_ids is None else values
 
     @property
     def mass(self) -> torch.Tensor:
@@ -1404,9 +1434,13 @@ class Articulation(BatchEntity):
         default_mass = self._data.default_mass[env_index]
         default_inertia = self._data.default_inertia[env_index]
         default_com_pose = self._data.default_com_pose[env_index]
-        current_mass, current_inertia, current_com_pose = (
-            value[env_index] for value in self._data.read_physical_properties()
-        )
+        if self._data.is_newton_backend:
+            current = (
+                value[env_index] for value in self._data.read_physical_properties()
+            )
+        else:
+            current = self._data.read_physical_properties(env_list)
+        current_mass, current_inertia, current_com_pose = current
 
         mass_changed = not torch.allclose(current_mass, default_mass)
         inertia_changed = not torch.allclose(current_inertia, default_inertia)
@@ -3046,13 +3080,16 @@ class Articulation(BatchEntity):
         # Initialization uses clear_dynamics=False with no subsequent clear.
         # Keep hold targets and mimic propagation for position-capable solvers;
         # effort-only solvers use native reset bookkeeping without a command.
-        if write_hold_targets:
+        # Default clearing already writes hold targets and publishes kinematics.
+        default_clear = clear_dynamics and not self.body_data.is_newton_backend
+        if write_hold_targets and not default_clear:
             self.set_qpos(qpos, target=True, env_ids=local_env_ids)
 
         if clear_dynamics:
             self.clear_dynamics(env_ids=local_env_ids)
 
-        self._data.articulation_view.compute_kinematics(local_env_ids)
+        if not default_clear:
+            self._data.articulation_view.compute_kinematics(local_env_ids)
         if self.device.type == "cpu" and not self._data.is_newton_backend:
             self._world.update(0.0)
 

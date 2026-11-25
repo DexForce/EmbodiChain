@@ -204,15 +204,23 @@ def test_partial_reset_restores_saved_inertia_frame_as_one_pair(newton: bool) ->
     articulation = object.__new__(Articulation)
     articulation.device = torch.device("cpu")
     articulation._spawn_result = object()
-    default_inertia = torch.tensor([3.0, 1.0, 2.0]).expand(3, 1, 3).clone()
+    default_inertia = torch.tensor([3.0, 1.0, 2.0]) * torch.arange(1, 4).reshape(
+        3, 1, 1
+    )
     default_pose = (
         torch.tensor([0.1, 0.2, 0.3, 1.0, 2.0, 3.0, 4.0]).expand(3, 1, 7).clone()
     )
     default_pose[..., 3:] /= torch.linalg.vector_norm(
         default_pose[..., 3:], dim=-1, keepdim=True
     )
+    default_pose[..., :3] += torch.arange(3).reshape(3, 1, 1)
     current_pose = (
         torch.tensor([0.4, 0.5, 0.6, 0.0, 0.0, 0.0, 1.0]).expand(3, 1, 7).clone()
+    )
+    current = (
+        torch.ones(3, 1),
+        torch.tensor([1.0, 2.0, 3.0]).expand(3, 1, 3),
+        current_pose,
     )
     data = SimpleNamespace(
         is_newton_backend=newton,
@@ -222,10 +230,10 @@ def test_partial_reset_restores_saved_inertia_frame_as_one_pair(newton: bool) ->
         default_inertia=default_inertia,
         default_com_pose=default_pose,
         read_physical_properties=Mock(
-            return_value=(
-                torch.ones(3, 1),
-                torch.tensor([1.0, 2.0, 3.0]).expand(3, 1, 3),
-                current_pose,
+            side_effect=lambda env_ids=None: (
+                current
+                if env_ids is None
+                else tuple(value[env_ids] for value in current)
             )
         ),
     )
@@ -248,4 +256,7 @@ def test_partial_reset_restores_saved_inertia_frame_as_one_pair(newton: bool) ->
             default_pose[index, 0, :3].numpy(),
         )
     assert articulation._entities[1].mock_calls == []
-    data.read_physical_properties.assert_called_once()
+    if newton:
+        data.read_physical_properties.assert_called_once_with()
+    else:
+        data.read_physical_properties.assert_called_once_with([2, 0])

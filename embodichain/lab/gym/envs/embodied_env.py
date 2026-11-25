@@ -831,6 +831,8 @@ class EmbodiedEnv(BaseEnv):
             self._max_rollout_steps = 0
             self._rollout_buffer_mode: str | None = None
             self._rollout_action_semantics: str | None = None
+            self._action_history_active = False
+            self._previous_transition: tuple[torch.Tensor, torch.Tensor] | None = None
             if self.cfg.init_rollout_buffer:
                 rollout_action_space = (
                     self.action_space
@@ -1021,6 +1023,86 @@ class EmbodiedEnv(BaseEnv):
         names = [str(name) for name in active_functors]
         return [("terms", names)] if names else []
 
+    def add_events(self, named_cfg: object) -> None:
+        """Attach additional events to this environment's existing lifecycle.
+
+        Args:
+            named_cfg: Mapping or configuration object of named EventCfg
+                declarations. ``None`` and empty inputs do nothing.
+
+        Raises:
+            ValueError: If a name is already declared or an event requests
+                ``prestartup``, which cannot run after environment construction.
+            TypeError: If an entry is neither an EventCfg nor None.
+            RuntimeError: If the environment has already closed.
+
+        Only newly added startup events run immediately. Reset and interval
+        events participate in subsequent environment resets and steps. Existing
+        functor instances, schedules and random streams remain unchanged. If
+        construction fails partway through, installed events remain environment
+        owned so closing the environment can release their recording resources.
+        Camera events require a renderer selected before World construction.
+        """
+        from embodichain.lab.gym.envs.managers.cfg import EventCfg
+
+        if named_cfg is None:
+            return
+        additions = dict(
+            named_cfg if isinstance(named_cfg, Mapping) else vars(named_cfg)
+        )
+        if not additions:
+            return
+        if getattr(self, "_closed", False):
+            raise RuntimeError("Cannot add events to a closed environment.")
+        existing = getattr(self.cfg, "events", None)
+        existing_names = (
+            existing.keys()
+            if isinstance(existing, Mapping)
+            else vars(existing).keys() if existing is not None else ()
+        )
+        overlap = set(existing_names) & additions.keys()
+        if overlap:
+            raise ValueError(f"Event names are already declared: {sorted(overlap)}")
+        for name, cfg in additions.items():
+            if cfg is not None and not isinstance(cfg, EventCfg):
+                raise TypeError(f"Event '{name}' must be an EventCfg or None.")
+            if cfg is not None and cfg.mode == "prestartup":
+                raise ValueError(f"Cannot add prestartup event '{name}' after startup.")
+        declarations = copy.deepcopy(additions)
+        if self.event_manager is None:
+            self.event_manager = EventManager({}, self)
+        manager = self.event_manager
+        manager_cfg = (
+            manager.cfg
+            if isinstance(manager.cfg, Mapping)
+            else vars(manager.cfg) if manager.cfg is not None else {}
+        )
+        previous_names = set(manager_cfg)
+        if existing is None:
+            existing = self.cfg.events = {}
+        try:
+            manager.add_events(additions)
+        finally:
+            # Store declarations, never initialized functor instances. Successful
+            # prefixes also remain visible to close() if a later term fails.
+            manager_cfg = (
+                manager.cfg
+                if isinstance(manager.cfg, Mapping)
+                else vars(manager.cfg) if manager.cfg is not None else {}
+            )
+            for name in additions:
+                if name in previous_names or name not in manager_cfg:
+                    continue
+                if isinstance(existing, dict):
+                    existing[name] = declarations[name]
+                else:
+                    setattr(existing, name, declarations[name])
+        for name, cfg in additions.items():
+            if cfg is not None and cfg.mode == "startup":
+                manager._call_event_functor(
+                    "startup", name, manager.get_functor_cfg(name), self, None
+                )
+
     def _after_episode_reset(self, obs: EnvObs, env_ids: torch.Tensor) -> None:
         if getattr(self, "_final_acceptance_rules", ()):
             bridge = self._active_task_program_bridge
@@ -1133,6 +1215,43 @@ class EmbodiedEnv(BaseEnv):
             raise RuntimeError("A fluid trajectory recorder is already attached.")
         self._fluid_trajectory_recorder = recorder
 
+    @contextmanager
+    def _action_history_scope(
+        self,
+    ) -> Iterator[Callable[[torch.Tensor, torch.Tensor], None] | None]:
+        """Borrow previous action/done views for one synchronous collection.
+
+        The collector owns their storage and advances history after writing a
+        transition. Explicitly bound buffers retain the legacy recording path.
+        Exiting the scope releases all borrowed tensors, including on failure.
+        """
+        if getattr(self, "_action_history_active", False):
+            raise RuntimeError("An action history collection is already active.")
+        if (
+            self.rollout_buffer is not None
+            or getattr(self.set_rollout_buffer, "__func__", None)
+            is not EmbodiedEnv.set_rollout_buffer
+        ):
+            # A custom setter may own initialization or other binding effects.
+            yield None
+            return
+
+        active = True
+
+        def update(action: torch.Tensor, done: torch.Tensor) -> None:
+            if not active:
+                raise RuntimeError("The action history collection has ended.")
+            self._previous_transition = (action, done)
+
+        self._action_history_active = True
+        self._previous_transition = None
+        try:
+            yield update
+        finally:
+            active = False
+            self._previous_transition = None
+            self._action_history_active = False
+
     def set_rollout_buffer(self, rollout_buffer: TensorDict) -> None:
         """Set the rollout buffer for episode data collection.
 
@@ -1146,6 +1265,8 @@ class EmbodiedEnv(BaseEnv):
                 transition-only fields is reserved as padding. Expert buffers
                 keep the legacy `[num_envs, time]` batch layout.
         """
+        if getattr(self, "_action_history_active", False):
+            raise RuntimeError("Cannot bind a rollout buffer during collection.")
         if rollout_buffer.shape[0] != self.num_envs:
             raise ValueError(
                 "Rollout buffer rows must match env.num_envs: "
@@ -1807,7 +1928,7 @@ class EmbodiedEnv(BaseEnv):
         """
         if getattr(self, "termination_manager", None) is None:
             return
-        ids = self.episode_context._ids(env_ids)
+        ids, rows = self.episode_context._resolve_ids(env_ids, include_rows=True)
         targets = {}
         for key in self._rl_target_keys():
             value = getattr(self, key, None)
@@ -1824,7 +1945,7 @@ class EmbodiedEnv(BaseEnv):
                 )
             targets[key] = value
         self.termination_manager.reset(ids)
-        for env_id in ids.cpu().tolist():
+        for env_id in rows:
             self._task_initial_states[env_id] = {
                 "schema_version": 1,
                 "targets": {
@@ -2158,6 +2279,7 @@ class EmbodiedEnv(BaseEnv):
         # (including asynchronous snapshots). The existing state buffer retains
         # the source episode's initial state even when training exports fragments.
         _traj_buffer = getattr(self, "_traj_buffer", None)
+        # Save callbacks may add recorders or change the live eligibility state.
         valid_recording_ids = self.episode_context.filter_recordable(env_ids_to_process)
         terminal_outcomes = {}
         if getattr(self, "_demo_episode_metadata", None):
@@ -2292,7 +2414,9 @@ class EmbodiedEnv(BaseEnv):
     def _initialize_episode(
         self, env_ids: Sequence[int] | torch.Tensor | None = None, **kwargs: Any
     ) -> None:
-        env_ids_to_process = self.episode_context._ids(env_ids)
+        env_ids_to_process, metadata_ids = self.episode_context._resolve_ids(
+            env_ids, include_rows=True
+        )
         replay = getattr(self, "_physical_replay", None)
         if replay is not None:
             replay.reset(self, env_ids_to_process)
@@ -2307,13 +2431,13 @@ class EmbodiedEnv(BaseEnv):
         rows = getattr(self, "_demo_episode_provenance", None)
         if rows is None:
             rows = self._demo_episode_provenance = [snapshot] * self.num_envs
-        metadata_ids = env_ids_to_process.cpu().tolist()
         for env_id in metadata_ids:
             rows[env_id] = snapshot
         episode_metadata = getattr(self, "_demo_episode_metadata", None)
         if not getattr(self, "_demo_metadata_initialized", True) and (
             self.dataset_manager is not None
             or getattr(self, "rollout_buffer", None) is not None
+            or getattr(self, "_action_history_active", False)
             or getattr(self, "_traj_buffer", None) is not None
             or getattr(self, "task_program_progress", None) is not None
         ):
@@ -2369,12 +2493,12 @@ class EmbodiedEnv(BaseEnv):
 
         raw_action_history = getattr(self, "_raw_action_history", None)
         if raw_action_history is not None:
-            for env_id in env_ids_to_process.cpu().tolist():
+            for env_id in metadata_ids:
                 if 0 <= env_id < len(raw_action_history):
                     raw_action_history[env_id].clear()
         executed_qpos_history = getattr(self, "_expert_controller_qpos_history", None)
         if executed_qpos_history is not None:
-            for env_id in env_ids_to_process.cpu().tolist():
+            for env_id in metadata_ids:
                 if 0 <= env_id < len(executed_qpos_history):
                     executed_qpos_history[env_id].clear()
 
@@ -4796,6 +4920,37 @@ class EmbodiedEnv(BaseEnv):
         saved_path = self.save_trajectory(path, env_ids=[env_id])
         self._traj_save_count += 1
         return saved_path
+
+    def flush_recordings(self) -> None:
+        """Discard incomplete camera frames and wait for committed writes.
+
+        This reusable evaluation boundary does not commit partial episodes or
+        finalize recorders. Every recorder is attempted even when another fails.
+        Environment :meth:`close` remains responsible for finalization.
+
+        Raises:
+            RuntimeError: If any recorder fails to discard frames or flush writes.
+        """
+        from embodichain.lab.gym.envs.managers.record import record_camera_data
+
+        manager = self.event_manager
+        if manager is None:
+            return
+        errors: list[Exception] = []
+        for mode_cfgs in manager._mode_functor_cfgs.values():
+            for cfg in mode_cfgs:
+                if not isinstance(cfg.func, record_camera_data):
+                    continue
+                for operation in (cfg.func.discard_and_clear, cfg.func.flush):
+                    try:
+                        operation()
+                    except Exception as error:
+                        errors.append(error)
+        if errors:
+            raise RuntimeError(
+                "Failed to flush camera recordings: "
+                + "; ".join(str(error) for error in errors)
+            ) from errors[0]
 
     def _discard_pending_recordings(self) -> None:
         """Abort recorder state that has not crossed an explicit reset commit."""

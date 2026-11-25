@@ -247,6 +247,37 @@ def test_action_adjoint_clip_is_per_environment_and_overflow_safe() -> None:
     assert stats.nonfinite_rows == 1
 
 
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_action_adjoint_metrics_preserve_python_reduction_across_segments(
+    device,
+) -> None:
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA is unavailable")
+    policy = nn.Linear(1, 1, device=device)
+    algorithm = APG(APGCfg(device=device), policy)
+    algorithm.begin_update()
+    for gradients in (
+        [[1e8, 0.0], [float("nan"), 0.0]],
+        [[1.0, 0.0], [0.0, 0.0]],
+        [[1.0, 0.0], [0.0, 0.0]],
+    ):
+        stats = BatchedGradientNormStats(device)
+        clip_batched_gradient_norm(torch.tensor(gradients, device=device), 10.0, stats)
+        rollout = _single_reward_rollout(policy.weight.sum() + policy.bias.sum())
+        algorithm.accumulate_segment(
+            DifferentiableRollout(
+                rollout.initial_observation, rollout.transitions, stats
+            )
+        )
+    metrics = algorithm.finish_update()
+
+    # A device-side FP32 sum would lose both unit contributions after 1e8.
+    assert metrics["action_adjoint_preclip_mean_norm"] == (100_000_000 + 1 + 1) / 5
+    assert metrics["action_adjoint_preclip_max_norm"] == 100_000_000
+    assert metrics["action_adjoint_clipped_fraction"] == 1 / 6
+    assert metrics["action_adjoint_nonfinite_fraction"] == 1 / 6
+
+
 def test_complete_rollout_objective_scale_equalizes_sequence_lengths() -> None:
     policy = _make_policy()
     algorithm = APG(APGCfg(device="cpu", max_grad_norm=100.0), policy)
@@ -300,21 +331,26 @@ def test_apg_skips_gradient_above_preclip_safety_limit() -> None:
     assert torch.equal(policy.actor.weight, initial_weight)
 
 
-def test_apg_entropy_uses_reward_discount_and_done_reset_semantics() -> None:
+@pytest.mark.parametrize("complete", [False, True])
+def test_apg_entropy_uses_reward_discount_and_done_reset_semantics(
+    complete: bool,
+) -> None:
     policy = _make_policy()
     observation = torch.zeros((1, 1))
     transitions = []
-    for entropy, done in ((1.0, True), (2.0, False), (4.0, False)):
+    entropy_steps = (
+        ((None, False), (2.0, True), (4.0, False))
+        if complete
+        else ((1.0, True), (2.0, False), (4.0, False))
+    )
+    for entropy, done in entropy_steps:
+        policy_output = TensorDict({"action": torch.zeros((1, 1))}, batch_size=[1])
+        if entropy is not None:
+            policy_output["entropy"] = torch.tensor([entropy]) + policy.log_std[0]
         transitions.append(
             DifferentiableTransition(
                 observation=observation,
-                policy_output=TensorDict(
-                    {
-                        "action": torch.zeros((1, 1)),
-                        "entropy": torch.tensor([entropy]) + policy.log_std[0],
-                    },
-                    batch_size=[1],
-                ),
+                policy_output=policy_output,
                 reward=policy.actor.weight.sum().reshape(1) * 0.0,
                 terminated=torch.tensor([done]),
                 truncated=torch.tensor([False]),
@@ -328,9 +364,15 @@ def test_apg_entropy_uses_reward_discount_and_done_reset_semantics() -> None:
         policy,
     )
 
-    metrics = algorithm.update(rollout)
+    if complete:
+        algorithm.begin_update()
+        algorithm.accumulate_complete_rollout(rollout)
+        metrics = algorithm.finish_update()
+    else:
+        metrics = algorithm.update(rollout)
 
-    assert metrics["entropy"] == pytest.approx(5.0)
+    assert metrics["entropy"] == pytest.approx(1.0 if complete else 5.0)
+    assert policy.log_std.grad.item() == pytest.approx(-0.05 if complete else -0.25)
 
 
 def test_apg_gradient_matches_central_finite_difference() -> None:
@@ -389,6 +431,97 @@ def test_apg_skips_nonfinite_update_without_changing_policy() -> None:
 
     assert metrics["skipped_update"] == 1.0
     assert torch.equal(policy.actor.weight, initial_weight)
+
+
+def _single_reward_rollout(reward: torch.Tensor) -> DifferentiableRollout:
+    observation = reward.detach().reshape(1, 1)
+    done = torch.zeros(1, dtype=torch.bool, device=reward.device)
+    transition = DifferentiableTransition(
+        observation=observation,
+        policy_output=TensorDict({}, batch_size=[1], device=reward.device),
+        reward=reward.reshape(1),
+        terminated=done,
+        truncated=done,
+        next_observation=observation,
+        info={},
+    )
+    return DifferentiableRollout(observation, (transition,))
+
+
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_apg_invalid_window_still_backpropagates_and_clears_later_segments(
+    device: str,
+) -> None:
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA is unavailable")
+    policy = nn.Linear(1, 1, device=device, dtype=torch.float64)
+    # Preserve float64 reporting precision while checking multiple parameter grads.
+    reward_value = 1.0 + 2.0**-40 + 0.125
+    with torch.no_grad():
+        policy.weight.fill_(1.0 + 2.0**-40)
+        policy.bias.fill_(0.125)
+    policy.register_parameter(
+        "unused", nn.Parameter(torch.zeros((), device=device, dtype=torch.float64))
+    )
+    initial_parameters = [
+        parameter.detach().clone() for parameter in policy.parameters()
+    ]
+    algorithm = APG(APGCfg(device=device, gamma=1.0), policy)
+    backward_calls = 0
+
+    def poison_second_gradient(gradient: torch.Tensor) -> torch.Tensor:
+        nonlocal backward_calls
+        backward_calls += 1
+        return gradient * float("nan") if backward_calls == 2 else gradient
+
+    policy.weight.register_hook(poison_second_gradient)
+    algorithm.begin_update()
+    for index in range(3):
+        rollout = _single_reward_rollout(policy.weight.sum() + policy.bias.sum())
+        algorithm.accumulate_segment(rollout)
+        assert backward_calls == index + 1
+        if index == 0:
+            torch.testing.assert_close(
+                policy.weight.grad, -torch.ones_like(policy.weight)
+            )
+        else:
+            assert all(parameter.grad is None for parameter in policy.parameters())
+    metrics = algorithm.finish_update()
+
+    assert metrics["skipped_update"] == 1.0
+    assert metrics["objective"] == 3 * reward_value
+    assert metrics["loss"] == -3 * reward_value
+    assert metrics["entropy"] == 0.0
+    for parameter, initial in zip(policy.parameters(), initial_parameters):
+        assert torch.equal(parameter, initial)
+
+
+@pytest.mark.parametrize("failure", ["loss", "gradient"])
+def test_apg_strict_nonfinite_failure_preserves_backward_boundary(failure: str) -> None:
+    policy = nn.Linear(1, 1)
+    algorithm = APG(APGCfg(device="cpu", skip_nonfinite_updates=False), policy)
+    backward_calls = 0
+
+    def invalid_gradient(gradient: torch.Tensor) -> torch.Tensor:
+        nonlocal backward_calls
+        backward_calls += 1
+        return gradient * float("nan")
+
+    handle = policy.weight.register_hook(invalid_gradient)
+    reward = policy.weight.sum() + policy.bias.sum()
+    if failure == "loss":
+        reward = reward * float("nan")
+    error = "non-finite loss" if failure == "loss" else "non-finite policy gradient"
+    with pytest.raises(FloatingPointError, match=error):
+        algorithm.update(_single_reward_rollout(reward))
+    assert backward_calls == (failure == "gradient")
+    assert all(parameter.grad is None for parameter in policy.parameters())
+
+    handle.remove()
+    metrics = algorithm.update(
+        _single_reward_rollout(policy.weight.sum() + policy.bias.sum())
+    )
+    assert metrics["skipped_update"] == 0.0
 
 
 def test_apg_optimizer_is_configurable() -> None:

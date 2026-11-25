@@ -282,7 +282,6 @@ def _build_training(
                 env,
                 algo,
                 cfg.horizon,
-                cfg.num_envs * cfg.horizon // cfg.ppo_minibatches,
                 None,
                 0,
                 0,

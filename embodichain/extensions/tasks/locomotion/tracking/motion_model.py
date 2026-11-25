@@ -63,15 +63,27 @@ def replay_motion_starts(
 ) -> MotionModelStart:
     """Sample usable starts with episode-padded history and preserved encoder bias."""
     for _ in range(4):
-        data = replay.sample_starts(batch_size * 4, task.cfg.history_steps)
+        data = replay.sample_starts(
+            batch_size * 4,
+            task.cfg.history_steps,
+            fields=("state", "context", "frame", "previous_action", "usable"),
+        )
         mask = (
             data["history_complete"]
             & data["start"]["usable"]
             & data["history"]["usable"].all(-1)
         )
-        if int(mask.sum()) >= batch_size:
-            start = {k: v[mask][:batch_size] for k, v in data["start"].items()}
-            history = {k: v[mask][:batch_size] for k, v in data["history"].items()}
+        indices = mask.nonzero(as_tuple=False).squeeze(-1)
+        if indices.numel() >= batch_size:
+            indices = indices[:batch_size]
+            start = {
+                name: data["start"][name][indices]
+                for name in ("state", "context", "frame", "previous_action", "usable")
+            }
+            history = {
+                name: data["history"][name][indices]
+                for name in ("state", "previous_action", "context")
+            }
             observations = task.observation(
                 unpack_robot_state(history["state"]),
                 history["previous_action"],

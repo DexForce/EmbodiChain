@@ -145,8 +145,7 @@ the immutable revision. Evaluation loads it with `weights_only=True`.
 `RobotMarkers` and `SimulationManager.sync_render_state()` for FastRT playback
 without physics steps. The visualization interfaces are supplied by #833.
 
-ODS owns production/storage/supply pacing; the model-based schedule owns learning
-order and update credit, and device replay owns measured episode sequences. The
-[G1 workflow guide](../../../examples/learning/motion_tracking/README.md#replay-and-ods-ownership)
-defines padding, masks, controls and future source-adapter boundaries. Connecting
-ODS must preserve one collection trigger and keep autograd with learner callbacks.
+The model-based schedule owns learning order and update credit; device replay
+owns measured episode sequences. The
+[G1 workflow guide](../../../examples/learning/motion_tracking/README.md#replay-ownership)
+defines padding, masks and controls.

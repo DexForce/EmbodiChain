@@ -732,16 +732,42 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
         root_ang_vel_w = state["root_ang_vel"]
         gravity_w = torch.zeros_like(root_lin_vel_w)
         gravity_w[:, 2] = -1.0
-        link_pose = self.robot.body_data.body_link_pose
-        link_velocity = self.robot.body_data.body_link_vel
-        selected_pose = link_pose[:, self.foot_link_ids]
-        selected_velocity = link_velocity[:, self.foot_link_ids]
-        local_offset = self._foot_offsets.unsqueeze(0).expand(self.num_envs, -1, -1)
-        world_offset = quat_apply(selected_pose[:, :, 3:7], local_offset)
-        foot_position = selected_pose[:, :, :3] + world_offset
-        foot_velocity = selected_velocity[:, :, :3] + torch.cross(
-            selected_velocity[:, :, 3:], world_offset, dim=-1
-        )
+        link_state = {}
+        if (
+            self._imu_offset is not None
+            or {
+                "foot_pos_w",
+                "foot_quat_w",
+                "foot_height",
+                "foot_vel_w",
+                "reward_body_ang_vel_w",
+                "orientation_projected_gravity_b",
+                "angular_momentum_w",
+            }
+            & self._state_fields
+        ):
+            link_pose = self.robot.body_data.body_link_pose
+            link_velocity = self.robot.body_data.body_link_vel
+            selected_pose = link_pose[:, self.foot_link_ids]
+            selected_velocity = link_velocity[:, self.foot_link_ids]
+            local_offset = self._foot_offsets.unsqueeze(0).expand(self.num_envs, -1, -1)
+            world_offset = quat_apply(selected_pose[:, :, 3:7], local_offset)
+            foot_position = selected_pose[:, :, :3] + world_offset
+            foot_velocity = selected_velocity[:, :, :3] + torch.cross(
+                selected_velocity[:, :, 3:], world_offset, dim=-1
+            )
+            orientation_pose = link_pose[:, self.orientation_link_id]
+            orientation_velocity = link_velocity[:, self.orientation_link_id]
+            link_state = {
+                "foot_pos_w": foot_position,
+                "foot_quat_w": selected_pose[:, :, 3:7],
+                "foot_height": foot_position[:, :, 2],
+                "foot_vel_w": foot_velocity,
+                "reward_body_ang_vel_w": orientation_velocity[:, 3:],
+                "orientation_projected_gravity_b": quat_apply_inverse(
+                    orientation_pose[:, 3:7], gravity_w
+                ),
+            }
         foot_contact = self._foot_contacts.found
         foot_force = self._foot_contacts.peak_force
         illegal_force_by_body = self._illegal_contacts.peak_force.norm(dim=-1)
@@ -754,8 +780,6 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
         )
         midpoint = limits.mean(dim=-1)
         half_range = 0.5 * (limits[:, 1] - limits[:, 0]) * limit_factor
-        orientation_pose = link_pose[:, self.orientation_link_id]
-        orientation_velocity = link_velocity[:, self.orientation_link_id]
         base_lin_vel_b = quat_apply_inverse(root_quaternion, root_lin_vel_w)
         base_ang_vel_b = quat_apply_inverse(root_quaternion, root_ang_vel_w)
         if self._imu_offset is not None:
@@ -783,10 +807,6 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
             "root_height": root_pose[:, 2],
             "root_acceleration_w": self._root_acceleration_w,
             "base_quat_w": root_quaternion,
-            "foot_pos_w": foot_position,
-            "foot_quat_w": selected_pose[:, :, 3:7],
-            "foot_height": foot_position[:, :, 2],
-            "foot_vel_w": foot_velocity,
             "foot_contact": foot_contact,
             "foot_force_w": foot_force,
             "foot_air_time": self._foot_contacts.current_air_time,
@@ -794,19 +814,16 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
             "first_foot_contact": first_foot_contact,
             "soft_joint_lower": (midpoint - half_range).unsqueeze(0),
             "soft_joint_upper": (midpoint + half_range).unsqueeze(0),
-            "reward_body_ang_vel_w": orientation_velocity[:, 3:],
             "illegal_contact_force": (
                 illegal_force_by_body.amax(dim=-1)
                 if illegal_force_by_body.shape[-1]
                 else torch.zeros(self.num_envs, device=self.device)
             ),
             "illegal_contact_force_by_body": illegal_force_by_body,
-            "orientation_projected_gravity_b": quat_apply_inverse(
-                orientation_pose[:, 3:7], gravity_w
-            ),
             "encoder_bias": self.encoder_bias,
             "foot_swing_height_cost": self._foot_swing_height_cost,
         }
+        common.update(link_state)
 
         if "joint_torque" in self._state_fields:
             common["joint_torque"] = self.robot.get_qf()[:, self.policy_joint_ids]

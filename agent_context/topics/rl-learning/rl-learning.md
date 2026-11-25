@@ -2,7 +2,8 @@
 
 RL orchestration lives in `embodichain/learning/rl/`; shared MLPs, normalization
 and layers live in `learning/models` and `learning/layers`. Package exports stay
-lazy so lightweight APG imports do not initialize the simulator-backed Trainer.
+lazy; simulator imports stay in native Gym construction and lifecycle paths so
+lightweight learning environments remain independent.
 
 ## Entry Points
 
@@ -10,6 +11,7 @@ lazy so lightweight APG imports do not initialize the simulator-backed Trainer.
 |---|---|
 | Unified training CLI/config assembly | `embodichain/learning/rl/train.py`; `embodichain train-rl` |
 | Environment protocols and registration | `embodichain/learning/rl/env.py` |
+| Offline learning-environment contract checks | `embodichain/learning/rl/env_checker.py` |
 | Algorithm type, rollout kind and registry | `embodichain/learning/rl/algo/` |
 | Policy API, registry and observation groups | `embodichain/learning/rl/policies/` |
 | Standard collection/storage | `embodichain/learning/rl/collector/`, `buffer/` |
@@ -50,27 +52,12 @@ scheduled APG supplies the next complete horizon/objective scale. Legacy vector
 environment names remain aliases. This path currently rejects distributed mode
 and environment profiling; see [differentiable environments](../differentiable-env/differentiable-env.md).
 
-The [Sharpa in-hand example](../../../examples/learning/sharpa_inhand/README.md)
-trains cylinder rotation in native EmbodiChain physics. `reference.py` first
-trains the pinned upstream teacher, whose saved training config parameterizes
-the native run. `native_full.py` / `_full_native_task.py` collect eight-scale,
-domain-randomized transitions through `SimulationManager`, physics-owned
-parameter writes and exact raw-cache replay. `_apg_learner.py` keeps the
-upstream HORA teacher, world model and replay while routing actor updates
-through EmbodiChain APG. Native hand self-contact dimensionality and metal
-contact parameters still differ from upstream, so results are not strict
-upstream physics parity or an algorithm comparison.
-`native_full_evaluate.py` checks frozen source receipts before qualifying a
-newly trained checkpoint; reference/implementation transfer modes are
-diagnostics only. Qualify a freshly trained checkpoint with physical traces.
-The sibling [Wuji example](../../../examples/learning/wuji_inhand/README.md)
-adapts the same learner to the 20-DOF Wuji hand in run-owned source snapshots.
-Its native task requires a palm-up root pose (local palmar +X faces world +Z),
-verified initial opposing-pad contacts, authored actuator effort limits and
-fixed physical parameters across eight sizes. Differentiable FK gates rewards
-by pad geometry and forces, while native termination/evaluation checks actual
-opposing-pad participation. Neither route uses the simulator's FK-only
-`DifferentiableEnv` or differentiates contact physics.
+The [Sharpa](../../../examples/learning/sharpa_inhand/README.md) and
+[Wuji](../../../examples/learning/wuji_inhand/README.md) in-hand examples combine
+native physics collection with world-model APG updates; they do not use the
+simulator's FK-only `DifferentiableEnv` or differentiate contact physics.
+Their READMEs own physical setup, resource profiles and checkpoint qualification;
+native physics differences preclude strict upstream parity claims.
 
 ## Rollout and Trainer Routing
 
@@ -83,17 +70,18 @@ The standard store reserves a bootstrap slot beyond its transition count and
 admits one unconsumed rollout. Actor/critic groups may differ; collection and
 evaluation retain the declared ordering and statistics. PPO preserves old
 Gaussian parameters for KL. Throughput uses transitions collected by the current
-train call, separately from restored cumulative counters.
+train call, separately from restored cumulative counters. [Execution and storage
+boundaries](training.md#execution-and-storage-boundaries) own training-field
+selection and batched metric reporting.
 
 Differentiable collection does not detach into the standard buffer. Segmented
-TBPTT and complete rollouts have different graph lifetimes. Complete mode resets
-each independent microbatch, retains the full scheduled horizon, excludes
-post-terminal rewards and freezes observation statistics until backward.
-`detach_state()` neither resets nor resamples a task. Semantic mask/type fields
-remain unnormalized. Actor-critic parameters are disjoint; time truncation needs
-the full pre-reset terminal-observation batch, while hard termination suppresses
-bootstrap. [Gradient details](training.md#actor-critic-gradients) own critic
-normalization and empty-sample behavior.
+TBPTT and complete rollouts have different graph lifetimes; [update
+semantics](training.md#update-semantics) own horizon, reset and normalization
+boundaries. `detach_state()` neither resets nor resamples a task. Semantic
+mask/type fields remain unnormalized. Actor-critic parameters are disjoint;
+time truncation needs the full pre-reset terminal-observation batch, while hard
+termination suppresses bootstrap. [Gradient details](training.md#actor-critic-gradients)
+own critic normalization and empty-sample behavior.
 
 `DifferentiableTrainer.update_once` exposes one collection/update boundary for
 online workflows; its caller owns evaluation and persistence. Native locomotion
@@ -147,11 +135,9 @@ followed by chronological history including current, with the matching input
 normalizer. Environment observation producers use that same layout. There is no
 separate proprioceptive policy adapter or historical encoder/history branch.
 Component contracts record semantic settings, including parameterless objectives,
-so equal neural tensor shapes cannot silently change training semantics on resume.
-The checkpoint loader accepts only the current full schema and metadata; older
-schemas and incomplete historical metadata are rejected before model mutation.
-Within schema v2, an omitted optional PPO auxiliary coefficient means zero; an
-explicitly different coefficient remains incompatible.
+so equal neural tensor shapes cannot silently change training semantics on
+resume. [Checkpoint validation](training.md#checkpoints-and-resume) owns schema
+and configuration compatibility.
 
 Named training fields travel with the observation that produced each action.
 Collectors preserve declared feature axes after combining configured observation
@@ -160,10 +146,9 @@ nested groups. Logical actor/critic parameter
 groups retain overlap so APG can reject shared trunks; PPO deduplicates shared
 parameters at gradient clipping.
 PPO's optional auxiliary decoder loss recomputes the latent in each minibatch
-so encoder gradients remain connected. Normalization statistics remain frozen
-through collection and PPO epochs, then update for the next rollout. Actor
-export excludes critic and contact decoder; inference alignment does not
-qualify task learning or simulator throughput.
+so encoder gradients remain connected. Actor export excludes critic and contact
+decoder; inference alignment does not qualify task learning or simulator
+throughput.
 
 Blind-assembly producers and manager functors live in the official task
 extension's `manipulation/assembly/functors.py`. The generic observation package

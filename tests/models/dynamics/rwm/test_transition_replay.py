@@ -79,7 +79,9 @@ def test_history_padding_respects_episode_and_oldest_retained_boundary():
     replay = TransitionReplay(4, 2, 3, 1, seed=9)
     for step in range(6):
         _append(replay, step)
+    rng_before = replay.generator.get_state()
     starts = replay.sample_starts(128, 5)
+    rng_after = replay.generator.get_state()
     valid = starts["history_valid"]
     assert valid[:, -1].all()
     assert not (valid[:, :-1] & ~valid[:, 1:]).any()
@@ -96,6 +98,37 @@ def test_history_padding_respects_episode_and_oldest_retained_boundary():
     torch.testing.assert_close(
         starts["history_complete"], starts["start"]["episode_id"] == 1
     )
+
+    for fields, expected_keys in (
+        (("episode_id", "state", "state"), ["state", "episode_id"]),
+        ((), []),
+    ):
+        replay.generator.set_state(rng_before)
+        selected = replay.sample_starts(128, 5, fields=fields)
+        assert torch.equal(replay.generator.get_state(), rng_after)
+        for group in ("start", "history"):
+            assert list(selected[group]) == expected_keys
+            for name in expected_keys:
+                torch.testing.assert_close(
+                    selected[group][name], starts[group][name], rtol=0, atol=0
+                )
+            if expected_keys:
+                selected[group]["state"].zero_()
+                assert starts[group]["state"].min() >= 2
+        for name in ("history_valid", "history_complete"):
+            assert torch.equal(selected[name], starts[name])
+
+    # Output mutation leaves Replay intact; an explicit RNG owns its own draws.
+    replay.generator.set_state(rng_before)
+    generator = torch.Generator()
+    generator.set_state(rng_before)
+    fresh = replay.sample_starts(128, 5, generator=generator, fields=("state",))
+    assert torch.equal(generator.get_state(), rng_after)
+    assert torch.equal(replay.generator.get_state(), rng_before)
+    for group in ("start", "history"):
+        torch.testing.assert_close(
+            fresh[group]["state"], starts[group]["state"], rtol=0, atol=0
+        )
 
 
 def test_snapshot_restores_content_boundaries_and_rng_before_mutation():
@@ -130,6 +163,11 @@ def test_memory_budget_and_invalid_sampling_fail_without_waits():
         replay.sample_windows(1, 1)
     with pytest.raises(ValueError, match="nonempty"):
         replay.sample_starts(1, 2)
+    _append(replay, 0)
+    rng_before = replay.generator.get_state()
+    with pytest.raises(ValueError, match="Unknown replay sample fields"):
+        replay.sample_starts(1, 2, fields=("missing",))
+    assert torch.equal(replay.generator.get_state(), rng_before)
 
 
 def test_auxiliary_fields_are_aligned_owned_budgeted_and_restorable():

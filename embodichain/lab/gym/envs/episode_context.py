@@ -66,9 +66,21 @@ class EpisodeContext:
     def _ids(
         self, env_ids: Sequence[int] | torch.Tensor | slice | None
     ) -> torch.Tensor:
+        return self._resolve_ids(env_ids, include_rows=False)[0]
+
+    def _resolve_ids(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | slice | None,
+        *,
+        include_rows: bool,
+    ) -> tuple[torch.Tensor, list[int] | None]:
+        """Own a selection, reusing any required host read for its validation."""
         self._assert_thread()
         if env_ids is None:
-            return torch.arange(self._count, device=self._device)
+            return (
+                torch.arange(self._count, device=self._device),
+                list(range(self._count)) if include_rows else None,
+            )
         if isinstance(env_ids, slice):
             env_ids = list(range(self._count))[env_ids]
         if isinstance(env_ids, torch.Tensor):
@@ -76,17 +88,37 @@ class EpisodeContext:
                 raise ValueError(
                     "Environment IDs must be a one-dimensional integer selection."
                 )
-            ids = env_ids.to(device=self._device, dtype=torch.long).clone()
-        else:
-            values = list(env_ids)
-            if any(type(value) is not int for value in values):
-                raise ValueError("Environment IDs must be integers.")
-            ids = torch.tensor(values, device=self._device, dtype=torch.long)
-        if len(torch.unique(ids)) != len(ids) or bool(
-            ((ids < 0) | (ids >= self._count)).any()
+            # CPU inputs already have host rows: validate an owned CPU snapshot
+            # before uploading it. Device inputs keep one owned device copy.
+            copy_device = (
+                env_ids.device if env_ids.device.type == "cpu" else self._device
+            )
+            ids = env_ids.to(device=copy_device, dtype=torch.long, copy=True)
+            if ids.device.type == "cpu" and not include_rows:
+                # Keep large CPU selections tensor-only when no host rows are
+                # needed. This validation does not synchronize a device.
+                if len(torch.unique(ids)) != len(ids) or bool(
+                    ((ids < 0) | (ids >= self._count)).any()
+                ):
+                    raise ValueError("Environment IDs must be unique valid rows.")
+                return ids.to(self._device), None
+            # One host read validates both uniqueness and bounds, without GPU
+            # sorting or scalar reductions that each synchronize the stream.
+            rows = ids.cpu().tolist()
+            if len(set(rows)) != len(rows) or (
+                rows and (min(rows) < 0 or max(rows) >= self._count)
+            ):
+                raise ValueError("Environment IDs must be unique valid rows.")
+            return ids.to(self._device), rows if include_rows else None
+        rows = list(env_ids)
+        if any(type(value) is not int for value in rows):
+            raise ValueError("Environment IDs must be integers.")
+        if len(set(rows)) != len(rows) or (
+            rows and (min(rows) < 0 or max(rows) >= self._count)
         ):
             raise ValueError("Environment IDs must be unique valid rows.")
-        return ids
+        ids = torch.tensor(rows, device=self._device, dtype=torch.long)
+        return ids, rows if include_rows else None
 
     @property
     def episode_ids(self) -> tuple[int, ...]:
@@ -123,23 +155,32 @@ class EpisodeContext:
             Owned row dictionaries suitable for info, episode sidecars and
             asynchronous persistence. Their eligibility does not prove task success.
         """
-        ids = self._ids(env_ids).cpu().tolist()
-        recordable = set(self.filter_recordable(ids).cpu().tolist())
-        initialized = self._initialized.cpu().tolist()
+        ids, rows = self._resolve_ids(env_ids, include_rows=True)
+        if (
+            getattr(self.filter_recordable, "__func__", None)
+            is EpisodeContext.filter_recordable
+        ):
+            initialized = self._initialized[ids]
+            recordable = initialized & ~self._rejected[ids] & (self._pending[ids] == 0)
+            states = torch.stack((initialized, recordable), dim=-1).cpu().tolist()
+        else:
+            recordable_rows = set(self.filter_recordable(rows).cpu().tolist())
+            initialized = self._initialized.cpu().tolist()
+            states = [(initialized[row], row in recordable_rows) for row in rows]
         return [
             {
                 "schema_version": 1,
                 "env_id": row,
                 "episode": self._episodes[row],
-                "initialized": initialized[row],
-                "recordable": row in recordable,
+                "initialized": row_initialized,
+                "recordable": row_recordable,
                 "pending_sources": sorted(
                     name for name, rows in self._active.items() if row in rows
                 ),
                 "rejections": deepcopy(self._reasons[row]),
                 "sources": deepcopy(self._sources[row]),
             }
-            for row in ids
+            for row, (row_initialized, row_recordable) in zip(rows, states, strict=True)
         ]
 
     @contextmanager
@@ -169,8 +210,7 @@ class EpisodeContext:
         """
         if type(source) is not str or not source or source != source.strip():
             raise ValueError("Check source must be a nonempty stripped string.")
-        ids = self._ids(env_ids)
-        rows = ids.cpu().tolist()
+        ids, rows = self._resolve_ids(env_ids, include_rows=True)
         if self._active.get(source, set()).intersection(rows):
             raise RuntimeError(f"Check {source!r} already covers a selected row.")
         if rows:
@@ -272,10 +312,10 @@ class EpisodeContext:
                     del self._active[source]
 
     def _begin_episode(self, env_ids: Sequence[int] | torch.Tensor) -> None:
-        ids = self._ids(env_ids)
+        ids, rows = self._resolve_ids(env_ids, include_rows=True)
         self._initialized[ids] = False
         self._rejected[ids] = False
-        for row in ids.cpu().tolist():
+        for row in rows:
             self._episodes[row] += 1
             self._sources[row] = {}
             self._reasons[row] = {}
@@ -286,10 +326,10 @@ class EpisodeContext:
     def _abort_initialization(
         self, env_ids: Sequence[int] | torch.Tensor, error: BaseException
     ) -> None:
-        ids = self._ids(env_ids)
+        ids, rows = self._resolve_ids(env_ids, include_rows=True)
         self._initialized[ids] = False
         self._rejected[ids] = True
-        for row in ids.cpu().tolist():
+        for row in rows:
             self._reasons[row].setdefault(
                 "reset", {"reason": type(error).__name__ + ": " + str(error)}
             )

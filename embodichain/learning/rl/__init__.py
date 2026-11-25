@@ -14,9 +14,9 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""On-policy reinforcement learning pipeline.
+"""Standard and differentiable reinforcement-learning pipelines.
 
-Algorithms (PPO/GRPO), rollout buffers, collectors, and the training entry point; rollout data flows as ``TensorDict`` objects.
+PPO/GRPO use TensorDict buffers; APG variants use graph-connected rollouts.
 """
 
 from __future__ import annotations
@@ -39,6 +39,7 @@ _LAZY_EXPORTS = {
     "LearningVecEnv": ("env", "LearningVecEnv"),
     "LearningEnvProtocol": ("env", "LearningEnvProtocol"),
     "build_learning_env": ("env", "build_learning_env"),
+    "check_learning_env": ("env_checker", "check_learning_env"),
     "get_registered_learning_env_names": ("env", "get_registered_learning_env_names"),
     "register_learning_env": ("env", "register_learning_env"),
     "ScheduledDifferentiableVecEnv": ("env", "ScheduledDifferentiableVecEnv"),
@@ -76,6 +77,7 @@ __all__ = [
     "ScheduledDifferentiableVecEnv",
     "ScheduledDifferentiableEnvProtocol",
     "build_learning_env",
+    "check_learning_env",
     "clip_batched_gradient_norm",
     "evaluate_episodes",
     "get_registered_learning_env_names",

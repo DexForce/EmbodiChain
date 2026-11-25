@@ -28,7 +28,6 @@ from tensordict import TensorDict
 
 from embodichain.learning.rl.collector import DifferentiableRollout
 from embodichain.learning.rl.utils import (
-    LRSchedulerCfg,
     OptimizerCfg,
     build_optimizer,
     coerce_optimizer_cfg,
@@ -360,8 +359,14 @@ class APGActorCritic(APG):
             metrics["critic_seconds"] = 0.0
             return metrics
         critic_started = time.perf_counter()
-        inputs = torch.cat(
-            [batch.inputs.flatten(0, 1) for batch in self._critic_batches]
+        # The active-row gather below owns the fitting inputs. A single batch
+        # needs no intermediate concatenation before that copy.
+        inputs = (
+            self._critic_batches[0].inputs.flatten(0, 1)
+            if len(self._critic_batches) == 1
+            else torch.cat(
+                [batch.inputs.flatten(0, 1) for batch in self._critic_batches]
+            )
         )
         if self.cfg.update_critic_normalization:
             # Count valid current states once. Add bootstrapped successors only
@@ -377,6 +382,7 @@ class APGActorCritic(APG):
             samples = torch.cat(samples)
             if samples.shape[0]:
                 self.policy.update_critic_normalization(samples)
+            del samples
         with torch.no_grad(), self._frozen_critic():
             targets = torch.cat(
                 [

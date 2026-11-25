@@ -182,7 +182,9 @@ class record_camera_data(Functor):
                 "frames": len(frames),
                 "fps": self._fps,
             }
-            self._jobs[key] = (tuple(frame.copy() for frame in frames), metadata)
+            # Capture already owns these CPU arrays. Move them into the job;
+            # later captures use a new list and never mutate committed frames.
+            self._jobs[key] = (tuple(frames), metadata)
             self._frames_list[row] = []
             self._ep_idx[row] += 1
         self._flush_jobs()
@@ -198,6 +200,15 @@ class record_camera_data(Functor):
         for row in self._normalize_env_ids(env_ids):
             self._frames_list[row] = []
 
+    def flush(self) -> None:
+        """Finish committed writes while keeping live frames and capture open.
+
+        Failed writes retain their owned frames and episode identity for a
+        later retry. This does not commit any unfinished episode.
+        """
+        self._ensure_open()
+        self._flush_jobs()
+
     def finalize(self) -> None:
         """Flush committed jobs and discard live frames; never commit on close."""
         with self._finalize_lock:
@@ -206,7 +217,7 @@ class record_camera_data(Functor):
                     raise self._finalize_error
                 return
             try:
-                self._flush_jobs()
+                self.flush()
             except BaseException as error:
                 self._finalize_error = error
                 raise
@@ -256,8 +267,10 @@ class record_camera_data(Functor):
                 continue
             frame = rgb[row, ..., :3]
             if isinstance(frame, torch.Tensor):
-                frame = frame.detach().cpu().numpy()
-            self._frames_list[row].append(np.array(frame, copy=True))
+                frame = frame.detach().to(device="cpu", copy=True).numpy()
+            else:
+                frame = np.array(frame, copy=True)
+            self._frames_list[row].append(frame)
 
 
 class record_camera_data_async(record_camera_data):
@@ -270,24 +283,35 @@ class record_camera_data_async(record_camera_data):
         )
         self._futures: dict[tuple[int, int, str], Future[None]] = {}
 
-    def _flush_jobs(self) -> None:
+    def _flush_jobs(self, *, wait: bool = False) -> None:
         for key, job in list(self._jobs.items()):
             future = self._futures.get(key)
-            if future is not None:
-                if not future.done():
+            if future is None:
+                future = self._executor.submit(self._write_job, key, job)
+                self._futures[key] = future
+                if not wait:
                     continue
-                try:
-                    future.result()
-                except BaseException:
-                    # Report the failed write once; its owned job remains available
-                    # for the next explicit retry under the original episode ID.
-                    del self._futures[key]
-                    raise
-                self._receipts[key] = len(job[0])
-                del self._jobs[key]
+            elif not wait and not future.done():
+                continue
+            try:
+                future.result()
+            except BaseException:
+                # Report the failed write once; its owned job remains available
+                # for the next explicit retry under the original episode ID.
                 del self._futures[key]
-            else:
-                self._futures[key] = self._executor.submit(self._write_job, key, job)
+                raise
+            self._receipts[key] = len(job[0])
+            del self._jobs[key]
+            del self._futures[key]
+
+    def flush(self) -> None:
+        """Wait for committed writes without closing capture or its executor.
+
+        Live frames remain uncommitted. Failed jobs retain their owned payload
+        and can be submitted again by the next flush.
+        """
+        self._ensure_open()
+        self._flush_jobs(wait=True)
 
     def finalize(self) -> None:
         """Wait for every committed row; independent rows never wait for a mosaic."""
@@ -297,12 +321,7 @@ class record_camera_data_async(record_camera_data):
                     raise self._finalize_error
                 return
             try:
-                self._flush_jobs()
-                for key, future in list(self._futures.items()):
-                    future.result()
-                    self._receipts[key] = len(self._jobs[key][0])
-                    del self._jobs[key]
-                    del self._futures[key]
+                self.flush()
             except BaseException as error:
                 self._finalize_error = error
                 raise

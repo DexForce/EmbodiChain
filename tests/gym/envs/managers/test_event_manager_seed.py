@@ -240,6 +240,75 @@ def test_string_class_functor_is_tracked_for_seeded_reset() -> None:
     assert len(manager._mode_class_functor_cfgs["reset"]) == 1
 
 
+@pytest.mark.parametrize("config_object", [False, True])
+def test_added_events_preserve_existing_instances_schedules_and_rng(
+    config_object: bool,
+) -> None:
+    """Adding an independent stream must not rewind a partially due event."""
+    cfg = {
+        "target": EventCfg(
+            func=_RandomClassFunctor,
+            mode="interval",
+            interval_step=2,
+            params={"label": "target"},
+        )
+    }
+    env = _StubEnv(42)
+    reference_env = _StubEnv(42)
+    manager = EventManager(SimpleNamespace(**cfg) if config_object else cfg, env)
+    reference = EventManager(cfg, reference_env)
+    original = manager.get_functor_cfg("target").func
+    manager.apply("interval")
+    reference.apply("interval")
+    added = EventCfg(func=_RandomClassFunctor, mode="reset", params={"label": "added"})
+    before_rng = torch.get_rng_state().clone()
+    manager.add_events({"added": added})
+    added.params["label"] = "changed by caller"
+
+    assert manager.get_functor_cfg("target").func is original
+    assert len(env.initialization_samples) == 2
+    assert added.func is _RandomClassFunctor
+    assert torch.equal(torch.get_rng_state(), before_rng)
+    for _ in range(3):
+        manager.apply("interval")
+        reference.apply("interval")
+    manager.apply("reset", torch.tensor([0, 1]))
+    assert env.samples["target"] == reference_env.samples["target"]
+    assert len(env.samples["target"]) == 2
+    assert len(env.samples["added"]) == 1
+
+
+@pytest.mark.parametrize("existing", [None, "active"])
+def test_add_events_rejects_collisions_before_constructing_any_term(existing) -> None:
+    env = _StubEnv(5)
+    cfg = EventCfg(func=_RandomClassFunctor, params={"label": "target"})
+    manager = EventManager({"reserved": cfg if existing else None}, env)
+    initialized = len(env.initialization_samples)
+    with pytest.raises(ValueError, match="reserved"):
+        manager.add_events({"new": cfg, "reserved": cfg})
+    assert len(env.initialization_samples) == initialized
+    assert "new" not in manager.cfg
+
+
+def test_add_events_to_empty_manager_keeps_owned_declarations() -> None:
+    env = _StubEnv(10)
+    manager = EventManager(None, env)
+    manager.add_events(None)
+    manager.add_events({})
+    manager.add_events(
+        SimpleNamespace(
+            target=EventCfg(
+                func=_mixed_rng_event,
+                mode="interval",
+                interval_step=1,
+                params={"label": "target"},
+            )
+        )
+    )
+    manager.apply("interval")
+    assert len(env.samples["target"]) == 1
+
+
 @pytest.mark.gpu
 def test_cuda_event_stream_replays_and_restores_device_rng() -> None:
     """The simulation-device generator is scoped and restored on CUDA."""

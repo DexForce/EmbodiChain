@@ -16,17 +16,19 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 import pytest
 import torch
 import torch.nn as nn
 from gymnasium import spaces
 from tensordict import TensorDict
 
+from embodichain.learning.models.normalizer import EmpiricalNormalizer
 from embodichain.learning.rl.algo import PPO, PPOCfg, compute_gae
 from embodichain.learning.rl.buffer import RolloutBuffer
 from embodichain.learning.rl.collector import SyncCollector
 from embodichain.learning.rl.policies import ActorCritic, build_policy
-from embodichain.learning.rl.train import _build_learning_policy
 from embodichain.learning.rl.utils import (
     LRSchedulerCfg,
     OptimizerCfg,
@@ -79,8 +81,27 @@ class _NormalizationEnv:
         )
 
 
-def _policy(*, normalize: bool = False, device: str = "cpu") -> ActorCritic:
-    return ActorCritic(
+class _ExtraFieldPolicy(ActorCritic):
+    """Custom action evaluator requiring a transition field beyond built-ins."""
+
+    def evaluate_actions(self, tensordict: TensorDict) -> TensorDict:
+        evaluated = ActorCritic.evaluate_actions(self, tensordict)
+        evaluated["sample_log_prob"] = (
+            evaluated["sample_log_prob"] + tensordict["extra"]
+        )
+        return evaluated
+
+
+def _policy(
+    *,
+    normalize: bool | tuple[bool, bool] = False,
+    device: str = "cpu",
+    policy_type: type[ActorCritic] = ActorCritic,
+) -> ActorCritic:
+    actor_normalization, critic_normalization = (
+        normalize if isinstance(normalize, tuple) else (normalize, normalize)
+    )
+    return policy_type(
         obs_dim=2,
         action_dim=1,
         device=torch.device(device),
@@ -89,8 +110,8 @@ def _policy(*, normalize: bool = False, device: str = "cpu") -> ActorCritic:
         critic_obs_dim=3,
         actor_obs_groups=("policy",),
         critic_obs_groups=("critic",),
-        actor_obs_normalization=normalize,
-        critic_obs_normalization=normalize,
+        actor_obs_normalization=actor_normalization,
+        critic_obs_normalization=critic_normalization,
     )
 
 
@@ -107,9 +128,278 @@ def _algorithm(policy: ActorCritic, **overrides: object) -> PPO:
     return PPO(PPOCfg(**cfg), policy)
 
 
-def test_ppo_updates_normalizers_after_using_the_rollout_distribution() -> None:
-    env = _NormalizationEnv()
+@pytest.mark.parametrize("normalize_per_minibatch", [False, True])
+@pytest.mark.parametrize("clipped_value", [False, True])
+def test_compute_losses_matches_objective_without_training_side_effects(
+    normalize_per_minibatch: bool, clipped_value: bool
+) -> None:
     policy = _policy(normalize=True)
+    with torch.no_grad():
+        policy.actor.weight.fill_(0.5)
+        policy.actor.bias.fill_(1.5)
+    policy.auxiliary_loss = (
+        lambda batch, evaluated: (evaluated["action_mean"] - batch["custom_target"])
+        .square()
+        .mean()
+    )
+    reference = deepcopy(policy)
+    algorithm = _algorithm(
+        policy,
+        ent_coef=0.03,
+        vf_coef=0.7,
+        action_bound_coef=0.2,
+        auxiliary_coef=0.4,
+        use_clipped_value_loss=clipped_value,
+        normalize_advantage_per_mini_batch=normalize_per_minibatch,
+        schedule="adaptive",
+        desired_kl=0.01,
+    )
+    batch = TensorDict(
+        {
+            "obs": torch.tensor([[1.0, 2.0], [-2.0, 1.0], [0.0, 0.5], [2.0, 1.0]]),
+            "critic_obs": torch.arange(12, dtype=torch.float32).reshape(4, 3) / 10,
+            "action": torch.tensor([[1.0], [-1.0], [0.5], [2.0]]),
+            "return": torch.tensor([1.0, -1.0, 0.5, 2.0]),
+            "advantage": torch.tensor([-2.0, -0.5, 0.7, 3.0], requires_grad=True),
+            "custom_target": torch.tensor([[0.0], [0.5], [-0.5], [1.0]]),
+        },
+        batch_size=[4],
+    )
+    evaluated = reference.evaluate_actions(batch)
+    batch["sample_log_prob"] = evaluated["sample_log_prob"].detach() - torch.tensor(
+        [0.3, -0.4, 0.1, -0.1]
+    )
+    batch["value"] = evaluated["value"].detach() - 0.4
+    advantages = batch["advantage"].detach()
+    if normalize_per_minibatch:
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+    # Independent probability-ratio definition also checks the combined loss's
+    # coefficients and gradient flow through every objective.
+    ratio = (evaluated["sample_log_prob"] - batch["sample_log_prob"]).exp()
+    actor = -torch.minimum(
+        ratio * advantages, ratio.clamp(0.8, 1.2) * advantages
+    ).mean()
+    value_errors = (evaluated["value"] - batch["return"]).square()
+    if clipped_value:
+        clipped = batch["value"] + (evaluated["value"] - batch["value"]).clamp(
+            -0.2, 0.2
+        )
+        value_errors = torch.maximum(value_errors, (clipped - batch["return"]).square())
+    value = value_errors.mean()
+    action_bound = torch.relu(evaluated["action_mean"].abs() - 1).square().mean()
+    entropy = -evaluated["entropy"].mean()
+    auxiliary = (evaluated["action_mean"] - batch["custom_target"]).square().mean()
+    expected = {
+        "total": actor
+        + 0.7 * value
+        + 0.2 * action_bound
+        + 0.03 * entropy
+        + 0.4 * auxiliary,
+        "actor": actor,
+        "value": value,
+        "action_bound": action_bound,
+        "entropy": entropy,
+        "auxiliary": auxiliary,
+    }
+    original_batch = batch.clone()
+    original_state = deepcopy(policy.state_dict())
+    original_rng = torch.get_rng_state()
+    evaluations = []
+    hook = policy.actor.register_forward_hook(lambda *args: evaluations.append(None))
+
+    losses = algorithm.compute_losses(batch)
+    hook.remove()
+
+    assert len(evaluations) == 1
+    assert losses.keys() == expected.keys()
+    for name in expected:
+        torch.testing.assert_close(losses[name], expected[name])
+    losses["total"].backward()
+    expected["total"].backward()
+    for actual_parameter, expected_parameter in zip(
+        policy.parameters(), reference.parameters()
+    ):
+        torch.testing.assert_close(actual_parameter.grad, expected_parameter.grad)
+    assert batch["advantage"].grad is None
+    assert not algorithm.optimizer.state
+    assert algorithm.current_learning_rate() == 1e-3
+    torch.testing.assert_close(policy.state_dict(), original_state, rtol=0, atol=0)
+    torch.testing.assert_close(torch.get_rng_state(), original_rng, rtol=0, atol=0)
+    for key in batch.keys():
+        torch.testing.assert_close(batch[key], original_batch[key], rtol=0, atol=0)
+
+
+@pytest.mark.parametrize(
+    "mutated_field", ["sample_log_prob", "return", "value", "advantage"]
+)
+@pytest.mark.parametrize("declare_fields", [False, True])
+@pytest.mark.parametrize("standalone", [False, True])
+def test_custom_evaluator_cannot_replace_ppo_reference_targets(
+    mutated_field: str,
+    declare_fields: bool,
+    standalone: bool,
+) -> None:
+    policy = _policy()
+    custom = deepcopy(policy)
+    env = _NormalizationEnv()
+    buffer = RolloutBuffer(2, 3, 2, 1, env.device, critic_obs_dim=3)
+    rollout = SyncCollector(env, policy, env.device).collect(
+        3, rollout=buffer.start_rollout()
+    )
+
+    def evaluate_actions(batch):
+        evaluated = ActorCritic.evaluate_actions(custom, batch)
+        if mutated_field == "sample_log_prob":
+            batch[mutated_field].copy_(evaluated[mutated_field].detach())
+        elif mutated_field == "value":
+            # An incorrect reference must activate the clipped-value branch,
+            # rather than be hidden by the ordinary squared-error maximum.
+            batch[mutated_field].fill_(50.0)
+        else:
+            batch[mutated_field].zero_()
+        return evaluated
+
+    custom.evaluate_actions = evaluate_actions
+    if declare_fields:
+        from embodichain.learning.rl.policies.policy import _TrainingInputSpec
+
+        custom._training_input_spec = lambda: _TrainingInputSpec(
+            fields=("obs", "critic_obs", "action")
+        )
+    expected = _algorithm(
+        policy,
+        n_epochs=3,
+        batch_size=6,
+        use_clipped_value_loss=mutated_field == "value",
+    )
+    actual = _algorithm(
+        custom,
+        n_epochs=3,
+        batch_size=6,
+        use_clipped_value_loss=mutated_field == "value",
+    )
+    if standalone:
+        compute_gae(
+            rollout, gamma=expected.cfg.gamma, gae_lambda=expected.cfg.gae_lambda
+        )
+        batch = rollout[:, :-1].reshape(-1)
+        # Make the frozen policy reference differ from this evaluation so an
+        # evaluator overwriting log probabilities cannot silently zero ratios.
+        batch["sample_log_prob"] = batch["sample_log_prob"] - 0.1
+        expected_losses = expected.compute_losses(batch.clone())
+        actual_losses = actual.compute_losses(batch.clone())
+        for name in expected_losses:
+            torch.testing.assert_close(
+                actual_losses[name], expected_losses[name], rtol=0, atol=0
+            )
+        expected_losses["total"].backward()
+        actual_losses["total"].backward()
+        for actual_parameter, expected_parameter in zip(
+            custom.parameters(), policy.parameters()
+        ):
+            torch.testing.assert_close(
+                actual_parameter.grad, expected_parameter.grad, rtol=0, atol=0
+            )
+        return
+    torch.random.default_generator.manual_seed(31)
+    expected_metrics = expected.update(rollout)
+    torch.random.default_generator.manual_seed(31)
+    actual_metrics = actual.update(rollout)
+    assert actual_metrics == pytest.approx(expected_metrics)
+    torch.testing.assert_close(custom.state_dict(), policy.state_dict(), rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("algorithm_name", ["ppo", "grpo"])
+def test_declared_policy_inputs_preserve_updates_and_refresh_between_rollouts(
+    algorithm_name: str,
+) -> None:
+    from embodichain.learning.rl.algo import GRPO, GRPOCfg
+    from embodichain.learning.rl.policies.policy import _TrainingInputSpec
+
+    reference = _policy()
+    declared = deepcopy(reference)
+    env = _NormalizationEnv()
+    rollout = SyncCollector(env, reference, env.device).collect(
+        3, RolloutBuffer(2, 3, 2, 1, env.device, critic_obs_dim=3).start_rollout()
+    )
+    rollout["extra"] = torch.full(rollout.batch_size, 0.1)
+    # A raw extra cannot replace transition_view's derived successor values.
+    rollout["next_value"] = torch.full(rollout.batch_size, -100.0)
+    selected_field = "extra"
+    declarations = []
+
+    def evaluate(model, batch, *, projected):
+        if projected:
+            assert "reward" not in batch.keys()
+        evaluated = ActorCritic.evaluate_actions(model, batch)
+        evaluated["sample_log_prob"] = (
+            evaluated["sample_log_prob"] + batch[selected_field]
+        )
+        return evaluated
+
+    reference.evaluate_actions = lambda batch: evaluate(
+        reference, batch, projected=False
+    )
+    declared.evaluate_actions = lambda batch: evaluate(declared, batch, projected=True)
+
+    def input_spec():
+        declarations.append(selected_field)
+        return _TrainingInputSpec(
+            fields=("obs", "critic_obs", "action", selected_field),
+            mutates_inputs=False,
+        )
+
+    declared._training_input_spec = input_spec
+    if algorithm_name == "ppo":
+        expected = _algorithm(reference, n_epochs=2, batch_size=2)
+        actual = _algorithm(declared, n_epochs=2, batch_size=2)
+    else:
+        cfg = GRPOCfg(device="cpu", group_size=2, n_epochs=2, batch_size=2, kl_coef=0.0)
+        expected, actual = GRPO(cfg.copy(), reference), GRPO(cfg.copy(), declared)
+
+    for selected_field in ("extra", "next_value"):
+        torch.random.default_generator.manual_seed(31)
+        expected_metrics = expected.update(rollout)
+        torch.random.default_generator.manual_seed(31)
+        actual_metrics = actual.update(rollout)
+        assert actual_metrics == expected_metrics
+        torch.testing.assert_close(
+            declared.state_dict(), reference.state_dict(), rtol=0, atol=0
+        )
+    assert declarations == ["extra", "next_value"]
+
+
+@pytest.mark.parametrize(
+    "policy_type,instance_override,normalization,mutating_normalizer",
+    [
+        (ActorCritic, False, (False, False), False),
+        (ActorCritic, False, (True, False), False),
+        (ActorCritic, False, (False, True), False),
+        (ActorCritic, False, (True, True), False),
+        (_ExtraFieldPolicy, False, (True, True), False),
+        (ActorCritic, True, (True, True), False),
+        (ActorCritic, False, (True, True), True),
+    ],
+)
+def test_ppo_updates_normalizers_after_using_the_rollout_distribution(
+    policy_type: type[ActorCritic],
+    instance_override: bool,
+    normalization: tuple[bool, bool],
+    mutating_normalizer: bool,
+) -> None:
+    env = _NormalizationEnv()
+    policy = _policy(normalize=normalization, policy_type=policy_type)
+    if mutating_normalizer:
+
+        class MutatingNormalizer(EmpiricalNormalizer):
+            def update(self, value: torch.Tensor) -> None:
+                super().update(value)
+                value.add_(1000.0)
+
+        policy.actor_obs_normalizer = MutatingNormalizer(policy.actor_obs_dim)
+        policy.critic_obs_normalizer = MutatingNormalizer(policy.critic_obs_dim)
+    if instance_override:
+        policy.evaluate_actions = _ExtraFieldPolicy.evaluate_actions.__get__(policy)
     buffer = RolloutBuffer(
         num_envs=env.num_envs,
         rollout_len=2,
@@ -122,6 +412,7 @@ def test_ppo_updates_normalizers_after_using_the_rollout_distribution() -> None:
     collector = SyncCollector(env, policy, env.device)
 
     rollout = collector.collect(2, rollout=buffer.start_rollout())
+    rollout["extra"] = torch.zeros(rollout.batch_size)
 
     evaluated = policy.evaluate_actions(rollout[:, :-1].reshape(-1))
     probability_ratio = (
@@ -129,23 +420,85 @@ def test_ppo_updates_normalizers_after_using_the_rollout_distribution() -> None:
     ).exp()
 
     torch.testing.assert_close(probability_ratio, torch.ones_like(probability_ratio))
-    assert int(policy.actor_obs_normalizer.count) == 0
-    assert int(policy.critic_obs_normalizer.count) == 0
+    for normalizer in (policy.actor_obs_normalizer, policy.critic_obs_normalizer):
+        if hasattr(normalizer, "count"):
+            assert int(normalizer.count) == 0
     assert rollout["critic_obs"].shape == (2, 3, 3)
     assert torch.isfinite(rollout["action_mean"][:, :-1]).all()
     assert torch.isfinite(rollout["action_std"][:, :-1]).all()
+    original = rollout.clone()
     losses = _algorithm(policy).update(rollout)
-    assert int(policy.actor_obs_normalizer.count) == 4
-    assert int(policy.critic_obs_normalizer.count) == 4
-    torch.testing.assert_close(
-        policy.actor_obs_normalizer.mean,
-        torch.full((1, 2), 0.5),
-    )
-    torch.testing.assert_close(
-        policy.critic_obs_normalizer.mean,
-        torch.full((1, 3), 2.5),
-    )
+    assert rollout.keys() == original.keys()
+    for key in original.keys():
+        torch.testing.assert_close(
+            rollout[key], original[key], rtol=0, atol=0, equal_nan=True
+        )
+    for normalizer, enabled, expected_mean in (
+        (policy.actor_obs_normalizer, normalization[0], torch.full((1, 2), 0.5)),
+        (policy.critic_obs_normalizer, normalization[1], torch.full((1, 3), 2.5)),
+    ):
+        if enabled:
+            assert int(normalizer.count) == 4
+            torch.testing.assert_close(normalizer.mean, expected_mean)
     assert all(torch.isfinite(torch.tensor(value)) for value in losses.values())
+
+
+@pytest.mark.parametrize("override_style", ["subclass", "instance"])
+def test_custom_normalization_update_keeps_complete_flat_observations(
+    override_style: str,
+) -> None:
+    captured = []
+
+    class CustomNormalization(ActorCritic):
+        def update_normalization(self, batch):
+            captured.append(batch.clone())
+
+    policy = _policy(
+        policy_type=CustomNormalization if override_style == "subclass" else ActorCritic
+    )
+    if override_style == "instance":
+        policy.update_normalization = lambda batch: captured.append(batch.clone())
+    env = _NormalizationEnv()
+    rollout = SyncCollector(env, policy, env.device).collect(
+        2, RolloutBuffer(2, 2, 2, 1, env.device, critic_obs_dim=3).start_rollout()
+    )
+    _algorithm(policy).update(rollout)
+
+    assert len(captured) == 1
+    assert captured[0].batch_size == torch.Size([4])
+    assert set(captured[0].keys()) == {"obs", "critic_obs"}
+    for name in ("obs", "critic_obs"):
+        expected = torch.cat((rollout[name][0, :-1], rollout[name][1, :-1]))
+        torch.testing.assert_close(captured[0][name], expected, rtol=0, atol=0)
+
+
+def test_critic_only_normalization_uses_shared_actor_observations() -> None:
+    from embodichain.learning.rl.algo.common import (
+        _resolve_training_input_spec,
+        _update_observation_normalization,
+    )
+
+    policy = ActorCritic(
+        2,
+        1,
+        torch.device("cpu"),
+        nn.Linear(2, 1),
+        nn.Linear(2, 1),
+        critic_obs_normalization=True,
+    )
+    rollout = TensorDict(
+        {"obs": torch.tensor([[[1.0, 2.0], [3.0, 4.0], [99.0, 99.0]]])},
+        batch_size=[1, 3],
+    )
+    _update_observation_normalization(
+        policy, rollout, _resolve_training_input_spec(policy)
+    )
+
+    assert int(policy.critic_obs_normalizer.count) == 2
+    torch.testing.assert_close(
+        policy.critic_obs_normalizer.mean, torch.tensor([[2.0, 3.0]])
+    )
+    torch.testing.assert_close(policy.critic_obs_normalizer.variance, torch.ones(1, 2))
 
 
 @pytest.mark.parametrize(
@@ -263,6 +616,8 @@ def test_observation_groups_preserve_order_and_configure_policy() -> None:
 
 
 def test_lightweight_policy_builds_distinct_actor_and_critic_inputs() -> None:
+    from embodichain.learning.rl.runtime import _build_learning_policy
+
     policy = _build_learning_policy(
         {
             "name": "actor_critic",
@@ -409,56 +764,110 @@ def test_minibatch_count_preserves_every_transition() -> None:
     )
 
 
-def test_non_finite_gradient_is_rejected_before_optimizer_step() -> None:
-    policy = _policy()
-    algorithm = _algorithm(policy)
-    first_parameter = next(policy.actor.parameters())
-    first_parameter.grad = torch.full_like(first_parameter, float("inf"))
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+@pytest.mark.parametrize(
+    "group,bad_value", [("actor", float("inf")), ("critic", float("nan"))]
+)
+def test_non_finite_gradient_is_rejected_before_optimizer_step(
+    device: str, group: str, bad_value: float
+) -> None:
+    env = _NormalizationEnv()
+    env.device = torch.device(device)
+    policy = _policy(device=device)
+    algorithm = _algorithm(policy, device=device)
+    rollout = SyncCollector(env, policy, env.device).collect(
+        1, RolloutBuffer(2, 1, 2, 1, env.device, critic_obs_dim=3).start_rollout()
+    )
+    original = deepcopy(policy.state_dict())
+    parameter = next(getattr(policy, group).parameters())
+    hook = parameter.register_hook(lambda grad: torch.full_like(grad, bad_value))
+    try:
+        with pytest.raises(FloatingPointError, match="optimizer step skipped"):
+            algorithm.update(rollout)
+    finally:
+        hook.remove()
+    torch.testing.assert_close(policy.state_dict(), original, rtol=0, atol=0)
+    assert not algorithm.optimizer.state
 
-    with pytest.raises(FloatingPointError, match="optimizer step skipped"):
-        algorithm._clip_gradients()
 
-
-def test_actor_and_critic_gradients_are_clipped_separately() -> None:
-    policy = _policy()
-    algorithm = _algorithm(policy, max_grad_norm=1.0)
-    actor_parameter = next(policy.actor.parameters())
-    critic_parameter = next(policy.critic.parameters())
-    actor_parameter.grad = torch.full_like(actor_parameter, 2.0)
-    critic_parameter.grad = torch.full_like(critic_parameter, 2.0)
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_actor_and_critic_gradients_are_clipped_separately(device: str) -> None:
+    policy = _policy(device=device)
+    reference = deepcopy(policy)
+    algorithm = _algorithm(policy, device=device, max_grad_norm=1.0)
+    for actual, expected in zip(policy.parameters(), reference.parameters()):
+        actual.grad = torch.full_like(actual, 2.0)
+        expected.grad = actual.grad.clone()
+    torch.nn.utils.clip_grad_norm_(
+        (*reference.actor.parameters(), reference.log_std), 1.0, error_if_nonfinite=True
+    )
+    torch.nn.utils.clip_grad_norm_(
+        reference.critic.parameters(), 1.0, error_if_nonfinite=True
+    )
 
     algorithm._clip_gradients()
 
-    actor_norm = torch.linalg.vector_norm(actor_parameter.grad)
-    critic_norm = torch.linalg.vector_norm(critic_parameter.grad)
-    assert float(actor_norm) == pytest.approx(1.0, rel=1e-5)
-    assert float(critic_norm) == pytest.approx(1.0, rel=1e-5)
+    for actual, expected in zip(policy.parameters(), reference.parameters()):
+        torch.testing.assert_close(actual.grad, expected.grad, rtol=0, atol=0)
 
 
-def test_shared_actor_critic_parameters_are_clipped_once(monkeypatch) -> None:
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_shared_actor_critic_parameters_are_clipped_once(device: str) -> None:
     shared = nn.Linear(2, 3)
     policy = ActorCritic(
         2,
         1,
-        torch.device("cpu"),
+        torch.device(device),
         nn.Sequential(shared, nn.Linear(3, 1)),
         nn.Sequential(shared, nn.Linear(3, 1)),
     )
-    algorithm = _algorithm(policy, max_grad_norm=1.0)
-    for parameter in policy.parameters():
-        parameter.grad = torch.ones_like(parameter)
-    clipped = []
-    original = torch.nn.utils.clip_grad_norm_
+    reference = deepcopy(policy)
+    algorithm = _algorithm(policy, device=device, max_grad_norm=1.0)
+    for actual, expected in zip(policy.parameters(), reference.parameters()):
+        actual.grad = torch.ones_like(actual)
+        expected.grad = actual.grad.clone()
+    actor_parameters = (*reference.actor.parameters(), reference.log_std)
+    actor_ids = {id(parameter) for parameter in actor_parameters}
+    critic_parameters = tuple(
+        parameter
+        for parameter in reference.critic.parameters()
+        if id(parameter) not in actor_ids
+    )
+    torch.nn.utils.clip_grad_norm_(actor_parameters, 1.0, error_if_nonfinite=True)
+    torch.nn.utils.clip_grad_norm_(critic_parameters, 1.0, error_if_nonfinite=True)
 
-    def observed(parameters, *args, **kwargs):
-        parameters = tuple(parameters)
-        clipped.extend(map(id, parameters))
-        return original(parameters, *args, **kwargs)
-
-    monkeypatch.setattr(torch.nn.utils, "clip_grad_norm_", observed)
     algorithm._clip_gradients()
-    assert len(clipped) == len(set(clipped))
-    assert set(clipped) == {id(parameter) for parameter in policy.parameters()}
+
+    for actual, expected in zip(policy.parameters(), reference.parameters()):
+        torch.testing.assert_close(actual.grad, expected.grad, rtol=0, atol=0)
+
+
+def test_custom_gradient_groups_are_refreshed_each_step() -> None:
+    policy = _policy()
+    reference = deepcopy(policy)
+    algorithm = _algorithm(policy, max_grad_norm=1.0)
+    for combined in (False, True):
+        for actual, expected in zip(policy.parameters(), reference.parameters()):
+            actual.grad = torch.full_like(actual, 2.0)
+            expected.grad = actual.grad.clone()
+
+        def groups(model):
+            actor = tuple(model.actor.parameters())
+            critic = tuple(model.critic.parameters())
+            return (
+                (actor + critic, (model.log_std,))
+                if combined
+                else (actor, critic + (model.log_std,))
+            )
+
+        policy.optimization_parameter_groups = lambda: groups(policy)
+        for parameters in groups(reference):
+            torch.nn.utils.clip_grad_norm_(parameters, 1.0, error_if_nonfinite=True)
+
+        algorithm._clip_gradients()
+
+        for actual, expected in zip(policy.parameters(), reference.parameters()):
+            torch.testing.assert_close(actual.grad, expected.grad, rtol=0, atol=0)
 
 
 def test_log_action_standard_deviation_uses_configured_range() -> None:
@@ -503,7 +912,64 @@ def test_gae_handles_episode_boundaries(
     torch.testing.assert_close(returns, torch.tensor([[expected_return]]))
 
 
-def test_timeout_bootstraps_terminal_state_instead_of_current_or_reset_state() -> None:
+@pytest.mark.parametrize("horizon", [1, 4])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.float64])
+@pytest.mark.parametrize("strided", [False, True])
+def test_gae_mixed_boundaries_preserve_recurrence_and_inputs(
+    horizon: int, dtype: torch.dtype, strided: bool
+) -> None:
+    """Known discounted returns retain timeout and per-row episode boundaries."""
+    fields = {
+        "reward": torch.tensor([[1, 2, 3, 4, 0], [2, 4, 6, 8, 0]], dtype=dtype),
+        "value": torch.tensor([[2, 4, 6, 8, 10], [1, 3, 5, 7, 9]], dtype=dtype),
+        "done": torch.tensor(
+            [[False, True, False, True, False], [False, True, True, False, False]]
+        ),
+        "terminated": torch.tensor(
+            [[False, True, False, False, False], [False, False, True, False, False]]
+        ),
+        "truncated": torch.tensor(
+            [[False, False, False, True, False], [False, True, True, False, False]]
+        ),
+        "timeout_value": torch.tensor(
+            [[float("nan")] * 3 + [20, 0], [float("nan")] * 2 + [20, 0, 0]],
+            dtype=dtype,
+        ),
+    }
+    fields = {name: value[:, : horizon + 1] for name, value in fields.items()}
+    if strided:
+        fields = {
+            name: value.repeat_interleave(2, dim=1)[:, ::2]
+            for name, value in fields.items()
+        }
+    rollout = TensorDict(fields, batch_size=[2, horizon + 1])
+    original = rollout.clone()
+
+    advantages, returns = compute_gae(rollout, gamma=0.5, gae_lambda=0.5)
+
+    # At horizon four, row 0's TD residuals are [1, -2, 1, 6]; row 1's
+    # are [2.5, 2.5, 1, 5.5]. Only nonterminal steps carry 1/4 of the next
+    # advantage. A missing timeout value uses the current value; termination
+    # takes precedence when both flags are set.
+    expected = torch.tensor(
+        [[3.0], [3.5]]
+        if horizon == 1
+        else [[2.5, 2.0, 8.5, 14.0], [4.125, 5.5, 6.0, 12.5]]
+    )
+    torch.testing.assert_close(returns, expected, rtol=0, atol=0)
+    torch.testing.assert_close(
+        advantages, expected - original["value"][:, :-1].float(), rtol=0, atol=0
+    )
+    for name, value in original.items():
+        torch.testing.assert_close(rollout[name], value, equal_nan=True)
+    for name in ("advantage", "return"):
+        torch.testing.assert_close(rollout[name][:, -1], torch.zeros(2))
+
+
+@pytest.mark.parametrize("next_ending", ["running", "timeout_without_observation"])
+def test_timeout_bootstraps_terminal_state_instead_of_current_or_reset_state(
+    next_ending: str,
+) -> None:
     from embodichain.learning.rl.algo import compute_gae
     from embodichain.learning.rl.buffer import RolloutBuffer
     from embodichain.learning.rl.collector import SyncCollector
@@ -512,6 +978,8 @@ def test_timeout_bootstraps_terminal_state_instead_of_current_or_reset_state() -
     class TimeoutEnv:
         num_envs = 1
         device = torch.device("cpu")
+        truncated = True
+        has_terminal_observation = True
 
         def reset(self):
             return {"state": torch.tensor([[2.0]])}, {}
@@ -521,12 +989,16 @@ def test_timeout_bootstraps_terminal_state_instead_of_current_or_reset_state() -
                 {"state": torch.tensor([[99.0]])},
                 torch.tensor([1.0]),
                 torch.tensor([False]),
-                torch.tensor([True]),
-                {
-                    "terminal_observation": {"state": torch.tensor([[7.0]])},
-                    "terminal_env_ids": torch.tensor([0]),
-                    "terminal_observation_mask": torch.tensor([True]),
-                },
+                torch.tensor([self.truncated]),
+                (
+                    {
+                        "terminal_observation": {"state": torch.tensor([[7.0]])},
+                        "terminal_env_ids": torch.tensor([0]),
+                        "terminal_observation_mask": torch.tensor([True]),
+                    }
+                    if self.has_terminal_observation
+                    else {}
+                ),
             )
 
     critic = torch.nn.Linear(1, 1, bias=False)
@@ -535,16 +1007,36 @@ def test_timeout_bootstraps_terminal_state_instead_of_current_or_reset_state() -
     policy = ActorCritic(1, 1, torch.device("cpu"), torch.nn.Linear(1, 1), critic)
     env = TimeoutEnv()
     buffer = RolloutBuffer(1, 1, 1, 1, env.device)
-    rollout = SyncCollector(env, policy, env.device).collect(
-        1, rollout=buffer.start_rollout()
-    )
+    collector = SyncCollector(env, policy, env.device)
+    rollout = collector.collect(1, rollout=buffer.start_rollout())
     _, returns = compute_gae(rollout, gamma=0.9, gae_lambda=1.0)
     torch.testing.assert_close(returns, torch.tensor([[7.3]]))
 
+    # Reusing the raw TensorDict must not inherit the prior terminal value,
+    # including when a legacy environment cannot provide terminal observations.
+    env.truncated = next_ending == "timeout_without_observation"
+    env.has_terminal_observation = False
+    collector.collect(1, rollout=rollout)
+    assert torch.isnan(rollout["timeout_value"]).all()
+    _, returns = compute_gae(rollout, gamma=0.9, gae_lambda=1.0)
+    torch.testing.assert_close(returns, torch.tensor([[1.0 + 0.9 * 99.0]]))
+
 
 @pytest.mark.parametrize("compact", [False, True])
-@pytest.mark.parametrize("ending", ["running", "terminated", "truncated", "both"])
-def test_terminal_values_only_infer_actual_timeout_rows(compact, ending) -> None:
+@pytest.mark.parametrize(
+    "ending,bootstrap_timeouts,has_timeout_field",
+    [
+        ("running", True, True),
+        ("terminated", True, True),
+        ("truncated", True, True),
+        ("both", True, True),
+        ("truncated", False, True),
+        ("truncated", True, False),
+    ],
+)
+def test_terminal_values_only_infer_actual_timeout_rows(
+    compact, ending, bootstrap_timeouts, has_timeout_field
+) -> None:
     """Full and reordered compact terminal batches use transition flags first."""
 
     class Env:
@@ -585,17 +1077,30 @@ def test_terminal_values_only_infer_actual_timeout_rows(compact, ending) -> None
     )
     policy = ActorCritic(1, 1, torch.device("cpu"), nn.Linear(1, 1), critic)
     buffer = RolloutBuffer(3, 1, 1, 1, torch.device("cpu"))
-    rollout = SyncCollector(Env(), policy, torch.device("cpu")).collect(
-        1, rollout=buffer.start_rollout()
-    )
-    if ending == "truncated":
+    rollout = buffer.start_rollout()
+    if not has_timeout_field:
+        del rollout["timeout_value"]
+    elif not bootstrap_timeouts:
+        rollout["timeout_value"].fill_(13.0)
+    SyncCollector(
+        Env(), policy, torch.device("cpu"), bootstrap_timeouts=bootstrap_timeouts
+    ).collect(1, rollout=rollout)
+    if ending == "truncated" and bootstrap_timeouts and has_timeout_field:
         assert [len(batch) for batch in batches] == [3, 3, 3]
         torch.testing.assert_close(batches[1], torch.tensor([[5.0], [7.0], [11.0]]))
         assert rollout["timeout_value"][1, 0] == 7.0
     else:
         assert [len(batch) for batch in batches] == [3, 3]
-        assert torch.isnan(rollout["timeout_value"]).all()
-    assert torch.isnan(rollout["timeout_value"][[0, 2], 0]).all()
+        if not has_timeout_field:
+            assert "timeout_value" not in rollout.keys()
+        elif not bootstrap_timeouts:
+            torch.testing.assert_close(
+                rollout["timeout_value"], torch.full((3, 2), 13.0)
+            )
+        else:
+            assert torch.isnan(rollout["timeout_value"]).all()
+    if bootstrap_timeouts and has_timeout_field:
+        assert torch.isnan(rollout["timeout_value"][[0, 2], 0]).all()
 
 
 @pytest.mark.parametrize("fail_terminal", [False, True])
@@ -797,13 +1302,20 @@ def test_base_env_preserves_terminal_rows_before_reused_reset_storage(
     from embodichain.lab.gym.envs import BaseEnv
 
     state = torch.tensor([[3.0], [7.0], [11.0]])
+    rewards = torch.tensor([2.0, 5.0, 8.0])
+    terminated = torch.tensor([True, False, False])
+    truncated = torch.tensor([False, True, False])
     observation = {"state": state}
     info = {"success": torch.tensor([True, False, False])}
     if tensor_dict_info:
         info = TensorDict(info, batch_size=[3])
 
     def reset(**kwargs):
-        state[kwargs["options"]["reset_ids"]] = 99.0
+        ids = kwargs["options"]["reset_ids"]
+        state[ids] = 99.0
+        rewards[ids] = 0
+        terminated[ids] = False
+        truncated[ids] = False
         return observation, {}
 
     env = SimpleNamespace(
@@ -818,7 +1330,7 @@ def test_base_env_preserves_terminal_rows_before_reused_reset_storage(
         _capture_observation=lambda **kwargs: SimpleNamespace(policy=observation),
         get_obs=lambda **kwargs: observation,
         get_info=lambda **kwargs: info,
-        get_reward=lambda **kwargs: torch.ones(3),
+        get_reward=lambda **kwargs: rewards,
         _extend_reward=lambda **kwargs: kwargs["rewards"],
         check_truncated=lambda **kwargs: torch.tensor([False, True, False]),
         _hook_after_sim_step=lambda **kwargs: None,
@@ -829,12 +1341,15 @@ def test_base_env_preserves_terminal_rows_before_reused_reset_storage(
         device=torch.device("cpu"),
         reset=reset,
     )
-    env._get_termination_flags = lambda obs, info: BaseEnv._get_termination_flags(
-        env, obs, info
-    )
+    env._get_termination_flags = lambda obs, info: (terminated, truncated)
     env._seal_step_outcomes = lambda *args: BaseEnv._seal_step_outcomes(env, *args)
     env._after_observation = lambda *args: BaseEnv._after_observation(env, *args)
-    _, _, _, _, info = BaseEnv.step(env, torch.zeros(3, 1))
+    _, step_reward, step_terminated, step_truncated, info = BaseEnv.step(
+        env, torch.zeros(3, 1)
+    )
+    torch.testing.assert_close(step_reward, torch.tensor([2.0, 5.0, 8.0]))
+    torch.testing.assert_close(step_terminated, torch.tensor([True, False, False]))
+    torch.testing.assert_close(step_truncated, torch.tensor([False, True, False]))
     torch.testing.assert_close(
         info["terminal_observation"]["state"], torch.tensor([[3.0], [7.0]])
     )

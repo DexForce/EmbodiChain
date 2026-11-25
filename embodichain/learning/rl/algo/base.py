@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from enum import Enum
 from copy import deepcopy
 from typing import Any, Dict, Generic, TypeVar
@@ -131,8 +131,17 @@ class BaseAlgorithm(ABC, Generic[RolloutT]):
         """
         if resume_scheduler not in {"restore", "restart"}:
             raise ValueError("resume_scheduler must be 'restore' or 'restart'.")
-        if not isinstance(state.get("restart_schedule", False), bool):
+        required = {"optimizer", "lr_scheduler", "lr_scheduler_cfg", "restart_schedule"}
+        missing = required - state.keys()
+        if missing:
+            raise ValueError(
+                f"Checkpoint is missing required fields: {sorted(missing)}"
+            )
+        if not isinstance(state["restart_schedule"], bool):
             raise ValueError("Checkpoint restart_schedule must be a boolean.")
+        if not isinstance(state["lr_scheduler_cfg"], Mapping):
+            raise ValueError("Checkpoint scheduler configuration must be a mapping.")
+        cfg = coerce_lr_scheduler_cfg(state["lr_scheduler_cfg"])
         groups = state["optimizer"]["param_groups"]
         if len(groups) != len(self.optimizer.param_groups) or any(
             len(saved["params"]) != len(current["params"])
@@ -150,10 +159,7 @@ class BaseAlgorithm(ABC, Generic[RolloutT]):
                         raise ValueError(
                             "Incompatible checkpoint optimizer state shape."
                         )
-        if state.get("lr_scheduler") is not None:
-            if state.get("lr_scheduler_cfg") is None:
-                raise ValueError("Checkpoint scheduler configuration is missing.")
-            cfg = coerce_lr_scheduler_cfg(state["lr_scheduler_cfg"])
+        if state["lr_scheduler"] is not None:
             probe_optimizer = torch.optim.SGD(
                 [torch.nn.Parameter(torch.zeros(()))], lr=1.0
             )
@@ -181,11 +187,8 @@ class BaseAlgorithm(ABC, Generic[RolloutT]):
         """Apply optimization state after checkpoint-wide validation."""
         self.lr_scheduler = None
         if resume_scheduler == "restore":
-            if state.get("lr_scheduler_cfg") is not None:
-                self._lr_scheduler_cfg = coerce_lr_scheduler_cfg(
-                    state["lr_scheduler_cfg"]
-                )
-            if state.get("lr_scheduler") is not None:
+            self._lr_scheduler_cfg = coerce_lr_scheduler_cfg(state["lr_scheduler_cfg"])
+            if state["lr_scheduler"] is not None:
                 self.lr_scheduler = build_lr_scheduler(
                     self.optimizer, self._lr_scheduler_cfg
                 )
@@ -202,8 +205,8 @@ class BaseAlgorithm(ABC, Generic[RolloutT]):
                     self.optimizer, self._lr_scheduler_cfg
                 )
         self._checkpoint_loaded = True
-        self._restart_schedule = resume_scheduler == "restart" or state.get(
-            "restart_schedule", False
+        self._restart_schedule = (
+            resume_scheduler == "restart" or state["restart_schedule"]
         )
 
     def _prepare_schedule(self, total_updates: int, remaining_updates: int) -> None:

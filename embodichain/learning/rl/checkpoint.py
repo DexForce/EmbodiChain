@@ -298,11 +298,13 @@ def _validate(trainer: Any, payload: Any, scheduler: str) -> list[str]:
         "metadata",
         "rng_by_rank",
         "normalizer_by_rank",
+        "environment_state_by_rank",
         "world_size",
         "best_eval_value",
         "best_checkpoint",
         "lr_scheduler",
         "lr_scheduler_cfg",
+        "restart_schedule",
     }
     if hasattr(trainer, "_rollout_index"):
         required.add("rollout_index")
@@ -346,17 +348,6 @@ def _validate(trainer: Any, payload: Any, scheduler: str) -> list[str]:
         unavailable.append("shared CLI configuration context")
         saved_metadata.pop("context")
         current_metadata.pop("context")
-    from .algo.ppo import PPO
-
-    if isinstance(trainer.algorithm, PPO) and isinstance(
-        saved_metadata.get("algorithm_config"), Mapping
-    ):
-        # An omitted optional coefficient has zero-loss semantics in schema v2.
-        # Explicit values still participate in the strict configuration check.
-        saved_metadata["algorithm_config"] = {
-            "auxiliary_coef": 0.0,
-            **saved_metadata["algorithm_config"],
-        }
     differences = _differences(saved_metadata, current_metadata)
     if differences:
         raise ValueError(
@@ -389,17 +380,15 @@ def _validate(trainer: Any, payload: Any, scheduler: str) -> list[str]:
     normalizers = payload["normalizer_by_rank"][rank]
     expected = _policy_normalizers(policy)
     _validate_state_layout(expected, normalizers, "rank normalizer")
-    environment_states = payload.get("environment_state_by_rank")
-    environment_state = None
-    if environment_states is not None:
-        if (
-            not isinstance(environment_states, list)
-            or len(environment_states) != world_size
-        ):
-            raise ValueError(
-                "Checkpoint environment state must contain one entry per rank."
-            )
-        environment_state = environment_states[rank]
+    environment_states = payload["environment_state_by_rank"]
+    if (
+        not isinstance(environment_states, list)
+        or len(environment_states) != world_size
+    ):
+        raise ValueError(
+            "Checkpoint environment state must contain one entry per rank."
+        )
+    environment_state = environment_states[rank]
     if environment_state is not None:
         validate = getattr(trainer.env, "validate_training_state", None)
         load = getattr(trainer.env, "load_training_state", None)
@@ -526,14 +515,13 @@ def _load(trainer: Any, path: str | Path, scheduler: str) -> dict[str, Any]:
         policy.load_state_dict(payload["policy"])
         trainer.algorithm._load_state_dict(payload, resume_scheduler=scheduler)
         rank = getattr(trainer, "rank", 0)
-        if "normalizer_by_rank" in payload:
-            policy.load_state_dict(payload["normalizer_by_rank"][rank], strict=False)
+        policy.load_state_dict(payload["normalizer_by_rank"][rank], strict=False)
         normalizer = getattr(trainer, "observation_normalizer", None)
         if normalizer is not None:
             normalizer.load_state_dict(payload["observation_normalizer"])
         trainer.global_step = int(payload["global_step"])
         trainer.num_updates = int(payload["num_updates"])
-        trainer.best_eval_value = payload.get("best_eval_value")
+        trainer.best_eval_value = payload["best_eval_value"]
         trainer.best_checkpoint_path = None
         trainer.latest_checkpoint_path = str(path)
         trainer._last_saved_update = None
@@ -542,8 +530,8 @@ def _load(trainer: Any, path: str | Path, scheduler: str) -> dict[str, Any]:
         if context is not None and "gym" in context and "gym" in original:
             # Retain the source identity across successive snapshot-based resumes.
             context["gym"] = deepcopy(original["gym"])
-        environment_states = payload.get("environment_state_by_rank")
-        if environment_states is not None and environment_states[rank] is not None:
+        environment_states = payload["environment_state_by_rank"]
+        if environment_states[rank] is not None:
             trainer.env.load_training_state(environment_states[rank])
         if hasattr(trainer.collector, "obs_td"):
             trainer.collector.obs_td = trainer.collector._reset_env()
@@ -559,14 +547,13 @@ def _load(trainer: Any, path: str | Path, scheduler: str) -> dict[str, Any]:
         error = exc
     _sync_errors(error, distributed)
     error = None
-    if "rng_by_rank" in payload:
-        try:
-            _restore_rng(
-                payload["rng_by_rank"][getattr(trainer, "rank", 0)],
-                trainer.algorithm.device,
-            )
-        except Exception as exc:
-            error = exc
+    try:
+        _restore_rng(
+            payload["rng_by_rank"][getattr(trainer, "rank", 0)],
+            trainer.algorithm.device,
+        )
+    except Exception as exc:
+        error = exc
     _sync_errors(error, distributed)
     if unavailable and getattr(trainer, "rank", 0) == 0:
         warnings.warn(

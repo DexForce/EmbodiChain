@@ -14,16 +14,12 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Policy base class for RL algorithms.
-
-This module defines an abstract Policy base class that all RL policies must
-inherit from. A Policy encapsulates the neural networks and exposes a uniform
-interface for RL algorithms (e.g., PPO, SAC) to interact with.
-"""
+"""Policy interface and training-input contracts for RL algorithms."""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 import torch.nn as nn
 
 import torch
@@ -32,20 +28,35 @@ from tensordict import TensorDict
 __all__ = ["Policy"]
 
 
-class Policy(nn.Module, ABC):
-    """Abstract base class that all RL policies must implement.
+@dataclass(frozen=True)
+class _TrainingInputSpec:
+    """Policy-owned inputs for action evaluation and auxiliary objectives.
 
-    A Policy:
-    - Encapsulates neural networks that are trained by RL algorithms
-    - Handles internal computations (e.g., network output → distribution)
-    - Provides a uniform interface for algorithms (PPO, SAC, etc.)
+    ``fields=None`` keeps the full transition payload. ``mutates_inputs``
+    describes action evaluation: algorithms protect their reference targets
+    before that call. Auxiliary objectives may require additional fields; this
+    flag does not declare their mutation behavior. ``normalization_fields=None``
+    preserves the complete historical normalization payload; an empty tuple
+    declares that no observation statistics consume this rollout.
     """
+
+    fields: tuple[str, ...] | None = None
+    mutates_inputs: bool = True
+    normalization_fields: tuple[str, ...] | None = None
+
+
+class Policy(nn.Module, ABC):
+    """Expose action sampling, action evaluation and value inference to algorithms."""
 
     device: torch.device
     """Device where the policy parameters are located."""
 
     def __init__(self) -> None:
         super().__init__()
+
+    def _training_input_spec(self) -> _TrainingInputSpec:
+        """Keep undeclared/custom evaluators on the full, defensive input path."""
+        return _TrainingInputSpec()
 
     def get_action(
         self, tensordict: TensorDict, deterministic: bool = False

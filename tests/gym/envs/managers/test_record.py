@@ -167,8 +167,9 @@ def test_videos_commit_valid_rows_and_keep_other_live_buffers(
     assert not (tmp_path / "env_002").exists()
 
 
+@pytest.mark.parametrize("retry", ["save_and_clear", "flush"])
 def test_sync_video_io_failure_retains_owned_job_for_retry(
-    camera_env, tmp_path, monkeypatch
+    camera_env, tmp_path, monkeypatch, retry
 ):
     from embodichain.lab.gym.envs.managers import record
 
@@ -182,10 +183,11 @@ def test_sync_video_io_failure_retains_owned_job_for_retry(
     )
     recorder(env, [3], name="camera")
     calls = []
+    failures = 2 if retry == "flush" else 1
 
     def save(frames, directory, name, fps):
         calls.append(name)
-        if len(calls) == 1:
+        if len(calls) <= failures:
             raise OSError("disk full")
         assert np.all(frames[0] == 3)
         (Path(directory) / (name + ".mp4")).write_bytes(b"video")
@@ -195,24 +197,38 @@ def test_sync_video_io_failure_retains_owned_job_for_retry(
         recorder.save_and_clear([3])
     assert len(recorder._jobs) == 1
     rgb.fill_(99)
-    recorder.save_and_clear([3])
+    if retry == "flush":
+        with pytest.raises(OSError, match="disk full"):
+            recorder.flush()
+        recorder.flush()
+    else:
+        recorder.save_and_clear([3])
     recorder.finalize()
-    assert calls[0] == calls[1]
+    assert calls == ["episode_000000_camera"] * (failures + 1)
     assert not recorder._jobs
     assert len(list(tmp_path.rglob("*.mp4"))) == 1
 
 
-def test_async_writer_owns_provenance_before_partial_reset(
-    camera_env, tmp_path, monkeypatch
+@pytest.mark.parametrize(
+    "source", ["cpu", "numpy", pytest.param("cuda", marks=pytest.mark.gpu)]
+)
+def test_async_writer_owns_frames_and_provenance_before_partial_reset(
+    camera_env, tmp_path, monkeypatch, source
 ):
     from embodichain.lab.gym.envs.managers import record
 
-    env, _ = camera_env
+    env, rgb = camera_env
+    rgb = rgb.numpy() if source == "numpy" else rgb.to(source)
     entered, release = threading.Event(), threading.Event()
 
     def save(frames, directory, name, fps):
         entered.set()
         assert release.wait(timeout=5)
+        assert len(frames) == 2
+        for frame, expected in zip(frames, [1, 7]):
+            np.testing.assert_array_equal(
+                frame, np.full((4, 6, 3), expected, dtype=np.uint8)
+            )
         (Path(directory) / (name + ".mp4")).write_bytes(b"video")
 
     monkeypatch.setattr(record, "images_to_video", save)
@@ -223,12 +239,19 @@ def test_async_writer_owns_provenance_before_partial_reset(
         ),
         env,
     )
+    recorder.camera.get_data = lambda: {"color": rgb}
+    recorder(env, [1], name="camera")
+    rgb[1] = 7
     recorder(env, [1], name="camera")
     recorder.save_and_clear([1])
     try:
         assert entered.wait(timeout=5)
         env.episode_context._begin_episode([1])
         env.episode_context._finish_initialization([1])
+        rgb[1] = 9
+        recorder(env, [1], name="camera")
+        recorder.discard_and_clear([1])
+        rgb[:] = 99
     finally:
         release.set()
         recorder.finalize()
@@ -258,8 +281,9 @@ def test_close_discards_uncommitted_rows(camera_env, kind, tmp_path, monkeypatch
     assert not list(tmp_path.rglob("*.mp4"))
 
 
+@pytest.mark.parametrize("retry", ["save_and_clear", "flush"])
 def test_async_failed_video_retries_with_owned_episode_identity(
-    camera_env, tmp_path, monkeypatch
+    camera_env, tmp_path, monkeypatch, retry
 ):
     from embodichain.lab.gym.envs.managers import record
 
@@ -291,16 +315,61 @@ def test_async_failed_video_retries_with_owned_episode_identity(
         rgb.fill_(99)
         # The first caller observes the failed future; the explicit retry uses
         # the owned old job even after the live environment starts episode 1.
+        retry_write = (
+            recorder.flush if retry == "flush" else lambda: recorder.save_and_clear([3])
+        )
         with pytest.raises(OSError, match="disk full"):
-            recorder.save_and_clear([3])
+            retry_write()
         assert len(recorder._jobs) == 1
-        recorder.save_and_clear([3])
+        retry_write()
     finally:
         recorder.finalize()
     assert calls == ["episode_000000_camera", "episode_000000_camera"]
     assert len(list(tmp_path.rglob("*.mp4"))) == 1
     sidecar = json.loads(next(tmp_path.rglob("*.json")).read_text())
     assert sidecar["episode_context"]["episode"] == 0
+
+
+@pytest.mark.parametrize("kind", [record_camera_data, record_camera_data_async])
+def test_flush_keeps_uncommitted_frames_and_allows_later_episodes(
+    camera_env, kind, tmp_path, monkeypatch
+):
+    from embodichain.lab.gym.envs.managers import record
+
+    env, rgb = camera_env
+    writes = []
+
+    def save(frames, directory, name, fps):
+        writes.append([int(frame[0, 0, 0]) for frame in frames])
+        (Path(directory) / (name + ".mp4")).write_bytes(b"video")
+
+    monkeypatch.setattr(record, "images_to_video", save)
+    recorder = kind(
+        FunctorCfg(func=kind, params={"name": "camera", "save_path": str(tmp_path)}),
+        env,
+    )
+    try:
+        recorder(env, [1, 2], name="camera")
+        recorder.save_and_clear([1])
+        recorder.flush()
+        assert writes == [[1]]
+        assert len(list((tmp_path / "env_001").glob("*.json"))) == 1
+        assert not (tmp_path / "env_002").exists()
+
+        env.episode_context._begin_episode([1])
+        env.episode_context._finish_initialization([1])
+        rgb[1].fill_(7)
+        rgb[2].fill_(9)
+        recorder(env, [1, 2], name="camera")
+        recorder.save_and_clear([1, 2])
+        recorder.flush()
+        recorder.flush()
+        # Row 1 starts a fresh episode; row 2 retains its earlier live frame.
+        assert sorted(writes) == [[1], [2, 9], [7]]
+        assert len(list((tmp_path / "env_001").glob("*.json"))) == 2
+        assert len(list((tmp_path / "env_002").glob("*.json"))) == 1
+    finally:
+        recorder.finalize()
 
 
 @pytest.mark.parametrize("kind", [record_camera_data, record_camera_data_async])

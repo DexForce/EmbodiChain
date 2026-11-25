@@ -1838,7 +1838,7 @@
           "symbol": "<module>",
           "start_line": 17,
           "end_line": 17,
-          "excerpt": "\"\"\"Algorithm registry and construction helpers (``BaseAlgorithm``, ``PPO``, ``GRPO``, ``compute_gae``, ``build_algo``).\"\"\""
+          "excerpt": "\"\"\"Algorithm registry and construction helpers.\"\"\""
         }
       ],
       "documentation": [
@@ -5120,7 +5120,7 @@
           "symbol": "train_from_config",
           "start_line": 588,
           "end_line": 588,
-          "excerpt": "    trainer = Trainer("
+          "excerpt": "        trainer = Trainer("
         }
       ]
     },

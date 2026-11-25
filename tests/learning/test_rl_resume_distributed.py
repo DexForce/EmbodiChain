@@ -81,7 +81,6 @@ def _components(rank: int, directory: Path, mode: str) -> Trainer:
         env,
         algo,
         buffer_size=4,
-        batch_size=8,
         writer=None,
         eval_freq=32,
         save_freq=32,
@@ -118,6 +117,73 @@ def _assert_shared(trainer: Trainer) -> None:
     assert rates[0] == rates[1]
 
 
+def _assert_distributed_reporting(rank: int, directory: Path) -> None:
+    """Each completion is counted once, even across empty and full windows."""
+    horizons_by_rank = ((7, 11), (3, 5, 9))
+
+    class Env:
+        device = torch.device("cpu")
+        num_envs = len(horizons_by_rank[rank])
+
+        def __init__(self):
+            self.steps = torch.zeros(self.num_envs, dtype=torch.long)
+
+        def reset(self):
+            self.steps.zero_()
+            return self.steps[:, None].float(), {}
+
+        def step(self, action):
+            self.steps += 1
+            done = self.steps == torch.tensor(horizons_by_rank[rank])
+            self.steps[done] = 0
+            return (
+                self.steps[:, None].float(),
+                torch.tensor(
+                    [10.0 ** (rank * 2 + row) for row in range(self.num_envs)]
+                ),
+                done,
+                torch.zeros_like(done),
+                {"metrics": {"value": 1.0}},
+            )
+
+    logged_steps = []
+    trainer = Trainer(
+        policy=ActorCritic(
+            1, 1, torch.device("cpu"), torch.nn.Linear(1, 1), torch.nn.Linear(1, 1)
+        ),
+        env=Env(),
+        algorithm=SimpleNamespace(device=torch.device("cpu")),
+        buffer_size=2,
+        writer=SimpleNamespace(
+            add_scalar=lambda tag, value, step: logged_steps.append(step)
+        ),
+        eval_freq=0,
+        save_freq=0,
+        checkpoint_dir=str(directory),
+        exp_name="reporting",
+        use_wandb=False,
+        distributed=True,
+        rank=rank,
+        world_size=2,
+    )
+    # 120 steps exceed 100 completions globally; the coprime horizons also
+    # produce rollouts without completions on one or both ranks.
+    for last_step in range(2, 121, 2):
+        trainer._collect_rollout()
+        trainer.buffer.get(flatten=False)
+        episodes = [
+            (horizon * 10.0 ** (source_rank * 2 + row), horizon)
+            for step in range(1, last_step + 1)
+            for source_rank, horizons in enumerate(horizons_by_rank)
+            for row, horizon in enumerate(horizons)
+            if step % horizon == 0 and (rank == 0 or source_rank == rank)
+        ][-100:]
+        assert list(trainer.ret_window) == [reward for reward, _ in episodes]
+        assert list(trainer.len_window) == [length for _, length in episodes]
+    assert trainer.global_step == 120 * 5
+    assert logged_steps == (list(range(5, 601, 5)) if rank == 0 else [])
+
+
 def _worker(rank: int, group_file: str, directory: str) -> None:
     torch.set_num_threads(1)
     torch.distributed.init_process_group(
@@ -129,6 +195,7 @@ def _worker(rank: int, group_file: str, directory: str) -> None:
     )
     directory = Path(directory)
     try:
+        _assert_distributed_reporting(rank, directory)
 
         def fail_export(*args, **kwargs):
             raise OSError("task resource export failed")

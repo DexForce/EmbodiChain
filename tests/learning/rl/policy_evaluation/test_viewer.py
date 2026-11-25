@@ -171,15 +171,28 @@ def _runtime(env: Environment, policy: Policy | None = None) -> PolicyRuntime:
 
 def test_viewer_adapter_uses_the_shared_deterministic_inference_chain():
     policy = Policy()
+    policy.normalizer = torch.nn.BatchNorm1d(2)
     observation = {"policy": torch.tensor([[0.25, 0.75]])}
     expected = infer_policy_action(policy, observation, device="cpu", num_envs=1)
     adapter = EmbodiChainTaskPolicyAdapter(policy, torch.device("cpu"))
+    # The caller may change mixed module modes between construction and setup.
+    policy.eval()
+    policy.normalizer.train()
     adapter.setup(PolicyContext(None, 0.005, 4, 0.02))
+    assert not any(module.training for module in policy.modules())
 
     output = adapter.infer(EvaluationFrame(0, 0.0, 0.0, 0, observation=observation))
 
     assert torch.equal(output.action, expected)
     adapter.close()
+    assert not policy.training
+    assert policy.normalizer.training
+    # Once restored, another close must not overwrite later caller changes.
+    policy.train()
+    policy.normalizer.eval()
+    adapter.close()
+    assert policy.training
+    assert not policy.normalizer.training
 
 
 def test_viewer_reuses_task_actions_resets_and_metrics():
@@ -262,12 +275,22 @@ def test_viewer_rejects_commands_for_tasks_without_velocity_interface():
         EmbodiChainTaskEnvironment(Environment(), seed=1, command=(0.1, 0.0, 0.0))
 
 
-def test_viewer_closes_resources_when_evaluator_creation_fails(monkeypatch):
+@pytest.mark.parametrize("setup_completed", [False, True])
+def test_viewer_closes_resources_when_evaluator_creation_fails(
+    monkeypatch, setup_completed
+):
     env = Environment()
     policy = Policy()
+    policy.normalizer = torch.nn.BatchNorm1d(2).eval()
+
+    def fail_creation(*, adapter, environment, **kwargs):
+        if setup_completed:
+            adapter.setup(environment.policy_context)
+        raise RuntimeError("setup failed")
+
     monkeypatch.setattr(
         "embodichain.learning.rl.policy_evaluation.viewer.create_motion_policy_evaluator",
-        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("setup failed")),
+        fail_creation,
     )
 
     with pytest.raises(RuntimeError, match="setup failed"):
@@ -281,6 +304,7 @@ def test_viewer_closes_resources_when_evaluator_creation_fails(monkeypatch):
 
     assert env.exit_process_values == [False]
     assert policy.training is True
+    assert not policy.normalizer.training
 
 
 class CameraEnvironment(Environment):

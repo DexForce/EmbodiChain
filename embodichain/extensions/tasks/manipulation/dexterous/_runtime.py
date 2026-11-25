@@ -501,6 +501,8 @@ class DexterousManipulationEnv(EmbodiedEnv):
     def _local_link_poses(self) -> torch.Tensor:
         """Return robot link poses in local arena coordinates ``(N, L, 7)`` (xyzw)."""
         link_poses = self.robot.body_data.body_link_pose
+        if self.sim.is_newton_backend:
+            return link_poses
         root_local = self.robot.get_local_pose()[:, :3]
         offset = link_poses[:, 0, :3] - root_local
         if bool((offset.abs() > 1e-6).any()):

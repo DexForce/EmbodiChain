@@ -255,9 +255,19 @@ save/discard only touches those rows. `fps=None` follows control frequency for
 an every-step recording event; an explicit fps fixes the output cadence.
 
 Reset commits or discards frames via `save_and_clear` / `discard_and_clear`.
+No-argument `flush()` completes already committed writes without submitting live
+frames or closing capture; asynchronous failures keep owned jobs for retry.
+`EmbodiedEnv.flush_recordings()` additionally discards unfinished live frames,
+providing a reusable evaluation boundary. `finalize()` remains a close operation.
 Close discards uncommitted frames, so a host ending without reset must explicitly
 commit its last episode. Source and regression tests live in `record.py` and
 `tests/gym/envs/managers/test_record.py`.
+
+`EmbodiedEnv.add_events()` appends declarations to the existing EventManager,
+preserving old instances, counters and random streams. Names (including disabled
+entries) cannot be reused. Only new startup events run immediately; late
+`prestartup` events are rejected. Successfully installed terms remain owned by
+the environment if a later constructor fails, so host cleanup can release them.
 
 ## Change sites and validation
 

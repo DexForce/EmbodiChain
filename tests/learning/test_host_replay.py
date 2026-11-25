@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 import pytest
 import torch
 
@@ -49,44 +51,73 @@ class _Storage:
         return {"features": self.features[:, 0]}, {"features": self.features}
 
 
-@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
-def test_host_transfer_preserves_data_and_owns_results(device) -> None:
+@pytest.mark.parametrize(
+    "device,new_stream",
+    [
+        ("cpu", False),
+        pytest.param("cuda", False, marks=pytest.mark.gpu),
+        pytest.param("cuda", True, marks=pytest.mark.gpu),
+    ],
+)
+def test_host_transfer_preserves_data_and_owns_results(device, new_stream) -> None:
     if device == "cuda" and not torch.cuda.is_available():
         pytest.skip("CUDA unavailable")
-    storage = _Storage()
-    adapter = _HostReplayAdapter(storage, device)
-    source = (
-        torch.arange(8, device=device, dtype=torch.float32)
-        .reshape(2, 4)
-        .requires_grad_()
-    )
-    done = torch.tensor([True, False], device=device)
-    adapter.add({"x": source, "done": done})
-    with torch.no_grad():
-        source.add_(100)
-    torch.testing.assert_close(
-        storage.added["x"], torch.arange(8, dtype=torch.float32).reshape(2, 4)
-    )
-    assert not storage.added["x"].requires_grad
-    assert storage.added["done"].dtype == torch.bool
-    windows = adapter.sample_windows(2, 3)
-    start, history = adapter.sample_starts(2, 3)
-    expected = torch.arange(48, dtype=torch.float32).reshape(2, 3, 8)[..., ::2].clone()
-    storage.features.zero_()
-    storage.mask.zero_()
-    torch.testing.assert_close(windows["features"].cpu(), expected)
-    torch.testing.assert_close(start["features"].cpu(), expected[:, 0])
-    torch.testing.assert_close(history["features"].cpu(), expected)
-    torch.testing.assert_close(
-        windows["mask"].cpu(), torch.tensor([[1.0, 1.0, 0.0], [1.0, 0.0, 0.0]])
-    )
-    for result in [windows, start, history]:
-        assert all(
-            value.device.type == device
-            and value.dtype == torch.float32
-            and not value.requires_grad
-            for value in result.values()
+    stream = torch.cuda.Stream() if new_stream else None
+    with torch.cuda.stream(stream) if stream is not None else nullcontext():
+        storage = _Storage()
+        adapter = _HostReplayAdapter(storage, device)
+        source = (
+            torch.arange(8, device=device, dtype=torch.float32)
+            .reshape(2, 4)
+            .requires_grad_()
         )
+        done = torch.tensor([True, False], device=device)
+        adapter.add({"x": source, "done": done})
+        if device == "cuda":
+            assert torch.cuda.current_stream().query()
+        with torch.no_grad():
+            source.add_(100)
+        torch.testing.assert_close(
+            storage.added["x"], torch.arange(8, dtype=torch.float32).reshape(2, 4)
+        )
+        assert not storage.added["x"].requires_grad
+        assert storage.added["done"].dtype == torch.bool
+        windows = adapter.sample_windows(2, 3)
+        if device == "cuda":
+            assert torch.cuda.current_stream().query()
+        start, history = adapter.sample_starts(2, 3)
+        if device == "cuda":
+            assert torch.cuda.current_stream().query()
+        expected = (
+            torch.arange(48, dtype=torch.float32).reshape(2, 3, 8)[..., ::2].clone()
+        )
+        storage.features.zero_()
+        storage.mask.zero_()
+        torch.testing.assert_close(windows["features"].cpu(), expected)
+        torch.testing.assert_close(start["features"].cpu(), expected[:, 0])
+        torch.testing.assert_close(history["features"].cpu(), expected)
+        torch.testing.assert_close(
+            windows["mask"].cpu(), torch.tensor([[1.0, 1.0, 0.0], [1.0, 0.0, 0.0]])
+        )
+        for result in [windows, start, history]:
+            assert all(
+                value.device.type == device
+                and value.dtype == torch.float32
+                and not value.requires_grad
+                for value in result.values()
+            )
+
+
+def test_empty_host_sample_does_not_access_cuda(monkeypatch) -> None:
+    storage = _Storage()
+    monkeypatch.setattr(storage, "sample_windows", lambda batch, window: {})
+
+    def unexpected_stream(*args, **kwargs):
+        raise AssertionError("Empty samples must not initialize or wait for CUDA")
+
+    monkeypatch.setattr(torch.cuda, "current_stream", unexpected_stream)
+    adapter = _HostReplayAdapter(storage, "cuda")
+    assert adapter.sample_windows(2, 3) == {}
 
 
 def test_host_transfer_rejects_device_resident_storage() -> None:

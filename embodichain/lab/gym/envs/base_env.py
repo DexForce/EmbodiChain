@@ -1193,6 +1193,8 @@ class BaseEnv(gym.Env):
             Auto-reset also preserves owned ``terminal_observation`` rows,
             ``terminal_env_ids`` and a full ``terminal_observation_mask`` for
             time-limit bootstrapping; live observations contain reset states.
+            Rewards and termination flags retain their pre-reset values even
+            when a task returns views into state cleared by reset.
         """
 
         if recording_active_mask is not None:
@@ -1271,6 +1273,10 @@ class BaseEnv(gym.Env):
                         reset_env_ids, terminateds, truncateds, info
                     )
                     if not no_auto_reset:
+                        # Task implementations may return reset-owned buffers.
+                        rewards = rewards.clone()
+                        terminateds = terminateds.clone()
+                        truncateds = truncateds.clone()
                         # Snapshot completed rows before reset reuses buffers.
                         info["terminal_env_ids"] = reset_env_ids.clone()
                         info["terminal_observation_mask"] = (

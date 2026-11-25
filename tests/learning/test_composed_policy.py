@@ -116,6 +116,43 @@ def test_actor_does_not_read_privileged_values_and_export_matches() -> None:
     torch.testing.assert_close(restored.export_actor()(td["obs"]), original["action"])
 
 
+@pytest.mark.parametrize("history_length", [30, 32])
+def test_temporal_actor_matches_adaptive_pool_outputs_and_gradients(
+    history_length: int,
+) -> None:
+    # H30 already has three temporal bins; H32 still needs pooling to three.
+    actor = _policy(contact_points=0, history_length=history_length).actor
+    reference = deepcopy(actor)
+    reference.encoder.pool = torch.nn.AdaptiveAvgPool1d(3)
+    observation = torch.randn(2, actor.input_dim, requires_grad=True)
+    reference_observation = observation.detach().clone().requires_grad_(True)
+
+    action, features = actor.forward_with_features(observation)
+    expected_action, expected_features = reference.forward_with_features(
+        reference_observation
+    )
+    torch.testing.assert_close(action, expected_action, rtol=0, atol=0)
+    torch.testing.assert_close(
+        features["latent"], expected_features["latent"], rtol=0, atol=0
+    )
+    (action.square().sum() + features["latent"].square().sum()).backward()
+    (
+        expected_action.square().sum() + expected_features["latent"].square().sum()
+    ).backward()
+    assert observation.grad is not None
+    assert reference_observation.grad is not None
+    torch.testing.assert_close(
+        observation.grad, reference_observation.grad, rtol=0, atol=0
+    )
+    expected_parameters = dict(reference.named_parameters())
+    for name, parameter in actor.named_parameters():
+        assert parameter.grad is not None
+        assert expected_parameters[name].grad is not None
+        torch.testing.assert_close(
+            parameter.grad, expected_parameters[name].grad, rtol=0, atol=0
+        )
+
+
 def test_weighted_contact_loss_matches_independent_logsumexp_and_backpropagates() -> (
     None
 ):
@@ -569,7 +606,6 @@ def test_composed_checkpoint_continues_optimizer_state(tmp_path):
             env,
             algorithm,
             buffer_size=3,
-            batch_size=6,
             writer=None,
             eval_freq=0,
             save_freq=0,
@@ -646,7 +682,7 @@ def test_custom_auxiliary_override_remains_supported_without_registered_tasks(
 ):
     class CustomObjective(ActorCritic):
         def auxiliary_loss(self, batch, evaluated):
-            return evaluated["action_mean"].square().mean()
+            return (evaluated["action_mean"] - batch["custom_target"]).square().mean()
 
     def policy(cls):
         return cls(
@@ -656,14 +692,32 @@ def test_custom_auxiliary_override_remains_supported_without_registered_tasks(
     custom = policy(CustomObjective if override_style == "subclass" else ActorCritic)
     if override_style == "instance":
         custom.auxiliary_loss = (
-            lambda batch, evaluated: evaluated["action_mean"].square().mean()
+            lambda batch, evaluated: (evaluated["action_mean"] - batch["custom_target"])
+            .square()
+            .mean()
         )
-    PPO(PPOCfg(device="cpu", auxiliary_coef=1.0), custom)
-    td = TensorDict({"obs": torch.ones(2, 3)}, batch_size=[2])
+    algorithm = PPO(PPOCfg(device="cpu", auxiliary_coef=1.0, n_epochs=1), custom)
+    td = TensorDict(
+        {"obs": torch.ones(2, 3), "custom_target": torch.ones(2, 2)}, batch_size=[2]
+    )
     custom.get_action(td)
     evaluated = custom.evaluate_actions(td)
     custom.auxiliary_loss(td, evaluated).backward()
     assert custom.actor.weight.grad.abs().sum() > 0
+    rollout = RolloutBuffer(2, 2, 3, 2, custom.device).start_rollout()
+    rollout["obs"].fill_(1.0)
+    rollout["reward"].fill_(1.0)
+    rollout["custom_target"] = torch.ones(2, 3, 2)
+    for name in (
+        "action",
+        "sample_log_prob",
+        "value",
+        "done",
+        "terminated",
+        "truncated",
+    ):
+        rollout[name].zero_()
+    assert algorithm.update(rollout)["auxiliary_loss"] > 0
     with pytest.raises(ValueError, match="configured tasks"):
         PPO(PPOCfg(device="cpu", auxiliary_coef=1.0), policy(ActorCritic))
 
@@ -723,7 +777,6 @@ def test_component_checkpoint_contract_rejects_shape_preserving_objective_change
             _LabelEnv(93),
             algorithm,
             buffer_size=3,
-            batch_size=6,
             writer=None,
             eval_freq=0,
             save_freq=0,

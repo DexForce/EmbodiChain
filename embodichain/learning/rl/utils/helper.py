@@ -33,15 +33,7 @@ def _flatten_observation_leaf(value: torch.Tensor) -> torch.Tensor:
     return value.unsqueeze(-1) if value.ndim == 1 else value.flatten(start_dim=1)
 
 
-def flatten_dict_observation(obs: TensorDict) -> torch.Tensor:
-    """Flatten a hierarchical observation TensorDict into a 2D tensor.
-
-    Args:
-        obs: Observation TensorDict with batch dimension `[num_envs]`.
-
-    Returns:
-        Flattened observation tensor of shape `[num_envs, obs_dim]`.
-    """
+def _observation_leaves(obs: TensorDict) -> list[torch.Tensor]:
     obs_list: list[torch.Tensor] = []
 
     def _collect_tensors(data: TensorDict) -> None:
@@ -57,7 +49,65 @@ def flatten_dict_observation(obs: TensorDict) -> torch.Tensor:
     if not obs_list:
         raise ValueError("No tensors found in observation TensorDict.")
 
-    return torch.cat(obs_list, dim=-1)
+    return obs_list
+
+
+def _pack_observation_groups(
+    obs: TensorDict,
+    groups: Sequence[str] | None,
+    out: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Resolve ordered leaves, optionally packing into owned collector storage."""
+    if groups is None:
+        grouped = [_observation_leaves(obs)]
+    else:
+        if len(groups) == 0:
+            raise ValueError("Observation groups cannot be empty.")
+        grouped = []
+        for group in groups:
+            value: TensorDict | torch.Tensor = obs
+            for key in group.split("."):
+                if not isinstance(value, TensorDict) or key not in value.keys():
+                    raise KeyError(
+                        f"Observation group '{group}' was not found. "
+                        f"Available top-level groups: {list(obs.keys())}."
+                    )
+                value = value[key]
+            if isinstance(value, TensorDict):
+                grouped.append(_observation_leaves(value))
+            elif isinstance(value, torch.Tensor):
+                grouped.append([_flatten_observation_leaf(value)])
+            else:
+                raise TypeError(
+                    f"Observation group '{group}' must contain tensors, got "
+                    f"{type(value)!r}."
+                )
+
+    # Preserve group-by-group dtype promotion. Concatenate multiple leaves
+    # before copying into storage that may alias an observation producer.
+    flattened = [
+        leaves[0] if len(leaves) == 1 else torch.cat(leaves, dim=-1)
+        for leaves in grouped
+    ]
+    result = flattened[0] if len(flattened) == 1 else torch.cat(flattened, dim=-1)
+    if out is not None:
+        out.copy_(result)
+        return out
+    return result
+
+
+def flatten_dict_observation(obs: TensorDict) -> torch.Tensor:
+    """Flatten a hierarchical observation TensorDict into a 2D tensor.
+
+    Args:
+        obs: Observation TensorDict with batch dimension `[num_envs]`.
+
+    Returns:
+        Flattened observation tensor of shape `[num_envs, obs_dim]`.
+        A single leaf may share storage with the input; clone it when retaining
+        a snapshot across environment steps that reuse observation buffers.
+    """
+    return _pack_observation_groups(obs, None)
 
 
 def flatten_observation_groups(
@@ -77,37 +127,14 @@ def flatten_observation_groups(
 
     Returns:
         Concatenated observation tensor with shape ``[num_envs, obs_dim]``.
+        A single leaf may share storage with the input; clone it when retaining
+        a snapshot across environment steps that reuse observation buffers.
 
     Raises:
         ValueError: If ``groups`` is empty or a selected group has no tensors.
         KeyError: If a configured group is absent from ``obs``.
     """
-    if groups is None:
-        return flatten_dict_observation(obs)
-    if len(groups) == 0:
-        raise ValueError("Observation groups cannot be empty.")
-
-    flattened: list[torch.Tensor] = []
-    for group in groups:
-        value: TensorDict | torch.Tensor = obs
-        for key in group.split("."):
-            if not isinstance(value, TensorDict) or key not in value.keys():
-                raise KeyError(
-                    f"Observation group '{group}' was not found. "
-                    f"Available top-level groups: {list(obs.keys())}."
-                )
-            value = value[key]
-        if isinstance(value, TensorDict):
-            flattened.append(flatten_dict_observation(value))
-        elif isinstance(value, torch.Tensor):
-            flattened.append(_flatten_observation_leaf(value))
-        else:
-            raise TypeError(
-                f"Observation group '{group}' must contain tensors, got "
-                f"{type(value)!r}."
-            )
-
-    return torch.cat(flattened, dim=-1)
+    return _pack_observation_groups(obs, groups)
 
 
 def dict_to_tensordict(

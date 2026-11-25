@@ -316,8 +316,10 @@ def test_rollout_context_freezes_critic_statistics_and_restores_training_mode():
         def __init__(self):
             super().__init__(1, 1, bias=False)
             self.register_buffer("calls_in_training", torch.zeros(()))
+            self.calls = 0
 
         def forward(self, value):
+            self.calls += 1
             if self.training:
                 self.calls_in_training.add_(1)
             return super().forward(value)
@@ -329,6 +331,7 @@ def test_rollout_context_freezes_critic_statistics_and_restores_training_mode():
     with algo.rollout_context():
         rollout = collector.collect(3, deterministic=True)
     assert p.critic.training
+    assert p.critic.calls == 0
     assert p.critic.calls_in_training == 0
     algo.begin_update()
     algo.accumulate_complete_rollout(rollout)
@@ -344,8 +347,11 @@ def test_critic_normalization_refreshes_targets_after_actor_backward():
     p.register_buffer("value_scale", torch.ones((), dtype=torch.float64))
     original_value = p.get_value
     observed = []
+    fitting_inputs = []
 
     def get_value(fields):
+        if p.critic.training:
+            fitting_inputs.append(fields["critic_obs"].detach().clone())
         output = original_value(fields)
         output["value"] = output["value"] * p.value_scale
         return output
@@ -356,6 +362,8 @@ def test_critic_normalization_refreshes_targets_after_actor_backward():
         assert p.critic.weight.grad is None
         observed.append(inputs.clone())
         p.value_scale.fill_(2)
+        # Callback-owned samples must stay separate from critic fitting inputs.
+        inputs.fill_(1000)
 
     p.get_value = get_value
     p.update_critic_normalization = update_normalization
@@ -377,6 +385,10 @@ def test_critic_normalization_refreshes_targets_after_actor_backward():
     )
     torch.testing.assert_close(
         observed[0].flatten(), torch.cat((torch.ones(1), states))
+    )
+    torch.testing.assert_close(
+        torch.cat(fitting_inputs).flatten().sort().values,
+        torch.tensor([1.0, 1.2, 1.44], dtype=torch.float64),
     )
     torch.testing.assert_close(p.actor.weight.grad, actor_grad)
 

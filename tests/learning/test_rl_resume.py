@@ -32,6 +32,7 @@ from embodichain.learning.rl.checkpoint import _atomic_write, _resolve_resume
 from embodichain.learning.rl.policies import ActorCritic
 from embodichain.learning.rl.policy_evaluation.manifest import RunManifest
 from embodichain.learning.rl.train import (
+    _checkpoint_context,
     _configure_checkpoints,
     _save_final_checkpoint,
     cli,
@@ -74,7 +75,6 @@ def _trainer(
         env,
         algo,
         buffer_size=4,
-        batch_size=8,
         writer=None,
         eval_freq=32,
         save_freq=32,
@@ -172,12 +172,12 @@ def test_environment_state_rejected_before_learning_state_changes(tmp_path, defe
     assert not restored.env.levels.any()
 
 
-def test_older_v2_reports_missing_environment_state(tmp_path):
+def test_stateless_checkpoint_warns_for_stateful_environment(tmp_path):
     source = _trainer(tmp_path / "source")
     source.train(16)
     payload = torch.load(source.save_checkpoint(), weights_only=True)
-    payload.pop("environment_state_by_rank")
-    path = tmp_path / "older-v2.pt"
+    assert payload["environment_state_by_rank"] == [None]
+    path = tmp_path / "stateless.pt"
     torch.save(payload, path)
     restored = _trainer(tmp_path / "restored")
     _attach_curriculum(restored, 0)
@@ -315,49 +315,21 @@ def test_pending_scheduler_restart_survives_checkpoint_round_trip(
     _assert_state_equal(direct.policy.state_dict(), again.policy.state_dict())
 
 
-def test_schema_v2_ppo_without_optional_auxiliary_coefficient_restores(
-    tmp_path,
-) -> None:
-    trainer = _trainer(tmp_path / "first")
-    trainer.train(16)
-    payload = torch.load(trainer.save_checkpoint(), weights_only=True)
-    assert payload["schema_version"] == 2
-    payload["metadata"]["algorithm_config"].pop("auxiliary_coef")
-    path = tmp_path / "without-coefficient.pt"
-    torch.save(payload, path)
-    restored = _trainer(tmp_path / "restored")
-    restored.load_checkpoint(path)
-    _assert_state_equal(trainer.policy.state_dict(), restored.policy.state_dict())
-    _assert_state_equal(trainer.algorithm.state_dict(), restored.algorithm.state_dict())
-    assert restored.global_step == trainer.global_step == 16
-    restored.train(32)
-    assert restored.global_step == 32
-
-
-def test_checkpoint_without_pending_restart_field_restores(tmp_path):
-    trainer = _trainer(
-        tmp_path / "first", scheduler=dict(name="linear", kwargs=dict(total_iters=4))
-    )
-    trainer.train(16)
-    path = trainer.save_checkpoint()
-    payload = torch.load(path, weights_only=True)
-    payload.pop("restart_schedule", None)
-    torch.save(payload, path)
-    restored = _trainer(tmp_path / "restored", scheduler=dict(name="linear"))
-    restored.load_checkpoint(path)
-    _assert_state_equal(trainer.algorithm.state_dict(), restored.algorithm.state_dict())
-    restored.train(48)
-    assert restored.algorithm._lr_scheduler_cfg.kwargs["total_iters"] == 4
-
-
 @pytest.mark.parametrize(
     "mutation,match",
     [
         (lambda c: c.update(schema_version=999), "schema version"),
         (lambda c: c.pop("rng_by_rank"), "required fields"),
+        (lambda c: c.pop("environment_state_by_rank"), "required fields"),
+        (lambda c: c.pop("restart_schedule"), "required fields"),
+        (lambda c: c.update(lr_scheduler_cfg=None), "scheduler configuration"),
         (lambda c: c["metadata"].update(environment="different"), "environment"),
         (
             lambda c: c["metadata"]["algorithm_config"].update(auxiliary_coef=0.5),
+            "auxiliary_coef",
+        ),
+        (
+            lambda c: c["metadata"]["algorithm_config"].pop("auxiliary_coef"),
             "auxiliary_coef",
         ),
         (lambda c: c.update(world_size=2), "world_size"),
@@ -674,7 +646,6 @@ def test_cli_and_public_trainer_checkpoints_interoperate(
             runtime.env,
             algo,
             buffer_size=4,
-            batch_size=8,
             writer=None,
             eval_freq=0,
             save_freq=0,
@@ -840,7 +811,39 @@ def test_cli_rejects_changed_environment_and_policy_semantics(tmp_path, monkeypa
             train_from_config(str(config_path), resume=first["latest_checkpoint_path"])
 
 
-def test_gym_resume_error_closes_runtime_without_process_exit(tmp_path, monkeypatch):
+def test_resume_checks_training_events_but_allows_evaluation_output_changes(tmp_path):
+    """Enabled training events change the task even outside the Gym declaration."""
+    config = _config("ppo")
+    config["trainer"]["events"] = {
+        "train": {"randomize": {"func": "randomize", "interval_step": 2}},
+        "eval": {"video": {"func": "record_camera_data", "params": {}}},
+    }
+    gym_config = {"id": "EmbodiedEnv-v1"}
+    source = _trainer(tmp_path / "source")
+    source._checkpoint_context = _checkpoint_context(config, gym_config)
+    source.train(16)
+    path = source.save_checkpoint()
+    restored = _trainer(tmp_path / "restored")
+    candidate = deepcopy(config)
+    candidate["trainer"]["events"]["eval"]["video"]["params"]["save_path"] = "new"
+    restored._checkpoint_context = _checkpoint_context(candidate, gym_config)
+    restored.load_checkpoint(path)
+    assert restored.global_step == source.global_step
+
+    for events in ({}, {"randomize": {"func": "randomize", "interval_step": 3}}):
+        incompatible = _trainer(tmp_path / "incompatible")
+        candidate["trainer"]["events"]["train"] = events
+        incompatible._checkpoint_context = _checkpoint_context(candidate, gym_config)
+        before = deepcopy(incompatible.policy.state_dict())
+        with pytest.raises(ValueError, match="train_events"):
+            incompatible.load_checkpoint(path)
+        _assert_state_equal(before, incompatible.policy.state_dict())
+
+
+@pytest.mark.parametrize("failure_stage", ["algorithm", "resume"])
+def test_gym_setup_or_resume_error_closes_runtime_without_process_exit(
+    tmp_path, monkeypatch, failure_stage
+):
     from types import SimpleNamespace
     from unittest.mock import Mock
     import embodichain.learning.rl.train as training
@@ -873,7 +876,14 @@ def test_gym_resume_error_closes_runtime_without_process_exit(tmp_path, monkeypa
     def incompatible(self, path, **kwargs):
         raise ValueError("incompatible resume configuration")
 
-    monkeypatch.setattr(Trainer, "load_checkpoint", incompatible)
+    if failure_stage == "algorithm":
+        monkeypatch.setattr(
+            training,
+            "build_algo",
+            Mock(side_effect=ValueError("incompatible resume configuration")),
+        )
+    else:
+        monkeypatch.setattr(Trainer, "load_checkpoint", incompatible)
     monkeypatch.chdir(tmp_path)
     with pytest.raises(ValueError, match="incompatible resume"):
         train_from_config(str(config_path), resume=source)
@@ -882,6 +892,7 @@ def test_gym_resume_error_closes_runtime_without_process_exit(tmp_path, monkeypa
 
 def test_cli_flushes_cleanup_and_propagates_resume_error(monkeypatch):
     import embodichain.learning.rl.train as training
+    from embodichain.lab.gym.utils import registration
     from embodichain.lab.sim.sim_manager import SimulationManager
 
     calls = []
@@ -889,8 +900,8 @@ def test_cli_flushes_cleanup_and_propagates_resume_error(monkeypatch):
     def incompatible(*args, **kwargs):
         raise ValueError("incompatible resume configuration")
 
-    monkeypatch.setattr(training, "discover_task_packages", lambda: None)
-    monkeypatch.setattr(training, "execute_init_hooks", lambda: None)
+    monkeypatch.setattr(registration, "discover_task_packages", lambda: None)
+    monkeypatch.setattr(registration, "execute_init_hooks", lambda: None)
     monkeypatch.setattr(training, "train_from_config", incompatible)
     monkeypatch.setattr(
         SimulationManager, "flush_cleanup_queue", lambda: calls.append("cleanup")

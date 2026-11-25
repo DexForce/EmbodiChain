@@ -181,7 +181,7 @@ class _TemporalEncoder(nn.Module):
                 raise ValueError("history_length is too short for the export encoder.")
             layers.extend((nn.Conv1d(channels, channels, kernel, stride), nn.ReLU()))
         self.temporal_convolution = nn.Sequential(*layers)
-        self.pool = nn.AdaptiveAvgPool1d(3)
+        self.pool = nn.Identity() if length == 3 else nn.AdaptiveAvgPool1d(3)
         self.projection = nn.Linear(channels * 3, latent_dim)
 
     def forward(self, frames: torch.Tensor) -> torch.Tensor:

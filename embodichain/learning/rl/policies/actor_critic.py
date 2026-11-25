@@ -27,7 +27,7 @@ from torch.distributions.normal import Normal
 from tensordict import TensorDict
 
 from embodichain.learning.models import EmpiricalNormalizer
-from .policy import Policy
+from .policy import Policy, _TrainingInputSpec
 from .auxiliary import AuxiliaryTask
 
 __all__ = ["ActorCritic"]
@@ -226,6 +226,41 @@ class ActorCritic(Policy):
             is not ActorCritic.auxiliary_loss
         )
 
+    def _training_input_spec(self) -> _TrainingInputSpec:
+        normalization_fields = None
+        if (
+            type(self) is ActorCritic
+            and getattr(self.update_normalization, "__func__", None)
+            is ActorCritic.update_normalization
+            and getattr(self._critic_observation, "__func__", None)
+            is ActorCritic._critic_observation
+        ):
+            requested = ("obs",) if self.actor_obs_normalization else ()
+            if self.critic_obs_normalization:
+                requested += ("critic_obs" if self.uses_separate_critic_obs else "obs",)
+            normalization_fields = tuple(dict.fromkeys(requested))
+        if (
+            type(self) is not ActorCritic
+            or getattr(self.evaluate_actions, "__func__", None)
+            is not ActorCritic.evaluate_actions
+        ):
+            return _TrainingInputSpec(normalization_fields=normalization_fields)
+        if (
+            getattr(self.auxiliary_loss, "__func__", None)
+            is not ActorCritic.auxiliary_loss
+        ):
+            return _TrainingInputSpec(
+                mutates_inputs=False, normalization_fields=normalization_fields
+            )
+        fields = ("obs", "action")
+        if self.uses_separate_critic_obs:
+            fields += ("critic_obs",)
+        return _TrainingInputSpec(
+            fields=(*fields, *self.training_field_specs),
+            mutates_inputs=False,
+            normalization_fields=normalization_fields,
+        )
+
     def _actor_outputs(
         self, obs: torch.Tensor, *, return_features: bool = False
     ) -> tuple[Normal, Mapping[str, torch.Tensor]]:
@@ -263,8 +298,7 @@ class ActorCritic(Policy):
         )
         seen = {id(parameter) for parameter in actor_parameters}
         critic_parameters = tuple(
-            parameter
-            for parameter in dict.fromkeys(
+            dict.fromkeys(
                 (
                     *self.critic.parameters(),
                     *self.critic_obs_normalizer.parameters(),
@@ -325,15 +359,36 @@ class ActorCritic(Policy):
             reparameterized=True,
         )
 
+    def _collect_differentiable_action(
+        self, tensordict: TensorDict, deterministic: bool = False
+    ) -> TensorDict:
+        """Collect pathwise actions without unused value or likelihood graphs."""
+        if (
+            getattr(self.get_differentiable_action, "__func__", None)
+            is not ActorCritic.get_differentiable_action
+            or getattr(self._sample_action, "__func__", None)
+            is not ActorCritic._sample_action
+        ):
+            return self.get_differentiable_action(
+                tensordict, deterministic=deterministic
+            )
+        return self._sample_action(
+            tensordict,
+            deterministic=deterministic,
+            reparameterized=True,
+            action_only=True,
+        )
+
     def _sample_action(
         self,
         tensordict: TensorDict,
         *,
         deterministic: bool,
         reparameterized: bool,
+        action_only: bool = False,
     ) -> TensorDict:
         actor_obs = tensordict["obs"]
-        critic_obs = self._critic_observation(tensordict)
+        critic_obs = None if action_only else self._critic_observation(tensordict)
         dist = self._distribution(actor_obs)
         mean = dist.mean
         if deterministic:
@@ -343,12 +398,13 @@ class ActorCritic(Policy):
         else:
             action = dist.sample()
         tensordict["action"] = action
-        tensordict["sample_log_prob"] = dist.log_prob(action).sum(dim=-1)
-        tensordict["action_mean"] = dist.mean
-        tensordict["action_std"] = dist.stddev
         if reparameterized:
             tensordict["entropy"] = dist.entropy().sum(dim=-1)
-        tensordict["value"] = self._value(critic_obs)
+        if not action_only:
+            tensordict["sample_log_prob"] = dist.log_prob(action).sum(dim=-1)
+            tensordict["action_mean"] = dist.mean
+            tensordict["action_std"] = dist.stddev
+            tensordict["value"] = self._value(critic_obs)
         return tensordict
 
     def get_value(self, tensordict: TensorDict) -> TensorDict:

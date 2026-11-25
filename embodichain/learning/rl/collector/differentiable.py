@@ -215,12 +215,17 @@ class DifferentiableCollector:
         if self._observation is None:
             self.reset()
 
-        initial_observation = self._flatten_observation(self._observation)
+        initial_observation = self._flatten_observation(self._observation).clone()
         transitions: list[DifferentiableTransition] = []
         gradient_stats = (
             BatchedGradientNormStats(self.device)
             if self.action_adjoint_max_norm > 0.0
             else None
+        )
+        sample_action = getattr(
+            self.policy,
+            "_collect_differentiable_action",
+            self.policy.get_differentiable_action,
         )
 
         for _ in range(num_steps):
@@ -235,9 +240,13 @@ class DifferentiableCollector:
                 batch_size=[self.env.num_envs],
                 device=self.device,
             )
-            critic_observation = self._critic_observation(self._observation).clone()
+            critic_observation = (
+                self._critic_observation(self._observation)
+                if getattr(self.policy, "uses_separate_critic_obs", False)
+                else policy_observation
+            ).clone()
             policy_input["critic_obs"] = critic_observation
-            policy_output = self.policy.get_differentiable_action(
+            policy_output = sample_action(
                 policy_input,
                 deterministic=deterministic,
             )
@@ -273,7 +282,7 @@ class DifferentiableCollector:
                 reward=reward.to(self.device),
                 terminated=terminated.to(self.device),
                 truncated=truncated.to(self.device),
-                next_observation=self._flatten_observation(next_observation),
+                next_observation=self._flatten_observation(next_observation).clone(),
                 info=info,
                 critic_observation=critic_observation,
                 next_critic_observation=next_critic_observation,
