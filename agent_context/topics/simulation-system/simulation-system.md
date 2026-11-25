@@ -36,7 +36,10 @@ paths by simulation UID, and optional logical entity bindings. The returned
 `AttachedSimulationManager` owns only local views and solvers. Its instance ID
 resolves the selected robot for planner lookup. Rebind on Scene replacement or
 a topology revision change. `detach()` and `destroy()` release the borrowed
-registration without entering native deferred cleanup. The external host owns
+registration without entering native deferred cleanup. Retained data and batch
+operations check the same binding before each native call. URDF joint axes and
+fixed mounts must match the live description; the planner reads host World
+gravity through the manager gravity property. The external host owns
 finalization, all stepping and final teardown.
 
 Backend differences belong in physics hooks or object adapters; tasks do not
