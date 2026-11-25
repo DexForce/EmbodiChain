@@ -24,16 +24,12 @@ import yaml
 
 from embodichain.lab.sim.cfg import ArticulationCfg, CableObjectCfg
 
-from embodichain.extensions.tasks.manipulation.cable.rj45_scene import (
-    cable_points,
-    load_config,
-    task_directory,
-)
+from embodichain.extensions.tasks.configs import get_config_path
 
 
 def test_rj45_deployment_preserves_the_original_cable_scene() -> None:
-    config = load_config()
-    environment = yaml.safe_load((task_directory() / "env.yaml").read_text())
+    path = get_config_path("tasks/manipulation/cable/franka_rj45_cycle/env.yaml")
+    environment = yaml.safe_load(path.read_text())
     assert environment["physics"] == "newton"
     assert environment["env"]["sim_steps_per_control"] == 32
     dt = environment["physics_config"]["physics_dt"]
@@ -46,12 +42,11 @@ def test_rj45_deployment_preserves_the_original_cable_scene() -> None:
     plug = ArticulationCfg.from_dict(
         next(item for item in scene["articulation"] if item["uid"] == "plug")
     )
-    points = cable_points(config)
+    points = np.asarray(cable.points, dtype=np.float32)
     # SHA-256 of the little-endian float32 array from the approved scene_inputs.npz.
     assert sha256(points.astype("<f4").tobytes()).hexdigest() == (
         "fb460bef62ce64eaf7a9918ed981dfaa385f35e80c6b4af23d614bc6fe713b27"
     )
-    np.testing.assert_array_equal(np.asarray(cable.points, dtype=np.float32), points)
     assert points.shape == (97, 3)
     assert cable.fixed_segments == [0]
     assert cable.collision_filter_span == 2

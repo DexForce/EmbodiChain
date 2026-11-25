@@ -46,8 +46,8 @@ invocation revisions are rejected for this path. Its phases share one timeout
 and failure scope; `SkillPlan.segments` remain descriptive command ranges.
 
 `ObservedJointTrajectory` opts into bounded joint-command chunks within one
-`MoveJoints` invocation. The registered trajectory source belongs to the
-execution host. It resolves each chunk after the preceding command is
+`MoveJoints` invocation. The engine's planning services own the
+registered trajectory source. It resolves each chunk after the preceding command is
 acknowledged and supplies the original host cadence and velocity targets.
 
 Row-local planning within a larger World must carry the same explicit

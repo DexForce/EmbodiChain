@@ -27,7 +27,7 @@ import math
 from _thread import LockType
 from threading import Lock
 from types import MappingProxyType
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar, TYPE_CHECKING, cast
 import torch
 
 from embodichain.lab.evaluation import CompiledEvaluation
@@ -1738,6 +1738,10 @@ class SimulationTaskProgramRegistration:
     """Rule references whose instantaneous predicates gate final acceptance."""
     evaluation_process_refs: tuple[str, ...] = field(default=(), kw_only=True)
     """Deployment-owned instantaneous process constraints checked per control step."""
+    episode_measurement: _EpisodeMeasurementPlan | None = field(
+        default=None, kw_only=True
+    )
+    """Optional physical measurement declaration identified by evaluation channel bindings."""
     catalog: TaskProgramIntegrationCatalog = field(init=False)
     _parallel_safety_validator_history: list[ParallelCommandSafetyValidator] = field(
         init=False,
@@ -2345,6 +2349,9 @@ class SimulationTaskProgramRegistration:
                 "Live robot skill profile differs from the registered declaration."
             )
 
+
+if TYPE_CHECKING:
+    from ._configured_measurements import _EpisodeMeasurementPlan
 
 __all__ = [
     "TaskProgramIntegrationCatalog",

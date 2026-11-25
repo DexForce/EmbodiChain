@@ -292,6 +292,8 @@ def evaluate_recorded_rules(
 def _matches_field(field, uid, quantity):
     if field.startswith("fluids/"):
         return quantity == "received_volume" and field == f"fluids/{uid}/{quantity}"
+    if field.startswith("measurements/"):
+        return field == f"measurements/{uid}/{quantity}"
     if field.startswith("cables/"):
         return field == f"cables/{uid}/{quantity}"
     if field.startswith("deformables/"):
@@ -370,6 +372,12 @@ def _field_projection(field, descriptor, expected_names=None):
             return None
     if field.startswith("fluids/"):
         contract = ("receiver", "scalar", ("m3",), (1,))
+    elif field.startswith("measurements/"):
+        from ._episode_reduction import _UNITS
+
+        if len(units) != 1 or units[0] not in _UNITS:
+            return None
+        contract = ("episode", "scalar", tuple(units), (1,))
     elif field.startswith("cables/"):
         from embodichain.compute.geometry._cable_route import (
             _CABLE_METRICS as _METRICS,

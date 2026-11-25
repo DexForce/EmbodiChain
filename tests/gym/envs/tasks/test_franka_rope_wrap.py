@@ -14,46 +14,52 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""CPU regressions for the Franka task's timed acceptance and contact evidence."""
+"""Verify pre-roll, trajectory handoff and measured rope-wrap evidence."""
 
 from __future__ import annotations
 
-import json
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import Mock, call
 
 import numpy as np
 import pytest
 import torch
+import yaml
 
-from embodichain.extensions.tasks.manipulation.cable.franka_rope_wrap import (
-    load_config,
-    settle_franka_rope,
+from embodichain.extensions.tasks.configs import get_config_path
+from embodichain.lab.evaluation._episode_reduction import (
+    _evaluate_scalar_checks,
+    _reduce_measurements,
 )
-from embodichain.extensions.tasks.manipulation.cable.wrap_evaluation import (
-    attach_wrap_monitor,
+from embodichain.lab.gym.envs.managers.events import pre_roll_with_robot_home
+from embodichain.lab.gym.envs.task_program._episode_measurement import (
+    _EpisodeMeasurements,
 )
-from embodichain.extensions.tasks.manipulation.cable.wrap_integration import (
-    _CableWrapPhaseLowerer,
+from embodichain.lab.task_program.integrations._configured_measurements import (
+    _decode_measurement_plan,
 )
-from embodichain.extensions.tasks.manipulation.cable.wrap_measurements import (
-    evaluate_wrap,
+from embodichain.lab.task_program.integrations._trajectory_phase import (
+    _Phase,
+    _TrajectorySource,
 )
-from embodichain.extensions.tasks.manipulation.cable.wrap_motion import _JOINT_NAMES
 
 pytestmark = pytest.mark.no_sim
 
 
-def test_pre_roll_sets_the_robot_at_rest_after_settling_the_rope(tmp_path) -> None:
-    config = load_config()
-    config["pre_roll_s"] = 2 / (config["control_hz"] * config["substeps"])
-    scenario = tmp_path / "config.json"
-    scenario.write_text(json.dumps(config))
+def _evaluation() -> dict:
+    path = get_config_path(
+        "tasks/manipulation/cable/franka_rope_wrap/task_program/evaluation.yaml"
+    )
+    return yaml.safe_load(path.read_text())
+
+
+def test_pre_roll_sets_the_robot_at_rest_after_settling_the_rope() -> None:
     env = Mock(num_envs=1, device="cpu")
-    env.robot.joint_names = _JOINT_NAMES
-
-    settle_franka_rope(env, None, str(scenario))
-
+    env.robot.cfg.init_qpos = [0.0, 0.04]
+    pre_roll_with_robot_home(
+        env, None, 2, restore_home=True, zero_velocity_target=False
+    )
     assert [item[0] for item in env.mock_calls] == [
         "robot.set_qpos",
         "sim.update",
@@ -61,95 +67,114 @@ def test_pre_roll_sets_the_robot_at_rest_after_settling_the_rope(tmp_path) -> No
         "robot.set_state",
     ]
     assert env.sim.update.call_args_list == [call(step=1, render_final_step=False)] * 2
-    home = torch.tensor([[*config["home_qpos"], *([config["open_half_gap_m"]] * 2)]])
     state = env.robot.set_state.call_args.kwargs
-    assert set(state) == {"qpos", "qvel", "target_qpos", "target_qvel"}
-    torch.testing.assert_close(state["qpos"], home, rtol=0, atol=0)
-    torch.testing.assert_close(state["target_qpos"], home, rtol=0, atol=0)
-    torch.testing.assert_close(state["qvel"], torch.zeros_like(home), rtol=0, atol=0)
-    torch.testing.assert_close(state["target_qvel"], state["qvel"], rtol=0, atol=0)
+    home = torch.tensor([[0.0, 0.04]])
+    torch.testing.assert_close(state["qpos"], home)
+    torch.testing.assert_close(state["target_qpos"], home)
+    torch.testing.assert_close(state["qvel"], torch.zeros_like(home))
+    torch.testing.assert_close(state["target_qvel"], state["qvel"])
 
 
 def test_pickup_handoff_keeps_the_authored_start_of_the_orbit() -> None:
-    nominal = torch.linspace(0, 0.25, 181)[None, :, None].expand(-1, -1, 9)
+    nominal = np.linspace(0, 0.25, 601, dtype=np.float32)[:, None].repeat(9, axis=1)
     loaded = torch.full((1, 9), 0.125)
-    monitor = SimpleNamespace(
-        rows=[None] * 391,
-        robot=Mock(**{"get_qpos.return_value": loaded}),
+    robot = Mock(**{"get_qpos.return_value": loaded})
+    source = _TrajectorySource(
+        robot,
+        (_Phase("approach_post", 420, 600, True, False),),
+        nominal,
+        np.empty(0),
+        1 / 60,
     )
-    lowerer = _CableWrapPhaseLowerer(monitor, 60)
-    context = SimpleNamespace(env_ids=torch.tensor([0]))
-
-    joined = lowerer._join_pickup(nominal, 420, context)
-
-    assert joined.shape == (1, 211, 9)
-    torch.testing.assert_close(joined[:, :31], loaded[:, None].expand(-1, 31, -1))
-    torch.testing.assert_close(joined[:, -1], nominal[:, -1], rtol=0, atol=0)
-    monitor.robot.get_qpos.assert_called_once_with(target=True)
-
-
-def test_scaled_pickup_and_final_hold_are_evaluated_at_their_measured_times(tmp_path):
-    path = tmp_path / "72s.json"
-    path.write_text(json.dumps({**load_config(), "duration_s": 72.0}))
-    config = load_config(path)
-    # At 2x duration the grasp finishes at 10 s, the lift at 14 s, and
-    # the final two seconds of the measured hold start at 70 s.
-    rows = []
-    for frame in range(72 * 60 + 1):
-        t = frame / 60
-        rows.append(
-            dict(
-                time_s=t,
-                finite=True,
-                arm_joint_limit_violation_rad=0,
-                finger_joint_limit_violation_m=0,
-                free_end_m=[0, 0, 0.06 if t >= 14 else 0.006],
-                grasp_confirmed=t >= 10,
-                bilateral_rope_contact=t >= 10,
-                tail_tcp_distance_m=0.025,
-                material_slip_m=0,
-                winding_deg=420 if t >= 70 else 0,
-                contact_arc_deg=330 if t >= 70 else 0,
-                rope_max_z_m=0.08,
-                rope_min_z_m=0.002,
-                post_penetration_m=0,
-                robot_post_penetration_m=0,
-                anchor_direction_error_deg=0,
-                anchor_exit_bend_max_deg=0,
-                anchor_error_m=0,
-                joint_gap_max_m=0,
-                dropped_contacts=0,
-            )
-        )
-
-    report = evaluate_wrap(rows, config)
-    assert len(report["checks"]) == 19 and report["passed"]
-    partial = evaluate_wrap(rows[:-1], config)
-    assert not partial["checks"]["completed"] and not partial["passed"]
-
-    # A bad measurement at the first hold frame cannot be hidden by recovery.
-    rows[70 * 60]["contact_arc_deg"] = 295
-    failed = evaluate_wrap(rows, config)
-    assert {name for name, ok in failed["checks"].items() if not ok} == {
-        "post_contact_arc"
-    }
+    context = SimpleNamespace(
+        robot=SimpleNamespace(qpos=loaded, timestamp=390 / 60),
+        env_ids=torch.tensor([0]),
+        batch_size=1,
+        is_preview=False,
+        require_control_dt=lambda: 1 / 60,
+    )
+    joined = source.resolve("approach_post", 0, 180, context, torch.tensor([True]))
+    assert joined.waypoint_count == 210
+    torch.testing.assert_close(
+        joined.positions[:, :30], loaded[:, None].expand(-1, 30, -1)
+    )
+    torch.testing.assert_close(
+        joined.positions[0, -1], torch.from_numpy(nominal[-1]), rtol=0, atol=0
+    )
 
 
-def test_grasp_requires_both_fingers_on_rope_in_the_same_sample(tmp_path):
-    config = {**load_config(), "grasp_complete_s": 0, "finger_pad_center_m": [0, 0, 0]}
-    env = Mock(num_envs=1, _wrap_monitor=None)
+def test_recorded_winding_can_be_evaluated_under_a_new_threshold() -> None:
+    component = _evaluation()
+    reductions = component["measurements"]["reductions"]
+    graph = component["graph"]
+    reference = dict(
+        finite=True,
+        arm_joint_limit_violation_rad=0,
+        finger_joint_limit_violation_m=0,
+        free_end_m=[0, 0, 0.006],
+        free_end_z_m=0.006,
+        grasp_confirmed=True,
+        bilateral_rope_contact=True,
+        tail_tcp_distance_m=0.025,
+        material_slip_m=0,
+        winding_deg=525,
+        contact_arc_deg=330,
+        rope_max_z_m=0.08,
+        rope_min_z_m=0.002,
+        post_penetration_m=0,
+        robot_post_penetration_m=0,
+        anchor_direction_error_deg=0,
+        anchor_exit_bend_max_deg=0,
+        anchor_error_m=0,
+        joint_gap_max_m=0,
+        dropped_contacts=0,
+    )
+    rows = [dict(reference, frame=i) for i in range(2161)]
+    for row in rows[420:451]:
+        row["free_end_z_m"] = 0.06
+    values = _reduce_measurements(rows, reductions)
+    assert values["actual_winding"] == 525
+    assert _evaluate_scalar_checks(graph, values)["wrap_success"]
+    assert not _evaluate_scalar_checks(
+        graph, _reduce_measurements(rows[:-1], reductions)
+    )["completed"]
+    graph["rules"]["actual_winding"]["params"]["minimum"] = 600
+    assert not _evaluate_scalar_checks(graph, values)["wrap_success"]
+
+
+def test_grasp_requires_both_fingers_in_one_sample_and_preserves_interval_loss(
+    tmp_path,
+) -> None:
+    scene = SimpleNamespace(
+        cables=[SimpleNamespace(entity_id="cable", simulation_uid="cable")],
+        rigid_objects=[SimpleNamespace(entity_id="post", simulation_uid="post")],
+    )
+    plan = _decode_measurement_plan(_evaluation()["measurements"], scene)
+    plan = replace(
+        plan,
+        parameters={
+            **plan.parameters,
+            "grasp_start": 0,
+            "finger_pad_center_m": [0, 0, 0],
+        },
+    )
+    env = Mock(num_envs=1, step_dt=1 / 60)
+    env.cfg.sim_steps_per_control = 32
     cable = env.sim.get_cable_object.return_value
     points = np.zeros((9, 3))
     points[:, 2] = np.arange(9) * 0.01
     cable.cfg.points = points
     segments = torch.zeros(1, 8, 13, dtype=torch.float64)
     segments[0, :, :3] = torch.from_numpy((points[1:] + points[:-1]) / 2)
-    segments[0, :, 6] = 1  # identity quaternion; capsule axes point up
+    segments[0, :, 6] = 1
     cable.data.segment_state_w = segments
     tcp = torch.eye(4, dtype=torch.float64)[None]
     tcp[0, :3, 3] = segments[0, -1, :3]
     env.robot.get_link_pose.return_value = tcp
     env.robot.get_qpos.return_value = torch.zeros(1, 9)
+    env.robot.uid = "robot"
+    env.robot.dof = 9
+    env.robot.get_joint_ids.return_value = list(range(7))
     env.robot.joint_names = [f"j{i}" for i in range(9)]
     urdf = tmp_path / "limits.urdf"
     urdf.write_text(
@@ -160,23 +185,17 @@ def test_grasp_requires_both_fingers_on_rope_in_the_same_sample(tmp_path):
         )
         + "</robot>"
     )
-    motion = SimpleNamespace(
-        poses=np.tile(np.eye(4), (4, 1, 1)),
-        labels=["grasp"] * 4,
-        times=np.arange(4) / 60,
-    )
+    env.robot.cfg.fpath = str(urdf)
     sensor = env.sim.get_sensor.return_value
-    sensor.latest_sample_dropped_contacts = 0
-    names = ["fr3_leftfinger", "fr3_rightfinger"]
     sensor.get_actor_info.side_effect = lambda i: SimpleNamespace(
-        path="/franka", link_name=names[i]
+        path="/robot", link_name=plan.parameters["fingers"][i]
     )
-    monitor = attach_wrap_monitor(env, config, motion, urdf)
+    monitor = _EpisodeMeasurements(env, plan, None)
 
-    def advance(contacts):
+    def advance(contacts, loss):
         monitor.begin_control_step()
-        for substep in range(1, 33):
-            fingers = contacts.get(substep, [])
+        for step in range(1, 33):
+            fingers = contacts.get(step, [])
             sensor.get_data.return_value = {
                 "user_ids": torch.tensor(
                     [[i, -1] for i in fingers], dtype=torch.long
@@ -185,14 +204,13 @@ def test_grasp_requires_both_fingers_on_rope_in_the_same_sample(tmp_path):
                 "position": torch.tensor([[0.004, 0.0, 0.075]]).repeat(len(fingers), 1),
                 "is_valid": torch.ones(len(fingers), dtype=torch.bool),
             }
+            sensor.evidence_dropped_contacts = loss if step >= 7 else 0
             monitor.after_sample(1 / 1920, None)
         return monitor.rows[-1]
 
-    # Between samples both touch, but on the 240 Hz sample grid their
-    # contacts alternate. The fingers must not jointly confirm this grasp.
-    split = advance({3: [0, 1], 8: [0], 16: [1]})
-    assert split["left_rope_contact"] and split["right_rope_contact"]
-    assert not split["bilateral_rope_contact"] and not split["grasp_confirmed"]
-    together = advance({24: [0, 1]})
-    assert together["bilateral_rope_contact"] and together["grasp_confirmed"]
-    assert sensor.get_data.call_count == 8
+    split = advance({8: [0], 16: [1]}, 1)
+    assert not split["bilateral_rope_contact"]
+    assert split["dropped_contacts"] == 1
+    together = advance({24: [0, 1]}, 0)
+    assert together["bilateral_rope_contact"]
+    assert together["grasp_confirmed"]

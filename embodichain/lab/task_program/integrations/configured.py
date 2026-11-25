@@ -27,7 +27,6 @@ from embodichain.lab.evaluation import (
 )
 
 from embodichain.lab.evaluation.observations import _raw_field_kind
-from embodichain.lab.evaluation._cable_checks import RJ45_CHECKS, WRAP_CHECKS
 from embodichain.lab.evaluation._recording import _is_segment_start_field
 
 from collections.abc import Mapping, Sequence
@@ -40,6 +39,8 @@ import math
 from typing import TYPE_CHECKING, TypeVar
 
 from ._kinematic_replay import _KinematicReplayFactory, _decode_kinematic_replay
+from ._trajectory_phase import _TrajectoryPhaseFactory, _decode_trajectory_phase
+from ._configured_measurements import _EpisodeMeasurementPlan, _decode_measurement_plan
 from ._configured_controls import (
     _PressLowererFactory,
     _TwistLowererFactory,
@@ -145,12 +146,6 @@ from embodichain.lab.task_program.semantics import (
 )
 
 if TYPE_CHECKING:
-    from embodichain.extensions.tasks.manipulation.cable.rj45_integration import (
-        FrankaRj45PhaseFactory,
-    )
-    from embodichain.extensions.tasks.manipulation.cable.wrap_integration import (
-        CableWrapPhaseFactory,
-    )
     from .environment import TaskProgramEnvironmentAdapter
 
 __all__: list[str] = []
@@ -2742,24 +2737,11 @@ def _decode_registered_lowerer(
     | _PushObjectLowererFactory
     | _RelativePlaceLowererFactory
     | _KinematicReplayFactory
-    | CableWrapPhaseFactory
-    | FrankaRj45PhaseFactory
+    | _TrajectoryPhaseFactory
 ):
     """Decode one allowlisted registered semantic lowerer factory."""
-    if isinstance(value, Mapping) and value.get("kind") == "cable_wrap_phase":
-        from embodichain.extensions.tasks.manipulation.cable.wrap_integration import (
-            CableWrapPhaseFactory,
-        )
-
-        _mapping(value, path=path, required=frozenset({"kind"}))
-        return CableWrapPhaseFactory()
-    if isinstance(value, Mapping) and value.get("kind") == "franka_rj45_phase":
-        from embodichain.extensions.tasks.manipulation.cable.rj45_integration import (
-            FrankaRj45PhaseFactory,
-        )
-
-        _mapping(value, path=path, required=frozenset({"kind"}))
-        return FrankaRj45PhaseFactory()
+    if isinstance(value, Mapping) and value.get("kind") == "joint_trajectory_phase":
+        return _decode_trajectory_phase(value, path=path)
     if isinstance(value, Mapping) and value.get("kind") == "kinematic_joint_replay":
         return _decode_kinematic_replay(value, path=path)
     if isinstance(value, Mapping) and value.get("kind") in {
@@ -3266,8 +3248,7 @@ class _DecodedRuntimeServices:
         | _PushObjectLowererFactory
         | _RelativePlaceLowererFactory
         | _KinematicReplayFactory
-        | CableWrapPhaseFactory
-        | FrankaRj45PhaseFactory,
+        | _TrajectoryPhaseFactory,
         ...,
     ] = ()
     control_part_evidence: _JointPositionConstraintEvidenceProviderFactory | None = None
@@ -3700,8 +3681,7 @@ def _decode_evaluation(
     robot_links: Mapping[str, str] | None = None,
     registry: PredicateRegistry | None = None,
     cable_material: object | None = None,
-    cable_wrap: bool = False,
-    rj45_cycle: bool = False,
+    measurement_plan: _EpisodeMeasurementPlan | None = None,
     transport_targets: Mapping[str, _MoveHeldObjectLowererFactory] | None = None,
 ) -> tuple[dict[str, CompiledEvaluation], tuple[str, ...], tuple[str, ...]]:
     if value is None:
@@ -3710,7 +3690,7 @@ def _decode_evaluation(
         value,
         path="evaluation",
         required=frozenset({"graph"}),
-        optional=frozenset({"final_acceptance", "process_constraints"}),
+        optional=frozenset({"final_acceptance", "process_constraints", "measurements"}),
     )
     graph = EvaluationSpec.from_dict(component["graph"])
     channels = {
@@ -3723,18 +3703,8 @@ def _decode_evaluation(
             channels[f"cables/{cable_material.entity_id}/{quantity}"] = (
                 f"cables/{cable_material.simulation_uid}/{quantity}"
             )
-    if cable_wrap:
-        for binding in scene.cables:
-            for name in WRAP_CHECKS:
-                channels[f"cables/{binding.entity_id}/wrap_{name}"] = (
-                    f"cables/{binding.simulation_uid}/wrap_{name}"
-                )
-    if rj45_cycle:
-        for binding in scene.cables:
-            for name in RJ45_CHECKS:
-                channels[f"cables/{binding.entity_id}/rj45_{name}"] = (
-                    f"cables/{binding.simulation_uid}/rj45_{name}"
-                )
+    if measurement_plan is not None:
+        channels.update(measurement_plan.channels())
     articulations = {
         binding.entity_id: binding.simulation_uid for binding in scene.articulations
     }
@@ -3928,6 +3898,14 @@ def _decode_configured_task_program_integration(
         )
     )
     for lowerer_factory in services.registered_semantic_lowerers:
+        if isinstance(lowerer_factory, _TrajectoryPhaseFactory) and (
+            lowerer_factory.feedback is not None
+            and lowerer_factory.feedback.articulation_uid
+            not in {binding.simulation_uid for binding in scene_binding.articulations}
+        ):
+            raise ValueError(
+                "Trajectory feedback requires a declared scene articulation."
+            )
         call_catalog = call_catalog.with_descriptor(
             SemanticCallDescriptor(
                 call_id=lowerer_factory.call_id,
@@ -3935,6 +3913,11 @@ def _decode_configured_task_program_integration(
                 target_descriptor=lowerer_factory.target_descriptor,
             )
         )
+    measurement_plan = (
+        _decode_measurement_plan(evaluation["measurements"], scene_binding)
+        if isinstance(evaluation, Mapping) and "measurements" in evaluation
+        else None
+    )
     conditions, final_refs, process_refs = _decode_evaluation(
         evaluation,
         scene_binding,
@@ -3942,14 +3925,7 @@ def _decode_configured_task_program_integration(
         robot_links=evaluation_robot_links,
         registry=evaluation_registry,
         cable_material=services.cable_material,
-        cable_wrap=any(
-            factory.call_id == "simulation.cable_wrap_phase"
-            for factory in services.registered_semantic_lowerers
-        ),
-        rj45_cycle=any(
-            factory.call_id == "simulation.franka_rj45_phase"
-            for factory in services.registered_semantic_lowerers
-        ),
+        measurement_plan=measurement_plan,
         transport_targets={
             factory.target_id: factory
             for factory in services.registered_semantic_lowerers
@@ -3961,6 +3937,7 @@ def _decode_configured_task_program_integration(
         evaluation_conditions=conditions,
         evaluation_final_refs=final_refs,
         evaluation_process_refs=process_refs,
+        episode_measurement=measurement_plan,
         robot_profile_binding=robot_profile_binding,
         call_catalog=call_catalog,
         handover_pose_providers=services.handover_pose_providers,

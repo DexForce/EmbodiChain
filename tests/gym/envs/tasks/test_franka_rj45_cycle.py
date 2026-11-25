@@ -14,44 +14,46 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Verify acceptance for the standard Franka RJ45 insertion Task Program."""
+"""Verify the declarative acceptance graph of the FR3 connector task."""
 
 from __future__ import annotations
 
-import numpy as np
+from copy import deepcopy
+
+import pytest
 import yaml
 
-from embodichain.extensions.tasks.manipulation.cable.rj45_measurements import (
-    RJ45_CHECKS,
-    evaluate_rj45,
-)
-from embodichain.extensions.tasks.manipulation.cable.rj45_scene import (
-    load_config,
-    task_directory,
+from embodichain.extensions.tasks.configs import get_config_path
+from embodichain.lab.evaluation._episode_reduction import (
+    _evaluate_scalar_checks,
+    _reduce_measurements,
 )
 
 
-def test_rj45_evaluation_covers_all_published_physical_checks() -> None:
-    component = task_directory() / "task_program/evaluation.yaml"
-    evaluation = yaml.safe_load(component.read_text())
-    rules = evaluation["graph"]["rules"]
-    assert rules["rj45_success"]["refs"] == list(RJ45_CHECKS)
-    assert evaluation["final_acceptance"] == ["rj45_success"]
-    for check in RJ45_CHECKS:
-        assert rules[check]["bindings"]["value"] == f"cables/cable/rj45_{check}"
-
-
-def test_rj45_acceptance_rejects_missing_contact_and_final_placement_slip() -> None:
-    config = load_config()
-    tcp_pose = np.eye(4)
-    tcp_pose[2, 1] = 1
+@pytest.mark.parametrize("wrap_depth_check", [False, True])
+def test_rj45_acceptance_requires_simultaneous_press_and_final_placement(
+    wrap_depth_check: bool,
+) -> None:
+    path = get_config_path(
+        "tasks/manipulation/cable/franka_rj45_cycle/task_program/evaluation.yaml"
+    )
+    evaluation = yaml.safe_load(path.read_text())
+    graph = evaluation["graph"]
+    if wrap_depth_check:
+        rules = graph["rules"]
+        rules["seat_depth_min_range"] = rules["seat_depth_min"]
+        rules["seat_depth_min"] = {"kind": "any", "refs": ["seat_depth_min_range"]}
+    check_names = graph["rules"]["rj45_success"]["refs"]
+    assert len(check_names) == 17
+    reductions = evaluation["measurements"]["reductions"]
     reference = {
-        "tip_m": [0.48, -0.14, 0.0055],
-        "actual_tcp_pose": tcp_pose,
+        "tip_z_m": 0.0055,
+        "tool_axis_z_abs": 1.0,
         "depth_m": 0.0105,
         "lateral_m": 0.0002,
         "orientation_error_deg": 1.0,
         "latch_angle_deg": 0.0,
+        "latch_angle_abs_deg": 0.0,
         "finger_latch_contact": False,
         "latch_socket_contact": True,
         "latch_limit_violation_rad": 0.01,
@@ -64,22 +66,28 @@ def test_rj45_acceptance_rejects_missing_contact_and_final_placement_slip() -> N
         "penetration_m": 0.0007,
         "dropped_contacts": 0,
         "finite": True,
+        "press_samples": [],
     }
-    rows = [
-        dict(reference, time_s=0.0),
-        dict(reference, time_s=8.0, tip_m=[0.48, -0.14, 0.15]),
-        dict(reference, time_s=18.5),
-        dict(reference, time_s=24.5, finger_latch_contact=True, latch_angle_deg=-10.0),
-        dict(reference, time_s=27.5, depth_m=-0.03),
-        dict(reference, time_s=40.0),
-    ]
-    assert evaluate_rj45(rows, config)["checks"] == dict.fromkeys(RJ45_CHECKS, True)
+    rows = [dict(reference, frame=frame) for frame in range(2401)]
+    for row in rows[360:541]:
+        row["tip_z_m"] = 0.15
+    rows[1470]["finger_latch_contact"] = True
+    rows[1470]["press_samples"] = [{"depth_m": 0.0105, "latch_angle_deg": -10.0}]
+    rows[1650]["depth_m"] = -0.03
 
-    rows[1]["finger_latch_contact"] = None
-    rows[-1]["return_error_m"] = 0.024
-    report = evaluate_rj45(rows, config)
-    assert not report["passed"]
-    assert {name for name, status in report["checks"].items() if not status} == {
-        "insertion_without_finger_latch_press",
+    passed = _evaluate_scalar_checks(graph, _reduce_measurements(rows, reductions))
+    assert passed["rj45_success"]
+
+    asynchronous = deepcopy(rows)
+    asynchronous[1470]["press_samples"] = [
+        {"depth_m": 0.0105, "latch_angle_deg": 0.0},
+        {"depth_m": -0.03, "latch_angle_deg": -10.0},
+    ]
+    asynchronous[-1]["return_error_m"] = 0.024
+    failed = _evaluate_scalar_checks(
+        graph, _reduce_measurements(asynchronous, reductions)
+    )
+    assert {name for name in check_names if not failed[name]} == {
+        "physical_latch_press_before_withdrawal",
         "placed_on_floor",
     }

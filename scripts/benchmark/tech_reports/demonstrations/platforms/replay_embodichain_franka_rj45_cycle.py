@@ -28,6 +28,7 @@ from franka_rj45_cycle_inputs import (
     JOINT_NAMES,
     TASK_CONFIG,
     load_commands,
+    load_measurements,
     load_scene,
     save_results,
     scene_inputs,
@@ -63,13 +64,11 @@ def main() -> None:
     )
     from embodichain.lab.sim import SimulationManager
     from embodichain.extensions.robots.franka.rj45_assets import get_rj45_models
-    from embodichain.extensions.tasks.manipulation.cable.rj45_measurements import (
-        evaluate_rj45,
-    )
 
     recording = args.recording.expanduser().resolve(strict=True)
     output = args.output.expanduser().resolve()
     config, environment, _ = load_scene()
+    measurements = load_measurements(config)
     positions, velocities, source = load_commands(recording, config)
     models = get_rj45_models()
     inputs = scene_inputs(recording, models)
@@ -134,12 +133,12 @@ def main() -> None:
             )
         np.testing.assert_array_equal(data["command_q"], positions)
         np.testing.assert_array_equal(data["command_qd"], velocities)
-        rows = env._rj45_monitor.rows
+        rows = env._episode_measurements.rows
         if len(rows) != steps + 1:
             raise RuntimeError(
                 f"Expected {steps + 1} measured RJ45 frames, got {len(rows)}."
             )
-        acceptance = evaluate_rj45(rows, config)
+        acceptance = measurements.evaluate(rows)
         report = {
             "status": "completed",
             "backend": "EmbodiChain DexSim Newton (DexUni)",

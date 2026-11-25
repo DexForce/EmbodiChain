@@ -6,6 +6,10 @@ requires:
 scene_binding:
   contract_id: rj45_cycle_v1
   registry_id: rj45_cycle
+  rigid_objects:
+  - entity_id: socket_mount
+    simulation_uid: socket_support_seat
+    dynamics: static
   articulations:
   - entity_id: plug
     simulation_uid: plug
@@ -19,10 +23,147 @@ profile:
     move_joints:
       primary: arm_and_hand
   skill_options:
-    simulation.franka_rj45_phase:
+    simulation.joint_trajectory_phase:
       kind: move_joints
       preserve_velocity_samples: true
   effect_monitors: {}
 runtime_services:
   registered_semantic_lowerers:
-  - kind: franka_rj45_phase
+  - kind: joint_trajectory_phase
+    motion:
+      control_hz: 60
+      arm: arm
+      gripper: eef
+      tool_link: fr3_hand_tcp
+      constraints: {position_tolerance_m: 1.0e-05, rotation_tolerance_rad: 0.0001}
+      targets:
+        initial_plug:
+          kind: pose
+          position: [0.48, -0.14, 0.0055]
+          quaternion_xyzw: [0.5, 0.5, 0.5, 0.5]
+        above_pickup:
+          kind: pose
+          position: [0.45349999999999996, -0.14, 0.1255]
+          quaternion_xyzw: [0.0, 1.0, 0.0, 0.0]
+        pickup:
+          kind: pose
+          position: [0.45349999999999996, -0.14, 0.0055]
+          quaternion_xyzw: [0.0, 1.0, 0.0, 0.0]
+        above_return:
+          kind: pose
+          position: [0.46199999999999997, -0.14055, 0.1245]
+          quaternion_xyzw: [1.0, 0.0, 0.0, 1.1102230246251565e-16]
+        return_to_floor:
+          kind: pose
+          position: [0.46199999999999997, -0.14055, 0.0045000000000000005]
+          quaternion_xyzw: [1.0, 0.0, 0.0, 1.1102230246251565e-16]
+        retreat_from_floor:
+          kind: pose
+          position: [0.362, -0.14055, 0.0845]
+          quaternion_xyzw: [1.0, 0.0, 0.0, 1.1102230246251565e-16]
+        seated_plug:
+          kind: scene_entity
+          entity_id: socket_mount
+          relative_pose: [0.0, 0.0, 1.0, -0.0040000000000000036, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.009950000024944006, 0.0, 0.0, 0.0, 1.0]
+        above_socket:
+          kind: scene_entity
+          entity_id: socket_mount
+          relative_pose: [-1.0, 0.0, 0.0, -0.09099999999999997, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.129950000024944, 0.0, 0.0, 0.0, 1.0]
+        align_socket:
+          kind: scene_entity
+          entity_id: socket_mount
+          relative_pose: [-1.0, 0.0, 0.0, -0.09099999999999997, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.009950000024944006, 0.0, 0.0, 0.0, 1.0]
+        seat_connector:
+          kind: scene_entity
+          entity_id: socket_mount
+          relative_pose: [-1.0, 0.0, 0.0, -0.03049999999999997, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.009950000024944006, 0.0, 0.0, 0.0, 1.0]
+        retreat_from_socket:
+          kind: scene_entity
+          entity_id: socket_mount
+          relative_pose: [-1.0, 0.0, 0.0, -0.03049999999999997, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.129950000024944, 0.0, 0.0, 0.0, 1.0]
+        approach_latch:
+          kind: scene_entity
+          entity_id: socket_mount
+          relative_pose: [1.0, 0.0, 0.0, -0.02200000000000002, 0.0, 0.0, -1.0, 0.0965, 0.0, 1.0, 0.0, 0.070500000024944, 0.0, 0.0, 0.0, 1.0]
+        grasp_latch:
+          kind: scene_entity
+          entity_id: socket_mount
+          relative_pose: [1.0, 0.0, 0.0, -0.02200000000000002, 0.0, 0.0, -1.0, -0.003500000000000003, 0.0, 1.0, 0.0, 0.010500000024944, 0.0, 0.0, 0.0, 1.0]
+        withdraw_connector:
+          kind: scene_entity
+          entity_id: socket_mount
+          relative_pose: [1.0, 0.0, 0.0, -0.08250000000000002, 0.0, 0.0, -1.0, -0.003500000000000003, 0.0, 1.0, 0.0, 0.010500000024944, 0.0, 0.0, 0.0, 1.0]
+        lift_clear:
+          kind: scene_entity
+          entity_id: socket_mount
+          relative_pose: [1.0, 0.0, 0.0, -0.08250000000000002, 0.0, 0.0, -1.0, -0.003500000000000003, 0.0, 1.0, 0.0, 0.130500000024944, 0.0, 0.0, 0.0, 1.0]
+      keyframes:
+      - {step: 0, target: home, grip: 0.04}
+      - {step: 60, target: home, grip: 0.04}
+      - {step: 180, target: above_pickup, grip: 0.04}
+      - {step: 240, target: pickup, grip: 0.04}
+      - {step: 300, target: pickup, grip: 0.005}
+      - {step: 360, target: above_pickup, grip: 0.005}
+      - {step: 540, target: above_socket, grip: 0.005}
+      - {step: 600, target: align_socket, grip: 0.005}
+      - {step: 720, target: seat_connector, grip: 0.005}
+      - {step: 780, target: seat_connector, grip: 0.005}
+      - {step: 840, target: seat_connector, grip: 0.04}
+      - {step: 900, target: retreat_from_socket, grip: 0.04}
+      - {step: 1050, target: home, grip: 0.04, interpolation: joint_home}
+      - {step: 1080, target: home, grip: 0.04, interpolation: joint_home}
+      - {step: 1140, target: home, grip: 0.04, interpolation: joint_home}
+      - {step: 1320, target: approach_latch, grip: 0.04}
+      - {step: 1380, target: grasp_latch, grip: 0.04}
+      - {step: 1440, target: grasp_latch, grip: 0.0036}
+      - {step: 1500, target: grasp_latch, grip: 0.0036}
+      - {step: 1620, target: withdraw_connector, grip: 0.0036}
+      - {step: 1680, target: lift_clear, grip: 0.0036}
+      - {step: 1860, target: above_return, grip: 0.0036}
+      - {step: 1920, target: return_to_floor, grip: 0.0036}
+      - {step: 1980, target: return_to_floor, grip: 0.0036}
+      - {step: 2040, target: return_to_floor, grip: 0.04}
+      - {step: 2100, target: retreat_from_floor, grip: 0.04}
+      - {step: 2280, target: home, grip: 0.04, interpolation: joint_home}
+      - {step: 2400, target: home, grip: 0.04, interpolation: joint_home}
+    phases:
+      home: {steps: [0, 60]}
+      floor_pickup: {steps: [60, 360], feedback: true}
+      approach_socket: {steps: [360, 600], feedback: true}
+      insert_and_release: {steps: [600, 840], feedback: true}
+      seated_hold: {steps: [840, 1140]}
+      latch_grasp: {steps: [1140, 1500], feedback: true}
+      withdraw: {steps: [1500, 1680], feedback: true}
+      place_and_release: {steps: [1680, 2040], feedback: true}
+      return_home: {steps: [2040, 2400]}
+    feedback:
+      articulation_uid: plug
+      link: plug
+      initial_offset:
+        reference: initial_plug
+        rise: [1, 3]
+        fall: [6, 9]
+      tracks:
+      - first: 540
+        last: 840
+        tool_in_object:
+          - [0, 1, 0, 0.0]
+          - [0, 0, -1, 0.0]
+          - [-1, 0, 0, -0.0265]
+          - [0, 0, 0, 1]
+        captures:
+        - {first: 540, last: 600, weight: 1.0}
+      - first: 1141
+        last: 2040
+        tool_in_object:
+          - [0, 0, -1, -0.0035]
+          - [0, 1, 0, 0.00055]
+          - [1, 0, 0, -0.018]
+          - [0, 0, 0, 1]
+        captures:
+        - {first: 1488, last: 1488, weight: 1.0}
+        - {first: 1860, last: 1980, weight: 0.1}
+        object_offset:
+          reference: seated_plug
+          rise: [19, 22]
+          fall: [28, 31]

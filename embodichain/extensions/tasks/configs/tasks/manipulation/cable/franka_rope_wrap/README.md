@@ -31,9 +31,12 @@ rope follows the resulting forces throughout the episode.
 
 The [program](task_program/program.yaml) uses `simulation.cable_pickup` to
 approach, grip and lift the live cable. The other six stages use `MoveJoints` to
-go from home through the wrap and the final two-second hold. The default
-36-second control sequence uses 2,160 steps
-at 60 Hz. The [evaluation graph](task_program/evaluation.yaml) requires all 19
+go from home through the wrap and the final two-second hold. The
+[integration](task_program/integration.yaml) declares the approach targets,
+post-relative arc, tightening offsets, and tracking tolerances. At runtime the
+planner resolves the post axis from the scene and solves the path on the
+control grid. The default 36-second sequence uses 2,160 steps at 60 Hz.
+The [evaluation graph](task_program/evaluation.yaml) requires all 19
 checks to pass, including floor pickup, grip retention, material slip, bilateral
 contact, measured winding, contact arc, clearance, anchor stability and the
 final hold. The standard trajectory recorder saves successful episodes for

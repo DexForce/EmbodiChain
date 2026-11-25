@@ -80,7 +80,10 @@ recording="$run_dir/recording/traj_env0_000000.pt"
 ```
 
 Omit `--record-dir` to run the YAML Task Program without saving a recording.
-The recording stores the actual position and velocity targets for all nine
+The integration declares connector targets relative to the socket mount,
+tracking tolerances, and grasp-observation windows. The source program plans
+the nominal joint path at runtime and applies feedback at those windows. The recording stores the actual
+position and velocity targets for all nine
 Franka joints across the accepted 40-second episode. Both replays use this
 recording and freshly solve the calibrated scene at 60 Hz with 32 physics
 substeps per control. The Isaac Lab run uses native Newton VBD for the whole
@@ -88,7 +91,10 @@ scene. EmbodiChain uses the configured Newton/DexUni coupling.
 
 Each replay writes measured robot, cable and plug states with target readbacks
 to `trajectory.npz` and its own frame measurements to `metrics.json`.
-`result.json` records input hashes and the original 17 gate results, including
-seating, latch contact, cable attachment and final return. A completed replay
-can report failed acceptance gates. The EmbodiChain result also reports the
-largest differences from the recorded state after its fresh pre-roll.
+`result.json` records input hashes and the gate results from the configured
+Task Program evaluation graph, including seating, latch contact, cable
+attachment and final return. Isaac Lab uses `samples_per_control` from that
+configuration for both stepping and the reported contact diagnostic rate.
+A completed replay can report failed acceptance gates. The EmbodiChain
+result also reports the largest differences from the recorded state after
+its fresh pre-roll.

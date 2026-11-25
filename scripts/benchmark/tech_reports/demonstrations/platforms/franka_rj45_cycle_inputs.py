@@ -17,10 +17,11 @@
 
 from __future__ import annotations
 
-from importlib.util import module_from_spec, spec_from_file_location
+from collections.abc import Sequence
 import json
 import math
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -193,15 +194,74 @@ def load_asset_manifest(path: Path) -> dict[str, Path]:
     return paths
 
 
-def load_measurements() -> Any:
-    """Load the task's pure evaluator without importing EmbodiChain in Isaac Lab."""
-    path = _TASK_PACKAGE / "manipulation/cable/rj45_measurements.py"
-    spec = spec_from_file_location("rj45_benchmark_measurements", path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Cannot load the RJ45 measurement module at {path}.")
-    module = module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def load_measurements(config: dict[str, Any]) -> SimpleNamespace:
+    """Load the shared rule graph and contact cadence for this replay."""
+    import yaml
+
+    from embodichain.lab.evaluation._episode_geometry import _connector_frame
+    from embodichain.lab.evaluation._episode_reduction import (
+        _evaluate_scalar_checks,
+        _reduce_measurements,
+    )
+
+    deployment = yaml.safe_load(TASK_CONFIG.read_text())
+    evaluation = yaml.safe_load(
+        (TASK_CONFIG.parent / deployment["evaluation"]["component"]).read_text()
+    )
+    measurements = evaluation["measurements"]
+    samples = measurements["samples_per_control"]
+    substeps = config["substeps"]
+    if type(samples) is not int or samples < 1 or substeps % samples:
+        raise ValueError(
+            "RJ45 samples_per_control must be a positive integer that divides the physics substeps."
+        )
+    diagnostic_rate_hz = config["control_hz"] * samples
+    parameters = {**measurements["parameters"], "control_hz": config["control_hz"]}
+    graph = evaluation["graph"]
+    (root,) = graph["roots"]
+
+    def measure(**frame: Any) -> dict[str, Any]:
+        return _connector_frame(parameters, **frame)
+
+    def evaluate(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        values = _reduce_measurements(rows, measurements["reductions"])
+        results = _evaluate_scalar_checks(graph, values)
+        checks = {name: results[name] for name in graph["rules"][root]["refs"]}
+        passed = results[root]
+        pressed = [row for row in rows if 24 <= row["time_s"] <= 25]
+        retained = [row["depth_m"] for row in rows if 18 <= row["time_s"] <= 19]
+        return {
+            "passed": passed,
+            "checks": checks,
+            "quality_status": "floor_cycle_verified" if passed else "demo_candidate",
+            "diagnostic_rate_hz": diagnostic_rate_hz,
+            "peak_penetration_m": values.get("peak_contact_penetration"),
+            "peak_attachment_error_m": values.get("cable_attachment"),
+            "peak_latch_limit_violation_deg": (
+                float(np.rad2deg(values["latch_limits"]))
+                if "latch_limits" in values
+                else None
+            ),
+            "pressed_latch_min_deg": min(
+                (row["latch_angle_deg"] for row in pressed), default=None
+            ),
+            "press_contact_frames": sum(
+                row["finger_latch_contact"] is True for row in pressed
+            ),
+            "final_return_error_m": rows[-1]["return_error_m"] if rows else None,
+            "retained_depth_range_m": (
+                [min(retained), max(retained)] if retained else None
+            ),
+        }
+
+    return SimpleNamespace(
+        measure_frame=measure,
+        evaluate=evaluate,
+        parameters=parameters,
+        samples_per_control=samples,
+        substeps_per_sample=substeps // samples,
+        diagnostic_rate_hz=diagnostic_rate_hz,
+    )
 
 
 def save_results(

@@ -7,7 +7,7 @@ program:
     kind: invoke
     call:
       kind: registered
-      call_id: simulation.franka_rj45_phase
+      call_id: simulation.joint_trajectory_phase
       arguments: {phase: home}
 - segment: floor_pickup
   instruction: Grasp the plug body on the floor and lift it.
@@ -15,7 +15,7 @@ program:
     kind: invoke
     call:
       kind: registered
-      call_id: simulation.franka_rj45_phase
+      call_id: simulation.joint_trajectory_phase
       arguments: {phase: floor_pickup}
 - segment: approach_socket
   instruction: Carry the plug and align it with the socket.
@@ -23,7 +23,7 @@ program:
     kind: invoke
     call:
       kind: registered
-      call_id: simulation.franka_rj45_phase
+      call_id: simulation.joint_trajectory_phase
       arguments: {phase: approach_socket}
 - segment: insert_and_release
   instruction: Seat the plug in the socket and open the jaws.
@@ -31,7 +31,7 @@ program:
     kind: invoke
     call:
       kind: registered
-      call_id: simulation.franka_rj45_phase
+      call_id: simulation.joint_trajectory_phase
       arguments: {phase: insert_and_release}
 - segment: seated_hold
   instruction: Move away while the plug remains seated.
@@ -39,7 +39,7 @@ program:
     kind: invoke
     call:
       kind: registered
-      call_id: simulation.franka_rj45_phase
+      call_id: simulation.joint_trajectory_phase
       arguments: {phase: seated_hold}
 - segment: latch_grasp
   instruction: Grasp the plug vertically, depressing the latch with the finger.
@@ -47,7 +47,7 @@ program:
     kind: invoke
     call:
       kind: registered
-      call_id: simulation.franka_rj45_phase
+      call_id: simulation.joint_trajectory_phase
       arguments: {phase: latch_grasp}
 - segment: withdraw
   instruction: Pull the plug out and lift it clear of the socket.
@@ -55,7 +55,7 @@ program:
     kind: invoke
     call:
       kind: registered
-      call_id: simulation.franka_rj45_phase
+      call_id: simulation.joint_trajectory_phase
       arguments: {phase: withdraw}
 - segment: place_and_release
   instruction: Rotate the plug onto its side, place it on the floor and release it.
@@ -63,7 +63,7 @@ program:
     kind: invoke
     call:
       kind: registered
-      call_id: simulation.franka_rj45_phase
+      call_id: simulation.joint_trajectory_phase
       arguments: {phase: place_and_release}
 - segment: return_home
   instruction: Retreat and return the arm to its starting posture.
@@ -71,7 +71,7 @@ program:
     kind: invoke
     call:
       kind: registered
-      call_id: simulation.franka_rj45_phase
+      call_id: simulation.joint_trajectory_phase
       arguments: {phase: return_home}
   validators:
   - kind: condition
