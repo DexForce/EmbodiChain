@@ -35,6 +35,7 @@ from .authoring_intent import (
     _ArmState,
     _expand_fact_shorthand,
     _intent_phases,
+    _intent_step_arms,
     _is_control_transition,
     _relation_pairs,
     _role_ancestry,
@@ -374,6 +375,7 @@ def _carried_facts(
     steps: dict[str, Any],
     seed: dict[str, list[dict[str, Any]]],
     parents: dict[str, str],
+    step_arms: dict[str, set[str]],
 ) -> dict[str, list[dict[str, Any]]]:
     """Keep declaration evidence only until an operation invalidates it."""
     current = dict(seed)
@@ -449,11 +451,9 @@ def _carried_facts(
                         else set()
                     )
                 )
-                step_arms = set(step["arms"])
                 return verb not in preserves and (
-                    "auto" in step_arms
-                    or "auto" in fact["arms"]
-                    or bool(step_arms.intersection(fact["arms"]))
+                    "auto" in fact["arms"]
+                    or bool(step_arms[ref].intersection(fact["arms"]))
                 )
             return False
 
@@ -544,7 +544,8 @@ def _validate_intent_audit(
     seed = {
         ref: [row["fact"]] for ref, row in conditions.items() if row["scope"] != "final"
     }
-    end = _carried_facts(steps, seed, parents)
+    step_arms = dict(zip(steps, _intent_step_arms(plan), strict=True))
+    end = _carried_facts(steps, seed, parents, step_arms)
     final = {
         ref: row["fact"] for ref, row in conditions.items() if row["scope"] == "final"
     }
@@ -564,8 +565,8 @@ def _validate_intent_audit(
 
     for fact in final.values():
         if any(_opposes(fact, other) for other in (*surviving, *final.values())) or (
-            fact["kind"] in _POSITION_FACTS | {"orientation"}
-            and fact in earlier
+            fact["kind"] in _POSITION_FACTS | {"orientation", "gripper_relation"}
+            and matches(fact, earlier)
             and not matches(fact, surviving)
         ):
             raise AuthoringEvidenceError(
@@ -739,7 +740,9 @@ def _validate_intent_audit(
             latest = max(int(ref.removeprefix("step_")) for ref in cited) - 1
             start, end_of_phase = phases[latest]
             cutoff = start if scope == "before" else end_of_phase
-            at_step = _carried_facts(dict(list(steps.items())[:cutoff]), seed, parents)
+            at_step = _carried_facts(
+                dict(list(steps.items())[:cutoff]), seed, parents, step_arms
+            )
             sources = refs if scope == "before" else cited
             facts = [fact for ref in sources for fact in at_step.get(ref, ())]
             if scope == "effect" and isinstance(check.get("spatial"), dict):

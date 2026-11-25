@@ -792,6 +792,153 @@ def _advance_arms(
     )
 
 
+def _intent_step_arms(plan: dict[str, Any]) -> list[set[str]]:
+    """Check ordered arm facts and return the arms possible at each step."""
+    states = {_ArmState()}
+    sites: dict[str, dict[str, str]] = {}
+    invariants = []
+    transitions = []
+
+    def require_fact(fact: dict[str, Any]) -> None:
+        nonlocal states
+        kind = fact["kind"]
+        if kind == "held":
+            required = set(fact["arms"]) - {"auto"}
+            states = {
+                state
+                for state in states
+                if all(
+                    (owners := state.holders(subject)) and required <= owners
+                    for subject in fact["subjects"]
+                )
+            }
+            message = (
+                "Held fact contradicts ordered acquisition/release or arm identity"
+            )
+        elif kind == "released":
+            states = {
+                state
+                for state in states
+                if not any(state.holders(subject) for subject in fact["subjects"])
+            }
+            message = "Released fact contradicts ordered holdings"
+        elif kind == "grasped_at":
+            subject, arm = fact["subjects"][0], fact["arms"][0]
+            grasp = sites.get(subject, {})
+            states = {
+                state
+                for state in states
+                if any(
+                    (arm == "auto" or side == arm)
+                    and grasp.get(side, grasp.get("auto")) == fact["part"]
+                    for side in state.holders(subject)
+                )
+            }
+            message = "Grasp site is not witnessed by the acquisition of that arm"
+        elif kind in {"arms_at_initial_pose", "grippers_open"}:
+            required = set(fact["arms"])
+            states = {
+                state
+                for state in states
+                if required
+                <= (state.parked if kind == "arms_at_initial_pose" else state.opened)
+            }
+            message = f"{kind} requires its explicit arm step"
+        else:
+            return
+        if not states:
+            raise ValueError(message)
+
+    for condition in plan["conditions"]:
+        scope, fact = condition["scope"], condition["fact"]
+        if scope == "always":
+            invariants.append(fact)
+        elif scope == "initial" and fact["kind"] == "held":
+            for subject in fact["subjects"]:
+                feasible = set()
+                for state in states:
+                    owners = state.holders(subject)
+                    for choice in _arm_options(fact["arms"]):
+                        if owners == set(choice):
+                            feasible.add(state)
+                        elif not owners:
+                            acquired = _advance_arms(state, "pick", [subject], choice)
+                            if acquired is not None:
+                                feasible.add(acquired)
+                if not feasible:
+                    raise ValueError(
+                        "Initial held conditions disagree on arm ownership or capacity"
+                    )
+                states = feasible
+    for fact in invariants:
+        try:
+            require_fact(fact)
+        except ValueError as error:
+            raise ValueError(
+                f"An always condition must hold before the first step: {error}"
+            ) from error
+
+    for step in plan["steps"]:
+        verb, subjects, effects = step["verb"], step["subjects"], step["effects"]
+        for fact in step.get("maintain", ()):
+            require_fact(fact)
+        edges = [
+            (state, choice, next_state)
+            for state in states
+            for choice in _arm_options(step["arms"])
+            if (next_state := _advance_arms(state, verb, subjects, choice)) is not None
+        ]
+        if not edges:
+            if verb in _ACQUIRE_VERBS:
+                if all(len(state.grips) + len(step["arms"]) > 2 for state in states):
+                    raise ValueError(
+                        "More simultaneous grasps than available arms, including auto. "
+                        "Release an earlier item before acquiring another if no arm is free."
+                    )
+                raise ValueError(
+                    "Pick would reacquire a held subject or occupy an already holding arm"
+                )
+            if verb == "open_grippers":
+                raise ValueError(
+                    "Opening grippers with a held object requires a preceding release or placement"
+                )
+            if verb in _HELD_VERBS:
+                raise ValueError(
+                    f"{verb} requires an earlier acquisition of {subjects[0]!r} by the same arm(s)"
+                    + (" and a free destination arm" if verb == "handover" else "")
+                )
+            if verb == "push" and any(
+                role in subjects for state in states for _, role in state.grips
+            ):
+                raise ValueError("A push cannot move a held object")
+            raise ValueError(f"{verb} contradicts the current arm holdings")
+        states = {end for _, _, end in edges}
+        if verb in _ACQUIRE_VERBS:
+            sites[subjects[0]] = {
+                fact["arms"][0]: fact["part"]
+                for fact in effects
+                if fact["kind"] == "grasped_at"
+            }
+        if verb in {"place", "release", "handover"}:
+            sites.pop(subjects[0], None)
+        for fact in (*effects, *invariants):
+            require_fact(fact)
+        transitions.append(
+            [(start, choice, end) for start, choice, end in edges if end in states]
+        )
+    for condition in plan["conditions"]:
+        if condition["scope"] == "final":
+            require_fact(condition["fact"])
+
+    # A later use of a held object can resolve an earlier auto choice.
+    touched = []
+    for edges in reversed(transitions):
+        viable = [(start, choice) for start, choice, end in edges if end in states]
+        touched.append({arm for _, choice in viable for arm in choice})
+        states = {start for start, _ in viable}
+    return list(reversed(touched))
+
+
 def _role_ancestry(role: str, parents: dict[str, str]) -> set[str]:
     lineage = {role}
     while role in parents:
@@ -938,63 +1085,13 @@ def validate_intent(
                 f"Use scene-context ID {name!r} for its corresponding role"
             )
 
-    # Keep each feasible concrete assignment until release or handover. Do not
-    # rewrite the authored auto arms in the returned plan.
-    arm_states = {_ArmState()}
     grasp_sites: dict[str, dict[str, str]] = {}
     manipulated: set[str] = set()
     seated: set[tuple[str, str]] = set()
     tightened: set[tuple[str, str]] = set()
     invariants = []
 
-    def check_fact_state(fact: dict[str, Any]) -> None:
-        nonlocal arm_states
-        kind = fact["kind"]
-        message = None
-        if kind == "held":
-            required = set(fact["arms"]) - {"auto"}
-            arm_states = {
-                state
-                for state in arm_states
-                if all(
-                    (owners := state.holders(s)) and required <= owners
-                    for s in fact["subjects"]
-                )
-            }
-            message = (
-                "Held fact contradicts ordered acquisition/release or arm identity"
-            )
-        elif kind == "released":
-            arm_states = {
-                state
-                for state in arm_states
-                if not any(state.holders(s) for s in fact["subjects"])
-            }
-            message = "Released fact contradicts ordered holdings"
-        elif kind == "grasped_at":
-            subject, arm = fact["subjects"][0], fact["arms"][0]
-            sites = grasp_sites.get(subject, {})
-            arm_states = {
-                state
-                for state in arm_states
-                if any(
-                    (arm == "auto" or side == arm)
-                    and sites.get(side, sites.get("auto")) == fact["part"]
-                    for side in state.holders(subject)
-                )
-            }
-            message = "Grasp site is not witnessed by the acquisition of that arm"
-        elif kind in {"arms_at_initial_pose", "grippers_open"}:
-            required = set(fact["arms"])
-            arm_states = {
-                state
-                for state in arm_states
-                if required
-                <= (state.parked if kind == "arms_at_initial_pose" else state.opened)
-            }
-            message = f"{kind} requires its explicit arm step"
-        if message is not None and not arm_states:
-            raise ValueError(message)
+    def check_tightening(fact: dict[str, Any]) -> None:
         if not _relation_pairs(fact, "tightened_on") <= tightened:
             raise ValueError(
                 "Tightened state has no prior seating and turn for the same role pair"
@@ -1050,29 +1147,10 @@ def validate_intent(
                 )
             seated.update(_relation_pairs(fact, "seated_on"))
             tightened.update(_relation_pairs(fact, "tightened_on"))
-            if fact["kind"] == "held":
-                for subject in fact["subjects"]:
-                    feasible = set()
-                    for state in arm_states:
-                        owners = state.holders(subject)
-                        for choice in _arm_options(fact["arms"]):
-                            if owners == set(choice):
-                                feasible.add(state)
-                            elif not owners:
-                                acquired = _advance_arms(
-                                    state, "pick", [subject], choice
-                                )
-                                if acquired is not None:
-                                    feasible.add(acquired)
-                    if not feasible:
-                        raise ValueError(
-                            "Initial held conditions disagree on arm ownership or capacity"
-                        )
-                    arm_states = feasible
     seated.update(tightened)
     for fact in invariants:
         try:
-            check_fact_state(fact)
+            check_tightening(fact)
         except ValueError as error:
             raise ValueError(
                 f"An always condition must hold before the first step: {error}"
@@ -1137,7 +1215,7 @@ def validate_intent(
             check_fact(fact)
             if _is_control_transition(fact):
                 raise ValueError("A control transition must be produced as an effect")
-            check_fact_state(fact)
+            check_tightening(fact)
         if verb == "press":
             _normalize_held_contact(step, parents, role_kinds, scene_objects)
             verb, subjects, effects = step["verb"], step["subjects"], step["effects"]
@@ -1221,37 +1299,6 @@ def validate_intent(
         tightened.update(new_tightened)
         seated.update(*(_relation_pairs(fact, "seated_on") for fact in effects))
 
-        advanced = {
-            next_state
-            for state in arm_states
-            for choice in _arm_options(step["arms"])
-            if (next_state := _advance_arms(state, verb, subjects, choice)) is not None
-        }
-        if not advanced:
-            if verb in _ACQUIRE_VERBS:
-                if all(len(state.grips) + len(arms) > 2 for state in arm_states):
-                    raise ValueError(
-                        "More simultaneous grasps than available arms, including auto. "
-                        "Release an earlier item before acquiring another if no arm is free."
-                    )
-                raise ValueError(
-                    "Pick would reacquire a held subject or occupy an already holding arm"
-                )
-            if verb == "open_grippers":
-                raise ValueError(
-                    "Opening grippers with a held object requires a preceding release or placement"
-                )
-            if verb in _HELD_VERBS:
-                raise ValueError(
-                    f"{verb} requires an earlier acquisition of {subjects[0]!r} by the same arm(s)"
-                    + (" and a free destination arm" if verb == "handover" else "")
-                )
-            if verb == "push" and any(
-                role in subjects for state in arm_states for _, role in state.grips
-            ):
-                raise ValueError("A push cannot move a held object")
-            raise ValueError(f"{verb} contradicts the current arm holdings")
-        arm_states = advanced
         if verb in _ACQUIRE_VERBS:
             grasp_sites[subjects[0]] = {fact["arms"][0]: fact["part"] for fact in sites}
         # A fully specified grasp does not imply contact with sibling parts.
@@ -1270,7 +1317,7 @@ def validate_intent(
         if verb in {"place", "release", "handover"}:
             grasp_sites.pop(subjects[0], None)
         for fact in (*effects, *invariants):
-            check_fact_state(fact)
+            check_tightening(fact)
         ordered_steps.append(step)
 
     seen_groups = set()
@@ -1293,7 +1340,7 @@ def validate_intent(
     for condition in plan["conditions"]:
         scope, fact = condition["scope"], condition["fact"]
         if scope == "final":
-            check_fact_state(fact)
+            check_tightening(fact)
         if scope != "initial" and fact["kind"] in {"untouched", "untouched_except"}:
             protected = set(fact["subjects"])
             if fact["kind"] == "untouched":
@@ -1315,6 +1362,7 @@ def validate_intent(
                 raise ValueError(
                     f"Ordered operations touch protected roles: {sorted(conflict)}"
                 )
+    _intent_step_arms(plan)
     return plan
 
 

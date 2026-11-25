@@ -751,28 +751,37 @@ def test_grouped_facts_keep_unaffected_subjects_and_references():
 
 
 @pytest.mark.parametrize("components", [["position"], ["position", "orientation"]])
-def test_turn_invalidates_only_orientation_bearing_pose_evidence(components):
+@pytest.mark.parametrize("declare_final", [False, True])
+def test_turn_invalidates_only_orientation_bearing_pose_evidence(
+    components, declare_final
+):
     pose = _fact(
         "pose_match", "bottle", "bottle", epoch="initial", components=components
     )
+    final = dict(pose, components=list(reversed(components)))
     plan = _validate(
         _plan(
             "bottle",
             _step("pick", "bottle", arms="left"),
             _step("move_held", "bottle", pose, arms="left"),
             _step("turn", "bottle", arms="left"),
+            conditions=[_condition("final", final)] if declare_final else [],
         )
     )
-    check = _audit(_check("step_02", scope="final", state=pose))
+    refs = ("step_02", "condition_01") if declare_final else ("step_02",)
+    check = _audit(_check(*refs, scope="final", state=final))
     if "orientation" in components:
-        with pytest.raises(AuthoringEvidenceError, match="still valid at the end"):
+        with pytest.raises(
+            AuthoringEvidenceError, match="still valid at the end|outlives"
+        ):
             _validate_intent_audit(_SOURCE, plan, check)
     else:
         _validate_intent_audit(_SOURCE, plan, check)
 
 
 @pytest.mark.parametrize("moved", ["bowl", "other"])
-def test_gripper_relation_loses_evidence_when_its_reference_moves(moved):
+@pytest.mark.parametrize("declare_final", [False, True])
+def test_gripper_relation_loses_evidence_when_its_reference_moves(moved, declare_final):
     hover = dict(
         kind="gripper_relation", arms=["left"], references=["rim"], value="above"
     )
@@ -782,11 +791,15 @@ def test_gripper_relation_loses_evidence_when_its_reference_moves(moved):
             _step("move_gripper", "", hover, arms="left"),
             _step("pick", moved, arms="right"),
             _step("move_held", moved, arms="right"),
+            conditions=[_condition("final", hover)] if declare_final else [],
         )
     )
-    check = _audit(_check("step_01", scope="final", state=hover))
+    refs = ("step_01", "condition_01") if declare_final else ("step_01",)
+    check = _audit(_check(*refs, scope="final", state=hover))
     if moved == "bowl":
-        with pytest.raises(AuthoringEvidenceError, match="still valid at the end"):
+        with pytest.raises(
+            AuthoringEvidenceError, match="still valid at the end|outlives"
+        ):
             _validate_intent_audit(_SOURCE, plan, check)
     else:
         _validate_intent_audit(_SOURCE, plan, check)
@@ -852,6 +865,15 @@ def test_grouped_arm_evidence_keeps_the_unaffected_arm(verb, kind):
     plan["steps"][1]["arms"] = ["auto"]
     with pytest.raises(AuthoringEvidenceError):
         _validate_intent_audit(_SOURCE, _validate(plan), claim("left"))
+    for effects, later in (
+        ([_fact("held", "item", arms=["right"])], []),
+        ([], [_step("move_held", "item", arms="right")]),
+    ):
+        plan["steps"][1]["effects"] = effects
+        constrained = _validate(dict(plan, steps=[*plan["steps"], *later]))
+        _validate_intent_audit(_SOURCE, constrained, claim("left"))
+        with pytest.raises(AuthoringEvidenceError):
+            _validate_intent_audit(_SOURCE, constrained, claim("right"))
 
 
 @pytest.mark.parametrize("phase", ["initial", "maintain", "effect"])
@@ -1223,6 +1245,8 @@ def test_authoring_publication_is_readable_without_execution(
             "step_03": "step_03",
         }
         assert pairing["goal_groups"] == expected_goals
+        assert pairing["goal_calls"] == expected_goals
+        assert pairing["milestone_calls"] == pairing["milestone_groups"]
     graph = result["semantic_task_graph"]
     if terminal == "effect_only":
         assert graph["success"]["conditions"]["final"] == [support]

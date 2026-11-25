@@ -17,20 +17,18 @@
 import { useEffect, useMemo, useState, useRef } from "react";
 import {
   ArrowUpFromLine,
-  Box,
   Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  CircleCheck,
   CircleX,
   FileText,
-  GitBranch,
   Maximize2,
-  Moon,
   MousePointer2,
   ScanLine,
-  Sun,
   Target,
+  Workflow,
   X,
 } from "lucide-react";
 import {
@@ -131,7 +129,7 @@ export type Review = {
         required_arm?: string;
         terminal_behavior?: string;
       }[];
-      clauses?: { id: string; quote: string }[];
+      clauses?: { id: string; quote: string; target?: string }[];
       references: {
         role_id: string;
         entities: {
@@ -147,6 +145,8 @@ export type Review = {
     role_entities: Record<string, string[]>;
     milestone_groups: Record<string, string>;
     goal_groups: Record<string, string[]>;
+    milestone_calls?: Record<string, string>;
+    goal_calls?: Record<string, string[]>;
   };
   annotations?: Record<string, { object?: string; reference?: string }>;
   pending: number;
@@ -370,14 +370,25 @@ export default function TaskReview({
       return "zh";
     }
   });
-  const [dark, theme] = useState(
-    () => new URLSearchParams(location.search).get("theme") === "dark",
+  const [theme, setTheme] = useState<"light" | "dark" | "system">(() => {
+    const value = new URLSearchParams(location.search).get("theme");
+    return value === "light" || value === "dark" ? value : "system";
+  });
+  const [systemDark, setSystemDark] = useState(
+    () => matchMedia("(prefers-color-scheme: dark)").matches,
   );
+  useEffect(() => {
+    const preference = matchMedia("(prefers-color-scheme: dark)");
+    const sync = () => setSystemDark(preference.matches);
+    preference.addEventListener("change", sync);
+    return () => preference.removeEventListener("change", sync);
+  }, []);
   const zh = locale === "zh",
     t = (a: string, b: string) => (zh ? a : b);
   const { spec, pairing } = review,
     groups = data.graph.task_groups,
     calls = data.graph.nodes;
+  const callNumbers = new Map(calls.map((node, index) => [node.id, index + 1]));
   const authoredPreview =
     !review.attempt && calls.some((node) => intentStep(node.call));
   const taskTitle =
@@ -409,15 +420,25 @@ export default function TaskReview({
     [reviewView, setReviewView] = useState<"steps" | "dependencies">(
       "dependencies",
     ),
+    [linkedGoal, setLinkedGoal] = useState(""),
     [imageLightbox, setImageLightbox] = useState(false);
   const opener = useRef<HTMLElement | null>(null),
     closeButton = useRef<HTMLButtonElement>(null),
-    imageOpener = useRef<HTMLButtonElement>(null),
+    imageOpener = useRef<HTMLElement>(null),
     imageDialog = useRef<HTMLDialogElement>(null);
-  const show = (key: string, source?: HTMLElement) => {
-    if (!selected)
+  const show = (key: string, source?: HTMLElement, goalId = "") => {
+    if (source || !selected)
       opener.current = source ?? (document.activeElement as HTMLElement);
+    setLinkedGoal(goalId);
     select(key);
+  };
+  const chooseCall = (
+    node: TaskNode,
+    source?: HTMLElement,
+    goalId?: string,
+  ) => {
+    setOpen(new Set([node.task_instance_id]));
+    show("call:" + node.id, source, goalId);
   };
   const close = () => {
     select("");
@@ -433,7 +454,7 @@ export default function TaskReview({
   };
   useEffect(() => {
     if (!selected) return;
-    closeButton.current?.focus();
+    if (!selected.startsWith("call:") || run) closeButton.current?.focus();
     const fn = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !imageDialog.current?.open) close();
     };
@@ -444,6 +465,10 @@ export default function TaskReview({
     const dialog = imageDialog.current;
     if (imageLightbox && dialog && !dialog.open) dialog.showModal();
   }, [imageLightbox]);
+  const openImage = (source: HTMLElement) => {
+    imageOpener.current = source;
+    setImageLightbox(true);
+  };
   const closeImage = () => {
     imageDialog.current?.close();
     setImageLightbox(false);
@@ -484,13 +509,18 @@ export default function TaskReview({
     if (p.predicate === "held_by_both_grippers")
       return t("双臂共同持有", "Both arms hold") + " " + subject;
     if (p.predicate === "handover_complete")
-      return subject + " · " + t("交接完成", "handover complete");
+      return zh ? subject + "交接完成" : subject + " handed over";
+    if (p.predicate === "pour_motion" && ref)
+      return t(
+        subject + "朝" + ref + "完成一次倾倒动作",
+        subject + " performs a pour toward " + ref,
+      );
     if (
       (p.predicate === "relation" || p.predicate === "semantic_goal") &&
       (relation === "on" || relation === "inside")
     )
       return zh
-        ? subject + " 在 " + ref + (relation === "on" ? " 上" : " 内")
+        ? subject + "在" + ref + (relation === "on" ? "上" : "内")
         : subject + (relation === "on" ? " on " : " inside ") + ref;
     return [subject, p.predicate, ref].filter(Boolean).join(" · ");
   };
@@ -518,7 +548,7 @@ export default function TaskReview({
     : calls.find((c) => selected === "call:" + c.id);
   const selectedIntent = intentStep(selectedCall?.call);
   const selectedGoal = spec.objectives.goal.find(
-    (p) => selected === "goal:" + p.id,
+    (p) => selected === "goal:" + p.id || (selectedCall && linkedGoal === p.id),
   );
   const selectedGoalFact =
     authoredPreview && selectedGoal?.predicate === "semantic_goal"
@@ -598,155 +628,171 @@ export default function TaskReview({
     if (left && right) return t("双臂协同", "Both arms together");
     return primary ? armName(primary) : "";
   };
-  const titles = (c: TaskNode) => {
-    const object = name(c.call.object || c.call.arguments?.object);
-    if (c.call.call_id === "simulation.coordinated_transport")
-      return t("双臂搬", "Carry together: ") + object;
-    if (c.call.kind === "place" && c.call.resources?.primary === "left")
-      return t("左臂放", "Left arm places ") + object;
-    if (c.call.kind === "hand_over") return t("交接", "Hand over ") + object;
-    return null;
+  const actionObject = (node: TaskNode) => {
+    const object =
+      node.call.object || node.call.arguments?.object || anns[node.id]?.object;
+    return object ? shortName(object) : "";
   };
-  const titleFor = (c: TaskNode) =>
-    intentStep(c.call)
-      ? intentLabel(c.task_type, locale)
-      : titles(c) ||
-        model.callLabel(c) +
-          " " +
-          name(
-            c.call.object || c.call.arguments?.object || anns[c.id]?.object,
-          ) +
-          (c.call.kind === "place" && anns[c.id]?.reference
-            ? " → " + name(anns[c.id]?.reference)
-            : "");
-  const toggle = (id: string) =>
-    setOpen((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  const verbTone = (taskType: string) => {
-    if (taskType === "pick" || taskType === "grasp") return "tone-pick";
-    if (taskType === "place" || taskType === "release") return "tone-place";
-    if (taskType === "return_arms" || taskType === "open_grippers")
-      return "tone-return";
+  const join = (label: string, object: string) =>
+    object ? label + t("", " ") + object : label;
+  const laneTitle = (node: TaskNode) => {
+    const label = (
+      {
+        pick: t("抓取", "Pick"),
+        place: t("放下", "Place"),
+        hand_over: t("交接", "Pass"),
+        "simulation.coordinated_transport": t("搬运", "Carry"),
+      } as Record<string, string>
+    )[node.call.call_id || node.call.kind];
+    return label ? join(label, actionObject(node)) : titleFor(node);
+  };
+  const titleFor = (node: TaskNode) => {
+    const step = intentStep(node.call);
+    if (step)
+      return join(
+        intentLabel(node.task_type, locale),
+        step.subjects.map(shortName).join(t("、", ", ")),
+      );
+    const object = actionObject(node);
+    const resources = node.call.resources;
     if (
-      [
-        "actuate",
-        "articulate",
-        "press",
-        "turn",
-        "push",
-        "transfer_contents",
-        "handover",
-      ].includes(taskType)
+      node.call.kind === "hand_over" &&
+      resources?.source &&
+      resources?.destination &&
+      object
     )
-      return "tone-action";
-    if (["move_held", "move_gripper", "orient"].includes(taskType))
-      return "tone-move";
-    return "tone-default";
+      return t(
+        armName(resources.source) +
+          "将" +
+          object +
+          "递给" +
+          armName(resources.destination),
+        armName(resources.source) +
+          " passes " +
+          object +
+          " to " +
+          armName(resources.destination),
+      );
+    const target = anns[node.id]?.reference || node.call.arguments?.reference;
+    if (node.call.kind === "place" && object && target) {
+      const destination = shortName(target);
+      const inside =
+        Boolean(node.call.inside) || node.call.arguments?.relation === "inside";
+      return t(
+        "将" + object + (inside ? "放入" : "放到") + destination + "并松开",
+        "Place " +
+          object +
+          (inside ? " inside " : " at ") +
+          destination +
+          " and release",
+      );
+    }
+    return (
+      join(model.callLabel(node), object) +
+      (target ? " → " + shortName(target) : "")
+    );
   };
+  const toggle = (id: string) =>
+    setOpen((current) => new Set(current.has(id) ? [] : [id]));
   const activeGroups = new Set(
     selectedGoal
       ? pairing.goal_groups[selectedGoal.id] || []
       : [selectedGroup?.id || selectedCall?.task_instance_id || ""],
   );
   const selectedForGraph = (node: TaskNode) =>
-    !!selectedCall && !selectedGoal
+    selectedCall
       ? selectedCall.id === node.id
       : activeGroups.has(node.task_instance_id);
+  const stepNumber = (number: number) =>
+    t("第 " + number + " 步", "Step " + number);
   const renderStages = () =>
-    groups.map((g, index) => {
-      const openGroup = open.has(g.id);
-      const groupRoleMatch = g.node_ids.some(matchesRole);
+    groups.map((group, index) => {
+      const openGroup = open.has(group.id);
+      const groupRoleMatch = group.node_ids.some(matchesRole);
+      const numbers = group.node_ids
+        .map((id) => callNumbers.get(id)!)
+        .filter(Boolean);
+      const first = numbers[0],
+        last = numbers.at(-1);
+      const range = !first
+        ? ""
+        : first === last
+          ? stepNumber(first)
+          : t(`第 ${first}–${last} 步`, `Steps ${first}–${last}`);
+      const stageTitle = authoredPreview
+        ? titleFor(model.calls.get(group.node_ids[0])!)
+        : model.groupLabel(group);
       return (
         <section
-          key={g.id}
+          key={group.id}
           className="rv-review-stage"
-          data-id={"group:" + g.id}
+          data-id={"group:" + group.id}
         >
           <div
             className={[
               "rv-frame",
-              authoredPreview && verbTone(g.task_type),
-              activeGroups.has(g.id) && "highlight",
+              activeGroups.has(group.id) && "highlight",
               selectedRole && groupRoleMatch && "role-match",
               !groupRoleMatch && "faded",
             ]
               .filter(Boolean)
               .join(" ")}
           >
-            <div className="rv-frame-head">
-              <button
-                type="button"
-                className="rv-stage"
-                data-key={"group:" + g.id}
-                onClick={(event) => show("group:" + g.id, event.currentTarget)}
-              >
-                <span className="rv-stage-index">
-                  {String(index + 1).padStart(2, "0")}
-                </span>
-                <span className="rv-stage-verb">
-                  {authoredPreview
-                    ? intentLabel(g.task_type, locale)
-                    : model.groupLabel(g)}
-                </span>
-              </button>
-              <button
-                type="button"
-                className="rv-toggle"
-                aria-expanded={openGroup}
-                onClick={() => toggle(g.id)}
-              >
-                {g.node_ids.length} {t("个动作", "actions")}{" "}
-                <ChevronDown size={14} />
-              </button>
-            </div>
-            {openGroup && (
-              <div className="rv-stage-calls">
-                {g.node_ids.map((id) => {
+            <button
+              type="button"
+              className="rv-toggle"
+              aria-expanded={openGroup}
+              aria-controls={"review-stage-" + index}
+              onClick={() => toggle(group.id)}
+            >
+              <span className="rv-stage-index">{index + 1}</span>
+              <span className="rv-stage-verb">{stageTitle}</span>
+              <small>{range}</small>
+              <ChevronDown size={14} />
+            </button>
+            <ol
+              className="rv-stage-calls"
+              id={"review-stage-" + index}
+              hidden={!openGroup}
+            >
+              {openGroup &&
+                group.node_ids.map((id) => {
                   const node = model.calls.get(id)!;
-                  const step = intentStep(node.call);
-                  const arm = step
-                    ? intentArmBadge(step.arms, locale)
-                    : armLabel(node);
                   return (
-                    <button
-                      key={id}
-                      type="button"
-                      data-key={"call:" + id}
-                      className={[
-                        "rv-action",
-                        status(node) === false && "failed",
-                        selectedForGraph(node) && "selected",
-                        !matchesRole(id) && "faded",
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}
-                      onClick={(event) =>
-                        show("call:" + id, event.currentTarget)
-                      }
-                    >
-                      <strong>{titleFor(node)}</strong>
-                      <small>
-                        {node.call.call_id || node.call.kind}
-                        {arm ? " · " + arm : ""}
-                      </small>
-                    </button>
+                    <li key={id}>
+                      <button
+                        type="button"
+                        data-key={"call:" + id}
+                        aria-pressed={selectedForGraph(node)}
+                        className={[
+                          "rv-step-action",
+                          status(node) === false && "failed",
+                          selectedForGraph(node) && "selected",
+                          !matchesRole(id) && "faded",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                        onClick={(event) =>
+                          chooseCall(node, event.currentTarget)
+                        }
+                      >
+                        <small>
+                          {String(callNumbers.get(id)).padStart(2, "0")}
+                        </small>
+                        <span>{titleFor(node)}</span>
+                      </button>
+                    </li>
                   );
                 })}
-              </div>
-            )}
+            </ol>
           </div>
         </section>
       );
     });
-  const localeButton = () => {
-    const l = zh ? "en" : "zh";
-    language(l);
+  const selectLanguage = (value: Locale) => {
+    language(value);
     try {
-      localStorage.setItem("gensim.graph.language", l);
+      localStorage.setItem("gensim.graph.language", value);
     } catch {}
   };
   const sources = selectedRole
@@ -767,27 +813,142 @@ export default function TaskReview({
               observation.env_ids.indexOf(Number(env))
             ]) || t("执行失败", "Execution failed");
   };
+  const goalCalls = (id: string) =>
+    (
+      pairing.goal_calls?.[id] ??
+      groups.flatMap((group) =>
+        pairing.goal_groups[id]?.includes(group.id) &&
+        group.node_ids.length === 1
+          ? group.node_ids
+          : [],
+      )
+    ).filter((id) => model.calls.has(id));
+  const reportGoals = [...spec.objectives.goal].sort(
+    (a, b) =>
+      Math.min(Infinity, ...goalCalls(a.id).map((id) => callNumbers.get(id)!)) -
+      Math.min(Infinity, ...goalCalls(b.id).map((id) => callNumbers.get(id)!)),
+  );
+  const stepMilestones = selectedCall
+    ? spec.objectives.milestones.filter(
+        (m) =>
+          pairing.milestone_calls?.[m.id] === selectedCall.id ||
+          (!pairing.milestone_calls?.[m.id] &&
+            stageCall?.id === selectedCall.id &&
+            pairing.milestone_groups[m.id] === selectedCall.task_instance_id),
+      )
+    : [];
+  const stepGoals = selectedCall
+    ? spec.objectives.goal.filter((goal) =>
+        goalCalls(goal.id).includes(selectedCall.id),
+      )
+    : [];
+  const stepQuotes = selectedCall
+    ? [
+        ...new Set(
+          [
+            selectedIntent?.quote,
+            ...(data.validation?.source?.requirements || [])
+              .filter((row) => row.node_ids.includes(selectedCall.id))
+              .map((row) => row.quote),
+            ...(spec.interpretation.clauses || [])
+              .filter((clause) =>
+                stepMilestones.some((m) => m.id === clause.target),
+              )
+              .map((clause) => clause.quote),
+          ].filter((quote): quote is string => !!quote),
+        ),
+      ]
+    : [];
+  const bindingRows =
+    data.validation?.source?.bindings?.filter(
+      (row) => row.node_id === selectedCall?.id,
+    ) || [];
+  const stepChecks = new Map<string, { scopes: Set<string>; hit: boolean }>();
+  for (const [check, scope] of [
+    ...stepMilestones.flatMap((m) =>
+      m.achieve.map((fact) => [fact, t("里程碑", "Milestone")] as const),
+    ),
+    ...stepGoals.map(
+      (fact) => [fact, t("完成条件", "Completion criterion")] as const,
+    ),
+  ]) {
+    const label = predicate(check);
+    const row = stepChecks.get(label) || {
+      scopes: new Set<string>(),
+      hit: false,
+    };
+    row.scopes.add(scope);
+    row.hit ||= check.id === selectedGoal?.id;
+    stepChecks.set(label, row);
+  }
+  const sceneBoxes = spec.interpretation.references.flatMap((reference) =>
+    reference.entities.flatMap((entity) => {
+      const box = entity.bbox;
+      if (
+        !box ||
+        box.length !== 4 ||
+        box.some((v) => !Number.isFinite(v) || v < 0 || v > 1)
+      )
+        return [];
+      const [left, top, right, bottom] = box;
+      if (left >= right || top >= bottom) return [];
+      return [
+        {
+          role: reference.role_id,
+          id: reference.role_id + ":" + entity.id,
+          style: {
+            left: left * 100 + "%",
+            top: top * 100 + "%",
+            width: (right - left) * 100 + "%",
+            height: (bottom - top) * 100 + "%",
+          },
+        },
+      ];
+    }),
+  );
+  const markedRoles = new Set(sceneBoxes.map((box) => box.role));
+  const toggleRole = (id: string, source: HTMLElement) =>
+    selectedRole?.id === id ? close() : show("role:" + id, source);
   return (
     <main
       className="rv rv-reviewer graph-ui"
-      data-theme={dark ? "dark" : "light"}
+      data-theme={
+        theme === "dark" || (theme === "system" && systemDark)
+          ? "dark"
+          : "light"
+      }
     >
       <header className="rv-bar">
-        <span className="rv-brand">
-          <GitBranch size={17} /> EmbodiChain
-        </span>
-        <span className="rv-bread">Generative Simulation · Task Engine</span>
+        <div className="rv-brand">
+          <Workflow size={16} aria-hidden="true" /> <strong>EmbodiChain</strong>
+          <span className="rv-bread">Generative Simulation - Task Engine</span>
+        </div>
         <div className="rv-tools">
-          <button type="button" onClick={localeButton}>
-            {zh ? "EN" : "中文"}
-          </button>
-          <button
-            type="button"
-            aria-label={t("主题", "Theme")}
-            onClick={() => theme(!dark)}
-          >
-            {dark ? <Sun size={16} /> : <Moon size={16} />}
-          </button>
+          <label>
+            {t("语言", "Language")}
+            <select
+              value={locale}
+              onChange={(e) => selectLanguage(e.target.value as Locale)}
+            >
+              <option value="zh" lang="zh-CN">
+                中文
+              </option>
+              <option value="en" lang="en">
+                English
+              </option>
+            </select>
+          </label>
+          <label>
+            {t("主题", "Theme")}
+            <select
+              value={theme}
+              onChange={(e) => setTheme(e.target.value as typeof theme)}
+            >
+              <option value="system">{t("跟随系统", "System")}</option>
+              <option value="light">{t("浅色", "Light")}</option>
+              <option value="dark">{t("深色", "Dark")}</option>
+            </select>
+          </label>
         </div>
       </header>
       <section className="rv-summary">
@@ -819,40 +980,62 @@ export default function TaskReview({
             </button>
           </div>
         </div>
-        <div
+        <dl
           className="rv-state"
           aria-label={t("计划与执行状态", "Plan and execution status")}
         >
-          <span className={unverifiedQualifiers.length ? "bad" : "good"}>
-            {unverifiedQualifiers.length ? (
-              <CircleX size={14} />
-            ) : (
-              <Check size={14} />
-            )}
-            {unverifiedQualifiers.length
-              ? t("限定要求待核实", "Qualifiers unverified")
-              : t("计划已校验", "Plan validated")}
-          </span>
-          {review.pending > 0 ? (
-            <button type="button" onClick={() => show("bindings")}>
-              {review.pending} {t("项待绑定", "pending bindings")}
-            </button>
-          ) : !run ? (
-            <span>{t("仅计划", "Plan only")}</span>
-          ) : null}
-          <span className={run?.status === "failed" ? "bad" : undefined}>
-            {t("执行", "Execution")} ·{" "}
-            {run ? model.t(run.status) : t("未执行", "Not run")}
-          </span>
+          <div>
+            <dt>{t("计划覆盖", "Plan coverage")}</dt>
+            <dd className={unverifiedQualifiers.length ? "bad" : "good"}>
+              {unverifiedQualifiers.length ? (
+                <CircleX size={14} />
+              ) : (
+                <CircleCheck size={14} />
+              )}
+              {unverifiedQualifiers.length
+                ? t("限定要求待核实", "Qualifiers unverified")
+                : t("通过", "Passed")}
+            </dd>
+          </div>
+          <div>
+            <dt>{t("场景", "Scene")}</dt>
+            <dd className="rv-scene-state">
+              {review.pending > 0 ? (
+                <button
+                  type="button"
+                  onClick={(e) => show("bindings", e.currentTarget)}
+                >
+                  {review.pending} {t("项待绑定", "pending bindings")}
+                </button>
+              ) : markedRoles.size && !run ? (
+                markedRoles.size +
+                "/" +
+                spec.configuration.roles.length +
+                t(" 已标注 · 待资格检查", " annotated · Awaiting qualification")
+              ) : !run ? (
+                t("仅计划 · 尚未绑定", "Plan only · Not bound")
+              ) : (
+                t("运行场景", "Run scene")
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt>{t("执行", "Execution")}</dt>
+            <dd className={run?.status === "failed" ? "bad" : undefined}>
+              {run ? model.t(run.status) : t("未执行", "Not run")}
+            </dd>
+          </div>
           {run && (
-            <span>
-              {t("任务验收", "Acceptance")} ·{" "}
-              {run.verdict === "not_evaluated"
-                ? t("未评估", "Not evaluated")
-                : model.t(run.physical)}
-            </span>
+            <div>
+              <dt>{t("任务验收", "Acceptance")}</dt>
+              <dd>
+                {run.verdict === "not_evaluated"
+                  ? t("未评估", "Not evaluated")
+                  : model.t(run.physical)}
+              </dd>
+            </div>
           )}
-        </div>
+        </dl>
       </section>
       <div className="rv-work">
         <div className="rv-flow-column">
@@ -860,8 +1043,8 @@ export default function TaskReview({
             <div className="rv-graphbar">
               <h2 id="rv-flow-heading">{t("任务流程", "Task flow")}</h2>
               <small>
-                {groups.length} {t("阶段", "stages")} · {calls.length}{" "}
-                {t("动作", "actions")}
+                {groups.length} {t("个阶段", "stages")} · {calls.length}{" "}
+                {t("个动作", "actions")}
               </small>
             </div>
             <div
@@ -890,11 +1073,11 @@ export default function TaskReview({
               <ReviewDependencies
                 calls={calls}
                 t={t}
-                title={titleFor}
+                title={laneTitle}
                 selected={selectedForGraph}
                 related={matchesRole}
                 status={status}
-                onSelect={(node, button) => show("call:" + node.id, button)}
+                onSelect={chooseCall}
               />
             )}
             {failure ? (
@@ -914,7 +1097,116 @@ export default function TaskReview({
               </div>
             ) : null}
           </section>
-          {selected && (
+          {selectedCall && !run && (
+            <aside
+              className="rv-detail rv-inline-step"
+              aria-label={t("详情", "Details")}
+            >
+              <div className="rv-review-heading rv-inline-heading">
+                <h2>{titleFor(selectedCall)}</h2>
+                <div className="rv-inline-tools">
+                  <small>
+                    {stepNumber(callNumbers.get(selectedCall.id)!)}
+                    {t("详情", " details")}
+                  </small>
+                  <button
+                    type="button"
+                    ref={closeButton}
+                    aria-label={t("关闭", "Close")}
+                    onClick={close}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+              <details className="rv-step-call" key={selectedCall.id}>
+                <summary>
+                  Semantic Call{" "}
+                  <code>
+                    {selectedCall.call.call_id || selectedCall.call.kind}
+                  </code>
+                </summary>
+                <Raw value={selectedCall.call} />
+              </details>
+              <div className="rv-step-info">
+                {stepQuotes.length > 0 && (
+                  <>
+                    <h3>{t("对应原文", "Source wording")}</h3>
+                    {stepQuotes.map((quote) => (
+                      <blockquote key={quote}>{quote}</blockquote>
+                    ))}
+                  </>
+                )}
+                {stepChecks.size > 0 && (
+                  <>
+                    <h3>{t("本步检查条件", "Checks for this step")}</h3>
+                    <ul className="rv-step-checks">
+                      {[...stepChecks].map(([label, row]) => (
+                        <li key={label} className={row.hit ? "hit" : undefined}>
+                          <span>{label}</span>
+                          <small>{[...row.scopes].join(" · ")}</small>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+                <details className="rv-step-tech" key={selectedCall.id}>
+                  <summary>{t("工程信息", "Engineering information")}</summary>
+                  <div className="rv-tech-links">
+                    {selectedCall.depends_on.map((id) => {
+                      const prerequisite = model.calls.get(id);
+                      return (
+                        prerequisite && (
+                          <button
+                            type="button"
+                            key={id}
+                            onClick={() => chooseCall(prerequisite)}
+                          >
+                            {t("前置步骤", "Prerequisite")} ·{" "}
+                            {stepNumber(callNumbers.get(id)!)}
+                          </button>
+                        )
+                      );
+                    })}
+                    <code>{selectedCall.id}</code>
+                    {(selectedIntent || armLabel(selectedCall)) && (
+                      <span>
+                        {t("机械臂", "Arm")} ·{" "}
+                        {selectedIntent
+                          ? intentArmBadge(selectedIntent.arms, locale)
+                          : armLabel(selectedCall)}
+                      </span>
+                    )}
+                  </div>
+                  {selectedIntent && (
+                    <IntentStepDetails
+                      key={selectedCall.id}
+                      step={selectedIntent}
+                      verb={selectedCall.task_type}
+                      locale={locale}
+                      name={shortName}
+                      releaseQuote={
+                        spec.interpretation.clauses?.find(
+                          (clause) =>
+                            clause.id ===
+                            "source." + selectedCall.id + ".release",
+                        )?.quote
+                      }
+                    />
+                  )}
+                  {!!bindingRows.length && (
+                    <details>
+                      <summary>
+                        {t("该调用的绑定声明", "Binding declaration")}
+                      </summary>
+                      <Raw value={bindingRows} />
+                    </details>
+                  )}
+                </details>
+              </div>
+            </aside>
+          )}
+          {selected && (!selectedCall || run) && (
             <aside className="rv-detail" aria-label={t("详情", "Details")}>
               <div className="rv-detailbar">
                 <ScanLine size={16} />
@@ -1309,27 +1601,49 @@ export default function TaskReview({
               </h2>
               {!run && <small>{t("待执行评估", "Awaiting execution")}</small>}
             </div>
-            {spec.objectives.goal.map((goal) => {
+            {reportGoals.map((goal) => {
               const producers = pairing.goal_groups[goal.id] || [];
+              const nodes = goalCalls(goal.id);
+              const actualSteps = nodes
+                .map((id) => callNumbers.get(id)!)
+                .sort((a, b) => a - b);
               const indexes = groups.flatMap((g, i) =>
                 producers.includes(g.id) ? [i + 1] : [],
               );
               return (
                 <button
                   key={goal.id}
+                  data-key={"goal:" + goal.id}
                   type="button"
                   aria-pressed={selectedGoal?.id === goal.id}
-                  onClick={(event) =>
-                    show("goal:" + goal.id, event.currentTarget)
-                  }
+                  onClick={(event) => {
+                    const node =
+                      nodes.length === 1 && !run
+                        ? model.calls.get(nodes[0])
+                        : null;
+                    if (!node) {
+                      show("goal:" + goal.id, event.currentTarget);
+                      return;
+                    }
+                    chooseCall(node, event.currentTarget, goal.id);
+                    requestAnimationFrame(() =>
+                      document
+                        .querySelector(".rv-inline-step")
+                        ?.scrollIntoView({ block: "nearest" }),
+                    );
+                  }}
                 >
                   <span>{predicate(goal)}</span>
                   <small>
-                    {indexes.length
-                      ? t("阶段 ", "Stages ") + indexes.join(" · ")
-                      : t("无配对证据", "No paired evidence")}
+                    {actualSteps.length === 1
+                      ? stepNumber(actualSteps[0])
+                      : actualSteps.length
+                        ? t("步骤 ", "Steps ") + actualSteps.join(" · ")
+                        : indexes.length
+                          ? t("阶段 ", "Stages ") + indexes.join(" · ")
+                          : t("无配对证据", "No paired evidence")}
+                    {producers.length || nodes.length ? " →" : ""}
                   </small>
-                  <ChevronRight size={14} />
                 </button>
               );
             })}
@@ -1338,75 +1652,97 @@ export default function TaskReview({
         <aside className="rv-review-scene" aria-labelledby="rv-scene-heading">
           <div className="rv-review-heading">
             <h2 id="rv-scene-heading">{t("输入场景", "Source scene")}</h2>
-          </div>
-          {review.source_image && (
-            <button
-              ref={imageOpener}
-              type="button"
-              className="rv-scene-thumb"
-              aria-label={t("查看输入场景原图", "View source scene image")}
-              onClick={() => setImageLightbox(true)}
-            >
-              <img
-                src={review.source_image}
-                alt={t("任务来源图", "Source image")}
-              />
-              {spec.interpretation.references.flatMap((reference) =>
-                reference.entities.map((entity) => {
-                  const box = entity.bbox;
-                  if (
-                    !box ||
-                    box.length !== 4 ||
-                    box.some((v) => !Number.isFinite(v) || v < 0 || v > 1)
-                  )
-                    return null;
-                  const [x1, y1, x2, y2] = box;
-                  if (x1 >= x2 || y1 >= y2) return null;
-                  return (
-                    <i
-                      className={
-                        selectedRole?.id === reference.role_id
-                          ? "rv-scene-box active"
-                          : "rv-scene-box"
-                      }
-                      key={reference.role_id + ":" + entity.id}
-                      aria-hidden="true"
-                      style={{
-                        left: x1 * 100 + "%",
-                        top: y1 * 100 + "%",
-                        width: (x2 - x1) * 100 + "%",
-                        height: (y2 - y1) * 100 + "%",
-                      }}
-                    />
-                  );
-                }),
-              )}
-              <span>
-                <Maximize2 size={13} /> {t("放大", "Enlarge")}
-              </span>
-            </button>
-          )}
-          <h3>{t("任务对象", "Task objects")}</h3>
-          <div className="rv-chips">
-            {spec.configuration.roles.map((r) => (
+            {review.source_image && (
               <button
-                key={r.id}
                 type="button"
-                className={"rv-role-chip kind-" + r.kind}
-                title={name(r.id)}
-                aria-pressed={selectedRole?.id === r.id}
-                onClick={(event) =>
-                  selectedRole?.id === r.id
-                    ? close()
-                    : show("role:" + r.id, event.currentTarget)
-                }
+                className="rv-enlarge"
+                aria-haspopup="dialog"
+                onClick={(event) => openImage(event.currentTarget)}
               >
-                <Box size={13} /> {shortName(r.id)}
-                {r.cardinality !== "one" && (
-                  <small>× {r.count || r.cardinality}</small>
-                )}
+                <Maximize2 size={16} /> {t("放大", "Enlarge")}
               </button>
-            ))}
+            )}
+          </div>
+          <div className="rv-scene-body">
+            {review.source_image && (
+              <div className="rv-scene-photo">
+                <button
+                  type="button"
+                  className="rv-scene-thumb"
+                  aria-label={t("查看输入场景原图", "View source scene image")}
+                  aria-haspopup="dialog"
+                  onClick={(event) => openImage(event.currentTarget)}
+                >
+                  <img
+                    src={review.source_image}
+                    alt={t("任务来源图", "Source image")}
+                  />
+                </button>
+                {sceneBoxes
+                  .filter(
+                    (box) => !selectedRole || box.role === selectedRole.id,
+                  )
+                  .map((box) => (
+                    <button
+                      key={box.id}
+                      type="button"
+                      style={box.style}
+                      className={
+                        "rv-scene-box" +
+                        (selectedRole?.id === box.role ? " active" : "")
+                      }
+                      aria-label={t("定位", "Locate ") + shortName(box.role)}
+                      aria-pressed={selectedRole?.id === box.role}
+                      onClick={(event) =>
+                        toggleRole(box.role, event.currentTarget)
+                      }
+                    >
+                      {selectedRole?.id === box.role && (
+                        <span>{shortName(box.role)}</span>
+                      )}
+                    </button>
+                  ))}
+              </div>
+            )}
+            <div className="rv-role-area">
+              <h3>{t("任务对象", "Task objects")}</h3>
+              <div
+                className="rv-chips"
+                role="group"
+                aria-label={t(
+                  "按任务对象定位动作",
+                  "Locate actions by task object",
+                )}
+              >
+                {spec.configuration.roles.map((role) => (
+                  <button
+                    key={role.id}
+                    type="button"
+                    className={"rv-role-chip kind-" + role.kind}
+                    title={name(role.id)}
+                    aria-pressed={selectedRole?.id === role.id}
+                    onClick={(event) =>
+                      toggleRole(role.id, event.currentTarget)
+                    }
+                  >
+                    {shortName(role.id)}
+                    {role.cardinality !== "one" && (
+                      <small>× {role.count || role.cardinality}</small>
+                    )}
+                  </button>
+                ))}
+              </div>
+              {selectedRole &&
+                review.source_image &&
+                !markedRoles.has(selectedRole.id) && (
+                  <small className="rv-role-note">
+                    {t(
+                      "该对象尚无图像标注框",
+                      "No source annotation for this object",
+                    )}
+                  </small>
+                )}
+            </div>
           </div>
           <section
             className="rv-review-instruction"
@@ -1419,9 +1755,6 @@ export default function TaskReview({
           </section>
         </aside>
       </div>
-      <footer className="rv-foot">
-        <span>TaskSpec v1　 /　 SemanticTaskGraph</span>
-      </footer>
       {imageLightbox && review.source_image && (
         <dialog
           ref={imageDialog}

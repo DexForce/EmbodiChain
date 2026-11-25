@@ -32,15 +32,17 @@ end; `maintain` holds during a step. The audit matches source obligations to
 facts in their required scope, not role labels. A `before` check uses cited
 facts still valid at the start of its latest cited step, not that step's effects.
 Final checks use a compatible final condition or a cited effect that survives
-subsequent actions. A verified terminal claim missing from the plan becomes a
+subsequent actions. Restating a stale fact as a final condition does not recover
+it, even if unordered fields use a different order. A verified terminal claim missing from the plan becomes a
 published goal; producer links still require cited, surviving effects. Independent
 facts keep unaffected subjects or arms, including complete joint support references.
 Known conflicts with `always` conditions are rejected at the initial, during-step,
 and step-end phases, even if a later step restores the state. Separate release facts prove a group was
 released only when valid at the same checkpoint. A stated spatial frame must match the
 evidence, including slot relations; inverse axis relations can match in a shared
-frame but not when swapping a reference-local anchor. The validator tracks feasible arm assignments
-across the sequence without replacing authored `auto` arms. Two independent
+frame but not when swapping a reference-local anchor. Validation and evidence
+invalidation share feasible arm assignments across the sequence without
+replacing authored `auto` arms. Two independent
 single-arm picks can share a `parallel_group` only with explicit timing for
 the acquisitions; naming both arms is not timing evidence. The audit verifies
 the hand-object pairs, and following steps depend on both branches. Both arms

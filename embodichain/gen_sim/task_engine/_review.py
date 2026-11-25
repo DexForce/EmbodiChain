@@ -108,27 +108,31 @@ def _producer_pairing(
 ) -> dict[str, Any]:
     group = {n["id"]: n["task_instance_id"] for n in graph["nodes"]}
     # Authoring coverage stores a node ID; native coverage stores a node/group pair.
-    producer_groups = {
-        identifier: group[producer if isinstance(producer, str) else producer[0]]
+    producers = {
+        identifier: producer if isinstance(producer, str) else producer[0]
         for identifier, producer in coverage["producers"].items()
     }
     audited = coverage.get("goal_producers", {})
+    milestone_calls = {
+        m["id"]: producers[m["id"]]
+        for m in spec["objectives"]["milestones"]
+        if m["id"] in producers
+    }
+    goal_calls = {
+        g["id"]: audited[g["id"]] if g["id"] in audited else [producers[g["id"]]]
+        for g in spec["objectives"]["goal"]
+        if g["id"] in audited or g["id"] in producers
+    }
     return {
         "milestone_groups": {
-            m["id"]: producer_groups[m["id"]]
-            for m in spec["objectives"]["milestones"]
-            if m["id"] in producer_groups
+            identifier: group[node] for identifier, node in milestone_calls.items()
         },
         "goal_groups": {
-            g["id"]: [producer_groups[g["id"]]]
-            for g in spec["objectives"]["goal"]
-            if g["id"] in producer_groups
-        }
-        | {
-            g["id"]: list(dict.fromkeys(group[node] for node in audited[g["id"]]))
-            for g in spec["objectives"]["goal"]
-            if g["id"] in audited
+            identifier: list(dict.fromkeys(group[node] for node in nodes))
+            for identifier, nodes in goal_calls.items()
         },
+        "milestone_calls": milestone_calls,
+        "goal_calls": goal_calls,
     }
 
 

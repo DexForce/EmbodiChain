@@ -32,7 +32,9 @@ for (const viewport of [
   }) => {
     await page.setViewportSize(viewport);
     await page.goto(pathToFileURL(join(root, "hybrid-authoring.html")).href);
-    await page.getByRole("button", { name: "中文", exact: true }).click();
+    await page
+      .getByRole("combobox", { name: /语言|Language/ })
+      .selectOption("zh");
     await expect(page.locator("h1")).toHaveText("Plank");
     await expect(page.getByRole("button", { name: "依赖图" })).toHaveAttribute(
       "aria-pressed",
@@ -63,18 +65,31 @@ for (const viewport of [
     await expect(detail).toContainText(/plank.*left pedestal.*right pedestal/);
     await close.click();
 
+    const goal = page.locator('button[data-key="goal:condition_02"]');
+    await expect(goal).toContainText("第 3 步");
+    await goal.click();
+    await expect(detail.locator(".rv-inline-heading")).toContainText(
+      "第 3 步详情",
+    );
+    await expect(
+      page.locator('.rv-lane-action[data-key="call:step_03"]'),
+    ).toHaveAttribute("aria-pressed", "true");
+    await close.click();
+
     await page.getByRole("button", { name: "步骤列表" }).click();
     await page.locator('[data-id="group:step_02"] .rv-toggle').click();
     await page.locator('button[data-key="call:step_02"]').click();
+    await detail.getByText("工程信息", { exact: true }).click();
     const semantics = detail.getByRole("region", { name: "步骤语义" });
     await expect(semantics.getByText("右臂", { exact: true })).toBeVisible();
     await expect(semantics).toContainText(/left pedestal.*right pedestal/);
     const quote = semantics.getByText("Release the plank.");
     await quote.scrollIntoViewIfNeeded();
     await expect(quote).toBeInViewport();
-    await expect(close).toBeInViewport();
     await close.click();
-    await page.locator('[data-id="group:step_03"] .rv-stage').click();
+    await page.locator('[data-id="group:step_03"] .rv-toggle').click();
+    await page.locator('button[data-key="call:step_03"]').click();
+    await detail.getByText("工程信息", { exact: true }).click();
     await expect(semantics).toContainText("左臂、右臂");
     if (viewport.width === 1680) {
       const thumb = page.locator(".rv-scene-thumb");
