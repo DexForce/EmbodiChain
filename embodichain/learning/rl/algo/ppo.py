@@ -101,6 +101,37 @@ class PPO(BaseAlgorithm[TensorDict]):
         self.device = torch.device(cfg.device)
         self._setup_optimization(cfg, policy.parameters())
 
+    def compute_losses(self, batch: TensorDict) -> dict[str, torch.Tensor]:
+        """Evaluate the complete PPO objective for one prepared minibatch.
+
+        Args:
+            batch: Transition minibatch with the policy's evaluation inputs and
+                ``sample_log_prob``, ``return``, ``advantage`` and ``value`` from
+                the rollout. Scalar targets have shape ``[batch_size]``.
+                Advantages are detached and normalized here only when
+                ``normalize_advantage_per_mini_batch`` is enabled. Otherwise,
+                they are used as supplied; :meth:`update` normalizes them over
+                the complete rollout before forming minibatches.
+
+        Returns:
+            Differentiable scalar tensors named ``total``, ``actor``, ``value``,
+            ``action_bound``, ``entropy`` and ``auxiliary``. Components are
+            unweighted; ``entropy`` is the negative mean entropy. ``total``
+            applies the configured coefficients. The value objective has no
+            additional factor of one half.
+
+        The policy is evaluated once. This method does not update optimizer,
+        learning-rate scheduler or observation-normalization state. Custom
+        policy evaluation and auxiliary hooks retain their own side effects.
+        """
+        input_spec = _resolve_training_input_spec(self.policy)
+        targets = self._prepare_loss_targets(
+            batch, mutates_inputs=input_spec.mutates_inputs
+        )
+        policy_module = getattr(self.policy, "module", self.policy)
+        eval_batch = policy_module.evaluate_actions(batch)
+        return self._compute_losses(batch, eval_batch, *targets)
+
     def update(self, rollout: TensorDict) -> Dict[str, float]:
         """Update the policy using a collected rollout."""
         # GAE adds fields but does not mutate the collected tensors. A shallow
@@ -130,45 +161,17 @@ class PPO(BaseAlgorithm[TensorDict]):
         for _ in range(self.cfg.n_epochs):
             for indices in self._minibatch_indices(flat_rollout.batch_size[0]):
                 batch = flat_rollout[indices]
-                old_logprobs = batch["sample_log_prob"]
-                returns = batch["return"]
-                if input_spec.mutates_inputs:
-                    old_logprobs = old_logprobs.clone()
-                    returns = returns.clone()
-                batch_advantages = batch["advantage"]
-                if self.cfg.normalize_advantage_per_mini_batch:
-                    batch_advantages = (batch_advantages - batch_advantages.mean()) / (
-                        batch_advantages.std(unbiased=batch_advantages.numel() > 1)
-                        + 1e-8
-                    )
-                batch_advantages = batch_advantages.detach()
+                targets = self._prepare_loss_targets(
+                    batch, mutates_inputs=input_spec.mutates_inputs
+                )
 
                 policy_module = getattr(self.policy, "module", self.policy)
                 eval_batch = policy_module.evaluate_actions(batch)
-                logprobs = eval_batch["sample_log_prob"]
-                entropy = eval_batch["entropy"]
-                values = eval_batch["value"]
                 kl = self._update_adaptive_learning_rate(batch, eval_batch)
-                actor_loss = self._actor_loss(logprobs - old_logprobs, batch_advantages)
-                value_loss = self._value_loss(values, returns, batch["value"])
-                action_bound_loss = self._action_bound_loss(eval_batch["action_mean"])
-                entropy_loss = -entropy.mean()
-                auxiliary_loss = (
-                    policy_module.auxiliary_loss(batch, eval_batch)
-                    if self.cfg.auxiliary_coef
-                    else actor_loss.new_zeros(())
-                )
-
-                loss = (
-                    actor_loss
-                    + self.cfg.vf_coef * value_loss
-                    + self.cfg.action_bound_coef * action_bound_loss
-                    + self.cfg.ent_coef * entropy_loss
-                    + self.cfg.auxiliary_coef * auxiliary_loss
-                )
+                losses = self._compute_losses(batch, eval_batch, *targets)
 
                 self.optimizer.zero_grad(set_to_none=True)
-                loss.backward()
+                losses["total"].backward()
                 self._sync_gradients()
                 self._clip_gradients()
                 self.optimizer.step()
@@ -177,11 +180,11 @@ class PPO(BaseAlgorithm[TensorDict]):
                 total_metrics.add_(
                     torch.stack(
                         (
-                            actor_loss.detach(),
-                            value_loss.detach(),
-                            action_bound_loss.detach(),
-                            -entropy_loss.detach(),
-                            auxiliary_loss.detach(),
+                            losses["actor"].detach(),
+                            losses["value"].detach(),
+                            losses["action_bound"].detach(),
+                            -losses["entropy"].detach(),
+                            losses["auxiliary"].detach(),
                         )
                     ).to(torch.float64),
                     alpha=bs,
@@ -204,6 +207,64 @@ class PPO(BaseAlgorithm[TensorDict]):
             "kl": total_kl / max(1, total_steps),
             "learning_rate": self.current_learning_rate(),
             "auxiliary_loss": auxiliary,
+        }
+
+    def _prepare_loss_targets(
+        self, batch: TensorDict, *, mutates_inputs: bool
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Prepare rollout targets before policy evaluation can mutate inputs."""
+        old_logprobs = batch["sample_log_prob"]
+        returns = batch["return"]
+        old_values = batch["value"]
+        if mutates_inputs:
+            old_logprobs = old_logprobs.clone()
+            returns = returns.clone()
+            old_values = old_values.clone()
+        advantages = batch["advantage"]
+        if self.cfg.normalize_advantage_per_mini_batch:
+            advantages = (advantages - advantages.mean()) / (
+                advantages.std(unbiased=advantages.numel() > 1) + 1e-8
+            )
+        elif mutates_inputs:
+            advantages = advantages.clone()
+        return old_logprobs, returns, advantages.detach(), old_values
+
+    def _compute_losses(
+        self,
+        batch: TensorDict,
+        eval_batch: TensorDict,
+        old_logprobs: torch.Tensor,
+        returns: torch.Tensor,
+        advantages: torch.Tensor,
+        old_values: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        """Compute all loss terms using an existing policy evaluation."""
+        actor = self._actor_loss(
+            eval_batch["sample_log_prob"] - old_logprobs, advantages
+        )
+        value = self._value_loss(eval_batch["value"], returns, old_values)
+        action_bound = self._action_bound_loss(eval_batch["action_mean"])
+        entropy = -eval_batch["entropy"].mean()
+        policy_module = getattr(self.policy, "module", self.policy)
+        auxiliary = (
+            policy_module.auxiliary_loss(batch, eval_batch)
+            if self.cfg.auxiliary_coef
+            else actor.new_zeros(())
+        )
+        total = (
+            actor
+            + self.cfg.vf_coef * value
+            + self.cfg.action_bound_coef * action_bound
+            + self.cfg.ent_coef * entropy
+            + self.cfg.auxiliary_coef * auxiliary
+        )
+        return {
+            "total": total,
+            "actor": actor,
+            "value": value,
+            "action_bound": action_bound,
+            "entropy": entropy,
+            "auxiliary": auxiliary,
         }
 
     def _minibatch_indices(self, total: int) -> tuple[torch.Tensor, ...]:

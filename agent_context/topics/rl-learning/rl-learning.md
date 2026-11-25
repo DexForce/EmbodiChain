@@ -11,6 +11,7 @@ lightweight learning environments remain independent.
 |---|---|
 | Unified training CLI/config assembly | `embodichain/learning/rl/train.py`; `embodichain train-rl` |
 | Environment protocols and registration | `embodichain/learning/rl/env.py` |
+| Offline learning-environment contract checks | `embodichain/learning/rl/env_checker.py` |
 | Algorithm type, rollout kind and registry | `embodichain/learning/rl/algo/` |
 | Policy API, registry and observation groups | `embodichain/learning/rl/policies/` |
 | Standard collection/storage | `embodichain/learning/rl/collector/`, `buffer/` |

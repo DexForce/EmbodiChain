@@ -253,6 +253,13 @@ example is an experimental gradient reference, not a general simulator task.
 3. Register the config/class pair in `algo/__init__.py`.
 4. Add focused algorithm, routing, and rollout-contract tests.
 
+`PPO.compute_losses(batch)` evaluates a prepared transition minibatch without
+an optimizer, LR-scheduler or observation-statistics update. Its named scalar
+components are unweighted; `total` applies the configured coefficients.
+Supply rollout-normalized advantages unless per-minibatch normalization is
+enabled. `update()` shares the loss computation and retains its own GAE,
+sampling, adaptive-KL scheduling and optimization boundaries.
+
 ### Add a Policy
 
 1. Implement the `Policy` contract under `policies/`.
@@ -273,6 +280,13 @@ example is an experimental gradient reference, not a general simulator task.
 6. Add an official config under
    `embodichain/extensions/tasks/configs/tasks/<domain>/<task>/agents/` when it is a
    bundled task.
+
+Use `check_learning_env(factory)` offline with a fresh environment factory to
+check sampled tensor shapes, dtypes, devices and supplied terminal metadata.
+The checker closes its environment and restores caller global RNG states;
+CUDA states are restored only if CUDA was already initialized. It does not run
+inside training or prove autograd correctness, missing bootstrap data, or episode
+boundaries absent from the sampled steps.
 
 Use `add-task-env` for simulator-backed task environments and
 `manager-functor` for their observation, reward, event, and action

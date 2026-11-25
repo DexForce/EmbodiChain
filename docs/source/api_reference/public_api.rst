@@ -7301,3 +7301,13 @@ and scalar metadata, with explicit batch and row identity.
 
 .. autoclass:: ResolvedContactPhase
    :members:
+
+
+embodichain.learning.rl.env_checker
+----------------------------------
+
+Offline checks validate sampled learning-environment tensors using a disposable
+environment while restoring the caller's existing global random states.
+
+.. automodule:: embodichain.learning.rl.env_checker
+   :members: check_learning_env

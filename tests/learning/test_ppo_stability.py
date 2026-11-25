@@ -128,11 +128,116 @@ def _algorithm(policy: ActorCritic, **overrides: object) -> PPO:
     return PPO(PPOCfg(**cfg), policy)
 
 
-@pytest.mark.parametrize("mutated_field", ["sample_log_prob", "return"])
+@pytest.mark.parametrize("normalize_per_minibatch", [False, True])
+@pytest.mark.parametrize("clipped_value", [False, True])
+def test_compute_losses_matches_objective_without_training_side_effects(
+    normalize_per_minibatch: bool, clipped_value: bool
+) -> None:
+    policy = _policy(normalize=True)
+    with torch.no_grad():
+        policy.actor.weight.fill_(0.5)
+        policy.actor.bias.fill_(1.5)
+    policy.auxiliary_loss = (
+        lambda batch, evaluated: (evaluated["action_mean"] - batch["custom_target"])
+        .square()
+        .mean()
+    )
+    reference = deepcopy(policy)
+    algorithm = _algorithm(
+        policy,
+        ent_coef=0.03,
+        vf_coef=0.7,
+        action_bound_coef=0.2,
+        auxiliary_coef=0.4,
+        use_clipped_value_loss=clipped_value,
+        normalize_advantage_per_mini_batch=normalize_per_minibatch,
+        schedule="adaptive",
+        desired_kl=0.01,
+    )
+    batch = TensorDict(
+        {
+            "obs": torch.tensor([[1.0, 2.0], [-2.0, 1.0], [0.0, 0.5], [2.0, 1.0]]),
+            "critic_obs": torch.arange(12, dtype=torch.float32).reshape(4, 3) / 10,
+            "action": torch.tensor([[1.0], [-1.0], [0.5], [2.0]]),
+            "return": torch.tensor([1.0, -1.0, 0.5, 2.0]),
+            "advantage": torch.tensor([-2.0, -0.5, 0.7, 3.0], requires_grad=True),
+            "custom_target": torch.tensor([[0.0], [0.5], [-0.5], [1.0]]),
+        },
+        batch_size=[4],
+    )
+    evaluated = reference.evaluate_actions(batch)
+    batch["sample_log_prob"] = evaluated["sample_log_prob"].detach() - torch.tensor(
+        [0.3, -0.4, 0.1, -0.1]
+    )
+    batch["value"] = evaluated["value"].detach() - 0.4
+    advantages = batch["advantage"].detach()
+    if normalize_per_minibatch:
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+    # Independent probability-ratio definition also checks the combined loss's
+    # coefficients and gradient flow through every objective.
+    ratio = (evaluated["sample_log_prob"] - batch["sample_log_prob"]).exp()
+    actor = -torch.minimum(
+        ratio * advantages, ratio.clamp(0.8, 1.2) * advantages
+    ).mean()
+    value_errors = (evaluated["value"] - batch["return"]).square()
+    if clipped_value:
+        clipped = batch["value"] + (evaluated["value"] - batch["value"]).clamp(
+            -0.2, 0.2
+        )
+        value_errors = torch.maximum(value_errors, (clipped - batch["return"]).square())
+    value = value_errors.mean()
+    action_bound = torch.relu(evaluated["action_mean"].abs() - 1).square().mean()
+    entropy = -evaluated["entropy"].mean()
+    auxiliary = (evaluated["action_mean"] - batch["custom_target"]).square().mean()
+    expected = {
+        "total": actor
+        + 0.7 * value
+        + 0.2 * action_bound
+        + 0.03 * entropy
+        + 0.4 * auxiliary,
+        "actor": actor,
+        "value": value,
+        "action_bound": action_bound,
+        "entropy": entropy,
+        "auxiliary": auxiliary,
+    }
+    original_batch = batch.clone()
+    original_state = deepcopy(policy.state_dict())
+    original_rng = torch.get_rng_state()
+    evaluations = []
+    hook = policy.actor.register_forward_hook(lambda *args: evaluations.append(None))
+
+    losses = algorithm.compute_losses(batch)
+    hook.remove()
+
+    assert len(evaluations) == 1
+    assert losses.keys() == expected.keys()
+    for name in expected:
+        torch.testing.assert_close(losses[name], expected[name])
+    losses["total"].backward()
+    expected["total"].backward()
+    for actual_parameter, expected_parameter in zip(
+        policy.parameters(), reference.parameters()
+    ):
+        torch.testing.assert_close(actual_parameter.grad, expected_parameter.grad)
+    assert batch["advantage"].grad is None
+    assert not algorithm.optimizer.state
+    assert algorithm.current_learning_rate() == 1e-3
+    torch.testing.assert_close(policy.state_dict(), original_state, rtol=0, atol=0)
+    torch.testing.assert_close(torch.get_rng_state(), original_rng, rtol=0, atol=0)
+    for key in batch.keys():
+        torch.testing.assert_close(batch[key], original_batch[key], rtol=0, atol=0)
+
+
+@pytest.mark.parametrize(
+    "mutated_field", ["sample_log_prob", "return", "value", "advantage"]
+)
 @pytest.mark.parametrize("declare_fields", [False, True])
+@pytest.mark.parametrize("standalone", [False, True])
 def test_custom_evaluator_cannot_replace_ppo_reference_targets(
     mutated_field: str,
     declare_fields: bool,
+    standalone: bool,
 ) -> None:
     policy = _policy()
     custom = deepcopy(policy)
@@ -146,6 +251,10 @@ def test_custom_evaluator_cannot_replace_ppo_reference_targets(
         evaluated = ActorCritic.evaluate_actions(custom, batch)
         if mutated_field == "sample_log_prob":
             batch[mutated_field].copy_(evaluated[mutated_field].detach())
+        elif mutated_field == "value":
+            # An incorrect reference must activate the clipped-value branch,
+            # rather than be hidden by the ordinary squared-error maximum.
+            batch[mutated_field].fill_(50.0)
         else:
             batch[mutated_field].zero_()
         return evaluated
@@ -157,8 +266,41 @@ def test_custom_evaluator_cannot_replace_ppo_reference_targets(
         custom._training_input_spec = lambda: _TrainingInputSpec(
             fields=("obs", "critic_obs", "action")
         )
-    expected = _algorithm(policy, n_epochs=3, batch_size=6)
-    actual = _algorithm(custom, n_epochs=3, batch_size=6)
+    expected = _algorithm(
+        policy,
+        n_epochs=3,
+        batch_size=6,
+        use_clipped_value_loss=mutated_field == "value",
+    )
+    actual = _algorithm(
+        custom,
+        n_epochs=3,
+        batch_size=6,
+        use_clipped_value_loss=mutated_field == "value",
+    )
+    if standalone:
+        compute_gae(
+            rollout, gamma=expected.cfg.gamma, gae_lambda=expected.cfg.gae_lambda
+        )
+        batch = rollout[:, :-1].reshape(-1)
+        # Make the frozen policy reference differ from this evaluation so an
+        # evaluator overwriting log probabilities cannot silently zero ratios.
+        batch["sample_log_prob"] = batch["sample_log_prob"] - 0.1
+        expected_losses = expected.compute_losses(batch.clone())
+        actual_losses = actual.compute_losses(batch.clone())
+        for name in expected_losses:
+            torch.testing.assert_close(
+                actual_losses[name], expected_losses[name], rtol=0, atol=0
+            )
+        expected_losses["total"].backward()
+        actual_losses["total"].backward()
+        for actual_parameter, expected_parameter in zip(
+            custom.parameters(), policy.parameters()
+        ):
+            torch.testing.assert_close(
+                actual_parameter.grad, expected_parameter.grad, rtol=0, atol=0
+            )
+        return
     torch.random.default_generator.manual_seed(31)
     expected_metrics = expected.update(rollout)
     torch.random.default_generator.manual_seed(31)
