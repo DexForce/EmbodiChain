@@ -547,6 +547,27 @@ def test_newton_physics_cfg_converts_mapping_solver_cfg_to_dexsim_cfg() -> None:
 
 
 @pytest.mark.no_sim
+def test_dexuni_replicates_all_joint_ownership_across_arenas() -> None:
+    cfg = NewtonPhysicsCfg(dexuni_mujoco_joints_per_arena=13)
+
+    native = cfg.to_dexsim_cfg(gpu_id=0, num_envs=4)
+
+    assert native.solver_cfg.solver_type == "dexuni"
+    assert native.solver_cfg.mujoco_joints == tuple(range(52))
+
+
+@pytest.mark.no_sim
+def test_dexuni_per_arena_joint_ownership_rejects_explicit_selection() -> None:
+    cfg = NewtonPhysicsCfg(
+        dexuni_mujoco_joints_per_arena=13,
+        solver_cfg={"solver_type": "dexuni", "mujoco_joints": (0,)},
+    )
+
+    with pytest.raises(ValueError, match="conflicts with an explicit selector"):
+        cfg.to_dexsim_cfg(gpu_id=0)
+
+
+@pytest.mark.no_sim
 @pytest.mark.parametrize(
     "solver_mapping",
     [None, {}],

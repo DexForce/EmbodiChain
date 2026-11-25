@@ -1,5 +1,9 @@
 # Repeated Pick and Place
 
+The catalog groups this task under `manipulation/pick_place`. Select
+`ur5_rubiks_cube` for the Rubik’s cube asset. Its original
+`show-task rubiks_cube_pick_place` lookup and Gym configuration still resolve.
+
 The Task Program repeats cube transfers between two authored target poses. The
 configuration directory separates the physical environment, robot deployments,
 and expansion settings:

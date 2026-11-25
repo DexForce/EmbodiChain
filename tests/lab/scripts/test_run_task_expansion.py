@@ -113,6 +113,37 @@ def _resolve(path: str):
     return _resolve_expansion_request(args, config)
 
 
+def test_explicit_replay_takes_priority_over_task_bound_expansion(
+    tmp_path, monkeypatch
+):
+    task = tmp_path / "task.yaml"
+    task.write_text("id: Expert-v1\nexpansion:\n  execution: {mode: rolling}\n")
+
+    def observer(*_):
+        pass
+
+    calls = []
+
+    def replay(args, *, replay_observer):
+        assert _resolve_expansion_request(args, load_config(task)) is None
+        calls.append((args.replay_mode, replay_observer))
+
+    monkeypatch.setattr(run_task, "_run_gym_task", replay)
+    run_task.cli(
+        [
+            "--gym-config",
+            str(task),
+            "--replay",
+            "--replay_trajectory",
+            "saved.pt",
+            "--replay_mode",
+            "dynamic",
+        ],
+        replay_observer=observer,
+    )
+    assert calls == [("dynamic", observer)]
+
+
 def test_repeated_pick_place_policy_component_merges_task_binding() -> None:
     request = _resolve(
         "embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/"

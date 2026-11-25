@@ -1,0 +1,25 @@
+id: TaskProgramOfficeUR5-DexUni-v1
+enable_sensor: true
+environment:
+  component: env.office.dexuni.yaml
+embodiment:
+  component: ../../../components/embodiments/ur5_dh_pgi_140_80.yaml
+  overrides:
+    init_pos: [0.67, -0.02, 0.765]
+    init_qpos: [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0]
+    grippers:
+      eef:
+        commands:
+          grasp:
+            gripper_finger1_joint_1: 0.034
+            gripper_finger2_joint_1: 0.034
+  camera_overrides:
+    cam_overhead:
+      extrinsics:
+        eye: [1.2, -1.45, 1.55]
+        target: [0.33, -0.08, 0.83]
+        up: [0.0, 0.0, 1.0]
+task_program:
+  program: task_program/program.office.yaml
+  integration: task_program/integration.office.dexuni.yaml
+  execution_policy: ../../../components/execution_policies/trajectory_open_loop.yaml

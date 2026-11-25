@@ -1564,6 +1564,52 @@ def test_companion_failure_rolls_back_declaration_without_deleting_existing_asse
     builder.remove_gaussian_splat.assert_not_called()
 
 
+@pytest.mark.parametrize("foreign_gaussian", [False, True], ids=["mesh", "gaussian"])
+def test_newton_visual_binding_reuses_and_removes_only_its_handles(
+    tmp_path, foreign_gaussian: bool
+) -> None:
+    from dexsim.scene import SpawnedGaussianSplat
+
+    binding, scene, _, _, _ = _binding(tmp_path)
+    binding.spawn.builder.backend = "newton"
+    binding.spawn._reserved_visual_names = set()
+    scene.handles.clear()
+    element = binding.elements[0]
+
+    def add(desc, arena):
+        path = f"{arena}/{element.name}"
+        handle = SpawnedGaussianSplat(path, desc, object(), int(arena[-1]))
+        scene.handles[path] = handle
+        return handle
+
+    scene.add_gaussian_splat = MagicMock(side_effect=add)
+    scene.clone_gaussian_splat = MagicMock(
+        side_effect=lambda source, name, arena: add(element.descriptor, arena)
+    )
+    scene.remove_gaussian_splat = MagicMock(side_effect=scene.handles.pop)
+
+    binding._materialize_scene_gaussians(scene)
+    binding._materialize_scene_gaussians(scene)
+    assert scene.add_gaussian_splat.call_count == 1
+    assert scene.clone_gaussian_splat.call_count == 3
+
+    scene.handles.pop(f"arena_0/{element.name}")
+    binding._materialize_scene_gaussians(scene)
+    assert scene.add_gaussian_splat.call_count == 1
+    scene.clone_gaussian_splat.assert_called_with(
+        f"arena_1/{element.name}", element.name, "arena_0"
+    )
+
+    replaced_path = f"arena_1/{element.name}"
+    foreign = add(element.descriptor, "arena_1") if foreign_gaussian else object()
+    scene.handles[replaced_path] = foreign
+    with pytest.raises(ValueError, match="Gaussian companion path already exists"):
+        binding._materialize_scene_gaussians(scene)
+    binding.remove()
+    assert list(scene.handles) == [replaced_path]
+    assert scene.handles[replaced_path] is foreign
+
+
 def test_declared_visual_metadata_does_not_require_native_resources():
     from embodichain.lab.sim.objects import VisualObject
 

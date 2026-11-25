@@ -22,6 +22,7 @@ from collections.abc import Mapping, Sequence
 from os import PathLike
 from typing import TYPE_CHECKING, Any
 
+from ._cable_checks import RJ45_CHECKS, WRAP_CHECKS
 from ._graph import CompiledEvaluation
 from ._session import EvaluationSnapshot, RuleSession
 
@@ -289,6 +290,10 @@ def evaluate_recorded_rules(
 
 
 def _matches_field(field, uid, quantity):
+    if field.startswith("fluids/"):
+        return quantity == "received_volume" and field == f"fluids/{uid}/{quantity}"
+    if field.startswith("measurements/"):
+        return field == f"measurements/{uid}/{quantity}"
     if field.startswith("cables/"):
         return field == f"cables/{uid}/{quantity}"
     if field.startswith("deformables/"):
@@ -365,15 +370,31 @@ def _field_projection(field, descriptor, expected_names=None):
         expected = expected_names[field]
         if expected is None or tuple(names) != tuple(expected):
             return None
-    if field.startswith("cables/"):
+    if field.startswith("fluids/"):
+        contract = ("receiver", "scalar", ("m3",), (1,))
+    elif field.startswith("measurements/"):
+        from ._episode_reduction import _UNITS
+
+        if len(units) != 1 or units[0] not in _UNITS:
+            return None
+        contract = ("episode", "scalar", tuple(units), (1,))
+    elif field.startswith("cables/"):
         from embodichain.compute.geometry._cable_route import (
             _CABLE_METRICS as _METRICS,
             _CABLE_METRIC_UNITS,
         )
 
-        if quantity not in _METRICS:
+        if quantity.startswith("rj45_"):
+            if quantity.removeprefix("rj45_") not in RJ45_CHECKS:
+                return None
+            contract = ("arena", "scalar", ("1",), (1,))
+        elif quantity.startswith("wrap_"):
+            if quantity.removeprefix("wrap_") not in WRAP_CHECKS:
+                return None
+            contract = ("arena", "scalar", ("1",), (1,))
+        elif quantity not in _METRICS:
             return None
-        if quantity == "end_position":
+        elif quantity == "end_position":
             contract = ("arena", "xyz", ("m",), (3,))
         else:
             contract = ("arena", "scalar", (_CABLE_METRIC_UNITS[quantity],), (1,))

@@ -95,6 +95,14 @@ ROBOT_ASSETS = {
         "class_path": "embodichain.extensions.robots.franka.assets:FrankaPandaArm",
         "category": "robot",
     },
+    "FrankaRopePads": {
+        "class_path": "embodichain.extensions.robots.franka.assets:FrankaRopePads",
+        "category": "robot",
+    },
+    "FrankaRj45": {
+        "class_path": "embodichain.extensions.robots.franka.rj45_assets:FrankaRj45",
+        "category": "robot",
+    },
     "Franka": {
         "class_path": "embodichain.extensions.robots.franka.assets:Franka",
         "category": "robot",

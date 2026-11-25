@@ -1222,6 +1222,42 @@ def test_relative_position_parent_frame_follows_live_reference_rotation(
     json.dumps(port.validator_metadata(validator, segment=segment), allow_nan=False)
 
 
+def test_ranking_size_accepts_placements_along_rotated_middle_block() -> None:
+    from embodichain.utils.utility import load_config
+
+    config = load_config(
+        Path(__file__).resolve().parents[4]
+        / "embodichain/extensions/tasks/configs/tasks/manipulation/tableware"
+        / "blocks_ranking_size/task_program/program.dexuni.yaml"
+    )
+    placements = [
+        validator
+        for step in config["program"]
+        for validator in step.get("validators", ())
+        if validator["kind"] == "object_relative_position"
+    ]
+    assert len(placements) == 3
+    # A 30-degree yaw gives a correct placement 45 mm of world Y displacement.
+    rotation = torch.tensor(
+        [[3**0.5 / 2, -0.5, 0.0], [0.5, 3**0.5 / 2, 0.0], [0.0, 0.0, 1.0]],
+        dtype=torch.float64,
+    )
+    for placement in placements:
+        segment = _measured_object_segment(
+            [{**placement, "object": "cube", "reference": "reference"}]
+        )
+        port, objects = _measured_object_port()
+        objects["reference"]._pose[:, :3, :3] = rotation
+        target = config["targets"][f"{placement['object']}_drop"]
+        offset = torch.tensor(target["position"], dtype=torch.float64)
+        objects["cube"]._pose[:, :3, 3] = torch.stack((rotation @ offset, offset))
+        port.begin_segment(segment=segment, active_mask=None)
+        assert port.validate(segment.validators[0], segment=segment).tolist() == [
+            True,
+            False,
+        ]
+
+
 def test_upright_rejects_angle_boundary_and_nonfinite_rows() -> None:
     segment = _measured_object_segment(
         [{"kind": "object_upright", "object": "cube", "maximum_tilt_degrees": 90.0}]

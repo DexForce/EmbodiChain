@@ -26,7 +26,7 @@ import json
 import re
 import shlex
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -40,6 +40,7 @@ except ModuleNotFoundError:
 _TASK_PROGRAM = "Expert Demo: Task Program"
 _HANDWRITTEN_DEMO = "Expert Demo: Handwritten Trajectory"
 _RL = "RL"
+_PURPOSES = ("training", "showcase", "research", "reference")
 _CAPABILITY_ORDER = (_TASK_PROGRAM, _HANDWRITTEN_DEMO, _RL)
 _OFFICIAL_TASK_PACKAGE = "embodichain.extensions.tasks"
 
@@ -210,6 +211,9 @@ class _Deployment:
     validation_resource: Traversable | None = None
     validation: Mapping[str, Any] | None = None
     requires_dataset_dir: bool = False
+    note: str | None = None
+    purpose: str | None = None
+    featured: bool = False
 
     @property
     def command(self) -> str | None:
@@ -236,6 +240,8 @@ class _Task:
     default_deployment: str | None
     deployments: list[_Deployment]
     readme: Traversable | None = None
+    aliases: dict[str, _Deployment] = field(default_factory=dict)
+    source_paths: set[tuple[str, ...]] = field(default_factory=set)
 
     @property
     def qualified_key(self) -> str:
@@ -349,10 +355,13 @@ def _agent_matches(
     return reference == deployment.config_ref
 
 
-def _load_catalog(roots: Mapping[str, Traversable]) -> list[_Task]:
-    """Read static task metadata; never import environment or robot modules."""
+def _load_catalog(
+    roots: Mapping[str, Traversable], *, runtime_packages: Sequence[str] | None = None
+) -> list[_Task]:
+    """Build the inventory before applying deployment-level browsing metadata."""
     tasks: list[_Task] = []
     identities: set[str] = set()
+    variants: list[tuple[_Task, str]] = []
     for package, root in roots.items():
         for task_path, resources, agents in _iter_task_directories(root):
             directory = root.joinpath(*task_path)
@@ -363,6 +372,8 @@ def _load_catalog(roots: Mapping[str, Traversable]) -> list[_Task]:
                     _load_metadata(metadata_file),
                     {
                         "task_key",
+                        "group",
+                        "variant_of",
                         "title",
                         "summary",
                         "tags",
@@ -404,20 +415,19 @@ def _load_catalog(roots: Mapping[str, Traversable]) -> list[_Task]:
                 for name, declaration in declarations.items():
                     name = _text(name, "deployment name")
                     declaration = _fields(
-                        declaration, {"config", "validation"}, "deployment"
+                        declaration,
+                        {"config", "validation", "alias", "note"},
+                        "deployment",
                     )
                     selected.append(
                         (name, _relative_resource(directory, declaration.get("config")))
                     )
                 default = _text(metadata["default_deployment"], "default_deployment")
-                if default not in declarations:
-                    raise ValueError(
-                        "default_deployment must name a declared deployment"
-                    )
             else:
                 default = None
                 selected = [(resource.name, resource) for resource in resources]
             deployments: list[_Deployment] = []
+            aliases: dict[str, _Deployment] = {}
             for name, resource in selected:
                 if not resource.name.lower().endswith((".json", ".yaml", ".yml")):
                     raise ValueError(
@@ -458,6 +468,22 @@ def _load_catalog(roots: Mapping[str, Traversable]) -> list[_Task]:
                         requires_dataset_dir="real2sim" in config,
                     )
                 )
+                if metadata and "note" in metadata["deployments"][name]:
+                    deployments[-1].note = _text(
+                        metadata["deployments"][name]["note"], "deployment note"
+                    )
+                if metadata and "alias" in metadata["deployments"][name]:
+                    alias = _text(metadata["deployments"][name]["alias"], "alias")
+                    identity = f"{package}:{alias}".casefold()
+                    if (
+                        not re.fullmatch(r"[A-Za-z0-9_.-]+", alias)
+                        or identity in identities
+                    ):
+                        raise ValueError(
+                            f"Invalid or duplicate deployment alias: {identity}"
+                        )
+                    identities.add(identity)
+                    aliases[alias.casefold()] = deployments[-1]
                 if metadata and "validation" in metadata["deployments"][name]:
                     validation_resource = _relative_resource(
                         directory, metadata["deployments"][name]["validation"]
@@ -505,20 +531,132 @@ def _load_catalog(roots: Mapping[str, Traversable]) -> list[_Task]:
                 raise ValueError(f"Duplicate task identity: {package}:{key}")
             identities.add(identity)
             readme = directory.joinpath("README.md")
-            tasks.append(
-                _Task(
-                    package,
-                    key,
-                    task_path or (key,),
-                    title,
-                    summary,
-                    tags,
-                    default,
-                    deployments,
-                    readme if readme.is_file() else None,
-                )
+            display_path = task_path or (key,)
+            if "group" in metadata:
+                group = _text(metadata["group"], "group")
+                if not re.fullmatch(r"[A-Za-z0-9_-]+", group):
+                    raise ValueError(f"Invalid catalog group: {group}")
+                display_path = (*display_path[:-1], group, display_path[-1])
+            task = _Task(
+                package,
+                key,
+                display_path,
+                title,
+                summary,
+                tags,
+                default,
+                deployments,
+                readme if readme.is_file() else None,
+                aliases,
+                source_paths={task_path},
+            )
+            if "variant_of" in metadata:
+                variants.append((task, _text(metadata["variant_of"], "variant_of")))
+            else:
+                tasks.append(task)
+
+    primary = {(task.package, task.key.casefold()): task for task in tasks}
+    for variant, parent_key in variants:
+        parent = primary.get((variant.package, parent_key.casefold()))
+        if (
+            parent is None
+            or len(variant.deployments) != 1
+            or variant.default_deployment != variant.deployments[0].name
+        ):
+            raise ValueError(
+                f"{variant.qualified_key} must extend a primary task with one deployment"
+            )
+        deployment = variant.deployments[0]
+        if any(item.name == deployment.name for item in parent.deployments):
+            raise ValueError(
+                f"Duplicate deployment in {parent.qualified_key}: {deployment.name}"
+            )
+        parent.deployments.append(deployment)
+        parent.source_paths.update(variant.source_paths)
+        parent.aliases.update(variant.aliases)
+        parent.aliases[variant.key.casefold()] = deployment
+    for task in tasks:
+        if task.default_deployment and task.default_deployment not in {
+            d.name for d in task.deployments
+        }:
+            raise ValueError("default_deployment must name a declared deployment")
+    if runtime_packages is not None:
+        _augment_runtime(tasks, runtime_packages)
+    for package, root in roots.items():
+        portfolio = root.joinpath("portfolio.yaml")
+        if portfolio.is_file():
+            _apply_portfolio(
+                tasks,
+                package,
+                _load_metadata(portfolio),
+                complete=runtime_packages is not None,
             )
     return sorted(tasks, key=lambda task: (task.task_path, task.package))
+
+
+def _apply_portfolio(
+    tasks: Sequence[_Task],
+    package: str,
+    portfolio: Mapping[str, Any],
+    *,
+    complete: bool,
+) -> None:
+    """Attach editorial uses to deployments available in this discovery mode."""
+    for task in tasks:
+        if task.package != package or task.key not in portfolio:
+            continue
+        entry = _fields(
+            portfolio[task.key], {"purpose", "featured", "overrides"}, "portfolio entry"
+        )
+        purpose = entry.get("purpose")
+        names = {d.name for d in task.deployments}
+        featured = entry.get("featured", [])
+        overrides = entry.get("overrides", {})
+        if not isinstance(overrides, Mapping):
+            raise ValueError("Deployment purpose overrides must be a mapping")
+        if complete and set(overrides) - names:
+            raise ValueError(f"Unknown purpose override for {task.qualified_key}")
+        if not isinstance(featured, list) or any(
+            not isinstance(name, str) or (complete and name not in names)
+            for name in featured
+        ):
+            raise ValueError(f"Unknown featured deployment for {task.qualified_key}")
+        if purpose not in _PURPOSES or any(
+            value not in _PURPOSES for value in overrides.values()
+        ):
+            raise ValueError(f"Invalid purpose for {task.qualified_key}")
+        for deployment in task.deployments:
+            deployment.purpose = overrides.get(deployment.name, purpose)
+            deployment.featured = deployment.name in featured
+
+
+def _portfolio_view(
+    tasks: Sequence[_Task], purpose: str | None, featured: bool
+) -> list[_Task]:
+    """Group selected deployments by user workflow while preserving launch references."""
+    selected = []
+    for section in _PURPOSES:
+        if purpose and purpose != section:
+            continue
+        for task in tasks:
+            deployments = [
+                d
+                for d in task.deployments
+                if d.purpose == section and (not featured or d.featured)
+            ]
+            if deployments:
+                default = task.default_deployment
+                if default not in {d.name for d in deployments}:
+                    default = deployments[0].name
+                selected.append(
+                    replace(
+                        task,
+                        task_path=(section, *task.task_path),
+                        default_deployment=default,
+                        deployments=deployments,
+                    )
+                )
+    return selected
 
 
 def _catalog_entries(tasks: Sequence[_Task]) -> dict[str, _EnvironmentListEntry]:
@@ -598,7 +736,11 @@ def _augment_runtime(tasks: list[_Task], task_packages: Sequence[str]) -> None:
                 key=len,
             )
             task = next(
-                (t for t in tasks if t.package == package and t.task_path == task_path),
+                (
+                    t
+                    for t in tasks
+                    if t.package == package and task_path in t.source_paths
+                ),
                 None,
             )
             if task is None:
@@ -611,6 +753,7 @@ def _augment_runtime(tasks: list[_Task], task_packages: Sequence[str]) -> None:
                     (),
                     None,
                     [],
+                    source_paths={task_path},
                 )
                 tasks.append(task)
             deployment = _Deployment(env_id, env_id, None, None, None, (), set())
@@ -648,17 +791,24 @@ def _discover_catalog() -> list[_Task]:
     roots = {
         package: root for package in packages for root in _task_config_roots((package,))
     }
-    tasks = _load_catalog(roots)
-    _augment_runtime(tasks, packages)
-    return tasks
+    return _load_catalog(roots, runtime_packages=packages)
 
 
 def _select_task(tasks: Sequence[_Task], key: str) -> _Task:
-    matches = [
-        task
-        for task in tasks
-        if (task.qualified_key if ":" in key else task.key).casefold() == key.casefold()
-    ]
+    package, separator, name = key.casefold().rpartition(":")
+    matches = []
+    for task in tasks:
+        if separator and task.package.casefold() != package:
+            continue
+        if task.key.casefold() == name:
+            matches.append(task)
+        elif name in task.aliases:
+            deployment = task.aliases[name]
+            matches.append(
+                replace(
+                    task, default_deployment=deployment.name, deployments=[deployment]
+                )
+            )
     if not matches:
         raise ValueError(f"Unknown task: {key}")
     if len(matches) != 1:
@@ -712,6 +862,8 @@ def _validation_summary(deployment: _Deployment) -> str:
     if report is None:
         return "Qualification: unavailable"
     parts = [f"Report status: {report.get('status', 'unavailable')}"]
+    if isinstance(report.get("summary"), str):
+        parts.append(report["summary"])
     code = report.get("code")
     if isinstance(code, Mapping):
         parts.append(
@@ -736,7 +888,7 @@ def _validation_summary(deployment: _Deployment) -> str:
             parts.append(
                 f"{result.get('action_source', 'unspecified')}: execution={status}, physical={physical_label}"
             )
-    else:
+    elif not report.get("summary"):
         parts.append("physical=unavailable")
     return "; ".join(parts)
 
@@ -774,6 +926,8 @@ def _render_html(tasks: Sequence[_Task], *, static_only: bool = False) -> str:
                         deployment.physics or "unavailable",
                         ", ".join(deployment.embodiments) or "unavailable",
                         _capability_label(deployment),
+                        deployment.purpose or "Unspecified",
+                        deployment.note or "",
                     )
                 )
                 + f"<td>{source}</td><td><code>{escape(deployment.command or 'No runnable config')}</code></td>"
@@ -790,7 +944,7 @@ def _render_html(tasks: Sequence[_Task], *, static_only: bool = False) -> str:
             f"<p>{escape(task.summary)}</p><p>Tags: {escape(', '.join(task.tags) or 'None')} · Default: {escape(task.default_deployment or 'unspecified')}</p>"
             "<p>Preview: unavailable. Validation reports describe observed outcomes for the recorded run only.</p>"
             + readme_link
-            + "<div class='scroll'><table><thead><tr><th>Deployment</th><th>Environment</th><th>Physics</th><th>Embodiment</th><th>Supported uses</th><th>Source</th><th>Run command</th><th>Agents</th><th>Qualification</th></tr></thead><tbody>"
+            + "<div class='scroll'><table><thead><tr><th>Deployment</th><th>Environment</th><th>Physics</th><th>Embodiment</th><th>Supported uses</th><th>Purpose</th><th>Scope</th><th>Source</th><th>Run command</th><th>Agents</th><th>Qualification</th></tr></thead><tbody>"
             + "".join(rows)
             + "</tbody></table></div></article>"
         )

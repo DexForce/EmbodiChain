@@ -26,11 +26,12 @@ from embodichain.data.constants import (
 )
 from embodichain.data.dataset import EmbodiChainDataset
 
-__all__ = ["PourCupAssets", "PourCupDemoData"]
+__all__ = ["PourCupAssets", "PourCupDemoData", "Rj45Fixture"]
 
 _HUB_PREFIX = (
     "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/"
 )
+_RJ45_FIXTURE_REVISION = "dcb448da52ea3df5df5a249e9ff977acafead0e4"
 
 
 class _TaskAsset(EmbodiChainDataset):
@@ -76,3 +77,29 @@ class PourCupDemoData(_TaskAsset):
     """
 
     archive_md5 = "8eb96cb756ac08efe403417f50ad2bf2"
+
+
+class Rj45Fixture(EmbodiChainDataset):
+    """Resolve the articulated RJ45 plug and fixed socket with their meshes.
+
+    The prepared URDFs and relative meshes share a pinned Hub archive. The
+    versioned cache keeps the previously downloaded fixture data available.
+
+    Args:
+        data_root: Optional cache root overriding the EmbodiChain default.
+    """
+
+    cache_prefix = "Rj45FixtureV1"
+    archive_md5 = "1d22a1fbad7a0ae10fd2c8da0cf0f8fd"
+
+    def __init__(self, data_root: str | None = None) -> None:
+        filename = "task_assets/Rj45FixtureV1.zip"
+        revision_path = f"/resolve/{_RJ45_FIXTURE_REVISION}/"
+        source = EMBODICHAIN_DOWNLOAD_PREFIX.replace("/resolve/main/", revision_path, 1)
+        origin = _HUB_PREFIX.replace("/resolve/main/", revision_path, 1)
+        urls = [f"{source}{filename}"]
+        if source != origin:
+            urls.append(f"{origin}{filename}")
+        descriptor = o3d.data.DataDescriptor(urls, self.archive_md5)
+        root = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+        super().__init__(self.cache_prefix, descriptor, root)

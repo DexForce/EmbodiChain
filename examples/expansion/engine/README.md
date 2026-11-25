@@ -91,7 +91,8 @@ For layout-only rolling jobs, `trajectory: {operators: [object_pose]}` is
 sufficient. Spatial operators also require their editable phases and motion
 limits. The launcher accepts `--seed` and `--output-dir` overrides for a
 task-bound engine job. `--num_envs`, `--device` and `--physics` can confirm
-the effective job and deployment values.
+the effective job and deployment values. Explicit `run-task --preview` and
+`--replay` requests select their ordinary task workflows.
 
 ```bash
 embodichain expansion preflight --job examples/expansion/engine/job.rolling.yaml

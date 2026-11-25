@@ -24,7 +24,9 @@ import pytest
 
 from embodichain.lab.sim.cfg import (
     ArticulationRootPropertiesCfg,
+    GaussianSplatCfg,
     RigidObjectCfg,
+    VisualElementCfg,
     VisualObjectCfg,
 )
 from embodichain.lab.sim.objects import (
@@ -336,6 +338,57 @@ def test_visual_owner_add_failure_preserves_existing_companion(failure):
     assert builder.mesh_objects[0] is companion
     assert set(scene._assets) == {"room"}
     assert getattr(facade, "_visual_binding", None) is None
+
+
+def test_deferred_gaussian_reserves_name_until_visual_owner_removal(tmp_path) -> None:
+    path = tmp_path / "surface.ply"
+    path.touch()
+    desc = SceneDesc()
+    builder = SimpleNamespace(
+        backend="newton",
+        is_finalized=False,
+        result=SimpleNamespace(handles={}),
+        replicate_plan=SimpleNamespace(env_names=lambda: ("arena_0",)),
+        scene_desc=desc,
+        mesh_objects=desc.mesh_objects,
+        add_object=desc.add_mesh_object,
+        remove_object=lambda name: desc.mesh_objects.pop(),
+    )
+    spawn = object.__new__(SpawnScene)
+    spawn.builder = builder
+    spawn._assets = {}
+    spawn._reserved_visual_names = set()
+    spawn._material_resources = SimpleNamespace(renderer="fast-rt")
+    facade = SimpleNamespace(
+        uid="scan",
+        num_instances=1,
+        cfg=VisualObjectCfg(
+            uid="scan",
+            visuals=[
+                VisualElementCfg(
+                    id="surface",
+                    representation=GaussianSplatCfg(file_path=str(path)),
+                )
+            ],
+        ),
+    )
+    name = "scan__visual_0_surface"
+    camera_path = f"arena_0/{name}"
+    camera = object()
+    builder.result.handles[camera_path] = camera
+    with pytest.raises(ValueError, match=camera_path):
+        spawn.declare("visual_object", "scan", ObjectDesc(name="scan"), facade=facade)
+    assert builder.result.handles == {camera_path: camera}
+    assert not builder.mesh_objects and "scan" not in spawn
+    builder.result.handles.clear()
+
+    spawn.declare("visual_object", "scan", ObjectDesc(name="scan"), facade=facade)
+    with pytest.raises(ValueError, match="already declared"):
+        spawn.declare("rigid_object", name, ObjectDesc(name=name))
+    assert [desc.name for desc in builder.mesh_objects] == ["scan"]
+    spawn.remove("scan")
+    spawn.declare("rigid_object", name, ObjectDesc(name=name))
+    assert name in spawn
 
 
 def test_rigid_object_receives_instance_count_only_when_declared() -> None:

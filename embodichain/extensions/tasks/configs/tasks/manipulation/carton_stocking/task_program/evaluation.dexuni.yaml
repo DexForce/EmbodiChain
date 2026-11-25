@@ -1,0 +1,14 @@
+graph:
+  roots: [carton_front_aligned]
+  rules:
+    carton_front_aligned:
+      kind: corner_containment_in_object
+      bindings:
+        pose: rigid_objects/carton/frame
+        frame: rigid_objects/worktop/frame
+      params:
+        # The center of the carton's positive-X face must point along the marked worktop.
+        corners: [[0.0482828127, 0.0, 0.0]]
+        lower: [0.035, -0.009, 0.033]
+        upper: [0.060, 0.009, 0.048]
+final_acceptance: [carton_front_aligned]

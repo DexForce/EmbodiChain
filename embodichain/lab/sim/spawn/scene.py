@@ -84,6 +84,7 @@ class SpawnScene:
             collision_policy="isolated",
         )
         self._assets: dict[str, _AssetDeclaration] = {}
+        self._reserved_visual_names: set[str] = set()
         self._usd_texture_files = _UsdTextureFiles()
         self._usd_source_files = ExitStack()
         if renderer is None:
@@ -210,12 +211,32 @@ class SpawnScene:
         return uid in self._assets
 
     def _require_available_uid(self, uid: str) -> None:
-        if uid in self._assets or any(
-            item.name == uid
-            for collection in ("mesh_objects", "scene_entities")
-            for item in getattr(self.builder, collection, ())
+        if (
+            uid in self._assets
+            or uid in getattr(self, "_reserved_visual_names", ())
+            or any(
+                item.name == uid
+                for collection in ("mesh_objects", "scene_entities")
+                for item in getattr(self.builder, collection, ())
+            )
         ):
             raise ValueError(f"Spawn asset uid is already declared: {uid!r}.")
+
+    def _require_unreserved_render_paths(
+        self, arena_names: Iterable[str], names: Iterable[str]
+    ) -> None:
+        """Reject render paths reserved for deferred Gaussian companions."""
+        if not self._reserved_visual_names:
+            return
+        replica_names = set(self.arena_names)
+        for arena_name, name in zip(arena_names, names, strict=True):
+            prefix = "" if arena_name == "default" else f"{arena_name}/"
+            path = name if name.startswith(prefix) else f"{prefix}{name}"
+            arena, _, local_name = path.partition("/")
+            if arena in replica_names and local_name in self._reserved_visual_names:
+                raise ValueError(
+                    f"Scene path is reserved for a Gaussian companion: {path}"
+                )
 
     def _require_compatible_particles(self, *, cables: bool, particles: bool) -> None:
         """Check both the incoming declaration and the native scene inventory."""
@@ -324,9 +345,13 @@ class SpawnScene:
             from dexsim.scene import Scene
 
             if self._material_resources.renderer != "no-render":
-                if self.builder.backend != "dexsim" and file_elements is None:
+                if (
+                    self.builder.backend != "dexsim"
+                    and kind != "visual_object"
+                    and file_elements is None
+                ):
                     raise NotImplementedError(
-                        "Explicit visual composition currently requires the Default backend."
+                        "Explicit visual composition on physics objects requires the Default backend."
                     )
                 if not hasattr(Scene, "clear_visual_meshes"):
                     raise RuntimeError(
@@ -707,6 +732,7 @@ class SpawnScene:
             )
             if binding is not None:
                 binding.handles.clear()
+                binding._scene_gaussian_handles.clear()
                 binding.gaussian_batch = None
                 binding.materials.clear()
                 binding.default_materials.clear()
@@ -717,6 +743,7 @@ class SpawnScene:
         finally:
             self.builder.result = None
             self._assets.clear()
+            getattr(self, "_reserved_visual_names", set()).clear()
             self._usd_texture_files.close()
             self._usd_source_files.close()
             getattr(self, "_no_render_material_definitions", {}).clear()
