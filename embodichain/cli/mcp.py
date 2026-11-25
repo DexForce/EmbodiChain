@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 from collections.abc import Sequence
 
 __all__ = ["main"]
@@ -33,6 +34,13 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument(
         "--session-directory", help="Optional DexSim discovery directory"
     )
+    parser.add_argument(
+        "--writer-key-file",
+        type=Path,
+        help="Enable control tools with this dedicated host's private writer grant",
+    )
+    parser.add_argument("--run-id", help="Originating Run ID for the DexSim journal")
+    parser.add_argument("--turn", type=int, help="Originating turn number")
     args = parser.parse_args(argv)
     try:
         from embodichain.mcp.server import serve
@@ -42,4 +50,10 @@ def main(argv: Sequence[str] | None = None) -> None:
         parser.exit(
             2, f"Install the MCP extra with pip install 'embodichain[mcp]': {exc}\n"
         )
-    serve(args.session, directory=args.session_directory)
+    serve(
+        args.session,
+        directory=args.session_directory,
+        writer_key_file=args.writer_key_file,
+        run_id=args.run_id,
+        turn=args.turn,
+    )

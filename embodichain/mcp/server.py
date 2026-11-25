@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from dexsim.runtime import Session
 from mcp.server import MCPServer
 
@@ -26,16 +27,35 @@ from .tools.robot import register_robot_tools
 __all__ = ["create_server", "serve"]
 
 
-def create_server(session: Session) -> MCPServer:
+def create_server(
+    session: Session, *, writer_key_file: Path | None = None
+) -> MCPServer:
     """Register the available domain tools using a caller-owned session."""
     server = MCPServer("EmbodiChain")
     register_robot_tools(server, session)
+    if writer_key_file is not None:
+        from embodichain.lab.sim.dexsim_session.writer import WriterClient
+        from .tools.control import register_control_tools
+
+        writer = WriterClient(session, writer_key_file)
+        writer.call("status", {})
+        register_control_tools(server, writer)
     return server
 
 
-def serve(session_id: str, *, directory: str | None = None) -> None:
+def serve(
+    session_id: str,
+    *,
+    directory: str | None = None,
+    writer_key_file: Path | None = None,
+    run_id: str | None = None,
+    turn: int | None = None,
+) -> None:
     """Connect to an existing session and release the connection when stdio closes."""
-    with Session.connect(
-        session_id, directory=directory, client={"kind": "embodichain-mcp"}
-    ) as session:
-        create_server(session).run(transport="stdio")
+    labels = {"kind": "embodichain-mcp"}
+    if run_id is not None or turn is not None:
+        if not run_id or turn is None or turn < 1:
+            raise ValueError("Supply both the Run ID and a positive turn number")
+        labels.update(run_id=run_id, turn=turn)
+    with Session.connect(session_id, directory=directory, client=labels) as session:
+        create_server(session, writer_key_file=writer_key_file).run(transport="stdio")
