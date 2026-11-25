@@ -1,0 +1,208 @@
+[
+ {
+  "event": "proposal",
+  "data": {
+   "semantic_plan": {
+    "roles": [
+     {
+      "id": "table",
+      "kind": "surface",
+      "description": "The table referenced as the spatial frame."
+     },
+     {
+      "id": "stamp",
+      "kind": "tool",
+      "description": "The wooden stamp, initially standing to the right of the middle of the table."
+     },
+     {
+      "id": "stamp_base",
+      "kind": "object",
+      "description": "The base of the wooden stamp; the part pressed onto the mat.",
+      "part_of": "stamp"
+     },
+     {
+      "id": "purple_mat",
+      "kind": "surface",
+      "description": "The purple mat on the right side of the table."
+     }
+    ],
+    "steps": [
+     {
+      "verb": "pick",
+      "subjects": [
+       "stamp"
+      ],
+      "arms": [
+       "right"
+      ],
+      "effects": [
+       {
+        "kind": "held",
+        "arms": [
+         "right"
+        ],
+        "subjects": [
+         "stamp"
+        ]
+       }
+      ],
+      "quote": "source_span_03"
+     },
+     {
+      "verb": "move_held",
+      "subjects": [
+       "stamp"
+      ],
+      "arms": [
+       "right"
+      ],
+      "effects": [
+       {
+        "kind": "relation",
+        "references": [
+         "purple_mat"
+        ],
+        "subjects": [
+         "stamp"
+        ],
+        "value": "above"
+       }
+      ],
+      "quote": "source_span_03"
+     },
+     {
+      "verb": "press",
+      "subjects": [
+       "stamp_base"
+      ],
+      "arms": [
+       "right"
+      ],
+      "direction": "down",
+      "maintain": [
+       {
+        "kind": "held",
+        "arms": [
+         "right"
+        ],
+        "subjects": [
+         "stamp"
+        ]
+       }
+      ],
+      "effects": [
+       {
+        "kind": "relation",
+        "references": [
+         "purple_mat"
+        ],
+        "subjects": [
+         "stamp_base"
+        ],
+        "value": "touching"
+       },
+       {
+        "kind": "actuated",
+        "subjects": [
+         "stamp_base"
+        ],
+        "value": "pressed"
+       }
+      ],
+      "quote": "source_span_03"
+     },
+     {
+      "verb": "release",
+      "subjects": [
+       "stamp"
+      ],
+      "arms": [
+       "right"
+      ],
+      "effects": [
+       {
+        "kind": "released",
+        "subjects": [
+         "stamp"
+        ]
+       }
+      ],
+      "quote": "source_span_04"
+     }
+    ],
+    "conditions": [
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "view_location",
+       "frame": "table",
+       "lateral": "right",
+       "subjects": [
+        "stamp"
+       ]
+      },
+      "quote": "source_span_01"
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "orientation",
+       "subjects": [
+        "stamp"
+       ],
+       "value": "upright"
+      },
+      "quote": "source_span_01"
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "view_location",
+       "frame": "table",
+       "lateral": "right",
+       "subjects": [
+        "purple_mat"
+       ]
+      },
+      "quote": "source_span_01"
+     },
+     {
+      "scope": "final",
+      "fact": {
+       "kind": "relation",
+       "references": [
+        "purple_mat"
+       ],
+       "subjects": [
+        "stamp"
+       ],
+       "value": "on"
+      },
+      "quote": "source_span_04"
+     },
+     {
+      "scope": "final",
+      "fact": {
+       "kind": "orientation",
+       "subjects": [
+        "stamp"
+       ],
+       "value": "upright"
+      },
+      "quote": "source_span_04"
+     }
+    ]
+   }
+  }
+ },
+ {
+  "event": "rejected",
+  "check": "validate_intent",
+  "message": "ArticulationDeclarationError: Scene object 'stamp' requires articulation; declare it with asset_kind: articulated in --scene-context"
+ },
+ {
+  "event": "outcome",
+  "published": false,
+  "error": "ArticulationDeclarationError: Scene object 'stamp' requires articulation; declare it with asset_kind: articulated in --scene-context"
+ }
+]

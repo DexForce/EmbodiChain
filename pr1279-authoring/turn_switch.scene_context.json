@@ -1,0 +1,10 @@
+{
+ "schema_version": "embodichain.task-scene-context/v1",
+ "objects": [
+  {
+   "id": "switch_panel",
+   "description": "white panel with a rocker switch on its front face",
+   "asset_kind": "articulated"
+  }
+ ]
+}

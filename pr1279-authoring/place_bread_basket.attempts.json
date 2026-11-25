@@ -1,0 +1,781 @@
+[
+ {
+  "event": "proposal",
+  "data": {
+   "semantic_plan": {
+    "roles": [
+     {
+      "id": "bread_left",
+      "kind": "object",
+      "description": "Piece of bread initially on the far left of the table."
+     },
+     {
+      "id": "bread_right",
+      "kind": "object",
+      "description": "Piece of bread initially on the far right of the table."
+     },
+     {
+      "id": "basket",
+      "kind": "container",
+      "description": "Wicker basket initially in the middle of the table, close to the robot."
+     },
+     {
+      "id": "table",
+      "kind": "surface",
+      "description": "Table supporting the bread and basket."
+     },
+     {
+      "id": "robot",
+      "kind": "robot",
+      "description": "Robot near the basket."
+     }
+    ],
+    "steps": [
+     {
+      "verb": "pick",
+      "subjects": [
+       "bread_left",
+       "bread_right"
+      ],
+      "arms": [
+       "left",
+       "right"
+      ],
+      "direction": "up",
+      "effects": [
+       {
+        "kind": "held",
+        "arms": [
+         "left"
+        ],
+        "subjects": [
+         "bread_left"
+        ]
+       },
+       {
+        "kind": "held",
+        "arms": [
+         "right"
+        ],
+        "subjects": [
+         "bread_right"
+        ]
+       }
+      ],
+      "quote": "source_span_02"
+     },
+     {
+      "verb": "place",
+      "subjects": [
+       "bread_left",
+       "bread_right"
+      ],
+      "arms": [
+       "left",
+       "right"
+      ],
+      "effects": [
+       {
+        "kind": "relation",
+        "references": [
+         "basket"
+        ],
+        "subjects": [
+         "bread_left",
+         "bread_right"
+        ],
+        "value": "inside"
+       },
+       {
+        "kind": "released",
+        "subjects": [
+         "bread_left",
+         "bread_right"
+        ]
+       }
+      ],
+      "quote": "source_span_03"
+     }
+    ],
+    "conditions": [
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "relation",
+       "references": [
+        "table"
+       ],
+       "subjects": [
+        "bread_left",
+        "bread_right"
+       ],
+       "value": "on"
+      },
+      "quote": "source_span_01"
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "view_location",
+       "frame": "table",
+       "lateral": "far_left",
+       "subjects": [
+        "bread_left"
+       ]
+      },
+      "quote": "source_span_01"
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "view_location",
+       "frame": "table",
+       "lateral": "far_right",
+       "subjects": [
+        "bread_right"
+       ]
+      },
+      "quote": "source_span_01"
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "relation",
+       "references": [
+        "table"
+       ],
+       "subjects": [
+        "basket"
+       ],
+       "value": "on"
+      },
+      "quote": "source_span_01"
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "view_location",
+       "frame": "table",
+       "lateral": "center",
+       "depth": "middle",
+       "subjects": [
+        "basket"
+       ]
+      },
+      "quote": "source_span_01"
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "relation",
+       "references": [
+        "robot"
+       ],
+       "subjects": [
+        "basket"
+       ],
+       "value": "near"
+      },
+      "quote": "source_span_01"
+     }
+    ]
+   }
+  }
+ },
+ {
+  "event": "rejected",
+  "check": "validate_intent",
+  "message": "ValueError: pick needs one object identity per occurrence"
+ },
+ {
+  "event": "proposal",
+  "data": {
+   "semantic_plan": {
+    "roles": [
+     {
+      "id": "bread_left",
+      "kind": "object",
+      "description": "Piece of bread initially on the far left of the table."
+     },
+     {
+      "id": "bread_right",
+      "kind": "object",
+      "description": "Piece of bread initially on the far right of the table."
+     },
+     {
+      "id": "basket",
+      "kind": "container",
+      "description": "Wicker basket initially in the middle of the table, close to the robot."
+     },
+     {
+      "id": "table",
+      "kind": "surface",
+      "description": "Table supporting the bread and basket."
+     },
+     {
+      "id": "robot",
+      "kind": "robot",
+      "description": "Robot near the basket."
+     }
+    ],
+    "steps": [
+     {
+      "verb": "pick",
+      "subjects": [
+       "bread_left"
+      ],
+      "arms": [
+       "left"
+      ],
+      "direction": "up",
+      "effects": [
+       {
+        "kind": "held",
+        "arms": [
+         "left"
+        ],
+        "subjects": [
+         "bread_left"
+        ]
+       }
+      ],
+      "quote": "source_span_02"
+     },
+     {
+      "verb": "pick",
+      "subjects": [
+       "bread_right"
+      ],
+      "arms": [
+       "right"
+      ],
+      "direction": "up",
+      "effects": [
+       {
+        "kind": "held",
+        "arms": [
+         "right"
+        ],
+        "subjects": [
+         "bread_right"
+        ]
+       }
+      ],
+      "quote": "source_span_02"
+     },
+     {
+      "verb": "place",
+      "subjects": [
+       "bread_left",
+       "bread_right"
+      ],
+      "arms": [
+       "left",
+       "right"
+      ],
+      "effects": [
+       {
+        "kind": "relation",
+        "references": [
+         "basket"
+        ],
+        "subjects": [
+         "bread_left",
+         "bread_right"
+        ],
+        "value": "inside"
+       },
+       {
+        "kind": "released",
+        "subjects": [
+         "bread_left",
+         "bread_right"
+        ]
+       }
+      ],
+      "quote": "source_span_03"
+     }
+    ],
+    "conditions": [
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "relation",
+       "references": [
+        "table"
+       ],
+       "subjects": [
+        "bread_left",
+        "bread_right"
+       ],
+       "value": "on"
+      },
+      "quote": "source_span_01"
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "view_location",
+       "frame": "table",
+       "lateral": "far_left",
+       "subjects": [
+        "bread_left"
+       ]
+      },
+      "quote": "source_span_01"
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "view_location",
+       "frame": "table",
+       "lateral": "far_right",
+       "subjects": [
+        "bread_right"
+       ]
+      },
+      "quote": "source_span_01"
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "relation",
+       "references": [
+        "table"
+       ],
+       "subjects": [
+        "basket"
+       ],
+       "value": "on"
+      },
+      "quote": "source_span_01"
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "view_location",
+       "frame": "table",
+       "lateral": "center",
+       "depth": "middle",
+       "subjects": [
+        "basket"
+       ]
+      },
+      "quote": "source_span_01"
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "relation",
+       "references": [
+        "robot"
+       ],
+       "subjects": [
+        "basket"
+       ],
+       "value": "near"
+      },
+      "quote": "source_span_01"
+     }
+    ]
+   }
+  }
+ },
+ {
+  "event": "rejected",
+  "check": "validate_intent",
+  "message": "ValueError: place needs one object identity per occurrence"
+ },
+ {
+  "event": "proposal",
+  "data": {
+   "semantic_plan": {
+    "roles": [
+     {
+      "id": "bread_left",
+      "kind": "object",
+      "description": "Piece of bread initially on the far left of the table."
+     },
+     {
+      "id": "bread_right",
+      "kind": "object",
+      "description": "Piece of bread initially on the far right of the table."
+     },
+     {
+      "id": "basket",
+      "kind": "container",
+      "description": "Wicker basket initially in the middle of the table, close to the robot."
+     },
+     {
+      "id": "table",
+      "kind": "surface",
+      "description": "Table supporting the bread and basket."
+     },
+     {
+      "id": "robot",
+      "kind": "robot",
+      "description": "Robot near the basket."
+     }
+    ],
+    "steps": [
+     {
+      "verb": "pick",
+      "subjects": [
+       "bread_left",
+       "bread_right"
+      ],
+      "arms": [
+       "left",
+       "right"
+      ],
+      "direction": "up",
+      "effects": [
+       {
+        "kind": "held",
+        "arms": [
+         "left"
+        ],
+        "subjects": [
+         "bread_left"
+        ]
+       },
+       {
+        "kind": "held",
+        "arms": [
+         "right"
+        ],
+        "subjects": [
+         "bread_right"
+        ]
+       }
+      ],
+      "quote": "source_span_02"
+     },
+     {
+      "verb": "place",
+      "subjects": [
+       "bread_left"
+      ],
+      "arms": [
+       "left"
+      ],
+      "effects": [
+       {
+        "kind": "relation",
+        "references": [
+         "basket"
+        ],
+        "subjects": [
+         "bread_left"
+        ],
+        "value": "inside"
+       },
+       {
+        "kind": "released",
+        "subjects": [
+         "bread_left"
+        ]
+       }
+      ],
+      "quote": "source_span_03"
+     },
+     {
+      "verb": "place",
+      "subjects": [
+       "bread_right"
+      ],
+      "arms": [
+       "right"
+      ],
+      "effects": [
+       {
+        "kind": "relation",
+        "references": [
+         "basket"
+        ],
+        "subjects": [
+         "bread_right"
+        ],
+        "value": "inside"
+       },
+       {
+        "kind": "released",
+        "subjects": [
+         "bread_right"
+        ]
+       }
+      ],
+      "quote": "source_span_03"
+     }
+    ],
+    "conditions": [
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "relation",
+       "references": [
+        "table"
+       ],
+       "subjects": [
+        "bread_left",
+        "bread_right"
+       ],
+       "value": "on"
+      },
+      "quote": "source_span_01"
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "view_location",
+       "frame": "table",
+       "lateral": "far_left",
+       "subjects": [
+        "bread_left"
+       ]
+      },
+      "quote": "source_span_01"
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "view_location",
+       "frame": "table",
+       "lateral": "far_right",
+       "subjects": [
+        "bread_right"
+       ]
+      },
+      "quote": "source_span_01"
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "relation",
+       "references": [
+        "table"
+       ],
+       "subjects": [
+        "basket"
+       ],
+       "value": "on"
+      },
+      "quote": "source_span_01"
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "view_location",
+       "frame": "table",
+       "lateral": "center",
+       "depth": "middle",
+       "subjects": [
+        "basket"
+       ]
+      },
+      "quote": "source_span_01"
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "relation",
+       "references": [
+        "robot"
+       ],
+       "subjects": [
+        "basket"
+       ],
+       "value": "near"
+      },
+      "quote": "source_span_01"
+     }
+    ]
+   }
+  }
+ },
+ {
+  "event": "rejected",
+  "check": "validate_intent",
+  "message": "ValueError: pick needs one object identity per occurrence"
+ },
+ {
+  "event": "proposal",
+  "data": {
+   "semantic_plan": {
+    "roles": [
+     {
+      "id": "bread_left",
+      "kind": "object",
+      "description": "The piece of bread on the far left of the table."
+     },
+     {
+      "id": "bread_right",
+      "kind": "object",
+      "description": "The piece of bread on the far right of the table."
+     },
+     {
+      "id": "basket",
+      "kind": "container",
+      "description": "The wicker basket in the middle of the table, close to the robot."
+     },
+     {
+      "id": "table",
+      "kind": "surface",
+      "description": "The table holding the bread and basket."
+     },
+     {
+      "id": "robot",
+      "kind": "robot",
+      "description": "The robot near the basket."
+     }
+    ],
+    "steps": [
+     {
+      "verb": "pick",
+      "subjects": [
+       "bread_left",
+       "bread_right"
+      ],
+      "arms": [
+       "left",
+       "right"
+      ],
+      "direction": "up",
+      "effects": [
+       {
+        "kind": "held",
+        "arms": [
+         "left"
+        ],
+        "subjects": [
+         "bread_left"
+        ]
+       },
+       {
+        "kind": "held",
+        "arms": [
+         "right"
+        ],
+        "subjects": [
+         "bread_right"
+        ]
+       }
+      ],
+      "quote": "source_span_02"
+     },
+     {
+      "verb": "place",
+      "subjects": [
+       "bread_left",
+       "bread_right"
+      ],
+      "arms": [
+       "left",
+       "right"
+      ],
+      "effects": [
+       {
+        "kind": "relation",
+        "references": [
+         "basket"
+        ],
+        "subjects": [
+         "bread_left",
+         "bread_right"
+        ],
+        "value": "inside"
+       },
+       {
+        "kind": "released",
+        "subjects": [
+         "bread_left",
+         "bread_right"
+        ]
+       }
+      ],
+      "quote": "source_span_03"
+     }
+    ],
+    "conditions": [
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "relation",
+       "references": [
+        "table"
+       ],
+       "subjects": [
+        "bread_left",
+        "bread_right",
+        "basket"
+       ],
+       "value": "on"
+      },
+      "quote": "source_span_01"
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "view_location",
+       "frame": "table",
+       "lateral": "far_left",
+       "subjects": [
+        "bread_left"
+       ]
+      },
+      "quote": "source_span_01"
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "view_location",
+       "frame": "table",
+       "lateral": "far_right",
+       "subjects": [
+        "bread_right"
+       ]
+      },
+      "quote": "source_span_01"
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "view_location",
+       "frame": "table",
+       "depth": "middle",
+       "lateral": "center",
+       "subjects": [
+        "basket"
+       ]
+      },
+      "quote": "source_span_01"
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "relation",
+       "references": [
+        "robot"
+       ],
+       "subjects": [
+        "basket"
+       ],
+       "value": "near"
+      },
+      "quote": "source_span_01"
+     }
+    ]
+   }
+  }
+ },
+ {
+  "event": "rejected",
+  "check": "validate_intent",
+  "message": "ValueError: pick needs one object identity per occurrence"
+ },
+ {
+  "event": "outcome",
+  "published": false,
+  "error": "ValueError: pick needs one object identity per occurrence"
+ }
+]

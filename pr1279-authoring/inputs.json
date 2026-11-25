@@ -1,0 +1,14 @@
+{
+ "place_bread_basket": {
+  "image": "place_bread_basket.png",
+  "instruction": "There are two pieces of bread on the table, one on the far left and one on the far right, and a wicker basket in the middle of the table, close to the robot. Use both arms: the left arm picks up the left piece of bread and the right arm picks up the right piece of bread at the same time. Then place both pieces of bread inside the basket and release them."
+ },
+ "stamp_seal": {
+  "image": "stamp_seal.png",
+  "instruction": "There is a wooden stamp standing to the right of the middle of the table and a purple mat on the right side of the table. Use the right arm only. Pick up the stamp, move it above the purple mat and press its base down onto the mat. Then release the stamp, leaving it standing on the mat."
+ },
+ "turn_switch": {
+  "image": "turn_switch.png",
+  "instruction": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face. Use the right arm only. Move the gripper to the switch and push the switch to flip it to the other position. Then move the gripper away. Do not grasp or move the panel."
+ }
+}

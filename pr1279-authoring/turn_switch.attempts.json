@@ -1,0 +1,1090 @@
+[
+ {
+  "event": "proposal",
+  "data": {
+   "semantic_plan": {
+    "roles": [
+     {
+      "id": "table",
+      "kind": "surface",
+      "description": "The table supporting the switch panel."
+     },
+     {
+      "id": "switch_panel",
+      "kind": "object",
+      "description": "White switch panel, standing on the table to the right of the middle and far from the robot."
+     },
+     {
+      "id": "switch",
+      "kind": "button",
+      "description": "The switch on the panel’s front face.",
+      "part_of": "switch_panel"
+     }
+    ],
+    "steps": [
+     {
+      "verb": "move_gripper",
+      "subjects": [],
+      "arms": [
+       "right"
+      ],
+      "effects": [
+       {
+        "kind": "gripper_relation",
+        "arms": [
+         "right"
+        ],
+        "references": [
+         "switch"
+        ],
+        "value": "above"
+       }
+      ],
+      "quote": "Move the gripper to the switch"
+     },
+     {
+      "verb": "push",
+      "subjects": [
+       "switch"
+      ],
+      "arms": [
+       "right"
+      ],
+      "effects": [
+       {
+        "kind": "actuated",
+        "subjects": [
+         "switch"
+        ],
+        "value": "pressed"
+       }
+      ],
+      "quote": "push the switch to flip it to the other position"
+     },
+     {
+      "verb": "move_gripper",
+      "subjects": [],
+      "arms": [
+       "right"
+      ],
+      "direction": "away",
+      "effects": [
+       {
+        "kind": "gripper_relation",
+        "arms": [
+         "right"
+        ],
+        "references": [
+         "switch"
+        ],
+        "value": "clear_of"
+       }
+      ],
+      "quote": "Then move the gripper away"
+     }
+    ],
+    "conditions": [
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "relation",
+       "references": [
+        "table"
+       ],
+       "subjects": [
+        "switch_panel"
+       ],
+       "value": "on"
+      },
+      "quote": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face."
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "orientation",
+       "subjects": [
+        "switch_panel"
+       ],
+       "value": "upright"
+      },
+      "quote": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face."
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "view_location",
+       "frame": "table",
+       "lateral": "right",
+       "subjects": [
+        "switch_panel"
+       ]
+      },
+      "quote": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face."
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "view_location",
+       "frame": "robot",
+       "depth": "far",
+       "subjects": [
+        "switch_panel"
+       ]
+      },
+      "quote": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face."
+     },
+     {
+      "scope": "always",
+      "fact": {
+       "kind": "pose_match",
+       "components": [
+        "position",
+        "orientation"
+       ],
+       "epoch": "initial",
+       "references": [
+        "switch_panel"
+       ],
+       "subjects": [
+        "switch_panel"
+       ]
+      },
+      "quote": "Do not grasp or move the panel."
+     }
+    ]
+   }
+  }
+ },
+ {
+  "event": "review",
+  "data": {
+   "issues": [],
+   "checks": [
+    {
+     "quote": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face.",
+     "requirement": "The identified switch panel is the white panel in the scene.",
+     "scope": "initial",
+     "evidence": [
+      "switch_panel"
+     ]
+    },
+    {
+     "quote": "standing on the table",
+     "requirement": "The switch panel is on the table.",
+     "scope": "initial",
+     "evidence": [
+      "condition_01"
+     ],
+     "spatial": {
+      "kind": "relation",
+      "value": "on",
+      "subjects": [
+       "switch_panel"
+      ],
+      "references": [
+       "table"
+      ]
+     }
+    },
+    {
+     "quote": "standing",
+     "requirement": "The switch panel is upright initially.",
+     "scope": "initial",
+     "evidence": [
+      "condition_02"
+     ],
+     "state": {
+      "kind": "orientation",
+      "subjects": [
+       "switch_panel"
+      ],
+      "value": "upright"
+     }
+    },
+    {
+     "quote": "to the right of the middle",
+     "requirement": "The switch panel is to the right in the table frame.",
+     "scope": "initial",
+     "evidence": [
+      "condition_03"
+     ],
+     "state": {
+      "kind": "view_location",
+      "frame": "table",
+      "lateral": "right",
+      "subjects": [
+       "switch_panel"
+      ]
+     }
+    },
+    {
+     "quote": "far from the robot",
+     "requirement": "The switch panel is far from the robot initially.",
+     "scope": "initial",
+     "evidence": [
+      "condition_04"
+     ],
+     "state": {
+      "kind": "view_location",
+      "frame": "robot",
+      "depth": "far",
+      "subjects": [
+       "switch_panel"
+      ]
+     }
+    },
+    {
+     "quote": "with a switch on its front face",
+     "requirement": "The switch is the control on the front face of this panel.",
+     "scope": "initial",
+     "evidence": [
+      "switch"
+     ]
+    },
+    {
+     "quote": "Use the right arm only.",
+     "requirement": "Use the right arm for the switch interaction.",
+     "scope": "action",
+     "evidence": [
+      "step_01",
+      "step_02",
+      "step_03"
+     ]
+    },
+    {
+     "quote": "Move the gripper to the switch",
+     "requirement": "Move the right gripper to above the switch before pushing it.",
+     "scope": "action",
+     "evidence": [
+      "step_01"
+     ],
+     "state": {
+      "kind": "gripper_relation",
+      "arms": [
+       "right"
+      ],
+      "references": [
+       "switch"
+      ],
+      "value": "above"
+     }
+    },
+    {
+     "quote": "push the switch to flip it to the other position",
+     "requirement": "Push the switch with the right arm to actuate it.",
+     "scope": "action",
+     "evidence": [
+      "step_02"
+     ]
+    },
+    {
+     "quote": "push the switch to flip it to the other position",
+     "requirement": "The switch is actuated by the push.",
+     "scope": "effect",
+     "evidence": [
+      "step_02"
+     ],
+     "state": {
+      "kind": "actuated",
+      "subjects": [
+       "switch"
+      ],
+      "value": "pressed"
+     }
+    },
+    {
+     "quote": "Then move the gripper away",
+     "requirement": "After pushing, move the right gripper away so it is clear of the switch.",
+     "scope": "action",
+     "evidence": [
+      "step_03"
+     ],
+     "state": {
+      "kind": "gripper_relation",
+      "arms": [
+       "right"
+      ],
+      "references": [
+       "switch"
+      ],
+      "value": "clear_of"
+     }
+    },
+    {
+     "quote": "Do not grasp or move the panel.",
+     "requirement": "Do not grasp the panel during the task.",
+     "scope": "action",
+     "evidence": [
+      "step_01",
+      "step_02",
+      "step_03"
+     ]
+    },
+    {
+     "quote": "Do not grasp or move the panel.",
+     "requirement": "Keep the panel at its initial position and orientation throughout the task.",
+     "scope": "always",
+     "evidence": [
+      "condition_05"
+     ],
+     "state": {
+      "kind": "pose_match",
+      "components": [
+       "position",
+       "orientation"
+      ],
+      "epoch": "initial",
+      "references": [
+       "switch_panel"
+      ],
+      "subjects": [
+       "switch_panel"
+      ]
+     }
+    }
+   ]
+  }
+ },
+ {
+  "event": "rejected",
+  "check": "_validate_intent_audit",
+  "message": "AuthoringEvidenceError: Source state claim 'actuated' lacks matching evidence for ['switch'] in the required scope"
+ },
+ {
+  "event": "proposal",
+  "data": {
+   "semantic_plan": {
+    "roles": [
+     {
+      "id": "table",
+      "kind": "surface",
+      "description": "The table supporting the switch panel."
+     },
+     {
+      "id": "switch_panel",
+      "kind": "object",
+      "description": "White panel, with a switch on its front face."
+     },
+     {
+      "id": "switch",
+      "kind": "button",
+      "description": "The switch on the panel’s front face.",
+      "part_of": "switch_panel"
+     }
+    ],
+    "steps": [
+     {
+      "verb": "move_gripper",
+      "subjects": [],
+      "arms": [
+       "right"
+      ],
+      "effects": [
+       {
+        "kind": "gripper_relation",
+        "arms": [
+         "right"
+        ],
+        "references": [
+         "switch"
+        ],
+        "value": "above"
+       }
+      ],
+      "quote": "Move the gripper to the switch"
+     },
+     {
+      "verb": "push",
+      "subjects": [
+       "switch"
+      ],
+      "arms": [
+       "right"
+      ],
+      "effects": [
+       {
+        "kind": "actuated",
+        "subjects": [
+         "switch"
+        ],
+        "value": "pressed"
+       }
+      ],
+      "quote": "push the switch to flip it to the other position"
+     },
+     {
+      "verb": "move_gripper",
+      "subjects": [],
+      "arms": [
+       "right"
+      ],
+      "direction": "away",
+      "effects": [
+       {
+        "kind": "gripper_relation",
+        "arms": [
+         "right"
+        ],
+        "references": [
+         "switch"
+        ],
+        "value": "clear_of"
+       }
+      ],
+      "quote": "Then move the gripper away"
+     }
+    ],
+    "conditions": [
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "relation",
+       "references": [
+        "table"
+       ],
+       "subjects": [
+        "switch_panel"
+       ],
+       "value": "on"
+      },
+      "quote": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face."
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "orientation",
+       "subjects": [
+        "switch_panel"
+       ],
+       "value": "upright"
+      },
+      "quote": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face."
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "view_location",
+       "frame": "table",
+       "lateral": "right",
+       "subjects": [
+        "switch_panel"
+       ]
+      },
+      "quote": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face."
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "view_location",
+       "frame": "robot",
+       "depth": "far",
+       "subjects": [
+        "switch_panel"
+       ]
+      },
+      "quote": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face."
+     },
+     {
+      "scope": "always",
+      "fact": {
+       "kind": "pose_match",
+       "components": [
+        "position",
+        "orientation"
+       ],
+       "epoch": "initial",
+       "references": [
+        "switch_panel"
+       ],
+       "subjects": [
+        "switch_panel"
+       ]
+      },
+      "quote": "Do not grasp or move the panel."
+     },
+     {
+      "scope": "final",
+      "fact": {
+       "kind": "actuated",
+       "subjects": [
+        "switch"
+       ],
+       "value": "pressed"
+      },
+      "quote": "push the switch to flip it to the other position"
+     }
+    ]
+   }
+  }
+ },
+ {
+  "event": "review",
+  "data": {
+   "issues": [
+    {
+     "quote": "push the switch to flip it to the other position",
+     "reason": "The graph records the switch as actuated:pressed, which does not establish that its position changed to the other position. No final state or effect represents the requested flip."
+    }
+   ]
+  }
+ },
+ {
+  "event": "rejected",
+  "check": "_validate_audit_issues",
+  "message": "ValueError: source_audit: [{\"quote\": \"push the switch to flip it to the other position\", \"reason\": \"The graph records the switch as actuated:pressed, which does not establish that its position changed to the other position. No final state or effect represents the requested flip.\"}]"
+ },
+ {
+  "event": "rejected",
+  "check": "_validate_intent_audit",
+  "message": "ValueError: source_audit: [{\"quote\": \"push the switch to flip it to the other position\", \"reason\": \"The graph records the switch as actuated:pressed, which does not establish that its position changed to the other position. No final state or effect represents the requested flip.\"}]"
+ },
+ {
+  "event": "proposal",
+  "data": {
+   "semantic_plan": {
+    "roles": [
+     {
+      "id": "table",
+      "kind": "surface",
+      "description": "The table supporting the switch panel."
+     },
+     {
+      "id": "switch_panel",
+      "kind": "object",
+      "description": "White panel, with a switch on its front face."
+     },
+     {
+      "id": "switch",
+      "kind": "button",
+      "description": "The switch on the panel’s front face.",
+      "part_of": "switch_panel"
+     }
+    ],
+    "steps": [
+     {
+      "verb": "move_gripper",
+      "subjects": [],
+      "arms": [
+       "right"
+      ],
+      "effects": [
+       {
+        "kind": "gripper_relation",
+        "arms": [
+         "right"
+        ],
+        "references": [
+         "switch"
+        ],
+        "value": "above"
+       }
+      ],
+      "quote": "Move the gripper to the switch"
+     },
+     {
+      "verb": "push",
+      "subjects": [
+       "switch"
+      ],
+      "arms": [
+       "right"
+      ],
+      "effects": [
+       {
+        "kind": "actuated",
+        "subjects": [
+         "switch"
+        ],
+        "value": "pressed"
+       },
+       {
+        "kind": "actuated",
+        "subjects": [
+         "switch"
+        ],
+        "value": "turned"
+       }
+      ],
+      "quote": "push the switch to flip it to the other position"
+     },
+     {
+      "verb": "move_gripper",
+      "subjects": [],
+      "arms": [
+       "right"
+      ],
+      "direction": "away",
+      "effects": [
+       {
+        "kind": "gripper_relation",
+        "arms": [
+         "right"
+        ],
+        "references": [
+         "switch"
+        ],
+        "value": "clear_of"
+       }
+      ],
+      "quote": "Then move the gripper away"
+     }
+    ],
+    "conditions": [
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "relation",
+       "references": [
+        "table"
+       ],
+       "subjects": [
+        "switch_panel"
+       ],
+       "value": "on"
+      },
+      "quote": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face."
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "orientation",
+       "subjects": [
+        "switch_panel"
+       ],
+       "value": "upright"
+      },
+      "quote": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face."
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "view_location",
+       "frame": "table",
+       "lateral": "right",
+       "subjects": [
+        "switch_panel"
+       ]
+      },
+      "quote": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face."
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "view_location",
+       "frame": "robot",
+       "depth": "far",
+       "subjects": [
+        "switch_panel"
+       ]
+      },
+      "quote": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face."
+     },
+     {
+      "scope": "always",
+      "fact": {
+       "kind": "pose_match",
+       "components": [
+        "position",
+        "orientation"
+       ],
+       "epoch": "initial",
+       "references": [
+        "switch_panel"
+       ],
+       "subjects": [
+        "switch_panel"
+       ]
+      },
+      "quote": "Do not grasp or move the panel."
+     },
+     {
+      "scope": "final",
+      "fact": {
+       "kind": "actuated",
+       "subjects": [
+        "switch"
+       ],
+       "value": "turned"
+      },
+      "quote": "push the switch to flip it to the other position"
+     }
+    ]
+   }
+  }
+ },
+ {
+  "event": "review",
+  "data": {
+   "issues": [],
+   "checks": [
+    {
+     "quote": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face.",
+     "requirement": "Identify the white switch panel and its front-face switch as parts of that panel.",
+     "scope": "initial",
+     "evidence": [
+      "switch_panel",
+      "switch"
+     ]
+    },
+    {
+     "quote": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face.",
+     "requirement": "The panel is on the table.",
+     "scope": "initial",
+     "evidence": [
+      "condition_01"
+     ],
+     "spatial": {
+      "kind": "relation",
+      "value": "on",
+      "subjects": [
+       "switch_panel"
+      ],
+      "references": [
+       "table"
+      ]
+     }
+    },
+    {
+     "quote": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face.",
+     "requirement": "The panel is standing upright initially.",
+     "scope": "initial",
+     "evidence": [
+      "condition_02"
+     ],
+     "state": {
+      "kind": "orientation",
+      "subjects": [
+       "switch_panel"
+      ],
+      "value": "upright"
+     }
+    },
+    {
+     "quote": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face.",
+     "requirement": "The panel is to the right of the middle of the table.",
+     "scope": "initial",
+     "evidence": [
+      "condition_03"
+     ],
+     "state": {
+      "kind": "view_location",
+      "frame": "table",
+      "lateral": "right",
+      "subjects": [
+       "switch_panel"
+      ]
+     }
+    },
+    {
+     "quote": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face.",
+     "requirement": "The panel is far from the robot initially.",
+     "scope": "initial",
+     "evidence": [
+      "condition_04"
+     ],
+     "state": {
+      "kind": "view_location",
+      "frame": "robot",
+      "depth": "far",
+      "subjects": [
+       "switch_panel"
+      ]
+     }
+    },
+    {
+     "quote": "Use the right arm only.",
+     "requirement": "Use the right arm for the gripper approach, switch push, and withdrawal.",
+     "scope": "action",
+     "evidence": [
+      "step_01",
+      "step_02",
+      "step_03"
+     ]
+    },
+    {
+     "quote": "Move the gripper to the switch",
+     "requirement": "Move the right gripper to the switch, approaching above its contact site.",
+     "scope": "action",
+     "evidence": [
+      "step_01"
+     ],
+     "state": {
+      "kind": "gripper_relation",
+      "arms": [
+       "right"
+      ],
+      "references": [
+       "switch"
+      ],
+      "value": "above"
+     }
+    },
+    {
+     "quote": "Do not grasp or move the panel.",
+     "requirement": "Do not grasp the panel.",
+     "scope": "action",
+     "evidence": [
+      "step_01",
+      "step_02",
+      "step_03"
+     ]
+    },
+    {
+     "quote": "Do not grasp or move the panel.",
+     "requirement": "Keep the panel at its initial position and orientation throughout the task.",
+     "scope": "always",
+     "evidence": [
+      "condition_05"
+     ],
+     "state": {
+      "kind": "pose_match",
+      "components": [
+       "position",
+       "orientation"
+      ],
+      "epoch": "initial",
+      "references": [
+       "switch_panel"
+      ],
+      "subjects": [
+       "switch_panel"
+      ]
+     }
+    },
+    {
+     "quote": "push the switch to flip it to the other position",
+     "requirement": "Push the switch and actuate it by pressing it.",
+     "scope": "effect",
+     "evidence": [
+      "step_02"
+     ],
+     "state": {
+      "kind": "actuated",
+      "subjects": [
+       "switch"
+      ],
+      "value": "pressed"
+     }
+    },
+    {
+     "quote": "push the switch to flip it to the other position",
+     "requirement": "Leave the switch flipped to the other position.",
+     "scope": "final",
+     "evidence": [
+      "step_02",
+      "condition_06"
+     ],
+     "state": {
+      "kind": "actuated",
+      "subjects": [
+       "switch"
+      ],
+      "value": "turned"
+     }
+    },
+    {
+     "quote": "Then move the gripper away",
+     "requirement": "Move the right gripper away from the switch so it is clear of the switch.",
+     "scope": "action",
+     "evidence": [
+      "step_03"
+     ],
+     "state": {
+      "kind": "gripper_relation",
+      "arms": [
+       "right"
+      ],
+      "references": [
+       "switch"
+      ],
+      "value": "clear_of"
+     }
+    }
+   ]
+  }
+ },
+ {
+  "event": "rejected",
+  "check": "_validate_intent_audit",
+  "message": "AuthoringEvidenceError: Source state claim 'actuated' lacks matching evidence for ['switch'] in the required scope"
+ },
+ {
+  "event": "proposal",
+  "data": {
+   "semantic_plan": {
+    "roles": [
+     {
+      "id": "table",
+      "kind": "surface",
+      "description": "The table supporting the switch panel."
+     },
+     {
+      "id": "switch_panel",
+      "kind": "object",
+      "description": "White panel, with a switch on its front face."
+     },
+     {
+      "id": "switch",
+      "kind": "button",
+      "description": "The switch on the panel’s front face.",
+      "part_of": "switch_panel"
+     }
+    ],
+    "steps": [
+     {
+      "verb": "move_gripper",
+      "subjects": [],
+      "arms": [
+       "right"
+      ],
+      "effects": [
+       {
+        "kind": "gripper_relation",
+        "arms": [
+         "right"
+        ],
+        "references": [
+         "switch"
+        ],
+        "value": "above"
+       }
+      ],
+      "quote": "Move the gripper to the switch"
+     },
+     {
+      "verb": "push",
+      "subjects": [
+       "switch"
+      ],
+      "arms": [
+       "right"
+      ],
+      "effects": [
+       {
+        "kind": "actuated",
+        "subjects": [
+         "switch"
+        ],
+        "value": "pressed"
+       },
+       {
+        "kind": "actuated",
+        "subjects": [
+         "switch"
+        ],
+        "value": "turned"
+       }
+      ],
+      "quote": "push the switch to flip it to the other position"
+     },
+     {
+      "verb": "move_gripper",
+      "subjects": [],
+      "arms": [
+       "right"
+      ],
+      "direction": "away",
+      "effects": [
+       {
+        "kind": "gripper_relation",
+        "arms": [
+         "right"
+        ],
+        "references": [
+         "switch"
+        ],
+        "value": "clear_of"
+       }
+      ],
+      "quote": "Then move the gripper away"
+     }
+    ],
+    "conditions": [
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "relation",
+       "references": [
+        "table"
+       ],
+       "subjects": [
+        "switch_panel"
+       ],
+       "value": "on"
+      },
+      "quote": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face."
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "orientation",
+       "subjects": [
+        "switch_panel"
+       ],
+       "value": "upright"
+      },
+      "quote": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face."
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "view_location",
+       "frame": "table",
+       "lateral": "right",
+       "subjects": [
+        "switch_panel"
+       ]
+      },
+      "quote": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face."
+     },
+     {
+      "scope": "initial",
+      "fact": {
+       "kind": "view_location",
+       "frame": "robot",
+       "depth": "far",
+       "subjects": [
+        "switch_panel"
+       ]
+      },
+      "quote": "There is a white switch panel standing on the table to the right of the middle, far from the robot, with a switch on its front face."
+     },
+     {
+      "scope": "always",
+      "fact": {
+       "kind": "pose_match",
+       "components": [
+        "position",
+        "orientation"
+       ],
+       "epoch": "initial",
+       "references": [
+        "switch_panel"
+       ],
+       "subjects": [
+        "switch_panel"
+       ]
+      },
+      "quote": "Do not grasp or move the panel."
+     },
+     {
+      "scope": "final",
+      "fact": {
+       "kind": "actuated",
+       "subjects": [
+        "switch"
+       ],
+       "value": "turned"
+      },
+      "quote": "push the switch to flip it to the other position"
+     }
+    ]
+   }
+  }
+ },
+ {
+  "event": "outcome",
+  "published": false,
+  "error": "ValueError: Unchanged rejected graph: Source state claim 'actuated' lacks matching evidence for ['switch'] in the required scope"
+ }
+]
