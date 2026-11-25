@@ -860,7 +860,7 @@ class Articulation(BatchEntity):
         ):
             self.__dict__.pop(name, None)
 
-    def _initialize_spawn_bound(self, result: Scene) -> None:
+    def _initialize_spawn_bound(self, result: Scene, *, borrowed: bool = False) -> None:
         """Create result-dependent runtime state on this declared facade."""
         if not isinstance(result, Scene):
             raise TypeError(
@@ -925,6 +925,8 @@ class Articulation(BatchEntity):
         self.active_joint_ids = [i for i in range(self.dof) if i not in self.mimic_ids]
 
         super().__init__(cfg, entities, self.device)
+        if not borrowed:
+            self._initialize_existing_visual_material()
         self._has_collision_visible_node_dict = {
             link_name: False for link_name in self.link_names
         }
@@ -948,7 +950,6 @@ class Articulation(BatchEntity):
         declared_state = self.__dict__.copy()
         try:
             self._initialize_spawn_bound(result)
-            self._initialize_existing_visual_material()
             self._apply_spawn_config()
             finalize_articulation_spawn(self, result)
         except Exception:

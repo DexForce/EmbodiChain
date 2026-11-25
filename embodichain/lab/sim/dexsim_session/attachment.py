@@ -31,6 +31,7 @@ from embodichain.lab.sim.cfg.source import _asset_file_path
 from embodichain.lab.sim.objects.rigid_object import RigidObject
 from embodichain.lab.sim.objects.robot import Robot
 from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+from .robot_state import _select_dofs
 
 if TYPE_CHECKING:
     from dexsim.runtime import SessionContext
@@ -99,6 +100,8 @@ def _bind_robot_cfg(cfg: RobotCfg, handle: SpawnedArticulation) -> RobotCfg:
             raise ValueError(
                 f"{handle.path}: incompatible mimic relation for {item.name}"
             )
+    for selectors in (cfg.control_parts or {}).values():
+        _select_dofs(layout, selectors)
     return cfg
 
 
@@ -145,6 +148,17 @@ class AttachedSimulationManager:
         scene = self._scene
         if scene is None or list(scene.arenas.names) != [arena]:
             raise ValueError("Attachment requires the named, finalized single arena")
+        if (
+            scene.backend not in ("dexsim", "newton")
+            or not context.world.is_physics_manually_update()
+        ):
+            raise ValueError("Attachment requires a supported manually stepped World")
+        if (
+            scene.backend == "newton"
+            and (scene.get_solver_diagnostics() or {}).get("solver_type")
+            != "mujoco_warp"
+        ):
+            raise ValueError("Attachment requires the Newton MuJoCo-Warp backend")
         self.topology_revision = scene.topology_revision
         self.validate()
         configs = [*robots, *rigid_objects]
@@ -174,7 +188,7 @@ class AttachedSimulationManager:
             robot = _AttachedRobot(_bind_robot_cfg(cfg, handle), device)
             robot._initialize_spawn_declaration(1)
             robot.attach_spawn_handles([handle])
-            robot._initialize_spawn_bound(scene)
+            robot._initialize_spawn_bound(scene, borrowed=True)
             self._robots[cfg.uid] = robot
         for cfg in rigid_objects:
             handle = scene.get_object(paths[cfg.uid])
@@ -186,7 +200,7 @@ class AttachedSimulationManager:
             body = _AttachedRigidObject(cfg, device)
             body._initialize_spawn_declaration(1)
             body.attach_spawn_handles([handle])
-            body._initialize_spawn_bound(scene)
+            body._initialize_spawn_bound(scene, borrowed=True)
             self._rigid_objects[cfg.uid] = body
         for facade in [*self._robots.values(), *self._rigid_objects.values()]:
             facade._attachment = self
@@ -198,6 +212,7 @@ class AttachedSimulationManager:
             get_ident() != self._thread
             or context is None
             or context.session_id != self.session_id
+            or context.world is not self._scene.world
             or context.scene is not self._scene
             or self._scene.topology_revision != self.topology_revision
             or context.builder.has_pending_changes
