@@ -1,0 +1,40 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="p01_pendulum">
+  <link name="base">
+    <inertial>
+      <mass value="0.1" />
+      <inertia ixx="0.001" iyy="0.001" izz="0.001" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+  <link name="bob">
+    <inertial>
+      <origin xyz="0 0 -0.5" />
+      <mass value="0.1" />
+      <inertia ixx="0.000025" iyy="0.000025" izz="0.000025" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 -0.5" />
+      <geometry>
+        <sphere radius="0.025" />
+      </geometry>
+      <material name="blue">
+        <color rgba="0.03 0.26 0.55 1" />
+      </material>
+    </visual>
+    <visual name="display_rod">
+      <origin xyz="0 0 -0.25" />
+      <geometry>
+        <cylinder radius="0.0025" length="0.5" />
+      </geometry>
+      <material name="rod_metal">
+        <color rgba="0.19 0.24 0.30 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="pivot" type="continuous">
+    <parent link="base" />
+    <child link="bob" />
+    <axis xyz="0 1 0" />
+    <dynamics damping="0" friction="0" />
+  </joint>
+</robot>

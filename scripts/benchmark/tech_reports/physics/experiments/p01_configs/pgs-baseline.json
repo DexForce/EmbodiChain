@@ -1,0 +1,89 @@
+{
+  "experiment": "P-01",
+  "purpose": "Complete PGS baseline, retaining the original TGS measurements.",
+  "run_prefix": "20261014_pgs_baseline_",
+  "solver": "PGS",
+  "position_iterations": 4,
+  "velocity_iterations": 1,
+  "duration_s": 10.0,
+  "initial_states": "assets/P-01/initial-states.json",
+  "external_forces_every_iteration": true,
+  "force_flag_note": "Same requested setting as the TGS main runs; ignored by PGS in the installed Isaac Lab interface.",
+  "baseline_trajectories": 60,
+  "common_configuration_trajectories": 20,
+  "capture_note": "One separate PGS recording of initial state 0; compare all state arrays with its baseline. Not an extra independent sample.",
+  "runs": [
+    {
+      "id": "freefall_dt010",
+      "case": "freefall",
+      "dt": 0.01,
+      "count": 10,
+      "phase": "main",
+      "group": "baseline"
+    },
+    {
+      "id": "freefall_dt005",
+      "case": "freefall",
+      "dt": 0.005,
+      "count": 10,
+      "phase": "main",
+      "group": "baseline"
+    },
+    {
+      "id": "freefall_dt0025",
+      "case": "freefall",
+      "dt": 0.0025,
+      "count": 10,
+      "phase": "main",
+      "group": "baseline"
+    },
+    {
+      "id": "freefall_dt001",
+      "case": "freefall",
+      "dt": 0.001,
+      "count": 10,
+      "phase": "investigation",
+      "group": "common_configuration"
+    },
+    {
+      "id": "pendulum_dt010",
+      "case": "pendulum",
+      "dt": 0.01,
+      "count": 10,
+      "phase": "main",
+      "group": "baseline"
+    },
+    {
+      "id": "pendulum_dt005",
+      "case": "pendulum",
+      "dt": 0.005,
+      "count": 10,
+      "phase": "main",
+      "group": "baseline"
+    },
+    {
+      "id": "pendulum_dt0025",
+      "case": "pendulum",
+      "dt": 0.0025,
+      "count": 10,
+      "phase": "main",
+      "group": "baseline"
+    },
+    {
+      "id": "pendulum_dt001",
+      "case": "pendulum",
+      "dt": 0.001,
+      "count": 10,
+      "phase": "investigation",
+      "group": "common_configuration"
+    },
+    {
+      "id": "capture_pendulum_dt005",
+      "case": "pendulum",
+      "dt": 0.005,
+      "count": 1,
+      "phase": "capture",
+      "group": "capture"
+    }
+  ]
+}

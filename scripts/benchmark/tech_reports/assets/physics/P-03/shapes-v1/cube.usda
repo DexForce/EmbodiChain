@@ -1,0 +1,49 @@
+#usda 1.0
+(
+    defaultPrim = "Object"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "Object" (
+    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "PhysxRigidBodyAPI"]
+)
+{
+    point3f physics:centerOfMass = (0, 0, 0)
+    float3 physics:diagonalInertia = (0.000041666666, 0.000041666666, 0.000041666666)
+    float physics:mass = 0.1
+    quatf physics:principalAxes = (1, 0, 0, 0)
+    custom float physxRigidBody:angularDamping = 0
+    custom float physxRigidBody:linearDamping = 0
+
+    def Cube "shape" (
+        prepend apiSchemas = ["PhysicsCollisionAPI", "PhysxCollisionAPI", "MaterialBindingAPI"]
+    )
+    {
+        rel material:binding = </Object/Material>
+        rel material:binding:physics = </Object/Material>
+        custom float physxCollision:contactOffset = 0.001
+        custom float physxCollision:restOffset = 0
+        color3f[] primvars:displayColor = [(0.85, 0.23, 0.06)]
+        double size = 0.05
+    }
+
+    def Material "Material" (
+        prepend apiSchemas = ["PhysicsMaterialAPI"]
+    )
+    {
+        token outputs:surface.connect = </Object/Material/Shader.outputs:surface>
+        float physics:dynamicFriction = 0.8
+        float physics:restitution = 0
+        float physics:staticFriction = 0.8
+
+        def Shader "Shader"
+        {
+            uniform token info:id = "UsdPreviewSurface"
+            color3f inputs:diffuseColor = (0.85, 0.23, 0.06)
+            float inputs:roughness = 0.6
+            token outputs:surface
+        }
+    }
+}
+

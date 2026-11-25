@@ -1,0 +1,70 @@
+{
+  "experiment": "P-03",
+  "version": "p03-main-v4",
+  "asset": "/home/oem/isaacsim_assets/Assets/Isaac/5.1/Isaac/IsaacLab/Factory/franka_mimic.usd",
+  "dt": 0.005,
+  "control_dt": 0.02,
+  "duration_s": 10.0,
+  "arm_kp": 2000.0,
+  "arm_kd": 100.0,
+  "finger_kp": 1000.0,
+  "finger_kd": 20.0,
+  "finger_force": 40.0,
+  "joint_velocity_limits": [
+    2.175,
+    2.175,
+    2.175,
+    2.175,
+    2.61,
+    2.61,
+    2.61,
+    0.05,
+    0.04
+  ],
+  "mass_kg": 0.1,
+  "mu": 0.8,
+  "rest_offset_m": 0.0,
+  "contact_offset_m": 0.001,
+  "robot_base": [
+    0.15,
+    0.5,
+    0.75
+  ],
+  "table_center": [
+    0.5,
+    0.5,
+    0.725
+  ],
+  "table_size": [
+    0.9,
+    0.8,
+    0.05
+  ],
+  "capture": {
+    "width": 960,
+    "height": 720,
+    "fps": 20,
+    "intrinsics": [
+      750,
+      750,
+      480,
+      360
+    ],
+    "eye": [
+      1.35,
+      -0.6,
+      1.35
+    ],
+    "target": [
+      0.45,
+      0.5,
+      0.9
+    ]
+  },
+  "dexuni_iterations": 100,
+  "physx_position_iterations": 16,
+  "physx_velocity_iterations": 1,
+  "coupling": "two_way",
+  "target_asset_physics_mode": "overlay",
+  "shapes_subdir": "shapes-v2"
+}

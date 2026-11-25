@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="home-intro">
+  <div class="eyebrow">SIMULATION · EXPERIMENTS · EVIDENCE</div>
+  <h1>机器人仿真，<br><span>用实验说清楚。</span></h1>
+  <p class="lead">以 Isaac Lab 为对照，记录 EmbodiChain / DexUni 的实际表现。<br class="desktop-only">从关键结论进入实验现场，再查阅完整分析和原始数据。</p>
+  <div class="overview-stats"><div><strong>{{ "%02d" | format(counts.complete) }}</strong><span>本轮完成</span></div><div><strong>{{ "%02d" | format(counts.partial) }}</strong><span>部分完成</span></div><div><strong>{{ "%02d" | format(counts.pending) }}</strong><span>待开展</span></div><p>共 {{ catalog | length }} 项实验<br>保留不同版本与适用边界</p></div>
+</section>
+<section aria-labelledby="available-heading">
+  <div class="section-heading"><h2 id="available-heading">已有实验材料</h2><span>结论 · 图表 · 原生视频 · 数据</span></div>
+  <div class="report-grid">
+    {% for entry in catalog if entry.status != 'pending' %}
+    <a class="report-card" href="{{ entry.url }}">
+      <div class="card-image">{% if entry.thumbnail %}<img src="{{ entry.thumbnail }}" alt="{{ entry.id }} 原生仿真实验画面" {% if not loop.first %}loading="lazy"{% endif %}><span class="image-tag">原生仿真画面</span>{% else %}<span class="image-tag">实验重做中 · 素材待补</span>{% endif %}<span class="card-arrow" aria-hidden="true">↗</span></div>
+      <div class="card-body"><div class="card-meta"><span>{{ entry.id }} <span class="muted">/ {{ entry.category }}</span></span><span class="badge {{ entry.status }}">{{ entry.status_label }}</span></div><h3>{{ entry.title }}</h3><p>{{ entry.description }}</p><div class="card-foot">{{ entry.scope }}</div></div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+<section class="review-section" aria-labelledby="review-heading">
+  <div class="section-heading"><h2 id="review-heading">发布前重点</h2><span>问题仍保留在对应报告中</span></div>
+  <div class="review-list">
+    {% for entry in catalog if entry.status != 'pending' %}
+    <a href="{{ entry.url }}#findings"><b>{{ entry.id }}</b><div><strong>{{ entry.issue.title }}</strong><p>{{ entry.issue.summary | default(entry.issue.text) }}</p></div><span>→</span></a>
+    {% endfor %}
+  </div>
+</section>
+<section aria-labelledby="directory-heading">
+  <div class="section-heading"><h2 id="directory-heading">完整实验目录</h2><span>按原技术报告分类</span></div>
+  <div class="directory-groups">{% for group in groups %}<section><h3>{{ group.name }}</h3><div>{% for entry in group['items'] %}<a class="directory-row" href="{{ entry.url }}"><b>{{ entry.id }}</b><span>{{ entry.title }}</span><span class="badge {{ entry.status }}">{{ entry.status_label }}</span></a>{% endfor %}</div></section>{% endfor %}</div>
+</section>
+<p class="page-note">这里展示已有实验素材与初稿。未开展的实验仅保留标题页；当前材料不等同于统一编辑后的正式对外报告。</p>
+{% endblock %}
