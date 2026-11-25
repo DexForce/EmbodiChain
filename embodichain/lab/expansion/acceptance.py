@@ -718,11 +718,16 @@ class MeasuredExpansionValidator:
             f"{env.robot.uid}/{link}": matrices[:, index]
             for index, link in enumerate(env.robot.link_names)
         }
+        captured_uids = (
+            set(measured.sim.get_rigid_object_uid_list())
+            if measured is not env and poses.device.type == "cpu"
+            else ()
+        )
         for uid in env.sim.get_rigid_object_uid_list():
             body = env.sim.get_rigid_object(uid)
             # Static native matrices and CUDA kinematics retain their original
-            # arithmetic. Dynamic CPU bodies use the already captured pose.
-            if poses.device.type == "cpu" and not body.is_static:
+            # arithmetic. Reuse a dynamic CPU pose when the view captured it.
+            if uid in captured_uids and not body.is_static:
                 body = measured.sim.get_rigid_object(uid)
             frames[uid] = body.get_local_pose(to_matrix=True).detach().cpu().numpy()
         frames["default_plane"] = np.broadcast_to(np.eye(4), (env.num_envs, 4, 4))

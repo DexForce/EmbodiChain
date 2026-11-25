@@ -343,3 +343,35 @@ def test_verified_target_supersedes_prior_collection_startup_failure(
     recovered = run_expansion_job(cfg, resume=True)
     assert recovered["committed"] == 1 and recovered["complete"]
     assert recovered["stages"]["collection"] == {"complete": True}
+
+
+def test_archived_render_failure_applies_only_to_requested_rendering(
+    tmp_path, monkeypatch
+):
+    from embodichain.lab.expansion.journal import ExpansionJournal
+    from embodichain.lab.expansion.workflow import inspect_expansion_job
+
+    patch_host(monkeypatch)
+    cfg = config(tmp_path)
+    cfg.target_episodes = 1
+    assert run_expansion_job(cfg)["complete"]
+    root = Path(cfg.output_dir)
+    ExpansionJournal(root).stage("render", "failed", error="legacy renderer failed")
+    glob = Path.glob
+
+    def collection_first(directory, pattern):
+        paths = glob(directory, pattern)
+        return iter(sorted(paths)) if directory == root / "stages" else paths
+
+    monkeypatch.setattr(Path, "glob", collection_first)
+    result = inspect_expansion_job(root)
+    assert result["collection_complete"] and result["complete"]
+    assert "render" not in result["stages"]
+
+    path = root / "execution.json"
+    execution = json.loads(path.read_text())
+    execution["config"]["render_profiles"] = ["blue"]
+    _atomic_json(path, execution)
+    result = inspect_expansion_job(root)
+    assert result["collection_complete"] and not result["complete"]
+    assert result["stages"]["render"]["error"] == "legacy renderer failed"

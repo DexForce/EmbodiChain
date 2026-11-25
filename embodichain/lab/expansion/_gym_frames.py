@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 import time
+from types import MethodType
 import torch
 from embodichain.data_pipeline.recording.media import MediaSpool
 
@@ -30,6 +31,11 @@ from ._gym_context import GymHostContext
 from .visual import _calibrated_frames, _calibration_batch
 
 __all__: list[str] = []
+
+_BUILTIN_SAMPLERS = {
+    _MeasuredCollision: _MeasuredCollision.sample,
+    MeasuredExpansionValidator: MeasuredExpansionValidator.sample,
+}
 
 
 class GymFrameCollector:
@@ -134,10 +140,15 @@ class GymFrameCollector:
         )
         stamp = time.monotonic()
         if collision is not None:
-            if type(collision) in (_MeasuredCollision, MeasuredExpansionValidator):
-                collision._sample_captured(ids, action, frame_state)
+            sample = collision.sample
+            if (
+                isinstance(sample, MethodType)
+                and sample.__self__ is collision
+                and sample.__func__ is _BUILTIN_SAMPLERS.get(type(collision))
+            ):
+                sample(ids, action, frame_state)
             else:
-                collision.sample(ids, action, frame_state.to_scene_state())
+                sample(ids, action, frame_state.to_scene_state())
         timings["sampled_validation"] = (
             timings.get("sampled_validation", 0.0) + time.monotonic() - stamp
         )

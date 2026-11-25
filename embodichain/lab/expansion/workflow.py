@@ -148,8 +148,8 @@ def inspect_expansion_job(directory: str | Path) -> dict[str, object]:
         },
     }
     # Retain progress readback for previously written visual archives.
-    requested = set(cfg.get("render_profiles", ()))
-    if requested:
+    legacy_render_profiles = set(cfg.get("render_profiles", ()))
+    if legacy_render_profiles:
         from .visual import _variant_key
 
         plan_path = root / "postprocessing.json"
@@ -165,7 +165,7 @@ def inspect_expansion_job(directory: str | Path) -> dict[str, object]:
                 else (parent.commit_id, name) not in available
             )
             for parent in receipts
-            for name in requested
+            for name in legacy_render_profiles
         )
         result["stages"]["render"] = {"complete": pending == 0, "pending": pending}
     if cfg.get("export_lerobot") and (root / "lerobot-export.json").exists():
@@ -179,16 +179,15 @@ def inspect_expansion_job(directory: str | Path) -> dict[str, object]:
             result["stages"]["export"]["reason"] = str(error)
     for path in (root / "stages").glob("*/*.json"):
         stage = json.loads(path.read_text())
+        name = stage["stage"]
         requested = (
-            bool(requested)
-            if stage["stage"] == "render"
-            else bool(cfg.get("export_lerobot")) if stage["stage"] == "export" else True
+            bool(legacy_render_profiles)
+            if name == "render"
+            else bool(cfg.get("export_lerobot")) if name == "export" else True
         )
-        satisfied_collection = (
-            stage["stage"] == "collection" and result["collection_complete"]
-        )
+        satisfied_collection = name == "collection" and result["collection_complete"]
         if requested and stage.get("state") == "failed" and not satisfied_collection:
-            result["stages"].setdefault(stage["stage"], {}).update(
+            result["stages"].setdefault(name, {}).update(
                 error=stage.get("error"), complete=False
             )
     seconds, uncertain = ExpansionJournal(root).time_usage()
