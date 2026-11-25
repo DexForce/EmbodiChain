@@ -29,27 +29,44 @@ import hashlib
 import json
 import os
 import tempfile
+import xml.etree.ElementTree as ET
 from itertools import product
 from pathlib import Path
+from typing import TypedDict
 
 import numpy as np
 import yaml
 
+from embodichain.robot_registry import (
+    _validate_gripper_command,
+    _validate_gripper_stiffness,
+    _validate_gripper_transform,
+    resolve_gripper_defaults,
+)
+
 from .metrics import summarize
-from ._reporting import _export_trials, _write_report
+from ._objects import _suite_asset_root, suite_objects
+from ._reporting import (
+    _export_trials,
+    _visual_report,
+    _write_report,
+    _write_visual_report,
+)
 
 __all__ = ["main"]
 
-PROTOCOL = dict(
+_BASE_PROTOCOL = dict(
     lift_m=0.10,
     clearance_m=0.02,
     hold_s=3.0,
+    physics_dt_s=0.01,
+    solver_substeps=4,
+)
+_DISTURBANCE_PROTOCOL = dict(
     amplitude_m=0.03,
     leg_s=0.30,
     cycles=1,
     command_peak_m_s2=10 / np.sqrt(3) * 0.03 / 0.30**2,
-    physics_dt_s=0.01,
-    solver_substeps=4,
 )
 
 
@@ -62,8 +79,19 @@ def _physics_protocol(physics):
             contact_evidence="positive_impulse_or_nonpositive_signed_distance",
         )
     return dict(
-        physics="default", solver="default", contact_evidence="positive_impulse"
+        physics="default",
+        solver="default",
+        mimic_coupling="hard",
+        contact_evidence="positive_impulse",
     )
+
+
+def _close_wait_steps(config: dict) -> int:
+    """Read the extra closed-target dwell in physics steps."""
+    steps = config.get("close_wait_steps", 0)
+    if type(steps) is not int or steps < 0:
+        raise ValueError("close_wait_steps must be a nonnegative integer")
+    return steps
 
 
 def _save(path, value):
@@ -89,22 +117,147 @@ def _poses(values):
     return poses
 
 
-def _generate(v, gripper, seed, direction):
+class _SuiteLoader(yaml.SafeLoader):
+    """Reject repeated names before YAML construction discards a calibration."""
+
+    def compose_mapping_node(self, anchor: str | None) -> yaml.nodes.MappingNode:
+        node = super().compose_mapping_node(anchor)
+        names = set()
+        for key, _ in node.value:
+            if key.tag == "tag:yaml.org,2002:str":
+                if key.value in names:
+                    raise ValueError(
+                        f"Duplicate suite key {key.value!r} at line {key.start_mark.line + 1}"
+                    )
+                names.add(key.value)
+        return node
+
+
+def _load_suite(path: Path) -> tuple[dict, Path, dict | None]:
+    """Read a benchmark or the underlying suite of a visual-check preset."""
+    suite = yaml.load(path.read_text(), Loader=_SuiteLoader)
+    if "visual_check" not in suite:
+        return suite, path.parent, None
+    check = suite["visual_check"]
+    if (
+        set(suite) != {"visual_check"}
+        or not isinstance(check, dict)
+        or not {"suite", "objects"}
+        <= check.keys()
+        <= {"suite", "objects", "sample_count"}
+    ):
+        raise ValueError(
+            "A visual_check preset accepts suite, objects and optional sample_count"
+        )
+    if not isinstance(check["suite"], str) or not check["suite"].strip():
+        raise ValueError("visual_check.suite must be a path to a benchmark suite")
+    check.setdefault("sample_count", 2000)
+    if type(check["sample_count"]) is not int or check["sample_count"] < 1:
+        raise ValueError("visual_check.sample_count must be a positive integer")
+    if not isinstance(check["objects"], dict) or not check["objects"]:
+        raise ValueError("visual_check.objects must map categories to model IDs")
+    base = path.parent / check["suite"]
+    suite = yaml.load(base.read_text(), Loader=_SuiteLoader)
+    if "visual_check" in suite:
+        raise ValueError("visual_check.suite must reference a benchmark suite")
+    return suite, base.parent, check
+
+
+def _trial_protocol(physics: str, close_wait_steps: int, visual: dict | None) -> dict:
+    protocol = dict(
+        _BASE_PROTOCOL, close_wait_steps=close_wait_steps, **_physics_protocol(physics)
+    )
+    if visual is None:
+        return protocol | _DISTURBANCE_PROTOCOL
+    return dict(
+        protocol,
+        mode="visual_check",
+        num_envs=1,
+        candidate_limit=1,
+        conditions=["base"],
+        sample_count=visual["sample_count"],
+    )
+
+
+class _GripperOptions(TypedDict, total=False):
+    gripper_urdf: str
+    variant: str
+    root_from_tcp: list[list[float]]
+    stiffness: float
+    close_qpos: dict[str, float]
+
+
+def _suite_grippers(
+    raw: object, *, gripper_root: Path | None = None
+) -> dict[str, _GripperOptions]:
+    """Resolve each catalog variant and validate its TCP and drive settings."""
+    if not isinstance(raw, (dict, list)) or not raw:
+        raise ValueError("grippers must be a nonempty list of IDs or a mapping by ID")
+    entries = raw.items() if isinstance(raw, dict) else ((name, {}) for name in raw)
+    grippers = {}
+    for name, fields in entries:
+        if not isinstance(name, str) or not name or name in grippers:
+            raise ValueError("grippers must contain unique, nonempty catalog IDs")
+        if not isinstance(fields, dict):
+            raise ValueError(f"grippers.{name} must be a settings mapping")
+        unknown = fields.keys() - {
+            "variant",
+            "root_from_tcp",
+            "stiffness",
+            "close_qpos",
+        }
+        if unknown:
+            raise ValueError(f"Unsupported grippers.{name} fields: {unknown}")
+        options: _GripperOptions = {}
+        if "variant" in fields and not isinstance(fields["variant"], str):
+            raise ValueError(f"grippers.{name}.variant must be a catalog variant ID")
+        defaults = resolve_gripper_defaults(name, variant=fields.get("variant"))
+        for field, value in fields.items():
+            try:
+                if field == "variant":
+                    options["variant"] = value
+                elif field == "stiffness":
+                    options["stiffness"] = _validate_gripper_stiffness(value)
+                elif field == "close_qpos":
+                    options["close_qpos"] = _validate_gripper_command(
+                        value, defaults["control_parts"]["eef"]
+                    )
+                else:
+                    options["root_from_tcp"] = [
+                        list(row) for row in _validate_gripper_transform(value)
+                    ]
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"grippers.{name}.{field}: {exc}") from exc
+        if gripper_root is not None:
+            options["gripper_urdf"] = str(
+                (gripper_root / name / f"{name}.urdf").resolve(strict=True)
+            )
+        grippers[name] = options
+    return grippers
+
+
+def _generate(v, defaults, root_from_tcp, seed, direction, sample_count=None):
     import torch
-    from embodichain.robot_registry import resolve_gripper_defaults
     from embodichain.lab.sim.utility.gripper_geometry import (
         build_gripper_collision_geometry,
         grasp_generator_parameters,
     )
     from embodichain.toolkits.graspkit.pg_grasp import (
         AntipodalGraspPoseGenerator,
+        AntipodalGraspPoseGeneratorCfg,
         GraspAnnotationCfg,
     )
 
-    defaults = resolve_gripper_defaults(gripper)
     gen = AntipodalGraspPoseGenerator(
         **grasp_generator_parameters(defaults),
-        collision_geometry=build_gripper_collision_geometry(defaults),
+        algorithm_cfg=(
+            AntipodalGraspPoseGeneratorCfg(sample_count=sample_count, max_candidates=1)
+            if sample_count is not None
+            else None
+        ),
+        collision_geometry=build_gripper_collision_geometry(
+            defaults, root_from_tcp=root_from_tcp
+        ),
         annotation_cfg=GraspAnnotationCfg(disk_cache=False),
     )
     vertices, faces = v.obj.get_semantic_mesh([0])
@@ -148,21 +301,24 @@ def _asset_config(value, root, digests):
     return result
 
 
+def _packaged_hand_files(urdf: Path) -> dict[str, str]:
+    """Fingerprint the actual URDF and collision meshes used by the two stages."""
+    meshes = ET.parse(urdf).iterfind(".//collision/geometry/mesh")
+    paths = {urdf.parent / mesh.attrib["filename"] for mesh in meshes}
+    paths.add(urdf)
+    digests = {}
+    for path in paths:
+        with path.open("rb") as stream:
+            digests[str(path)] = hashlib.file_digest(stream, "sha256").hexdigest()
+    return digests
+
+
 def _run_case(spec, method, source, root, out, args):
     from embodichain.lab.sim.grasp_validation import GraspValidator
     from embodichain.lab.sim.cfg import RigidObjectCfg
-    from embodichain.robot_registry import resolve_gripper_defaults
 
     meta = {
-        key: spec[key]
-        for key in (
-            "object",
-            "gripper",
-            "family",
-            "object_holdout",
-            "seed",
-            "placement",
-        )
+        key: spec[key] for key in ("object", "category", "gripper", "seed", "placement")
     }
     case = dict(
         meta,
@@ -174,15 +330,35 @@ def _run_case(spec, method, source, root, out, args):
     )
     digests = {}
     rigid = _asset_config(spec["rigid"], root, digests)
+    variant = spec.get("variant")
+    defaults = resolve_gripper_defaults(spec["gripper"], variant=variant)
+    root_from_tcp = spec.get("root_from_tcp")
+    close_wait_steps = _close_wait_steps(spec)
+    visual = spec.get("visual_check") if args.command == "run" else None
+    gripper_urdf = None
+    gripper_files = {}
+    if "gripper_urdf" in spec:
+        gripper_urdf = (root / Path(spec["gripper_urdf"]).expanduser()).resolve(
+            strict=True
+        )
+        gripper_files = _packaged_hand_files(gripper_urdf)
+        defaults.update(
+            fpath=str(gripper_urdf),
+            source_sha256=gripper_files[str(gripper_urdf)],
+            mesh_paths={},
+            extract_subtree=False,
+        )
     protocol = {
-        "version": 4,
+        "version": 5,
         **_physics_protocol(args.physics),
-        "gripper_defaults": resolve_gripper_defaults(spec["gripper"]),
+        "gripper_defaults": defaults,
         "dexsim": version("dexsim-engine"),
         "object_files": digests,
         "newton": version("newton"),
     }
-    case["protocol"] = dict(PROTOCOL, **_physics_protocol(args.physics))
+    if gripper_urdf is not None:
+        protocol["gripper_files"] = gripper_files
+    case["protocol"] = _trial_protocol(args.physics, close_wait_steps, visual)
     case["provenance"] = protocol
     encoded = json.dumps(
         [protocol, spec, method, source, args.command], sort_keys=True, allow_nan=False
@@ -204,30 +380,44 @@ def _run_case(spec, method, source, root, out, args):
     initial_gpu = torch.cuda.memory_allocated(device)
     torch.cuda.reset_peak_memory_stats(device)
     cfg = RigidObjectCfg.from_dict(rigid)
+    if not args.headless:
+        label = f"{spec['category']} / {spec['object']} with {spec['gripper']}"
+        print(f"Preparing {label}", flush=True)
     v = GraspValidator(
         cfg,
         spec["gripper"],
         args.num_envs,
+        variant=variant,
+        gripper_urdf=gripper_urdf,
         physics=args.physics,
         headless=args.headless,
+        rotation_shift_deg=spec.get("rotation_shift_deg"),
+        root_from_tcp=root_from_tcp,
+        stiffness=spec.get("stiffness"),
+        close_qpos=spec.get("close_qpos"),
+        close_wait_steps=close_wait_steps,
     )
     try:
         if args.resume and path.exists():
             case = json.loads(path.read_text())
             poses = _poses(case["poses"])
         else:
+            if not args.headless and source is None:
+                print(f"Generating grasp candidates for {label}", flush=True)
             candidates = (
                 source
                 if source is not None
                 else _generate(
                     v,
-                    spec["gripper"],
+                    defaults,
+                    root_from_tcp,
                     spec["seed"],
                     spec.get("approach_direction", [0, 0, -1]),
+                    sample_count=visual["sample_count"] if visual is not None else None,
                 )
             )
             if args.command == "run":
-                candidates = candidates[:10]
+                candidates = candidates[:1] if visual is not None else candidates[:10]
             poses = _poses([c["T_object_tcp"] for c in candidates])
             case["candidate_metadata"] = [
                 {k: v for k, v in c.items() if k != "T_object_tcp"} for c in candidates
@@ -239,6 +429,8 @@ def _run_case(spec, method, source, root, out, args):
                 trial_id_prefix=name,
             )
             _save(path, case)
+        if not args.headless and len(poses) == 0:
+            print(f"No grasp candidates for {label}. Skipping playback.", flush=True)
         if not np.allclose(case["initial"], v.initial.cpu().numpy(), atol=1e-4):
             raise ValueError("Settled initial state changed on resume")
         v.initial.copy_(v.initial.new_tensor(case["initial"]))
@@ -247,9 +439,10 @@ def _run_case(spec, method, source, root, out, args):
             for r in case["trials"]
             if r["status"] == "ok"
         }
+        conditions = ("base",) if visual is not None else ("base", "x", "y")
         work = [
             item
-            for item in product(range(1, len(poses) + 1), ("base", "x", "y"))
+            for item in product(range(1, len(poses) + 1), conditions)
             if item not in completed
         ]
         for start in range(0, len(work), args.num_envs):
@@ -257,14 +450,22 @@ def _run_case(spec, method, source, root, out, args):
             if not args.headless:
                 rank, condition = batch[0]
                 print(
-                    f"Viewing {spec['object']} with {spec['gripper']} in arena 0 "
-                    f"(candidate {rank}, {condition})",
+                    f"Viewing {label} in arena 0 " f"(candidate {rank}, {condition})",
                     flush=True,
                 )
             padded = batch + [batch[-1]] * (args.num_envs - len(batch))
             results = v.validate(
                 np.stack([poses[i - 1] for i, _ in padded]), [d for _, d in padded]
             )
+            if not args.headless:
+                trial = results[0]
+                if trial["status"] != "ok":
+                    outcome = trial.get("reason", trial["status"])
+                elif trial["success"]:
+                    outcome = "success"
+                else:
+                    outcome = f"failed during {trial['failure_stage']}"
+                print(f"Arena 0 candidate {rank} ({condition}): {outcome}", flush=True)
             for (rank, d), result in zip(batch, results):
                 completed[rank, d] = dict(
                     result, rank=rank, condition=d, trial_id=f"{name}/{rank}/{d}"
@@ -304,8 +505,8 @@ def main(argv: list[str] | None = None) -> None:
         p.add_argument(
             "--headless",
             action=argparse.BooleanOptionalAction,
-            default=True,
-            help="Run headlessly by default. Use --no-headless to open the simulator viewer.",
+            default=True if p is validate else None,
+            help="Show the native window with --no-headless. Visual-check presets show it by default.",
         )
         p.add_argument("--output", type=Path, required=True)
         p.add_argument("--resume", action="store_true")
@@ -315,16 +516,21 @@ def main(argv: list[str] | None = None) -> None:
     args.output.mkdir(parents=True, exist_ok=True)
     if args.command == "validate":
         spec = yaml.safe_load(args.case.read_text())
+        spec.setdefault("category", spec.pop("family", spec["object"]))
+        spec.pop("object_holdout", None)
+        if "root_from_contact_frame" in spec:
+            parser.error("root_from_contact_frame is supplied by the gripper catalog")
+        if spec.keys() & {"default_physics", "mimic_compliance"}:
+            parser.error(
+                "Remove the mimic settings from the case YAML. PhysX uses hard coupling automatically."
+            )
         poses = [
             json.loads(line)
             for line in args.poses.read_text().splitlines()
             if line.strip()
         ]
         case = _run_case(
-            dict(
-                family=spec["object"], object_holdout=False, seed=0, placement="default"
-            )
-            | spec,
+            dict(seed=0, placement="default") | spec,
             "external",
             poses,
             args.case.parent,
@@ -335,51 +541,75 @@ def main(argv: list[str] | None = None) -> None:
         if not case["finished"]:
             raise SystemExit("Incomplete observations; retry using --resume")
         return
-    suite = yaml.safe_load(args.suite.read_text())
+    suite, root, visual = _load_suite(args.suite)
+    if args.headless is None:
+        args.headless = visual is None
+    if visual is not None and args.num_envs != 1:
+        parser.error("A visual check runs in a single arena; use --num-envs 1")
+    close_wait_steps = _close_wait_steps(suite)
+    gripper_root = suite.get("gripper_root")
+    grippers = _suite_grippers(
+        suite["grippers"],
+        gripper_root=(
+            _suite_asset_root(gripper_root, root) if gripper_root is not None else None
+        ),
+    )
+    objects = suite_objects(
+        suite,
+        root,
+        physics=args.physics,
+        representatives=visual["objects"] if visual is not None else None,
+    )
+    seeds = suite.get("seeds", [0])
+    algorithms = suite.get("algorithms", {"antipodal": None})
+    methods = list(algorithms)
     jobs = []
     started = time.perf_counter()
-    families = {}
     for entries in (
-        [o["id"] for o in suite["objects"]],
-        suite["grippers"],
-        suite.get("seeds", [0]),
-        list(suite.get("algorithms", {"antipodal": None})),
+        [(o["category"], o["id"]) for o in objects],
+        seeds,
+        methods,
     ):
         if not entries or len(set(entries)) != len(entries):
             raise ValueError("Suite axes must be nonempty and unique")
-    for obj in suite["objects"]:
-        family = obj["family"]
-        if (
-            type(obj["holdout"]) is not bool
-            or families.setdefault(family, obj["holdout"]) != obj["holdout"]
-        ):
-            raise ValueError("Each CAD family must belong to exactly one object split")
-    for obj, hand, seed, method in product(
-        suite["objects"],
-        suite["grippers"],
-        suite.get("seeds", [0]),
-        suite.get("algorithms", {"antipodal": None}),
-    ):
-        for placement, overrides in obj.get("placements", {"default": {}}).items():
+    if visual is not None:
+        seeds, methods = seeds[:1], methods[:1]
+    for obj, hand, seed, method in product(objects, grippers, seeds, methods):
+        placements = list(obj.get("placements", {"default": {}}).items())
+        if visual is not None:
+            if not placements:
+                raise ValueError(f"At least one placement is required for {obj['id']}")
+            placements = placements[:1]
+        for placement, overrides in placements:
             spec = dict(
                 object=obj["id"],
-                family=obj["family"],
-                object_holdout=obj["holdout"],
+                category=obj["category"],
                 gripper=hand,
                 seed=seed,
                 placement=placement,
                 rigid=obj["rigid"] | overrides,
+                **grippers[hand],
             )
+            if close_wait_steps:
+                spec["close_wait_steps"] = close_wait_steps
+            if visual is not None:
+                spec["visual_check"] = {"sample_count": visual["sample_count"]}
+            if "rotation_shift_deg" in obj:
+                spec["rotation_shift_deg"] = obj["rotation_shift_deg"]
             spec["approach_direction"] = obj.get("approach_direction", [0, 0, -1])
-            table = suite.get("algorithms", {}).get(method)
+            table = algorithms[method]
             source = None
             if table is not None:
                 filename = table.format(
-                    object=obj["id"], gripper=hand, seed=seed, placement=placement
+                    object=obj["id"],
+                    category=obj["category"],
+                    gripper=hand,
+                    seed=seed,
+                    placement=placement,
                 )
                 source = [
                     json.loads(line)
-                    for line in (args.suite.parent / filename).read_text().splitlines()
+                    for line in (root / filename).read_text().splitlines()
                     if line.strip()
                 ]
             jobs.append((spec, method, source))
@@ -388,9 +618,14 @@ def main(argv: list[str] | None = None) -> None:
     pool = None
     cases = []
     try:
-        for spec, method, source in jobs:
+        for index, (spec, method, source) in enumerate(jobs, 1):
             current = copy(args)
-            for attempt in range(2):
+            if visual is not None:
+                print(
+                    f"Visual check {index}/{len(jobs)}: {spec['gripper']} / {spec['category']} / {spec['object']}",
+                    flush=True,
+                )
+            for _ in range(1 if visual is not None else 2):
                 if pool is None:
                     pool = ProcessPoolExecutor(
                         max_workers=1, mp_context=multiprocessing.get_context("spawn")
@@ -401,7 +636,7 @@ def main(argv: list[str] | None = None) -> None:
                         spec,
                         method,
                         source,
-                        args.suite.parent,
+                        root,
                         args.output,
                         current,
                     ).result()
@@ -414,6 +649,8 @@ def main(argv: list[str] | None = None) -> None:
                     case = dict(
                         spec, algorithm=method, error=str(exc), count=0, trials=[]
                     )
+                    if visual is not None:
+                        print(f"Visual check error: {exc}", flush=True)
                 current.resume = True
             cases.append(case)
     finally:
@@ -421,11 +658,18 @@ def main(argv: list[str] | None = None) -> None:
             pool.shutdown()
 
     _export_trials(args.output, cases)
-    held = suite.get("held_grippers", suite["grippers"])
-    if not held or not set(held) <= set(suite["grippers"]):
-        raise ValueError("held_grippers must select evaluated grippers")
-    report = summarize(cases, held)
-    report["protocol"] = dict(PROTOCOL, **_physics_protocol(args.physics))
+    protocol = _trial_protocol(args.physics, close_wait_steps, visual)
+    if visual is not None:
+        report = _visual_report(cases, protocol)
+        report["wall_s"] = time.perf_counter() - started
+        _save(args.output / "report.json", report)
+        _write_visual_report(args.output, report)
+        print(args.output / "report.md")
+        if not report["complete"]:
+            raise SystemExit("Incomplete visual checks; retry using --resume")
+        return
+    report = summarize(cases)
+    report["protocol"] = protocol
     elapsed = time.perf_counter() - started
     report["wall_s"] = elapsed
     report["case_inventory"] = [
@@ -433,6 +677,7 @@ def main(argv: list[str] | None = None) -> None:
             k: c[k]
             for k in (
                 "object",
+                "category",
                 "gripper",
                 "placement",
                 "seed",

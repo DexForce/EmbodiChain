@@ -83,7 +83,13 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
             for value in metadata.get_all("Requires-Dist", [])
         )
         assert "embodichain/extensions/benchmarks/__init__.py" in entries
-        for resource in ("suite.yaml", "block.yaml", "candidates.jsonl", "cli.py"):
+        for resource in (
+            "suite.yaml",
+            "visual_check.yaml",
+            "block.yaml",
+            "candidates.jsonl",
+            "cli.py",
+        ):
             assert (
                 f"embodichain/extensions/benchmarks/grasp_pose_generator/{resource}"
                 in entries

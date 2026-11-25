@@ -19,34 +19,43 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from numbers import Real
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import time
 import xml.etree.ElementTree as ET
 
 import numpy as np
+from numpy.typing import ArrayLike
+from scipy.spatial.transform import Rotation
 import torch
 
-from embodichain.robot_registry import resolve_robot_cfg
+from embodichain.robot_registry import (
+    _validate_gripper_command,
+    _validate_gripper_stiffness,
+    _validate_gripper_transform,
+    resolve_robot_cfg,
+)
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     DefaultPhysicsCfg,
+    MimicComplianceCfg,
     NewtonPhysicsCfg,
     RenderCfg,
     RigidObjectCfg,
 )
 from embodichain.lab.sim.sensors import ContactSensorCfg, ArticulationContactFilterCfg
 from embodichain.lab.sim.shapes import CubeCfg
+from embodichain.lab.sim.utility.gripper_geometry import _native_joint_limits
 
 __all__ = ["GraspValidator"]
 
 DT = 0.01
-_APPROACH_END = 60
-_CLOSE_END = 100
-_LIFT_END = 180
+_APPROACH_STEPS = 60
+_CLOSE_STEPS = 40
+_LIFT_STEPS = 80
 _HOLD_STEPS = 300
 _LEG_STEPS = 30
-_HOLD_END = _LIFT_END + _HOLD_STEPS
 
 # Device trace layout, one sample per completed physics step.
 _COM = slice(0, 3)
@@ -57,11 +66,54 @@ _SUPPORT = 15
 _ACCEL = 16
 
 
-def _stage(hand, directory):
-    """Add three translational drive axes upstream of the native hand."""
-    source = Path(hand.urdf_cfg.assemble_urdf())
+def _stage(hand, directory, physics, close_qpos=None):
+    """Mount the native hand on three axes and hard-couple its PhysX mimics."""
+    source = Path(hand.fpath or hand.urdf_cfg.assemble_urdf())
     xml = ET.parse(source)
     root = xml.getroot()
+    if close_qpos is not None:
+        names = hand.control_parts["eef"]
+        command = _validate_gripper_command(close_qpos, names)
+        limits = _native_joint_limits(hand.qpos_limits, names)
+        joints = {joint.attrib["name"]: joint for joint in root.findall("joint")}
+        for name, value in command.items():
+            joint = joints.get(name)
+            if joint is None or joint.get("type") == "fixed":
+                raise ValueError(
+                    f"close_qpos joint {name!r} must be movable in the hand URDF"
+                )
+            bounds = limits.get(name)
+            if bounds is None and joint.get("type") != "continuous":
+                limit = joint.find("limit")
+                if limit is None:
+                    raise ValueError(
+                        f"Missing joint limits for close_qpos joint {name!r}"
+                    )
+                bounds = (float(limit.attrib["lower"]), float(limit.attrib["upper"]))
+            if bounds is not None and not bounds[0] <= value <= bounds[1]:
+                raise ValueError(
+                    f"close_qpos for {name!r} exceeds joint limits {bounds}"
+                )
+            mimic = joint.find("mimic")
+            if mimic is not None:
+                master = mimic.attrib["joint"]
+                if master not in command or not np.isclose(
+                    value,
+                    command[master] * float(mimic.get("multiplier", "1"))
+                    + float(mimic.get("offset", "0")),
+                    rtol=0,
+                    atol=1e-8,
+                ):
+                    raise ValueError(
+                        f"close_qpos for {name!r} contradicts its mimic of {master!r}"
+                    )
+        hand.joint_commands["grasp"] = command
+    if physics == "default":
+        masters = {mimic.attrib["joint"] for mimic in root.findall("joint/mimic")}
+        hand.mimic_compliance = {
+            name: MimicComplianceCfg(natural_frequency=0.0, damping_ratio=0.0)
+            for name in sorted(masters)
+        }
     children = {joint.find("child").get("link") for joint in root.findall("joint")}
     (mount,) = [
         link.get("name")
@@ -121,6 +173,26 @@ def _stage(hand, directory):
         )
 
 
+def _rotation_shift_matrix(rotation_shift_deg: ArrayLike | None) -> np.ndarray | None:
+    """Convert an optional arena-frame XYZ offset in degrees to a rotation."""
+    if rotation_shift_deg is None:
+        return None
+    if isinstance(rotation_shift_deg, torch.Tensor):
+        rotation_shift_deg = rotation_shift_deg.tolist()
+    angles = np.asarray(rotation_shift_deg, dtype=object)
+    if angles.shape != (3,) or any(
+        isinstance(value, (bool, np.bool_)) or not isinstance(value, Real)
+        for value in angles
+    ):
+        raise ValueError("rotation_shift_deg requires three finite angles in degrees")
+    angles = angles.astype(float)
+    if not np.isfinite(angles).all():
+        raise ValueError("rotation_shift_deg requires three finite angles in degrees")
+    if not angles.any():
+        return None
+    return Rotation.from_euler("xyz", angles, degrees=True).as_matrix()
+
+
 def _smooth(x):
     x = min(max(x, 0.0), 1.0)
     return x**3 * (10 + x * (6 * x - 15))
@@ -133,10 +205,28 @@ class GraspValidator:
         object_cfg: Dynamic target shared by the replicated arenas.
         gripper: Catalog ID of a calibrated parallel-jaw hand.
         num_envs: Number of independent trial arenas.
-        physics: GPU backend, either ``default`` or ``newton``. Newton runs
-            DexUni with two-way coupling between the hand and target.
-        headless: Set to False to watch arena 0 in a native window, with
-            trial playback paced to real time.
+        variant: Catalog variant for hands with multiple models, such as the
+            left or right Tianji Marvin hand.
+        gripper_urdf: Optional standalone URDF to mount using this hand's
+            catalog calibration and joint controls.
+        physics: GPU backend, either ``default`` or ``newton``. Default (PhysX)
+            hard-couples every URDF mimic joint. Newton runs DexUni with
+            two-way coupling between the hand and target.
+        headless: Set to False to open a native window when the first grasp
+            starts and watch arena 0 in real time.
+        root_from_tcp: Optional 4×4 TCP pose in the native hand root, in metres.
+            Candidate transforms refer to this TCP.
+        stiffness: Optional position gain for the native gripper drives. The
+            translation stage has its own gains and mimic joints follow the
+            backend's coupling rules.
+        close_qpos: Optional closed target by native joint name, including mimic
+            followers. Positions use metres for prismatic joints and radians for
+            revolute joints.
+        rotation_shift_deg: Optional object rotation about the fixed arena X, Y
+            and Z axes, in that order, in degrees. A rotated target starts with
+            its lowest collision point on the support, then settles.
+        close_wait_steps: Extra physics steps to hold the fully closed command
+            at the grasp pose after the 40-step closing ramp and before lifting.
     """
 
     def __init__(
@@ -145,9 +235,21 @@ class GraspValidator:
         gripper: str,
         num_envs: int = 1,
         *,
+        variant: str | None = None,
+        gripper_urdf: str | Path | None = None,
         physics: str = "default",
         headless: bool = True,
+        root_from_tcp: ArrayLike | None = None,
+        stiffness: float | None = None,
+        close_qpos: dict[str, float] | None = None,
+        close_wait_steps: int = 0,
+        rotation_shift_deg: ArrayLike | None = None,
     ) -> None:
+        if type(close_wait_steps) is not int or close_wait_steps < 0:
+            raise ValueError("close_wait_steps must be a nonnegative integer")
+        self.close_wait_steps = close_wait_steps
+        self._show_trials = not headless
+        rotation = _rotation_shift_matrix(rotation_shift_deg)
         if object_cfg.env_variants:
             raise ValueError("Each validator batch requires a single target geometry")
         if physics == "default":
@@ -162,11 +264,23 @@ class GraspValidator:
             )
         else:
             raise ValueError("physics must be default or newton")
+        overrides = {}
+        if gripper_urdf is not None:
+            overrides["fpath"] = str(Path(gripper_urdf).resolve(strict=True))
+        if root_from_tcp is not None:
+            overrides["default_root_from_tcp"] = [
+                list(row)
+                for row in _validate_gripper_transform(
+                    np.asarray(root_from_tcp).tolist()
+                )
+            ]
+        if stiffness is not None:
+            stiffness = _validate_gripper_stiffness(stiffness)
         self.temp = TemporaryDirectory()
         self.sim = SimulationManager(
             SimulationManagerCfg(
                 num_envs=num_envs,
-                headless=headless,
+                headless=True,
                 width=1280,
                 height=720,
                 enable_ground_plane=False,
@@ -177,8 +291,10 @@ class GraspValidator:
             )
         )
         try:
-            cfg = resolve_robot_cfg(gripper)
-            _stage(cfg, self.temp.name)
+            cfg = resolve_robot_cfg(gripper, overrides, variant=variant)
+            if stiffness is not None:
+                cfg.joint_drive_props.stiffness = stiffness
+            _stage(cfg, self.temp.name, physics, close_qpos)
             cfg.init_pos = [0, 0, 1.5]
             self.hand = self.sim.add_robot(cfg)
             self.sim.add_rigid_object(
@@ -208,36 +324,26 @@ class GraspValidator:
             self.sim.prepare()
             if self.obj.is_non_dynamic:
                 raise ValueError("Grasp target must be dynamic")
-            # Measure residual motion over the final 0.5 s. Resting contacts
-            # on Default GPU can report nonzero instantaneous angular velocity.
-            self.sim.update(step=100)
-            reference = self.obj.get_local_pose(to_matrix=True).clone()
-            settled = torch.ones(
-                self.sim.num_envs, dtype=torch.bool, device=self.sim.device
-            )
-            for _ in range(5):
-                self.sim.update(step=10)
-                current = self.obj.get_local_pose(to_matrix=True)
-                displacement = torch.linalg.vector_norm(
-                    current[:, :3, 3] - reference[:, :3, 3], dim=1
+            self.shapes = [
+                replace(
+                    shape,
+                    local_pose=self._tensor(shape.local_pose),
+                    half_extents=(
+                        None
+                        if shape.half_extents is None
+                        else self._tensor(shape.half_extents)
+                    ),
+                    vertices=(
+                        None if shape.vertices is None else self._tensor(shape.vertices)
+                    ),
                 )
-                cosine = (
-                    (current[:, :3, :3] * reference[:, :3, :3]).sum((1, 2)) - 1
-                ) * 0.5
-                settled &= (displacement <= 0.001) & (cosine >= np.cos(0.005))
-            if not settled.all().item():
-                raise ValueError("Target did not settle")
-            self.initial = self.obj.get_local_pose(to_matrix=True)[0].clone()
-            if not headless:
-                viewer = self.sim.viewer
-                if viewer is None:
-                    raise RuntimeError(
-                        "Could not open the native grasp benchmark window"
-                    )
-                target = (self.initial[:3, 3] + self.sim.arena_offsets[0]).cpu().numpy()
-                target = target + [0, 0, 0.05]  # Frame both the pickup and the lift.
-                eye = target + [0.36, -0.42, 0.25]
-                viewer.set_look_at(eye.tolist(), target.tolist(), [0, 0, 1])
+                for shape in self.obj.get_collision_shapes(env_id=0)
+            ]
+            if not self.shapes:
+                raise ValueError("Target has no collision geometry")
+            if rotation is not None:
+                self._place_rotated_target(rotation)
+            self.initial = self._settled_pose()
             self.com = self.obj.body_data.com_pose[0, :3].clone()
             self.cfg = cfg
             self.root_tcp = self._tensor(cfg.default_root_from_tcp)
@@ -263,29 +369,49 @@ class GraspValidator:
                 raise ValueError(
                     "Each target must settle on the support without hand contact"
                 )
-            self.shapes = [
-                replace(
-                    shape,
-                    local_pose=self._tensor(shape.local_pose),
-                    half_extents=(
-                        None
-                        if shape.half_extents is None
-                        else self._tensor(shape.half_extents)
-                    ),
-                    vertices=(
-                        None if shape.vertices is None else self._tensor(shape.vertices)
-                    ),
-                )
-                for shape in self.obj.get_collision_shapes(env_id=0)
-            ]
-            if not self.shapes:
-                raise ValueError("Target has no collision geometry")
         except BaseException:
             self.close()
             raise
 
     def _tensor(self, value: object) -> torch.Tensor:
         return torch.as_tensor(value, device=self.sim.device, dtype=torch.float32)
+
+    def _place_rotated_target(self, rotation: np.ndarray) -> None:
+        """Rotate each native root in arena axes and rest it on the support."""
+        pose = self.obj.get_local_pose(to_matrix=True).clone()
+        pose[:, :3, :3] = pose.new_tensor(rotation) @ pose[:, :3, :3]
+        pose[:, 2, 3] -= self._clearance(pose)
+        # Discard contacts from the source orientation before placing it on edge.
+        separated = pose.clone()
+        separated[:, 2, 3] += 0.5
+        self.obj.set_local_pose(separated)
+        self.sim.update(step=2)
+        self.obj.set_local_pose(pose)
+        zero = torch.zeros_like(pose[:, :3, 3])
+        self.obj.set_velocity(zero, zero)
+
+    def _settled_pose(self) -> torch.Tensor:
+        """Wait up to five simulated seconds for every arena to remain still for 0.5 s."""
+        self.sim.update(step=100)
+        current = self.obj.get_local_pose(to_matrix=True)
+        for _ in range(8):
+            reference = current.clone()
+            settled = torch.ones(
+                self.sim.num_envs, dtype=torch.bool, device=self.sim.device
+            )
+            for _ in range(5):
+                self.sim.update(step=10)
+                current = self.obj.get_local_pose(to_matrix=True)
+                displacement = torch.linalg.vector_norm(
+                    current[:, :3, 3] - reference[:, :3, 3], dim=1
+                )
+                cosine = (
+                    (current[:, :3, :3] * reference[:, :3, :3]).sum((1, 2)) - 1
+                ) * 0.5
+                settled &= (displacement <= 0.001) & (cosine >= np.cos(0.005))
+            if settled.all().item():
+                return current[0].clone()
+        raise ValueError("Target did not settle within 5 simulated seconds")
 
     def close(self) -> None:
         """Release physics resources and the temporary mounting URDF."""
@@ -373,6 +499,13 @@ class GraspValidator:
         zero = torch.zeros_like(axis)
         self.obj.set_velocity(zero, zero)
         self.sensor.reset()
+        if self._show_trials and self.sim.viewer is None:
+            if not self.sim.open_viewer():
+                raise RuntimeError("Could not open the native grasp benchmark window")
+            target = (self.initial[:3, 3] + self.sim.arena_offsets[0]).cpu().numpy()
+            target = target + [0, 0, 0.05]  # Frame both the pickup and the lift.
+            eye = target + [0.36, -0.42, 0.25]
+            self.sim.viewer.set_look_at(eye.tolist(), target.tolist(), [0, 0, 1])
         shift = self._tensor(
             [
                 {"base": [0, 0, 0], "x": [0.03, 0, 0], "y": [0, 0.03, 0]}[d]
@@ -382,10 +515,11 @@ class GraspValidator:
         up = self._tensor([0, 0, 0.1])
         history = []
         unavailable = torch.zeros(n, device=axis.device, dtype=torch.bool)
-        end = _HOLD_END + (
-            2 * _LEG_STEPS if any(d != "base" for d in directions) else 0
-        )
-        deadline = None if self.sim.sim_config.headless else time.monotonic()
+        lift_start = _APPROACH_STEPS + _CLOSE_STEPS + self.close_wait_steps
+        lift_end = lift_start + _LIFT_STEPS
+        hold_end = lift_end + _HOLD_STEPS
+        end = hold_end + (2 * _LEG_STEPS if any(d != "base" for d in directions) else 0)
+        deadline = time.monotonic() if self._show_trials else None
         previous = velocity = None
         for step in range(1, end + 1):
             if deadline is not None:
@@ -395,22 +529,22 @@ class GraspValidator:
                 if delay > 0:
                     time.sleep(delay)
                 deadline = time.monotonic() + DT
-            position = 0.08 * axis * _smooth(step / _APPROACH_END) + up * _smooth(
-                (step - _CLOSE_END) / (_LIFT_END - _CLOSE_END)
+            position = 0.08 * axis * _smooth(step / _APPROACH_STEPS) + up * _smooth(
+                (step - lift_start) / _LIFT_STEPS
             )
             position += shift * (
-                _smooth((step - _HOLD_END) / _LEG_STEPS)
-                - _smooth((step - _HOLD_END - _LEG_STEPS) / _LEG_STEPS)
+                _smooth((step - hold_end) / _LEG_STEPS)
+                - _smooth((step - hold_end - _LEG_STEPS) / _LEG_STEPS)
             )
             q = (
                 opened
                 + (self.closed - self.opened)
-                * _smooth((step - _APPROACH_END) / (_CLOSE_END - _APPROACH_END))
+                * _smooth((step - _APPROACH_STEPS) / _CLOSE_STEPS)
             ).clone()
             q[:, self.axes] = (base[:, :3, :3].mT @ position.unsqueeze(-1)).squeeze(-1)
             self.hand.set_qpos(q)
             self.sim.update(step=1)
-            if step < _LIFT_END - 1:
+            if step < lift_end - 1:
                 continue
             tcp = (
                 self.hand.get_link_pose(self.cfg.root_link, to_matrix=True)
@@ -423,11 +557,11 @@ class GraspValidator:
             v = zero if previous is None else (tcp[:, :3, 3] - previous) / DT
             acc = zero if velocity is None else (v - velocity) / DT
             previous, velocity = tcp[:, :3, 3].clone(), v
-            if step < _LIFT_END:
+            if step < lift_end:
                 continue
             fingers, support, lost = self._contacts()
             unavailable |= (
-                lost if step <= _HOLD_END else lost & (shift.abs().sum(-1) > 0)
+                lost if step <= hold_end else lost & (shift.abs().sum(-1) > 0)
             )
             history.append(
                 torch.cat(

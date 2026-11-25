@@ -18,10 +18,13 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 import os
+from pathlib import Path
+from statistics import median
 import tempfile
 
-import numpy as np
+from .metrics import _METRICS
 
 
 def _export_trials(out, cases):
@@ -30,7 +33,7 @@ def _export_trials(out, cases):
 
     dest = out / "trials"
     dest.mkdir(exist_ok=True)
-    identity = ("physics", "algorithm", "object", "family", "gripper", "placement")
+    identity = ("physics", "algorithm", "object", "category", "gripper", "placement")
     schema = {
         k: pl.String
         for k in (
@@ -45,7 +48,6 @@ def _export_trials(out, cases):
     schema.update(
         rank=pl.Int64,
         seed=pl.Int64,
-        object_holdout=pl.Boolean,
         success=pl.Boolean,
         peak_acceleration_m_s2=pl.Float64,
         peak_axis_acceleration_m_s2=pl.Float64,
@@ -68,7 +70,7 @@ def _export_trials(out, cases):
             continue
         records = []
         for trial in case["trials"]:
-            row = {k: case[k] for k in (*identity, "seed", "object_holdout")}
+            row = {k: case[k] for k in (*identity, "seed")}
             row.update(
                 {
                     k: trial.get(k)
@@ -102,56 +104,163 @@ def _export_trials(out, cases):
         os.replace(tmp.name, path)
 
 
+def _metric_groups(report):
+    for hand, group in report["by_gripper"].items():
+        yield hand, "All", group
+    for category, group in report["by_category"].items():
+        yield "All", category, group
+    for hand, categories in report["by_gripper_category"].items():
+        for category, group in categories.items():
+            yield hand, category, group
+
+
 def _write_report(out, report):
+    protocol = report["protocol"]
+    wait_steps = protocol["close_wait_steps"]
     lines = [
         "# Physical grasp benchmark",
         "",
-        f"Physics: {report['protocol']['physics']} (solver: {report['protocol']['solver']})",
+        f"Physics backend {protocol['physics']} with solver {protocol['solver']}.",
+        "",
+        f"The closing command stayed at its final target for {wait_steps} extra steps "
+        f"({wait_steps * protocol['physics_dt_s']:.2f} s) before lift.",
         "",
         "## Time & Memory",
         "",
-        "| Worker case | cost_time_ms | cpu_delta_mb | gpu_delta_mb | peak_gpu_mb |",
-        "|---|---:|---:|---:|---:|",
-        *[
-            f"| {case['trial_id_prefix'][:12]} | "
-            + " | ".join(f"{v:.2f}" for v in case["performance"].values())
-            + " |"
-            for case in report["case_inventory"]
-            if "performance" in case
-        ],
-        "",
-        f"Run wall time {report['wall_s']:.2f} s. Recorded trials {report['attempts']}. Memory uses worker RSS and the Torch CUDA allocator.",
-        "",
-        "## Success & Other Metrics",
-        "",
-        "| Held-out hand | Split | Algorithm | Success@1 | Hit@5 | Hit@10 | Precision@10 | Robust@1 |",
+        "| Gripper | Object category | Algorithm | Timed cases | Median time (ms) | Median CPU Δ (MiB) | Median GPU Δ (MiB) | Peak GPU (MiB) |",
         "|---|---|---|---:|---:|---:|---:|---:|",
     ]
-    leaderboard = {}
-    for hand, fold in report["folds"].items():
-        for label in ("seen", "new_object", "new_gripper", "both_new"):
-            if fold[label] is None:
-                continue
-            for method, stats in fold[label]["algorithms"].items():
-                metrics = stats["metrics"]
-                values = " | ".join(f"{x:.1%}" for x in metrics.values())
-                lines.append(f"| {hand} | {label} | {method} | {values} |")
-                if label == "both_new":
-                    leaderboard.setdefault(method, []).append(
-                        [metrics["Success@1"], metrics["Robust@1"]]
-                    )
+    timing = defaultdict(list)
+    for case in report["case_inventory"]:
+        if "performance" in case:
+            timing[case["gripper"], case["category"], case["algorithm"]].append(
+                case["performance"]
+            )
+    for (hand, category, method), samples in timing.items():
+        values = [
+            median(p[key] for p in samples)
+            for key in ("cost_time_ms", "cpu_delta_mb", "gpu_delta_mb")
+        ]
+        values.append(max(p["peak_gpu_mb"] for p in samples))
+        cells = " | ".join(f"{value:.2f}" for value in values)
+        lines.append(f"| {hand} | {category} | {method} | {len(samples)} | {cells} |")
+    lines.extend(
+        [
+            "",
+            f"Run wall time {report['wall_s']:.2f} s. Recorded trials {report['attempts']}. "
+            "Memory uses worker RSS and the Torch CUDA allocator.",
+            "",
+            "## Success & Other Metrics",
+            "",
+            "| Gripper | Object category | Algorithm | Objects | Completed cases | Missing cases | "
+            + " | ".join(_METRICS)
+            + " |",
+            "|---|---|---|---:|---:|---:|" + "---:|" * len(_METRICS),
+        ]
+    )
+    for hand, category, group in _metric_groups(report):
+        for method, stats in group["algorithms"].items():
+            metrics = stats["metrics"]
+            cells = " | ".join(
+                f"{metrics[key]:.1%}" if metrics else "—" for key in _METRICS
+            )
+            lines.append(
+                f"| {hand} | {category} | {method} | {group['objects']} | {stats['completed_cases']} | {stats['missing_cases']} | {cells} |"
+            )
     lines += [
         "",
         "## Leaderboard",
         "",
-        "| Algorithm | Double-held-out Success@1 | Robust@1 |",
+        "| Algorithm | Overall Success@1 | Overall Robust@1 |",
         "|---|---:|---:|",
     ]
-    means = {m: np.mean(v, axis=0) for m, v in leaderboard.items()}
-    for method, scores in sorted(means.items(), key=lambda item: -item[1][0]):
-        lines.append(f"| {method} | {scores[0]:.1%} | {scores[1]:.1%} |")
+    methods = report["overall"]["algorithms"]
+    for method, stats in sorted(
+        methods.items(),
+        key=lambda item: (item[1]["metrics"] or {}).get("Success@1", -1),
+        reverse=True,
+    ):
+        metrics = stats["metrics"]
+        cells = " | ".join(
+            f"{metrics[key]:.1%}" if metrics else "—"
+            for key in ("Success@1", "Robust@1")
+        )
+        lines.append(f"| {method} | {cells} |")
     lines += [
         "",
-        f"Missing cases: {report['missing_cases']}. Intervals and stage diagnostics are in report.json.",
+        f"Missing cases {report['missing_cases']}. Each object instance and gripper pair has equal weight. "
+        "Stage diagnostics and object-bootstrap intervals are in report.json.",
     ]
+    (out / "report.md").write_text("\n".join(lines) + "\n")
+
+
+def _visual_outcome(case: dict) -> tuple[str, str | None]:
+    """Describe the observed top-ranked base trial or why it is unavailable."""
+    if "error" in case:
+        return "error", case["error"]
+    trials = case["trials"]
+    if not trials and case["count"] == 0 and case.get("finished"):
+        return "no_candidate", None
+    if len(trials) != 1 or (trials[0]["rank"], trials[0]["condition"]) != (1, "base"):
+        return "missing", "Expected one rank-1 base trial"
+    trial = trials[0]
+    if trial["status"] != "ok":
+        return "missing", trial.get("reason", trial["status"])
+    if trial["success"]:
+        return "success", None
+    return "failed", trial["failure_stage"]
+
+
+def _visual_report(cases: list[dict], protocol: dict) -> dict:
+    """Summarize one visual check per gripper and object category."""
+    counts = dict.fromkeys(("success", "failed", "no_candidate", "missing", "error"), 0)
+    rows = []
+    for case in cases:
+        status, reason = _visual_outcome(case)
+        counts[status] += 1
+        rows.append(
+            dict(
+                gripper=case["gripper"],
+                category=case["category"],
+                object=case["object"],
+                status=status,
+                reason=reason,
+                attempts=len(case["trials"]),
+            )
+        )
+    return dict(
+        protocol=protocol,
+        complete=counts["missing"] == counts["error"] == 0,
+        attempts=sum(row["attempts"] for row in rows),
+        counts=counts,
+        cases=rows,
+    )
+
+
+def _write_visual_report(out: Path, report: dict) -> None:
+    """Write the per-pair outcomes of a single-grasp inspection."""
+    counts = report["counts"]
+    lines = [
+        "# Visual grasp check",
+        "",
+        f"{len(report['cases'])} gripper/category pairs, {report['attempts']} recorded "
+        f"attempts on {report['protocol']['physics']}.",
+        "",
+        f"{counts['success']} successful, {counts['failed']} failed, "
+        f"{counts['no_candidate']} without candidates, {counts['missing']} missing "
+        f"observations, {counts['error']} errors.",
+        "",
+        "| Gripper | Object category | Object | Outcome | Stage or reason |",
+        "|---|---|---|---|---|",
+    ]
+    for row in report["cases"]:
+        cells = [
+            row["gripper"],
+            row["category"],
+            row["object"],
+            row["status"].replace("_", " "),
+            row["reason"] or "—",
+        ]
+        cells = [cell.replace("|", "\\|").replace("\n", " ") for cell in cells]
+        lines.append("| " + " | ".join(cells) + " |")
     (out / "report.md").write_text("\n".join(lines) + "\n")

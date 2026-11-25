@@ -152,5 +152,13 @@ For physical single-object grasp evaluation, the installed
 TCPs and delegates independent base/X/Y trials to
 `embodichain.lab.sim.grasp_validation.GraspValidator`. The
 [physical suite](../../../embodichain/extensions/benchmarks/grasp_pose_generator/README.md)
-owns held-out splits, fixed attempt budgets and reports. The legacy CoffeeCup
-sweep measures geometric sampling and selection.
+owns per-hand TCP, drive stiffness and closed joint targets, the pre-lift
+closure wait, dataset discovery, initial rotations by category and attempt budgets.
+Results are grouped by gripper, object category and their combination.
+The visual-check preset reuses the full suite's hand and object settings
+for one nominal grasp per gripper and category. The validator applies hard
+coupling to gripper mimic joints on PhysX.
+Generation and execution share the catalog variant and frames, and use the
+same standalone URDF. Suite asset roots can reference registered datasets
+through `get_data_path()` or directories relative to the suite file.
+The legacy CoffeeCup sweep measures geometric sampling and selection.

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Fixed-budget physical grasp statistics and paired family bootstrap."""
+"""Fixed-budget physical grasp statistics by gripper and object category."""
 
 from __future__ import annotations
 
@@ -24,6 +24,8 @@ from itertools import combinations
 import numpy as np
 
 __all__ = ["summarize"]
+
+_METRICS = ("Success@1", "Hit@5", "Hit@10", "Precision@10", "Robust@1")
 
 
 def _case_metrics(case):
@@ -49,151 +51,158 @@ def _case_metrics(case):
     )
 
 
-def summarize(
-    cases: list[dict], held_grippers: list[str], *, repeats: int = 2000
-) -> dict:
-    """Aggregate paired scenes, with equal object/hand weights within each split."""
-    metrics = ["Success@1", "Hit@5", "Hit@10", "Precision@10", "Robust@1"]
-    methods = sorted({c["algorithm"] for c in cases})
-    pairs = defaultdict(list)
-    families = {}
-    diagnostics = defaultdict(list)
-    if not cases or repeats < 1:
-        raise ValueError("Cases and positive bootstrap repetitions are required")
-    missing = 0
-    population = defaultdict(set)
-    for c in cases:
-        key = (
-            c["object"],
-            c["gripper"],
-            c.get("placement", "default"),
-            c.get("seed", 0),
+def _diagnostics(rows):
+    info = {}
+    nominal = [r for r in rows if r["condition"] == "base"]
+    info["base_retention"] = {
+        str(t): (
+            np.mean([r["retention"][str(t)] for r in nominal]).item()
+            if nominal
+            else None
         )
-        if key in population[c["algorithm"]]:
-            raise ValueError(f"Duplicate benchmark case {key}")
-        population[c["algorithm"]].add(key)
-        value = _case_metrics(c)
-        if value is None:
-            missing += 1
-            continue
-        group = (c["object"], c["gripper"], c["object_holdout"])
-        families[group[0]] = c["family"]
-        pairs[c["algorithm"], group].append(value)
-        diagnostics[c["algorithm"]].extend(c["trials"])
-    intended = set.union(*population.values())
-    missing += sum(len(intended - scenes) for scenes in population.values())
-    report = {
-        "complete": not missing,
-        "missing_cases": missing,
-        "folds": {},
-        "diagnostics": {},
+        for t in (0.5, 1.0, 3.0)
     }
-    for method, rows in diagnostics.items():
-        info = {}
-        nominal = [r for r in rows if r["condition"] == "base"]
-        info["base_retention"] = {
-            str(t): (
-                np.mean([r["retention"][str(t)] for r in nominal]).item()
-                if nominal
+    for d in ("x", "y"):
+        trials = [r for r in rows if r["condition"] == d and r["hold"]["success"]]
+        info[d] = {
+            "started": len(trials),
+            "passed": sum(r["success"] for r in trials),
+            "conditional_retention": (
+                sum(r["success"] for r in trials) / len(trials) if trials else None
+            ),
+        }
+    for phase in ("hold", "disturbance"):
+        windows = [
+            r[phase]
+            for r in rows
+            if r.get(phase) is not None
+            and r[phase].get("entered", True)
+            and (phase != "hold" or r["condition"] == "base")
+        ]
+        info[phase] = {
+            "entered": len(windows),
+            "drops": sum(w["drop_s"] is not None for w in windows),
+        }
+        for metric in ("slip_mm", "rotation_deg"):
+            info[phase][metric + "_p50_p95"] = (
+                np.percentile([w[metric] for w in windows], [50, 95]).tolist()
+                if windows
                 else None
             )
-            for t in (0.5, 1.0, 3.0)
+    return info
+
+
+def _ci95(draws):
+    bounds = np.percentile(draws, [2.5, 97.5], axis=0).T.tolist()
+    return dict(zip(_METRICS, bounds))
+
+
+def _group_summary(scenes, methods, repeats):
+    pairs = sorted({pair for pair, _ in scenes})
+    objects = sorted({obj for obj, _ in pairs})
+    group = {
+        "objects": len(objects),
+        "object_gripper_pairs": len(pairs),
+        "algorithms": {},
+        "paired_difference_ci95": {},
+    }
+    complete_scores = {}
+    for method in methods:
+        scores = defaultdict(list)
+        trials = []
+        missing = 0
+        for pair, observations in scenes:
+            result = observations.get(method)
+            if result is None:
+                missing += 1
+            else:
+                case_scores, case_trials = result
+                scores[pair].append(case_scores)
+                trials.extend(case_trials)
+
+        stats = {
+            "completed_cases": len(scenes) - missing,
+            "missing_cases": missing,
+            "trials": len(trials),
+            "metrics": None,
+            "ci95": None,
+            "diagnostics": _diagnostics(trials),
         }
-        for d in ("x", "y"):
-            trials = [r for r in rows if r["condition"] == d and r["hold"]["success"]]
-            info[d] = {
-                "started": len(trials),
-                "passed": sum(r["success"] for r in trials),
-                "conditional_retention": (
-                    sum(r["success"] for r in trials) / len(trials) if trials else None
-                ),
-            }
-        for phase in ("hold", "disturbance"):
-            windows = [
-                r[phase]
-                for r in rows
-                if r.get(phase) is not None
-                and r[phase].get("entered", True)
-                and (phase != "hold" or r["condition"] == "base")
-            ]
-            info[phase] = {"drops": sum(w["drop_s"] is not None for w in windows)}
-            for metric in ("slip_mm", "rotation_deg"):
-                info[phase][metric + "_p50_p95"] = (
-                    np.percentile([w[metric] for w in windows], [50, 95]).tolist()
-                    if windows
-                    else None
-                )
-        report["diagnostics"][method] = info
-    if missing:
-        return report
-    for held in held_grippers:
-        fold = {}
-        for obj_new, hand_new, label in (
-            (False, False, "seen"),
-            (True, False, "new_object"),
-            (False, True, "new_gripper"),
-            (True, True, "both_new"),
-        ):
-            groups = sorted(
-                {g for _, g in pairs if g[2] == obj_new and (g[1] == held) == hand_new}
+        if not missing:
+            values = np.array([np.mean(scores[pair], axis=0) for pair in pairs])
+            complete_scores[method] = values
+            stats["metrics"] = dict(zip(_METRICS, values.mean(axis=0).tolist()))
+        group["algorithms"][method] = stats
+
+    if len(objects) >= 2 and complete_scores:
+        # Keep every hand and method paired when resampling an object instance.
+        object_indices = {obj: i for i, obj in enumerate(objects)}
+        indices = [object_indices[obj] for obj, _ in pairs]
+        probabilities = np.full(len(objects), 1 / len(objects))
+        values = np.stack(list(complete_scores.values()))
+        rng = np.random.default_rng(0)
+        batches = []
+        for start in range(0, repeats, 32):
+            counts = rng.multinomial(
+                len(objects), probabilities, size=min(32, repeats - start)
             )
-            if not groups:
-                fold[label] = None
-                continue
-            values = np.array(
-                [[np.mean(pairs[m, g], axis=0) for g in groups] for m in methods]
+            weights = counts[:, indices]
+            batches.append((weights / weights.sum(1, keepdims=True)) @ values)
+        draws = dict(zip(complete_scores, np.concatenate(batches, axis=1)))
+        for method, sample in draws.items():
+            group["algorithms"][method]["ci95"] = _ci95(sample)
+        for first, second in combinations(draws, 2):
+            group["paired_difference_ci95"][f"{first} minus {second}"] = _ci95(
+                draws[first] - draws[second]
             )
-            family_ids = np.array([families[g[0]] for g in groups])
-            family_names = np.unique(family_ids)
-            rng = np.random.default_rng(0)
-            scores = values.mean(1)
-            bootstrap = []
-            # Bound temporary storage independently of the number of draws.
-            indices = np.searchsorted(family_names, family_ids)
-            for start in range(0, repeats, 32):
-                counts = rng.multinomial(
-                    len(family_names),
-                    np.full(len(family_names), 1 / len(family_names)),
-                    size=min(32, repeats - start),
-                )
-                weights = counts[:, indices]
-                bootstrap.append((weights / weights.sum(1, keepdims=True)) @ values)
-            draws = np.concatenate(bootstrap, axis=1)
-            stats = {}
-            for i, m in enumerate(methods):
-                stats[m] = {
-                    "metrics": dict(zip(metrics, scores[i].tolist())),
-                    "ci95": dict(
-                        zip(
-                            metrics,
-                            np.percentile(draws[i], [2.5, 97.5], axis=0).T.tolist(),
-                        )
-                    ),
-                }
-            comparisons = {}
-            for i, j in combinations(range(len(methods)), 2):
-                comparisons[f"{methods[i]} minus {methods[j]}"] = dict(
-                    zip(
-                        metrics,
-                        np.percentile(
-                            draws[i] - draws[j], [2.5, 97.5], axis=0
-                        ).T.tolist(),
-                    )
-                )
-            fold[label] = {
-                "object_gripper_pairs": len(groups),
-                "families": len(family_names),
-                "algorithms": stats,
-                "paired_difference_ci95": comparisons,
-            }
-        if fold["seen"] and fold["both_new"]:
-            fold["drop_percentage_points"] = {
-                m: 100
-                * (
-                    fold["seen"]["algorithms"][m]["metrics"]["Success@1"]
-                    - fold["both_new"]["algorithms"][m]["metrics"]["Success@1"]
-                )
-                for m in methods
-            }
-        report["folds"][held] = fold
+    return group
+
+
+def summarize(cases: list[dict], *, repeats: int = 2000) -> dict:
+    """Score algorithms overall, by gripper, by object category, and by both.
+
+    Each object-instance/gripper pair has equal weight within its group after
+    averaging its placements and seeds. Missing observations suppress the
+    affected method's scores in that group. Empty candidate sets score zero.
+    """
+    if not cases or repeats < 1:
+        raise ValueError("Cases and positive bootstrap repetitions are required")
+    methods = sorted({case["algorithm"] for case in cases})
+    population = defaultdict(dict)
+    for case in cases:
+        obj = (case["category"], case["object"])
+        pair = (obj, case["gripper"])
+        scene = (pair, case.get("placement", "default"), case.get("seed", 0))
+        method = case["algorithm"]
+        if method in population[scene]:
+            raise ValueError(f"Duplicate benchmark case {scene} for {method}")
+        scores = _case_metrics(case)
+        population[scene][method] = (
+            (scores, case["trials"]) if scores is not None else None
+        )
+
+    groups = defaultdict(list)
+    for (pair, _, _), observations in population.items():
+        (category, _), hand = pair
+        for key in ((None, None), (hand, None), (None, category), (hand, category)):
+            groups[key].append((pair, observations))
+
+    overall = _group_summary(groups.pop((None, None)), methods, repeats)
+    missing = sum(stats["missing_cases"] for stats in overall["algorithms"].values())
+    report = {
+        "complete": missing == 0,
+        "missing_cases": missing,
+        "overall": overall,
+        "by_gripper": {},
+        "by_category": {},
+        "by_gripper_category": {},
+    }
+    for (hand, category), scenes in groups.items():
+        result = _group_summary(scenes, methods, repeats)
+        if category is None:
+            report["by_gripper"][hand] = result
+        elif hand is None:
+            report["by_category"][category] = result
+        else:
+            report["by_gripper_category"].setdefault(hand, {})[category] = result
     return report

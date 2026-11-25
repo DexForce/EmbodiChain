@@ -1,0 +1,10 @@
+# Show the top-ranked grasp for each hand and object category in one arena.
+visual_check:
+  suite: suite.yaml  # Inherit the GraspBenchmark assets and hand calibration.
+  sample_count: 2000  # Surface rays per model for the antipodal generator.
+  objects:
+    book: decor_book_b02
+    bottle: D00374
+    bowl: D00488
+    cup: D00804
+    spoon: D00162

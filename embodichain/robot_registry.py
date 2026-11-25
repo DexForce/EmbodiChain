@@ -338,6 +338,41 @@ def resolve_gripper_defaults(
     return _validate_gripper_description(result)
 
 
+def _validate_gripper_command(value: object, names: Sequence[str]) -> dict[str, float]:
+    """Require one finite position per native gripper joint, including followers."""
+    import math
+
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != set(names)
+        or any(
+            isinstance(x, bool)
+            or not isinstance(x, (int, float))
+            or not math.isfinite(x)
+            for x in value.values()
+        )
+    ):
+        raise ValueError(
+            "Gripper commands must cover all native moving joints with finite positions."
+        )
+    return {name: float(value[name]) for name in names}
+
+
+def _validate_gripper_stiffness(value: object) -> float:
+    """Normalize a scalar position gain for the native gripper joints."""
+    from numbers import Real
+
+    # Native drive descriptors store their gains as float32.
+    max_float32 = 3.4028234663852886e38
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, Real)
+        or not 0 <= value <= max_float32
+    ):
+        raise ValueError("stiffness must be finite, nonnegative and fit in float32.")
+    return float(value)
+
+
 def _validate_gripper_transform(value: object) -> tuple[tuple[float, ...], ...]:
     """Normalize a finite SE(3) matrix without importing numerical backends."""
     import math
@@ -449,18 +484,6 @@ def _validate_gripper_description(value: object) -> dict[str, object]:
     if not isinstance(commands, Mapping) or not {"open", "grasp"} <= commands.keys():
         raise ValueError("Gripper commands must provide open and grasp.")
     for command in commands.values():
-        if (
-            not isinstance(command, Mapping)
-            or set(command) != set(names)
-            or any(
-                isinstance(x, bool)
-                or not isinstance(x, (int, float))
-                or not math.isfinite(x)
-                for x in command.values()
-            )
-        ):
-            raise ValueError(
-                "Gripper commands must cover all native moving joints with finite positions."
-            )
+        _validate_gripper_command(command, names)
     json.dumps(data, allow_nan=False)
     return data
