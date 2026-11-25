@@ -92,9 +92,10 @@ use PyTorch from the base installation.
 The `nmg.actor.pt2.v1` archive contains the upstream actor graph, frozen
 weights, observation metadata and normalization. Its `nmg.checkpoint_sha256`
 identifies the training checkpoint. Use the program paired with the ONNX
-export by policy identity. Released `.pt2` files and their `.pt` URL aliases
-use the same graph archive and built-in SHA256. Pass a trusted `sha256` to
-`from_checkpoint()` for a custom graph archive.
+export by policy identity. Update scripts using a `.pt` alias on Hugging Face
+`main` to the matching `.pt2` link above. `from_checkpoint()` verifies the
+published archives against built-in SHA256 digests. Pass a trusted `sha256`
+for a custom graph archive.
 
 ```python
 from pathlib import Path

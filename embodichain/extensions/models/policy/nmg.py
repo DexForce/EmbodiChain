@@ -144,8 +144,7 @@ class NeuralMotionGenerator(nn.Module):
         """Load a graph-bearing NMG checkpoint for differentiable evaluation.
 
         Args:
-            path: Path to a local PT2 archive. Published .pt aliases use
-                the same archive format.
+            path: Path to a local PT2 archive with a ``.pt2`` or ``.pt`` suffix.
             device: Device on which to evaluate the policy.
             sha256: Trusted digest for an unpublished policy. The published
                 v1 artifacts are recognized by their built-in SHA256.
