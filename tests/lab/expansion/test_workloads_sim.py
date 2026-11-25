@@ -589,7 +589,7 @@ def _facade_probe(output: str) -> None:
 
 
 def _reuse_probe(output: str) -> None:
-    """A real rejected installation opens reuse, then only one receipt wins."""
+    """A rejected initial scene opens reuse, then only one receipt wins."""
     import json
     import numpy as np
     import torch
@@ -603,7 +603,7 @@ def _reuse_probe(output: str) -> None:
         load_expansion_episode,
     )
     from embodichain.lab.expansion.collision import _MeasuredCollision
-    from embodichain.lab.sim.scene.expansion import SceneVariant
+    from embodichain.lab.sim.scene.expansion import ScenePoseChange, SceneVariant
     from embodichain.lab.sim.scene.feasibility import (
         JointSceneCandidate,
         RobotDeploymentCandidate,
@@ -643,17 +643,27 @@ def _reuse_probe(output: str) -> None:
 
     def scenes(env):
         nominal = env.robot.get_local_pose(to_matrix=True)[0].cpu().tolist()
+        cube_nominal = (
+            env.sim.get_rigid_object("cube")
+            .get_local_pose(to_matrix=True)[0]
+            .cpu()
+            .tolist()
+        )
 
         class Source:
             def candidate(self, ordinal):
                 pose = np.array(nominal)
+                changes = ()
                 if ordinal == 0:
-                    pose[2, 3] -= 0.6
+                    # Violate the initial pose check while keeping stable support.
+                    cube_pose = np.array(cube_nominal)
+                    cube_pose[0, 3] -= 0.2
+                    changes = (ScenePoseChange("cube", cube_pose.tolist()),)
                 elif ordinal == 2:
                     pose[0, 3] += 0.02
                 return JointSceneCandidate(
                     "retry",
-                    SceneVariant("retry", 2, ordinal, ()),
+                    SceneVariant("retry", 2, ordinal, changes),
                     RobotDeploymentCandidate({env.robot.uid: pose.tolist()}),
                     "installation",
                     (),
@@ -777,10 +787,7 @@ def _reuse_probe(output: str) -> None:
         json.loads(p.read_text())
         for p in (path / "group/attempts").glob("*/attempt.json")
     ]
-    assert next(r for r in records if r["ordinal"] == 0)["status"] in {
-        "initial_rejected",
-        "rejected",
-    }
+    assert next(r for r in records if r["ordinal"] == 0)["status"] == "initial_rejected"
     cancelled = [
         p
         for p in (path / "group/attempts").glob("*/attempt.json")
