@@ -75,6 +75,7 @@ def _run(
         UsdSourceCfg,
     )
     from embodichain.lab.sim.objects import Articulation
+    from embodichain.lab.visualization import VisualizationCfg
 
     from ._reference import (
         CONTROL_DT,
@@ -157,6 +158,7 @@ def _run(
             height=resolution[1],
             enable_ground_plane=False,
             enable_entity_gizmo=False,
+            visualization=VisualizationCfg(backend="none"),
             render_cfg=RenderCfg(
                 renderer="fast-rt" if want_video else "no-render", spp=8
             ),
