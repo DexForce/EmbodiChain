@@ -155,6 +155,24 @@ _FACT_FIELDS = {
     "articulated": ({"subjects", "references", "mechanism", "value"}, set()),
 }
 
+# Only independent members can be projected out of a grouped state.
+_INDEPENDENT_STATE_MEMBERS = {
+    "actuated": "subjects",
+    "distance_change": "subjects",
+    "held": "subjects",
+    "intact": "subjects",
+    "movable": "subjects",
+    "orientation": "subjects",
+    "pose_match": "subjects",
+    "released": "subjects",
+    "unoccupied": "subjects",
+    "untouched": "subjects",
+    "vertical_rise": "subjects",
+    "view_location": "subjects",
+    "arms_at_initial_pose": "arms",
+    "grippers_open": "arms",
+}
+
 _FACT_CHOICES = {
     "relation": {"value": _RELATIONS},
     "orientation": {"value": _ORIENTATIONS},
@@ -680,29 +698,37 @@ def verify_state_claim(
 ) -> None:
     """Match a typed source state to the graph facts cited for its scope."""
     _fact(claim, set(roles))
-    candidates = [fact for fact in facts if fact["kind"] == claim["kind"]]
+    kind = claim["kind"]
+    candidates = [fact for fact in facts if fact["kind"] == kind]
     # Unheld subjects are independent, but only combine facts at one snapshot.
     if (
         combine_released
-        and claim["kind"] == "released"
+        and kind == "released"
         and set(claim["subjects"])
         <= {subject for fact in candidates for subject in fact["subjects"]}
     ):
         return
     unordered = {"subjects", "arms", "references", "components"}
-    if claim["kind"] == "ordered_row":
+    if kind == "ordered_row":
         unordered.remove("subjects")
-    if claim["kind"] in {"distance_compare", "transferred"}:
+    if kind in {"distance_compare", "transferred"}:
         unordered.remove("references")
+    member_field = _INDEPENDENT_STATE_MEMBERS.get(kind)
 
     def matches(fact: dict[str, Any]) -> bool:
-        return all(
-            key in fact
-            and (
-                set(value) == set(fact[key]) if key in unordered else value == fact[key]
-            )
-            for key, value in claim.items()
-        )
+        for key, value in claim.items():
+            if key not in fact:
+                return False
+            actual = fact[key]
+            if key == member_field:
+                if not set(value).issubset(actual):
+                    return False
+            elif key in unordered:
+                if set(value) != set(actual):
+                    return False
+            elif value != actual:
+                return False
+        return True
 
     if not any(matches(fact) for fact in candidates):
         raise AuthoringEvidenceError(

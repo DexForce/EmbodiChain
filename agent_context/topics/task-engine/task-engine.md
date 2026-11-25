@@ -33,9 +33,11 @@ facts in their required scope, not role labels. A `before` check uses cited
 facts still valid at the start of its latest cited step, not that step's effects.
 Final checks use a compatible final condition or a cited effect that survives
 subsequent actions. Restating a stale fact as a final condition does not recover
-it, even if unordered fields use a different order. A verified terminal claim missing from the plan becomes a
-published goal; producer links still require cited, surviving effects. Independent
-facts keep unaffected subjects or arms, including complete joint support references.
+it, even if unordered fields use a different order. A verified terminal claim
+missing from the plan becomes a published goal; producer links still require
+cited, surviving effects. Grouped independent states can prove a subset of
+their subjects or arms and keep unaffected members after an action. Joint facts,
+ordered operands and shared qualifiers still require matching evidence.
 Known conflicts with `always` conditions are rejected at the initial, during-step,
 and step-end phases, even if a later step restores the state. Separate release facts prove a group was
 released only when valid at the same checkpoint. A stated spatial frame must match the

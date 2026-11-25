@@ -524,6 +524,59 @@ def test_joint_relation_cannot_be_assembled_from_separate_groups():
         )
 
 
+def test_initial_audit_can_use_one_member_of_a_grouped_state():
+    grouped = _fact("orientation", "a b", value="upright", frame="head_camera")
+    plan = _validate(
+        _plan(
+            "a b c",
+            _step("push", "c"),
+            conditions=[_condition("initial", grouped)],
+        )
+    )
+    member = dict(grouped, subjects=["b"])
+
+    def audit(claim):
+        return _audit(_check("condition_01", scope="initial", state=claim))
+
+    _validate_intent_audit(_SOURCE, plan, audit(member))
+    for different in (
+        dict(member, subjects=["c"]),
+        dict(member, value="flat"),
+        dict(member, frame="table"),
+    ):
+        with pytest.raises(AuthoringEvidenceError, match="matching evidence"):
+            _validate_intent_audit(_SOURCE, plan, audit(different))
+    with pytest.raises(AuthoringEvidenceError, match="matching evidence"):
+        verify_state_claim(
+            grouped,
+            [dict(grouped, subjects=["a"]), member],
+            dict.fromkeys("abc", "object"),
+        )
+
+
+@pytest.mark.parametrize(
+    "grouped",
+    [
+        _fact("ordered_row", "a b c", frame="table"),
+        _fact("stable", "a b c"),
+        _fact("mutually_separate", "a b c"),
+        _fact("untouched_except", "a b c"),
+        _fact("transferred", "a b c", "x y", material="solid", all=True, quantity=3),
+    ],
+    ids=lambda fact: fact["kind"],
+)
+def test_joint_state_cannot_be_proven_by_changing_its_members(grouped):
+    roles = dict.fromkeys("abcxy", "object")
+    verify_state_claim(grouped, [grouped], roles)
+    with pytest.raises(AuthoringEvidenceError, match="matching evidence"):
+        verify_state_claim(dict(grouped, subjects=["a", "b"]), [grouped], roles)
+    if grouped["kind"] == "ordered_row":
+        with pytest.raises(AuthoringEvidenceError, match="matching evidence"):
+            verify_state_claim(
+                dict(grouped, subjects=["c", "b", "a"]), [grouped], roles
+            )
+
+
 @pytest.mark.parametrize(
     "kind,value,refs,wrong",
     [
@@ -691,6 +744,10 @@ def test_grouped_facts_keep_unaffected_subjects_and_references():
                 _condition("initial", _relation("on_top_faces", "b", "a marker")),
                 _condition("initial", _fact("orientation", "a b", value="upright")),
                 _condition("initial", _relation("supported_by", "a b", "table marker")),
+                _condition(
+                    "initial",
+                    _fact("view_location", "a b", frame="table", lateral="left"),
+                ),
             ],
         )
     )
@@ -725,6 +782,12 @@ def test_grouped_facts_keep_unaffected_subjects_and_references():
                 scope="before",
                 spatial=_relation("supported_by", "b", "table marker"),
             ),
+            _check(
+                "step_02",
+                "condition_07",
+                scope="before",
+                state=_fact("view_location", "b", frame="table", lateral="left"),
+            ),
         ),
     )
     for index, field, fact in (
@@ -734,6 +797,7 @@ def test_grouped_facts_keep_unaffected_subjects_and_references():
         (4, "spatial", _relation("on_top_faces", "b", "marker")),
         (5, "state", _fact("orientation", "a", value="upright")),
         (6, "spatial", _relation("supported_by", "a", "table marker")),
+        (7, "state", _fact("view_location", "a", frame="table", lateral="left")),
     ):
         with pytest.raises(AuthoringEvidenceError):
             _validate_intent_audit(
@@ -859,6 +923,11 @@ def test_grouped_arm_evidence_keeps_the_unaffected_arm(verb, kind):
     def claim(arm):
         return _audit(_check("step_01", scope="final", state=dict(both, arms=[arm])))
 
+    _validate_intent_audit(
+        _SOURCE,
+        checked,
+        _audit(_check("step_01", scope="effect", state=dict(both, arms=["left"]))),
+    )
     _validate_intent_audit(_SOURCE, checked, claim("left"))
     with pytest.raises(AuthoringEvidenceError):
         _validate_intent_audit(_SOURCE, checked, claim("right"))

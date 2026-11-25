@@ -29,6 +29,7 @@ from typing import Any
 from .authoring_intent import (
     _AXIS_INVERSES,
     _GROUP_RELATIONS,
+    _INDEPENDENT_STATE_MEMBERS,
     _PROMPT as _INTENT_FORMAT,
     AuthoringEvidenceError,
     _advance_arms,
@@ -461,17 +462,7 @@ def _carried_facts(
             if not invalidates(fact):
                 yield fact
                 return
-            if fact["kind"] == "released":
-                for subject in fact["subjects"]:
-                    member = dict(fact, subjects=[subject])
-                    if not invalidates(member):
-                        yield member
-            elif fact["kind"] in {
-                "orientation",
-                "arms_at_initial_pose",
-                "grippers_open",
-            }:
-                field = "subjects" if fact["kind"] == "orientation" else "arms"
+            if field := _INDEPENDENT_STATE_MEMBERS.get(fact["kind"]):
                 survivors = [
                     member
                     for member in fact[field]
