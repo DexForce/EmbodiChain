@@ -24,7 +24,11 @@ import re
 from typing import Any
 
 from ..task_spec import TaskSpec
-from .scene_context import require_articulation, scene_objects_requirement
+from .scene_context import (
+    _SCENE_ROLE_ID,
+    require_articulation,
+    scene_objects_requirement,
+)
 from .semantic_graph import (
     _AUTHORING_INTENT_PREFIX,
     SEMANTIC_TASK_GRAPH_SCHEMA,
@@ -33,7 +37,6 @@ from .semantic_graph import (
 
 __all__: list[str] = []
 
-_ID = re.compile(r"[a-z][a-z0-9_]*")
 _ROLE_KINDS = set(
     "object target surface container tool articulation button robot".split()
 )
@@ -68,7 +71,15 @@ _VERBS = (
 _FRAMES = {"head_camera", "table", "robot", "world", "reference"}
 _LATERAL = {"left", "right", "center", "far_left", "far_right"}
 _NEAR_REGIONS = {"near_center_of", "near_left_end", "near_right_end"}
-_AXIS_RELATIONS = {"left_of", "right_of", "in_front_of", "behind", "above", "below"}
+_AXIS_INVERSES = {
+    "left_of": "right_of",
+    "right_of": "left_of",
+    "in_front_of": "behind",
+    "behind": "in_front_of",
+    "above": "below",
+    "below": "above",
+}
+_AXIS_RELATIONS = set(_AXIS_INVERSES)
 _GROUP_RELATIONS = {"between", "opposite_sides", "opposite_ends", "spans"}
 _RELATIONS = (
     _AXIS_RELATIONS
@@ -150,7 +161,7 @@ _PROMPT = {
     "shape": {
         "roles": [
             {
-                "id": "snake_case",
+                "id": "ASCII identifier; preserve caller-declared case",
                 "kind": "one role kind string",
                 "description": "concise image/source identity",
                 "part_of": "owner role ID for a named part, grip site or joint; omit for standalone roles",
@@ -523,10 +534,18 @@ def _fact(fact: Any, roles: set[str]) -> None:
 
 
 def _relation_pairs(fact: dict[str, Any], value: str) -> set[tuple[str, str]]:
-    if fact["kind"] != "relation" or fact["value"] != value:
+    if fact["kind"] != "relation":
+        return set()
+    direct = fact["value"] == value
+    # Swapping operands also swaps the anchor of a reference-local frame.
+    if not direct and (
+        fact.get("frame") == "reference" or _AXIS_INVERSES.get(fact["value"]) != value
+    ):
         return set()
     return {
-        (subject, other) for subject in fact["subjects"] for other in fact["references"]
+        (subject, reference) if direct else (reference, subject)
+        for subject in fact["subjects"]
+        for reference in fact["references"]
     }
 
 
@@ -749,7 +768,7 @@ def validate_intent(
         name = role["id"]
         if (
             not isinstance(name, str)
-            or _ID.fullmatch(name) is None
+            or _SCENE_ROLE_ID.fullmatch(name) is None
             or name in role_kinds
             or not isinstance(role["kind"], str)
             or role["kind"] not in _ROLE_KINDS
@@ -757,7 +776,7 @@ def validate_intent(
             or not role["description"].strip()
         ):
             raise ValueError(
-                "Roles require distinct snake_case IDs, one scalar kind string and a description"
+                "Roles require distinct ASCII identifiers, one scalar kind string and a description"
             )
         role_kinds[name] = role["kind"]
         # Older candidates can carry a model hint, not a caller declaration.
@@ -780,7 +799,8 @@ def validate_intent(
             parent = parents.get(parent)
     for name, role in scene_objects.items():
         if name not in roles and any(
-            item["description"].casefold() == role["description"].casefold()
+            item["id"] not in scene_objects
+            and item["description"].casefold() == role["description"].casefold()
             for item in plan["roles"]
         ):
             raise ValueError(

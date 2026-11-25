@@ -80,7 +80,7 @@ def native_hybrid(tmp_path, monkeypatch):
     image, output = tmp_path / "scene.png", tmp_path / "plan"
     Image.new("RGB", (20, 20)).save(image)
 
-    def run(ops, *, context=None, review=None):
+    def run(ops, *, context=None, review=None, initial_proposal=None):
         text = ops[0]["quote"]
         source = None
         if context is not None:
@@ -88,7 +88,10 @@ def native_hybrid(tmp_path, monkeypatch):
             source.write_text(json.dumps(context))
 
         def proposal(*args, **kwargs):
-            assert json.loads(kwargs["user_prompt"]).get("scene_context") == context
+            request = json.loads(kwargs["user_prompt"])
+            assert request.get("scene_context") == context
+            if initial_proposal is not None and "diagnostic" not in request:
+                return json.dumps(initial_proposal)
             return json.dumps(ops)
 
         def audit(**kwargs):
@@ -517,6 +520,114 @@ def test_hybrid_held_vessel_pours_without_reacquisition():
         _supported_program(operations)
 
 
+def test_native_auto_is_not_a_third_arm_in_expansion_or_witness():
+    from embodichain.gen_sim.task_engine.hybrid import (
+        _supported_program,
+        verify_witness,
+    )
+    from embodichain.gen_sim.task_spec import TaskSpec
+
+    text = "Align three objects without releasing any."
+    ops = [
+        dict(template="E2", object=obj, primary=arm, orientation="upright", quote=text)
+        for obj, arm in (("a", "left"), ("b", "right"), ("c", "auto"))
+    ]
+    bindings = {}
+    objective, _, calls = _supported_program(ops[:2], bindings=bindings)
+    objective["roles"].append({"id": "c"})
+    calls.append({**calls[0], "arguments": {"object": "c"}, "resources": {}})
+    plan = author_goal_plan(text, "overcapacity", objective, calls)
+    witness = verify_witness(
+        TaskSpec.from_dict(plan["task_spec"]),
+        plan["semantic_task_graph"],
+        support_targets={},
+        bindings=bindings,
+    )
+    assert witness["status"] == "uncovered"
+    assert [c["node_id"] for c in witness["resource_conflicts"]] == ["call_3"]
+    with pytest.raises(ValueError, match="occupied"):
+        _supported_program(ops)
+
+
+@pytest.mark.parametrize("transfer", [False, True])
+def test_native_explicit_continuation_can_constrain_auto_pick(transfer):
+    from embodichain.gen_sim.task_engine.hybrid import (
+        _supported_program,
+        verify_witness,
+    )
+    from embodichain.gen_sim.task_spec import TaskSpec
+
+    text = "Align the object, then move it with the requested arm."
+    ops = [
+        dict(
+            template="E2", object="a", orientation="upright", primary="auto", quote=text
+        )
+    ]
+    if transfer:
+        ops.append(
+            dict(
+                template="E4",
+                object="a",
+                source="left",
+                destination="right",
+                quote=text,
+            )
+        )
+    else:
+        ops.append(
+            dict(
+                template="E1",
+                object="a",
+                reference="tray",
+                relation="on",
+                primary="right",
+                quote=text,
+            )
+        )
+    bindings = {}
+    objective, _, calls = _supported_program(ops, bindings=bindings)
+    assert len(calls) == 2 and calls[0]["resources"] == {}
+    plan = author_goal_plan(text, "auto_continuation", objective, calls)
+    assert (
+        verify_witness(
+            TaskSpec.from_dict(plan["task_spec"]),
+            plan["semantic_task_graph"],
+            support_targets={},
+            bindings=bindings,
+        )["status"]
+        == "covered"
+    )
+
+
+def test_native_auto_holder_cannot_switch_when_another_object_is_released():
+    from embodichain.gen_sim.task_engine.hybrid import _supported_program
+
+    text = "Align both objects; release B with the left arm; hand over A."
+    ops = [
+        dict(
+            template="E2", object=obj, primary="auto", orientation="upright", quote=text
+        )
+        for obj in ("a", "b")
+    ]
+    ops.append(
+        dict(
+            template="E1",
+            object="b",
+            reference="tray",
+            relation="on",
+            primary="left",
+            quote=text,
+        )
+    )
+    _, _, calls = _supported_program(ops)
+    assert [c["resources"].get("primary") for c in calls] == [None, None, "left"]
+    ops.append(
+        dict(template="E4", object="a", source="left", destination="right", quote=text)
+    )
+    with pytest.raises(ValueError, match="occupied"):
+        _supported_program(ops)
+
+
 @pytest.mark.parametrize(
     "template,replace", [("E2", False), ("E3", False), ("E4", False), ("E4", True)]
 )
@@ -819,6 +930,10 @@ def test_native_joint_action_requires_the_declared_owner(
     context = (
         _context(dict(id=name, description=name, asset_kind=kind)) if name else None
     )
+    if name == "drawer":
+        context["objects"].append(
+            dict(id="cabinet", description="cabinet", asset_kind="articulated")
+        )
     op = dict(template="E6", object="drawer", state="open", quote="Open the drawer.")
     if name == "cabinet":
         op["part_of"] = name
@@ -837,3 +952,23 @@ def test_native_joint_action_requires_the_declared_owner(
         assert declared == [
             dict(id=name, description=name, asset_kind=kind, is_articulated=True)
         ]
+
+
+def test_native_proposal_can_repair_an_omitted_articulation_owner(native_hybrid):
+    context = _context(
+        dict(id="cabinet", description="cabinet", asset_kind="articulated")
+    )
+    first = dict(template="E6", object="drawer", state="open", quote="Open the drawer.")
+    repaired = dict(first, part_of="cabinet")
+    audited = []
+
+    def review(role, request):
+        assert role == "task_interpretation"
+        audited.append(request["operations"])
+        return dict(issues=[], source_operations=[repaired])
+
+    result = native_hybrid(
+        [repaired], context=context, review=review, initial_proposal=[first]
+    )
+    assert result["coverage"]["status"] == "covered"
+    assert len(audited) == 1 and audited[0][0]["part_of"] == "cabinet"

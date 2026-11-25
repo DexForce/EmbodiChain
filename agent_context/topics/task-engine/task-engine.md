@@ -20,7 +20,8 @@ remain separate; motion-only pouring never establishes liquid transfer.
 Hybrid compares quoted operations and expanded calls with an independent source
 audit; invalid interpretations cannot publish. Align, pour and handover add
 hold or return-and-release only from explicit terminal instructions. Pouring
-restores orientation, not position.
+restores orientation, not position. Native acquisition and witness checks track
+feasible two-arm assignments without treating `auto` as a third resource.
 
 Without deployment or explicit grounding, `authoring_intent.py` supports scoped
 typed steps when native E1–E9 lose source requirements. Effects hold at step
@@ -28,19 +29,24 @@ end; `maintain` holds during a step. The audit matches source obligations to
 facts in their required scope, not role labels. A `before` check uses cited
 facts still valid at the start of its latest cited step, not that step's effects.
 Final checks use a compatible final condition or a cited effect that survives
-subsequent actions. Independent facts keep unaffected members; joint spatial
-facts are not split. Known effect conflicts with `always` conditions are rejected
+subsequent actions. A verified terminal claim missing from the plan becomes a
+published goal; producer links still require cited, surviving effects. Independent
+facts keep unaffected subjects, including their complete joint support references.
+Known effect conflicts with `always` conditions are rejected
 even if a later step restores the state. Separate release facts prove a group was
 released only when valid at the same checkpoint. A stated spatial frame must match the
-evidence, including slot relations. The validator tracks feasible arm assignments
+evidence, including slot relations; inverse axis relations can match in a shared
+frame but not when swapping a reference-local anchor. The validator tracks feasible arm assignments
 across the sequence without replacing authored `auto` arms. Citation repairs can
 fix malformed evidence without changing the graph or weakening its final checks.
 `task_engine.intent.*` remains unbound `authoring_only` (`source_reviewed`),
 not executable or lowerable.
 
 `--scene-context FILE` accepts `embodichain.task-scene-context/v1` scene facts and
-object IDs, not additional actions. An object is rigid unless explicitly
-declared `asset_kind: articulated`; joint actions require a declared owner.
+case-sensitive ASCII object IDs, not additional actions. An object is rigid unless
+explicitly declared `asset_kind: articulated`; joint actions require a declared
+owner. A missing model-authored owner link can be repaired if an articulated
+caller declaration exists; a proposal cannot override an explicit rigid declaration.
 Background objects do not become task roles. The frozen scene requirements
 publish derived `is_articulated`; the retained source context is not visibility evidence.
 For rigid pick/place, named handovers ending in placement and coordinated tray release, hybrid automatically grounds frozen roles in the original image, or verifies a supplied `--scene-grounding FILE`. A null box retains a pending role. Plans outside this deployment scope publish an authoring-only manifest. Qualification and deployment preparation then use the same
@@ -112,7 +118,8 @@ mention can reconcile reference labels. A uniquely stated metric lift height
 is also checked against the source for a targetless upward hold. Agreed explicit
 arm returns project to ordered `simulation.park` calls with pending resource
 postures, not extra image-grounding entities. New default attempts mark the audit
-`purpose: source_review`; older published plans remain readable.
+`purpose: source_review`. Resource-only park calls require the audited clauses;
+sealed pre-audit plans with object-annotated park calls remain readable.
 
 `lab/task_program/language/semantic_contracts.py` owns provider-free call argument,
 resource, precondition/effect and runtime-binding declarations. Configured live

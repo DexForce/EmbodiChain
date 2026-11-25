@@ -19,13 +19,20 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import re
 from typing import Any
 
 __all__: list[str] = []
 
+_SCENE_ROLE_ID = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
+
 
 class ArticulationDeclarationError(ValueError):
     """An authored operation requires a joint the caller has not enabled."""
+
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.retryable = retryable
 
 
 def _effective_asset_kind(
@@ -55,6 +62,14 @@ def require_articulation(
     if scene_objects.get(object_id, {}).get("asset_kind") == "rigid":
         raise ArticulationDeclarationError(
             f"Scene object {object_id!r} is declared rigid but requires articulation"
+        )
+    if object_id not in scene_objects and any(
+        row.get("asset_kind") == "articulated" for row in scene_objects.values()
+    ):
+        raise ArticulationDeclarationError(
+            f"Unresolved articulated owner for {object_id!r}; provide the source-supported "
+            "part_of link to an articulated object declared in --scene-context",
+            retryable=True,
         )
     raise ArticulationDeclarationError(
         f"Scene object {object_id!r} requires articulation; declare it with "

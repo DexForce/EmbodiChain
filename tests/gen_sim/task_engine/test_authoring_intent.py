@@ -234,6 +234,59 @@ def test_spatial_claim_preserves_an_explicit_reference_frame(through_slot):
     )
 
 
+@pytest.mark.parametrize(
+    "value,inverse",
+    [("left_of", "right_of"), ("in_front_of", "behind"), ("above", "below")],
+)
+def test_axis_relations_match_inverse_evidence_and_reject_conflicts(value, inverse):
+    effect = _relation(value, "cup", "bowl", frame="table")
+    inverse_claim = _relation(inverse, "bowl", "cup", frame="table")
+    plan = _plan(
+        "cup bowl",
+        _step("pick", "cup"),
+        _step("place", "cup", effect),
+    )
+    _validate_intent_audit(
+        _SOURCE,
+        _validate(plan),
+        _audit(_check("step_02", scope="final", spatial=inverse_claim)),
+    )
+    at = _relation("at", "cup", "slot")
+    slotted = _validate(
+        _plan(
+            [_role("cup"), _role("bowl"), _role("slot", kind="target")],
+            _step("pick", "cup"),
+            _step("place", "cup", at),
+            conditions=[
+                _condition("initial", _relation(inverse, "bowl", "slot", frame="table"))
+            ],
+        )
+    )
+    _validate_intent_audit(
+        _SOURCE,
+        slotted,
+        _audit(_check("condition_01", "step_02", scope="final", spatial=effect)),
+    )
+    roles = dict(cup="object", bowl="object", slot="target")
+    for frame in ("world", "reference"):
+        with pytest.raises(AuthoringEvidenceError):
+            verify_spatial_claim({**inverse_claim, "frame": frame}, [effect], roles)
+    with pytest.raises(AuthoringEvidenceError):
+        verify_spatial_claim(
+            {**inverse_claim, "frame": "reference"},
+            [{**effect, "frame": "reference"}],
+            roles,
+        )
+    conflict = _relation(value, "bowl", "cup", frame="table")
+    plan["conditions"] = [_condition("final", conflict)]
+    with pytest.raises(AuthoringEvidenceError, match="contradicts"):
+        _validate_intent_audit(
+            _SOURCE,
+            _validate(plan),
+            _audit(_check("condition_01", scope="final", spatial=conflict)),
+        )
+
+
 def test_joint_relation_cannot_be_assembled_from_separate_groups():
     roles = dict.fromkeys("abcd", "object")
     claim = _relation("between", "a", "b c")
@@ -409,6 +462,7 @@ def test_grouped_facts_keep_unaffected_subjects_and_references():
                 _condition("initial", _relation("left_of", "b", "a marker")),
                 _condition("initial", _relation("on_top_faces", "b", "a marker")),
                 _condition("initial", _fact("orientation", "a b", value="upright")),
+                _condition("initial", _relation("supported_by", "a b", "table marker")),
             ],
         )
     )
@@ -437,6 +491,12 @@ def test_grouped_facts_keep_unaffected_subjects_and_references():
                 scope="before",
                 state=_fact("orientation", "b", value="upright"),
             ),
+            _check(
+                "step_02",
+                "condition_06",
+                scope="before",
+                spatial=_relation("supported_by", "b", "table marker"),
+            ),
         ),
     )
     for index, field, fact in (
@@ -445,6 +505,7 @@ def test_grouped_facts_keep_unaffected_subjects_and_references():
         (3, "spatial", _relation("left_of", "b", "a")),
         (4, "spatial", _relation("on_top_faces", "b", "marker")),
         (5, "state", _fact("orientation", "a", value="upright")),
+        (6, "spatial", _relation("supported_by", "a", "table marker")),
     ):
         with pytest.raises(AuthoringEvidenceError):
             _validate_intent_audit(
@@ -459,6 +520,48 @@ def test_grouped_facts_keep_unaffected_subjects_and_references():
                     )
                 ),
             )
+
+
+@pytest.mark.parametrize("components", [["position"], ["position", "orientation"]])
+def test_turn_invalidates_only_orientation_bearing_pose_evidence(components):
+    pose = _fact(
+        "pose_match", "bottle", "bottle", epoch="initial", components=components
+    )
+    plan = _validate(
+        _plan(
+            "bottle",
+            _step("pick", "bottle", arms="left"),
+            _step("move_held", "bottle", pose, arms="left"),
+            _step("turn", "bottle", arms="left"),
+        )
+    )
+    check = _audit(_check("step_02", scope="final", state=pose))
+    if "orientation" in components:
+        with pytest.raises(AuthoringEvidenceError, match="still valid at the end"):
+            _validate_intent_audit(_SOURCE, plan, check)
+    else:
+        _validate_intent_audit(_SOURCE, plan, check)
+
+
+@pytest.mark.parametrize("moved", ["bowl", "other"])
+def test_gripper_relation_loses_evidence_when_its_reference_moves(moved):
+    hover = dict(
+        kind="gripper_relation", arms=["left"], references=["rim"], value="above"
+    )
+    plan = _validate(
+        _plan(
+            [_role("bowl"), _role("rim", part_of="bowl"), _role("other")],
+            _step("move_gripper", "", hover, arms="left"),
+            _step("pick", moved, arms="right"),
+            _step("move_held", moved, arms="right"),
+        )
+    )
+    check = _audit(_check("step_01", scope="final", state=hover))
+    if moved == "bowl":
+        with pytest.raises(AuthoringEvidenceError, match="still valid at the end"):
+            _validate_intent_audit(_SOURCE, plan, check)
+    else:
+        _validate_intent_audit(_SOURCE, plan, check)
 
 
 @pytest.mark.parametrize("verb", ["place", "move_held"])
@@ -789,7 +892,9 @@ def hybrid(tmp_path, monkeypatch):
     return run
 
 
-@pytest.mark.parametrize("terminal", ["implicit", "audited_effect", "declaration_only"])
+@pytest.mark.parametrize(
+    "terminal", ["implicit", "effect_only", "audited_effect", "declaration_only"]
+)
 def test_authoring_publication_is_readable_without_execution(
     hybrid, tmp_path, terminal
 ):
@@ -803,7 +908,10 @@ def test_authoring_publication_is_readable_without_execution(
     )
     expected_goals = {"final_step_completed": ["step_03"]}
     checks = [_check("step_02", "step_03")]
-    if terminal == "audited_effect":
+    if terminal == "effect_only":
+        checks = [_check("step_02", "step_03", spatial=support, scope="final")]
+        expected_goals = {"condition_01": ["step_02"]}
+    elif terminal == "audited_effect":
         plan["conditions"] = [_condition("final", fact) for fact in (support, parked)]
         checks = [
             _check(
@@ -855,6 +963,9 @@ def test_authoring_publication_is_readable_without_execution(
         }
         assert pairing["goal_groups"] == expected_goals
     graph = result["semantic_task_graph"]
+    if terminal == "effect_only":
+        assert graph["success"]["conditions"]["final"] == [support]
+        assert result["task_spec"]["goal"][0]["id"] == "condition_01"
     assert graph["nodes"][1]["call"]["arguments"]["effects"] == [support]
     terminal = graph["nodes"][-1]
     assert terminal["depends_on"] == ["step_02"]
@@ -866,6 +977,37 @@ def test_authoring_publication_is_readable_without_execution(
     )
     with pytest.raises(ValueError, match="authoring-only"):
         validate_semantic_task_graph({**graph, "integration_fingerprint": "1" * 64})
+
+
+def test_typed_authoring_keeps_the_scene_context_id(hybrid, tmp_path):
+    context = tmp_path / "scene.json"
+    button = dict(id="Button", description="button", asset_kind="articulated")
+    context.write_text(
+        json.dumps(
+            dict(schema_version="embodichain.task-scene-context/v1", objects=[button])
+        )
+    )
+    hover = dict(
+        kind="gripper_relation", arms=["left"], references=["Button"], value="above"
+    )
+    plan = _plan(
+        [_role("Button", kind="button") | {"description": "button"}],
+        _step("move_gripper", "", hover, arms="left"),
+        _step(
+            "press", "Button", _fact("actuated", "Button", value="pressed"), arms="left"
+        ),
+    )
+    alias = _plan([_role("button", kind="button")], _step("pick", "button"))
+    with pytest.raises(ValueError, match="Use scene-context ID 'Button'"):
+        _validate(alias, {"Button": button})
+    _validate(plan, {"Button": button, "button": dict(button, id="button")})
+    result, _, _ = hybrid(
+        [plan], lambda _: _audit(_check("step_01", "step_02")), scene_context=context
+    )
+    assert result["task_spec"]["roles"][0]["id"] == "Button"
+    assert result["semantic_task_graph"]["nodes"][0]["call"]["arguments"][
+        "effects"
+    ] == [hover]
 
 
 def test_invalid_positive_review_citation_is_repaired_without_replanning(hybrid):

@@ -459,7 +459,9 @@ export default function TaskReview({
     );
   const serpentine = canWrapGroups && wrappedLayout;
   const opener = useRef<HTMLElement | null>(null),
-    closeButton = useRef<HTMLButtonElement>(null);
+    closeButton = useRef<HTMLButtonElement>(null),
+    imageOpener = useRef<HTMLButtonElement>(null),
+    imageDialog = useRef<HTMLDialogElement>(null);
   const show = (key: string, source?: HTMLElement) => {
     if (!selected)
       opener.current = source ?? (document.activeElement as HTMLElement);
@@ -478,17 +480,23 @@ export default function TaskReview({
     });
   };
   useEffect(() => {
-    if (!selected && !imageLightbox) return;
-    if (selected && !imageLightbox) closeButton.current?.focus();
+    if (!selected) return;
+    closeButton.current?.focus();
     const fn = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (imageLightbox) setImageLightbox(false);
-        else close();
-      }
+      if (e.key === "Escape" && !imageDialog.current?.open) close();
     };
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
-  }, [selected, imageLightbox]);
+  }, [selected]);
+  useEffect(() => {
+    const dialog = imageDialog.current;
+    if (imageLightbox && dialog && !dialog.open) dialog.showModal();
+  }, [imageLightbox]);
+  const closeImage = () => {
+    imageDialog.current?.close();
+    setImageLightbox(false);
+    imageOpener.current?.focus({ preventScroll: true });
+  };
   useEffect(() => {
     document.documentElement.lang = zh ? "zh-CN" : "en";
     document.title = authoredPreview ? taskTitle : spec.inputs.instruction;
@@ -601,6 +609,15 @@ export default function TaskReview({
     string,
     { object?: string; reference?: string }
   >;
+  const matchesRole = (id: string) => {
+    if (!selectedRole) return true;
+    const step = intentStep(model.calls.get(id)?.call);
+    return step
+      ? intentStepRoleIds(step).has(selectedRole.id)
+      : pairing.role_entities[selectedRole.id]?.some((uid) =>
+          [anns[id]?.object, anns[id]?.reference].includes(uid),
+        ) === true;
+  };
   const armName = (id: string) =>
     id === "left"
       ? t("左臂", "Left arm")
@@ -863,16 +880,7 @@ export default function TaskReview({
         ? model.calls.get(g.node_ids[0])
         : undefined;
     const previewIntent = intentStep(previewNode?.call);
-    const groupRoleMatch =
-      !selectedRole ||
-      g.node_ids.some((id) => {
-        const node = model.calls.get(id);
-        const iStep = intentStep(node?.call);
-        if (iStep) return intentStepRoleIds(iStep).has(selectedRole.id);
-        return pairing.role_entities[selectedRole.id]?.some((uid) =>
-          [anns[id]?.object, anns[id]?.reference].includes(uid),
-        );
-      });
+    const groupRoleMatch = !selectedRole || g.node_ids.some(matchesRole);
     const isFrameSelected =
       activeGroupId === g.id ||
       (selectedGoal && pairing.goal_groups[selectedGoal.id]?.includes(g.id));
@@ -981,11 +989,7 @@ export default function TaskReview({
         const c = model.calls.get(id)!,
           pos = local.get(id)!,
           s = status(c);
-        const related =
-          !selectedRole ||
-          pairing.role_entities[selectedRole.id]?.some((uid) =>
-            [anns[id]?.object, anns[id]?.reference].includes(uid),
-          );
+        const related = matchesRole(id);
         part(
           "call:" + id,
           x + pos.x,
@@ -1191,6 +1195,7 @@ export default function TaskReview({
           </div>
           {review.source_image && (
             <button
+              ref={imageOpener}
               type="button"
               className="rv-scene-thumb"
               aria-label={t("查看输入场景原图", "View source scene image")}
@@ -1745,13 +1750,20 @@ export default function TaskReview({
         </button>
       </footer>
       {imageLightbox && review.source_image && (
-        <div
+        <dialog
+          ref={imageDialog}
           className="rv-lightbox"
-          role="dialog"
-          aria-modal="true"
           aria-label={t("输入场景原图", "Source scene image")}
+          onCancel={(e) => {
+            e.preventDefault();
+            closeImage();
+          }}
+          onKeyDown={(e) => {
+            // The modal has one focusable control; keep both Tab directions on it.
+            if (e.key === "Tab") e.preventDefault();
+          }}
           onClick={(e) => {
-            if (e.target === e.currentTarget) setImageLightbox(false);
+            if (e.target === e.currentTarget) closeImage();
           }}
         >
           <div className="rv-lightbox-card">
@@ -1760,7 +1772,7 @@ export default function TaskReview({
               <button
                 type="button"
                 aria-label={t("关闭预览", "Close preview")}
-                onClick={() => setImageLightbox(false)}
+                onClick={closeImage}
               >
                 <X size={16} />
               </button>
@@ -1770,7 +1782,7 @@ export default function TaskReview({
               alt={t("任务来源图", "Source image")}
             />
           </div>
-        </div>
+        </dialog>
       )}
     </main>
   );

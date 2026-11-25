@@ -1279,13 +1279,22 @@ Licensed under the Apache License, Version 2.0.
 .rv-lightbox {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  color: inherit;
   background: rgba(9, 13, 22, 0.78);
   backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
+}
+.rv-lightbox::backdrop {
+  background: transparent;
 }
 .rv-lightbox-card {
   max-width: min(820px, 94vw);

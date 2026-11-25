@@ -272,7 +272,10 @@ def _validate_clause_coverage(
                 ),
             }
         )
-    if witnessed_park != park_ids:
+    # Fresh parks are resource-only; pre-audit archives used grounded object annotations.
+    if witnessed_park != park_ids and (
+        declared_park or any(annotations[nid]["object"] is None for nid in park_ids)
+    ):
         raise ValueError(
             "Terminal park nodes must match the audited arm requirements exactly"
         )

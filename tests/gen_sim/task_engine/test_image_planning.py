@@ -422,6 +422,72 @@ def test_template_park_uses_audited_arms_after_the_placement(
         ) == (2, 4)
 
 
+def test_pre_audit_park_archive_can_be_loaded_and_viewed(
+    source_image, tmp_path, monkeypatch
+):
+    from embodichain.gen_sim.task_engine import _image_run
+    from embodichain.gen_sim.task_engine._review import write_review
+    from embodichain.gen_sim.task_spec import canonical_hash
+    from embodichain.gen_sim.workflow import load_task_plan
+
+    result = _plan(source_image)
+    graph = result["semantic_task_graph"]
+    report = result["semantic_graph_validation"]
+    source = report["source"]
+    # Legacy park calls were annotated as a scene object rather than a pure resource.
+    annotation = dict(object="source", reference=None, relation=None, intent={})
+    call = dict(
+        kind="registered",
+        call_id="simulation.park",
+        arguments={},
+        resources={"primary": "left"},
+    )
+    group = graph["task_groups"][0]
+    graph["nodes"].append(
+        dict(
+            id="park",
+            call=call,
+            depends_on=[graph["nodes"][-1]["id"]],
+            task_instance_id=group["id"],
+            task_type=group["task_type"],
+            role="primary",
+        )
+    )
+    group["node_ids"].append("park")
+    source["annotations"]["park"] = annotation
+    source["requirements"][0]["node_ids"].append("park")
+    for kind in validate_semantic_call_payload(call)["runtime_bindings"]:
+        source["bindings"].append(
+            dict(
+                id="park." + kind,
+                node_id="park",
+                kind=kind,
+                parameter="runtime." + kind,
+                subject="source",
+                value=annotation,
+                source=group["id"],
+            )
+        )
+    report.update(
+        graph_digest=canonical_hash(graph),
+        coverage=validate_semantic_plan(graph, **source),
+    )
+    result["binding_requirements"] = source["bindings"]
+    monkeypatch.setattr(
+        _image_run, "generate_semantic_task_graph_from_image", lambda *a, **kw: result
+    )
+    directory = _image_run.plan_image_task(
+        source_image, graph["instruction"], tmp_path / "legacy"
+    )
+    manifest = directory / "task_plan_manifest.json"
+    sealed = manifest.read_bytes()
+    loaded = load_task_plan(directory)
+    assert loaded["semantic_graph_sha256"] == report["graph_digest"]
+    preview = tmp_path / "review.html"
+    write_review(directory, preview)
+    assert preview.is_file() and manifest.read_bytes() == sealed
+
+
 def test_variation_permission_and_coverage_have_independent_identities(source_image):
     from embodichain.gen_sim.task_spec.publication import (
         project_expansion_requirements,

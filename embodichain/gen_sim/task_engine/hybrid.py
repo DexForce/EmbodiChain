@@ -18,18 +18,23 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 import hashlib
 from itertools import combinations
 import json
-import re
 from pathlib import Path
 from typing import Any
 
 from .authoring_intent import (
+    _AXIS_INVERSES,
     _GROUP_RELATIONS,
     _PROMPT as _INTENT_FORMAT,
     AuthoringEvidenceError,
+    _advance_arms,
+    _arm_options,
+    _ArmState,
+    _expand_fact_shorthand,
+    _relation_pairs,
     _role_ancestry,
     compile_intent,
     source_spans,
@@ -40,6 +45,7 @@ from .authoring_intent import (
 from .goal_planning import author_goal_plan, _deployment_check
 from .ontology import task_contract
 from .scene_context import (
+    _SCENE_ROLE_ID,
     ArticulationDeclarationError,
     require_articulation,
     scene_objects_requirement,
@@ -88,9 +94,7 @@ def _load_scene_context(path: Path) -> dict[str, Any]:
         }:
             raise ValueError("Expected a scene-context object declaration")
         role = entry.get("id")
-        if not isinstance(role, str) or not re.fullmatch(
-            r"[A-Za-z][A-Za-z0-9_]*", role
-        ):
+        if not isinstance(role, str) or _SCENE_ROLE_ID.fullmatch(role) is None:
             raise ValueError("Invalid scene-context object ID")
         if role in seen:
             raise ValueError(f"Duplicate scene-context object ID {role!r}")
@@ -255,15 +259,7 @@ _POSITION_FACTS = {
     "mutually_separate",
 }
 _OPPOSITE_VALUES = {
-    "relation": {
-        frozenset(pair.split())
-        for pair in (
-            "left_of right_of",
-            "in_front_of behind",
-            "above below",
-            "inside not_inside",
-        )
-    },
+    "relation": {frozenset({"inside", "not_inside"})},
     "orientation": (
         {
             frozenset(pair.split())
@@ -303,10 +299,14 @@ _OPPOSITE_VALUES = {
 
 def _opposes(fact: dict[str, Any], effect: dict[str, Any]) -> bool:
     kind = fact["kind"]
+    if kind != effect["kind"] or fact.get("frame") != effect.get("frame"):
+        return False
+    if kind == "relation" and (opposite := _AXIS_INVERSES.get(fact["value"])):
+        return bool(
+            _relation_pairs(fact, fact["value"]) & _relation_pairs(effect, opposite)
+        )
     if (
         kind not in _OPPOSITE_VALUES
-        or kind != effect["kind"]
-        or fact.get("frame") != effect.get("frame")
         or not set(fact.get("subjects", ())).intersection(effect.get("subjects", ()))
         or frozenset({fact.get("value"), effect.get("value")})
         not in _OPPOSITE_VALUES.get(kind, ())
@@ -345,10 +345,24 @@ def _carried_facts(
             if fact["kind"] == "transferred"
             for role in fact["subjects"]
         }
+        rotated = (subjects if verb in {"orient", "turn", "articulate"} else set()) | {
+            role
+            for fact in effects
+            if fact["kind"] == "orientation"
+            for role in fact["subjects"]
+        }
 
         def invalidates(fact: dict[str, Any]) -> bool:
             kind = fact["kind"]
             if any(_opposes(fact, effect) for effect in effects):
+                return True
+            if (
+                kind == "pose_match"
+                and "orientation" in fact["components"]
+                and affected(fact, rotated)
+            ):
+                return True
+            if kind == "gripper_relation" and affected(fact, displaced):
                 return True
             if kind in _POSITION_FACTS and not (
                 kind == "relation" and fact["value"] in {"compatible_with", "fixed_to"}
@@ -400,14 +414,14 @@ def _carried_facts(
                     yield dict(fact, subjects=survivors)
             elif fact["kind"] == "relation" and fact["value"] not in _GROUP_RELATIONS:
                 # Multiple supporting faces prove a joint contact, not separate placements.
-                if (
-                    fact["value"] in {"supported_by", "on_top_faces"}
-                    and len(fact["references"]) > 1
-                ):
-                    return
+                reference_groups = (
+                    [fact["references"]]
+                    if fact["value"] in {"supported_by", "on_top_faces"}
+                    else [[reference] for reference in fact["references"]]
+                )
                 for subject in fact["subjects"]:
-                    for reference in fact["references"]:
-                        pair = dict(fact, subjects=[subject], references=[reference])
+                    for references in reference_groups:
+                        pair = dict(fact, subjects=[subject], references=references)
                         if not invalidates(pair):
                             yield pair
 
@@ -421,8 +435,8 @@ def _carried_facts(
 
 def _validate_intent_audit(
     instruction: str, plan: dict[str, Any], audit: Any
-) -> dict[str, list[str]]:
-    """Validate cited evidence and return witnessed terminal goal producers."""
+) -> tuple[dict[str, list[str]], list[dict[str, Any]]]:
+    """Validate evidence and return terminal producers and proven undeclared goals."""
     _validate_audit_issues(instruction, audit, "checks")
     checks = audit.get("checks")
     steps = {f"step_{i:02d}": row for i, row in enumerate(plan["steps"], 1)}
@@ -476,20 +490,33 @@ def _validate_intent_audit(
     def slot_facts(
         refs: list[str], carried: dict[str, list[dict[str, Any]]], claim: dict[str, Any]
     ) -> list[dict[str, Any]]:
+        def describes_slot(fact):
+            if fact["kind"] != "relation":
+                return False
+            subjects = set(fact["subjects"])
+            if fact["value"] in _AXIS_INVERSES and claim.get("value") in _AXIS_INVERSES:
+                subjects = {
+                    subject for subject, _ in _relation_pairs(fact, claim["value"])
+                }
+            return (
+                subjects
+                and all(roles[role] == "target" for role in subjects)
+                and subjects.isdisjoint(claim.get("subjects", ()))
+            )
+
         return [
             fact
             for ref in refs
             if ref in seed
             for fact in carried.get(ref, ())
-            if fact["kind"] == "relation"
-            and all(roles[role] == "target" for role in fact["subjects"])
-            and not set(fact["subjects"]).intersection(claim.get("subjects", ()))
+            if describes_slot(fact)
         ]
 
     if not isinstance(checks, list) or not checks:
         raise ValueError("source_audit: no independently reviewed requirements")
     witnessed = False
     goal_producers: dict[str, set[str]] = {}
+    added_conditions: list[dict[str, Any]] = []
     for check in checks:
         if (
             not isinstance(check, dict)
@@ -604,9 +631,13 @@ def _validate_intent_audit(
                     "A final check needs a final condition or an effect still valid at the end"
                 )
         witnessed |= bool(graph_evidence.intersection(refs))
+        claims = []
         if "spatial" in check:
             claim = check["spatial"]
             verify_spatial_claim(claim, facts, roles)
+            claim = dict(claim)
+            _expand_fact_shorthand(claim)
+            claims.append(claim)
             if (
                 scope == "final"
                 and claim.get("kind") == "relation"
@@ -637,16 +668,38 @@ def _validate_intent_audit(
                 roles,
                 combine_released=scope in {"before", "effect", "final"},
             )
+            claims.append(claim)
             if scope == "final" and any(_opposes(claim, other) for other in surviving):
                 raise AuthoringEvidenceError(
                     "A final state check conflicts with an ordered effect"
                 )
         if scope == "final":
             cited_steps = [step for step in steps if step in refs and end[step]]
-            for goal_id in dict.fromkeys(refs):
-                if goal_id not in final or not cited_steps:
-                    continue
-                goal = final[goal_id]
+            reviewed_goals = {ref: final[ref] for ref in refs if ref in final}
+            for claim in claims:
+                if any(_opposes(claim, goal) for goal in final.values()):
+                    raise AuthoringEvidenceError(
+                        "Conflicting reviewed terminal conditions"
+                    )
+                existing = {
+                    goal_id: goal
+                    for goal_id, goal in final.items()
+                    if matches(claim, [goal])
+                }
+                if existing:
+                    reviewed_goals.update(existing)
+                elif not matches(claim, list(final.values())):
+                    # A surviving audited effect is a source goal, not mere step completion.
+                    goal_id = (
+                        f"condition_{len(conditions) + len(added_conditions) + 1:02d}"
+                    )
+                    added_conditions.append(
+                        dict(scope="final", fact=claim, quote=check["quote"])
+                    )
+                    final[goal_id] = reviewed_goals[goal_id] = claim
+            if not cited_steps:
+                continue
+            for goal_id, goal in reviewed_goals.items():
                 slots = (
                     slot_facts(refs, end, goal) if goal["kind"] == "relation" else []
                 )
@@ -673,7 +726,7 @@ def _validate_intent_audit(
     return {
         goal: [step for step in steps if step in proven]
         for goal, proven in goal_producers.items()
-    }
+    }, added_conditions
 
 
 def _review_scope_guards(audit: Any) -> Counter[str]:
@@ -695,6 +748,83 @@ def _review_scope_guards(audit: Any) -> Counter[str]:
             ):
                 guards[canonical_hash([final, name, fact])] += 1
     return guards
+
+
+def _native_resource_conflicts(
+    calls: Iterable[tuple[str, dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Check feasible two-arm holdings without assigning an authored auto call."""
+    from embodichain.lab.task_program.language.semantic_contracts import (
+        semantic_planning_catalog,
+    )
+
+    catalog = semantic_planning_catalog()["calls"]
+    states = {_ArmState()}
+    conflicts = []
+    verbs = dict(
+        acquire="pick",
+        acquire_align="pick",
+        held="move_held",
+        release="release",
+        transfer="handover",
+    )
+    for node_id, call in calls:
+        cid = call.get("call_id", call["kind"])
+        contract = catalog[cid]
+        effect = contract["effect"]
+        if effect == "preserve":
+            continue
+        args = call.get("arguments", call)
+        subject = args.get("object", args.get("handle"))
+        res = call.get("resources", {})
+        primary = res.get("primary", "auto")
+        choices = (
+            _arm_options([primary]) if primary in {"left", "right", "auto"} else ()
+        )
+        if effect == "transfer":
+            source, destination = res["source"], res["destination"]
+            choices = (
+                ((source, destination),)
+                if {source, destination} == {"left", "right"}
+                else ()
+            )
+
+        advanced = set()
+        for state in states:
+            busy = dict(state.grips)
+            if effect == "coordinated_release":
+                if not busy and {res.get("left"), res.get("right")} == {
+                    "left",
+                    "right",
+                }:
+                    advanced.add(state)
+            elif effect == "control":
+                if any(choice[0] not in busy for choice in choices):
+                    advanced.add(state)
+            elif effect == "held" and subject is None:
+                if any(choice[0] in busy for choice in choices):
+                    advanced.add(state)
+            else:
+                for choice in choices:
+                    following = _advance_arms(state, verbs[effect], [subject], choice)
+                    if following is not None:
+                        advanced.add(following)
+        if advanced:
+            states = advanced
+        else:
+            # Keep the incoming state when recording a bad call, as in goal-route diagnostics.
+            before = min(sorted(state.grips) for state in states)
+            conflicts.append(
+                dict(
+                    node_id=node_id,
+                    call=cid,
+                    object=subject,
+                    requested=res,
+                    held_before=dict(before),
+                    preconditions=contract["preconditions"],
+                )
+            )
+    return conflicts
 
 
 def _supported_program(operations, *, bindings=None, scene_objects=None):
@@ -758,8 +888,8 @@ def _supported_program(operations, *, bindings=None, scene_objects=None):
             # Reacquisition ends the earlier placement, not its milestone.
             goals.pop(obj, None)
         if template in {"E2", "E3", "E6", "E7", "E8", "E9"}:
-            reuse = template == "E3" and obj in holder and holder[obj] == side
-            if (obj in holder or side in holder.values()) and not reuse:
+            reuse = template == "E3" and obj in holder
+            if template not in {"E2", "E3"} and obj in holder:
                 raise ValueError(
                     f"Control arm occupied: {side}, held={holder}, requested={obj}"
                 )
@@ -839,12 +969,7 @@ def _supported_program(operations, *, bindings=None, scene_objects=None):
             goals[(obj, template)] = (dict(pred, id=f"final_{obj}_{template}"), quote)
         elif template == "E4":
             src, dst = op["source"], op["destination"]
-            if (
-                {src, dst} != {"left", "right"}
-                or holder.get(obj, src) != src
-                or (obj not in holder and src in holder.values())
-                or dst in holder.values()
-            ):
+            if {src, dst} != {"left", "right"}:
                 raise ValueError("Invalid transfer resources")
             requirements.update((src, dst))
             if obj not in holder:
@@ -880,11 +1005,7 @@ def _supported_program(operations, *, bindings=None, scene_objects=None):
                 raise ValueError("Invalid support endpoints")
             args = {}
             if template == "E1":
-                if holder.get(obj, side) != side:
-                    raise ValueError("Wrong placing arm")
                 if obj not in holder:
-                    if side in holder.values():
-                        raise ValueError("Acquisition arm occupied")
                     calls.append(dict(kind="pick", object=obj, resources=resource))
                 holder.pop(obj, None)
                 if side != "auto":
@@ -969,6 +1090,13 @@ def _supported_program(operations, *, bindings=None, scene_objects=None):
         roles[obj]["affordances"] = sorted(
             set(roles[obj].get("affordances", ())) | contract.required_affordances
         )
+    conflicts = _native_resource_conflicts(
+        (f"call_{i}", call) for i, call in enumerate(calls, 1)
+    )
+    if conflicts:
+        raise ValueError(
+            f"Arm occupied or incompatible resources in native proposal: {conflicts[0]}"
+        )
     if not goals:
         # A handover-only instruction can require the transfer without a final hold.
         transfer = milestones[-1]["achieve"][0]
@@ -1006,7 +1134,7 @@ def _supported_program(operations, *, bindings=None, scene_objects=None):
 
 def verify_witness(spec, graph, *, support_targets, bindings=None):
     """Check ordered occurrence effects derived from canonical calls against frozen obligations."""
-    from .goal_planning import _facts, _coverage
+    from .goal_planning import _facts
     from embodichain.lab.task_program.language.semantic_contracts import (
         validate_semantic_call_payload,
     )
@@ -1178,7 +1306,7 @@ def verify_witness(spec, graph, *, support_targets, bindings=None):
             links[p.id] = hit[:2]
         else:
             missing.append(p.id)
-    conflicts = _coverage(spec, graph)["resource_diagnostics"]
+    conflicts = _native_resource_conflicts((n["id"], n["call"]) for n in graph["nodes"])
     missing.extend(k for k in ("temporal", "invariants") if getattr(spec, k))
     return dict(
         status="covered" if not missing and not conflicts else "uncovered",
@@ -1416,7 +1544,7 @@ def publish_hybrid(
         "request": (
             "Return JSON {operations:[...]}. Include only requested operations in order. "
             "Every row requires template, object and a verbatim instruction quote. "
-            "Use consistent short ASCII snake_case role IDs and retain identity across steps. "
+            "Use consistent short ASCII role IDs, preserving caller-declared case and identity across steps. "
             "Use primary:auto|left|right on single-arm rows; use auto if unspecified. "
             "E1 pick and place {reference,relation:on|inside|left_of|right_of|behind|front_of|above}; "
             "E2 alignment {orientation:upright|vertical}; E3 pour {reference,mode:motion|fluid}; "
@@ -1808,12 +1936,24 @@ def publish_hybrid(
                         instruction,
                         scene_objects=scene_objects,
                     )
+                    interpreted = True
+                    prompt["previous_semantic_plan"] = proposed_intent
+                    goal_producers, added_conditions = audit_intent(proposed_intent)
+                    if added_conditions:
+                        proposed_intent = validate_intent(
+                            dict(
+                                proposed_intent,
+                                conditions=[
+                                    *proposed_intent["conditions"],
+                                    *added_conditions,
+                                ],
+                            ),
+                            instruction,
+                            scene_objects=scene_objects,
+                        )
                     spec, graph, intent_clauses, descriptions = compile_intent(
                         proposed_intent, instruction, task_id, scene_objects
                     )
-                    interpreted = True
-                    prompt["previous_semantic_plan"] = proposed_intent
-                    goal_producers = audit_intent(proposed_intent)
                     intent = proposed_intent
                     break
                 operations = _operation_rows(proposal, instruction)
@@ -1826,9 +1966,12 @@ def publish_hybrid(
                 used += 1
                 audit_calls(operations, calls, bindings)
                 break
-            except ArticulationDeclarationError:
-                raise
             except (KeyError, ValueError, TypeError) as error:
+                if (
+                    isinstance(error, ArticulationDeclarationError)
+                    and not error.retryable
+                ):
+                    raise
                 if attempt == (3 if saw_intent else 1):
                     raise
                 prompt["diagnostic"] = str(error)

@@ -62,9 +62,15 @@ for (const viewport of [
     if (viewport.width === 1680) {
       const thumb = page.locator(".rv-scene-thumb");
       await expect(thumb).toBeVisible();
-      await thumb.click();
+      await thumb.press("Enter");
       const lightbox = page.getByRole("dialog", { name: "输入场景原图" });
       await expect(lightbox).toBeVisible();
+      const dismiss = lightbox.getByRole("button", { name: "关闭预览" });
+      await expect(dismiss).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(dismiss).toBeFocused();
+      await page.keyboard.press("Shift+Tab");
+      await expect(dismiss).toBeFocused();
       await expect
         .poll(() =>
           lightbox
@@ -76,9 +82,32 @@ for (const viewport of [
         .toBe(true);
       await page.keyboard.press("Escape");
       await expect(lightbox).toHaveCount(0);
+      await expect(thumb).toBeFocused();
+      await expect(detail).toBeVisible();
+      await thumb.click();
+      await dismiss.click();
+      await expect(thumb).toBeFocused();
+      await thumb.click();
+      await lightbox.click({ position: { x: 5, y: 5 } });
+      await expect(lightbox).toHaveCount(0);
+      await expect(thumb).toBeFocused();
     }
   });
 }
+
+test("typed role selection highlights the stage and its expanded action", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1680, height: 1120 });
+  await page.goto(pathToFileURL(join(root, "hybrid-authoring.html")).href);
+  const stage = page.locator('[data-id="group:step_02"]');
+  await stage.locator(".rv-toggle").click();
+  await page.locator('.rv-role-chip[title="left pedestal"]').click();
+  await expect(stage.locator(".rv-frame")).toHaveClass(/role-match/);
+  await expect(page.locator('button[data-key="call:step_02"]')).not.toHaveClass(
+    /faded/,
+  );
+});
 
 test("unified canvas opens measured evidence by clicking the action itself", async ({
   page,

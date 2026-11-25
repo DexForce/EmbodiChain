@@ -18,10 +18,23 @@ model configuration frozen for the whole batch.
    serpentine layout, and the scientific palette—into
    `PLAN/semantic_task_graph.html`. To re-render a sealed historical plan or
    attach an execution attempt without altering published digests, run
-   `embodichain gensim task view --plan PLAN [--run RUN] --output NEW.html`
-   (or `outputs/task-engine-luna-dojo-repair-20261121/export_review_views.py`
-   for a batch). The output must be outside the sealed plan directory; do not
-   hand-edit the HTML or graph JSON.
+   `embodichain gensim task view --plan PLAN [--run RUN] --output NEW.html`.
+   For a batch, use Bash with the campaign directory and a separate output directory:
+
+   ```bash
+   campaign=/absolute/path/to/campaign
+   destination=/absolute/path/to/previews
+   while IFS= read -r -d '' manifest; do
+     plan=${manifest%/*}
+     case_run=${plan#"$campaign/runs/"}
+     html="$destination/${case_run%/plan}/review.html"
+     mkdir -p "${html%/*}" || exit 1
+     embodichain gensim task view --plan "$plan" --output "$html" || exit 1
+   done < <(find "$campaign/runs" -type f -path '*/plan/task_plan_manifest.json' -print0)
+   ```
+
+   Keep output outside the sealed plan directories; do not hand-edit their HTML
+   or graph JSON.
 3. For a benchmark batch, preserve the runner manifest and input hashes, then
    run the fixed RoboDojo/RoboTwin cases three times each. Keep rejected trials
    and never replace them with a later run from another snapshot.
