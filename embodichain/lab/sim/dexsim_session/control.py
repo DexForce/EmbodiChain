@@ -83,8 +83,14 @@ class WorldControl:
 
     def status(self) -> dict[str, Any]:
         """Describe the binding, ledger revision, and control-boundary counters."""
-        self.manager.validate()
+        try:
+            self.manager.validate()
+            binding_current = True
+        except RuntimeError:
+            # Preserve access to past receipts even if the host replaced its Scene.
+            binding_current = False
         return dict(
+            binding_current=binding_current,
             session_id=self.manager.session_id,
             topology_revision=self.manager.topology_revision,
             revision=self._revision if not self._receipts else None,
@@ -140,10 +146,15 @@ class WorldControl:
         if len(self._receipts) >= 4096:
             raise RuntimeError("This dedicated session has reached its command limit")
         state = self.status()
-        if self._state != "ready" or (session_id, topology_revision, revision) != (
-            state["session_id"],
-            state["topology_revision"],
-            self._revision,
+        if (
+            not state["binding_current"]
+            or self._state != "ready"
+            or (session_id, topology_revision, revision)
+            != (
+                state["session_id"],
+                state["topology_revision"],
+                self._revision,
+            )
         ):
             raise ValueError(
                 "Control is stopped, uncertain or the supplied binding/revision is stale"
@@ -190,7 +201,7 @@ class WorldControl:
         entry = dict(
             command_id=command_id,
             target=list(target),
-            target_accepted=False,
+            target_accepted=None,
             target_attained=None,
             measured_before=before,
             measured_after=None,

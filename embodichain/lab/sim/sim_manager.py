@@ -1066,6 +1066,11 @@ class SimulationManager:
         return spawn_scene.builder.result
 
     @property
+    def world_gravity(self) -> tuple[float, float, float]:
+        """Return configured World gravity used by the planner dynamics adapter."""
+        return tuple(self.sim_config.physics_cfg.gravity)
+
+    @property
     def physics_step_index(self) -> int:
         """Number of physics substeps completed through :meth:`update`.
 

@@ -77,8 +77,8 @@ def writer_executors(
     from dexsim.kit.mcp import dispatch
     from . import robot_state
 
-    if len(writer_key) < 32:
-        raise ValueError("Writer key must contain at least 32 random bytes")
+    if len(writer_key) != 32:
+        raise ValueError("Writer key must contain 32 random bytes")
     native_reads = {
         "world.status",
         "scene.list_objects",
@@ -147,13 +147,15 @@ class WriterClient:
         """Execute or query one authorized operation, fencing uncertain writes."""
         from dexsim.runtime.errors import SessionRemoteError
 
+        if operation == "target_and_step":
+            arguments = {"tolerance": 1e-3, **arguments}
         with self.key_file.open("rb") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             pending = (
                 json.loads(self.outbox.read_bytes()) if self.outbox.exists() else None
             )
             if pending and operation == "target_and_step":
-                if pending != arguments:
+                if {"tolerance": 1e-3, **pending} != arguments:
                     raise RuntimeError(
                         f"Reconcile pending command {pending['command_id']!r} before writing"
                     )

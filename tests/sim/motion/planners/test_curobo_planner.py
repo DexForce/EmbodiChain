@@ -1284,9 +1284,7 @@ def test_timeopt_gravity_uses_physics_and_the_planning_frame(
             world_to_base=world_to_base,
         )
         planner.robot.get_link_pose.side_effect = AssertionError("live pose reread")
-    manager = SimpleNamespace(
-        sim_config=SimpleNamespace(physics_cfg=SimpleNamespace(gravity=world_gravity))
-    )
+    manager = SimpleNamespace(world_gravity=world_gravity)
     getter = Mock(return_value=manager)
     monkeypatch.setattr(SimulationManager, "get_instance", getter)
     backend = _CuroboBackend(
