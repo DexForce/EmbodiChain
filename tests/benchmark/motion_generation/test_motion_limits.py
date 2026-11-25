@@ -140,6 +140,50 @@ def test_nmg_retime_uses_conservative_common_budgets() -> None:
     assert limits["acceleration"] == [8.0, 6.0]
 
 
+def test_retimed_nmg_atomic_policy_receives_the_suite_acceleration_budget() -> None:
+    from embodichain.extensions.benchmarks.motion_generation.scenarios.atomic_policy import (
+        with_plan_options,
+    )
+    from embodichain.lab.sim.atomic_skills import (
+        MotionPolicy,
+        SkillBinding,
+        SkillInvocation,
+    )
+    from embodichain.lab.sim.motion.motion_generator import MotionGenerator
+    from embodichain.lab.sim.motion.planners import NeuralPlanner, NeuralPlannerCfg
+
+    adapter = _adapter(NmgOnnxAdapter, velocity=2.0, config={"retime": True})
+    invocation = SkillInvocation(
+        skill_id="hand_over",
+        goal=None,
+        binding=SkillBinding(owner_id="budget_test", endpoints={}),
+        motion_policy=MotionPolicy(strategy="motion_gen"),
+    )
+    native = adapter.atomic_plan_options(control_dt=0.04)
+    assert native is not None
+    assert _adapter(NmgOnnxAdapter).atomic_plan_options() is None
+    motion_options = with_plan_options(
+        invocation, native
+    ).motion_policy.to_motion_gen_options(
+        start_qpos=torch.zeros(1, 2),
+        control_part="arm",
+    )
+    planner = object.__new__(NeuralPlanner)
+    planner.robot = adapter.context.robot
+    planner.cfg = NeuralPlannerCfg(constraints=adapter._retiming_constraints())
+    generator = object.__new__(MotionGenerator)
+    generator.planner = planner
+    resolved = generator.resolve_plan_options(
+        motion_options.plan_opts,
+        sample_count=motion_options.sample_count,
+        velocity_limit=motion_options.velocity_limit,
+        acceleration_limit=motion_options.acceleration_limit,
+    )
+
+    limits = planner._retiming_constraints(resolved, "arm", dof=2, batch_size=1)
+    assert limits["acceleration"].tolist() == [8.0, 6.0]
+
+
 def test_curobo_maps_control_order_to_active_joint_order() -> None:
     """The selected control part may order joints differently from cuRobo."""
     limits = _adapter(CuroboAdapter, velocity=2.0)._backend_motion_limits()

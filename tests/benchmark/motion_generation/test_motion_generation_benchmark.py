@@ -1324,8 +1324,21 @@ def test_nmg_model_revision_is_derived_from_runtime_model_path():
     assert adapter.metadata.model_revision == "unified-k3"
 
 
+@pytest.mark.parametrize(
+    "device,providers,cuda_use_tf32,provider_options",
+    [
+        ("cpu", ["CPUExecutionProvider"], None, None),
+        (
+            "cuda:3",
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            False,
+            [{"device_id": "3", "use_tf32": "0"}, {}],
+        ),
+    ],
+    ids=["host_provider", "explicit_device_ordinal"],
+)
 def test_nmg_uses_onnx_dimensions_for_case_selection_and_retimed_construction(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, device, providers, cuda_use_tf32, provider_options
 ):
     from embodichain.extensions.benchmarks.motion_generation.planners import nmg_onnx
 
@@ -1344,13 +1357,19 @@ def test_nmg_uses_onnx_dimensions_for_case_selection_and_retimed_construction(
         "onnxruntime",
         SimpleNamespace(
             SessionOptions=SimpleNamespace,
-            GraphOptimizationLevel=SimpleNamespace(ORT_DISABLE_ALL=0),
+            GraphOptimizationLevel=SimpleNamespace(ORT_ENABLE_ALL=1),
             InferenceSession=load_session,
         ),
     )
     build_motion_generator = Mock()
     monkeypatch.setattr(nmg_onnx, "MotionGenerator", build_motion_generator)
-    adapter = _nmg_adapter(onnx_model_path=str(model), retime=True)
+    adapter = _nmg_adapter(
+        onnx_model_path=str(model),
+        onnx_providers=providers,
+        onnx_cuda_use_tf32=cuda_use_tf32,
+        retime=True,
+    )
+    adapter.context = replace(adapter.context, device=torch.device(device))
     adapter.context.robot.get_qvel_limits.return_value = torch.full((1, 6), 2.62)
 
     def case_with_waypoints(count: int) -> BenchmarkCase:
@@ -1372,7 +1391,8 @@ def test_nmg_uses_onnx_dimensions_for_case_selection_and_retimed_construction(
     assert adapter.availability() == (True, None)
     adapter.build()
     load_session.assert_called_once()
-    assert load_session.call_args.kwargs["providers"] == ["CPUExecutionProvider"]
+    assert load_session.call_args.kwargs["providers"] == providers
+    assert load_session.call_args.kwargs.get("provider_options") == provider_options
     planner_cfg = build_motion_generator.call_args.args[0].planner_cfg
     assert planner_cfg.num_arm_joints is None
     assert planner_cfg.num_waypoints is None

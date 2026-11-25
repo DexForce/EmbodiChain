@@ -26,6 +26,7 @@ import torch
 from embodichain.extensions.models.policy._nmg_observation import (
     _OnnxObservationDimensions,
 )
+from embodichain.extensions.models.policy.nmg import _create_ort_session
 from embodichain.lab.sim.motion.motion_generator import (
     MotionGenCfg,
     MotionGenOptions,
@@ -125,18 +126,12 @@ class NmgOnnxAdapter(PlannerAdapter):
         if path.suffix.lower() != ".onnx":
             return None, f"NMG requires a standalone .onnx policy, got {path}."
         try:
-            import onnxruntime as ort
-        except ImportError as exc:
-            return None, f"NMG requires onnxruntime: {exc}"
-        try:
-            options = ort.SessionOptions()
-            options.intra_op_num_threads = 1
-            options.inter_op_num_threads = 1
-            options.graph_optimization_level = (
-                ort.GraphOptimizationLevel.ORT_DISABLE_ALL
-            )
-            session = ort.InferenceSession(
-                str(path), sess_options=options, providers=["CPUExecutionProvider"]
+            session = _create_ort_session(
+                str(path),
+                device=self.context.device,
+                providers=self.spec.config.get("onnx_providers"),
+                cuda_use_tf32=self.spec.config.get("onnx_cuda_use_tf32"),
+                intra_op_threads=1,
             )
             metadata = session.get_modelmeta().custom_metadata_map
             return _OnnxObservationDimensions.from_metadata(metadata), None
@@ -235,6 +230,23 @@ class NmgOnnxAdapter(PlannerAdapter):
         )
         self.motion_generator = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg))
         self.fixed_batch_size = self.motion_generator.planner._policy.fixed_batch_size
+
+    def atomic_plan_options(
+        self, *, control_dt: float | None = None
+    ) -> NeuralPlanOptions | None:
+        """Provide the suite's timing limits for retimed Atomic Skill trials.
+
+        Args:
+            control_dt: Host control period, if known. NMG uses its configured
+                maximum output sample interval.
+
+        Returns:
+            Native options with the resolved suite budgets, or ``None`` for a
+            nominal NMG rollout.
+        """
+        if self.retime:
+            return NeuralPlanOptions(constraints=self._retiming_constraints())
+        return None
 
     def plan(self, case: BenchmarkCase) -> PlanResult:
         """Plan all ordered constraints in one closed-loop rollout."""

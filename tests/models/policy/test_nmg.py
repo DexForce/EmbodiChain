@@ -310,6 +310,61 @@ def test_ort_validates_observation_signature(tmp_path):
         policy(obs.double())
 
 
+@pytest.mark.parametrize(
+    "load",
+    [NeuralMotionGenerator, NeuralMotionGenerator.from_onnx],
+    ids=["constructor", "onnx_factory"],
+)
+def test_ort_load_enforces_supplied_sha256(tmp_path, load):
+    path, weight = _linear_policy(tmp_path, "batch")
+    pytest.importorskip("onnxruntime")
+    with pytest.raises(ValueError, match="SHA256 mismatch"):
+        load(path, sha256="0" * 64)
+
+    policy = load(path, sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+    obs = torch.arange(9, dtype=torch.float32).reshape(3, 3)
+    torch.testing.assert_close(policy(obs), obs @ weight)
+
+
+@pytest.mark.parametrize("action_batch", [1, "batch"], ids=["static", "runtime"])
+def test_ort_rejects_an_action_shared_across_observations(
+    tmp_path, monkeypatch, action_batch
+):
+    model = tmp_path / "policy.onnx"
+    model.touch()
+    session = SimpleNamespace(
+        get_inputs=lambda: [
+            SimpleNamespace(name="obs", type="tensor(float)", shape=["batch", 3])
+        ],
+        get_outputs=lambda: [
+            SimpleNamespace(
+                name="action", type="tensor(float)", shape=[action_batch, 2]
+            )
+        ],
+        get_modelmeta=lambda: SimpleNamespace(custom_metadata_map={}),
+        get_providers=lambda: ["CPUExecutionProvider"],
+        run=lambda *args, **kwargs: [torch.zeros(1, 2).numpy()],
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "onnxruntime",
+        SimpleNamespace(
+            SessionOptions=SimpleNamespace,
+            GraphOptimizationLevel=SimpleNamespace(ORT_ENABLE_ALL="all"),
+            InferenceSession=lambda *args, **kwargs: session,
+        ),
+    )
+    if action_batch == 1:
+        with pytest.raises(ValueError, match="output batch 1 disagrees"):
+            NeuralMotionGenerator.from_onnx(model)
+    else:
+        policy = NeuralMotionGenerator.from_onnx(model)
+        with pytest.raises(
+            ValueError, match=r"actions of shape \(3, 2\), got \(1, 2\)"
+        ):
+            policy(torch.zeros(3, 3))
+
+
 def test_missing_ort_names_its_optional_extra(tmp_path, monkeypatch):
     path = tmp_path / "local.onnx"
     path.touch()

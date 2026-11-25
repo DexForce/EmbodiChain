@@ -18,6 +18,10 @@ from __future__ import annotations
 import torch
 import pytest
 
+from embodichain.extensions.models.policy import nmg as nmg_module
+from embodichain.extensions.models.policy._nmg_observation import (
+    _WaypointObservationLayout,
+)
 from embodichain.extensions.models.policy.nmg import NeuralMotionGenerator
 from embodichain.lab.sim.motion.motion_generator import (
     MotionGenCfg,
@@ -74,7 +78,7 @@ def _create_fake_onnx_model(tmp_path) -> str:
 class FakeOnnxPolicy:
     obs_dim = OBS_DIM
     fixed_batch_size = 1
-    observation_metadata = neural_planner_module._WaypointObservationLayout(
+    observation_metadata = _WaypointObservationLayout(
         NUM_WAYPOINTS, NUM_ARM_JOINTS, True, True
     ).onnx_metadata
 
@@ -97,7 +101,7 @@ class FakeOnnxPolicy:
 
 @pytest.fixture(autouse=True)
 def _mock_onnx_policy(monkeypatch):
-    monkeypatch.setattr(neural_planner_module, "NeuralMotionGenerator", FakeOnnxPolicy)
+    monkeypatch.setattr(nmg_module, "NeuralMotionGenerator", FakeOnnxPolicy)
 
 
 class FakeRobot:
@@ -167,7 +171,7 @@ def test_neural_planner_observation_width_matches_nmg_contract(
     capacity: int,
     expected_width: int,
 ):
-    layout = neural_planner_module._WaypointObservationLayout(capacity, 7, True)
+    layout = _WaypointObservationLayout(capacity, 7, True)
 
     assert layout.dim == expected_width
     assert layout.fingerprint == NMG_OBSERVATION_FINGERPRINTS[capacity]
@@ -176,7 +180,7 @@ def test_neural_planner_observation_width_matches_nmg_contract(
 
 def test_ur5_periodic_observation_matches_nmg_export(tmp_path, monkeypatch):
     """UR5 policy consumes raw joints followed by sin/cos in the ONNX contract."""
-    layout = neural_planner_module._WaypointObservationLayout(5, 6, True, True, True)
+    layout = _WaypointObservationLayout(5, 6, True, True, True)
     assert layout.dim == 186
     assert layout.fingerprint == (
         "5cd10ef20e627bdc17b9fd4f1c038d6615faad192796168695de0afa92c4dd49"
@@ -191,7 +195,7 @@ def test_ur5_periodic_observation_matches_nmg_export(tmp_path, monkeypatch):
         output_dim = 6
         observation_metadata = layout.onnx_metadata
 
-    monkeypatch.setattr(neural_planner_module, "NeuralMotionGenerator", FakeUr5Policy)
+    monkeypatch.setattr(nmg_module, "NeuralMotionGenerator", FakeUr5Policy)
     monkeypatch.setattr(
         SimulationManager,
         "get_instance",
@@ -234,14 +238,14 @@ def test_neural_planner_observation_width_matches_k5_nmg_export():
 
 def test_neural_planner_reads_joint_count_and_capacity_from_onnx(tmp_path, monkeypatch):
     """The released six-joint, twelve-slot layout needs no dimension config."""
-    layout = neural_planner_module._WaypointObservationLayout(12, 6, True)
+    layout = _WaypointObservationLayout(12, 6, True)
 
     class ReleasedPolicy(FakeOnnxPolicy):
         output_dim = 6
         obs_dim = 391
         observation_metadata = layout.onnx_metadata
 
-    monkeypatch.setattr(neural_planner_module, "NeuralMotionGenerator", ReleasedPolicy)
+    monkeypatch.setattr(nmg_module, "NeuralMotionGenerator", ReleasedPolicy)
     monkeypatch.setattr(
         SimulationManager, "get_instance", lambda *args: FakeSimulationManager()
     )
@@ -287,15 +291,11 @@ def test_neural_planner_rejects_mismatched_observation_metadata(tmp_path, monkey
 
     class MismatchedMetadataPolicy(FakeOnnxPolicy):
         observation_metadata = {
-            **neural_planner_module._WaypointObservationLayout(
-                5, 7, True
-            ).onnx_metadata,
+            **_WaypointObservationLayout(5, 7, True).onnx_metadata,
             "nmg.canonicalize_quat_obs": "false",
         }
 
-    monkeypatch.setattr(
-        neural_planner_module, "NeuralMotionGenerator", MismatchedMetadataPolicy
-    )
+    monkeypatch.setattr(nmg_module, "NeuralMotionGenerator", MismatchedMetadataPolicy)
 
     with pytest.raises(ValueError, match="observation layout metadata mismatch"):
         NeuralPlanner(
@@ -335,9 +335,7 @@ def test_neural_planner_rejects_invalid_observation_dimensions(
     class InvalidMetadataPolicy(FakeOnnxPolicy):
         observation_metadata = metadata
 
-    monkeypatch.setattr(
-        neural_planner_module, "NeuralMotionGenerator", InvalidMetadataPolicy
-    )
+    monkeypatch.setattr(nmg_module, "NeuralMotionGenerator", InvalidMetadataPolicy)
 
     with pytest.raises(
         ValueError, match=f"observation layout metadata mismatch: {key}"
@@ -514,7 +512,7 @@ def _rollout(tmp_path, monkeypatch, *, policy=None, **cfg_overrides):
         classmethod(lambda cls, instance_id=0: fake_sim),
     )
     if policy is not None:
-        monkeypatch.setattr(neural_planner_module, "NeuralMotionGenerator", policy)
+        monkeypatch.setattr(nmg_module, "NeuralMotionGenerator", policy)
     motion_generator = MotionGenerator(
         cfg=MotionGenCfg(
             planner_cfg=NeuralPlannerCfg(
@@ -577,9 +575,7 @@ def test_neural_request_limits_are_capped_and_isolated(tmp_path, monkeypatch):
         manager.robot, "get_qvel_limits", lambda *, joint_ids: robot_caps[:, joint_ids]
     )
     monkeypatch.setattr(SimulationManager, "get_instance", lambda *args: manager)
-    monkeypatch.setattr(
-        neural_planner_module, "NeuralMotionGenerator", SaturatingOnnxPolicy
-    )
+    monkeypatch.setattr(nmg_module, "NeuralMotionGenerator", SaturatingOnnxPolicy)
     generator = MotionGenerator(
         MotionGenCfg(
             planner_cfg=NeuralPlannerCfg(
@@ -627,6 +623,68 @@ def test_neural_request_limits_are_capped_and_isolated(tmp_path, monkeypatch):
     q, qd, _, _ = retime_to_control_grid(capped.positions, capped.dt, command_dt)
     assert (q.diff(dim=1) / command_dt).abs().max().item() <= 0.5 + 1e-6
     assert (qd.diff(dim=1) / command_dt).abs().max().item() <= 1.0 + 1e-3
+
+
+@pytest.mark.parametrize("request_bounds", [False, True], ids=["planner", "request"])
+def test_neural_retiming_accepts_zero_acceleration_for_a_stationary_joint(
+    tmp_path, monkeypatch, request_bounds
+):
+    class OneMovingJointPolicy(FakeOnnxPolicy):
+        def __call__(self, obs: torch.Tensor) -> torch.Tensor:
+            action = super().__call__(obs)
+            action[:, 1] = 1.0
+            return action
+
+    monkeypatch.setattr(nmg_module, "NeuralMotionGenerator", OneMovingJointPolicy)
+    manager = FakeSimulationManager()
+    monkeypatch.setattr(SimulationManager, "get_instance", lambda *args: manager)
+    bounds = (
+        [[0.0, 0.0]] + [[-1.0, 1.0]] * (NUM_ARM_JOINTS - 1)
+        if request_bounds
+        else [0.0] + [1.0] * (NUM_ARM_JOINTS - 1)
+    )
+    generator = MotionGenerator(
+        MotionGenCfg(
+            planner_cfg=NeuralPlannerCfg(
+                robot_uid=manager.robot.uid,
+                onnx_model_path=_create_fake_onnx_model(tmp_path),
+                control_part="main_arm",
+                constraints=(
+                    {"velocity": 1.0}
+                    if request_bounds
+                    else {"velocity": 1.0, "acceleration": bounds}
+                ),
+            )
+        )
+    )
+    goal = torch.zeros(1, NUM_ARM_JOINTS)
+    goal[0, 1] = 0.4
+    result = generator.generate(
+        [PlanState.from_qpos(goal)],
+        MotionGenOptions(
+            plan_opts=NeuralPlanOptions(
+                constraints={"acceleration": bounds} if request_bounds else None,
+            ),
+            acceleration_limit=0.5,
+        ),
+    )
+
+    assert result.is_all_success()
+    torch.testing.assert_close(result.positions[:, -1], goal.double())
+    assert torch.count_nonzero(result.accelerations[..., 0]) == 0
+    assert result.accelerations[..., 1].abs().max() == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize("config_type", [NeuralPlannerCfg, NeuralPlanOptions])
+def test_neural_constraints_copy_computed_tensor_values(config_type):
+    source = 2.0 * torch.ones(NUM_ARM_JOINTS, requires_grad=True)
+    config = config_type(constraints={"velocity": source})
+    with torch.no_grad():
+        source.zero_()
+
+    copied_limits = config.copy().constraints["velocity"]
+    assert not copied_limits.requires_grad
+    torch.testing.assert_close(copied_limits, torch.full_like(source, 2.0))
 
 
 def test_retime_joint_paths_rejects_malformed_input():
@@ -1535,9 +1593,7 @@ def test_motion_generator_neural_preserves_failed_rollout_positions(
             action[:, 0] = 1.0
             return action
 
-    monkeypatch.setattr(
-        neural_planner_module, "NeuralMotionGenerator", MovingFakeOnnxPolicy
-    )
+    monkeypatch.setattr(nmg_module, "NeuralMotionGenerator", MovingFakeOnnxPolicy)
     model_path = _create_fake_onnx_model(tmp_path)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
@@ -1577,9 +1633,7 @@ def test_motion_generator_neural_preserves_failed_rollout_positions(
 def test_neural_planner_rejects_pytorch_checkpoint(tmp_path, monkeypatch):
     pytorch_checkpoint_path = tmp_path / "checkpoint.pt"
     pytorch_checkpoint_path.write_bytes(b"not-an-onnx-model")
-    monkeypatch.setattr(
-        neural_planner_module, "NeuralMotionGenerator", NeuralMotionGenerator
-    )
+    monkeypatch.setattr(nmg_module, "NeuralMotionGenerator", NeuralMotionGenerator)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
         SimulationManager,
@@ -1939,7 +1993,7 @@ def test_packed_arms_share_inference_and_match_independent_rollouts(
             local[..., :3, 3] = qpos[..., :3]
             return bases[name] @ local
 
-    monkeypatch.setattr(neural_planner_module, "NeuralMotionGenerator", StepPolicy)
+    monkeypatch.setattr(nmg_module, "NeuralMotionGenerator", StepPolicy)
     manager = FakeSimulationManager()
     manager.robot = MountedRobot()
     monkeypatch.setattr(SimulationManager, "get_instance", lambda *args: manager)
@@ -2092,7 +2146,7 @@ def test_synchronized_arms_share_visits_and_isolate_failed_environments(
             local[..., :3, 3] = qpos[..., :3]
             return mounts[name] @ local
 
-    monkeypatch.setattr(neural_planner_module, "NeuralMotionGenerator", PairedPolicy)
+    monkeypatch.setattr(nmg_module, "NeuralMotionGenerator", PairedPolicy)
     manager = FakeSimulationManager()
     manager.robot = PairedRobot()
     monkeypatch.setattr(SimulationManager, "get_instance", lambda *args: manager)

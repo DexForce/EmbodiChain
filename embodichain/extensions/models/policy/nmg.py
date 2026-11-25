@@ -28,12 +28,61 @@ from torch import nn
 
 from embodichain.utils import logger
 
-from ._nmg_exported import _load_exported_actor
+from ._nmg_exported import _load_exported_actor, _verify_sha256
 
 if TYPE_CHECKING:
     from onnxruntime import InferenceSession
 
 __all__ = ["NeuralMotionGenerator"]
+
+
+def _create_ort_session(
+    source: str | bytes,
+    *,
+    device: torch.device,
+    providers: Sequence[str] | None,
+    cuda_use_tf32: bool | None,
+    intra_op_threads: int | None = None,
+) -> InferenceSession:
+    """Open a session with the provider options shared by preflight and rollout."""
+    try:
+        import onnxruntime as ort
+    except ImportError as exc:
+        raise ImportError(
+            "NMG inference requires ONNX Runtime. Install it with "
+            "pip install 'embodichain[policy-deploy]'."
+        ) from exc
+
+    options = ort.SessionOptions()
+    options.intra_op_num_threads = (
+        torch.get_num_threads() if intra_op_threads is None else intra_op_threads
+    )
+    options.inter_op_num_threads = 1
+    options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    cuda_options = {}
+    if device.type == "cuda":
+        # ORT ordinals are process-local, including under CUDA_VISIBLE_DEVICES.
+        cuda_options["device_id"] = str(
+            torch.cuda.current_device() if device.index is None else device.index
+        )
+    if cuda_use_tf32 is not None:
+        cuda_options["use_tf32"] = "1" if cuda_use_tf32 else "0"
+    provider_kwargs = {}
+    if cuda_options:
+        if providers is None:
+            available = ort.get_available_providers()
+            providers = [
+                name
+                for name in ("CUDAExecutionProvider", "CPUExecutionProvider")
+                if name in available
+            ]
+        provider_kwargs["provider_options"] = [
+            dict(cuda_options) if name == "CUDAExecutionProvider" else {}
+            for name in providers
+        ]
+    return ort.InferenceSession(
+        source, sess_options=options, providers=providers, **provider_kwargs
+    )
 
 
 class NeuralMotionGenerator(nn.Module):
@@ -88,7 +137,7 @@ class NeuralMotionGenerator(nn.Module):
         if enable_grad:
             self._load_torch(path, device, sha256)
         else:
-            self._load_ort(path, device, providers, cuda_use_tf32)
+            self._load_ort(path, device, providers, cuda_use_tf32, sha256)
         self.eval()
 
     @classmethod
@@ -100,6 +149,7 @@ class NeuralMotionGenerator(nn.Module):
         device: str | torch.device = "cpu",
         providers: Sequence[str] | None = None,
         cuda_use_tf32: bool | None = None,
+        sha256: str | None = None,
     ) -> NeuralMotionGenerator:
         """Load a local ONNX policy for ONNX Runtime inference.
 
@@ -110,6 +160,7 @@ class NeuralMotionGenerator(nn.Module):
                 Reload the model to bind an ORT session to a different device.
             providers: Optional ORT execution providers in priority order.
             cuda_use_tf32: Optional TF32 setting for the ORT CUDA provider.
+            sha256: Optional trusted SHA256 of the standalone ONNX file.
 
         Returns:
             A policy ready for inference.
@@ -118,8 +169,8 @@ class NeuralMotionGenerator(nn.Module):
             FileNotFoundError: If the local model file is missing.
             ImportError: If ONNX Runtime is unavailable.
             TypeError: If ``cuda_use_tf32`` is neither a bool nor ``None``.
-            ValueError: If the file suffix, model signature or backend options
-                are incompatible.
+            ValueError: If the digest mismatches or the file suffix, model
+                signature, or backend options are incompatible.
         """
         if enable_grad:
             raise ValueError(
@@ -131,6 +182,7 @@ class NeuralMotionGenerator(nn.Module):
             device=device,
             providers=providers,
             cuda_use_tf32=cuda_use_tf32,
+            sha256=sha256,
         )
 
     @classmethod
@@ -165,44 +217,14 @@ class NeuralMotionGenerator(nn.Module):
         device: torch.device,
         providers: Sequence[str] | None,
         cuda_use_tf32: bool | None,
+        sha256: str | None,
     ) -> None:
-        try:
-            import onnxruntime as ort
-        except ImportError as exc:
-            raise ImportError(
-                "NMG inference requires ONNX Runtime. Install it with "
-                "pip install 'embodichain[policy-deploy]'."
-            ) from exc
-
-        options = ort.SessionOptions()
-        # Use the host's thread budget when running alongside other workers.
-        options.intra_op_num_threads = torch.get_num_threads()
-        options.inter_op_num_threads = 1
-        options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        cuda_options = {}
-        if device.type == "cuda":
-            # ORT ordinals are process-local, including under CUDA_VISIBLE_DEVICES.
-            cuda_options["device_id"] = str(
-                torch.cuda.current_device() if device.index is None else device.index
-            )
-        if cuda_use_tf32 is not None:
-            cuda_options["use_tf32"] = "1" if cuda_use_tf32 else "0"
-        provider_kwargs = {}
-        if cuda_options:
-            if providers is None:
-                # Explicit CUDA options select the CUDA/CPU path.
-                available = ort.get_available_providers()
-                providers = [
-                    name
-                    for name in ("CUDAExecutionProvider", "CPUExecutionProvider")
-                    if name in available
-                ]
-            provider_kwargs["provider_options"] = [
-                dict(cuda_options) if name == "CUDAExecutionProvider" else {}
-                for name in providers
-            ]
-        session = ort.InferenceSession(
-            str(path), sess_options=options, providers=providers, **provider_kwargs
+        source: str | bytes = str(path)
+        if sha256 is not None:
+            source = path.read_bytes()
+            _verify_sha256(source, sha256)
+        session = _create_ort_session(
+            source, device=device, providers=providers, cuda_use_tf32=cuda_use_tf32
         )
         inputs, outputs = session.get_inputs(), session.get_outputs()
         self._set_signature(
@@ -267,8 +289,13 @@ class NeuralMotionGenerator(nn.Module):
 
         self.obs_dim: int = input_shape[1]
         self.output_dim: int = output_shape[1]
+        input_batch, output_batch = input_shape[0], output_shape[0]
+        if isinstance(output_batch, int) and input_batch != output_batch:
+            raise ValueError(
+                f"NMG policy output batch {output_batch} disagrees with input batch {input_batch!r}."
+            )
         self.fixed_batch_size: int | None = (
-            input_shape[0] if isinstance(input_shape[0], int) else None
+            input_batch if isinstance(input_batch, int) else None
         )
         self.observation_metadata: dict[str, str] = dict(metadata)
 
@@ -283,7 +310,7 @@ class NeuralMotionGenerator(nn.Module):
             Raw actions of shape ``(B, output_dim)`` on the observation device.
 
         Raises:
-            ValueError: If the observation shape or batch size is incompatible.
+            ValueError: If the observation or action shape is incompatible.
             TypeError: If observations are supplied in a different dtype.
         """
         if obs.ndim != 2 or obs.shape[1] != self.obs_dim:
@@ -309,6 +336,11 @@ class NeuralMotionGenerator(nn.Module):
 
         obs_np = np.ascontiguousarray(obs.detach().cpu().numpy())
         action = self._session.run([self._output_name], {self._input_name: obs_np})[0]
+        expected = (obs.shape[0], self.output_dim)
+        if action.shape != expected:
+            raise ValueError(
+                f"Expected NMG actions of shape {expected}, got {action.shape}."
+            )
         return torch.as_tensor(action, dtype=torch.float32, device=obs.device)
 
     def _forward_ort_cuda(self, obs: torch.Tensor) -> torch.Tensor:

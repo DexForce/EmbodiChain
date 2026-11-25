@@ -219,21 +219,24 @@ heterogeneous limits. Validate reports, geometry and padding together in
 ### Neural policy adapter
 
 `embodichain.extensions.models.policy.nmg.NeuralMotionGenerator` returns raw
-actions from NMG model artifacts. The ORT backend loads `.onnx` and uses the
-`policy-deploy` extra. The PyTorch backend loads a trusted `.pt2`
+actions from NMG model artifacts. The ORT backend loads `.onnx`, verifies an
+explicit SHA256 before loading, and uses the `policy-deploy` extra. The
+PyTorch backend loads a trusted `.pt2`
 archive with `from_checkpoint()`, verifies its digest and preserves input
 autograd through the upstream graph with frozen actor weights. The two backends
 share the model observation layout. `NeuralPlanner` uses ORT, reads the
 joint count and constraint capacity from the ONNX metadata, and verifies
 the observation layout and fingerprint before rollout. Explicit dimension
-fields only assert compatibility with the export.
-The NMG benchmark adapter reads the same metadata before case selection. Its
-CPU preflight caches the exported dimensions per adapter, uses the capacity
-to classify oversized cases and checks retiming against the exported joint
-count. The timed construction loads the execution backend through
-`MotionGenerator`, which Atomic Skill scenarios also use.
+fields only assert compatibility with the export. The planner loads model
+extensions when it initializes a policy.
+The NMG benchmark adapter caches the exported dimensions before case selection
+using the same execution providers and CUDA options as rollout. It uses the
+capacity to classify oversized cases and checks retiming against the exported
+joint count. The timed construction loads the execution backend through
+`MotionGenerator`. Retimed Atomic Skill benchmark requests receive the
+suite's native limits through the adapter's planning-options hook.
 The CUDA ORT path binds Torch observation and action buffers on the same
-device. CPU inputs continue through the host ORT interface.
+device. The host ORT interface checks that each input row has one action row.
 Canonicalized XYZW observations use the first significant X/Y/Z component
 around a half-turn to keep float32 FK roundoff from flipping their sign.
 
@@ -284,7 +287,9 @@ Raw rollouts integrate one joint delta per policy step on the nominal
 `NeuralPlannerCfg.dt`. A `constraints` mapping on `NeuralPlanOptions` or
 `NeuralPlannerCfg` selects TOPPRA timing. Each control part intersects its
 request with configured limits, generic motion budgets, and the effective
-robot speed caps in joint order. The solve resamples the path and recomputes
+robot speed caps in joint order. A stationary joint can have a zero
+acceleration bound. Tensor constraints are detached and copied when options
+or configuration are constructed. The solve resamples the path and recomputes
 poses. With both mappings omitted, the planner returns the nominal rollout
 even when an Atomic Skill supplies a default acceleration budget.
 

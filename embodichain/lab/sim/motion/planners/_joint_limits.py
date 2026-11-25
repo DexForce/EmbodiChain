@@ -194,7 +194,7 @@ def _merge_limit(
 
 
 def _cap_request_limit(
-    value: object, cap: float, *, allow_zero: bool
+    value: object, cap: float
 ) -> float | list[float] | list[list[float]]:
     """Tighten a request with a scalar budget before the control part is bound."""
     if value is None:
@@ -202,9 +202,9 @@ def _cap_request_limit(
     requested = torch.as_tensor(value, dtype=torch.float64)
     width = requested.shape[0] if requested.ndim else 1
     caps = _merge_limit(
-        cap, requested.new_full((width,), torch.inf), cap, allow_zero=allow_zero
+        cap, requested.new_full((width,), torch.inf), cap, allow_zero=True
     )
-    bounded = _merge_limit(requested, caps, cap, allow_zero=allow_zero)
+    bounded = _merge_limit(requested, caps, cap, allow_zero=True)
     return bounded.tolist() if requested.ndim else bounded.item()
 
 
@@ -217,6 +217,7 @@ def _resolve_joint_constraints(
     batch_size: int | None = None,
     env_ids: tuple[int, ...] | None = None,
     request_constraints: Mapping[str, object] | None = None,
+    allow_zero_acceleration: bool = False,
 ) -> dict[str, object]:
     """Intersect requested limits with one another and with robot speed caps."""
     ids = _plan_joint_ids(robot, control_part, dof)
@@ -233,7 +234,12 @@ def _resolve_joint_constraints(
         ("acceleration", torch.full_like(caps, torch.inf), _DEFAULT_ACCELERATION),
     ):
         limits = [
-            _merge_limit(source[key], ceiling, fallback, allow_zero=key == "velocity")
+            _merge_limit(
+                source[key],
+                ceiling,
+                fallback,
+                allow_zero=key == "velocity" or allow_zero_acceleration,
+            )
             for source in sources
             if source.get(key) is not None
         ]

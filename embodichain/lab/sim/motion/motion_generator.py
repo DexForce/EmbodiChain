@@ -647,9 +647,7 @@ class MotionGenerator:
                     ("acceleration", acceleration_limit),
                 ):
                     if cap is not None:
-                        limits[key] = _cap_request_limit(
-                            limits.get(key), cap, allow_zero=key == "velocity"
-                        )
+                        limits[key] = _cap_request_limit(limits.get(key), cap)
                 resolved.constraints = limits
             return resolved
         if plan_opts is not None:

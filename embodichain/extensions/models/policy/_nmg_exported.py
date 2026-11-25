@@ -58,8 +58,7 @@ class _FixedEvaluationActor(nn.Module):
 
 
 def _verify_sha256(data: bytes, expected: str | None) -> None:
-    # torch.export.load can deserialize pickle. Check the very bytes passed to
-    # the loader against the published release or a caller's trusted digest.
+    """Check a trusted digest or the built-in allowlist for published PT2 files."""
     actual = hashlib.sha256(data).hexdigest()
     if expected is None:
         if actual not in _RELEASED_SHA256.values():
@@ -71,9 +70,9 @@ def _verify_sha256(data: bytes, expected: str | None) -> None:
         not isinstance(expected, str)
         or re.fullmatch(r"[0-9a-fA-F]{64}", expected) is None
     ):
-        raise ValueError("NMG checkpoint SHA256 must have 64 hexadecimal characters.")
+        raise ValueError("NMG model SHA256 must have 64 hexadecimal characters.")
     if actual != expected.lower():
-        raise ValueError("NMG checkpoint SHA256 mismatch.")
+        raise ValueError("NMG model SHA256 mismatch.")
 
 
 def _tensor_signature(
@@ -107,6 +106,7 @@ def _load_exported_actor(
     tuple[int | str, int],
     dict[str, str],
 ]:
+    # torch.export.load can deserialize pickle. Verify the exact bytes it reads.
     data = path.read_bytes()
     _verify_sha256(data, sha256)
     files = {"metadata.json": "", "deployment.json": ""}

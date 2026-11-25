@@ -21,11 +21,6 @@ import json
 from pathlib import Path
 import torch
 
-from embodichain.extensions.models.policy._nmg_observation import (
-    _OnnxObservationDimensions,
-    _WaypointObservationLayout,
-)
-from embodichain.extensions.models.policy.nmg import NeuralMotionGenerator
 from embodichain.lab.sim.motion.planners._joint_limits import _resolve_joint_constraints
 from embodichain.lab.sim.motion.planners.base_planner import (
     BasePlanner,
@@ -69,6 +64,18 @@ _ParsedWaypoints = tuple[
 ]
 
 
+def _detach_joint_limits(
+    limits: dict[str, _JointLimit] | None,
+) -> dict[str, _JointLimit] | None:
+    """Detach computed tensors before configclass copies the numeric inputs."""
+    if limits is None:
+        return None
+    return {
+        name: limit.detach() if isinstance(limit, torch.Tensor) else limit
+        for name, limit in limits.items()
+    }
+
+
 def _waypoint_obs_dim(
     num_waypoints: int,
     use_relative_obs: bool,
@@ -76,6 +83,10 @@ def _waypoint_obs_dim(
     joint_periodic_features: bool = False,
 ) -> int:
     """Return the unified NMG constraint-observation width."""
+    from embodichain.extensions.models.policy._nmg_observation import (
+        _WaypointObservationLayout,
+    )
+
     return _WaypointObservationLayout(
         int(num_waypoints),
         int(num_arm_joints),
@@ -218,6 +229,10 @@ class NeuralPlannerCfg(BasePlannerCfg):
     each phase's original samples. These semantic stops can increase duration.
     """
 
+    def __post_init__(self) -> None:
+        """Take a numeric snapshot of tensor-valued constraints."""
+        self.constraints = _detach_joint_limits(self.constraints)
+
 
 @configclass
 class NeuralPlanOptions(PlanOptions):
@@ -231,11 +246,17 @@ class NeuralPlanOptions(PlanOptions):
     """Request TOPPRA with joint ``velocity`` (rad/s) and ``acceleration`` (rad/s²).
 
     Values may be scalar magnitudes, per-joint magnitudes or signed intervals
-    containing zero, in control-part order. Limits may tighten configured
-    bounds. An omitted velocity uses the robot's speed caps (0.2 rad/s for
-    unknown caps), and an omitted acceleration budget defaults to 0.5 rad/s²
-    when no other source supplies that limit. ``None`` inherits the planner mode.
+    containing zero, in control-part order. Zero acceleration allows a joint
+    to remain stationary. Tensor values are copied as detached numerical
+    inputs. Limits may tighten configured bounds. An omitted velocity uses
+    the robot's speed caps (0.2 rad/s for unknown caps). Acceleration defaults
+    to 0.5 rad/s² when no other source supplies that limit. ``None`` inherits
+    the planner mode.
     """
+
+    def __post_init__(self) -> None:
+        """Take a numeric snapshot of tensor-valued constraints."""
+        self.constraints = _detach_joint_limits(self.constraints)
 
 
 class NeuralPlanner(BasePlanner):
@@ -297,6 +318,12 @@ class NeuralPlanner(BasePlanner):
         return options
 
     def _load_onnx_model(self, model_path: Path) -> None:
+        from embodichain.extensions.models.policy._nmg_observation import (
+            _OnnxObservationDimensions,
+            _WaypointObservationLayout,
+        )
+        from embodichain.extensions.models.policy.nmg import NeuralMotionGenerator
+
         self._use_relative_obs = bool(self.cfg.use_relative_obs)
         self._canonicalize_quat_obs = bool(self.cfg.canonicalize_quat_obs)
         self._joint_periodic_features = bool(self.cfg.joint_periodic_features)
@@ -576,6 +603,7 @@ class NeuralPlanner(BasePlanner):
             control_part=part,
             dof=dof,
             batch_size=batch_size,
+            allow_zero_acceleration=True,
         )
 
     def _plan_groups(
@@ -1370,17 +1398,19 @@ class NeuralPlanner(BasePlanner):
             )
         if getattr(self, "_joint_periodic_features", False):
             obs_blocks.update(joint_sin=joint_pos.sin(), joint_cos=joint_pos.cos())
-        layout = getattr(
-            self,
-            "_observation_layout",
-            _WaypointObservationLayout(
+        layout = getattr(self, "_observation_layout", None)
+        if layout is None:
+            from embodichain.extensions.models.policy._nmg_observation import (
+                _WaypointObservationLayout,
+            )
+
+            layout = _WaypointObservationLayout(
                 self._num_waypoints,
                 self._action_dim,
                 self._use_relative_obs,
                 getattr(self, "_canonicalize_quat_obs", False),
                 getattr(self, "_joint_periodic_features", False),
-            ),
-        )
+            )
         obs = layout.concatenate(obs_blocks)
         if obs.shape[-1] != self._obs_dim:
             raise ValueError(
