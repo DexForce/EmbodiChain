@@ -44,6 +44,7 @@ from embodichain.learning.rl.utils import (
     dict_to_tensordict,
     flatten_observation_groups,
 )
+from embodichain.utils.config_paths import resolve_config_path
 from embodichain.utils.utility import load_config
 
 __all__ = [
@@ -86,15 +87,13 @@ def _resolve_config_reference(
     *,
     base_dir: str | Path | None = None,
 ) -> Path:
-    """Resolve a referenced config relative to its containing config file."""
+    """Locate the Gym config while retaining its filename and component directory."""
     path = Path(value).expanduser()
-    if path.is_absolute():
-        return path
-    if base_dir is not None:
-        candidate = Path(base_dir).expanduser().resolve() / path
+    if not path.is_absolute() and base_dir is not None:
+        candidate = Path(base_dir).expanduser() / path
         if candidate.exists():
-            return candidate
-    return path
+            return candidate.absolute()
+    return resolve_config_path(path).absolute()
 
 
 def _build_learning_environment(
@@ -280,7 +279,7 @@ def _build_gym_environment(
         env_id=str(gym_config["id"]),
         env_cfg=env_cfg,
         gym_config=gym_config,
-        gym_config_path=gym_config_path.resolve(),
+        gym_config_path=gym_config_path,
     )
 
 

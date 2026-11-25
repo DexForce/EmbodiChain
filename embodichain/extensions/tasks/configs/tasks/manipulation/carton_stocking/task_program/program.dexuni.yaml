@@ -1,0 +1,57 @@
+program_id: real2sim_carton_stocking
+instruction: Pick the carton and align its front with the marked support region.
+targets:
+  above_worktop:
+    kind: pose
+    position:
+    - 0.656938142745868
+    - 0.01285806378570287
+    - 0.1168918780165142
+    quaternion_xyzw:
+    - 0.0
+    - 0.0
+    - -0.3442393738635206
+    - 0.9388819166871047
+  rest_pose:
+    kind: pose
+    position:
+    - 0.656938142745868
+    - 0.01285806378570287
+    - 0.062095391004832
+    quaternion_xyzw:
+    - 0.0
+    - 0.0
+    - -0.3442393738635206
+    - 0.9388819166871047
+program:
+- segment: pick
+  steps:
+    pick:
+      object: carton
+  validators:
+  - kind: object_lifted
+    object: carton
+    minimum_lift: 0.03
+- segment: transport
+  steps:
+    registered:
+      call_id: simulation.move_held_object
+      arguments:
+        target: above_worktop
+- segment: place
+  steps:
+    place:
+      object: carton
+      'on': marked_support
+  post:
+  - kind: wait_stable
+    entity: carton
+  validators:
+  - kind: object_upright
+    object: carton
+  - kind: object_near_target
+    object: carton
+    target: rest_pose
+    position_tolerance: 0.022
+  - kind: condition
+    ref: carton_front_aligned

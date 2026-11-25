@@ -1,0 +1,52 @@
+id: CartonStockingUR5-DexUni-v1
+environment:
+  component: env.dexuni.yaml
+embodiment:
+  component: ../../../components/embodiments/ur5_dh_pgi_140_80.yaml
+  overrides:
+    init_pos:
+    - 1.13
+    - 0.015
+    - 0.045
+    init_qpos:
+    - 0.0
+    - -1.57
+    - 1.57
+    - -1.57
+    - -1.57
+    - 0.0
+    - 0.0
+    - 0.0
+    grippers:
+      eef:
+        commands:
+          grasp:
+            gripper_finger1_joint_1: 0.034
+            gripper_finger2_joint_1: 0.034
+  camera_overrides:
+    cam_overhead:
+      extrinsics:
+        eye:
+        - 0.32
+        - -0.9
+        - 0.61
+        target:
+        - 0.71
+        - -0.045
+        - 0.11
+        up:
+        - 0.0
+        - 0.0
+        - 1.0
+task_program:
+  program: task_program/program.dexuni.yaml
+  integration: task_program/integration.dexuni.yaml
+  execution_policy:
+    component: ../../../components/execution_policies/trajectory_open_loop.yaml
+    overrides:
+      motion:
+        sample_count: 95
+        acceleration_limit: 1.5
+        velocity_limit: 0.5
+evaluation:
+  component: task_program/evaluation.dexuni.yaml

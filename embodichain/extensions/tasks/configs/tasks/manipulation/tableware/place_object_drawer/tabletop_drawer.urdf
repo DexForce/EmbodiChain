@@ -1,0 +1,247 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!--
+  Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+  Licensed under the Apache License, Version 2.0 (the "License").
+  You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0.
+  Distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND.
+-->
+<robot name="guided_tabletop_drawer">
+  <material name="frame">
+    <color rgba=".23 .28 .32 1" />
+  </material>
+  <material name="tray">
+    <color rgba=".20 .39 .53 1" />
+  </material>
+  <material name="handle">
+    <color rgba=".63 .67 .71 1" />
+  </material>
+  <link name="outer_box">
+    <inertial>
+      <origin xyz="0 0 0.07" />
+      <mass value="1.4" />
+      <inertia ixx=".004" iyy=".005" izz=".006" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual name="floor">
+      <origin xyz="0 0 0.005" />
+      <geometry>
+        <box size="0.2 0.208 0.01" />
+      </geometry>
+      <material name="frame" />
+    </visual>
+    <collision name="floor">
+      <origin xyz="0 0 0.005" />
+      <geometry>
+        <box size="0.2 0.208 0.01" />
+      </geometry>
+    </collision>
+    <visual name="top">
+      <origin xyz="0 0 0.197" />
+      <geometry>
+        <box size="0.2 0.208 0.01" />
+      </geometry>
+      <material name="frame" />
+    </visual>
+    <collision name="top">
+      <origin xyz="0 0 0.197" />
+      <geometry>
+        <box size="0.2 0.208 0.01" />
+      </geometry>
+    </collision>
+    <visual name="left">
+      <origin xyz="0 0.099 0.101" />
+      <geometry>
+        <box size="0.2 0.01 0.182" />
+      </geometry>
+      <material name="frame" />
+    </visual>
+    <collision name="left">
+      <origin xyz="0 0.099 0.101" />
+      <geometry>
+        <box size="0.2 0.01 0.182" />
+      </geometry>
+    </collision>
+    <visual name="right">
+      <origin xyz="0 -0.099 0.101" />
+      <geometry>
+        <box size="0.2 0.01 0.182" />
+      </geometry>
+      <material name="frame" />
+    </visual>
+    <collision name="right">
+      <origin xyz="0 -0.099 0.101" />
+      <geometry>
+        <box size="0.2 0.01 0.182" />
+      </geometry>
+    </collision>
+    <visual name="back">
+      <origin xyz="-0.095 0 0.101" />
+      <geometry>
+        <box size="0.01 0.188 0.182" />
+      </geometry>
+      <material name="frame" />
+    </visual>
+    <collision name="back">
+      <origin xyz="-0.095 0 0.101" />
+      <geometry>
+        <box size="0.01 0.188 0.182" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="inner_box">
+    <inertial>
+      <origin xyz="0 0 0.07" />
+      <mass value="0.35" />
+      <inertia ixx=".004" iyy=".005" izz=".006" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+    <visual name="base">
+      <origin xyz="0 0 0.018" />
+      <geometry>
+        <box size="0.176 0.176 0.012" />
+      </geometry>
+      <material name="tray" />
+    </visual>
+    <collision name="base">
+      <origin xyz="0 0 0.018" />
+      <geometry>
+        <box size="0.176 0.176 0.012" />
+      </geometry>
+    </collision>
+    <visual name="left">
+      <origin xyz="0 0.084 0.077" />
+      <geometry>
+        <box size="0.176 0.008 0.11" />
+      </geometry>
+      <material name="tray" />
+    </visual>
+    <collision name="left">
+      <origin xyz="0 0.084 0.077" />
+      <geometry>
+        <box size="0.176 0.008 0.11" />
+      </geometry>
+    </collision>
+    <visual name="right">
+      <origin xyz="0 -0.084 0.077" />
+      <geometry>
+        <box size="0.176 0.008 0.11" />
+      </geometry>
+      <material name="tray" />
+    </visual>
+    <collision name="right">
+      <origin xyz="0 -0.084 0.077" />
+      <geometry>
+        <box size="0.176 0.008 0.11" />
+      </geometry>
+    </collision>
+    <visual name="back">
+      <origin xyz="-0.084 0 0.077" />
+      <geometry>
+        <box size="0.008 0.16 0.11" />
+      </geometry>
+      <material name="tray" />
+    </visual>
+    <collision name="back">
+      <origin xyz="-0.084 0 0.077" />
+      <geometry>
+        <box size="0.008 0.16 0.11" />
+      </geometry>
+    </collision>
+    <visual name="front">
+      <origin xyz="0.084 0 0.082" />
+      <geometry>
+        <box size="0.008 0.176 0.128" />
+      </geometry>
+      <material name="tray" />
+    </visual>
+    <collision name="front">
+      <origin xyz="0.084 0 0.082" />
+      <geometry>
+        <box size="0.008 0.176 0.128" />
+      </geometry>
+    </collision>
+    <visual name="mount_-0.041">
+      <origin xyz="0.105 -0.041 0.1" />
+      <geometry>
+        <box size="0.034 0.011 0.016" />
+      </geometry>
+      <material name="handle" />
+    </visual>
+    <collision name="mount_-0.041">
+      <origin xyz="0.105 -0.041 0.1" />
+      <geometry>
+        <box size="0.034 0.011 0.016" />
+      </geometry>
+    </collision>
+    <visual name="mount_0.041">
+      <origin xyz="0.105 0.041 0.1" />
+      <geometry>
+        <box size="0.034 0.011 0.016" />
+      </geometry>
+      <material name="handle" />
+    </visual>
+    <collision name="mount_0.041">
+      <origin xyz="0.105 0.041 0.1" />
+      <geometry>
+        <box size="0.034 0.011 0.016" />
+      </geometry>
+    </collision>
+    <visual name="handle">
+      <origin xyz=".132 0 .100" />
+      <geometry>
+        <box size=".030 .103 .034" />
+      </geometry>
+      <material name="handle" />
+    </visual>
+    <collision name="handle">
+      <origin xyz=".132 0 .100" />
+      <geometry>
+        <box size=".030 .103 .034" />
+      </geometry>
+    </collision>
+    <visual name="insert_wall_0">
+      <origin xyz="-0.06 0 .045" />
+      <geometry>
+        <box size=".009 .145 .042" />
+      </geometry>
+      <material name="tray" />
+    </visual>
+    <collision name="insert_wall_0">
+      <origin xyz="-0.06 0 .045" />
+      <geometry>
+        <box size=".009 .145 .042" />
+      </geometry>
+    </collision>
+    <visual name="insert_wall_1">
+      <origin xyz="0.06 0 .045" />
+      <geometry>
+        <box size=".009 .145 .042" />
+      </geometry>
+      <material name="tray" />
+    </visual>
+    <collision name="insert_wall_1">
+      <origin xyz="0.06 0 .045" />
+      <geometry>
+        <box size=".009 .145 .042" />
+      </geometry>
+    </collision>
+    <visual name="liner">
+      <origin xyz="0 0 .028" />
+      <geometry>
+        <cylinder radius=".087" length=".034" />
+      </geometry>
+      <material name="tray" />
+    </visual>
+    <collision name="liner">
+      <origin xyz="0 0 .028" />
+      <geometry>
+        <cylinder radius=".087" length=".034" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="slide_rails" type="prismatic">
+    <parent link="outer_box" />
+    <child link="inner_box" />
+    <axis xyz="1 0 0" />
+    <limit effort="25" lower="0" upper=".20" velocity=".35" />
+    <dynamics friction=".06" damping=".18" />
+  </joint>
+</robot>

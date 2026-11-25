@@ -40,6 +40,7 @@ _CONFIG = json.loads(
 )
 
 
+@register_env("HumanoidRun-DexUni-v1", max_episode_steps=900, supports_rl=True)
 @register_env("HumanoidRun-v1", max_episode_steps=900, override=True, supports_rl=True)
 class HumanoidRunEnv(EmbodiedEnv):
     """Preserve the benchmark's 63 observations and clipped motor effort action."""

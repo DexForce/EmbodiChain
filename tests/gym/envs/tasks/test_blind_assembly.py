@@ -183,7 +183,7 @@ _CONFIG_ROOT = (
 def test_formal_and_nominal_profiles_schedule_every_100_updates() -> None:
     paths = sorted(_CONFIG_ROOT.glob("*/agents/ppo.*.yaml"))
     paths = [path for path in paths if ".dev." not in path.name]
-    assert len(paths) == 12
+    assert len(paths) == 15
     for path in paths:
         trainer = load_config(str(path))["trainer"]
         interval = 100 * trainer["num_envs"] * trainer["buffer_size"]
@@ -289,10 +289,27 @@ def test_task_assets_keep_real_mating_constraints(
         )
         assert any(g.name.startswith("bore_") for g in bodies[moving].geometries)
         assert any(g.name.startswith("boss_") for g in bodies[moving].geometries)
+        assert any(g.visible for g in bodies[moving].geometries)
     elif kind == "peg":
         outline = np.asarray(asset.config["mating_outline"])
         assert outline.shape[1] == 2
         assert outline[:, 0].max() - outline[:, 0].min() > 0.05
+
+
+def test_tip_up_bolt_keeps_the_head_below_the_threads_in_the_reset_frame() -> None:
+    pytest.importorskip("mjfit")
+    from embodichain.extensions.tasks.manipulation.assembly.assets import (
+        build_task_assembly,
+    )
+
+    asset = build_task_assembly("nut", {"thread_tip_up": True})
+    bolt = next(body for body in asset.bodies if body.name == "bolt")
+    geometry = {shape.name: shape for shape in bolt.geometries}
+
+    assert bolt.quaternion == pytest.approx([0.0, 0.0, 0.0, 1.0])
+    assert geometry["bolt_head"].position[2] < -asset.config["thread_length"]
+    assert geometry["bolt_thread_0"].position[2] > geometry["bolt_head"].position[2]
+    assert asset.config["thread_tip_up"] is True
 
 
 def test_official_proprioception_uses_world_linear_and_tcp_angular_velocity() -> None:

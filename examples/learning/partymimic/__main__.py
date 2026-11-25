@@ -75,7 +75,7 @@ def _run(
         UsdSourceCfg,
     )
     from embodichain.lab.sim.objects import Articulation
-    from embodichain.lab.visualization import visualization_cfg_from_args
+    from embodichain.lab.visualization import VisualizationCfg
 
     from ._reference import (
         CONTROL_DT,
@@ -122,8 +122,6 @@ def _run(
     )
 
     want_video = not args.no_video
-    visualization = visualization_cfg_from_args(args)
-    native_render = want_video or visualization.backend == "dexsim-web"
     cpu_physics = args.device == "cpu"
     use_dexuni = args.solver == "dexuni"
     mujoco_options = {
@@ -160,10 +158,10 @@ def _run(
             height=resolution[1],
             enable_ground_plane=False,
             enable_entity_gizmo=False,
+            visualization=VisualizationCfg(backend="none"),
             render_cfg=RenderCfg(
-                renderer="fast-rt" if native_render else "no-render", spp=8
+                renderer="fast-rt" if want_video else "no-render", spp=8
             ),
-            visualization=visualization,
             physics_cfg=NewtonPhysicsCfg(
                 device=args.device,
                 num_substeps=1,
@@ -372,7 +370,7 @@ def _run(
                 sim.update(
                     step=physics_steps_per_command,
                     physics_dt=PHYSICS_DT,
-                    render_final_step=visualization.backend != "none",
+                    render_final_step=False,
                 )
                 state, root = read()
                 loop_ms.append(1000 * (perf_counter() - start))
@@ -660,8 +658,6 @@ def _cpu_platform_contacts(
 
 def main(argv: list[str] | None = None) -> None:
     """Run one or both reconstructed PartyMimic carrying scenarios."""
-    from embodichain.cli._visualization import add_viewer_args_to_parser
-
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--policy", required=True, type=Path, help="Official sparse5 ONNX"
@@ -689,12 +685,11 @@ def main(argv: list[str] | None = None) -> None:
         "--device", help="Physics device (MuJoCo defaults to cpu, DexUni to cuda:0)"
     )
     parser.add_argument(
-        "--no-video", action="store_true", help="Skip recording an MP4 video."
+        "--no-video", action="store_true", help="Run physics without a renderer"
     )
     parser.add_argument(
         "--unloaded", action="store_true", help="Run without the welded payload"
     )
-    add_viewer_args_to_parser(parser)
     args = parser.parse_args(argv)
     if args.device is None:
         args.device = "cuda:0" if args.solver == "dexuni" else "cpu"

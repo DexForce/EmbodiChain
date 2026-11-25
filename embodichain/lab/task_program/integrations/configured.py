@@ -3737,6 +3737,15 @@ def _decode_evaluation(
                         raise ValueError(
                             "A segment-start pose can only bind a lift baseline."
                         )
+                elif field.startswith("fluids/"):
+                    parts = field.split("/")
+                    if (
+                        len(parts) != 4
+                        or not all(parts)
+                        or parts[-1] != "received_volume"
+                    ):
+                        raise ValueError(f"Invalid fluid evaluation field {field!r}.")
+                    native = field
                 elif field.startswith("deformables/"):
                     from embodichain.lab.evaluation._deformable import (
                         _centroid_selection,

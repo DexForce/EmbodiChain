@@ -56,6 +56,10 @@ def main(argv: Sequence[str] | None = None) -> None:
         print(f"\n{deployment.name}: {deployment.env_id}")
         print(f"  Physics: {deployment.physics or 'unavailable'}")
         print(f"  Embodiment: {', '.join(deployment.embodiments) or 'unavailable'}")
+        if deployment.note:
+            print(f"  Scope: {deployment.note}")
+        if deployment.purpose:
+            print(f"  Purpose: {deployment.purpose}")
         print(f"  Supported uses: {_capability_label(deployment)}")
         print(f"  Config: {deployment.config_ref or 'unavailable'}")
         print(f"  Agents: {', '.join(deployment.agent_refs) or 'None'}")

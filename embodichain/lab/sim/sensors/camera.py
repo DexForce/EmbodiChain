@@ -232,15 +232,9 @@ class Camera(BaseSensor):
         """Create all eyes together in the already prepared, Scene-owned Arenas."""
         from dexsim.spawn import CameraDesc
 
-        total_views = self.num_instances * len(intrinsics)
         owner = self._owner_ref()
         if owner is None:
             raise RuntimeError("Camera owner is unavailable.")
-        lease = owner._camera_group_pool.acquire(config, total_views, self._scene)
-        self._camera_lease = lease
-        self._camera_groups = lease.groups
-        self._camera_group = lease.groups[0]
-        self._frame_buffers = tuple(group.native for group in lease.groups)
         descriptors = []
         for eye, values in enumerate(intrinsics):
             matrix = np.eye(3, dtype=np.float32)
@@ -260,9 +254,18 @@ class Camera(BaseSensor):
                         view_flags=config.get_view_attrib(),
                     )
                 )
+        arena_names = list(self._arena_names) * len(intrinsics)
+        owner._spawn_scene._require_unreserved_render_paths(
+            arena_names, (descriptor.name for descriptor in descriptors)
+        )
+        lease = owner._camera_group_pool.acquire(config, len(descriptors), self._scene)
+        self._camera_lease = lease
+        self._camera_groups = lease.groups
+        self._camera_group = lease.groups[0]
+        self._frame_buffers = tuple(group.native for group in lease.groups)
         self._camera_handles = self._scene.add_cameras(
             descriptors,
-            arena_names=list(self._arena_names) * len(intrinsics),
+            arena_names=arena_names,
             camera_groups=lease.camera_groups,
         )
         self._frame_buffer = self._frame_buffers[0]

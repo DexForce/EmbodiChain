@@ -34,7 +34,9 @@ __all__: list[str] = []
 
 _EMBODIMENT_OVERRIDE_FIELDS = frozenset({"uid", "init_pos", "init_rot", "init_qpos"})
 # Bounded task calibration: replace existing named drive gains and hand commands.
-_EMBODIMENT_CALIBRATION_FIELDS = frozenset({"joint_drive_props", "grippers"})
+_EMBODIMENT_CALIBRATION_FIELDS = frozenset(
+    {"joint_drive_props", "grippers", "root_props"}
+)
 _DRIVE_GAIN_OVERRIDE_FIELDS = frozenset({"stiffness", "damping"})
 _GRIPPER_COMMAND_OVERRIDE_NAMES = frozenset({"open", "grasp"})
 _ENVIRONMENT_COMPONENT_FIELDS = frozenset(
@@ -426,6 +428,16 @@ def _resolve_embodiment_component(
             if key in _EMBODIMENT_OVERRIDE_FIELDS
         }
     )
+    if "root_props" in overrides:
+        root = _mapping(
+            overrides["root_props"],
+            path="embodiment.overrides.root_props",
+            required=frozenset({"newton_mimic_stabilizer"}),
+            optional=frozenset(),
+        )
+        if type(root["newton_mimic_stabilizer"]) is not bool:
+            raise ValueError("newton_mimic_stabilizer must be a boolean")
+        simulation["root_props"] = {**simulation.get("root_props", {}), **root}
     if "joint_drive_props" in overrides:
         _override_drive_gains(simulation, overrides["joint_drive_props"])
     grippers = component.get("grippers")

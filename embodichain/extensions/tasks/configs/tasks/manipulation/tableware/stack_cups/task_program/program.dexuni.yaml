@@ -1,0 +1,58 @@
+program_id: stack_cups_reference
+instruction: Place the second cup inside the first cup and leave both upright.
+targets:
+  cup_2_drop:
+    kind: scene_relative
+    entity: cup_1
+    frame: parent
+    position:
+    - 0.0
+    - 0.0
+    - 0.055
+    quaternion_xyzw:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+program:
+- segment: pick_cup_2
+  instruction: Lift the second cup.
+  steps:
+    pick:
+      object: cup_2
+      grasp: cup_2_grasp
+      resources:
+        primary: primary_manipulator
+  validators:
+  - kind: object_lifted
+    object: cup_2
+    minimum_lift: 0.035
+- segment: place_cup_2
+  instruction: Place the second cup at its target.
+  steps:
+    place:
+      object: cup_2
+      at: cup_2_drop
+      resources:
+        primary: primary_manipulator
+  post:
+  - kind: wait_stable
+    entity: cup_2
+  validators:
+  - kind: object_relative_position
+    object: cup_2
+    reference: cup_1
+    position_offset:
+    - 0.0
+    - 0.0
+    - 0.015
+    position_tolerance:
+    - 0.025
+    - 0.025
+    - 0.015
+  - kind: object_upright
+    object: cup_2
+    maximum_tilt_degrees: 25
+  - kind: object_upright
+    object: cup_1
+    maximum_tilt_degrees: 25

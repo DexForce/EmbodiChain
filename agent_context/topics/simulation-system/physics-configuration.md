@@ -40,6 +40,11 @@ contact-path policy. Expert settings use the native option groups
 (`vbd_options`, `mujoco_options`, `collision_options`); unknown solver names
 are rejected for mappings and native config objects, and flat DexUni options
 are rejected by native validation.
+Rigid-only environments can opt into DexUni's native MuJoCo path for the whole
+scene with `dexuni_mujoco_joints_per_arena`. Supply the number of finalized
+joints in one arena, including fixed and free-body joints. The manager expands
+ownership across arenas and checks the finalized joint count. This option is
+exclusive with explicit native joint and articulation selectors.
 Fluid settings belong under [DexUni's nested DFSPH configuration](fluids.md);
 there is no separate fluid solver family. Robot presets select
 `newton_dexuni` before the MuJoCo aliases and portable fallbacks. Gradient mode

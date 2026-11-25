@@ -142,6 +142,8 @@ inline `robot`, `sensor`, and scene fields continue to parse unchanged.
 An embodiment selector permits robot installation `overrides` (`uid`,
 `init_pos`, `init_rot`, `init_qpos`), bounded robot calibration in the same
 mapping, and a separate `camera_overrides` mapping keyed by camera UID.
+Newton embodiments can opt into follower-drive stabilization for existing mimic joints through
+`root_props.newton_mimic_stabilizer`.
 Calibration may replace finite, nonnegative `joint_drive_props.stiffness` or
 `damping` values for entries the component already names, and a declared
 hand's `grippers.<instance>.commands.open` or `grasp` with positions for every
@@ -364,7 +366,20 @@ filtering and `list-task --export-html`. `--config-root PACKAGE=PATH` selects
 explicit config roots for static browsing without simulation imports; it cannot
 infer Python-only handwritten capabilities. Uncataloged tasks retain inferred
 records. Metadata must point to existing runnable configs and a valid default;
-capabilities remain deployment-specific. A catalog's optional validation report
+capabilities remain deployment-specific. An optional `group` inserts a browsing
+subdomain. Runtime registration matches the original module path, which stays
+independent of that browsing subdomain. A single-deployment catalog may use
+`variant_of` to publish its deployment under another primary task in the same
+package. Runtime registrations from the variant module join the primary task.
+The variant key still selects its declared deployment in `show-task`. A
+deployment can also declare an `alias` for a previously inferred task key. Package-owned `configs/tasks/portfolio.yaml` assigns
+browsing purposes by logical key, with deployment overrides and featured
+selections. Runtime discovery applies these after merging registered and packaged
+deployments. Static discovery shows only config-backed or inferred agent entries
+and defers validation of runtime-only deployment names. `list-task --purpose` and `--featured` use these selections.
+The default CLI keeps full discovery; HTML export selects featured deployments
+unless a category, purpose or `--all` was requested. Deployment `note` describes
+scope and prerequisites independently of the validation report. A catalog's optional validation report
 is provenance, not a replacement for measured runtime results.
 
 `objective: {component: objective.yaml}` is a deployment-owned, optional selector

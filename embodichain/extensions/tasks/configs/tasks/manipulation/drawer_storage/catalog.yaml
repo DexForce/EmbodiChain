@@ -10,8 +10,14 @@ tags:
 default_deployment: ur5
 deployments:
   ur5:
+    validation: validation/ur5.json
     config: task.ur5.yaml
   franka:
+    validation: validation/franka.json
     config: task.franka.yaml
   ur5_long_horizon:
+    validation: validation/ur5_long_horizon.json
     config: task.ur5.long_horizon.yaml
+  dexuni:
+    config: task.ur5.dexuni.yaml
+    note: The UR5 expert regrasps the handle in short strokes and checks that the released cube remains inside the closed drawer.

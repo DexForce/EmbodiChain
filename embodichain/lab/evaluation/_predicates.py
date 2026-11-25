@@ -582,6 +582,16 @@ def builtin_predicates() -> PredicateRegistry:
         ("stable", _STABLE),
         ("inside_region", _REGION),
         ("corner_containment", _CORNERS),
+        (
+            "corner_containment_in_object",
+            PredicateDefinition(
+                1,
+                ("pose", "frame"),
+                _corner_params,
+                _corner_containment,
+                ("object_frame", "object_frame"),
+            ),
+        ),
         ("link_object_distance", _LINK_NEAR),
     ):
         registry.register(kind, definition)

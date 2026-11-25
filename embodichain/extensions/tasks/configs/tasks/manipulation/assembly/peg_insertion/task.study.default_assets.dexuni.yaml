@@ -1,0 +1,14 @@
+id: BlindPegInsertionRL-StudyDefaultAssets-DexUni-v1
+environment:
+  component: env.study.default_assets.dexuni.yaml
+embodiment:
+  component: ../../../../components/embodiments/flexiv_rizon4s_robotiq2f85.yaml
+rl_task:
+  success:
+    assembly:
+      func: assembly_success
+      params: {}
+  failure:
+    assembly:
+      func: assembly_failure
+      params: {}

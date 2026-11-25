@@ -1,0 +1,308 @@
+program_id: match_object_container_reference
+instruction: Put the cubes in the right container and the spheres in the left container.
+targets:
+  block_cube_1_drop:
+    kind: scene_relative
+    entity: container_cube
+    frame: parent
+    position:
+    - -0.044
+    - 0.0
+    - 0.118
+    quaternion_xyzw:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+  block_cube_2_drop:
+    kind: scene_relative
+    entity: container_cube
+    frame: parent
+    position:
+    - 0.044
+    - 0.0
+    - 0.118
+    quaternion_xyzw:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+  block_sphere_1_drop:
+    kind: scene_relative
+    entity: container_sphere
+    frame: parent
+    position:
+    - -0.044
+    - 0.0
+    - 0.118
+    quaternion_xyzw:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+  block_sphere_2_drop:
+    kind: scene_relative
+    entity: container_sphere
+    frame: parent
+    position:
+    - 0.044
+    - 0.0
+    - 0.118
+    quaternion_xyzw:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+program:
+- segment: pick_block_sphere_1
+  instruction: Lift the first sphere.
+  steps:
+    pick:
+      object: block_sphere_1
+      grasp: block_sphere_1_grasp
+      resources:
+        primary: primary_manipulator
+  validators:
+  - kind: object_lifted
+    object: block_sphere_1
+    minimum_lift: 0.035
+- segment: place_block_sphere_1
+  instruction: Place the first sphere at its target.
+  steps:
+    place:
+      object: block_sphere_1
+      at: block_sphere_1_drop
+      resources:
+        primary: primary_manipulator
+  post:
+  - kind: wait_stable
+    entity: block_sphere_1
+    preset: contained_sphere
+  validators:
+  - kind: object_near_relative_target
+    object: block_sphere_1
+    reference: container_sphere
+    displacement:
+    - 0.0
+    - 0.0
+    - 0.0
+    position_tolerance: 0.104
+  - kind: object_relative_position
+    object: block_sphere_1
+    reference: container_sphere
+    position_offset:
+    - 0.0
+    - 0.0
+    - 0.013
+    position_tolerance:
+    - null
+    - null
+    - 0.021
+  - kind: object_upright
+    object: container_sphere
+    maximum_tilt_degrees: 35
+- segment: pick_block_sphere_2
+  instruction: Lift the second sphere.
+  steps:
+    pick:
+      object: block_sphere_2
+      grasp: block_sphere_2_grasp
+      resources:
+        primary: primary_manipulator
+  validators:
+  - kind: object_lifted
+    object: block_sphere_2
+    minimum_lift: 0.035
+- segment: place_block_sphere_2
+  instruction: Place the second sphere at its target.
+  steps:
+    place:
+      object: block_sphere_2
+      at: block_sphere_2_drop
+      resources:
+        primary: primary_manipulator
+  post:
+  - kind: wait_stable
+    entity: block_sphere_2
+    preset: contained_sphere
+  validators:
+  - kind: object_near_relative_target
+    object: block_sphere_2
+    reference: container_sphere
+    displacement:
+    - 0.0
+    - 0.0
+    - 0.0
+    position_tolerance: 0.104
+  - kind: object_relative_position
+    object: block_sphere_2
+    reference: container_sphere
+    position_offset:
+    - 0.0
+    - 0.0
+    - 0.013
+    position_tolerance:
+    - null
+    - null
+    - 0.021
+  - kind: object_upright
+    object: container_sphere
+    maximum_tilt_degrees: 35
+- segment: pick_block_cube_1
+  instruction: Lift the first cube.
+  steps:
+    pick:
+      object: block_cube_1
+      grasp: block_cube_1_grasp
+      resources:
+        primary: primary_manipulator
+  validators:
+  - kind: object_lifted
+    object: block_cube_1
+    minimum_lift: 0.035
+- segment: place_block_cube_1
+  instruction: Place the first cube at its target.
+  steps:
+    place:
+      object: block_cube_1
+      at: block_cube_1_drop
+      resources:
+        primary: primary_manipulator
+  post:
+  - kind: wait_stable
+    entity: block_cube_1
+  validators:
+  - kind: object_near_relative_target
+    object: block_cube_1
+    reference: container_cube
+    displacement:
+    - 0.0
+    - 0.0
+    - 0.0
+    position_tolerance: 0.104
+  - kind: object_relative_position
+    object: block_cube_1
+    reference: container_cube
+    position_offset:
+    - 0.0
+    - 0.0
+    - 0.013
+    position_tolerance:
+    - null
+    - null
+    - 0.021
+  - kind: object_upright
+    object: container_cube
+    maximum_tilt_degrees: 35
+- segment: pick_block_cube_2
+  instruction: Lift the second cube.
+  steps:
+    pick:
+      object: block_cube_2
+      grasp: block_cube_2_grasp
+      resources:
+        primary: primary_manipulator
+  validators:
+  - kind: object_lifted
+    object: block_cube_2
+    minimum_lift: 0.035
+- segment: place_block_cube_2
+  instruction: Place the second cube at its target.
+  steps:
+    place:
+      object: block_cube_2
+      at: block_cube_2_drop
+      resources:
+        primary: primary_manipulator
+  post:
+  - kind: wait_stable
+    entity: block_cube_2
+  validators:
+  - kind: object_near_relative_target
+    object: block_cube_2
+    reference: container_cube
+    displacement:
+    - 0.0
+    - 0.0
+    - 0.0
+    position_tolerance: 0.104
+  - kind: object_relative_position
+    object: block_cube_2
+    reference: container_cube
+    position_offset:
+    - 0.0
+    - 0.0
+    - 0.013
+    position_tolerance:
+    - null
+    - null
+    - 0.021
+  - kind: object_upright
+    object: container_cube
+    maximum_tilt_degrees: 35
+  - kind: object_near_relative_target
+    object: block_cube_1
+    reference: container_cube
+    displacement:
+    - 0.0
+    - 0.0
+    - 0.0
+    position_tolerance: 0.104
+  - kind: object_relative_position
+    object: block_cube_1
+    reference: container_cube
+    position_offset:
+    - 0.0
+    - 0.0
+    - 0.013
+    position_tolerance:
+    - null
+    - null
+    - 0.021
+  - kind: object_upright
+    object: container_cube
+    maximum_tilt_degrees: 35
+  - kind: object_near_relative_target
+    object: block_sphere_1
+    reference: container_sphere
+    displacement:
+    - 0.0
+    - 0.0
+    - 0.0
+    position_tolerance: 0.104
+  - kind: object_relative_position
+    object: block_sphere_1
+    reference: container_sphere
+    position_offset:
+    - 0.0
+    - 0.0
+    - 0.013
+    position_tolerance:
+    - null
+    - null
+    - 0.021
+  - kind: object_upright
+    object: container_sphere
+    maximum_tilt_degrees: 35
+  - kind: object_near_relative_target
+    object: block_sphere_2
+    reference: container_sphere
+    displacement:
+    - 0.0
+    - 0.0
+    - 0.0
+    position_tolerance: 0.104
+  - kind: object_relative_position
+    object: block_sphere_2
+    reference: container_sphere
+    position_offset:
+    - 0.0
+    - 0.0
+    - 0.013
+    position_tolerance:
+    - null
+    - null
+    - 0.021
+  - kind: object_upright
+    object: container_sphere
+    maximum_tilt_degrees: 35

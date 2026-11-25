@@ -55,9 +55,14 @@ def test_locomotion_deployments_resolve_matching_ppo(
     )
     assert task.readme == _CONFIG_ROOT / task_path / "README.md"
     assert task.readme.is_file()
-    assert {deployment.name for deployment in task.deployments} == {"default", "newton"}
+    expected_physics = {"default": "default", "newton": "newton"}
+    if task_path == "classic_control/humanoid":
+        expected_physics["dexuni"] = "newton"
+    assert {
+        deployment.name for deployment in task.deployments
+    } == expected_physics.keys()
     for deployment in task.deployments:
-        suffix = ".newton" if deployment.name == "newton" else ""
+        suffix = "" if deployment.name == "default" else f".{deployment.name}"
         prefix = f"embodichain/extensions/tasks/configs/tasks/{task_path}"
         env_path = _CONFIG_ROOT / task_path / f"env{suffix}.yaml"
         env = yaml.safe_load(env_path.read_text())
@@ -68,7 +73,7 @@ def test_locomotion_deployments_resolve_matching_ppo(
         assert deployment.config_ref == agent["trainer"]["gym_config"]
         assert deployment.agent_refs == (f"{prefix}/agents/ppo{suffix}.yaml",)
         assert deployment.env_id == env["id"]
-        assert deployment.physics == deployment.name == env["physics"]
+        assert deployment.physics == env["physics"] == expected_physics[deployment.name]
         assert deployment.capabilities == {catalog._RL}
         assert deployment.validation is None
 
@@ -92,8 +97,8 @@ def test_locomotion_details_and_gallery(
         detail = capsys.readouterr().out
         assert task.title in detail and task.title in gallery
         assert f"Default deployment: {task.default_deployment}" in detail
-        assert detail.count("Supported uses: RL") == 2
-        assert detail.count("Qualification: unavailable") == 2
+        assert detail.count("Supported uses: RL") == len(task.deployments)
+        assert detail.count("Qualification: unavailable") == len(task.deployments)
         assert task.readme.as_uri() in gallery
         for deployment in task.deployments:
             assert deployment.agent_refs[0] in detail
