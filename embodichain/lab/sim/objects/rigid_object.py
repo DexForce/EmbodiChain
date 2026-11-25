@@ -570,9 +570,6 @@ class RigidObject(BatchEntity):
         self.is_shared_visual_material = False
 
         super().__init__(cfg, entities, self.device)
-        self._apply_spawn_visual_uv()
-        self._initialize_existing_visual_material()
-        self._apply_initial_state()
         if self._data is not None:
             self._capture_default_physical_properties()
         self._has_collision_visible_node = False
@@ -598,6 +595,9 @@ class RigidObject(BatchEntity):
         declared_state = self.__dict__.copy()
         try:
             self._initialize_spawn_bound(result)
+            self._apply_spawn_visual_uv()
+            self._initialize_existing_visual_material()
+            self._apply_initial_state()
         except Exception:
             self.__dict__.clear()
             self.__dict__.update(declared_state)

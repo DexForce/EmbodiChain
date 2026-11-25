@@ -7317,3 +7317,15 @@ and scalar metadata, with explicit batch and row identity.
 
 .. autoclass:: ResolvedContactPhase
    :members:
+
+embodichain.lab.sim.dexsim_session.attachment
+---------------------------------------------
+
+A single-arena task view binds an existing DexSim Runtime Scene to configured
+robot and rigid-body UIDs. Create the view with
+``SimulationManager.attach(context, arena=..., robots=..., rigid_objects=..., paths=...)``
+on the host thread. Use its instance ID for planner lookup. Detach releases
+local resources while the native World remains available to its owner.
+
+.. autoclass:: embodichain.lab.sim.dexsim_session.attachment.AttachedSimulationManager
+   :members:

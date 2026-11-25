@@ -177,6 +177,8 @@ from embodichain.utils.math import (
 )
 
 if TYPE_CHECKING:
+    from dexsim.runtime import SessionContext
+    from .dexsim_session.attachment import AttachedSimulationManager
     from dexsim.spawn import GeometryDesc, NewtonCollisionDesc
     from dexsim.engine import PhysicsScene
     from embodichain.lab.visualization._web_viewer import _WebViewer
@@ -908,6 +910,42 @@ class SimulationManager:
 
         logger.log_info(format_summary("Scene ready", scene_rows(self)), prefix=False)
         self._scene_summary_logged = True
+
+    @classmethod
+    def attach(
+        cls,
+        context: SessionContext,
+        *,
+        arena: str,
+        robots: Sequence[RobotCfg],
+        rigid_objects: Sequence[RigidObjectCfg],
+        paths: Mapping[str, str],
+        logical_entities: Mapping[str, str] | None = None,
+        device: str | torch.device = "cpu",
+    ) -> AttachedSimulationManager:
+        """Bind resolved configuration UIDs to existing host-owned Scene paths.
+
+        Call on the World owner thread after finalization. The returned task
+        view owns local facades and solvers; detach it before replacing the
+        host topology. The host remains responsible for World teardown.
+        """
+        from .dexsim_session.attachment import AttachedSimulationManager
+
+        manager = AttachedSimulationManager(
+            context,
+            arena,
+            robots,
+            rigid_objects,
+            paths,
+            logical_entities or {},
+            torch.device(device),
+        )
+        instance_id = 0
+        while instance_id in cls._instances:
+            instance_id += 1
+        manager.instance_id = instance_id
+        cls._instances[instance_id] = manager
+        return manager
 
     @classmethod
     def get_instance(cls, instance_id: int = 0) -> SimulationManager:
