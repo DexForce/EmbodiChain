@@ -1902,7 +1902,7 @@ class CuroboPlanner(BasePlanner):
 
         manager = SimulationManager.get_instance(self.cfg.sim_instance_id)
         world_gravity = torch.as_tensor(
-            manager.sim_config.physics_cfg.gravity,
+            manager.world_gravity,
             dtype=torch.float32,
             device=self._curobo_device,
         )

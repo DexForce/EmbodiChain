@@ -42,16 +42,20 @@ async def verify(
     session = Session.connect(
         sid, directory=directory, client={"kind": "acceptance", **labels}
     )
-    client = WriterClient(session, key_file)
 
     @asynccontextmanager
     async def connection():
         if interface == "python":
 
-            async def direct(operation, arguments):
-                return client.call(operation, arguments)
+            with Session.connect(
+                sid, directory=directory, client={"kind": "python-writer", **labels}
+            ) as writer_session:
+                client = WriterClient(writer_session, key_file)
 
-            yield direct
+                async def direct(operation, arguments):
+                    return client.call(operation, arguments)
+
+                yield direct
         else:
             from mcp import Client, StdioServerParameters
 

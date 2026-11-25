@@ -105,6 +105,13 @@ def populate_with(call: Callable[..., dict[str, Any]], asset: Path) -> None:
 def attach(
     context: SessionContext, assembled: bool, paths: dict[str, str]
 ) -> AttachedSimulationManager:
+    binding = yaml.safe_load(
+        (TASK.parent / "task_program" / "integration.yaml").read_text()
+    )["scene_binding"]
+    logical_entities = {
+        row["entity_id"]: row["simulation_uid"] for row in binding["rigid_objects"]
+    }
+    logical_entities["manipulator"] = "UR5"
     return SimulationManager.attach(
         context,
         arena=context.scene.arenas.names[0],
@@ -114,11 +121,7 @@ def attach(
             RigidObjectCfg(uid="platform", body_type="static"),
         ],
         paths=paths,
-        logical_entities={
-            "manipulator": "UR5",
-            "payload": "cube",
-            "destination": "platform",
-        },
+        logical_entities=logical_entities,
     )
 
 

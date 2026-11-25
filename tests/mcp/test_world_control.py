@@ -102,6 +102,8 @@ def test_dedicated_writer(
                         native(session, method)
                 with pytest.raises(SessionRemoteError):
                     session.evaluate("world.update(.01)")
+                with pytest.raises(SessionRemoteError):
+                    session.shutdown()
                 assert (
                     read("robot_b")["joint_target_position"]
                     == b0["joint_target_position"]
@@ -121,7 +123,9 @@ def test_dedicated_writer(
                 writer = WriterClient(reconnected, key)
                 with pytest.raises(RuntimeError, match="pending"):
                     writer.call("target_and_step", {**req, "command_id": "other"})
-                recovered = writer.call("receipt", {"command_id": "one"})
+                # MCP supplies the default tolerance explicitly; Python may omit it.
+                recovered = writer.call("target_and_step", {**req, "tolerance": 1e-3})
+                assert writer.call("receipt", {"command_id": "one"}) == recovered
                 assert recovered["state"] == "ready" and recovered["target_accepted"]
                 assert writer.call("target_and_step", req) == recovered
                 assert (
@@ -219,5 +223,8 @@ def test_partial_native_step_fences_writes(monkeypatch: pytest.MonkeyPatch) -> N
         owner.target_and_step(
             **{**request, "command_id": "again", "revision": first["revision"]}
         )
+    manager.validate.side_effect = RuntimeError("scene replaced")
+    assert owner.status()["binding_current"] is False
+    assert owner.receipt("once") == first
     robot.set_qpos.assert_called_once()
     assert ctx.world.update.call_count == 2
