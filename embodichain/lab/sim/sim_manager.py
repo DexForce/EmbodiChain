@@ -3198,7 +3198,8 @@ class SimulationManager:
 
         Raises:
             RuntimeError: If the World has no native renderer.
-            ValueError: If ``cfg.light_type`` is not supported.
+            ValueError: If the light type is unsupported or a generated Scene
+                path is reserved for a Gaussian companion.
         """
         self._require_native_renderer("Light creation")
         if cfg.uid is None:
@@ -3234,15 +3235,14 @@ class SimulationManager:
         scene = self._spawn_scene.builder.result
         global_light = cfg.light_type in self._GLOBAL_LIGHT_TYPES
         arena_names = ("default",) if global_light else self._spawn_scene.arena_names
-        handles = scene.add_lights(
-            [
-                LightDesc(
-                    name=uid if global_light else f"{uid}_{i}", light_type=light_type
-                )
-                for i in range(len(arena_names))
-            ],
-            arena_names=arena_names,
+        descriptors = [
+            LightDesc(name=uid if global_light else f"{uid}_{i}", light_type=light_type)
+            for i in range(len(arena_names))
+        ]
+        self._spawn_scene._require_unreserved_render_paths(
+            arena_names, (descriptor.name for descriptor in descriptors)
         )
+        handles = scene.add_lights(descriptors, arena_names=arena_names)
         try:
             batch_lights = Light(cfg=cfg, entities=handles, scene=scene)
         except Exception:

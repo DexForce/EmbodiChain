@@ -222,6 +222,22 @@ class SpawnScene:
         ):
             raise ValueError(f"Spawn asset uid is already declared: {uid!r}.")
 
+    def _require_unreserved_render_paths(
+        self, arena_names: Iterable[str], names: Iterable[str]
+    ) -> None:
+        """Reject render paths reserved for deferred Gaussian companions."""
+        if not self._reserved_visual_names:
+            return
+        replica_names = set(self.arena_names)
+        for arena_name, name in zip(arena_names, names, strict=True):
+            prefix = "" if arena_name == "default" else f"{arena_name}/"
+            path = name if name.startswith(prefix) else f"{prefix}{name}"
+            arena, _, local_name = path.partition("/")
+            if arena in replica_names and local_name in self._reserved_visual_names:
+                raise ValueError(
+                    f"Scene path is reserved for a Gaussian companion: {path}"
+                )
+
     def _require_compatible_particles(self, *, cables: bool, particles: bool) -> None:
         """Check both the incoming declaration and the native scene inventory."""
         if (cables and (particles or self._has_particles)) or (

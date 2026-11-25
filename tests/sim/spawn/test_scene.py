@@ -347,7 +347,8 @@ def test_deferred_gaussian_reserves_name_until_visual_owner_removal(tmp_path) ->
     builder = SimpleNamespace(
         backend="newton",
         is_finalized=False,
-        result=None,
+        result=SimpleNamespace(handles={}),
+        replicate_plan=SimpleNamespace(env_names=lambda: ("arena_0",)),
         scene_desc=desc,
         mesh_objects=desc.mesh_objects,
         add_object=desc.add_mesh_object,
@@ -371,8 +372,17 @@ def test_deferred_gaussian_reserves_name_until_visual_owner_removal(tmp_path) ->
             ],
         ),
     )
-    spawn.declare("visual_object", "scan", ObjectDesc(name="scan"), facade=facade)
     name = "scan__visual_0_surface"
+    camera_path = f"arena_0/{name}"
+    camera = object()
+    builder.result.handles[camera_path] = camera
+    with pytest.raises(ValueError, match=camera_path):
+        spawn.declare("visual_object", "scan", ObjectDesc(name="scan"), facade=facade)
+    assert builder.result.handles == {camera_path: camera}
+    assert not builder.mesh_objects and "scan" not in spawn
+    builder.result.handles.clear()
+
+    spawn.declare("visual_object", "scan", ObjectDesc(name="scan"), facade=facade)
     with pytest.raises(ValueError, match="already declared"):
         spawn.declare("rigid_object", name, ObjectDesc(name=name))
     assert [desc.name for desc in builder.mesh_objects] == ["scan"]

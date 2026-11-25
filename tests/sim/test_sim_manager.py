@@ -41,6 +41,7 @@ from embodichain.lab.sim.cfg import (
     DefaultPhysicsCfg,
     DenoisingCfg,
     DLSSCfg,
+    LightCfg,
     MarkerCfg,
     NewtonPhysicsCfg,
     RenderCfg,
@@ -57,6 +58,7 @@ from embodichain.lab.sim.sim_manager import (
 )
 from embodichain.lab.sim.sensors import Camera, CameraCfg, StereoCamera, StereoCameraCfg
 from embodichain.lab.sim.sensors.stereo import PairCameraView
+from embodichain.lab.sim.spawn.scene import SpawnScene
 from embodichain.lab.visualization import (
     GizmoCommand,
     PickCommand,
@@ -3120,6 +3122,58 @@ def test_prepare_retries_deferred_mounted_sensor_after_factory_failure() -> None
     sim.prepare()
     assert not sim._pending_mounted_sensors
     assert sim.add_sensor.call_count == 2
+
+
+@pytest.mark.parametrize(
+    ("kind", "reserved_name"),
+    [
+        ("camera", "scan__visual_0_surface_view2"),
+        ("point", "scan__visual_0_surface_1"),
+    ],
+)
+def test_render_declaration_rejects_reserved_gaussian_path_before_allocation(
+    monkeypatch: pytest.MonkeyPatch, kind: str, reserved_name: str
+) -> None:
+    sim = _make_camera_attachment_manager()
+    sim.sim_config = SimpleNamespace(render_cfg=RenderCfg(renderer="fast-rt"))
+    sim._world = object()
+    sim._lights = {}
+    sim._camera_group_pool = MagicMock()
+    sim._camera_group_pool.acquire.side_effect = AssertionError(
+        "allocated camera group"
+    )
+    native = MagicMock()
+    native.add_lights.side_effect = AssertionError("allocated lights")
+    spawn = object.__new__(SpawnScene)
+    spawn._assets = {}
+    spawn._reserved_visual_names = {reserved_name}
+    spawn.builder = SimpleNamespace(
+        result=native,
+        is_finalized=False,
+        replicate_plan=SimpleNamespace(env_names=lambda: ("arena_0", "arena_1")),
+    )
+    sim._spawn_scene = spawn
+
+    with pytest.raises(ValueError, match=f"arena_1/{reserved_name}"):
+        if kind == "camera":
+            sim.add_sensor(CameraCfg(uid="scan__visual_0_surface"))
+        else:
+            sim.add_light(LightCfg(uid="scan__visual_0_surface", light_type=kind))
+
+    sim._camera_group_pool.acquire.assert_not_called()
+    native.add_cameras.assert_not_called()
+    native.add_lights.assert_not_called()
+    assert not sim._sensors and not sim._lights
+
+    if kind == "point":
+        # A global light occupies the root path instead of the reserved arena path.
+        native.add_lights.side_effect = None
+        light = object()
+        monkeypatch.setattr(sim_manager_module, "Light", MagicMock(return_value=light))
+        assert sim.add_light(LightCfg(uid=reserved_name, light_type="sun")) is light
+        (descriptor,) = native.add_lights.call_args.args[0]
+        assert descriptor.name == reserved_name
+        assert native.add_lights.call_args.kwargs["arena_names"] == ("default",)
 
 
 def test_auto_sensor_uid_skips_deferred_mounted_reservations() -> None:

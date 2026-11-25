@@ -237,6 +237,15 @@ class _VisualBinding:
         try:
             for element in self.elements:
                 if self._uses_finalized_scene(element):
+                    # Direct Scene cameras and lights bypass the builder template.
+                    scene = self.spawn.builder.result
+                    if scene is not None:
+                        for arena in self.spawn.arena_names:
+                            path = f"{arena}/{element.name}"
+                            if path in scene.handles:
+                                raise ValueError(
+                                    f"Gaussian companion path already exists: {path}"
+                                )
                     deferred.append(element.name)
                     continue
                 method = (
