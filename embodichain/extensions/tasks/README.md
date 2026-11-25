@@ -8,6 +8,60 @@ inside the core `embodichain` import package. It is bundled into the main
 registered through the `embodichain.tasks` entry point. It has no independent
 distribution metadata or version.
 
+## Browse the official tasks
+
+Start with `embodichain list-task --featured` for representative training recipes and capability demonstrations. Use `embodichain show-task <key>` to inspect each deployment’s environment ID, configuration, supported execution paths, scope and available validation report.
+
+| Purpose | Task families and starting points |
+| --- | --- |
+| Training | PushCube for state RL or visual imitation learning, Go2 and G1 for flat velocity tracking, G1 rough terrain and reference motion tracking, LEAP cube and Shadow pen for in-hand control. |
+| Showcase | Drawer storage, cable routing, measured fluid pouring, cloth folding, bimanual transfer, Real2Sim carton stocking and captured-background pick and place. |
+| Research | Nominal peg, gear and nut assembly deployments, policy-controlled two-block stacking and tableware environments with geometric success criteria. Assembly reference configurations have explicit qualification prerequisites. |
+| Reference | CartPole, PointMass, differentiable Franka reaching and workspace-conditioned pose coverage. |
+
+```bash
+embodichain list-task --purpose training
+embodichain list-task --purpose research --category manipulation/assembly
+embodichain list-task --all
+embodichain list-task --export-html task-gallery.html
+embodichain list-task --all --export-html task-inventory.html
+```
+
+The CLI lists all discovered tasks when called without flags. The default HTML gallery features starting deployments. Purpose describes the intended workflow. Training recipes and expert demonstrations have separate evidence requirements; checkpoint performance belongs to the evaluated deployment and conditions.
+
+## DexUni task deployments
+
+Select the `dexuni` entry in `embodichain show-task <key>`. Each entry points
+to a deployment that owns or selects a Newton environment with an explicit
+DexUni solver. CartPole, Humanoid Run and PushCube have PPO configurations.
+Assembly PPO recipes are listed under `dexuni_nominal`. The `dexuni` assembly
+deployments use the Rizon4S with a Robotiq 2F85 for reference rollouts.
+
+Use `--preview` with the listed run command to inspect a scene. Launch a task
+with an expert to execute its measured demonstration. For PushCube, select
+`franka_visual_dexuni`. The assembly examples document the peg policy and the
+geometry-informed gear and nut controllers. Install the pinned MJFit provider
+to generate assembly assets. The nominal PPO variants additionally use the
+prepared public Rizon4S parallel-jaw assets.
+
+```bash
+python -m pip install 'mjfit @ git+https://github.com/younghyopark/mjfit.git@5833f465896e1e06bc4be4f003be847f5183a4db'
+python -m embodichain.extensions.benchmarks.assembly.robot_reference --gripper-model parallel_jaw
+```
+
+## Pick and place
+
+Run `embodichain list-task --category manipulation/pick_place` to browse
+these three tasks. Use `embodichain show-task <task>` for deployments and commands.
+
+| Task | Goal |
+| --- | --- |
+| `repeated_pick_place` | Move a cube between two targets. The `ur5_rubiks_cube` deployment uses a Rubik’s cube. |
+| `workspace_pose_pick_place` | Place a cuboid at a scene-relative position and yaw, with an optional obstacle. |
+| `gaussian_pick_place` | Record physical pick and place from two cameras in three captured Gaussian scenes. |
+
+## Task layout
+
 Tasks are organized by task family, optional subdomain, and task identity, not
 by solution method. Import-registered tasks keep their environment
 registration in a task-named Python module; simulator scene and MDP settings

@@ -1,0 +1,36 @@
+id: DrawerStorage-UR5-DexUni-v1
+environment:
+  component: env.dexuni.yaml
+embodiment:
+  component: ../../../components/embodiments/ur5_dh_pgi_140_80.yaml
+  overrides:
+    init_qpos:
+    - 0.0
+    - -1.57
+    - 1.57
+    - -3.14
+    - -1.57
+    - 0.0
+    - 0.0
+    - 0.0
+    init_pos:
+    - -0.18
+    - 0.0
+    - 0.2
+  camera_overrides:
+    cam_overhead:
+      extrinsics:
+        eye:
+        - 0.4
+        - -1.34
+        - 1.17
+        target:
+        - -0.53
+        - 0.09
+        - 0.41
+        up:
+        - 0.0
+        - 0.0
+        - 1.0
+collection:
+  max_attempts: 1

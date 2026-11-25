@@ -1,0 +1,39 @@
+id: PlaceObjectDrawer-UR5-DexUni-v1
+device: cpu
+environment:
+  component: env.dexuni.yaml
+embodiment:
+  component: ../../../../components/embodiments/ur5_dh_pgi_140_80.yaml
+  overrides:
+    init_pos:
+    - 0.1
+    - 0.0
+    - 0.875
+    init_rot:
+    - 0.0
+    - 0.0
+    - 180.0
+    init_qpos:
+    - 0.0
+    - -1.57
+    - 1.57
+    - -1.57
+    - -1.57
+    - 0.0
+    - 0.0
+    - 0.0
+  camera_overrides:
+    cam_overhead:
+      extrinsics:
+        eye:
+        - 0.22
+        - -0.62
+        - 1.49
+        target:
+        - 0.58
+        - 0.04
+        - 0.96
+        up:
+        - 0.0
+        - 0.0
+        - 1.0

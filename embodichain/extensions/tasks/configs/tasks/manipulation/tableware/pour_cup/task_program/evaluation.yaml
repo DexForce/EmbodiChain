@@ -1,0 +1,13 @@
+graph:
+  roots:
+  - water_received
+  rules:
+    water_received:
+      kind: scalar_range
+      bindings:
+        value: fluids/water/receiver/received_volume
+      params:
+        minimum: 5.0e-05
+        maximum: 1.0
+final_acceptance:
+- water_received

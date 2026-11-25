@@ -130,7 +130,8 @@ def test_humanoid_reward_penalizes_both_joint_limits(
     torch.testing.assert_close(reward, torch.tensor([3.6, 3.6 - expected_cost, -1.0]))
 
 
-def test_humanoid_deployment_preserves_effort_contract(monkeypatch):
+@pytest.mark.parametrize("config_name", ["env.yaml", "env.dexuni.yaml"])
+def test_humanoid_deployment_preserves_effort_contract(monkeypatch, config_name):
     from pathlib import Path
     from embodichain.lab.sim import cfg as sim_cfg
     from embodichain.lab.gym.utils.gym_utils import config_to_cfg
@@ -138,7 +139,7 @@ def test_humanoid_deployment_preserves_effort_contract(monkeypatch):
 
     monkeypatch.setattr(sim_cfg, "get_data_path", lambda value: value)
     path = Path(
-        "embodichain/extensions/tasks/configs/tasks/classic_control/humanoid/env.yaml"
+        f"embodichain/extensions/tasks/configs/tasks/classic_control/humanoid/{config_name}"
     )
     cfg = config_to_cfg(load_config(str(path)), source_path=path)
     assert cfg.sim_cfg.physics_dt == pytest.approx(1 / 120)
@@ -146,3 +147,5 @@ def test_humanoid_deployment_preserves_effort_contract(monkeypatch):
     assert cfg.max_episode_steps == 900
     assert cfg.robot.control_parts["whole_body"] == _CONFIG["joint_names"]
     assert cfg.robot.joint_drive_props.drive_type == "force"
+    if config_name == "env.dexuni.yaml":
+        assert cfg.actions is None

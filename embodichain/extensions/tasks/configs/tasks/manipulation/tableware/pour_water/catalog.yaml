@@ -1,17 +1,24 @@
 task_key: pour_water
 title: Pour Water
-summary: Pick, tilt and return a bottle above a cup using a configured Task Program.
+summary: Pour liquid into a receiver with Franka or CobotMagic; legacy bottle-motion deployments are also available.
 tags:
 - tableware
 - manipulation
 - task_program
-default_deployment: cobotmagic
+default_deployment: franka_fluid
 deployments:
   cobotmagic:
     config: task.cobotmagic.yaml
+    note: Default physics bottle motion without fluid simulation.
+  cobotmagic_fluid:
+    config: task.cobotmagic.fluid.yaml
+    validation: validation/cobotmagic.fluid.json
   tianji_marvin:
+    note: Legacy rigid-body motion demonstration without measured liquid transfer.
     config: task.tianji_marvin.yaml
   dual_ur5_dh_pgi_140_80:
+    note: Legacy rigid-body motion demonstration without measured liquid transfer.
     config: task.dual_ur5_dh_pgi_140_80.yaml
   dexforce_w1_030_pika:
+    note: Legacy rigid-body motion demonstration without measured liquid transfer.
     config: task.dexforce_w1_030_pika.yaml

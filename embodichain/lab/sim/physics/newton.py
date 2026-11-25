@@ -103,6 +103,7 @@ class NewtonPhysicsBackend(PhysicsBackend):
         newton_physics_cfg = sim_config.physics_cfg
         newton_cfg = newton_physics_cfg.to_dexsim_cfg(
             gpu_id=sim_config.gpu_id,
+            num_envs=sim_config.num_envs,
         )
         self._configured_solver_type = str(newton_cfg.solver_cfg.solver_type)
         self._runtime_device = str(newton_cfg.device)
@@ -141,6 +142,24 @@ class NewtonPhysicsBackend(PhysicsBackend):
         # WorldConfig.newton_cfg registers the World-owned NewtonBackend.
         # SceneBuilder.finalize() completes its model; no second manager-level
         # activation or rebuild domain participates.
+
+    def prepare_spawn_runtime(self, result: "dexsim.scene.Scene") -> None:
+        """Check the topology of rigid scenes with per-arena solver ownership."""
+        sim_config = self._manager.sim_config
+        joint_count = sim_config.physics_cfg.dexuni_mujoco_joints_per_arena
+        if joint_count is None:
+            return
+
+        from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+
+        backend = get_newton_backend(result.world)
+        expected = joint_count * sim_config.num_envs
+        actual = backend.model.joint_count
+        if actual != expected:
+            raise ValueError(
+                f"DexUni MuJoCo ownership expected {expected} joints in "
+                f"{sim_config.num_envs} arenas, but the finalized model has {actual}."
+            )
 
     def _create_joint_wrench_reader(
         self,

@@ -14,6 +14,8 @@ collection:
         when: always
       received_volume:
         min: [0.00005]
+evaluation:
+  component: task_program/evaluation.yaml
 environment:
   component: env.fluid.yaml
 task_program:

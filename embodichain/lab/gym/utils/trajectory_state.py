@@ -305,7 +305,9 @@ def _evaluation_observation_cfgs(
                 params={"field": name},
                 consumers=("recording",),
             )
-        elif name.startswith(("links/", "robot/", "robot_links/", "cables/")):
+        elif name.startswith(
+            ("links/", "robot/", "robot_links/", "cables/", "fluids/")
+        ):
             result[f"recording:{name}"] = ObservationCfg(
                 func=_get_evaluation_state,
                 mode="add",

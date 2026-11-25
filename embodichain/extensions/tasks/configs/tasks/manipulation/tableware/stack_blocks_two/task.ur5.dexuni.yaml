@@ -1,0 +1,52 @@
+id: StackBlocksTwo-DexUni-v1
+environment:
+  component: env.dexuni.yaml
+task_program:
+  program: task_program/program.yaml
+  integration: task_program/integration.dexuni.yaml
+  execution_policy:
+    component: ../../../../components/execution_policies/trajectory_open_loop.yaml
+    overrides:
+      motion:
+        sample_count: 110
+        velocity_limit: 0.65
+        acceleration_limit: 2.5
+embodiment:
+  component: ../../../../components/embodiments/ur5_dh_pgi_140_80.yaml
+  overrides:
+    init_pos:
+    - 1.18
+    - 0.0
+    - 0.876
+    init_qpos:
+    - 0.0
+    - -1.57
+    - 1.57
+    - -1.57
+    - -1.57
+    - 0.0
+    - 0.0
+    - 0.0
+    grippers:
+      eef:
+        commands:
+          grasp:
+            gripper_finger1_joint_1: 0.034
+            gripper_finger2_joint_1: 0.034
+  camera_overrides:
+    cam_overhead:
+      extrinsics:
+        eye:
+        - 0.39
+        - -0.91
+        - 1.55
+        target:
+        - 0.73
+        - 0.0
+        - 0.93
+        up:
+        - 0.0
+        - 0.0
+        - 1.0
+evaluation:
+  component: task_program/evaluation.yaml

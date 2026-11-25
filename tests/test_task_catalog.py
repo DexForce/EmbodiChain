@@ -86,7 +86,7 @@ def write(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
-def test_gaussian_pick_place_is_one_official_task_with_three_deployments() -> None:
+def test_pick_place_catalog_groups_tasks_and_preserves_deployment_lookups() -> None:
     root = (
         Path(__file__).resolve().parents[1]
         / "embodichain/extensions/tasks/configs/tasks"
@@ -95,16 +95,42 @@ def test_gaussian_pick_place_is_one_official_task_with_three_deployments() -> No
     task = catalog._select_task(
         tasks, "embodichain.extensions.tasks:gaussian_pick_place"
     )
-    assert task.task_path == ("manipulation", "gaussian_pick_place")
+    assert {
+        t.key for t in tasks if t.task_path[:-1] == ("manipulation", "pick_place")
+    } == {
+        "gaussian_pick_place",
+        "repeated_pick_place",
+        "workspace_pose_pick_place",
+    }
+    acceptance = catalog._select_task(tasks, "scene_first")
+    assert acceptance.key == "workspace_pose_pick_place"
+    assert acceptance.default_deployment == "scene_first_acceptance"
+    repeated = catalog._select_task(tasks, "repeated_pick_place")
+    for key in (
+        "rubiks_cube_pick_place",
+        "embodichain.extensions.tasks:rubiks_cube_pick_place",
+    ):
+        alias = catalog._select_task(tasks, key)
+        assert alias.qualified_key == repeated.qualified_key
+        assert alias.default_deployment == "ur5_rubiks_cube"
+        (rubiks,) = alias.deployments
+        assert rubiks in repeated.deployments
+        assert rubiks.env_id == "TaskProgramRubiksCubePickPlace-v1"
+        assert (
+            rubiks.resource
+            == root / "manipulation/rubiks_cube_pick_place/task.ur5.yaml"
+        )
     assert task.default_deployment == "office"
     assert {deployment.name: deployment.env_id for deployment in task.deployments} == {
         "office": "FrankaGSPickPlace-Office-v1",
         "discoverse": "FrankaGSPickPlace-Discoverse-v1",
         "robosimgs": "FrankaGSPickPlace-Robosimgs-v1",
+        "dexuni": "TaskProgramOfficeUR5-DexUni-v1",
     }
     assert all(
         deployment.capabilities == {catalog._TASK_PROGRAM}
-        and deployment.physics == "default"
+        and deployment.physics
+        == ("newton" if deployment.name == "dexuni" else "default")
         for deployment in task.deployments
     )
 
@@ -368,6 +394,102 @@ def test_official_catalogs_resolve_real_deployments() -> None:
                 assert deployment.resource.is_file()
 
 
+def test_official_dexuni_deployments_resolve_to_the_selected_solver() -> None:
+    root = (
+        Path(__file__).resolve().parents[1]
+        / "embodichain/extensions/tasks/configs/tasks"
+    )
+    tasks = catalog._load_catalog({"embodichain.extensions.tasks": root})
+    ppo_tasks = {
+        "cart_pole",
+        "humanoid",
+        "push_cube",
+        "peg_insertion",
+        "gear_meshing",
+        "nut_threading",
+    }
+    expected = ppo_tasks | {
+        "carton_stocking",
+        "drawer_storage",
+        "gaussian_pick_place",
+        "hand_over",
+        "workspace_pose_pick_place",
+        "blocks_ranking_rgb",
+        "blocks_ranking_size",
+        "match_object_container",
+        "place_object_drawer",
+        "stack_blocks_two",
+        "stack_cups",
+    }
+    seen = set()
+    for task in tasks:
+        if task.key not in expected:
+            continue
+        (dexuni,) = [d for d in task.deployments if d.name == "dexuni"]
+        assert dexuni.physics == "newton"
+        assert dexuni.env_id.endswith("-DexUni-v1")
+        assert all(
+            d.env_id != dexuni.env_id for d in task.deployments if d.name != "dexuni"
+        )
+        deployment = catalog._load_mapping(dexuni.resource)
+        if "environment" in deployment:
+            deployment = catalog._load_mapping(
+                dexuni.resource.parent / deployment["environment"]["component"]
+            )
+        assert deployment["physics_config"]["solver_cfg"]["solver_type"] == "dexuni"
+        if task.key in ppo_tasks:
+            training = next(
+                (d for d in task.deployments if d.name == "dexuni_nominal"), dexuni
+            )
+            assert training.physics == "newton"
+            (agent,) = training.agent_refs
+            assert Path(agent).name.endswith((".dexuni.yaml", ".dexuni.json"))
+        seen.add(task.key)
+    assert seen == expected
+
+
+def test_official_portfolio_keeps_deployment_purposes_and_evidence_separate() -> None:
+    root = (
+        Path(__file__).resolve().parents[1]
+        / "embodichain/extensions/tasks/configs/tasks"
+    )
+    tasks = catalog._load_catalog({"embodichain.extensions.tasks": root})
+    assert all(
+        d.purpose in catalog._PURPOSES for task in tasks for d in task.deployments
+    )
+    pour = catalog._select_task(tasks, "pour_water")
+    assert pour.default_deployment == "franka_fluid"
+    assert {d.env_id for d in pour.deployments} == {
+        "PourCup-Franka-Fluid-v1",
+        "PourWater-v1",
+        "PourWater-CobotMagic-Fluid-v1",
+        "PourWater-TianjiMarvin-v1",
+        "PourWater-DualUR5-v1",
+        "PourWater-DexforceW1V030Pika-v1",
+    }
+    rigid = next(d for d in pour.deployments if d.name == "cobotmagic")
+    fluid = next(d for d in pour.deployments if d.name == "cobotmagic_fluid")
+    assert (rigid.env_id, rigid.physics, rigid.validation) == (
+        "PourWater-v1",
+        "default",
+        None,
+    )
+    assert (fluid.env_id, fluid.physics) == ("PourWater-CobotMagic-Fluid-v1", "newton")
+    assert fluid.validation["deployment"] == fluid.name
+    assert catalog._select_task(tasks, "pour_cup").qualified_key == pour.qualified_key
+    research = catalog._portfolio_view(tasks, "research", False)
+    stack = catalog._select_task(research, "stack_blocks_two")
+    assert [d.env_id for d in stack.deployments] == ["StackBlocksTwoPolicy-v1"]
+    featured = catalog._portfolio_view(tasks, None, True)
+    drawer = catalog._select_task(featured, "drawer_storage")
+    assert drawer.default_deployment == "ur5"
+    assert drawer.deployments[0].validation["attempts"] == 10
+    assert all(task.key != "cart_pole" for task in featured)
+    assert (
+        catalog._select_task(tasks, "cart_pole").deployments[0].purpose == "reference"
+    )
+
+
 def test_offline_gallery_explains_runtime_capability_limit(
     task_root: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -519,7 +641,7 @@ def test_carton_source_and_ordinary_rgbd_deployments_without_loading_assets(
     )
     assert task.default_deployment == "panda"
     deployments = {deployment.name: deployment for deployment in task.deployments}
-    assert set(deployments) == {"panda", "panda_rgbd"}
+    assert set(deployments) == {"panda", "panda_rgbd", "dexuni"}
     assert deployments["panda"].env_id == "CartonStockingPanda-v1"
     assert deployments["panda"].capabilities == {catalog._TASK_PROGRAM}
     assert deployments["panda"].requires_dataset_dir
@@ -528,3 +650,75 @@ def test_carton_source_and_ordinary_rgbd_deployments_without_loading_assets(
     assert deployments["panda_rgbd"].capabilities == {catalog._TASK_PROGRAM}
     assert not deployments["panda_rgbd"].requires_dataset_dir
     assert "--dataset-dir" not in deployments["panda_rgbd"].command
+
+
+@pytest.mark.parametrize("variant", [False, True], ids=["primary", "variant"])
+def test_grouped_runtime_deployments_keep_identity_and_purpose(
+    task_root, monkeypatch, variant: bool
+) -> None:
+    from types import SimpleNamespace
+    from embodichain.lab.gym.utils import registration
+    from embodichain.learning.rl import env
+
+    path = task_root / "manipulation/pick/catalog.yaml"
+    write(path, {**json.loads(path.read_text()), "group": "pick_place"})
+    if variant:
+        directory = task_root / "manipulation/alternate"
+        write(directory / "task.yaml", {"id": "Alternate-v1", "physics": "default"})
+        write(
+            directory / "catalog.yaml",
+            {
+                "task_key": "alternate",
+                "variant_of": "pick",
+                "title": "Alternate Pick",
+                "summary": "An additional deployment for picking.",
+                "default_deployment": "alternate",
+                "deployments": {"alternate": {"config": "task.yaml"}},
+            },
+        )
+    module = "demo.manipulation.alternate" if variant else "demo.manipulation.pick"
+    cls = type("PickEnv", (), {"__module__": module})
+    spec = SimpleNamespace(
+        cls=cls,
+        supports_handwritten_demo=False,
+        supports_rl=True,
+        task_program_registration=None,
+        task_program_adapter_factory=None,
+    )
+    monkeypatch.setattr(
+        registration, "REGISTERED_ENVS", {"PickAlt": spec, "PickResearch": spec}
+    )
+    monkeypatch.setattr(env, "get_registered_learning_env_names", lambda: [])
+    write(
+        task_root / "portfolio.yaml",
+        {
+            "pick": {
+                "purpose": "training",
+                "featured": ["PickAlt"],
+                "overrides": {"PickResearch": "research"},
+            }
+        },
+    )
+    roots = {"demo": task_root}
+    static = catalog._load_catalog(roots)
+    configured = {"a", "b", "alternate"} if variant else {"a", "b"}
+    assert {
+        d.name for d in catalog._select_task(static, "pick").deployments
+    } == configured
+    tasks = catalog._load_catalog(roots, runtime_packages=["demo"])
+    (pick,) = tasks
+    assert catalog._select_task(tasks, "demo:pick") is pick
+    assert pick.task_path == ("manipulation", "pick_place", "pick")
+    if variant:
+        alias = catalog._select_task(tasks, "demo:alternate")
+        assert alias.key == pick.key
+        assert alias.default_deployment == "alternate"
+        assert [d.env_id for d in alias.deployments] == ["Alternate-v1"]
+    training = catalog._portfolio_view(tasks, "training", False)
+    assert {d.name for d in training[0].deployments} == configured | {"PickAlt"}
+    assert [
+        d.name for d in catalog._portfolio_view(tasks, None, True)[0].deployments
+    ] == ["PickAlt"]
+    assert [
+        d.name for d in catalog._portfolio_view(tasks, "research", False)[0].deployments
+    ] == ["PickResearch"]

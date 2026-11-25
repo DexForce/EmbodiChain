@@ -29,9 +29,11 @@ from dexsim.scene.objects import SpawnedRigidBody
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
+    DefaultPhysicsCfg,
     DenoisingCfg,
     GaussianRenderCfg,
     GaussianSplatCfg,
+    NewtonPhysicsCfg,
     RenderCfg,
     RigidObjectCfg,
     UsdSourceCfg,
@@ -300,9 +302,13 @@ def test_gaussian_workspace_failure_cannot_publish_a_valid_capture(tmp_path):
         sim.flush_cleanup_queue()
 
 
-@pytest.mark.parametrize("renderer", ["fast-rt", "hybrid"])
+@pytest.mark.parametrize(
+    ("renderer", "dexuni"),
+    [("fast-rt", False), ("hybrid", False), ("hybrid", True)],
+    ids=["fast-rt", "hybrid", "hybrid-dexuni"],
+)
 def test_gaussian_randomization_parallel_cameras_isolation_and_reset(
-    tmp_path, renderer
+    tmp_path, renderer, dexuni
 ):
     path = tmp_path / "scan.ply"
     _write_splat(path)
@@ -310,7 +316,12 @@ def test_gaussian_randomization_parallel_cameras_isolation_and_reset(
         SimulationManagerCfg(
             headless=True,
             num_envs=4,
-            device="cpu",
+            device="cuda:0" if dexuni else "cpu",
+            physics_cfg=(
+                NewtonPhysicsCfg(solver_cfg={"solver_type": "dexuni"})
+                if dexuni
+                else DefaultPhysicsCfg()
+            ),
             enable_entity_gizmo=False,
             startup_summary="off",
             render_cfg=RenderCfg(
@@ -433,6 +444,14 @@ def test_gaussian_randomization_parallel_cameras_isolation_and_reset(
         unchanged = capture()
         for old, new in zip(restored, unchanged):
             torch.testing.assert_close(old, new, atol=2, rtol=0)
+        if dexuni:
+            render_paths = {
+                handle.path
+                for group in visual._visual_binding.handles
+                for handle in group
+            }
+            assert sim.remove_asset("scan")
+            assert render_paths.isdisjoint(sim.spawn_result.handles)
     finally:
         cameras.clear()
         visual = None

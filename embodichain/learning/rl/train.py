@@ -67,6 +67,7 @@ from embodichain.lab.gym.utils.registration import (
     execute_init_hooks,
 )
 from embodichain.lab.gym.utils.profiler import EnvProfilerCfg
+from embodichain.utils.config_paths import resolve_config_path
 from embodichain.utils.utility import load_config
 from embodichain.utils.module_utils import find_function_from_modules
 from embodichain.lab.gym.envs.managers.cfg import EventCfg
@@ -397,6 +398,7 @@ def train_from_config(
         raise ValueError("resume_scheduler restart requires resume.")
     if resume is None and run is not None:
         raise ValueError("run requires resume latest/best.")
+    config_path = str(resolve_config_path(config_path).absolute())
     cfg_data = load_config(config_path)
 
     trainer_cfg = cfg_data["trainer"]
@@ -595,7 +597,7 @@ def train_from_config(
         renderer=renderer,
         gpu_id=gpu_id,
         seed=effective_seed,
-        config_dir=Path(config_path).expanduser().resolve().parent,
+        config_dir=Path(config_path).resolve().parent,
         profiler=profiler,
         trainer_events=(*train_event_cfg.values(), *eval_event_cfg.values()),
     )
@@ -756,12 +758,11 @@ def _freeze_gym_config(gym_data: dict, source_path: str | Path) -> dict:
     """
     from embodichain.lab.gym.utils.composition import resolve_gym_components
 
-    base_dir = Path(source_path).expanduser().resolve().parent
+    base_dir = resolve_config_path(source_path).absolute().parent
     resolved = resolve_gym_components(gym_data, base_dir=base_dir).config
     if "task_program" not in gym_data:
         return resolved
 
-    from embodichain.utils.config_paths import resolve_config_path
     from embodichain.lab.task_program.integrations._configured_composition import (
         _resolve_task_program_components,
     )

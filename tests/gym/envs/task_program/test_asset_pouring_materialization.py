@@ -65,6 +65,7 @@ def pouring(tmp_path):
     source.mkdir()
     integration = yaml.safe_load((POUR / "task_program/integration.yaml").read_text())
     program = yaml.safe_load((POUR / "task_program/program.yaml").read_text())
+    evaluation = yaml.safe_load((POUR / "task_program/evaluation.yaml").read_text())
     requirements = AssetRequirements(
         roles={
             "bottle": AssetRoleRequirement(
@@ -126,10 +127,7 @@ def pouring(tmp_path):
         ("env", env),
         ("integration", integration),
         ("program", program),
-        (
-            "evaluation",
-            yaml.safe_load((POUR / "task_program/evaluation.yaml").read_text()),
-        ),
+        ("evaluation", evaluation),
     ):
         _dump(source / f"{name}.yaml", document)
     return source / "task.yaml", requirements
