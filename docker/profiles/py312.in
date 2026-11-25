@@ -1,5 +1,5 @@
 # Qualified CUDA 12.8 versions; regenerate using docker/lock.sh.
-dexsim-engine @ http://pyp.open3dv.site:2345/packages/dexsim_engine-0.6.0-cp312-cp312-manylinux_2_31_x86_64.whl#sha256=40e0bfea2b1a3acceeea09202e7308cd26ce2b0f272d75c6fb4fffab2b750723
+dexsim-engine @ http://pyp.open3dv.site:2345/packages/dexsim_engine-0.6.1rc1-cp312-cp312-manylinux_2_31_x86_64.whl#sha256=723c05f5492b464fceda756a53d82fd3404122ec6e7753a999646ee41495195c
 torch==2.11.0+cu128
 torchvision==0.26.0+cu128
 torchcodec==0.11.1+cu128

@@ -202,3 +202,49 @@ def test_refill_transforms_selected_container_pose_into_world_frame():
     pose, ids = recorded[0]
     torch.testing.assert_close(pose[:, :3], torch.tensor([[10.0, 2.0, 3.1]]))
     assert ids.tolist() == [1]
+
+
+def test_cobotmagic_final_acceptance_counts_water_inside_cup_only(monkeypatch):
+    from embodichain.lab.gym.envs.task_program._final_acceptance import (
+        _evaluate_final_frame,
+    )
+    from embodichain.lab.gym.envs.managers.observations import _get_evaluation_state
+    from embodichain.lab.gym.envs.managers.observation_types import ObservationFrame
+    from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
+
+    monkeypatch.setattr("embodichain.data.get_data_path", lambda path: path)
+    source = TASK.parents[1] / "pour_water/task.cobotmagic.fluid.yaml"
+    cfg = config_to_cfg(load_config(source), source_path=source)
+    assert cfg.robot.root_props.newton_mimic_stabilizer is True
+    reg = REGISTERED_ENVS["PourWater-CobotMagic-Fluid-v1"].task_program_registration
+    rule = reg.evaluation_conditions["water_received"]
+    # Identical cup poses in separate arenas. 60 one-mL particles are inside,
+    # beside the rim (inside the bounding box), or directly above the cup.
+    offsets = torch.tensor([[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [6.0, 0.0, 0.0]])
+    local = torch.tensor([[0.0, 0.0, 0.0], [0.024, 0.024, 0.0], [0.0, 0.0, 0.06]])
+    state = (offsets + local)[:, None, :].expand(3, 60, 3)
+    water = SimpleNamespace(
+        cfg=SimpleNamespace(particle_spacing=0.01),
+        data=SimpleNamespace(particle_pos_w=state),
+    )
+    cup = SimpleNamespace(
+        get_local_pose=lambda: torch.tensor(
+            [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]]
+        ).expand(3, 7)
+    )
+    env = SimpleNamespace(
+        cfg=cfg,
+        num_envs=3,
+        device="cpu",
+        sim=SimpleNamespace(
+            arena_offsets=offsets,
+            get_fluid_object=lambda uid: water,
+            get_rigid_object=lambda uid: cup,
+        ),
+    )
+    (field,) = rule.required_fields
+    sample = _get_evaluation_state(env, {}, field=field)
+    frame = ObservationFrame(None, {field: sample}, (0, 1, 2), 0)
+    result = _evaluate_final_frame((("water_received", rule),), frame)
+    torch.testing.assert_close(sample.values[:, 0], torch.tensor([0.00006, 0.0, 0.0]))
+    assert result.satisfied.tolist() == [True, False, False]

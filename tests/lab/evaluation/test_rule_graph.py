@@ -18,6 +18,9 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
+
 import pytest
 import torch
 
@@ -82,6 +85,37 @@ def test_registered_predicate_boolean_and_missing_evidence():
     assert result["not_closed"].status.tolist() == [Status.UNAVAILABLE] * 2
     assert result["hold"].status.tolist() == [Status.NOT_RUN] * 2
     assert result["progress"].status.tolist() == [Status.UNAVAILABLE] * 2
+
+
+def test_corner_containment_in_object_measures_the_directional_front() -> None:
+    graph = builtin_predicates().compile(
+        EvaluationSpec(
+            {
+                "front_aligned": PredicateSpec(
+                    "corner_containment_in_object",
+                    {"pose": "carton", "frame": "worktop"},
+                    {
+                        "corners": [[0.05, 0.0, 0.0]],
+                        "lower": [0.04, -0.01, -0.01],
+                        "upper": [0.06, 0.01, 0.01],
+                    },
+                )
+            },
+            ("front_aligned",),
+        ),
+        field_kinds={"carton": "object_frame", "worktop": "object_frame"},
+    )
+    half_turn_component = 2**-0.5
+    aligned = [0.0, 0.0, 0.0, 0.0, 0.0, half_turn_component, half_turn_component]
+    reversed_front = [*aligned[:5], -half_turn_component, half_turn_component]
+    result = graph.evaluate(
+        {
+            "carton": torch.tensor([aligned, reversed_front]),
+            "worktop": torch.tensor([aligned, aligned]),
+        },
+        batch_size=2,
+    )
+    assert result["front_aligned"].status.tolist() == [Status.SATISFIED, Status.FAILED]
 
 
 def test_shared_segment_sessions_preserve_selection_qualification_and_names():
@@ -434,6 +468,75 @@ def test_file_replay_uses_original_segment_and_qualifies_each_row(tmp_path):
         ]
         assert result.rules["hold"].witness_steps.tolist() == [[2, 3], [-1, -1]]
         assert result.rules["hold"].witness_revisions.tolist() == [[22, 23], [-1, -1]]
+
+
+def test_recorded_cable_checks_evaluate_without_dexsim():
+    code = """
+import importlib.abc
+import sys
+
+class NoDexSim(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "dexsim" or fullname.startswith("dexsim."):
+            raise AssertionError(f"Offline cable evaluation imported {fullname}")
+
+sys.meta_path.insert(0, NoDexSim())
+
+import torch
+from embodichain.lab.evaluation import (
+    EvaluationSpec,
+    EvaluationStatus,
+    PredicateSpec,
+    builtin_predicates,
+    evaluate_recorded_rules,
+)
+
+expected = {
+    "wrap_completed": EvaluationStatus.SATISFIED,
+    "rj45_complete": EvaluationStatus.SATISFIED,
+    "rj45_unknown_check": EvaluationStatus.UNAVAILABLE,
+}
+rules = {}
+fields = {}
+for quantity in expected:
+    field = f"cables/cable/{quantity}"
+    rules[quantity] = PredicateSpec(
+        "scalar_range", {"value": field}, {"minimum": 0.5, "maximum": 1.5}
+    )
+    fields[field] = {
+        "values": torch.tensor([[[1.0]]]),
+        "valid": torch.tensor([[True]]),
+        "descriptor": {
+            "entity_uid": "cable",
+            "quantity": quantity,
+            "coordinate_frame": "arena",
+            "representation": "scalar",
+            "units": ("1",),
+            "shape": (1,),
+            "dtype": "torch.float32",
+        },
+    }
+payload = {
+    "raw_observations": {
+        "schema_version": 1,
+        "env_ids": (0,),
+        "episode_ids": (1,),
+        "lengths": torch.tensor([0]),
+        "revisions": torch.tensor([[10]]),
+        "fields": fields,
+    },
+}
+compiled = builtin_predicates().compile(EvaluationSpec(rules, tuple(rules)))
+result = evaluate_recorded_rules(
+    compiled, payload, env_ids=(0,), episode_ids=(1,), scope="final"
+)
+for quantity, status in expected.items():
+    assert result.rules[quantity].status.tolist() == [status], quantity
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=60
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_recorded_joint_uses_native_order_and_rejects_foreign_field():

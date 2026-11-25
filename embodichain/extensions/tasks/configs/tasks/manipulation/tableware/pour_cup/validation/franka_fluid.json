@@ -1,0 +1,25 @@
+{
+  "status": "measured",
+  "deployment": "franka_fluid",
+  "seed": 0,
+  "device": "NVIDIA GeForce RTX 5090",
+  "engine": "dexsim-engine 0.6.0",
+  "renderer": "fast-rt",
+  "minimum_received_ml": 50,
+  "results": [
+    {
+      "case": "nominal",
+      "action_source": "Task Program expert",
+      "execution_outcome": {
+        "status": "success",
+        "control_steps": 751,
+        "segments_passed": 4
+      },
+      "physical_outcome": {
+        "success": true,
+        "final_received_ml": 171.2205
+      }
+    }
+  ],
+  "summary": "Seed 0: received 171.22 mL and returned the cup within 1.80 mm of its target."
+}

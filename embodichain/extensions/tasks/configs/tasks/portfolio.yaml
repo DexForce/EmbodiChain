@@ -1,0 +1,43 @@
+# Browsing purpose applies to all deployments unless overridden below.
+# Featured entries are starting points for a workflow, not policy qualifications.
+push_cube: {purpose: training, featured: [default, franka_visual]}
+go2_flat: {purpose: training, featured: [newton]}
+g1_flat: {purpose: training, featured: [newton]}
+anymal_c_flat: {purpose: training}
+go1_flat: {purpose: training}
+h1_2_flat: {purpose: training}
+microduck_flat: {purpose: training}
+g1_rough: {purpose: training}
+g1_motion:
+  purpose: training
+  overrides: {MotionTrackingModelRL: research}
+humanoid: {purpose: training}
+leap_cube_reorient: {purpose: training, featured: [default]}
+leap_cube_rotate_z: {purpose: training}
+leap_cube_face_turn: {purpose: training}
+shadow_pen_fixed: {purpose: training}
+shadow_pen_continuous: {purpose: training}
+drawer_storage: {purpose: showcase, featured: [ur5]}
+gaussian_pick_place: {purpose: showcase, featured: [office]}
+route_the_cable: {purpose: showcase, featured: [yam]}
+cloth_fold: {purpose: showcase}
+carton_stocking: {purpose: showcase}
+open_drawer: {purpose: showcase}
+hand_over: {purpose: showcase}
+repeated_pick_place: {purpose: showcase}
+blocks_ranking_rgb: {purpose: showcase}
+pour_water: {purpose: showcase, featured: [franka_fluid]}
+stack_blocks_two:
+  purpose: showcase
+  overrides: {policy_cobotmagic: research}
+blocks_ranking_size: {purpose: research}
+match_object_container: {purpose: research}
+place_object_drawer: {purpose: research}
+stack_cups: {purpose: research}
+peg_insertion: {purpose: research}
+gear_meshing: {purpose: research}
+nut_threading: {purpose: research}
+workspace_pose_pick_place: {purpose: reference}
+cart_pole: {purpose: reference}
+point_mass: {purpose: reference}
+franka_reach_apg: {purpose: reference}

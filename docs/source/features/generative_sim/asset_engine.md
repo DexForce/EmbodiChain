@@ -311,4 +311,5 @@ for client and generation entry points.
 | Rendering or thumbnail failure | Inspect EGL/offscreen rendering support and the recorded stage error; source conversion mode does not configure the renderer |
 
 For preview modes and asset loading, see [Previewing Assets](../../guides/preview_asset.md).
-For mesh preparation utilities outside this workflow, see [Toolkits](../toolkits/index.rst).
+For mesh preparation utilities outside this workflow, see
+[Tools](../toolkits/index.rst).

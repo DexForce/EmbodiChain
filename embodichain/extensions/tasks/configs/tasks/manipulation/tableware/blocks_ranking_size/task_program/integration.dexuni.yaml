@@ -1,0 +1,56 @@
+integration_id: blocks_ranking_size_reference
+program_id: blocks_ranking_size_reference
+requires:
+  scene_contract: blocks_ranking_size_reference_scene
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: blocks_ranking_size_reference_scene
+  registry_id: blocks_ranking_size_reference
+  rigid_objects:
+  - entity_id: block_1
+    dynamics: dynamic
+    affordances:
+    - entity_id: block_1_grasp
+      kind: antipodal_grasp
+  - entity_id: block_2
+    dynamics: dynamic
+  - entity_id: block_3
+    dynamics: dynamic
+    affordances:
+    - entity_id: block_3_grasp
+      kind: antipodal_grasp
+profile:
+  defaults:
+    pick_up:
+      primary: primary_manipulator
+    place:
+      primary: primary_manipulator
+  skill_options:
+    pick:
+      kind: pick_up
+      pre_grasp_distance: 0.08
+      lift_height: 0.1
+      hand_interp_steps: 28
+      grasp_settle_steps: 22
+      fixed_object_to_eef:
+        position:
+        - 0.0
+        - 0.0
+        - 0.0
+        rotation_matrix:
+        - - 1.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - -1.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - -1.0
+    place:
+      kind: place
+      lift_height: 0.1
+      hand_interp_steps: 24
+      preserve_current_object_orientation: true
+      release_settle_steps: 28
+  effect_monitors: {}

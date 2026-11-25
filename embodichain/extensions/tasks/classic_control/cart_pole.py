@@ -26,6 +26,7 @@ from embodichain.lab.sim.types import EnvObs
 __all__ = ["CartPoleEnv"]
 
 
+@register_env("CartPoleRL-DexUni-v1", max_episode_steps=50, supports_rl=True)
 @register_env("CartPoleRL", max_episode_steps=50, override=True, supports_rl=True)
 class CartPoleEnv(EmbodiedEnv):
     """

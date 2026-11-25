@@ -10,3 +10,8 @@ deployments:
     config: env.configured_rl.yaml
   franka_visual:
     config: task.franka.visual.yaml
+  dexuni:
+    config: env.dexuni.json
+  franka_visual_dexuni:
+    config: task.franka.visual.dexuni.yaml
+    note: Franka scripted expert and measured target region on DexUni.

@@ -103,6 +103,9 @@ Held-object guards and phase-effect gates are observational:
 - neither mechanism creates constraints, freezes objects, or overwrites poses.
 
 Pick gates attachment before lift. Place gates detachment before retract.
+For placement after a separate supported lowering step, set
+`PlaceOptions.approach_lift_height=0` to approach the release pose directly.
+`lift_height` still sets the retract clearance.
 HandOver owns independent source/destination transfer boundaries.
 
 ## Row-local state
@@ -201,9 +204,11 @@ physically qualified task needs a lower speed than the selected robot's limits.
 default) or `zero` (explicit position-only control).
 Configured execution policies decode the same field under `motion`.
 `AtomicSkill.build_plan` derives missing velocities after composite skills
-have assembled their final full-robot positions and timing. The first command,
-both ends of every stationary joint interval, and terminal settling commands
-use zero velocity; failed rows remain held.
+have assembled their final full-robot positions and timing. By default the first
+command, both ends of a stationary joint interval and terminal settling commands
+use zero velocity. For consecutive explicitly timed trajectories,
+`MoveJointsOptions.preserve_velocity_samples` preserves the supplied arrival
+velocities across phase boundaries. Failed rows remain held.
 
 `SimulationExecutionAdapter` always clears absent velocity references to zero;
 it never substitutes observed velocities or depends on peer active masks.

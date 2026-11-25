@@ -337,3 +337,41 @@ def test_franka_drawer_storage_contact_pairs() -> None:
         check=False,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+@pytest.mark.parametrize("tableware", [False, True])
+def test_dexuni_policy_success_measures_each_drawer(tableware):
+    from embodichain.extensions.tasks.manipulation.drawer_storage import (
+        DrawerStorageDexUniEnv,
+    )
+    from embodichain.extensions.tasks.manipulation.tableware.place_object_drawer import (
+        PlaceObjectDrawerDexUniEnv,
+    )
+
+    cls = PlaceObjectDrawerDexUniEnv if tableware else DrawerStorageDexUniEnv
+    env = object.__new__(cls)
+    count = 5
+    tray = torch.eye(4).repeat(count, 1, 1)
+    obj = tray.clone()
+    obj[:, :3, 3] = torch.tensor([0, 0, 0.09] if tableware else [0, 0.1, 0])
+    obj[0, 0, 3] = 0.3  # On the table outside the closed drawer.
+    rail = torch.zeros(count, 1)
+    rail[2] = 0.15
+    grip = torch.zeros(count, 1)
+    grip[3] = 0.03
+    if tableware:
+        obj[4, 2, 3] = 0.3  # Above the liner.
+    else:
+        obj[4, 0, 3] = 0.19  # Centre inside, but the cube protrudes.
+    env.sim = SimpleNamespace(
+        get_articulation=lambda uid: SimpleNamespace(
+            get_link_pose=lambda *a, **kw: tray, get_qpos=lambda: rail
+        ),
+        get_rigid_object=lambda uid: SimpleNamespace(
+            get_local_pose=lambda to_matrix=False: obj if to_matrix else obj[:, :3, 3]
+        ),
+    )
+    env.robot = SimpleNamespace(
+        get_qpos=lambda **kw: grip, get_link_pose=lambda link: torch.ones(count, 3)
+    )
+    assert env.is_task_success().tolist() == [False, True, False, False, False]

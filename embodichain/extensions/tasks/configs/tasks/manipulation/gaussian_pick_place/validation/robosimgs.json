@@ -1,0 +1,11 @@
+{
+  "status": "reported",
+  "deployment": "robosimgs",
+  "summary": "1/1 expert episode passed measured lift and settled placement checks on Default CPU physics with Hybrid rendering (seed 42).",
+  "source": "https://github.com/DexForce/EmbodiChain/blob/cd7b9fe0c2290d9e8bb2831d181c69931525ea77/examples/gym/gaussian_pick_place/QUALIFICATION.md",
+  "attempts": 1,
+  "successes": 1,
+  "seeds": [
+    42
+  ]
+}

@@ -1,0 +1,64 @@
+program_id: franka_rope_wrap
+instruction: Grasp the free end of the floor cable, wrap it around the post and hold the tightened wrap.
+targets: {}
+program:
+- segment: home
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.joint_trajectory_phase
+      arguments:
+        phase: home
+- segment: pickup
+  instruction: Locate the rope's free end, grasp it and lift it from the floor.
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_pickup
+      arguments:
+        target: pick_free_end
+- segment: approach_post
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.joint_trajectory_phase
+      arguments:
+        phase: approach_post
+- segment: orbit
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.joint_trajectory_phase
+      arguments:
+        phase: orbit
+- segment: tighten
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.joint_trajectory_phase
+      arguments:
+        phase: tighten
+- segment: settle
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.joint_trajectory_phase
+      arguments:
+        phase: settle
+- segment: hold_closed
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.joint_trajectory_phase
+      arguments:
+        phase: hold_closed
+  validators:
+  - kind: condition
+    ref: wrap_success

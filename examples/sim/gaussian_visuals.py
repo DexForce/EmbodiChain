@@ -22,7 +22,7 @@ Run from the repository root with a qualified DexSim integration build::
 
 For a display-referred SuperSplat/Inria background, pass
 --no-apply-display-srgb. The synthetic cube keeps the existing sRGB-transfer
-default; the switch is World-wide, including Gaussian body/link appearances.
+default. The switch applies to the entire rendered frame.
 Without --background a synthetic Gaussian cube is used. Physics and semantic
 geometry are independent of the captured appearance. Outputs include a camera
 mosaic and per-frame capture metadata. No Gaussian USD import is performed.
@@ -122,7 +122,7 @@ def main() -> None:
         help=(
             "Apply the shared sRGB display transfer (default: on for synthetic colors). "
             "Use --no-apply-display-srgb for SuperSplat/Inria captures; "
-            "this setting applies to every Gaussian asset in the World."
+            "this setting applies to the entire rendered frame."
         ),
     )
     parser.add_argument("--output", type=Path, default=Path("outputs/gaussian_visuals"))

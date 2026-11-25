@@ -1,0 +1,41 @@
+program_id: workspace_pose_pick_place
+instruction: Pick up the cuboid and place it at the scene-relative goal pose.
+targets:
+  drop_pose:
+    kind: scene_relative
+    entity: goal
+    frame: parent
+    position: [0.0, 0.0, 0.12]
+    quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+program:
+  kind: sequence
+  items:
+    - kind: segment
+      name: pick_cube
+      instruction: Grasp and lift the cube.
+      steps:
+        pick:
+          object: cube
+      validators:
+        - kind: object_lifted
+          object: cube
+          minimum_lift: 0.04
+    - kind: segment
+      name: place_cube
+      instruction: Put the cube at the goal and let it settle.
+      steps:
+        place:
+          object: cube
+          at: drop_pose
+      post:
+        - kind: wait_stable
+          entity: cube
+      validators:
+        - kind: object_near_relative_target
+          object: cube
+          reference: goal
+          displacement: [0.0, 0.0, 0.12]
+          position_tolerance: 0.02
+        - kind: object_upright
+          object: cube
+          maximum_tilt_degrees: 15.0

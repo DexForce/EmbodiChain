@@ -59,7 +59,9 @@ including perforated gear cores and bosses. It records the changed topology
 separately from the passive generator output. Peg tasks request a local support
 floor through public `bottom_thickness`; passive/raw generator defaults remain
 unchanged. Existing manifests pin their geometry, including an open bottom,
-and do not acquire later task defaults. Task registration, manager
+and do not acquire later task defaults. `thread_tip_up` bakes the nut-driven
+generator's bolt orientation into the fixture geometry. Assemble the nut from
+the exposed threaded end in the task reset frame. Task registration, manager
 semantics and training deployment belong to the environment/RL owners. Assembly
 deployments declare `rl_task` and register the common `EmbodiedEnv` through the
 configuration loader, with distinct IDs for distinct deployments. Physical

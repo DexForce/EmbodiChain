@@ -40,6 +40,11 @@ contact-path policy. Expert settings use the native option groups
 (`vbd_options`, `mujoco_options`, `collision_options`); unknown solver names
 are rejected for mappings and native config objects, and flat DexUni options
 are rejected by native validation.
+Rigid-only environments can opt into DexUni's native MuJoCo path for the whole
+scene with `dexuni_mujoco_joints_per_arena`. Supply the number of finalized
+joints in one arena, including fixed and free-body joints. The manager expands
+ownership across arenas and checks the finalized joint count. This option is
+exclusive with explicit native joint and articulation selectors.
 Fluid settings belong under [DexUni's nested DFSPH configuration](fluids.md);
 there is no separate fluid solver family. Robot presets select
 `newton_dexuni` before the MuJoCo aliases and portable fallbacks. Gradient mode
@@ -176,9 +181,8 @@ finalized solver-array mutations. `has_particle_collision` is
 per-shape participation; Arena isolation remains scene-owned.
 
 Rigid USD import rejects a parsed disabled body with authored child colliders
-but no retained collision pieces. The pinned DexSim SDK retains static-body
-collider ownership. Use direct compound construction on 0.6.0rc1 and 0.6.0rc2,
-whose USD parsers drop these colliders.
+but no retained collision pieces. Use direct compound construction with DexSim
+0.6.0rc1, 0.6.0rc2, 0.6.0 and 0.6.1rc1, whose USD parsers drop these colliders.
 
 File-backed Newton collision queries read each prepared shape independently,
 including cooked hulls, local poses and scales. Explicit particle-only boundaries

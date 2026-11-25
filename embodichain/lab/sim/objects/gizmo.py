@@ -40,7 +40,7 @@ from embodichain.utils import configclass, logger
 
 if TYPE_CHECKING:
     from dexsim.engine import GizmoController
-    from dexsim.kit.ik import IKGizmoController, NewtonChainIK
+    from dexsim.kit.ik import IKGizmoController, InteractiveIK
     from embodichain.lab.sim.motion.solvers import BaseSolver
 
 __all__ = ["Gizmo", "GizmoCfg", "create_robot_ik_gizmo_controller"]
@@ -336,7 +336,7 @@ def _build_robot_ik(
     robot: Robot,
     control_part: str,
     cfg: GizmoCfg,
-) -> tuple[_RobotGizmoAdapter, NewtonChainIK | _EmbodiChainIK, str, np.ndarray]:
+) -> tuple[_RobotGizmoAdapter, InteractiveIK | _EmbodiChainIK, str, np.ndarray]:
     if robot.num_instances != 1:
         raise RuntimeError(
             "Robot Gizmo supports exactly one environment, "
@@ -369,11 +369,11 @@ def _build_robot_ik(
         return adapter, _EmbodiChainIK(adapter, solver, tcp_pose), end_link, tcp_pose
 
     import warp as wp
-    from dexsim.kit.ik import NewtonChainIK, build_newton_model_from_urdf
+    from dexsim.kit.ik import InteractiveIK, RobotIK, build_newton_model_from_urdf
 
     with wp.ScopedDevice(cfg.ik_device or str(robot.device)):
         model = build_newton_model_from_urdf(robot.cfg.fpath, hide_visuals=True)
-        solver = NewtonChainIK(
+        robot_ik = RobotIK.from_newton_model(
             model,
             start_link=root_link,
             end_link=end_link,
@@ -384,16 +384,14 @@ def _build_robot_ik(
     # Newton preserves the start link's URDF rest transform in its reduced
     # model. Follow the live chain root (including upstream joints) while
     # retaining that model frame, rather than assuming the robot root is it.
-    root_index = list(solver.model.body_label).index(solver.info.start_link)
-    root_pose = solver.state.body_q.numpy()[root_index]
-    adapter.model_root_inverse = np.linalg.inv(
-        pose_from_position_rotation(root_pose[:3], root_pose[3:])
-    )
-    solver.set_qpos_from_joint_names(
+    adapter.model_root_inverse = np.linalg.inv(robot_ik.fk(link=root_link))
+    robot_ik.set_qpos_from_joint_names(
         adapter.get_actived_joint_names(),
         adapter.get_current_qpos(),
     )
+    solver = InteractiveIK(robot_ik)
     solver.sync_target_state_from_link(adapter, adapter.get_world_pose())
+    solver.reset_target_state_changed()
     logger.log_info(
         f"Robot Gizmo uses DexSim Newton IK for control part {control_part!r} "
         f"({root_link} -> {end_link})."
@@ -492,7 +490,7 @@ class Gizmo:
         self._interaction_owner: str | None = None
         self._pending_target_transform: torch.Tensor | None = None
         self._desired_target_transform: torch.Tensor | None = None
-        self._ik_solver: NewtonChainIK | _EmbodiChainIK | None = None
+        self._ik_solver: InteractiveIK | _EmbodiChainIK | None = None
         self._robot_adapter: _RobotGizmoAdapter | None = None
         self._robot_end_link: str | None = None
         self._robot_tcp_pose: np.ndarray | None = None

@@ -119,7 +119,7 @@ def main() -> None:
         help=(
             "Apply the shared sRGB display transfer (default: off for scanned display-referred colors). "
             "Use --no-apply-display-srgb for SuperSplat/Inria captures; "
-            "this setting applies to every Gaussian asset in the World."
+            "this setting applies to the entire rendered frame."
         ),
     )
     parser.add_argument("--output", type=Path, default=Path("outputs/gaussian_scenes"))
