@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Serve EmbodiChain queries over stdio for an explicitly selected session."""
+"""Serve EmbodiChain robot queries and authorized control operations over stdio."""
 
 from __future__ import annotations
 

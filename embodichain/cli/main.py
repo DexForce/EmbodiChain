@@ -40,7 +40,7 @@ COMMANDS = (
     Command(
         name="mcp",
         target="embodichain.cli.mcp:main",
-        help="Serve read-only robot state from an existing DexSim session over stdio.",
+        help="Serve robot state and optional dedicated-writer controls for an existing DexSim session.",
     ),
     Command(
         name="gensim",
