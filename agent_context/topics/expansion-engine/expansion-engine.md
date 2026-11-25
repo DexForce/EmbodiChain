@@ -7,7 +7,8 @@ algorithms stay in `sim.motion.expansion`; scene and workspace algorithms stay i
 | Change | Owner |
 |---|---|
 | CLI job commands | `embodichain/cli/expansion.py` |
-| Closed configuration and preflight | `embodichain/lab/expansion/configured.py` |
+| Shared task/job declaration and mode dispatch | `embodichain/lab/expansion/_job_config.py` |
+| Cohort configuration and preflight | `embodichain/lab/expansion/configured.py` |
 | Canonical in-memory session, lifecycle limits and coverage port | `embodichain/lab/expansion/session.py`, `session_cfg.py`, `coverage.py` |
 | Shared scheduling, admission and commit ports | `embodichain/lab/expansion/engine.py` |
 | Rolling workload × B execution in one caller-owned World | `embodichain/lab/expansion/workloads.py` |
@@ -27,6 +28,15 @@ algorithms stay in `sim.motion.expansion`; scene and workspace algorithms stay i
 | Portable one-episode dataset export | `embodichain/lab/expansion/episode_export.py` |
 | Rollout appearance and archived variant verification | `embodichain/lab/expansion/visual.py` |
 | Bounded media blocks | `embodichain/data_pipeline/recording/media.py` |
+
+An `expansion` block with `execution.mode: cohort|rolling` works in a task
+deployment or a standalone job that names its `deployment`. `expansion.config`
+resolves a preset before mode-specific validation. `run-task` delegates this
+block before constructing a Gym environment, leaving World ownership to the
+chosen collector. Cohort quotas apply to the job and rolling quotas to each
+operator. Preflight reports actual capacity and recovery support. Flat cohort
+jobs, task-bound Combined Expansion Profiles, and legacy rolling declarations
+remain supported. See the [configured job guide](../../../examples/expansion/engine/README.md#shared-task-and-job-configuration).
 
 `ExpansionEngine.from_job` resolves a deployment-owned backend and sensor suite.
 `run` initializes one World with the requested capacity; `resume` reconciles

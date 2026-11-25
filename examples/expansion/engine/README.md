@@ -50,6 +50,63 @@ native; the browser receives H.264 video over WebRTC.
 
 ## Run a configured job
 
+### Shared task and job configuration
+
+Put an `expansion` block with `execution.mode: cohort` or `rolling` in
+the task deployment and launch it with `embodichain run-task --gym-config TASK`.
+A standalone job uses the same block and adds a top-level `deployment` path.
+For example, this standalone cohort job can go next to `task.default.yaml`.
+
+```yaml
+deployment: task.default.yaml
+expansion:
+  execution: {mode: cohort, batch_size: 8, seed: 7}
+  collection: {output_dir: ./outputs/cohort, target_episodes: 8, max_attempts: 16}
+  validation: {collision_profile: ../scene_robot_feasibility/search.ur5.yaml}
+  physics:
+    mass_scale: {cube: [0.98, 1.02]}
+```
+
+[job.rolling.yaml](job.rolling.yaml) uses a reusable UR5 layout and validation
+preset. Its `expansion` block can also be placed in the referenced task, with any
+relative paths adjusted to that file. `expansion.config` accepts the body of the
+new block, a file containing only an outer `expansion` block, or an existing
+rolling configuration paired with `execution.mode: rolling`. Local fields
+override the preset and paths resolve from the file that declares them.
+
+| Setting | Cohort | Rolling |
+| --- | --- | --- |
+| Collection quota | `collection.target_episodes` for the job | `collection.episodes_per_operator` for each operator |
+| Parallel capacity | `execution.batch_size` | `execution.batch_size` per active group, up to `execution.workload_count` groups |
+| Scenes | `scene.atlas` | `scene.poses`, `scene.strategy`, layout and coverage options |
+| Motion | `trajectory.motion_profile`, source and timing options | `trajectory.operators` and settings for those operators |
+| Measurement | `validation.collision_profile` and optional prototype profile | Inline `validation` checks and contact permissions |
+| Media and storage | `observation` for capture and appearance, `collection.export_lerobot` for export | `observation.capture_media` for capture, per-episode LeRobot export through the rolling collector |
+
+Both modes use `collection.output_dir`, `collection.max_attempts`,
+`collection.max_wall_time_s`, `execution.max_steps` and `execution.settling_steps`.
+Attempt and wall-time budgets apply to the whole cohort job or to each rolling
+operator group.
+For layout-only rolling jobs, `trajectory: {operators: [object_pose]}` is
+sufficient. Spatial operators also require their editable phases and motion
+limits. The launcher accepts `--seed` and `--output-dir` overrides for a
+task-bound engine job. `--num_envs`, `--device` and `--physics` can confirm
+the effective job and deployment values.
+
+```bash
+embodichain expansion preflight --job examples/expansion/engine/job.rolling.yaml
+embodichain expansion run --job examples/expansion/engine/job.rolling.yaml
+```
+
+Preflight reports the resolved World capacity and quotas before opening a World.
+Cohort jobs support `resume`. Rolling jobs start with a fresh output directory
+and report per-operator results in `expansion.json`. Use
+`expansion inspect --output` on a rolling result's `dataset/<operator>` directory.
+Flat cohort job files, task-owned Combined Expansion Profiles, and the
+existing Python rolling entry continue to use their original formats.
+
+### Flat cohort job examples
+
 From the repository root, with the simulation dependencies installed:
 
 ```bash

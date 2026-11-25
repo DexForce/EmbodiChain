@@ -287,11 +287,23 @@ def _semantic_value(value, hashes):
 
 
 def load_expansion_job(path: str | Path) -> ExpansionRunCfg:
-    """Read a closed YAML/JSON job and resolve paths relative to that file."""
-    import yaml
+    """Read a cohort job from a flat or nested YAML/JSON declaration.
 
-    path = Path(path).expanduser().resolve()
-    values = yaml.safe_load(path.read_text())
+    Args:
+        path: Job file; resource paths resolve from the file that declares them.
+
+    Returns:
+        Validated cohort settings for :meth:`ExpansionEngine.from_job`.
+    """
+    from ._job_config import _load_job
+
+    job = _load_job(path)
+    if not isinstance(job, ExpansionRunCfg):
+        raise ValueError("This operation requires a cohort expansion job")
+    return job
+
+
+def _decode_cohort_job(values: object, base_dir: Path) -> ExpansionRunCfg:
     if not isinstance(values, dict) or set(values) - {
         field.name for field in fields(ExpansionRunCfg)
     }:
@@ -312,7 +324,7 @@ def load_expansion_job(path: str | Path) -> ExpansionRunCfg:
         if value is not None:
             if not isinstance(value, str):
                 raise ValueError(f"{key} must be a path string")
-            values[key] = str((path.parent / Path(value).expanduser()).resolve())
+            values[key] = str((base_dir / Path(value).expanduser()).resolve())
     return ExpansionRunCfg(**values)
 
 
@@ -598,6 +610,7 @@ def preflight_expansion_job(cfg: ExpansionRunCfg) -> dict[str, object]:
         ),
         "source": cfg.source,
         "physics_backend": backend,
+        "simulation_device": str(environment.sim_cfg.device),
         "capabilities": {
             "batch_execution": True,
             "rigid_parameters": ["mass", "inertia", "friction", "center_of_mass"],

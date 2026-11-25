@@ -212,9 +212,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         except (ValueError, OSError) as exc:
             parser.error(str(exc))
         return 2 if coverage and not coverage["coverage_complete"] else 0
-    from embodichain.lab.expansion.configured import (
-        load_expansion_job,
-    )
+    from embodichain.lab.expansion._job_config import _execute_job, _load_job
     from embodichain.lab.expansion.workflow import (
         inspect_expansion_job,
     )
@@ -230,17 +228,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         if args.operation == "resume" and args.stage != "all":
             parser.error("use --output with --stage export")
-        cfg = load_expansion_job(args.job)
-        from embodichain.lab.expansion import ExpansionEngine
-
-        engine = ExpansionEngine.from_job(cfg)
-        result = getattr(engine, args.operation)()
+        try:
+            result = _execute_job(_load_job(args.job), args.operation)
+        except (ValueError, OSError) as exc:
+            parser.error(str(exc))
     printable = {
         key: value for key, value in result.items() if key != "resolved_deployment"
     }
     print(json.dumps(printable, indent=2, sort_keys=True))
     if args.operation in {"run", "resume"} and not result.get(
-        "stage_complete", result["complete"]
+        "stage_complete", result.get("complete", False)
     ):
         raise SystemExit(2)
     return 0

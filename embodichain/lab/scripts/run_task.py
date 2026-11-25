@@ -52,7 +52,6 @@ from embodichain.lab.gym.utils.gym_utils import (
     build_env_cfg_from_args,
     configure_fluid_spacing,
     load_trajectory,
-    _load_expansion_declaration,
 )
 from embodichain.lab.gym.utils.registration import (
     discover_task_packages,
@@ -896,6 +895,7 @@ def _resolve_expansion_request(
     gym_config: Mapping[str, Any],
 ) -> tuple[Any, tuple[int, ...], Path, Mapping[str, Any]] | None:
     """Resolve a task-bound or CLI-selected Expansion Profile."""
+    from embodichain.lab.expansion._job_config import _load_expansion_declaration
     from embodichain.utils.config_paths import resolve_config_path
     from embodichain.utils.utility import load_config
     from embodichain.lab.sim.motion.expansion import (
@@ -2055,7 +2055,89 @@ def _abort_and_close_env(env: Any, *, exit_process: bool | None = None) -> None:
         raise abort_error
 
 
-@_native_auto_renderer("fast-rt")
+def _run_task_expansion(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> bool:
+    """Hand engine declarations to their World owner before building a Gym env."""
+    from embodichain.lab.expansion._job_config import (
+        _decode_job,
+        _execute_job,
+        _has_job_mode,
+        _load_expansion_declaration,
+    )
+    from embodichain.utils.config_paths import resolve_config_path
+    from embodichain.utils.utility import load_config
+
+    if not getattr(args, "gym_config", None):
+        return False
+    deployment = resolve_config_path(args.gym_config).resolve()
+    if not deployment.is_file():
+        return False
+    task = load_config(deployment)
+    if "expansion" not in task:
+        return False
+    try:
+        binding, _ = _load_expansion_declaration(
+            task["expansion"], base_dir=deployment.parent
+        )
+        if not _has_job_mode(binding):
+            return False
+        supported = {
+            "gym_config",
+            "seed",
+            "headless",
+            "expansion_output_dir",
+            "num_envs",
+            "physics",
+            "device",
+        }
+        unsupported = sorted(
+            f"--{name}"
+            for name, value in vars(args).items()
+            if name not in supported and value != parser.get_default(name)
+        )
+        if unsupported:
+            parser.error(
+                f"Engine expansion does not use {', '.join(unsupported)}. Configure the expansion or its deployment instead."
+            )
+        if args.seed is not None:
+            binding["execution"]["seed"] = args.seed
+        if args.expansion_output_dir is not None:
+            if not args.expansion_output_dir.strip():
+                parser.error("--output-dir must be a nonempty path")
+            collection = _mapping_or_empty(
+                binding.get("collection"), "expansion.collection"
+            )
+            binding["collection"] = {
+                **collection,
+                "output_dir": str(
+                    Path(args.expansion_output_dir).expanduser().resolve()
+                ),
+            }
+        job = _decode_job(deployment, binding)
+        confirmations = {
+            "num_envs": "num_envs",
+            "physics": "physics_backend",
+            "device": "simulation_device",
+        }
+        if any(getattr(args, name) is not None for name in confirmations):
+            report = _execute_job(job, "preflight")
+            for name, field in confirmations.items():
+                requested = getattr(args, name)
+                if requested is not None and requested != report[field]:
+                    parser.error(
+                        f"--{name}={requested} differs from the expansion's resolved value {report[field]}. "
+                        "Select the value in the expansion or deployment configuration."
+                    )
+        result = _execute_job(job, "run")
+    except (ValueError, OSError) as exc:
+        parser.error(str(exc))
+    print(json.dumps(result, indent=2, sort_keys=True))
+    if not result["complete"]:
+        raise SystemExit(2)
+    return True
+
+
 def cli(argv: Sequence[str] | None = None) -> None:
     """Command-line interface for environment runner.
 
@@ -2088,6 +2170,13 @@ def cli(argv: Sequence[str] | None = None) -> None:
             log_error("--replay and --preview are mutually exclusive.")
             return
 
+    if _run_task_expansion(args, parser):
+        return
+    _run_gym_task(args)
+
+
+@_native_auto_renderer("fast-rt")
+def _run_gym_task(args: argparse.Namespace) -> None:
     # Step 1: Discover all task packages via entry_points
     discover_task_packages()
 
