@@ -2161,7 +2161,10 @@ def test_ik_smoothing_preserves_contact_and_phase_event_derivatives() -> None:
     assert after < before
 
 
-def test_place_holds_fully_open_before_retracting_when_configured() -> None:
+@pytest.mark.parametrize("approach_lift_height", [None, 0.0])
+def test_place_holds_fully_open_before_retracting_when_configured(
+    approach_lift_height: float | None,
+) -> None:
     generator = _motion_generator()
     generator.generate = Mock(wraps=generator.generate)
     action = _bind_action(generator, Place())
@@ -2177,7 +2180,9 @@ def test_place_holds_fully_open_before_retracting_when_configured() -> None:
         goal=PlaceGoal(SceneEntityPose("destination")),
         binding=_binding(action),
         motion_policy=MotionPolicy(sample_count=sample_count),
-        skill_options=PlaceOptions(release_settle_steps=settle_steps),
+        skill_options=PlaceOptions(
+            release_settle_steps=settle_steps, approach_lift_height=approach_lift_height
+        ),
     )
 
     destination_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
@@ -2208,8 +2213,9 @@ def test_place_holds_fully_open_before_retracting_when_configured() -> None:
     generator.generate.assert_called_once()
     target_states = generator.generate.call_args.args[0]
     assert len(target_states) == 3
+    expected_approach = 0.1 if approach_lift_height is None else 0.0
     assert [state.xpos[0, 2, 3].item() for state in target_states] == pytest.approx(
-        [0.1, 0.0, 0.1]
+        [expected_approach, 0.0, 0.1]
     )
     assert generator.generate.call_args.kwargs["options"].sample_count == (
         sample_count - PlaceOptions().hand_interp_steps
