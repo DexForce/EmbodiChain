@@ -549,6 +549,45 @@ def test_native_auto_is_not_a_third_arm_in_expansion_or_witness():
         _supported_program(ops)
 
 
+def test_native_custom_handover_keeps_auto_within_the_named_arms():
+    from embodichain.gen_sim.task_engine.hybrid import verify_witness
+    from embodichain.gen_sim.task_spec import TaskSpec
+
+    objective = dict(
+        roles=[{"id": obj} for obj in ("a", "b", "c")],
+        goal=[
+            dict(
+                id="transfer",
+                predicate="handover_complete",
+                subject="a",
+                arguments=dict(transfer_arm="gripper_a", receive_arm="gripper_b"),
+            )
+        ],
+    )
+    calls = [
+        dict(kind="pick", object="a", resources={"primary": "gripper_a"}),
+        dict(
+            kind="hand_over",
+            object="a",
+            resources=dict(source="gripper_a", destination="gripper_b"),
+        ),
+        dict(kind="pick", object="b", resources={"primary": "gripper_a"}),
+    ]
+
+    def witness(sequence):
+        result = author_goal_plan("Hand over A.", "custom_arms", objective, sequence)
+        return verify_witness(
+            TaskSpec.from_dict(result["task_spec"]),
+            result["semantic_task_graph"],
+            support_targets={},
+        )
+
+    assert witness(calls)["status"] == "covered"
+    result = witness([*calls, dict(kind="pick", object="c")])
+    assert result["status"] == "uncovered"
+    assert [row["node_id"] for row in result["resource_conflicts"]] == ["call_4"]
+
+
 @pytest.mark.parametrize("transfer", [False, True])
 def test_native_explicit_continuation_can_constrain_auto_pick(transfer):
     from embodichain.gen_sim.task_engine.hybrid import (
@@ -873,6 +912,56 @@ def _context(*objects):
     return dict(
         schema_version="embodichain.task-scene-context/v1", objects=list(objects)
     )
+
+
+def test_hybrid_archive_with_named_resource_can_be_loaded_and_viewed(
+    native_hybrid, tmp_path
+):
+    from hashlib import sha256
+
+    from embodichain.gen_sim.task_engine._review import write_review
+    from embodichain.gen_sim.task_spec import canonical_hash
+    from embodichain.gen_sim.workflow import load_task_plan
+
+    result = native_hybrid(
+        [
+            dict(
+                template="E1",
+                object="cup",
+                reference="tray",
+                relation="on",
+                quote="Place the cup on the tray.",
+            )
+        ]
+    )
+    root = tmp_path / "plan"
+    # Re-seal the fixture in the legacy format with its explicit resource identity.
+    graph = result["semantic_task_graph"]
+    for node in graph["nodes"]:
+        node["call"]["resources"] = {"primary": "gripper_a"}
+    digest = canonical_hash(graph)
+    manifest_path = root / "task_plan_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["semantic_graph_sha256"] = digest
+    run_manifest = json.loads((root / "run_manifest.json").read_text())
+    run_manifest["graph_digest"] = digest
+    for name, payload in (
+        ("semantic_task_graph.json", graph),
+        ("run_manifest.json", run_manifest),
+    ):
+        artifact = root / name
+        artifact.write_text(json.dumps(payload))
+        manifest["artifacts"][name] = sha256(artifact.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest))
+    sealed = manifest_path.read_bytes()
+
+    loaded = load_task_plan(root)
+    assert loaded["schema_version"] == "embodichain.hybrid-task-plan/v1"
+    assert loaded["semantic_graph_sha256"] == digest
+    preview = tmp_path / "custom-arm.html"
+    write_review(root, preview)
+    assert '"gripper_a"' in preview.read_text()
+    assert manifest_path.read_bytes() == sealed
 
 
 def test_hybrid_keeps_explicit_destination_without_adding_background_roles(

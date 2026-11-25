@@ -31,7 +31,6 @@ from .authoring_intent import (
     _PROMPT as _INTENT_FORMAT,
     AuthoringEvidenceError,
     _advance_arms,
-    _arm_options,
     _ArmState,
     _expand_fact_shorthand,
     _relation_pairs,
@@ -753,12 +752,25 @@ def _review_scope_guards(audit: Any) -> Counter[str]:
 def _native_resource_conflicts(
     calls: Iterable[tuple[str, dict[str, Any]]],
 ) -> list[dict[str, Any]]:
-    """Check feasible two-arm holdings without assigning an authored auto call."""
+    """Check feasible holdings without rewriting logical resource IDs."""
     from embodichain.lab.task_program.language.semantic_contracts import (
         semantic_planning_catalog,
     )
 
     catalog = semantic_planning_catalog()["calls"]
+    calls = tuple(calls)
+    named = {
+        resource
+        for _, call in calls
+        for resource in call.get("resources", {}).values()
+        if resource != "auto"
+    }
+    # Legacy graphs use their own resource labels, not extra left/right aliases.
+    if named <= {"left", "right"}:
+        named = {"left", "right"}
+    elif len(named) == 1:
+        named.add("auto")  # One unnamed slot in a partially named two-arm plan.
+    auto_choices = tuple((arm,) for arm in sorted(named))
     states = {_ArmState()}
     conflicts = []
     verbs = dict(
@@ -778,14 +790,12 @@ def _native_resource_conflicts(
         subject = args.get("object", args.get("handle"))
         res = call.get("resources", {})
         primary = res.get("primary", "auto")
-        choices = (
-            _arm_options([primary]) if primary in {"left", "right", "auto"} else ()
-        )
+        choices = auto_choices if primary == "auto" else ((primary,),)
         if effect == "transfer":
             source, destination = res["source"], res["destination"]
             choices = (
                 ((source, destination),)
-                if {source, destination} == {"left", "right"}
+                if source != destination and "auto" not in (source, destination)
                 else ()
             )
 

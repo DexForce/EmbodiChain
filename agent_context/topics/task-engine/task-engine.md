@@ -22,6 +22,9 @@ audit; invalid interpretations cannot publish. Align, pour and handover add
 hold or return-and-release only from explicit terminal instructions. Pouring
 restores orientation, not position. Native acquisition and witness checks track
 feasible two-arm assignments without treating `auto` as a third resource.
+Archived Hybrid witnesses retain explicit resource IDs. With custom IDs, `auto`
+uses the supplied names (and an unnamed second slot if only one is supplied)
+without guessing physical aliases.
 
 Without deployment or explicit grounding, `authoring_intent.py` supports scoped
 typed steps when native E1–E9 lose source requirements. Effects hold at step
