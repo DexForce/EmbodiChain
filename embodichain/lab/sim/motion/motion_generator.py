@@ -63,7 +63,12 @@ from embodichain.utils.math import (
     quat_error_magnitude,
     quat_from_matrix,
 )
-from .planners._joint_limits import _joint_velocity_limits, _plan_joint_ids
+from .planners._joint_limits import (
+    _cap_request_limit,
+    _joint_velocity_limits,
+    _plan_joint_ids,
+)
+from .planners.neural_planner import NeuralPlanOptions
 from .limits import authored_joint_velocity_limits
 from .planners.utils import (
     MoveType,
@@ -621,6 +626,30 @@ class MotionGenerator:
         """
         if sample_count is not None and sample_count < 2:
             raise ValueError("sample_count must be at least 2.")
+        planner_type = getattr(getattr(self.planner, "cfg", None), "planner_type", None)
+        if planner_type == "neural" and (
+            velocity_limit is not None or acceleration_limit is not None
+        ):
+            resolved = (
+                self.planner.default_plan_options()
+                if plan_opts is None
+                else deepcopy(plan_opts)
+            )
+            if isinstance(resolved, NeuralPlanOptions) and (
+                resolved.constraints is not None
+                or self.planner.cfg.constraints is not None
+            ):
+                # Generic budgets tighten an opted-in TOPPRA request. A raw
+                # Atomic Skill can still supply its ordinary acceleration budget.
+                limits = dict(resolved.constraints or {})
+                for key, cap in (
+                    ("velocity", velocity_limit),
+                    ("acceleration", acceleration_limit),
+                ):
+                    if cap is not None:
+                        limits[key] = _cap_request_limit(limits.get(key), cap)
+                resolved.constraints = limits
+            return resolved
         if plan_opts is not None:
             resolved = deepcopy(plan_opts)
             if isinstance(resolved, CuroboPlanOptions):
@@ -629,7 +658,6 @@ class MotionGenerator:
                 if acceleration_limit is not None:
                     resolved.max_acceleration = float(acceleration_limit)
             return resolved
-        planner_type = getattr(getattr(self.planner, "cfg", None), "planner_type", None)
         if planner_type == "curobo":
             return CuroboPlanOptions(
                 max_velocity=(

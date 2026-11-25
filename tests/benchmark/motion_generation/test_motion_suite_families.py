@@ -362,7 +362,7 @@ def test_component_ur5_policy_tcp_is_inverse_of_the_component_solver_tcp():
     candidate = next(spec for spec in suite.planners if spec.id == "nmg")
     policy_tcp = torch.tensor(candidate.config["runtime_tcp_from_policy_tcp"])
     torch.testing.assert_close(runtime_tcp @ policy_tcp, torch.eye(4))
-    assert candidate.config["num_arm_joints"] == 6
+    assert {"num_arm_joints", "num_waypoints"}.isdisjoint(candidate.config)
     assert candidate.enabled is False
 
 

@@ -14,7 +14,7 @@ prepared separately by each example.
 
 ## Choose a model
 
-| Capability | [NeRD](neural_dynamics/nerd.md) | [Robot world model (RWM)](neural_dynamics/rwm.md) | [LeWM](neural_dynamics/lewm.md) | [RigidFormer](neural_dynamics/rigidformer.md) | [WorldParticle](neural_dynamics/worldparticle.md) |
+| Capability | [NeRD](nerd.md) | [Robot world model (RWM)](rwm.md) | [LeWM](lewm.md) | [RigidFormer](rigidformer.md) | [WorldParticle](worldparticle.md) |
 | --- | --- | --- | --- | --- | --- |
 | Prediction subject | Articulated robot state | Robot state at a fixed control period | Visual environment dynamics | Interacting rigid objects | Particles with static authored boundaries |
 | Architecture | Causal Transformer over history | MLP with frame-local state integration | ViT image encoder and action-conditioned causal predictor | Geometry encoder and attention with anchor prediction | Source particle network with local convolution and attention |
@@ -43,11 +43,11 @@ workflow and available validation:
 ```{toctree}
 :maxdepth: 1
 
-neural_dynamics/nerd
-neural_dynamics/rwm
-neural_dynamics/lewm
-neural_dynamics/rigidformer
-neural_dynamics/worldparticle
+nerd
+rwm
+lewm
+rigidformer
+worldparticle
 ```
 
 ## Shared supervised training
@@ -75,7 +75,7 @@ embodichain train-sl --config /path/to/recipe.yaml --resume /path/to/train/last.
 Relative paths in SL recipes resolve from the working directory. Use a fresh
 `trainer.output_dir` for a new run. Recovery uses the same recipe, data and
 model identity; changing the output destination does not make an incompatible
-checkpoint resumable. The [SL API and launch guide](../api_reference/embodichain/embodichain.learning.sl.rst)
+checkpoint resumable. The [SL API and launch guide](../../../api_reference/embodichain/embodichain.learning.sl.rst)
 describes checkpoints, distributed launches and per-rank batch sizes.
 
 The shared trainer owns optimizer updates and recovery. Each family owns its
@@ -104,13 +104,13 @@ engine comparisons and controlled fitting. Their reported results apply to the
 recorded data, physical setup and evaluation protocol. Use each model's
 reference workflow for published-weight or retraining comparisons.
 
-- [Official model API](../api_reference/model_catalogs.rst): NeRD network,
+- [Official model API](../../../api_reference/model_catalogs.rst): NeRD network,
   transition/geometry, optional Providers and WorldParticle inference, with a
   link to the RWM API.
-- [RWM API](../api_reference/rwm.rst): state integration, prediction, replay
+- [RWM API](../../../api_reference/rwm.rst): state integration, prediction, replay
   and supervised training.
-- [LeWM API](../api_reference/lewm.rst) covers the model, SL recipe and CEM planner.
-- [RigidFormer API](../api_reference/model_rigidformer.rst): geometry inputs,
+- [LeWM API](../../../api_reference/lewm.rst) covers the model, SL recipe and CEM planner.
+- [RigidFormer API](../../../api_reference/model_rigidformer.rst): geometry inputs,
   checkpoint loading, MOVi source, objective and trainer factory.
 - [Model catalog](https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/models/README.md):
   model families and public import conventions.
