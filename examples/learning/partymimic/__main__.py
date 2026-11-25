@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     import torch
 
+    from dexsim.runtime import SessionContext
     from dexsim.scene import ContactQuery
     from embodichain.extensions.models.policies.partymimic import PartyMimicPolicy
     from embodichain.lab.sim import SimulationManager
@@ -54,7 +55,12 @@ def _sha256(path: Path) -> str:
 
 
 def _run(
-    args: argparse.Namespace, scenario: str, policy: PartyMimicPolicy
+    args: argparse.Namespace,
+    scenario: str,
+    policy: PartyMimicPolicy,
+    *,
+    context: SessionContext | None = None,
+    prepared_scene: tuple[Path, Path] | None = None,
 ) -> dict[str, Any]:
     import imageio.v2 as imageio
     import numpy as np
@@ -87,6 +93,7 @@ def _run(
     )
     from ._scene import WristCrateClearance, convert_scene, write_mjcf
 
+    assets_started = perf_counter()
     output = args.output_dir
     asset_dir = output / "scenes"
     asset_dir.mkdir(exist_ok=True)
@@ -101,18 +108,24 @@ def _run(
         rp_hands=args.hand == "rp",
     )
     payload_kg = 0.0 if args.unloaded else reference.payload_kg
-    mjcf = asset_dir / f"{stem}.xml"
-    usd = mjcf.with_suffix(".usdc")
-    model = write_mjcf(
-        args.robot_xml,
-        mjcf,
-        scenario,
-        reference,
-        policy,
-        payload_kg=payload_kg,
-        hand_model=args.hand,
-    )
-    convert_scene(mjcf, model, usd, args.converter_python, policy, reference)
+    if prepared_scene is None:
+        mjcf = asset_dir / f"{stem}.xml"
+        usd = mjcf.with_suffix(".usdc")
+        model = write_mjcf(
+            args.robot_xml,
+            mjcf,
+            scenario,
+            reference,
+            policy,
+            payload_kg=payload_kg,
+            hand_model=args.hand,
+        )
+        convert_scene(mjcf, model, usd, args.converter_python, policy, reference)
+    else:
+        import mujoco
+
+        mjcf, usd = prepared_scene
+        model = mujoco.MjModel.from_xml_path(str(mjcf))
     native_wrist_to_crate = model.eq_data[:, 3:6].copy()
     reflection = SagittalMirror(model, policy.joint_names) if video_step else None
     policy_reference = (
@@ -120,6 +133,7 @@ def _run(
         if reflection is not None
         else reference.poses
     )
+    assets_duration = perf_counter() - assets_started
 
     want_video = not args.no_video
     cpu_physics = args.device == "cpu"
@@ -148,57 +162,91 @@ def _run(
             **mujoco_options,
         }
     resolution = _VIDEO_RESOLUTION
-    sim = SimulationManager(
-        SimulationManagerCfg(
-            num_envs=1,
-            headless=True,
-            device=args.device,
-            gpu_id=torch.device(args.device).index or 0,
-            width=resolution[0],
-            height=resolution[1],
-            enable_ground_plane=False,
-            enable_entity_gizmo=False,
-            visualization=VisualizationCfg(backend="none"),
-            render_cfg=RenderCfg(
-                renderer="fast-rt" if want_video else "no-render", spp=8
-            ),
-            physics_cfg=NewtonPhysicsCfg(
-                device=args.device,
-                num_substeps=1,
-                physics_dt=PHYSICS_DT,
-                sync_to_renderer=False,
-                solver_cfg=solver_cfg,
-            ),
-        )
-    )
+    sim = None
+    attachment = None
     camera = None
     try:
-        assets = sim.add_usd(
-            UsdImportCfg(name="rp1_carry", source=UsdSourceCfg(file_path=str(usd)))
-        )
-        robot = next(
-            asset for asset in assets.values() if isinstance(asset, Articulation)
-        )
-        if want_video:
-            for name, direction, intensity in (
-                ("key", (-0.52, 0.46, -0.71), 3.0),
-                ("fill", (0.38, -0.46, -0.80), 0.9),
-            ):
-                sim.add_light(
-                    LightCfg(
-                        uid=name,
-                        light_type="direction",
-                        direction=direction,
-                        intensity=intensity,
-                    )
+        scene_started = perf_counter()
+        if context is None:
+            sim = SimulationManager(
+                SimulationManagerCfg(
+                    num_envs=1,
+                    headless=True,
+                    device=args.device,
+                    gpu_id=torch.device(args.device).index or 0,
+                    width=resolution[0],
+                    height=resolution[1],
+                    enable_ground_plane=False,
+                    enable_entity_gizmo=False,
+                    visualization=VisualizationCfg(backend="none"),
+                    render_cfg=RenderCfg(
+                        renderer="fast-rt" if want_video else "no-render", spp=8
+                    ),
+                    physics_cfg=NewtonPhysicsCfg(
+                        device=args.device,
+                        num_substeps=1,
+                        physics_dt=PHYSICS_DT,
+                        sync_to_renderer=False,
+                        solver_cfg=solver_cfg,
+                    ),
                 )
-        sim.prepare()
-        scene = sim.spawn_result
+            )
+            assets = sim.add_usd(
+                UsdImportCfg(name="rp1_carry", source=UsdSourceCfg(file_path=str(usd)))
+            )
+            robot = next(
+                asset for asset in assets.values() if isinstance(asset, Articulation)
+            )
+            if want_video:
+                for name, direction, intensity in (
+                    ("key", (-0.52, 0.46, -0.71), 3.0),
+                    ("fill", (0.38, -0.46, -0.80), 0.9),
+                ):
+                    sim.add_light(
+                        LightCfg(
+                            uid=name,
+                            light_type="direction",
+                            direction=direction,
+                            intensity=intensity,
+                        )
+                    )
+            sim.prepare()
+            scene = sim.spawn_result
+            crate = next(
+                (asset for asset in assets.values() if asset.uid == "carry_crate"), None
+            )
+            device = sim.device
+
+            def advance(steps: int) -> None:
+                sim.update(step=steps, physics_dt=PHYSICS_DT, render_final_step=False)
+
+            def clock() -> float:
+                return sim.simulation_time
+
+            sync_render_state = sim.sync_render_state
+        else:
+            from .borrowed import _attach
+
+            attachment, backend = _attach(context, usd, output, video=want_video)
+            scene = context.scene
+            robot = attachment.get_robot("base_link")
+            crate = attachment.get_rigid_object("carry_crate")
+            device = attachment.device
+
+            def advance(steps: int) -> None:
+                for _ in range(steps):
+                    context.world.update(PHYSICS_DT)
+
+            def clock() -> float:
+                return scene.get_simulation_time()
+
+            def sync_render_state() -> None:
+                backend.sync_to_dexsim(context.world)
+
+        scene_duration = perf_counter() - scene_started
+        rollout_started = perf_counter()
         solver_features = (scene.get_solver_diagnostics() or {}).get("features", {})
         native_path = {path.rsplit("/", 1)[-1]: path for path in scene.get_paths()}
-        crate = next(
-            (asset for asset in assets.values() if asset.uid == "carry_crate"), None
-        )
         if payload_kg > 0 and (crate is None or len(native_wrist_to_crate) != 2):
             raise RuntimeError(
                 "The payload scene requires a rigid crate and two welds."
@@ -266,10 +314,10 @@ def _run(
                         ),
                     )
 
-        q0 = torch.as_tensor(reference.initial_joints[None], device=sim.device)
+        q0 = torch.as_tensor(reference.initial_joints[None], device=device)
         robot.set_state(
-            root_pose=torch.as_tensor(reference.poses[0, 0:1], device=sim.device),
-            root_velocity=torch.zeros((1, 6), device=sim.device),
+            root_pose=torch.as_tensor(reference.poses[0, 0:1], device=device),
+            root_velocity=torch.zeros((1, 6), device=device),
             qpos=q0,
             qvel=torch.zeros_like(q0),
             target_qpos=q0,
@@ -320,10 +368,17 @@ def _run(
             initial_torso_rotation = Rotation.from_quat(
                 robot.body_data.body_link_pose[0, torso_index, 3:].cpu().numpy()
             )
-        start_time = sim.simulation_time
+        start_time = clock()
         physics_steps_per_command = round(CONTROL_DT / PHYSICS_DT)
 
         with ExitStack() as stack:
+            trajectory = (
+                stack.enter_context(
+                    (output / "trajectory.jsonl").open("w", encoding="utf-8")
+                )
+                if context is not None
+                else None
+            )
             video = None
             if want_video:
                 # The source platform's projected edges give a roughly 865 px focal
@@ -347,7 +402,7 @@ def _run(
                 video = stack.enter_context(
                     imageio.get_writer(
                         output / f"{stem}.mp4",
-                        fps=_VIDEO_FPS,
+                        fps=_VIDEO_FPS if context is None else 20,
                         codec="libx264",
                         pixelformat="yuv420p",
                         quality=8,
@@ -363,17 +418,27 @@ def _run(
                 if reflection is not None:
                     target = reflection.joints(target)
                 robot.set_qpos(
-                    torch.as_tensor(target[None], device=sim.device),
+                    torch.as_tensor(target[None], device=device),
                     joint_ids=target_joints,
                     clamp_target_qpos=False,
                 )
-                sim.update(
-                    step=physics_steps_per_command,
-                    physics_dt=PHYSICS_DT,
-                    render_final_step=False,
-                )
+                advance(physics_steps_per_command)
                 state, root = read()
                 loop_ms.append(1000 * (perf_counter() - start))
+                if trajectory is not None:
+                    trajectory.write(
+                        json.dumps(
+                            {
+                                "control_step": frame + 1,
+                                "simulation_time_s": clock() - start_time,
+                                "target_qpos": target.tolist(),
+                                "qpos": state.joint_position.tolist(),
+                                "qvel": state.joint_velocity.tolist(),
+                                "root_pose": root.tolist(),
+                            }
+                        )
+                        + "\n"
+                    )
 
                 min_root_height = min(min_root_height, float(root[2]))
                 up_z = Rotation.from_quat(root[3:]).as_matrix()[2, 2]
@@ -449,7 +514,7 @@ def _run(
                         center.tolist(),
                         [0, 0, 1],
                     )
-                    sim.sync_render_state()
+                    sync_render_state()
                     camera.render()
                     rgb = np.array(camera.get_rgb_map(), copy=True)[..., :3]
                     if np.issubdtype(rgb.dtype, np.floating):
@@ -457,7 +522,7 @@ def _run(
                     video.append_data(rgb)
 
         dx, dy = (float(x) for x in root[:2] - start_xyz[:2])
-        duration = sim.simulation_time - start_time
+        duration = clock() - start_time
         welded = payload_kg == 0 or max_weld_error <= 0.03
         if scenario == "walk":
             task_passed = abs(dx - 3.5) <= 0.15 and abs(duration - 8.0) <= PHYSICS_DT
@@ -510,6 +575,18 @@ def _run(
             "platform_size_m": platform.size if platform is not None else None,
             "scene": str(usd),
             "video": str(output / f"{stem}.mp4") if want_video else None,
+            **(
+                {
+                    "trajectory": str(output / "trajectory.jsonl"),
+                    "stage_durations_s": {
+                        "assets": assets_duration,
+                        "scene_and_binding": scene_duration,
+                        "rollout_and_recording": perf_counter() - rollout_started,
+                    },
+                }
+                if context is not None
+                else {}
+            ),
             "passed": bool(
                 task_passed
                 and welded
@@ -521,7 +598,10 @@ def _run(
         }
     finally:
         camera = None
-        sim.destroy(exit_process=False)
+        if attachment is not None:
+            attachment.detach()
+        if sim is not None:
+            sim.destroy(exit_process=False)
 
 
 def _verify_payload_welds(

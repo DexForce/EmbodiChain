@@ -28,9 +28,7 @@ __all__ = ["main"]
 def main(argv: Sequence[str] | None = None) -> None:
     """Start the local MCP server for an existing DexSim Runtime session."""
     parser = argparse.ArgumentParser(prog="embodichain mcp", description=__doc__)
-    parser.add_argument(
-        "--session", required=True, help="Existing DexSim Runtime session ID"
-    )
+    parser.add_argument("--session", help="Existing DexSim Runtime session ID")
     parser.add_argument(
         "--session-directory", help="Optional DexSim discovery directory"
     )
@@ -41,8 +39,39 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     parser.add_argument("--run-id", help="Originating Run ID for the DexSim journal")
     parser.add_argument("--turn", type=int, help="Originating turn number")
+    parser.add_argument(
+        "--policy-catalog",
+        type=Path,
+        help="Enable policy tools with this local catalog",
+    )
+    parser.add_argument(
+        "--policy-output",
+        type=Path,
+        help="Directory for policy run receipts and artifacts",
+    )
     args = parser.parse_args(argv)
+    if args.policy_catalog is not None:
+        if args.policy_output is None or not (args.session or args.session_directory):
+            parser.error(
+                "--policy-catalog requires --policy-output and a Session or discovery directory"
+            )
+        if args.writer_key_file or args.run_id is not None or args.turn is not None:
+            parser.error(
+                "Policy runs use their own World scope and journal attribution"
+            )
+    elif not args.session or args.policy_output is not None:
+        parser.error("Supply --session or enable policy tools with --policy-catalog")
     try:
+        if args.policy_catalog is not None:
+            from embodichain.mcp._policy_runs import serve as serve_policy
+
+            serve_policy(
+                args.policy_catalog,
+                args.policy_output,
+                directory=args.session_directory,
+                session_id=args.session,
+            )
+            return
         from embodichain.mcp.server import serve
     except ModuleNotFoundError as exc:
         if exc.name != "mcp" and not (exc.name or "").startswith("mcp."):

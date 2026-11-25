@@ -47,6 +47,13 @@ read-only. Use the [external World ownership contract](../simulation-system/simu
 and the runnable `examples/sim/attached_world/` fixture for grant, clock,
 retry and DexPilot Run/turn semantics.
 
+`embodichain mcp --policy-catalog ... --policy-output ...` enables versioned
+robot, policy, scene and task preflight and an asynchronous run receipt.
+Preparation can precede World creation. The runner executes on the specified
+empty World's owner thread, and the host retains World ownership.
+The [policy-run example](../../../examples/learning/policy_runs/README.md)
+owns the RP1 and ANYmal-C catalogs, resources and DexPilot setup.
+
 ## Configuration resolution
 
 The lightweight catalog is the selection boundary for Gym, preview, workspace
