@@ -26,6 +26,7 @@ from embodichain.data import get_data_path
 from embodichain.extensions.robots import CobotMagicCfg, FrankaCfg
 from embodichain.lab.sim.cfg import RobotCfg, URDFCfg
 from embodichain.lab.sim.motion.solvers import OPWSolverCfg
+from embodichain.lab.sim.robots.dual_arm import build_dual_arm_cfg, resolve_mounts
 from embodichain.robot_registry import resolve_gripper_defaults
 
 
@@ -96,4 +97,28 @@ def make_robot_cfg(robot: str) -> RobotCfg:
         raise ValueError(f"Unknown robot {robot!r}")
     cfg.uid = f"nmg_{robot}"
     cfg.root_props.fixed_base = True
+    return cfg
+
+
+def make_dual_franka_cfg() -> RobotCfg:
+    """Mount two policy-matched FR3 arms with Robotiq grippers."""
+    base = make_robot_cfg("franka")
+    mounts = resolve_mounts({"preset": "mirrored_rz", "separation": 0.92, "rz": 0.15})
+    cfg = build_dual_arm_cfg(base, mounts)
+    cfg.uid = "nmg_dual_franka"
+    cfg.urdf_cfg.fname = "nmg_example_dual_franka_v1"
+    hand = base.urdf_cfg.components["hand"]
+    for side in ("left", "right"):
+        cfg.urdf_cfg.add_component(
+            f"{side}_hand",
+            hand["urdf_path"],
+            hand["transform"],
+            **hand.get("params", {}),
+        )
+    arm_home = base.init_qpos[: len(base.control_parts["arm"])]
+    hand_home = base.init_qpos[len(arm_home) :]
+    # The articulation visits the arm branches in interleaved joint order.
+    cfg.init_qpos = [
+        value for joint in arm_home for value in (joint, joint)
+    ] + hand_home * 2
     return cfg

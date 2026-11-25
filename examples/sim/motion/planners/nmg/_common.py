@@ -34,7 +34,6 @@ if TYPE_CHECKING:
     import torch
 
     from embodichain.lab.sim import SimulationManager
-    from embodichain.lab.sim.motion.planners import PlanResult
     from embodichain.lab.sim.objects import Robot
     from examples.sim.motion.planners.nmg._visuals import TrajectoryMarkers
 
@@ -48,16 +47,10 @@ _FPS = 25
 _PHASE_HOLD_SECONDS = 0.5
 
 
-def _parse_args(robot_name: str) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=f"NMG v1 {robot_name} example")
+def _demo_parser(description: str) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=description)
     add_sim_args_to_parser(parser)
     parser.set_defaults(arena_space=2.0)
-    parser.add_argument(
-        "--scenario",
-        choices=["free-motion", "closed-loop-perturbation"],
-        default="free-motion",
-        help="Replay a timed free-space plan or drive the arm with live NMG feedback.",
-    )
     parser.add_argument(
         "--velocity-limit",
         type=float,
@@ -105,7 +98,32 @@ def _parse_args(robot_name: str) -> argparse.Namespace:
         type=Path,
         help="Record simulated playback to a 720p MP4, including in headless mode.",
     )
-    return parser.parse_args()
+    return parser
+
+
+def _configure_renderer(args: argparse.Namespace) -> None:
+    if args.video and not args.download_only:
+        if args.video.suffix.lower() != ".mp4":
+            raise ValueError("--video must end in .mp4.")
+        args.video = args.video.with_suffix(".mp4")
+        if args.no_playback:
+            raise ValueError("--video requires playback; omit --no-playback.")
+        if args.renderer == "no-render":
+            raise ValueError("--video requires a renderer; omit --renderer no-render.")
+        if args.renderer == "auto":
+            args.renderer = "fast-rt"
+    elif args.headless and not args.web and args.renderer == "auto":
+        args.renderer = "no-render"
+
+
+def _requested_joint_limits(args: argparse.Namespace) -> dict[str, float | list[float]]:
+    return {
+        key: values[0] if len(values) == 1 else values
+        for key, values in (
+            ("velocity", args.velocity_limit),
+            ("acceleration", args.acceleration_limit),
+        )
+    }
 
 
 def _model_path(robot_name: str, args: argparse.Namespace) -> Path:
@@ -126,12 +144,75 @@ def _model_path(robot_name: str, args: argparse.Namespace) -> Path:
     return path
 
 
+def _make_sim(args: argparse.Namespace) -> tuple[SimulationManager, torch.device]:
+    import torch
+
+    from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+    from embodichain.lab.sim.cfg import RenderCfg, physics_cfg_for_backend
+    from embodichain.lab.visualization import visualization_cfg_from_args
+
+    torch.set_num_threads(min(torch.get_num_threads(), 4))
+    device = torch.device(
+        args.device or (f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu")
+    )
+    if device.type == "cuda" and device.index is None:
+        device = torch.device(f"cuda:{args.gpu_id}")
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=args.headless,
+            width=1280,
+            height=720,
+            device=str(device),
+            num_envs=1,
+            arena_space=args.arena_space,
+            gpu_id=device.index if device.type == "cuda" else args.gpu_id,
+            render_cfg=RenderCfg(renderer=args.renderer),
+            physics_cfg=physics_cfg_for_backend(args.physics),
+            visualization=visualization_cfg_from_args(args),
+        )
+    )
+    return sim, device
+
+
+def _start_recording(
+    sim: SimulationManager,
+    video: Path,
+    recording_seconds: float,
+    look_at: tuple[tuple[float, float, float], ...],
+) -> None:
+    # The recorder holds RGB frames in memory until encoding.
+    frame_count = math.ceil(recording_seconds * _FPS) + 1
+    memory_mb = math.ceil(
+        frame_count * sim.sim_config.width * sim.sim_config.height * 3 / 2**20
+    )
+    if not sim.start_window_record(
+        save_path=str(video),
+        fps=_FPS,
+        max_memory=memory_mb,
+        look_at=look_at,
+        use_sim_time=True,
+    ):
+        raise RuntimeError("Could not start the demo video recorder.")
+
+
+def _finish_recording(sim: SimulationManager, video: Path) -> str:
+    if not sim.stop_window_record():
+        raise RuntimeError("No video frames were captured.")
+    sim.wait_window_record_saves()
+    if not video.is_file() or video.stat().st_size == 0:
+        raise RuntimeError(f"Video encoding did not produce {video}.")
+    return str(video.resolve())
+
+
 def _free_motion_commands(
     robot: Robot,
-    result: PlanResult,
+    positions: torch.Tensor,
+    intervals: torch.Tensor,
     waypoint_indices: Sequence[int],
     control_dt: float,
     constraints: dict[str, float | list[float]],
+    *,
+    control_parts: tuple[str, ...] = ("arm",),
 ) -> list[tuple[torch.Tensor, torch.Tensor]]:
     """Prepare each rest-to-rest phase on the simulation command clock."""
     import torch
@@ -142,23 +223,27 @@ def _free_motion_commands(
         _resolve_joint_constraints,
     )
 
-    limits = _resolve_joint_constraints(
-        robot,
-        constraints,
-        dof=result.positions.shape[-1],
-        control_part="arm",
-        batch_size=1,
-    )
+    limits = [
+        _resolve_joint_constraints(
+            robot,
+            constraints,
+            dof=len(robot.get_joint_ids(part)),
+            control_part=part,
+            batch_size=1,
+        )
+        for part in control_parts
+    ]
     speed, accel = (
-        limits[key].to(result.positions)[None] for key in ("velocity", "acceleration")
+        torch.cat([part[key] for part in limits]).to(positions)[None]
+        for key in ("velocity", "acceleration")
     )
-    target_dtype = robot.get_qpos(name="arm").dtype
+    target_dtype = robot.get_qpos(name=control_parts[0]).dtype
     phases = []
     previous = 0
     for end in waypoint_indices:
-        phase_dt = result.dt[:, previous : end + 1].clone()
+        phase_dt = intervals[:, previous : end + 1].clone()
         phase_dt[:, 0] = 0
-        phase_positions = result.positions[:, previous : end + 1]
+        phase_positions = positions[:, previous : end + 1]
         for _ in range(8):
             q, qd, dt, _ = retime_to_control_grid(phase_positions, phase_dt, control_dt)
             # Check both drive targets at the receiver's precision, and the
@@ -243,19 +328,15 @@ def run(
     look_at: tuple[tuple[float, float, float], ...],
 ) -> None:
     """Download the release and run one free-space robot demonstration."""
-    args = _parse_args(robot_name)
-    if args.video and not args.download_only:
-        if args.video.suffix.lower() != ".mp4":
-            raise ValueError("--video must end in .mp4.")
-        args.video = args.video.with_suffix(".mp4")
-        if args.no_playback:
-            raise ValueError("--video requires playback; omit --no-playback.")
-        if args.renderer == "no-render":
-            raise ValueError("--video requires a renderer; omit --renderer no-render.")
-        if args.renderer == "auto":
-            args.renderer = "fast-rt"
-    elif args.headless and not args.web and args.renderer == "auto":
-        args.renderer = "no-render"
+    parser = _demo_parser(f"NMG v1 {robot_name} example")
+    parser.add_argument(
+        "--scenario",
+        choices=["free-motion", "closed-loop-perturbation"],
+        default="free-motion",
+        help="Replay a timed free-space plan or drive the arm with live NMG feedback.",
+    )
+    args = parser.parse_args()
+    _configure_renderer(args)
     model_path = _model_path(robot_name, args)
     if args.download_only:
         return
@@ -264,9 +345,7 @@ def run(
 
     import torch
 
-    from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-    from embodichain.lab.sim.cfg import RenderCfg, physics_cfg_for_backend
-    from embodichain.lab.visualization import visualization_cfg_from_args
+    from embodichain.lab.sim import SimulationManager
     from embodichain.lab.sim.motion.motion_generator import (
         MotionGenCfg,
         MotionGenOptions,
@@ -283,27 +362,7 @@ def run(
     from examples.sim.motion.planners.nmg._robots import make_robot_cfg
     from examples.sim.motion.planners.nmg._visuals import TrajectoryMarkers
 
-    # Avoid machine-sized Torch/ORT thread pools for the small actor batch.
-    torch.set_num_threads(min(torch.get_num_threads(), 4))
-    device = torch.device(
-        args.device or (f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu")
-    )
-    if device.type == "cuda" and device.index is None:
-        device = torch.device(f"cuda:{args.gpu_id}")
-    sim = SimulationManager(
-        SimulationManagerCfg(
-            headless=args.headless,
-            width=1280,
-            height=720,
-            device=str(device),
-            num_envs=1,
-            arena_space=args.arena_space,
-            gpu_id=device.index if device.type == "cuda" else args.gpu_id,
-            render_cfg=RenderCfg(renderer=args.renderer),
-            physics_cfg=physics_cfg_for_backend(args.physics),
-            visualization=visualization_cfg_from_args(args),
-        )
-    )
+    sim, device = _make_sim(args)
     try:
         cfg = make_robot_cfg(robot_name)
         robot = sim.add_robot(cfg=cfg)
@@ -375,13 +434,7 @@ def run(
                 )
             )
         )
-        constraints = {
-            key: values[0] if len(values) == 1 else values
-            for key, values in (
-                ("velocity", args.velocity_limit),
-                ("acceleration", args.acceleration_limit),
-            )
-        }
+        constraints = _requested_joint_limits(args)
         result = generator.generate(
             target_states=targets,
             options=MotionGenOptions(
@@ -461,7 +514,12 @@ def run(
                 []
                 if feedback
                 else _free_motion_commands(
-                    robot, result, waypoint_indices, control_dt, constraints
+                    robot,
+                    result.positions,
+                    result.dt,
+                    waypoint_indices,
+                    control_dt,
+                    constraints,
                 )
             )
             if args.video:
@@ -473,24 +531,7 @@ def run(
                     recording_seconds = sum(
                         float(dt.sum()) + _PHASE_HOLD_SECONDS for _, dt in phases
                     )
-                # The recorder holds RGB frames in memory. Budget for the full
-                # sequence, including the control-grid rounding and settles.
-                frame_count = math.ceil(recording_seconds * _FPS) + 1
-                memory_mb = math.ceil(
-                    frame_count
-                    * sim.sim_config.width
-                    * sim.sim_config.height
-                    * 3
-                    / 2**20
-                )
-                if not sim.start_window_record(
-                    save_path=str(args.video),
-                    fps=_FPS,
-                    max_memory=memory_mb,
-                    look_at=look_at,
-                    use_sim_time=True,
-                ):
-                    raise RuntimeError("Could not start the demo video recorder.")
+                _start_recording(sim, args.video, recording_seconds, look_at)
             if feedback:
                 playback = play_closed_loop(
                     sim,
@@ -507,12 +548,7 @@ def run(
                 )
             report.update(playback)
             if args.video:
-                if not sim.stop_window_record():
-                    raise RuntimeError("No video frames were captured.")
-                sim.wait_window_record_saves()
-                if not args.video.is_file() or args.video.stat().st_size == 0:
-                    raise RuntimeError(f"Video encoding did not produce {args.video}.")
-                report["video"] = str(args.video.resolve())
+                report["video"] = _finish_recording(sim, args.video)
         report["duration_s"] = result.duration.cpu().tolist()
         text = json.dumps(report, indent=2)
         print(text)

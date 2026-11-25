@@ -81,9 +81,38 @@ The JSON report gives the per-target feedback steps, measured disturbance
 size and recovery steps. The active target advances after three consecutive
 measurements meet its constraint tolerances.
 
+## Dual Franka
+
+Both examples mount two FR3 arms with Robotiq 2F-140 grippers and share the
+released Franka ONNX policy. They enable `batch_control_parts` and call
+`NeuralPlanner.plan_multi_part(..., synchronize_waypoints=True)`. Each rollout
+step sends two observation rows per environment to ONNX. Each pair advances
+when both arms satisfy their targets. TOPPRA times the entire 14-joint path
+under velocity and acceleration constraints, preserving the common visits.
+
+```bash
+embodichain run-example sim/motion/planners/nmg/dual_franka_free_space --headless --device cpu
+embodichain run-example sim/motion/planners/nmg/dual_franka_interlock --headless --device cpu
+```
+
+- **Free space** follows six pairs of joint and Cartesian targets across both
+  workspaces. A pair can mix target types across arms.
+- **Proximity interlock** moves both arms through approach, activation, and
+  retreat. The shared indicator latches green when both measured TCPs stay
+  within 25 mm of their sensor centers for at least 0.24 seconds during the
+  activation hold.
+
+The viewer shows the left measured TCP in cyan and the right in magenta. Dots
+show the planned paths. Cubes mark joint targets and spheres and axes mark
+Cartesian targets. The two target markers advance together during playback.
+Use `--output /tmp/dual-franka.json` to inspect the actor batch size, per-arm
+rollout visits, shared sample indices, and measured playback tracking. The
+interlock example also reports its measured simultaneous hold time. Choose
+`--no-playback` for geometric planning alone.
+
 ## Record
 
-Add `--video` to either scenario to record the fixed-camera view.
+Add `--video` to record the fixed-camera view for any example on this page.
 
 ```bash
 embodichain run-example sim/motion/planners/nmg/franka --headless --device cpu --video /tmp/franka-free-motion.mp4

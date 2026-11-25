@@ -85,3 +85,16 @@ Pose targets and FK observations inside `NeuralPlanner` use EmbodiChain's
 additional quaternion reordering is required before the ONNX observation is
 assembled. Conversions to `wxyz` belong only at an explicitly documented
 external-library boundary.
+
+## Synchronized dual-arm planning
+
+Set `batch_control_parts=True` and supply each arm's policy frame via
+`policy_frame_from_world_by_control_part`. Call
+`NeuralPlanner.plan_multi_part(targets, options, synchronize_waypoints=True)`
+with two disjoint control groups and equally many goals in each group. Enable
+retiming with planner-wide or per-request `constraints`.
+
+The shared policy receives `2 * B` observations per rollout step. Each
+environment advances after both arms reach their current targets. The returned
+plans share the time grid, output arrival indices, and success mask. See the
+[dual Franka examples](../../../../resources/models/policy/nmg.md#dual-franka).

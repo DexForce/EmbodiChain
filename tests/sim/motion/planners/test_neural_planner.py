@@ -2026,6 +2026,170 @@ def test_packed_arms_share_inference_and_match_independent_rollouts(
             )
 
 
+def test_synchronized_arms_share_visits_and_isolate_failed_environments(
+    tmp_path, monkeypatch
+):
+    """An early arm waits for its partner, including before repeated visits."""
+    parts = ("left_arm", "right_arm")
+    b = 3
+    mounts = {
+        "left_arm": torch.eye(4),
+        "right_arm": torch.tensor(
+            [
+                [0.0, -1.0, 0.0, 0.4],
+                [1.0, 0.0, 0.0, -0.5],
+                [0.0, 0.0, 1.0, 0.3],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        ),
+    }
+
+    class PairedPolicy(FakeOnnxPolicy):
+        fixed_batch_size = None
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.batch_sizes = []
+
+        def __call__(self, obs):
+            self.batch_sizes.append(obs.shape[0])
+            # Row 2 of the right arm fails immediately; row 1 simply runs out
+            # of steps. Every other proposal advances all joints by 0.1 rad.
+            actions = torch.full((2 * b, NUM_ARM_JOINTS), 0.5)
+            actions[-1] = torch.nan
+            return actions
+
+    class PairedRobot(FakeRobot):
+        num_instances = b
+        control_parts = {part: list(range(NUM_ARM_JOINTS)) for part in parts}
+        joint_names = [
+            f"{part}_joint{idx}" for part in parts for idx in range(NUM_ARM_JOINTS)
+        ]
+
+        def get_joint_ids(self, name):
+            start = parts.index(name) * NUM_ARM_JOINTS
+            return list(range(start, start + NUM_ARM_JOINTS))
+
+        def get_solver(self, name):
+            return self if name in parts else None
+
+        def get_qpos_limits(self, name=None):
+            limits = super().get_qpos_limits(name).repeat(b, 1, 1)
+            if name == "right_arm":
+                limits[1, :, 1] = 0.38
+            return limits
+
+        def get_qvel_limits(self, *, joint_ids):
+            return torch.full((b, len(joint_ids)), 0.35)
+
+        def compute_fk(self, qpos, name=None, **kwargs):
+            assert qpos.shape == (b, NUM_ARM_JOINTS)
+            return self.compute_batch_fk(qpos, name=name)
+
+        def compute_batch_fk(self, qpos, name=None, **kwargs):
+            assert qpos.shape[0] == b
+            local = torch.eye(4).repeat(*qpos.shape[:-1], 1, 1)
+            local[..., :3, 3] = qpos[..., :3]
+            return mounts[name] @ local
+
+    monkeypatch.setattr(neural_planner_module, "NeuralMotionGenerator", PairedPolicy)
+    manager = FakeSimulationManager()
+    manager.robot = PairedRobot()
+    monkeypatch.setattr(SimulationManager, "get_instance", lambda *args: manager)
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=_create_fake_onnx_model(tmp_path),
+            batch_control_parts=True,
+            max_steps=6,
+            dt=0.04,
+            policy_frame_from_world_by_control_part={
+                part: torch.linalg.inv(mount).tolist() for part, mount in mounts.items()
+            },
+        )
+    )
+    start = torch.tensor([0.0, 0.05, -0.10])[:, None].repeat(1, NUM_ARM_JOINTS)
+    left_first = torch.tensor([0.10, 0.15, 0.10])[:, None].repeat(1, NUM_ARM_JOINTS)
+    right_first = torch.tensor([0.30, 0.95, 0.30])[:, None].repeat(1, NUM_ARM_JOINTS)
+    joint_targets = {parts[0]: left_first, parts[1]: right_first}
+    tcp_targets = {
+        part: manager.robot.compute_fk(target + 0.20, name=part)
+        for part, target in joint_targets.items()
+    }
+    targets = {
+        part: [
+            PlanState.from_qpos(joint_targets[part]),
+            PlanState.from_xpos(tcp_targets[part]),
+            PlanState.from_xpos(tcp_targets[part]),
+        ]
+        for part in parts
+    }
+    options = {
+        parts[0]: NeuralPlanOptions(
+            start_qpos=start,
+            constraints={
+                "velocity": [[-0.22, 0.25]] * NUM_ARM_JOINTS,
+                "acceleration": 2.0,
+            },
+        ),
+        parts[1]: NeuralPlanOptions(
+            start_qpos=start,
+            constraints={"velocity": 1.0, "acceleration": 2.0},
+        ),
+    }
+
+    plans = planner.plan_multi_part(targets, options, synchronize_waypoints=True)
+    left, right = plans.values()
+    assert planner._policy.batch_sizes == [2 * b] * 6
+    assert left.success.tolist() == right.success.tolist() == [True, False, False]
+    torch.testing.assert_close(left.dt, right.dt)
+    torch.testing.assert_close(left.waypoint_indices, right.waypoint_indices)
+    assert left.policy_waypoint_indices.tolist() == [[1, 5, 6], [1, -1, -1], [-1] * 3]
+    assert right.policy_waypoint_indices.tolist() == [[3, 5, 6], [-1] * 3, [-1] * 3]
+    torch.testing.assert_close(
+        left.policy_rollout_positions[0, 1:4], left_first[0].expand(3, -1)
+    )
+    assert right.policy_rollout_positions[1].amax() == pytest.approx(0.38)
+
+    for part, plan in plans.items():
+        visits = plan.waypoint_indices[0]
+        assert bool((visits.diff() > 0).all())
+        torch.testing.assert_close(
+            plan.positions[0, visits[0]].float(), joint_targets[part][0]
+        )
+        torch.testing.assert_close(
+            plan.xpos_list[0, visits[1:]], tcp_targets[part][0].expand(2, -1, -1)
+        )
+        if part == parts[0]:
+            assert plan.velocities.max() <= 0.250001
+            assert plan.velocities.min() >= -0.220001
+        else:
+            assert plan.velocities.abs().max() <= 0.350001
+        assert plan.accelerations.abs().max() <= 2.000001
+        assert not plan.dt[1:].any()
+        assert (plan.waypoint_indices[1:] == -1).all()
+        torch.testing.assert_close(
+            plan.positions[1:].float(), start[1:, None].expand(-1, plan.dt.shape[1], -1)
+        )
+
+
+def test_synchronized_parts_reject_different_waypoint_counts(tmp_path, monkeypatch):
+    manager = FakeSimulationManager()
+    monkeypatch.setattr(SimulationManager, "get_instance", lambda *args: manager)
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=_create_fake_onnx_model(tmp_path),
+            batch_control_parts=True,
+        )
+    )
+    goal = PlanState.from_qpos(torch.zeros(1, NUM_ARM_JOINTS))
+    targets = {"left_arm": [goal, goal], "right_arm": [goal]}
+    options = {part: NeuralPlanOptions() for part in targets}
+    with pytest.raises(ValueError, match="equal waypoint counts"):
+        planner.plan_multi_part(targets, options, synchronize_waypoints=True)
+
+
 def test_packed_arms_reject_fixed_single_row_policy(tmp_path, monkeypatch):
     manager = FakeSimulationManager()
     monkeypatch.setattr(SimulationManager, "get_instance", lambda *args: manager)

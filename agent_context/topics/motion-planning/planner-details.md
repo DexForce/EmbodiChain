@@ -267,6 +267,19 @@ Grouping a request does not imply a packed backend. Atomic benchmark
 record groups actually planned, so an enabled flag alone does not prove batching
 ran when a prior stage failed.
 
+Direct `NeuralPlanner.plan_multi_part(..., synchronize_waypoints=True)` pairs
+equally many targets for two disjoint arms with the same rollout budget.
+Each environment advances after both TCP or joint constraints are met. A
+reached arm holds while its partner moves, with one `2 * B` actor call per
+rollout step. The position limits apply per environment. TOPPRA times the
+concatenated joint path under each arm's effective limits. Both results carry
+the same `dt`, `waypoint_indices` and success mask.
+The planner validates the two targets at each common output sample. Failed
+rows hold their start, and the per-arm `policy_waypoint_indices` and rollout
+prefixes retain the original arrival and waiting history. This mode supplies
+paired timing for fixed-base, independent joint chains. Collision validation
+and constraints on a shared payload belong to the caller's task plan.
+
 Raw rollouts integrate one joint delta per policy step on the nominal
 `NeuralPlannerCfg.dt`. A `constraints` mapping on `NeuralPlanOptions` or
 `NeuralPlannerCfg` selects TOPPRA timing. Each control part intersects its
@@ -286,8 +299,7 @@ Runtime/training frame differences must be expressed through explicit policy
 frame and TCP transforms. A shared single-arm policy can serve both arms of a
 fixed-base assembly through `policy_frame_from_world_by_control_part`; every
 requested arm must have an entry. The selected transform applies to targets,
-rollout FK, and retimed arrival checks. Atomic task orchestration coordinates
-the arms; reusing the policy does not create a jointly trained dual-arm policy.
+rollout FK, and retimed arrival checks. Each ONNX observation describes one arm.
 Acceptance uses the caller's runtime TCP origin even when the actor observes
 an offset policy TCP. Undo the right-hand tool transform when measuring
 position error; orientation error can move the two origins differently.

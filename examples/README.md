@@ -174,4 +174,6 @@ python -m embodichain run-example sim/demo/cable_viser --num-envs 2 --port 8080 
 
 The [NMG v1 examples](sim/motion/planners/nmg/README.md) use pinned ONNX policies
 to follow eight joint and Cartesian goals on Franka and PiPER. They record
-retimed free motion and live recovery from a simulated joint disturbance.
+retimed free motion and live recovery from a simulated joint disturbance. Two
+dual Franka examples show synchronized free-space motion and a proximity
+interlock using paired NMG waypoints.

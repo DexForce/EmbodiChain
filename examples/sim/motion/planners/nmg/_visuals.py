@@ -75,9 +75,15 @@ class TrajectoryMarkers:
         path_poses: torch.Tensor,
         waypoint_indices: Sequence[int],
         modalities: Sequence[str],
+        *,
+        control_part: str = "arm",
+        planned_color: tuple[float, float, float, float] = _PLANNED,
+        measured_color: tuple[float, float, float, float] = _MEASURED,
     ) -> None:
         self._sim = sim
         self._robot = robot
+        self._control_part = control_part
+        prefix = "nmg" if control_part == "arm" else f"nmg_{control_part}"
         path = path_poses[:, :3, 3].detach().cpu().numpy()
         positions = goal_poses[:, :3, 3].detach().cpu().numpy().copy()
         # An orientation-only command leaves translation free. Anchor its frame
@@ -90,10 +96,10 @@ class TrajectoryMarkers:
 
         plan = sim.add_marker_group(
             MarkerGroupCfg(
-                name="nmg_planned_tcp",
+                name=f"{prefix}_planned_tcp",
                 prototypes={
                     "sample": MarkerPrototypeCfg(
-                        shape="sphere", scale=(0.010,) * 3, color=_PLANNED
+                        shape="sphere", scale=(0.010,) * 3, color=planned_color
                     )
                 },
             )
@@ -110,7 +116,7 @@ class TrajectoryMarkers:
         self._colors = np.tile(_PENDING, (len(modalities), 1))
         self._targets = sim.add_marker_group(
             MarkerGroupCfg(
-                name="nmg_targets",
+                name=f"{prefix}_targets",
                 prototypes={
                     "tcp": MarkerPrototypeCfg(shape="sphere", color=_PENDING),
                     "joint": MarkerPrototypeCfg(shape="box", color=_PENDING),
@@ -128,7 +134,7 @@ class TrajectoryMarkers:
         if len(self._frame_slots):
             self._frames = sim.add_marker_group(
                 MarkerGroupCfg(
-                    name="nmg_target_orientations",
+                    name=f"{prefix}_target_orientations",
                     prototypes={
                         "frame": MarkerPrototypeCfg(shape="frame", scale=(0.077,) * 3)
                     },
@@ -142,10 +148,10 @@ class TrajectoryMarkers:
 
         self._trail = sim.add_marker_group(
             MarkerGroupCfg(
-                name="nmg_measured_tcp",
+                name=f"{prefix}_measured_tcp",
                 prototypes={
                     "segment": MarkerPrototypeCfg(
-                        shape="box", scale=(1.0, 0.008, 0.008), color=_MEASURED
+                        shape="box", scale=(1.0, 0.008, 0.008), color=measured_color
                     )
                 },
             )
@@ -170,9 +176,9 @@ class TrajectoryMarkers:
 
     def _read_tip(self, qpos: torch.Tensor | None = None) -> np.ndarray:
         if qpos is None:
-            qpos = self._robot.get_qpos(name="arm")
+            qpos = self._robot.get_qpos(name=self._control_part)
         return (
-            self._robot.compute_fk(qpos=qpos, name="arm")[0, :3]
+            self._robot.compute_fk(qpos=qpos, name=self._control_part)[0, :3]
             .detach()
             .cpu()
             .numpy()

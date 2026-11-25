@@ -10,7 +10,8 @@ kinematics, see the [NMG project page](https://gs-world.github.io/nmg/).
 
 ## Demo scenarios
 
-Both arms visit eight goals in the default EmbodiChain scene. A cube marks the
+The single-arm Franka and PiPER demos each visit eight goals in the default
+EmbodiChain scene. A cube marks the
 TCP associated with a joint goal. A sphere marks a Cartesian position, and RGB
 axes show a requested orientation. Amber highlights the active goal. Completed
 goals turn green. Blue-gray dots trace the planned TCP path, and cyan traces
@@ -33,6 +34,18 @@ three consecutive measurements satisfy the active constraints.
 In the CPU demos the TCP moved about 28 cm on Franka and 14 cm on PiPER
 at injection. The arms reached the disturbed goal after 37 and 13 further
 policy updates, respectively, then finished the sequence.
+
+### Dual Franka
+
+Two FR3 arms share the released Franka ONNX policy. In free space they follow
+six pairs of joint and Cartesian goals. In the proximity interlock, the two
+measured TCPs must hold inside their respective sensor regions simultaneously.
+Both examples use paired waypoint progression and timing in NeuralPlanner.
+
+```bash
+embodichain run-example sim/motion/planners/nmg/dual_franka_free_space --headless --device cpu
+embodichain run-example sim/motion/planners/nmg/dual_franka_interlock --headless --device cpu
+```
 
 ## Run and record
 
