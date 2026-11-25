@@ -422,13 +422,13 @@ def test_template_park_uses_audited_arms_after_the_placement(
         ) == (2, 4)
 
 
-def test_pre_audit_park_archive_can_be_loaded_and_viewed(
+def test_pre_audit_park_archive_can_be_viewed_and_revised(
     source_image, tmp_path, monkeypatch
 ):
     from embodichain.gen_sim.task_engine import _image_run
     from embodichain.gen_sim.task_engine._review import write_review
     from embodichain.gen_sim.task_spec import canonical_hash
-    from embodichain.gen_sim.workflow import load_task_plan
+    from embodichain.gen_sim.workflow import load_task_plan, revise_task_plan
 
     result = _plan(source_image)
     graph = result["semantic_task_graph"]
@@ -486,6 +486,56 @@ def test_pre_audit_park_archive_can_be_loaded_and_viewed(
     preview = tmp_path / "review.html"
     write_review(directory, preview)
     assert preview.is_file() and manifest.read_bytes() == sealed
+
+    renamed = {graph["nodes"][-2]["id"]: "placed"}
+    proposal = dict(
+        nodes=[
+            dict(
+                id=renamed.get(node["id"], node["id"]),
+                step_id=node["task_instance_id"],
+                call=node["call"],
+                depends_on=[renamed.get(dep, dep) for dep in node["depends_on"]],
+                semantic=source["annotations"][node["id"]],
+            )
+            for node in graph["nodes"]
+        ],
+        requirements=[
+            dict(row, node_ids=[renamed.get(node, node) for node in row["node_ids"]])
+            for row in source["requirements"]
+        ],
+    )
+    identities = dict(
+        expected_spec_digest=loaded["spec_digest"],
+        expected_graph_digest=loaded["semantic_graph_sha256"],
+        expected_plan_digest=loaded["plan_digest"],
+    )
+    revised = revise_task_plan(directory, proposal, tmp_path / "revised", **identities)
+    assert load_task_plan(revised)["spec_digest"] == loaded["spec_digest"]
+    revision_source = json.loads(
+        (revised / "semantic_graph_validation.json").read_text()
+    )["source"]
+    assert revision_source["annotations"]["park"] == annotation
+    assert (
+        next(
+            row
+            for row in revision_source["bindings"]
+            if row["id"] == "park.park_posture"
+        )["subject"]
+        == "source"
+    )
+    revision_graph = json.loads((revised / "semantic_task_graph.json").read_text())
+    assert next(node for node in revision_graph["nodes"] if node["id"] == "park")[
+        "depends_on"
+    ] == ["placed"]
+    assert manifest.read_bytes() == sealed
+
+    extra_park = deepcopy(proposal)
+    extra_park["nodes"].append(
+        dict(proposal["nodes"][-1], id="new_park", depends_on=["park"])
+    )
+    extra_park["requirements"][0]["node_ids"].append("new_park")
+    with pytest.raises(ValueError, match="Terminal park"):
+        revise_task_plan(directory, extra_park, tmp_path / "invalid", **identities)
 
 
 def test_variation_permission_and_coverage_have_independent_identities(source_image):

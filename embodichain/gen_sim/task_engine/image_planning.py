@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from embodichain.gen_sim.services.runtime import GenSimServices, service_entry
 from embodichain.gen_sim.services.compat import VisionFacade
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 import hashlib
 import json
 from pathlib import Path
@@ -437,7 +437,12 @@ def generate_semantic_task_graph_from_image(
 
 
 def _assemble(
-    plan: dict[str, Any], candidate: dict[str, Any]
+    plan: dict[str, Any],
+    candidate: dict[str, Any],
+    *,
+    legacy_parks: (
+        Mapping[str, tuple[str, dict[str, Any], dict[str, Any]]] | None
+    ) = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
     if set(plan) != {"nodes", "requirements"}:
         raise ValueError("Planner must return exactly nodes and requirements")
@@ -463,8 +468,11 @@ def _assemble(
             raise ValueError(
                 "semantic requires object, reference, relation and a dictionary intent"
             )
-        park = item["call"].get("call_id") == _TERMINAL_PARK_CALL
-        if park:
+        binding_subject = semantic["object"]
+        if item["call"].get("call_id") == _TERMINAL_PARK_CALL and (
+            legacy_parks is None
+            or legacy_parks.get(item["id"]) != (step["id"], item["call"], semantic)
+        ):
             arm = item["call"].get("resources", {}).get("primary")
             if arm not in _TERMINAL_PARK_KINDS.values() or semantic not in (
                 dict(object=None, reference=None, relation=None, intent={}),
@@ -479,6 +487,7 @@ def _assemble(
                     "Terminal park must name only its declared arm resource"
                 )
             semantic = dict(semantic, object=None)
+            binding_subject = arm
         annotations[item["id"]] = semantic
         nodes.append(
             {
@@ -497,7 +506,7 @@ def _assemble(
                     "node_id": item["id"],
                     "kind": kind,
                     "parameter": "runtime." + kind,
-                    "subject": arm if park else semantic["object"],
+                    "subject": binding_subject,
                     "value": semantic,
                     "source": step["id"],
                 }

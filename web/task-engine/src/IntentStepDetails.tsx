@@ -199,6 +199,7 @@ export function intentStepRoleIds(step?: IntentStep): Set<string> {
   for (const fact of [...(step.effects || []), ...(step.maintain || [])]) {
     for (const id of fact.subjects || []) out.add(id);
     for (const id of fact.references || []) out.add(id);
+    if (fact.part) out.add(fact.part);
   }
   return out;
 }

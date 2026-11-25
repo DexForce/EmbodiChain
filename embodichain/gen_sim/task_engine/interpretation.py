@@ -434,8 +434,14 @@ def _validate_model_intent(
     return _SourceIntent(intent, normalizations, scene_ref_quotes, terminal_park)
 
 
+# Conjunctions inside descriptions are fine; a coordinated action is not.
+_LIFT_ACTION_BOUNDARY = (
+    r"\bthen\b|\b(?:and|or)\s+(?:(?:also|[a-z]+ly)\s+)*"
+    r"(?:lift|raise|lower|move|advance|push|pull|slide|shift|turn|rotate|"
+    r"[a-z]+\s+(?:the|a|an|it|them|this|that))\b"
+)
 _LIFT_MEASUREMENT = re.compile(
-    r"\b(?:lift|raise)\b(?:(?!\b(?:and|or|then)\b)[^.!?;,\n])*?"
+    rf"\b(?:lift|raise)\b(?:(?!{_LIFT_ACTION_BOUNDARY})[^.!?;,\n])*?"
     r"\s+(?:\bby\s+(?:(?:more than|at least|over|exactly)\s+)?|"
     r"\b(?:more than|at least|over|exactly)\s+)"
     r"([0-9]+(?:\.[0-9]+)?)\s*(mm|cm|m|millimet(?:er|re)s?|"

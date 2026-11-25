@@ -602,7 +602,32 @@ def test_later_explicit_orientation_supersedes_the_same_axis(
         _validate_intent_audit(_SOURCE, plan, previous_claim)
 
 
-def test_invariant_rejects_a_conflicting_effect_even_if_restored_later():
+@pytest.mark.parametrize(
+    "verb,kind",
+    [("return_arms", "arms_at_initial_pose"), ("open_grippers", "grippers_open")],
+)
+def test_grouped_arm_evidence_keeps_the_unaffected_arm(verb, kind):
+    both = dict(kind=kind, arms=["left", "right"])
+    plan = _plan(
+        "item",
+        _step(verb, "", both, arms="left right"),
+        _step("pick", "item", arms="right"),
+    )
+    checked = _validate(plan)
+
+    def claim(arm):
+        return _audit(_check("step_01", scope="final", state=dict(both, arms=[arm])))
+
+    _validate_intent_audit(_SOURCE, checked, claim("left"))
+    with pytest.raises(AuthoringEvidenceError):
+        _validate_intent_audit(_SOURCE, checked, claim("right"))
+    plan["steps"][1]["arms"] = ["auto"]
+    with pytest.raises(AuthoringEvidenceError):
+        _validate_intent_audit(_SOURCE, _validate(plan), claim("left"))
+
+
+@pytest.mark.parametrize("phase", ["initial", "maintain", "effect"])
+def test_invariant_rejects_a_conflicting_fact_even_if_restored_later(phase):
     upright = _fact("orientation", "vase", value="upright")
     plan = _plan(
         "vase other",
@@ -612,7 +637,13 @@ def test_invariant_rejects_a_conflicting_effect_even_if_restored_later():
     )
     audit = _audit(_check("condition_01", scope="always", state=upright))
     _validate_intent_audit(_SOURCE, _validate(plan), audit)
-    plan["steps"].insert(1, _step("push", "vase", dict(upright, value="flat")))
+    flat = dict(upright, value="flat")
+    if phase == "initial":
+        plan["conditions"].append(_condition("initial", flat))
+    elif phase == "maintain":
+        plan["steps"][-1]["maintain"] = [flat]
+    else:
+        plan["steps"].insert(1, _step("push", "vase", flat))
     with pytest.raises(AuthoringEvidenceError, match="always condition"):
         _validate_intent_audit(_SOURCE, _validate(plan), audit)
 

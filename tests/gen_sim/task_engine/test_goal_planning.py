@@ -860,8 +860,11 @@ def test_nonaffirmative_pour_reaches_publication_and_review(
 
 @pytest.mark.parametrize("family", ["E1", "E5"])
 def test_hybrid_two_mats_project_each_occurrence(tmp_path, monkeypatch, family):
+    import re
+
     from PIL import Image
     from embodichain.gen_sim.services import compat
+    from embodichain.gen_sim.task_engine._review import write_review
     from embodichain.gen_sim.task_engine.hybrid import publish_hybrid
     from embodichain.gen_sim.workflow import load_task_plan
 
@@ -906,6 +909,16 @@ def test_hybrid_two_mats_project_each_occurrence(tmp_path, monkeypatch, family):
         annotations["call_4" if family == "E1" else "call_2"]["reference"]
         == "second_mat"
     )
+    preview = tmp_path / "review.html"
+    write_review(tmp_path / "plan", preview)
+    for page in (tmp_path / "plan" / "semantic_task_graph.html", preview):
+        payload = re.search(
+            r'<script id="graph-data" type="application/json">(.*?)</script>',
+            page.read_text(),
+            re.S,
+        )
+        assert payload is not None
+        assert json.loads(payload[1])["review"]["annotations"] == annotations
 
 
 def _context(*objects):
@@ -1043,10 +1056,15 @@ def test_native_joint_action_requires_the_declared_owner(
         ]
 
 
-def test_native_proposal_can_repair_an_omitted_articulation_owner(native_hybrid):
+@pytest.mark.parametrize("described_part", [False, True])
+def test_native_proposal_can_repair_an_omitted_articulation_owner(
+    native_hybrid, described_part
+):
     context = _context(
         dict(id="cabinet", description="cabinet", asset_kind="articulated")
     )
+    if described_part:
+        context["objects"].append(dict(id="drawer", description="drawer"))
     first = dict(template="E6", object="drawer", state="open", quote="Open the drawer.")
     repaired = dict(first, part_of="cabinet")
     audited = []

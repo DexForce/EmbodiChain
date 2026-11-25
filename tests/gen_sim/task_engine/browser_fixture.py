@@ -51,10 +51,14 @@ def _image(color: str) -> str:
 
 def _authoring_fixture() -> str:
     from embodichain.gen_sim.task_engine._review import _hybrid_preview
-    from embodichain.gen_sim.task_engine.authoring_intent import compile_intent
+    from embodichain.gen_sim.task_engine.authoring_intent import (
+        compile_intent,
+        validate_intent,
+    )
+    from embodichain.gen_sim.task_engine.hybrid import _validate_intent_audit
     from embodichain.gen_sim.task_spec.publication import freeze_task_spec
 
-    pickup = "Pick up the plank with the right arm."
+    pickup = "Pick up the plank by its handle with the right arm."
     placement = "Lay the plank across the tops of both pedestals."
     release = "Release the plank."
     stability = "Leave the plank and both pedestals stable."
@@ -73,14 +77,22 @@ def _authoring_fixture() -> str:
         roles=[
             dict(id=role, kind="object", description=role.replace("_", " "))
             for role in roles
-        ],
+        ]
+        + [dict(id="handle", kind="object", description="handle", part_of="plank")],
         steps=[
             dict(
                 verb="pick",
                 subjects=["plank"],
                 arms=["right"],
                 quote=pickup,
-                effects=[],
+                effects=[
+                    dict(
+                        kind="grasped_at",
+                        subjects=["plank"],
+                        part="handle",
+                        arms=["right"],
+                    )
+                ],
             ),
             dict(
                 verb="place",
@@ -99,6 +111,23 @@ def _authoring_fixture() -> str:
             for fact, quote in ((stable, stability), (parked, park))
         ],
     )
+    plan = validate_intent(plan, text, scene_objects={})
+    goal_producers, _ = _validate_intent_audit(
+        text,
+        plan,
+        dict(
+            issues=[],
+            checks=[
+                dict(
+                    quote=park,
+                    requirement="both arms return",
+                    scope="final",
+                    evidence=["condition_02", "step_03"],
+                    state=parked,
+                )
+            ],
+        ),
+    )
     spec, graph, clauses, descriptions = compile_intent(plan, text, "plank", {})
     image = BytesIO(base64.b64decode(_image("#497ea3").partition(",")[2]))
     frozen = freeze_task_spec(
@@ -115,7 +144,10 @@ def _authoring_fixture() -> str:
             semantic_task_graph=graph,
             task_spec=spec.to_dict(),
             task_spec_v1=frozen,
-            coverage={"producers": {node["id"]: node["id"] for node in graph["nodes"]}},
+            coverage={
+                "producers": {node["id"]: node["id"] for node in graph["nodes"]},
+                "goal_producers": goal_producers,
+            },
         ),
         image,
         None,

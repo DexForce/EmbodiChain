@@ -34,9 +34,9 @@ facts still valid at the start of its latest cited step, not that step's effects
 Final checks use a compatible final condition or a cited effect that survives
 subsequent actions. A verified terminal claim missing from the plan becomes a
 published goal; producer links still require cited, surviving effects. Independent
-facts keep unaffected subjects, including their complete joint support references.
-Known effect conflicts with `always` conditions are rejected
-even if a later step restores the state. Separate release facts prove a group was
+facts keep unaffected subjects or arms, including complete joint support references.
+Known conflicts with `always` conditions are rejected at the initial, during-step,
+and step-end phases, even if a later step restores the state. Separate release facts prove a group was
 released only when valid at the same checkpoint. A stated spatial frame must match the
 evidence, including slot relations; inverse axis relations can match in a shared
 frame but not when swapping a reference-local anchor. The validator tracks feasible arm assignments
@@ -48,8 +48,9 @@ not executable or lowerable.
 `--scene-context FILE` accepts `embodichain.task-scene-context/v1` scene facts and
 case-sensitive ASCII object IDs, not additional actions. An object is rigid unless
 explicitly declared `asset_kind: articulated`; joint actions require a declared
-owner. A missing model-authored owner link can be repaired if an articulated
-caller declaration exists; a proposal cannot override an explicit rigid declaration.
+owner. A missing model-authored owner link can be repaired for a part without an
+explicit asset kind if an articulated caller declaration exists; a proposal
+cannot override an explicit rigid declaration.
 Background objects do not become task roles. The frozen scene requirements
 publish derived `is_articulated`; the retained source context is not visibility evidence.
 For rigid pick/place, named handovers ending in placement and coordinated tray release, hybrid automatically grounds frozen roles in the original image, or verifies a supplied `--scene-grounding FILE`. A null box retains a pending role. Plans outside this deployment scope publish an authoring-only manifest. Qualification and deployment preparation then use the same
@@ -121,8 +122,9 @@ mention can reconcile reference labels. A uniquely stated metric lift height
 is also checked against the source for a targetless upward hold. Agreed explicit
 arm returns project to ordered `simulation.park` calls with pending resource
 postures, not extra image-grounding entities. New default attempts mark the audit
-`purpose: source_review`. Resource-only park calls require the audited clauses;
-sealed pre-audit plans with object-annotated park calls remain readable.
+`purpose: source_review`. Resource-only park calls require the audited clauses.
+Sealed pre-audit plans remain readable, and revisions can keep an existing
+object-annotated park call with its original node and task step identity.
 
 `lab/task_program/language/semantic_contracts.py` owns provider-free call argument,
 resource, precondition/effect and runtime-binding declarations. Configured live
@@ -183,8 +185,9 @@ semantic review and never qualify physical execution.
 
 Version-2 plans and revisions embed the frozen v1 specification and its pairing
 report in the offline viewer. The grouped action canvas links milestones, final
-goals and roles. Typed final goals link only to cited steps with surviving
-effects that prove them. Native run review is published separately at `task_review.html`;
+goals and roles. The review canvas and Graph & exports share goal pairings; typed
+goals link only to cited steps with surviving effects that prove them.
+Native run review is published separately at `task_review.html`;
 `gensim task view --plan PLAN [--run RUN] --output NEW.html` also renders
 existing artifacts. Only matching attempt identities, complete plan identities and
 execution-report digests supply native call evidence. Per-environment details

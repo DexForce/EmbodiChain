@@ -158,6 +158,7 @@ export type Review = {
     milestone_groups: Record<string, string>;
     goal_groups: Record<string, string[]>;
   };
+  annotations?: Record<string, { object?: string; reference?: string }>;
   pending: number;
   qualifiers?: { clause_id: string; status: string; reason: string }[];
   attempt: Attempt | { error: string } | null;
@@ -605,10 +606,9 @@ export default function TaskReview({
           ? issue.env_mask[Number(env)] === true
           : envs.length === 1),
     );
-  const anns = (data.validation?.source?.annotations || {}) as Record<
-    string,
-    { object?: string; reference?: string }
-  >;
+  const anns = (review.annotations ??
+    data.validation?.source?.annotations ??
+    {}) as NonNullable<Review["annotations"]>;
   const matchesRole = (id: string) => {
     if (!selectedRole) return true;
     const step = intentStep(model.calls.get(id)?.call);

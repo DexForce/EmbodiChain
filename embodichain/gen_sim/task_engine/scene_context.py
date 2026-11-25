@@ -63,7 +63,7 @@ def require_articulation(
         raise ArticulationDeclarationError(
             f"Scene object {object_id!r} is declared rigid but requires articulation"
         )
-    if object_id not in scene_objects and any(
+    if scene_objects.get(object_id, {}).get("asset_kind") is None and any(
         row.get("asset_kind") == "articulated" for row in scene_objects.values()
     ):
         raise ArticulationDeclarationError(

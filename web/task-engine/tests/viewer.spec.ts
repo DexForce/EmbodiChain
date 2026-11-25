@@ -95,17 +95,40 @@ for (const viewport of [
   });
 }
 
-test("typed role selection highlights the stage and its expanded action", async ({
+for (const [role, step] of [
+  ["left pedestal", "step_02"],
+  ["handle", "step_01"],
+]) {
+  test(`typed role selection highlights the stage and expanded action for ${role}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1680, height: 1120 });
+    await page.goto(pathToFileURL(join(root, "hybrid-authoring.html")).href);
+    const stage = page.locator(`[data-id="group:${step}"]`);
+    await stage.locator(".rv-toggle").click();
+    await page.locator(`.rv-role-chip[title="${role}"]`).click();
+    await expect(stage.locator(".rv-frame")).toHaveClass(/role-match/);
+    await expect(
+      page.locator(`button[data-key="call:${step}"]`),
+    ).not.toHaveClass(/faded/);
+  });
+}
+
+test("advanced view highlights the published terminal goal producer", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1680, height: 1120 });
   await page.goto(pathToFileURL(join(root, "hybrid-authoring.html")).href);
-  const stage = page.locator('[data-id="group:step_02"]');
-  await stage.locator(".rv-toggle").click();
-  await page.locator('.rv-role-chip[title="left pedestal"]').click();
-  await expect(stage.locator(".rv-frame")).toHaveClass(/role-match/);
-  await expect(page.locator('button[data-key="call:step_02"]')).not.toHaveClass(
-    /faded/,
+  await page.getByRole("button", { name: "Graph & exports" }).click();
+  await page.locator(".goal-card").filter({ hasText: "condition_02" }).click();
+  await expect(
+    page.locator('.task-graph-node[data-key="group:step_03"]'),
+  ).not.toHaveClass(/faded/);
+  await expect(
+    page.locator('.task-graph-node[data-key="group:step_01"]'),
+  ).toHaveClass(/faded/);
+  await expect(page.locator("#detail")).toContainText(
+    /Source stages\s*step_03/,
   );
 });
 

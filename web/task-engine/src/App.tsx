@@ -346,14 +346,7 @@ function Inspector({
         <Facts
           values={[
             [t("predicate"), goal.predicate],
-            [
-              t("groupId"),
-              (
-                data.validation?.coverage.goals.find(
-                  (value) => value.id === goal.id,
-                )?.groups || []
-              ).join(", "),
-            ],
+            [t("groupId"), model.goalGroups(goal.id).join(", ")],
           ]}
         />
         <RawJson label={t("rawGoal")} value={goal} />
@@ -372,9 +365,7 @@ function Inspector({
   const control = isGroup ? model.groupLane(group) : model.lane(node!);
   const window = model.eventWindow(ids);
   const related = (data.task_spec?.goal || []).filter((goal) =>
-    data.validation?.coverage.goals
-      .find((value) => value.id === goal.id)
-      ?.groups.includes(group.id),
+    model.goalGroups(goal.id).includes(group.id),
   );
   return (
     <>

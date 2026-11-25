@@ -403,14 +403,19 @@ def _carried_facts(
                     member = dict(fact, subjects=[subject])
                     if not invalidates(member):
                         yield member
-            elif fact["kind"] == "orientation":
+            elif fact["kind"] in {
+                "orientation",
+                "arms_at_initial_pose",
+                "grippers_open",
+            }:
+                field = "subjects" if fact["kind"] == "orientation" else "arms"
                 survivors = [
-                    subject
-                    for subject in fact["subjects"]
-                    if not invalidates(dict(fact, subjects=[subject]))
+                    member
+                    for member in fact[field]
+                    if not invalidates({**fact, field: [member]})
                 ]
                 if survivors:
-                    yield dict(fact, subjects=survivors)
+                    yield {**fact, field: survivors}
             elif fact["kind"] == "relation" and fact["value"] not in _GROUP_RELATIONS:
                 # Multiple supporting faces prove a joint contact, not separate placements.
                 reference_groups = (
@@ -449,12 +454,21 @@ def _validate_intent_audit(
     invariants = {
         ref: row["fact"] for ref, row in conditions.items() if row["scope"] == "always"
     }
+
+    def check_invariants(origin: str, facts: Iterable[dict[str, Any]]) -> None:
+        for fact in facts:
+            for invariant in invariants.values():
+                if _opposes(invariant, fact):
+                    raise AuthoringEvidenceError(
+                        f"{origin} contradicts an always condition: {invariant}"
+                    )
+
+    for ref, condition in conditions.items():
+        if condition["scope"] == "initial":
+            check_invariants(f"{ref} initial fact", (condition["fact"],))
     for ref, step in steps.items():
-        for fact in invariants.values():
-            if any(_opposes(fact, effect) for effect in step["effects"]):
-                raise AuthoringEvidenceError(
-                    f"{ref} effect contradicts an always condition: {fact}"
-                )
+        check_invariants(f"{ref} maintained fact", step.get("maintain", ()))
+        check_invariants(f"{ref} effect", step["effects"])
     seed = {
         ref: [row["fact"]] for ref, row in conditions.items() if row["scope"] != "final"
     }

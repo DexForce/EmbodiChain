@@ -267,18 +267,27 @@ def test_source_audit_repairs_an_omitted_metric_height():
 
 
 @pytest.mark.parametrize(
-    "measurement", ["by 100 mm", "more than 10 cm", "by more than 0.1 metres"]
+    "object_description,measurement",
+    [
+        ("figurine", "by 100 mm"),
+        ("figurine", "more than 10 cm"),
+        ("figurine", "by more than 0.1 metres"),
+        ("cup with the red and blue stripes", "by at least 10 cm"),
+        ("cup with the red or blue stripes", "by at least 10 cm"),
+    ],
 )
-def test_explicit_lift_height_is_checked_even_when_both_models_agree(measurement):
+def test_explicit_lift_height_is_checked_even_when_both_models_agree(
+    object_description, measurement
+):
     step = dict(
-        _step(reference="figurine"),
+        _step(reference=object_description),
         task_type="E1",
         orientation_goal="none",
         direction="up",
         terminal_behavior="hold",
         lift_height_m=0.01,
     )
-    text = f"Lift the figurine {measurement} and keep holding it."
+    text = f"Lift the {object_description} {measurement} and keep holding it."
     wrong = {"steps": [step]}
     with pytest.raises(ValueError, match="lift_height_m.*explicit source height"):
         interpret_instruction_draft(text, caller=_audit_caller(wrong, wrong))
@@ -291,7 +300,14 @@ def test_explicit_lift_height_is_checked_even_when_both_models_agree(measurement
     )
 
 
-def test_lift_height_does_not_borrow_another_actions_distance():
+@pytest.mark.parametrize(
+    "instruction",
+    [
+        "Lift the figurine and advance the platform by 10 cm.",
+        "Lift the figurine with red and blue stripes and gently advance the platform by 10 cm.",
+    ],
+)
+def test_lift_height_does_not_borrow_another_actions_distance(instruction):
     from embodichain.gen_sim.task_engine.interpretation import (
         _validate_explicit_lift_height,
     )
@@ -302,9 +318,7 @@ def test_lift_height_does_not_borrow_another_actions_distance():
         direction="up",
         terminal_behavior="hold",
     )
-    _validate_explicit_lift_height(
-        "Lift the figurine and advance the platform by 10 cm.", {"steps": [step]}
-    )
+    _validate_explicit_lift_height(instruction, {"steps": [step]})
 
 
 def test_source_audit_repairs_an_invented_scene_role_for_a_start_pose():

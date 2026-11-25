@@ -163,6 +163,11 @@ def _hybrid_preview(result, image, attempt):
             **_producer_pairing(graph, spec, result["coverage"]),
         },
     }
+    annotations = (
+        result.get("semantic_graph_validation", {}).get("source", {}).get("annotations")
+    )
+    if annotations is not None:
+        data["review"]["annotations"] = annotations
     return _viewer_document(data)
 
 
@@ -192,6 +197,8 @@ def write_review(plan_dir: Path, output: Path, run_dir: Path | None = None) -> N
     )
     if hybrid and (root / "image_grounding.json").is_file():
         keys.append("image_grounding")
+    if plan["schema_version"] == "embodichain.hybrid-task-plan/v1":
+        keys.append("semantic_graph_validation")
     if not hybrid and "task_document" in plan:
         keys.extend(["task_spec_v1", "plan_coverage"])
     result = {k: json.loads((root / (k + ".json")).read_text()) for k in keys}
