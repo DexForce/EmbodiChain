@@ -7359,7 +7359,7 @@ attribute native journal entries. DexSim MCP owns scene setup and low-level
 inspection.
 
 Packaged locomotion policy entry points
---------------------------------------
+---------------------------------------
 
 .. currentmodule:: embodichain.extensions.models.policies.anymal_c.profile
 
