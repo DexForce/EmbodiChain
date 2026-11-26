@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
 import json
 import os
@@ -33,6 +34,43 @@ from dexsim.runtime import Session
 from dexsim.runtime.handoff import MODULE, signature
 from embodichain.data import get_data_path
 from embodichain.lab.sim.dexsim_session.writer import WriterClient
+
+TARGET = [0.08, -0.06, 0.04, -0.03, 0.02, -0.01]
+
+
+async def read_after_release(directory: Path, session_id: str) -> dict[str, Any]:
+    import mcp
+
+    stdio = mcp.StdioServerParameters(
+        command=sys.executable,
+        args=[
+            "-m",
+            "embodichain",
+            "mcp",
+            "--session",
+            session_id,
+            "--session-directory",
+            str(directory),
+        ],
+    )
+    async with mcp.Client(stdio) as client:
+        tools = (await client.list_tools()).tools
+        assert [tool.name for tool in tools] == ["embodichain_get_robot_state"]
+        assert tools[0].annotations.read_only_hint
+        measurements = {}
+        for ref in ("arm_a", "arm_b"):
+            result = await client.call_tool(
+                tools[0].name,
+                {
+                    "robot_cfg": "URRobot",
+                    "variant": "ur5",
+                    "object_ref": ref,
+                    "control_part": "arm",
+                },
+            )
+            assert not result.is_error, result.content
+            measurements[ref] = result.structured_content
+        return measurements
 
 
 def trial(root: Path, source: str, pilot: Path) -> dict[str, Any]:
@@ -140,7 +178,7 @@ def trial(root: Path, source: str, pilot: Path) -> dict[str, Any]:
                 robot_uid="UR5",
                 control_part="arm",
                 units=["rad"] * 6,
-                target=[0.08] * 6,
+                target=TARGET,
                 control_interval_s=0.04,
                 **{k: st[k] for k in ("session_id", "topology_revision", "revision")},
             )
@@ -174,7 +212,7 @@ def trial(root: Path, source: str, pilot: Path) -> dict[str, Any]:
         assert handoff("describe")["phase"] == "authoring"
         assert diagnostics["step_index"] == 4
         np.testing.assert_allclose(
-            after["arm_b"]["joint_target_position"], [0.08] * 6, atol=1e-6
+            after["arm_b"]["joint_target_position"], TARGET, atol=1e-6
         )
         np.testing.assert_allclose(
             after["arm_a"]["joint_target_position"], [0] * 6, atol=1e-6
@@ -183,6 +221,30 @@ def trial(root: Path, source: str, pilot: Path) -> dict[str, Any]:
             native("simulation.get_rigid_body_state", object_ref="floor")["world_pose"],
             floor_pose,
         )
+        measurements = asyncio.run(read_after_release(root, s.session_id))
+        names = [f"joint{i}" for i in range(1, 7)]
+        for ref, observed in measurements.items():
+            reverse = native(
+                "articulation.get_state", object_ref=ref, joint_names=names[::-1]
+            )
+            assert (
+                observed["session_id"] == s.session_id and observed["object_ref"] == ref
+            )
+            assert (
+                observed["joint_names"] == names
+                and observed["dof_ids"] == reverse["dof_ids"][::-1]
+            )
+            np.testing.assert_allclose(
+                observed["qpos"], reverse["joint_position"][::-1], atol=1e-6
+            )
+            np.testing.assert_allclose(
+                observed["qvel"], reverse["joint_velocity"][::-1], atol=1e-6
+            )
+            assert observed["step_index"] == reverse["step_index"] == 4
+            np.testing.assert_array_equal(
+                after[ref]["joint_target_position"],
+                reverse["joint_target_position"][::-1],
+            )
         native("simulation.step", steps=1, dt=0.01)
         report = dict(
             session=s.session_id,
@@ -193,6 +255,7 @@ def trial(root: Path, source: str, pilot: Path) -> dict[str, Any]:
             objects=native("scene.list_objects")["objects"],
             diagnostics=diagnostics,
             readback=after,
+            reconnected_read_only=measurements,
             journal=s.info["journal"],
         )
         (root / "report.json").write_text(json.dumps(report, indent=2))
