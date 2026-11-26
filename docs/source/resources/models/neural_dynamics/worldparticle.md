@@ -1,28 +1,64 @@
-# WorldParticle: Frozen Particle Dynamics
+# WorldParticle: Lagrangian Particle Dynamics
 
-## Use cases and ownership
+WorldParticle tracks material as moving particles. The authors train the same
+architecture on different materials using their particle features, boundary
+samples and connectivity. EmbodiChain runs four frozen checkpoints for Fancy
+Fluid, Cloth on Ball, Duck forward deformation and Deep Fluid.
 
-WorldParticle predicts particle positions and velocities from the current
-state, total acceleration and fixed authored features/boundaries/topology.
-The family preserves the original frozen networks and published checkpoints
-for Fancy Fluid, Cloth on Ball, Duck forward deformation and Deep Fluid.
-Its [source provenance](https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/models/dynamics/worldparticle/PROVENANCE.json)
-records the upstream revision and retained licenses, including the separate
-ToMe notice.
+## Architecture
 
-| Owner | Responsibility |
-| --- | --- |
-| `embodichain.extensions.models.dynamics.worldparticle` | Frozen network, strict weights, feature normalization, topology and coordinate conversion |
-| `embodichain.extensions.solvers.physics.worldparticle.provider` | Native scene admission and the optional `worldparticle` Provider |
-| SDK `ParticleInferenceSolver` | Streams, native buffers, force-to-acceleration conversion, writes, reset and close |
-| `examples/learning/worldparticle` | Resource preparation, scene construction, demos and usage contracts |
+The original model advances particles under known external acceleration,
+then learns a correction for interactions. Local convolutions encode nearby
+particles, boundaries and, where available, neighbors connected in the
+material. The encoder alternates attention with token merging. Each particle
+then queries the smaller set of super tokens to recover its own correction.
+[WorldParticle project and architecture diagram](https://worldparticle.github.io/WorldParticle_Web/#method)
 
-The model runs without Newton/DexSim imports. Native deployment calls the same
-model through a thin Provider. NeRD reuses the existing Provider lifecycle but
-has a separate articulated-state/history contract. WorldParticle currently has
-no shared-SL recipe, learning-env or APG/functional-gradient contract.
+```mermaid
+flowchart TB
+    accTitle: WorldParticle predictor and learned particle corrections
+    S["Positions, velocities and external acceleration"] --> P["Explicit integration"]
+    P --> L["Local particle tokenizer"]
+    G["Material features, boundaries and optional topology"] --> L
+    L --> E["Self-attention and merging into super tokens"]
+    E --> D["Per-particle cross-attention decoder"]
+    L -->|particle queries| D
+    D --> C["Per-particle corrections"]
+    C --> O["Corrected positions and velocities"]
+    P --> O
+```
 
-## Runtime and inputs
+The diagram shows the position-and-velocity head. A position-only checkpoint
+predicts displacement from the current state and recovers velocity
+by dividing that displacement by the timestep.
+
+## Inputs and outputs
+
+Load the matching local `checkpoint`, `config` and `inputs` once with
+`load_model(options, device="cuda:0")`. Then call
+`next_q, next_qd = model(q, qd, acceleration, dt)` for each step.
+
+| Quantity | Shape | Meaning |
+| --- | --- | --- |
+| Fixed inputs | `[N, C]` features and two `[M, 3]` boundary arrays | Material features for `N` particles, positions and features for `M` boundary samples, plus CSR connectivity for topology-enabled checkpoints |
+| `q`, `qd` | Each `[N, 3]` | Current world-space positions in metres and velocities in metres/second |
+| `acceleration`, `dt` | `[N, 3]` and a scalar | Total world acceleration in metres/second², including gravity, and the checkpoint timestep in seconds |
+| `next_q`, `next_qd` | Each `[N, 3]` | Predicted positions and velocities in the same world frame and particle order, ready for the next step |
+
+The caller supplies FP32 CUDA tensors in the authored particle order. The
+frozen network uses BF16 internally. The native solver converts force to
+acceleration as force divided by mass plus gravity. With an optional proper
+rotation `R = model_to_world`, row vectors obey `q_world = q_model @ R.T`.
+Boundary samples stay in model coordinates and native gravity is
+`R @ config_gravity`. The Provider checks the particle count. The caller
+preserves particle identity and order. [Full input and coordinate contract](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/worldparticle/INPUTS.md)
+
+## Examples
+
+Prepare assets, run standalone tensor inference, or launch any of the four
+native scenes with the [WorldParticle examples](https://github.com/DexForce/EmbodiChain/tree/main/examples/learning/worldparticle).
+
+### Runtime requirements
 
 The checked profile is Linux x86_64 / Python 3.12, Torch 2.11.0+cu128,
 CXX11 ABI, SDK 0.6.0rc2 and SM120. Open3D `0.19.0+1e7b1743` and FlashAttention
@@ -30,32 +66,11 @@ CXX11 ABI, SDK 0.6.0rc2 and SM120. Open3D `0.19.0+1e7b1743` and FlashAttention
 not replace main's Torch 2.11 operators. Compatible wheels remain local build
 artifacts, without a published `worldparticle` installation extra.
 
-Check the [runtime requirements](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/worldparticle/README.md#runtime-requirements)
+Check the [runtime requirements](https://github.com/DexForce/EmbodiChain/tree/main/examples/learning/worldparticle#runtime-requirements)
 before loading assets or creating a World. Provision compatible operators
 separately; their build/patch tooling is outside this model integration.
 
-`load_model(options, device="cuda:0")` takes local `checkpoint`, `config` and
-`inputs` paths, plus optional proper 3×3 `model_to_world` rotation R. Fixed NPZ
-inputs are raw `(N, C)` features, nonempty `(M, 3)` boundary positions/features
-and, for topology-enabled checkpoints, integer CSR neighbors/row splits.
-
-Call `next_q, next_qd = model(q, qd, acceleration, dt)` with world-space
-float32 CUDA tensors of shape `(N, 3)` in the authored particle order. Position,
-velocity and acceleration use metres, metres/second and metres/second². Total
-acceleration includes gravity; the SDK adds gravity to force/mass once. The
-checkpoint dt is in seconds and must match native stepping. Transport is FP32;
-the source network uses BF16.
-
-For row vectors, `q_world = q_model @ R.T`; boundary NPZ fields remain in model
-coordinates and native gravity is `R @ config_gravity`. The Provider validates
-count, not a permutation or geometry identity. The
-[input contract](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/worldparticle/INPUTS.md)
-defines all fields, feature transforms, task-name aliases, frame/stride rules
-and reset/admission constraints. The
-[README](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/worldparticle/README.md)
-contains a complete standalone tensor example with explicit options.
-
-## Prepare and run
+### Prepare and run
 
 In the checked environment, from the repository root:
 
@@ -78,14 +93,26 @@ and the registered-name alternative. The demos use direct SDK SceneBuilder;
 the manager's `add_fluid_object` retains its DexUni/SPH semantics. Cloth keeps
 its authored surface; other demos use an unconnected-particle carrier.
 
-## Execution evidence and limits
+### Native integration
+
+The frozen model also runs independently of Newton and DexSim. Native
+deployment calls it through the particle Provider.
+
+| Component | Responsibility |
+| --- | --- |
+| `embodichain.extensions.models.dynamics.worldparticle` | Frozen network, checkpoint loading, features, topology and coordinate conversion |
+| `embodichain.extensions.solvers.physics.worldparticle.provider` | Scene admission and the `worldparticle` Provider |
+| SDK `ParticleInferenceSolver` | Streams, native buffers, force-to-acceleration conversion, writes, reset and close |
+| `examples/learning/worldparticle` | Resource preparation, scene construction and runnable demos |
+
+### Execution evidence and limits
 
 At implementation commit `b0875186c` on 2026-11-15, default headless runs
 completed 199 / 80 / 15 / 199 steps for Fancy Fluid / Cloth / Duck / Deep Fluid,
 with finite state and normal exit. Each scene also produced two 1920×1080 RGB
 offscreen captures in a separate two-step run.
 
-The [verification summary](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/worldparticle/README.md#verification)
+The [verification summary](https://github.com/DexForce/EmbodiChain/tree/main/examples/learning/worldparticle#verification)
 gives commands and measured scope. Desktop window interaction
 and new full-length video encoding were not qualified in this run. Finite
 rollout/captures do not establish accuracy, historical equivalence, native/model
@@ -99,3 +126,26 @@ forward-deformation demo here; Deep Fluid uses generated initial conditions
 without an official reference trajectory.
 
 See the {doc}`model API </api_reference/model_catalogs>` for public imports.
+
+## References
+
+Caoliwen Wang et al. (2026). *WorldParticle: Unified World Simulation of
+Lagrangian Particle Dynamics via Transformer*. [arXiv:2605.15305](https://arxiv.org/abs/2605.15305)
+
+```bibtex
+@misc{wang2026worldparticle,
+  author = {Wang, Caoliwen and Guo, Minghao and Chen, Siyuan and Zhang, Heng and
+            Wang, Mengdi and Ni, Xingyu and Sun, Hanson and Wang, Kunyi and
+            Pan, Zherong and Wu, Kui and Liu, Lingjie and Yang, Yin and
+            Jiang, Chenfanfu and Komura, Taku and Matusik, Wojciech and Chen, Peter Yichen},
+  title = {{WorldParticle}: Unified World Simulation of Lagrangian Particle Dynamics via Transformer},
+  year = {2026},
+  eprint = {2605.15305},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.GR},
+  url = {https://arxiv.org/abs/2605.15305}
+}
+```
+
+The upstream revision, source-file hashes and retained licenses, including the
+ToMe notice, are recorded in the [source provenance](https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/models/dynamics/worldparticle/PROVENANCE.json).

@@ -1,47 +1,22 @@
-# Neural Dynamics Models
+# Neural Dynamics Models: Predicting the Next State
 
-Neural dynamics models learn how physical systems evolve from observations,
-controls and physical context. **NeRD** models robot dynamics with state and
-effort histories. **RWM** predicts robot states from actions, **LeWM** predicts
-visual latents from images and actions, and **RigidFormer** predicts how
-interacting rigid geometry moves. **WorldParticle** provides frozen particle
-prediction and optional native forward-inference deployment.
-
-The models ship as `embodichain.extensions.models.dynamics.<family>` in the main
-`embodichain` wheel. Import the family you need explicitly. Model imports do
-not start a simulator; datasets, reference assets and pretrained weights are
-prepared separately by each example.
+Choose a dynamics model by the quantity you observe and the quantity you want
+to predict. Each family ships as `embodichain.extensions.models.dynamics.<family>`
+in the main `embodichain` wheel. You can import a model independently of a
+simulator. Its example handles the required data, assets and weights.
 
 ## Choose a model
 
-| Capability | [NeRD](nerd.md) | [Robot world model (RWM)](rwm.md) | [LeWM](lewm.md) | [RigidFormer](rigidformer.md) | [WorldParticle](worldparticle.md) |
-| --- | --- | --- | --- | --- | --- |
-| Prediction subject | Articulated robot state | Robot state at a fixed control period | Visual environment dynamics | Interacting rigid objects | Particles with static authored boundaries |
-| Architecture | Causal Transformer over history | MLP with frame-local state integration | ViT image encoder and action-conditioned causal predictor | Geometry encoder and attention with anchor prediction | Source particle network with local convolution and attention |
-| Inputs | State, effort and optional contact histories | Current state, action and optional physical context | RGB observation history and actions | Geometry history, reference geometry, anchors and physical properties | Current state, total acceleration and fixed features/boundaries/topology |
-| Outputs | Relative state changes decoded by a physical codec | Next robot state | Predicted future embeddings | Future object geometry | Next world-space particle position/velocity |
-| Action conditioning | Generalized efforts | Explicitly configured control vector | Raw actions grouped into model steps | No action input | Total acceleration; native force/mass plus gravity |
-| Gradients | Network and codec retain input gradients | State/action gradients through multi-step prediction | Differentiable latent rollout with gradient-free CEM | `forward()` trains parameters; public `rollout()` disables autograd | Frozen inference; no qualified functional-gradient/APG contract |
-| Runtime | PyTorch on CPU or CUDA; reference online FK uses Newton/Warp | PyTorch on CPU or CUDA | PyTorch on CPU or CUDA for the model, with DexUni and native RGB for the Cube example | CUDA for geometry prediction; `embodichain[rigidformer]` dependencies | Checked Python 3.12 / Torch 2.11 CUDA / SM120 operator build; manual provisioning |
-| Included workflows | Cartpole/Ant SL, learning-env policy training and optional native solver deployment | Controlled fitting, differentiable prediction and transition replay | OGBench Cube RGB collection, training, CEM evaluation and video export | MOVi resources, engine demo, training, export and evaluation | Asset preparation, standalone inference and four native demos |
-
-Use **NeRD** when your transition model needs a history of joint efforts and
-contact observations. Its shipped reference systems are Cartpole and Ant.
-Use **RWM** when you have measured state/action transitions and need a
-graph-connected predictor with an explicit control period and joint order.
-Use **LeWM** when observations and goals are images and planning uses a
-learned visual representation.
-Use **RigidFormer** when your input is a sequence of rigid-object geometries
-and you want to predict their subsequent motion from observed warmup frames.
-
-Use **WorldParticle** for the supported frozen particle demonstrations; it
-currently provides inference/reset rather than a shared training recipe.
-
-Each guide explains the model's working principles, tensor layout, runnable
-workflow and available validation:
+| Model | Inputs | Prediction | Example |
+| --- | --- | --- | --- |
+| [NeRD](nerd.md) | History of robot states, joint efforts and contacts when present | State change decoded into the next articulated state | [Cartpole and Ant](https://github.com/DexForce/EmbodiChain/tree/main/examples/learning/nerd) |
+| [RWM](rwm.md) | Current robot state, control and optional physical context | Next robot state at a fixed control period | [Controlled fitting and replay](https://github.com/DexForce/EmbodiChain/tree/main/examples/learning/rwm) |
+| [LeWM](lewm.md) | RGB history and actions grouped into model steps | Future visual embeddings for image-goal planning | [OGBench Cube](https://github.com/DexForce/EmbodiChain/tree/main/examples/learning/lewm/cube) |
+| [RigidFormer](rigidformer.md) | Point-cloud history, reference geometry, anchors, physical properties and step size | Future geometry of interacting rigid objects in free rollout | [MOVi rigid bodies](https://github.com/DexForce/EmbodiChain/tree/main/examples/learning/rigidformer) |
+| [WorldParticle](worldparticle.md) | Particle state, total acceleration, material features, static boundaries and optional topology | Next world-space particle positions and velocities | [Fluid, cloth and elastic solids](https://github.com/DexForce/EmbodiChain/tree/main/examples/learning/worldparticle) |
 
 ```{toctree}
-:maxdepth: 1
+:hidden:
 
 nerd
 rwm
@@ -49,6 +24,16 @@ lewm
 rigidformer
 worldparticle
 ```
+
+## Architecture and runtime
+
+| Model | Architecture and gradients | Runtime |
+| --- | --- | --- |
+| NeRD | Causal Transformer over history. The network and physical codec retain input gradients. | PyTorch on CPU or CUDA. Reference online forward kinematics uses Newton/Warp. |
+| RWM | MLP with frame-local state integration. State and action gradients propagate through multiple steps. | PyTorch on CPU or CUDA. |
+| LeWM | Vision Transformer and action-conditioned latent predictor. The rollout is differentiable and the CEM planner samples actions. | PyTorch on CPU or CUDA. The Cube example uses DexUni and native RGB. |
+| RigidFormer | Object-level attention and anchor acceleration prediction. `forward()` trains parameters and `rollout()` runs inference without autograd. | Geometry prediction needs CUDA and the `rigidformer` extra. |
+| WorldParticle | Local particle convolutions, token merging and cross-attention. The integration supports frozen forward inference and reset. | The tested configuration uses Python 3.12, Torch 2.11 CUDA and separately provisioned SM120 operators. |
 
 ## Shared supervised training
 
@@ -92,10 +77,10 @@ model selection.
 | RWM (methodological inspiration) | Liao et al. (2026). [SuperMimic: Scaling Humanoid Whole-Body Control with One Differentiable World Model](https://arxiv.org/abs/2610.28480). |
 | LeWM | Maes et al. (2026). [LeWorldModel: Stable End-to-End Joint-Embedding Predictive Architecture from Pixels](https://arxiv.org/abs/2603.19312). |
 | RigidFormer | Dou et al. (2026). [RigidFormer: Learning Rigid Dynamics using Transformers](https://arxiv.org/abs/2605.09196). |
+| WorldParticle | Wang et al. (2026). [WorldParticle: Unified World Simulation of Lagrangian Particle Dynamics via Transformer](https://arxiv.org/abs/2605.15305). |
 
-The NeRD, RWM and RigidFormer guides provide author lists and BibTeX.
-WorldParticle links its upstream source and retained license/provenance record. The RWM guide
-distinguishes the SuperMimic paper from its independent implementation reference.
+Each model guide includes the project site and a BibTeX entry. For RWM's
+implementation lineage, see the [RWM references](rwm.md#references).
 
 ## Results and further reading
 
