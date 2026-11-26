@@ -15,6 +15,7 @@
 // ----------------------------------------------------------------------------
 
 import { tr, type Locale } from "./i18n";
+import { intentStep } from "./IntentStepDetails";
 import type {
   Control,
   Mode,
@@ -72,7 +73,10 @@ export function createModel(
     ),
   ];
   const lane = (node: TaskNode): Control => {
-    const values = Object.values(node.call.resources || {});
+    const authored = intentStep(node.call)?.arms;
+    const values = Array.isArray(authored)
+      ? authored
+      : Object.values(node.call.resources || {});
     return values.includes("left") && values.includes("right")
       ? "coordinated"
       : values.includes("left")
@@ -206,10 +210,15 @@ export function createModel(
           (locale === "en" ? " " + object.toLocaleLowerCase("en-US") : object)
       : group.task_type;
   };
+  const goalGroups = (id: string) => {
+    const published = data.review?.pairing?.goal_groups;
+    return published
+      ? (published[id] ?? [])
+      : (data.validation?.coverage.goals.find((value) => value.id === id)
+          ?.groups ?? []);
+  };
   const goalLabel = (goal: Predicate) => {
-    const ids =
-        data.validation?.coverage.goals.find((value) => value.id === goal.id)
-          ?.groups || [],
+    const ids = goalGroups(goal.id),
       group = ids.length === 1 ? groups.get(ids[0]) : null;
     const relation = goal.relation || goal.arguments?.relation;
     if (group && (relation === "on" || relation === "inside")) {
@@ -272,6 +281,7 @@ export function createModel(
     steps,
     callLabel,
     groupLabel,
+    goalGroups,
     goalLabel,
     strict: strict as Status,
   };
@@ -345,11 +355,7 @@ export function layoutGraph(
         : row;
     const related =
       !selected.startsWith("goal:") ||
-      (
-        data.validation?.coverage.goals.find(
-          (goal) => goal.id === selected.slice(5),
-        )?.groups || []
-      ).includes(group.id);
+      model.goalGroups(selected.slice(5)).includes(group.id);
     const text =
       JSON.stringify(source) +
       title +

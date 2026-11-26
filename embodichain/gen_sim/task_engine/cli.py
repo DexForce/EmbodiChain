@@ -53,6 +53,11 @@ def main(
         help="Reviewed source-image grounding for hybrid rigid placement qualification",
     )
     parser.add_argument(
+        "--scene-context",
+        type=Path,
+        help="Versioned JSON scene facts and object identities for hybrid authoring.",
+    )
+    parser.add_argument(
         "--route",
         choices=("template", "goal", "hybrid"),
         default="hybrid",
@@ -83,6 +88,8 @@ def main(
         parser.error("--instruction must not be empty")
     if args.scene_grounding and args.route != "hybrid":
         parser.error("--scene-grounding requires --route hybrid")
+    if args.scene_context and args.route != "hybrid":
+        parser.error("--scene-context requires --route hybrid")
     if args.route == "hybrid":
         from .hybrid import publish_hybrid
 
@@ -96,6 +103,7 @@ def main(
             services,
             args.deployment,
             scene_grounding=args.scene_grounding,
+            scene_context=args.scene_context,
         )
         print("Coverage:", result["coverage"]["status"])
         return

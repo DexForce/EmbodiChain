@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from embodichain.gen_sim.services.runtime import GenSimServices, service_entry
 from embodichain.gen_sim.services.compat import VisionFacade
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 import hashlib
 import json
 from pathlib import Path
@@ -28,7 +28,12 @@ import re
 from typing import Any
 from .agent import TaskAgent
 from .contracts import canonical_hash
-from .interpretation import InstructionCaller
+from .interpretation import (
+    InstructionCaller,
+    _TERMINAL_PARK_CALL,
+    _TERMINAL_PARK_KINDS,
+    interpret_instruction_draft,
+)
 from .ontology import task_success_type
 from .task_spec import generate_task_spec
 from .semantic_graph import validate_semantic_task_graph
@@ -121,25 +126,51 @@ def generate_semantic_task_graph_from_image(
     artifacts = {"call_catalog": semantic_planning_catalog(), "model_attempts": []}
     try:
         if instruction_caller is None:
-            from .interpretation import _default_instruction_caller
+            from .interpretation import (
+                _SOURCE_INTENT_AUDIT_TITLE,
+                _default_instruction_caller,
+            )
 
             def audited_instruction_caller(**kwargs: Any) -> Any:
                 response = _default_instruction_caller(**kwargs, services=services)
-                artifacts["model_attempts"].append(
-                    {"stage": "interpretation", "response": response}
-                )
+                attempt = {"stage": "interpretation", "response": response}
+                if kwargs["schema"].get("title") == _SOURCE_INTENT_AUDIT_TITLE:
+                    attempt["purpose"] = "source_review"
+                artifacts["model_attempts"].append(attempt)
                 return response
 
             instruction_caller = audited_instruction_caller
-        candidates = TaskAgent(caller=instruction_caller, services=services).generate(
-            task_id, instruction, model=model, candidate_count=1
+        reviewed = interpret_instruction_draft(
+            instruction,
+            model=model,
+            caller=instruction_caller,
+            services=services,
+            _allow_terminal_park=_TERMINAL_PARK_CALL
+            in artifacts["call_catalog"]["calls"],
         )
+        candidates = TaskAgent(
+            interpreter=lambda *_args, **_kwargs: reviewed,
+            services=services,
+        ).generate(task_id, instruction, candidate_count=1)
         spec = generate_task_spec(candidates)
         candidate = next(
             c
             for c in candidates["candidates"]
             if c["candidate_id"] == spec.metadata["candidate_id"]
         )
+        terminal_park = reviewed.terminal_park
+        park_payload = {"terminal_park": terminal_park} if terminal_park else {}
+        park_clauses = [
+            dict(
+                id=f"terminal_park_{row['arm']}",
+                quote=row["quote"],
+                target=candidate["draft"]["steps"][-1]["id"],
+                origin="explicit",
+                resolution="pending_binding",
+                constraint={"kind": f"terminal_park_{row['arm']}"},
+            )
+            for row in terminal_park
+        ]
         artifacts.update(task_candidates=candidates, task_spec=spec.to_dict())
         image_caller = (
             image_caller
@@ -157,7 +188,13 @@ def generate_semantic_task_graph_from_image(
         errors = []
         for attempt in range(max_repairs + 1):
             raw = image_caller(
-                system_prompt=_GROUNDING_PROMPT,
+                system_prompt=_GROUNDING_PROMPT
+                + (
+                    "\nDo not duplicate terminal_park quotes as visual clauses or create "
+                    "entities for them; their subjects are arm resources, not scene objects."
+                    if terminal_park
+                    else ""
+                ),
                 user_prompt=json.dumps(
                     {
                         "instruction": instruction,
@@ -168,6 +205,7 @@ def generate_semantic_task_graph_from_image(
                             "milestones": [m.id for m in spec.milestones],
                         },
                         "repair_errors": errors,
+                        **park_payload,
                     },
                     ensure_ascii=False,
                 ),
@@ -181,6 +219,10 @@ def generate_semantic_task_graph_from_image(
                 clauses = grounding.pop("clauses", [])
                 properties = grounding.pop("role_properties", {})
                 entities = {obj["id"]: obj for obj in grounding["objects"]}
+                if any(clause["id"] in entities for clause in park_clauses):
+                    raise ValueError(
+                        "Grounding must not declare a reserved terminal park subject"
+                    )
                 from .task_spec import _project_candidate
 
                 projected_spec = _project_candidate(candidate, grounding=grounding)
@@ -202,6 +244,15 @@ def generate_semantic_task_graph_from_image(
                     for p in spec.goal
                 }
                 for clause in clauses:
+                    constraint = (
+                        clause.get("constraint") if isinstance(clause, dict) else None
+                    )
+                    if isinstance(constraint, dict) and constraint.get("kind") in tuple(
+                        _TERMINAL_PARK_KINDS
+                    ):
+                        raise ValueError(
+                            "Only the source audit may declare terminal park"
+                        )
                     if clause["target"] in remap:
                         target = remap[clause["target"]]
                         if target is None:
@@ -229,7 +280,7 @@ def generate_semantic_task_graph_from_image(
                         for ref in refs
                     ],
                     generalization=variations,
-                    clauses=clauses,
+                    clauses=clauses + park_clauses,
                     role_properties=properties,
                     interpreted_steps=candidate["draft"]["steps"],
                 )
@@ -266,6 +317,7 @@ def generate_semantic_task_graph_from_image(
             "grounding": grounding,
             "catalog": artifacts["call_catalog"],
             "task_producer_obligations": semantic_plan_rules(),
+            **park_payload,
             "resource_identity": {
                 "intent_side_to_logical_resource": dict(_INTENT_RESOURCE_IDS),
                 "unspecified_single_arm_resources": {},
@@ -277,6 +329,16 @@ def generate_semantic_task_graph_from_image(
             raw = planning_caller(
                 system_prompt=(
                     _PLANNING_PROMPT
+                    + (
+                        f"\nFor each terminal_park row add exactly one {_TERMINAL_PARK_CALL} "
+                        "with empty arguments, resources.primary=arm and a resource-only semantic annotation: "
+                        "null object/reference/relation and empty intent. Attach each to the final "
+                        "source step and make it depend on all other task actions, directly or "
+                        "transitively. Link its given verbatim quote to its node. Do not claim "
+                        "that the pending park posture equals a measured initial pose."
+                        if terminal_park
+                        else ""
+                    )
                     + ("\n\n" + _PLANNING_REPAIR_PROMPT if errors else "")
                 ),
                 user_prompt=json.dumps(
@@ -375,7 +437,12 @@ def generate_semantic_task_graph_from_image(
 
 
 def _assemble(
-    plan: dict[str, Any], candidate: dict[str, Any]
+    plan: dict[str, Any],
+    candidate: dict[str, Any],
+    *,
+    legacy_parks: (
+        Mapping[str, tuple[str, dict[str, Any], dict[str, Any]]] | None
+    ) = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
     if set(plan) != {"nodes", "requirements"}:
         raise ValueError("Planner must return exactly nodes and requirements")
@@ -401,7 +468,27 @@ def _assemble(
             raise ValueError(
                 "semantic requires object, reference, relation and a dictionary intent"
             )
-        annotations[item["id"]] = item["semantic"]
+        binding_subject = semantic["object"]
+        if item["call"].get("call_id") == _TERMINAL_PARK_CALL and (
+            legacy_parks is None
+            or legacy_parks.get(item["id"]) != (step["id"], item["call"], semantic)
+        ):
+            arm = item["call"].get("resources", {}).get("primary")
+            if arm not in _TERMINAL_PARK_KINDS.values() or semantic not in (
+                dict(object=None, reference=None, relation=None, intent={}),
+                dict(
+                    object=f"terminal_park_{arm}",
+                    reference=None,
+                    relation=None,
+                    intent={},
+                ),
+            ):
+                raise ValueError(
+                    "Terminal park must name only its declared arm resource"
+                )
+            semantic = dict(semantic, object=None)
+            binding_subject = arm
+        annotations[item["id"]] = semantic
         nodes.append(
             {
                 "id": item["id"],
@@ -419,8 +506,8 @@ def _assemble(
                     "node_id": item["id"],
                     "kind": kind,
                     "parameter": "runtime." + kind,
-                    "subject": item["semantic"]["object"],
-                    "value": item["semantic"],
+                    "subject": binding_subject,
+                    "value": semantic,
                     "source": step["id"],
                 }
             )
@@ -614,7 +701,7 @@ For hidden contents explicitly named in the instruction, use instruction_declare
 _PLANNING_PROMPT = """Plan the COMPLETE original instruction as canonical Semantic Calls from the supplied catalog ONLY. Return JSON only:
 {nodes:[{id:unique_identifier,step_id:source_step_id,call:canonical_call,depends_on:[earlier_node_ids],semantic:{object:logical_entity_id,reference:logical_entity_id_or_null,relation:string_or_null,intent:{all_applicable_intent_fields:their_exact_source_values}}}],requirements:[{id:unique_identifier,quote:exact_substring_of_original_instruction,node_ids:[implementing_node_ids]}]}.
 Follow the task_producer_obligations and their declared semantics EXACTLY; required producers are derived from task affordances and catalog capabilities. Calls must be JSON OBJECTS, never JSON-encoded strings. quotes must be literal source instruction text; do not put source intent field names or JSON fragments into quote. Cover every original clause, not just the candidate summary. Requirements must quote all distinct obligations including restoration, release, ordering, location, orientation and arm direction. Every call must have a requirement. Keep every candidate step and its identity and intent. Canonical built-ins: pick {kind:pick,object:ID,resources:{}}; place {kind:place,object:ID,inside:AFFORDANCE_ID or on:AFFORDANCE_ID,resources:{}}; hand_over {kind:hand_over,object:ID,resources:{source:ARM,destination:OTHER_ARM}}. Registered calls use {kind:registered,call_id:catalog_id,arguments:exact_catalog_arguments,resources:{} for an unspecified single arm (or primary:ARM when constrained, source/destination for hand_over, left/right for coordinated transport)}. Omit resources consistently for unspecified single-arm operations: the robot profile is unknown. Only use named arms when requested or logically required by a handover; those names still require a runtime resource profile. Use the key primary literally, NEVER slots. If resources are omitted for acquisition, omit them throughout that held-object chain; do not mix unspecified and named arms. For a named handover, the acquisition MUST explicitly use resources:{primary:SOURCE_ARM}, the hand_over must use resources:{source:SOURCE_ARM,destination:RECEIVING_ARM}, and every following held/release call must use resources:{primary:RECEIVING_ARM}. Map the Task Engine intent side labels with resource_identity: left_arm maps to logical resource left and right_arm maps to logical resource right. Keep left_arm/right_arm verbatim in semantic.intent, but use left/right in call.resources. These logical side IDs are NOT robot control-part names; custom configured identifiers remain unchanged. A named handover source is NOT unspecified, even if the acquisition itself has no explicit arm in the instruction.
-Order nodes by source steps and serialize operations with dependencies; include a dependency on the preceding node, so resource and held-object state is unambiguous. A pick acquires an object; axis_align also acquires and aligns it (do not pick again); place releases it; hand_over transfers an already held object; pour and move_held_object require a held object and preserve the grasp. A subsequent pick must follow a release. A step with terminal_behavior=hold ends holding its object: use terminal_hold_requires_one_of, i.e. pick then exactly one simulation.move_held_object whose semantic.reference and semantic.relation are the step target and relation (null for E2), and never place it; that held transport also realizes the step orientation_goal, so its semantic.intent carries that orientation_goal, and do not add axis_align. simulation.pour already restores the source orientation: for 回正 annotate restore_upright=true on the pour, NEVER add axis_align on a held pouring source. axis_align always acquires an UNHELD object. After pouring use move_held_object then place with intent.return_to_origin=true when 原位 is requested. Control calls (press/twist/slide/open_door) operate on their target without a pick and finish with the hand released. Coordinated transport acquires with both hands then releases at target; both hands must be free beforehand. Respect the terminal behavior and cleanup semantics of each source task contract, including transfer recipients, restoration and release. Preserve the explicitly requested source and recipient identities through later reuses. A later separate source pickup must happen after release.
+Order nodes by source steps and serialize operations with dependencies; include a dependency on the preceding node, so resource and held-object state is unambiguous. A pick acquires an object; axis_align also acquires and aligns it (do not pick again); place releases it; hand_over transfers an already held object; pour and move_held_object require a held object and preserve the grasp. A subsequent pick must follow a release. A step with terminal_behavior=hold ends holding its object: use terminal_hold_requires_one_of, i.e. pick then exactly one simulation.move_held_object whose semantic.reference and semantic.relation are the step target and relation (null for E2), and never place it; that held transport also realizes the step orientation_goal, so its semantic.intent carries that orientation_goal, and do not add axis_align. simulation.pour already restores the source orientation: when orientation restoration is requested annotate restore_upright=true on the pour, NEVER add axis_align on a held pouring source. axis_align always acquires an UNHELD object. After pouring use move_held_object then place with intent.return_to_origin=true when the instruction requests return to the source pose. Control calls (press/twist/slide/open_door) operate on their target without a pick and finish with the hand released. Coordinated transport acquires with both hands then releases at target; both hands must be free beforehand. Respect the terminal behavior and cleanup semantics of each source task contract, including transfer recipients, restoration and release. Preserve the explicitly requested source and recipient identities through later reuses. A later separate source pickup must happen after release.
 Use builtin place for inside (e.g. inside__tray__cup logical affordance ID), NOT simulation.place_relative which does NOT support inside. Use simulation.place_relative for right_of and other catalog relations. For any placement, semantic.reference is the actual logical destination and semantic.relation is the requested relation. For return-to-origin place on an origin-support logical affordance alias and semantic.intent.return_to_origin=true; semantic.reference MUST be the source object ID itself (or null), NEVER an invented source_pose/source_support/origin entity. The pose alias belongs ONLY in call.arguments.target or place.on. The original pose is deferred in a source_pose binding, not an extra observed scene object. move_held_object's arguments contain ONLY a logical target identifier (no invented poses); semantic.reference identifies the destination, e.g. pouring recipient. simulation.pour arguments contain ONLY object; semantic.reference MUST identify the pouring recipient. simulation.axis_align arguments contain ONLY object; orientation semantics belong to intent. Slide arguments contain ONLY handle logical ID; requested open/closed state belongs to intent and pending runtime policy. Press/twist arguments contain ONLY object; requested target_state, coarse twist_goal_mode, target_setting etc belong to intent and pending runtime policy. Open door uses object and state open|closed.
 semantic.intent MUST retain each applicable source step field verbatim including relation, orientation_goal, target_state, terminal_behavior, direction, layout, axis, pour_goal_mode and twist_goal_mode (skip none); do not invent a numeric angle for coarse twist or fluid evidence for motion-only pouring. Include target_setting only when explicitly requested. Represent upright vs either-end vertical distinctly. Never invent a registered call, target pose, joint value, controller, or trajectory. Unknown calibration, affordance, source pose and policies remain binding requirements derived from catalog. Do not omit or simplify unsupported original requirements.
 For an E1 upward lift-and-hold, pick the identified object with the requested arm, then use one simulation.move_held_object with that arm. Its semantic.reference is null, semantic.relation is none, and semantic.intent retains direction=up, lift_height_m and terminal_behavior=hold. The call's target is a logical pose alias for later binding to the initial object pose. The object stays in the gripper."""
