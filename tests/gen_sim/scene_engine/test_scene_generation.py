@@ -1044,6 +1044,10 @@ def test_refinement_levels_and_grounds_bases_with_descendants_before_heading(
     placement_clearance = 0.02
     asset_half_height = 0.05
     low_half_height_after_turn = 0.15
+    child_target_yaw = 15.0
+    settled_child_center_y = (
+        support_height + 2 * low_half_height_after_turn + asset_half_height
+    )
     objects = []
     layouts = []
     for object_id, pos in seed_positions.items():
@@ -1140,8 +1144,25 @@ def test_refinement_levels_and_grounds_bases_with_descendants_before_heading(
         return program_heading_degrees, [0.0, 0.0]
 
     settled = []
+    vision_reviews = []
 
     def settle_vertically(self):
+        if self.dynamic_asset_ids == {"child_001"}:
+            assert len(vision_reviews) == 1
+            assert self.static_asset_ids == {"low_001"}
+            child_layout = next(
+                body.y_up_layout
+                for body in self.participant_bodies
+                if body.scene_object.id == "child_001"
+            )
+            x, y, z = child_layout["pos"]
+            assert y == pytest.approx(settled_child_center_y + placement_clearance)
+            return {
+                "child_001": {
+                    "pos": [x, y - placement_clearance, z],
+                    "rot": child_layout["rot"],
+                }
+            }
         assert self.dynamic_asset_ids == {"low_001", "high_001"}
         results = {}
         for body in self.participant_bodies:
@@ -1161,12 +1182,7 @@ def test_refinement_levels_and_grounds_bases_with_descendants_before_heading(
         settled.append(results)
         return results
 
-    def keep_child_poses(*, assets_layout, z_up_yaws_degrees_by_id, **_):
-        assert z_up_yaws_degrees_by_id == {"child_001": -program_heading_degrees}
-        return assets_layout
-
     heading_client = object()
-    vision_reviews = []
 
     def review_settled(
         *,
@@ -1191,6 +1207,7 @@ def test_refinement_levels_and_grounds_bases_with_descendants_before_heading(
         assert by_id["child_001"][:3, 3] == pytest.approx(
             expected_child_pos - [0.0, placement_clearance, 0.0]
         )
+        assert by_id["child_001"][:3, :3] == pytest.approx(child_delta.as_matrix())
         for asset in scene.assets:
             np.testing.assert_allclose(
                 layout_object_to_transform_matrix(scene_object_y_up_layout(asset)),
@@ -1206,14 +1223,13 @@ def test_refinement_levels_and_grounds_bases_with_descendants_before_heading(
         scene_generation, "review_settled_scene_heading", review_settled
     )
     monkeypatch.setattr(scene_generation.GravitySettler, "settle", settle_vertically)
-    monkeypatch.setattr(scene_generation, "_refine_on_children_bfs", keep_child_poses)
     scene_generation._layout_refinement(
         scene=scene,
         scene_graph=scene_graph,
         image_path=tmp_path / "source.png",
         simready_geometry_output_root=tmp_path,
         debug_output_root=tmp_path,
-        z_up_yaws_degrees_by_id={"child_001": 0.0},
+        z_up_yaws_degrees_by_id={"child_001": child_target_yaw},
         vlm_client=heading_client,
     )
 
@@ -1257,12 +1273,12 @@ def test_refinement_levels_and_grounds_bases_with_descendants_before_heading(
     assert low[:3, 3] == pytest.approx(
         yaw.apply(np.asarray(expected_low_pos) - [0.0, placement_clearance, 0.0])
     )
-    child = layout_object_to_transform_matrix(
-        scene_object_y_up_layout(by_id["child_001"])
-    )
-    assert child[:3, :3] == pytest.approx((yaw * child_delta).as_matrix())
-    assert child[:3, 3] == pytest.approx(
-        yaw.apply(expected_child_pos - [0.0, placement_clearance, 0.0])
+    child_layout = scene_object_y_up_layout(by_id["child_001"])
+    assert child_layout["pos"][1] == pytest.approx(settled_child_center_y)
+    np.testing.assert_allclose(
+        _z_up_rotation_from_y_up_layout(child_layout),
+        Rotation.from_euler("z", child_target_yaw, degrees=True).as_matrix(),
+        atol=1e-8,
     )
 
 

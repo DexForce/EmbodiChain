@@ -754,6 +754,8 @@ def _layout_refinement(
             debug_root=debug_root,
             vlm_client=vlm_client,
             heading=heading,
+            table_root_ids=table_root_ids,
+            z_up_yaws_degrees_by_id=z_up_yaws_degrees_by_id,
             pose_frames=dict.fromkeys(
                 ("before_posture", "before_y_align", "after_y_align"), initial_layout
             ),
@@ -845,6 +847,8 @@ def _layout_refinement(
             debug_root=debug_root,
             vlm_client=vlm_client,
             heading=(heading_degrees, heading_pivot_xy),
+            table_root_ids=table_root_ids,
+            z_up_yaws_degrees_by_id=z_up_yaws_degrees_by_id,
             pose_frames=pose_frames,
             floor_placements=floor_placements,
         )
@@ -983,21 +987,6 @@ def _layout_refinement(
         root_matrices_before_update=table_root_matrices_before_settle,
     )
 
-    # 9. The table roots are now stable, so refine each non-table on-parent
-    # group in BFS order. Every child begins only after its parent is current.
-    refined_assets_layout = _refine_on_children_bfs(
-        scene=scene,
-        scene_graph=scene_graph,
-        table_layout=refined_table_layout,
-        assets_layout=refined_assets_layout,
-        table_root_ids=table_root_ids,
-        debug_output_root=debug_output_root,
-        z_up_yaws_degrees_by_id={
-            asset_id: yaw - heading_degrees
-            for asset_id, yaw in z_up_yaws_degrees_by_id.items()
-        },
-    )
-
     return _finalize_refined_layout(
         scene=scene,
         scene_graph=scene_graph,
@@ -1008,6 +997,8 @@ def _layout_refinement(
         debug_root=debug_root,
         vlm_client=vlm_client,
         heading=(heading_degrees, heading_pivot_xy),
+        table_root_ids=table_root_ids,
+        z_up_yaws_degrees_by_id=z_up_yaws_degrees_by_id,
         pose_frames=pose_frames,
         floor_placements=floor_placements,
     )
@@ -1024,17 +1015,17 @@ def _finalize_refined_layout(
     debug_root: Path,
     vlm_client: VisionClient,
     heading: tuple[int, list[float]],
+    table_root_ids: set[str],
+    z_up_yaws_degrees_by_id: dict[str, float],
     pose_frames: dict[str, list[dict[str, object]]],
     floor_placements: dict[str, FloorSide] | None = None,
 ) -> tuple[dict[str, object], list[dict[str, object]]]:
-    """Publish the layout after reviewing and applying the shared scene heading."""
-    _update_scene_final_y_up_layout_and_z_up_centers(
+    """Resolve the shared heading, place supported children, and publish the poses."""
+    _sync_scene_y_up_poses_from_layouts(
         scene=scene,
         table_layout=table_layout,
         assets_layout=assets_layout,
-        geometry_root=geometry_root,
     )
-    pose_frames["before_heading"] = [table_layout, *assets_layout]
     program_heading, pivot_xy = heading
     tabletop_preview_layouts = assets_layout
     if floor_placements:
@@ -1058,6 +1049,28 @@ def _finalize_refined_layout(
         proposed_yaw_degrees=program_heading,
         pivot_xy=pivot_xy,
     )
+    if table_root_ids:
+        # Check support bounds and settle children using the orientation they
+        # will have once the selected heading is applied to the whole scene.
+        assets_layout = _refine_on_children_bfs(
+            scene=scene,
+            scene_graph=scene_graph,
+            table_layout=table_layout,
+            assets_layout=assets_layout,
+            table_root_ids=table_root_ids,
+            debug_output_root=debug_root,
+            z_up_yaws_degrees_by_id={
+                asset_id: yaw - heading_degrees
+                for asset_id, yaw in z_up_yaws_degrees_by_id.items()
+            },
+        )
+    _update_scene_final_y_up_layout_and_z_up_centers(
+        scene=scene,
+        table_layout=table_layout,
+        assets_layout=assets_layout,
+        geometry_root=geometry_root,
+    )
+    pose_frames["before_heading"] = [table_layout, *assets_layout]
     if heading_degrees:
         rotate_scene_z_up_world(
             scene=scene,
