@@ -7365,7 +7365,7 @@ Local GenSim placement experiment
    :members:
 
 Packaged locomotion policy entry points
---------------------------------------
+---------------------------------------
 
 .. currentmodule:: embodichain.extensions.models.policies.anymal_c.profile
 
