@@ -86,6 +86,32 @@ three color channels with either storage setting.
 The calibration, development selection, 300-second publication budget and
 independent reserved evaluation use the same protocol for both arms.
 
+### Five paired seeds
+
+A single A100-SXM4-80GB ran both arms in alternating order within each
+seed pair. Arm A used 20 live slots. Arm B used the same slots with RAM
+history, and both recorded committed episode IDs. The experiment used an
+instrumented checkout of `82d1aa283`. The integrated example's auditor
+recounted all ten runs, including live credits at each release, checkpoint
+identity and the physical outcomes of submitted policies.
+
+| Learner seed | Dev at step 1500, A / B (of 50) | Submitted update, A / B | Reserved, A / B (of 100) |
+| --- | ---: | ---: | ---: |
+| 207101 | 49 / 46 | 1500 / 2000 | 95 / 98 |
+| 207102 | 45 / 48 | 2000 / 2000 | 97 / 100 |
+| 207103 | 39 / 49 | — / 2000 | — / 100 |
+| 207104 | 50 / 49 | 2000 / 1500 | 95 / 92 |
+| 207105 | 48 / 44 | 2000 / 2000 | 95 / 78 |
+
+Across the five pairs, B covered a median of 46.19 additional distinct
+episodes per 100 consecutive updates. It submitted an eligible policy on time for
+5/5 seeds, compared with 4/5 for A. Arm A qualified 4/5 policies at 95/100, and B qualified 3/5. A dash denotes a run without an eligible policy.
+The predeclared StackCube transfer required a better step-1500 development
+score on at least three seeds, greater coverage and at least as many on-time
+submissions. B improved the development score on two seeds, so this cohort
+did not advance to StackCube. The [per-seed evidence](results/ram_replay.json)
+includes exposure, paired outcomes, checkpoint selection and receipt digests.
+
 ## Compare dual-GPU supply layouts
 
 Both layouts train one ACT policy using two local DDP ranks and a global batch

@@ -1,0 +1,252 @@
+{
+  "protocol_base": "82d1aa28304c2c4acf85ab5d9dafae5e7cfa3412",
+  "capture": "Experiment overlay on the pinned revision; both arms recorded successful step IDs. The public API refactor was validated separately.",
+  "arms": {
+    "A": "20 shared slots, all live",
+    "B": "20 shared slots, 24 live plus up to 8 retired anchors, live fallback"
+  },
+  "gpu": "NVIDIA A100-SXM4-80GB",
+  "seed_pairs": [
+    {
+      "seed": 207101,
+      "A": {
+        "updates": 2400,
+        "dev1500": 49,
+        "decision_s": 295.001,
+        "selected_update": 1500,
+        "reserved": 95,
+        "qualified": true,
+        "episodes": 100,
+        "min_live_draws_at_release": 192,
+        "live_draws": 76800,
+        "history_draws": 0,
+        "history_bytes": 0,
+        "mean_100_step_coverage": 17.364,
+        "sampling_sha256": "d45431738043817dc851ebb01ec505fe31e483dd28ac3c8779799d9348a44504",
+        "decision_sha256": "68ca6cda7f983a50ecc9ed97901de3e42ec1623440765e8116f381c3fc3e3d46",
+        "reserved_sha256": "e375a34ba42e827a6963ce2f11365a93b80ed5e8e6aa946395d0ee49994f0a76"
+      },
+      "B": {
+        "updates": 2000,
+        "dev1500": 46,
+        "decision_s": 266.719,
+        "selected_update": 2000,
+        "reserved": 98,
+        "qualified": true,
+        "episodes": 100,
+        "min_live_draws_at_release": 192,
+        "live_draws": 49456,
+        "history_draws": 14544,
+        "history_bytes": 516469760,
+        "mean_100_step_coverage": 60.119,
+        "sampling_sha256": "c6e0ad3b503a0348866e382294fdb9eb61d917b4f951260af15b92d0c1328b3d",
+        "decision_sha256": "baf135e130e4b6daf4ad5062c91676adcf3a85357f0f5a817a651d6a50e2cee0",
+        "reserved_sha256": "a9000ea441b6b60e27a4628e88266393fe419611b3c972b23f36238ab12f84bb"
+      },
+      "dev1500_discordant": {
+        "a_only": 4,
+        "b_only": 1
+      },
+      "reserved_discordant": {
+        "a_only": 1,
+        "b_only": 4
+      }
+    },
+    {
+      "seed": 207102,
+      "A": {
+        "updates": 2000,
+        "dev1500": 45,
+        "decision_s": 250.12,
+        "selected_update": 2000,
+        "reserved": 97,
+        "qualified": true,
+        "episodes": 100,
+        "min_live_draws_at_release": 312,
+        "live_draws": 64000,
+        "history_draws": 0,
+        "history_bytes": 0,
+        "mean_100_step_coverage": 15.772,
+        "sampling_sha256": "f668fd469162ea0fdbb2510f64b74b3a371a41b19add6576e9a2153449b8b954",
+        "decision_sha256": "2622c95f9c62daebb9d00fde3657822e135c684033f6c1e1747af811ca48d7aa",
+        "reserved_sha256": "22d6f41b61e6230c36ee7aefe9f9598f369d6f7787420292497a7757d0c8c6ed"
+      },
+      "B": {
+        "updates": 2000,
+        "dev1500": 48,
+        "decision_s": 271.336,
+        "selected_update": 2000,
+        "reserved": 100,
+        "qualified": true,
+        "episodes": 100,
+        "min_live_draws_at_release": 193,
+        "live_draws": 49384,
+        "history_draws": 14616,
+        "history_bytes": 516469760,
+        "mean_100_step_coverage": 61.958,
+        "sampling_sha256": "4a83c821cdf5e3127dc796275c404243cbb9567496d5ed14a3139175c1e0844f",
+        "decision_sha256": "d7ab9792c70f09b7a4c62d546e1c49b82befed5957f3cd50e5d72f29cb4c0fca",
+        "reserved_sha256": "96e2658bcf05cf50eb07cd83929ab07d01b1cdb47a402654a3633efc45cacb80"
+      },
+      "dev1500_discordant": {
+        "a_only": 1,
+        "b_only": 4
+      },
+      "reserved_discordant": {
+        "a_only": 0,
+        "b_only": 3
+      }
+    },
+    {
+      "seed": 207103,
+      "A": {
+        "updates": 2500,
+        "dev1500": 39,
+        "decision_s": 295.001,
+        "selected_update": null,
+        "reserved": null,
+        "qualified": false,
+        "episodes": 100,
+        "min_live_draws_at_release": 194,
+        "live_draws": 80000,
+        "history_draws": 0,
+        "history_bytes": 0,
+        "mean_100_step_coverage": 16.626,
+        "sampling_sha256": "03b9f9bb0469411d294894ca12467f7b9a406ebf37a341a7f3222bcc388b7de2",
+        "decision_sha256": "7e5caca9c5cd20028ed5880e803b8ff67aaee55cd4723cba29a063293eb58b8d",
+        "reserved_sha256": null
+      },
+      "B": {
+        "updates": 2000,
+        "dev1500": 49,
+        "decision_s": 258.44,
+        "selected_update": 2000,
+        "reserved": 100,
+        "qualified": true,
+        "episodes": 100,
+        "min_live_draws_at_release": 193,
+        "live_draws": 49504,
+        "history_draws": 14496,
+        "history_bytes": 516469760,
+        "mean_100_step_coverage": 59.785,
+        "sampling_sha256": "6608e1ea7149cd3e490bb72567fcc0014af504720e6e721fa83cb058668b1190",
+        "decision_sha256": "a9ac2a1a9625fad272056ac87a602625f4927a99b3a52399ac931f181d12c58f",
+        "reserved_sha256": "84f7705b17b58a9d565b05b122a04cb57a5d92d5ffc457811851e02c8c333566"
+      },
+      "dev1500_discordant": {
+        "a_only": 1,
+        "b_only": 11
+      },
+      "reserved_discordant": null
+    },
+    {
+      "seed": 207104,
+      "A": {
+        "updates": 2469,
+        "dev1500": 50,
+        "decision_s": 295.001,
+        "selected_update": 2000,
+        "reserved": 95,
+        "qualified": true,
+        "episodes": 100,
+        "min_live_draws_at_release": 192,
+        "live_draws": 79008,
+        "history_draws": 0,
+        "history_bytes": 0,
+        "mean_100_step_coverage": 17.616,
+        "sampling_sha256": "42e458d38c2fe767b39ab452b103336514cfc0bf7b09741c3eeb8c1905daadc1",
+        "decision_sha256": "32164fe74febfd36e2d1b24a4233164044129a01fe3c452f53cb51e7a85f7ec8",
+        "reserved_sha256": "df6c270df7f4a17c80168f37c221fb670c53fbcb462c55d816f33d03b99523c2"
+      },
+      "B": {
+        "updates": 2487,
+        "dev1500": 49,
+        "decision_s": 295.001,
+        "selected_update": 1500,
+        "reserved": 92,
+        "qualified": false,
+        "episodes": 100,
+        "min_live_draws_at_release": 193,
+        "live_draws": 61176,
+        "history_draws": 18408,
+        "history_bytes": 516469760,
+        "mean_100_step_coverage": 66.594,
+        "sampling_sha256": "6e041d71197e0e24687ff47a6087cdc9e5a0c36fc96fbe8fe71c7224cf112c10",
+        "decision_sha256": "10cf4bc069d623ed0d6b6ba636f8bb163b0a8323fba1f1c3c75fc4020e2244ea",
+        "reserved_sha256": "1da6f5f2d8d55537a3535bfa781ecfe2130f691bc65006210c665fc5cbc8b89b"
+      },
+      "dev1500_discordant": {
+        "a_only": 1,
+        "b_only": 0
+      },
+      "reserved_discordant": {
+        "a_only": 6,
+        "b_only": 3
+      }
+    },
+    {
+      "seed": 207105,
+      "A": {
+        "updates": 2000,
+        "dev1500": 48,
+        "decision_s": 262.381,
+        "selected_update": 2000,
+        "reserved": 95,
+        "qualified": true,
+        "episodes": 100,
+        "min_live_draws_at_release": 192,
+        "live_draws": 64000,
+        "history_draws": 0,
+        "history_bytes": 0,
+        "mean_100_step_coverage": 16.792,
+        "sampling_sha256": "a86d5159c04cffd69b26b60eaa9164e4383b3c2c209468573d0de48955b2e31e",
+        "decision_sha256": "60977e15a858260f5baca19cdbbba8259219a2af08a01259ebda983ae257a0fa",
+        "reserved_sha256": "46552e58e828235708cbb7dd650b09d0b0bc7e69fc5f914f9e6d1a96acbee8a2"
+      },
+      "B": {
+        "updates": 2421,
+        "dev1500": 44,
+        "decision_s": 295.001,
+        "selected_update": 2000,
+        "reserved": 78,
+        "qualified": false,
+        "episodes": 100,
+        "min_live_draws_at_release": 193,
+        "live_draws": 59512,
+        "history_draws": 17960,
+        "history_bytes": 516469760,
+        "mean_100_step_coverage": 69.71,
+        "sampling_sha256": "96df6fa5998481129b1048b93ce938026def9195738f26b853ce25514b2b0a55",
+        "decision_sha256": "a835e2d6a4588eca3367548fa19ec0fb0b46d43d0c133467cfc5ff6a8d899f4b",
+        "reserved_sha256": "dcffb065f584d8aa20aa3e954b2e4f565ef19148e18ebbde6b37987fd2a233a2"
+      },
+      "dev1500_discordant": {
+        "a_only": 6,
+        "b_only": 2
+      },
+      "reserved_discordant": {
+        "a_only": 18,
+        "b_only": 1
+      }
+    }
+  ],
+  "transfer_decision": {
+    "comparable": [
+      207101,
+      207102,
+      207103,
+      207104,
+      207105
+    ],
+    "wins": [
+      207102,
+      207103
+    ],
+    "on_time": {
+      "A": 4,
+      "B": 5
+    },
+    "median_coverage100_difference": 46.18674381904261,
+    "stackcube_gate": false
+  }
+}
