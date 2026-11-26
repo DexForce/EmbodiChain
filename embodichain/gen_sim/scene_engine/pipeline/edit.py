@@ -135,6 +135,7 @@ def edit_scene(
         scene=post_edit_scene,
         scene_graph=updated_scene_graph,
         output_root=resolved_output_root,
+        vision_client=vlm_client,
     )
     scene_exporter.export()
     scene_usd_path = build_scene_usd(output_root=resolved_output_root)

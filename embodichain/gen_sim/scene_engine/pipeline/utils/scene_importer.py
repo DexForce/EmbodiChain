@@ -351,6 +351,7 @@ class SceneExportImporter:
             support_surface_z=support_surface_z,
             support_contour_xy=support_contour_xy,
             support_optimization_rect_xy=support_optimization_rect_xy,
+            placement_support=entry.get("placement_support"),
             physics=ObjectPhysics(
                 body_type=str(entry.get("body_type", "dynamic")),  # type: ignore[arg-type]
                 attrs=self._physics_attrs(
@@ -379,6 +380,7 @@ class SceneExportImporter:
         proxy_entry = {
             **entry,
             "init_pos": entry.get("proxy_init_pos", entry.get("init_pos")),
+            "init_rot": entry.get("proxy_init_rot", entry.get("init_rot")),
             "shape": {"shape_type": "Mesh", "fpath": proxy_glb_fpath},
             "body_scale": proxy_body_scale,
         }
@@ -387,8 +389,15 @@ class SceneExportImporter:
             raise ValueError(
                 f"Articulation entry {uid!r} must set is_articulated=true."
             )
+        runtime_usdc = self._resolve_export_articulated_usdc_path(
+            entry, uid=uid, field="fpath"
+        )
         scene_object.articulated_usdc_path = str(
-            self._resolve_export_articulated_usdc_path(entry, uid=uid)
+            self._resolve_export_articulated_usdc_path(
+                entry, uid=uid, field="source_usdc_fpath"
+            )
+            if "source_usdc_fpath" in entry
+            else runtime_usdc
         )
         articulated_usdc_scale = self._vector3(
             entry.get("body_scale"), field_name=f"{uid}.body_scale"
@@ -396,6 +405,12 @@ class SceneExportImporter:
         if any(value <= 0.0 for value in articulated_usdc_scale):
             raise ValueError(f"Articulation entry {uid!r} body_scale must be positive.")
         scene_object.articulated_usdc_scale = articulated_usdc_scale
+        yaw_offset = entry.get("articulation_yaw_offset_degrees")
+        if yaw_offset is not None and (
+            type(yaw_offset) is not int or yaw_offset not in (0, 90, 180, 270)
+        ):
+            raise ValueError(f"Articulation entry {uid!r} has an invalid yaw offset.")
+        scene_object.articulation_yaw_offset_degrees = yaw_offset
         return scene_object
 
     def _resolve_export_glb_path(
@@ -433,20 +448,22 @@ class SceneExportImporter:
         entry: dict[str, Any],
         *,
         uid: str,
+        field: str,
     ) -> Path:
         """Validate one exported articulation reference and return its USDC path."""
-        raw_fpath = entry.get("fpath")
+        raw_fpath = entry.get(field)
         if not isinstance(raw_fpath, str):
-            raise ValueError(f"Articulation entry {uid!r} must contain fpath.")
+            raise ValueError(f"Articulation entry {uid!r} must contain {field}.")
         fpath = Path(raw_fpath)
         if fpath.is_absolute() or fpath.suffix.lower() != ".usdc":
             raise ValueError(
-                f"Articulation entry {uid!r} fpath must be a relative USDC path."
+                f"Articulation entry {uid!r} {field} must be a relative USDC path."
             )
-        expected_fpath = Path("articulated_assets") / uid / f"{uid}.usdc"
+        suffix = ".source.usdc" if field == "source_usdc_fpath" else ".usdc"
+        expected_fpath = Path("articulated_assets") / uid / f"{uid}{suffix}"
         if fpath != expected_fpath:
             raise ValueError(
-                f"Articulation entry {uid!r} fpath must be "
+                f"Articulation entry {uid!r} {field} must be "
                 f"{expected_fpath.as_posix()!r}."
             )
         usdc_path = (self.scene_export_root / fpath).resolve()

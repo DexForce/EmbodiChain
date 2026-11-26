@@ -38,6 +38,7 @@ from embodichain.lab.sim.scene._support_cpu import (
 
 _Y_UP_TO_Z_UP = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
 _MAX_TABLE_BOUNDARY_TOLERANCE_M = 1e-6
+_RECTANGLE_AXIS_TOLERANCE_M = 1e-9
 
 
 @dataclass(frozen=True)
@@ -185,11 +186,16 @@ def _read_rectangle(value: object) -> Polygon:
         raise ValueError("Table safe rectangle must contain four XY corners.") from exc
     if points.shape != (4, 2) or not np.isfinite(points).all():
         raise ValueError("Table safe rectangle must contain four finite XY corners.")
-    rectangle = Polygon(points)
+    minimum, maximum = points.min(axis=0), points.max(axis=0)
+    rectangle = box(*minimum, *maximum)
+    # A quarter-turn computed by the scene exporter can leave round-off at a
+    # corner. Snap only this small error and validate the resulting corner order.
+    snapped = np.where(points - minimum <= maximum - points, minimum, maximum)
+    snapped_polygon = Polygon(snapped)
     if (
-        not rectangle.is_valid
-        or rectangle.area <= 0.0
-        or not rectangle.equals(box(*rectangle.bounds))
+        np.any(np.abs(points - snapped) > _RECTANGLE_AXIS_TOLERANCE_M)
+        or not snapped_polygon.is_valid
+        or not snapped_polygon.equals(rectangle)
     ):
         raise ValueError("Table safe rectangle must be axis-aligned and non-empty.")
     return rectangle

@@ -37,8 +37,11 @@ def _layout(object_id: str, y: float) -> dict[str, object]:
     }
 
 
+@pytest.mark.parametrize(("support_top_z", "expected_y"), [(None, 1.1), (0.4, 1.0)])
 def test_group_table_aligner_preserves_relative_vertical_offsets(
     tmp_path: Path,
+    support_top_z: float | None,
+    expected_y: float,
 ) -> None:
     trimesh.creation.box(extents=(2.0, 1.0, 2.0)).export(tmp_path / "table.glb")
     trimesh.creation.box(extents=(0.5, 1.0, 0.5)).export(tmp_path / "first.glb")
@@ -49,10 +52,11 @@ def test_group_table_aligner_preserves_relative_vertical_offsets(
         table_layout=_layout("table", 0.0),
         assets_layout=assets_layout,
         geometry_root=tmp_path,
+        support_top_z=support_top_z,
         config=AssetsGroupTableAlignerConfig(clearance_m=0.1),
     ).align()
 
-    assert aligned_assets[0]["pos"][1] > assets_layout[0]["pos"][1]  # type: ignore[index]
+    assert aligned_assets[0]["pos"][1] == pytest.approx(expected_y)  # type: ignore[index]
     assert aligned_assets[1]["pos"][1] - aligned_assets[0]["pos"][1] == pytest.approx(  # type: ignore[index]
         0.3
     )

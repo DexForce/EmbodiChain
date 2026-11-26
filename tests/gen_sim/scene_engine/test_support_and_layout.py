@@ -92,6 +92,34 @@ def test_support_detector_prefers_main_tabletop_over_small_higher_piece() -> Non
     assert region.support_polygon.area == pytest.approx(4.0)
 
 
+def test_degraded_reference_prefers_connected_tabletop_over_disconnected_edges() -> (
+    None
+):
+    broad_face = _top_mesh(
+        [(0.1, 0.1), (1.9, 0.1), (1.9, 1.9), (0.1, 1.9)],
+        [[0, 1, 2], [0, 2, 3]],
+        z=0.2,
+    )
+    corners = [
+        _top_mesh(
+            [(x, y), (x + 0.15, y), (x + 0.15, y + 0.15), (x, y + 0.15)],
+            [[0, 1, 2], [0, 2, 3]],
+            z=0.0,
+        )
+        for x, y in [(0.0, 0.0), (1.85, 0.0), (0.0, 1.85), (1.85, 1.85)]
+    ]
+    detector = TableSupportSurfaceDetector(
+        table_world_mesh=trimesh.util.concatenate([broad_face, *corners])
+    )
+
+    assert detector.detect().support_polygon.area == pytest.approx(0.15**2)
+
+    reference = detector.detect(degraded_reference=True)
+    assert reference.top_z == pytest.approx(0.2)
+    assert reference.support_polygon.area == pytest.approx(1.8**2)
+    assert detector.support_region is reference
+
+
 def test_group_clamp_preserves_relative_layout_while_moving_inside_support() -> None:
     support = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
     aabbs = {

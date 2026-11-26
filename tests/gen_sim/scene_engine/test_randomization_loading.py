@@ -45,10 +45,17 @@ from .test_randomization_baseline import _export
 
 
 @pytest.fixture
-def saved_pool(tmp_path: Path) -> tuple[Path, Path, SceneRandomizationResult]:
+def floor_subtree() -> bool:
+    return False
+
+
+@pytest.fixture
+def saved_pool(
+    tmp_path: Path, floor_subtree: bool
+) -> tuple[Path, Path, SceneRandomizationResult]:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    _, cfg = _export(workspace)
+    _, cfg = _export(workspace, floor_subtree=floor_subtree)
     result = generation.randomize_scene(
         cfg, seed=42, candidate_count=2, max_attempts=10
     )
@@ -78,9 +85,11 @@ def _source_poses(workspace: Path) -> dict[str, np.ndarray]:
     return poses
 
 
+@pytest.mark.parametrize("floor_subtree", [False, True])
 def test_load_reconstructs_complete_variants_without_generation_or_writes(
     saved_pool: tuple[Path, Path, SceneRandomizationResult],
     monkeypatch: pytest.MonkeyPatch,
+    floor_subtree: bool,
 ) -> None:
     workspace, directory, result = saved_pool
     before = _snapshot(workspace)
@@ -110,7 +119,9 @@ def test_load_reconstructs_complete_variants_without_generation_or_writes(
         assert actual.variant_id == expected.variant.variant_id
         assert actual.metadata == expected.variant.metadata
         poses = {change.entity_uid: change.arena_pose for change in actual.pose_changes}
-        assert set(poses) == set(source_poses) - {"table"}
+        assert set(poses) == (
+            {"bottle"} if floor_subtree else set(source_poses) - {"table"}
+        )
         for change in expected.variant.pose_changes:
             np.testing.assert_allclose(
                 poses[change.entity_uid], change.arena_pose, atol=1e-12
@@ -276,14 +287,17 @@ class _Sim:
         self.syncs += 1
 
 
+@pytest.mark.parametrize("floor_subtree", [False, True])
 def test_preview_uses_one_scene_and_cycles_absolute_poses_on_deadlines(
     saved_pool: tuple[Path, Path, SceneRandomizationResult],
     monkeypatch: pytest.MonkeyPatch,
+    floor_subtree: bool,
 ) -> None:
     from embodichain.lab.scripts import preview_scene as preview
 
     workspace, directory, result = saved_pool
     baseline_poses = _source_poses(workspace)
+    movable_uids = {"bottle"} if floor_subtree else set(baseline_poses) - {"table"}
     sim = _Sim(set(baseline_poses))
     candidate_paths = {path.resolve() for path in directory.glob("*.json")}
     read_counts: Counter[Path] = Counter()
@@ -328,9 +342,11 @@ def test_preview_uses_one_scene_and_cycles_absolute_poses_on_deadlines(
             writes_after = sum(entity.writes for entity in sim.entities.values())
             expected_writes = 0
             if changed:
-                # Candidate poses cover every movable member; the fixed table
-                # only needs an explicit write when restoring the original scene.
-                expected_writes = len(sim.entities) - (timestamp not in (100, 103, 106))
+                expected_writes = (
+                    len(sim.entities)
+                    if timestamp in (100, 103, 106)
+                    else len(movable_uids)
+                )
             assert writes_after - writes_before == expected_writes
             if changed:
                 observed.append(
@@ -361,10 +377,13 @@ def test_preview_uses_one_scene_and_cycles_absolute_poses_on_deadlines(
         for uid, pose in target.items():
             np.testing.assert_allclose(actual[uid], pose, atol=1e-7)
     assert sim.syncs == 7
-    assert sim.entities["table"].clears == sim.entities["table"].writes == 3
+    assert all(
+        sim.entities[uid].clears == sim.entities[uid].writes == 3
+        for uid in set(sim.entities) - movable_uids
+    )
     assert all(
         entity.clears == entity.writes == 7
         for uid, entity in sim.entities.items()
-        if uid != "table"
+        if uid in movable_uids
     )
     assert read_counts == Counter({path: 1 for path in candidate_paths})

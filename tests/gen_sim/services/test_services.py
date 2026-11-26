@@ -42,6 +42,7 @@ from embodichain.gen_sim.services import (
     GeometryResult,
 )
 from embodichain.gen_sim.services.config import resolve_profile, load_services_config
+from embodichain.gen_sim.services.compat import VisionFacade
 
 
 class Chat:
@@ -61,6 +62,30 @@ def configured(adapter="test", roles=("task_interpretation",)):
     return GenSimServicesCfg(
         profiles={"chosen": {"adapter": adapter}},
         roles={role: "chosen" for role in roles},
+    )
+
+
+def test_vision_facade_preserves_order_of_multiple_reference_images(
+    tmp_path: Path,
+) -> None:
+    client = Chat()
+    reference = tmp_path / "source.png"
+    candidates = tmp_path / "candidates.png"
+    with GenSimServices(
+        configured(roles=("scene_understanding",)),
+        injected={"scene_understanding": client},
+    ) as services:
+        response = VisionFacade(services, "scene_understanding").complete_images(
+            system_prompt="Review heading.",
+            user_prompt="Reference first.",
+            image_paths=(reference, candidates),
+        )
+
+    assert response == "ok"
+    assert client.requests[0].messages[1].content == (
+        TextPart("Reference first."),
+        ImagePart(reference),
+        ImagePart(candidates),
     )
 
 
@@ -841,6 +866,192 @@ def test_legacy_public_client_uses_same_transport_and_response_contract(tmp_path
     assert original[0]["rotation_quaternion_wxyz"] == [1.0, 0.0, 0.0, 0.0]
 
 
+@pytest.mark.parametrize(
+    ("configured", "result_declaration", "object_declaration", "expected", "source"),
+    [
+        (None, None, None, (0.5, 0.5, 0.5, 0.5), "default"),
+        ("glb_column", None, None, (0.5, 0.5, 0.5, 0.5), "configuration"),
+        (
+            "sam3d_row_conjugated",
+            None,
+            None,
+            (-0.5, -0.5, -0.5, 0.5),
+            "configuration",
+        ),
+        (
+            "glb_column",
+            "sam3d_row_conjugated",
+            None,
+            (-0.5, -0.5, -0.5, 0.5),
+            "response_result",
+        ),
+        (
+            "sam3d_row_conjugated",
+            "sam3d_row_conjugated",
+            "glb_column",
+            (0.5, 0.5, 0.5, 0.5),
+            "response_object",
+        ),
+    ],
+)
+def test_legacy_geometry_pose_conventions_preserve_translation_scale_and_wire_audit(
+    tmp_path: Path,
+    configured: str | None,
+    result_declaration: str | None,
+    object_declaration: str | None,
+    expected: tuple[float, float, float, float],
+    source: str,
+) -> None:
+    from embodichain.gen_sim.services.adapters.geometry_generation import (
+        _parse_objects_response,
+    )
+    from embodichain.gen_sim.services.adapters.normalized import (
+        GeometryAdapter,
+        geometry_result,
+    )
+
+    raw_object = {
+        "name": "cabinet",
+        "mesh": "/cabinet.glb",
+        "rotation_quaternion_wxyz": [0.5, 0.5, 0.5, 0.5],
+        "translation": [1.0, 2.0, 3.0],
+        "scale": [2.0, 3.0, 4.0],
+        "pose_coordinate_system": "glb_y_up",
+    }
+    raw = {"ok": True, "result": {"objects": [raw_object]}}
+    if result_declaration is not None:
+        raw["result"]["pose_convention"] = result_declaration
+    if object_declaration is not None:
+        raw_object["pose_convention"] = object_declaration
+    original = json.loads(json.dumps(raw))
+    client = GeometryAdapter(
+        base_url="http://unused",
+        timeout_s=1,
+        max_attempts=1,
+        health_path="/health",
+        generate_objects_path="/objects",
+        pose_convention=configured,
+    )
+    client.generate_objects = lambda **_: (
+        raw,
+        _parse_objects_response(raw, object_ids=["cabinet"]),
+    )
+    try:
+        result = geometry_result(
+            client,
+            GeometryRequest(tmp_path / "image.png", (("cabinet", tmp_path),), tmp_path),
+        )
+    finally:
+        client.close()
+    obj = result.objects[0]
+
+    assert obj.quaternion_xyzw == expected
+    assert obj.position == (1.0, 2.0, 3.0)
+    assert obj.scale == (2.0, 3.0, 4.0)
+    assert obj.source_quaternion_wxyz == (0.5, 0.5, 0.5, 0.5)
+    assert obj.pose_coordinate_system == "glb_y_up"
+    assert obj.pose_convention == (
+        object_declaration or result_declaration or configured or "glb_column"
+    )
+    assert obj.pose_convention_source == source
+    assert json.loads(result.audit_path.read_text()) == original == raw
+
+
+@pytest.mark.parametrize(
+    ("field", "declaration"),
+    [("pose_convention", "unknown"), ("pose_coordinate_system", "camera_z_up")],
+)
+def test_legacy_geometry_rejects_unknown_pose_declarations(
+    tmp_path: Path, field: str, declaration: str
+) -> None:
+    from embodichain.gen_sim.services import ServiceResponseError
+    from embodichain.gen_sim.services.adapters.geometry_generation import (
+        _parse_objects_response,
+    )
+    from embodichain.gen_sim.services.adapters.normalized import geometry_result
+
+    raw = {
+        "ok": True,
+        "result": {
+            "objects": [
+                {
+                    "name": "cabinet",
+                    "mesh": "/cabinet.glb",
+                    "rotation_quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                    "translation": [1.0, 2.0, 3.0],
+                    "scale": [2.0, 3.0, 4.0],
+                    field: declaration,
+                }
+            ]
+        },
+    }
+    client = SimpleNamespace(
+        generate_objects=lambda **_: (
+            raw,
+            _parse_objects_response(raw, object_ids=["cabinet"]),
+        )
+    )
+
+    with pytest.raises(ServiceResponseError, match=field):
+        geometry_result(
+            client,
+            GeometryRequest(tmp_path / "image.png", (("cabinet", tmp_path),), tmp_path),
+        )
+    assert (
+        json.loads((tmp_path / "geometry_generation_response.json").read_text()) == raw
+    )
+
+
+def test_geometry_profile_and_legacy_env_resolve_pose_convention(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.gen_sim.services.adapters import geometry_generation
+    from embodichain.gen_sim.services.runtime import _http_adapter
+
+    env_key = "SCENE_ENGINE_GEOMETRY_GENERATION_POSE_CONVENTION"
+    monkeypatch.setattr(
+        geometry_generation,
+        "read_scene_engine_env_values",
+        lambda *_: {
+            "SCENE_ENGINE_GEOMETRY_GENERATION_BASE_URL": "http://unused",
+            "SCENE_ENGINE_GEOMETRY_GENERATION_TIMEOUT_S": "1",
+            "SCENE_ENGINE_GEOMETRY_GENERATION_MAX_ATTEMPTS": "1",
+            "SCENE_ENGINE_GEOMETRY_GENERATION_HEALTH_PATH": "/health",
+            "SCENE_ENGINE_GEOMETRY_GENERATION_OBJECTS_PATH": "/objects",
+        },
+    )
+    monkeypatch.setattr(
+        geometry_generation, "_load_local_env", lambda: {env_key: "glb_column"}
+    )
+    monkeypatch.setenv(env_key, "sam3d_row_conjugated")
+    cfg = geometry_generation._load_dotenv_config()
+    assert cfg["pose_convention"] == "sam3d_row_conjugated"
+
+    client = _http_adapter(
+        "geometry_reconstruction",
+        {
+            "base_url": "http://unused",
+            "timeout_s": 1,
+            "max_attempts": 1,
+            "options": {
+                "health_path": "/health",
+                "generate_objects_path": "/objects",
+                "pose_convention": cfg["pose_convention"],
+            },
+        },
+    )
+    try:
+        assert client.pose_convention == "sam3d_row_conjugated"
+        assert client.pose_convention_source == "configuration"
+    finally:
+        client.close()
+    monkeypatch.delenv(env_key)
+    assert geometry_generation._load_dotenv_config()["pose_convention"] == "glb_column"
+    monkeypatch.setenv(env_key, "unknown")
+    with pytest.raises(ValueError, match="pose_convention"):
+        geometry_generation.GeometryGenerationClient.from_dotenv()
+
+
 def test_closed_run_rejects_use_and_cannot_write_into_sealed_bundle(tmp_path):
     client = Chat()
     run = GenSimServices(configured(), injected={"task_interpretation": client})
@@ -860,7 +1071,7 @@ def test_closed_run_rejects_use_and_cannot_write_into_sealed_bundle(tmp_path):
 @pytest.mark.parametrize("outcome", ["poll_failure", "malformed_response"])
 def test_accepted_geometry_job_is_not_resubmitted(tmp_path, outcome):
     from embodichain.gen_sim.services.adapters.normalized import GeometryAdapter
-    from embodichain.gen_sim.services import ServiceResponseError
+    from embodichain.gen_sim.services import ServiceResponseError, SubmissionUnknown
 
     image = tmp_path / "input.png"
     Image.new("RGB", (2, 2)).save(image)
@@ -884,7 +1095,14 @@ def test_accepted_geometry_job_is_not_resubmitted(tmp_path, outcome):
             return Response()
 
         def get(self, *args, **kwargs):
-            raise ValueError("malformed task JSON")
+            class InvalidTaskResponse:
+                def raise_for_status(self):
+                    pass
+
+                def json(self):
+                    raise ValueError("malformed task JSON")
+
+            return InvalidTaskResponse()
 
         def close(self):
             pass
@@ -898,7 +1116,8 @@ def test_accepted_geometry_job_is_not_resubmitted(tmp_path, outcome):
         generate_objects_path="/objects",
         session=session,
     )
-    with pytest.raises(ServiceResponseError):
+    expected = SubmissionUnknown if outcome == "poll_failure" else ServiceResponseError
+    with pytest.raises(expected):
         client.reconstruct(GeometryRequest(image, (("one", image),), tmp_path))
     assert session.posts == 1
 

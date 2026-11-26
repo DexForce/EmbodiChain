@@ -226,6 +226,8 @@ def materialize_blueprint(
     vlm_client: VisionClient | None = None,
     geometry_generation_client: GeometryClient | None = None,
     articulated_generation_client: ArticulationClient | None = None,
+    image_generation_client: ImageClient | None = None,
+    image_segmentation_client: SegmentationClient | None = None,
     services: GenSimServices | None = None,
 ) -> SceneMaterialization:
     """Generate assets and layout for one image-derived blueprint.
@@ -235,6 +237,10 @@ def materialize_blueprint(
         vlm_client: Optional caller-owned layout/refinement client.
         geometry_generation_client: Optional caller-owned geometry client.
         articulated_generation_client: Optional caller-owned articulation client.
+        image_generation_client: Optional caller-owned image client for rebuilding
+            a degraded tabletop.
+        image_segmentation_client: Optional caller-owned mask client for the
+            generated replacement table.
 
     Returns:
         Exported scene revision without mutating the supplied blueprint objects.
@@ -267,6 +273,9 @@ def materialize_blueprint(
             geometry_generation_client=geometry,
             vlm_client=effective_vlm,
             articulated_generation_client=articulated,
+            image_generation_client=image_generation_client or ImageFacade(services),
+            image_segmentation_client=image_segmentation_client
+            or SegmentationFacade(services),
         )
     finally:
         if owns_articulated and articulated is not None:
@@ -278,6 +287,7 @@ def materialize_blueprint(
         scene=scene,
         scene_graph=scene_graph,
         output_root=blueprint.output_root,
+        vision_client=effective_vlm if has_articulated_objects else None,
     )
 
 
@@ -361,6 +371,7 @@ def materialize_edit(
         Exported edited scene without mutating the supplied blueprint objects.
     """
     scene_edit_plan = deepcopy(blueprint.scene_edit_plan)
+    scene_edit_plan.validate()
     updated_scene_graph = deepcopy(blueprint.updated_scene_graph)
     owned_clients = []
     added_assets = []
@@ -402,6 +413,11 @@ def materialize_edit(
         scene=scene,
         scene_graph=updated_scene_graph,
         output_root=blueprint.output_root,
+        vision_client=(
+            vlm_client or VisionFacade(services, "scene_edit")
+            if any(asset.is_articulated for asset in scene.assets)
+            else None
+        ),
     )
 
 
@@ -410,12 +426,14 @@ def _export_materialization(
     scene: Scene,
     scene_graph: SceneGraph,
     output_root: Path,
+    vision_client: VisionClient | None = None,
 ) -> SceneMaterialization:
     log_info("Starting Scene Export")
     scene_config_path = SceneExporter(
         scene=scene,
         scene_graph=scene_graph,
         output_root=output_root,
+        vision_client=vision_client,
     ).export()
     from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
         build_scene_usd,

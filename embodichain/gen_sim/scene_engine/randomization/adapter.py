@@ -71,7 +71,10 @@ def scene_layout_input_from_export(
     *,
     scene_id: str | None = None,
 ) -> SceneLayoutInput:
-    """Read scaled local Z-up geometry without modifying its source export.
+    """Read tabletop geometry in local Z-up without modifying its source export.
+
+    Floor-supported roots and their descendants remain in the source scene,
+    while this temporary layout input contains only the table and its groups.
 
     Args:
         output_root: Workspace or scene_export directory.
@@ -94,13 +97,19 @@ def scene_layout_input_from_export(
     _, graph = SceneExportImporter(
         output_root=export.parent, scene_export_root=export
     ).read_scene_and_graph()
+    groups = _support_groups(graph, entries)
+    if not groups:
+        raise ValueError("Scene randomization requires at least one table group.")
     parents = {}
-    for uid, members in _support_groups(graph).items():
+    for uid, members in groups.items():
         parents[uid] = "table"
         parents.update(dict(members))
+    active_uids = {"table", *parents}
     vertices, faces, poses = {}, {}, {}
     for entry in entries:
         uid = entry["uid"]
+        if uid not in active_uids:
+            continue
         mesh = load_glb_mesh(export / entry["shape"]["fpath"])
         vertices[uid] = (
             np.asarray(mesh.vertices) * entry.get("body_scale", [1, 1, 1])

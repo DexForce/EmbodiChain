@@ -126,9 +126,15 @@ def load_layouts(layout_dir: str | Path) -> LoadedLayouts:
         )
         if source.fingerprint != loaded.prepared.source.fingerprint:
             raise ValueError("Scene Engine source changed after layouts were saved.")
+        export_root = (
+            output_root
+            if (output_root / "scene_config.json").is_file()
+            else output_root / "scene_export"
+        )
+        _, config = _read_json(export_root / "scene_config.json")
         return LoadedLayouts(
             output_root,
-            {uid: np.array(pose) for uid, pose in source.poses.items()},
+            {entry["uid"]: _entry_pose(entry) for entry in _rigid_entries(config)},
             loaded.variants,
             tuple(f"candidate_{i:06d}" for i in range(len(loaded.variants))),
         )
@@ -180,7 +186,7 @@ def _load(directory: Path, paths: list[Path]) -> LoadedLayouts:
         ),
         "export_dir": Path(os.path.relpath(export_root, base_path.parent)).as_posix(),
     }
-    baseline = _cached_base(base_path, source, entries, _support_groups(graph))
+    baseline = _cached_base(base_path, source, entries, _support_groups(graph, entries))
     if baseline is None:
         raise ValueError(
             "Saved baseline or source no longer matches; regenerate layouts."

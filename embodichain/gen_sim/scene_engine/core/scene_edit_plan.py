@@ -91,8 +91,8 @@ class SceneEditPlan:
 
     Raises:
         ValueError: If scene IDs are inconsistent, an operation has invalid
-            fields or references, edits conflict, or a deletion would orphan a
-            support descendant.
+            fields or references, an edit involves a floor-supported object,
+            edits conflict, or a deletion would orphan a support descendant.
     """
 
     scene: Scene
@@ -133,6 +133,11 @@ class SceneEditPlan:
             raise ValueError("Scene edit plan graph nodes must match scene object ids.")
 
         existing_object_ids = set(scene_object_ids)
+        floor_object_ids = {
+            asset.id
+            for asset in self.scene.assets
+            if asset.placement_support == "floor"
+        }
         added_object_ids: set[str] = set()
         # Collect deletion intents first so move and add cannot target them regardless of order.
         deleted_object_ids = {
@@ -146,6 +151,14 @@ class SceneEditPlan:
         edited_object_ids: set[str] = set()
         # Validate each operation against the unchanged input scene and graph.
         for operation in self.operations:
+            involved_floor_ids = floor_object_ids.intersection(
+                (operation.object_id, operation.target_id)
+            )
+            if involved_floor_ids:
+                names = ", ".join(repr(uid) for uid in sorted(involved_floor_ids))
+                raise ValueError(
+                    f"Scene edit cannot operate on or reference floor-supported objects: {names}."
+                )
             self._validate_operation(
                 operation=operation,
                 existing_object_ids=existing_object_ids,

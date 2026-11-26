@@ -103,7 +103,7 @@ def prepare_scene_baseline(
     _, graph = SceneExportImporter(
         output_root=export_root.parent, scene_export_root=export_root
     ).read_scene_and_graph()
-    groups = _support_groups(graph)
+    groups = _support_groups(graph, entries)
     files = [export_root / entry["shape"]["fpath"] for entry in entries]
     path = Path(os.path.abspath(Path(cfg.base_data_path).expanduser()))
     _check_destination(path, export_root, files)
@@ -194,6 +194,10 @@ def _rigid_entries(config: dict[str, Any]) -> list[dict[str, Any]]:
     if len(ids) != len(set(ids)):
         raise ValueError("Scene entity UIDs must be unique.")
     for entry in entries:
+        if "placement_support" in entry and (
+            entry["placement_support"] != "floor" or entry["uid"] == "table"
+        ):
+            raise ValueError("Only rigid assets may declare placement_support='floor'.")
         if entry.get("is_articulated") is not False:
             raise ValueError(
                 "Baseline preparation requires non-articulated rigid entities."
@@ -212,8 +216,21 @@ def _rigid_entries(config: dict[str, Any]) -> list[dict[str, Any]]:
     return entries
 
 
-def _support_groups(graph: SceneGraph) -> dict[str, list[tuple[str, str]]]:
+def _support_groups(
+    graph: SceneGraph, entries: list[dict[str, Any]] | None = None
+) -> dict[str, list[tuple[str, str]]]:
+    """Group support descendants, excluding explicitly floor-supported roots."""
     nodes = graph.node_by_id()
+    floor_roots = {
+        entry["uid"]
+        for entry in entries or []
+        if entry.get("placement_support") == "floor"
+    }
+    for uid in floor_roots:
+        if uid not in nodes or nodes[uid].parent_id != "table":
+            raise ValueError(
+                "Floor-supported assets must be direct table children in the scene graph."
+            )
     groups: dict[str, list[tuple[str, str]]] = {}
     for uid in sorted(set(nodes) - {"table"}):
         node = nodes[uid]
@@ -230,7 +247,9 @@ def _support_groups(graph: SceneGraph) -> dict[str, list[tuple[str, str]]]:
         if uid != root:
             assert node.parent_id is not None
             members.append((uid, node.parent_id))
-    return {root: sorted(groups[root]) for root in sorted(groups)}
+    return {
+        root: sorted(groups[root]) for root in sorted(groups) if root not in floor_roots
+    }
 
 
 def _group_data(

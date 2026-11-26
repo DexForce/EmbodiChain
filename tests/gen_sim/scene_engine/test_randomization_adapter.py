@@ -17,23 +17,38 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 
+import numpy as np
 import pytest
 
 from embodichain.gen_sim.scene_engine.randomization.adapter import (
     convert_layouts,
     randomize_scene_export,
+    scene_layout_input_from_export,
 )
 from embodichain.gen_sim.scene_engine.randomization.generation import randomize_scene
 from embodichain.gen_sim.scene_engine.randomization.loading import load_layouts
 from embodichain.gen_sim.scene_engine.randomization.persistence import save_layouts
 from .test_randomization_baseline import _export
+from .test_randomization_loading import _source_poses
 
 
-def test_export_adapter_generates_source_independent_layouts(tmp_path) -> None:
-    export, _ = _export(tmp_path)
+@pytest.mark.parametrize("floor_subtree", [False, True])
+def test_export_adapter_generates_source_independent_layouts(
+    tmp_path, floor_subtree: bool
+) -> None:
+    export, _ = _export(tmp_path, floor_subtree=floor_subtree)
     workspace = export.parent
     original = (workspace / "scene_export/scene_config.json").read_bytes()
+    original_graph = (export / "scene_graph.json").read_bytes()
+    source_poses = _source_poses(workspace)
+    source = scene_layout_input_from_export(workspace)
+    expected_uids = {"table", "bottle"} if floor_subtree else set(source_poses)
+    assert (
+        set(source.poses) == set(source.vertices) == set(source.faces) == expected_uids
+    )
+    assert set(source.parent_by_uid) == expected_uids - {"table"}
     run = randomize_scene_export(
         workspace,
         {
@@ -45,10 +60,27 @@ def test_export_adapter_generates_source_independent_layouts(tmp_path) -> None:
     loaded = load_layouts(run / "layouts")
     assert len(loaded.variants) == 3
     assert (workspace / "scene_export/scene_config.json").read_bytes() == original
+    assert (export / "scene_graph.json").read_bytes() == original_graph
+    assert set(loaded.baseline_poses) == set(source_poses)
+    for uid, pose in source_poses.items():
+        np.testing.assert_allclose(loaded.baseline_poses[uid], pose, atol=1e-12)
     assert all(
         {change.entity_uid for change in variant.pose_changes} == {"bottle"}
         for variant in loaded.variants
     )
+
+
+def test_randomization_rejects_a_scene_with_only_floor_groups(tmp_path) -> None:
+    export, cfg = _export(tmp_path, floor_subtree=True)
+    config_path = export / "scene_config.json"
+    config = json.loads(config_path.read_text())
+    config["rigid_object"][-1]["placement_support"] = "floor"
+    config_path.write_text(json.dumps(config))
+
+    with pytest.raises(ValueError, match="requires at least one table group"):
+        scene_layout_input_from_export(export)
+    with pytest.raises(ValueError, match="requires at least one table group"):
+        randomize_scene(cfg)
 
 
 @pytest.mark.parametrize("backend,storage", [("slsqp", "json"), ("batched", "packed")])

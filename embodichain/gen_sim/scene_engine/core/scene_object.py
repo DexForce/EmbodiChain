@@ -79,14 +79,26 @@ class SceneObject:
     table_state: Literal["normal", "degraded"] | None = (
         None  # Observed table completeness; unknown for legacy scenes.
     )
+    articulation_yaw_offset_degrees: Literal[0, 90, 180, 270] | None = None
+    placement_support: Literal["floor"] | None = None  # Explicit rigid-asset support.
 
     def __post_init__(self) -> None:
-        """Keep observed table completeness separate from asset semantics."""
+        """Validate metadata specific to table or rigid asset roles."""
         if self.table_state is not None:
             if self.kind != "table":
                 raise ValueError("table_state is only valid for table objects.")
             if self.table_state not in ("normal", "degraded"):
                 raise ValueError("table_state must be 'normal', 'degraded', or null.")
+        self.validate_placement_support()
+
+    def validate_placement_support(self) -> None:
+        """Require a declared floor support to belong to a rigid asset."""
+        if self.placement_support is None:
+            return
+        if self.placement_support != "floor":
+            raise ValueError("placement_support must be 'floor' or null.")
+        if self.kind != "asset" or self.is_articulated:
+            raise ValueError("placement_support is only valid for rigid assets.")
 
     def to_dict(self) -> dict[str, object]:
         """Serialize this object and its currently available pipeline artifacts."""
@@ -103,6 +115,13 @@ class SceneObject:
             "simready_glb_path": self.simready_glb_path,
             "articulated_usdc_path": self.articulated_usdc_path,
             "articulated_usdc_scale": self.articulated_usdc_scale,
+            **(
+                {
+                    "articulation_yaw_offset_degrees": self.articulation_yaw_offset_degrees
+                }
+                if self.articulation_yaw_offset_degrees is not None
+                else {}
+            ),
             "rot": self.rot,
             "pos": self.pos,
             "scale": self.scale,
@@ -110,5 +129,10 @@ class SceneObject:
             "support_surface_z": self.support_surface_z,
             "support_contour_xy": self.support_contour_xy,
             "support_optimization_rect_xy": self.support_optimization_rect_xy,
+            **(
+                {"placement_support": self.placement_support}
+                if self.placement_support is not None
+                else {}
+            ),
             "physics": self.physics.to_dict() if self.physics is not None else None,
         }

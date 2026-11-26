@@ -52,16 +52,17 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils im
 _SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 _CATEGORY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 _VISIBLE_RGBA_IMAGE_SIZE = (512, 512)
-_SYSTEM_PROMPT = """You inspect one tabletop-scene image.
+_SYSTEM_PROMPT = """You inspect one image of a table and the surrounding area.
 Identify the main table and every visible, physically distinct object that should
-be segmented and later generated as an independent 3D asset.
+be segmented and later generated as an independent 3D asset, including objects
+resting on the floor beside the table.
 
 Rules:
-1. Ignore people, floor, carpet, walls, ceiling, doors, and indistinguishable
-   specks when listing independent assets. Partial robot grippers, fingers,
-   wrists, or arms may enter from either side or the lower corners. Treat
+1. Ignore people, the floor surface itself, carpet, walls, ceiling, doors, and
+   indistinguishable specks when listing independent assets. Partial robot
+   grippers, fingers, wrists, or arms may enter from either side or the lower corners. Treat
    robot hardware as an occluder and never list it as an independent asset.
-   Keep distinguishable tabletop objects even if the image border cuts them
+   Keep distinguishable objects even if the image border cuts them
    off or a gripper touches or occludes them. Describe only their visible parts.
    Robot shadows and reflections on the tabletop are appearance effects, not
    additional assets or table legs.
@@ -192,8 +193,12 @@ _TABLE_MASK_CRITIC_COMMON_PROMPT = """You select a mask for an already-identifie
 main table or scene support surface.
 The image is one selection sheet. The overview shows numbered colored mask
 outlines in scene context. Non-table assets may be gray in the overview because
-they were intentionally hidden for validation. Each separate candidate card
-shows original RGB pixels inside that exact mask, with excluded pixels gray.
+they were intentionally hidden for validation. Gray asset silhouettes in the
+overview mark occlusions. Where a candidate excludes those same silhouettes,
+they do not count as missing visible tabletop, even when large objects cover
+most of the center. Judge missing tabletop only where the surface remains
+visible in the overview. Each separate candidate card shows original RGB
+pixels inside that exact mask, with excluded pixels gray.
 The card's number and color match its overview outline. Candidate numbers and
 gray backgrounds are annotations, not scene content.
 Use the overview to locate the main support, then inspect each candidate's own
@@ -239,6 +244,9 @@ Examples:
   {"selected_mask_index": 1, "reason": "Candidate 1 covers the main table with only a minor edge gap."}
 - Candidate 2 covers the main tabletop but not the visible legs:
   {"selected_mask_index": 2, "reason": "Candidate 2 identifies the main tabletop despite omitting the legs."}
+- Candidate 1 covers the legs and visible tabletop around a large gray asset
+  silhouette in the overview, and excludes that same silhouette:
+  {"selected_mask_index": 1, "reason": "Candidate 1 covers the table wherever it is visible around the large asset."}
 - All candidates cover objects resting on the table:
   {"selected_mask_index": null, "reason": "The candidates cover tabletop objects rather than the main table."}
 """

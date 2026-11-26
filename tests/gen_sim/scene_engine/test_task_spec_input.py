@@ -261,3 +261,135 @@ def test_rejects_invalid_instruction_structure(tmp_path: Path, inputs: object) -
 
     with pytest.raises(ValueError, match="TaskSpec.inputs"):
         load_task_spec_input(path)
+
+
+def _write_scene_objects_task_spec(
+    tmp_path: Path, objects: list[dict[str, Any]]
+) -> Path:
+    path = _write_task_spec(tmp_path, [])
+    document = json.loads(path.read_text())
+    document["configuration"] = {
+        "requirements": [
+            {"consumer": "scene", "key": "scene_objects", "value": objects}
+        ]
+    }
+    path.write_text(json.dumps(document), encoding="utf-8")
+    return path
+
+
+def test_scene_objects_requirement_loads_official_entities_without_references(
+    tmp_path: Path,
+) -> None:
+    path = _write_scene_objects_task_spec(
+        tmp_path,
+        [
+            {
+                "id": "table",
+                "description": "The scene support table",
+                "asset_kind": "rigid_object",
+                "is_articulated": False,
+            },
+            {
+                "id": "cabinet_01",
+                "description": "Brown cabinet",
+                "asset_kind": "articulation",
+                "is_articulated": True,
+                "provenance": {"source": "task-image"},
+                "context": "Open its drawer.",
+            },
+            {
+                "id": "block_01",
+                "description": "Purple block",
+                "asset_kind": "rigid_object",
+                "is_articulated": False,
+            },
+            {
+                "id": "cabinet_01",
+                "description": "Cabinet with a silver handle",
+                "asset_kind": "articulation",
+                "is_articulated": True,
+            },
+        ],
+    )
+    original = path.read_bytes()
+
+    assert load_task_spec_input(path) == TaskSpecInput(
+        instruction="Move the referenced objects.",
+        entities=(
+            TaskEntity(
+                "cabinet_01", "Brown cabinet\nCabinet with a silver handle", True
+            ),
+            TaskEntity("block_01", "Purple block", False),
+        ),
+    )
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("empty", [False, True])
+def test_scene_objects_requirement_is_authoritative_over_legacy_references(
+    tmp_path: Path, empty: bool
+) -> None:
+    objects = (
+        []
+        if empty
+        else [
+            {
+                "id": "cabinet_01",
+                "description": "Current rigid cabinet",
+                "asset_kind": "articulation",
+                "is_articulated": False,
+            }
+        ]
+    )
+    path = _write_scene_objects_task_spec(tmp_path, objects)
+    document = json.loads(path.read_text())
+    document["interpretation"]["references"] = [
+        {
+            "description": "A superseded role reference",
+            "entities": [
+                {
+                    "id": "cabinet_01",
+                    "description": "Legacy cabinet",
+                    "is_articulated": True,
+                },
+                {
+                    "id": "legacy_only",
+                    "description": "Legacy object",
+                    "is_articulated": True,
+                },
+            ],
+        }
+    ]
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    assert load_task_spec_input(path).entities == (
+        () if empty else (TaskEntity("cabinet_01", "Current rigid cabinet", False),)
+    )
+
+
+@pytest.mark.parametrize("flag", [None, 0, "false"])
+def test_scene_objects_requirement_requires_explicit_boolean_flag(
+    tmp_path: Path, flag: object
+) -> None:
+    entity = {
+        "id": "cabinet_01",
+        "description": "Brown cabinet",
+        "asset_kind": "articulation",
+    }
+    if flag is not None:
+        entity["is_articulated"] = flag
+    path = _write_scene_objects_task_spec(tmp_path, [entity])
+
+    with pytest.raises(ValueError, match="is_articulated"):
+        load_task_spec_input(path)
+
+
+def test_rejects_duplicate_scene_objects_requirements(tmp_path: Path) -> None:
+    path = _write_scene_objects_task_spec(tmp_path, [])
+    document = json.loads(path.read_text())
+    requirements = document["configuration"]["requirements"]
+    requirements.append(dict(requirements[0]))
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="scene_objects"):
+        load_task_spec_input(path)

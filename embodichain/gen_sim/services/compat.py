@@ -22,7 +22,7 @@ Business code may retain prompt helpers while consuming replaceable capabilities
 
 from __future__ import annotations
 from pathlib import Path
-from typing import Any, Mapping, Protocol
+from typing import Any, Mapping, Protocol, Sequence
 import json
 from .contracts import (
     ChatRequest,
@@ -36,6 +36,7 @@ from .contracts import (
     SegmentationRequest,
     ArticulationRequest,
 )
+from .errors import CapabilityError
 from .runtime import GenSimServices, service_scope
 
 __all__: list[str] = []
@@ -54,7 +55,7 @@ class VisionClient(Protocol):
 
 
 class VisionFacade:
-    """Adapt existing single-image prompt helpers to a role-bound chat service."""
+    """Adapt vision prompts to a role-bound chat service."""
 
     def __init__(
         self, services: GenSimServices, role: str, model: str | None = None
@@ -68,8 +69,23 @@ class VisionFacade:
         user_prompt: str,
         image_path: str | Path | None = None,
     ) -> str:
-        parts = (TextPart(user_prompt),) + (
-            (ImagePart(Path(image_path)),) if image_path is not None else ()
+        return self.complete_images(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            image_paths=() if image_path is None else (image_path,),
+        )
+
+    def complete_images(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        image_paths: Sequence[str | Path],
+    ) -> str:
+        """Send the specified images after the user prompt, in order."""
+        parts = (
+            TextPart(user_prompt),
+            *(ImagePart(Path(path)) for path in image_paths),
         )
         return (
             self.services.get(self.role)
@@ -171,6 +187,33 @@ class ImageFacade:
             self.services.get("image_generation")
             .generate(ImageGenerationRequest(prompt, Path(output_path)))
             .path
+        )
+
+    def generate_image_by_image(
+        self,
+        *,
+        image_path: Path,
+        prompt: str,
+        output_path: Path,
+        size: tuple[int, int],
+        seed: int,
+    ) -> Path:
+        """Edit a reference image with the configured image provider."""
+        editor = getattr(
+            self.services.get("image_generation"), "generate_image_by_image", None
+        )
+        if not callable(editor):
+            raise CapabilityError(
+                "The selected image service does not support image-to-image editing."
+            )
+        return Path(
+            editor(
+                image_path=image_path,
+                prompt=prompt,
+                output_path=output_path,
+                size=size,
+                seed=seed,
+            )
         )
 
 

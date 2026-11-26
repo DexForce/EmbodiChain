@@ -245,7 +245,7 @@ def test_materialize_blueprint_does_not_mutate_audited_snapshot(
     monkeypatch.setattr(
         api,
         "_export_materialization",
-        lambda *, scene, scene_graph, output_root: _materialization(
+        lambda *, scene, scene_graph, output_root, vision_client: _materialization(
             scene=scene,
             scene_graph=scene_graph,
             output_root=output_root,
@@ -303,7 +303,7 @@ def test_materialize_edit_does_not_mutate_audited_snapshot(
     monkeypatch.setattr(
         api,
         "_export_materialization",
-        lambda *, scene, scene_graph, output_root: _materialization(
+        lambda *, scene, scene_graph, output_root, vision_client: _materialization(
             scene=scene,
             scene_graph=scene_graph,
             output_root=output_root,
@@ -323,6 +323,50 @@ def test_materialize_edit_does_not_mutate_audited_snapshot(
     assert package.scene_edit_plan.to_dict() == original_plan
     assert package.updated_scene_graph.to_dict() == original_graph
     assert manifest_path.read_text(encoding="utf-8") == "audited edit blueprint\n"
+
+
+def test_materialize_edit_rechecks_floor_targets_before_asset_preparation(
+    tmp_path: Path,
+) -> None:
+    scene, graph = _table_scene()
+    container = SceneObject(
+        id="bin", kind="asset", category="bin", name="bin", description="A blue bin."
+    )
+    scene.objects.append(container)
+    graph.nodes.append(
+        SceneGraphNode(object_id=container.id, parent_id="table", parent_relation="on")
+    )
+    plan = SceneEditPlan(
+        scene=scene,
+        scene_graph=graph,
+        operations=[
+            SceneEditOperation(
+                op="add",
+                object_id="cup",
+                target_id=container.id,
+                relation="left_of",
+                category="cup",
+                name="cup",
+                description="A ceramic cup.",
+            )
+        ],
+    )
+    package = api.SceneEditBlueprintPackage(
+        schema_version=api.SCENE_EDIT_BLUEPRINT_SCHEMA,
+        blueprint_id="edit-blueprint",
+        edit_prompt="Add a cup left of the bin.",
+        output_root=tmp_path,
+        manifest_path=tmp_path / "scene_edit_blueprint.json",
+        scene_edit_plan=plan,
+        updated_scene_graph=graph,
+    )
+    container.placement_support = "floor"
+    image_client = _HealthyClient()
+
+    with pytest.raises(ValueError, match="floor-supported objects: 'bin'"):
+        api.materialize_edit(package, image_generation_client=image_client)
+
+    assert image_client.health_checks == 0
 
 
 def test_scene_blueprint_package_rejects_v1_schema(tmp_path: Path) -> None:
@@ -457,7 +501,7 @@ def test_materialize_blueprint_owns_articulated_client_lifecycle(
     monkeypatch.setattr(
         api,
         "_export_materialization",
-        lambda *, scene, scene_graph, output_root: _materialization(
+        lambda *, scene, scene_graph, output_root, vision_client: _materialization(
             scene=scene,
             scene_graph=scene_graph,
             output_root=output_root,
@@ -578,7 +622,11 @@ def test_layout_only_edit_requires_no_generation_clients(
     monkeypatch.setattr(api, "prepare_scene_edit_assets", unexpected)
     monkeypatch.setattr(api, "edit_layout", lambda **kwargs: kwargs["scene"])
     monkeypatch.setattr(
-        api, "_export_materialization", lambda **kwargs: _materialization(**kwargs)
+        api,
+        "_export_materialization",
+        lambda *, scene, scene_graph, output_root, vision_client: _materialization(
+            scene=scene, scene_graph=scene_graph, output_root=output_root
+        ),
     )
     result = api.materialize_edit(package)
     assert result.scene.objects[1].id == "mug"

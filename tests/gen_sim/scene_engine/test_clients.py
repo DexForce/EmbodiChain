@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -543,6 +544,194 @@ def test_geometry_client_posts_masks_and_downloads_glbs(tmp_path: Path) -> None:
     assert session.post_call is not None
     assert session.post_call["url"] == "http://geometry/objects"
     assert (tmp_path / "output/cup.glb").read_bytes() == b"glTF-mesh"
+
+
+class _GeometryJobSession(_Session):
+    """Replay one accepted task and its status GETs without a remote service."""
+
+    def __init__(self, polls: list[object]) -> None:
+        super().__init__(get_payload={})
+        self.polls = iter(polls)
+        self.posts = 0
+        self.task_gets: list[tuple[str, float]] = []
+
+    def post(self, url: str, **kwargs: object) -> _Response:
+        self.posts += 1
+        return _Response({"status": "queued", "request_id": "accepted-job"})
+
+    def get(self, url: str, *, timeout: float) -> _Response:
+        if url.endswith("/tasks/accepted-job"):
+            self.task_gets.append((url, timeout))
+            outcome = next(self.polls)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            if isinstance(outcome, _Response):
+                return outcome
+            return _Response(outcome)
+        return _Response({}, content=b"glTF-mesh")
+
+
+def _completed_geometry_job() -> dict[str, object]:
+    return {
+        "ok": True,
+        "status": "succeeded",
+        "request_id": "accepted-job",
+        "result": {
+            "objects": [
+                {
+                    "name": "cup",
+                    "mesh": "/cup.glb",
+                    "rotation_quaternion_wxyz": [1, 0, 0, 0],
+                    "translation": [0, 0, 0],
+                    "scale": [1, 1, 1],
+                }
+            ]
+        },
+    }
+
+
+def _run_geometry_job(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    session: _GeometryJobSession,
+    *,
+    poll_timeout_s: float = 3.0,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    clock = [0.0]
+
+    def advance(seconds: float) -> None:
+        clock[0] += seconds
+
+    monkeypatch.setattr(
+        geometry_generation,
+        "time",
+        SimpleNamespace(monotonic=lambda: clock[0], sleep=advance),
+    )
+    image = tmp_path / "image.png"
+    image.write_bytes(b"png")
+    client = geometry_generation.GeometryGenerationClient(
+        base_url="http://geometry",
+        timeout_s=30,
+        max_attempts=4,
+        health_path="/health",
+        generate_objects_path="/objects",
+        session=session,
+        poll_timeout_s=poll_timeout_s,
+        poll_interval_s=0.1,
+    )
+    return client.generate_objects(
+        image_path=image, object_masks=[("cup", image)], output_root=tmp_path / "output"
+    )
+
+
+def test_geometry_job_accepts_queued_polling_until_completion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    completed = _completed_geometry_job()
+    session = _GeometryJobSession(
+        [
+            {"status": "queued"},
+            {"status": "waiting for GPU"},
+            {"status": "running"},
+            completed,
+        ]
+    )
+
+    response, _ = _run_geometry_job(tmp_path, monkeypatch, session)
+
+    assert response == completed
+    assert (tmp_path / "output/cup.glb").read_bytes() == b"glTF-mesh"
+    assert session.posts == 1
+    assert len(session.task_gets) == 4
+
+
+def _http_failure(status_code: int):
+    response = geometry_generation.requests.Response()
+    response.status_code = status_code
+    return geometry_generation.requests.HTTPError(response=response)
+
+
+@pytest.mark.parametrize("failure", ["timeout", "connection", "429", "503"])
+def test_geometry_job_retries_only_transient_status_gets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    if failure == "timeout":
+        error = geometry_generation.requests.Timeout("private transport detail")
+    elif failure == "connection":
+        error = geometry_generation.requests.ConnectionError("private transport detail")
+    else:
+        error = _http_failure(int(failure))
+    session = _GeometryJobSession([error, _completed_geometry_job()])
+
+    response, _ = _run_geometry_job(tmp_path, monkeypatch, session)
+
+    assert response["status"] == "succeeded"
+    assert session.posts == 1
+    assert len(session.task_gets) == 2
+
+
+@pytest.mark.parametrize("status", ["failed", "cancelled"])
+def test_geometry_job_reports_terminal_status_without_provider_error_body(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    from embodichain.gen_sim.services import ServiceResponseError
+
+    session = _GeometryJobSession(
+        [{"status": status, "error": "private-provider-error-body"}]
+    )
+
+    with pytest.raises(ServiceResponseError) as error:
+        _run_geometry_job(tmp_path, monkeypatch, session)
+
+    assert "accepted-job" in str(error.value)
+    assert status in str(error.value)
+    assert "private-provider-error-body" not in str(error.value)
+    assert session.posts == 1
+
+
+@pytest.mark.parametrize("invalid", ["malformed_json", "unknown_status", "HTTP_403"])
+def test_geometry_job_preserves_unknown_submission_for_unresolved_polling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid: str
+) -> None:
+    from embodichain.gen_sim.services import SubmissionUnknown
+
+    class MalformedResponse(_Response):
+        def json(self) -> object:
+            raise ValueError("private-provider-error-body")
+
+    if invalid == "malformed_json":
+        outcome = MalformedResponse({})
+    elif invalid == "unknown_status":
+        outcome = {"status": "private-provider-error-body"}
+    else:
+        outcome = _http_failure(403)
+    session = _GeometryJobSession([outcome])
+
+    with pytest.raises(SubmissionUnknown) as error:
+        _run_geometry_job(tmp_path, monkeypatch, session)
+
+    assert "accepted-job" in str(error.value)
+    assert "private-provider-error-body" not in str(error.value)
+    assert session.posts == 1
+    assert len(session.task_gets) == 1
+
+
+def test_geometry_job_retries_transient_gets_only_within_polling_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from embodichain.gen_sim.services import ServiceTimeout
+
+    # A 0.25-second budget permits GETs at virtual times 0, 0.1 and 0.2.
+    session = _GeometryJobSession([geometry_generation.requests.Timeout()] * 4)
+
+    with pytest.raises(ServiceTimeout, match="accepted-job"):
+        _run_geometry_job(tmp_path, monkeypatch, session, poll_timeout_s=0.25)
+
+    assert session.posts == 1
+    assert len(session.task_gets) == 3
+    assert [timeout for _, timeout in session.task_gets] == pytest.approx(
+        [0.25, 0.15, 0.05]
+    )
 
 
 def test_articulated_upload_hashes_the_same_expanded_image_path(

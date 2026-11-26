@@ -64,14 +64,31 @@ def test_worker_uses_files_and_does_not_inherit_business_python(
 
 
 @pytest.mark.parametrize("selection", ["process", "dotenv"])
+@pytest.mark.parametrize(
+    ("operation", "module_path", "function"),
+    [
+        (
+            "front_top",
+            "scene_engine/pipeline/utils/_blender_rendering.py",
+            "_render_object_front_top_views",
+        ),
+        ("process_obj", "_blender_operations.py", "process_obj"),
+    ],
+)
 def test_blender_application_runs_the_same_worker_protocol(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    selection: str,
+    operation: str,
+    module_path: str,
+    function: str,
 ) -> None:
     worker = tmp_path / "worker with spaces.py"
     worker.write_text(runtime._WORKER.read_text())
-    (tmp_path / "_blender_operations.py").write_text(
-        "def _render_object_front_top_views(*, value):\n"
-        "    return {'value': value}\n"
+    implementation = tmp_path / module_path
+    implementation.parent.mkdir(parents=True, exist_ok=True)
+    implementation.write_text(
+        f"def {function}(*, value):\n    return {{'value': value}}\n"
     )
     application = tmp_path / "blender application"
     application.write_text(
@@ -93,9 +110,9 @@ def test_blender_application_runs_the_same_worker_protocol(
     else:
         dotenv.write_text(f'EMBODICHAIN_BLENDER_EXECUTABLE="{application}"\n')
     monkeypatch.setenv("EMBODICHAIN_BLENDER_PYTHON", str(tmp_path / "unused-python"))
-    assert runtime._run_blender_job(
-        "front_top", {"value": "asset with spaces.glb"}
-    ) == {"value": "asset with spaces.glb"}
+    assert runtime._run_blender_job(operation, {"value": "asset with spaces.glb"}) == {
+        "value": "asset with spaces.glb"
+    }
     if selection == "dotenv":
         assert "EMBODICHAIN_BLENDER_EXECUTABLE" not in os.environ
 

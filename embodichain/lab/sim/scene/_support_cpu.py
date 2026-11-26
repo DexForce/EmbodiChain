@@ -18,11 +18,13 @@
 
 from __future__ import annotations
 from collections import deque
+from collections.abc import Iterator
 from dataclasses import dataclass
 import numpy as np
 import torch
 from embodichain.compute.geometry import triangle_geometry
 from scipy.spatial import ConvexHull, QhullError
+from shapely.errors import ShapelyError
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 import trimesh
@@ -30,6 +32,8 @@ from embodichain.utils import configclass
 from embodichain.utils.logger import log_info, log_warning
 
 __all__ = ["SupportSurfaceConfig", "DetectedSupportSurface", "SupportSurfaceDetector"]
+
+_DEFAULT_RECTANGLE_SAMPLES_PER_AXIS = 48
 
 
 @configclass
@@ -52,13 +56,21 @@ class SupportSurfaceConfig:
 
 @dataclass(frozen=True)
 class DetectedSupportSurface:
-    """Detected main table support surface in z-up world coordinates."""
+    """One detected support surface in z-up world coordinates."""
 
     top_z: float  # Highest z value among the selected support-surface triangles.
     vertices: np.ndarray  # Full z-up table vertex array referenced by ``faces``.
-    faces: np.ndarray  # Indices of triangles selected as the main support surface.
+    faces: np.ndarray  # Indices of triangles belonging to this support surface.
     support_polygon: Polygon  # Largest valid outer support contour in z-up XY.
     optimization_rectangle: Polygon  # Axis-aligned rectangle fully inside the contour.
+
+
+@dataclass(frozen=True)
+class _SupportLevel:
+    indices: np.ndarray
+    hull_gap: float
+    top_z: float
+    area: float
 
 
 class SupportSurfaceDetector:
@@ -131,6 +143,62 @@ class SupportSurfaceDetector:
 
     def detect(self) -> DetectedSupportSurface:
         """Detect the main upward-facing support surface of a z-up table mesh."""
+        mesh, levels, hull_gap_tolerance = self._find_support_levels()
+        level = next(self._rank_levels(levels, hull_gap_tolerance))
+        self.support_region = self._build_support_surface(mesh, level)
+        return self.support_region
+
+    def detect_candidates(
+        self,
+        *,
+        limit: int,
+        rectangle_samples_per_axis: int = _DEFAULT_RECTANGLE_SAMPLES_PER_AXIS,
+    ) -> list[DetectedSupportSurface]:
+        """Return up to ``limit`` usable levels in the default detection order.
+
+        ``rectangle_samples_per_axis`` caps the boundary coordinates used on
+        each axis when searching for an inscribed rectangle.
+        Candidate enumeration leaves :attr:`support_region` untouched. All
+        candidates share the read-only vertex array of the prepared geometry.
+        """
+        if type(limit) is not int or limit < 1:
+            raise ValueError("Support candidate limit must be a positive integer.")
+        if (
+            type(rectangle_samples_per_axis) is not int
+            or rectangle_samples_per_axis < 2
+        ):
+            raise ValueError(
+                "Support rectangle sample count must be an integer of at least 2."
+            )
+        mesh, levels, hull_gap_tolerance = self._find_support_levels()
+        vertices = mesh.vertices.copy()
+        vertices.setflags(write=False)
+        candidates: list[DetectedSupportSurface] = []
+        for level in self._rank_levels(levels, hull_gap_tolerance):
+            try:
+                candidates.append(
+                    self._build_support_surface(
+                        mesh,
+                        level,
+                        vertices,
+                        rectangle_samples_per_axis=rectangle_samples_per_axis,
+                    )
+                )
+            except (ValueError, ShapelyError) as exc:
+                log_warning(
+                    f"Skipping unusable support level at z={level.top_z}: {exc}"
+                )
+                continue
+            if len(candidates) == limit:
+                break
+        if not candidates:
+            raise ValueError("No upward-facing support level has usable geometry.")
+        return candidates
+
+    def _find_support_levels(
+        self,
+    ) -> tuple[trimesh.Trimesh, list[_SupportLevel], float]:
+        """Prepare the geometry once and measure each eligible support level."""
         self._validate_config()
         table_world_mesh = self.mesh
 
@@ -162,28 +230,39 @@ class SupportSurfaceDetector:
                 "satisfy max_face_height_span_m."
             )
 
-        # Select the best support level among the candidate triangles.
-        selected_faces = self._select_main_support_level(
+        full_table_hull_area = self._convex_hull_area(
+            mesh.vertices[:, :2], name="Table"
+        )
+        levels = self._measure_support_levels(
             mesh=mesh,
             candidate_face_indices=candidate_face_indices,
-            full_table_hull_area=self._convex_hull_area(
-                mesh.vertices[:, :2], name="Table"
-            ),
+            full_table_hull_area=full_table_hull_area,
         )
-        selected_vertices = face_vertices[selected_faces]
-        vertices = mesh.vertices.copy()
-        faces = mesh.faces[selected_faces].copy()
+        return mesh, levels, max(full_table_hull_area * 1e-6, 1e-9)
+
+    def _build_support_surface(
+        self,
+        mesh: trimesh.Trimesh,
+        level: _SupportLevel,
+        vertices: np.ndarray | None = None,
+        *,
+        rectangle_samples_per_axis: int = _DEFAULT_RECTANGLE_SAMPLES_PER_AXIS,
+    ) -> DetectedSupportSurface:
+        if vertices is None:
+            vertices = mesh.vertices.copy()
+        faces = mesh.faces[level.indices].copy()
         support_polygon = self._extract_largest_support_polygon(
             vertices[faces, :2], preserve_holes=self.config.preserve_holes
         )
-        self.support_region = DetectedSupportSurface(
-            top_z=float(selected_vertices[:, :, 2].max()),
+        return DetectedSupportSurface(
+            top_z=level.top_z,
             vertices=vertices,
             faces=faces,
             support_polygon=support_polygon,
-            optimization_rectangle=self._largest_inscribed_rectangle(support_polygon),
+            optimization_rectangle=self._largest_inscribed_rectangle(
+                support_polygon, samples_per_axis=rectangle_samples_per_axis
+            ),
         )
-        return self.support_region
 
     @staticmethod
     def _repair_normals_if_possible(mesh: trimesh.Trimesh) -> None:
@@ -214,13 +293,13 @@ class SupportSurfaceDetector:
         )
         return
 
-    def _select_main_support_level(
+    def _measure_support_levels(
         self,
         *,
         mesh: trimesh.Trimesh,
         candidate_face_indices: np.ndarray,
         full_table_hull_area: float,
-    ) -> np.ndarray:
+    ) -> list[_SupportLevel]:
         # Find adj.
         adjacency = self._face_adjacency(mesh)
         # Use BFS to group the connect components.
@@ -255,11 +334,7 @@ class SupportSurfaceDetector:
             else:
                 levels.append((component_top_z, [component]))
 
-        best_level_faces: np.ndarray | None = None
-        best_hull_gap = np.inf
-        best_top_z = -np.inf
-        best_projected_support_area = 0.0
-        hull_gap_tolerance = max(full_table_hull_area * 1e-6, 1e-9)
+        eligible_levels: list[_SupportLevel] = []
         for level_top_z, level_components in levels:
             level_indices = np.asarray(
                 sorted(
@@ -283,29 +358,48 @@ class SupportSurfaceDetector:
             # for selecting the best level among multiple candidates which avoids
             # small area which have the largest z value.
             level_hull_gap = max(0.0, full_table_hull_area - level_hull_area)
-            if (
-                best_level_faces is None
-                or level_hull_gap < best_hull_gap - hull_gap_tolerance
-                or (
-                    abs(level_hull_gap - best_hull_gap) <= hull_gap_tolerance
-                    and level_top_z > best_top_z + self.config.height_level_tolerance_m
+            eligible_levels.append(
+                _SupportLevel(
+                    indices=level_indices,
+                    hull_gap=level_hull_gap,
+                    top_z=level_top_z,
+                    area=level_projected_support_area,
                 )
-                or (
-                    abs(level_hull_gap - best_hull_gap) <= hull_gap_tolerance
-                    and abs(level_top_z - best_top_z)
-                    <= self.config.height_level_tolerance_m
-                    and level_projected_support_area > best_projected_support_area
-                )
-            ):
-                best_level_faces = level_indices
-                best_hull_gap = level_hull_gap
-                best_top_z = level_top_z
-                best_projected_support_area = level_projected_support_area
-        if best_level_faces is None:
+            )
+        if not eligible_levels:
             raise ValueError(
                 "No upward-facing support level meets min_surface_area_m2."
             )
-        return best_level_faces
+        return eligible_levels
+
+    def _rank_levels(
+        self, levels: list[_SupportLevel], hull_gap_tolerance: float
+    ) -> Iterator[_SupportLevel]:
+        # Rank each next choice using the existing tolerance-based comparison.
+        # It may not be transitive, so a comparator sort could reorder the best
+        # candidate. Only callers that need further choices pay for more passes.
+        remaining = levels.copy()
+        height_tolerance = self.config.height_level_tolerance_m
+        while remaining:
+            best_index = 0
+            best = remaining[0]
+            for index in range(1, len(remaining)):
+                level = remaining[index]
+                hull_gap_delta = level.hull_gap - best.hull_gap
+                height_delta = level.top_z - best.top_z
+                if level.hull_gap < best.hull_gap - hull_gap_tolerance or (
+                    abs(hull_gap_delta) <= hull_gap_tolerance
+                    and (
+                        level.top_z > best.top_z + height_tolerance
+                        or (
+                            abs(height_delta) <= height_tolerance
+                            and level.area > best.area
+                        )
+                    )
+                ):
+                    best_index = index
+                    best = level
+            yield remaining.pop(best_index)
 
     @staticmethod
     def _convex_hull_area(points: np.ndarray, *, name: str) -> float:
@@ -370,7 +464,9 @@ class SupportSurfaceDetector:
         return largest_polygon if preserve_holes else Polygon(boundary_xy)
 
     @staticmethod
-    def _largest_inscribed_rectangle(polygon: Polygon) -> Polygon:
+    def _largest_inscribed_rectangle(
+        polygon: Polygon, *, samples_per_axis: int
+    ) -> Polygon:
         """Find a conservative axis-aligned rectangle contained by the support contour."""
         coordinates = np.concatenate(
             [
@@ -381,10 +477,14 @@ class SupportSurfaceDetector:
         x_values = np.unique(coordinates[:, 0])
         y_values = np.unique(coordinates[:, 1])
         # Keep the search bounded for highly tessellated support contours.
-        if len(x_values) > 48:
-            x_values = x_values[np.linspace(0, len(x_values) - 1, 48, dtype=int)]
-        if len(y_values) > 48:
-            y_values = y_values[np.linspace(0, len(y_values) - 1, 48, dtype=int)]
+        if len(x_values) > samples_per_axis:
+            x_values = x_values[
+                np.linspace(0, len(x_values) - 1, samples_per_axis, dtype=int)
+            ]
+        if len(y_values) > samples_per_axis:
+            y_values = y_values[
+                np.linspace(0, len(y_values) - 1, samples_per_axis, dtype=int)
+            ]
 
         best_rectangle: Polygon | None = None
         best_area = 0.0

@@ -445,6 +445,7 @@ def _add_articulations(
                     fpath=str(usdc_path),
                     init_pos=tuple(_vector3(entry.get("init_pos"), f"{uid}.init_pos")),
                     init_rot=tuple(_vector3(entry.get("init_rot"), f"{uid}.init_rot")),
+                    init_local_pose=entry.get("init_local_pose"),
                     body_scale=tuple(
                         _vector3(
                             entry.get("body_scale", [1.0, 1.0, 1.0]),

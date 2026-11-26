@@ -29,6 +29,32 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils impo
 )
 
 
+def apply_rest_pose_preserving_yaw(
+    layout: dict[str, object],
+    *,
+    rest_rotation_y_up: np.ndarray,
+    local_center: np.ndarray,
+) -> dict[str, object]:
+    """Use the reviewed local rest pose while retaining projected heading and center."""
+    transform = layout_object_to_transform_matrix(layout)
+    original_linear = transform[:3, :3].copy()
+    scale = np.linalg.norm(original_linear, axis=0)
+    previous_heading_frame = (original_linear / scale) @ rest_rotation_y_up.T
+    forward = previous_heading_frame[:, 2]
+    if np.hypot(forward[0], forward[2]) > 1e-8:
+        yaw = np.arctan2(forward[0], forward[2])
+    else:
+        right = previous_heading_frame[:, 0]
+        yaw = np.arctan2(-right[2], right[0])
+
+    rest_linear = (
+        Rotation.from_euler("y", yaw).as_matrix() @ rest_rotation_y_up
+    ) * scale
+    transform[:3, :3] = rest_linear
+    transform[:3, 3] += (original_linear - rest_linear) @ local_center
+    return transform_matrix_to_layout_object(str(layout["id"]), transform)
+
+
 def update_scene_object_y_up_pose_from_z_up_support(
     *,
     scene_object: SceneObject,
@@ -79,7 +105,11 @@ def translate_scene_object_y_up_by_z_up_delta(
 
 
 def rotate_scene_z_up_world(
-    *, scene: Scene, rotation_degrees: float, scene_graph: SceneGraph | None = None
+    *,
+    scene: Scene,
+    rotation_degrees: float,
+    scene_graph: SceneGraph | None = None,
+    pivot_xy: list[float] | None = None,
 ) -> None:
     """Rotate every final scene pose and support point about world z.
 
@@ -92,6 +122,8 @@ def rotate_scene_z_up_world(
         rotation_degrees: Counterclockwise world-z rotation in degrees.
         scene_graph: Optional saved world-axis relations and tabletop regions.
             Directional graph metadata requires a multiple of 90 degrees.
+        pivot_xy: XY coordinates of the vertical rotation axis in Z-up metres.
+            Defaults to the world origin.
 
     Raises:
         ValueError: If the rotation is not finite or a scene pose is incomplete.
@@ -99,6 +131,9 @@ def rotate_scene_z_up_world(
     angle = float(rotation_degrees)
     if not np.isfinite(angle):
         raise ValueError("rotation_degrees must be finite.")
+    pivot = np.asarray(
+        [0.0, 0.0] if pivot_xy is None else two_floats(pivot_xy, field_name="pivot_xy")
+    )
     if angle % 360.0 == 0.0:
         return
 
@@ -145,9 +180,11 @@ def rotate_scene_z_up_world(
 
     world_rotation = np.eye(4)
     world_rotation[:3, :3] = Rotation.from_euler("z", angle, degrees=True).as_matrix()
+    rotation_xy = world_rotation[:2, :2]
+    translation_xy = pivot - rotation_xy @ pivot
+    world_rotation[:2, 3] = translation_xy
     basis = y_up_to_z_up_matrix()
     inverse_basis = np.linalg.inv(basis)
-    rotation_xy = world_rotation[:2, :2]
 
     for scene_object in scene.objects:
         y_up_layout = scene_object_y_up_layout(scene_object)
@@ -165,11 +202,8 @@ def rotate_scene_z_up_world(
 
         if scene_object.center_xy is not None:
             scene_object.center_xy = (
-                rotation_xy
-                @ np.asarray(
-                    two_floats(scene_object.center_xy, field_name="center_xy"),
-                    dtype=float,
-                )
+                rotation_xy @ two_floats(scene_object.center_xy, field_name="center_xy")
+                + translation_xy
             ).tolist()
         for field_name in ("support_contour_xy", "support_optimization_rect_xy"):
             points = getattr(scene_object, field_name)
@@ -179,9 +213,10 @@ def rotate_scene_z_up_world(
                 scene_object,
                 field_name,
                 [
-                    (rotation_xy @ np.asarray(two_floats(point, field_name=field_name)))
-                    .astype(float)
-                    .tolist()
+                    (
+                        rotation_xy @ two_floats(point, field_name=field_name)
+                        + translation_xy
+                    ).tolist()
                     for point in points
                 ],
             )

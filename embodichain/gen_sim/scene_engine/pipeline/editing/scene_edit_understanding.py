@@ -321,6 +321,11 @@ def _simplify_scene_info(
                 "center_xy": scene_object.center_xy,
                 "table_region": table_regions_by_id.get(scene_object.id),
                 "pose_description": pose_descriptions_by_id.get(scene_object.id),
+                **(
+                    {"placement_support": scene_object.placement_support}
+                    if scene_object.placement_support is not None
+                    else {}
+                ),
             }
             for scene_object in scene.objects
         ],

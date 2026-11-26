@@ -25,6 +25,7 @@ from pathlib import Path
 import shutil
 import struct
 import time
+from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -32,13 +33,22 @@ from scipy.spatial.transform import Rotation
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraph
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
-from embodichain.utils.logger import log_info
+from embodichain.utils.logger import log_info, log_warning
 from embodichain.gen_sim.asset_engine.utils.articulated_usdc_utils import (
     _articulation_root_bottom_z,
 )
+from embodichain.gen_sim.scene_engine.pipeline.utils.articulation_proxy_alignment import (
+    align_articulation_proxy,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_utils import (
+    load_scene_object_z_up_mesh,
     measure_scene_object_z_up_world_aabb,
 )
+from embodichain.lab.sim.scene.articulation_geometry import read_articulation_geometry
+from embodichain.lab.sim.spawn.source_geometry import read_usd_source
+
+if TYPE_CHECKING:
+    from embodichain.gen_sim.services.compat import VisionClient
 
 _Y_UP_TO_Z_UP_ROTATION = np.array(
     [
@@ -59,10 +69,12 @@ class SceneExporter:
         scene: Scene,
         scene_graph: SceneGraph,
         output_root: str | Path,
+        vision_client: VisionClient | None = None,
     ) -> None:
         self.scene = scene
         self.scene_graph = scene_graph
         self.output_root = Path(output_root).expanduser().resolve()
+        self.vision_client = vision_client
         self.export_root = self.output_root / "scene_export"
         self.scene_config_path: Path | None = None
         self.scene_graph_path: Path | None = None
@@ -83,11 +95,13 @@ class SceneExporter:
         if self.scene.table.is_articulated:
             raise ValueError("The exported table must remain a rigid support object.")
 
+        scene_objects = self.scene.objects
+        for scene_object in scene_objects:
+            scene_object.validate_placement_support()
         mesh_assets_root = self.export_root / "mesh_assets"
         articulated_assets_root = self.export_root / "articulated_assets"
         mesh_assets_root.mkdir(parents=True, exist_ok=True)
         articulated_assets_root.mkdir(parents=True, exist_ok=True)
-        scene_objects = self.scene.objects
         object_ids = [scene_object.id for scene_object in scene_objects]
         if len(set(object_ids)) != len(object_ids):
             raise ValueError("Scene export requires unique table and asset ids.")
@@ -313,6 +327,11 @@ class SceneExporter:
             "support_surface_z": scene_object.support_surface_z,
             "support_contour_xy": scene_object.support_contour_xy,
             "support_optimization_rect_xy": scene_object.support_optimization_rect_xy,
+            **(
+                {"placement_support": scene_object.placement_support}
+                if scene_object.placement_support is not None
+                else {}
+            ),
             "max_convex_hull_num": scene_object.physics.max_convex_hull_num,
         }
 
@@ -484,18 +503,18 @@ class SceneExporter:
         articulated_relative_path: str,
         proxy_glb_relative_path: str,
     ) -> dict[str, object]:
-        """Place native root collision geometry on the proxy's support surface."""
+        """Fit native articulation geometry to the final editable proxy pose."""
         pos_y_up = SceneExporter._scene_vector(scene_object, "pos")
         rot_y_up = SceneExporter._scene_vector(scene_object, "rot")
         proxy_scale_y_up = SceneExporter._scene_vector(scene_object, "scale")
-        articulated_scale_y_up = SceneExporter._articulated_usdc_scale(scene_object)
         pos_z_up = _Y_UP_TO_Z_UP_ROTATION @ np.asarray(pos_y_up, dtype=float)
         rotation_y_up = Rotation.from_euler("xyz", rot_y_up, degrees=True).as_matrix()
         rotation_z_up = (
             _Y_UP_TO_Z_UP_ROTATION @ rotation_y_up @ _Y_UP_TO_Z_UP_ROTATION.T
         )
-        rot_z_up = Rotation.from_matrix(rotation_z_up).as_euler("XYZ", degrees=True)
-        proxy_pos_z_up = pos_z_up.copy()
+        proxy_rot_z_up = Rotation.from_matrix(rotation_z_up).as_euler(
+            "XYZ", degrees=True
+        )
         parent_id = self.scene_graph.node_by_id()[scene_object.id].parent_id
         parent = next(o for o in self.scene.objects if o.id == parent_id)
         if parent.kind == "table" and parent.support_surface_z is not None:
@@ -513,15 +532,20 @@ class SceneExporter:
             ] + float((_Y_UP_TO_Z_UP_ROTATION @ np.asarray(parent.pos))[2])
         else:
             support_z = measure_scene_object_z_up_world_aabb(scene_object=parent)[1][2]
-        pos_z_up[2] = (
-            support_z
-            + 0.001
-            - _articulation_root_bottom_z(
-                scene_object.articulated_usdc_path,
-                articulated_scale_y_up,
-                rot_z_up.tolist(),
+        native_position, native_rotation, native_scale, original_path, yaw_offset = (
+            self._fit_articulation_pose(
+                scene_object=scene_object,
+                proxy_position=pos_z_up,
+                proxy_rotation=rotation_z_up,
+                support_z=support_z,
+                runtime_usdc_path=self.export_root / articulated_relative_path,
             )
         )
+        native_pose = np.eye(4)
+        native_pose[:3, :3] = Rotation.from_euler(
+            "XYZ", native_rotation, degrees=True
+        ).as_matrix()
+        native_pose[:3, 3] = native_position
         return {
             "uid": scene_object.id,
             "category": scene_object.category,
@@ -529,16 +553,161 @@ class SceneExporter:
             "description": scene_object.description,
             "is_articulated": True,
             "fpath": articulated_relative_path,
+            **(
+                {
+                    "source_usdc_fpath": original_path.relative_to(
+                        self.export_root
+                    ).as_posix(),
+                    "articulation_yaw_offset_degrees": yaw_offset,
+                }
+                if original_path is not None
+                else {}
+            ),
             # The proxy stays in the export so scene edit can keep using GLB AABBs.
             "proxy_glb_fpath": proxy_glb_relative_path,
-            # Runtime root and editable proxy have distinct placement origins.
-            "init_pos": pos_z_up.tolist(),
-            "proxy_init_pos": proxy_pos_z_up.tolist(),
-            "init_rot": rot_z_up.tolist(),
-            "body_scale": articulated_scale_y_up,
+            # Runtime and editable geometry can use different root frames.
+            "init_pos": native_position,
+            "proxy_init_pos": pos_z_up.tolist(),
+            "init_rot": native_rotation,
+            "init_local_pose": native_pose.tolist(),
+            "proxy_init_rot": proxy_rot_z_up.tolist(),
+            "body_scale": native_scale,
             "proxy_body_scale": proxy_scale_y_up,
             "fix_base": True,
         }
+
+    def _fit_articulation_pose(
+        self,
+        *,
+        scene_object: SceneObject,
+        proxy_position: np.ndarray,
+        proxy_rotation: np.ndarray,
+        support_z: float,
+        runtime_usdc_path: Path,
+    ) -> tuple[list[float], list[float], list[float], Path | None, int | None]:
+        """Compute the runtime frame against the settled GLB and source links."""
+        from pxr import UsdGeom
+
+        source = read_usd_source(scene_object.articulated_usdc_path)
+        audit_path = runtime_usdc_path.with_name("alignment.json")
+        original_path = None
+        yaw_offset = scene_object.articulation_yaw_offset_degrees
+        if UsdGeom.GetStageUpAxis(source.stage) == UsdGeom.Tokens.y:
+            # Retain the placement contract for existing Y-up scene exports.
+            scale = SceneExporter._articulated_usdc_scale(scene_object)
+            rotation = (
+                Rotation.from_matrix(proxy_rotation)
+                .as_euler("XYZ", degrees=True)
+                .tolist()
+            )
+            position = proxy_position.tolist()
+            position[2] = (
+                support_z
+                + 0.001
+                - _articulation_root_bottom_z(
+                    scene_object.articulated_usdc_path, scale, rotation
+                )
+            )
+            audit = {"status": "legacy_y_up", "support_z_m": support_z}
+        else:
+            from embodichain.gen_sim.scene_engine.pipeline.utils.articulation_scale import (
+                bake_articulation_scale,
+            )
+
+            native = read_articulation_geometry(source, reset_to_default=True)
+            proxy = load_scene_object_z_up_mesh(scene_object=scene_object)
+            review = None
+            if (
+                self.vision_client is not None
+                and yaw_offset is None
+                and scene_object.visible_rgba_path is not None
+                and Path(scene_object.visible_rgba_path).is_file()
+            ):
+                from embodichain.gen_sim.scene_engine.pipeline.utils.articulation_orientation_review import (
+                    review_articulation_orientation,
+                )
+
+                vision_client = self.vision_client
+                reference_image = Path(scene_object.visible_rgba_path)
+
+                def review(
+                    yaw: float, native_upright: np.ndarray
+                ) -> tuple[int | None, str]:
+                    return review_articulation_orientation(
+                        reference_image=reference_image,
+                        source=source,
+                        geometry=native,
+                        native_to_upright=native_upright,
+                        proxy_yaw_degrees=yaw,
+                        category=scene_object.category,
+                        description=scene_object.description,
+                        vision_client=vision_client,
+                        output_root=audit_path.parent,
+                    )
+
+            alignment = align_articulation_proxy(
+                proxy_oriented_vertices=proxy.vertices,
+                proxy_world_rotation=proxy_rotation,
+                proxy_world_position=proxy_position,
+                native_footprint_vertices=native.vertices,
+                native_collision_vertices=native.vertices,
+                native_root_up=native.root_local_up,
+                support_z=support_z,
+                saved_heading_degrees=yaw_offset,
+                review_heading=review,
+            )
+            yaw_offset = alignment.native_heading_degrees
+            fit = alignment.fit
+            position = fit.position_z_up.tolist()
+            rotation = (
+                Rotation.from_matrix(fit.rotation_z_up)
+                .as_euler("XYZ", degrees=True)
+                .tolist()
+            )
+            original_path = runtime_usdc_path.with_name(
+                f"{scene_object.id}.source.usdc"
+            )
+            if not original_path.is_file() or not source.path.samefile(original_path):
+                shutil.copy2(source.path, original_path)
+            bake_articulation_scale(
+                original_path,
+                runtime_usdc_path,
+                native_scale_matrix=fit.native_scale_transform,
+            )
+            scale = [1.0] * 3
+            audit = {
+                "status": "fitted",
+                "support_z_m": support_z,
+                "proxy_yaw_degrees": alignment.proxy_yaw_degrees,
+                "native_root_up": native.root_local_up.tolist(),
+                "native_to_standard": alignment.native_to_standard.tolist(),
+                "orientation_source": alignment.orientation_source,
+                "orientation_reason": alignment.orientation_reason,
+                "native_heading_degrees": alignment.native_heading_degrees,
+                "shape_score": alignment.shape_score,
+                "near_equal_frames": alignment.near_equal_frames,
+                "standard_scale": fit.standard_scale.tolist(),
+                "scale_baked_into_usdc": True,
+                "proxy_footprint_m": fit.proxy_footprint_size.tolist(),
+                "native_footprint_m": fit.fitted_footprint_size.tolist(),
+                "axis_coverage": fit.axis_coverage.tolist(),
+            }
+            if alignment.orientation_source == "geometry" and (
+                self.vision_client is not None or alignment.near_equal_frames > 1
+            ):
+                log_warning(
+                    f"Articulation {scene_object.id!r} used geometry to select its "
+                    f"heading; see {audit_path}."
+                )
+        audit_path.write_text(
+            json.dumps(
+                {**audit, "init_pos": position, "init_rot": rotation, "scale": scale},
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return position, rotation, scale, original_path, yaw_offset
 
     @staticmethod
     def _articulated_usdc_scale(scene_object: SceneObject) -> list[float]:

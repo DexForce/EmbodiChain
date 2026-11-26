@@ -24,6 +24,8 @@ from embodichain.gen_sim.services.contracts import GeometryRequest
 
 
 from collections import deque
+from copy import deepcopy
+from dataclasses import replace
 import json
 from pathlib import Path
 import shutil
@@ -41,6 +43,7 @@ from matplotlib.patches import Rectangle
 
 from embodichain.gen_sim.services.compat import GeometryClient
 from embodichain.gen_sim.services.compat import ArticulationClient
+from embodichain.gen_sim.services.compat import ImageClient, SegmentationClient
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_graph import (
     TABLE_OBJECT_ID,
@@ -48,6 +51,16 @@ from embodichain.gen_sim.scene_engine.core.scene_graph import (
 )
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.gen_sim.services.compat import VisionClient
+from embodichain.gen_sim.scene_engine.pipeline.utils.asset_posture import (
+    review_asset_posture,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.degraded_table_asset import (
+    generate_degraded_table_asset,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.degraded_table_fit import (
+    fit_degraded_table,
+    tabletop_level_rotation,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_support_clamp import (
     AssetsGroupSupportClamp,
 )
@@ -63,6 +76,11 @@ from embodichain.gen_sim.asset_engine.utils.articulated_usdc_utils import (
 from embodichain.gen_sim.asset_engine.pipeline.articulation import (
     generate_articulated_usdcs,
 )
+from embodichain.gen_sim.scene_engine.pipeline.utils.floor_placement import (
+    FloorSide,
+    floor_placement_delta,
+    identify_floor_placements,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.gravity_settler import (
     GravitySettleBody,
     GravitySettler,
@@ -77,13 +95,25 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils impo
     transform_matrix_to_layout_object,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_utils import (
+    apply_rest_pose_preserving_yaw,
     measure_scene_object_z_up_world_aabb,
+    rotate_scene_z_up_world,
     scene_object_y_up_layout,
-    update_scene_object_y_up_pose_from_z_up_support,
+    translate_scene_object_y_up_by_z_up_delta,
+    y_up_to_z_up_matrix,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.scene_heading import (
+    review_scene_heading,
+    review_settled_scene_heading,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor import (
     SimReadyProcessor,
     SimReadyProcessorConfig,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.table_support_surface import (
+    SupportSurfaceConfig,
+    TableSupportSurfaceDetector,
+    store_table_support,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.visual_yaw_optimizer import (
     VisualYawOptimizer,
@@ -91,6 +121,10 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.visual_yaw_optimizer import
 from embodichain.utils.logger import log_info
 
 _SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
+_DEGRADED_TABLETOP_HEIGHT_M = (
+    0.75  # Metric height prior when the floor is outside the image.
+)
+_FLOOR_RELEASE_CLEARANCE_M = 0.02
 
 
 def generate_scene_and_refine(
@@ -102,11 +136,19 @@ def generate_scene_and_refine(
     geometry_generation_client: GeometryClient,
     vlm_client: VisionClient,
     articulated_generation_client: ArticulationClient | None = None,
+    image_generation_client: ImageClient | None = None,
+    image_segmentation_client: SegmentationClient | None = None,
 ) -> Scene:
 
     resolved_image_path = _validate_image_path(image_path)
     # Validate the scene graph before layout refinement consumes it.
     scene_graph.validate()
+    table = scene.table
+    recover_table = table is not None and table.table_state == "degraded"
+    if recover_table and (
+        image_generation_client is None or image_segmentation_client is None
+    ):
+        raise ValueError("Degraded table recovery requires image and mask clients.")
     # Create stage output directory.
     stage_output_root = Path(output_root).expanduser().resolve() / "scene_generation"
     if stage_output_root.exists():
@@ -134,25 +176,23 @@ def generate_scene_and_refine(
         scene=scene,  # Use the masks which are kept in the scene data structure.
         geometry_generation_client=geometry_generation_client,
     )
-    # Generate articulated USDCs for every articulated object, if any.
-    _generate_articulated_usdcs(
-        scene=scene,
-        output_root=stage_output_root / "articulated_geometry",
-        coarse_scales_y_up_by_id=coarse_scales_y_up_by_id,
-        articulated_generation_client=articulated_generation_client,
-    )
-
     # Simready all the assets(includes table).
     # Treat table and assets seperately.
     coarse_layout = _load_layout(coarse_geometry_output_root / "coarse_layout.json")
     coarse_layout_by_id = {
         layout_object["id"]: layout_object for layout_object in coarse_layout
     }
-    # Only an explicit graph pose description requires a VLM pose adjustment.
+    # Direct tabletop assets receive their reviewed pose during layout, when the
+    # whole base-and-descendants subtree can follow the adjustment.
+    table_root_ids = _table_on_asset_ids(
+        scene_graph=scene_graph, table_id=TABLE_OBJECT_ID
+    )
     pose_descriptions_by_id = {
         node.object_id: node.pose_description
         for node in scene_graph.nodes
-        if node.object_id != TABLE_OBJECT_ID and node.pose_description is not None
+        if node.object_id != TABLE_OBJECT_ID
+        and node.object_id not in table_root_ids
+        and node.pose_description is not None
     }
     simready_processor = SimReadyProcessor(
         scene=scene,
@@ -168,16 +208,48 @@ def generate_scene_and_refine(
         ),
         vlm_client=vlm_client,
     )
+    simready_table_layout = simready_processor.process_table(
+        reference_plane=recover_table
+    )
+    ground_shift = 0.0
+    if recover_table:
+        assert (
+            table is not None
+            and image_generation_client is not None
+            and image_segmentation_client is not None
+        )
+        ground_shift = _recover_degraded_table(
+            table=table,
+            output_root=stage_output_root / "table_recovery",
+            image_generation_client=image_generation_client,
+            image_segmentation_client=image_segmentation_client,
+            geometry_generation_client=geometry_generation_client,
+            vlm_client=vlm_client,
+        )
+    _generate_articulated_usdcs(
+        scene=scene,
+        output_root=stage_output_root / "articulated_geometry",
+        coarse_scales_y_up_by_id=coarse_scales_y_up_by_id,
+        articulated_generation_client=articulated_generation_client,
+    )
     simready_assets_layout = simready_processor.process_assets()
-    # Replace unreliable coarse rotations with VLM-observed canonical z-up yaw.
+    if ground_shift:
+        simready_assets_layout = _lift_table_subtrees(
+            scene_graph=scene_graph,
+            table_layout=simready_table_layout,
+            assets_layout=simready_assets_layout,
+            table_root_ids=table_root_ids,
+            ground_shift=ground_shift,
+        )
+    # Defer each stacked object's existing visual yaw to its own placement layer.
     visual_yaws_by_id = _optimize_simready_asset_visual_yaws(
         scene=scene,
         simready_assets_layout=simready_assets_layout,
         coarse_layout_by_id=coarse_layout_by_id,
         vlm_client=vlm_client,
         debug_output_root=debug_output_root / "visual_yaw",
+        excluded_ids=table_root_ids,
     )
-    simready_table_layout = simready_processor.process_table()
     # Concat then save the table info and the assets info in one JSON file.
     simready_layout = [simready_table_layout, *simready_assets_layout]
     (simready_geometry_output_root / "simready_layout.json").write_text(
@@ -189,9 +261,11 @@ def generate_scene_and_refine(
     refined_table_layout, refined_assets_layout = _layout_refinement(
         scene=scene,  # Update this data structure internally.
         scene_graph=scene_graph,
+        image_path=resolved_image_path,
         simready_geometry_output_root=simready_geometry_output_root,  # Contains simready assets and their current coarse layout JSON.
         debug_output_root=debug_output_root,  # Keep the table support surface info + optimized layout info (render with matplotlib) for debugging.
         z_up_yaws_degrees_by_id=visual_yaws_by_id,
+        vlm_client=vlm_client,
     )
 
     # Write the Updated scene JSON for debugging.
@@ -202,6 +276,126 @@ def generate_scene_and_refine(
     return scene
 
 
+def _recover_degraded_table(
+    *,
+    table: SceneObject,
+    output_root: Path,
+    image_generation_client: ImageClient,
+    image_segmentation_client: SegmentationClient,
+    geometry_generation_client: GeometryClient,
+    vlm_client: VisionClient,
+) -> float:
+    """Replace the leveled reference with a complete, grounded table."""
+    if (
+        table.simready_glb_path is None
+        or table.support_surface_z is None
+        or table.support_contour_xy is None
+    ):
+        raise ValueError("Table recovery requires a leveled reference surface.")
+    if not table.visible_rgba_path or not Path(table.visible_rgba_path).is_file():
+        raise ValueError("Table recovery requires the observed table RGB mask image.")
+    old_height = table.support_surface_z
+    reference_xy = np.asarray(table.support_contour_xy, dtype=float)
+    reference_bounds = np.stack([reference_xy.min(axis=0), reference_xy.max(axis=0)])
+    width, depth = (reference_bounds[1] - reference_bounds[0]).tolist()
+    table_path = Path(table.simready_glb_path)
+    output_root.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(table_path, output_root / "old_plane.glb")
+    log_info("Recovering a complete table from the degraded tabletop.")
+    generated_path = generate_degraded_table_asset(
+        reference_image_path=Path(table.visible_rgba_path),
+        description=table.description,
+        support_width_depth=(width, depth),
+        output_root=output_root,
+        image_generation_client=image_generation_client,
+        image_segmentation_client=image_segmentation_client,
+        geometry_generation_client=geometry_generation_client,
+    )
+    basis = y_up_to_z_up_matrix()
+    complete_mesh = load_glb_mesh(generated_path)
+    complete_mesh.apply_transform(basis)
+    level = np.eye(4)
+    level[:3, :3] = tabletop_level_rotation(complete_mesh, complete=True)
+    complete_mesh.apply_transform(level)
+    detector = TableSupportSurfaceDetector(
+        table_world_mesh=complete_mesh,
+        debug_output_root=output_root,
+        config=SupportSurfaceConfig(preserve_holes=True),
+    )
+    new_support = detector.select_with_vision(
+        vlm_client=vlm_client, table_state="normal", require_complete_base=True
+    )
+    fit = fit_degraded_table(
+        replacement_mesh_z_up=complete_mesh,
+        replacement_support=new_support,
+        reference_bounds_xy=reference_bounds,
+        reference_top_z=old_height,
+        grounded_tabletop_height_m=_DEGRADED_TABLETOP_HEIGHT_M,
+    )
+    detector.table_world_mesh = fit.mesh_z_up
+    detector.support_region = fit.support_region
+    detector.save_support_surface_debug_images()
+    grounded_path = output_root / "grounded_table.glb"
+    grounded_mesh_y_up = fit.mesh_z_up.copy()
+    grounded_mesh_y_up.apply_transform(np.linalg.inv(basis))
+    grounded_mesh_y_up.export(grounded_path, file_type="glb")
+    (output_root / "alignment.json").write_text(
+        json.dumps(
+            {
+                "reference_bounds_xy_m": reference_bounds.tolist(),
+                "reference_height_m": old_height,
+                "new_support_bounds_xy_m": np.asarray(
+                    fit.support_region.optimization_rectangle.bounds
+                )
+                .reshape(2, 2)
+                .tolist(),
+                "new_support_contour_xy_m": [
+                    list(point)
+                    for point in fit.support_region.support_polygon.exterior.coords
+                ],
+                "scale_xyz": fit.scale_xyz,
+                "aligned_table_bottom_m": fit.aligned_bottom_z,
+                "shared_ground_shift_m": fit.ground_shift_z,
+                "grounded_table_bottom_m": float(fit.mesh_z_up.bounds[0, 2]),
+                "grounded_tabletop_height_m": fit.support_region.top_z,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    shutil.copyfile(grounded_path, table_path)
+    store_table_support(table, fit.support_region)
+    log_info(
+        f"Restored table {table.id!r}, with tabletop at {fit.support_region.top_z:.3f} m "
+        f"and shared vertical shift {fit.ground_shift_z:+.3f} m."
+    )
+    return fit.ground_shift_z
+
+
+def _lift_table_subtrees(
+    *,
+    scene_graph: SceneGraph,
+    table_layout: dict[str, object],
+    assets_layout: list[dict[str, object]],
+    table_root_ids: set[str],
+    ground_shift: float,
+) -> list[dict[str, object]]:
+    """Apply the table-local ground shift in the current SimReady layout frame."""
+    table_matrix = layout_object_to_transform_matrix(table_layout)
+    world_shift = table_matrix[:3, 1] * ground_shift
+    roots = _select_asset_layouts(assets_layout=assets_layout, asset_ids=table_root_ids)
+    return _apply_root_layout_updates_to_descendant_subtrees(
+        scene_graph=scene_graph,
+        assets_layout=assets_layout,
+        updated_root_layouts=[
+            {**layout, "pos": (np.asarray(layout["pos"]) + world_shift).tolist()}
+            for layout in roots
+        ],
+        root_matrices_before_update=_layout_matrices_by_id(roots),
+    )
+
+
 def _optimize_simready_asset_visual_yaws(
     *,
     scene: Scene,
@@ -209,8 +403,9 @@ def _optimize_simready_asset_visual_yaws(
     coarse_layout_by_id: dict[str, dict[str, object]],
     vlm_client: VisionClient,
     debug_output_root: str | Path,
+    excluded_ids: set[str] | None = None,
 ) -> dict[str, float]:
-    """Query one absolute canonical z-up yaw for every observed SimReady asset."""
+    """Query an absolute Z-up yaw for each included observed SimReady asset."""
     assets_by_id = {asset.id: asset for asset in scene.assets}
     layout_ids = [layout.get("id") for layout in simready_assets_layout]
     if not all(isinstance(layout_id, str) and layout_id for layout_id in layout_ids):
@@ -221,9 +416,12 @@ def _optimize_simready_asset_visual_yaws(
         raise ValueError("SimReady asset layouts must match the scene asset ids.")
 
     yaws_degrees_by_id: dict[str, float] = {}
+    excluded = excluded_ids or set()
     for asset_layout in simready_assets_layout:
         layout_id = asset_layout["id"]
         assert isinstance(layout_id, str)
+        if layout_id in excluded:
+            continue
         coarse_layout = coarse_layout_by_id.get(layout_id)
         if coarse_layout is None:
             raise ValueError(f"Coarse layout does not contain asset {layout_id!r}.")
@@ -327,18 +525,37 @@ def _generate_coarse_results_from_masks(
         destination = Path(debug_output_root) / "geometry_generation_response.json"
         if result.audit_path.resolve() != destination.resolve():
             shutil.copyfile(result.audit_path, destination)
-    coarse_layout = [
-        {
-            "id": obj.object_id,
-            "rot": Rotation.from_quat(obj.quaternion_xyzw)
-            .as_euler("xyz", degrees=True)
-            .tolist(),
-            "pos": list(obj.position),
-            "scale": list(obj.scale),
-        }
-        for obj in result.objects
-    ]
-    (Path(coarse_geometry_output_root) / "coarse_layout.json").write_text(
+    coarse_root = Path(coarse_geometry_output_root).resolve()
+    coarse_layout = []
+    for obj in result.objects:
+        rotation = Rotation.from_quat(obj.quaternion_xyzw)
+        local_to_scene = np.eye(4)
+        local_to_scene[:3, :3] = rotation.as_matrix() @ np.diag(obj.scale)
+        local_to_scene[:3, 3] = obj.position
+        mesh_path = obj.mesh_path.resolve()
+        if mesh_path.is_relative_to(coarse_root):
+            mesh_path = mesh_path.relative_to(coarse_root)
+        source = {"geometry_path": mesh_path.as_posix()}
+        if obj.source_quaternion_wxyz is not None:
+            source.update(
+                rotation_quaternion_wxyz=list(obj.source_quaternion_wxyz),
+                translation=list(obj.position),
+                scale=list(obj.scale),
+                pose_coordinate_system=obj.pose_coordinate_system,
+                pose_convention=obj.pose_convention,
+                pose_convention_source=obj.pose_convention_source,
+            )
+        coarse_layout.append(
+            {
+                "id": obj.object_id,
+                "rot": rotation.as_euler("xyz", degrees=True).tolist(),
+                "pos": list(obj.position),
+                "scale": list(obj.scale),
+                "matrix": local_to_scene.tolist(),
+                "source": source,
+            }
+        )
+    (coarse_root / "coarse_layout.json").write_text(
         json.dumps(coarse_layout, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
@@ -403,18 +620,8 @@ def _update_scene_final_y_up_layout_and_z_up_centers(
     )
     # Persist AABB centers for future scene-edit object disambiguation.
     scene.table.center_xy = table_mesh.bounds[:, :2].mean(axis=0).tolist()
-    if scene.table.support_contour_xy is not None:
-        # Move SimReady-local support geometry into the final table-frame position.
-        table_center_xy = np.asarray(scene.table.center_xy, dtype=float)
-        scene.table.support_contour_xy = [
-            (np.asarray(point, dtype=float) + table_center_xy).tolist()
-            for point in scene.table.support_contour_xy
-        ]
-        if scene.table.support_optimization_rect_xy is not None:
-            scene.table.support_optimization_rect_xy = [
-                (np.asarray(point, dtype=float) + table_center_xy).tolist()
-                for point in scene.table.support_optimization_rect_xy
-            ]
+    # The support is already in the refined table frame. The mesh AABB center
+    # can differ from that frame's origin, especially after tabletop recovery.
     for asset in scene.assets:
         asset.center_xy = assets_aabb_corners_by_id[asset.id].mean(axis=0).tolist()
 
@@ -448,9 +655,11 @@ def _layout_refinement(
     *,
     scene: Scene,
     scene_graph: SceneGraph,
+    image_path: Path,
     simready_geometry_output_root: str | Path,
     debug_output_root: str | Path,
     z_up_yaws_degrees_by_id: dict[str, float],
+    vlm_client: VisionClient,
 ) -> tuple[dict[str, object], list[dict[str, object]]]:
 
     # 1. All layouts and geometries below are SimReady outputs. Do not mix a
@@ -515,15 +724,7 @@ def _layout_refinement(
             )
         )
 
-    # Table-frame conversion retains the coarse relative positions but can also
-    # transfer an inverted coarse-table orientation; replace only that rotation
-    # with the canonical SimReady pose and its observed z-up yaw.
-    refined_assets_layout = _apply_visual_yaws_to_simready_asset_layouts(
-        simready_assets_layout=refined_assets_layout,
-        z_up_yaws_degrees_by_id=z_up_yaws_degrees_by_id,
-    )
-
-    # 4. Only direct on-table children participate in the table-level layout
+    # Only direct on-table children participate in the table-level layout
     # stages. Their descendants follow each solved root transform until their
     # own parent-surface optimization is introduced in a later BFS pass.
     table_root_ids = _table_on_asset_ids(scene_graph=scene_graph, table_id=table_id)
@@ -531,31 +732,130 @@ def _layout_refinement(
         assets_layout=refined_assets_layout,
         asset_ids=table_root_ids,
     )
+    geometry_root = Path(simready_geometry_output_root)
+    debug_root = Path(debug_output_root)
     if not table_root_layouts:
         log_info("Scene has no on-table assets; skipping table layout refinement.")
-        return refined_table_layout, refined_assets_layout
+        heading = review_scene_heading(
+            image_path=image_path,
+            table_layout=refined_table_layout,
+            assets_layout=refined_assets_layout,
+            geometry_root=geometry_root,
+            debug_output_root=debug_root / "reference_heading",
+        )
+        initial_layout = [refined_table_layout, *refined_assets_layout]
+        return _finalize_refined_layout(
+            scene=scene,
+            scene_graph=scene_graph,
+            image_path=image_path,
+            table_layout=refined_table_layout,
+            assets_layout=refined_assets_layout,
+            geometry_root=geometry_root,
+            debug_root=debug_root,
+            vlm_client=vlm_client,
+            heading=heading,
+            pose_frames=dict.fromkeys(
+                ("before_posture", "before_y_align", "after_y_align"), initial_layout
+            ),
+        )
 
-    # Each on-table root needs its own support height; its descendants follow it.
+    if (
+        scene.table.support_surface_z is None
+        or scene.table.support_contour_xy is None
+        or scene.table.support_optimization_rect_xy is None
+    ):
+        raise ValueError("Scene table has no persisted support geometry.")
+
+    pose_frames = {
+        "before_posture": deepcopy([refined_table_layout, *refined_assets_layout])
+    }
+    assets_by_id = {asset.id: asset for asset in scene.assets}
+    floor_placements = identify_floor_placements(
+        image_path=image_path,
+        table=scene.table,
+        assets=[asset for asset in scene.assets if asset.id in table_root_ids],
+        vlm_client=vlm_client,
+        debug_root=debug_root,
+    )
+    graph_nodes_by_id = scene_graph.node_by_id()
+    prepared_roots = []
+    for layout in table_root_layouts:
+        object_id = str(layout["id"])
+        glb_path = Path(simready_geometry_output_root) / f"{object_id}.glb"
+        rest_rotation = review_asset_posture(
+            glb_path=glb_path,
+            description=assets_by_id[object_id].description,
+            pose_description=graph_nodes_by_id[object_id].pose_description,
+            vlm_client=vlm_client,
+            debug_output_root=Path(debug_output_root) / "asset_posture" / object_id,
+        )
+        prepared_roots.append(
+            layout
+            if rest_rotation is None
+            else apply_rest_pose_preserving_yaw(
+                layout,
+                rest_rotation_y_up=rest_rotation,
+                local_center=load_glb_mesh(glb_path).bounds.mean(axis=0),
+            )
+        )
+    refined_assets_layout = _apply_root_layout_updates_to_descendant_subtrees(
+        scene_graph=scene_graph,
+        assets_layout=refined_assets_layout,
+        updated_root_layouts=prepared_roots,
+        root_matrices_before_update=_layout_matrices_by_id(table_root_layouts),
+    )
+    pose_frames["before_y_align"] = deepcopy(
+        [refined_table_layout, *refined_assets_layout]
+    )
+
+    table_root_ids.difference_update(floor_placements)
+    # Prepare the tabletop bases and their descendants at the selected surface. The
+    # heading scorer compares all four projections from these release poses.
     refined_table_layout, refined_assets_layout = _align_table_roots_individually(
         scene_graph=scene_graph,
         table_layout=refined_table_layout,
         assets_layout=refined_assets_layout,
         table_root_ids=table_root_ids,
         geometry_root=simready_geometry_output_root,
+        support_top_z=scene.table.support_surface_z,
     )
-    # Re-select direct table children after their independent vertical placement.
+    pose_frames["after_y_align"] = deepcopy(
+        [refined_table_layout, *refined_assets_layout]
+    )
+    heading_degrees, heading_pivot_xy = review_scene_heading(
+        image_path=image_path,
+        table_layout=refined_table_layout,
+        assets_layout=refined_assets_layout,
+        geometry_root=geometry_root,
+        debug_output_root=debug_root / "reference_heading",
+        mask_paths={
+            uid: path
+            for uid in table_root_ids
+            if (path := assets_by_id[uid].mask_path) is not None
+        },
+    )
+    if not table_root_ids:
+        return _finalize_refined_layout(
+            scene=scene,
+            scene_graph=scene_graph,
+            image_path=image_path,
+            table_layout=refined_table_layout,
+            assets_layout=refined_assets_layout,
+            geometry_root=geometry_root,
+            debug_root=debug_root,
+            vlm_client=vlm_client,
+            heading=(heading_degrees, heading_pivot_xy),
+            pose_frames=pose_frames,
+            floor_placements=floor_placements,
+        )
+
+    # Re-select direct table children after posture and vertical placement.
     table_root_layouts = _select_asset_layouts(
         assets_layout=refined_assets_layout,
         asset_ids=table_root_ids,
     )
 
-    # 5. Reuse support geometry detected during SimReady processing.
-    if (
-        scene.table is None
-        or scene.table.support_contour_xy is None
-        or scene.table.support_optimization_rect_xy is None
-    ):
-        raise ValueError("Scene table has no persisted support geometry.")
+    # 5. Reuse the selected support geometry for planar refinement.
     table_support_polygon = Polygon(scene.table.support_contour_xy)
     table_optimization_rectangle = Polygon(scene.table.support_optimization_rect_xy)
     if not table_support_polygon.is_valid or table_support_polygon.is_empty:
@@ -647,7 +947,6 @@ def _layout_refinement(
 
     # 8. Settle only the direct on-table roots. Their unoptimized descendants
     # stay outside this simulation and inherit each root's final pose delta.
-    assets_by_id = {asset.id: asset for asset in scene.assets}
     table_root_matrices_before_settle = _layout_matrices_by_id(table_root_layouts)
     # Settle.
     settled_pose_by_id = GravitySettler(
@@ -693,16 +992,201 @@ def _layout_refinement(
         assets_layout=refined_assets_layout,
         table_root_ids=table_root_ids,
         debug_output_root=debug_output_root,
+        z_up_yaws_degrees_by_id={
+            asset_id: yaw - heading_degrees
+            for asset_id, yaw in z_up_yaws_degrees_by_id.items()
+        },
     )
 
-    # Update the scene data structure with the final layout and spatial metadata.
-    _update_scene_final_y_up_layout_and_z_up_centers(
+    return _finalize_refined_layout(
         scene=scene,
+        scene_graph=scene_graph,
+        image_path=image_path,
         table_layout=refined_table_layout,
         assets_layout=refined_assets_layout,
-        geometry_root=simready_geometry_output_root,
+        geometry_root=geometry_root,
+        debug_root=debug_root,
+        vlm_client=vlm_client,
+        heading=(heading_degrees, heading_pivot_xy),
+        pose_frames=pose_frames,
+        floor_placements=floor_placements,
     )
-    return refined_table_layout, refined_assets_layout
+
+
+def _finalize_refined_layout(
+    *,
+    scene: Scene,
+    scene_graph: SceneGraph,
+    image_path: Path,
+    table_layout: dict[str, object],
+    assets_layout: list[dict[str, object]],
+    geometry_root: Path,
+    debug_root: Path,
+    vlm_client: VisionClient,
+    heading: tuple[int, list[float]],
+    pose_frames: dict[str, list[dict[str, object]]],
+    floor_placements: dict[str, FloorSide] | None = None,
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    """Publish the layout after reviewing and applying the shared scene heading."""
+    _update_scene_final_y_up_layout_and_z_up_centers(
+        scene=scene,
+        table_layout=table_layout,
+        assets_layout=assets_layout,
+        geometry_root=geometry_root,
+    )
+    pose_frames["before_heading"] = [table_layout, *assets_layout]
+    program_heading, pivot_xy = heading
+    tabletop_preview_layouts = assets_layout
+    if floor_placements:
+        floor_subtrees = set(floor_placements)
+        children = scene_graph._children_by_parent()
+        pending = list(floor_subtrees)
+        while pending:
+            for child in children.get(pending.pop(), ()):
+                floor_subtrees.add(child.object_id)
+                pending.append(child.object_id)
+        tabletop_preview_layouts = [
+            layout for layout in assets_layout if layout["id"] not in floor_subtrees
+        ]
+    heading_degrees = review_settled_scene_heading(
+        image_path=image_path,
+        table_layout=table_layout,
+        assets_layout=tabletop_preview_layouts,
+        geometry_root=geometry_root,
+        debug_output_root=debug_root / "reference_heading",
+        vision_client=vlm_client,
+        proposed_yaw_degrees=program_heading,
+        pivot_xy=pivot_xy,
+    )
+    if heading_degrees:
+        rotate_scene_z_up_world(
+            scene=scene,
+            scene_graph=scene_graph,
+            rotation_degrees=heading_degrees,
+            pivot_xy=pivot_xy,
+        )
+        table_layout = scene_object_y_up_layout(scene.table)
+        assets_layout = [scene_object_y_up_layout(asset) for asset in scene.assets]
+    if floor_placements:
+        assets_layout = _place_floor_roots(
+            scene=scene,
+            scene_graph=scene_graph,
+            assets_layout=assets_layout,
+            floor_placements=floor_placements,
+            debug_root=debug_root,
+        )
+        _update_scene_final_y_up_layout_and_z_up_centers(
+            scene=scene,
+            table_layout=table_layout,
+            assets_layout=assets_layout,
+            geometry_root=geometry_root,
+        )
+    pose_frames["final"] = [table_layout, *assets_layout]
+    (debug_root / "layout_pose_snapshots.json").write_text(
+        json.dumps({"up_axis": "Y", "frames": pose_frames}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return table_layout, assets_layout
+
+
+def _place_floor_roots(
+    *,
+    scene: Scene,
+    scene_graph: SceneGraph,
+    assets_layout: list[dict[str, object]],
+    floor_placements: dict[str, FloorSide],
+    debug_root: Path,
+) -> list[dict[str, object]]:
+    """Release ground assets beside the finalized table and move their subtrees."""
+    assert scene.table is not None
+    table_bounds = np.asarray(
+        measure_scene_object_z_up_world_aabb(scene_object=scene.table)
+    )
+    ground_z = float(table_bounds[0, 2])
+    assets_by_id = {asset.id: asset for asset in scene.assets}
+    root_layouts = _select_asset_layouts(
+        assets_layout=assets_layout, asset_ids=set(floor_placements)
+    )
+    original_poses = _layout_matrices_by_id(root_layouts)
+    y_up_to_z_up = y_up_to_z_up_matrix()[:3, :3]
+    z_up_to_y_up = y_up_to_z_up.T
+    ground_offset_y_up = z_up_to_y_up @ np.array([0.0, 0.0, ground_z])
+    release_layouts = {}
+    for object_id, side in floor_placements.items():
+        asset = assets_by_id[object_id]
+        delta = floor_placement_delta(
+            table_bounds,
+            np.asarray(measure_scene_object_z_up_world_aabb(scene_object=asset)),
+            side,
+        )
+        # The temporary world has its ground at Z=0. Release above that plane.
+        delta[2] += _FLOOR_RELEASE_CLEARANCE_M - ground_z
+        pose = original_poses[object_id].copy()
+        pose[:3, 3] += z_up_to_y_up @ delta
+        release_layouts[object_id] = transform_matrix_to_layout_object(object_id, pose)
+
+    table_layout = scene_object_y_up_layout(scene.table)
+    table_layout["pos"] = (
+        np.asarray(table_layout["pos"]) - ground_offset_y_up
+    ).tolist()
+    settled = GravitySettler(
+        table_body=GravitySettleBody(
+            scene_object=scene.table, y_up_layout=table_layout
+        ),
+        participant_bodies=[
+            GravitySettleBody(
+                scene_object=assets_by_id[object_id], y_up_layout=release_layout
+            )
+            for object_id, release_layout in release_layouts.items()
+        ],
+        dynamic_asset_ids=set(release_layouts),
+        static_asset_ids=set(),
+    ).settle()
+
+    updated_layouts = []
+    audit = {}
+    for object_id, side in floor_placements.items():
+        asset = assets_by_id[object_id]
+        settled_layout = {**release_layouts[object_id], **settled[object_id]}
+        settled_pos = np.asarray(settled_layout["pos"]) + ground_offset_y_up
+        settled_layout["pos"] = settled_pos.tolist()
+        settled_asset = replace(asset)
+        _copy_y_up_layout_to_scene_object(settled_asset, settled_layout)
+        # Rolling or tipping may change the footprint. Only move it farther
+        # from the table if needed, keeping the height and rotation from physics.
+        correction = floor_placement_delta(
+            table_bounds,
+            np.asarray(
+                measure_scene_object_z_up_world_aabb(scene_object=settled_asset)
+            ),
+            side,
+        )
+        correction[2] = 0.0
+        if side in {"left", "front"}:
+            correction = np.minimum(correction, 0.0)
+        else:
+            correction = np.maximum(correction, 0.0)
+        final_pos = settled_pos + z_up_to_y_up @ correction
+        settled_layout["pos"] = final_pos.tolist()
+        updated_layouts.append(settled_layout)
+        asset.placement_support = "floor"
+        audit[object_id] = {
+            "side": side,
+            "release_clearance_m": _FLOOR_RELEASE_CLEARANCE_M,
+            "ground_z_up_m": ground_z,
+            "world_delta_z_up_m": (
+                y_up_to_z_up @ (final_pos - original_poses[object_id][:3, 3])
+            ).tolist(),
+        }
+    (debug_root / "floor_placement_final.json").write_text(
+        json.dumps(audit, indent=2) + "\n", encoding="utf-8"
+    )
+    return _apply_root_layout_updates_to_descendant_subtrees(
+        scene_graph=scene_graph,
+        assets_layout=assets_layout,
+        updated_root_layouts=updated_layouts,
+        root_matrices_before_update=original_poses,
+    )
 
 
 def _align_table_roots_individually(
@@ -712,6 +1196,7 @@ def _align_table_roots_individually(
     assets_layout: list[dict[str, object]],
     table_root_ids: set[str],
     geometry_root: str | Path,
+    support_top_z: float,
 ) -> tuple[dict[str, object], list[dict[str, object]]]:
     """Place each direct on-table root above the table and move its subtree."""
     refined_table_layout = table_layout
@@ -736,6 +1221,7 @@ def _align_table_roots_individually(
             table_layout=refined_table_layout,
             assets_layout=current_root_layouts,
             geometry_root=geometry_root,
+            support_top_z=support_top_z,
         ).align()
         refined_table_layout = aligned_table_layout
         # Propagating the complete root delta keeps descendants attached to it.
@@ -756,6 +1242,7 @@ def _refine_on_children_bfs(
     assets_layout: list[dict[str, object]],
     table_root_ids: set[str],
     debug_output_root: str | Path,
+    z_up_yaws_degrees_by_id: dict[str, float] | None = None,
 ) -> list[dict[str, object]]:
     """Refine every non-table ``on`` group after its parent has settled."""
     if scene.table is None:
@@ -783,15 +1270,78 @@ def _refine_on_children_bfs(
         if parent is None:
             raise ValueError(f"Non-table parent {parent_id!r} is not an asset.")
 
-        parent_aabb = measure_scene_object_z_up_world_aabb(scene_object=parent)
-        parent_aabb_xy = [
-            [float(parent_aabb[0][0]), float(parent_aabb[0][1])],
-            [float(parent_aabb[1][0]), float(parent_aabb[1][1])],
-        ]
-        child_aabbs_xy_by_id = {
-            child_id: _scene_object_z_up_aabb_xy(scene_object=assets_by_id[child_id])
+        # Keep inherited poses through the parent's placement. Apply the existing
+        # child-level yaw only when this support group reaches its own turn.
+        if z_up_yaws_degrees_by_id is not None:
+            child_layouts = _select_asset_layouts(
+                assets_layout=refined_assets_layout, asset_ids=set(child_ids)
+            )
+            refined_assets_layout = _apply_root_layout_updates_to_descendant_subtrees(
+                scene_graph=scene_graph,
+                assets_layout=refined_assets_layout,
+                updated_root_layouts=_apply_visual_yaws_to_simready_asset_layouts(
+                    simready_assets_layout=child_layouts,
+                    z_up_yaws_degrees_by_id={
+                        key: z_up_yaws_degrees_by_id[key] for key in child_ids
+                    },
+                ),
+                root_matrices_before_update=_layout_matrices_by_id(child_layouts),
+            )
+            for child_layout in _select_asset_layouts(
+                assets_layout=refined_assets_layout, asset_ids=set(child_ids)
+            ):
+                _copy_y_up_layout_to_scene_object(
+                    assets_by_id[str(child_layout["id"])], child_layout
+                )
+
+        child_id_set = set(child_ids)
+        parent_aabb = np.asarray(
+            measure_scene_object_z_up_world_aabb(scene_object=parent), dtype=float
+        )
+        if parent_aabb.shape != (2, 3) or not np.isfinite(parent_aabb).all():
+            raise ValueError(f"Parent {parent_id!r} has no finite mesh bounds.")
+        parent_aabb_xy = parent_aabb[:, :2].tolist()
+        parent_top_z = float(parent_aabb[1, 2])
+        child_aabbs_by_id = {
+            child_id: np.asarray(
+                measure_scene_object_z_up_world_aabb(
+                    scene_object=assets_by_id[child_id]
+                ),
+                dtype=float,
+            )
             for child_id in child_ids
         }
+        child_aabbs_xy_by_id = {
+            child_id: bounds[:, :2] for child_id, bounds in child_aabbs_by_id.items()
+        }
+
+        # Establish release height at the inherited XZ, then carry the Y change
+        # to descendants before seeking a horizontal position in the parent AABB.
+        child_layouts = _select_asset_layouts(
+            assets_layout=refined_assets_layout, asset_ids=child_id_set
+        )
+        for child_id in child_ids:
+            child = assets_by_id[child_id]
+            child.center_xy = child_aabbs_xy_by_id[child_id].mean(axis=0).tolist()
+            assert (
+                child.pos is not None
+            )  # Synchronized from the inherited layout above.
+            x, y, z = child.pos
+            delta_y = parent_top_z + 0.02 - child_aabbs_by_id[child_id][0, 2]
+            child.pos = [x, y + float(delta_y), z]
+        refined_assets_layout = _apply_root_layout_updates_to_descendant_subtrees(
+            scene_graph=scene_graph,
+            assets_layout=refined_assets_layout,
+            updated_root_layouts=[
+                scene_object_y_up_layout(assets_by_id[child_id])
+                for child_id in child_ids
+            ],
+            root_matrices_before_update=_layout_matrices_by_id(child_layouts),
+        )
+        _sync_scene_y_up_poses_from_layouts(
+            scene=scene, table_layout=table_layout, assets_layout=refined_assets_layout
+        )
+
         child_seed_xy_by_id, projected_child_aabbs_xy_by_id = (
             _project_child_aabb_centers_into_parent_aabb(
                 parent_aabb_xy=parent_aabb_xy,
@@ -809,28 +1359,27 @@ def _refine_on_children_bfs(
         if projected_child_ids:
             log_info(
                 "Projected "
-                f"{len(projected_child_ids)} child AABBs into parent {parent_id!r}: "
+                f"{len(projected_child_ids)} child AABBs into support bounds on {parent_id!r}: "
                 f"{projected_child_ids}."
             )
         else:
             log_info(
-                f"All direct children are already inside parent {parent_id!r}'s AABB."
+                f"All direct children are already inside their support bounds on {parent_id!r}."
             )
         _render_parent_child_aabb_transition(
             parent_id=parent_id,
             parent_aabb_xy=parent_aabb_xy,
             before_child_aabbs_xy_by_id=child_aabbs_xy_by_id,
             after_child_aabbs_xy_by_id=projected_child_aabbs_xy_by_id,
-            before_title="Before parent-AABB projection",
-            after_title="After parent-AABB projection",
+            before_title="Before support projection",
+            after_title="After support projection",
             output_path=(
                 Path(debug_output_root)
                 / f"parent_{parent_id}_child_aabb_projection_2d.png"
             ),
         )
-        child_id_set = set(child_ids)
         # All image-observed children are movable and start from their nearest
-        # parent-AABB-valid image seed.
+        # position within the parent's horizontal AABB.
         parent_surface_problem = ParentSurfaceLayoutProblem(
             assets_by_id=assets_by_id,
             child_ids=child_ids,
@@ -838,7 +1387,11 @@ def _refine_on_children_bfs(
             imported_child_ids=child_id_set,
             fixed_child_xy_by_id={child_id: None for child_id in child_ids},
             parent_aabb_xy=parent_aabb_xy,
-            parent_top_z=float(parent_aabb[1][2]),
+            parent_top_z=parent_top_z,
+            half_extents_xy_by_id={
+                child_id: (bounds[1] - bounds[0]) / 2.0
+                for child_id, bounds in child_aabbs_xy_by_id.items()
+            },
             child_relations=[
                 relation
                 for relation in scene_graph.relations
@@ -872,19 +1425,20 @@ def _refine_on_children_bfs(
             ),
         )
 
-        child_matrices_before_placement = _layout_matrices_by_id(
+        child_matrices_before_translation = _layout_matrices_by_id(
             _select_asset_layouts(
                 assets_layout=refined_assets_layout,
                 asset_ids=child_id_set,
             )
         )
         for child_id, solved_xy in solved_child_xy_by_id.items():
-            # Place each child above the parent's current top before gravity settles it.
-            update_scene_object_y_up_pose_from_z_up_support(
+            delta_xy = np.asarray(solved_xy) - child_aabbs_xy_by_id[child_id].mean(
+                axis=0
+            )
+            # Keep the release height and rotation during this XZ adjustment.
+            translate_scene_object_y_up_by_z_up_delta(
                 scene_object=assets_by_id[child_id],
-                support_region_z=parent_surface_problem.parent_top_z,
-                center_xy=solved_xy,
-                clearance_m=0.02,
+                delta_xy=delta_xy.tolist(),
             )
         refined_assets_layout = _apply_root_layout_updates_to_descendant_subtrees(
             scene_graph=scene_graph,
@@ -893,7 +1447,7 @@ def _refine_on_children_bfs(
                 scene_object_y_up_layout(assets_by_id[child_id])
                 for child_id in child_ids
             ],
-            root_matrices_before_update=child_matrices_before_placement,
+            root_matrices_before_update=child_matrices_before_translation,
         )
         _sync_scene_y_up_poses_from_layouts(
             scene=scene,
@@ -960,27 +1514,16 @@ def _sync_scene_y_up_poses_from_layouts(
         raise ValueError("Current layouts do not cover every scene asset.")
 
 
-def _scene_object_z_up_aabb_xy(*, scene_object: SceneObject) -> np.ndarray:
-    """Measure one current scene object's z-up XY AABB bounds."""
-    aabb = measure_scene_object_z_up_world_aabb(scene_object=scene_object)
-    return np.asarray(
-        [
-            [float(aabb[0][0]), float(aabb[0][1])],
-            [float(aabb[1][0]), float(aabb[1][1])],
-        ]
-    )
-
-
 def _project_child_aabb_centers_into_parent_aabb(
     *,
     parent_aabb_xy: list[list[float]],
     child_aabbs_xy_by_id: dict[str, np.ndarray],
 ) -> tuple[dict[str, list[float]], dict[str, np.ndarray]]:
-    """Project child AABB centers to their nearest parent-AABB-valid positions."""
+    """Project child centers to the nearest positions inside the parent AABB."""
     parent_bounds = np.asarray(parent_aabb_xy, dtype=float)
     if parent_bounds.shape != (2, 2) or not np.all(np.isfinite(parent_bounds)):
         raise ValueError("Parent AABB must contain two finite XY corners.")
-    parent_minimum, parent_maximum = parent_bounds
+    support_minimum, support_maximum = parent_bounds
     projected_center_xy_by_id: dict[str, list[float]] = {}
     projected_aabbs_xy_by_id: dict[str, np.ndarray] = {}
     for child_id, child_aabb_xy in child_aabbs_xy_by_id.items():
@@ -990,10 +1533,12 @@ def _project_child_aabb_centers_into_parent_aabb(
         child_minimum, child_maximum = child_bounds
         half_extents_xy = (child_maximum - child_minimum) / 2.0
         center_xy = (child_minimum + child_maximum) / 2.0
-        legal_minimum = parent_minimum + half_extents_xy
-        legal_maximum = parent_maximum - half_extents_xy
+        legal_minimum = support_minimum + half_extents_xy
+        legal_maximum = support_maximum - half_extents_xy
         if np.any(legal_minimum > legal_maximum):
-            raise ValueError(f"Asset {child_id!r} cannot fit inside its parent AABB.")
+            raise ValueError(
+                f"Asset {child_id!r} cannot fit inside its support bounds."
+            )
         projected_center_xy = np.clip(center_xy, legal_minimum, legal_maximum)
         projected_center_xy_by_id[child_id] = projected_center_xy.tolist()
         projected_aabbs_xy_by_id[child_id] = _translated_aabb_xy(

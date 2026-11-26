@@ -143,6 +143,8 @@ def generate_scene_from_image(
             geometry_generation_client=geometry_generation_client,
             articulated_generation_client=articulated_generation_client,
             vlm_client=vlm_client,
+            image_generation_client=ImageFacade(services),
+            image_segmentation_client=SegmentationFacade(services),
         )
     finally:
         geometry_generation_client.close()  # Kill the session to avoid resource leaks.
@@ -161,6 +163,7 @@ def generate_scene_from_image(
         scene=scene,
         scene_graph=scene_graph,
         output_root=resolved_output_root,
+        vision_client=vlm_client,
     )
     scene_exporter.export()
     scene_usd_path = build_scene_usd(output_root=resolved_output_root)

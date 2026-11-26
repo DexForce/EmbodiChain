@@ -147,7 +147,7 @@ def prepare_scene_edit_assets(
         # Every added asset uses the VLM's pose and post-pose XY footprint scale.
         config=SimReadyProcessorConfig(
             use_vlm_scale=vlm_client is not None,
-            use_vlm_rotation=vlm_client is not None,
+            use_vlm_rest_pose=vlm_client is not None,
             # Explicit edit pose descriptions override the default stable pose.
             pose_descriptions_by_id={
                 operation.object_id: operation.pose_description

@@ -22,6 +22,7 @@ __all__: list[str] = []
 
 from contextlib import ExitStack
 import json
+import os
 from pathlib import Path
 import time
 from typing import Any
@@ -36,7 +37,10 @@ from ..errors import (
     ServiceResponseError,
 )
 
-from ..legacy import read_scene_engine_env_values
+from ..legacy import (
+    _load_local_env,
+    read_scene_engine_env_values,
+)
 
 
 class GeometryGenerationClient:
@@ -53,9 +57,16 @@ class GeometryGenerationClient:
         session: requests.Session | None = None,
         poll_timeout_s: float = 600,
         poll_interval_s: float = 1,
+        pose_convention: str | None = None,
     ) -> None:
         if poll_timeout_s <= 0 or poll_interval_s <= 0:
             raise ValueError("Geometry polling budgets must be positive")
+        self.pose_convention = _pose_convention(
+            "glb_column" if pose_convention is None else pose_convention
+        )
+        self.pose_convention_source = (
+            "default" if pose_convention is None else "configuration"
+        )
         self._poll_timeout_s = poll_timeout_s
         self._poll_interval_s = poll_interval_s
         self._base_url = base_url.rstrip("/")
@@ -218,14 +229,7 @@ class GeometryGenerationClient:
                 raise RuntimeError(
                     "Geometry Generation Server response is not valid JSON."
                 ) from exc
-            try:
-                response_data = self._wait_for_task_if_needed(response_data)
-            except ServiceTimeout:
-                raise
-            except RuntimeError:
-                raise ServiceResponseError(
-                    "Geometry task did not deliver a valid result"
-                ) from None
+            response_data = self._wait_for_task_if_needed(response_data)
             response_objects = _parse_objects_response(
                 response_data,
                 object_ids=[object_id for object_id, _ in object_masks],
@@ -253,54 +257,52 @@ class GeometryGenerationClient:
                 "Geometry Generation Server response must be a JSON object."
             )
 
-        status = response_data.get("status")
-        if not isinstance(status, str) or (
-            "waiting" not in status and status not in {"queued", "running"}
-        ):
+        if not _is_pending_task_status(response_data.get("status")):
             return response_data
 
         request_id = response_data.get("request_id")
         if not isinstance(request_id, str) or not request_id:
-            raise RuntimeError(
-                "Geometry Generation Server queued response has no request_id."
+            raise SubmissionUnknown(
+                "Geometry server queued the request without returning a task ID."
             )
 
-        # The server test client uses one-second polling and permits ten minutes
-        # for a queued job. Keep the same contract here.
         deadline = time.monotonic() + self._poll_timeout_s
-        while time.monotonic() < deadline:
+        while (remaining := deadline - time.monotonic()) > 0:
             try:
                 record_attempt()
                 response = self._session.get(
                     self._url(f"/tasks/{request_id}"),
-                    timeout=10,
+                    timeout=min(10, remaining),
                 )
                 response.raise_for_status()
-                task_data = response.json()
-            except (requests.RequestException, ValueError) as exc:
-                raise RuntimeError(
-                    f"Geometry Generation Server task polling failed: {request_id}."
-                ) from exc
-
-            if not isinstance(task_data, dict):
-                raise RuntimeError(
-                    "Geometry Generation Server task response must be a JSON object."
+            except (requests.Timeout, requests.ConnectionError):
+                # The existing task can still run. Retry only its status GET.
+                pass
+            except requests.HTTPError as exc:
+                status_code = (
+                    exc.response.status_code if exc.response is not None else 0
                 )
-            task_status = task_data.get("status")
-            if task_status == "succeeded":
-                return task_data
-            if task_status in {"failed", "cancelled"}:
-                raise RuntimeError(
-                    "Geometry Generation Server task "
-                    f"{task_status}: {task_data.get('error', 'unknown error')}"
-                )
-            if not isinstance(task_status, str) or (
-                task_status != "running" and "waiting" not in task_status
-            ):
-                raise RuntimeError(
-                    "Geometry Generation Server returned unknown task status: "
-                    f"{task_status!r}."
-                )
+                if status_code != 429 and not 500 <= status_code < 600:
+                    raise SubmissionUnknown(
+                        f"Could not verify geometry task {request_id}: HTTP {status_code}."
+                    ) from None
+            except requests.RequestException:
+                raise SubmissionUnknown(
+                    f"Could not verify geometry task {request_id}."
+                ) from None
+            else:
+                task_data = _task_json(response, request_id)
+                task_status = task_data.get("status")
+                if task_status == "succeeded":
+                    return task_data
+                if task_status in ("failed", "cancelled"):
+                    raise ServiceResponseError(
+                        f"Geometry task {request_id} ended with status {task_status}."
+                    )
+                if not _is_pending_task_status(task_status):
+                    raise SubmissionUnknown(
+                        f"Geometry task {request_id} returned an unrecognized status."
+                    )
 
             time.sleep(min(self._poll_interval_s, max(0, deadline - time.monotonic())))
 
@@ -341,6 +343,24 @@ class GeometryGenerationClient:
 
     def _url(self, path: str) -> str:
         return f"{self._base_url}/{path.lstrip('/')}"
+
+
+def _is_pending_task_status(status: object) -> bool:
+    return isinstance(status, str) and (
+        status in {"queued", "running"} or "waiting" in status
+    )
+
+
+def _task_json(response: requests.Response, request_id: str) -> dict[str, Any]:
+    try:
+        task = response.json()
+    except ValueError:
+        task = None
+    if not isinstance(task, dict):
+        raise SubmissionUnknown(
+            f"Geometry task {request_id} did not return a JSON object."
+        )
+    return task
 
 
 def _parse_objects_response(
@@ -407,6 +427,18 @@ def _parse_objects_response(
             }
         )
     return parsed_objects
+
+
+def _pose_convention(value: object) -> str:
+    if not isinstance(value, str) or value not in (
+        "glb_column",
+        "sam3d_row_conjugated",
+    ):
+        raise ValueError(
+            "Geometry generation pose_convention must be 'glb_column' or "
+            "'sam3d_row_conjugated'."
+        )
+    return value
 
 
 def _parse_numeric_list(
@@ -480,4 +512,8 @@ def _load_dotenv_config() -> dict[str, Any]:
         "generate_objects_path": values[
             "SCENE_ENGINE_GEOMETRY_GENERATION_OBJECTS_PATH"
         ].strip(),
+        "pose_convention": os.environ.get(
+            "SCENE_ENGINE_GEOMETRY_GENERATION_POSE_CONVENTION",
+            _load_local_env().get("SCENE_ENGINE_GEOMETRY_GENERATION_POSE_CONVENTION"),
+        ),
     }

@@ -57,7 +57,10 @@ __all__ = [
 
 @dataclass
 class ParentSurfaceLayoutProblem:
-    """All geometry and layout-state inputs for one parent-surface solve."""
+    """All geometry and layout-state inputs for one parent-surface solve.
+
+    Optional half-extents describe every child's footprint in the parent AABB frame.
+    """
 
     assets_by_id: dict[str, SceneObject]
     child_ids: list[str]
@@ -68,6 +71,7 @@ class ParentSurfaceLayoutProblem:
     parent_top_z: float
     child_relations: list[SceneGraphRelation]
     support_uid: str = "parent"
+    half_extents_xy_by_id: dict[str, np.ndarray] | None = None
 
     @classmethod
     def from_layout_problem(
@@ -135,7 +139,7 @@ class ParentSurfaceLayoutOptimizerConfig(TableSurfaceLayoutOptimizerConfig):
 
 
 class ParentSurfaceLayoutOptimizer:
-    """Solve direct ``on`` children inside one parent's current XY footprint."""
+    """Solve direct ``on`` children within their horizontal support bounds."""
 
     def __init__(
         self,
@@ -148,18 +152,22 @@ class ParentSurfaceLayoutOptimizer:
 
     def optimize(self, problem: ParentSurfaceLayoutProblem) -> dict[str, list[float]]:
         """Adapt GenSim semantics to the shared arena-frame layout service."""
-        half_extents = _asset_half_extents_xy(
-            assets_by_id=problem.assets_by_id,
-            object_ids=problem.child_ids,
-        )
+        child_ids = set(problem.child_ids)
+        half_extents = problem.half_extents_xy_by_id
+        if half_extents is None:
+            half_extents = _asset_half_extents_xy(
+                assets_by_id=problem.assets_by_id,
+                object_ids=problem.child_ids,
+            )
+        elif set(half_extents) != child_ids:
+            raise ValueError("Half-extents must cover every parent-surface child.")
         parent_bounds = _bounds_from_points(problem.parent_aabb_xy)
-        bounds = {uid: parent_bounds for uid in problem.child_ids}
         solution = solve_layout(
             LayoutProblem(
                 support_uid=problem.support_uid,
                 seed_xy_by_uid=problem.child_seed_xy_by_id,
                 half_extents_xy_by_uid=half_extents,
-                bounds_xy_by_uid=bounds,
+                bounds_xy_by_uid={uid: parent_bounds for uid in problem.child_ids},
                 fixed_xy_by_uid={
                     uid: xy
                     for uid, xy in problem.fixed_child_xy_by_id.items()
