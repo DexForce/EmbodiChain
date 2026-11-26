@@ -10,24 +10,36 @@ deploying models into the real world.
 
 The framework is built on top of `DexSim <https://github.com/DexForce>`_, a high-performance physics and rendering engine, designed for Embodied AI research and production use.
 
+Start Here
+----------
+
+* :doc:`Install EmbodiChain <quick_start/install>` and
+  :ref:`create your first scene <first-run-scene>`.
+* :ref:`Preview an official task <first-run-task>` or browse the
+  :doc:`task catalog <resources/task/index>` for another deployment.
+* :doc:`Find a guide <guides/index>` for building environments, preparing assets,
+  or collecting and training on demonstration data.
+
 Table of Contents
-=================
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Introduction
-   :glob:
-
-   introduction
+-----------------
 
 .. toctree::
    :maxdepth: 1
    :caption: Getting Started
-   :glob:
 
-   quick_start/install.md
+   Introduction <introduction>
+   quick_start/install
+   quick_start/first_run
    tutorial/index
-   guides/index
+
+.. toctree::
+   :maxdepth: 1
+   :caption: How-to Guides
+
+   guides/tasks_and_environments
+   guides/robots_and_assets
+   guides/data_and_training
+   guides/integrations
 
 .. toctree::
    :maxdepth: 1
@@ -56,22 +68,25 @@ Table of Contents
    :caption: Resources
    :glob:
 
-   resources/models/index
    resources/assets.md
    resources/robot/index*
    resources/task/index*
+   resources/models/index
    resources/roadmap.md
    resources/publications/README.md
 
 .. toctree::
-   :maxdepth: 1
-   :caption: Development
-
-   quick_start/docs.md
-
-.. toctree::
    :maxdepth: 2
-   :caption: API Reference
+   :caption: Reference
    :titlesonly:
 
-   api_reference/index
+   guides/cli
+   Python API <api_reference/index>
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Contributing
+
+   Contribution Guide <https://github.com/DexForce/EmbodiChain/blob/main/CONTRIBUTING.md>
+   quick_start/docs.md
+   guides/agent_skills
