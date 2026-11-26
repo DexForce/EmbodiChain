@@ -740,12 +740,14 @@ def config_to_cfg(
     from embodichain.lab.sim.shapes import CompoundShapeCfg
 
     def resolve_shape_paths(shape: object) -> None:
-        if (
-            isinstance(shape, MeshCfg)
-            and isinstance(shape.fpath, (str, Path))
-            and shape.fpath
-        ):
-            shape.fpath = get_data_path(shape.fpath)
+        if isinstance(shape, MeshCfg):
+            if isinstance(shape.fpath, (str, Path)) and shape.fpath:
+                shape.fpath = get_data_path(shape.fpath)
+            collision = shape.collision
+            if collision is not None and collision.decomposition_fpath is not None:
+                collision.decomposition_fpath = get_data_path(
+                    collision.decomposition_fpath
+                )
         elif isinstance(shape, CompoundShapeCfg):
             for part in shape.parts:
                 resolve_shape_paths(part.shape)
@@ -760,6 +762,8 @@ def config_to_cfg(
             asset.shape.fpath = get_data_path(path)
         elif isinstance(asset, ArticulationCfg) and path is not None:
             asset.fpath = get_data_path(path)
+        if isinstance(getattr(asset, "shape", None), MeshCfg):
+            resolve_shape_paths(asset.shape)
         if isinstance(asset, RigidObjectCfg):
             if isinstance(asset.shape, CompoundShapeCfg):
                 resolve_shape_paths(asset.shape)

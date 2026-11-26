@@ -1382,6 +1382,80 @@ def test_spawn_forwards_convex_decomposition_algorithm(
     assert collision.decomp_algorithm == expected
 
 
+@pytest.mark.parametrize("render_enabled", [True, False])
+def test_precomputed_decomposition_keeps_separate_colliders_and_original_visual(
+    tmp_path,
+    render_enabled,
+) -> None:
+    """Two disjoint tetrahedra remain two colliders, preserving the empty gap."""
+    parts = tmp_path / "parts.obj"
+    parts.write_text(
+        "o left\nv 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\n"
+        "f 1 3 2\nf 1 2 4\nf 1 4 3\nf 2 3 4\n"
+        "o right\nv 3 0 0\nv 4 0 0\nv 3 1 0\nv 3 0 1\n"
+        "f 5 7 6\nf 5 6 8\nf 5 8 7\nf 6 7 8\n"
+    )
+    cfg = RigidObjectCfg.from_dict(
+        dict(
+            uid="cup",
+            body_type="dynamic",
+            render_enabled=render_enabled,
+            body_scale=[2.0, 2.0, 2.0],
+            shape=dict(
+                shape_type="Mesh",
+                fpath="original.glb",
+                collision=dict(
+                    approximation="convex_decomposition",
+                    max_hulls=8,
+                    decomposition_fpath=str(parts),
+                ),
+            ),
+            attrs=dict(material_props=dict(static_friction=0.9, dynamic_friction=0.8)),
+        )
+    )
+    descriptor, _ = rigid_desc_from_cfg(cfg)
+    assert [render.file_path for render in descriptor.renders] == (
+        ["original.glb"] if render_enabled else []
+    )
+    np.testing.assert_array_equal(descriptor.body_scale, (2.0, 2.0, 2.0))
+    assert len(descriptor.collisions) == 2
+    for collider, expected_minimum in zip(
+        descriptor.collisions, ([0, 0, 0], [3, 0, 0])
+    ):
+        assert collider.approximation == CollisionApproximation.CONVEX_HULL
+        assert collider.file_path is None
+        np.testing.assert_array_equal(
+            np.min(collider.vertices, axis=0), expected_minimum
+        )
+        np.testing.assert_array_equal(
+            np.max(collider.vertices, axis=0), np.asarray(expected_minimum) + 1
+        )
+        assert collider.dexsim == descriptor.collisions[0].dexsim
+        assert collider.newton == descriptor.collisions[0].newton
+
+
+def test_precomputed_decomposition_missing_or_empty_fails_without_recooking(
+    tmp_path,
+) -> None:
+    parts = tmp_path / "parts.obj"
+    cfg = RigidObjectCfg(
+        uid="cup",
+        shape=MeshCfg(
+            fpath="visual.obj",
+            collision=MeshCollisionCfg(
+                approximation="convex_decomposition",
+                max_hulls=8,
+                decomposition_fpath=str(parts),
+            ),
+        ),
+    )
+    with pytest.raises(FileNotFoundError):
+        rigid_desc_from_cfg(cfg)
+    parts.write_text("# interrupted or empty input\n")
+    with pytest.raises(ValueError, match="no convex parts"):
+        rigid_desc_from_cfg(cfg)
+
+
 def test_spawn_rejects_unsupported_convex_decomposition_method() -> None:
     cfg = RigidObjectCfg(
         uid="mesh",

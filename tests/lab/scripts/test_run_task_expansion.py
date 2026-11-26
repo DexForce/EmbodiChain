@@ -312,3 +312,79 @@ def test_cli_expansion_profile_overrides_task_expansion_policy() -> None:
 
     assert request is not None
     assert request[0].source.source_id == "task_program_source"
+
+
+@pytest.mark.parametrize(
+    "unsupported", [None, "scene", "source", "capacity", "recipes", "video", "dataset"]
+)
+def test_native_skill_sequence_and_expansion_profile_coexist_without_task_program(
+    tmp_path, unsupported
+):
+    import yaml
+    from embodichain.toolkits.skill_fitting._sequence_expansion import (
+        validate_sequence_expansion,
+        validate_sequence_collection,
+        write_sequence_expansion_profile,
+    )
+
+    timeline = [
+        dict(kind="demo_skill"),
+        dict(kind="atomic_skill"),
+        dict(kind="demo_skill"),
+    ]
+    manifest = tmp_path / "skills.yaml"
+    manifest.write_text(
+        yaml.safe_dump(dict(schema="native-skill-sequence/v1", timeline=timeline))
+    )
+    task = tmp_path / "task.yaml"
+    task.write_text("id: EmbodiedEnv-v1\nphysics: default\n")
+    write_sequence_expansion_profile(tmp_path, timeline)
+    profile_path = tmp_path / "expansion.yaml"
+    data = yaml.safe_load(profile_path.read_text())
+    # A requested demo index is excluded at the native-only dispatch boundary.
+    data["source"]["trajectory_call_indices"] = [0, 1, 2]
+    if unsupported == "scene":
+        data["scene_randomization"]["enabled"] = True
+        data["scene_randomization"]["change_scope"] = "cube_initial_pose_only"
+    if unsupported == "source":
+        data["source"]["kind"] = "task_program"
+    profile_path.write_text(yaml.safe_dump(data))
+    args = _create_parser().parse_args(
+        [
+            "--gym_config",
+            str(task),
+            "--skill-sequence",
+            str(manifest),
+            "--expansion-profile",
+            str(profile_path),
+            "--headless",
+        ]
+    )
+    resolved = _resolve_expansion_request(args, {})
+    assert resolved is not None
+    if unsupported in {"scene", "source", "capacity"}:
+        with pytest.raises(ValueError):
+            validate_sequence_expansion(
+                resolved[0], manifest, 2 if unsupported == "capacity" else 1
+            )
+    else:
+        assert (
+            validate_sequence_expansion(resolved[0], manifest, 1)["timeline"]
+            == timeline
+        )
+        if unsupported == "recipes":
+            args.max_episodes = 4
+        if unsupported == "video":
+            args.expansion_save_video = True
+        if unsupported == "dataset":
+            args.expansion_dataset_dir = str(tmp_path / "dataset")
+        if unsupported:
+            with pytest.raises(ValueError):
+                validate_sequence_collection(
+                    args, {}, resolved[0], resolved[1], resolved[3]
+                )
+        else:
+            plan = validate_sequence_collection(
+                args, {}, resolved[0], resolved[1], resolved[3]
+            )
+            assert plan.target_episodes == 3

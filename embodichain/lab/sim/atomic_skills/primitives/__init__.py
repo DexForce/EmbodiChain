@@ -31,7 +31,7 @@ from .coordinated_placement import (
     CoordinatedPlacementGoal,
     CoordinatedPlacementOptions,
 )
-from .hand_over import HandOver, HandOverGoal, HandOverOptions
+from .hand_over import HandOver, HandOverGoal, HandOverMotionGoal, HandOverOptions
 from .move_end_effector import (
     EndEffectorPoseGoal,
     MoveEndEffector,
@@ -55,6 +55,7 @@ from .pick_up import (
     ContactGraspGoal,
     GraspGoal,
     PickUp,
+    PickUpMotionGoal,
     PickUpOptions,
 )
 from .place import ContactPlaceGoal, AssembleGoal, Place, PlaceGoal, PlaceOptions
@@ -75,10 +76,11 @@ from .pour import Pour, PourGoal, PourOptions, PourTarget
 from .slide import (
     Slide,
     SlideGoal,
+    SlideMotionGoal,
     SlideJointTarget,
     SlideOptions,
 )
-from .twist import Twist, TwistGoal, TwistOptions
+from .twist import Twist, TwistGoal, TwistMotionGoal, TwistOptions
 
 BUILTIN_SKILL_TYPES: tuple[type[AtomicSkill], ...] = (
     ExecuteDemoSkill,
@@ -119,8 +121,10 @@ __all__ = [
     "ContactPickUpGoal",
     "ContactPlaceGoal",
     "GraspGoal",
+    "PickUpMotionGoal",
     "HandOver",
     "HandOverGoal",
+    "HandOverMotionGoal",
     "HandOverOptions",
     "HeldObjectPoseGoal",
     "JointPositionGoal",
@@ -155,9 +159,11 @@ __all__ = [
     "PushObjectToolCalibration",
     "Slide",
     "SlideGoal",
+    "SlideMotionGoal",
     "SlideJointTarget",
     "SlideOptions",
     "Twist",
     "TwistGoal",
+    "TwistMotionGoal",
     "TwistOptions",
 ]

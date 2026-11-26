@@ -43,6 +43,11 @@ COMMANDS = (
         help="Serve read-only robot state from an existing DexSim session over stdio.",
     ),
     Command(
+        name="fit-trajectory",
+        target="embodichain.toolkits.skill_fitting.cli:main",
+        help="Fit a video-selected joint segment through native atomic skills.",
+    ),
+    Command(
         name="gensim",
         target="embodichain.cli.gensim:main",
         help="Prepare assets, generate scenes, plan tasks and run GenSim workflows.",
@@ -171,6 +176,11 @@ COMMANDS = (
         name="annotate-grasp",
         target="embodichain.lab.scripts.annotate_grasp:cli",
         help="Interactively annotate a grasp region on a mesh.",
+    ),
+    Command(
+        name="annotate-trajectory",
+        target="embodichain.toolkits.trajectory_annotator._cli:cli",
+        help="Annotate atomic skill frame intervals in an image sequence.",
     ),
     Command(
         name="decompose-urdf",
