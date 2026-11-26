@@ -15,6 +15,7 @@ dynamic = ["version"]
 # Core install dependencies (kept from requirements.txt).
 dependencies = [
   "dexsim_engine==0.6.1rc1",
+  "mcp>=2,<3",
   # DexSim and LeRobot require different OpenCV distributions sharing cv2.
   # Keep their bindings on the same release to avoid mixed Python/native APIs.
   "opencv-python==4.12.0.88; python_version < '3.12'",
@@ -61,7 +62,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mcp = ["mcp>=2,<3"]
+# Compatibility for existing installations using embodichain[mcp].
+mcp = []
 geometry = [
   # Optional mesh inputs for pure numerical geometry; no simulation/FCL backend.
   "trimesh>=4.9",
