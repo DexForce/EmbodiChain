@@ -75,8 +75,10 @@ def load_task_program_expansion(path: str | Path) -> dict[str, Any]:
     Raises:
         ValueError: For invalid scopes, protected phases, budgets or criteria.
     """
-    path = Path(path)
-    value = load_mapping(path)
+    return _validate_task_program_expansion(load_mapping(path))
+
+
+def _validate_task_program_expansion(value: dict[str, Any]) -> dict[str, Any]:
     if (set(value) - {"scene_sampling", "scheduling", "pose_coverage"}) != {
         "schema_version",
         "engine",
@@ -85,6 +87,11 @@ def load_task_program_expansion(path: str | Path) -> dict[str, Any]:
         "validation",
     } or value["schema_version"] != 1:
         raise ValueError("Invalid demo expansion configuration")
+    if any(
+        not isinstance(value[key], dict)
+        for key in ("engine", "trajectory", "validation")
+    ):
+        raise ValueError("engine, trajectory and validation must be mappings")
     engine, motion = value["engine"], value["trajectory"]
     required_engine = {
         "episodes_per_operator",
@@ -157,23 +164,30 @@ def load_task_program_expansion(path: str | Path) -> dict[str, Any]:
         or type(engine["capture_media"]) is not bool
     ):
         raise ValueError("Invalid expansion attempt or media settings")
-    required = {
-        "operators",
+    spatial_fields = {
         "joint_offset_scale",
-        "via_count",
         "max_proposals",
         "minimum_joint_delta",
         "velocity_limit",
         "acceleration_limit",
+        "free_phases",
+    }
+    nullspace_fields = {
         "nullspace_task_rows",
         "nullspace_translation_tolerance_m",
         "nullspace_rotation_tolerance_rad",
-        "free_phases",
     }
-    if required - set(motion) or set(motion) - required - {
-        "affordance",
-        "call_indices",
-    }:
+    if (
+        set(motion)
+        - spatial_fields
+        - nullspace_fields
+        - {
+            "operators",
+            "via_count",
+            "affordance",
+            "call_indices",
+        }
+    ):
         raise ValueError("Unknown or missing trajectory settings")
     calls = motion.get("call_indices")
     if calls is not None and (
@@ -185,16 +199,28 @@ def load_task_program_expansion(path: str | Path) -> dict[str, Any]:
         raise ValueError(
             "Trajectory call_indices must be distinct non-negative integers"
         )
-    operators = motion["operators"]
+    operators = motion.get("operators")
     if (
         not isinstance(operators, list)
         or not operators
+        or any(not isinstance(operator, str) for operator in operators)
         or len(set(operators)) != len(operators)
         or set(operators) - set(OPERATORS)
     ):
         raise ValueError(
             "trajectory.operators must contain distinct supported operators"
         )
+    required = set()
+    if set(operators) & {"joint_residual", "via_points", "nullspace_residual"}:
+        required.update(spatial_fields)
+    if "via_points" in operators:
+        required.add("via_count")
+    if "nullspace_residual" in operators:
+        required.update(nullspace_fields)
+    if missing := required - motion.keys():
+        raise ValueError(f"Missing trajectory settings: {sorted(missing)}")
+    if required:
+        motion.setdefault("nullspace_task_rows", [0, 1, 2, 3, 4, 5])
     affordance = motion.get("affordance")
     if "affordance" in operators and affordance is None:
         raise ValueError("trajectory.affordance is required for affordance expansion")
@@ -268,12 +294,10 @@ def load_task_program_expansion(path: str | Path) -> dict[str, Any]:
                 raise ValueError(
                     "Affordance approach_deviation_angle must be finite and non-negative"
                 )
-    for name in ("via_count", "max_proposals"):
+    for name in motion.keys() & {"via_count", "max_proposals"}:
         if type(motion[name]) is not int or motion[name] < 1:
             raise ValueError(f"trajectory.{name} must be a positive integer")
-    for name in required - {
-        "operators",
-        "via_count",
+    for name in (motion.keys() & (spatial_fields | nullspace_fields)) - {
         "max_proposals",
         "nullspace_task_rows",
         "free_phases",
@@ -284,7 +308,10 @@ def load_task_program_expansion(path: str | Path) -> dict[str, Any]:
             or motion[name] <= 0
         ):
             raise ValueError(f"trajectory.{name} must be finite and positive")
-    if motion["nullspace_task_rows"] not in ([0, 1, 2], [0, 1, 2, 3, 4, 5]):
+    if "nullspace_task_rows" in motion and motion["nullspace_task_rows"] not in (
+        [0, 1, 2],
+        [0, 1, 2, 3, 4, 5],
+    ):
         raise ValueError(
             "Nullspace tasks must explicitly constrain position or full pose"
         )
@@ -294,9 +321,12 @@ def load_task_program_expansion(path: str | Path) -> dict[str, Any]:
         "pick_up": {"approach"},
         "place": {"retract"},
     }
-    if not isinstance(motion["free_phases"], dict) or not motion["free_phases"]:
+    phases_by_skill = motion.get("free_phases", {})
+    if "free_phases" in motion and (
+        not isinstance(phases_by_skill, dict) or not phases_by_skill
+    ):
         raise ValueError("Explicit free_phases are required")
-    for skill, phases in motion["free_phases"].items():
+    for skill, phases in phases_by_skill.items():
         if (
             skill not in allowed
             or not isinstance(phases, list)
@@ -308,6 +338,8 @@ def load_task_program_expansion(path: str | Path) -> dict[str, Any]:
     if not isinstance(scene, dict) or not scene:
         raise ValueError("Explicit scene pose ranges are required")
     for uid, options in scene.items():
+        if not isinstance(options, dict):
+            raise ValueError(f"Invalid scene pose range for {uid}")
         if set(options) == {"follow"}:
             if options["follow"] not in scene or "follow" in scene[options["follow"]]:
                 raise ValueError(
@@ -328,7 +360,12 @@ def load_task_program_expansion(path: str | Path) -> dict[str, Any]:
                 or limits[0] > limits[1]
             ):
                 raise ValueError(f"Invalid finite ordered pose range for {uid}")
-    if not math.isfinite(engine["max_wall_time_s"]) or engine["max_wall_time_s"] <= 0:
+    wall_time = engine["max_wall_time_s"]
+    if (
+        type(wall_time) not in (int, float)
+        or not math.isfinite(wall_time)
+        or wall_time <= 0
+    ):
         raise ValueError("engine.max_wall_time_s must be finite and positive")
     required_validation = {
         "initial_checks",

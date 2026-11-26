@@ -278,6 +278,6 @@ function drawPixelDifference(){
 }
 setInterval(()=>{if(!document.hidden&&!$('lab').classList.contains('hidden'))drawPixelDifference()},200);
 
-chooseCase(data.cases.find(c=>c.id==='wide-visual'&&data.episodes.some(e=>e.case===c.id))?.id||data.cases.find(c=>c.id==='default-rerender-controls'&&data.episodes.some(e=>e.case===c.id))?.id||data.cases.find(c=>data.episodes.some(e=>e.case===c.id))?.id||data.cases[0]?.id);
+chooseCase(['wide-visual','default-visual-camera','default-rerender-controls'].find(id=>data.cases.some(c=>c.id===id)&&data.episodes.some(e=>e.case===id))||data.cases.find(c=>data.episodes.some(e=>e.case===c.id))?.id||data.cases[0]?.id);
 
 for(const figure of document.querySelectorAll('.media figure'))figure.ondblclick=()=>figure.requestFullscreen?.();

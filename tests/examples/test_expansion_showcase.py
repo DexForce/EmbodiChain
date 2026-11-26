@@ -23,6 +23,7 @@ from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace
+import pytest
 import torch
 from examples.expansion.engine.showcase._cases import (
     dump,
@@ -67,7 +68,7 @@ def test_nominal_commits_cannot_qualify_a_requested_motion_operator(
         "backend": "default",
     }
     dump(tmp_path / "cases.json", {"cases": [case]})
-    dump(tmp_path / "jobs/motion/job.json", {})
+    dump(tmp_path / "jobs/motion/job.json", {"config": {}})
     receipt = SimpleNamespace(storage_id="fixture", commit_id="commit")
     monkeypatch.setattr(
         expansion,
@@ -102,6 +103,105 @@ def test_nominal_commits_cannot_qualify_a_requested_motion_operator(
     report = json.loads((tmp_path / "acceptance.json").read_text())
     assert report["checks"][0]["status"] == "failed"
     assert "No admitted via_points" in report["checks"][0]["reason"]
+
+
+@pytest.mark.parametrize("unchanged", [None, "intrinsics", "arena_pose"])
+def test_camera_case_checks_measured_calibration(tmp_path, monkeypatch, unchanged):
+    import embodichain.lab.expansion as expansion
+    import embodichain.lab.expansion.visual as visual
+
+    registry = tmp_path / "profiles.yaml"
+    dump(
+        registry,
+        {
+            "profiles": {
+                "camera": {
+                    "cameras": {
+                        "overhead": {
+                            "focal_scale": 1.08,
+                            "position_delta": [0.04, 0.0, 0.02],
+                        }
+                    }
+                }
+            }
+        },
+    )
+    baseline = {
+        "intrinsics": [[100.0, 0.0, 60.0], [0.0, 120.0, 41.0], [0.0, 0.0, 1.0]],
+        "arena_pose": [
+            [1.0, 0.0, 0.0, 0.25],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    }
+    adjusted = {
+        "intrinsics": [[108.0, 0.0, 60.0], [0.0, 129.6, 41.0], [0.0, 0.0, 1.0]],
+        "arena_pose": [
+            [1.0, 0.0, 0.0, 0.29],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.02],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    }
+    if unchanged:
+        adjusted[unchanged] = baseline[unchanged]
+    cases, episodes = [], {}
+    for name, profile, calibration in (
+        ("baseline", None, baseline),
+        ("camera", "camera", adjusted),
+    ):
+        cases.append(
+            {
+                "id": name,
+                "required": True,
+                "source": "ur5",
+                "backend": "default",
+                "tags": ["visual", "controlled_visual"] if profile else ["baseline"],
+            }
+        )
+        directory = tmp_path / "jobs" / name
+        dump(directory / "job.json", {"config": {"visual_profile": profile}})
+        manifest = directory / "media.json"
+        dump(manifest, {"frame_count": 2, "calibration": {"overhead": calibration}})
+        episodes[name] = SimpleNamespace(
+            episode_id=name,
+            timestamps=torch.tensor([0.0, 0.1]),
+            actions=torch.zeros(1, 1),
+            observations={"joint_positions": torch.zeros(2, 1)},
+            validation=SimpleNamespace(accepted=True),
+            metadata={
+                "recipe_spec": {"context": {"ordinal": 0}},
+                "recipe_id": name,
+                "media_manifest": str(manifest),
+                "visual_profile": profile,
+                "expansion_source_artifacts": {
+                    "visual_profile_file": {"path": str(registry)}
+                },
+            },
+        )
+    dump(tmp_path / "cases.json", {"cases": cases})
+    monkeypatch.setattr(
+        expansion,
+        "ArtifactEpisodeSink",
+        lambda directory: SimpleNamespace(
+            inspect=lambda: (SimpleNamespace(storage_id=directory.name),)
+        ),
+    )
+    monkeypatch.setattr(
+        expansion, "inspect_expansion_job", lambda _: {"complete": True}
+    )
+    monkeypatch.setattr(expansion, "load_expansion_episode", episodes.__getitem__)
+    monkeypatch.setattr(visual, "inspect_observation_variants", lambda _: ())
+
+    audit(tmp_path)
+    result = json.loads((tmp_path / "acceptance.json").read_text())["checks"][1]
+    if unchanged:
+        assert result["status"] == "failed"
+        assert f"Camera overhead {unchanged} differs" in result["reason"]
+    else:
+        assert result["status"] == "passed"
+        assert result["visual_checks"][0]["verified_cameras"] == ["overhead"]
 
 
 def test_relocation_intent_restores_hidden_job_and_dataset(tmp_path):
@@ -212,7 +312,6 @@ def test_unmarked_truncated_preparation_recovers_but_marked_corruption_is_reject
     tmp_path,
 ):
     from examples.expansion.engine.showcase._cases import ensure_prepared
-    import pytest
 
     root = tmp_path / "carton"
     root.mkdir()
@@ -339,7 +438,6 @@ def test_generated_newton_clock_and_resume_preserve_frozen_inputs(tmp_path):
 
 def test_browser_comparison_selects_actual_augmentation_and_preserves_units():
     import shutil
-    import pytest
 
     node = shutil.which("node")
     if node is None:

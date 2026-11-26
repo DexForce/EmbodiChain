@@ -80,8 +80,8 @@ def main() -> None:
                 target_episodes=size,
                 max_attempts=size * 2,
                 capture_media=mode == "rgbd",
+                visual_profile=cfg.visual_profile if mode == "rgbd" else None,
                 export_lerobot=False,
-                render_profiles=(),
                 output_dir=str(root),
             )
             job = args.output / (name + ".yaml")

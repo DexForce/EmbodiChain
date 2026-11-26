@@ -120,7 +120,7 @@ def main() -> None:
     p.add_argument("--job", type=Path)
     p.add_argument("--resume", action="store_true")
     p.add_argument("--backend", default="default")
-    p.add_argument("--fault", choices=("after_commit", "render"))
+    p.add_argument("--fault", choices=("after_commit", "export"))
     args = p.parse_args()
     os.environ["EMBODICHAIN_SIM_EXIT_PROCESS"] = "0"
     metrics = ProcessMetrics(

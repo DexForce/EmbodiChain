@@ -18,8 +18,14 @@
 
 from __future__ import annotations
 
-import pytest
+import json
+from pathlib import Path
 
+import pytest
+import yaml
+
+from embodichain.cli import expansion as expansion_cli
+from embodichain.lab.scripts import run_task
 from embodichain.lab.scripts.run_task import (
     CollectionPlan,
     CollectionSelection,
@@ -34,12 +40,108 @@ from embodichain.utils.config_paths import resolve_config_path
 from embodichain.utils.utility import load_config
 
 
+@pytest.mark.parametrize("mode", ["cohort", "rolling"])
+def test_task_and_job_dispatch_same_expansion_without_a_launcher_world(
+    mode, tmp_path, monkeypatch, capsys
+):
+    from embodichain.lab.expansion import task_program_jobs, workflow
+
+    calls = []
+
+    def cohort(cfg, *, resume=False):
+        calls.append(
+            (cfg.deployment, Path(cfg.output_dir).name, cfg.seed, cfg.batch_size)
+        )
+        return {"complete": True}
+
+    def rolling(deployment, options, output, *, configuration_sha256, seed):
+        assert options["trajectory"] == {"operators": ["object_pose"]}
+        calls.append(
+            (str(deployment), output.name, seed, options["engine"]["batch_size"])
+        )
+        return {"complete": True}
+
+    monkeypatch.setattr(workflow, "run_expansion_job", cohort)
+    monkeypatch.setattr(task_program_jobs, "_collect_task_program_expansion", rolling)
+    monkeypatch.setattr(
+        run_task,
+        "build_env_cfg_from_args",
+        lambda *_: pytest.fail(
+            "launcher must hand off before building a Gym environment"
+        ),
+    )
+    expansion = {
+        "execution": {"mode": mode, "batch_size": 2, "seed": 13},
+        "collection": {"output_dir": "task-output"},
+    }
+    if mode == "rolling":
+        expansion["collection"]["episodes_per_operator"] = 3
+        expansion.update(
+            scene={
+                "poses": {"cube": {"translation_m": [[0, 0]] * 3, "yaw_rad": [0, 0]}}
+            },
+            trajectory={"operators": ["object_pose"]},
+            validation={
+                "initial_checks": [],
+                "final_checks": [],
+                "events": [],
+                "allowed_contacts": [],
+                "mounting_contacts": [],
+            },
+        )
+    task = tmp_path / "task.yaml"
+    task.write_text(yaml.safe_dump({"id": "Expert-v1", "expansion": expansion}))
+    run_task.cli(["--gym-config", str(task)])
+    assert json.loads(capsys.readouterr().out)["complete"]
+
+    expansion["collection"]["output_dir"] = "job-output"
+    job = tmp_path / "job.yaml"
+    job.write_text(yaml.safe_dump({"deployment": task.name, "expansion": expansion}))
+    assert expansion_cli.main(["run", "--job", str(job)]) == 0
+    assert json.loads(capsys.readouterr().out)["complete"]
+    assert calls == [
+        (str(task), "task-output", 13, 2),
+        (str(task), "job-output", 13, 2),
+    ]
+
+
 def _resolve(path: str):
     args = _create_parser().parse_args(
         ["--gym-config", path, "--headless", "--device", "cpu"]
     )
     config = load_config(resolve_config_path(path))
     return _resolve_expansion_request(args, config)
+
+
+def test_explicit_replay_takes_priority_over_task_bound_expansion(
+    tmp_path, monkeypatch
+):
+    task = tmp_path / "task.yaml"
+    task.write_text("id: Expert-v1\nexpansion:\n  execution: {mode: rolling}\n")
+
+    def observer(*_):
+        pass
+
+    calls = []
+
+    def replay(args, *, replay_observer):
+        assert _resolve_expansion_request(args, load_config(task)) is None
+        calls.append((args.replay_mode, replay_observer))
+
+    monkeypatch.setattr(run_task, "_run_gym_task", replay)
+    run_task.cli(
+        [
+            "--gym-config",
+            str(task),
+            "--replay",
+            "--replay_trajectory",
+            "saved.pt",
+            "--replay_mode",
+            "dynamic",
+        ],
+        replay_observer=observer,
+    )
+    assert calls == [("dynamic", observer)]
 
 
 def test_repeated_pick_place_policy_component_merges_task_binding() -> None:
