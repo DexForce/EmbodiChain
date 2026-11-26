@@ -185,6 +185,40 @@ def test_prepare_validates_exported_rotated_support_rectangle(
             baseline.prepare_scene_baseline(cfg)
 
 
+@pytest.mark.parametrize("rectangle_on_saved_level", [True, False])
+def test_prepare_revalidates_the_saved_tabletop_level(
+    tmp_path: Path, rectangle_on_saved_level: bool
+) -> None:
+    root, cfg = _export(tmp_path)
+    path = root / "scene_config.json"
+    config = json.loads(path.read_text())
+    table = config["background"][0]
+    mesh_path = root / table["shape"]["fpath"]
+    upper = trimesh.load(mesh_path, force="mesh")
+    lower = trimesh.creation.box(extents=[0.8, 0.04, 0.6])
+    lower.apply_translation([-0.35, -0.32, 0.0])
+    trimesh.util.concatenate([upper, lower]).export(mesh_path)
+
+    # The wider default surface is at zero. The export selects the lower shelf.
+    table["support_surface_z"] = -0.30
+    left = -0.5 if rectangle_on_saved_level else 0.5
+    table["support_optimization_rect_xy"] = [
+        [left, -0.2],
+        [left + 0.3, -0.2],
+        [left + 0.3, 0.2],
+        [left, 0.2],
+    ]
+    path.write_text(json.dumps(config))
+
+    if rectangle_on_saved_level:
+        result = baseline.prepare_scene_baseline(cfg)
+        assert result.data["table"]["surface_z"] == pytest.approx(-0.30)
+        assert result.data["table"]["size_xy"] == pytest.approx([0.3, 0.4])
+    else:
+        with pytest.raises(ValueError, match="one connected support surface"):
+            baseline.prepare_scene_baseline(cfg)
+
+
 @pytest.mark.parametrize("change", ["pose", "scale", "mesh", "graph", "support"])
 def test_source_changes_invalidate_cache(tmp_path: Path, change: str) -> None:
     root, cfg = _export(tmp_path)

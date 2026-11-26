@@ -113,7 +113,11 @@ def _measure_table(
 ) -> dict[str, Any]:
     """Validate one safe rectangle against actual support triangles."""
     config = SupportSurfaceConfig()
-    detected = SupportSurfaceDetector(mesh.vertices, mesh.faces, config=config).detect()
+    saved_height = entry.get("support_surface_z")
+    expected_height = None if saved_height is None else float(saved_height)
+    detected = SupportSurfaceDetector(mesh.vertices, mesh.faces, config=config).detect(
+        top_z=expected_height
+    )
     selected_triangles = detected.vertices[detected.faces]
     if (
         float(np.ptp(selected_triangles[:, :, 2]))
@@ -127,13 +131,7 @@ def _measure_table(
         if rect_points is None
         else _read_rectangle(rect_points)
     )
-    saved_height = entry.get("support_surface_z")
-    surface_z = detected.top_z if saved_height is None else float(saved_height)
-    if (
-        not np.isfinite(surface_z)
-        or abs(surface_z - detected.top_z) > config.height_level_tolerance_m + 1e-9
-    ):
-        raise ValueError("Table support height does not match the final mesh.")
+    surface_z = detected.top_z if expected_height is None else expected_height
 
     projected_triangles = [Polygon(triangle[:, :2]) for triangle in selected_triangles]
     support = unary_union(

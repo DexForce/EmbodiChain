@@ -248,6 +248,9 @@ class SceneLayoutConstructor:
         pending = list(children_by_parent.get(root_id, []))
         while pending:
             descendant_id = pending.pop(0)
+            if descendant_id not in self._current_xy_by_id:
+                # A floor subtree has no editable layout state.
+                continue
             descendant_xy = self._current_xy_by_id[descendant_id]
             if descendant_xy is not None:
                 self._current_xy_by_id[descendant_id] = [
@@ -376,10 +379,16 @@ class SceneLayoutConstructor:
         }
         if post_edit_object_ids != graph_object_ids:
             raise ValueError("Goal scene graph and post-edit scene have different ids.")
-        # Get the movable asset ids.
-        if not self.layout_variable_ids.issubset(post_edit_object_ids - {"table"}):
+        floor_roots = {
+            asset.id
+            for asset in post_edit_scene.assets
+            if asset.placement_support == "floor"
+        }
+        groups = self._build_groups(floor_roots=floor_roots)
+        layout_ids = {uid for group in groups for uid in group.child_ids}
+        if not self.layout_variable_ids.issubset(layout_ids):
             raise ValueError(
-                "Only post-edit assets may participate in layout optimization."
+                "Only post-edit tabletop assets may participate in layout optimization."
             )
         # Get initial XY centers.
         initial_xy_by_id = {
@@ -388,15 +397,13 @@ class SceneLayoutConstructor:
                 is_generated=asset.id in generated_objects_by_id,
             )
             for asset in post_edit_scene.assets
+            if asset.id in layout_ids
         }
         for object_id, initial_xy in initial_xy_by_id.items():
             if initial_xy is None and object_id not in self.layout_variable_ids:
                 raise ValueError(
                     f"New asset {object_id!r} must participate in layout optimization."
                 )
-        # Build the table-rooted BFS groups.
-        groups = self._build_groups()
-
         return SceneLayoutProblem(
             post_edit_scene=post_edit_scene,
             goal_scene_graph=self.goal_scene_graph,
@@ -405,11 +412,11 @@ class SceneLayoutConstructor:
             groups=groups,
         )
 
-    def _build_groups(self) -> list[SceneLayoutGroup]:
-        """Build table-rooted BFS groups of direct on-children."""
+    def _build_groups(self, *, floor_roots: set[str]) -> list[SceneLayoutGroup]:
+        """Build table-rooted groups while leaving complete floor subtrees in place."""
         children_by_parent: dict[str, list[str]] = {}
         for node in self.goal_scene_graph.nodes:
-            if node.parent_id is None:
+            if node.parent_id is None or node.object_id in floor_roots:
                 continue
             if node.parent_relation != "on":
                 raise ValueError(f"Node {node.object_id!r} must be on its parent.")

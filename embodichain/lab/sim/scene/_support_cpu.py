@@ -141,10 +141,29 @@ class SupportSurfaceDetector:
         ):
             raise ValueError("Area, height span and height tolerance must be positive.")
 
-    def detect(self) -> DetectedSupportSurface:
-        """Detect the main upward-facing support surface of a z-up table mesh."""
-        mesh, levels, hull_gap_tolerance = self._find_support_levels()
-        level = next(self._rank_levels(levels, hull_gap_tolerance))
+    def detect(self, *, top_z: float | None = None) -> DetectedSupportSurface:
+        """Detect the main support surface or validate a previously selected level.
+
+        Args:
+            top_z: Optional saved height in the mesh's Z-up frame. The nearest
+                eligible level must match within the configured height tolerance.
+
+        Returns:
+            The detected upward-facing support surface.
+        """
+        mesh = self._prepare_mesh()
+        face_vertices = mesh.vertices[mesh.faces]
+        face_normals, _, valid_faces = triangle_geometry(
+            torch.from_numpy(face_vertices)
+        )
+        levels = self._ranked_support_levels(
+            mesh, face_vertices, face_normals.numpy(), valid_faces.numpy(), top_z=top_z
+        )
+        level = (
+            next(levels)
+            if top_z is None
+            else min(levels, key=lambda candidate: abs(candidate.top_z - top_z))
+        )
         self.support_region = self._build_support_surface(mesh, level)
         return self.support_region
 
@@ -170,11 +189,18 @@ class SupportSurfaceDetector:
             raise ValueError(
                 "Support rectangle sample count must be an integer of at least 2."
             )
-        mesh, levels, hull_gap_tolerance = self._find_support_levels()
+        mesh = self._prepare_mesh()
+        face_vertices = mesh.vertices[mesh.faces]
+        face_normals, _, valid_faces = triangle_geometry(
+            torch.from_numpy(face_vertices)
+        )
+        levels = self._ranked_support_levels(
+            mesh, face_vertices, face_normals.numpy(), valid_faces.numpy()
+        )
         vertices = mesh.vertices.copy()
         vertices.setflags(write=False)
         candidates: list[DetectedSupportSurface] = []
-        for level in self._rank_levels(levels, hull_gap_tolerance):
+        for level in levels:
             try:
                 candidates.append(
                     self._build_support_surface(
@@ -195,10 +221,8 @@ class SupportSurfaceDetector:
             raise ValueError("No upward-facing support level has usable geometry.")
         return candidates
 
-    def _find_support_levels(
-        self,
-    ) -> tuple[trimesh.Trimesh, list[_SupportLevel], float]:
-        """Prepare the geometry once and measure each eligible support level."""
+    def _prepare_mesh(self) -> trimesh.Trimesh:
+        """Weld seams and make a copy with corrected normals when possible."""
         self._validate_config()
         table_world_mesh = self.mesh
 
@@ -212,16 +236,23 @@ class SupportSurfaceDetector:
 
         # Repair normals if possible.
         self._repair_normals_if_possible(mesh)
+        return mesh
 
-        face_vertices = mesh.vertices[mesh.faces]
+    def _ranked_support_levels(
+        self,
+        mesh: trimesh.Trimesh,
+        face_vertices: np.ndarray,
+        face_normals: np.ndarray,
+        valid_faces: np.ndarray,
+        *,
+        top_z: float | None = None,
+    ) -> Iterator[_SupportLevel]:
+        """Measure and rank the eligible horizontal levels of a prepared mesh."""
         face_height_ranges = np.ptp(face_vertices[:, :, 2], axis=1)
-        face_normals, _, valid_faces = triangle_geometry(
-            torch.from_numpy(face_vertices)
-        )
         # Check: 1. range of z values of each triangle; 2. upward-facing triangles.
         candidate_face_indices = np.flatnonzero(
-            valid_faces.numpy()
-            & (face_normals[:, 2].numpy() >= self.config.normal_z_min)
+            valid_faces
+            & (face_normals[:, 2] >= self.config.normal_z_min)
             & (face_height_ranges <= self.config.max_face_height_span_m)
         )
         if len(candidate_face_indices) == 0:
@@ -238,7 +269,16 @@ class SupportSurfaceDetector:
             candidate_face_indices=candidate_face_indices,
             full_table_hull_area=full_table_hull_area,
         )
-        return mesh, levels, max(full_table_hull_area * 1e-6, 1e-9)
+        if top_z is not None:
+            height_tolerance = self.config.height_level_tolerance_m + 1e-9
+            levels = [
+                level
+                for level in levels
+                if abs(level.top_z - top_z) <= height_tolerance
+            ]
+            if not levels:
+                raise ValueError("Table support height does not match the final mesh.")
+        return self._rank_levels(levels, max(full_table_hull_area * 1e-6, 1e-9))
 
     def _build_support_surface(
         self,

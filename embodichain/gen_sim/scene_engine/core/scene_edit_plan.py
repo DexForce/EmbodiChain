@@ -133,11 +133,21 @@ class SceneEditPlan:
             raise ValueError("Scene edit plan graph nodes must match scene object ids.")
 
         existing_object_ids = set(scene_object_ids)
-        floor_object_ids = {
+        children_by_parent = {
+            parent_id: [child.object_id for child in children]
+            for parent_id, children in self.scene_graph._children_by_parent().items()
+        }
+        floor_roots = {
             asset.id
             for asset in self.scene.assets
             if asset.placement_support == "floor"
         }
+        floor_object_ids = floor_roots.union(
+            *(
+                self._descendant_ids(root_id, children_by_parent)
+                for root_id in floor_roots
+            )
+        )
         added_object_ids: set[str] = set()
         # Collect deletion intents first so move and add cannot target them regardless of order.
         deleted_object_ids = {
@@ -167,7 +177,7 @@ class SceneEditPlan:
                 added_object_ids=added_object_ids,
             )
         # A removed support object must not leave any child objects orphaned.
-        self._validate_deleted_subtrees(deleted_object_ids)
+        self._validate_deleted_subtrees(deleted_object_ids, children_by_parent)
 
     def _validate_operation(
         self,
@@ -297,13 +307,9 @@ class SceneEditPlan:
         if operation.target_id in deleted_object_ids:
             raise ValueError("Edit targets must not reference deleted objects.")
 
-    def _validate_deleted_subtrees(self, deleted_object_ids: set[str]) -> None:
-        # Index the support graph once before checking every deleted parent.
-        children_by_parent: dict[str, list[str]] = {}
-        for node in self.scene_graph.nodes:
-            if node.parent_id is not None:
-                children_by_parent.setdefault(node.parent_id, []).append(node.object_id)
-
+    def _validate_deleted_subtrees(
+        self, deleted_object_ids: set[str], children_by_parent: dict[str, list[str]]
+    ) -> None:
         for object_id in deleted_object_ids:
             descendants = self._descendant_ids(object_id, children_by_parent)
             if not descendants.issubset(deleted_object_ids):
@@ -321,6 +327,8 @@ class SceneEditPlan:
         pending = list(children_by_parent.get(object_id, []))
         while pending:
             child_id = pending.pop()
+            if child_id in descendants:
+                continue
             descendants.add(child_id)
             pending.extend(children_by_parent.get(child_id, []))
         return descendants
