@@ -55,7 +55,7 @@ const binding = {
 const task =
   "Use the mounted DexSim and EmbodiChain MCP tools only. You are attached to a manual DexUni World with an existing floor. List objects. Import UR5.urdf twice through dexsim_import_urdf: name arm_a at [0,0,0], arm_b at [2,0,0], both fixed_base=true. Rebuild with dexsim_rebuild_scene. Inspect solver and native joint state of both robots. Use embodichain_inspect_handoff; then call embodichain_bind_world with the returned generation and topology_revision and this exact binding: " +
   JSON.stringify(binding) +
-  ". Call embodichain_control_status and use its session_id, revision and topology_revision in embodichain_control_target_and_step. Supply command_id='one', robot_uid='UR5', control_part='arm', target=[0.08,0.08,0.08,0.08,0.08,0.08], units=['rad','rad','rad','rad','rad','rad'], control_interval_s=0.04. Read both robots with the native tools. Do not release until the next turn.";
+  ". Call embodichain_control_status and use its session_id, revision and topology_revision in embodichain_control_target_and_step. Supply command_id='one', robot_uid='UR5', control_part='arm', target=[0.08,-0.06,0.04,-0.03,0.02,-0.01], units=['rad','rad','rad','rad','rad','rad'], control_interval_s=0.04. Read both robots with the native tools. Do not release until the next turn.";
 const opts = {
   onPermission: (r) =>
     /dexsim_|embodichain_/.test(r.toolCall?.title ?? "")
