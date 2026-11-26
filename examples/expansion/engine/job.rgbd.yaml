@@ -19,7 +19,4 @@ friction:
 capture_media: true
 export_lerobot: true
 visual_profile_file: visual.yaml
-render_profiles:
-- blue
-- camera
-observation_independent: true
+visual_profile: combined

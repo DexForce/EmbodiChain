@@ -1,6 +1,6 @@
 # Installation
 
-EmbodiChain is a Python framework built on the [DexSim](https://github.com/DexForce) simulation engine (`dexsim_engine` on PyPI). This guide covers system requirements, package indexes, Docker and local install paths, optional policy deployment and generative-simulation dependencies, and verification.
+EmbodiChain is a Python framework built on the [DexSim](https://github.com/DexForce) simulation engine (`dexsim_engine` on PyPI). This guide covers system requirements, package indexes, Docker and local install paths, optional policy deployment, NMG input gradients, generative-simulation dependencies, and verification.
 
 After installation, continue with the [Quick Start Tutorial](../tutorial/index.rst).
 
@@ -273,10 +273,9 @@ and cuDNN libraries using the
 [CUDA provider requirements](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html#requirements).
 Installing the extra does not override a policy's execution-provider selection.
 
-The former `nmg` extra has been replaced by `policy-deploy`. Update existing
-install commands accordingly. If the old extra installed the CPU package,
-remove it before installing the shared GPU runtime. If both ORT packages are
-already installed, remove both first to avoid overlapping package files:
+Use `policy-deploy` for ORT inference. If both ORT distributions are present,
+remove the existing runtime packages before installing the shared GPU runtime
+to avoid overlapping files.
 
 ```bash
 python -m pip uninstall -y onnxruntime onnxruntime-gpu
@@ -284,6 +283,18 @@ python -m pip install "embodichain[policy-deploy]" ${PIP_EXTRA_ARGS}
 ```
 
 For an editable checkout, use `-e ".[policy-deploy]"` in the second command.
+
+## NMG input gradients
+
+The standard EmbodiChain installation includes PyTorch for exported NMG
+actor programs. Load a verified `.pt2` with
+`NeuralMotionGenerator.from_checkpoint(checkpoint, device=...)`. The archive
+provides the actor graph, weights, normalization and observation contract.
+Install `policy-deploy` when the same environment also runs an ONNX policy
+through ONNX Runtime.
+
+See the [NMG model guide](../resources/models/policy/nmg.md) for the checkpoint
+format and a single-step gradient example.
 
 ## Newton planning geometry
 

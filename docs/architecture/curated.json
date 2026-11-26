@@ -3467,7 +3467,7 @@
           "label": "Official model library"
         },
         {
-          "docname": "features/neural_dynamics/nerd",
+          "docname": "resources/models/neural_dynamics/nerd",
           "label": "NeRD data and training workflow"
         }
       ]
@@ -3496,7 +3496,7 @@
       ],
       "documentation": [
         {
-          "docname": "features/neural_dynamics/nerd",
+          "docname": "resources/models/neural_dynamics/nerd",
           "label": "NeRD showcase commands"
         }
       ]
@@ -3587,7 +3587,7 @@
           "label": "RWM state, objectives, prediction, replay and SL recipe"
         },
         {
-          "docname": "features/neural_dynamics/rwm",
+          "docname": "resources/models/neural_dynamics/rwm",
           "label": "RWM principles and usage"
         }
       ]
@@ -3622,7 +3622,7 @@
       ],
       "documentation": [
         {
-          "docname": "features/neural_dynamics/lewm",
+          "docname": "resources/models/neural_dynamics/lewm",
           "label": "LeWM model and Cube workflow"
         },
         {
@@ -4295,15 +4295,15 @@
       "source": "env-launcher",
       "target": "task-discovery",
       "relation": "calls",
-      "description": "Discover installed task packages before loading the deployment.",
-      "scope": "Environment launcher setup path, before configuration decoding.",
+      "description": "Discover installed task packages before decoding the Gym deployment.",
+      "scope": "Gym launcher setup after CLI routing, before configuration decoding.",
       "provenance": "source-reviewed",
       "evidence": [
         {
           "path": "embodichain/lab/scripts/run_task.py",
-          "symbol": "cli",
-          "start_line": 1018,
-          "end_line": 1018,
+          "symbol": "_run_gym_task",
+          "start_line": 2228,
+          "end_line": 2228,
           "excerpt": "    discover_task_packages()"
         }
       ]
@@ -4346,14 +4346,14 @@
       "target": "config-loader",
       "relation": "calls",
       "description": "Build the typed environment configuration from launcher arguments.",
-      "scope": "After discovery and init hooks, before gymnasium.make.",
+      "scope": "In the Gym launcher after discovery and init hooks, before gymnasium.make.",
       "provenance": "source-reviewed",
       "evidence": [
         {
           "path": "embodichain/lab/scripts/run_task.py",
-          "symbol": "cli",
-          "start_line": 1628,
-          "end_line": 1628,
+          "symbol": "_run_gym_task",
+          "start_line": 2233,
+          "end_line": 2233,
           "excerpt": "    env_cfg, gym_config, action_config = build_env_cfg_from_args(args)"
         }
       ]
@@ -4401,9 +4401,9 @@
         },
         {
           "path": "embodichain/lab/scripts/run_task.py",
-          "symbol": "cli",
-          "start_line": 2180,
-          "end_line": 2180,
+          "symbol": "_run_gym_task",
+          "start_line": 2365,
+          "end_line": 2365,
           "excerpt": "        env = gymnasium.make(id=gym_config[\"id\"], cfg=env_cfg, **action_config)"
         }
       ]

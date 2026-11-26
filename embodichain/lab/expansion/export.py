@@ -415,7 +415,9 @@ def export_expansion_lerobot(
                     ),
                     media_manifest_sha256=child["media_sha256"],
                     parent_episode_uuid=str(uuid5(NAMESPACE_URL, parent.episode_id)),
-                    observation_origin="state_rerender",
+                    observation_origin=child.get(
+                        "observation_origin", "state_rerender"
+                    ),
                     observation_variant_id=child["variant_id"],
                     visual_profile=child["profile"],
                     physical_parent_commit_id=parent.commit_id,

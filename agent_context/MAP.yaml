@@ -217,7 +217,7 @@ topics:
 - id: expansion-engine
   title: Expansion Engine
   aliases: [Expansion Engine, offline expansion, 扩增引擎, 批量专家采集]
-  keywords: [ExpansionEngine, ExpansionRunCfg, ExpansionJobCfg, ExpansionSession, ExpansionSessionCfg, ExpansionCoverage, EpisodeCoverage, GymExpansionHost, ArtifactEpisodeSink, MediaSpool, render_observation_variants, WorkloadProgramExecutor, WorkloadExecutionCfg, workload_count, GymExpansionHostExtensions, MeasuredExpansionValidator, MeasuredTrajectory, preview_expansion_comparison, 扩增虚影]
+  keywords: [ExpansionEngine, ExpansionRunCfg, ExpansionJobCfg, ExpansionSession, ExpansionSessionCfg, ExpansionCoverage, EpisodeCoverage, GymExpansionHost, ArtifactEpisodeSink, MediaSpool, visual_profile, WorkloadProgramExecutor, WorkloadExecutionCfg, workload_count, GymExpansionHostExtensions, MeasuredExpansionValidator, MeasuredTrajectory, preview_expansion_comparison, 扩增虚影]
   paths: [topics/expansion-engine/expansion-engine.md]
   source_of_truth:
   - embodichain/lab/expansion/
@@ -233,7 +233,7 @@ topics:
     trajectory expansion, trajectory augmentation, expansion profile, configured trajectory expansion,
     fixed scene trajectory augmentation, trajectory variants, trajectory variant expansion,
     轨迹播放, 轨迹扩增, 轨迹扩增配置, 运动规划, 轨迹规划, 轨迹变体, kinematic trajectory refinement, 轨迹修正]
-  keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, CuroboPoseConstraintCfg, NeuralPlanner,
+  keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, CuroboPoseConstraintCfg, NeuralPlanner, NeuralMotionGenerator,
     CuroboPayload, CuroboQuerySnapshot, curobo_motion_generator,
     interpolation_mode, ik_seed_mode, resolve_continuous_ik_path, search_cost_scope, RejectedMotionCandidate, MotionRecoveryTrace,
     expansion, TrajectorySessionCoverage, TrajectoryAugmentationCfg, TrajectoryExpansionJobCfg,
@@ -250,6 +250,9 @@ topics:
   source_of_truth:
   - embodichain/lab/sim/motion/planners/base_planner.py
   - embodichain/lab/sim/motion/motion_generator.py
+  - embodichain/extensions/models/policy/nmg.py
+  - embodichain/extensions/models/policy/_nmg_exported.py
+  - embodichain/extensions/models/policy/_nmg_observation.py
   - embodichain/lab/sim/motion/ik.py
   - embodichain/lab/sim/motion/_cartesian.py
   - embodichain/lab/sim/motion/limits.py
@@ -275,7 +278,7 @@ topics:
   - embodichain/lab/sim/utility/action_utils.py
   - embodichain/toolkits/graspkit/pg_grasp/
   watch_paths: [tests/benchmark/motion_generation/, tests/test_benchmark_package.py, tests/sim/motion/test_motion_generator.py,
-    tests/sim/motion/test_motion_generator_batched.py, embodichain/lab/sim/motion/planners/,
+    tests/sim/motion/test_motion_generator_batched.py, tests/models/policy/test_nmg.py, embodichain/lab/sim/motion/planners/,
     tests/sim/motion/expansion/, tests/sim/motion/planners/, tests/compute/, examples/expansion/trajectory/,
     examples/expansion/README.md, tests/toolkits/test_coordinated_grasp.py, tests/toolkits/test_urdf_collision_surfaces.py,
     tests/toolkits/test_contact_fit.py]
@@ -351,8 +354,7 @@ topics:
   - embodichain/extensions/models/dynamics/worldparticle/
   - embodichain/extensions/solvers/physics/worldparticle/
   - examples/learning/worldparticle/
-  watch_paths: [embodichain/extensions/models/, examples/learning/nerd/, docs/source/features/neural_dynamics.md,
-    docs/source/features/neural_dynamics/, docs/source/guides/neural_dynamics.md, docs/source/api_reference/model_catalogs.rst,
+  watch_paths: [embodichain/extensions/models/, examples/learning/nerd/, docs/source/resources/models/neural_dynamics/, docs/source/guides/neural_dynamics.md, docs/source/api_reference/model_catalogs.rst,
     docs/source/api_reference/model_rigidformer.rst]
   related_topics: [supervised-learning, robot-world-model, learning-layers, data-pipeline, data-assets]
   status: active
@@ -756,7 +758,7 @@ topics:
   - embodichain/extensions/models/policies/motion_tracking.py
   - embodichain/extensions/tasks/locomotion/tracking/motion_model.py
   watch_paths: [tests/models/dynamics/rwm/, embodichain/learning/dynamics/, tests/learning/test_online_schedule.py,
-    tests/gym/envs/tasks/test_motion_model.py, docs/source/features/neural_dynamics/rwm.md,
+    tests/gym/envs/tasks/test_motion_model.py, docs/source/resources/models/neural_dynamics/rwm.md,
     docs/source/api_reference/rwm.rst]
   related_topics: [supervised-learning, learning-layers, neural-dynamics]
   status: active
