@@ -41,7 +41,7 @@ the discovery record, journal and JSON report for reproducibility.
 
 ## MCP and DexPilot
 
-Install `embodichain[mcp]` in the Python environment. Start a fresh dedicated
+Install `embodichain` in the Python environment. Start a fresh dedicated
 host for **each** of the following runs. The host framebuffer can use Xvfb;
 the MCP client and DexPilot run in a separate terminal. From the checkout root:
 

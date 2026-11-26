@@ -20,6 +20,8 @@ shadow_pen_continuous: {purpose: training}
 drawer_storage: {purpose: showcase, featured: [ur5]}
 gaussian_pick_place: {purpose: showcase, featured: [office]}
 route_the_cable: {purpose: showcase, featured: [yam]}
+franka_rope_wrap: {purpose: showcase}
+franka_rj45_cycle: {purpose: showcase}
 cloth_fold: {purpose: showcase}
 carton_stocking: {purpose: showcase}
 open_drawer: {purpose: showcase}
