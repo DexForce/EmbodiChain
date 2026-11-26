@@ -14,7 +14,6 @@ cube's resting position, and save one trajectory.**
 ```{toctree}
 :hidden:
 
-quickstart
 authoring
 recipes
 deployment

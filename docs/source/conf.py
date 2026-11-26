@@ -55,6 +55,7 @@ with open(os.path.join(os.path.dirname(__file__), "..", "..", "VERSION")) as f:
 
 extensions = [
     "architecture_sphinx",
+    "task_catalog_sphinx",
     "autodocsumm",
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
@@ -118,6 +119,14 @@ html_baseurl = ""
 
 # Keep published URLs working after documentation reorganizations.
 doc_redirects = {
+    "features/neural_dynamics": "resources/models/neural_dynamics/index",
+    "resources/models/policy_models": "resources/models/policy/index",
+    "resources/models/nmg": "resources/models/policy/nmg",
+    "features/neural_dynamics/nerd": "resources/models/neural_dynamics/nerd",
+    "features/neural_dynamics/rwm": "resources/models/neural_dynamics/rwm",
+    "features/neural_dynamics/lewm": "resources/models/neural_dynamics/lewm",
+    "features/neural_dynamics/rigidformer": "resources/models/neural_dynamics/rigidformer",
+    "features/neural_dynamics/worldparticle": "resources/models/neural_dynamics/worldparticle",
     "features/interaction/index": "overview/sim/visualization/index",
     "features/interaction/window": "overview/sim/visualization/window",
     "features/interaction/gizmo": "overview/sim/visualization/gizmo",

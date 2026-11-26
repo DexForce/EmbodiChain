@@ -17,11 +17,63 @@ and twist mode can require occurrence-bound deployment parameters. The hybrid
 validator checks symbolic declaration coverage, including acquisition versus
 release in coordinated transport. Physical evidence and calibrated installation
 remain separate; motion-only pouring never establishes liquid transfer.
-Before freezing the hybrid objective, source checks distinguish explicit pour
-motion, requested liquid transfer and ambiguous outcomes. A separately prompted
-source audit checks omissions and invented actions against both the declarations and their expanded calls and occurrence bindings. During expansion, a following placement or pour can reuse the same held object; explicit incompatible arms remain errors. Diagnostics feed a bounded
-reinterpretation; a failed audit prevents plan publication.
-For rigid pick/place, named handovers and coordinated tray release, hybrid automatically grounds frozen roles in the original image, or verifies a supplied `--scene-grounding FILE`. A null box retains a pending role. Plans outside this deployment scope publish an authoring-only manifest. Qualification and deployment preparation then use the same
+Hybrid compares quoted operations and expanded calls with an independent source
+audit; invalid interpretations cannot publish. Align, pour and handover add
+hold or return-and-release only from explicit terminal instructions. Pouring
+restores orientation, not position. Native acquisition and witness checks track
+feasible two-arm assignments without treating `auto` as a third resource.
+Archived Hybrid witnesses retain explicit resource IDs. With custom IDs, `auto`
+uses the supplied names (and an unnamed second slot if only one is supplied)
+without guessing physical aliases.
+
+Without deployment or explicit grounding, `authoring_intent.py` supports scoped
+typed steps when native E1–E9 lose source requirements. Effects hold at step
+end; `maintain` holds during a step. The audit matches source obligations to
+facts in their required scope, not role labels. A `before` check uses cited
+facts still valid at the start of its latest cited step, not that step's effects.
+Final checks use a compatible final condition or a cited effect that survives
+subsequent actions. Restating a stale fact as a final condition does not recover
+it, even if unordered fields use a different order. A verified terminal claim
+missing from the plan becomes a published goal; producer links still require
+cited, surviving effects. Grouped independent states can prove a subset of
+their subjects or arms and keep unaffected members after an action. Joint facts,
+ordered operands and shared qualifiers still require matching evidence.
+Known conflicts with `always` conditions are rejected at the initial, during-step,
+and step-end phases, even if a later step restores the state. Separate release facts prove a group was
+released only when valid at the same checkpoint. A stated spatial frame must match the
+evidence, including slot relations; inverse axis relations can match in a shared
+frame but not when swapping a reference-local anchor. Validation and evidence
+invalidation share feasible arm assignments across the sequence without
+replacing authored `auto` arms. Two independent
+single-arm picks can share a `parallel_group` only with explicit timing in the
+acquisition clause; timing a later action or naming both arms is not evidence.
+The audit verifies
+the hand-object pairs, and following steps depend on both branches. Both arms
+acquiring the same object remain one pick. A held tool making contact is a held
+motion with a contact-part relation, not a button actuation. A requested lift
+then move away has separate upward and departure steps within the same hold,
+even when a later step resolves an earlier `auto` arm. A requested short
+displacement has a qualitative extent, not an invented metric. Opposite sides
+of a future reference require a relation established at or after its placement,
+checked at the cited effect checkpoint or at the end for a final claim.
+Nesting, stacking and release alone do not require a separate stability claim.
+A bistable
+control's other position requires an explicit action effect relative to its
+initial position, not `pressed`. A typed source audit may cite indexed source
+spans on its first pass or bounded citation repair; they resolve to verbatim
+instruction text without changing the graph or weakening its reviewed constraints.
+`task_engine.intent.*` remains unbound `authoring_only` (`source_reviewed`),
+not executable or lowerable.
+
+`--scene-context FILE` accepts `embodichain.task-scene-context/v1` scene facts and
+case-sensitive ASCII object IDs, not additional actions. An object is rigid unless
+explicitly declared `asset_kind: articulated`; joint actions require a declared
+owner. A missing model-authored owner link can be repaired for a part without an
+explicit asset kind if an articulated caller declaration exists; a proposal
+cannot override an explicit rigid declaration.
+Background objects do not become task roles. The frozen scene requirements
+publish derived `is_articulated`; the retained source context is not visibility evidence.
+For rigid pick/place, named handovers ending in placement and coordinated tray release, hybrid automatically grounds frozen roles in the original image, or verifies a supplied `--scene-grounding FILE`. A null box retains a pending role. Plans outside this deployment scope publish an authoring-only manifest. Qualification and deployment preparation then use the same
 role, geometry, resource and configuration checks as template plans. The same tray identity is retained across fruit landings and the final transport;
 qualification selects non-overlapping landing poses and the terminal segment
 rechecks retained payloads. A handover requires a trusted exchange pose. Ungrounded
@@ -84,6 +136,17 @@ stage-selection flags. `image_planning.py` retains raw provider attempts and
 allows a bounded number of diagnostic repairs per grounding/planning stage (one
 by default). It contains no per-task graph construction templates.
 
+`template` and default `TaskAgent` independently audit typed intent before
+grounding. Ordering compares reachability, and only a unique shared verbatim
+mention can reconcile reference labels. A uniquely stated metric lift height
+is checked against the source for a targetless upward hold, without taking a
+distance from another action. Agreed explicit
+arm returns project to ordered `simulation.park` calls with pending resource
+postures, not extra image-grounding entities. New default attempts mark the audit
+`purpose: source_review`. Resource-only park calls require the audited clauses.
+Sealed pre-audit plans remain readable, and revisions can keep an existing
+object-annotated park call with its original node and task step identity.
+
 `lab/task_program/language/semantic_contracts.py` owns provider-free call argument,
 resource, precondition/effect and runtime-binding declarations. Configured live
 lowerers consume those same argument contracts and retain their stricter scene
@@ -143,13 +206,30 @@ semantic review and never qualify physical execution.
 
 Version-2 plans and revisions embed the frozen v1 specification and its pairing
 report in the offline viewer. The grouped action canvas links milestones, final
-goals and roles. Native run review is published separately at `task_review.html`;
+goals and roles. The review canvas and Graph & exports share goal pairings; typed
+goals link only to cited steps with surviving effects that prove them.
+The review shows the recorded plan coverage, distinguishing source review from
+a covered native witness. Step checks distinguish full predicates, including
+different references for the same subject and relation.
+Native run review is published separately at `task_review.html`;
 `gensim task view --plan PLAN [--run RUN] --output NEW.html` also renders
 existing artifacts. Only matching attempt identities, complete plan identities and
 execution-report digests supply native call evidence. Per-environment details
 retain row reasons, step ranges and event masks. Source images come from the
 verified input reference or legacy inventory. Archived graph-only views retain
 their existing renderer.
+
+`task view --preview-boxes FILE` optionally overlays role-keyed rectangles from
+JSON with `image_sha256` and `boxes`. Keys must be frozen role IDs and values
+are normalized `[x0, y0, x1, y1]` or `null` to hide a role's box. These
+display annotations do not change the TaskSpec, graph, grounding or execution
+readiness; reopening a grounded Hybrid plan also displays its stored boxes.
+Selecting a box or its object label locates the related calls, including those
+that reference the object's declared parts.
+`task view --auto-preview-boxes` is an opt-in call to the configured
+`task_image_grounding` service on the frozen source image. Unknown, hidden,
+ambiguous and abstract roles have no box. Automatic boxes are display hints,
+not grounding or execution evidence; plain `task view` stays offline.
 
 `semantic_graph_html.py` renders an existing graph and optional TaskSpec,
 recomputed coverage and recorded execution report. `reporting.py` owns the

@@ -1,8 +1,9 @@
 # Installation
 
-EmbodiChain is a Python framework built on the [DexSim](https://github.com/DexForce) simulation engine (`dexsim_engine` on PyPI). This guide covers system requirements, package indexes, Docker and local install paths, optional policy deployment and generative-simulation dependencies, and verification.
+EmbodiChain is a Python framework built on the [DexSim](https://github.com/DexForce) simulation engine (`dexsim_engine` on PyPI). This guide covers system requirements, package indexes, Docker and local install paths, optional policy deployment, NMG input gradients, generative-simulation dependencies, and verification.
 
-After installation, continue with the [Quick Start Tutorial](../tutorial/index.rst).
+After installation, follow {doc}`first_run` to create a scene or preview an
+official task.
 
 ## Choose your setup
 
@@ -249,6 +250,23 @@ Commands can continue to use repository-style paths such as
 EmbodiChain resolves these paths from the checkout when present and otherwise
 from the installed wheel.
 
+(verify-install)=
+## Verify installation
+
+### Quick check (all install methods)
+
+```bash
+python -c "import embodichain, dexsim; print('embodichain', embodichain.__version__); print('dexsim', dexsim.__version__)"
+```
+
+You should see version strings for both packages with no import errors. To
+check simulation startup, {ref}`run a scene <first-run-scene>` or
+{ref}`preview an official task <first-run-task>`.
+
+### Simulation tutorial (source tree or Docker with repo)
+
+See {ref}`first-run-scene` for the tutorial command and local or remote display setup.
+
 ## Optional: policy deployment (`policy-deploy`)
 
 Install the `policy-deploy` extra to run ONNX policies with NeuralPlanner/NMG
@@ -273,10 +291,9 @@ and cuDNN libraries using the
 [CUDA provider requirements](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html#requirements).
 Installing the extra does not override a policy's execution-provider selection.
 
-The former `nmg` extra has been replaced by `policy-deploy`. Update existing
-install commands accordingly. If the old extra installed the CPU package,
-remove it before installing the shared GPU runtime. If both ORT packages are
-already installed, remove both first to avoid overlapping package files:
+Use `policy-deploy` for ORT inference. If both ORT distributions are present,
+remove the existing runtime packages before installing the shared GPU runtime
+to avoid overlapping files.
 
 ```bash
 python -m pip uninstall -y onnxruntime onnxruntime-gpu
@@ -284,6 +301,18 @@ python -m pip install "embodichain[policy-deploy]" ${PIP_EXTRA_ARGS}
 ```
 
 For an editable checkout, use `-e ".[policy-deploy]"` in the second command.
+
+## NMG input gradients
+
+The standard EmbodiChain installation includes PyTorch for exported NMG
+actor programs. Load a verified `.pt2` with
+`NeuralMotionGenerator.from_checkpoint(checkpoint, device=...)`. The archive
+provides the actor graph, weights, normalization and observation contract.
+Install `policy-deploy` when the same environment also runs an ONNX policy
+through ONNX Runtime.
+
+See the [NMG model guide](../resources/models/policy/nmg.md) for the checkpoint
+format and a single-step gradient example.
 
 ## Newton planning geometry
 
@@ -385,58 +414,6 @@ correction described in the
 
 For Asset Engine usage and LLM configuration, see [Asset Engine](../features/generative_sim/asset_engine.md).
 
-## Verify installation
-
-### Quick check (all install methods)
-
-```bash
-python -c "import embodichain, dexsim; print('embodichain', embodichain.__version__); print('dexsim', dexsim.__version__)"
-```
-
-You should see version strings for both packages with no import errors.
-
-### Simulation tutorial (source tree or Docker with repo)
-
-The tutorial script `scripts/tutorials/sim/create_scene.py` ships with the repository. Run it from the **repository root**:
-
-```bash
-cd /path/to/EmbodiChain
-python scripts/tutorials/sim/create_scene.py
-```
-
-- **With a display:** omit `--headless` to open the DexSim viewer after the scene is built.
-- **Headless / SSH:** use `--headless` to run without a window (FPS logs in the terminal):
-
-```bash
-python scripts/tutorials/sim/create_scene.py --headless
-```
-
-Optional GPU smoke test:
-
-```bash
-python scripts/tutorials/sim/create_scene.py --headless --device cuda
-```
-
-For a headless browser view, enable Viser:
-
-```bash
-python scripts/tutorials/sim/create_scene.py --viser
-```
-
-Open the endpoint printed in the terminal, normally
-`http://127.0.0.1:8080`. On a remote machine, keep the default loopback binding
-and forward the port:
-
-```bash
-ssh -N -L 8080:127.0.0.1:8080 user@worker-host
-```
-
-See [Browser visualization with Viser](../overview/sim/visualization/viser.md)
-for supported objects, camera preview, update-rate options, and remote-access
-guidance.
-
-Press `Ctrl+C` to stop; the script cleans up the simulation on exit.
-
 ## Troubleshooting
 
 | Symptom | What to try |
@@ -454,4 +431,5 @@ Press `Ctrl+C` to stop; the script cleans up the simulation on exit.
 - [Quick Start Tutorial](../tutorial/index.rst)
 - [Simulation Manager](../overview/sim/sim_manager.md)
 - [Browser visualization with Viser](../overview/sim/visualization/viser.md)
-- [Build documentation](docs.md)
+
+If you are editing the documentation, see {doc}`docs`.

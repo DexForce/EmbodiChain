@@ -195,6 +195,7 @@ def _image_preview(
     summary: dict[str, Any],
     *,
     attempt: dict[str, Any] | None = None,
+    preview_boxes: dict[str, list[float] | None] | None = None,
 ) -> str:
     from PIL import Image
 
@@ -275,4 +276,6 @@ def _image_preview(
                 "qualifier_coverage", []
             ),
         }
+        if preview_boxes:
+            data["review"]["preview_boxes"] = preview_boxes
     return _viewer_document(data)

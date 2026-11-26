@@ -335,6 +335,33 @@ def test_replay_restores_wrapper_state_without_closing_caller_env(monkeypatch) -
     assert replay_env.env._replay_no_auto_reset is False
 
 
+@pytest.mark.parametrize("stop_step", [2, 3])
+def test_dynamic_replay_observer_receives_live_frames(stop_step) -> None:
+    env = SimpleNamespace(frame=-1)
+    replay_env = MagicMock(env=env)
+    replay_env._lengths = torch.tensor([3])
+    replay_env.reset.side_effect = lambda: setattr(env, "frame", 0)
+
+    def step(_action):
+        env.frame += 1
+        return None, None, None, torch.tensor([env.frame == stop_step]), None
+
+    replay_env.step.side_effect = step
+    frames = []
+
+    def observe(live, frame, total):
+        assert live is env
+        frames.append((live.frame, frame, total))
+
+    if stop_step == 3:
+        run_task.replay_auto(replay_env, "dynamic", replay_observer=observe)
+    else:
+        with pytest.raises(RuntimeError, match="ended after 2 of 3 steps"):
+            run_task.replay_auto(replay_env, "dynamic", replay_observer=observe)
+
+    assert frames == [(i, i, 3) for i in range(stop_step + 1)]
+
+
 def test_preview_quit_returns_without_zero_exit(monkeypatch) -> None:
     """Preview quit lets CLI cleanup failures determine the process status."""
     env = MagicMock()

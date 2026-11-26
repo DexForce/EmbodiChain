@@ -88,7 +88,15 @@ def prepare_scene_baseline(
         raise ValueError("rebuild must be a boolean.")
     export_root = Path(cfg.scene_path).expanduser().resolve()
     if not (export_root / "scene_config.json").is_file():
-        export_root = export_root / "scene_export"
+        from embodichain.gen_sim.scene_engine.pipeline.utils.scene_package import (
+            _restore_scene_export,
+        )
+
+        workspace = (
+            export_root.parent if export_root.name == "scene_export" else export_root
+        )
+        _restore_scene_export(workspace)
+        export_root = workspace / "scene_export"
     config_bytes, config = _read_json(export_root / "scene_config.json")
     graph_bytes, _ = _read_json(export_root / "scene_graph.json")
     entries = _rigid_entries(config)

@@ -27,6 +27,13 @@ Shared runtime fields remain documented on ``RobotCfg``; the class declarations
 below identify canonical imports without re-expanding inherited configuration
 fields or generated constructors.
 
+.. toctree::
+   :maxdepth: 1
+
+   agibot_g1
+   data/eef_assets
+   locomotion_robots
+
 
 embodichain.robot_registry
 --------------------------
@@ -629,7 +636,41 @@ and cache prefixes while using the shared core download and locking services.
 
 .. autoclass:: embodichain.extensions.robots.franka.assets.FrankaPandaArm
 
+.. autoclass:: embodichain.extensions.robots.franka.assets.FrankaRopePads
+
+   The cable-wrap embodiment resolves the flat-pad model through
+   ``FrankaRopePads/Panda/Fr3RopePadsV1.urdf``.
+
+.. autofunction:: embodichain.extensions.robots.franka.rope_pads.apply_rope_pads
+
 .. autofunction:: embodichain.extensions.robots.robotiq.two_finger.robotiq85_joint_positions
+
+
+embodichain.extensions.robots.franka.rj45_assets
+------------------------------------------------
+
+Both replay backends use the same derived Franka, plug and socket models.
+The Franka derivative retains the original joints and inertias and replaces
+the finger geometry with the narrow jaws calibrated for the RJ45 cycle.
+The fixture archive supplies the prepared GLB appearance and fixed socket
+mount while preserving the plug's passive latch and collision geometry.
+The fixture class is available from
+:class:`embodichain.data.assets.task_assets.Rj45Fixture` and through the import
+below.
+
+.. currentmodule:: embodichain.extensions.robots.franka.rj45_assets
+
+.. autosummary::
+
+   FrankaRj45
+   Rj45Fixture
+   get_rj45_models
+
+.. autoclass:: FrankaRj45
+
+.. autoclass:: Rj45Fixture
+
+.. autofunction:: get_rj45_models
 
 
 embodichain.extensions.robots.i2rt.yam

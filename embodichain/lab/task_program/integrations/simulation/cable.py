@@ -23,7 +23,7 @@ step. Program calls use the ordinary Atomic Skills and Gym command bridge.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 from typing import ClassVar, Any, TYPE_CHECKING
 
@@ -73,14 +73,18 @@ __all__: list[str] = []
 
 from embodichain.compute.geometry._cable_route import _CABLE_METRICS as _METRICS
 
+_PICKUP_METRICS = ("end_position", "max_grasp_slip")
+
 
 @dataclass(frozen=True, slots=True)
 class _CableTarget:
     target_id: str
     kind: str
     material_distance: float | None = None
+    material_inset: float | None = None
     retract_distance: float = 0.0
     position: tuple[float | None, float | None, float | None] = (None, None, None)
+    z_offset: float | None = None
     speed: float = 0.05
     angular_speed: float = 0.5
     tolerance: float = 0.02
@@ -110,6 +114,10 @@ class _CableService:
     motion_parts: tuple[str, ...]
     slip_limit: float = 0.012
     operations: tuple[CableContactOperation, ...] = ()
+
+    @property
+    def metrics(self) -> tuple[str, ...]:
+        return _METRICS if self.geometry else _PICKUP_METRICS
 
     def target(self, target_id: str) -> _CableTarget:
         for target in self.targets:
@@ -148,6 +156,21 @@ class _CableRuntime:
             self.cable.cfg.points, device=env_ids.device, dtype=torch.float32
         )
         self.lengths = points.diff(dim=0).norm(dim=-1)
+        if any(target.material_inset is not None for target in cfg.targets):
+            length = float(self.lengths.cumsum(0)[-1])
+            self.cfg = replace(
+                cfg,
+                targets=tuple(
+                    (
+                        replace(
+                            target, material_distance=length - target.material_inset
+                        )
+                        if target.material_inset is not None
+                        else target
+                    )
+                    for target in cfg.targets
+                ),
+            )
         origins = torch.as_tensor(
             simulation.spawn_result.arenas.root_offsets,
             device=env_ids.device,
@@ -173,7 +196,7 @@ class _CableRuntime:
         self.closed_reference_samples: list[dict[str, object]] = []
         self._metric_cache_time: float | None = None
         self._metric_cache: dict[str, torch.Tensor] = {}
-        for target in cfg.targets:
+        for target in self.cfg.targets:
             if target.material_distance is not None:
                 # Configuration errors fail before the first command.
                 sample_cable_material(
@@ -230,17 +253,26 @@ class _CableRuntime:
         if timestamp is not None and timestamp == self._metric_cache_time:
             return {key: value.clone() for key, value in self._metric_cache.items()}
         self.observe()
-        hands = torch.stack(
-            [self.tool(part, world=True)[:, :3, 3] for part in self.cfg.motion_parts], 1
-        )
-        result = _measure_cable_route(
-            self.state(),
-            self.lengths,
-            hands,
-            self.origins,
-            self.geometry,
-            float(self.cable.cfg.radius),
-        )
+        state = self.state()
+        if self.geometry:
+            hands = torch.stack(
+                [
+                    self.tool(part, world=True)[:, :3, 3]
+                    for part in self.cfg.motion_parts
+                ],
+                1,
+            )
+            result = _measure_cable_route(
+                state,
+                self.lengths,
+                hands,
+                self.origins,
+                self.geometry,
+                float(self.cable.cfg.radius),
+            )
+        else:
+            ends = cable_endpoints(state, self.lengths)[1]
+            result = {"end_position": ends[:, -1] - self.origins}
         result["max_grasp_slip"] = self.max_slip.clone()
         if timestamp is not None:
             self._metric_cache_time = timestamp
@@ -368,6 +400,8 @@ class _CableRuntime:
             pose[:, :3, 3] = point - self.origins
             if target.position[2] is not None:
                 pose[:, 2, 3] = target.position[2]
+            elif target.z_offset is not None:
+                pose[:, 2, 3] += target.z_offset
             success, qpos = self.robot.compute_ik(
                 pose, joint_seed=seed, name=part, env_ids=self.env_ids
             )
@@ -545,10 +579,19 @@ class _CableRuntime:
                 )
         elif target.kind == "material_lift":
             assert target.material_distance is not None
-            assert target.position[2] is not None
-            tangent = self.point(target.material_distance)[1][:, :2]
+            point, tangent, _ = self.point(target.material_distance)
+            tangent = tangent[:, :2]
+            if target.z_offset is None:
+                assert target.position[2] is not None
+                z = pose.new_tensor(target.position[2])
+            else:
+                z = point[:, 2] - self.origins[:, 2] + target.z_offset
             horizontal_norm = tangent.norm(dim=-1, keepdim=True)
-            valid = torch.isfinite(tangent).all(-1) & (horizontal_norm[:, 0] > 1e-6)
+            valid = (
+                torch.isfinite(tangent).all(-1)
+                & (horizontal_norm[:, 0] > 1e-6)
+                & torch.isfinite(z)
+            )
             if valid_mask is not None:
                 valid_mask &= valid
             elif not bool(valid.all()):
@@ -562,9 +605,7 @@ class _CableRuntime:
                 valid[:, None], horizontal_norm, torch.ones_like(horizontal_norm)
             )
             pose[:, :2, 3] -= target.retract_distance * safe_tangent / denominator
-            pose[:, 2, 3] = torch.where(
-                valid, pose.new_tensor(target.position[2]), pose[:, 2, 3]
-            )
+            pose[:, 2, 3] = torch.where(valid, z, pose[:, 2, 3])
         elif target.kind == "tip_align":
             end = cable_endpoints(self.state(), self.lengths)[1][:, -1] - self.origins
             for axis, value in enumerate(target.position):
@@ -613,7 +654,7 @@ class _CableLowerer(RegisteredSemanticLowerer):
             )
         if self.runtime is None:
             raise RuntimeError("Cable service was not bound to this runtime assembly.")
-        return self.runtime, self.cfg.target(call.arguments["target"])
+        return self.runtime, self.runtime.cfg.target(call.arguments["target"])
 
     @staticmethod
     def _part(bound: BoundSemanticCall, endpoint: str = "motion") -> str:
@@ -969,10 +1010,8 @@ def _decode_cable_service(value: object) -> _CableService:
     config = _mapping(
         value,
         path="cable_material",
-        required=frozenset(
-            {"entity_id", "simulation_uid", "motion_parts", "geometry", "targets"}
-        ),
-        optional=frozenset({"slip_limit", "operations"}),
+        required=frozenset({"entity_id", "simulation_uid", "motion_parts", "targets"}),
+        optional=frozenset({"geometry", "slip_limit", "operations"}),
     )
     targets = []
     fields = {
@@ -994,9 +1033,22 @@ def _decode_cable_service(value: object) -> _CableService:
         motion_fields = {"speed", "angular_speed", "tolerance", "orientation_tolerance"}
         allowed = {
             "material": motion_fields
-            | {"material_distance", "position", "port_screen", "firm"},
+            | {
+                "material_distance",
+                "material_inset",
+                "position",
+                "z_offset",
+                "port_screen",
+                "firm",
+            },
             "material_lift": motion_fields
-            | {"material_distance", "retract_distance", "position"},
+            | {
+                "material_distance",
+                "material_inset",
+                "retract_distance",
+                "position",
+                "z_offset",
+            },
             "measured": motion_fields | {"position", "stop_when_seated"},
             "command": motion_fields | {"position", "stop_when_seated"},
             "home": motion_fields,
@@ -1079,14 +1131,21 @@ def _decode_cable_service(value: object) -> _CableService:
             or target.maximum_correction <= 0
         ):
             raise ValueError("Cable motion limits must be positive.")
+        material_coordinates = tuple(
+            distance
+            for distance in (target.material_distance, target.material_inset)
+            if distance is not None
+        )
         if kind in {
             "material",
             "material_lift",
             "yaw_align",
             "ray_align",
             "pitch_align",
-        } and (target.material_distance is None or target.material_distance < 0):
-            raise ValueError("A cable material coordinate must be nonnegative.")
+        } and (len(material_coordinates) != 1 or material_coordinates[0] < 0):
+            raise ValueError("Specify one nonnegative cable material coordinate.")
+        if target.z_offset is not None and target.position[2] is not None:
+            raise ValueError("A cable target can choose absolute or relative Z.")
         if kind == "pitch_align" and not (
             -math.pi / 2 < target.pitch <= 0
             and -math.pi / 2 < target.minimum_tool_pitch <= 0
@@ -1102,7 +1161,9 @@ def _decode_cable_service(value: object) -> _CableService:
         if kind == "material_lift":
             if target.retract_distance < 0:
                 raise ValueError("Cable retraction distance must be nonnegative.")
-            if target.position[:2] != (None, None) or target.position[2] is None:
+            if target.position[:2] != (None, None) or (
+                target.position[2] is None and target.z_offset is None
+            ):
                 raise ValueError(
                     "Material lift position must specify only its Z height."
                 )
@@ -1111,8 +1172,54 @@ def _decode_cable_service(value: object) -> _CableService:
         if kind == "check" and target.condition not in {"pose", "lift", "seated"}:
             raise ValueError("Unknown cable check condition.")
         targets.append(target)
+    if "geometry" in config:
+        geometry = _decode_cable_route_geometry(config["geometry"])
+    else:
+        if any(
+            target.kind in {"port_stage", "ray_align", "pitch_align", "lay_down"}
+            or target.condition == "seated"
+            or target.port_screen
+            or target.stop_when_seated
+            for target in targets
+        ):
+            raise ValueError("Cable route targets require geometry.")
+        geometry = {}
+    parts = tuple(
+        _identifier(part, path="cable_material.motion_parts")
+        for part in _sequence(
+            config["motion_parts"], path="cable_material.motion_parts"
+        )
+    )
+    if not parts or len(set(parts)) != len(parts):
+        raise ValueError("Cable motion parts must be nonempty and unique.")
+    from ._cable_contact import decode_operations
+
+    operations = decode_operations(
+        config.get("operations", {}), {t.target_id: t for t in targets}
+    )
+    return _CableService(
+        entity_id=_identifier(config["entity_id"], path="cable_material.entity_id"),
+        simulation_uid=_identifier(
+            config["simulation_uid"], path="cable_material.simulation_uid"
+        ),
+        targets=tuple(targets),
+        operations=operations,
+        geometry=tuple(geometry.items()),
+        motion_parts=parts,
+        slip_limit=_real(
+            config.get("slip_limit", 0.012),
+            path="cable_material.slip_limit",
+            minimum=0.0,
+            strict_minimum=True,
+        ),
+    )
+
+
+def _decode_cable_route_geometry(value: object) -> dict[str, object]:
+    from ..configured import _mapping, _real
+
     geometry = _mapping(
-        config["geometry"],
+        value,
         path="cable_material.geometry",
         required=frozenset(
             {
@@ -1175,32 +1282,4 @@ def _decode_cable_service(value: object) -> _CableService:
         raise ValueError(
             "Cable obstacle boxes require centres and positive half sizes."
         )
-    parts = tuple(
-        _identifier(part, path="cable_material.motion_parts")
-        for part in _sequence(
-            config["motion_parts"], path="cable_material.motion_parts"
-        )
-    )
-    if not parts or len(set(parts)) != len(parts):
-        raise ValueError("Cable motion parts must be nonempty and unique.")
-    from ._cable_contact import decode_operations
-
-    operations = decode_operations(
-        config.get("operations", {}), {t.target_id: t for t in targets}
-    )
-    return _CableService(
-        entity_id=_identifier(config["entity_id"], path="cable_material.entity_id"),
-        simulation_uid=_identifier(
-            config["simulation_uid"], path="cable_material.simulation_uid"
-        ),
-        targets=tuple(targets),
-        operations=operations,
-        geometry=tuple(frozen_geometry.items()),
-        motion_parts=parts,
-        slip_limit=_real(
-            config.get("slip_limit", 0.012),
-            path="cable_material.slip_limit",
-            minimum=0.0,
-            strict_minimum=True,
-        ),
-    )
+    return frozen_geometry

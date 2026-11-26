@@ -1,0 +1,10 @@
+deployment: embodichain/extensions/tasks/configs/tasks/manipulation/workspace_pose_pick_place/acceptance/scene_first/task.yaml
+expansion:
+  config: embodichain/extensions/tasks/configs/tasks/manipulation/workspace_pose_pick_place/acceptance/scene_first/expansion.yaml
+  execution:
+    mode: rolling
+    batch_size: 2
+    seed: 7
+  collection:
+    episodes_per_operator: 4
+    output_dir: /tmp/embodichain-expansion/rolling

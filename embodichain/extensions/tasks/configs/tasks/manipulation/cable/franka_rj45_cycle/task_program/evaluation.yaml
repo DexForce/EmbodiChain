@@ -1,0 +1,446 @@
+measurements:
+  kind: connector
+  cable: cable
+  contact_sensor: contacts
+  tool_link: fr3_hand_tcp
+  arm: arm
+  steps: 2400
+  samples_per_control: 4
+  anchor_at_reset: true
+  parameters:
+    connectable: plug
+    receiver_uid: socket
+    connectable_link: plug
+    latch_link: latch
+    latch_joint: latch_hinge
+    receiver_link: socket
+    home_qpos:
+    - 0.0
+    - -0.569
+    - 0.0
+    - -2.81
+    - 0.0
+    - 3.037
+    - 0.741
+    vertical_tool_axis: 1
+    fingers:
+    - fr3_leftfinger
+    - fr3_rightfinger
+    latch_range_rad:
+    - -0.19198621771937624
+    - 0
+    socket_mouth_m:
+    - 0.57
+    - 0.14
+    - 0.202
+    attachment_point_m:
+    - 0
+    - 0
+    - -0.031
+    return_tip_m:
+    - 0.48
+    - -0.14
+    - 0.008
+    insertion_rotation:
+    - - 0
+      - 0
+      - 1
+    - - 1
+      - 0
+      - 0
+    - - 0
+      - 1
+      - 0
+    return_rotation:
+    - - 0
+      - 0
+      - 1
+    - - 2.220446049250313e-16
+      - -1
+      - 0
+    - - 1
+      - 2.220446049250313e-16
+      - 0
+  reductions:
+    starts_on_floor:
+      operation: first
+      unit: m
+      field: tip_z_m
+    insertion_without_finger_latch_press:
+      operation: max
+      unit: '1'
+      field: finger_latch_contact
+      window:
+      - 300
+      - 840
+    vertical_withdrawal_grasp:
+      operation: min
+      unit: '1'
+      field: tool_axis_z_abs
+      window: &id002
+      - 1440
+      - 1500
+    complete:
+      operation: last
+      unit: '1'
+      field: frame
+    pickup_and_lift:
+      operation: min
+      unit: m
+      field: tip_z_m
+      window:
+      - 360
+      - 540
+    seat_depth_min:
+      operation: min
+      unit: m
+      field: depth_m
+      window: &id001
+      - 1080
+      - 1140
+    seat_depth_max:
+      operation: max
+      unit: m
+      field: depth_m
+      window: *id001
+    seat_lateral:
+      operation: max
+      unit: m
+      field: lateral_m
+      window: *id001
+    seat_orientation:
+      operation: max
+      unit: deg
+      field: orientation_error_deg
+      window: *id001
+    seat_home_error:
+      operation: max
+      unit: rad
+      field: home_error_rad
+      window: *id001
+    latch_socket:
+      operation: max
+      unit: '1'
+      field: latch_socket_contact
+      window: *id001
+    seated_finger_contact:
+      operation: max
+      unit: '1'
+      field: finger_latch_contact
+      window: *id001
+    physical_latch_press_before_withdrawal:
+      operation: min
+      unit: deg
+      field: latch_angle_deg
+      window: *id002
+      samples: press_samples
+      where:
+        depth_m:
+        - 0.009
+        - 1000000000000000.0
+    latch_limits:
+      operation: max
+      unit: rad
+      field: latch_limit_violation_rad
+    latch_returns_after_release:
+      operation: max
+      unit: deg
+      field: latch_angle_abs_deg
+      window: &id003
+      - 2340
+      - 2400
+    unplugged:
+      operation: min
+      unit: m
+      field: depth_m
+      window:
+      - 1620
+      - 1680
+    return_position:
+      operation: max
+      unit: m
+      field: return_error_m
+      window: *id003
+    return_orientation:
+      operation: max
+      unit: deg
+      field: return_orientation_error_deg
+      window: *id003
+    final_home_error:
+      operation: max
+      unit: rad
+      field: home_error_rad
+      window: *id003
+    final_open_gap:
+      operation: min
+      unit: m
+      field: finger_gap_m
+      window: *id003
+    fixed_end:
+      operation: max
+      unit: m
+      field: anchor_error_m
+    cable_attachment:
+      operation: max
+      unit: m
+      field: attachment_error_m
+    peak_contact_penetration:
+      operation: max
+      unit: m
+      field: penetration_m
+    lost_contacts:
+      operation: max
+      unit: '1'
+      field: dropped_contacts
+    finite_state:
+      operation: min
+      unit: '1'
+      field: finite
+graph:
+  roots:
+  - rj45_success
+  rules:
+    starts_on_floor:
+      kind: scalar_range
+      bindings:
+        value: measurements/starts_on_floor
+      params:
+        minimum: 0
+        maximum: 0.007
+        minimum_inclusive: false
+        maximum_inclusive: false
+    insertion_without_finger_latch_press:
+      kind: scalar_range
+      bindings:
+        value: measurements/insertion_without_finger_latch_press
+      params:
+        minimum: 0
+        maximum: 0
+    vertical_withdrawal_grasp:
+      kind: scalar_range
+      bindings:
+        value: measurements/vertical_withdrawal_grasp
+      params:
+        minimum: 0.984807753012208
+        maximum: 1.000001
+        minimum_inclusive: false
+    complete:
+      kind: scalar_range
+      bindings:
+        value: measurements/complete
+      params:
+        minimum: 2400
+        maximum: 2400
+    pickup_and_lift:
+      kind: scalar_range
+      bindings:
+        value: measurements/pickup_and_lift
+      params:
+        minimum: 0.050499999999999996
+        maximum: 1000000000000000.0
+        minimum_inclusive: false
+    seat_depth_min:
+      kind: scalar_range
+      bindings:
+        value: measurements/seat_depth_min
+      params:
+        minimum: 0.009
+        maximum: 1000000000000000.0
+        minimum_inclusive: false
+    seat_depth_max:
+      kind: scalar_range
+      bindings:
+        value: measurements/seat_depth_max
+      params:
+        minimum: -1000000000000000.0
+        maximum: 0.012
+        maximum_inclusive: false
+    seat_lateral:
+      kind: scalar_range
+      bindings:
+        value: measurements/seat_lateral
+      params:
+        minimum: 0
+        maximum: 0.0006
+        maximum_inclusive: false
+    seat_orientation:
+      kind: scalar_range
+      bindings:
+        value: measurements/seat_orientation
+      params:
+        minimum: 0
+        maximum: 5.0
+        maximum_inclusive: false
+    seat_home_error:
+      kind: scalar_range
+      bindings:
+        value: measurements/seat_home_error
+      params:
+        minimum: 0
+        maximum: 0.0001
+        maximum_inclusive: false
+    seated_while_robot_home:
+      kind: all
+      refs:
+      - seat_depth_min
+      - seat_depth_max
+      - seat_lateral
+      - seat_orientation
+      - seat_home_error
+    latch_socket:
+      kind: scalar_range
+      bindings:
+        value: measurements/latch_socket
+      params:
+        minimum: 1
+        maximum: 1
+    seated_finger_contact:
+      kind: scalar_range
+      bindings:
+        value: measurements/seated_finger_contact
+      params:
+        minimum: 0
+        maximum: 0
+    latch_locked_while_robot_home:
+      kind: all
+      refs:
+      - latch_socket
+      - seated_finger_contact
+    physical_latch_press_before_withdrawal:
+      kind: scalar_range
+      bindings:
+        value: measurements/physical_latch_press_before_withdrawal
+      params:
+        minimum: -1000000000000000.0
+        maximum: -8.0
+    latch_limits:
+      kind: scalar_range
+      bindings:
+        value: measurements/latch_limits
+      params:
+        minimum: 0
+        maximum: 0.017453292519943295
+        maximum_inclusive: false
+    latch_returns_after_release:
+      kind: scalar_range
+      bindings:
+        value: measurements/latch_returns_after_release
+      params:
+        minimum: 0
+        maximum: 1.0
+        maximum_inclusive: false
+    unplugged:
+      kind: scalar_range
+      bindings:
+        value: measurements/unplugged
+      params:
+        minimum: -1000000000000000.0
+        maximum: -0.02
+        maximum_inclusive: false
+    return_position:
+      kind: scalar_range
+      bindings:
+        value: measurements/return_position
+      params:
+        minimum: 0
+        maximum: 0.003
+        maximum_inclusive: false
+    return_orientation:
+      kind: scalar_range
+      bindings:
+        value: measurements/return_orientation
+      params:
+        minimum: 0
+        maximum: 10.0
+        maximum_inclusive: false
+    placed_on_floor:
+      kind: all
+      refs:
+      - return_position
+      - return_orientation
+    final_home_error:
+      kind: scalar_range
+      bindings:
+        value: measurements/final_home_error
+      params:
+        minimum: 0
+        maximum: 0.0001
+        maximum_inclusive: false
+    final_open_gap:
+      kind: scalar_range
+      bindings:
+        value: measurements/final_open_gap
+      params:
+        minimum: 0.07
+        maximum: 1000000000000000.0
+        minimum_inclusive: false
+    final_home:
+      kind: all
+      refs:
+      - final_home_error
+      - final_open_gap
+    fixed_end:
+      kind: scalar_range
+      bindings:
+        value: measurements/fixed_end
+      params:
+        minimum: 0
+        maximum: 1.0e-05
+        maximum_inclusive: false
+    cable_attachment:
+      kind: scalar_range
+      bindings:
+        value: measurements/cable_attachment
+      params:
+        minimum: 0
+        maximum: 0.0002
+        maximum_inclusive: false
+    peak_contact_penetration:
+      kind: scalar_range
+      bindings:
+        value: measurements/peak_contact_penetration
+      params:
+        minimum: 0
+        maximum: 0.0008
+        maximum_inclusive: false
+    lost_contacts:
+      kind: scalar_range
+      bindings:
+        value: measurements/lost_contacts
+      params:
+        minimum: 0
+        maximum: 0
+    contacts:
+      kind: all
+      refs:
+      - peak_contact_penetration
+      - lost_contacts
+    finite_state:
+      kind: scalar_range
+      bindings:
+        value: measurements/finite_state
+      params:
+        minimum: 1
+        maximum: 1
+    rj45_success:
+      kind: all
+      refs:
+      - starts_on_floor
+      - insertion_without_finger_latch_press
+      - vertical_withdrawal_grasp
+      - complete
+      - pickup_and_lift
+      - seated_while_robot_home
+      - latch_locked_while_robot_home
+      - physical_latch_press_before_withdrawal
+      - latch_limits
+      - latch_returns_after_release
+      - unplugged
+      - placed_on_floor
+      - final_home
+      - fixed_end
+      - cable_attachment
+      - contacts
+      - finite_state
+final_acceptance:
+- rj45_success

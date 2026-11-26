@@ -670,6 +670,9 @@ class MeasuredExpansionValidator:
         snapshot: SceneState | None = None,
     ) -> None:
         """Check measured task state and retain each row's first physical failure."""
+        self._sample_captured(ids, action, snapshot)
+
+    def _sample_captured(self, ids, action, snapshot):
         if not ids:
             return
         from .collision import _measured_frame
@@ -695,11 +698,11 @@ class MeasuredExpansionValidator:
                     check._interval_samples = 0
                 self.terminal[row] = check.terminal[row]
         if self.sensor is None:
-            self._sample_geometry(ids, action)
+            self._sample_geometry(ids, action, measured)
         for row in ids:
             self.results[row] = self.rows[row].results[row]
 
-    def _sample_geometry(self, ids, action):
+    def _sample_geometry(self, ids, action, measured):
         """Batch compatible physical geometry, retaining heterogeneous-row checks."""
         from embodichain.utils.math import matrix_from_quat
 
@@ -715,16 +718,18 @@ class MeasuredExpansionValidator:
             f"{env.robot.uid}/{link}": matrices[:, index]
             for index, link in enumerate(env.robot.link_names)
         }
-        frames.update(
-            {
-                uid: env.sim.get_rigid_object(uid)
-                .get_local_pose(to_matrix=True)
-                .detach()
-                .cpu()
-                .numpy()
-                for uid in env.sim.get_rigid_object_uid_list()
-            }
+        captured_uids = (
+            set(measured.sim.get_rigid_object_uid_list())
+            if measured is not env and poses.device.type == "cpu"
+            else ()
         )
+        for uid in env.sim.get_rigid_object_uid_list():
+            body = env.sim.get_rigid_object(uid)
+            # Static native matrices and CUDA kinematics retain their original
+            # arithmetic. Reuse a dynamic CPU pose when the view captured it.
+            if uid in captured_uids and not body.is_static:
+                body = measured.sim.get_rigid_object(uid)
+            frames[uid] = body.get_local_pose(to_matrix=True).detach().cpu().numpy()
         frames["default_plane"] = np.broadcast_to(np.eye(4), (env.num_envs, 4, 4))
         groups = {}
         for row in ids:
@@ -734,9 +739,10 @@ class MeasuredExpansionValidator:
                 groups.setdefault((checker, tuple(allowed), moving), []).append(row)
         for (checker, allowed, moving), rows in groups.items():
             reports = checker.check_batch(
-                {uid: values[rows] for uid, values in frames.items()},
+                frames,
                 allowed_contacts=allowed,
                 moving_objects=moving,
+                env_ids=rows,
             )
             for row, report, pair in zip(rows, reports, checker.last_batch_pairs):
                 self.rows[row].record_geometry(report, pair, action)

@@ -260,6 +260,12 @@ def _get_evaluation_state(
             valid,
             tuple(None if ok else "Invalid volume" for ok in valid.tolist()),
         )
+    if parts[0] == "measurements":
+        from embodichain.lab.gym.envs.task_program._episode_measurement import (
+            _measurement_sample,
+        )
+
+        return _measurement_sample(env, parts[1], parts[2])
     if parts[0] == "cables":
         from embodichain.compute.geometry._cable_route import (
             _CABLE_METRICS as _METRICS,

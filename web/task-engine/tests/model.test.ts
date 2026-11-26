@@ -38,6 +38,30 @@ function example(): ViewerData {
 
 describe("recorded task presentation", () => {
   it.each([
+    ["pick", ["right"], "right"],
+    ["place", ["left"], "left"],
+    ["return_arms", ["left", "right"], "coordinated"],
+    ["pick", ["auto"], "auto"],
+  ])(
+    "uses the authored arms of %s for display and export",
+    (verb, arms, lane) => {
+      const data = example();
+      const node = data.graph.nodes[0];
+      node.call = {
+        kind: "registered",
+        call_id: "task_engine.intent." + verb,
+        arguments: { arms },
+        resources: {},
+      };
+      const model = createModel(data, "all", "en");
+      const layout = layoutGraph(data, model, "calls", "", "all", "overview");
+      expect(
+        layout.rows.find((row) => row.nodeIds.includes(node.id))?.control,
+      ).toBe(lane);
+      expect(node.call.resources).toEqual({});
+    },
+  );
+  it.each([
     {
       name: "render before cutout",
       render: "data:image/png;base64,cmVuZGVy",
