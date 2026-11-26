@@ -154,3 +154,8 @@ object-from-TCP pose per arena to `validate()`. The validator closes the hand, l
 optionally translates 3 cm out and back along world X and Y, and measures retention
 during a three-second hold. `drop_objects()` and `restore_placement()` support replay
 from measured resting poses.
+
+For offline labels, `embodichain label-grasps` samples settled placements and
+world-space approaches, then uses the validator to qualify object-local TCPs.
+The [CobotMagic cup example](../../../examples/toolkits/grasp_labeling/README.md)
+describes catalog and custom hand inputs, checkpoints and the output tensors.

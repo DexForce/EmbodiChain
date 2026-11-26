@@ -101,6 +101,10 @@ coordinated-manipulation and recovery demonstrations. The two source-checkout
 walkthroughs under `scripts/tutorials/atomic_skill/` teach single-arm and dual-arm
 API composition; they reuse the canonical example setup.
 
+The [CobotMagic grasp labeling example](toolkits/grasp_labeling/README.md)
+samples stable cup placements and saves physically verified grasp poses and
+opening widths with `embodichain label-grasps`.
+
 The RoboCasa365 example tracks recorded PandaOmron joint trajectories across
 six fixed episodes and checks their outcomes in live simulation.
 [RoboCasa365 physical replay](sim/robocasa365/README.md)

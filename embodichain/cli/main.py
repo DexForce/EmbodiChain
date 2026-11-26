@@ -173,6 +173,11 @@ COMMANDS = (
         help="Interactively annotate a grasp region on a mesh.",
     ),
     Command(
+        name="label-grasps",
+        target="embodichain.lab.scripts.label_grasps:cli",
+        help="Label object-local grasps with a parallel-jaw hand and physical validation.",
+    ),
+    Command(
         name="decompose-urdf",
         target="embodichain.toolkits.acd.cli:main",
         help="Generate convex collision meshes for a URDF.",

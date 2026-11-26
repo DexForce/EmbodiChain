@@ -75,6 +75,7 @@ def _prepared_backend(
     backend._center_mode = center_mode
     backend._approach_alignment_angle = None
     backend._closing_geometry = None
+    backend._collision_threshold = 0.0
     backend._ranking_weights = (0.5, 0.5, 0.0)
     return backend
 
@@ -89,6 +90,62 @@ def _object_pose() -> torch.Tensor:
             [0.0, 0.0, 0.0, 1.0],
         ]
     )
+
+
+def test_open_hand_clearance_rejects_nearby_pose_before_top_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.toolkits.graspkit.pg_grasp import (
+        AntipodalGraspPoseGenerator,
+        AntipodalGraspPoseGeneratorCfg,
+        FixedGripperCollisionGeometry,
+        GraspAnnotationCfg,
+        ParallelJawGraspCollisionCfg,
+    )
+    from embodichain.toolkits.graspkit.pg_grasp import gripper_collision_checker
+
+    vertices, triangles = _box_geometry()
+    # The box top is at +20 mm. With a downward approach, the palm point sits
+    # 20 mm above each grasp center, leaving gaps of 3 mm and 12 mm.
+    pairs = torch.tensor([[[0, -0.02, z], [0, 0.02, z]] for z in (0.003, 0.012)])
+    monkeypatch.setattr(AntipodalSampler, "sample", lambda *args, **kwargs: pairs)
+
+    def query_box(points, collision_threshold):
+        half_extents = points.new_tensor([0.1, 0.02, 0.02])
+        distance = (points.abs() - half_extents).amax(dim=-1)
+        return distance <= collision_threshold, distance
+
+    box = Mock()
+    box.query_batch_points.side_effect = query_box
+    monkeypatch.setattr(
+        gripper_collision_checker, "ConvexCollisionChecker", Mock(return_value=box)
+    )
+    geometry = FixedGripperCollisionGeometry(
+        torch.tensor([[0.0, 0.0, -0.02]]), {"grasp_from_tcp": torch.eye(4).tolist()}
+    )
+    for policy, selected_z in (
+        (ParallelJawGraspCollisionCfg(), 0.003),
+        (ParallelJawGraspCollisionCfg(collision_threshold=0.005), 0.012),
+    ):
+        generator = AntipodalGraspPoseGenerator(
+            model_id="parallel_jaw",
+            min_opening_width=0.001,
+            max_opening_width=0.1,
+            collision_geometry=geometry,
+            collision_cfg=policy,
+            algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
+                approach_direction_samples=1, max_candidates=1
+            ),
+            annotation_cfg=GraspAnnotationCfg(disk_cache=False),
+        )
+        [(poses, costs)] = generator.get_valid_grasp_poses(
+            mesh_vertices=vertices,
+            mesh_triangles=triangles,
+            obj_poses=torch.eye(4)[None],
+            approach_direction=torch.tensor([0.0, 0.0, -1.0]),
+        )
+        assert torch.isfinite(costs).all()
+        assert poses[:, 2, 3].tolist() == pytest.approx([selected_z])
 
 
 def test_closing_floor_rejection_precedes_top_candidate_ranking() -> None:

@@ -5181,6 +5181,16 @@ embodichain.lab.scripts.annotate_grasp
 
    cli
 
+embodichain.lab.scripts.label_grasps
+------------------------------------
+
+Generate object-local parallel-jaw grasps and record candidates that pass
+physical validation from a sampled resting placement.
+
+.. currentmodule:: embodichain.lab.scripts.label_grasps
+
+.. autofunction:: cli
+
 embodichain.toolkits.urdf_assembly.component
 --------------------------------------------
 

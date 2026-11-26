@@ -97,8 +97,10 @@ class _AntipodalMeshBackend:
         viser_port: int,
         use_largest_connected_component: bool,
         filter_ground_collision: bool,
+        collision_threshold: float,
         approach_alignment_angle: float | None = None,
         check_collision: bool = True,
+        disk_cache: bool = True,
         prepared: _AntipodalMeshBackend | None = None,
         closing_geometry: SampledHandGeometry | None = None,
         closing_ground_height_m: float | None = None,
@@ -126,6 +128,8 @@ class _AntipodalMeshBackend:
             use_largest_connected_component: Whether to retain only the largest
                 component of an interactive selection.
             filter_ground_collision: Whether to reject ground collisions.
+            collision_threshold: Signed-distance threshold in metres for fixed
+                open-hand surface queries.
             approach_alignment_angle: Optional hard TCP-Z angle in radians,
                 applied before deduplication, collision checks and ranking.
         """
@@ -162,6 +166,7 @@ class _AntipodalMeshBackend:
                 cfg=collision_cfg,
                 collision_geometry=collision_geometry,
             )
+        self._disk_cache = disk_cache
         self._sampler_cfg = sampler_cfg
         self._center_mode = sampler_cfg.center_mode
         self._max_deviation_angle = max_deviation_angle
@@ -173,13 +178,14 @@ class _AntipodalMeshBackend:
         self._viser_port = viser_port
         self._use_largest_connected_component = use_largest_connected_component
         self._filter_ground_collision = filter_ground_collision
+        self._collision_threshold = collision_threshold
         self._antipodal_sampler = AntipodalSampler(cfg=sampler_cfg)
         self._hit_point_pairs: torch.Tensor | None = (
             prepared._hit_point_pairs if prepared is not None else None
         )
 
         # Load cached antipodal pairs for the whole mesh if available.
-        if prepared is None:
+        if prepared is None and disk_cache:
             cache_path = self._get_cache_dir(self.vertices, self.triangles)
             if os.path.exists(cache_path):
                 logger.log_info(
@@ -374,6 +380,8 @@ class _AntipodalMeshBackend:
 
     def _cache_hit_point_pairs(self, hit_point_pairs: torch.Tensor):
         self._hit_point_pairs = hit_point_pairs
+        if not self._disk_cache:
+            return
         cache_path = self._get_cache_dir(self.vertices, self.triangles)
         self._save_cache(cache_path, hit_point_pairs)
 
@@ -890,7 +898,7 @@ class _AntipodalMeshBackend:
                 valid_grasp_poses,
                 is_filter_ground_collision=self._filter_ground_collision,
                 is_visual=visualize_collision,
-                collision_threshold=0.0,
+                collision_threshold=self._collision_threshold,
             )
             if is_colliding.logical_not().sum() == 0:
                 logger.log_warning(
