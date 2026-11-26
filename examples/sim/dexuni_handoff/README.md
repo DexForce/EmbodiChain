@@ -7,6 +7,43 @@ objects by role and topology revision, calls the profile and releases the
 same World. The host serializes all changes on its owner thread. Reconnecting
 a client preserves the host-side binding and command receipts.
 
+## Connect DexPilot to an operator-managed host
+
+Start the standard manual host with `DEXSIM_HANDOFF_PROVIDER=embodichain` and
+`DEXSIM_HANDOFF_KEY_FILE` set to an owner-only file containing 32 random
+bytes. Set `EMBODICHAIN_MOTION_OUTPUT` to the private jobs directory on the
+host. For UR5, set `EMBODICHAIN_UR5_DEPLOYMENT` to the installed
+`examples/expansion/asset_generalization/configs/cube_platform_pick_place/task.ur5.dexuni.yaml`.
+For RP1 or ANYmal-C, set `EMBODICHAIN_LIVE_POLICY_CATALOG` to the prepared
+catalog described below. Select the matching physics profile at Session creation.
+DexPilot, the host and the plugin share a local filesystem.
+
+Add an entry to `mcp_servers` in the DexPilot settings. Replace the example
+absolute paths with the interpreter, grant and jobs directory used by the host.
+
+```json
+{
+  "name": "embodichain",
+  "command": "/opt/simulation/bin/python",
+  "args": [
+    "-m", "embodichain", "mcp", "--session", "{session_id}",
+    "--session-directory", "{session_directory}",
+    "--handoff-key-file", "/srv/robot/writer.key",
+    "--motion-output", "/srv/robot/jobs"
+  ],
+  "env": []
+}
+```
+
+Open `dexpilot chat --session SESSION_ID`. After native scene creation and
+finalization, call `embodichain_inspect_handoff`, then
+`embodichain_bind_world` with its generation, topology revision and the actual
+role paths. Inspect capabilities, start the skill or policy and poll its job.
+Release the binding to resume native authoring. For an ordinary read-only
+connection, omit the grant and the jobs directory from the MCP arguments.
+
+## Qualify the two scene sources
+
 | Demo | Existing objects | Physical acceptance |
 | --- | --- | --- |
 | UR5 | PGI gripper, selected cube, distractor, two destinations | Lift the selected cube, validate the grasp on a later turn, release on the newly selected platform and measure sustained stability. |
