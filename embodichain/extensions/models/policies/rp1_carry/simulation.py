@@ -273,7 +273,7 @@ def _rollout(
             _verify_payload_welds(
                 sim.get_world() if context is None else context.world,
                 policy.keypoint_names[2:4],
-                crate.uid,
+                live_paths["crate"] if live_paths is not None else crate.uid,
             )
         measured_mass = 0.0 if crate is None else float(crate.get_mass()[0].item())
         if abs(measured_mass - payload_kg) > 1e-4:
