@@ -22,6 +22,7 @@ import argparse
 import html
 import importlib.metadata
 import importlib.resources
+import importlib.util
 import json
 import re
 import shlex
@@ -92,8 +93,21 @@ def _task_path_from_module(
     return tuple(relative_module.split("."))
 
 
+def _package_resource_roots(package: str) -> tuple[Traversable, ...]:
+    """Resolve a top-level package's resources without running its initializer."""
+    spec = importlib.util.find_spec(package)
+    if spec is None:
+        return ()
+    get_reader = getattr(spec.loader, "get_resource_reader", None)
+    reader = get_reader(package) if get_reader is not None else None
+    files = getattr(reader, "files", None)
+    if files is not None:
+        return (files(),)
+    return tuple(Path(path) for path in (spec.submodule_search_locations or ()))
+
+
 def _task_config_roots(
-    task_package_modules: Sequence[str],
+    task_package_modules: Sequence[str], *, import_packages: bool = True
 ) -> tuple[Traversable, ...]:
     """Locate packaged ``configs/tasks`` trees for installed task packages."""
     roots: list[Traversable] = []
@@ -107,11 +121,21 @@ def _task_config_roots(
             if config_package in visited_packages:
                 continue
             visited_packages.add(config_package)
-            try:
-                root = importlib.resources.files(config_package).joinpath("tasks")
-            except (ModuleNotFoundError, TypeError):
-                continue
-            if root.is_dir():
+            if import_packages:
+                try:
+                    candidates = (
+                        importlib.resources.files(config_package).joinpath("tasks"),
+                    )
+                except (ModuleNotFoundError, TypeError):
+                    continue
+            else:
+                package, *parts = config_package.split(".")
+                candidates = tuple(
+                    root.joinpath(*parts, "tasks")
+                    for root in _package_resource_roots(package)
+                )
+            root = next((path for path in candidates if path.is_dir()), None)
+            if root is not None:
                 roots.append(root)
                 break
     return tuple(roots)
@@ -786,12 +810,14 @@ def _augment_runtime(tasks: list[_Task], task_packages: Sequence[str]) -> None:
             )
 
 
-def _discover_catalog() -> list[_Task]:
+def _discover_catalog(*, include_runtime: bool = True) -> list[_Task]:
     packages = _task_package_module_names()
     roots = {
-        package: root for package in packages for root in _task_config_roots((package,))
+        package: root
+        for package in packages
+        for root in _task_config_roots((package,), import_packages=include_runtime)
     }
-    return _load_catalog(roots, runtime_packages=packages)
+    return _load_catalog(roots, runtime_packages=packages if include_runtime else None)
 
 
 def _select_task(tasks: Sequence[_Task], key: str) -> _Task:

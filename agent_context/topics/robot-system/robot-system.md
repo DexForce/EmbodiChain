@@ -26,7 +26,15 @@ identity and calibrated defaults belong to `embodichain.extensions.robots`.
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
 | Shared articulation state and drive properties | `embodichain/lab/sim/objects/articulation.py`, `embodichain/lab/sim/cfg/articulation.py` |
 
-## Reading a robot in an existing DexSim World
+## MCP discovery and live robot state
+
+`embodichain mcp --catalog` serves the installed robot presets and packaged
+task deployments without starting a World. It uses the same discovery sources
+as the CLI. Add `--session ID` to expose the selected World's manifest and
+robot state on the same stdio connection. Catalog result schemas carry
+`schema_version`; capability listings reflect the protocol registrations for
+that connection. The live manifest reads lifecycle status from the existing
+DexSim host. See the [MCP catalog example](../../../examples/mcp/README.md).
 
 Install the same EmbodiChain version in the DexSim host and the stdio server
 environment, with the `mcp` extra on the server. Use `embodichain mcp --session ID`
