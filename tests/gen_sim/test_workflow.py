@@ -297,11 +297,11 @@ def test_workflow_generates_binds_and_preserves_actual_execution_verdict(
         }
     )
 
-    monkeypatch.setattr(
-        generate,
-        "generate_scene_from_image",
-        lambda image, output, **kwargs: _write_scene(output),
-    )
+    def generate_scene(image, output, **kwargs):
+        assert kwargs.get("task_spec") is None
+        _write_scene(output)
+
+    monkeypatch.setattr(generate, "generate_scene_from_image", generate_scene)
     executed = []
 
     def execute(path: Path, **kwargs) -> dict:
@@ -1334,6 +1334,84 @@ def test_reused_task_must_plan_the_run_instruction_and_image(
     with pytest.raises(ValueError, match="different instruction or image"):
         _run(cfg)
     assert not cfg.output.exists()
+
+
+def test_workflow_hands_verified_hybrid_scene_objects_to_generation(
+    run_cfg: _RunCfg, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from embodichain.gen_sim import _run_binding, scene_providers
+    from embodichain.gen_sim.task_engine.hybrid import publish_hybrid
+    from embodichain.gen_sim.workflow import load_task_plan
+
+    roles = ("cube_native", "table")
+    ground = run_cfg.image.parent / "ground.json"
+    ground.write_text(
+        json.dumps(
+            {
+                "image_sha256": hashlib.sha256(run_cfg.image.read_bytes()).hexdigest(),
+                "grounding": {
+                    "bindings": {uid: [uid] for uid in roles},
+                    "objects": [
+                        dict(
+                            id=uid,
+                            description=uid,
+                            bbox=[100, 100, 200, 200],
+                            provenance="observed",
+                        )
+                        for uid in roles
+                    ],
+                },
+            }
+        )
+    )
+    operation = dict(
+        template="E1",
+        object="cube_native",
+        reference="table",
+        relation="on",
+        quote=run_cfg.instruction,
+    )
+    plan_root = run_cfg.image.parent / "hybrid-plan"
+    with GenSimServices(
+        GenSimServicesCfg(),
+        injected={
+            "task_image_grounding": _ScriptedChat({"operations": [operation]}),
+            "task_interpretation": _ScriptedChat(
+                {"issues": [], "source_operations": [operation]}
+            ),
+        },
+    ) as services:
+        publish_hybrid(
+            run_cfg.instruction,
+            run_cfg.task_id,
+            run_cfg.image,
+            plan_root,
+            services,
+            scene_grounding=ground,
+        )
+    plan = load_task_plan(plan_root)
+    requests = []
+
+    def submit(request, *, idempotency_key):
+        requests.append(request)
+        raise RuntimeError("stop before generation")
+
+    monkeypatch.setattr(
+        scene_providers,
+        "load_scene_generation_provider",
+        lambda *args: SimpleNamespace(submit=submit),
+    )
+    monkeypatch.setattr(_run_binding, "_load_runtime", lambda cfg: (None, None, None))
+    with GenSimServices(GenSimServicesCfg()) as services:
+        with pytest.raises(RuntimeError, match="stop before generation"):
+            _run(run_cfg.replace(task=plan_root), services=services)
+    (request,) = requests
+    assert request.task_spec_path == run_cfg.output / "task" / "task_spec_v1.json"
+    assert request.task_spec_sha256 == plan["artifacts"]["task_spec_v1.json"]
+    assert (
+        request.task_spec_sha256
+        == hashlib.sha256(request.task_spec_path.read_bytes()).hexdigest()
+    )
 
 
 @pytest.mark.parametrize("corrupted_artifact", [None, "input.png", "robot-mask.png"])

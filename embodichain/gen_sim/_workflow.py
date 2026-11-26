@@ -225,6 +225,17 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
                 provider = load_scene_generation_provider(
                     cfg.scene_provider["id"], provider_profile
                 )
+                task_document = plan.get("task_document")
+                task_spec = (
+                    task / "task_spec_v1.json"
+                    if task_document is not None
+                    and any(
+                        row.get("consumer") == "scene"
+                        and row.get("key") == "scene_objects"
+                        for row in task_document["configuration"]["requirements"]
+                    )
+                    else None
+                )
                 request = SceneGenerationRequest(
                     task_id=plan["task_id"],
                     image_path=source,
@@ -235,6 +246,12 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
                     ).hexdigest(),
                     output=output / "scene-job",
                     options={},
+                    task_spec_path=task_spec,
+                    task_spec_sha256=(
+                        plan["artifacts"]["task_spec_v1.json"]
+                        if task_spec is not None
+                        else None
+                    ),
                 )
                 request_key = hashlib.sha256(
                     (

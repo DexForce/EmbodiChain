@@ -325,6 +325,37 @@ def test_scene_objects_requirement_loads_official_entities_without_references(
     assert path.read_bytes() == original
 
 
+def test_scene_objects_projects_named_parts_to_their_outermost_owner(
+    tmp_path: Path,
+) -> None:
+    path = _write_scene_objects_task_spec(
+        tmp_path,
+        [
+            {"id": "cabinet", "description": "Brown cabinet", "is_articulated": True},
+            {"id": "drawer", "description": "Front drawer", "is_articulated": False},
+        ],
+    )
+    document = json.loads(path.read_text())
+    document["configuration"].update(
+        roles=[
+            {"id": "drawer", "properties": {"part_of": "cabinet"}},
+            {"id": "handle", "properties": {"part_of": "drawer"}},
+        ],
+        descriptions={"handle": "Silver drawer handle"},
+    )
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    assert load_task_spec_input(path).entities == (
+        TaskEntity(
+            "cabinet",
+            "Brown cabinet",
+            True,
+            ("Front drawer", "Silver drawer handle"),
+            ("drawer", "handle"),
+        ),
+    )
+
+
 @pytest.mark.parametrize("empty", [False, True])
 def test_scene_objects_requirement_is_authoritative_over_legacy_references(
     tmp_path: Path, empty: bool

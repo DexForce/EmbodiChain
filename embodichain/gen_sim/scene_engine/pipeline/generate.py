@@ -95,7 +95,9 @@ def generate_scene_from_image(
         if scene_randomization is not None:
             raise ValueError("TaskSpec input cannot be combined with randomization.")
     task_input = (
-        load_task_spec_input(Path(task_spec).expanduser().resolve())
+        load_task_spec_input(
+            Path(task_spec).expanduser().resolve(), image_path=image_path
+        )
         if task_spec is not None
         else None
     )

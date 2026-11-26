@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -28,6 +29,7 @@ from typing import Any
 __all__: list[str] = []
 
 _ENTITY_ID_PATTERN = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
+_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,12 +41,14 @@ class TaskEntity:
         description: TaskSpec descriptions used to find the visible entity.
         is_articulated: Explicit TaskSpec value; never inferred from semantics.
         task_references: Distinct task-reference descriptions mentioning the entity.
+        aliases: TaskSpec IDs of named parts owned by this entity.
     """
 
     id: str
     description: str
     is_articulated: bool
     task_references: tuple[str, ...] = ()
+    aliases: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +64,9 @@ class TaskSpecInput:
     entities: tuple[TaskEntity, ...]
 
 
-def load_task_spec_input(task_spec: str | Path) -> TaskSpecInput:
+def load_task_spec_input(
+    task_spec: str | Path, *, image_path: str | Path | None = None
+) -> TaskSpecInput:
     """Read the matching projection of a ``task_spec/v1`` JSON document.
 
     The hybrid route publishes entities in the ``scene_objects`` scene requirement.
@@ -68,6 +74,7 @@ def load_task_spec_input(task_spec: str | Path) -> TaskSpecInput:
     When it is absent, use the legacy interpretation references and preserve
     their task-reference descriptions alongside the visual descriptions.
     Deduplicate entities in order of first appearance and join distinct descriptions.
+    Use named parts as additional evidence for their owning scene object.
     Missing, null or blank task instructions become an empty string; entity
     descriptions remain available for binding without an instruction.
     Articulation flags must be explicit and consistent for each entity.
@@ -75,12 +82,13 @@ def load_task_spec_input(task_spec: str | Path) -> TaskSpecInput:
 
     Args:
         task_spec: Path to the TaskSpec JSON corresponding to the source image.
+        image_path: Source image to check against a declared image SHA-256.
 
     Returns:
         The task instruction and distinct entities for matching scene instances.
 
     Raises:
-        ValueError: The JSON or the consumed TaskSpec entity fields are invalid.
+        ValueError: The consumed TaskSpec fields are invalid or the image differs.
         OSError: The input file cannot be read.
     """
     path = Path(task_spec)
@@ -93,6 +101,7 @@ def load_task_spec_input(task_spec: str | Path) -> TaskSpecInput:
     if document.get("schema_version") != "task_spec/v1":
         raise ValueError("TaskSpec.schema_version must be 'task_spec/v1'.")
     inputs = _require_object(document.get("inputs"), "TaskSpec.inputs")
+    _verify_source_image(inputs, image_path)
     instruction = inputs.get("instruction")
     if instruction is not None and not isinstance(instruction, str):
         raise ValueError("TaskSpec.inputs.instruction must be text or null.")
@@ -138,6 +147,25 @@ def load_task_spec_input(task_spec: str | Path) -> TaskSpecInput:
             if normalized_reference not in task_references[entity_id]:
                 task_references[entity_id].append(normalized_reference)
 
+    configuration = document.get("configuration")
+    part_owners = _part_owners(configuration)
+    aliases_by_owner: dict[str, list[str]] = {}
+    role_descriptions = (
+        configuration.get("descriptions") if isinstance(configuration, dict) else None
+    )
+    for part_id, owner_id in part_owners.items():
+        if owner_id not in descriptions:
+            continue
+        aliases_by_owner.setdefault(owner_id, []).append(part_id)
+        part_references = descriptions.get(part_id, []) + task_references.get(
+            part_id, []
+        )
+        if isinstance(role_descriptions, dict):
+            role_description = role_descriptions.get(part_id)
+            if isinstance(role_description, str) and role_description.strip():
+                part_references.append(role_description.strip())
+        task_references[owner_id].extend(part_references)
+
     return TaskSpecInput(
         instruction=instruction,
         entities=tuple(
@@ -145,11 +173,70 @@ def load_task_spec_input(task_spec: str | Path) -> TaskSpecInput:
                 id=entity_id,
                 description="\n".join(entity_descriptions),
                 is_articulated=articulation_flags[entity_id],
-                task_references=tuple(task_references[entity_id]),
+                task_references=tuple(dict.fromkeys(task_references[entity_id])),
+                aliases=tuple(aliases_by_owner.get(entity_id, ())),
             )
             for entity_id, entity_descriptions in descriptions.items()
+            if entity_id not in part_owners
         ),
     )
+
+
+def _verify_source_image(inputs: dict[str, Any], image_path: str | Path | None) -> None:
+    if "image" not in inputs:
+        return
+    image = _require_object(inputs["image"], "TaskSpec.inputs.image")
+    if "sha256" not in image:
+        return
+    expected = image["sha256"]
+    if not isinstance(expected, str) or _SHA256_PATTERN.fullmatch(expected) is None:
+        raise ValueError("TaskSpec.inputs.image.sha256 must be a SHA-256 digest.")
+    if image_path is not None:
+        path = Path(image_path).expanduser()
+        with path.open("rb") as stream:
+            actual = hashlib.file_digest(stream, "sha256").hexdigest()
+        if actual != expected:
+            raise ValueError(
+                f"TaskSpec source image SHA-256 does not match the supplied image: {path}"
+            )
+
+
+def _part_owners(configuration: object) -> dict[str, str]:
+    """Resolve each named part to its outermost owner."""
+    roles = configuration.get("roles") if isinstance(configuration, dict) else None
+    if not isinstance(roles, list):
+        return {}
+
+    parents: dict[str, str] = {}
+    for role in roles:
+        properties = role.get("properties") if isinstance(role, dict) else None
+        if not isinstance(properties, dict) or "part_of" not in properties:
+            continue
+        part_id, owner_id = role.get("id"), properties["part_of"]
+        if any(
+            not isinstance(uid, str) or _ENTITY_ID_PATTERN.fullmatch(uid) is None
+            for uid in (part_id, owner_id)
+        ):
+            raise ValueError("TaskSpec part_of declarations require valid role IDs.")
+        if part_id in parents and parents[part_id] != owner_id:
+            raise ValueError(
+                f"Conflicting TaskSpec part_of declarations for {part_id!r}."
+            )
+        parents[part_id] = owner_id
+
+    owners: dict[str, str] = {}
+    for part_id in parents:
+        owner_id = part_id
+        visited: set[str] = set()
+        while owner_id in parents:
+            if owner_id in visited:
+                raise ValueError(
+                    f"Cyclic TaskSpec part_of declarations for {part_id!r}."
+                )
+            visited.add(owner_id)
+            owner_id = parents[owner_id]
+        owners[part_id] = owner_id
+    return owners
 
 
 def _entity_rows(

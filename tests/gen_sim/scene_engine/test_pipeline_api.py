@@ -16,9 +16,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
+import hashlib
 import json
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -32,7 +35,7 @@ from embodichain.gen_sim.scene_engine.core.scene_graph import (
     SceneGraphNode,
 )
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
-from embodichain.gen_sim.scene_engine.pipeline import api
+from embodichain.gen_sim.scene_engine.pipeline import api, generate
 
 
 class _HealthyClient:
@@ -119,6 +122,12 @@ def test_analyze_image_persists_blueprint_and_artifact_hashes(
     image_path.write_bytes(b"image")
     scene, graph = _table_scene()
     task_spec = _write_task_spec(tmp_path) if with_task_spec else None
+    if task_spec is not None:
+        document = json.loads(task_spec.read_text(encoding="utf-8"))
+        document["inputs"]["image"] = {
+            "sha256": hashlib.sha256(image_path.read_bytes()).hexdigest(),
+        }
+        task_spec.write_text(json.dumps(document), encoding="utf-8")
     scene.table.table_state = "degraded"
 
     def fake_understand_scene(**kwargs):
@@ -170,6 +179,35 @@ def test_analyze_image_requires_image_for_task_spec(tmp_path, monkeypatch) -> No
     monkeypatch.setattr(api, "VisionFacade", unexpected)
     with pytest.raises(ValueError, match="requires an image"):
         api.analyze_image(None, tmp_path, task_spec=tmp_path / "task_spec.json")
+
+
+@pytest.mark.parametrize(
+    ("module", "entry"),
+    [(api, api.analyze_image), (generate, generate.generate_scene_from_image)],
+)
+def test_scene_entry_points_reject_task_spec_for_a_different_image(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    module: ModuleType,
+    entry: Callable[..., object],
+) -> None:
+    image_path = tmp_path / "different.png"
+    image_path.write_bytes(b"different image")
+    task_spec = _write_task_spec(tmp_path)
+    document = json.loads(task_spec.read_text(encoding="utf-8"))
+    document["inputs"]["image"] = {
+        "ref": "source.png",
+        "sha256": hashlib.sha256(b"source image").hexdigest(),
+    }
+    task_spec.write_text(json.dumps(document), encoding="utf-8")
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("mismatched input must fail before client setup")
+
+    monkeypatch.setattr(module, "VisionFacade", unexpected)
+    with pytest.raises(ValueError, match="SHA-256 does not match"):
+        entry(image_path, tmp_path / "output", task_spec=task_spec)
+    assert not (tmp_path / "output").exists()
 
 
 def test_analyze_edit_persists_post_edit_blueprint(

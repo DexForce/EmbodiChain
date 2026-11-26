@@ -159,15 +159,15 @@ def analyze_image(
     """
     if task_spec is not None and image_path is None:
         raise ValueError("TaskSpec input requires an image.")
+    resolved_image = Path(image_path).expanduser().resolve()
     resolved_task_spec = (
         Path(task_spec).expanduser().resolve() if task_spec is not None else None
     )
     task_input = (
-        load_task_spec_input(resolved_task_spec)
+        load_task_spec_input(resolved_task_spec, image_path=resolved_image)
         if resolved_task_spec is not None
         else None
     )
-    resolved_image = Path(image_path).expanduser().resolve()
     resolved_output = Path(output_root).expanduser().resolve()
     resolved_output.mkdir(parents=True, exist_ok=True)
     effective_vlm = vlm_client or VisionFacade(services, "scene_understanding")

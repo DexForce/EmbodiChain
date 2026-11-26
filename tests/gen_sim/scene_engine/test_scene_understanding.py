@@ -210,7 +210,11 @@ def test_understanding_integrates_task_ids_before_segmentation(
             entities=(
                 (
                     TaskEntity(
-                        "evidence_001", "blue cup", True, ("the cup on the left",)
+                        "evidence_001",
+                        "blue cup",
+                        True,
+                        ("the cup on the left",),
+                        ("cup_handle",),
                     ),
                     TaskEntity("evidence_002", "missing block", False),
                 )
@@ -235,7 +239,7 @@ def test_understanding_integrates_task_ids_before_segmentation(
     overlay_ids: list[list[str]] = []
     if task_aware:
         payload["assets"][0].update(
-            task_entity_id="evidence_001", instance_hint=expected_hints["evidence_001"]
+            task_entity_id="cup_handle", instance_hint=expected_hints["evidence_001"]
         )
         payload["assets"][1].update(
             task_entity_id=None, instance_hint=expected_hints["cup_001"]
@@ -337,6 +341,13 @@ def test_understanding_integrates_task_ids_before_segmentation(
     if task_aware:
         assert json.loads(report.read_text())["entity_to_scene"] == {
             "evidence_001": "evidence_001",
+            "cup_handle": "evidence_001",
+            "evidence_002": None,
+        }
+        masked_report = report.with_name("task_entity_mask_matches.json")
+        assert json.loads(masked_report.read_text())["entity_to_scene"] == {
+            "evidence_001": "evidence_001",
+            "cup_handle": "evidence_001",
             "evidence_002": None,
         }
         assert task_input is not None
@@ -345,11 +356,16 @@ def test_understanding_integrates_task_ids_before_segmentation(
                 "task_instruction": task_input.instruction,
                 "task_entities": [
                     {
-                        "id": entity.id,
-                        "description": entity.description,
-                        "task_references": list(entity.task_references),
-                    }
-                    for entity in task_input.entities
+                        "id": "evidence_001",
+                        "description": "blue cup",
+                        "task_references": ["the cup on the left"],
+                        "part_aliases": ["cup_handle"],
+                    },
+                    {
+                        "id": "evidence_002",
+                        "description": "missing block",
+                        "task_references": [],
+                    },
                 ],
             }
         ]
@@ -416,6 +432,27 @@ def test_unmatched_assets_reserve_all_task_entity_ids_when_allocating_ids() -> N
         "cup_002": "The middle cup.",
         "cup_004": "The right cup.",
     }
+
+
+def test_owner_and_part_alias_cannot_bind_two_assets() -> None:
+    payload = json.loads(_response(asset_name="cabinet"))
+    payload["assets"][0].update(task_entity_id="cabinet", instance_hint="The cabinet.")
+    payload["assets"].append(
+        {
+            **payload["assets"][0],
+            "task_entity_id": "drawer",
+            "instance_hint": "Its front drawer.",
+        }
+    )
+    task_input = TaskSpecInput(
+        "Open the drawer.",
+        (TaskEntity("cabinet", "Brown cabinet", True, aliases=("drawer",)),),
+    )
+
+    with pytest.raises(ValueError, match="cannot bind more than one scene asset"):
+        scene_understanding._parse_image_object_analysis_response(
+            json.dumps(payload), task_input=task_input
+        )
 
 
 class _PromptedSegmentation:

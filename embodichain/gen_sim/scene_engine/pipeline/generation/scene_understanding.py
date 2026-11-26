@@ -163,8 +163,9 @@ distinguishable visible instance merely because it is small or not task-related.
 
 Keep generating complete independent assets. A task reference to a door,
 button, lid edge, or rack branch may identify its uniquely visible owning
-asset; bind the task entity ID to that whole asset rather than creating an
-extra standalone part. If ownership or instance identity is ambiguous, leave
+asset. Use any listed part aliases only as evidence for the owning asset and
+return its canonical task entity ID. Do not create a separate asset for a part.
+If ownership or instance identity is ambiguous, leave
 it unmatched. At most one task entity ID may be bound to each asset, and each
 entity ID may be used at most once. Table/plane regions are reserved support
 references and cannot be bound to independent assets.
@@ -410,8 +411,9 @@ def understand_scene(
                 {
                     "stage": "image_object_analysis",
                     "entity_to_scene": {
-                        entity.id: entity.id if entity.id in asset_ids else None
+                        source_id: entity.id if entity.id in asset_ids else None
                         for entity in task_input.entities
+                        for source_id in (entity.id, *entity.aliases)
                     },
                 },
                 indent=2,
@@ -439,8 +441,9 @@ def understand_scene(
                     {
                         "stage": "asset_segmentation",
                         "entity_to_scene": {
-                            entity.id: entity.id if entity.id in masked_ids else None
+                            source_id: entity.id if entity.id in masked_ids else None
                             for entity in task_input.entities
+                            for source_id in (entity.id, *entity.aliases)
                         },
                     },
                     indent=2,
@@ -643,6 +646,11 @@ def _analyze_image_objects(
                         "id": entity.id,
                         "description": entity.description,
                         "task_references": list(entity.task_references),
+                        **(
+                            {"part_aliases": list(entity.aliases)}
+                            if entity.aliases
+                            else {}
+                        ),
                     }
                     for entity in task_input.entities
                 ],
@@ -735,7 +743,11 @@ def _parse_image_object_analysis_response(
     if not isinstance(assets_value, list):
         raise ValueError("VLM JSON key assets must be an array.")
     task_entities: dict[str, TaskEntity] = (
-        {entity.id: entity for entity in task_input.entities}
+        {
+            source_id: entity
+            for entity in task_input.entities
+            for source_id in (entity.id, *entity.aliases)
+        }
         if task_input is not None
         else {}
     )
@@ -765,6 +777,7 @@ def _parse_image_object_analysis_response(
                     or task_entity_id not in task_entities
                 ):
                     raise ValueError(f"Unknown task_entity_id: {task_entity_id!r}.")
+                task_entity_id = task_entities[task_entity_id].id
                 if task_entity_id in used_task_ids:
                     raise ValueError(
                         "A task entity ID cannot bind more than one scene asset."
