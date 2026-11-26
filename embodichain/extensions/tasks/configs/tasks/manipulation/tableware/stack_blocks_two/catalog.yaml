@@ -9,6 +9,7 @@ tags:
 default_deployment: default
 deployments:
   default:
+    note: Expert passed seed 0. Seeds 1 and 2 exposed planning and lift failures in the reported randomization range.
     config: task.cobotmagic.yaml
   dual_ur5_dh_pgi_140_80:
     config: task.dual_ur5_dh_pgi_140_80.yaml
@@ -16,3 +17,9 @@ deployments:
     config: task.tianji_marvin.yaml
   dexforce_w1_030_pika:
     config: task.dexforce_w1_030_pika.yaml
+  policy_cobotmagic:
+    note: Policy-owned actions with measured stage rewards. Training performance has not been qualified here.
+    config: task.policy.cobotmagic.yaml
+  dexuni:
+    config: task.ur5.dexuni.yaml
+    note: UR5 with DH PGI-140-80 and native DexUni rigid contacts. The program measures the lift, alignment and stability of the two-block stack.

@@ -10,3 +10,5 @@ deployments:
     config: env.yaml
   json:
     config: env.json
+  dexuni:
+    config: env.dexuni.yaml

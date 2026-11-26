@@ -59,6 +59,10 @@ Cube corpus, adapts the published visual encoder to native camera observations,
 and evaluates the fixed queries in DexUni. It exports weights and optional MP4
 previews to caller-owned directories.
 
+The [RP1 PartyMimic example](learning/partymimic/README.md) runs an official
+sparse5 ONNX export to carry a crate along level ground and onto a platform.
+It records the DexUni rollouts, payload welds, and foot contacts.
+
 The [SL data-source example](learning/sl_data_source/README.md) connects resident
 causal windows to explicit action or state-transition encoders, and describes
 caller-owned online sampling and the limits of exact recovery.
@@ -161,3 +165,9 @@ capsules in the browser:
 ```bash
 python -m embodichain run-example sim/demo/cable_viser --num-envs 2 --port 8080 --duration 12
 ```
+
+The [NMG v1 examples](sim/motion/planners/nmg/README.md) use pinned ONNX policies
+to follow eight joint and Cartesian goals on Franka and PiPER. They record
+retimed free motion and live recovery from a simulated joint disturbance. Two
+dual Franka examples show synchronized free-space motion and a proximity
+interlock using paired NMG waypoints.

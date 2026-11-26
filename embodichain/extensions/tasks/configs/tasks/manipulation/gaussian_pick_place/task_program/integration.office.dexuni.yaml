@@ -1,0 +1,45 @@
+integration_id: office_ur5_pick_place_v1
+program_id: franka_gs_pick_place
+requires:
+  scene_contract: franka_gs_tabletop_v1
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: franka_gs_tabletop_v1
+  registry_id: franka_gs_tabletop
+  rigid_objects:
+  - entity_id: cube
+    simulation_uid: cube
+    dynamics: dynamic
+    semantic_type: cube
+    affordances:
+    - entity_id: cube_grasp
+      kind: antipodal_grasp
+  - entity_id: support_surface
+    simulation_uid: support_surface
+    dynamics: static
+    semantic_type: support_surface
+profile:
+  defaults:
+    pick_up:
+      primary: primary_manipulator
+    place:
+      primary: primary_manipulator
+  skill_options:
+    pick:
+      kind: pick_up
+      pre_grasp_distance: 0.1
+      lift_height: 0.1
+      hand_interp_steps: 30
+      grasp_settle_steps: 24
+      fixed_object_to_eef:
+        position: [0.0, 0.0, 0.0]
+        rotation_matrix:
+        - [1.0, 0.0, 0.0]
+        - [0.0, -1.0, 0.0]
+        - [0.0, 0.0, -1.0]
+    place:
+      kind: place
+      hand_interp_steps: 30
+      release_settle_steps: 25
+      preserve_current_object_orientation: true
+  effect_monitors: {}

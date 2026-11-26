@@ -261,6 +261,8 @@ def _compile_usd_import(
         raise ValueError("USD scene pose must be a finite (4, 4) transform.")
 
     occupied = set(reserved_uids if manager is None else manager.asset_uids)
+    if manager is not None:
+        occupied.update(getattr(manager._spawn_scene, "_reserved_visual_names", ()))
     for collection in (
         "mesh_objects",
         "articulations",

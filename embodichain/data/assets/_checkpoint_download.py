@@ -32,6 +32,9 @@ def _download_checkpoint(
     filename: str,
     token: str | None,
     endpoint: str,
+    *,
+    revision: str | None = None,
+    local_files_only: bool = False,
 ) -> str:
     """Apply one proxy, authentication and error policy to checkpoint downloads."""
     https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
@@ -51,15 +54,14 @@ def _download_checkpoint(
             filename=filename,
             token=token,
             endpoint=endpoint,
+            revision=revision,
+            local_files_only=local_files_only,
         )
     except Exception as exc:
         raise RuntimeError(
             f"Failed to download '{filename}' from '{repo_id}'.\n"
-            "The repository is gated and requires an authenticated HuggingFace account.\n"
-            "To fix this:\n"
-            f"  1. Accept the model license at {_HF_ENDPOINT}/{repo_id}\n"
-            "  2. Create an access token at https://huggingface.co/settings/tokens\n"
-            "  3. Export the token:  export HF_TOKEN=<your_token>\n"
-            "     or run:            huggingface-cli login\n"
+            "Check the filename, revision, network and local cache. "
+            "For private or gated repositories, obtain access and set HF_TOKEN "
+            "or log in with the Hugging Face CLI.\n"
             f"Original error: {exc}"
         ) from exc

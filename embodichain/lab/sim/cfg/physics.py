@@ -21,7 +21,7 @@ from __future__ import annotations
 import math
 
 from collections.abc import Mapping
-from dataclasses import field, fields
+from dataclasses import field, fields, replace
 from typing import Any, Literal, Sequence, TYPE_CHECKING
 
 import numpy as np
@@ -428,6 +428,15 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     than a live provider or solver instance.
     """
 
+    dexuni_mujoco_joints_per_arena: int | None = None
+    """Assign every joint of a replicated rigid scene to DexUni's MuJoCo solver.
+
+    The count includes fixed joints and free-body joints. It must match the
+    scene topology in each arena. The manager expands it to the native joint
+    IDs for the configured arena count and verifies the finalized model size.
+    Explicit DexUni ownership selectors are mutually exclusive with this option.
+    """
+
     collision_cfg: NewtonCollisionPipelineCfg | Mapping[str, Any] | None = field(
         default_factory=NewtonCollisionPipelineCfg
     )
@@ -443,6 +452,13 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
         """Normalize dictionary collision settings at the config boundary."""
         if isinstance(self.collision_cfg, Mapping):
             self.collision_cfg = NewtonCollisionPipelineCfg(**self.collision_cfg)
+        joint_count = self.dexuni_mujoco_joints_per_arena
+        if joint_count is not None and (
+            type(joint_count) is not int or joint_count < 1
+        ):
+            raise ValueError(
+                "dexuni_mujoco_joints_per_arena must be a positive integer."
+            )
         if self.rigid_transform_sync_mode not in ("all", "dynamic"):
             raise ValueError(
                 "NewtonPhysicsCfg.rigid_transform_sync_mode must be 'all' or "
@@ -460,8 +476,18 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     def to_dexsim_cfg(
         self,
         gpu_id: int,
+        *,
+        num_envs: int = 1,
     ) -> NewtonCfg:
-        """Convert this config to ``dexsim.engine.newton_physics.NewtonCfg``."""
+        """Convert this config to ``dexsim.engine.newton_physics.NewtonCfg``.
+
+        Args:
+            gpu_id: GPU to use when the device omits an index.
+            num_envs: Number of arenas for expanding per-arena solver ownership.
+
+        Returns:
+            The resolved native Newton configuration.
+        """
         from dexsim.engine import newton_physics
         from dexsim.engine.newton_physics import (
             NewtonCfg,
@@ -518,6 +544,26 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
         )
 
         solver_name = "dexuni" if solver_cfg is None else str(solver_cfg.solver_type)
+        joint_count = self.dexuni_mujoco_joints_per_arena
+        if joint_count is not None:
+            if solver_name != "dexuni":
+                raise ValueError("Per-arena MuJoCo joint ownership requires DexUni.")
+            if solver_cfg is None:
+                solver_cfg = newton_physics.DexUniSolverCfg()
+            if any(
+                getattr(solver_cfg, field_name) is not None
+                for field_name in (
+                    "mujoco_joints",
+                    "mujoco_articulations",
+                    "mujoco_articulation_paths",
+                )
+            ):
+                raise ValueError(
+                    "Per-arena MuJoCo ownership conflicts with an explicit selector."
+                )
+            solver_cfg = replace(
+                solver_cfg, mujoco_joints=tuple(range(joint_count * num_envs))
+            )
         if (
             self.requires_grad
             and solver_name in builtin_types

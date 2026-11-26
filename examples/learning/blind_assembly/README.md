@@ -69,3 +69,15 @@ A checkpoint's bundled embodiment and feature convention must match training.
 Changing the hand, TCP, normalization or history layout requires separate
 validation; matching tensor dimensions alone is insufficient. Generated runs,
 reports, learning curves and videos belong outside the source tree.
+
+## DexUni geometry-informed references
+
+```bash
+embodichain run-example learning/blind_assembly/geometry_reference --task gear_meshing
+embodichain run-example learning/blind_assembly/geometry_reference --task nut_threading
+```
+
+These single-arena references read the simulated part and fixture poses and
+issue joint targets through the assembly action manager. They check native
+grasp and mating conditions against the terminal state. The default replay
+seeds are 106 for gear meshing and 213 for nut threading.

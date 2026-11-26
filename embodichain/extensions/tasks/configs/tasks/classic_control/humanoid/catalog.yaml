@@ -11,3 +11,6 @@ deployments:
     config: env.yaml
   newton:
     config: env.newton.yaml
+  dexuni:
+    config: env.dexuni.yaml
+    note: The 256-arena PPO configuration yielded a checkpoint that ran all 900 steps in the single-arena DexUni evaluation at seed 10042.

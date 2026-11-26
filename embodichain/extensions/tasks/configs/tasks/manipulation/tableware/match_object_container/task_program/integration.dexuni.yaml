@@ -1,0 +1,84 @@
+integration_id: match_object_container_reference
+program_id: match_object_container_reference
+requires:
+  scene_contract: match_object_container_reference_scene
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: match_object_container_reference_scene
+  registry_id: match_object_container_reference
+  rigid_objects:
+  - entity_id: block_cube_1
+    dynamics: dynamic
+    affordances:
+    - entity_id: block_cube_1_grasp
+      kind: antipodal_grasp
+  - entity_id: container_cube
+    dynamics: dynamic
+  - entity_id: block_cube_2
+    dynamics: dynamic
+    affordances:
+    - entity_id: block_cube_2_grasp
+      kind: antipodal_grasp
+  - entity_id: block_sphere_1
+    dynamics: dynamic
+    affordances:
+    - entity_id: block_sphere_1_grasp
+      kind: antipodal_grasp
+  - entity_id: container_sphere
+    dynamics: dynamic
+  - entity_id: block_sphere_2
+    dynamics: dynamic
+    affordances:
+    - entity_id: block_sphere_2_grasp
+      kind: antipodal_grasp
+profile:
+  defaults:
+    pick_up:
+      primary: primary_manipulator
+    place:
+      primary: primary_manipulator
+  skill_options:
+    pick:
+      kind: pick_up
+      pre_grasp_distance: 0.08
+      lift_height: 0.1
+      hand_interp_steps: 28
+      grasp_settle_steps: 22
+      fixed_object_to_eef:
+        position:
+        - 0.0
+        - 0.0
+        - 0.0
+        rotation_matrix:
+        - - 1.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - -1.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - -1.0
+    place:
+      kind: place
+      lift_height: 0.1
+      hand_interp_steps: 24
+      preserve_current_object_orientation: true
+      release_settle_steps: 28
+  effect_monitors: {}
+runtime_services:
+  settle_presets:
+    contained_sphere:
+      linear_velocity_threshold: 0.01
+      angular_velocity_threshold: 0.36
+      min_steps: 20
+      max_steps: 430
+      check_interval_steps: 2
+      required_stable_checks: 10
+    rigid_object:
+      linear_velocity_threshold: 0.03
+      angular_velocity_threshold: 0.2
+      min_steps: 10
+      max_steps: 240
+      check_interval_steps: 2
+      required_stable_checks: 3

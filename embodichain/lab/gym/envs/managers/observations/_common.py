@@ -234,6 +234,38 @@ def _get_evaluation_state(
     env: EmbodiedEnv, obs: EnvObs, *, field: str
 ) -> ObservationSample:
     parts = field.split("/")
+    if parts[0] == "fluids":
+        _, fluid_uid, receiver_uid, quantity = parts
+        cfg = env.cfg.observations.received_volume
+        if cfg.func is not get_fluid_volume_in_region or [
+            e.uid for e in cfg.params["entity_cfgs"]
+        ] != [fluid_uid, receiver_uid]:
+            raise ValueError(
+                "Fluid volume rule requires the matching receiver observation."
+            )
+        values = cfg.func(env, obs, **cfg.params)
+        descriptor = ObservationDescriptor(
+            f"{fluid_uid}/{receiver_uid}",
+            quantity,
+            "receiver",
+            "scalar",
+            ("m3",),
+            (1,),
+            values.dtype,
+        )
+        valid = torch.isfinite(values[:, 0])
+        return ObservationSample(
+            descriptor,
+            values,
+            valid,
+            tuple(None if ok else "Invalid volume" for ok in valid.tolist()),
+        )
+    if parts[0] == "measurements":
+        from embodichain.lab.gym.envs.task_program._episode_measurement import (
+            _measurement_sample,
+        )
+
+        return _measurement_sample(env, parts[1], parts[2])
     if parts[0] == "cables":
         from embodichain.compute.geometry._cable_route import (
             _CABLE_METRICS as _METRICS,
@@ -1660,6 +1692,7 @@ def get_fluid_volume_in_region(
     upper: list[float],
     sphere_center: list[float] | None = None,
     sphere_radius: float | None = None,
+    radial_profile: list[list[float]] | None = None,
 ) -> torch.Tensor:
     """Measure nominal fluid volume inside a rigid-local region.
 
@@ -1671,6 +1704,7 @@ def get_fluid_volume_in_region(
         upper: Inclusive local AABB upper corner, metres.
         sphere_center: Optional local sphere centre intersected with the AABB.
         sphere_radius: Positive sphere radius, metres, paired with sphere_center.
+        radial_profile: Optional receiver-local (height, inner radius) pairs in metres.
 
     Returns:
         ``(E, 1)`` contained rest volume in cubic metres.
@@ -1711,4 +1745,29 @@ def get_fluid_volume_in_region(
         ):
             raise ValueError("Sphere needs a finite centre and positive radius.")
         inside &= (local - center).square().sum(-1) <= sphere_radius**2
+    if radial_profile is not None:
+        profile = bounds.new_tensor(radial_profile)
+        if (
+            profile.ndim != 2
+            or profile.shape[0] < 2
+            or profile.shape[1] != 2
+            or not torch.isfinite(profile).all()
+            or not (profile[:, 1] > 0).all()
+            or not (profile[1:, 0] > profile[:-1, 0]).all()
+        ):
+            raise ValueError(
+                "Receiver profile requires increasing heights and positive radii."
+            )
+        heights, radii = profile.T
+        z = local[..., 2]
+        ix = torch.searchsorted(heights.contiguous(), z.contiguous()).clamp(
+            1, len(profile) - 1
+        )
+        alpha = (z - heights[ix - 1]) / (heights[ix] - heights[ix - 1])
+        radius = torch.lerp(radii[ix - 1], radii[ix], alpha)
+        inside &= (
+            (z >= heights[0])
+            & (z <= heights[-1])
+            & (local[..., :2].square().sum(-1) <= radius.square())
+        )
     return inside.sum(-1, keepdim=True).float() * fluid.cfg.particle_spacing**3

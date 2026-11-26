@@ -1,5 +1,11 @@
 # Pour Water
 
+The default deployment is Franka cup-to-bowl (`franka_fluid`). The former
+`pour_cup` catalog key selects that deployment. CobotMagic uses a bottle
+and a tapered cup. Both fluid deployments require at least 50 mL in the
+receiver at the final physical observation. The four rigid bottle
+deployments retain their rigid-motion criteria and original Gym IDs.
+
 `task.cobotmagic.yaml` runs the existing right-arm pick, tilt and return Task
 Program. The scene uses a RoboCasa open-neck bottle and red cup, a wood tabletop
 with a Poly Haven material, and fixed area lights. Materials survive resets and
@@ -14,13 +20,51 @@ targets for uncommanded joints on active rows, so the idle left arm does not
 repeatedly accept gravity deflection as a new target. Explicit safe stops and
 inactive rows still hold their measured positions.
 
+## Measured CobotMagic fluid qualification
+
+Use `task.cobotmagic.fluid.yaml` (Gym ID `PourWater-CobotMagic-Fluid-v1`) for Newton fluid simulation. The original `task.cobotmagic.yaml` (`PourWater-v1`) uses Default physics for bottle motion and return, with no liquid.
+
+The current CobotMagic scene fills the bottle using its inner profile and
+advances the fluid every 0.833 ms. DFSPH starts each step without cached
+pressure multipliers to prevent the upright fill from jetting through the neck.
+A single-arena seed-0 run on DexSim 0.6.1rc1 and an RTX 5090 with NoRender
+measured zero particles outside the bottle envelope at one second and
+64.93 mL in the cup after the bottle returned. Moving the liquid out of the
+receiver changed final success to false. The
+[containment report](validation/cobotmagic.fluid.json) records the measurement
+and the earlier warm-start comparisons.
+
+The historical trials below used DexSim 0.6.0 on the same GPU, 100 Hz
+controls, 1.5 mm particles, the earlier fill and a 2.5 ms fluid step.
+Each completed all four motion segments.
+
+| Aim relative to nominal | Tilt dwell | Final received volume | Episode accepted |
+| --- | --- | --- | --- |
+| Nominal | 8 s | 58.67 mL | Yes |
+| Nominal | 4 s | 48.92 mL | No |
+| X offset −120 mm | 4 s | 0.00 mL | No |
+
+To reproduce those historical trials, use the scene from commit `e296c3a01`
+and set the pour option `dwell_duration`
+to 4. For the miss, subtract 0.12 m from the X component of the
+`cup_pour_pose` lowerer's receiver-relative position. Keep the final volume
+rule, cup, and bottle return targets fixed. The paired runs isolate the aim
+change. These are individual trials.
+
 ## Run locally
 
-From the repository root, using the project's simulation Python environment:
+The first command launches the original CobotMagic rigid-body demonstration
+on Default physics. The second launches the Newton fluid deployment and
+checks the volume received by the cup.
 
 ```bash
 python -m embodichain run-task \
-  --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml
+  --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml \
+  --physics default
+
+python -m embodichain run-task \
+  --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.fluid.yaml \
+  --physics newton
 ```
 
 The registered `PourWaterAssets` bundle downloads and extracts automatically
@@ -49,9 +93,8 @@ directory into the chosen data root before launching.
 
 The bottle retains the previous local Z bounds and grasp frame. The cup retains
 its height with a 62 mm outer diameter. Both start just above the table's 875 mm
-support height, avoiding deep initial interpenetration. The cup uses 16 convex
-parts, 30 g mass and increased friction; reset waits for both objects to settle.
-The two area lights and modified Reinhard tone mapping are task-local settings.
+support height, avoiding deep initial interpenetration. For the CobotMagic fluid deployment the rigid contacts use axial cylinder sections and the water contacts use separate, open, watertight shell boundaries. The cup has 30 g mass; reset waits for both objects to settle.
+The bottle shell and cup shell use closed outer and inner surfaces joined at the lip and base, with an open cavity. Profiles are in metres in the container frame. The bottle includes a narrow neck. The CobotMagic shell inertias are calculated about their centres of mass. The cup observation uses a conservative axial profile inside the wall and excludes the space above its rim.
 
 ## Sources and redistribution
 
@@ -80,24 +123,29 @@ The preparation script itself does not publish anything.
 The CobotMagic program declares four segment contracts. A measured lift
 supports the pick; the held relation remains symbolic. Transport acceptance
 and the incoming pour condition use the same cup-relative target as the
-planner. The pour contract reports command completion separately from
-`liquid_transfer: unavailable`. The return contract retains the bottle and
+planner. The pour segment reports motion completion. Final acceptance counts simulated water particles in the cup-local inner profile after the bottle returns. Water above the rim or outside the wall contributes zero. The return contract retains the bottle and
 cup position validators and both settling policies. Physical attachment and
 release evidence are also reported as unavailable by this deployment.
 
-Check structure with `inspect_deployment.py --strict-contracts` for
-`task.cobotmagic.yaml`. The episode instruction, each stage instruction,
-resolved evidence and acceptance are retained in segment reports and
-dataset fragments.
+From the repository root, inspect the fluid deployment's strict segment contracts.
+
+```bash
+PYTHONPATH=. python .agents/skills/add-task-program/scripts/inspect_deployment.py --strict-contracts \
+  embodichain/extensions/tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.fluid.yaml
+```
+
+The final `water_received` rule is defined in
+[evaluation.fluid.yaml](task_program/evaluation.fluid.yaml).
+
+Segment reports and dataset fragments retain the episode and stage instructions,
+resolved evidence and acceptance.
 
 ## Tianji Marvin deployment
 
 `task.tianji_marvin.yaml` selects `env.tianji_marvin.yaml` and
 `task_program/program.tianji_marvin.yaml`. This 750 mm tabletop variant lowers
 the table, bottle, cup and all absolute task targets by 125 mm from the
-CobotMagic scene, giving the compact ready pose elbow clearance. Assets,
-lighting, four program segments, 100 Hz control and the 60-degree object-space
-tilt remain the same; CobotMagic retains its separate 875 mm tabletop scene.
+CobotMagic scene, giving the compact ready pose elbow clearance. Marvin retains its rigid bottle-motion program at 100 Hz with a 60-degree tilt. CobotMagic uses its separate 875 mm tabletop and fluid trajectory.
 Both arms inherit the shared compact ready pose. The right arm carries the
 bottle while the left arm retains its initial target. The deployment selects
 the reusable Marvin embodiment, a calibrated
@@ -150,11 +198,10 @@ passed 8/9 load/seed trials, with 13 mm slip in one 250 g case. A 20 N candidate
 passed the batched trials but slipped in a camera-enabled single-environment
 run; both modes must pass qualification. This is not a real-device rating.
 
-The pouring axis follows the wrist's roll axis in the bottle frame. The
-pre-pour bottle origin is 180 mm above the cup origin, with horizontal offset
-`[0.02764513585, -0.05356490290]` m. This offset cancels the bottle-mouth motion
-at the 60-degree tilt, placing the opening over the cup while keeping both
-the bottle body and robot clear.
+For the CobotMagic fluid deployment, the calibrated pre-pour bottle origin is
+40 mm forward in X, 85 mm back in Y and 80 mm above the cup origin. The
+105-degree commanded tilt and 8-second dwell allow the narrow neck to discharge.
+The horizontal offset accounts for travel between the outlet and cup opening.
 
 The program first picks and positions the bottle, then checks its actual pose
 within 10 mm of the pre-pour target before executing the pour segment.
@@ -165,7 +212,7 @@ clearance while the hand opens; the bottle then settles naturally onto the table
 These checkpoints supplement projected effects; they are not continuous grasp
 verification during every call.
 
-## Validation
+## Historical rigid-motion validation
 
 The CobotMagic segment contracts ran on DexSim 0.6.0rc1 Default physics
 with CPU Hybrid and sensors disabled. Seed 0 accepted all four stages in
@@ -290,11 +337,11 @@ Fault injection with a 1 N right-gripper budget stops with
 The force budget is calibrated for these simulated checks and is not a measured
 real-device payload rating.
 
-The physical environments select the Hybrid renderer explicitly. The GLB files
+The legacy rigid environments select the Hybrid renderer. The CobotMagic fluid environment selects FastRT. The GLB files
 use the glTF Y-up root frame, which the native loader converts to simulation
 Z-up. In the current DexSim runtime, the NoRender mesh path does not apply that
 conversion. Disabling sensor acquisition therefore retains Hybrid; explicitly
-forcing NoRender is not qualified for this asset bundle.
+forcing NoRender was outside that earlier rigid-body validation.
 
 ## Grasp retention and UR5 deployment
 

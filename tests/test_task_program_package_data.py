@@ -62,6 +62,11 @@ _PROGRAMS = (
     ),
 )
 _DEPLOYMENTS = {
+    Path("tasks/manipulation/cable/franka_rj45_cycle/task.franka.yaml"): (
+        "franka_rj45_cycle",
+        "rj45_cycle",
+        "franka_rj45",
+    ),
     Path("tasks/manipulation/drawer_storage/task.ur5.long_horizon.yaml"): (
         "drawer_storage_long_horizon",
         "task_program_drawer_storage_long_horizon",
@@ -136,6 +141,11 @@ _DEPLOYMENTS = {
         "dual_ur5_dh_pgi_140_80",
     ),
     Path("tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml"): (
+        "pour_water_with_right_arm",
+        "task_program_pour_water",
+        "cobotmagic",
+    ),
+    Path("tasks/manipulation/tableware/pour_water/task.cobotmagic.fluid.yaml"): (
         "pour_water_with_right_arm",
         "task_program_pour_water",
         "cobotmagic",
@@ -257,6 +267,35 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/gaussian_pick_place/catalog.yaml"),
         Path("tasks/manipulation/gaussian_pick_place/README.md"),
         Path("tasks/manipulation/cable/route_the_cable/cable.usda"),
+        Path("components/embodiments/franka_flat_pads.yaml"),
+        *(
+            Path("tasks/manipulation/cable/franka_rope_wrap") / filename
+            for filename in (
+                "README.md",
+                "cable.usda",
+                "catalog.yaml",
+                "config.json",
+                "env.yaml",
+                "task.franka.yaml",
+                "task_program/evaluation.yaml",
+                "task_program/integration.yaml",
+                "task_program/program.yaml",
+            )
+        ),
+        Path("components/embodiments/franka_rj45.yaml"),
+        *(
+            Path("tasks/manipulation/cable/franka_rj45_cycle") / filename
+            for filename in (
+                "catalog.yaml",
+                "config.json",
+                "env.yaml",
+                "task.franka.yaml",
+                "task_program/evaluation.yaml",
+                "task_program/execution_policy.yaml",
+                "task_program/integration.yaml",
+                "task_program/program.yaml",
+            )
+        ),
         Path("tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"),
         Path("tasks/manipulation/tableware/pour_cup/env.fluid.yaml"),
         Path("tasks/manipulation/tableware/pour_cup/task_program/program.fluid.yaml"),
@@ -385,6 +424,9 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/rubiks_cube_pick_place/env.yaml"),
         Path("tasks/manipulation/rubiks_cube_pick_place/task_program/integration.yaml"),
         Path("tasks/manipulation/tableware/pour_water/env.yaml"),
+        Path("tasks/manipulation/tableware/pour_water/boundaries/bottle.obj"),
+        Path("tasks/manipulation/tableware/pour_water/boundaries/cup.obj"),
+        Path("tasks/manipulation/tableware/pour_cup/task_program/evaluation.yaml"),
         Path("tasks/manipulation/tableware/pour_water/env.tianji_marvin.yaml"),
         Path("tasks/manipulation/tableware/pour_water/README.md"),
         Path("tasks/manipulation/tableware/pour_water/task_program/integration.yaml"),
@@ -437,9 +479,11 @@ def staged_config_package(
     assert type(include_package_data) is bool
 
     build_lib = tmp_path_factory.mktemp("task-config-build")
+    packages = get_packages()
+    assert "embodichain.extensions.tasks.manipulation.cable" in packages
     distribution = Distribution(
         {
-            "packages": get_packages(),
+            "packages": packages,
             "package_data": package_data,
             "include_package_data": include_package_data,
         }
@@ -650,7 +694,7 @@ installed = Path(sys.argv[1])
 sys.path.insert(0, str(installed))
 from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
-from embodichain.lab.gym.utils.registration import get_env_spec
+from embodichain.lab.gym.utils.registration import discover_task_packages, get_env_spec
 from embodichain.utils.utility import load_config
 from gymnasium import registry
 from embodichain.lab.sim.cfg import RobotPresetCfg
@@ -660,7 +704,6 @@ import embodichain
 assert Path(embodichain.__file__).is_relative_to(installed)
 
 configs = installed / "embodichain/extensions/tasks/configs/tasks/manipulation/drawer_storage"
-assert not (installed / "embodichain/extensions/tasks/manipulation/drawer_storage.py").exists()
 assert (configs / "task_program/evaluation.yaml").is_file()
 assert "embodichain.extensions.tasks" not in sys.modules
 
@@ -733,18 +776,25 @@ assert len(shared_embodiments) == 1
 assert not (installed / "embodichain/extensions/tasks/manipulation/gaussian_pick_place.py").exists()
 assert not (installed / "share/embodichain/examples/gym/gaussian_pick_place/configs").exists()
 
-import embodichain.extensions.tasks
+assert "embodichain.extensions.tasks.manipulation.drawer_storage" not in sys.modules
 from embodichain.cli.list_task import _collect_environment_entries
 from embodichain.cli.main import main
 
-assert Path(embodichain.extensions.tasks.__file__).is_relative_to(installed)
-assert "embodichain.extensions.tasks.manipulation.drawer_storage" not in sys.modules
+assert "official_tasks" in discover_task_packages()
+assert Path(sys.modules["embodichain.extensions.tasks"].__file__).is_relative_to(installed)
 assert {entry.env_id for entry in _collect_environment_entries()} >= {
     "TaskProgramDrawerStorage-UR5-v1",
     "TaskProgramDrawerStorage-Franka-v1",
     "TaskProgramDrawerStorage-UR5-LongHorizon-v1",
+    "DrawerStorage-UR5-DexUni-v1",
+    "PlaceObjectDrawer-UR5-DexUni-v1",
     *gaussian_ids.values(),
 }
+for env_id in ("DrawerStorage-UR5-DexUni-v1", "PlaceObjectDrawer-UR5-DexUni-v1"):
+    spec = get_env_spec(env_id)
+    assert spec.cls.create_demo_segments is not EmbodiedEnv.create_demo_segments
+    assert spec.task_program_registration is None
+assert (configs.parent / "tableware/place_object_drawer/tabletop_drawer.urdf").is_file()
 with redirect_stdout(StringIO()) as details:
     main(["show-task", "embodichain.extensions.tasks:pour_water"])
 assert "pour_water" in details.getvalue()

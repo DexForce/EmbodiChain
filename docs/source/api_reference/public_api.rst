@@ -342,6 +342,17 @@ embodichain.data.assets.solver_assets
 
    download_neural_ik_checkpoint
 
+embodichain.data.assets.task_assets
+-----------------------------------
+
+.. currentmodule:: embodichain.data.assets.task_assets
+
+.. autosummary::
+
+   Rj45Fixture
+
+.. autoclass:: Rj45Fixture
+
 embodichain.data.assets.w1_assets
 ---------------------------------
 
@@ -523,6 +534,20 @@ Simulation-independent camera dimensions used to reconstruct recording features 
 .. autosummary::
 
    RecordedCamera
+
+embodichain.extensions.models.policies.partymimic
+------------------------------------------------
+
+Runtime adapter for the official RP1 PartyMimic sparse5 ONNX export. It
+assembles observation histories and maps actor output into joint targets.
+
+.. currentmodule:: embodichain.extensions.models.policies.partymimic
+
+.. autosummary::
+
+   PartyMimicPolicy
+   PartyMimicState
+   sparse5_window
 
 .. _simready_asset_api:
 
@@ -3357,6 +3382,8 @@ embodichain.lab.sim.atomic_skills
    MoveEndEffectorOptions
    MoveHeldObjectOptions
    MoveJointsOptions
+   ObservedJointTrajectory
+   ObservedJointTrajectorySource
    ObjectSkillGoal
    OPEN_COMMAND
    PickUpOptions
@@ -5293,6 +5320,18 @@ penetration and end-insertion acceptance.
    RouteTheCableEnv
    measure_route
 
+embodichain.extensions.tasks.manipulation.drawer_storage
+---------------------------------------------------------
+
+.. currentmodule:: embodichain.extensions.tasks.manipulation.drawer_storage
+
+The single-arena UR5 expert opens the drawer, transfers a cube from a side
+table, and checks that it remains inside after closure.
+
+.. autosummary::
+
+   DrawerStorageDexUniEnv
+
 embodichain.extensions.tasks.manipulation.push_cube
 ---------------------------------------------------
 
@@ -5336,9 +5375,13 @@ embodichain.extensions.tasks.manipulation.tableware.place_object_drawer
 
 .. currentmodule:: embodichain.extensions.tasks.manipulation.tableware.place_object_drawer
 
+The DexUni UR5 deployment starts with the tabletop drawer open. Its expert
+places a toy duck on the liner and checks its position after closing the drawer.
+
 .. autosummary::
 
    PlaceObjectDrawerEnv
+   PlaceObjectDrawerDexUniEnv
 
 embodichain.extensions.tasks.manipulation.tableware.stack_cups
 --------------------------------------------------------------

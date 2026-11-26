@@ -1,0 +1,20 @@
+{
+  "status": "reported",
+  "deployment": "ur5_long_horizon",
+  "summary": "10/10 expert episodes passed final physical acceptance on Default CPU physics, sensors disabled, one attempt per seed (0–9).",
+  "source": "https://github.com/DexForce/EmbodiChain/blob/cd7b9fe0c2290d9e8bb2831d181c69931525ea77/embodichain/extensions/tasks/configs/tasks/manipulation/drawer_storage/README.md",
+  "attempts": 10,
+  "successes": 10,
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ]
+}

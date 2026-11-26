@@ -256,9 +256,9 @@ def _deployment_from_path(
     )
 
 
-def _tableware_config_path(task_name: str) -> Path:
+def _tableware_config_path(task_name: str, *, variant: str = "cobotmagic") -> Path:
     """Return one config-defined tableware task's Gym config path."""
-    return _TABLEWARE_CONFIG_DIRECTORY / task_name / "task.cobotmagic.yaml"
+    return _TABLEWARE_CONFIG_DIRECTORY / task_name / f"task.{variant}.yaml"
 
 
 def _tableware_gym_config(task_name: str) -> dict[str, object]:
@@ -268,11 +268,12 @@ def _tableware_gym_config(task_name: str) -> dict[str, object]:
     return payload
 
 
-def _tableware_integration_payload(task_name: str) -> dict[str, object]:
+def _tableware_integration_payload(
+    task_name: str, *, variant: str = "cobotmagic"
+) -> dict[str, object]:
     """Return one tableware task's independently owned integration."""
-    path = _tableware_config_path(task_name)
-    config = _tableware_gym_config(task_name)
-    physical = _physical_components(path, config)
+    path = _tableware_config_path(task_name, variant=variant)
+    physical = _physical_components(path, load_config(path))
     _, task, policy = _resolve_task_program_components(
         physical.config["task_program"], base_dir=path.parent
     )
@@ -287,11 +288,12 @@ def _tableware_integration_payload(task_name: str) -> dict[str, object]:
     )
 
 
-def _tableware_deployment(task_name: str) -> ConfiguredTaskProgramDeployment:
+def _tableware_deployment(
+    task_name: str, *, variant: str = "cobotmagic"
+) -> ConfiguredTaskProgramDeployment:
     """Return one fully composed tableware deployment."""
-    path = _tableware_config_path(task_name)
-    config = _tableware_gym_config(task_name)
-    physical = _physical_components(path, config)
+    path = _tableware_config_path(task_name, variant=variant)
+    physical = _physical_components(path, load_config(path))
     assert physical.embodiment_skill_profile is not None
     return load_configured_task_program_deployment(
         task_program=physical.config["task_program"],
@@ -771,9 +773,16 @@ def test_tableware_programs_decode_and_preflight_without_task_environment_code(
     assert frozenset(registration.call_catalog.descriptors) == expected_calls
 
 
-def test_pour_water_integration_declares_live_transport_and_axis_aware_pour() -> None:
+@pytest.mark.parametrize(
+    ("variant", "grasp_z", "tilt_degrees"),
+    [("cobotmagic", 0.0321167707, -60), ("cobotmagic.fluid", -0.010, -105)],
+    ids=["rigid", "fluid"],
+)
+def test_pour_water_integration_declares_live_transport_and_axis_aware_pour(
+    variant: str, grasp_z: float, tilt_degrees: int
+) -> None:
     """Pouring policy owns its calibrated grasp, cup offset, axis, and tilt."""
-    integration_payload = _tableware_integration_payload("pour_water")
+    integration_payload = _tableware_integration_payload("pour_water", variant=variant)
     integration = _decode_configured_task_program_integration(integration_payload)
     registration = integration.registration
     grasp = registration.scene_binding.antipodal_grasps[0]
@@ -792,16 +801,18 @@ def test_pour_water_integration_declares_live_transport_and_axis_aware_pour() ->
     assert options["pick"].fixed_object_to_eef == pytest.approx(
         torch.tensor(
             (
-                (-0.0530918874, 0.4963395894, 0.8665033579, 0.0358702540),
+                (-0.0530918874, 0.4963395894, 0.8665033579, 0.035870254),
                 (-0.0525476672, -0.8679134846, 0.4939277470, 0.0204655528),
-                (0.9972059727, -0.0193091929, 0.0721606836, 0.0321167707),
+                (0.9972059727, -0.0193091929, 0.0721606836, grasp_z),
                 (0.0, 0.0, 0.0, 1.0),
             )
         ),
     )
     assert type(options["simulation.move_held_object"]) is MoveHeldObjectOptions
     assert type(options["simulation.pour"]) is PourOptions
-    assert options["simulation.pour"].rotate_angle == pytest.approx(-torch.pi / 3)
+    assert options["simulation.pour"].rotate_angle == pytest.approx(
+        tilt_degrees * torch.pi / 180
+    )
     assert type(options["place"]) is PlaceOptions
     assert options["place"].hand_interp_steps == 44
     assert options["place"].release_settle_steps == 60
@@ -817,9 +828,12 @@ def test_pour_water_integration_declares_live_transport_and_axis_aware_pour() ->
         assert generator["gripper"]["model_id"] == "cobotmagic_v100_gripper"
 
 
-def test_pour_water_mouth_alignment_and_measured_checkpoints() -> None:
+@pytest.mark.parametrize(
+    "variant", ["cobotmagic", "cobotmagic.fluid"], ids=["rigid", "fluid"]
+)
+def test_pour_water_mouth_alignment_and_measured_checkpoints(variant: str) -> None:
     """The tilted mouth clears the cup and a missed grasp stops before pouring."""
-    deployment = _tableware_deployment("pour_water")
+    deployment = _tableware_deployment("pour_water", variant=variant)
     program = load_task_program(
         deployment.program_path,
         integration=deployment.selection,
@@ -846,7 +860,7 @@ def test_pour_water_mouth_alignment_and_measured_checkpoints() -> None:
     cup_check = next(check for check in returning.validators if check.object == "cup")
     assert cup_check.position_tolerance <= 0.002
 
-    integration = _tableware_integration_payload("pour_water")
+    integration = _tableware_integration_payload("pour_water", variant=variant)
     lowerer = integration["runtime_services"]["registered_semantic_lowerers"][0]
     decoded = _decode_registered_lowerer(lowerer, path="transport")
     relative = torch.tensor(decoded.relative_pose, dtype=torch.float64).reshape(4, 4)
@@ -867,13 +881,17 @@ def test_pour_water_mouth_alignment_and_measured_checkpoints() -> None:
         + torch.linalg.cross(axis, mouth) * torch.sin(theta)
         + axis * torch.dot(axis, mouth) * (1 - torch.cos(theta))
     )
-    torch.testing.assert_close(
-        (relative[:3, 3] + rotated)[:2],
-        torch.zeros(2, dtype=torch.float64),
-        atol=1e-7,
-        rtol=0,
-    )
-    assert float(relative[2, 3] + rotated[2]) >= 0.21
+    mouth_target = relative[:3, 3] + rotated
+    if variant == "cobotmagic.fluid":
+        # Leave room for the stream to travel from the lip into the cup.
+        assert float(torch.dot(mouth_target[:2], rotated[:2])) < 0
+        assert 0.01 < float(mouth_target[:2].norm()) < 0.04
+        assert 0.045 < float(mouth_target[2]) < 0.095
+    else:
+        torch.testing.assert_close(
+            mouth_target[:2], torch.zeros(2, dtype=torch.float64), atol=1e-7, rtol=0
+        )
+        assert float(mouth_target[2]) >= 0.21
     assert predicate["displacement"] == pytest.approx(relative[:3, 3].tolist())
     condition = segments[1].validators[0].spec
     qualified_cup = torch.tensor([[0.75, 0.1, 0.921, 0.0, 0.0, 0.5**0.5, 0.5**0.5]])
@@ -2895,6 +2913,7 @@ def test_configured_motion_budgets_reject_invalid_values(
         ("open_drawer", "newton"),
         ("hand_over", "default"),
         ("pour_water", "default"),
+        ("pour_water", "newton"),
     ],
 )
 def test_segmented_examples_preserve_overall_and_segment_instructions(
@@ -2903,17 +2922,28 @@ def test_segmented_examples_preserve_overall_and_segment_instructions(
     registered_test_ids: list[str],
 ) -> None:
     """Production composition retains both language levels for every backend."""
+    from embodichain.lab.sim.cfg import DefaultPhysicsCfg, NewtonPhysicsCfg
+
+    variant = (
+        "cobotmagic.fluid"
+        if task_name == "pour_water" and backend == "newton"
+        else "cobotmagic"
+    )
     path = (
-        _tableware_config_path(task_name)
+        _tableware_config_path(task_name, variant=variant)
         if task_name in _TABLEWARE_TASKS
         else _config_path(task_name)
     )
     config = load_config(path)
-    if backend == "newton":
+    if backend in config["environment"]:
         config["environment"] = {"component": config["environment"][backend]}
     config["id"] = _TEST_ENV_ID
     registered_test_ids.append(_TEST_ENV_ID)
     cfg = config_to_cfg(config, source_path=path)
+    assert isinstance(
+        cfg.sim_cfg.physics_cfg,
+        NewtonPhysicsCfg if backend == "newton" else DefaultPhysicsCfg,
+    )
     assert cfg.task_program is not None
     overall = cfg.task_program.instruction
     assert "instruction" not in cfg.dataset.lerobot.params
