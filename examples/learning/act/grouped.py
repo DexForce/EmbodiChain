@@ -187,6 +187,8 @@ def _source_hashes() -> dict[str, str]:
         example.with_name("_study_panel.py"),
         package / "extensions/models/policy/act/runtime.py",
         package / "lab/gym/envs/base_env.py",
+        package / "lab/gym/envs/embodied_env.py",
+        package / "lab/gym/utils/gym_utils.py",
         package / "data_pipeline/engine/data.py",
     )
     return {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
