@@ -196,5 +196,8 @@ admission, worker lifetime, budget and independent native measurements.
 An authoring Run starts before any World exists. Each submitted attempt
 creates its own Gym World and publishes its live read-only Session. The MCP
 connection does not own that worker. Cancel and inspect use the original
-run/job IDs. The fixed placement objective and the candidate drop target
+run/job IDs. Each attempt verifies the sealed bundle against its requested
+revision. While physics advances, inspection exposes snapshots of the step
+count, simulation time and gripper measurements. The fixed placement
+objective and the candidate drop target
 have separate ownership.

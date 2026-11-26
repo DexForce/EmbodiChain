@@ -19,6 +19,7 @@
 from __future__ import annotations
 from pathlib import Path
 import json
+import shutil
 from unittest.mock import Mock
 import pytest
 from embodichain.gen_sim import agent_experiment as pilot
@@ -70,6 +71,25 @@ def test_wall_budget_and_changed_bundle(
         store.validate(run, rev)
 
 
+def test_another_sealed_bundle_cannot_replace_the_requested_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = pilot.ExperimentStore(tmp_path)
+    run = store.create("test", "initial")
+    run_id, previous = run["run_id"], run["revision"]
+    current = store.revise(run_id, previous, 0.0, "correct")["revision"]
+    bundles = tmp_path / run_id / "bundles"
+    shutil.copytree(bundles / previous, bundles / current, dirs_exist_ok=True)
+
+    launch = Mock()
+    monkeypatch.setattr(pilot.subprocess, "Popen", launch)
+    with pytest.raises(ValueError, match="does not match the requested revision"):
+        store.validate(run_id, current)
+    with pytest.raises(ValueError, match="does not match the requested revision"):
+        store.submit(run_id, current, "attempt")
+    launch.assert_not_called()
+
+
 @pytest.mark.gpu
 def test_cancel_reconciles_at_owner_boundary(tmp_path: Path) -> None:
     import time
@@ -82,12 +102,16 @@ def test_cancel_reconciles_at_owner_boundary(tmp_path: Path) -> None:
     deadline = time.monotonic() + 180
     while time.monotonic() < deadline:
         observed = store.inspect(rid)["attempts"][-1]
-        if observed.get("session_id"):
+        if observed.get("physics_steps", 0) > 0:
             break
         if observed["state"] not in ("running", "queued"):
             pytest.fail(str(observed))
         time.sleep(0.2)
-    assert observed.get("session_id")
+    assert observed["state"] == "running"
+    assert observed["session_id"]
+    assert observed["physics_steps"] > 0 and observed["simulation_time_s"] > 0
+    assert observed["last_gripper"]
+    live_steps = observed["physics_steps"]
     store.cancel(rid, j["job_id"])
     while time.monotonic() < deadline:
         observed = store.inspect(rid)["attempts"][-1]
@@ -98,4 +122,5 @@ def test_cancel_reconciles_at_owner_boundary(tmp_path: Path) -> None:
         observed["state"] == "cancelled"
         and observed["physical_verdict"] == "unavailable"
     )
+    assert observed["physics_steps"] >= live_steps
     assert not list(Path(observed["session_directory"]).glob("dsws_*.json"))

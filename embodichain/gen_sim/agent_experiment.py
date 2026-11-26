@@ -55,6 +55,7 @@ GOAL = {
     "wall_seconds": 1800,
 }
 _ID = re.compile(r"[a-f0-9]{32}")
+_PROGRESS_INTERVAL_S = 0.5
 
 
 def _save(path: Path, data: Any) -> None:
@@ -105,7 +106,7 @@ def _seal(root: Path, offset: float, parent: str | None = None) -> str:
         entry = copy(TASK)
     else:
         prior = root / "bundles" / parent
-        declaration = yaml.safe_load(_validate(prior).read_text())
+        declaration = yaml.safe_load(_validate(prior, parent).read_text())
         original = _load(prior / "manifest.json")
         files = {name: (prior / name).read_text() for name in original["files"]}
         program = yaml.safe_load(files.pop(declaration["task_program"]["program"]))
@@ -118,7 +119,9 @@ def _seal(root: Path, offset: float, parent: str | None = None) -> str:
         files[entry] = yaml.safe_dump(declaration, sort_keys=False)
     identity = _hash({"entry": entry, "files": files, "goal": GOAL})
     dest = root / "bundles" / identity
-    if not dest.exists():
+    if dest.exists():
+        _validate(dest, identity)
+    else:
         tmp = Path(tempfile.mkdtemp(dir=dest.parent))
         try:
             for name, content in files.items():
@@ -127,7 +130,7 @@ def _seal(root: Path, offset: float, parent: str | None = None) -> str:
                 tmp / "manifest.json",
                 {"entry": entry, "bundle": identity, "files": sorted(files)},
             )
-            _validate(tmp)
+            _validate(tmp, identity)
             tmp.rename(dest)
         finally:
             if tmp.exists():
@@ -135,10 +138,12 @@ def _seal(root: Path, offset: float, parent: str | None = None) -> str:
     return identity
 
 
-def _validate(directory: Path) -> Path:
+def _validate(directory: Path, expected_revision: str) -> Path:
     from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 
     m = _load(directory / "manifest.json")
+    if m["bundle"] != expected_revision:
+        raise ValueError("Bundle does not match the requested revision")
     if m["entry"] not in m["files"] or any(
         not re.fullmatch(r"[0-9a-f]{64}\.yaml", n) for n in m["files"]
     ):
@@ -159,7 +164,7 @@ def _validate(directory: Path) -> Path:
 class ExperimentStore:
     """Own one local GenSim run directory per frozen experimental goal."""
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path) -> None:
         self.root = root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
 
@@ -240,7 +245,7 @@ class ExperimentStore:
             data = _load(path / "run.json")
             if data["revision"] != expected_revision:
                 raise ValueError("Stale program revision")
-            _validate(path / "bundles" / expected_revision)
+            _validate(path / "bundles" / expected_revision, expected_revision)
             return dict(
                 valid=True, bundle=expected_revision, physical_verdict="unavailable"
             )
@@ -269,7 +274,7 @@ class ExperimentStore:
                     raise ValueError("Command ID input conflict")
                 return self._job(path, result)
             self._admit(path, d, expected_revision)
-            _validate(path / "bundles" / expected_revision)
+            _validate(path / "bundles" / expected_revision, expected_revision)
             job = uuid4().hex
             folder = path / "jobs" / job
             folder.mkdir()
@@ -424,9 +429,10 @@ def _worker(folder: Path) -> None:
                 )
                 _save(folder / "receipt.json", s)
                 initial_q = None
+                next_receipt_at = time.monotonic()
 
                 def poll():
-                    nonlocal initial_q
+                    nonlocal initial_q, next_receipt_at
                     queue.poll(timeout=0)
                     pose = env.robot.get_qpos(name="eef").detach().cpu().tolist()[0]
                     if initial_q is None:
@@ -437,6 +443,10 @@ def _worker(folder: Path) -> None:
                         initial_gripper=initial_q,
                         last_gripper=pose,
                     )
+                    now = time.monotonic()
+                    if now >= next_receipt_at:
+                        _save(folder / "receipt.json", s)
+                        next_receipt_at = now + _PROGRESS_INTERVAL_S
 
                 yield poll
         finally:
@@ -446,7 +456,8 @@ def _worker(folder: Path) -> None:
     try:
         check()
         count = 0
-        entry = _validate(run / "bundles" / s["bundle"])
+        revision = s["bundle"]
+        entry = _validate(run / "bundles" / revision, revision)
         result = _execute_deployment(
             entry,
             device="cuda:0",
