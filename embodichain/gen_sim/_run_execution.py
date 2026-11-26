@@ -114,6 +114,7 @@ def _execute_deployment(
     reset_observer: Callable[[Any], None] | None = None,
     step_observer: Callable[[Any, Any, Any], None] | None = None,
     recording: Path | None = None,
+    world_scope: Callable[[Any], Any] | None = None,
 ) -> dict[str, Any]:
     from embodichain.lab.gym.envs.demo import execute_demo_episode
     from embodichain.lab.gym.utils.gym_utils import config_to_cfg
@@ -134,8 +135,12 @@ def _execute_deployment(
     cfg.sim_cfg.headless = headless
     env = None
     recorder = None
+    from contextlib import ExitStack
+
+    scope = ExitStack()
     try:
         env = get_env_spec(data["id"]).make(cfg=cfg)
+        poll = scope.enter_context(world_scope(env.unwrapped)) if world_scope else None
         reset_result = env.reset(options={"save_data": False})
         if recording is not None:
             recorder = _EpisodeRecording(env, recording)
@@ -143,9 +148,11 @@ def _execute_deployment(
         if reset_observer is not None:
             reset_observer(reset_result[0])
         kwargs = {"episode_index": 0}
-        if step_observer is not None or recorder is not None:
+        if step_observer is not None or recorder is not None or poll is not None:
 
             def observe(active: Any, action: Any, observation: Any) -> None:
+                if poll is not None:
+                    poll()
                 if recorder is not None:
                     recorder.observe(observation)
                 if step_observer is not None:
@@ -171,7 +178,10 @@ def _execute_deployment(
         return report
     finally:
         try:
-            if env is not None:
-                env.close(exit_process=False)
+            scope.close()
         finally:
-            SimulationManager.flush_cleanup_queue()
+            try:
+                if env is not None:
+                    env.close(exit_process=False)
+            finally:
+                SimulationManager.flush_cleanup_queue()

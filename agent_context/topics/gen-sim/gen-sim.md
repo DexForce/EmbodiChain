@@ -191,3 +191,16 @@ TaskSpec separately applies normative criteria.
 
 Choose provider/simulator tests for the changed boundary; unit checks alone do
 not establish remote model quality or native task success.
+
+The local `embodichain mcp --experiment-output DIR` service exposes a bounded
+GenSim authoring pilot for the official single-arena UR5 DexUni deployment.
+`embodichain/gen_sim/agent_experiment.py` owns candidate snapshots, revision
+admission, worker lifetime, budget and independent native measurements.
+An authoring Run starts before any World exists. Each submitted attempt
+creates its own Gym World and publishes its live read-only Session. The MCP
+connection does not own that worker. Cancel and inspect use the original
+run/job IDs. Each attempt verifies the sealed bundle against its requested
+revision. While physics advances, inspection exposes snapshots of the step
+count, simulation time and gripper measurements. The fixed placement
+objective and the candidate drop target
+have separate ownership.

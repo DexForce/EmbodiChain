@@ -59,7 +59,39 @@ def main(argv: Sequence[str] | None = None) -> None:
         type=Path,
         help="Operator grant for a standard handoff-enabled manual World",
     )
+    parser.add_argument(
+        "--experiment-output",
+        type=Path,
+        help="Local durable GenSim authoring runs; no pre-existing World required",
+    )
+    parser.add_argument(
+        "--experiment-agent",
+        help="Restrict this experiment server to one agent session and one run",
+    )
     args = parser.parse_args(argv)
+    if args.experiment_agent and not args.experiment_output:
+        parser.error("--experiment-agent requires --experiment-output")
+    if args.experiment_output is not None:
+        if any(
+            (
+                args.session,
+                args.session_directory,
+                args.writer_key_file,
+                args.handoff_key_file,
+                args.motion_output,
+                args.policy_catalog,
+                args.policy_output,
+                args.run_id,
+                args.turn,
+            )
+        ):
+            parser.error(
+                "Experiment authoring owns its workers; choose one session mode"
+            )
+        from embodichain.mcp._experiments import serve as serve_experiments
+
+        serve_experiments(args.experiment_output, args.experiment_agent)
+        return
     if args.handoff_key_file and (args.writer_key_file or args.policy_catalog):
         parser.error("Select one host control mode")
     if args.motion_output is not None and args.handoff_key_file is None:
