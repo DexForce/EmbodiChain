@@ -531,7 +531,7 @@ class RigidObject(BatchEntity):
             )
         self._entities = handles
 
-    def _initialize_spawn_bound(self, result: Scene) -> None:
+    def _initialize_spawn_bound(self, result: Scene, *, borrowed: bool = False) -> None:
         """Create result-dependent runtime state on this declared facade."""
         if not isinstance(result, Scene):
             raise TypeError(
@@ -570,9 +570,10 @@ class RigidObject(BatchEntity):
         self.is_shared_visual_material = False
 
         super().__init__(cfg, entities, self.device)
-        self._apply_spawn_visual_uv()
-        self._initialize_existing_visual_material()
-        self._apply_initial_state()
+        if not borrowed:
+            self._apply_spawn_visual_uv()
+            self._initialize_existing_visual_material()
+            self._apply_initial_state()
         if self._data is not None:
             self._capture_default_physical_properties()
         self._has_collision_visible_node = False
