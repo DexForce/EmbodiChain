@@ -194,51 +194,71 @@ def _rotation_shift_matrix(rotation_shift_deg: ArrayLike | None) -> np.ndarray |
     return Rotation.from_euler("xyz", angles, degrees=True).as_matrix()
 
 
+def _settled_poses(sim, stations):
+    def read_poses():
+        return torch.cat([v.obj.get_local_pose(to_matrix=True) for v in stations])
+
+    sim.update(step=100)
+    current = read_poses()
+    for _ in range(8):
+        reference = current.clone()
+        settled = torch.ones(len(current), dtype=torch.bool, device=sim.device)
+        for _ in range(5):
+            sim.update(step=10)
+            current = read_poses()
+            displacement = torch.linalg.vector_norm(
+                current[:, :3, 3] - reference[:, :3, 3], dim=1
+            )
+            cosine = ((current[:, :3, :3] * reference[:, :3, :3]).sum((1, 2)) - 1) * 0.5
+            settled &= (displacement <= 0.001) & (cosine >= np.cos(0.005))
+        if settled.all().item():
+            return current.clone()
+    raise ValueError("Target did not settle within 5 simulated seconds")
+
+
 def _smooth(x):
     x = min(max(x, 0.0), 1.0)
     return x**3 * (10 + x * (6 * x - 15))
 
 
-class GraspValidator:
-    """Own a prepared hand, support and dynamic target for independent trials.
+def _validation_scene(num_envs, physics, headless):
+    if physics == "default":
+        physics_cfg = DefaultPhysicsCfg(device="cuda:0", physics_dt=DT, num_substeps=4)
+    elif physics == "newton":
+        physics_cfg = NewtonPhysicsCfg(
+            physics_dt=DT,
+            num_substeps=4,
+            solver_cfg={"solver_type": "dexuni", "coupling": "two_way"},
+        )
+    else:
+        raise ValueError("physics must be default or newton")
+    return SimulationManager(
+        SimulationManagerCfg(
+            num_envs=num_envs,
+            headless=True,
+            width=1280,
+            height=720,
+            enable_ground_plane=False,
+            enable_entity_gizmo=False,
+            robot_ik_gizmo=None,
+            render_cfg=RenderCfg(renderer="no-render" if headless else "fast-rt"),
+            physics_cfg=physics_cfg,
+        )
+    )
 
-    Args:
-        object_cfg: Dynamic target shared by the replicated arenas.
-        gripper: Catalog ID of a calibrated parallel-jaw hand.
-        num_envs: Number of independent trial arenas.
-        variant: Catalog variant for hands with multiple models, such as the
-            left or right Tianji Marvin hand.
-        gripper_urdf: Optional standalone URDF to mount using this hand's
-            catalog calibration and joint controls.
-        physics: GPU backend, either ``default`` or ``newton``. Default (PhysX)
-            hard-couples every URDF mimic joint. Newton runs DexUni with
-            two-way coupling between the hand and target.
-        headless: Set to False to open a native window when the first grasp
-            starts and watch arena 0 in real time.
-        root_from_tcp: Optional 4×4 TCP pose in the native hand root, in metres.
-            Candidate transforms refer to this TCP.
-        stiffness: Optional position gain for the native gripper drives. The
-            translation stage has its own gains and mimic joints follow the
-            backend's coupling rules.
-        max_effort: Optional per-joint drive effort limit in newtons for
-            prismatic joints or newton-metres for revolute joints.
-        open_qpos: Optional open target used for trial reset and approach, by
-            native joint name including mimic followers. Positions use metres
-            for prismatic joints and radians for revolute joints.
-        close_qpos: Optional closing target in the same joint names and units.
-        rotation_shift_deg: Optional object rotation about the fixed arena X, Y
-            and Z axes, in that order, in degrees. A rotated target starts with
-            its lowest collision point on the support, then settles.
-        close_wait_steps: Extra physics steps to hold the fully closed command
-            at the grasp pose after the 40-step closing ramp and before lifting.
-    """
+
+class _GraspStation:
+    """The hand, object and trial controls for one pair inside a caller-owned scene."""
 
     def __init__(
         self,
+        sim: SimulationManager,
         object_cfg: RigidObjectCfg,
         gripper: str,
-        num_envs: int = 1,
+        directory: str,
         *,
+        uid_suffix: str = "",
+        mount_xy: tuple[float, float] = (0.0, 0.0),
         variant: str | None = None,
         gripper_urdf: str | Path | None = None,
         physics: str = "default",
@@ -250,26 +270,19 @@ class GraspValidator:
         close_qpos: dict[str, float] | None = None,
         close_wait_steps: int = 0,
         rotation_shift_deg: ArrayLike | None = None,
+        enable_disturbance: bool = True,
     ) -> None:
+        self.sim = sim
         if type(close_wait_steps) is not int or close_wait_steps < 0:
             raise ValueError("close_wait_steps must be a nonnegative integer")
         self.close_wait_steps = close_wait_steps
+        if type(enable_disturbance) is not bool:
+            raise ValueError("enable_disturbance must be a boolean")
+        self.enable_disturbance = enable_disturbance
         self._show_trials = not headless
-        rotation = _rotation_shift_matrix(rotation_shift_deg)
+        self._rotation = _rotation_shift_matrix(rotation_shift_deg)
         if object_cfg.env_variants:
             raise ValueError("Each validator batch requires a single target geometry")
-        if physics == "default":
-            physics_cfg = DefaultPhysicsCfg(
-                device="cuda:0", physics_dt=DT, num_substeps=4
-            )
-        elif physics == "newton":
-            physics_cfg = NewtonPhysicsCfg(
-                physics_dt=DT,
-                num_substeps=4,
-                solver_cfg={"solver_type": "dexuni", "coupling": "two_way"},
-            )
-        else:
-            raise ValueError("physics must be default or newton")
         overrides = {}
         if gripper_urdf is not None:
             overrides["fpath"] = str(Path(gripper_urdf).resolve(strict=True))
@@ -285,108 +298,98 @@ class GraspValidator:
             for name, value in (("stiffness", stiffness), ("max_effort", max_effort))
             if value is not None
         }
-        self.temp = TemporaryDirectory()
-        self.sim = SimulationManager(
-            SimulationManagerCfg(
-                num_envs=num_envs,
-                headless=True,
-                width=1280,
-                height=720,
-                enable_ground_plane=False,
-                enable_entity_gizmo=False,
-                robot_ik_gizmo=None,
-                render_cfg=RenderCfg(renderer="no-render" if headless else "fast-rt"),
-                physics_cfg=physics_cfg,
+        cfg = resolve_robot_cfg(gripper, overrides, variant=variant)
+        for name, value in drive_overrides.items():
+            setattr(cfg.joint_drive_props, name, value)
+        _stage(cfg, directory, physics, close_qpos, open_qpos=open_qpos)
+        if uid_suffix:
+            cfg.uid += uid_suffix
+            cfg.init_local_pose = None
+        cfg.init_pos = [*mount_xy, 1.5]
+        self.hand = self.sim.add_robot(cfg)
+        self.support = self.sim.add_rigid_object(
+            RigidObjectCfg(
+                uid=f"support{uid_suffix}",
+                shape=CubeCfg(size=(4.0, 4.0, 0.1)),
+                init_pos=(*mount_xy, -0.05),
+                render_enabled=not uid_suffix,
+                # Direct GPU exposes an actor ID for a stationary kinematic support.
+                body_type="kinematic" if physics == "default" else "static",
             )
         )
-        try:
-            cfg = resolve_robot_cfg(gripper, overrides, variant=variant)
-            for name, value in drive_overrides.items():
-                setattr(cfg.joint_drive_props, name, value)
-            _stage(cfg, self.temp.name, physics, close_qpos, open_qpos=open_qpos)
-            cfg.init_pos = [0, 0, 1.5]
-            self.hand = self.sim.add_robot(cfg)
-            self.sim.add_rigid_object(
-                RigidObjectCfg(
-                    uid="support",
-                    shape=CubeCfg(size=(4.0, 4.0, 0.1)),
-                    init_pos=(0.0, 0.0, -0.05),
-                    # Direct GPU exposes an actor ID for a stationary kinematic support.
-                    body_type="kinematic" if physics == "default" else "static",
-                )
+        self.cfg = cfg
+        object_cfg = object_cfg.copy()
+        object_cfg.uid = f"target{uid_suffix}"
+        self._target_uid = object_cfg.uid
+        self.obj = self.sim.add_rigid_object(object_cfg)
+        self.sensor = self.sim.add_sensor(
+            ContactSensorCfg(
+                uid=f"contacts{uid_suffix}",
+                rigid_uid_list=[self.support.uid, self._target_uid],
+                articulation_cfg_list=[
+                    ArticulationContactFilterCfg(
+                        articulation_uid=cfg.uid, link_name_list=list(cfg.pad_links)
+                    )
+                ],
+                max_contacts_per_env=256,
             )
-            object_cfg = object_cfg.copy()
-            object_cfg.uid = "target"
-            self.obj = self.sim.add_rigid_object(object_cfg)
-            self.sensor = self.sim.add_sensor(
-                ContactSensorCfg(
-                    uid="contacts",
-                    rigid_uid_list=["support", "target"],
-                    articulation_cfg_list=[
-                        ArticulationContactFilterCfg(
-                            articulation_uid=cfg.uid, link_name_list=list(cfg.pad_links)
-                        )
-                    ],
-                    max_contacts_per_env=256,
-                )
+        )
+
+    def _read_geometry(self):
+        if self.obj.is_non_dynamic:
+            raise ValueError("Grasp target must be dynamic")
+        self.shapes = [
+            replace(
+                shape,
+                local_pose=self._tensor(shape.local_pose),
+                half_extents=(
+                    None
+                    if shape.half_extents is None
+                    else self._tensor(shape.half_extents)
+                ),
+                vertices=(
+                    None if shape.vertices is None else self._tensor(shape.vertices)
+                ),
             )
-            self.sim.prepare()
-            if self.obj.is_non_dynamic:
-                raise ValueError("Grasp target must be dynamic")
-            self.shapes = [
-                replace(
-                    shape,
-                    local_pose=self._tensor(shape.local_pose),
-                    half_extents=(
-                        None
-                        if shape.half_extents is None
-                        else self._tensor(shape.half_extents)
-                    ),
-                    vertices=(
-                        None if shape.vertices is None else self._tensor(shape.vertices)
-                    ),
-                )
-                for shape in self.obj.get_collision_shapes(env_id=0)
-            ]
-            if not self.shapes:
-                raise ValueError("Target has no collision geometry")
-            if rotation is not None:
-                self._place_rotated_target(rotation)
-            self.initial = self._settled_pose()
-            self.com = self.obj.body_data.com_pose[0, :3].clone()
-            self.cfg = cfg
-            self.root_tcp = self._tensor(cfg.default_root_from_tcp)
-            self.root_contact = self._tensor(cfg.root_from_contact_frame)
-            self.pad_ids = self.sensor.get_actor_ids(cfg.uid, list(cfg.pad_links))
-            self.target_id = self.sensor.get_actor_ids("target")
-            self.support_id = self.sensor.get_actor_ids("support")
-            self.opened = self._tensor(
-                [cfg.joint_commands["open"].get(j, 0.0) for j in self.hand.joint_names]
+            for shape in self.obj.get_collision_shapes(env_id=0)
+        ]
+        if not self.shapes:
+            raise ValueError("Target has no collision geometry")
+
+    def _bind_trial(self, physics):
+        self.com = self.obj.body_data.com_pose[0, :3].clone()
+        cfg = self.cfg
+        self.root_tcp = self._tensor(cfg.default_root_from_tcp)
+        self.root_contact = self._tensor(cfg.root_from_contact_frame)
+        self.pad_ids = self.sensor.get_actor_ids(cfg.uid, list(cfg.pad_links))
+        self.target_id = self.sensor.get_actor_ids(self._target_uid)
+        self.support_id = self.sensor.get_actor_ids(self.support.uid)
+        self.opened = self._tensor(
+            [cfg.joint_commands["open"].get(j, 0.0) for j in self.hand.joint_names]
+        )
+        self.closed = self._tensor(
+            [cfg.joint_commands["grasp"].get(j, 0.0) for j in self.hand.joint_names]
+        )
+        self.axes = [self.hand.joint_names.index(f"stage_{i}") for i in range(3)]
+        self._geometry_contacts = physics == "newton"
+        if not self._geometry_contacts and not self.sensor.contact_capabilities.impulse:
+            raise ValueError("Grasp validation requires measured contact impulses")
+        fingers, support, lost = self._contacts()
+        if not bool((support & ~lost & ~fingers.any(1)).all()):
+            raise ValueError(
+                "Each target must settle on the support without hand contact"
             )
-            self.closed = self._tensor(
-                [cfg.joint_commands["grasp"].get(j, 0.0) for j in self.hand.joint_names]
-            )
-            self.axes = [self.hand.joint_names.index(f"stage_{i}") for i in range(3)]
-            self._geometry_contacts = physics == "newton"
-            if (
-                not self._geometry_contacts
-                and not self.sensor.contact_capabilities.impulse
-            ):
-                raise ValueError("Grasp validation requires measured contact impulses")
-            fingers, support, lost = self._contacts()
-            if not bool((support & ~lost & ~fingers.any(1)).all()):
-                raise ValueError(
-                    "Each target must settle on the support without hand contact"
-                )
-        except BaseException:
-            self.close()
-            raise
 
     def _tensor(self, value: object) -> torch.Tensor:
         return torch.as_tensor(value, device=self.sim.device, dtype=torch.float32)
 
     def _place_rotated_target(self, rotation: np.ndarray) -> None:
         """Rotate each native root in arena axes and rest it on the support."""
+        pose = self._separate_rotated_target(rotation)
+        self.sim.update(step=2)
+        self._reset_target(pose)
+
+    def _separate_rotated_target(self, rotation):
         pose = self.obj.get_local_pose(to_matrix=True).clone()
         pose[:, :3, :3] = pose.new_tensor(rotation) @ pose[:, :3, :3]
         pose[:, 2, 3] -= self._clearance(pose)
@@ -394,39 +397,16 @@ class GraspValidator:
         separated = pose.clone()
         separated[:, 2, 3] += 0.5
         self.obj.set_local_pose(separated)
-        self.sim.update(step=2)
+        return pose
+
+    def _reset_target(self, pose):
         self.obj.set_local_pose(pose)
         zero = torch.zeros_like(pose[:, :3, 3])
         self.obj.set_velocity(zero, zero)
 
     def _settled_pose(self) -> torch.Tensor:
         """Wait up to five simulated seconds for every arena to remain still for 0.5 s."""
-        self.sim.update(step=100)
-        current = self.obj.get_local_pose(to_matrix=True)
-        for _ in range(8):
-            reference = current.clone()
-            settled = torch.ones(
-                self.sim.num_envs, dtype=torch.bool, device=self.sim.device
-            )
-            for _ in range(5):
-                self.sim.update(step=10)
-                current = self.obj.get_local_pose(to_matrix=True)
-                displacement = torch.linalg.vector_norm(
-                    current[:, :3, 3] - reference[:, :3, 3], dim=1
-                )
-                cosine = (
-                    (current[:, :3, :3] * reference[:, :3, :3]).sum((1, 2)) - 1
-                ) * 0.5
-                settled &= (displacement <= 0.001) & (cosine >= np.cos(0.005))
-            if settled.all().item():
-                return current[0].clone()
-        raise ValueError("Target did not settle within 5 simulated seconds")
-
-    def close(self) -> None:
-        """Release physics resources and the temporary mounting URDF."""
-        self.sim.destroy(exit_process=False)
-        SimulationManager.flush_cleanup_queue()
-        self.temp.cleanup()
+        return _settled_poses(self.sim, [self])[0]
 
     def _clearance(self, pose):
         heights = []
@@ -473,18 +453,12 @@ class GraspValidator:
         lost = lost | (data["is_valid"] & ~evidence).any(1)
         return fingers, supported, lost
 
-    def validate(self, poses: np.ndarray, directions: list[str]) -> list[dict]:
-        """Run one full arena batch of object-local TCP poses and named conditions."""
+    def _trial_steps(self, poses):
+        """Yield after writing controls; the scene owner advances physics once."""
         poses = np.asarray(poses)
         n = self.sim.num_envs
-        if (
-            poses.shape != (n, 4, 4)
-            or len(directions) != n
-            or not set(directions) <= {"base", "x", "y"}
-        ):
-            raise ValueError(
-                "One object_from_tcp pose and valid condition per arena required"
-            )
+        if poses.shape != (n, 4, 4):
+            raise ValueError("One object_from_tcp pose per arena required")
         rotations = poses[:, :3, :3]
         if not (
             np.isfinite(poses).all()
@@ -515,19 +489,13 @@ class GraspValidator:
             target = target + [0, 0, 0.05]  # Frame both the pickup and the lift.
             eye = target + [0.36, -0.42, 0.25]
             self.sim.viewer.set_look_at(eye.tolist(), target.tolist(), [0, 0, 1])
-        shift = self._tensor(
-            [
-                {"base": [0, 0, 0], "x": [0.03, 0, 0], "y": [0, 0.03, 0]}[d]
-                for d in directions
-            ]
-        )
         up = self._tensor([0, 0, 0.1])
         history = []
         unavailable = torch.zeros(n, device=axis.device, dtype=torch.bool)
         lift_start = _APPROACH_STEPS + _CLOSE_STEPS + self.close_wait_steps
         lift_end = lift_start + _LIFT_STEPS
-        hold_end = lift_end + _HOLD_STEPS
-        end = hold_end + (2 * _LEG_STEPS if any(d != "base" for d in directions) else 0)
+        disturbance_end = lift_end + (4 * _LEG_STEPS if self.enable_disturbance else 0)
+        end = disturbance_end + _HOLD_STEPS
         deadline = time.monotonic() if self._show_trials else None
         previous = velocity = None
         for step in range(1, end + 1):
@@ -541,10 +509,11 @@ class GraspValidator:
             position = 0.08 * axis * _smooth(step / _APPROACH_STEPS) + up * _smooth(
                 (step - lift_start) / _LIFT_STEPS
             )
-            position += shift * (
-                _smooth((step - hold_end) / _LEG_STEPS)
-                - _smooth((step - hold_end - _LEG_STEPS) / _LEG_STEPS)
-            )
+            if lift_end < step <= disturbance_end:
+                leg, tick = divmod(step - lift_end - 1, _LEG_STEPS)
+                progress = _smooth((tick + 1) / _LEG_STEPS)
+                # Each arena follows the same out-and-back in world X, then Y.
+                position[:, leg // 2] += 0.03 * (1 - progress if leg % 2 else progress)
             q = (
                 opened
                 + (self.closed - self.opened)
@@ -552,7 +521,7 @@ class GraspValidator:
             ).clone()
             q[:, self.axes] = (base[:, :3, :3].mT @ position.unsqueeze(-1)).squeeze(-1)
             self.hand.set_qpos(q)
-            self.sim.update(step=1)
+            yield
             if step < lift_end - 1:
                 continue
             tcp = (
@@ -569,9 +538,7 @@ class GraspValidator:
             if step < lift_end:
                 continue
             fingers, support, lost = self._contacts()
-            unavailable |= (
-                lost if step <= hold_end else lost & (shift.abs().sum(-1) > 0)
-            )
+            unavailable |= lost
             history.append(
                 torch.cat(
                     [
@@ -587,9 +554,120 @@ class GraspValidator:
             )
         samples = torch.stack(history).transpose(0, 1).cpu().numpy()
         return [
-            _result(row, d, bool(bad))
-            for row, d, bad in zip(samples, directions, unavailable.cpu().tolist())
+            _result(row, self.enable_disturbance, bad)
+            for row, bad in zip(samples, unavailable.cpu().tolist())
         ]
+
+
+class GraspValidator(_GraspStation):
+    """Own a prepared hand, support and dynamic target for independent trials.
+
+    Args:
+        object_cfg: Dynamic target shared by the replicated arenas.
+        gripper: Catalog ID of a calibrated parallel-jaw hand.
+        num_envs: Number of independent trial arenas.
+        variant: Catalog variant for hands with multiple models, such as the
+            left or right Tianji Marvin hand.
+        gripper_urdf: Optional standalone URDF to mount using this hand's
+            catalog calibration and joint controls.
+        physics: GPU backend, either ``default`` or ``newton``. Default (PhysX)
+            hard-couples every URDF mimic joint. Newton runs DexUni with
+            two-way coupling between the hand and target.
+        headless: Set to False to open a native window when the first grasp
+            starts and watch arena 0 in real time.
+        root_from_tcp: Optional 4×4 TCP pose in the native hand root, in metres.
+            Candidate transforms refer to this TCP.
+        stiffness: Optional position gain for the native gripper drives. The
+            translation stage has its own gains and mimic joints follow the
+            backend's coupling rules.
+        max_effort: Optional per-joint drive effort limit in newtons for
+            prismatic joints or newton-metres for revolute joints.
+        open_qpos: Optional open target used for trial reset and approach, by
+            native joint name including mimic followers. Positions use metres
+            for prismatic joints and radians for revolute joints.
+        close_qpos: Optional closing target in the same joint names and units.
+        rotation_shift_deg: Optional object rotation about the fixed arena X, Y
+            and Z axes, in that order, in degrees. A rotated target starts with
+            its lowest collision point on the support, then settles.
+        close_wait_steps: Extra physics steps to hold the fully closed command
+            at the grasp pose after the 40-step closing ramp and before lifting.
+        enable_disturbance: After lifting, move 3 cm along arena +X and back,
+            then 3 cm along +Y and back, before the three-second hold.
+    """
+
+    def __init__(
+        self,
+        object_cfg: RigidObjectCfg,
+        gripper: str,
+        num_envs: int = 1,
+        *,
+        variant: str | None = None,
+        gripper_urdf: str | Path | None = None,
+        physics: str = "default",
+        headless: bool = True,
+        root_from_tcp: ArrayLike | None = None,
+        stiffness: float | None = None,
+        max_effort: float | None = None,
+        open_qpos: dict[str, float] | None = None,
+        close_qpos: dict[str, float] | None = None,
+        close_wait_steps: int = 0,
+        rotation_shift_deg: ArrayLike | None = None,
+        enable_disturbance: bool = True,
+    ) -> None:
+        self.sim = _validation_scene(num_envs, physics, headless)
+        self.temp = TemporaryDirectory()
+        try:
+            super().__init__(
+                self.sim,
+                object_cfg,
+                gripper,
+                self.temp.name,
+                variant=variant,
+                gripper_urdf=gripper_urdf,
+                physics=physics,
+                headless=headless,
+                root_from_tcp=root_from_tcp,
+                stiffness=stiffness,
+                max_effort=max_effort,
+                open_qpos=open_qpos,
+                close_qpos=close_qpos,
+                close_wait_steps=close_wait_steps,
+                rotation_shift_deg=rotation_shift_deg,
+                enable_disturbance=enable_disturbance,
+            )
+            self.sim.prepare()
+            self._read_geometry()
+            if self._rotation is not None:
+                self._place_rotated_target(self._rotation)
+            self.initial = self._settled_pose()
+            self._bind_trial(physics)
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        """Release physics resources and the temporary mounting URDF."""
+        self.sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
+        self.temp.cleanup()
+
+    def validate(self, poses: np.ndarray) -> list[dict]:
+        """Execute one continuous grasp trajectory per arena.
+
+        Args:
+            poses: One object-from-TCP transform per arena, shape (N, 4, 4).
+
+        Returns:
+            One result per pose, with measured disturbance and hold windows
+            for the phases reached after lift.
+        """
+        steps = self._trial_steps(poses)
+        while True:
+            try:
+                next(steps)
+            except StopIteration as done:
+                return done.value
+            self.sim.update(step=1)
 
 
 def _window(row):
@@ -614,42 +692,46 @@ def _window(row):
     )
 
 
-def _result(row, direction, bad):
-    if direction == "base":
-        row = row[: _HOLD_STEPS + 1]
-    if bad or not np.isfinite(row).all():
+def _result(row, enable_disturbance, bad):
+    hold_start = 4 * _LEG_STEPS if enable_disturbance else 0
+    if bad or len(row) != hold_start + _HOLD_STEPS + 1 or not np.isfinite(row).all():
         return {"status": "missing", "reason": "incomplete physics observations"}
-    hold = _window(row[: _HOLD_STEPS + 1])
+    hold_trace = row[hold_start:]
+    lifted = row[0, _CLEARANCE] >= 0.02 and row[0, _PADS].any() and not row[0, _SUPPORT]
+    disturbance = None
+    hold = None
+    if not lifted:
+        failure_stage = "lift"
+    else:
+        if enable_disturbance:
+            disturbance = _window(row[: hold_start + 1])
+        if disturbance is not None and not disturbance["success"]:
+            failure_stage = "disturbance"
+        else:
+            hold = _window(hold_trace)
+            failure_stage = None if hold["success"] else "hold"
     cutoffs = {
-        str(s): _window(row[: round(s / DT) + 1])["success"] for s in (0.5, 1.0, 3.0)
+        str(s): hold is not None and _window(hold_trace[: round(s / DT) + 1])["success"]
+        for s in (0.5, 1.0, 3.0)
     }
-    shake = (
-        _window(row[_HOLD_STEPS:]) if direction != "base" and hold["success"] else None
-    )
-    acceleration = row[_HOLD_STEPS + 1 :, _ACCEL:] if direction != "base" else None
+    peak_acceleration = peak_axis_acceleration = None
+    if enable_disturbance:
+        acceleration = row[1 : hold_start + 1, _ACCEL:]
+        peak_acceleration = float(np.linalg.norm(acceleration, axis=1).max())
+        axis_change = 2 * _LEG_STEPS
+        peak_axis_acceleration = float(
+            max(
+                np.abs(acceleration[:axis_change, 0]).max(),
+                np.abs(acceleration[axis_change:, 1]).max(),
+            )
+        )
     return dict(
         status="ok",
-        success=hold["success"] and (shake is None or shake["success"]),
-        failure_stage=(
-            ("lift" if not hold["entered"] else "hold")
-            if not hold["success"]
-            else ("disturbance" if shake and not shake["success"] else None)
-        ),
+        success=failure_stage is None,
+        failure_stage=failure_stage,
         hold=hold,
         retention=cutoffs,
-        disturbance=shake,
-        peak_acceleration_m_s2=(
-            float(np.linalg.norm(acceleration, axis=1).max())
-            if acceleration is not None
-            else None
-        ),
-        peak_axis_acceleration_m_s2=(
-            float(
-                np.abs(
-                    row[_HOLD_STEPS + 1 :, _ACCEL + ("x", "y").index(direction)]
-                ).max()
-            )
-            if direction != "base"
-            else None
-        ),
+        disturbance=disturbance,
+        peak_acceleration_m_s2=peak_acceleration,
+        peak_axis_acceleration_m_s2=peak_axis_acceleration,
     )

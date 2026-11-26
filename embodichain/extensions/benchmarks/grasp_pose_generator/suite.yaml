@@ -1,5 +1,7 @@
 # Extra physics steps at the closed target before lifting (60 × 0.01 s = 0.60 s).
 close_wait_steps: 60
+# After lifting, move 3 cm along world +X and back, then +Y and back, before holding.
+enable_disturbance: true
 # Open-gripper clearance in metres for antipodal candidate filtering.
 collision_threshold: 0.005  # 5 mm from the object and the inferred ground plane.
 # Joint targets use metres for prismatic joints and radians for revolute joints.

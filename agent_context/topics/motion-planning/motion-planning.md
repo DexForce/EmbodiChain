@@ -150,7 +150,7 @@ Tests target production owners rather than importing tutorial implementations.
 
 For physical single-object grasp evaluation, the installed
 `embodichain.extensions.benchmarks.grasp_pose_generator` runner freezes ranked object-local
-TCPs and delegates independent base/X/Y trials to
+TCPs and delegates one physical trial per candidate to
 `embodichain.lab.sim.grasp_validation.GraspValidator`. The
 [physical suite](../../../embodichain/extensions/benchmarks/grasp_pose_generator/README.md)
 owns per-hand TCP, drive stiffness, effort limits and open/closed joint targets, the pre-lift
@@ -159,10 +159,15 @@ Candidate collision geometry uses the same open command as the physical approach
 The suite sets the open-hand clearance for generated candidates. External
 candidate files go directly to physical validation.
 Results are grouped by gripper, object category and their combination.
-The visual-check preset reuses the full suite's hand and object settings
-for one nominal grasp per gripper and category. The validator applies hard
-coupling to gripper mimic joints on PhysX.
+When disturbance is enabled, the lifted gripper makes consecutive round trips
+along world +X and +Y before the stationary hold. The visual-check preset
+inherits this setting for one grasp per gripper and category. The validator
+applies hard coupling to gripper mimic joints on PhysX.
 Generation and execution share the catalog variant and frames, and use the
 same standalone URDF. Suite asset roots can reference registered datasets
 through `get_data_path()` or directories relative to the suite file.
+For simultaneous evaluation of unlike hand/object pairs, the suite runner's
+`run --grid COUNT` places up to COUNT pairs on a square grid with
+isolated collision groups and one shared PhysX
+scene clock. The default runner batches candidates for one pair across arenas.
 The legacy CoffeeCup sweep measures geometric sampling and selection.

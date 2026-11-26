@@ -4,20 +4,18 @@ From the repository root, with the simulation dependencies and CUDA available:
 
 ```bash
 d=embodichain/extensions/benchmarks/grasp_pose_generator
-embodichain benchmark grasp-pose-generator validate --case "$d/block.yaml" --poses "$d/candidates.jsonl" --num-envs 9 --output outputs/benchmarks/grasp-validation
-python -m embodichain benchmark grasp-pose-generator run --suite "$d/suite.yaml" --num-envs 30 --output outputs/benchmarks/grasp-desk --resume
+embodichain benchmark grasp-pose-generator validate --case "$d/block.yaml" --poses "$d/candidates.jsonl" --num-envs 3 --output outputs/benchmarks/grasp-validation
+python -m embodichain benchmark grasp-pose-generator run --suite "$d/suite.yaml" --num-envs 10 --output outputs/benchmarks/grasp-desk --resume
 ```
 
 To watch the suite execute grasps, use `run --no-headless`. The terminal
 shows scene preparation and candidate generation. The window opens when
 the first candidate is in its pre-grasp pose. A case with zero candidates
 prints a message and skips playback. The camera starts on arena 0 and the
-terminal shows the object, gripper, candidate rank, condition and result.
-Each successful base grasp holds the object still for three seconds after
-lifting it 10 cm. On a fresh run, three
-arenas play the base, X and Y conditions of each candidate in parallel, so
-arena 0 shows one nominal grasp per candidate. Use `--num-envs 1` to watch
-every condition in sequence.
+terminal shows the object, gripper, candidate rank and result. Each candidate
+gets one trial from approach through hold. Multiple arenas run different
+candidate ranks in parallel. Use `--num-envs 1` to watch every candidate
+in sequence.
 
 ```bash
 python -m embodichain benchmark grasp-pose-generator run --suite "$d/suite.yaml" --no-headless --num-envs 3 --output outputs/benchmarks/grasp-desk-view
@@ -33,11 +31,44 @@ The preset references `suite.yaml` for hand calibration, object physics and
 placement. Its `objects` mapping selects one model ID per category. Each of
 the 35 hand/category pairs uses the first configured seed, method and placement.
 The antipodal generator samples 2,000 rays per pair; `sample_count` controls
-this budget. The native window opens for the top-ranked candidate's ordinary
-lift and three-second hold. A pair with zero candidates skips playback and
+this budget. The native window shows the top-ranked candidate's lift,
+optional disturbance and three-second hold. A pair with zero candidates skips playback and
 counts as a failed check with the reason `no candidate`.
 The terminal shows progress, and `report.md` lists each pair's outcome and
 failure stage. Use `--headless` to run the same checks without a window.
+
+### Run different hands and objects together
+
+`run --grid COUNT` places up to `COUNT` cases in one PhysX scene. Each
+side of the square grid has `ceil(sqrt(COUNT))` cells. For example,
+`--grid 35` fills 35 cells of a 6 × 6 grid in row-major order and leaves
+the last cell empty. The runner mixes hands and objects across the grid, then
+loads the next group until it has covered the suite. Every active hand sends
+its command before the scene advances one physics step. Each cell has its own
+PhysX collision group, contact sensor and 4 m × 4 m support centered on its
+object workspace. The window draws a single tabletop for the grid.
+`--grid-spacing` sets the distance between neighboring centers in metres
+(default 1.0). The camera frames the entire grid.
+
+```bash
+d=embodichain/extensions/benchmarks/grasp_pose_generator
+python -m embodichain benchmark grasp-pose-generator run --suite "$d/visual_check.yaml" --grid 35 --close-wait-steps 260 --no-headless --output outputs/benchmarks/grasp-grid-view
+python -m embodichain benchmark grasp-pose-generator run --suite "$d/suite.yaml" --grid 16 --close-wait-steps 260 --headless --resume --output outputs/benchmarks/grasp-grid
+```
+
+The examples hold the final closing command for 2.6 simulated seconds before
+lift. Omit `--close-wait-steps` to use the YAML value.
+The override also works for the ordinary sequential runner.
+
+The grid uses the default PhysX backend and one native arena. Candidate
+generation runs per pair. Candidate rank, grasp outcome and checkpoint are
+recorded separately for each pair. Between candidate ranks, the grid parks
+the hands and lets the targets settle again at the configured placement.
+Reuse the same suite, grid count, spacing and output directory when resuming.
+Grid runs report wall-clock time for the
+whole run because the pairs share their physics steps. Contact-sensitive grasps
+can change outcome between layouts even with the same object-local candidate.
+For comparisons across revisions, keep the physics backend, layout and dwell fixed.
 
 To watch a completed case again, omit `--resume` and use a fresh output
 directory. Use the default headless mode when comparing execution times.
@@ -146,33 +177,44 @@ After one simulated second, the validator checks the target pose every 0.1 s.
 It takes a snapshot once every arena stays within 1 mm and 0.005 rad of its
 starting pose for a 0.5 s window. A rocking target can settle for up to 5 s.
 Each scene checkpoint stores the frozen candidates and measured starting pose.
-Each condition starts from the same settled target pose with cleared velocities.
-The base trial approaches 8 cm in 60 physics steps and ramps the fingers from
+Each candidate starts from the same settled target pose with cleared velocities.
+The gripper approaches 8 cm in 60 physics steps and ramps the fingers from
 open to closed over the next 40 steps. The suite-wide `close_wait_steps` then
 holds the closed command at the grasp location before lifting. Each step is
 0.01 s. The bundled suite sets 60 extra steps, giving the fingers 1.00 s from
 the start of closing until lift. Set it to 0 for an immediate lift after the
 ramp. Files that omit the key use 0. Single-case validation accepts the same
-key in the case YAML. The lift travels 10 cm in 80 steps, followed by a 3 s
-hold. Changes to the wait or target mass select a new case checkpoint.
-The independent X and Y trials also travel 3 cm horizontally and back in two
-0.30 s minimum-jerk legs. The commanded acceleration peak is 1.92 m/s².
+key in the case YAML. The lift travels 10 cm in 80 steps.
+
+`enable_disturbance` controls the motion immediately after lift. It defaults
+to `true` in suite and single-case YAML. The visual preset inherits the suite
+value. With the fingers closed at lift height, the gripper moves 3 cm along
+world +X, returns to the lift position, moves 3 cm along world +Y and returns
+again. Each minimum-jerk leg takes 0.30 s, for 1.20 s of motion in one grasp.
+The gripper then holds still for 3 s. Setting `enable_disturbance: false`
+starts the same hold immediately after lift.
+
+The protocol and the disturbance setting are part of the checkpoint identity.
+`--resume` reuses trials from the matching protocol. Changing the wait or
+target mass also selects a new checkpoint.
 Labels use collision clearance, support contact, continuous retention and
 terminal bilateral pad contact. Relative COM motion and orientation are
 diagnostics. A window records whether the target entered airborne, and whether its drop time was censored at the observation horizon.
 Missing contact evidence is retried from checkpoints. Native worker failure
 does not remove its scene from the intended population.
 
-The Markdown and JSON reports show Success@1, Hit@5, Hit@10, Precision@10
-and Robust@1 by gripper, by object category and by gripper/category pair.
+The Markdown and JSON reports show Success@1, Hit@5, Hit@10 and Precision@10
+by gripper, by object category and by gripper/category pair. Success requires
+the candidate to pass the lift, the disturbance when enabled, and the final hold.
 Each object instance and gripper pair has equal weight after averaging its
 seeds and placements. Missing candidate slots count as failures for
 Precision@10. Missing observations leave the affected group's score unavailable.
-Conditional X/Y retention uses only trials that qualified to start that
-disturbance. The JSON includes case inventory, stage diagnostics, bootstrap
+Conditional disturbance retention uses the trials that entered the combined
+X/Y motion. The JSON includes case inventory, stage diagnostics, bootstrap
 intervals over object instances and paired method differences.
 
-Each Parquet trial records its gripper, object instance and category. Use a
+Each Parquet trial in `trials/v6/` records one candidate rank, its gripper,
+object instance, category and disturbance setting. Use a
 fresh output directory when switching datasets or replacing referenced USD
 layers. Checkpoints retain user-supplied candidate metadata such as score
 and opening.

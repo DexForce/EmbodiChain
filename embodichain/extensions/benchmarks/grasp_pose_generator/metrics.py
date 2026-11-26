@@ -25,62 +25,44 @@ import numpy as np
 
 __all__ = ["summarize"]
 
-_METRICS = ("Success@1", "Hit@5", "Hit@10", "Precision@10", "Robust@1")
+_METRICS = ("Success@1", "Hit@5", "Hit@10", "Precision@10")
 
 
 def _case_metrics(case):
     rows = case["trials"]
-    if case.get("error") or any(r["status"] != "ok" for r in rows):
+    if (
+        case.get("error")
+        or case.get("finished") is False
+        or any(r["status"] != "ok" for r in rows)
+    ):
         return None
-    outcomes = {(r["rank"], r["condition"]): r["success"] for r in rows}
-    expected = {
-        (rank, d) for rank in range(1, case["count"] + 1) for d in ("base", "x", "y")
-    }
+    outcomes = {r["rank"]: r["success"] for r in rows}
+    expected = set(range(1, case["count"] + 1))
     if outcomes.keys() != expected or len(outcomes) != len(rows):
         return None
-    base = [outcomes.get((i, "base"), False) for i in range(1, 11)]
+    ranked = [outcomes.get(i, False) for i in range(1, 11)]
     return np.array(
-        [
-            base[0],
-            any(base[:5]),
-            any(base),
-            sum(base) / 10,
-            all(outcomes.get((1, d), False) for d in ("base", "x", "y")),
-        ],
-        dtype=float,
+        [ranked[0], any(ranked[:5]), any(ranked), sum(ranked) / 10], dtype=float
     )
 
 
 def _diagnostics(rows):
     info = {}
-    nominal = [r for r in rows if r["condition"] == "base"]
-    info["base_retention"] = {
+    info["hold_retention"] = {
         str(t): (
-            np.mean([r["retention"][str(t)] for r in nominal]).item()
-            if nominal
-            else None
+            np.mean([r["retention"][str(t)] for r in rows]).item() if rows else None
         )
         for t in (0.5, 1.0, 3.0)
     }
-    for d in ("x", "y"):
-        trials = [r for r in rows if r["condition"] == d and r["hold"]["success"]]
-        info[d] = {
-            "started": len(trials),
-            "passed": sum(r["success"] for r in trials),
-            "conditional_retention": (
-                sum(r["success"] for r in trials) / len(trials) if trials else None
-            ),
-        }
     for phase in ("hold", "disturbance"):
         windows = [
-            r[phase]
-            for r in rows
-            if r.get(phase) is not None
-            and r[phase].get("entered", True)
-            and (phase != "hold" or r["condition"] == "base")
+            r[phase] for r in rows if r.get(phase) is not None and r[phase]["entered"]
         ]
+        passed = sum(w["success"] for w in windows)
         info[phase] = {
             "entered": len(windows),
+            "passed": passed,
+            "conditional_retention": passed / len(windows) if windows else None,
             "drops": sum(w["drop_s"] is not None for w in windows),
         }
         for metric in ("slip_mm", "rotation_deg"):

@@ -26,20 +26,21 @@ import tempfile
 
 from .metrics import _METRICS
 
+_PROTOCOL_VERSION = 6
+
 
 def _export_trials(out, cases):
     """Export one typed, atomically replaceable Parquet part per frozen case."""
     import polars as pl
 
-    dest = out / "trials"
-    dest.mkdir(exist_ok=True)
+    dest = out / "trials" / f"v{_PROTOCOL_VERSION}"
+    dest.mkdir(parents=True, exist_ok=True)
     identity = ("physics", "algorithm", "object", "category", "gripper", "placement")
     schema = {
         k: pl.String
         for k in (
             *identity,
             "trial_id",
-            "condition",
             "status",
             "failure_stage",
             "reason",
@@ -48,6 +49,7 @@ def _export_trials(out, cases):
     schema.update(
         rank=pl.Int64,
         seed=pl.Int64,
+        enable_disturbance=pl.Boolean,
         success=pl.Boolean,
         peak_acceleration_m_s2=pl.Float64,
         peak_axis_acceleration_m_s2=pl.Float64,
@@ -55,6 +57,7 @@ def _export_trials(out, cases):
     for exponent in ("0.5", "1.0", "3.0"):
         schema[f"retained_{exponent}s"] = pl.Boolean
     for phase in ("hold", "disturbance"):
+        schema[f"{phase}_success"] = pl.Boolean
         schema[f"{phase}_entered"] = pl.Boolean
         schema[f"{phase}_censored"] = pl.Boolean
         for key in (
@@ -71,12 +74,12 @@ def _export_trials(out, cases):
         records = []
         for trial in case["trials"]:
             row = {k: case[k] for k in (*identity, "seed")}
+            row["enable_disturbance"] = case["protocol"]["enable_disturbance"]
             row.update(
                 {
                     k: trial.get(k)
                     for k in (
                         "trial_id",
-                        "condition",
                         "status",
                         "failure_stage",
                         "reason",
@@ -114,6 +117,23 @@ def _metric_groups(report):
             yield hand, category, group
 
 
+def _post_lift_motion(protocol: dict) -> str:
+    if protocol["enable_disturbance"]:
+        return (
+            "After lift the gripper moved 3 cm along world +X and returned, "
+            "then moved 3 cm along world +Y and returned before the hold."
+        )
+    return "The hold started immediately after lift with the disturbance disabled."
+
+
+def _grid_description(grid: dict) -> str:
+    capacity = grid.get("capacity", grid["rows"] * grid["columns"])
+    return (
+        f"Shared PhysX grid {grid['rows']} × {grid['columns']}, up to {capacity} "
+        f"cases per batch, spacing {grid['spacing_m']:g} m."
+    )
+
+
 def _write_report(out, report):
     protocol = report["protocol"]
     wait_steps = protocol["close_wait_steps"]
@@ -124,12 +144,21 @@ def _write_report(out, report):
         "",
         f"The closing command stayed at its final target for {wait_steps} extra steps "
         f"({wait_steps * protocol['physics_dt_s']:.2f} s) before lift.",
+        _post_lift_motion(protocol),
         "",
-        "## Time & Memory",
-        "",
-        "| Gripper | Object category | Algorithm | Timed cases | Median time (ms) | Median CPU Δ (MiB) | Median GPU Δ (MiB) | Peak GPU (MiB) |",
-        "|---|---|---|---:|---:|---:|---:|---:|",
     ]
+    grid = protocol.get("grid")
+    if grid:
+        lines.append(_grid_description(grid))
+    else:
+        lines.extend(
+            [
+                "## Time & Memory",
+                "",
+                "| Gripper | Object category | Algorithm | Timed cases | Median time (ms) | Median CPU Δ (MiB) | Median GPU Δ (MiB) | Peak GPU (MiB) |",
+                "|---|---|---|---:|---:|---:|---:|---:|",
+            ]
+        )
     timing = defaultdict(list)
     for case in report["case_inventory"]:
         if "performance" in case:
@@ -147,8 +176,8 @@ def _write_report(out, report):
     lines.extend(
         [
             "",
-            f"Run wall time {report['wall_s']:.2f} s. Recorded trials {report['attempts']}. "
-            "Memory uses worker RSS and the Torch CUDA allocator.",
+            f"Run wall time {report['wall_s']:.2f} s. Recorded trials {report['attempts']}."
+            + ("" if grid else " Memory uses worker RSS and the Torch CUDA allocator."),
             "",
             "## Success & Other Metrics",
             "",
@@ -171,8 +200,8 @@ def _write_report(out, report):
         "",
         "## Leaderboard",
         "",
-        "| Algorithm | Overall Success@1 | Overall Robust@1 |",
-        "|---|---:|---:|",
+        "| Algorithm | Overall Success@1 |",
+        "|---|---:|",
     ]
     methods = report["overall"]["algorithms"]
     for method, stats in sorted(
@@ -181,11 +210,8 @@ def _write_report(out, report):
         reverse=True,
     ):
         metrics = stats["metrics"]
-        cells = " | ".join(
-            f"{metrics[key]:.1%}" if metrics else "—"
-            for key in ("Success@1", "Robust@1")
-        )
-        lines.append(f"| {method} | {cells} |")
+        score = f"{metrics['Success@1']:.1%}" if metrics else "—"
+        lines.append(f"| {method} | {score} |")
     lines += [
         "",
         f"Missing cases {report['missing_cases']}. Each object instance and gripper pair has equal weight. "
@@ -195,14 +221,14 @@ def _write_report(out, report):
 
 
 def _visual_outcome(case: dict) -> tuple[str, str | None]:
-    """Describe the observed top-ranked base trial or why it is unavailable."""
+    """Describe the observed top-ranked grasp or why it is unavailable."""
     if "error" in case:
         return "error", case["error"]
     trials = case["trials"]
     if not trials and case["count"] == 0 and case.get("finished"):
         return "failed", "no candidate"
-    if len(trials) != 1 or (trials[0]["rank"], trials[0]["condition"]) != (1, "base"):
-        return "missing", "Expected one rank-1 base trial"
+    if len(trials) != 1 or trials[0]["rank"] != 1:
+        return "missing", "Expected one rank-1 trial"
     trial = trials[0]
     if trial["status"] != "ok":
         return "missing", trial.get("reason", trial["status"])
@@ -245,6 +271,7 @@ def _write_visual_report(out: Path, report: dict) -> None:
         "",
         f"{len(report['cases'])} gripper/category pairs, {report['attempts']} recorded "
         f"attempts on {report['protocol']['physics']}.",
+        _post_lift_motion(report["protocol"]),
         "",
         f"{counts['success']} successful, {counts['failed']} failed, "
         f"{counts['missing']} missing observations, {counts['error']} errors.",
@@ -252,6 +279,8 @@ def _write_visual_report(out: Path, report: dict) -> None:
         "| Gripper | Object category | Object | Outcome | Stage or reason |",
         "|---|---|---|---|---|",
     ]
+    if grid := report["protocol"].get("grid"):
+        lines[2:2] = [_grid_description(grid), ""]
     for row in report["cases"]:
         cells = [
             row["gripper"],

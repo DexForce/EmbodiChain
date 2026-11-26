@@ -42,35 +42,45 @@ from embodichain.robot_registry import resolve_gripper_defaults
 from embodichain.utils.string import resolve_matching_names_values
 
 
-def _trace(length=361):
+def _trace(length=421):
     row = np.zeros((length, 19))
     row[:, 3:12] = np.eye(3).reshape(9)
     row[:, 12:15] = [0.09, 1, 1]
     return row
 
 
-def test_rotating_retained_target_and_directional_drop():
+def test_disturbance_precedes_hold_and_loss_is_final():
     row = _trace()
-    row[320:, 3:12] = np.diag([-1, -1, 1]).reshape(9)
-    kept = _result(row, "x", False)
+    row[65:, 3:12] = np.diag([-1, -1, 1]).reshape(9)
+    kept = _result(row, True, False)
     assert kept["success"] and kept["disturbance"]["rotation_deg"] == 180
-    row[335:, 13:15] = 0
-    lost = _result(row, "y", False)
-    assert lost["hold"]["success"] and not lost["success"]
-    assert np.isclose(lost["disturbance"]["drop_s"], 0.35)
-    assert _result(row, "x", True)["status"] == "missing"
+    assert kept["hold"]["rotation_deg"] == 0
+
+    # Briefly lose the object in the Y leg, then regain both pad contacts.
+    row[95, 13:15] = 0
+    lost = _result(row, True, False)
+    assert not lost["success"] and lost["failure_stage"] == "disturbance"
+    assert lost["disturbance"]["drop_s"] == pytest.approx(0.95)
+    assert lost["hold"] is None and not any(lost["retention"].values())
+    assert _result(row, True, True)["status"] == "missing"
+    assert _result(row[:-1], True, False)["status"] == "missing"
+
+    # Loss after the completed return belongs to the following hold window.
+    row = _trace()
+    row[120 + 70 :, 13:15] = 0
+    lost = _result(row, True, False)
+    assert lost["disturbance"]["success"] and lost["failure_stage"] == "hold"
+    assert lost["hold"]["drop_s"] == pytest.approx(0.70)
+    assert lost["retention"] == {"0.5": True, "1.0": False, "3.0": False}
 
 
 def test_ranking_missing_evidence_and_zero_padding():
     rows = []
     for rank in (1, 2, 3):
-        for direction in ("base", "x", "y"):
-            trace = _trace()
-            if rank != 3:
-                trace[:, 13:15] = 0
-            rows.append(
-                dict(_result(trace, direction, False), rank=rank, condition=direction)
-            )
+        trace = _trace()
+        if rank != 3:
+            trace[75:, 13:15] = 0
+        rows.append(dict(_result(trace, True, False), rank=rank))
     case = dict(
         count=3,
         trials=rows,
@@ -88,11 +98,13 @@ def test_ranking_missing_evidence_and_zero_padding():
         "Hit@5": 1,
         "Hit@10": 1,
         "Precision@10": 0.1,
-        "Robust@1": 0,
     }
-    rows[0].update(_result(_trace(), "base", False))
-    rows[1].update(_result(_trace(), "x", False))
-    assert scores()["Success@1"] == 1 and scores()["Robust@1"] == 0
+    diagnostics = summarize([case])["overall"]["algorithms"]["test"]["diagnostics"]
+    assert diagnostics["disturbance"]["entered"] == 3
+    assert diagnostics["disturbance"]["passed"] == 1
+    assert diagnostics["hold"]["entered"] == 1
+    rows[0].update(_result(_trace(), True, False))
+    assert scores()["Success@1"] == 1
     rows.pop()
     incomplete = summarize([case])
     assert incomplete["missing_cases"] == 1
@@ -101,10 +113,7 @@ def test_ranking_missing_evidence_and_zero_padding():
 
 def test_gripper_and_category_scores_weight_objects_equally():
     records = []
-    good = [
-        dict(_result(_trace(), d, False), rank=1, condition=d)
-        for d in ("base", "x", "y")
-    ]
+    good = [dict(_result(_trace(), True, False), rank=1)]
     for method in ("first", "second"):
         for object_id, category, seeds in (
             ("easy", "book", 3),
@@ -156,6 +165,8 @@ def test_inline_suite_reports_gripper_category_and_instance(
     shift = [25, 0, -45]
     suite = {
         "collision_threshold": 0.007,
+        "close_wait_steps": 60,
+        "enable_disturbance": False,
         "grippers": [hand],
         "objects": [
             {
@@ -173,16 +184,19 @@ def test_inline_suite_reports_gripper_category_and_instance(
     def completed_case(spec, method, source, root, out, args):
         assert spec["rotation_shift_deg"] == shift
         if source is None:
+            assert spec["close_wait_steps"] == 260
             assert spec["collision_threshold"] == 0.007
+            assert spec["enable_disturbance"] is False
+        enabled = spec.get("enable_disturbance", True)
         trials = [
-            dict(_result(_trace(), d, False), rank=1, condition=d)
-            for d in ("base", "x", "y")
+            dict(_result(_trace(421 if enabled else 301), enabled, False), rank=1)
         ]
         return dict(
             spec,
             algorithm=method,
             physics=args.physics,
             trial_id_prefix="case1",
+            protocol={"enable_disturbance": enabled},
             count=1,
             finished=True,
             trials=trials,
@@ -190,21 +204,35 @@ def test_inline_suite_reports_gripper_category_and_instance(
 
     monkeypatch.setattr(cli, "ProcessPoolExecutor", lambda **_: ThreadPoolExecutor(1))
     monkeypatch.setattr(cli, "_run_case", completed_case)
-    cli.main(["run", "--suite", str(config), "--output", str(tmp_path)])
-    report = json.loads((tmp_path / "report.json").read_text())
-    assert (
-        report["by_gripper_category"][hand]["boxes"]["algorithms"]["antipodal"][
-            "metrics"
-        ]["Robust@1"]
-        == 1
+    cli.main(
+        [
+            "run",
+            "--suite",
+            str(config),
+            "--close-wait-steps",
+            "260",
+            "--output",
+            str(tmp_path),
+        ]
     )
-    trials = pl.read_parquet(tmp_path / "trials" / "case1.parquet")
+    report = json.loads((tmp_path / "report.json").read_text())
+    assert report["protocol"]["close_wait_steps"] == 260
+    stats = report["by_gripper_category"][hand]["boxes"]["algorithms"]["antipodal"]
+    assert stats["metrics"]["Success@1"] == 1
+    assert report["protocol"]["enable_disturbance"] is False
+    assert stats["diagnostics"]["disturbance"]["conditional_retention"] is None
+    trials = pl.read_parquet(tmp_path / "trials" / "v6" / "case1.parquet")
+    assert trials["enable_disturbance"].to_list() == [False]
+    assert "condition" not in trials.columns
     assert trials.select("gripper", "category", "object").unique().rows() == [
         (hand, "boxes", "block")
     ]
     assert "object_holdout" not in trials.columns
     markdown = (tmp_path / "report.md").read_text()
     assert hand in markdown and "boxes" in markdown and "both_new" not in markdown
+    config.write_text(yaml.safe_dump(suite | {"enable_disturbance": "false"}))
+    with pytest.raises(ValueError, match="enable_disturbance"):
+        cli.main(["run", "--suite", str(config), "--output", str(tmp_path)])
 
     case = tmp_path / "block.yaml"
     case.write_text(
@@ -251,6 +279,7 @@ def test_visual_preset_dispatches_one_case_per_gripper_category(
     monkeypatch.setattr("embodichain.data.get_data_path", resolve_asset)
     suite.update(
         seeds=[17, 23],
+        enable_disturbance=False,
         algorithms={"external": "poses.jsonl", "other": None},
     )
     for hand in suite["grippers"]:
@@ -293,9 +322,10 @@ def test_visual_preset_dispatches_one_case_per_gripper_category(
             algorithm=method,
             case_config=spec,
             trial_id_prefix=str(len(attempts)),
+            protocol={"enable_disturbance": spec["enable_disturbance"]},
             count=int(missing),
             trials=(
-                [dict(rank=1, condition="base", status="missing", reason="sensor lost")]
+                [dict(rank=1, status="missing", reason="sensor lost")]
                 if missing
                 else []
             ),
@@ -332,6 +362,7 @@ def test_visual_preset_dispatches_one_case_per_gripper_category(
                 "external",
             )
             assert source == [candidate]
+            assert spec["enable_disturbance"] is False
             assert "collision_threshold" not in spec
             assert spec["visual_check"] == {"sample_count": visual["sample_count"]}
             assert (
@@ -344,7 +375,7 @@ def test_visual_preset_dispatches_one_case_per_gripper_category(
         cli.suite_objects(suite, suite_dir, representatives={"book": "absent"})
 
 
-def test_visual_worker_executes_only_top_base_and_isolates_checkpoints(
+def test_worker_runs_each_selected_rank_once_and_resumes_matching_protocol(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     spec = dict(
@@ -379,12 +410,11 @@ def test_visual_worker_executes_only_top_base_and_isolates_checkpoints(
 
     result = run(visual, candidates)
     assert result["finished"] and result["count"] == 1
-    poses, conditions = validator.validate.call_args.args
+    (poses,) = validator.validate.call_args.args
     np.testing.assert_array_equal(poses, first[None])
-    assert conditions == ["base"]
-    assert [(row["rank"], row["condition"]) for row in result["trials"]] == [
-        (1, "base")
-    ]
+    assert result["protocol"]["enable_disturbance"] is True
+    assert result["provenance"]["version"] > 5
+    assert [row["rank"] for row in result["trials"]] == [1]
     catalog = resolve_gripper_defaults(spec["gripper"])["joint_commands"]
     explicit = visual | {"open_qpos": catalog["open"], "close_qpos": catalog["grasp"]}
     assert run(explicit, candidates)["trial_id_prefix"] == result["trial_id_prefix"]
@@ -395,8 +425,22 @@ def test_visual_worker_executes_only_top_base_and_isolates_checkpoints(
     assert run(narrowed, candidates)["trial_id_prefix"] != result["trial_id_prefix"]
     full = run(spec, candidates)
     assert full["trial_id_prefix"] != result["trial_id_prefix"]
-    assert len(full["trials"]) == 6
-    assert {row["condition"] for row in full["trials"]} == {"base", "x", "y"}
+    assert [row["rank"] for row in full["trials"]] == [1, 2]
+    assert len({row["trial_id"] for row in full["trials"]}) == 2
+    # Resume a partial batch without repeating the rank already observed.
+    checkpoint = tmp_path / (full["trial_id_prefix"] + ".json")
+    checkpoint.write_text(
+        json.dumps(full | {"finished": False, "trials": full["trials"][:1]})
+    )
+    validator.validate.reset_mock()
+    resumed = run(spec, candidates)
+    assert resumed["trials"] == full["trials"]
+    validator.validate.assert_called_once()
+    (retried_poses,) = validator.validate.call_args.args
+    np.testing.assert_array_equal(retried_poses, second[None])
+    quiet = run(spec | {"enable_disturbance": False}, candidates)
+    assert quiet["protocol"]["enable_disturbance"] is False
+    assert quiet["trial_id_prefix"] != full["trial_id_prefix"]
     urdf = tmp_path / "hand.urdf"
     urdf.write_text(
         '<robot><link><collision><geometry><mesh filename="pad.obj"/>'
@@ -590,6 +634,7 @@ def test_rotation_shift_requires_three_finite_angles() -> None:
 def trial_validator() -> GraspValidator:
     validator = GraspValidator.__new__(GraspValidator)
     validator._show_trials = False
+    validator.enable_disturbance = True
     validator.close_wait_steps = 20
     validator.initial = validator.root_tcp = validator.root_contact = torch.eye(4)
     validator.axes = [0, 1, 2]
@@ -617,8 +662,10 @@ def trial_validator() -> GraspValidator:
     return validator
 
 
-def test_close_wait_holds_closed_target_before_lift_and_shifts_disturbance(
+@pytest.mark.parametrize("enabled", [True, False])
+def test_close_wait_then_lift_and_optional_world_xy_round_trips(
     trial_validator: GraspValidator,
+    enabled: bool,
 ) -> None:
     validator = trial_validator
     commands = []
@@ -626,17 +673,34 @@ def test_close_wait_holds_closed_target_before_lift_and_shifts_disturbance(
         validator.hand.set_qpos.call_args.args[0][0]
     )
 
-    (trial,) = validator.validate(np.eye(4)[None], ["x"])
-    # Each row is the three stage positions followed by the finger command.
+    validator.enable_disturbance = enabled
+    # The hand is rotated 90° around world Z. Its local stage axes differ from
+    # the world X and Y translation directions requested by the protocol.
+    pose = np.eye(4)
+    pose[:2, :2] = [[0, -1], [1, 0]]
+    (trial,) = validator.validate(pose[None])
+    # Each row is the three local stage positions followed by the finger command.
     assert commands[80 - 1].tolist() == pytest.approx([0, 0, 0.08, 0.6])
     np.testing.assert_allclose(
         torch.stack(commands[100 - 1 : 120]), np.tile([0, 0, 0.08, 1], (21, 1))
     )
     assert commands[160 - 1].tolist() == pytest.approx([0, 0, 0.13, 1])
-    assert commands[530 - 1].tolist() == pytest.approx([0.03, 0, 0.18, 1])
-    assert len(commands) == 560
+    world_xy = torch.stack(commands).numpy()[:, :2] @ pose[:2, :2].T
+    # Lift ends at step 200; each leg takes 30 steps, followed by the 3 s hold.
+    if enabled:
+        np.testing.assert_allclose(
+            world_xy[[199, 229, 259, 289, 319]],
+            [[0, 0], [0.03, 0], [0, 0], [0, 0.03], [0, 0]],
+            atol=1e-7,
+        )
+        assert len(commands) == 620
+        assert trial["disturbance"]["duration_s"] == pytest.approx(1.2)
+    else:
+        np.testing.assert_allclose(world_xy, 0)
+        assert len(commands) == 500 and trial["disturbance"] is None
+        assert trial["peak_acceleration_m_s2"] is None
+    np.testing.assert_allclose(world_xy[-300:], 0)
     assert trial["hold"]["duration_s"] == pytest.approx(3.0)
-    assert trial["disturbance"]["duration_s"] == pytest.approx(0.6)
     validator.sim.open_viewer.assert_not_called()
 
 
@@ -662,7 +726,7 @@ def test_window_opens_at_first_pregrasp_and_is_reused(
     validator.sim.open_viewer.side_effect = open_viewer
     monkeypatch.setattr(grasp_validation.time, "sleep", lambda seconds: None)
     for _ in range(2):
-        validator.validate(np.eye(4)[None], ["base"])
+        validator.validate(np.eye(4)[None])
     validator.sim.open_viewer.assert_called_once()
     viewer.set_look_at.assert_called_once()
 
@@ -761,6 +825,7 @@ def test_case_uses_tcp_for_geometry_and_drive_settings_for_simulation(
         gripper_urdf="hand.urdf",
         collision_threshold=0.005,
         close_wait_steps=25,
+        enable_disturbance=False,
         rotation_shift_deg=[0, 90, 0],
         **cli._suite_grippers({hand: calibration})[hand],
     )
@@ -784,6 +849,7 @@ def test_case_uses_tcp_for_geometry_and_drive_settings_for_simulation(
     with pytest.raises(RuntimeError, match="stop before mesh sampling"):
         cli._run_case(spec, "antipodal", None, tmp_path, tmp_path, options)
     assert validator.call_args.kwargs["close_wait_steps"] == 25
+    assert validator.call_args.kwargs["enable_disturbance"] is False
     assert validator.call_args.kwargs["rotation_shift_deg"] == [0, 90, 0]
     assert validator.call_args.kwargs["stiffness"] == 0.0
     assert validator.call_args.kwargs["max_effort"] == 27.0
@@ -898,7 +964,7 @@ def test_dh_qpos_respects_mimic_and_travel(
 @pytest.mark.subprocess_sim
 @pytest.mark.parametrize("physics", ["default", "newton"])
 def test_gpu_cli_isolates_missed_and_held_grasps(tmp_path: Path, physics: str) -> None:
-    """Two misses and a centred grasp share a native nine-arena batch."""
+    """Two misses and a centred grasp share a native three-arena batch."""
     fixtures = files("embodichain.extensions.benchmarks.grasp_pose_generator")
     subprocess.run(
         [
@@ -915,7 +981,7 @@ def test_gpu_cli_isolates_missed_and_held_grasps(tmp_path: Path, physics: str) -
             "--poses",
             str(fixtures / "candidates.jsonl"),
             "--num-envs",
-            "9",
+            "3",
             "--output",
             str(tmp_path),
         ],
@@ -933,27 +999,124 @@ def test_gpu_cli_isolates_missed_and_held_grasps(tmp_path: Path, physics: str) -
         "dexuni" if physics == "newton" else "default"
     )
     assert case["finished"]
-    trials = {(r["rank"], r["condition"]): r for r in case["trials"]}
-    assert len(trials) == 9
-    for direction in ("base", "x", "y"):
-        assert not trials[1, direction]["success"]
-        assert not trials[2, direction]["success"]
-        centred = trials[3, direction]
-        assert centred["hold"]["entered"]
-        if physics == "default":
-            assert centred["success"]
-    # The coupled hand can slip after pickup. Each condition runs from reset.
-    assert any(trials[3, direction]["success"] for direction in ("base", "x", "y"))
-    for direction in ("x", "y"):
-        trial = trials[3, direction]
-        assert np.isfinite(trial["peak_acceleration_m_s2"])
-        assert (
-            1.5
-            < trial["peak_axis_acceleration_m_s2"]
-            <= trial["peak_acceleration_m_s2"]
+    assert case["protocol"]["enable_disturbance"] is True
+    trials = {r["rank"]: r for r in case["trials"]}
+    assert len(case["trials"]) == 3 and set(trials) == {1, 2, 3}
+    for rank in (1, 2):
+        assert trials[rank]["failure_stage"] == "lift" and not trials[rank]["success"]
+    centred = trials[3]
+    assert centred["disturbance"]["entered"]
+    assert centred["disturbance"]["duration_s"] == pytest.approx(1.2)
+    assert (
+        1.5
+        < centred["peak_axis_acceleration_m_s2"]
+        <= centred["peak_acceleration_m_s2"]
+    )
+    if physics == "default":
+        assert centred["success"]
+        assert centred["peak_acceleration_m_s2"] < 2.5
+
+
+def test_grid_advances_all_active_stations_on_the_same_clock():
+    from embodichain.extensions.benchmarks.grasp_pose_generator._grid import (
+        _advance_trials,
+    )
+
+    ticks = []
+    commands = set()
+
+    def update(step):
+        assert step == 1
+        ticks.append(commands.copy())
+        commands.clear()
+
+    def trial(name, duration):
+        for _ in range(duration):
+            commands.add(name)
+            yield
+        return (name, len(ticks))
+
+    results = _advance_trials(
+        SimpleNamespace(update=update),
+        {2: trial("left", 2), 8: trial("right", 3)},
+        None,
+    )
+    assert ticks == [{"left", "right"}, {"left", "right"}, {"right"}]
+    assert results == {2: ("left", 2), 8: ("right", 3)}
+
+
+@pytest.mark.gpu
+@pytest.mark.subprocess_sim
+def test_physx_grid_isolates_coincident_targets_and_records_each_pair(
+    tmp_path: Path,
+) -> None:
+    fixtures = files("embodichain.extensions.benchmarks.grasp_pose_generator")
+    candidates = (fixtures / "candidates.jsonl").read_text().splitlines()
+    hands = ["FrankaPandaHand", "DHPGI14080"]
+    objects = []
+    for index, (model, width, offset) in enumerate(
+        [("wide", 0.065, 0.1), ("thin", 0.035, -0.4)]
+    ):
+        rigid = yaml.safe_load((fixtures / "block.yaml").read_text())["rigid"]
+        rigid["shape"]["size"][1] = width
+        rigid["init_pos"][0] = offset
+        objects.append(dict(id=model, category=model, rigid=rigid))
+        for h, hand in enumerate(hands):
+            poses = [candidates[2], candidates[0]] if index == h else [candidates[0]]
+            (tmp_path / f"{model}-{hand}.jsonl").write_text("\n".join(poses) + "\n")
+    suite = tmp_path / "suite.yaml"
+    suite.write_text(
+        yaml.safe_dump(
+            dict(
+                objects=objects,
+                grippers=hands,
+                algorithms={"frozen": "{object}-{gripper}.jsonl"},
+            )
         )
-        if physics == "default":
-            assert trial["peak_acceleration_m_s2"] < 2.5
+    )
+    out = tmp_path / "results"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "embodichain",
+            "benchmark",
+            "grasp-pose-generator",
+            "run",
+            "--suite",
+            str(suite),
+            "--grid",
+            "3",
+            "--grid-spacing",
+            "0.5",
+            "--output",
+            str(out),
+        ],
+        check=True,
+        timeout=180,
+    )
+    cases = [
+        json.loads(p.read_text()) for p in out.glob("*.json") if p.name != "report.json"
+    ]
+    assert len(cases) == 4
+    grid = json.loads((out / "report.json").read_text())["protocol"]["grid"]
+    assert grid == {"capacity": 3, "rows": 2, "columns": 2, "spacing_m": 0.5}
+    assert sorted(c["protocol"]["grid"]["index"] for c in cases) == [0, 0, 1, 2]
+    passed = [case for case in cases if case["trials"][0]["success"]]
+    assert {(c["gripper"], c["object"]) for c in passed} == {
+        (hands[0], "wide"),
+        (hands[1], "thin"),
+    }
+    assert all(
+        [(r["rank"], r["success"]) for r in c["trials"]] == [(1, True), (2, False)]
+        for c in passed
+    )
+    # The first two unlike hand/object pairs physically occupy the same pickup point.
+    for case in passed:
+        np.testing.assert_allclose(
+            np.asarray(case["initial"])[:2, 3], [-0.15, 0.25], atol=1e-3
+        )
+    assert all(case["finished"] for case in cases)
 
 
 def test_visual_report_distinguishes_observed_and_unexecuted_grasps(
@@ -962,7 +1125,7 @@ def test_visual_report_distinguishes_observed_and_unexecuted_grasps(
     from embodichain.extensions.benchmarks.grasp_pose_generator import _reporting
 
     case = dict(category="book", object="atlas", count=1, finished=True)
-    base = dict(rank=1, condition="base", status="ok")
+    base = dict(rank=1, status="ok")
     cases = [
         dict(case, gripper="A", trials=[dict(base, success=True)]),
         dict(
@@ -970,7 +1133,7 @@ def test_visual_report_distinguishes_observed_and_unexecuted_grasps(
         ),
         dict(case, gripper="C", count=0, trials=[]),
     ]
-    protocol = {"physics": "default"}
+    protocol = {"physics": "default", "enable_disturbance": True}
     assert _reporting._visual_report(cases, protocol)["complete"]
     cases.extend(
         [

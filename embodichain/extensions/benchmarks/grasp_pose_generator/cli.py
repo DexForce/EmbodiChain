@@ -48,6 +48,7 @@ from embodichain.robot_registry import (
 from .metrics import summarize
 from ._objects import _suite_asset_root, suite_objects
 from ._reporting import (
+    _PROTOCOL_VERSION,
     _export_trials,
     _visual_report,
     _write_report,
@@ -66,7 +67,7 @@ _BASE_PROTOCOL = dict(
 _DISTURBANCE_PROTOCOL = dict(
     amplitude_m=0.03,
     leg_s=0.30,
-    cycles=1,
+    round_trip_axes=["+world_x", "+world_y"],
     command_peak_m_s2=10 / np.sqrt(3) * 0.03 / 0.30**2,
 )
 
@@ -93,6 +94,13 @@ def _close_wait_steps(config: dict) -> int:
     if type(steps) is not int or steps < 0:
         raise ValueError("close_wait_steps must be a nonnegative integer")
     return steps
+
+
+def _enable_disturbance(config: dict) -> bool:
+    enabled = config.get("enable_disturbance", True)
+    if type(enabled) is not bool:
+        raise ValueError("enable_disturbance must be a boolean")
+    return enabled
 
 
 def _save(path, value):
@@ -164,18 +172,25 @@ def _load_suite(path: Path) -> tuple[dict, Path, dict | None]:
     return suite, base.parent, check
 
 
-def _trial_protocol(physics: str, close_wait_steps: int, visual: dict | None) -> dict:
+def _trial_protocol(
+    physics: str, close_wait_steps: int, enable_disturbance: bool, visual: dict | None
+) -> dict:
     protocol = dict(
-        _BASE_PROTOCOL, close_wait_steps=close_wait_steps, **_physics_protocol(physics)
+        _BASE_PROTOCOL,
+        version=_PROTOCOL_VERSION,
+        close_wait_steps=close_wait_steps,
+        enable_disturbance=enable_disturbance,
+        **_physics_protocol(physics),
     )
+    if enable_disturbance:
+        protocol.update(_DISTURBANCE_PROTOCOL)
     if visual is None:
-        return protocol | _DISTURBANCE_PROTOCOL
+        return protocol
     return dict(
         protocol,
         mode="visual_check",
         num_envs=1,
         candidate_limit=1,
-        conditions=["base"],
         sample_count=visual["sample_count"],
     )
 
@@ -252,6 +267,7 @@ def _generate(
     sample_count=None,
     *,
     collision_threshold=0.0,
+    grid_xy=None,
 ):
     import torch
     from embodichain.lab.sim.utility.gripper_geometry import (
@@ -284,17 +300,22 @@ def _generate(
     vertices, faces = v.obj.get_semantic_mesh([0])
     np.random.seed(seed)
     torch.manual_seed(seed)
+    pose = v.initial
+    if grid_xy is not None:
+        # Sample in the station frame so grid translation cannot bias ranking.
+        pose = pose.clone()
+        pose[:2, 3] -= pose.new_tensor(grid_xy)
     poses, widths, cost = gen.get_grasp_candidates(
         mesh_vertices=vertices[0],
         mesh_triangles=faces[0],
-        obj_poses=v.initial[None],
+        obj_poses=pose[None],
         approach_direction=torch.as_tensor(
             direction, device=vertices.device, dtype=vertices.dtype
         ),
     )[0]
     order = torch.argsort(cost, stable=True)
     order = order[torch.isfinite(cost[order])]
-    local = (torch.linalg.inv(v.initial) @ poses[order]).cpu().tolist()
+    local = (torch.linalg.inv(pose) @ poses[order]).cpu().tolist()
     return [
         dict(T_object_tcp=pose, cost=c, opening_m=w)
         for pose, c, w in zip(
@@ -334,10 +355,12 @@ def _packaged_hand_files(urdf: Path) -> dict[str, str]:
     return digests
 
 
-def _run_case(spec, method, source, root, out, args):
-    from embodichain.lab.sim.grasp_validation import GraspValidator
+def _case_trials(spec, method, source, root, out, args, *, cell=None):
+    """Yield a station request, then candidate batches; checkpoint received results."""
     from embodichain.lab.sim.cfg import RigidObjectCfg
 
+    enable_disturbance = _enable_disturbance(spec)
+    spec = dict(spec, enable_disturbance=enable_disturbance)
     meta = {
         key: spec[key] for key in ("object", "category", "gripper", "seed", "placement")
     }
@@ -370,7 +393,7 @@ def _run_case(spec, method, source, root, out, args):
             extract_subtree=False,
         )
     protocol = {
-        "version": 5,
+        "version": _PROTOCOL_VERSION,
         **_physics_protocol(args.physics),
         "gripper_defaults": defaults,
         "dexsim": version("dexsim-engine"),
@@ -379,7 +402,12 @@ def _run_case(spec, method, source, root, out, args):
     }
     if gripper_urdf is not None:
         protocol["gripper_files"] = gripper_files
-    case["protocol"] = _trial_protocol(args.physics, close_wait_steps, visual)
+    case["protocol"] = _trial_protocol(
+        args.physics, close_wait_steps, enable_disturbance, visual
+    )
+    if cell is not None:
+        protocol["grid"] = cell
+        case["protocol"]["grid"] = cell
     case["provenance"] = protocol
     checkpoint_spec = spec
     if args.command == "run" and "open_qpos" in spec:
@@ -399,24 +427,26 @@ def _run_case(spec, method, source, root, out, args):
         prior = json.loads(path.read_text())
         if prior.get("finished"):
             return prior
-    import psutil
-    import torch
+    if cell is None:
+        import psutil
+        import torch
 
-    clock = time.perf_counter()
-    process = psutil.Process()
-    initial_rss = process.memory_info().rss
-    device = torch.device("cuda:0")
-    torch.cuda.init()
-    initial_gpu = torch.cuda.memory_allocated(device)
-    torch.cuda.reset_peak_memory_stats(device)
+        clock = time.perf_counter()
+        process = psutil.Process()
+        initial_rss = process.memory_info().rss
+        device = torch.device("cuda:0")
+        torch.cuda.init()
+        initial_gpu = torch.cuda.memory_allocated(device)
+        torch.cuda.reset_peak_memory_stats(device)
     cfg = RigidObjectCfg.from_dict(rigid)
     if not args.headless:
         label = f"{spec['category']} / {spec['object']} with {spec['gripper']}"
+        if cell is not None:
+            label += f" at grid cell {cell['index']} {cell['xy_m']} m"
         print(f"Preparing {label}", flush=True)
-    v = GraspValidator(
-        cfg,
-        spec["gripper"],
-        args.num_envs,
+    v = yield dict(
+        object_cfg=cfg,
+        gripper=spec["gripper"],
         variant=variant,
         gripper_urdf=gripper_urdf,
         physics=args.physics,
@@ -428,94 +458,148 @@ def _run_case(spec, method, source, root, out, args):
         open_qpos=spec.get("open_qpos"),
         close_qpos=spec.get("close_qpos"),
         close_wait_steps=close_wait_steps,
+        enable_disturbance=enable_disturbance,
     )
-    try:
-        if args.resume and path.exists():
-            case = json.loads(path.read_text())
-            poses = _poses(case["poses"])
-        else:
-            if not args.headless and source is None:
-                print(f"Generating grasp candidates for {label}", flush=True)
-            candidates = (
-                source
-                if source is not None
-                else _generate(
-                    v,
-                    defaults,
-                    root_from_tcp,
-                    spec["seed"],
-                    spec.get("approach_direction", [0, 0, -1]),
-                    sample_count=visual["sample_count"] if visual is not None else None,
-                    collision_threshold=spec.get("collision_threshold", 0.0),
-                )
+    if args.resume and path.exists():
+        case = json.loads(path.read_text())
+        poses = _poses(case["poses"])
+    else:
+        if not args.headless and source is None:
+            print(f"Generating grasp candidates for {label}", flush=True)
+        candidates = (
+            source
+            if source is not None
+            else _generate(
+                v,
+                defaults,
+                root_from_tcp,
+                spec["seed"],
+                spec.get("approach_direction", [0, 0, -1]),
+                sample_count=visual["sample_count"] if visual is not None else None,
+                collision_threshold=spec.get("collision_threshold", 0.0),
+                grid_xy=cell["xy_m"] if cell is not None else None,
             )
-            if args.command == "run":
-                candidates = candidates[:1] if visual is not None else candidates[:10]
-            poses = _poses([c["T_object_tcp"] for c in candidates])
-            case["candidate_metadata"] = [
-                {k: v for k, v in c.items() if k != "T_object_tcp"} for c in candidates
-            ]
-            case.update(
-                count=len(poses),
-                poses=poses.tolist(),
-                initial=v.initial.cpu().tolist(),
-                trial_id_prefix=name,
-            )
-            _save(path, case)
-        if not args.headless and len(poses) == 0:
-            print(f"No grasp candidates for {label}. Skipping playback.", flush=True)
-        if not np.allclose(case["initial"], v.initial.cpu().numpy(), atol=1e-4):
-            raise ValueError("Settled initial state changed on resume")
-        v.initial.copy_(v.initial.new_tensor(case["initial"]))
-        completed = {
-            (r["rank"], r["condition"]): r
-            for r in case["trials"]
-            if r["status"] == "ok"
-        }
-        conditions = ("base",) if visual is not None else ("base", "x", "y")
-        work = [
-            item
-            for item in product(range(1, len(poses) + 1), conditions)
-            if item not in completed
+        )
+        if args.command == "run":
+            candidates = candidates[:1] if visual is not None else candidates[:10]
+        poses = _poses([c["T_object_tcp"] for c in candidates])
+        case["candidate_metadata"] = [
+            {k: v for k, v in c.items() if k != "T_object_tcp"} for c in candidates
         ]
-        for start in range(0, len(work), args.num_envs):
-            batch = work[start : start + args.num_envs]
-            if not args.headless:
-                rank, condition = batch[0]
-                print(
-                    f"Viewing {label} in arena 0 " f"(candidate {rank}, {condition})",
-                    flush=True,
-                )
-            padded = batch + [batch[-1]] * (args.num_envs - len(batch))
-            results = v.validate(
-                np.stack([poses[i - 1] for i, _ in padded]), [d for _, d in padded]
+        case.update(
+            count=len(poses),
+            poses=poses.tolist(),
+            initial=v.initial.cpu().tolist(),
+            trial_id_prefix=name,
+        )
+        _save(path, case)
+    if not args.headless and len(poses) == 0:
+        print(f"No grasp candidates for {label}. Skipping playback.", flush=True)
+    if not np.allclose(case["initial"], v.initial.cpu().numpy(), atol=1e-4):
+        raise ValueError("Settled initial state changed on resume")
+    v.initial.copy_(v.initial.new_tensor(case["initial"]))
+    completed = {r["rank"]: r for r in case["trials"] if r["status"] == "ok"}
+    work = [rank for rank in range(1, len(poses) + 1) if rank not in completed]
+    for start in range(0, len(work), args.num_envs):
+        batch = work[start : start + args.num_envs]
+        if not args.headless:
+            print(
+                f"Viewing {label} (candidate {batch[0]})",
+                flush=True,
             )
-            if not args.headless:
-                trial = results[0]
-                if trial["status"] != "ok":
-                    outcome = trial.get("reason", trial["status"])
-                elif trial["success"]:
-                    outcome = "success"
-                else:
-                    outcome = f"failed during {trial['failure_stage']}"
-                print(f"Arena 0 candidate {rank} ({condition}): {outcome}", flush=True)
-            for (rank, d), result in zip(batch, results):
-                completed[rank, d] = dict(
-                    result, rank=rank, condition=d, trial_id=f"{name}/{rank}/{d}"
-                )
-            case["trials"] = list(completed.values())
-            _save(path, case)
-        case["finished"] = all(r["status"] == "ok" for r in case["trials"])
+        padded = batch + [batch[-1]] * (args.num_envs - len(batch))
+        results = yield poses[np.asarray(padded) - 1]
+        if not args.headless:
+            trial = results[0]
+            if trial["status"] != "ok":
+                outcome = trial.get("reason", trial["status"])
+            elif trial["success"]:
+                outcome = "success"
+            else:
+                outcome = f"failed during {trial['failure_stage']}"
+            print(f"{label} candidate {batch[0]}: {outcome}", flush=True)
+        for rank, result in zip(batch, results):
+            completed[rank] = dict(result, rank=rank, trial_id=f"{name}/{rank}")
+        case["trials"] = [completed[rank] for rank in sorted(completed)]
+        _save(path, case)
+    case["finished"] = len(completed) == len(poses) and all(
+        r["status"] == "ok" for r in completed.values()
+    )
+    if cell is None:
         case["performance"] = {
             "cost_time_ms": 1000 * (time.perf_counter() - clock),
             "cpu_delta_mb": (process.memory_info().rss - initial_rss) / 2**20,
             "gpu_delta_mb": (torch.cuda.memory_allocated(device) - initial_gpu) / 2**20,
             "peak_gpu_mb": torch.cuda.max_memory_allocated(device) / 2**20,
         }
-        _save(path, case)
-        return case
+    _save(path, case)
+    return case
+
+
+def _run_case(spec, method, source, root, out, args):
+    from embodichain.lab.sim.grasp_validation import GraspValidator
+
+    work = _case_trials(spec, method, source, root, out, args)
+    try:
+        options = next(work)
+    except StopIteration as done:
+        return done.value
+    validator = GraspValidator(num_envs=args.num_envs, **options)
+    try:
+        batch = work.send(validator)
+        while True:
+            batch = work.send(validator.validate(batch))
+    except StopIteration as done:
+        return done.value
     finally:
-        v.close()
+        validator.close()
+
+
+def _run_individual(jobs, root, args, visual):
+    # Native solver failures can terminate the process. The parent owns the
+    # intended population and retries from atomically committed arena batches.
+    pool = None
+    cases = []
+    try:
+        for index, (spec, method, source) in enumerate(jobs, 1):
+            current = copy(args)
+            if visual is not None:
+                print(
+                    f"Visual check {index}/{len(jobs)}: {spec['gripper']} / {spec['category']} / {spec['object']}",
+                    flush=True,
+                )
+            for _ in range(1 if visual is not None else 2):
+                if pool is None:
+                    pool = ProcessPoolExecutor(
+                        max_workers=1, mp_context=multiprocessing.get_context("spawn")
+                    )
+                try:
+                    case = pool.submit(
+                        _run_case,
+                        spec,
+                        method,
+                        source,
+                        root,
+                        args.output,
+                        current,
+                    ).result()
+                    if case["finished"]:
+                        break
+                except Exception as exc:
+                    if isinstance(exc, BrokenProcessPool):
+                        pool.shutdown(wait=True)
+                        pool = None
+                    case = dict(
+                        spec, algorithm=method, error=str(exc), count=0, trials=[]
+                    )
+                    if visual is not None:
+                        print(f"Visual check error: {exc}", flush=True)
+                current.resume = True
+            cases.append(case)
+    finally:
+        if pool is not None:
+            pool.shutdown()
+    return cases
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -527,6 +611,24 @@ def main(argv: list[str] | None = None) -> None:
     validate.add_argument("--poses", type=Path, required=True)
     run = sub.add_parser("run")
     run.add_argument("--suite", type=Path, required=True)
+    run.add_argument(
+        "--close-wait-steps",
+        type=int,
+        help="Override the suite's dwell after the closing ramp and before lift.",
+    )
+    run.add_argument(
+        "--grid",
+        type=int,
+        metavar="COUNT",
+        help="Run up to COUNT hand/object pairs together in a square grid in one PhysX arena.",
+    )
+    run.add_argument(
+        "--grid-spacing",
+        type=float,
+        default=1.0,
+        metavar="METRES",
+        help="XY grid pitch in metres (default 1).",
+    )
     for p in (run, validate):
         p.add_argument(
             "--physics",
@@ -546,6 +648,14 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     if args.num_envs < 1:
         parser.error("--num-envs must be positive")
+    if getattr(args, "grid", None) is not None:
+        if args.grid < 1:
+            parser.error("--grid COUNT must be a positive integer")
+        if not math.isfinite(args.grid_spacing) or args.grid_spacing <= 0:
+            parser.error("--grid-spacing must be finite and positive")
+        if args.num_envs != 1 or args.physics != "default":
+            parser.error("--grid uses one arena and the default PhysX backend")
+        args.grid_side = math.isqrt(args.grid - 1) + 1
     args.output.mkdir(parents=True, exist_ok=True)
     if args.command == "validate":
         spec = yaml.safe_load(args.case.read_text())
@@ -579,7 +689,10 @@ def main(argv: list[str] | None = None) -> None:
         args.headless = visual is None
     if visual is not None and args.num_envs != 1:
         parser.error("A visual check runs in a single arena; use --num-envs 1")
+    if args.close_wait_steps is not None:
+        suite["close_wait_steps"] = args.close_wait_steps
     close_wait_steps = _close_wait_steps(suite)
+    enable_disturbance = _enable_disturbance(suite)
     collision_threshold = suite.get("collision_threshold", 0.0)
     if type(collision_threshold) not in (int, float) or not math.isfinite(
         collision_threshold
@@ -625,6 +738,7 @@ def main(argv: list[str] | None = None) -> None:
                 gripper=hand,
                 seed=seed,
                 placement=placement,
+                enable_disturbance=enable_disturbance,
                 rigid=obj["rigid"] | overrides,
                 **grippers[hand],
             )
@@ -653,52 +767,24 @@ def main(argv: list[str] | None = None) -> None:
             elif collision_threshold != 0.0:
                 spec["collision_threshold"] = float(collision_threshold)
             jobs.append((spec, method, source))
-    # Native solver failures can terminate the process. The parent owns the
-    # intended population and retries from atomically committed arena batches.
-    pool = None
-    cases = []
-    try:
-        for index, (spec, method, source) in enumerate(jobs, 1):
-            current = copy(args)
-            if visual is not None:
-                print(
-                    f"Visual check {index}/{len(jobs)}: {spec['gripper']} / {spec['category']} / {spec['object']}",
-                    flush=True,
-                )
-            for _ in range(1 if visual is not None else 2):
-                if pool is None:
-                    pool = ProcessPoolExecutor(
-                        max_workers=1, mp_context=multiprocessing.get_context("spawn")
-                    )
-                try:
-                    case = pool.submit(
-                        _run_case,
-                        spec,
-                        method,
-                        source,
-                        root,
-                        args.output,
-                        current,
-                    ).result()
-                    if case["finished"]:
-                        break
-                except Exception as exc:
-                    if isinstance(exc, BrokenProcessPool):
-                        pool.shutdown(wait=True)
-                        pool = None
-                    case = dict(
-                        spec, algorithm=method, error=str(exc), count=0, trials=[]
-                    )
-                    if visual is not None:
-                        print(f"Visual check error: {exc}", flush=True)
-                current.resume = True
-            cases.append(case)
-    finally:
-        if pool is not None:
-            pool.shutdown()
+    if args.grid:
+        from ._grid import run_grid
+
+        cases = run_grid(jobs, root, args)
+    else:
+        cases = _run_individual(jobs, root, args, visual)
 
     _export_trials(args.output, cases)
-    protocol = _trial_protocol(args.physics, close_wait_steps, visual)
+    protocol = _trial_protocol(
+        args.physics, close_wait_steps, enable_disturbance, visual
+    )
+    if args.grid:
+        protocol["grid"] = {
+            "capacity": args.grid,
+            "rows": args.grid_side,
+            "columns": args.grid_side,
+            "spacing_m": args.grid_spacing,
+        }
     if visual is not None:
         report = _visual_report(cases, protocol)
         report["wall_s"] = time.perf_counter() - started
