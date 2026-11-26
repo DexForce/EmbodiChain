@@ -540,7 +540,16 @@ def _validate_intent_audit(
     def check_invariants(origin: str, facts: Iterable[dict[str, Any]]) -> None:
         for fact in facts:
             for invariant in invariants.values():
-                if _opposes(invariant, fact):
+                # A position locked to an initial snapshot cannot rise. Only
+                # these comparisons to the positive threshold exclude zero.
+                if _opposes(invariant, fact) or (
+                    invariant["kind"] == "pose_match"
+                    and invariant["epoch"] == "initial"
+                    and "position" in invariant["components"]
+                    and fact["kind"] == "vertical_rise"
+                    and fact["comparison"] in {"eq", "gt", "ge"}
+                    and not set(invariant["subjects"]).isdisjoint(fact["subjects"])
+                ):
                     raise AuthoringEvidenceError(
                         f"{origin} contradicts an always condition: {invariant}"
                     )

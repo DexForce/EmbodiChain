@@ -1057,6 +1057,44 @@ def test_invariant_rejects_a_conflicting_fact_even_if_restored_later(phase):
 
 
 @pytest.mark.parametrize(
+    "components,epoch,reference,moved,comparison,conflict",
+    [
+        (["position", "orientation"], "initial", "panel", "panel", "gt", True),
+        (["position"], "initial", "panel", "panel", "eq", True),
+        (["position"], "initial", "other", "panel", "ge", True),
+        (["orientation"], "initial", "panel", "panel", "gt", False),
+        (["position"], "initial", "panel", "panel", "lt", False),
+        (["position"], "initial", "panel", "other", "gt", False),
+        (["position"], "current", "other", "panel other", "gt", False),
+    ],
+)
+def test_fixed_position_invariant_rejects_only_required_displacement(
+    components, epoch, reference, moved, comparison, conflict
+):
+    pose = _fact("pose_match", "panel", reference, epoch=epoch, components=components)
+    rise = _fact("vertical_rise", moved, comparison=comparison, meters=0.1)
+    plan = _validate(
+        _plan(
+            "panel other",
+            _step("push", moved, rise),
+            conditions=[_condition("always", pose)],
+        )
+    )
+    audit = _audit(
+        _check("condition_01", scope="always", state=pose),
+        _check("step_01", scope="effect", state=rise),
+    )
+    if conflict:
+        with pytest.raises(
+            AuthoringEvidenceError,
+            match="step_01 effect contradicts an always condition",
+        ):
+            _validate_intent_audit(_SOURCE, plan, audit)
+    else:
+        _validate_intent_audit(_SOURCE, plan, audit)
+
+
+@pytest.mark.parametrize(
     "source", ["initial", "maintain", "stale_effect", "final", "stale_final"]
 )
 def test_terminal_audit_rejects_nonterminal_or_conflicting_evidence(source):
