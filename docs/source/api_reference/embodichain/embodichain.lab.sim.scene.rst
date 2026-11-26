@@ -485,7 +485,6 @@ The generic scene services own no task lifecycle or dataset writer.
    :maxdepth: 1
 
    embodichain.lab.sim.scene.expansion
-   embodichain.gen_sim.scene_adapters
 
 See :mod:`embodichain.lab.task_program.integrations.scene_expansion` for task
 execution and :mod:`embodichain.compute.geometry` for reusable tensor kernels.

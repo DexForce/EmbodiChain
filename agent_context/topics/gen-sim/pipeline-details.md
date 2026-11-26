@@ -18,9 +18,10 @@
    blueprints before materialization. Articulated generation delegates to
    `asset_engine/pipeline/articulation.py`; the shared environment parser accepts
    legacy Scene Engine articulation keys through the Asset Engine loader.
-4. Editing imports `scene_export`, validates the scene and graph, asks the VLM for a typed
-   edit plan, generates assets only for additions, applies layout changes, then exports over
-   the same portable directory (`edit.py`).
+4. Editing imports `scene_export` or restores it from an editable
+   `scene_package.zip`. It validates the scene and graph, asks the VLM for a
+   typed edit plan, generates assets only for additions, applies layout changes,
+   then exports over the same portable directory (`edit.py`).
 5. The editable export is `scene_export/` with `scene.json`, `scene_config.json`,
    `scene_graph.json`, `mesh_assets/`, and `articulated_assets/`. Generation and
    editing also build standard `scene_usd/scene.usda`, relocatable `scene.usdz`

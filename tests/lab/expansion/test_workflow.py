@@ -51,7 +51,7 @@ class Host:
         self.journal = journal
         self.appearance = None
         self.env = SimpleNamespace(_profiler=SimpleNamespace(report=lambda: {}))
-        self.timings = {"render_variants": 0.0, "export": 0.0}
+        self.timings = {"export": 0.0}
 
     def recipe(self, ordinal):
         return recipe(ordinal)
@@ -228,71 +228,19 @@ def test_interrupted_execution_reuses_recipe_with_new_attempt_and_capacity(
     assert Host.opened == Host.closed == 2
 
 
-def test_renderer_failure_does_not_block_export_of_confirmed_parents(
-    tmp_path, monkeypatch
-):
+def test_new_job_tracks_collection_and_export(tmp_path, monkeypatch):
     patch_host(monkeypatch)
     Host.all_success = True
     cfg = config(tmp_path)
-    cfg.capture_media = True
-    cfg.export_lerobot = True
-    cfg.visual_profile_file = str(
-        Path(__file__).resolve().parents[3] / "examples/expansion/engine/visual.yaml"
-    )
-    cfg.render_profiles = ("blue",)
-    cfg.observation_independent = True
-    import embodichain.lab.expansion.visual as visual
-    import embodichain.lab.expansion.export as exporter
-
-    def broken(*args, **kwargs):
-        raise RuntimeError("render failed")
-
-    monkeypatch.setattr(visual, "render_observation_variants", broken)
-
-    def export(env, root, *, verify_only=False):
-        assert env is None
-        value = {
-            "dataset_path": "frozen",
-            "episode_ids": [r.episode_id for r in ArtifactEpisodeSink(root).inspect()],
-        }
-        _atomic_json(Path(root) / "lerobot-export.json", value)
-        return value
-
-    monkeypatch.setattr(exporter, "export_expansion_lerobot", export)
     result = run_expansion_job(cfg)
-    assert result["committed"] == 2 and result["collection_complete"]
-    assert (
-        not result["complete"]
-        and result["stages"]["render"]["error"] == "render failed"
-    )
-    assert result["stages"]["export"]["complete"]
+    assert result["complete"] and result["committed"] == 2
+    assert set(result["stages"]) == {"collection", "export"}
+    assert result["observation_variants"] == 0
+    assert not (Path(cfg.output_dir) / "observations").exists()
 
-
-def test_inspection_counts_interrupted_running_attempt_and_new_render_obligations(
-    tmp_path, monkeypatch
-):
-    patch_host(monkeypatch)
-    Host.all_success = True
-    cfg = config(tmp_path)
-    cfg.capture_media = True
-    cfg.observation_independent = True
-    cfg.visual_profile_file = str(
-        Path(__file__).resolve().parents[3] / "examples/expansion/engine/visual.yaml"
-    )
-    cfg.render_profiles = ("blue",)
-    import embodichain.lab.expansion.stages as stages
-    import embodichain.lab.expansion.workflow as workflow
-
-    # Stop after physical receipts, leaving the genuine pre-collection empty plan.
-    monkeypatch.setattr(stages, "run_postprocessing", lambda *args, **kwargs: None)
-    result = run_expansion_job(cfg)
-    assert result["committed"] == 2
-    assert result["stages"]["render"]["pending"] == 2
-    assert not result["stages"]["render"]["complete"]
     root = Path(cfg.output_dir)
-    path = root / "attempts" / "00000002" / "attempt.json"
     _atomic_json(
-        path,
+        root / "attempts" / "00000002" / "attempt.json",
         {
             "sequence": 2,
             "ordinal": 2,
@@ -302,44 +250,45 @@ def test_inspection_counts_interrupted_running_attempt_and_new_render_obligation
             "executed_steps_lower_bound": 1,
         },
     )
-    assert workflow.inspect_expansion_job(root)["rollout_attempted"] == 3
+    from embodichain.lab.expansion.workflow import inspect_expansion_job
+
+    assert inspect_expansion_job(root)["rollout_attempted"] == 3
 
 
-def test_render_host_startup_failure_keeps_offline_export_available(
-    tmp_path, monkeypatch
-):
+def test_legacy_visual_archive_can_export_without_a_world(tmp_path, monkeypatch):
+    import embodichain.lab.expansion.host as host_module
+    import embodichain.lab.expansion.export as exporter
+    from embodichain.lab.expansion.workflow import resume_expansion_export
+
     patch_host(monkeypatch)
     Host.all_success = True
     cfg = config(tmp_path)
-    cfg.capture_media = True
-    cfg.observation_independent = True
     run_expansion_job(cfg)
-    import embodichain.lab.expansion.host as host_module
-    import embodichain.lab.expansion.export as exporter
+    root = Path(cfg.output_dir)
+    path = root / "execution.json"
+    execution = json.loads(path.read_text())
+    execution["config"]["render_profiles"] = ["blue"]
+    _atomic_json(path, execution)
 
     def unavailable(*args, **kwargs):
-        raise RuntimeError("renderer startup unavailable")
+        pytest.fail("exporting archived evidence must not require a World")
 
-    monkeypatch.setattr(host_module, "GymExpansionHost", unavailable)
-    cfg.visual_profile_file = str(
-        Path(__file__).resolve().parents[3] / "examples/expansion/engine/visual.yaml"
-    )
-    cfg.render_profiles = ("blue",)
-    cfg.export_lerobot = True
-
-    def export(env, root, *, verify_only=False):
+    def export(env, output, *, verify_only=False):
         assert env is None
         value = {
             "dataset_path": "frozen",
-            "episode_ids": [r.episode_id for r in ArtifactEpisodeSink(root).inspect()],
+            "episode_ids": [
+                r.episode_id for r in ArtifactEpisodeSink(output).inspect()
+            ],
         }
-        _atomic_json(Path(root) / "lerobot-export.json", value)
+        _atomic_json(Path(output) / "lerobot-export.json", value)
         return value
 
+    monkeypatch.setattr(host_module, "GymExpansionHost", unavailable)
     monkeypatch.setattr(exporter, "export_expansion_lerobot", export)
-    result = run_expansion_job(cfg, resume=True)
-    assert result["stages"]["export"]["complete"]
-    assert result["stages"]["render"]["error"] == "renderer startup unavailable"
+    result = resume_expansion_export(root)
+    assert result["collection_complete"] and result["stage_complete"]
+    assert result["stages"]["render"] == {"complete": False, "pending": 2}
     assert not result["complete"]
 
 
@@ -394,3 +343,35 @@ def test_verified_target_supersedes_prior_collection_startup_failure(
     recovered = run_expansion_job(cfg, resume=True)
     assert recovered["committed"] == 1 and recovered["complete"]
     assert recovered["stages"]["collection"] == {"complete": True}
+
+
+def test_archived_render_failure_applies_only_to_requested_rendering(
+    tmp_path, monkeypatch
+):
+    from embodichain.lab.expansion.journal import ExpansionJournal
+    from embodichain.lab.expansion.workflow import inspect_expansion_job
+
+    patch_host(monkeypatch)
+    cfg = config(tmp_path)
+    cfg.target_episodes = 1
+    assert run_expansion_job(cfg)["complete"]
+    root = Path(cfg.output_dir)
+    ExpansionJournal(root).stage("render", "failed", error="legacy renderer failed")
+    glob = Path.glob
+
+    def collection_first(directory, pattern):
+        paths = glob(directory, pattern)
+        return iter(sorted(paths)) if directory == root / "stages" else paths
+
+    monkeypatch.setattr(Path, "glob", collection_first)
+    result = inspect_expansion_job(root)
+    assert result["collection_complete"] and result["complete"]
+    assert "render" not in result["stages"]
+
+    path = root / "execution.json"
+    execution = json.loads(path.read_text())
+    execution["config"]["render_profiles"] = ["blue"]
+    _atomic_json(path, execution)
+    result = inspect_expansion_job(root)
+    assert result["collection_complete"] and not result["complete"]
+    assert result["stages"]["render"]["error"] == "legacy renderer failed"

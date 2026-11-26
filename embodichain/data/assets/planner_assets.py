@@ -22,35 +22,44 @@ __all__ = ["download_neural_planner_checkpoint"]
 
 def download_neural_planner_checkpoint(
     repo_id: str = "DexForceAI/neural_motion_generator",
-    filename: str = "franka/franka.pt",
+    filename: str = "v1/franka.onnx",
     token: str | None = None,
     endpoint: str = _HF_ENDPOINT,
+    *,
+    revision: str | None = None,
+    local_files_only: bool = False,
 ) -> str:
-    """Download a neural planner checkpoint from HuggingFace.
+    """Download a neural planner deployment model from Hugging Face.
 
-    The repository is gated. Either set the ``HF_TOKEN`` environment variable or
-    run ``huggingface-cli login`` before calling this function.
+    Public weights can be downloaded anonymously. For a private or gated
+    repository, set ``HF_TOKEN`` or log in with the Hugging Face CLI.
 
     If your network requires an HTTP proxy, set ``HTTPS_PROXY`` or
     ``https_proxy`` in the environment before launching Python.
 
     Args:
         repo_id: HuggingFace repository ID.
-        filename: Checkpoint path in the repo, e.g. ``franka/franka.pt``.
+        filename: Model path in the repo, e.g. ``v1/franka.onnx`` or ``v1/piper.onnx``.
         token: HuggingFace API token. Falls back to the ``HF_TOKEN``
             environment variable or the cached token from
             ``huggingface-cli login``.
         endpoint: HuggingFace-compatible endpoint URL. Defaults to
             ``https://huggingface.co``. Mirrors that merely redirect to the
             real hub are not supported.
+        revision: Optional commit hash, tag or branch. Pin a commit for releases.
+        local_files_only: Resolve an already cached file without network access.
 
     Returns:
-        str: Local path to the downloaded checkpoint file.
+        str: Local path to the downloaded model file.
 
     Raises:
-        RuntimeError: If the download fails, with authentication instructions.
+        RuntimeError: If the download fails, with network/cache/authentication guidance.
     """
-    # Normalize proxy env vars: the ``requests`` library on Linux requires the
-    # lowercase form (``https_proxy``), but users typically export the uppercase
-    # form (``HTTPS_PROXY``).
-    return _download_checkpoint(repo_id, filename, token, endpoint)
+    return _download_checkpoint(
+        repo_id,
+        filename,
+        token,
+        endpoint,
+        revision=revision,
+        local_files_only=local_files_only,
+    )

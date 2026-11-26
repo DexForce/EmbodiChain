@@ -1,0 +1,129 @@
+integration_id: franka_rope_wrap_v1
+program_id: franka_rope_wrap
+requires:
+  scene_contract: cable_post_v1
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: cable_post_v1
+  registry_id: cable_post
+  rigid_objects:
+  - entity_id: post
+    simulation_uid: post
+    dynamics: static
+  cables:
+  - entity_id: cable
+    simulation_uid: cable
+profile:
+  defaults:
+    pick_up:
+      primary: primary_manipulator
+    move_joints:
+      primary: arm_and_hand
+  skill_options:
+    simulation.cable_pickup:
+      kind: pick_up
+      pre_grasp_distance: 0.0
+      lift_height: 0.0
+      hand_interp_steps: 60
+      grasp_settle_steps: 15
+    simulation.joint_trajectory_phase:
+      kind: move_joints
+      preserve_velocity_samples: true
+  effect_monitors: {}
+runtime_services:
+  cable_material:
+    entity_id: cable
+    simulation_uid: cable
+    motion_parts: [arm]
+    slip_limit: 0.008
+    targets:
+      approach_free_end:
+        kind: material
+        material_inset: 0.025
+        z_offset: 0.09
+        speed: 0.20
+        angular_speed: 1.2
+      grasp_free_end:
+        kind: material
+        material_inset: 0.025
+      lift_free_end:
+        kind: material_lift
+        material_inset: 0.025
+        z_offset: 0.09
+        speed: 0.06
+        angular_speed: 1.2
+      settle_lift:
+        kind: hold
+        samples: 8
+      lifted_free_end:
+        kind: check
+        condition: lift
+    operations:
+      pick_free_end:
+        kind: pick_up
+        phases:
+        - kind: pose
+          target: approach_free_end
+        - kind: grasp
+          target: grasp_free_end
+        - kind: pose
+          target: lift_free_end
+          after:
+          - kind: hold
+            target: settle_lift
+          - kind: check
+            target: lifted_free_end
+  registered_semantic_lowerers:
+  - kind: joint_trajectory_phase
+    motion:
+      control_hz: 60
+      arm: arm
+      gripper: eef
+      tool_link: fr3_hand_tcp
+      constraints: {position_tolerance_m: 1.0e-05, rotation_tolerance_rad: 0.0001}
+      targets:
+        pickup_reference:
+          kind: pose
+          position: [0.495, -0.25, 0.006]
+          quaternion_xyzw: [1.0, 0.0, 0.0, 0.0]
+        lifted_reference:
+          kind: pose
+          position: [0.495, -0.25, 0.096]
+          quaternion_xyzw: [1.0, 0.0, 0.0, 0.0]
+        orbit_entry: {kind: arc_endpoint, arc: around_post, end: false}
+        orbit_exit: {kind: arc_endpoint, arc: around_post, end: true}
+        tightened:
+          kind: arc_endpoint
+          arc: around_post
+          end: true
+          radial_offset_m: 0.018
+          tangent_offset_m: 0.02
+      arcs:
+        around_post:
+          axis: {kind: scene_entity, entity_id: post}
+          radius_m: 0.16
+          start_deg: -90.0
+          sweep_deg: 465
+          height_m: [0.0030000000000000027, 0.023000000000000007]
+          tool_offset: [-0.025, 0.0, 0.0]
+          tool_orientation_xyzw: [1.0, 0.0, 0.0, 0.0]
+      # Pickup reference poses seed IK. The pickup call grasps the observed cable.
+      keyframes:
+      - {step: 0, target: home, grip: 0.0395}
+      - {step: 60, target: home, grip: 0.0395}
+      - {step: 180, target: lifted_reference, grip: 0.0395}
+      - {step: 240, target: pickup_reference, grip: 0.0395}
+      - {step: 300, target: pickup_reference, grip: 0.0018}
+      - {step: 420, target: lifted_reference, grip: 0.0018}
+      - {step: 600, target: orbit_entry, grip: 0.0018}
+      - {step: 1680, target: orbit_exit, grip: 0.0018, interpolation: arc}
+      - {step: 1920, target: tightened, grip: 0.0018}
+      - {step: 2040, target: tightened, grip: 0.0018}
+      - {step: 2160, target: tightened, grip: 0.0018}
+    phases:
+      home: {steps: [0, 60]}
+      approach_post: {steps: [420, 600], join_current: true}
+      orbit: {steps: [600, 1680]}
+      tighten: {steps: [1680, 1920]}
+      settle: {steps: [1920, 2040]}
+      hold_closed: {steps: [2040, 2160]}

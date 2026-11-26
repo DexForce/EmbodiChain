@@ -41,7 +41,7 @@ __all__ = ["advance_observation"]
 def _raw_field_kind(field: str) -> str:
     owner, _, channel = field.partition("/")
     quantity = channel.rsplit("/", 1)[1]
-    if owner == "fluids":
+    if owner in ("fluids", "measurements"):
         return "scalar"
     if owner == "cables":
         return "position" if quantity == "end_position" else "scalar"

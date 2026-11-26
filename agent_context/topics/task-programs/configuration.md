@@ -291,9 +291,44 @@ acknowledged close frame and checks material slip after every consumed action.
 Measured cable conditions reject individual eligible rows. Healthy rows continue
 to the next stage.
 References are fresh per bridge, guarded by its episode scope, and mapped from
-selected robot rows to native cable arenas. Evaluation consumes qualified
-`cables/<uid>/<measurement>` channels, including strict endpoint geometry and
-episode slip. Keep routing acceptance in the deployment's named evaluation rules.
+selected robot rows to native cable arenas. Generic pickup may omit routing
+geometry. Its material targets can locate a point by arc-length inset from the
+free end and offset Z from that point's observed height. Routing geometry adds
+slot-specific observations to the `cables/<uid>/<measurement>` channels.
+Keep routing acceptance in the deployment's named evaluation rules.
+
+`FrankaRopeWrap-v1` and `FrankaRj45Cycle-v1` are configuration-only
+deployments. `simulation.joint_trajectory_phase` selects an interval of a
+runtime-planned fixed-grid trajectory. Its `motion` declaration identifies
+the arm, gripper, and TCP. It supplies named poses, keyframe control steps and
+gripper positions, and TCP position and rotation tolerances. The planner
+resolves scene-relative poses through the assembled registry, samples
+Cartesian transitions and declared axis-relative arcs, and solves ordered IK
+before dispatch. Joint-space return-to-home segments use the embodiment's
+configured home. TCP errors are checked against the emitted samples, while
+joint position and velocity limits also cover feedback and handoff commands.
+
+An arc declares its observed axis, radius, signed sweep, endpoint heights,
+and arena-frame tool offset and orientation. Arc keyframes reference that
+arc's unshifted endpoints. Wrap pickup uses `simulation.cable_pickup`; the
+phase approaching the post blends from the last acknowledged pickup target
+at the configured handoff. Connector feedback resolves declared reference
+targets from the same runtime scene poses, then retains the observed grasp
+and object offset in the active trajectory source. The engine owns the
+planned samples and the live feedback source for the episode.
+
+The reset event owns fixed-step pre-roll. Optional `evaluation.measurements`
+binds a physical probe to declared scene entities and selects named reductions
+over inclusive control-frame windows. Winding probes measure the cable and
+bilateral grasp, and connector probes measure relative poses, attachment and
+contact. Contact loss covers the whole control interval. Press observations
+keep insertion depth and latch angle from the same finger-contact sample.
+Terminal scalar observations feed the ordinary evaluation graph and recorder.
+The observation channel identity includes the physical probe and reduction
+declaration. Rule thresholds remain in the graph. The RJ45 replay tools use
+the same reductions and rules on freshly simulated state. Isaac Lab groups
+its physics substeps by `samples_per_control`, which also determines the
+reported diagnostic rate.
 
 The configured lowerer allowlist also exposes profile-owned Park, AxisAlign,
 relative Place and coordinated transport. Their declarations in

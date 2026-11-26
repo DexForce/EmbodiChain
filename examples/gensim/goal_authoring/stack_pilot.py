@@ -84,6 +84,15 @@ def run(root):
         ),
     )
     text = "Place the small block on the larger block."
+    operations = [
+        dict(
+            template="E1",
+            object="block_2",
+            reference="block_1",
+            relation="on",
+            quote=text,
+        )
+    ]
 
     class Reply:
         def __init__(self, value):
@@ -95,20 +104,8 @@ def run(root):
     with GenSimServices(
         GenSimServicesCfg(),
         injected=dict(
-            task_image_grounding=Reply(
-                dict(
-                    operations=[
-                        dict(
-                            template="E1",
-                            object="block_2",
-                            reference="block_1",
-                            relation="on",
-                            quote=text,
-                        )
-                    ]
-                )
-            ),
-            task_interpretation=Reply(dict(issues=[])),
+            task_image_grounding=Reply(dict(operations=operations)),
+            task_interpretation=Reply(dict(issues=[], source_operations=operations)),
         ),
     ) as services:
         plan_cli(

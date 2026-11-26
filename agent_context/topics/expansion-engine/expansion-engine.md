@@ -7,14 +7,15 @@ algorithms stay in `sim.motion.expansion`; scene and workspace algorithms stay i
 | Change | Owner |
 |---|---|
 | CLI job commands | `embodichain/cli/expansion.py` |
-| Closed configuration and preflight | `embodichain/lab/expansion/configured.py` |
+| Shared task/job declaration and mode dispatch | `embodichain/lab/expansion/_job_config.py` |
+| Cohort configuration and preflight | `embodichain/lab/expansion/configured.py` |
 | Canonical in-memory session, lifecycle limits and coverage port | `embodichain/lab/expansion/session.py`, `session_cfg.py`, `coverage.py` |
 | Shared scheduling, admission and commit ports | `embodichain/lab/expansion/engine.py` |
 | Rolling workload × B execution in one caller-owned World | `embodichain/lab/expansion/workloads.py` |
 | Native workload World, source/evidence assembly and bounded export | `embodichain/lab/expansion/gym_workloads.py` |
 | Declarative scene/motion jobs and pure configuration validation | `embodichain/lab/expansion/task_program_jobs.py`, `_task_program_config.py` |
 | Owned result-preview launch, wait and stop | `embodichain/lab/expansion/preview.py` |
-| Job assembly, stage recovery and inspect | `embodichain/lab/expansion/workflow.py`, `stages.py` |
+| Job assembly, export recovery and inspect | `embodichain/lab/expansion/workflow.py` |
 | Native World ownership and compatibility facade | `embodichain/lab/expansion/host.py` |
 | Task-owned render/source/transform/acceptance ports | `embodichain/lab/expansion/host_extensions.py` |
 | Measured geometry, native substeps and sustained-contact acceptance | `embodichain/lab/expansion/acceptance.py` |
@@ -25,8 +26,17 @@ algorithms stay in `sim.motion.expansion`; scene and workspace algorithms stay i
 | Source-pinned sampling and joint scene candidates | `embodichain/lab/expansion/recipes.py`, `scene.py` |
 | Artifact staging, checks and dataset export | `embodichain/lab/expansion/persistence.py`, `export.py` |
 | Portable one-episode dataset export | `embodichain/lab/expansion/episode_export.py` |
-| Native appearance and state rerender | `embodichain/lab/expansion/visual.py` |
+| Rollout appearance and archived variant verification | `embodichain/lab/expansion/visual.py` |
 | Bounded media blocks | `embodichain/data_pipeline/recording/media.py` |
+
+An `expansion` block with `execution.mode: cohort|rolling` works in a task
+deployment or a standalone job that names its `deployment`. `expansion.config`
+resolves a preset before mode-specific validation. `run-task` delegates this
+block before constructing a Gym environment, leaving World ownership to the
+chosen collector. Cohort quotas apply to the job and rolling quotas to each
+operator. Preflight reports actual capacity and recovery support. Flat cohort
+jobs, task-bound Combined Expansion Profiles, and legacy rolling declarations
+remain supported. See the [configured job guide](../../../examples/expansion/engine/README.md#shared-task-and-job-configuration).
 
 `ExpansionEngine.from_job` resolves a deployment-owned backend and sensor suite.
 `run` initializes one World with the requested capacity; `resume` reconciles
@@ -55,14 +65,16 @@ source/backend/phase/scope and shared-resource compatibility; the host checks th
 before mutating the World.
 
 Semantic IDs pin sampling inputs, while execution IDs describe mutable resource
-budgets and postprocessing. Recipe IDs survive interrupted retries and B changes;
+budgets and export requests. Recipe IDs survive interrupted retries and B changes;
 new attempt IDs distinguish physical executions, and persistent job-instance IDs
 separate independently collected episodes. Native scene-case identity includes the
 logical recipe: independently prepared recipes must not share trajectory-only
-coverage admission merely because their sampled physical values match. Frozen writes are recovered before
-allocating new attempts. A hard-loss time budget is an explicit lower bound.
+coverage admission merely because their sampled physical values match. Frozen
+writes are recovered before allocating new attempts. The single writer indexes
+attempt IDs and statuses from durable records and updates the index at record
+publication. A hard-loss time budget is an explicit lower bound.
 
-Confirmed parents may render/export before the collection target is met. Stage
+Confirmed episodes may export before the collection target is met. Stage
 failures remain independent; export-only recovery opens no World and needs no
 source configuration. Version 2 manifests use contained relative hashed references;
 export includes media, calibration and source evidence in a portable dataset bundle.
@@ -188,8 +200,9 @@ checks reject unsupported geometry, source violations and parameter drift.
 
 Media spools own copies, bound raw buffering and publish hashed manifests. Encoding
 has bounded transient copies; no per-candidate dense full-episode image array is held.
-Frame readers stream selected frames from stored blocks; full artifact audits still
-validate bounded blocks. LeRobot export streams confirmed parents and visual children through the existing
+Frame readers stream selected frames from stored blocks. Submission compares
+numeric fields against the frozen archive and verifies its media before publishing
+the receipt. LeRobot export streams confirmed parents and visual children through the existing
 recorder and checks the exact final journal identity set. ODS remains unchanged.
 `export_expansion_episodes` additionally publishes one portable LeRobot dataset
 per confirmed parent. Cached evidence reads still hash every file byte and
@@ -197,11 +210,11 @@ reconstruct checked, independently owned numerical tensors; source/receipt/media
 inspection remains required. Immutable JSON nodes can be shared internally, while
 public mutable projections own separate containers.
 
-Pure visual replay requires complete scene state and an explicit observation-independent
-expert contract. Physics is disabled across the entire World; render-state publication
-preserves measured joint excursions while restoring physical limits. Each child owns
-new images/calibration but retains the original actions, times and parent ancestry.
-It increases observation-variant counts, not physical-success counts.
+Configured cohort jobs apply one shared World appearance from `visual_profile`
+before the rollout. The selected material, light and camera settings are pinned
+by the recipe. Calibrated RGB-D is captured at the initial and post-control
+boundaries of that physical episode. Inspection and export retain support for
+visual variants in historical artifacts.
 
 Unsupported parameter, sensor and planner combinations are errors, not silent B=1
 fallbacks. The native physical operators admit measured mass/inertia, friction and CoM
@@ -209,8 +222,10 @@ changes, plus explicit robot joint stiffness/damping scales. Single-body Newton 
 See the runnable jobs and qualification instructions in `examples/expansion/engine/`.
 
 Geometry, actual physics, visual and source coverage remain separate diagnostic
-channels. Native calibration/state readout is batched once per frame; per-row checks
-use the captured evidence. Engine and host timing phases are nested, not additive.
+channels. The frame collector and built-in validators share owned batched state
+fields. Custom validators receive portable scene snapshots. Pose-sampling
+diagnostics checkpoint at growing event counts and record full history on
+completion. Engine and host timing phases are nested, not additive.
 
 Focused coverage lives in `tests/lab/expansion/`, `tests/data_pipeline/test_media_spool.py`,
 `tests/sim/scene/` and the existing Task Program/Real2Sim suites. Native qualification

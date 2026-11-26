@@ -161,6 +161,39 @@ def test_changed_media_manifest_cannot_pass_inspection(tmp_path):
         sink.inspect()
 
 
+def test_submit_uses_and_verifies_frozen_media(tmp_path):
+    data = episode()
+    spool = MediaSpool(
+        tmp_path / "capture",
+        max_buffer_bytes=16,
+        parent_episode_id=data.episode_id,
+        calibration={},
+    )
+    for stamp in data.timestamps.tolist():
+        spool.append(stamp, {"depth": np.ones((1, 1), dtype=np.float32)})
+    original = spool.finish()
+    data = replace(
+        data,
+        metadata={
+            "media_manifest": str(original),
+            "media_manifest_sha256": hashlib.sha256(original.read_bytes()).hexdigest(),
+        },
+    )
+    sink = ArtifactEpisodeSink(tmp_path / "job")
+    path = sink.stage(data)
+    original.unlink()
+    chunk = next((path.parent / "media").glob("chunk-*.npz"))
+    frozen = chunk.read_bytes()
+    chunk.write_bytes(b"damaged archive")
+    with pytest.raises(ValueError, match="media chunk content changed"):
+        sink.submit(data, submission_id=0)
+    assert sink.inspect() == ()
+
+    chunk.write_bytes(frozen)
+    assert sink.submit(data, submission_id=0).confirmed
+    assert len(sink.inspect()) == 1
+
+
 def test_archived_job_sources_survive_input_removal_and_detect_corruption(tmp_path):
     source = tmp_path / "program.yaml"
     source.write_text("program_id: pinned")

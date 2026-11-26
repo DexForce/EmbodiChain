@@ -43,8 +43,8 @@ from .contracts import (
 from .interpretation import (
     InstructionCaller,
     InstructionDraftResult,
+    _canonicalize_intent,
     interpret_instruction_draft,
-    validate_instruction_intent,
 )
 from .ontology import TASK_CONTRACTS, task_success_type
 
@@ -313,25 +313,6 @@ def derive_success_spec(draft: Mapping[str, Any]) -> dict[str, Any]:
         },
         draft=normalized,
     )
-
-
-def _canonicalize_intent(intent: Mapping[str, Any]) -> dict[str, Any]:
-    """Remove arbitrary model step IDs while preserving the explicit DAG order."""
-    normalized = validate_instruction_intent(intent)
-    id_map = {
-        step["id"]: f"step_{index + 1:02d}"
-        for index, step in enumerate(normalized["steps"])
-    }
-    steps = deepcopy(normalized["steps"])
-    for step in steps:
-        old_id = step["id"]
-        step["id"] = id_map[old_id]
-        step["depends_on"] = [id_map[item] for item in step["depends_on"]]
-        for selector_name in ("object", "target"):
-            selector = step[selector_name]
-            if selector["kind"] == "step_result":
-                selector["step_id"] = id_map[selector["step_id"]]
-    return validate_instruction_intent({"steps": steps})
 
 
 def _target_affordances(task_type: str, relation: str) -> list[str]:

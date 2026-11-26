@@ -184,6 +184,13 @@ class TestNeuralEarlyConvergenceHold:
         class _Robot:
             num_instances = 3
             device = torch.device("cpu")
+            joint_names = [f"joint{i}" for i in range(7)]
+
+            def get_joint_ids(self, name):
+                return list(range(7))
+
+            def get_qvel_limits(self, *, joint_ids):
+                return torch.ones(self.num_instances, len(joint_ids))
 
             def get_qpos(self, name=None):
                 return torch.zeros(3, 7)

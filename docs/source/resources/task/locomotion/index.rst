@@ -1,15 +1,16 @@
 Locomotion Tasks
 ================
 
-Locomotion tasks are grouped by control objective. The current official set
-contains flat-terrain velocity tracking for several legged embodiments. Each
-task has a default-physics deployment and a Newton deployment with the same
-environment ID.
+Locomotion tasks are grouped by control objective. Choose velocity tracking
+for legged robots following velocity commands or reference motion tracking
+for Unitree G1 following motion clips. See :doc:`../deployments` for the
+declared configurations and physics backends.
 
 .. toctree::
    :maxdepth: 1
 
    velocity
+   tracking
 
 Discover the complete group with:
 

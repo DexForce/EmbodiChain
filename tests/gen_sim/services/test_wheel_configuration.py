@@ -199,6 +199,22 @@ def test_installed_wheel_cli_reads_external_profiles_without_package_edits(tmp_p
         "XDG_CONFIG_HOME": str(external / "xdg"),
     }
     env.pop("PYTHONPATH", None)
+
+    def assert_external_requests(invocations):
+        assert auth == ["Bearer process-key"] * (4 * invocations)
+        assert all(body["model"] == "wheel-model" for body in bodies)
+        assert (
+            sum(
+                any(
+                    isinstance(message["content"], str)
+                    and "SOURCE AUDIT:" in message["content"]
+                    for message in body["messages"]
+                )
+                for body in bodies
+            )
+            == invocations
+        )
+
     try:
         execute(
             [
@@ -230,9 +246,7 @@ def test_installed_wheel_cli_reads_external_profiles_without_package_edits(tmp_p
             s["source"] == "environment" and s["model"] == "wheel-model"
             for s in records["selections"].values()
         )
-        assert auth == ["Bearer process-key"] * 3 and all(
-            b["model"] == "wheel-model" for b in bodies
-        )
+        assert_external_requests(1)
         execute(
             [
                 python,
@@ -256,7 +270,7 @@ def test_installed_wheel_cli_reads_external_profiles_without_package_edits(tmp_p
             env,
         )
         assert (external / "canonical/semantic_task_graph.html").is_file()
-        assert auth == ["Bearer process-key"] * 6
+        assert_external_requests(2)
         for command in (
             ["gensim", "run"],
             ["gensim", "ui"],
