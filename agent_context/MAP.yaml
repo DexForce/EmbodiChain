@@ -153,6 +153,7 @@ topics:
   - embodichain/mcp/server.py
   - embodichain/cli/mcp.py
   - embodichain/mcp/tools/robot.py
+  - embodichain/mcp/_policy_runs.py
   - embodichain/lab/observations/joints.py
   - embodichain/lab/sim/dexsim_session/
   - embodichain/lab/gym/utils/_gripper_composition.py

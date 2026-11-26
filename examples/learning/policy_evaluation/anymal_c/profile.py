@@ -125,7 +125,7 @@ def build_profile(request: MotionProfileRequest) -> MotionProfile:
                 "models": {"actor": {"path": str(request.checkpoint)}},
                 "adapter": {
                     "type": "python",
-                    "entrypoint": ("anymal_c.profile:AnymalCVelocityAdapter"),
+                    "entrypoint": f"{__name__}:AnymalCVelocityAdapter",
                     "config": {
                         "inference_device": str(request.device),
                         "joint_names": list(_JOINT_NAMES),

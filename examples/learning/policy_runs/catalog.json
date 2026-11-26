@@ -1,0 +1,49 @@
+{
+  "profiles": [
+    {
+      "robot": "roboparty/rp1@1",
+      "policy": "partymimic/rp1-sparse5@1",
+      "scene": "carry/step-up@1",
+      "task": "carry/hold-crate-on-platform@1",
+      "entrypoint": "examples.learning.partymimic.borrowed:run",
+      "world": {
+        "backend": "newton",
+        "solver": "mujoco_warp",
+        "device": "cuda:0",
+        "dt": 0.005,
+        "renderer": "fast-rt",
+        "headless": true,
+        "sync_to_dexsim": true,
+        "enable_restitution": false
+      },
+      "files": {
+        "policy": "assets/rp1/model/rp1_sparse5.onnx",
+        "deployment": "assets/rp1/model/rp1_sparse5.yaml",
+        "robot_xml": "assets/rp1/cache/upstream/data/rp1_28dof_mjlab/rp1_28dof.xml",
+        "converter_python": "assets/rp1/cache/converter/bin/python"
+      },
+      "options": {"video": true}
+    },
+    {
+      "robot": "anybotics/anymal-c@1",
+      "policy": "newton/anymal-c-velocity@1",
+      "scene": "locomotion/flat-ground@1",
+      "task": "locomotion/forward-velocity@1",
+      "entrypoint": "examples.learning.policy_evaluation.anymal_c.borrowed:run",
+      "world": {
+        "backend": "dexsim",
+        "solver": "auto",
+        "device": "cpu",
+        "dt": 0.005,
+        "renderer": "hybrid",
+        "headless": true
+      },
+      "files": {
+        "resource_root": "assets/anymal/upstream",
+        "policy": "assets/anymal/upstream/anybotics_anymal_c/rl_policies/mjw_anymal.pt",
+        "robot_urdf": "assets/anymal/upstream/anybotics_anymal_c/urdf/anymal.urdf"
+      },
+      "options": {"command": [0.4, 0.0, 0.0], "control_steps": 100}
+    }
+  ]
+}
