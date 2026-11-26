@@ -900,6 +900,8 @@ class TaskProgramEnvironmentAdapter:
         self,
         program: CompiledTaskProgram,
         collision_guard: TabletopCollisionGuardFactory | None = None,
+        *,
+        decorate_demo_source: Callable | None = None,
     ) -> TracingTaskProgramNominalSources:
         """Bind configured prototypes to a paired host collision guard.
 
@@ -924,6 +926,7 @@ class TaskProgramEnvironmentAdapter:
             program,
             self._configured_nominal_sources,
             host_collision_guard=collision_guard,
+            decorate_demo_source=decorate_demo_source,
         )
         return TracingTaskProgramNominalSources(program, delegate)
 

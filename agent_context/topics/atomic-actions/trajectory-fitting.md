@@ -56,6 +56,17 @@ Optional `frame_source` adds a content-bound local video for
 same inventory and persists mutable `annotations.edited.json` separately from
 the sealed annotation seed. `--package-video` creates video-enabled resources;
 the web fit and exported native runtime need no original recording directory.
+A v2 bundle additionally pins a host-owned execution context and declares the
+qualified design reference as its fitting trajectory. CLI fitting accepts saved
+annotation edits for the same frame source via `--annotations`.
+`export_task_program` uses that context to bind a scene-bound Pickup to one
+named invocation. It separates the fitted core from the surrounding annotation
+samples. Each retained interval needs an explicit named DemoSkill and measured
+boundary contract. A retained slice on the same post-step clock can be built
+from the pinned source asset with its original commands, shifted phases, events
+and scoped evidence. The output links recorded event ticks and asset hashes to
+compiled calls. The Expansion Engine owns physical qualification and writes a
+new receipt before dataset conversion.
 `_collision.py` prepares content-addressed scene convex parts; web import and
 packaging supply precomputed files for decomposition-free runtime startup.
 Scene-owned Z compensation precedes fitting; the existing pickup interpolation
@@ -88,7 +99,8 @@ exports the native invocation deployment described above.
 selects a unique closing hand; ambiguous evidence requires an explicit choice.
 Names do not establish capabilities. A profile must supply explicit runtime TCP
 calibration and actual finger collision assets; automatic scene geometry supports
-opposing prismatic fingers. Without a scene, the effect-free world-TCP motion
+opposing prismatic fingers, including two URDF followers of one aperture driver.
+Without a scene, the effect-free world-TCP motion
 fitter remains available for PickUp, Slide, Twist and explicitly bound HandOver.
 Scene HandOver needs time-resolved object/attachment bindings and is not inferred
 from an initial object pose. Both paths retain explicit source identity, inclusive

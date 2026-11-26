@@ -38,10 +38,18 @@ def _bundle_main(argv: Sequence[str]) -> None:
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--run-task-output", type=Path)
+    parser.add_argument(
+        "--annotations", type=Path, help="Saved edits for the bundle's source video."
+    )
     parser.add_argument("--package-output", type=Path)
     parser.add_argument("--package-video", type=Path)
     parser.add_argument("--video-stream", type=int)
     parser.add_argument("--device", default="cpu")
+    parser.add_argument(
+        "--observed-grasp",
+        type=Path,
+        help="Measured object-to-TCP JSON matrix for a scene-bound Pickup.",
+    )
     args = parser.parse_args(argv)
     if args.output is None and args.package_output is None:
         parser.error("Choose --output for fitting or --package-output for repackaging.")
@@ -54,10 +62,35 @@ def _bundle_main(argv: Sequence[str]) -> None:
     from ._bundle import load_inputs, pack_inputs, _video_source
     from ._episode import fit_episode
     from ._export import export_run_task
-    from embodichain.data_pipeline.skill_fitting import save_skill_fit
+    from embodichain.data_pipeline.skill_fitting import file_digest, save_skill_fit
 
     inputs, document, clock, durations = load_inputs(args.bundle)
     inputs.device = args.device
+    grasp_digest = None
+    if args.observed_grasp is not None:
+        if args.output is None or args.package_output is not None:
+            parser.error("--observed-grasp requires a fit output.")
+        if args.output.resolve() == args.observed_grasp.resolve():
+            parser.error("The fit output cannot replace its measured grasp input.")
+        grasp_digest = file_digest(args.observed_grasp)
+        inputs.observed_object_to_tcp = json.loads(args.observed_grasp.read_text())
+    edited_digest = None
+    if args.annotations is not None:
+        edited_digest = file_digest(args.annotations)
+        edited = json.loads(args.annotations.read_text())
+        actual, expected = edited.get("source", {}), document["source"]
+        if (
+            edited.get("frame_index_base") != 0
+            or edited.get("interval") != "closed"
+            or any(
+                actual.get(k) != expected[k]
+                for k in ("identity", "frame_count", "timing")
+            )
+        ):
+            raise ValueError(
+                "Edited annotations do not belong to this bundle's frame source."
+            )
+        document = edited
     if args.package_output is not None:
         root = args.bundle.expanduser().resolve()
         visual = _video_source(root, json.loads((root / "fitting.json").read_text()))
@@ -85,6 +118,12 @@ def _bundle_main(argv: Sequence[str]) -> None:
     arrays, report = fit_episode(
         inputs, document, lambda a, b: (clock[a : b + 1], durations[a : b + 1])
     )
+    if args.annotations is not None and file_digest(args.annotations) != edited_digest:
+        raise ValueError("Annotations changed during fitting.")
+    if grasp_digest is not None:
+        if file_digest(args.observed_grasp) != grasp_digest:
+            raise ValueError("Measured grasp changed during fitting.")
+        report["observed_grasp_sha256"] = grasp_digest
     save_skill_fit(args.output, arrays, report)
     archive = None
     if args.run_task_output and report["accepted"]:

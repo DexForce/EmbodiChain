@@ -723,7 +723,9 @@ def _compose_integration_payload(
         _normalize_skill_options_key(task["profile"], path="task integration.profile"),
         path="task integration.profile",
         required=frozenset({"defaults", "skill_options", "effect_monitors"}),
-        optional=frozenset({"skill_presets", "grounding_providers"}),
+        optional=frozenset(
+            {"skill_presets", "grounding_providers", "invocation_presets"}
+        ),
     )
     preset = {
         "preset_id": deepcopy(policy["preset_id"]),
@@ -740,6 +742,30 @@ def _compose_integration_payload(
         preset["required_planner"] = deepcopy(policy["planner"]["type"])
     elif "required_planner" in policy:
         preset["required_planner"] = deepcopy(policy["required_planner"])
+    named = _owned_mapping(
+        profile.get("invocation_presets", {}), path="profile.invocation_presets"
+    )
+    extra_presets = []
+    for key, item in named.items():
+        path = f"profile.invocation_presets.{key}"
+        name = _identifier(key, path=path)
+        if name == preset["preset_id"]:
+            raise ValueError("An invocation preset cannot replace the default preset.")
+        override = _mapping(
+            item, path=path, required=frozenset({"skill_options", "motion"})
+        )
+        options = _owned_mapping(
+            override["skill_options"], path=f"{path}.skill_options"
+        )
+        motion = _owned_mapping(override["motion"], path=f"{path}.motion")
+        extra_presets.append(
+            {
+                **deepcopy(preset),
+                "preset_id": name,
+                "skill_options": {**preset["skill_options"], **options},
+                "motion": {**preset["motion"], **motion},
+            }
+        )
 
     scene_payload = {
         key: deepcopy(value) for key, value in scene.items() if key != "contract_id"
@@ -749,7 +775,7 @@ def _compose_integration_payload(
         "resources": deepcopy(skill_profile["resources"]),
         "command_presets": deepcopy(skill_profile["command_presets"]),
         "defaults": deepcopy(profile["defaults"]),
-        "presets": [preset],
+        "presets": [preset, *extra_presets],
         "default_preset": None,
         "skill_presets": deepcopy(profile.get("skill_presets", {})),
         "grounding_providers": deepcopy(profile.get("grounding_providers", {})),

@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+import xml.etree.ElementTree as ET
 
 import numpy as np
 import torch
@@ -161,6 +162,29 @@ class RobotPort:
         self.mimic_ids: list[int] = []
         self.mimic_parents: list[int] = []
         self.mimic_multipliers: list[float] = []
+        self.mimic_offsets: list[float] = []
+        mimic_joints: dict[str, tuple[str, float, float]] = {}
+        for model in {mapping["urdf_path"] for mapping in profile.solvers.values()}:
+            for joint in ET.parse(model).findall("./joint"):
+                mimic = joint.find("mimic")
+                name = joint.get("name")
+                if mimic is None or name not in self.joint_names:
+                    continue
+                relation = (
+                    mimic.attrib["joint"],
+                    float(mimic.get("multiplier", "1")),
+                    float(mimic.get("offset", "0")),
+                )
+                if name in mimic_joints and mimic_joints[name] != relation:
+                    raise ValueError(f"Conflicting mimic declarations for {name}.")
+                mimic_joints[name] = relation
+        for name, (driver, multiplier, offset) in mimic_joints.items():
+            if driver not in self.joint_names:
+                raise ValueError(f"Robot profile is missing the driver of {name}.")
+            self.mimic_ids.append(self.joint_names.index(name))
+            self.mimic_parents.append(self.joint_names.index(driver))
+            self.mimic_multipliers.append(multiplier)
+            self.mimic_offsets.append(offset)
         self.solvers = {}
         self.bases = {}
         for part, declaration in profile.solvers.items():
