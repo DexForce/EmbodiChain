@@ -7357,3 +7357,16 @@ native target acceptance separately from measured attainment. Query the original
 command after a connection loss. Supply both ``--run-id`` and ``--turn`` to
 attribute native journal entries. DexSim MCP owns scene setup and low-level
 inspection.
+
+Packaged locomotion policy entry points
+--------------------------------------
+
+.. currentmodule:: embodichain.extensions.models.policies.anymal_c.profile
+
+.. autosummary::
+
+   AnymalCVelocityAdapter
+   PROFILE_ID
+   build_profile
+
+.. autofunction:: embodichain.extensions.models.policies.rp1_carry.simulation.main

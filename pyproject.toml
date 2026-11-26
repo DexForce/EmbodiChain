@@ -146,3 +146,6 @@ markers = [
     "renderer: marks tests that exercise a rendering backend",
     "xdist_group(name): keeps resource-sharing tests on one pytest-xdist worker",
 ]
+
+[project.entry-points."dexsim.runtime_handoff"]
+embodichain = "embodichain.lab.sim.dexsim_session.handoff:BoundWorld"

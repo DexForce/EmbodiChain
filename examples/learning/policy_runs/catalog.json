@@ -5,7 +5,7 @@
       "policy": "partymimic/rp1-sparse5@1",
       "scene": "carry/step-up@1",
       "task": "carry/hold-crate-on-platform@1",
-      "entrypoint": "examples.learning.partymimic.borrowed:run",
+      "entrypoint": "embodichain.extensions.models.policies.rp1_carry.borrowed:run",
       "world": {
         "backend": "newton",
         "solver": "mujoco_warp",
@@ -29,7 +29,7 @@
       "policy": "newton/anymal-c-velocity@1",
       "scene": "locomotion/flat-ground@1",
       "task": "locomotion/forward-velocity@1",
-      "entrypoint": "examples.learning.policy_evaluation.anymal_c.borrowed:run",
+      "entrypoint": "embodichain.extensions.models.policies.anymal_c.borrowed:run",
       "world": {
         "backend": "dexsim",
         "solver": "auto",

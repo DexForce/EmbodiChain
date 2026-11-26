@@ -73,6 +73,25 @@ def test_command_replay_does_not_advance_and_cancel_stops_at_boundary(
     assert jobs.start("pick1", "skill", {"object": "cube"}, work) == receipt
 
 
+def test_reused_command_conflicts_after_rebinding(tmp_path: Path) -> None:
+    owner = _owner()
+    jobs = MotionJobs(owner, tmp_path, lambda: {})
+    jobs.binding_id = "first-binding"
+
+    def move(_folder):
+        yield {"phase": "running"}
+        return {"passed": True}
+
+    request = {"target": "platform"}
+    jobs.start("move", "skill", request, move)
+    jobs.close()
+    rebound = MotionJobs(owner, tmp_path, lambda: {})
+    rebound.binding_id = "second-binding"
+    with pytest.raises(ValueError, match="COMMAND_ID_CONFLICT"):
+        rebound.start("move", "skill", request, move)
+    assert rebound.active is None
+
+
 def test_owner_grant_covers_the_bound_session_and_intent() -> None:
     from dexsim.runtime.errors import InvalidParamsError, UnsupportedOperationError
 

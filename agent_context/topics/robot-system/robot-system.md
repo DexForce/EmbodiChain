@@ -188,3 +188,12 @@ contains no hand selection or assembly-task metadata. The canonical example is
 extension. Assembly grasp assumptions and exact-dynamics qualification gates
 belong to the physical task environment. Historical reference conversion is
 owned by [assembly asset preparation](../assembly-assets/assembly-assets.md), not a robot type.
+
+A standard manual DexSim Runtime can opt into the `embodichain`
+`dexsim.runtime_handoff` provider before authoring a scene. Use
+`--handoff-key-file` for the matching local operator grant. Scene assembly
+and native observations remain DexSim operations. The plugin binds exact
+roles to finalized objects, qualifies the measured solver and provides
+owner-thread robot, skill or policy execution. Release returns the same
+World to native scene authoring. Qualification starts at a prebuilt floor;
+see `examples/sim/dexuni_handoff/`.

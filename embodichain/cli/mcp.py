@@ -54,8 +54,15 @@ def main(argv: Sequence[str] | None = None) -> None:
         type=Path,
         help="Receipts directory for a dedicated motion World",
     )
+    parser.add_argument(
+        "--handoff-key-file",
+        type=Path,
+        help="Operator grant for a standard handoff-enabled manual World",
+    )
     args = parser.parse_args(argv)
-    if args.motion_output is not None:
+    if args.handoff_key_file and (args.writer_key_file or args.policy_catalog):
+        parser.error("Select one host control mode")
+    if args.motion_output is not None and args.handoff_key_file is None:
         if (
             not args.session
             or args.writer_key_file is None
@@ -79,7 +86,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     elif not args.session or args.policy_output is not None:
         parser.error("Supply --session or enable policy tools with --policy-catalog")
     try:
-        if args.motion_output is not None:
+        if args.motion_output is not None and args.handoff_key_file is None:
             from embodichain.mcp._motion import serve as serve_motion
 
             labels = (
@@ -114,6 +121,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         args.session,
         directory=args.session_directory,
         writer_key_file=args.writer_key_file,
+        handoff_key_file=args.handoff_key_file,
+        motion_output=args.motion_output,
         run_id=args.run_id,
         turn=args.turn,
     )
