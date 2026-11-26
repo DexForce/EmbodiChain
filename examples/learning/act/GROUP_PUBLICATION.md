@@ -112,6 +112,24 @@ submissions. B improved the development score on two seeds, so this cohort
 did not advance to StackCube. The [per-seed evidence](results/ram_replay.json)
 includes exposure, paired outcomes, checkpoint selection and receipt digests.
 
+### Thirty live slots
+
+A follow-up kept every draw live and raised the shared capacity from 20
+to 30 slots. The five C runs followed the A/B pairs on the same physical
+A100 with the same seeds, qualification, calibration, draw floor, evaluation
+scenes and publication clock. The live shared tensor payload grew by
+574.95 MiB. B retained up to 492.54 MiB of history tensors in process RAM.
+
+| Learner seed | C dev at 1500 (of 50) | C reserved (of 100) | Mean distinct episodes per 100 updates over the first 1500, A / B / C |
+| --- | ---: | ---: | ---: |
+| 207101 | 48 | 95 | 15.7 / 47.3 / 24.1 |
+| 207102 | 45 | 96 | 14.9 / 48.4 / 24.4 |
+| 207103 | 48 | 94 | 14.6 / 46.9 / 24.3 |
+| 207104 | 48 | 96 | 15.5 / 44.9 / 24.3 |
+| 207105 | 46 | 93 | 15.6 / 49.8 / 23.6 |
+
+C submitted an eligible policy in time on 5/5 seeds and qualified 3/5 at 95/100. The first-1500 coverage column compares identical update budgets. The evidence file also includes paired discordant scene counts and steady-state update rates.
+
 ## Compare dual-GPU supply layouts
 
 Both layouts train one ACT policy using two local DDP ranks and a global batch

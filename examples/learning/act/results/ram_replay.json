@@ -248,5 +248,401 @@
     },
     "median_coverage100_difference": 46.18674381904261,
     "stackcube_gate": false
+  },
+  "live_capacity_control": {
+    "arm_order": [
+      "A live20",
+      "B live20 with RAM history",
+      "C live30"
+    ],
+    "seed_pairs": [
+      {
+        "seed": 207101,
+        "dev1500": [
+          49,
+          46,
+          48
+        ],
+        "reserved": [
+          95,
+          98,
+          95
+        ],
+        "published": [
+          true,
+          true,
+          true
+        ],
+        "qualified": [
+          true,
+          true,
+          true
+        ],
+        "published_or_decision_s": [
+          295.001,
+          266.719,
+          295.001
+        ],
+        "coverage100_first1500": [
+          15.673,
+          47.339,
+          24.149
+        ],
+        "steady_updates_s": [
+          14.455,
+          15.157,
+          15.095
+        ],
+        "episodes": [
+          100,
+          100,
+          100
+        ],
+        "c_min_credit": 292,
+        "dev1500_discordant_A_C": [
+          2,
+          1
+        ],
+        "dev1500_discordant_B_C": [
+          2,
+          4
+        ],
+        "reserved_discordant_A_C": [
+          5,
+          5
+        ],
+        "reserved_discordant_B_C": [
+          5,
+          2
+        ],
+        "selected_updates": [
+          1500,
+          2000,
+          1500
+        ],
+        "control_receipt_sha256": {
+          "sampling.json": "3b5bc7636e3e3db6209b494a8a0f4d2ded374b41e8a301a3f0bfad072473254b",
+          "deadline.json": "199eeb7d604aac707957a7f125c602da2fd41f2dd5b70fce07fbfa85ac3db8c2",
+          "dev_1500.json": "3dd2ec00640e30e17857231199d66f6510528df6958d7b261a80ca0666e701ae",
+          "test.json": "84b5140713f1147efb5956c9b7010f23da8cdd576d91eca09dc7c9276cbdfc0a"
+        }
+      },
+      {
+        "seed": 207102,
+        "dev1500": [
+          45,
+          48,
+          45
+        ],
+        "reserved": [
+          97,
+          100,
+          96
+        ],
+        "published": [
+          true,
+          true,
+          true
+        ],
+        "qualified": [
+          true,
+          true,
+          true
+        ],
+        "published_or_decision_s": [
+          250.12,
+          271.336,
+          295.001
+        ],
+        "coverage100_first1500": [
+          14.943,
+          48.385,
+          24.35
+        ],
+        "steady_updates_s": [
+          15.381,
+          15.017,
+          14.504
+        ],
+        "episodes": [
+          100,
+          100,
+          100
+        ],
+        "c_min_credit": 393,
+        "dev1500_discordant_A_C": [
+          3,
+          3
+        ],
+        "dev1500_discordant_B_C": [
+          3,
+          0
+        ],
+        "reserved_discordant_A_C": [
+          4,
+          3
+        ],
+        "reserved_discordant_B_C": [
+          4,
+          0
+        ],
+        "selected_updates": [
+          2000,
+          2000,
+          2000
+        ],
+        "control_receipt_sha256": {
+          "sampling.json": "9b455ae51027df53e6c715b69affd8c07a2fb4113e451635ffbf5ddf29f5e808",
+          "deadline.json": "1e9288b1f22acce62ab68b36ba1c3ebffef2bc9d1c9b5733972c9103c57011e9",
+          "dev_1500.json": "58a4c14a90364bf4c0ab3a6317c0959ada3085f98c51410c11bf28045afc392f",
+          "test.json": "1f9e3700e62bae6a6b654fb1d4ea5d8042680e6edf983432cef387f3b97ac485"
+        }
+      },
+      {
+        "seed": 207103,
+        "dev1500": [
+          39,
+          49,
+          48
+        ],
+        "reserved": [
+          null,
+          100,
+          94
+        ],
+        "published": [
+          false,
+          true,
+          true
+        ],
+        "qualified": [
+          false,
+          true,
+          false
+        ],
+        "published_or_decision_s": [
+          295.001,
+          258.44,
+          295.001
+        ],
+        "coverage100_first1500": [
+          14.572,
+          46.895,
+          24.262
+        ],
+        "steady_updates_s": [
+          15.233,
+          15.396,
+          14.707
+        ],
+        "episodes": [
+          100,
+          100,
+          100
+        ],
+        "c_min_credit": 367,
+        "dev1500_discordant_A_C": [
+          0,
+          9
+        ],
+        "dev1500_discordant_B_C": [
+          2,
+          1
+        ],
+        "reserved_discordant_A_C": null,
+        "reserved_discordant_B_C": [
+          6,
+          0
+        ],
+        "selected_updates": [
+          null,
+          2000,
+          2000
+        ],
+        "control_receipt_sha256": {
+          "sampling.json": "5944425c3e55e9f1094f1fad775b337d4b67337e720120de6f9eaf5bb217dece",
+          "deadline.json": "90cb02a35cf962bb77b034bae6fa46334ea76f8b08135f3c0e028b1b644a4e44",
+          "dev_1500.json": "8d14cd5f0a0f4689225ae21313d07a7e8ff40a498edda97fb6c025fa2d83ec7c",
+          "test.json": "3343b609843bbe022d64e570276dfdbadb2fd1d53417042247cac28272c880c5"
+        }
+      },
+      {
+        "seed": 207104,
+        "dev1500": [
+          50,
+          49,
+          48
+        ],
+        "reserved": [
+          95,
+          92,
+          96
+        ],
+        "published": [
+          true,
+          true,
+          true
+        ],
+        "qualified": [
+          true,
+          false,
+          true
+        ],
+        "published_or_decision_s": [
+          295.001,
+          295.001,
+          295.001
+        ],
+        "coverage100_first1500": [
+          15.477,
+          44.921,
+          24.266
+        ],
+        "steady_updates_s": [
+          14.961,
+          15.066,
+          14.724
+        ],
+        "episodes": [
+          100,
+          100,
+          100
+        ],
+        "c_min_credit": 371,
+        "dev1500_discordant_A_C": [
+          2,
+          0
+        ],
+        "dev1500_discordant_B_C": [
+          1,
+          0
+        ],
+        "reserved_discordant_A_C": [
+          2,
+          3
+        ],
+        "reserved_discordant_B_C": [
+          3,
+          7
+        ],
+        "selected_updates": [
+          2000,
+          1500,
+          1500
+        ],
+        "control_receipt_sha256": {
+          "sampling.json": "aff512bb4575e18354fa8e0f42adbe750de0c9545d4d325ec6068dda05adfd4a",
+          "deadline.json": "26a0148a4e919a3a8a386f5a5ff2fe4f62d87796fbc125fa0c97c0f4adb73748",
+          "dev_1500.json": "f68a5534a0cf8c835c3b85dbbc19733f7fad85b13523c6b8fdb1bc45a22182ac",
+          "test.json": "95eb9757e13c609b5b86107f372722d6747b55674c17d1b93b6f6ee9e2d19315"
+        }
+      },
+      {
+        "seed": 207105,
+        "dev1500": [
+          48,
+          44,
+          46
+        ],
+        "reserved": [
+          95,
+          78,
+          93
+        ],
+        "published": [
+          true,
+          true,
+          true
+        ],
+        "qualified": [
+          true,
+          false,
+          false
+        ],
+        "published_or_decision_s": [
+          262.381,
+          295.001,
+          295.001
+        ],
+        "coverage100_first1500": [
+          15.649,
+          49.799,
+          23.65
+        ],
+        "steady_updates_s": [
+          14.653,
+          15.183,
+          14.762
+        ],
+        "episodes": [
+          100,
+          100,
+          100
+        ],
+        "c_min_credit": 469,
+        "dev1500_discordant_A_C": [
+          3,
+          1
+        ],
+        "dev1500_discordant_B_C": [
+          3,
+          5
+        ],
+        "reserved_discordant_A_C": [
+          7,
+          5
+        ],
+        "reserved_discordant_B_C": [
+          5,
+          20
+        ],
+        "selected_updates": [
+          2000,
+          2000,
+          2000
+        ],
+        "control_receipt_sha256": {
+          "sampling.json": "b5ec9b62944b7b27aa5dc6ed0cb8c712edad04288cdcddd52af9e48ab67f6332",
+          "deadline.json": "8f8bbb842241eef0a7b14a3b9cf694870aac6f1a61ffc5ed7bbb680e1619ec13",
+          "dev_1500.json": "161cb57cf0c6157bd8327455f3cce9a70fa0b121f862b1506e4c052f0986ebb3",
+          "test.json": "dc04624b27daba25b008bc2e0f62a8c8b6f59bdb496a98ba56ab3eab2e660288"
+        }
+      }
+    ],
+    "launch_order": "C followed the original alternating A/B cohort on the same physical A100; this extension was not interleaved.",
+    "live20_storage": {
+      "slots": 20,
+      "color_bytes": 1204224000,
+      "all_tensor_bytes": 1205748000,
+      "color_shape": [
+        20,
+        300,
+        224,
+        224,
+        4
+      ]
+    },
+    "live30_storage": {
+      "slots": 30,
+      "color_bytes": 1806336000,
+      "all_tensor_bytes": 1808622000,
+      "color_shape": [
+        30,
+        300,
+        224,
+        224,
+        4
+      ]
+    },
+    "published": [
+      4,
+      5,
+      5
+    ],
+    "qualified": [
+      4,
+      3,
+      3
+    ]
   }
 }
