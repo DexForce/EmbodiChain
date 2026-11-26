@@ -3,6 +3,9 @@
 Official LeRobot ACT and PushCube
 ========================================
 
+See the :doc:`ACT model guide </resources/models/policy/act>` for the observation and
+action contract.
+
 The ACT integration uses LeRobot 0.6.1 on Python 3.12. EmbodiChain owns
 collection, declared action contracts, corpus provenance and simulator evaluation.
 LeRobot owns its model, processors, training loop and native checkpoints.

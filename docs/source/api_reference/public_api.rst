@@ -342,6 +342,17 @@ embodichain.data.assets.solver_assets
 
    download_neural_ik_checkpoint
 
+embodichain.data.assets.task_assets
+-----------------------------------
+
+.. currentmodule:: embodichain.data.assets.task_assets
+
+.. autosummary::
+
+   Rj45Fixture
+
+.. autoclass:: Rj45Fixture
+
 embodichain.data.assets.w1_assets
 ---------------------------------
 
@@ -3371,6 +3382,8 @@ embodichain.lab.sim.atomic_skills
    MoveEndEffectorOptions
    MoveHeldObjectOptions
    MoveJointsOptions
+   ObservedJointTrajectory
+   ObservedJointTrajectorySource
    ObjectSkillGoal
    OPEN_COMMAND
    PickUpOptions

@@ -18,11 +18,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from subprocess import Popen
 import sys
 from time import monotonic, sleep
+from typing import Any
 
 import pytest
 from dexsim.runtime import Session
@@ -30,6 +32,41 @@ from dexsim.runtime.errors import SessionConnectionError, SessionRemoteError
 
 from embodichain.lab.sim.dexsim_session.writer import WriterClient
 from examples.sim.attached_world.fixture import ARM, native
+
+
+async def _reconcile_through_stdio(
+    directory: Path, key: Path, request: dict[str, Any], receipt: dict[str, Any]
+) -> dict[str, Any]:
+    import mcp
+
+    parameters = mcp.StdioServerParameters(
+        command=sys.executable,
+        args=[
+            "-m",
+            "embodichain",
+            "mcp",
+            "--session",
+            request["session_id"],
+            "--session-directory",
+            str(directory),
+            "--writer-key-file",
+            str(key),
+        ],
+    )
+    async with mcp.Client(parameters) as client:
+        tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+        assert tools["embodichain_control_receipt"].annotations.read_only_hint
+
+        async def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
+            result = await client.call_tool("embodichain_control_" + name, args)
+            assert not result.is_error, result.content
+            return result.structured_content
+
+        # Resume from a new MCP connection after a Python client lost its reply.
+        assert await call("receipt", {"command_id": request["command_id"]}) == receipt
+        assert await call("target_and_step", request) == receipt
+        assert (await call("status", {}))["control_step"] == 1
+        return await call("stop", {})
 
 
 @pytest.mark.gpu
@@ -135,7 +172,9 @@ def test_dedicated_writer(
                     abs(a - b) <= 0.001
                     for a, b in zip(req["target"], recovered["measured_after"]["qpos"])
                 )
-                stopped = writer.call("stop", {})
+                stopped = asyncio.run(
+                    _reconcile_through_stdio(directory, key, req, recovered)
+                )
                 assert stopped["state"] == "stopped" and stopped["control_step"] == 1
                 with pytest.raises(SessionRemoteError):
                     writer.call(

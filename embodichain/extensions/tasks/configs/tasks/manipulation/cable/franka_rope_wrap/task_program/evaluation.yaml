@@ -1,0 +1,377 @@
+measurements:
+  kind: cable_winding
+  cable: cable
+  contact_sensor: contacts
+  tool_link: fr3_hand_tcp
+  arm: arm
+  steps: 2160
+  samples_per_control: 4
+  anchor_at_reset: false
+  parameters:
+    floor_height_m: 0.002
+    post_radius_m: 0.045
+    post_height_m: 0.12
+    cable_radius_m: 0.004
+    grasp_inset_m: 0.025
+    post_center_xy_m:
+    - 0.48
+    - 0
+    finger_pad_center_m:
+    - 0
+    - 0.002
+    - 0.04175
+    finger_pad_size_m:
+    - 0.028
+    - 0.004
+    - 0.0135
+    post: post
+    fingers:
+    - fr3_leftfinger
+    - fr3_rightfinger
+    contact_band_m: 0.003
+    contact_distance_m: 1.0e-05
+    contact_point_gap_m: 0.0003
+    pad_gap_m: 0.0002
+    grasp_start: 300
+    tail_segments: 8
+  reductions:
+    last_control_frame:
+      operation: last
+      unit: '1'
+      field: frame
+    hold_frame_count:
+      operation: count
+      unit: '1'
+      window: &id002
+      - 2040
+      - 2160
+    finite:
+      operation: min
+      unit: '1'
+      field: finite
+    arm_limit:
+      operation: max
+      unit: rad
+      field: arm_joint_limit_violation_rad
+    finger_limit:
+      operation: max
+      unit: m
+      field: finger_joint_limit_violation_m
+    initial_tip_height:
+      operation: first
+      unit: m
+      field: free_end_z_m
+    lifted_tip_height:
+      operation: min
+      unit: m
+      field: free_end_z_m
+      window:
+      - 420
+      - 450
+    grasp_confirmation:
+      operation: min
+      unit: '1'
+      field: grasp_confirmed
+      window: &id001
+      - 300
+      - 2160
+    tip_grasp_distance:
+      operation: max
+      unit: m
+      field: tail_tcp_distance_m
+      window: *id001
+    material_grasp_slip:
+      operation: max
+      unit: m
+      field: material_slip_m
+      window: *id001
+    bilateral_finger_contact:
+      operation: mean
+      unit: '1'
+      field: bilateral_rope_contact
+      window: *id001
+    actual_winding:
+      operation: min
+      unit: deg
+      field: winding_deg
+      window: *id002
+      absolute: true
+    post_contact_arc:
+      operation: min
+      unit: deg
+      field: contact_arc_deg
+      window: *id002
+    hold_winding_drift:
+      operation: range
+      unit: deg
+      field: winding_deg
+      window: *id002
+    hold_tip_drift:
+      operation: displacement
+      unit: m
+      field: free_end_m
+      window: *id002
+    rope_below_post_top:
+      operation: max
+      unit: m
+      field: rope_max_z_m
+    post_nonpenetration:
+      operation: max
+      unit: m
+      field: post_penetration_m
+    robot_post_clearance:
+      operation: max
+      unit: m
+      field: robot_post_penetration_m
+    anchor_points_toward_post:
+      operation: max
+      unit: deg
+      field: anchor_direction_error_deg
+    smooth_anchor_exit:
+      operation: max
+      unit: deg
+      field: anchor_exit_bend_max_deg
+      window: *id002
+    anchor_fixed:
+      operation: max
+      unit: m
+      field: anchor_error_m
+    length_preserved:
+      operation: max
+      unit: m
+      field: joint_gap_max_m
+    contacts_not_dropped:
+      operation: max
+      unit: '1'
+      field: dropped_contacts
+    floor_nonpenetration:
+      operation: min
+      unit: m
+      field: rope_min_z_m
+graph:
+  roots:
+  - wrap_success
+  rules:
+    last_control_frame:
+      kind: scalar_range
+      bindings:
+        value: measurements/last_control_frame
+      params:
+        minimum: 2160
+        maximum: 2160
+    hold_frame_count:
+      kind: scalar_range
+      bindings:
+        value: measurements/hold_frame_count
+      params:
+        minimum: 121
+        maximum: 121
+    completed:
+      kind: all
+      refs:
+      - last_control_frame
+      - hold_frame_count
+    finite:
+      kind: scalar_range
+      bindings:
+        value: measurements/finite
+      params:
+        minimum: 1
+        maximum: 1
+    arm_limit:
+      kind: scalar_range
+      bindings:
+        value: measurements/arm_limit
+      params:
+        minimum: 0
+        maximum: 0.0001
+        maximum_inclusive: false
+    finger_limit:
+      kind: scalar_range
+      bindings:
+        value: measurements/finger_limit
+      params:
+        minimum: 0
+        maximum: 0.0001
+        maximum_inclusive: false
+    joint_limits:
+      kind: all
+      refs:
+      - arm_limit
+      - finger_limit
+    initial_tip_height:
+      kind: scalar_range
+      bindings:
+        value: measurements/initial_tip_height
+      params:
+        minimum: -1000000000000000.0
+        maximum: 0.01
+    lifted_tip_height:
+      kind: scalar_range
+      bindings:
+        value: measurements/lifted_tip_height
+      params:
+        minimum: 0.037000000000000005
+        maximum: 1000000000000000.0
+        minimum_inclusive: false
+    direct_floor_pickup:
+      kind: all
+      refs:
+      - initial_tip_height
+      - lifted_tip_height
+    grasp_confirmation:
+      kind: scalar_range
+      bindings:
+        value: measurements/grasp_confirmation
+      params:
+        minimum: 1
+        maximum: 1
+    tip_grasp_distance:
+      kind: scalar_range
+      bindings:
+        value: measurements/tip_grasp_distance
+      params:
+        minimum: 0
+        maximum: 0.045
+    grasp_retained:
+      kind: all
+      refs:
+      - grasp_confirmation
+      - tip_grasp_distance
+    material_grasp_slip:
+      kind: scalar_range
+      bindings:
+        value: measurements/material_grasp_slip
+      params:
+        minimum: 0
+        maximum: 0.008
+    bilateral_finger_contact:
+      kind: scalar_range
+      bindings:
+        value: measurements/bilateral_finger_contact
+      params:
+        minimum: 0.95
+        maximum: 1
+    actual_winding:
+      kind: scalar_range
+      bindings:
+        value: measurements/actual_winding
+      params:
+        minimum: 360.0
+        maximum: 1000000000000000.0
+    post_contact_arc:
+      kind: scalar_range
+      bindings:
+        value: measurements/post_contact_arc
+      params:
+        minimum: 300.0
+        maximum: 360.000001
+    hold_winding_drift:
+      kind: scalar_range
+      bindings:
+        value: measurements/hold_winding_drift
+      params:
+        minimum: 0
+        maximum: 3.0
+    hold_tip_drift:
+      kind: scalar_range
+      bindings:
+        value: measurements/hold_tip_drift
+      params:
+        minimum: 0
+        maximum: 0.003
+    hold_stable:
+      kind: all
+      refs:
+      - hold_winding_drift
+      - hold_tip_drift
+    rope_below_post_top:
+      kind: scalar_range
+      bindings:
+        value: measurements/rope_below_post_top
+      params:
+        minimum: -1000000000000000.0
+        maximum: 0.122
+        maximum_inclusive: false
+    post_nonpenetration:
+      kind: scalar_range
+      bindings:
+        value: measurements/post_nonpenetration
+      params:
+        minimum: 0
+        maximum: 0.0008
+    robot_post_clearance:
+      kind: scalar_range
+      bindings:
+        value: measurements/robot_post_clearance
+      params:
+        minimum: 0
+        maximum: 0.0001
+    anchor_points_toward_post:
+      kind: scalar_range
+      bindings:
+        value: measurements/anchor_points_toward_post
+      params:
+        minimum: 0
+        maximum: 0.1
+        maximum_inclusive: false
+    smooth_anchor_exit:
+      kind: scalar_range
+      bindings:
+        value: measurements/smooth_anchor_exit
+      params:
+        minimum: 0
+        maximum: 20.0
+    anchor_fixed:
+      kind: scalar_range
+      bindings:
+        value: measurements/anchor_fixed
+      params:
+        minimum: 0
+        maximum: 1.0e-05
+        maximum_inclusive: false
+    length_preserved:
+      kind: scalar_range
+      bindings:
+        value: measurements/length_preserved
+      params:
+        minimum: 0
+        maximum: 0.0008
+    contacts_not_dropped:
+      kind: scalar_range
+      bindings:
+        value: measurements/contacts_not_dropped
+      params:
+        minimum: 0
+        maximum: 0
+    floor_nonpenetration:
+      kind: scalar_range
+      bindings:
+        value: measurements/floor_nonpenetration
+      params:
+        minimum: 0.0012000000000000001
+        maximum: 1000000000000000.0
+    wrap_success:
+      kind: all
+      refs:
+      - completed
+      - finite
+      - joint_limits
+      - direct_floor_pickup
+      - grasp_retained
+      - material_grasp_slip
+      - bilateral_finger_contact
+      - actual_winding
+      - post_contact_arc
+      - hold_stable
+      - rope_below_post_top
+      - post_nonpenetration
+      - robot_post_clearance
+      - anchor_points_toward_post
+      - smooth_anchor_exit
+      - anchor_fixed
+      - length_preserved
+      - contacts_not_dropped
+      - floor_nonpenetration
+final_acceptance:
+- wrap_success

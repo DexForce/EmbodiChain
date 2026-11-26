@@ -13,6 +13,25 @@ load every model or initialize simulation. NeRD's raw teacher assets, data
 generation and original-repository comparison runners belong to the
 ``learning/nerd`` showcase, outside the runtime model package.
 
+Neural Motion Generator
+-----------------------
+
+``embodichain.extensions.models.policy.nmg`` evaluates standalone NMG models
+with a batched FP32 observation-to-action interface. ONNX Runtime evaluates an
+ONNX export for inference. An exported PyTorch program retains
+first-order observation gradients with frozen actor weights. Both formats
+carry normalization and observation metadata. See the :doc:`NMG model guide
+</resources/models/policy/nmg>` for supported configurations, weight downloads and examples.
+
+.. currentmodule:: embodichain.extensions.models.policy.nmg
+
+.. autosummary::
+
+   NeuralMotionGenerator
+
+.. autoclass:: NeuralMotionGenerator
+   :members: from_onnx, from_checkpoint, forward
+
 NeRD public entry points
 -------------------------
 
@@ -95,7 +114,7 @@ objectives may continue using measured contact features.
 Optional native NeRD deployment
 -------------------------------
 
-The :doc:`NeRD guide </features/neural_dynamics/nerd>` distinguishes measured
+The :doc:`NeRD guide </resources/models/neural_dynamics/nerd>` distinguishes measured
 window prediction, online rollout, learning-env training and native inference.
 Its native quickstart links model preparation with step/reset/close and records
 the verified physical domain and execution environment.
@@ -318,6 +337,7 @@ Other dynamics families
    :maxdepth: 2
 
    rwm
+   model_rigidformer
 
 
 WorldParticle independent transition
@@ -329,7 +349,7 @@ conversion. The optional native Provider belongs to the solver extension and
 uses the SDK particle inference adapter. Operator/runtime qualification is
 separate from discovery; main's Torch/SDK pins are unchanged.
 
-The :doc:`WorldParticle guide </features/neural_dynamics/worldparticle>` links
+The :doc:`WorldParticle guide </resources/models/neural_dynamics/worldparticle>` links
 the complete native quickstart, standalone call, NPZ/frame contract, operator
 installation/preflight and measured execution record. Frozen inference does not
 establish a learning-env or functional-gradient contract.

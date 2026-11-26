@@ -558,8 +558,10 @@ class SuiteCfg:
             if track.scenario == "affordance_reaching":
                 _validate_affordance_reaching_track(track)
         for nmg in (spec for spec in self.planners if spec.adapter == "nmg_onnx"):
+            expected_waypoints = nmg.config.get("num_waypoints")
+            if expected_waypoints is not None:
+                _positive_int(expected_waypoints, name="NMG num_waypoints")
             for field, default in (
-                ("num_waypoints", 5),
                 ("steps_per_waypoint", 30),
                 ("max_steps", 150),
             ):
@@ -857,7 +859,7 @@ def _finite_nonnegative_pair(
     return values
 
 
-def _positive_int(value: object, *, name: str, default: int) -> int:
+def _positive_int(value: object, *, name: str, default: int | None = None) -> int:
     """Normalize one strict positive integer configuration value."""
     resolved = default if value is None else value
     if type(resolved) is not int:

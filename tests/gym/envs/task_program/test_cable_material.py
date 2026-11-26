@@ -196,6 +196,8 @@ def test_cable_configuration_rejects_invalid_closed_payload(change):
     [
         {"material_distance": None},
         {"material_distance": -0.01},
+        {"material_inset": 0.025},
+        {"z_offset": 0.09},
         {"retract_distance": -0.001},
         {"retract_distance": float("inf")},
         {"position": [0.5, None, 0.78]},
@@ -254,8 +256,9 @@ def test_cable_binding_rejects_missing_physical_uid_before_simulation():
         )
 
 
-def _runtime():
-    cfg = _decode_cable_service(_declaration())
+def _runtime(cfg=None):
+    if cfg is None:
+        cfg = _decode_cable_service(_declaration())
     qpos = torch.zeros(4, 3)
     origins = torch.tensor(
         [[0, 0, 0], [10, 0, 0], [20, 0, 0], [30, 0, 0], [40, 0, 0]], dtype=torch.float32
@@ -311,6 +314,61 @@ def test_material_observation_maps_selected_rows_and_arena_origins_once():
         atol=4e-6,
         rtol=0,
     )
+
+
+def test_contact_pickup_targets_follow_live_material_without_board_geometry():
+    cfg = _decode_cable_service(
+        {
+            "entity_id": "cable",
+            "simulation_uid": "cable",
+            "motion_parts": ["arm"],
+            "targets": {
+                "approach": {
+                    "kind": "material",
+                    "material_inset": 0.025,
+                    "z_offset": 0.09,
+                },
+                "grasp": {"kind": "material", "material_inset": 0.025},
+                "lift": {
+                    "kind": "material_lift",
+                    "material_inset": 0.025,
+                    "z_offset": 0.09,
+                },
+            },
+            "operations": {
+                "pick": {
+                    "kind": "pick_up",
+                    "phases": [
+                        {"kind": "pose", "target": "approach"},
+                        {"kind": "grasp", "target": "grasp"},
+                        {"kind": "pose", "target": "lift"},
+                    ],
+                }
+            },
+        }
+    )
+    service, state, _ = _runtime(cfg)
+    state[[3, 1], :, 2] = torch.tensor([[0.02], [0.01]])
+    service.robot.compute_ik = lambda pose, *, joint_seed, env_ids, **_: (
+        torch.ones_like(env_ids, dtype=torch.bool),
+        joint_seed,
+    )
+    approach = service.pose(service.cfg.target("approach"), "arm")
+    grasp = service.pose(service.cfg.target("grasp"), "arm")
+    lift = service.pose(service.cfg.target("lift"), "arm")
+    compatible_rotation = torch.diag(torch.tensor([1.0, -1.0, -1.0]))
+    torch.testing.assert_close(
+        approach[:, :3, 3],
+        torch.tensor([[0.575, 0, 0.11], [0.575, 0, 0.10]]),
+        atol=4e-6,
+        rtol=0,
+    )
+    torch.testing.assert_close(grasp[:, 2, 3], torch.tensor([0.02, 0.01]))
+    torch.testing.assert_close(lift[:, 2, 3], approach[:, 2, 3])
+    torch.testing.assert_close(grasp[:, :3, :3], compatible_rotation.expand(2, -1, -1))
+    metrics = service.metrics()
+    assert metrics.keys() == set(cfg.metrics)
+    torch.testing.assert_close(metrics["end_position"][:, 0], torch.tensor([0.6, 0.6]))
 
 
 @pytest.mark.parametrize("kind", ["material", "material_lift", "ray_align"])

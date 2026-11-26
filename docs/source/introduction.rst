@@ -3,25 +3,16 @@ EmbodiChain
 
 .. image:: ../../assets/imgs/teaser.jpg
 
-EmbodiChain is an end-to-end, GPU-accelerated framework for Embodied AI.
-It streamlines research and development by unifying high-performance
-simulation, automated generative data pipelines, modular model
-architectures, and efficient training workflows. This integration
-enables rapid experimentation, seamless deployment of intelligent
-agents, and effective Sim2Real transfer for real-world robotic systems.
-
-Official task and robot modules live under
-`extensions/ <embodichain/extensions/README.md>`__ and ship with the main
-distribution. Their Python imports remain ``embodichain.extensions.tasks`` and
-``embodichain.extensions.robots``.
+EmbodiChain is an end-to-end, GPU-accelerated framework for embodied AI.
+It brings robot simulation, generative data pipelines, and learning
+workflows together so you can build environments, collect
+demonstrations, train policies, and evaluate them in simulation.
 
 .. NOTE::
-   EmbodiChain is in Alpha and under active development: * More
-   features will be continually added in the coming months. You can find
-   more details in the
-   `roadmap <https://dexforce.github.io/EmbodiChain/main/resources/roadmap.html>`__.
-   * Since this is an early release, we welcome feedback (bug reports,
-   feature requests, etc.) via GitHub Issues.
+   EmbodiChain is in Alpha and under active development. See the
+   `roadmap <resources/roadmap.html>`__ for planned work, and share bug
+   reports or feature requests through `GitHub
+   Issues <https://github.com/DexForce/EmbodiChain/issues>`__.
 
 Key Features
 ------------
@@ -44,49 +35,134 @@ The figure below illustrates the overall architecture of EmbodiChain:
    :align: center
 
 Explore EmbodiChain’s module relationships with the `interactive
-architecture
-visualization <https://dexforce.github.io/EmbodiChain/main/overview/architecture/index.html#>`__.
+architecture visualization <overview/architecture/index.html#>`__.
 
 Getting Started
 ---------------
 
-To get started with EmbodiChain, follow these steps:
+1. **Set up your environment** with the `Installation
+   Guide <quick_start/install.html>`__, including Docker, local
+   installation, Python compatibility, and optional dependencies.
+2. **Create your first scene or preview an official task** with the
+   `First Run guide <quick_start/first_run.html>`__.
+3. **Explore runnable workflows** in the
+   `examples <https://github.com/DexForce/EmbodiChain/blob/main/examples/README.md>`__,
+   or consult the `API Reference <api_reference/index.html>`__ to build
+   your own.
 
-- `Installation
-  Guide <https://dexforce.github.io/EmbodiChain/main/quick_start/install.html>`__
-- `Quick Start
-  Tutorial <https://dexforce.github.io/EmbodiChain/main/tutorial/index.html>`__
-- `API
-  Reference <https://dexforce.github.io/EmbodiChain/main/api_reference/index.html>`__
+After installation, discover the available tasks, robots, and examples:
+
+.. code:: bash
+
+   embodichain list-task
+   embodichain list-robot
+   embodichain run-example --list
 
 Task Environments
 ~~~~~~~~~~~~~~~~~
 
-Official task environments are included in the main ``embodichain``
-installation. Use ``embodichain list-task`` to discover tasks and
+Use ``embodichain list-task`` to discover tasks and
 ``embodichain run-task`` to launch one with its configuration. See
-`Supported
-Tasks <https://dexforce.github.io/EmbodiChain/main/resources/task/index.html>`__
-for available tasks, runnable configurations, and task authoring guides.
+`Tasks <resources/task/index.html>`__ for available tasks, runnable
+configurations, and task authoring guides.
 
-For external training, see the optional `RLinf
-integration <https://dexforce.github.io/EmbodiChain/main/guides/rlinf.html>`__
-and the `official RLinf EmbodiChain
-recipe <https://rlinf.readthedocs.io/en/latest/rst_source/examples/embodied/embodichain.html>`__.
+Third-party Training Frameworks
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+EmbodiChain supports **RLinf** and **LeRobot** alongside its native
+trainers. EmbodiChain owns simulation, task configuration and
+demonstration collection; the selected framework owns its training
+runtime and checkpoints.
+
++-----------------------------------+------------------------------------------------------------------------------------------------+
+| Workflow                          | Entry point                                                                                    |
++===================================+================================================================================================+
+| RLinf: train against EmbodiChain  | `RLinf integration <guides/rlinf.html>`__                                                      |
+| Gym environments; the upstream    |                                                                                                |
+| example uses CartPole PPO         |                                                                                                |
++-----------------------------------+------------------------------------------------------------------------------------------------+
+| LeRobot: collect demonstrations,  | `LeRobot integration <guides/lerobot.html>`__ · `Runnable ACT                                  |
+| train official ACT and evaluate   | example <https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/act/README.md>`__ |
+| in simulation                     |                                                                                                |
++-----------------------------------+------------------------------------------------------------------------------------------------+
+| Export finalized recordings for   | `Dataset export <guides/lerobot_export.html>`__                                                |
+| LeRobot 0.6.1 consumers           |                                                                                                |
++-----------------------------------+------------------------------------------------------------------------------------------------+
+
+See `training framework selection <guides/training_frameworks.html>`__
+for dependency profiles, ownership and compatibility boundaries.
+
+Official Extensions
+-------------------
+
+EmbodiChain bundles six official extensions under
+``embodichain.extensions`` in the main ``embodichain`` distribution.
+
++---------------------------------------+-----------------------+----------------------------------------------------------------------------------------------------------------------------+
+| Module                                | What it provides      | Explore                                                                                                                    |
++=======================================+=======================+============================================================================================================================+
+| ``embodichain.extensions.tasks``      | Official task         | `Task configurations and                                                                                                   |
+|                                       | environments,         | authoring <https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/tasks/README.md>`__                    |
+|                                       | runnable deployments, |                                                                                                                            |
+|                                       | and reusable scene    |                                                                                                                            |
+|                                       | and embodiment        |                                                                                                                            |
+|                                       | components for        |                                                                                                                            |
+|                                       | manipulation,         |                                                                                                                            |
+|                                       | locomotion, and       |                                                                                                                            |
+|                                       | classic control.      |                                                                                                                            |
++---------------------------------------+-----------------------+----------------------------------------------------------------------------------------------------------------------------+
+| ``embodichain.extensions.robots``     | Concrete robot        | `Robot catalog and                                                                                                         |
+|                                       | presets, model        | configuration <https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/robots/README.md>`__               |
+|                                       | assets, and           |                                                                                                                            |
+|                                       | calibrated defaults,  |                                                                                                                            |
+|                                       | organized by vendor   |                                                                                                                            |
+|                                       | and model.            |                                                                                                                            |
++---------------------------------------+-----------------------+----------------------------------------------------------------------------------------------------------------------------+
+| ``embodichain.extensions.models``     | Policy models for     | `Model families and                                                                                                        |
+|                                       | action prediction,    | workflows <https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/models/README.md>`__                   |
+|                                       | and world models /    |                                                                                                                            |
+|                                       | neural dynamics       |                                                                                                                            |
+|                                       | models for predicting |                                                                                                                            |
+|                                       | future states and     |                                                                                                                            |
+|                                       | environment dynamics. |                                                                                                                            |
++---------------------------------------+-----------------------+----------------------------------------------------------------------------------------------------------------------------+
+| ``embodichain.extensions.solvers``    | Native physics        | `Solver adapters <https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/solvers/README.md>`__           |
+|                                       | deployment adapters.  |                                                                                                                            |
++---------------------------------------+-----------------------+----------------------------------------------------------------------------------------------------------------------------+
+| ``embodichain.extensions.sensors``    | Official sensor       | `Sensor backend                                                                                                            |
+|                                       | presets, including    | support <https://github.com/DexForce/EmbodiChain/blob/main/docs/source/overview/sim/sensors/backend_support.md>`__         |
+|                                       | the nominal VLP-16    |                                                                                                                            |
+|                                       | lidar.                |                                                                                                                            |
++---------------------------------------+-----------------------+----------------------------------------------------------------------------------------------------------------------------+
+| ``embodichain.extensions.benchmarks`` | Motion planning and   | `Benchmark suites and                                                                                                      |
+|                                       | Atomic Skill          | usage <https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/benchmarks/motion_generation/README.md>`__ |
+|                                       | evaluation suites     |                                                                                                                            |
+|                                       | with scenarios,       |                                                                                                                            |
+|                                       | planner adapters,     |                                                                                                                            |
+|                                       | scoring, and reports. |                                                                                                                            |
++---------------------------------------+-----------------------+----------------------------------------------------------------------------------------------------------------------------+
+
+The core provides shared simulation, data, and learning infrastructure.
+Extensions build on those APIs for specific workflows. See each
+workflow’s guide for model weights, datasets, and optional runtime
+dependencies.
+
+See the `extension development
+guide <https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/README.md>`__
+for package layout and how to add a bundled extension.
 
 Contribution Guide
 ------------------
 
-We welcome contributions! Please see the
-`CONTRIBUTING.md <https://github.com/DexForce/EmbodiChain/blob/main/CONTRIBUTING.md>`__
-file in this repository for guidelines on how to get started.
+We welcome contributions! Please see the `contribution
+guide <https://github.com/DexForce/EmbodiChain/blob/main/CONTRIBUTING.md>`__
+for guidelines on how to get started.
 
 Publications
 ------------
 
-See `Academic
-Publications <https://dexforce.github.io/EmbodiChain/main/resources/publications/README.html>`__
-for a complete list of academic papers related to EmbodiChain.
+See `Academic Publications <resources/publications/README.html>`__ for a
+complete list of academic papers related to EmbodiChain.
 
 Citation
 --------

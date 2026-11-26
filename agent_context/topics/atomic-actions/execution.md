@@ -204,9 +204,11 @@ physically qualified task needs a lower speed than the selected robot's limits.
 default) or `zero` (explicit position-only control).
 Configured execution policies decode the same field under `motion`.
 `AtomicSkill.build_plan` derives missing velocities after composite skills
-have assembled their final full-robot positions and timing. The first command,
-both ends of every stationary joint interval, and terminal settling commands
-use zero velocity; failed rows remain held.
+have assembled their final full-robot positions and timing. By default the first
+command, both ends of a stationary joint interval and terminal settling commands
+use zero velocity. For consecutive explicitly timed trajectories,
+`MoveJointsOptions.preserve_velocity_samples` preserves the supplied arrival
+velocities across phase boundaries. Failed rows remain held.
 
 `SimulationExecutionAdapter` always clears absent velocity references to zero;
 it never substitutes observed velocities or depends on peer active masks.

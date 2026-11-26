@@ -73,7 +73,7 @@ official dataset.
 Before running the commands, set up Python, CUDA and the example dependencies
 from the [Cube runtime guide](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/lewm/cube/DEPLOYMENT.md).
 
-```{include} ../../../../examples/learning/lewm/cube/README.md
+```{include} ../../../../../examples/learning/lewm/cube/README.md
 :start-after: <!-- cube-reproduction-start -->
 :end-before: <!-- cube-reproduction-end -->
 ```
@@ -94,7 +94,7 @@ between observations, and candidate future actions of shape `(B, S, T, A)`.
 It returns predicted future latents of shape `(B, S, T, D)` for `S` proposals
 and `T` future model steps. `LeWMCEMPlanner.plan_sequence` returns a
 complete sequence of raw action blocks for the caller to execute.
-[LeWM API](../../api_reference/lewm.rst)
+[LeWM API](../../../api_reference/lewm.rst)
 
 ## Reference
 

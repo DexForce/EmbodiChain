@@ -74,22 +74,24 @@ class BoundWorld:
             )
             output = Path(os.environ["EMBODICHAIN_MOTION_OUTPUT"]).resolve()
             output.mkdir(mode=0o700, parents=True, exist_ok=True)
-            with ExitStack() as constructing:
+            try:
                 episode = _Episode(
                     context,
                     deployment,
                     False,
-                    constructing,
+                    self.resources,
                     live_paths=binding["paths"],
                     destinations=binding["destinations"],
                 )
                 self.motion = Ur5Motion(episode, output)
                 self.motion.jobs.binding_id = uuid4().hex
-                constructing.callback(self.motion.close)
+                self.resources.callback(self.motion.close)
                 self.invoke = executors(context, self.motion.operations(), key)[
                     "adapter.invoke"
                 ]
-                self.resources = constructing.pop_all()
+            except BaseException:
+                self.resources.close()
+                raise
             return
         robots = []
         objects = []

@@ -36,7 +36,7 @@ from embodichain.data.assets import _checkpoint_download
         (
             download_neural_planner_checkpoint,
             "DexForceAI/neural_motion_generator",
-            "franka/franka.pt",
+            "v1/franka.onnx",
         ),
         (download_neural_ik_checkpoint, "DexForceAI/neural_ik_solver", "franka.pt"),
     ],
@@ -62,6 +62,8 @@ def test_checkpoint_defaults_authentication_and_proxy(
         filename=filename,
         token=token or "environment-test-token",
         endpoint="https://huggingface.co",
+        revision=None,
+        local_files_only=False,
     )
     assert os.environ["https_proxy"] == "http://proxy.example:8080"
 
@@ -81,3 +83,17 @@ def test_checkpoint_download_preserves_failure_cause(
         download()
 
     assert error.value.__cause__ is failure
+
+
+def test_planner_pinned_offline_download(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A pinned cached policy must not silently resolve the moving main branch."""
+    hub = Mock(return_value="/cache/piper.onnx")
+    monkeypatch.setattr(_checkpoint_download, "hf_hub_download", hub)
+    download_neural_planner_checkpoint(
+        filename="v1/piper.onnx",
+        revision="release-commit",
+        local_files_only=True,
+    )
+    assert hub.call_args.kwargs["filename"] == "v1/piper.onnx"
+    assert hub.call_args.kwargs["revision"] == "release-commit"
+    assert hub.call_args.kwargs["local_files_only"] is True

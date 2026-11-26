@@ -53,6 +53,9 @@ Gym launcher arguments compose lightweight `cli.sim` options with config, seed
 and recording options. Omitted runtime overrides stay `None` and preserve file
 values; explicit runtime values override them. `--physics` only confirms the
 file-owned backend. Omitted seed preserves the config seed.
+Task-bound `expansion.execution.mode` declarations delegate to the
+[Expansion Engine](../expansion-engine/expansion-engine.md) before the launcher
+builds a Gym environment.
 
 `--disable_sensor`/`--disable-sensor` disables acquisition without removing
 reusable declarations. BaseEnv copies config, applies filters, then determines

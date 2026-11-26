@@ -269,9 +269,9 @@ in this guide; the paper also studies policy learning and humanoid control.
 
 ### Implementation and further reading
 
-- [RWM API](../../api_reference/rwm.rst): state transforms, model, predictor,
+- [RWM API](../../../api_reference/rwm.rst): state transforms, model, predictor,
   replay, objective and trainer factory.
 - [Example and fitting protocol](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/rwm/README.md).
 - [Model implementation](https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/models/dynamics/rwm/model.py):
   frame-local transition model and its upstream reference.
-- [All neural dynamics models](../neural_dynamics.md).
+- [All neural dynamics models](index.md).

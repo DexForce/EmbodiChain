@@ -24,7 +24,7 @@ Paths are relative to `embodichain/gen_sim/` unless qualified.
 | Grouped layouts from an existing export | `scene_engine/cli/randomization.py`, `scene_engine/randomization/generation.py` |
 | Baseline cache, saved runs and pose playback | `scene_engine/randomization/baseline.py`, `persistence.py`, `loading.py` |
 | Whole-scene USD package | `scene_engine/pipeline/utils/scene_usd.py`: `build_scene_usd()`, direct preview loading; `usd_scene.py`: entity index |
-| DexSim AssetRevision delivery | `scene_engine/pipeline/utils/scene_package.py`: SDK-owned scheme-one packaging and dependency closure; [output contract](../../../embodichain/gen_sim/README.md) |
+| DexSim AssetRevision delivery | `scene_engine/pipeline/utils/scene_package.py`: SDK packaging, semantic package validation and workspace recovery; [output contract](../../../embodichain/gen_sim/README.md#relocate-and-reopen-a-scene-engine-package) |
 | General asset ingest | `asset_engine/pipeline/ingest.py`: `ingest_one_asset()` |
 | Asset orientation and scaling orchestration | `asset_engine/utils/_simready_pipeline.py`; `simready_utils.py` and `full_blender.py` retain geometry/render/export adapters and entry points |
 | Articulated asset generation | `asset_engine/pipeline/articulation.py`, `asset_engine/clients/articulated_generation.py` |
@@ -122,8 +122,11 @@ relations/table regions; directional vocabularies require quarter turns.
   dependency digests and provenance. The private processed-USD exporter is isolated
   in `scene_package.py`. Packaging grants no capability or certification;
   unmeasured quality stays unknown. Delivery failures propagate and stale delivery
-  files are invalidated when editable exports are replaced. Build after scene
-  preparation, validate UIDs and keep package paths inside the output root.
+  files are invalidated when editable exports are replaced. Scene Engine owns
+  the static layout, semantic graph projection and package-local asset
+  references in `_scene_package_metadata.py`. Edit and rigid randomization can
+  restore an inventoried v1 workspace from a ZIP after checking semantic
+  agreement with the included config and graph.
 - Lab-owned `preview-scene --usd-file` loads standard USD through
   `SimulationManager.add_usd` without interpreting producer identity/joint tags.
   Manifest and native-asset preview adapters are removed.

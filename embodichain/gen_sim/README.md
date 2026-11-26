@@ -38,6 +38,51 @@ packager validates the JSON schema, byte digests and cross-object references.
 Its processed-USD packaging support is required; an export failure fails the
 operation while retaining the editable workspace for diagnosis.
 
+### Relocate and reopen a Scene Engine package
+
+A package with an editable graph contains `scene_export/scene_config.json`,
+`scene_export/scene_graph.json`, and the referenced GLB, USDC and dependency
+files. `asset.json` uses the AssetRevision schema snapshot recorded in
+[#1158](https://github.com/DexForce/EmbodiChain/issues/1158). Its schema ID is
+`urn:dexsim:databank:asset-schema:2.0-draft` and its SHA-256 is
+`493eb3c1e4c0649d9e95ada8ff851c01f3e1667cb5f75b1223379243f7299a03`.
+
+| Field | Scene Engine mapping |
+| --- | --- |
+| `scene_layout` | Configured scene ID and a content-derived layout revision. Each object contributes its UID and runtime pose in the metre, Z-up stage frame with an xyzw quaternion. Source-local scale is reordered when the asset is Y-up. |
+| `scene_layout.instances[].asset_ref` | A package-local UUID derived from the primary artifact digest, a revision digest covering the runtime file, editable proxy and dependencies, and the SHA-256 of the primary GLB or USDC. |
+| `semantics` | Category labels and descriptions from the scene objects. Support and planar relations, tabletop regions and pose descriptions come from the editable graph. The v1 graph has no source-evidence field, so `origin` is `unknown`. |
+| `extensions["embodichain:scene_export"]` | Version 1 maps instance IDs to original UIDs and inventoried representations. It identifies the v1 config and graph used to reopen the scene. Generated IDs that fall outside Dextrove's stable-ID syntax have deterministic aliases. |
+
+Asset references resolve within the package through the extension. The v1
+config carries edit-specific values such as the GLB proxy pose for an
+articulation. The ZIP's world placement stays in the runtime USD. Instance
+usage is `unspecified` until foreground or background intent and binding IDs
+are available.
+
+Copy only the ZIP to a new workspace. The editor and rigid scene expansion
+restore `scene_export/` after checking the SDK inventory and agreement between
+the manifest and the editable config and graph. Existing v1 workspaces are
+read directly. Older USD-only packages remain compatible with simulation
+import. Editing an older package requires the original editable workspace.
+
+```bash
+mkdir -p outputs/restored
+cp outputs/scene/scene_package.zip outputs/restored/
+embodichain gensim scene edit --scene outputs/restored --prompt "Move the cup to the left"
+# Expand a rigid scene using your existing layout policy file.
+embodichain gensim scene expand --scene outputs/restored --config layouts.yaml
+```
+
+Use the shared USD preview after exporting or editing the scene.
+
+```bash
+embodichain preview-scene --usd-file outputs/restored/scene_usd/scene.usda \
+  --headless --renderer hybrid --screenshot outputs/restored/preview.png
+```
+
+### USD package scope
+
 The AssetRevision describes packaging provenance. A scene with multiple
 independent bodies is not automatically one rigidbody or articulation:
 `asset_kind` remains unknown until classified. Unmeasured quality facts stay

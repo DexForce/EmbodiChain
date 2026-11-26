@@ -52,7 +52,6 @@ from embodichain.lab.gym.utils.gym_utils import (
     build_env_cfg_from_args,
     configure_fluid_spacing,
     load_trajectory,
-    _load_expansion_declaration,
 )
 from embodichain.lab.gym.utils.registration import (
     discover_task_packages,
@@ -896,6 +895,10 @@ def _resolve_expansion_request(
     gym_config: Mapping[str, Any],
 ) -> tuple[Any, tuple[int, ...], Path, Mapping[str, Any]] | None:
     """Resolve a task-bound or CLI-selected Expansion Profile."""
+    from embodichain.lab.expansion._job_config import (
+        _has_job_mode,
+        _load_expansion_declaration,
+    )
     from embodichain.utils.config_paths import resolve_config_path
     from embodichain.utils.utility import load_config
     from embodichain.lab.sim.motion.expansion import (
@@ -912,6 +915,10 @@ def _resolve_expansion_request(
             binding,
             base_dir=task_path.parent,
         )
+        if _has_job_mode(binding) and (
+            getattr(args, "preview", False) or getattr(args, "replay", False)
+        ):
+            return None
         unknown = set(binding) - {
             "profile",
             "policy",
@@ -1276,6 +1283,7 @@ def replay(
     mode: str = "kinematic",
     *,
     fluid_reader: FluidTrajectoryReader | None = None,
+    replay_observer: Callable[[Any, int, int], None] | None = None,
 ) -> None:
     """Replay a recorded trajectory.
 
@@ -1288,7 +1296,12 @@ def replay(
         trajectory_path: Path to the ``.pt`` trajectory file.
         mode: ``"kinematic"`` (exact, physics off), ``"dynamic"`` (feed recorded
             actions, physics on), or ``"control"`` (interactive kinematic scrubber).
+        replay_observer: Optional callback for dynamic replay. It receives the
+            live unwrapped environment, the frame index (zero after reset), and
+            the expected step count. Subsequent frames follow each replay step.
     """
+    if replay_observer is not None and mode != "dynamic":
+        raise ValueError("A replay observer requires dynamic replay.")
     data = load_trajectory(trajectory_path)
     meta = data["meta"]
     lengths = meta["lengths"]
@@ -1324,7 +1337,7 @@ def replay(
         if mode == "control":
             replay_control(replay_env)
         else:
-            replay_auto(replay_env, mode)
+            replay_auto(replay_env, mode, replay_observer=replay_observer)
     finally:
         if replay_env is None:
             if fluid_reader is not None:
@@ -1340,14 +1353,23 @@ def replay(
                     replay_env._fluid_reader.close()
 
 
-def replay_auto(replay_env: ReplayWrapper, mode: str) -> None:
+def replay_auto(
+    replay_env: ReplayWrapper,
+    mode: str,
+    *,
+    replay_observer: Callable[[Any, int, int], None] | None = None,
+) -> None:
     """Auto-replay the full trajectory with a progress bar."""
     num_steps = int(replay_env._lengths.min().item())
     replay_env.reset()
+    if replay_observer is not None:
+        replay_observer(replay_env.env, 0, num_steps)
     max_err = 0.0
     rec_states = replay_env._trajectory["states"]
     for i in tqdm.tqdm(range(num_steps), desc=f"Replaying ({mode})", unit="step"):
         obs, reward, term, trunc, info = replay_env.step(None)
+        if replay_observer is not None:
+            replay_observer(replay_env.env, i + 1, num_steps)
         if mode == "kinematic":
             st = min(i, num_steps - 1)
             err = (
@@ -1358,6 +1380,10 @@ def replay_auto(replay_env: ReplayWrapper, mode: str) -> None:
             )
             max_err = max(max_err, err)
         if bool(trunc.all()):
+            if replay_observer is not None and i + 1 < num_steps:
+                raise RuntimeError(
+                    f"Observed replay ended after {i + 1} of {num_steps} steps."
+                )
             break
     if mode == "kinematic":
         log_info(
@@ -1656,6 +1682,7 @@ def main(
     gym_config: dict[str, Any],
     *,
     fluid_reader: FluidTrajectoryReader | None = None,
+    replay_observer: Callable[[Any, int, int], None] | None = None,
 ) -> None:
     """Run the selected workflow without taking ownership of ``env``."""
     if getattr(args, "replay", False):
@@ -1665,8 +1692,12 @@ def main(
             args.replay_trajectory,
             getattr(args, "replay_mode", "kinematic"),
             fluid_reader=fluid_reader,
+            replay_observer=replay_observer,
         )
         return
+
+    if replay_observer is not None:
+        raise ValueError("A replay observer requires dynamic replay.")
 
     if getattr(args, "preview", False):
         log_info(
@@ -2055,8 +2086,94 @@ def _abort_and_close_env(env: Any, *, exit_process: bool | None = None) -> None:
         raise abort_error
 
 
-@_native_auto_renderer("fast-rt")
-def cli(argv: Sequence[str] | None = None) -> None:
+def _run_task_expansion(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> bool:
+    """Hand engine declarations to their World owner before building a Gym env."""
+    from embodichain.lab.expansion._job_config import (
+        _decode_job,
+        _execute_job,
+        _has_job_mode,
+        _load_expansion_declaration,
+    )
+    from embodichain.utils.config_paths import resolve_config_path
+    from embodichain.utils.utility import load_config
+
+    if not getattr(args, "gym_config", None):
+        return False
+    deployment = resolve_config_path(args.gym_config).resolve()
+    if not deployment.is_file():
+        return False
+    task = load_config(deployment)
+    if "expansion" not in task:
+        return False
+    try:
+        binding, _ = _load_expansion_declaration(
+            task["expansion"], base_dir=deployment.parent
+        )
+        if not _has_job_mode(binding):
+            return False
+        supported = {
+            "gym_config",
+            "seed",
+            "headless",
+            "expansion_output_dir",
+            "num_envs",
+            "physics",
+            "device",
+        }
+        unsupported = sorted(
+            f"--{name}"
+            for name, value in vars(args).items()
+            if name not in supported and value != parser.get_default(name)
+        )
+        if unsupported:
+            parser.error(
+                f"Engine expansion does not use {', '.join(unsupported)}. Configure the expansion or its deployment instead."
+            )
+        if args.seed is not None:
+            binding["execution"]["seed"] = args.seed
+        if args.expansion_output_dir is not None:
+            if not args.expansion_output_dir.strip():
+                parser.error("--output-dir must be a nonempty path")
+            collection = _mapping_or_empty(
+                binding.get("collection"), "expansion.collection"
+            )
+            binding["collection"] = {
+                **collection,
+                "output_dir": str(
+                    Path(args.expansion_output_dir).expanduser().resolve()
+                ),
+            }
+        job = _decode_job(deployment, binding)
+        confirmations = {
+            "num_envs": "num_envs",
+            "physics": "physics_backend",
+            "device": "simulation_device",
+        }
+        if any(getattr(args, name) is not None for name in confirmations):
+            report = _execute_job(job, "preflight")
+            for name, field in confirmations.items():
+                requested = getattr(args, name)
+                if requested is not None and requested != report[field]:
+                    parser.error(
+                        f"--{name}={requested} differs from the expansion's resolved value {report[field]}. "
+                        "Select the value in the expansion or deployment configuration."
+                    )
+        result = _execute_job(job, "run")
+    except (ValueError, OSError) as exc:
+        parser.error(str(exc))
+    print(json.dumps(result, indent=2, sort_keys=True))
+    if not result["complete"]:
+        raise SystemExit(2)
+    return True
+
+
+def cli(
+    argv: Sequence[str] | None = None,
+    *,
+    replay_observer: Callable[[Any, int, int], None] | None = None,
+) -> None:
     """Command-line interface for environment runner.
 
     Parses CLI arguments, builds the environment config, and launches
@@ -2065,6 +2182,8 @@ def cli(argv: Sequence[str] | None = None) -> None:
     Args:
         argv: Arguments excluding the command name. Uses ``sys.argv`` when
             omitted.
+        replay_observer: Programmatic dynamic replay callback. See :func:`replay`
+            for its arguments and cadence.
     """
     np.set_printoptions(5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
@@ -2079,6 +2198,10 @@ def cli(argv: Sequence[str] | None = None) -> None:
         parser.error(
             "--record-fluid-state is only available for Task Program collection"
         )
+    if replay_observer is not None and not (
+        args.replay and args.replay_mode == "dynamic"
+    ):
+        parser.error("A replay observer requires --replay --replay_mode dynamic.")
 
     if getattr(args, "replay", False):
         if not args.replay_trajectory:
@@ -2088,6 +2211,19 @@ def cli(argv: Sequence[str] | None = None) -> None:
             log_error("--replay and --preview are mutually exclusive.")
             return
 
+    if not (
+        getattr(args, "preview", False) or getattr(args, "replay", False)
+    ) and _run_task_expansion(args, parser):
+        return
+    _run_gym_task(args, replay_observer=replay_observer)
+
+
+@_native_auto_renderer("fast-rt")
+def _run_gym_task(
+    args: argparse.Namespace,
+    *,
+    replay_observer: Callable[[Any, int, int], None] | None,
+) -> None:
     # Step 1: Discover all task packages via entry_points
     discover_task_packages()
 
@@ -2251,7 +2387,13 @@ def cli(argv: Sequence[str] | None = None) -> None:
             install_real2sim_tabletop_owner(
                 env, real2sim_profile, dataset_dir=args.expansion_dataset_dir
             )
-        main(args, env, gym_config, fluid_reader=fluid_reader)
+        main(
+            args,
+            env,
+            gym_config,
+            fluid_reader=fluid_reader,
+            replay_observer=replay_observer,
+        )
     except BaseException as error:
         body_error = error
         raise
