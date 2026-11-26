@@ -49,7 +49,24 @@ def main(argv: Sequence[str] | None = None) -> None:
         type=Path,
         help="Directory for policy run receipts and artifacts",
     )
+    parser.add_argument(
+        "--motion-output",
+        type=Path,
+        help="Receipts directory for a dedicated motion World",
+    )
     args = parser.parse_args(argv)
+    if args.motion_output is not None:
+        if (
+            not args.session
+            or args.writer_key_file is None
+            or args.policy_catalog is not None
+            or args.policy_output is not None
+        ):
+            parser.error("--motion-output requires --session and --writer-key-file")
+        if (args.run_id is None) != (args.turn is None) or (
+            args.turn is not None and args.turn < 1
+        ):
+            parser.error("Supply both a Run ID and a positive turn number")
     if args.policy_catalog is not None:
         if args.policy_output is None or not (args.session or args.session_directory):
             parser.error(
@@ -62,6 +79,22 @@ def main(argv: Sequence[str] | None = None) -> None:
     elif not args.session or args.policy_output is not None:
         parser.error("Supply --session or enable policy tools with --policy-catalog")
     try:
+        if args.motion_output is not None:
+            from embodichain.mcp._motion import serve as serve_motion
+
+            labels = (
+                {}
+                if args.run_id is None
+                else {"run_id": args.run_id, "turn": args.turn}
+            )
+            serve_motion(
+                args.session,
+                args.motion_output,
+                args.writer_key_file,
+                directory=args.session_directory,
+                labels=labels,
+            )
+            return
         if args.policy_catalog is not None:
             from embodichain.mcp._policy_runs import serve as serve_policy
 
