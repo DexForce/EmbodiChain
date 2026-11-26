@@ -219,3 +219,85 @@ def test_ur5_world_rejects_place_after_measured_grasp_loss(tmp_path: Path) -> No
         motion.jobs._tick(0)
         assert receipt(stale)["error"]["code"] == "GRASP_LOST"
         assert episode.physics_step == steps
+
+
+def test_motion_server_dispatches_bound_place_intent(tmp_path: Path) -> None:
+    import asyncio
+
+    pytest.importorskip("mcp.server.mcpserver")
+    from embodichain.mcp._motion import _server
+
+    context = _owner()
+    key = b"s" * 32
+    args = {
+        "skill_id": "place",
+        "target_ref": "platform_top",
+        "object_ref": "cube",
+        "grasp_ref": "verified-grasp",
+        "command_id": "place-1",
+    }
+    receipt = {"status": "queued", "run_id": "ecmotion_" + "a" * 24}
+    handler = Mock(return_value=receipt)
+    invoke = executors(context, {"start_skill": handler}, key)["adapter.invoke"]
+    session = Mock(session_id=context.session_id)
+    session.invoke.side_effect = lambda module, **params: invoke(
+        context, {"module": module, "arguments": params}
+    )
+
+    server = _server(context.session_id, session, key, tmp_path)
+    result = asyncio.run(server.call_tool("embodichain_start_skill", args))
+    assert result.structured_content == receipt
+    handler.assert_called_once_with(**args)
+
+
+def test_offline_motion_server_preserves_only_the_bound_world_receipts(
+    tmp_path: Path,
+) -> None:
+    import asyncio
+
+    pytest.importorskip("mcp.server.mcpserver")
+    from embodichain.mcp._motion import ToolError, _server
+
+    session_id = _owner().session_id
+    server = _server(session_id, None, b"s" * 32, tmp_path)
+    run_id = "ecmotion_" + "a" * 24
+    path = tmp_path / run_id / "receipt.json"
+    path.parent.mkdir()
+    args = {"run_id": run_id}
+    receipt = {
+        "run_id": run_id,
+        "session_id": session_id,
+        "status": "running",
+        "done": False,
+        "physical_verdict": "pending",
+    }
+
+    async def read_receipt() -> None:
+        path.write_text(json.dumps(receipt), encoding="utf-8")
+        result = await server.call_tool("embodichain_get_run", args)
+        assert result.structured_content == {
+            **receipt,
+            "world_reachable": False,
+            "physical_verdict": "unverified",
+        }
+        with pytest.raises(ToolError, match="WORLD_UNREACHABLE"):
+            await server.call_tool("embodichain_cancel_run", args)
+
+        complete = {
+            **receipt,
+            "status": "succeeded",
+            "done": True,
+            "physical_verdict": "pass",
+        }
+        path.write_text(json.dumps(complete), encoding="utf-8")
+        result = await server.call_tool("embodichain_get_run", args)
+        assert result.structured_content == complete
+
+        path.write_text(
+            json.dumps({**complete, "session_id": "dsws_" + "b" * 32}),
+            encoding="utf-8",
+        )
+        with pytest.raises(ToolError, match="belongs to another World"):
+            await server.call_tool("embodichain_get_run", args)
+
+    asyncio.run(read_receipt())
