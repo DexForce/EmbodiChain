@@ -63,6 +63,20 @@ The core ``embodichain`` framework includes these top-level packages:
    learning
    utils
 
+.. toctree::
+   :maxdepth: 1
+
+   embodichain/embodichain.mcp
+   embodichain/embodichain.gen_sim.task_engine
+
+Official Extensions
+-------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   extensions/index
+
 Public API Coverage
 -------------------
 
@@ -84,31 +98,4 @@ documentation. CI runs this same checker after style checks and before tests.
 .. toctree::
    :maxdepth: 1
 
-   embodichain/embodichain.mcp
    public_api
-   embodichain/embodichain.gen_sim.task_engine
-   benchmarks
-   locomotion_tasks
-
-
-.. toctree::
-   :maxdepth: 2
-
-   robot_catalogs
-   agibot_g1
-   data/eef_assets
-   model_catalogs
-   model_rigidformer
-
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Locomotion robots
-
-   locomotion_robots
-
-
-.. toctree::
-   :maxdepth: 1
-
-   kinematics_matrix
