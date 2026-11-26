@@ -579,6 +579,8 @@ topics:
   - embodichain/gen_sim/_run_config.py
   - embodichain/gen_sim/_run_binding.py
   - embodichain/gen_sim/_run_execution.py
+  - embodichain/gen_sim/agent_experiment.py
+  - embodichain/mcp/_experiments.py
   - embodichain/gen_sim/_robot_cleanup.py
   - embodichain/gen_sim/scene_engine/cli/robot_cleanup.py
   - embodichain/gen_sim/services/

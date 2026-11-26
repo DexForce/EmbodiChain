@@ -7358,6 +7358,12 @@ command after a connection loss. Supply both ``--run-id`` and ``--turn`` to
 attribute native journal entries. DexSim MCP owns scene setup and low-level
 inspection.
 
+Local GenSim placement experiment
+---------------------------------
+
+.. autoclass:: embodichain.gen_sim.agent_experiment.ExperimentStore
+   :members:
+
 Packaged locomotion policy entry points
 --------------------------------------
 
