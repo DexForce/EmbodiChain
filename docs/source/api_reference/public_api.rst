@@ -7330,3 +7330,11 @@ and scalar metadata, with explicit batch and row identity.
 
 .. autoclass:: ResolvedContactPhase
    :members:
+
+Physical grasp validation
+=========================
+
+.. currentmodule:: embodichain.lab.sim.grasp_validation
+
+.. autoclass:: GraspValidator
+   :members: validate, drop_objects, restore_placement, close

@@ -147,3 +147,10 @@ and [design contract](../../../embodichain/extensions/benchmarks/motion_generati
 For stale obstacles inspect identity/capabilities; for duration or acceleration
 changes inspect normalization and the destination clock before tuning limits.
 Tests target production owners rather than importing tutorial implementations.
+
+For parallel-jaw grasp validation, `embodichain.lab.sim.grasp_validation.GraspValidator`
+owns the gripper, dynamic object and support in replicated physics arenas. Supply one
+object-from-TCP pose per arena to `validate()`. The validator closes the hand, lifts,
+optionally translates 3 cm out and back along world X and Y, and measures retention
+during a three-second hold. `drop_objects()` and `restore_placement()` support replay
+from measured resting poses.
