@@ -128,6 +128,162 @@ for (const viewport of [
   });
 }
 
+test("review shows recorded coverage even without unverified qualifiers", async ({
+  page,
+}) => {
+  for (const [fixture, expected] of [
+    ["hybrid-uncovered", "Uncovered"],
+    ["hybrid-authoring", "Source reviewed"],
+  ]) {
+    await page.goto(pathToFileURL(join(root, `${fixture}.html`)).href);
+    const badge = page
+      .locator(".rv-state > div")
+      .filter({ hasText: "Plan coverage" })
+      .locator("dd");
+    await expect(badge).toHaveText(expected);
+  }
+});
+
+test("each completion criterion keeps its reference and highlights its own check", async ({
+  page,
+}) => {
+  await page.goto(pathToFileURL(join(root, "hybrid-authoring.html")).href);
+  for (const [goal, reference, other] of [
+    ["condition_03", "left pedestal", "right pedestal"],
+    ["condition_04", "right pedestal", "left pedestal"],
+  ]) {
+    const button = page.locator(`button[data-key="goal:${goal}"]`);
+    await expect(button).toContainText(reference);
+    await button.click();
+    const criteria = page
+      .locator(".rv-step-checks li")
+      .filter({ hasText: "Completion criterion" });
+    await expect(criteria).toHaveCount(2);
+    await expect(criteria.filter({ hasText: reference })).toHaveClass(/hit/);
+    await expect(criteria.filter({ hasText: other })).not.toHaveClass(/hit/);
+  }
+});
+
+test("dependency wires do not pass under cards outside their endpoints", async ({
+  page,
+}) => {
+  const html = readFileSync(
+    join(root, "hybrid-authoring.html"),
+    "utf8",
+  ).replace(
+    /(<script id="graph-data" type="application\/json">)(.*?)(<\/script>)/s,
+    (_match, opening, payload, closing) => {
+      const fixture: ViewerData = JSON.parse(payload);
+      const action = fixture.graph.nodes[0];
+      const deps: Record<number, string[]> = {
+        2: ["step_01"],
+        5: ["step_04"],
+        6: ["step_02"],
+      };
+      fixture.graph.nodes = Array.from({ length: 7 }, (_, index) => ({
+        ...action,
+        id: `step_0${index + 1}`,
+        depends_on: deps[index] ?? [],
+        call: {
+          ...action.call,
+          resources: {},
+          arguments: { ...action.call.arguments, arms: ["auto"] },
+        },
+      }));
+      return `${opening}${JSON.stringify(fixture)}${closing}`;
+    },
+  );
+  await page.setViewportSize({ width: 1680, height: 900 });
+  await page.setContent(html);
+  const cards = page.locator(".rv-lane-action");
+  const wires = page.locator(".rv-lane-edges path[data-from]");
+  await expect(wires).toHaveCount(3);
+  for (const width of [1680, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect
+      .poll(() =>
+        cards.evaluateAll(
+          (nodes) =>
+            nodes[0].getBoundingClientRect().top ===
+            nodes[2].getBoundingClientRect().top,
+        ),
+      )
+      .toBe(width === 1680);
+    const crossings = await wires.evaluateAll((edges: SVGPathElement[]) => {
+      const nodes = Array.from(document.querySelectorAll(".rv-lane-action"));
+      return edges.flatMap((edge) => {
+        const view = edge.getScreenCTM()!;
+        return nodes.flatMap((node) => {
+          if (
+            [`call:${edge.dataset.from}`, `call:${edge.dataset.to}`].includes(
+              node.getAttribute("data-key")!,
+            )
+          )
+            return [];
+          const rect = node.getBoundingClientRect();
+          for (
+            let distance = 0;
+            distance < edge.getTotalLength();
+            distance += 2
+          ) {
+            const { x, y } = edge
+              .getPointAtLength(distance)
+              .matrixTransform(view);
+            if (
+              x > rect.left + 1 &&
+              x < rect.right - 1 &&
+              y > rect.top + 1 &&
+              y < rect.bottom - 1
+            )
+              return [
+                `${edge.dataset.from}→${edge.dataset.to} crosses ${node.getAttribute("data-key")}`,
+              ];
+          }
+          return [];
+        });
+      });
+    });
+    expect(crossings).toEqual([]);
+  }
+});
+
+test("the shipped offline export opens within the physical mobile viewport", async ({
+  page,
+}) => {
+  for (const height of [396, 780]) {
+    await page.setViewportSize({ width: 390, height });
+    await page.goto(pathToFileURL(join(root, "offline-preview.html")).href);
+    const preview = page.frameLocator("iframe");
+    await preview.locator("#te-language").selectOption("en");
+    const trigger = preview.getByRole("button", {
+      name: "Export",
+      exact: true,
+    });
+    await expect
+      .poll(
+        async () => (await page.locator("iframe").boundingBox())?.height ?? 0,
+      )
+      .toBeGreaterThan(height * 2);
+    await trigger.click();
+    const dialog = preview.locator("#te-export-dialog");
+    const close = dialog.getByRole("button", { name: "Close", exact: true });
+    const copy = dialog.locator("#te-copy");
+    await expect
+      .poll(async () => {
+        const a = await close.boundingBox(),
+          b = await copy.boundingBox();
+        return (
+          !!a &&
+          !!b &&
+          [a, b].every(({ y, height: h }) => y >= 0 && y + h <= height)
+        );
+      })
+      .toBe(true);
+    await close.click();
+    await expect(dialog).not.toBeVisible();
+  }
+});
+
 for (const [role, step] of [
   ["left pedestal", "step_02"],
   ["handle", "step_01"],

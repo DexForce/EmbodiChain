@@ -262,26 +262,82 @@ def test_bilateral_assignments_do_not_authorize_parallel_picks(ending):
     )
 
 
-def test_departure_requires_a_distinct_held_motion_after_lifting():
+@pytest.mark.parametrize("earlier_arm", ["right", "auto"])
+def test_departure_requires_a_distinct_held_motion_after_lifting(earlier_arm):
     source = "Grasp the container, lift it and move it a short distance away from where it was."
     moved = _fact(
         "distance_change", "container", "origin", comparison="gt", epoch="initial"
     )
-    grasp = _step("grasp", "container", arms="right", quote=source)
+    grasp = _step("grasp", "container", arms=earlier_arm, quote=source)
     lift = _step(
-        "move_held", "container", moved, arms="right", quote=source, direction="up"
+        "move_held", "container", moved, arms=earlier_arm, quote=source, direction="up"
     )
     plan = _plan("container origin", grasp, lift)
     with pytest.raises(ValueError, match="separate.*move_held"):
         _validate(plan, text=source)
-    depart = dict(lift, direction="away", extent="short")
+    depart = dict(lift, arms=["right"], direction="away", extent="short")
     plan["steps"].append(depart)
     checked = _validate(plan, text=source)
     _, graph, _, _ = compile_intent(checked, source, "held_motion", {})
+    assert graph["nodes"][1]["call"]["arguments"]["arms"] == [earlier_arm]
     assert graph["nodes"][2]["depends_on"] == ["step_02"]
     assert graph["nodes"][2]["call"]["arguments"]["extent"] == "short"
     with pytest.raises(ValueError, match="separate.*move_held"):
         _validate(dict(plan, steps=[grasp, depart, lift]), text=source)
+
+
+def test_departure_cannot_reuse_a_lift_from_before_release():
+    source = "Lift the container and move it away."
+    pick = _step("pick", "container", quote=source)
+    lift = _step("move_held", "container", quote=source, direction="up")
+    release = _step("release", "container", quote=source)
+    depart = _step("move_held", "container", quote=source, direction="away")
+    with pytest.raises(ValueError, match="separate.*move_held"):
+        _validate(_plan("container", pick, lift, release, pick, depart), text=source)
+
+
+@pytest.mark.parametrize(
+    "placement,quote_only_timing",
+    [
+        ("and place both in the tray at the same time", False),
+        ("and with both arms place them in the tray at the same time", True),
+        ("and they place both in the tray at the same time", False),
+        ("and the robot together places both in the tray at the same time", False),
+    ],
+)
+def test_placement_timing_does_not_authorize_parallel_picks(
+    placement, quote_only_timing
+):
+    source = (
+        "Pick up the cup with the left arm first and pick up the card with the "
+        f"right arm second, {placement}."
+    )
+    picks = [
+        _step("pick", obj, arms=arm, quote=source, parallel_group="pickup")
+        for arm, obj in [("left", "cup"), ("right", "card")]
+    ]
+    places = [
+        _step("place", obj, _relation("inside", obj, "tray"), arms=arm, quote=source)
+        for arm, obj in [("left", "cup"), ("right", "card")]
+    ]
+    plan = _plan("cup card tray", *picks, *places)
+    supported = _check("step_01", "step_02", scope="action", quote=source)
+    unsupported = dict(
+        supported,
+        quote="at the same time" if quote_only_timing else source,
+        parallel_picks={"left": "cup", "right": "card"},
+    )
+    with pytest.raises(AuthoringEvidenceError, match="explicit.*timing"):
+        _validate_intent_audit(
+            source, _validate(plan, text=source), _audit(unsupported)
+        )
+
+    for step in picks:
+        del step["parallel_group"]
+    parsed = _validate(plan, text=source)
+    _validate_intent_audit(source, parsed, _audit(supported))
+    _, graph, _, _ = compile_intent(parsed, source, "ordered_acquisition", {})
+    assert graph["nodes"][1]["depends_on"] == ["step_01"]
 
 
 def test_negated_lift_and_depart_does_not_require_motion():
@@ -323,6 +379,39 @@ def test_future_side_relation_needs_evidence_after_reference_is_placed():
     final["evidence"].append("step_02")
     producers, _ = _validate_intent_audit(source, plan, _audit(placement, final))
     assert producers == {"condition_01": ["step_02"]}
+
+
+def test_future_side_effect_survives_audit_at_its_checkpoint_but_not_as_a_final_goal():
+    relation_quote = "Put the two supports one on each side of the future crosspiece."
+    install = "Install the crosspiece on the table."
+    move = "Then move the crosspiece into the tray."
+    source = " ".join((relation_quote, install, move))
+    sides = _relation("opposite_sides", "left_base right_base", "crosspiece")
+    plan = _validate(
+        _plan(
+            "left_base right_base crosspiece table tray",
+            _step("pick", "crosspiece", quote=install),
+            _step(
+                "place",
+                "crosspiece",
+                _relation("on", "crosspiece", "table"),
+                sides,
+                quote=install,
+            ),
+            _step("pick", "crosspiece", quote=move),
+            _step(
+                "place",
+                "crosspiece",
+                _relation("inside", "crosspiece", "tray"),
+                quote=move,
+            ),
+        ),
+        text=source,
+    )
+    effect = _check("step_02", scope="effect", quote=relation_quote, spatial=sides)
+    assert _validate_intent_audit(source, plan, _audit(effect)) == ({}, [])
+    with pytest.raises(AuthoringEvidenceError, match="final|evidence"):
+        _validate_intent_audit(source, plan, _audit(dict(effect, scope="final")))
 
 
 def test_auto_grasps_reserve_capacity_until_release():

@@ -988,20 +988,21 @@ def _verify_lift_then_depart(instruction: str, steps: list[dict[str, Any]]) -> N
             continue
         lift, depart = (phrase.strip() for phrase in match.groups())
         short = bool(_SHORT_DISTANCE.search(depart))
-        lifted: set[tuple[str, tuple[str, ...]]] = set()
+        # Arm validation already ensures continuity within each uninterrupted hold.
+        lifted: set[str] = set()
         for step in steps:
             verb = step["verb"]
             if verb in {"release", "place", "handover"}:
-                lifted = {key for key in lifted if key[0] != step["subjects"][0]}
+                lifted.discard(step["subjects"][0])
             if verb != "move_held":
                 continue
-            key = (step["subjects"][0], tuple(sorted(step["arms"])))
+            subject = step["subjects"][0]
             direction, quote = step.get("direction"), step["quote"]
             if direction == "up" and lift in quote:
-                lifted.add(key)
+                lifted.add(subject)
             if (
                 direction == "away"
-                and key in lifted
+                and subject in lifted
                 and depart in quote
                 and (not short or step.get("extent") == "short")
             ):
@@ -1361,7 +1362,6 @@ def validate_intent(
                 "A parallel group must use distinct arms and independent objects"
             )
         seen_groups.add(group)
-    _verify_lift_then_depart(instruction, ordered_steps)
     plan["steps"] = ordered_steps
     for condition in plan["conditions"]:
         scope, fact = condition["scope"], condition["fact"]
@@ -1389,6 +1389,7 @@ def validate_intent(
                     f"Ordered operations touch protected roles: {sorted(conflict)}"
                 )
     _intent_step_arms(plan)
+    _verify_lift_then_depart(instruction, ordered_steps)
     return plan
 
 

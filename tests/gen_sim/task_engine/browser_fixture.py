@@ -33,6 +33,7 @@ import re
 import shutil
 import subprocess
 from typing import Any
+from zipfile import ZipFile
 
 from PIL import Image
 
@@ -49,7 +50,7 @@ def _image(color: str) -> str:
     return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode()
 
 
-def _authoring_fixture() -> str:
+def _authoring_fixture(*, coverage_status: str = "source_reviewed") -> str:
     from embodichain.gen_sim.task_engine._review import _hybrid_preview
     from embodichain.gen_sim.task_engine.authoring_intent import (
         compile_intent,
@@ -62,14 +63,16 @@ def _authoring_fixture() -> str:
     placement = "Lay the plank across the tops of both pedestals."
     release = "Release the plank."
     stability = "Leave the plank and both pedestals stable."
+    proximity = "Leave the plank near the left pedestal and near the right pedestal."
     park = "Return both arms to their starting poses."
     scene = "The plank and pedestals are visible in the reference image. "
-    text = f"{scene * 14}{pickup} {placement} {release} {stability} {park}"
+    text = f"{scene * 14}{pickup} {placement} {release} {stability} {proximity} {park}"
     roles = ["plank", "left_pedestal", "right_pedestal"]
     both = ["left", "right"]
     support = dict(
         kind="relation", value="on_top_faces", subjects=["plank"], references=roles[1:]
     )
+    nearby = [dict(support, value="near", references=[ref]) for ref in roles[1:]]
     parked, stable = dict(kind="arms_at_initial_pose", arms=both), dict(
         kind="stable", subjects=roles
     )
@@ -108,7 +111,7 @@ def _authoring_fixture() -> str:
                 arms=["right"],
                 quote=placement,
                 release_quote=release,
-                effects=[support, dict(kind="released", subjects=["plank"])],
+                effects=[support, *nearby, dict(kind="released", subjects=["plank"])],
             ),
             dict(
                 verb="return_arms", subjects=[], arms=both, quote=park, effects=[parked]
@@ -116,7 +119,11 @@ def _authoring_fixture() -> str:
         ],
         conditions=[
             dict(scope="final", fact=fact, quote=quote)
-            for fact, quote in ((stable, stability), (parked, park))
+            for fact, quote in (
+                (stable, stability),
+                (parked, park),
+                *((fact, proximity) for fact in nearby),
+            )
         ],
     )
     plan = validate_intent(plan, text, scene_objects={})
@@ -132,7 +139,17 @@ def _authoring_fixture() -> str:
                     scope="final",
                     evidence=["condition_02", "step_03"],
                     state=parked,
-                )
+                ),
+                *(
+                    dict(
+                        quote=proximity,
+                        requirement="plank near the named pedestal",
+                        scope="final",
+                        evidence=[f"condition_{index:02d}", "step_02"],
+                        spatial=fact,
+                    )
+                    for index, fact in enumerate(nearby, start=3)
+                ),
             ],
         ),
     )
@@ -153,6 +170,8 @@ def _authoring_fixture() -> str:
             task_spec=spec.to_dict(),
             task_spec_v1=frozen,
             coverage={
+                "status": coverage_status,
+                "uncovered": ["condition_01"] if coverage_status == "uncovered" else [],
                 "producers": {node["id"]: node["id"] for node in graph["nodes"]},
                 "goal_producers": goal_producers,
             },
@@ -178,6 +197,15 @@ def build_fixtures(output: Path, reference: Path | None = None) -> None:
     (output / "hybrid-authoring.html").write_text(
         _authoring_fixture(), encoding="utf-8"
     )
+    (output / "hybrid-uncovered.html").write_text(
+        _authoring_fixture(coverage_status="uncovered"), encoding="utf-8"
+    )
+    archive = (
+        Path(__file__).resolve().parents[3]
+        / "web/task-engine/preview/semantic-calls/task-engine-preview.zip"
+    )
+    with ZipFile(archive) as preview:
+        (output / "offline-preview.html").write_bytes(preview.read("index.html"))
     fixture = json.loads(
         Path(__file__)
         .with_name("data")

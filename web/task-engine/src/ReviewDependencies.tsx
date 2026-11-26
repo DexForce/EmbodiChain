@@ -30,7 +30,14 @@ function laneFor({ call }: TaskNode): string {
   return !arm || arm === "auto" ? "unassigned" : arm;
 }
 
-type Box = { x: number; y: number; width: number; height: number };
+type Box = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  row: number;
+  column: number;
+};
 
 export function ReviewDependencies({
   calls,
@@ -121,29 +128,75 @@ export function ReviewDependencies({
   };
   let nextY = laneLabelHeight + (assigned ? 5 : pad);
   if (assigned) {
-    for (const node of calls) {
-      const x = span * lanes.indexOf(laneFor(node)) + pad;
+    calls.forEach((node, row) => {
+      const column = lanes.indexOf(laneFor(node));
+      const x = span * column + pad;
       const height = tall(node);
-      placement.set(node.id, { x, y: nextY, width: cell, height });
+      placement.set(node.id, { x, y: nextY, width: cell, height, row, column });
       nextY += height + gap;
-    }
+    });
   } else {
     for (let start = 0; start < calls.length; start += cols) {
       const row = calls.slice(start, start + cols);
       const height = Math.max(...row.map(tall));
       row.forEach((node, i) => {
-        const col = (start / cols) % 2 ? cols - 1 - i : i;
+        const column = (start / cols) % 2 ? cols - 1 - i : i;
         placement.set(node.id, {
-          x: pad + col * (cell + gap),
+          x: pad + column * (cell + gap),
           y: nextY,
           width: cell,
           height,
+          row: start / cols,
+          column,
         });
       });
       nextY += height + gap;
     }
   }
-  const height = Math.max(laneLabelHeight, nextY - gap + (assigned ? 5 : pad));
+  let height = Math.max(laneLabelHeight, nextY - gap + (assigned ? 5 : pad));
+  const edges = calls.flatMap((node) =>
+    node.depends_on.flatMap((id) => {
+      const from = placement.get(id),
+        to = placement.get(node.id);
+      if (!from || !to) return [];
+      let path: string;
+      if (from.row === to.row) {
+        const direction = from.x < to.x ? 1 : -1;
+        const x1 = direction > 0 ? from.x + from.width : from.x;
+        const x2 = direction > 0 ? to.x : to.x + to.width;
+        const y = from.y + from.height / 2;
+        if (Math.abs(from.column - to.column) > 1) {
+          const gutter = from.y + from.height + gap / 2;
+          height = Math.max(height, gutter + 3);
+          path = `M ${x1} ${y} H ${x1 + (direction * gap) / 2} V ${gutter} H ${x2 - (direction * gap) / 2} V ${y} H ${x2 - direction * 2}`;
+        } else {
+          path = `M ${x1} ${y} H ${x2 - direction * 2}`;
+        }
+      } else {
+        const down = from.row < to.row;
+        const x1 = from.x + from.width / 2,
+          x2 = to.x + to.width / 2;
+        const y1 = down ? from.y + from.height : from.y;
+        const y2 = down ? to.y : to.y + to.height;
+        const direction = down ? 1 : -1;
+        if (Math.abs(from.row - to.row) > 1) {
+          // Keep the long vertical segment in a column gutter, never over a card.
+          const gutter =
+            cols === 1
+              ? pad / 2
+              : assigned
+                ? span * Math.min(from.column + 1, cols - 1)
+                : from.column < cols - 1
+                  ? from.x + from.width + gap / 2
+                  : from.x - gap / 2;
+          path = `M ${x1} ${y1} V ${y1 + (direction * gap) / 2} H ${gutter} V ${y2 - (direction * gap) / 2} H ${x2} V ${y2 - direction * 2}`;
+        } else {
+          path = `M ${x1} ${y1} V ${(y1 + y2) / 2} H ${x2} V ${y2 - direction * 2}`;
+        }
+      }
+      return [{ id, node, path }];
+    }),
+  );
 
   return (
     <div
@@ -184,34 +237,16 @@ export function ReviewDependencies({
               <path d="M0 0L8 4L0 8Z" fill="currentColor" />
             </marker>
           </defs>
-          {calls.flatMap((node) =>
-            node.depends_on.map((id) => {
-              const from = placement.get(id),
-                to = placement.get(node.id);
-              if (!from || !to) return null;
-              let edge: string;
-              if (from.y === to.y) {
-                const forward = from.x < to.x;
-                edge = `M ${forward ? from.x + from.width : from.x} ${from.y + from.height / 2} H ${forward ? to.x - 2 : to.x + to.width + 2}`;
-              } else {
-                const x1 = from.x + from.width / 2,
-                  x2 = to.x + to.width / 2;
-                const y1 = from.y + from.height,
-                  y2 = to.y - 2;
-                edge = `M ${x1} ${y1} V ${(y1 + y2) / 2} H ${x2} V ${y2}`;
-              }
-              return (
-                <path
-                  key={`${id}:${node.id}`}
-                  data-from={id}
-                  data-to={node.id}
-                  d={edge}
-                  className={selected(node) ? "selected" : undefined}
-                  markerEnd={`url(#${marker})`}
-                />
-              );
-            }),
-          )}
+          {edges.map(({ id, node, path }) => (
+            <path
+              key={`${id}:${node.id}`}
+              data-from={id}
+              data-to={node.id}
+              d={path}
+              className={selected(node) ? "selected" : undefined}
+              markerEnd={`url(#${marker})`}
+            />
+          ))}
         </svg>
         {calls.map((node, index) => {
           const box = placement.get(node.id)!;

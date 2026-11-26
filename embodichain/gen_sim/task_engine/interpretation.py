@@ -447,8 +447,14 @@ _LIFT_PAIRED_MODIFIER = (
     rf"(?:{_LIFT_ACTION_VERBS})\s+(?:and|or)\s+(?:{_LIFT_ACTION_VERBS})\b"
     rf"(?=\s+(?!(?:{_LIFT_ACTION_OBJECT}|by|to|toward|over|forward|back|up|down|left|right)\b)[a-z])"
 )
+# A coordinated relative predicate describes the object, not another motion.
+_LIFT_RELATIVE_MODIFIER = (
+    r"\b[\w-]+\s+(?:that|which)\s+(?:(?!then\b|and\b|or\b)[\w-]+\s+)+?"
+    rf"(?:and|or)\s+(?!(?:{_LIFT_ACTION_VERBS})\b)[a-z]+\s+(?:{_LIFT_ACTION_OBJECT})\b"
+)
 _LIFT_MEASUREMENT = re.compile(
-    rf"\b(?:lift|raise)\b(?:{_LIFT_PAIRED_MODIFIER}|(?!{_LIFT_ACTION_BOUNDARY})[^.!?;,\n])*?"
+    rf"\b(?:lift|raise)\b(?:{_LIFT_PAIRED_MODIFIER}|{_LIFT_RELATIVE_MODIFIER}"
+    rf"|(?!{_LIFT_ACTION_BOUNDARY})[^.!?;,\n])*?"
     r"\s+(?:\bby\s+(?:(?:more than|at least|over|exactly)\s+)?|"
     r"\b(?:more than|at least|over|exactly)\s+)"
     r"([0-9]+(?:\.[0-9]+)?)\s*(mm|cm|m|millimet(?:er|re)s?|"

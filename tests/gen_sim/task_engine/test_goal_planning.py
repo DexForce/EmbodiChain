@@ -102,6 +102,8 @@ def native_hybrid(tmp_path, monkeypatch):
             assert request.get("scene_context") == context
             if kwargs["role"] == "task_interpretation":
                 return dict(issues=[], source_operations=ops)
+            if kwargs["role"] == "task_semantic_planning" and "feedback" in request:
+                return {"calls": request["previous"]}
             return {
                 r: dict(description=r, bbox=[10, 10, 500, 500])
                 for r in kwargs["schema"]["required"]
@@ -1032,6 +1034,39 @@ def test_hybrid_keeps_explicit_destination_without_adding_background_roles(
             r: [0.01, 0.01, 0.5, 0.5] for r in ("cup", tray)
         }
         assert review["spec"] == result["task_spec_v1"]
+        assert review["coverage"]["status"] == "covered"
+
+
+def test_uncovered_native_pour_retains_coverage_in_published_and_reopened_reviews(
+    native_hybrid, tmp_path
+):
+    from embodichain.gen_sim.task_engine._review import write_review
+
+    result = native_hybrid(
+        [
+            dict(
+                template="E3",
+                object="pitcher",
+                reference="cup",
+                mode="fluid",
+                quote="Pour the liquid from the pitcher into the cup.",
+            )
+        ]
+    )
+    plan = tmp_path / "plan"
+    coverage = json.loads((plan / "coverage.json").read_text())
+    assert coverage == result["coverage"]
+    assert coverage["status"] == "uncovered" and coverage["uncovered"]
+    reopened = tmp_path / "pour-review.html"
+    write_review(plan, reopened)
+    for page in (plan / "semantic_task_graph.html", reopened):
+        match = re.search(
+            r'<script id="graph-data" type="application/json">(.*?)</script>',
+            page.read_text(encoding="utf-8"),
+            re.S,
+        )
+        assert match is not None
+        assert json.loads(match[1])["review"]["coverage"] == coverage
 
 
 @pytest.mark.parametrize(

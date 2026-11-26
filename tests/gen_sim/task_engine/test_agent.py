@@ -275,6 +275,7 @@ def test_source_audit_repairs_an_omitted_metric_height():
         ("cup with the red and blue stripes", "by at least 10 cm"),
         ("cup with the red or blue stripes", "by at least 10 cm"),
         ("toy car with push and pull handles", "by at least 10 cm"),
+        ("cup with stripes that cross and touch the rim", "by at least 10 cm"),
     ],
 )
 def test_explicit_lift_height_is_checked_even_when_both_models_agree(
@@ -307,6 +308,7 @@ def test_explicit_lift_height_is_checked_even_when_both_models_agree(
         "Lift the figurine and advance the platform by 10 cm.",
         "Lift the figurine with red and blue stripes and gently advance the platform by 10 cm.",
         "Lift the figurine with push and pull handles and pull the platform by 10 cm.",
+        "Lift the cup with stripes that cross and touch the rim and advance the platform by 10 cm.",
     ],
 )
 def test_lift_height_does_not_borrow_another_actions_distance(instruction):

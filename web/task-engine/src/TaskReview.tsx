@@ -150,6 +150,7 @@ export type Review = {
     milestone_calls?: Record<string, string>;
     goal_calls?: Record<string, string[]>;
   };
+  coverage?: { status: string; uncovered?: string[] };
   annotations?: Record<string, { object?: string; reference?: string }>;
   pending: number;
   qualifiers?: { clause_id: string; status: string; reason: string }[];
@@ -402,6 +403,26 @@ export default function TaskReview({
   const unverifiedQualifiers = (review.qualifiers || []).filter(
     (q) => q.status !== "covered",
   );
+  const coverage = review.coverage?.status ?? data.validation?.coverage?.status;
+  const coverageBadge =
+    coverage === "uncovered"
+      ? { label: t("未覆盖", "Uncovered"), tone: "bad", Icon: CircleX }
+      : unverifiedQualifiers.length
+        ? {
+            label: t("限定要求待核实", "Qualifiers unverified"),
+            tone: "bad",
+            Icon: CircleX,
+          }
+        : coverage === "source_reviewed" || coverage === "covered"
+          ? {
+              label:
+                coverage === "covered"
+                  ? t("通过", "Passed")
+                  : t("已核对原文", "Source reviewed"),
+              tone: "good",
+              Icon: CircleCheck,
+            }
+          : { label: t("未提供", "Unavailable") };
   const run =
     review.attempt && "calls" in review.attempt ? review.attempt : null;
   const initialFailure = calls.find((c) => run?.calls[c.id]?.success === false);
@@ -502,7 +523,8 @@ export default function TaskReview({
       if (typeof label === "string")
         return [
           intentLabel(label, locale),
-          ids(args.subjects).slice(0, 2).map(shortName).join(", "),
+          ids(args.subjects).map(shortName).join(", "),
+          ids(args.references).map(shortName).join(", "),
         ]
           .filter(Boolean)
           .join(" · ");
@@ -896,7 +918,10 @@ export default function TaskReview({
     data.validation?.source?.bindings?.filter(
       (row) => row.node_id === selectedCall?.id,
     ) || [];
-  const stepChecks = new Map<string, { scopes: Set<string>; hit: boolean }>();
+  const stepChecks = new Map<
+    string,
+    { label: string; scopes: Set<string>; hit: boolean }
+  >();
   for (const [check, scope] of [
     ...stepMilestones.flatMap((m) =>
       m.achieve.map((fact) => [fact, t("里程碑", "Milestone")] as const),
@@ -905,14 +930,22 @@ export default function TaskReview({
       (fact) => [fact, t("完成条件", "Completion criterion")] as const,
     ),
   ]) {
-    const label = predicate(check);
-    const row = stepChecks.get(label) || {
+    const { id, ...fact } = check;
+    const key = JSON.stringify(fact, (_, value: unknown) =>
+      value && typeof value === "object" && !Array.isArray(value)
+        ? Object.fromEntries(
+            Object.entries(value).sort(([a], [b]) => a.localeCompare(b)),
+          )
+        : value,
+    );
+    const row = stepChecks.get(key) || {
+      label: predicate(check),
       scopes: new Set<string>(),
       hit: false,
     };
     row.scopes.add(scope);
-    row.hit ||= check.id === selectedGoal?.id;
-    stepChecks.set(label, row);
+    row.hit ||= id === selectedGoal?.id;
+    stepChecks.set(key, row);
   }
   const sourceBoxes = new Map(Object.entries(review.source_boxes ?? {}));
   const previewBoxes = new Map(Object.entries(review.preview_boxes ?? {}));
@@ -1092,15 +1125,12 @@ export default function TaskReview({
         >
           <div>
             <dt>{t("计划覆盖", "Plan coverage")}</dt>
-            <dd className={unverifiedQualifiers.length ? "bad" : "good"}>
-              {unverifiedQualifiers.length ? (
-                <CircleX size={14} />
-              ) : (
-                <CircleCheck size={14} />
-              )}
-              {unverifiedQualifiers.length
-                ? t("限定要求待核实", "Qualifiers unverified")
-                : t("通过", "Passed")}
+            <dd
+              className={coverageBadge.tone}
+              title={review.coverage?.uncovered?.join(", ") || undefined}
+            >
+              {coverageBadge.Icon && <coverageBadge.Icon size={14} />}
+              {coverageBadge.label}
             </dd>
           </div>
           <div>
@@ -1251,9 +1281,9 @@ export default function TaskReview({
                   <>
                     <h3>{t("本步检查条件", "Checks for this step")}</h3>
                     <ul className="rv-step-checks">
-                      {[...stepChecks].map(([label, row]) => (
-                        <li key={label} className={row.hit ? "hit" : undefined}>
-                          <span>{label}</span>
+                      {[...stepChecks].map(([key, row]) => (
+                        <li key={key} className={row.hit ? "hit" : undefined}>
+                          <span>{row.label}</span>
                           <small>{[...row.scopes].join(" · ")}</small>
                         </li>
                       ))}

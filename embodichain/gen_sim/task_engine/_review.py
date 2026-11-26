@@ -277,6 +277,7 @@ def _hybrid_preview(result, image, attempt, *, preview_boxes=None):
             o["provenance"] != "observed" for o in grounding.get("objects", [])
         ),
         "attempt": attempt,
+        "coverage": result["coverage"],
         "pairing": {
             "role_entities": {
                 r["id"]: [r["id"]] for r in spec["configuration"]["roles"]

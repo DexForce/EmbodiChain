@@ -122,7 +122,22 @@ _TIMING_CUE = re.compile(
     r"\b(?:simultaneously|concurrently|synchronously|at (?:the )?same time|at once|in (?:parallel|unison))\b|同时|同步|并行",
     re.IGNORECASE,
 )
-_PICK_CUE = re.compile(r"\b(?:pick|grab|grasp|acquir)\w*\b|抓|拿起", re.IGNORECASE)
+_PICK_CUE = re.compile(
+    r"\b(?:(?:pick|grasp)(?:s|ed|ing)?|grab(?:s|bed|bing)?|acquir(?:e[sd]?|ing))\b|抓|拿起",
+    re.IGNORECASE,
+)
+_PICK_TIMING_BOUNDARY = re.compile(
+    r"[.!?;。！？；]|\b(?:then|afterwards|before)\b"
+    r"|(?:,\s*(?:(?:and|or|but|while)\s+)?|\b(?:and|or|but|while)\s+)"
+    r"(?=(?:(?:you|they|we|it|both|(?:the|a|an|both)\s+(?:[\w-]+\s+){0,2}[\w-]+)\s+)?"
+    rf"(?:(?:also|together|[a-z]+ly|will|should|must|can|are|is|be|{_TIMING_CUE.pattern}|"
+    r"with\s+(?:(?:the|both|left|right|your)\s+)*arms?)[\s,]+)*"
+    r"(?:(?:plac|releas|rais|mov|clos|rotat|actuat)(?:e[sd]?|ing)|"
+    r"(?:deposit|lift|lower|transfer|pour|open|push|pull|turn|hold|press|return)(?:s|ed|ing)?|"
+    r"(?:put|set)(?:s|ting)?|drop(?:s|ped|ping)?|carr(?:y|ies|ied|ying))\b)"
+    r"|(?:，|然后|并|再)\s*(?=(?:同时|同步|并行)?\s*(?:放|置|松开|抬|移|转|倒))",
+    re.IGNORECASE,
+)
 _NEGATED_CUE = re.compile(r"\b(?:not|never|avoid)\b|不要|不得|别", re.IGNORECASE)
 _FUTURE_SIDES = re.compile(
     r"\b(?:one on (?:each|either) side|opposite sides) of (?:(?:the|a) )?"
@@ -135,19 +150,23 @@ _STABILITY_CUE = re.compile(
 )
 
 
-def _explicit_pick_timing(quote: str, spans: Iterable[str]) -> bool:
+def _explicit_pick_timing(quote: str, instruction: str) -> bool:
     if not _TIMING_CUE.search(quote):
         return False
-    contexts = [span for span in spans if quote in span] or [quote]
-    for context in contexts:
-        for clause in re.split(
-            r"[.!?;]|\b(?:then|afterwards|before)\b", context, flags=re.IGNORECASE
-        ):
-            if not _PICK_CUE.search(clause):
-                continue
-            if any(
-                cue.group() in quote and not _NEGATED_CUE.search(clause[: cue.start()])
-                for cue in _TIMING_CUE.finditer(clause)
+    # A cue must occur in the quoted range of an acquisition clause itself.
+    quotes = [match.span() for match in re.finditer(re.escape(quote), instruction)]
+    boundaries = [match.span() for match in _PICK_TIMING_BOUNDARY.finditer(instruction)]
+    for start, stop in zip(
+        [0, *(end for _, end in boundaries)],
+        [*(begin for begin, _ in boundaries), len(instruction)],
+    ):
+        clause = instruction[start:stop]
+        if not _PICK_CUE.search(clause):
+            continue
+        for cue in _TIMING_CUE.finditer(clause):
+            if not _NEGATED_CUE.search(clause[: cue.start()]) and any(
+                left <= start + cue.start() and start + cue.end() <= right
+                for left, right in quotes
             ):
                 return True
     return False
@@ -644,7 +663,7 @@ def _validate_intent_audit(
         scope = check.get("scope")
         typed = "spatial" in check or "state" in check
         if "parallel_picks" in check:
-            if not _explicit_pick_timing(check["quote"], spans):
+            if not _explicit_pick_timing(check["quote"], instruction):
                 raise AuthoringEvidenceError(
                     "Parallel picks need explicit source timing for acquisition; "
                     "separate hand-object assignments alone do not request synchrony"
@@ -775,11 +794,13 @@ def _validate_intent_audit(
                 and _FUTURE_SIDES.search(check["quote"])
             ):
                 reference = _role_ancestry(claim["references"][0], parents)
+                checkpoint = at_step if scope == "effect" else end
                 placed = max(
                     (
                         order[ref]
                         for ref, step in steps.items()
                         if step["verb"] == "place"
+                        and ref in checkpoint
                         and reference.intersection(step["subjects"])
                     ),
                     default=None,
@@ -789,7 +810,7 @@ def _validate_intent_audit(
                         fact
                         for ref in refs
                         if ref in order and order[ref] >= placed
-                        for fact in end[ref]
+                        for fact in checkpoint.get(ref, ())
                     ]
                     if matches(claim, proof):
                         witnessed_future_sides.update(

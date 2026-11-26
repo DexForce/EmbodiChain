@@ -45,14 +45,17 @@ evidence, including slot relations; inverse axis relations can match in a shared
 frame but not when swapping a reference-local anchor. Validation and evidence
 invalidation share feasible arm assignments across the sequence without
 replacing authored `auto` arms. Two independent
-single-arm picks can share a `parallel_group` only with explicit timing for
-the acquisitions; naming both arms is not timing evidence. The audit verifies
+single-arm picks can share a `parallel_group` only with explicit timing in the
+acquisition clause; timing a later action or naming both arms is not evidence.
+The audit verifies
 the hand-object pairs, and following steps depend on both branches. Both arms
 acquiring the same object remain one pick. A held tool making contact is a held
 motion with a contact-part relation, not a button actuation. A requested lift
-then move away has separate upward and departure steps; a requested short
+then move away has separate upward and departure steps within the same hold,
+even when a later step resolves an earlier `auto` arm. A requested short
 displacement has a qualitative extent, not an invented metric. Opposite sides
-of a future reference require a surviving relation from its placement or later.
+of a future reference require a relation established at or after its placement,
+checked at the cited effect checkpoint or at the end for a final claim.
 Nesting, stacking and release alone do not require a separate stability claim.
 A bistable
 control's other position requires an explicit action effect relative to its
@@ -136,7 +139,8 @@ by default). It contains no per-task graph construction templates.
 `template` and default `TaskAgent` independently audit typed intent before
 grounding. Ordering compares reachability, and only a unique shared verbatim
 mention can reconcile reference labels. A uniquely stated metric lift height
-is also checked against the source for a targetless upward hold. Agreed explicit
+is checked against the source for a targetless upward hold, without taking a
+distance from another action. Agreed explicit
 arm returns project to ordered `simulation.park` calls with pending resource
 postures, not extra image-grounding entities. New default attempts mark the audit
 `purpose: source_review`. Resource-only park calls require the audited clauses.
@@ -204,6 +208,9 @@ Version-2 plans and revisions embed the frozen v1 specification and its pairing
 report in the offline viewer. The grouped action canvas links milestones, final
 goals and roles. The review canvas and Graph & exports share goal pairings; typed
 goals link only to cited steps with surviving effects that prove them.
+The review shows the recorded plan coverage, distinguishing source review from
+a covered native witness. Step checks distinguish full predicates, including
+different references for the same subject and relation.
 Native run review is published separately at `task_review.html`;
 `gensim task view --plan PLAN [--run RUN] --output NEW.html` also renders
 existing artifacts. Only matching attempt identities, complete plan identities and
