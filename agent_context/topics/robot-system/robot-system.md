@@ -29,7 +29,7 @@ identity and calibrated defaults belong to `embodichain.extensions.robots`.
 ## Reading a robot in an existing DexSim World
 
 Install the same EmbodiChain version in the DexSim host and the stdio server
-environment, with the `mcp` extra on the server. Use `embodichain mcp --session ID`
+environment. The default install includes the MCP SDK. Use `embodichain mcp --session ID`
 and optionally `--session-directory DIR` for a custom discovery directory.
 `embodichain_get_robot_state` takes a finalized scene articulation path,
 registered robot config ID, optional variant and configured control part.

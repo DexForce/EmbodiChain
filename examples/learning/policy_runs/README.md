@@ -8,7 +8,7 @@ RP1 sparse5 ONNX actor and the public ANYmal-C velocity TorchScript actor.
 ## Prepare the catalog
 
 Run these commands from the EmbodiChain checkout in the same environment that
-will run the World. Install the MCP extra and the dependencies for the linked
+will run the World. Install EmbodiChain and the dependencies for the linked
 [PartyMimic example](../partymimic/README.md) and
 [ANYmal-C example](../policy_evaluation/README.md).
 
