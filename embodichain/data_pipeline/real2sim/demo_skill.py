@@ -128,12 +128,16 @@ class RobotDemonstration:
 
 @dataclass(frozen=True)
 class DemoSkillRole:
-    """A logical rigid scene participant with frozen geometry and source pose."""
+    """A rigid participant with frozen geometry and a checked entry pose.
+
+    A movable participant is observed during execution and can move through
+    physical contact without becoming an attachment or changing the plan.
+    """
 
     role_id: str
     geometry_sha256: str
     source_pose: tuple[float, ...]
-    reference_kind: Literal["static", "held"] = "static"
+    reference_kind: Literal["static", "held", "movable"] = "static"
 
     def __post_init__(self) -> None:
         _text(self.role_id, "role_id")
@@ -145,8 +149,8 @@ class DemoSkillRole:
             raise ValueError("source_pose must be a flat rigid transform")
         _rigid(pose.reshape(4, 4), "source_pose")
         object.__setattr__(self, "source_pose", tuple(float(x) for x in pose))
-        if self.reference_kind not in {"static", "held"}:
-            raise ValueError("reference_kind must be static or held")
+        if self.reference_kind not in {"static", "held", "movable"}:
+            raise ValueError("reference_kind must be static, held or movable")
 
 
 @dataclass(frozen=True)

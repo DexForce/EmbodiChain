@@ -58,6 +58,23 @@ def test_task_program_declarations_are_pure_and_protect_contact_phases(tmp_path)
         load_task_program_expansion(invalid)
 
 
+@pytest.mark.parametrize("steps", [0, -1, False])
+def test_task_program_settling_steps_can_skip_preliminary_physics(steps, tmp_path):
+    import yaml
+    from embodichain.lab.expansion import load_task_program_expansion
+
+    fixture = Path(__file__).parent / "fixtures/task_program_job.yaml"
+    job = yaml.safe_load(fixture.read_text())
+    job["engine"]["settling_steps"] = steps
+    path = tmp_path / "settling.yaml"
+    path.write_text(yaml.safe_dump(job))
+    if type(steps) is int and steps == 0:
+        assert load_task_program_expansion(path)["engine"]["settling_steps"] == 0
+    else:
+        with pytest.raises(ValueError, match="engine.settling_steps"):
+            load_task_program_expansion(path)
+
+
 def test_official_layout_jobs_load_without_simulation_imports():
     import subprocess
     import sys

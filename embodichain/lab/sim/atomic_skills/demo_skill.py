@@ -140,6 +140,10 @@ class DemoSkillMonitor:
             raise ValueError("DemoSkill evidence is not aligned to the observation")
         if frame.timestamp < self.last_timestamp:
             raise ValueError("DemoSkill observation clock moved backwards")
+        for role in self.spec.roles:
+            if role.reference_kind == "movable" and role.role_id not in frame.poses:
+                self.failure = f"DemoSkill missing movable scene pose: {role.role_id}"
+                raise ValueError(self.failure)
         for name, initial in self.static_pose_guards.items():
             current = frame.poses.get(name)
             if (

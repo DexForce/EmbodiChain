@@ -323,6 +323,40 @@ def test_runner_preserves_source_and_semantic_verification_boundaries(failure):
         assert sink.cancel.called and sink.hold.called
 
 
+def test_movable_role_accepts_motion_and_requires_fresh_measured_pose(tmp_path):
+    from embodichain.data_pipeline.real2sim import (
+        DemoSkillRole,
+        load_demo_skill,
+        save_demo_skill,
+    )
+
+    original = _asset()
+    spec = original.spec
+    pose = np.eye(4)
+    spec.roles = (DemoSkillRole("fixture", "c" * 64, tuple(pose.flat), "movable"),)
+    artifact = build_demo_skill(
+        original.demonstration, spec, joints=original.joint_specs, control_dt=DT
+    )
+    artifact = load_demo_skill(save_demo_skill(artifact, tmp_path / "movable"))
+    observed = {"fixture": pose}
+    monitor = DemoSkillMonitor(
+        artifact,
+        SimpleNamespace(
+            observe=lambda context: DemoSkillObservation(
+                context.robot.timestamp, 0, observed
+            )
+        ),
+    )
+    monitor.observe(_context(), None)
+    pose[0, 3] = 0.05
+    monitor.observe(_context(DT), 0)
+    assert monitor.last_sample == 0
+    observed.clear()
+    with pytest.raises(ValueError, match="missing movable scene pose: fixture"):
+        monitor.observe(_context(2 * DT), 1)
+    assert monitor.last_sample == 0
+
+
 def test_monitor_missing_contact_is_not_evidence_of_no_contact():
     asset = _asset()
     spec = asset.spec
