@@ -14,28 +14,61 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Build and serve the stdio interface to a borrowed DexSim World."""
+"""Build the local stdio service and connect to a DexSim World when selected."""
 
 from __future__ import annotations
 
-from dexsim.runtime import Session
+from typing import TYPE_CHECKING
+
 from mcp.server import MCPServer
 
-from .tools.robot import register_robot_tools
+if TYPE_CHECKING:
+    from dexsim.runtime import Session
 
 __all__ = ["create_server", "serve"]
 
 
-def create_server(session: Session) -> MCPServer:
-    """Register the available domain tools using a caller-owned session."""
+def create_server(session: Session | None, *, catalog: bool = False) -> MCPServer:
+    """Register read-only tools and optional discovery on a caller-owned session.
+
+    Args:
+        session: Borrowed DexSim session, or None for a standalone catalog.
+        catalog: Include service discovery, catalog tools and resources.
+
+    Returns:
+        The configured MCP server.
+    """
+    if session is None and not catalog:
+        raise ValueError("Supply a DexSim Session or enable the catalog")
     server = MCPServer("EmbodiChain")
-    register_robot_tools(server, session)
+    if session is not None:
+        from .tools.robot import register_robot_tools
+
+        register_robot_tools(server, session)
+    if catalog:
+        from ._discovery import _register_discovery
+
+        _register_discovery(server, session)
     return server
 
 
-def serve(session_id: str, *, directory: str | None = None) -> None:
-    """Connect to an existing session and release the connection when stdio closes."""
+def serve(
+    session_id: str | None, *, directory: str | None = None, catalog: bool = False
+) -> None:
+    """Run the stdio server and release any borrowed connection on exit.
+
+    Args:
+        session_id: Existing DexSim Session ID, or None for offline discovery.
+        directory: Optional directory containing the selected session record.
+        catalog: Include service discovery, catalog tools and resources.
+    """
+    if session_id is None:
+        create_server(None, catalog=catalog).run(transport="stdio")
+        return
+
+    from dexsim.runtime import Session
+
     with Session.connect(
         session_id, directory=directory, client={"kind": "embodichain-mcp"}
     ) as session:
-        create_server(session).run(transport="stdio")
+        create_server(session, catalog=catalog).run(transport="stdio")
