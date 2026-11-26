@@ -50,6 +50,12 @@ The core ``embodichain`` framework includes these top-level packages:
     Shared utilities: the ``@configclass`` decorator, logging, math/tensor
     helpers, file/string/device helpers, and legacy computation import aliases.
 
+``mcp``
+    MCP server and robot state queries for a running DexSim Runtime session.
+
+``gen_sim``
+    Asset and scene generation, scene adapters, and semantic task planning.
+
 .. currentmodule:: embodichain
 
 .. autosummary::
@@ -64,10 +70,10 @@ The core ``embodichain`` framework includes these top-level packages:
    utils
 
 .. toctree::
-   :maxdepth: 1
+   :maxdepth: 2
 
-   embodichain/embodichain.mcp
-   embodichain/embodichain.gen_sim.task_engine
+   embodichain.mcp <embodichain/embodichain.mcp>
+   embodichain/embodichain.gen_sim
 
 Official Extensions
 -------------------
