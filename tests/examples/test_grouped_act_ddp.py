@@ -45,7 +45,8 @@ from examples.learning.act._grouped_ddp import (
     training_batch,
 )
 from examples.learning.act import paired_grouped
-from examples.learning.act.audit_grouped import _audit, _audit_supply
+from examples.learning.act.audit_grouped import _audit, _audit_draws, _audit_supply
+from examples.learning.act._grouped_replay import GroupReplay
 from examples.learning.act.grouped import _calibration_stats, _inputs, _scene_shard
 
 
@@ -230,6 +231,47 @@ def test_audit_requires_release_for_each_authorized_generation(layout: str) -> N
         _audit_supply(recipe, supply, spec)
 
 
+def test_retired_samples_commit_and_audit_separately() -> None:
+    first = TensorDict({"ods_episode_id": torch.zeros(32, dtype=torch.long)}, [32])
+
+    @contextmanager
+    def live_batch(n, horizon, **kwargs):
+        yield TensorDict({"ods_episode_id": torch.full((n,), 2)}, [n])
+
+    engine = SimpleNamespace(
+        group_batch=live_batch,
+        try_refill_group_with_anchors=lambda *args, **kwargs: (3, (first,)),
+    )
+    sampler = GroupReplay(engine, 12, True, 4, 30, ["obs"], torch.Generator())
+    assert sampler.refill() == 3
+    with pytest.raises(ArithmeticError):
+        with sampler.draw():
+            raise ArithmeticError("failed optimizer")
+    assert sampler.steps == []
+    with sampler.draw() as batch:
+        assert batch["ods_episode_id"].tolist() == [2, 2, 2, 0]
+    assert sampler.steps == [([2, 2, 2], [0])]
+
+    # First update earns the four live credits needed to displace episode 0.
+    journal = dict(steps=[([0] * 4, []), *sampler.steps], release_before_step=[1, 2])
+    spec = dict(retired_history=True, batch_size=4)
+    release = dict(requested_generation=3, episode_ids=[0], committed_draws=[4])
+    producer = dict(
+        width=1,
+        engine=dict(completed_generation=3),
+        releases=[
+            dict(requested_generation=2, episode_ids=[], committed_draws=[]),
+            release,
+        ],
+    )
+    supply = dict(step=2, producers=[producer])
+    result = _audit_draws(journal, dict(world_size=1), supply, spec)
+    assert (result["live_draws"], result["history_draws"]) == (7, 1)
+    release["committed_draws"] = [5]
+    with pytest.raises(ValueError, match="Release credits"):
+        _audit_draws(journal, dict(world_size=1), supply, spec)
+
+
 def test_legacy_audit_requires_pending_group_receipt(tmp_path: Path) -> None:
     spec = dict(
         producer_envs=2,
@@ -294,6 +336,7 @@ def test_paired_seed_launches_installed_example_outside_checkout(
         "grouped.py",
         "_environment.py",
         "_grouped_ddp.py",
+        "_grouped_replay.py",
         "_study_panel.py",
     ):
         shutil.copyfile(source / name, installed / name)

@@ -70,6 +70,44 @@ if TYPE_CHECKING:
 _ERROR_BUFFER_SIZE = 64 * 1024
 
 
+def _validate_group_sample(
+    batch_size: int, horizon: int, anchor_fields: Sequence[str | tuple[str, ...]]
+) -> None:
+    if (
+        type(batch_size) is not int
+        or batch_size < 1
+        or type(horizon) is not int
+        or horizon < 1
+        or not anchor_fields
+        or any(
+            (k if isinstance(k, str) else k[0])
+            in {"actions", "action_is_pad", "ods_episode_id"}
+            for k in anchor_fields
+        )
+    ):
+        raise ValueError("Invalid grouped batch dimensions or anchor fields")
+
+
+def _group_anchors(
+    buf: TensorDict,
+    valid: torch.Tensor,
+    continuity: torch.Tensor | None,
+    rows: torch.Tensor,
+    frames: torch.Tensor,
+    horizon: int,
+    anchor_fields: Sequence[str | tuple[str, ...]],
+) -> TensorDict:
+    """Gather owned inputs and masked action targets at valid frame indices."""
+    indices, mask, _ = _context_indices(valid, continuity, rows, frames, 1, horizon)
+    last = frames + mask.sum(1) - 1
+    indices = indices.minimum(last[:, None])
+    batch = buf.select(*anchor_fields)[rows, frames]
+    batch["actions"] = buf["actions"][rows[:, None], indices]
+    batch["action_is_pad"] = ~mask
+    batch["ods_episode_id"] = buf["ods_episode_id"][rows, frames]
+    return batch
+
+
 class OnlineDataEngineState(str, Enum):
     """Lifecycle states for :class:`OnlineDataEngine`."""
 
@@ -2200,18 +2238,113 @@ class OnlineDataEngine:
         Only the creator may request recycling. A group is eligible when
         every resident trajectory meets the draw floor. Empty groups are free.
         """
+        generation, _ = self._refill_group(0, 1, (), None)
+        return generation
+
+    def try_refill_group_with_anchors(
+        self,
+        anchors_per_episode: int,
+        horizon: int,
+        *,
+        anchor_fields: Sequence[str | tuple[str, ...]],
+        generator: torch.Generator | None = None,
+    ) -> tuple[int | None, tuple[TensorDict, ...]]:
+        """Copy anchors from displaced episodes before authorizing their replacement.
+
+        Returns the same generation as :meth:`try_refill_group` and one owned
+        minibatch per displaced episode in release-receipt order. Blocked,
+        coalesced and empty-slot refills return an empty tuple of batches.
+        Valid frames are sampled without replacement up to the episode length,
+        then with replacement to fill the requested count. Copies earn no
+        optimizer credits. A copy failure leaves the publication unauthorized.
+
+        Args:
+            anchors_per_episode: Number of valid anchors to retain per outgoing row.
+            horizon: Action steps per anchor, including masked tail padding.
+            anchor_fields: Observation or provenance keys to copy at each frame.
+            generator: Optional frame sampler on the shared buffer device.
+
+        Returns:
+            The requested generation and its newly displaced episode batches.
+
+        """
+        _validate_group_sample(anchors_per_episode, horizon, anchor_fields)
+        return self._refill_group(
+            anchors_per_episode, horizon, anchor_fields, generator
+        )
+
+    def _copy_retiring_anchors(
+        self,
+        start: int,
+        width: int,
+        count: int,
+        horizon: int,
+        fields: Sequence[str | tuple[str, ...]],
+        generator: torch.Generator | None,
+    ) -> tuple[TensorDict, ...]:
+        buf = self.shared_buffer
+        valid = buf["valid"]
+        continuity = buf.get("continuity_id", None)
+        if continuity is not None:
+            valid = valid & (continuity >= 0)
+        batches = []
+        for slot in range(start, start + width):
+            eligible = valid[slot].nonzero().flatten()
+            n = len(eligible)
+            if not n:
+                raise DataUnavailableError("Displaced episode has no valid anchors")
+            indices = torch.randperm(n, generator=generator, device=eligible.device)[
+                :count
+            ]
+            if n < count:
+                extra = torch.randint(
+                    n, (count - n,), generator=generator, device=eligible.device
+                )
+                indices = torch.cat((indices, extra))
+            frames = eligible[indices]
+            batches.append(
+                _group_anchors(
+                    buf,
+                    valid,
+                    continuity,
+                    torch.full_like(frames, slot),
+                    frames,
+                    horizon,
+                    fields,
+                )
+            )
+        return tuple(batches)
+
+    def _refill_group(
+        self,
+        anchors_per_episode: int,
+        horizon: int,
+        anchor_fields: Sequence[str | tuple[str, ...]],
+        generator: torch.Generator | None,
+    ) -> tuple[int | None, tuple[TensorDict, ...]]:
         counts = self._require_groups()
         width = self._gym_num_envs
         with self._lifecycle_condition, self._progress.values.get_lock():
             self._require_state(OnlineDataEngineState.READY, "try_refill_group")
             requested, completed = self._progress.values[:2]
             if requested > completed:
-                return int(requested)
+                return int(requested), ()
             start = (int(completed) * width) % self.buffer_size
             occupied = completed * width >= self.buffer_size
             old = counts[start : start + width] if occupied else []
             if self._group_batch_active or (old and min(old) < self._group_draw_floor):
-                return None
+                return None, ()
+            retired = ()
+            if occupied and anchors_per_episode:
+                with self._lock_index.get_lock():
+                    retired = self._copy_retiring_anchors(
+                        start,
+                        width,
+                        anchors_per_episode,
+                        horizon,
+                        anchor_fields,
+                        generator,
+                    )
             first = int(completed) * width - self.buffer_size
             self._last_group_release = {
                 "requested_generation": int(completed) + 1,
@@ -2221,7 +2354,7 @@ class OnlineDataEngine:
             counts[start : start + width] = [0] * width
             self._progress.values[0] = completed + 1
             self._fill_signal.set()
-            return int(completed) + 1
+            return int(completed) + 1, retired
 
     def get_group_release(self) -> dict | None:
         """Return an owned copy of the most recent release authorization."""
@@ -2272,19 +2405,7 @@ class OnlineDataEngine:
         Use :meth:`get_group_release` for the committed counts at recycling.
         """
         counts = self._require_groups()
-        if (
-            type(batch_size) is not int
-            or batch_size < 1
-            or type(horizon) is not int
-            or horizon < 1
-            or not anchor_fields
-            or any(
-                (k if isinstance(k, str) else k[0])
-                in {"actions", "action_is_pad", "ods_episode_id"}
-                for k in anchor_fields
-            )
-        ):
-            raise ValueError("Invalid grouped batch dimensions or anchor fields")
+        _validate_group_sample(batch_size, horizon, anchor_fields)
         with (
             self._lifecycle_condition,
             self._progress.values.get_lock(),
@@ -2316,15 +2437,9 @@ class OnlineDataEngine:
                     device=anchors.device,
                 )
             ].unbind(1)
-            indices, mask, _ = _context_indices(
-                valid, continuity, rows, frames, 1, horizon
+            batch = _group_anchors(
+                buf, valid, continuity, rows, frames, horizon, anchor_fields
             )
-            last = frames + mask.sum(1) - 1
-            indices = indices.minimum(last[:, None])
-            batch = buf.select(*anchor_fields)[rows, frames]
-            batch["actions"] = buf["actions"][rows[:, None], indices]
-            batch["action_is_pad"] = ~mask
-            batch["ods_episode_id"] = buf["ods_episode_id"][rows, frames]
             credits = torch.bincount(rows, minlength=self.buffer_size).tolist()
             self._progress.add(6, batch_size)
             self._group_batch_active = True

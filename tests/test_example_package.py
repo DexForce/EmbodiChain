@@ -54,6 +54,7 @@ def test_distribution_preserves_the_ordinary_examples_tree(tmp_path: Path) -> No
         "learning/act/timed_grouped.py",
         "learning/act/paired_grouped.py",
         "learning/act/_grouped_ddp.py",
+        "learning/act/_grouped_replay.py",
         "learning/act/grouped_elapsed_protocol.json",
         "learning/differentiable_ik/learn_grasp_yaw.py",
         "expansion/asset_generalization/configs/pour_water/task.cobotmagic.yaml",

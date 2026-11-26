@@ -58,6 +58,29 @@ release for each seed. It writes checkpoint fingerprints, development results
 and release receipts to `$ACT_ROOT/acceptance.json`. It exits successfully when
 all five policies meet the deadline and each reaches 95/100.
 
+## Single-GPU RAM replay
+
+Set `"retired_history": true` in a copy of the protocol and pass that file to
+both the cold launcher and the auditor. The control can set
+`"record_group_draws": true` to produce the same journal with all-live batches.
+The default protocol and dual-GPU recipes use their existing live batch path.
+
+With a global batch of 32, each successful optimizer step uses up to eight
+distinct retired trajectories and fills the remaining positions from the
+active CPU slots. At an occupied-group release the engine copies 32 valid
+frame anchors per outgoing trajectory with its action targets, continuity
+boundaries and padding mask. The learner keeps the most recent 96 displaced
+trajectories in process RAM. With this protocol's 100-trajectory budget and
+20 active slots, at most 80 displaced trajectories are available.
+
+The per-step journal in `sampling.json` records live IDs, history IDs and
+the step boundary of each refill authorization. The auditor reconstructs
+live credits at each release and reports history draws and mean distinct
+trajectory counts over consecutive 10- and 100-update windows. An optimizer
+failure discards the pending live credits and the journal entry.
+The calibration, development selection, 300-second publication budget and
+independent reserved evaluation use the same protocol for both arms.
+
 ## Compare dual-GPU supply layouts
 
 Both layouts train one ACT policy using two local DDP ranks and a global batch

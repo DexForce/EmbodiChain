@@ -19,6 +19,9 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter, defaultdict
+from itertools import chain
+from statistics import mean
 import hashlib
 import json
 from pathlib import Path
@@ -53,7 +56,82 @@ def _panel(path: Path, base: int, count: int, fingerprint: str) -> dict:
     return panel
 
 
-def _audit_supply(recipe: dict, supply: dict, spec: dict) -> list[int]:
+def _audit_draws(journal: dict, recipe: dict, supply: dict, spec: dict) -> dict:
+    """Recount live credits at each release and check the source of each anchor."""
+    from ._grouped_replay import MAX_EPISODES, MAX_HISTORY_DRAWS
+
+    if recipe["world_size"] != 1 or len(supply["producers"]) != 1:
+        raise ValueError("Replay journal requires a single producer and learner")
+    producer = supply["producers"][0]
+    steps = journal["steps"]
+    boundaries = journal["release_before_step"]
+    if len(steps) != supply["step"] or len(boundaries) != len(producer["releases"]):
+        raise ValueError("Incomplete replay journal")
+    if any(
+        type(i) is not int or not 1 <= i <= len(steps) + 1 for i in boundaries
+    ) or boundaries != sorted(boundaries):
+        raise ValueError("Invalid release step")
+    releases = defaultdict(list)
+    for step, receipt in zip(boundaries, producer["releases"], strict=True):
+        releases[step].append(receipt)
+    live_counts = Counter()
+    history_count = 0
+    retired = 0
+    generation = 1
+    batch_size = spec["batch_size"]
+    panels = []
+    for step, batch in enumerate(chain(steps, [None]), 1):
+        for receipt in releases[step]:
+            ids = receipt["episode_ids"]
+            if [live_counts[i] for i in ids] != receipt["committed_draws"]:
+                raise ValueError("Release credits disagree with live optimizer draws")
+            retired += len(ids)
+            generation = receipt["requested_generation"]
+        if step == len(steps) + 1:
+            break
+        live, old = batch
+        expected = (
+            min(MAX_HISTORY_DRAWS, batch_size - 1, retired)
+            if spec.get("retired_history", False)
+            else 0
+        )
+        if (
+            len(live) + len(old) != batch_size
+            or len(old) != expected
+            or len(set(old)) != expected
+        ):
+            raise ValueError("Unexpected live/history batch composition")
+        published_limit = (
+            min(generation, producer["engine"]["completed_generation"])
+            * producer["width"]
+        )
+        if any(type(i) is not int or not retired <= i < published_limit for i in live):
+            raise ValueError("Live draw outside resident generations")
+        if any(
+            type(i) is not int or not max(0, retired - MAX_EPISODES) <= i < retired
+            for i in old
+        ):
+            raise ValueError("History draw outside retained generations")
+        live_counts.update(live)
+        history_count += len(old)
+        panels.append(set(live + old))
+    coverage = {
+        str(n): mean(
+            len(set.union(*panels[i : i + n])) for i in range(len(panels) - n + 1)
+        )
+        for n in (10, 100)
+        if len(panels) >= n
+    }
+    return dict(
+        live_draws=live_counts.total(),
+        history_draws=history_count,
+        mean_episode_coverage=coverage,
+    )
+
+
+def _audit_supply(
+    recipe: dict, supply: dict, spec: dict, *, history_draws: int = 0
+) -> list[int]:
     """Check delivered draws and each producer's complete authorization chain."""
     layouts = {"per-rank": 2, "shared": 1}
     world_size = recipe["world_size"]
@@ -96,7 +174,8 @@ def _audit_supply(recipe: dict, supply: dict, spec: dict) -> list[int]:
             or width * producer_count != spec["producer_envs"]
             or slots * producer_count != spec["shared_slots"]
             or cap * producer_count != spec["episodes"]
-            or stats["sampled_chunks"] * producer_count != steps * spec["batch_size"]
+            or stats["sampled_chunks"] * producer_count + history_draws
+            != steps * spec["batch_size"]
         ):
             raise ValueError(f"Producer {rank} differs from the supply contract")
         if (
@@ -244,8 +323,18 @@ def _audit(path: Path, spec: dict, seed: int) -> dict:
         or (not chosen and (path / "test.json").exists())
     ):
         raise ValueError("Reported result differs from verified checkpoint")
+    draw_summary = {}
     if current:
-        counts = _audit_supply(recipe, supply, spec)
+        sampling = path / "sampling.json"
+        if (
+            spec.get("retired_history")
+            or spec.get("record_group_draws")
+            or sampling.exists()
+        ):
+            draw_summary = _audit_draws(_read(sampling), recipe, supply, spec)
+        counts = _audit_supply(
+            recipe, supply, spec, history_draws=draw_summary.get("history_draws", 0)
+        )
         engine_stats = [producer["engine"] for producer in supply["producers"]]
         releases = supply["producers"]
     else:
@@ -270,6 +359,7 @@ def _audit(path: Path, spec: dict, seed: int) -> dict:
         raise ValueError("Inconsistent run gate")
     return dict(
         seed=seed,
+        **draw_summary,
         qualified=qualified,
         reserved_successes=score,
         locked_seconds=receipt.get("locked_seconds"),

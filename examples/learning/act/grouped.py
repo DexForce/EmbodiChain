@@ -34,6 +34,7 @@ from ._environment import task_config, task_identity
 
 if TYPE_CHECKING:
     from ._grouped_ddp import Ranks
+    from ._grouped_replay import GroupReplay
 
 __all__ = ["main", "make_engine", "seeded_expert"]
 
@@ -180,6 +181,7 @@ def _source_hashes() -> dict[str, str]:
     paths = (
         example,
         example.with_name("_grouped_ddp.py"),
+        example.with_name("_grouped_replay.py"),
         example.with_name("_study_panel.py"),
         package / "extensions/models/policy/act/runtime.py",
         package / "lab/gym/envs/base_env.py",
@@ -214,6 +216,7 @@ class _Producer:
         self.cap = cap
         self.releases: list[dict] = []
         self.requested = 1
+        self.sampler: GroupReplay | None = None
         self.floor_waits = 0
         self.floor_wait_seconds = 0.0
         self.floor_blocked_since: float | None = None
@@ -222,7 +225,11 @@ class _Producer:
         if self.requested * self.width >= self.cap:
             self.engine.check_health()
             return
-        request = self.engine.try_refill_group()
+        request = (
+            self.sampler.refill()
+            if self.sampler is not None
+            else self.engine.try_refill_group()
+        )
         now = time.monotonic()
         if request is None:
             self.floor_waits += 1
@@ -234,6 +241,9 @@ class _Producer:
             self.floor_blocked_since = None
         if request > self.requested:
             self.releases.append(self.engine.get_group_release())
+            if self.sampler is not None:
+                self.sampler.release_before_step.append(len(self.sampler.steps) + 1)
+                self.sampler.release_monotonic.append(now)
             self.requested = request
 
     def stats(self) -> dict:
@@ -547,6 +557,13 @@ def _train(
             raise ValueError(
                 "Grouped ACT requires whole producer groups and equal positive rank batches"
             )
+        record_draws = spec.get("retired_history", False) or spec.get(
+            "record_group_draws", False
+        )
+        if record_draws and ranks.size != 1:
+            raise ValueError(
+                "The ACT replay and per-step draw journal require a single GPU"
+            )
         producer_seed, train, dev, test, schema = _qualification(spec, seed, qual)
         device_info = {
             "rank": ranks.rank,
@@ -639,7 +656,20 @@ def _train(
             else None
         )
         draw = None
-        if producer is not None:
+        if record_draws:
+            from ._grouped_replay import GroupReplay
+
+            producer.sampler = GroupReplay(
+                producer.engine,
+                seed,
+                spec.get("retired_history", False),
+                local_batch,
+                policy.config.chunk_size,
+                fields,
+                rng,
+            )
+            draw = producer.sampler.draw
+        elif producer is not None:
 
             def draw():
                 return producer.engine.group_batch(
@@ -803,6 +833,8 @@ def _train(
             if producer is not None:
                 producer.engine.stop()
                 evidence = producer.evidence()
+                if producer.sampler is not None:
+                    _write(out / "sampling.json", producer.sampler.evidence())
         summaries = ranks.gather(
             {
                 "rank": ranks.rank,

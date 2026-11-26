@@ -2881,3 +2881,50 @@ def test_group_worker_first_readiness_and_rotation(
     )
     assert windows == [(0, 2), (2, 4), (0, 2)]
     assert observed == [[0, 1, -1, -1], [0, 1, 2, 3], [4, 5, 2, 3]]
+
+
+def test_group_retirement_copies_owned_anchors_with_live_padding() -> None:
+    engine = _make_fake_engine(buffer_size=4, max_episode_steps=4)
+    engine.run_id = 1
+    engine._progress = engine_module._ProducerProgress(engine._mp_ctx)
+    engine._progress.values[:2] = [2, 2]
+    engine._gym_num_envs = 2
+    engine._group_draw_floor = 192
+    engine._group_counts = [192, 191, 0, 0]
+    engine._last_group_release = None
+    engine._group_batch_active = False
+    buf = engine.shared_buffer
+    buf["ods_episode_id"] = torch.arange(4)[:, None].expand(4, 4).clone()
+    buf["ods_frame_index"] = torch.arange(4)[None, :].expand(4, 4).clone()
+    buf["valid"][0, 1:] = False
+    buf["valid"][1, 3] = False
+    buf["continuity_id"][1, 2] = 1
+    fields = ["obs", "ods_frame_index"]
+    copy = engine.try_refill_group_with_anchors
+    assert copy(4, 3, anchor_fields=fields) == (None, ())
+    engine._group_counts[1] += 1
+    with pytest.raises(KeyError):
+        copy(4, 3, anchor_fields=["missing_field"])
+    assert engine.get_group_release() is None
+    gen, episodes = copy(4, 3, anchor_fields=fields)
+    assert gen == 3 and len(episodes) == 2
+    assert engine.get_group_release()["committed_draws"] == [192, 192]
+    assert copy(4, 3, anchor_fields=fields) == (3, ())
+    assert engine.get_stats()["sampled_chunks"] == 0
+    for slot, batch in enumerate(episodes):
+        assert batch["ods_episode_id"].tolist() == [slot] * 4
+        frames = batch["ods_frame_index"].tolist()
+        assert set(frames) == ({0} if slot == 0 else {0, 1, 2})
+        for k, frame in enumerate(frames):
+            end = 1 if slot == 1 and frame == 0 else frame
+            selected = [min(frame + i, end) for i in range(3)]
+            torch.testing.assert_close(
+                batch["actions"][k], buf["actions"][slot, selected]
+            )
+            torch.testing.assert_close(batch["obs"][k], buf["obs"][slot, frame])
+            assert batch["action_is_pad"][k].tolist() == [
+                frame + i > end for i in range(3)
+            ]
+    saved = episodes[1]["obs"].clone()
+    buf["obs"][1].fill_(123.0)
+    torch.testing.assert_close(episodes[1]["obs"], saved)
