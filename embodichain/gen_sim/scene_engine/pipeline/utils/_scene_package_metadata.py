@@ -115,8 +115,10 @@ def _glb_dependencies(glb: Path, export: Path) -> set[Path]:
     return dependencies
 
 
-def _asset_files(obj: SceneObject, export: Path) -> tuple[Path, Path, set[Path]]:
-    """Resolve the runtime file, editable proxy and their local dependencies."""
+def _asset_files(
+    obj: SceneObject, export: Path, entry: dict[str, Any]
+) -> tuple[Path, Path, set[Path]]:
+    """Resolve the runtime file, editable proxy and all their local dependencies."""
     assert obj.simready_glb_path is not None  # SceneExportImporter requires a GLB.
     proxy = _local_file(export, Path(obj.simready_glb_path))
     dependencies = _glb_dependencies(proxy, export)
@@ -125,33 +127,50 @@ def _asset_files(obj: SceneObject, export: Path) -> tuple[Path, Path, set[Path]]
 
     from pxr import UsdUtils
 
-    runtime = _local_file(export, Path(obj.articulated_usdc_path))
-    layers, assets, unresolved = UsdUtils.ComputeAllDependencies(str(runtime))
-    if unresolved:
-        raise ValueError(
-            f"Editable articulation has unresolved dependencies: {unresolved}"
+    # The imported object can hold the original USD for editing. The config
+    # identifies which USD the simulator actually loads.
+    runtime = _local_file(export, export / entry["fpath"])
+    usd_files = {runtime}
+    if "source_usdc_fpath" in entry:
+        usd_files.add(_local_file(export, export / entry["source_usdc_fpath"]))
+    dependencies.update(usd_files)
+    for path in sorted(usd_files):
+        layers, assets, unresolved = UsdUtils.ComputeAllDependencies(str(path))
+        if unresolved:
+            raise ValueError(
+                f"Editable articulation has unresolved dependencies: {unresolved} (in {path})"
+            )
+        dependencies.update(
+            _local_file(export, Path(dependency))
+            for dependency in [*(layer.realPath for layer in layers), *assets]
         )
-    dependencies.update(
-        _local_file(export, Path(dependency))
-        for dependency in [*(layer.realPath for layer in layers), *assets]
-    )
     dependencies.discard(runtime)
     return runtime, proxy, dependencies
+
+
+def _entries_by_uid(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        entry["uid"]: entry
+        for section in ("background", "rigid_object", "articulation")
+        for entry in config.get(section, [])
+    }
 
 
 def _stage_scene_export(source: Path, destination: Path) -> None:
     """Stage the v1 config, graph and referenced assets for the SDK inventory."""
     from pxr import Sdf, UsdUtils
 
-    scene, _ = SceneExportImporter(
-        output_root=source.parent, scene_export_root=source
-    ).read_scene_and_graph()
+    importer = SceneExportImporter(output_root=source.parent, scene_export_root=source)
+    scene, _ = importer.read_scene_and_graph()
+    entries = _entries_by_uid(
+        json.loads(importer.scene_config_path.read_text(encoding="utf-8"))
+    )
     files = {
         _local_file(source, source / "scene_config.json"),
         _local_file(source, source / "scene_graph.json"),
     }
     for obj in scene.objects:
-        runtime, proxy, dependencies = _asset_files(obj, source)
+        runtime, proxy, dependencies = _asset_files(obj, source, entries[obj.id])
         files.update((runtime, proxy, *dependencies))
     for path in sorted(files):
         target = destination / path.relative_to(source)
@@ -263,11 +282,7 @@ def _scene_package_metadata(root: Path, asset: dict[str, Any]) -> dict[str, Any]
         or not scene_id.strip()
     ):
         raise ValueError("Scene package requires a v1 scene export with a scene_id")
-    entries = {
-        entry["uid"]: entry
-        for section in ("background", "rigid_object", "articulation")
-        for entry in config.get(section, [])
-    }
+    entries = _entries_by_uid(config)
     representations = {r["relative_path"]: r for r in asset["representations"]}
     frame = representations["asset.usda"]["convention"]
     if (
@@ -310,7 +325,8 @@ def _scene_package_metadata(root: Path, asset: dict[str, Any]) -> dict[str, Any]
     relations = []
     origin = {"origin": "unknown", "evidence_refs": []}
     for obj in scene.objects:
-        runtime, proxy, dependencies = _asset_files(obj, export)
+        entry = entries[obj.id]
+        runtime, proxy, dependencies = _asset_files(obj, export, entry)
         runtime_rep, proxy_rep = representation(runtime), representation(proxy)
         runtime_convention = (
             _GLTF_CONVENTION if runtime == proxy else _usd_convention(runtime)
@@ -336,7 +352,7 @@ def _scene_package_metadata(root: Path, asset: dict[str, Any]) -> dict[str, Any]
                     "revision_id": revision,
                     "artifact_digest": artifact_digest,
                 },
-                "transform": _transform(entries[obj.id], runtime_convention["up_axis"]),
+                "transform": _transform(entry, runtime_convention["up_axis"]),
                 "usage": "unspecified",
                 "collision_binding_ids": [],
                 "interaction_region_ids": [],

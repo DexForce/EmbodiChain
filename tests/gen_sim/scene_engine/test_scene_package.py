@@ -27,7 +27,9 @@ from dexsim.kit.simready import open_asset_package, validate_asset_revision
 from jsonschema import Draft202012Validator, FormatChecker
 from pxr import Sdf, Usd, UsdGeom, UsdPhysics
 import pytest
+import trimesh
 
+from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraph, SceneGraphNode
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_package import (
     _export_scene_package,
 )
@@ -115,6 +117,102 @@ def test_scene_package_schema_bytes_and_relocated_joint_targets(tmp_path: Path) 
         stream.write("\n# changed bytes\n")
     with pytest.raises(ValueError, match="inventory or digest mismatch"):
         validate_asset_revision(relocated)
+
+
+def test_editable_scene_package_retains_both_articulation_models(
+    tmp_path: Path,
+) -> None:
+    export = tmp_path / "scene_export"
+    table_glb = Path("mesh_assets/table/table.glb")
+    laptop_glb = Path("mesh_assets/laptop/laptop.glb")
+    for path in (table_glb, laptop_glb):
+        (export / path).parent.mkdir(parents=True)
+        trimesh.creation.box().export(export / path)
+
+    articulation_dir = Path("articulated_assets/laptop")
+    (export / articulation_dir).mkdir(parents=True)
+    runtime = articulation_dir / "laptop.usdc"
+    original = articulation_dir / "laptop.source.usdc"
+    runtime_dependency = articulation_dir / "runtime_geometry.usda"
+    original_dependency = articulation_dir / "source_geometry.usda"
+    for model, dependency, axis in (
+        (runtime, runtime_dependency, "Z"),
+        (original, original_dependency, "Y"),
+    ):
+        geometry = Usd.Stage.CreateNew(str(export / dependency))
+        UsdGeom.Cube.Define(geometry, "/Body")
+        geometry.GetRootLayer().Save()
+        model_stage = Usd.Stage.CreateNew(str(export / model))
+        UsdGeom.SetStageUpAxis(model_stage, axis)
+        model_stage.GetRootLayer().subLayerPaths = [dependency.name]
+        model_stage.GetRootLayer().Save()
+
+    config = {
+        "format": "embodichain.scene-export/v1",
+        "scene_id": "laptop_scene",
+        "background": [
+            {
+                "uid": "table",
+                "is_articulated": False,
+                "shape": {"shape_type": "Mesh", "fpath": table_glb.as_posix()},
+            }
+        ],
+        "articulation": [
+            {
+                "uid": "laptop",
+                "is_articulated": True,
+                "fpath": runtime.as_posix(),
+                "source_usdc_fpath": original.as_posix(),
+                "proxy_glb_fpath": laptop_glb.as_posix(),
+                "init_pos": [0, 0, 0],
+                "init_rot": [0, 0, 0],
+                "body_scale": [1.0, 1.0, 1.0],
+                "proxy_body_scale": [1.0, 1.0, 1.0],
+            }
+        ],
+    }
+    (export / "scene_config.json").write_text(json.dumps(config), encoding="utf-8")
+    graph = SceneGraph(
+        nodes=[SceneGraphNode("table", None), SceneGraphNode("laptop", "table", "on")],
+        relations=[],
+    )
+    (export / "scene_graph.json").write_text(
+        json.dumps(graph.to_dict()), encoding="utf-8"
+    )
+
+    scene_usd = tmp_path / "scene.usda"
+    stage = Usd.Stage.CreateNew(str(scene_usd))
+    world = UsdGeom.Xform.Define(stage, "/World").GetPrim()
+    world.SetCustomDataByKey("embodichain:scene_schema", USD_SCENE_SCHEMA)
+    stage.SetDefaultPrim(world)
+    UsdGeom.SetStageUpAxis(stage, "Z")
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdPhysics.SetStageKilogramsPerUnit(stage, 1.0)
+    for uid, kind in (("table", "rigid"), ("laptop", "articulation")):
+        prim = UsdGeom.Cube.Define(stage, f"/World/{uid}").GetPrim()
+        prim.SetCustomDataByKey("embodichain:uid", uid)
+        prim.SetCustomDataByKey("embodichain:kind", kind)
+    stage.GetRootLayer().Save()
+
+    destination = tmp_path / "scene_package.zip"
+    _export_scene_package(
+        scene_usd_path=scene_usd, destination=destination, scene_export_root=export
+    )
+
+    with open_asset_package(destination, workspace=tmp_path) as root:
+        for path in (runtime, original, runtime_dependency, original_dependency):
+            assert (root / "scene_export" / path).read_bytes() == (
+                export / path
+            ).read_bytes()
+        asset = json.loads((root / "asset.json").read_text(encoding="utf-8"))
+        laptop = asset["extensions"]["embodichain:scene_export"]["instances"]["laptop"]
+        representations = {
+            rep["representation_id"]: rep for rep in asset["representations"]
+        }
+        assert (
+            representations[laptop["runtime_representation_id"]]["relative_path"]
+            == f"scene_export/{runtime.as_posix()}"
+        )
 
 
 def test_scene_package_removes_stale_delivery_on_dependency_failure(
