@@ -267,13 +267,41 @@ def visual_difference_checks(receipts, variants) -> list[dict]:
     return checks
 
 
+def _verify_camera_calibration(baseline, recorded, cameras) -> None:
+    import numpy as np
+
+    for uid, adjustment in cameras.items():
+        if uid not in baseline or uid not in recorded:
+            raise ValueError(f"Missing measured calibration for camera {uid}")
+        before, after = baseline[uid], recorded[uid]
+        sides = ("_left", "_right") if "intrinsics_left" in before else ("",)
+        for side in sides:
+            intrinsic_key, pose_key = f"intrinsics{side}", f"arena_pose{side}"
+            intrinsics = np.array(before[intrinsic_key], dtype=float)
+            intrinsics[[0, 1], [0, 1]] *= adjustment.get("focal_scale", 1.0)
+            pose = np.array(before[pose_key], dtype=float)
+            pose[:3, 3] += adjustment.get("position_delta", (0.0, 0.0, 0.0))
+            for key, expected in ((intrinsic_key, intrinsics), (pose_key, pose)):
+                np.testing.assert_allclose(
+                    after[key],
+                    expected,
+                    rtol=1e-6,
+                    atol=1e-6,
+                    equal_nan=False,
+                    err_msg=f"Camera {uid} {key} differs from the requested profile",
+                )
+
+
 def audit(root: Path) -> dict:
     from embodichain.lab.expansion import (
         ArtifactEpisodeSink,
         load_expansion_episode,
         inspect_expansion_job,
     )
-    from embodichain.lab.expansion.visual import inspect_observation_variants
+    from embodichain.lab.expansion.visual import (
+        inspect_observation_variants,
+        load_visual_profiles,
+    )
     from embodichain.data_pipeline.datasets.inspection import validate_dataset
     import numpy as np
 
@@ -281,6 +309,7 @@ def audit(root: Path) -> dict:
     checks = []
     batch_recipes = {}
     baseline_parameters = {}
+    baseline_calibration = {}
     portable = []
     for case in cases:
         directory = root / "jobs" / case["id"]
@@ -307,6 +336,11 @@ def audit(root: Path) -> dict:
             visual_checks = (
                 visual_difference_checks(receipts, variants) if variants else []
             )
+            capture_profile = read(directory / "job.json")["config"].get(
+                "visual_profile"
+            )
+            baseline_key = (case["source"], case["backend"])
+            case_calibration = None
             recipes = []
             parameters = []
             expansion = []
@@ -330,6 +364,38 @@ def audit(root: Path) -> dict:
                     np.diff(episode.timestamps.numpy()) > 0
                 ), "nonmonotonic clock"
                 assert episode.validation.accepted, "receipt for rejected evidence"
+                if capture_profile:
+                    assert episode.metadata["visual_profile"] == capture_profile
+                    media = read(Path(episode.metadata["media_manifest"]))
+                    assert media["frame_count"] == len(episode.timestamps)
+                    profile_ref = episode.metadata["expansion_source_artifacts"][
+                        "visual_profile_file"
+                    ]
+                    profiles = load_visual_profiles(profile_ref["path"])
+                    cameras = profiles[capture_profile].get("cameras", {})
+                    if cameras:
+                        baseline = baseline_calibration.get(baseline_key)
+                        if baseline is None:
+                            raise ValueError(
+                                "No measured baseline for camera calibration"
+                            )
+                        _verify_camera_calibration(
+                            baseline, media["calibration"], cameras
+                        )
+                    visual_checks.append(
+                        {
+                            "episode_id": episode.episode_id,
+                            "profile": capture_profile,
+                            "frame_count": media["frame_count"],
+                            "verified_cameras": sorted(cameras),
+                        }
+                    )
+                elif (
+                    "baseline" in case["tags"]
+                    and case_calibration is None
+                    and (manifest := episode.metadata.get("media_manifest"))
+                ):
+                    case_calibration = read(Path(manifest))["calibration"]
                 parameters.append(dict(episode.metadata.get("physics_parameters", {})))
                 records = episode.metadata.get("expansion", ())
                 expansion.append(records)
@@ -553,6 +619,8 @@ def audit(root: Path) -> dict:
                         "evidence": portable_result,
                     }
                 )
+            if case_calibration is not None and summary["complete"]:
+                baseline_calibration[baseline_key] = case_calibration
             checks.append(
                 {
                     "id": case["id"],

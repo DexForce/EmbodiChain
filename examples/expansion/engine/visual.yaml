@@ -1,6 +1,6 @@
 profiles:
   blue:
-    materials:
+    materials: &blue_material
       cube:
         base_color:
         - 0.15
@@ -8,10 +8,19 @@ profiles:
         - 0.95
         roughness: 0.42
   camera:
-    cameras:
+    cameras: &shifted_camera
       cam_overhead:
         focal_scale: 1.02
         position_delta:
         - 0.02
         - 0.0
         - 0.0
+  light:
+    lights: &cool_light
+      main_light:
+        color: [0.35, 0.58, 0.85]
+        intensity: 7.0
+  combined:
+    materials: *blue_material
+    cameras: *shifted_camera
+    lights: *cool_light

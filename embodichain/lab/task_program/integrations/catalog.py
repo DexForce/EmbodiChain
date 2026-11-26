@@ -27,7 +27,7 @@ import math
 from _thread import LockType
 from threading import Lock
 from types import MappingProxyType
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar, TYPE_CHECKING, cast
 import torch
 
 from embodichain.lab.evaluation import CompiledEvaluation
@@ -264,8 +264,11 @@ def _canonical_value(value: object) -> object:
 
         if type(value) is SimulationSceneBinding and not value.cables:
             metadata.pop("cables")
-        if type(value) is MoveJointsOptions and not value.preserve_samples:
-            metadata.pop("preserve_samples")
+        if type(value) is MoveJointsOptions:
+            if not value.preserve_samples:
+                metadata.pop("preserve_samples")
+            if not value.preserve_velocity_samples:
+                metadata.pop("preserve_velocity_samples")
         if (
             type(value) is MoveEndEffectorOptions
             and not value.preserve_cartesian_samples
@@ -1735,6 +1738,10 @@ class SimulationTaskProgramRegistration:
     """Rule references whose instantaneous predicates gate final acceptance."""
     evaluation_process_refs: tuple[str, ...] = field(default=(), kw_only=True)
     """Deployment-owned instantaneous process constraints checked per control step."""
+    episode_measurement: _EpisodeMeasurementPlan | None = field(
+        default=None, kw_only=True
+    )
+    """Optional physical measurement declaration identified by evaluation channel bindings."""
     catalog: TaskProgramIntegrationCatalog = field(init=False)
     _parallel_safety_validator_history: list[ParallelCommandSafetyValidator] = field(
         init=False,
@@ -2342,6 +2349,9 @@ class SimulationTaskProgramRegistration:
                 "Live robot skill profile differs from the registered declaration."
             )
 
+
+if TYPE_CHECKING:
+    from ._configured_measurements import _EpisodeMeasurementPlan
 
 __all__ = [
     "TaskProgramIntegrationCatalog",

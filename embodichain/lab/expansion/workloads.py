@@ -298,7 +298,7 @@ class WorkloadProgramExecutor:
         self.warming: dict[int, dict[str, Any]] = {}
         self.live: dict[int, dict[str, Any]] = {}
         self.completed: set[str] = set()
-        self.receipts: set[tuple[str, str, str]] = set()
+        self._receipt_ids: tuple[set[str], set[str], set[str]] = (set(), set(), set())
         self.control_steps = self.active_control_steps = self.refills = 0
         self.hold = self.env.robot.get_qpos(target=True).clone()
         self.observation = None
@@ -524,12 +524,14 @@ class WorkloadProgramExecutor:
                 )
             identity = receipt.episode_id, receipt.candidate_id, receipt.commit_id
             if any(
-                identity[i] == known[i] for known in self.receipts for i in range(3)
+                value in seen
+                for value, seen in zip(identity, self._receipt_ids, strict=True)
             ):
                 raise ValueError(
                     "a repeated episode/candidate/commit cannot earn quota twice"
                 )
-            self.receipts.add(identity)
+            for value, seen in zip(identity, self._receipt_ids, strict=True):
+                seen.add(value)
             self.counts[assignment.workload_id]["committed"] += 1
         cursor.close()
         del self.live[row]
@@ -589,6 +591,13 @@ class WorkloadProgramExecutor:
         )
 
         env, torch = self.env, self.torch
+        active_columns = torch.as_tensor(
+            env.active_joint_ids, dtype=torch.long, device=self.hold.device
+        )
+        active_width, full_width = len(active_columns), env.robot.dof
+        position_velocity = (
+            env.expert_action_spec.joint_command_mode == "position_velocity"
+        )
         previous_auto = getattr(env, "_demo_no_auto_reset", False)
         had_mask = hasattr(env, "_demo_active_mask")
         previous_mask = getattr(env, "_demo_active_mask", None)
@@ -624,10 +633,8 @@ class WorkloadProgramExecutor:
                         if any(self._eligible(name) for name in self.workloads):
                             continue
                         break
-                    qpos, qvel = self.hold.clone(), torch.zeros_like(self.hold)
-                    velocity = (
-                        env.expert_action_spec.joint_command_mode == "position_velocity"
-                    )
+                    qpos = self.hold.clone()
+                    qvel = torch.zeros_like(self.hold) if position_velocity else None
                     for row in tuple(commands):
                         cursor = self.live[row]["cursor"]
                         if self.live[row].pop("replace_command", False):
@@ -658,10 +665,12 @@ class WorkloadProgramExecutor:
                             raise ValueError(
                                 "workload rows require explicit position controller commands"
                             )
-                        if velocity and "qvel" not in fields:
+                        if qvel is not None and "qvel" not in fields:
                             raise ValueError(
                                 "position-velocity evidence requires explicit velocity commands"
                             )
+                        if "qvel" in fields and qvel is None:
+                            qvel = torch.zeros_like(self.hold)
                         for name, target in (("qpos", qpos), ("qvel", qvel)):
                             if name not in fields:
                                 continue
@@ -670,19 +679,16 @@ class WorkloadProgramExecutor:
                                 raise ValueError(
                                     "row commands must retain one physical batch row"
                                 )
-                            columns = (
-                                list(env.active_joint_ids)
-                                if data.shape[1] == len(env.active_joint_ids)
-                                else list(range(env.robot.dof))
-                            )
-                            if data.shape[1] != len(columns):
+                            if data.shape[1] == active_width:
+                                target[row, active_columns] = data[0]
+                            elif data.shape[1] == full_width:
+                                target[row].copy_(data[0])
+                            else:
                                 raise ValueError("row command joint layout differs")
-                            target[row, columns] = data[0]
-                            velocity |= name == "qvel"
                     if not commands and not self.warming:
                         continue
                     payload = {"qpos": qpos}
-                    if velocity:
+                    if qvel is not None:
                         payload["qvel"] = qvel
                     action = ControllerAction(
                         TensorDict(payload, batch_size=[env.num_envs]),

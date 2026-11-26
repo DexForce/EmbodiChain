@@ -42,7 +42,13 @@ from .move_held_object import (
     MoveHeldObject,
     MoveHeldObjectOptions,
 )
-from .move_joints import JointPositionGoal, MoveJoints, MoveJointsOptions
+from .move_joints import (
+    JointPositionGoal,
+    MoveJoints,
+    MoveJointsOptions,
+    ObservedJointTrajectory,
+    ObservedJointTrajectorySource,
+)
 from .open_door import OpenDoor, OpenDoorGoal, OpenDoorOptions
 from .pick_up import (
     ContactPickUpGoal,
@@ -124,6 +130,8 @@ __all__ = [
     "MoveHeldObjectOptions",
     "MoveJoints",
     "MoveJointsOptions",
+    "ObservedJointTrajectory",
+    "ObservedJointTrajectorySource",
     "OpenDoor",
     "OpenDoorGoal",
     "OpenDoorOptions",

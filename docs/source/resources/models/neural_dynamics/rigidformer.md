@@ -301,7 +301,7 @@ Matusik. **RigidFormer: Learning Rigid Dynamics using Transformers.** 2026.
 
 ### Implementation and further reading
 
-- [RigidFormer API](../../api_reference/model_rigidformer.rst): model/config,
+- [RigidFormer API](../../../api_reference/model_rigidformer.rst): model/config,
   checkpoint, data source, objective and trainer interfaces.
 - [Example README](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/rigidformer/README.md):
   independent author comparison and exact recovery commands.
@@ -309,7 +309,7 @@ Matusik. **RigidFormer: Learning Rigid Dynamics using Transformers.** 2026.
   frozen sources, numerical checks, evaluation and retraining requirements.
 - [Public model package](https://github.com/DexForce/EmbodiChain/tree/main/embodichain/extensions/models/dynamics/rigidformer):
   model/config, checkpoint, source, objective and trainer APIs.
-- [All neural dynamics models](../neural_dynamics.md).
+- [All neural dynamics models](index.md).
 
 ### Resource provenance
 

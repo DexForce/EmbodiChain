@@ -39,6 +39,8 @@ import math
 from typing import TYPE_CHECKING, TypeVar
 
 from ._kinematic_replay import _KinematicReplayFactory, _decode_kinematic_replay
+from ._trajectory_phase import _TrajectoryPhaseFactory, _decode_trajectory_phase
+from ._configured_measurements import _EpisodeMeasurementPlan, _decode_measurement_plan
 from ._configured_controls import (
     _PressLowererFactory,
     _TwistLowererFactory,
@@ -1095,6 +1097,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
             {
                 "hand_interp_steps",
                 "preserve_samples",
+                "preserve_velocity_samples",
                 "preserve_cartesian_samples",
                 "hold_steps",
                 "release",
@@ -1381,10 +1384,13 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
             value,
             path=path,
             required=frozenset({"kind"}),
-            optional=frozenset({"preserve_samples"}),
+            optional=frozenset({"preserve_samples", "preserve_velocity_samples"}),
         )
         return MoveJointsOptions(
-            preserve_samples=_boolean(config.get("preserve_samples", False), path=path)
+            preserve_samples=_boolean(config.get("preserve_samples", False), path=path),
+            preserve_velocity_samples=_boolean(
+                config.get("preserve_velocity_samples", False), path=path
+            ),
         )
     if kind == "move_end_effector":
         config = _mapping(
@@ -2731,8 +2737,11 @@ def _decode_registered_lowerer(
     | _PushObjectLowererFactory
     | _RelativePlaceLowererFactory
     | _KinematicReplayFactory
+    | _TrajectoryPhaseFactory
 ):
     """Decode one allowlisted registered semantic lowerer factory."""
+    if isinstance(value, Mapping) and value.get("kind") == "joint_trajectory_phase":
+        return _decode_trajectory_phase(value, path=path)
     if isinstance(value, Mapping) and value.get("kind") == "kinematic_joint_replay":
         return _decode_kinematic_replay(value, path=path)
     if isinstance(value, Mapping) and value.get("kind") in {
@@ -3238,7 +3247,8 @@ class _DecodedRuntimeServices:
         | _PourLowererFactory
         | _PushObjectLowererFactory
         | _RelativePlaceLowererFactory
-        | _KinematicReplayFactory,
+        | _KinematicReplayFactory
+        | _TrajectoryPhaseFactory,
         ...,
     ] = ()
     control_part_evidence: _JointPositionConstraintEvidenceProviderFactory | None = None
@@ -3671,6 +3681,7 @@ def _decode_evaluation(
     robot_links: Mapping[str, str] | None = None,
     registry: PredicateRegistry | None = None,
     cable_material: object | None = None,
+    measurement_plan: _EpisodeMeasurementPlan | None = None,
     transport_targets: Mapping[str, _MoveHeldObjectLowererFactory] | None = None,
 ) -> tuple[dict[str, CompiledEvaluation], tuple[str, ...], tuple[str, ...]]:
     if value is None:
@@ -3679,7 +3690,7 @@ def _decode_evaluation(
         value,
         path="evaluation",
         required=frozenset({"graph"}),
-        optional=frozenset({"final_acceptance", "process_constraints"}),
+        optional=frozenset({"final_acceptance", "process_constraints", "measurements"}),
     )
     graph = EvaluationSpec.from_dict(component["graph"])
     channels = {
@@ -3688,12 +3699,12 @@ def _decode_evaluation(
         for quantity in ("pose", "frame", "segment_start_frame", "lin_vel", "ang_vel")
     }
     if cable_material is not None:
-        from .simulation.cable import _METRICS
-
-        for quantity in _METRICS:
+        for quantity in cable_material.metrics:
             channels[f"cables/{cable_material.entity_id}/{quantity}"] = (
                 f"cables/{cable_material.simulation_uid}/{quantity}"
             )
+    if measurement_plan is not None:
+        channels.update(measurement_plan.channels())
     articulations = {
         binding.entity_id: binding.simulation_uid for binding in scene.articulations
     }
@@ -3887,6 +3898,14 @@ def _decode_configured_task_program_integration(
         )
     )
     for lowerer_factory in services.registered_semantic_lowerers:
+        if isinstance(lowerer_factory, _TrajectoryPhaseFactory) and (
+            lowerer_factory.feedback is not None
+            and lowerer_factory.feedback.articulation_uid
+            not in {binding.simulation_uid for binding in scene_binding.articulations}
+        ):
+            raise ValueError(
+                "Trajectory feedback requires a declared scene articulation."
+            )
         call_catalog = call_catalog.with_descriptor(
             SemanticCallDescriptor(
                 call_id=lowerer_factory.call_id,
@@ -3894,6 +3913,11 @@ def _decode_configured_task_program_integration(
                 target_descriptor=lowerer_factory.target_descriptor,
             )
         )
+    measurement_plan = (
+        _decode_measurement_plan(evaluation["measurements"], scene_binding)
+        if isinstance(evaluation, Mapping) and "measurements" in evaluation
+        else None
+    )
     conditions, final_refs, process_refs = _decode_evaluation(
         evaluation,
         scene_binding,
@@ -3901,6 +3925,7 @@ def _decode_configured_task_program_integration(
         robot_links=evaluation_robot_links,
         registry=evaluation_registry,
         cable_material=services.cable_material,
+        measurement_plan=measurement_plan,
         transport_targets={
             factory.target_id: factory
             for factory in services.registered_semantic_lowerers
@@ -3912,6 +3937,7 @@ def _decode_configured_task_program_integration(
         evaluation_conditions=conditions,
         evaluation_final_refs=final_refs,
         evaluation_process_refs=process_refs,
+        episode_measurement=measurement_plan,
         robot_profile_binding=robot_profile_binding,
         call_catalog=call_catalog,
         handover_pose_providers=services.handover_pose_providers,

@@ -1,0 +1,8 @@
+task_key: franka_rj45_cycle
+title: Franka RJ45 Cable Cycle
+summary: Pick up an RJ45 plug, seat it in its socket, press the latch to withdraw it and return it to the floor.
+tags: [cable, deformable, manipulation, task_program_expert]
+default_deployment: franka
+deployments:
+  franka:
+    config: task.franka.yaml

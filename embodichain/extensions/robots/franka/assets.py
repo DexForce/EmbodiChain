@@ -33,17 +33,26 @@ from embodichain.data.constants import (
     EMBODICHAIN_DEFAULT_DATA_ROOT,
 )
 
-__all__ = ["Franka", "FrankaPandaArm"]
+__all__ = ["Franka", "FrankaPandaArm", "FrankaRopePads"]
 
 robot_assets = "robot_assets"
+_FR3_WITH_HAND_SHA256 = (
+    "a4a2d3265dadd69c4c7d8ed9238ae44494c217db6f66f586fcc40e8754ce2315"
+)
+
+
+def _franka_v4_archive() -> o3d.data.DataDescriptor:
+    return o3d.data.DataDescriptor(
+        os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "FrankaV4.zip"),
+        "0c613d884798e8b084604381641cc8e1",
+    )
 
 
 def _materialize_hand_component(extract_dir: str, data_root: str) -> None:
     """Split the authored hand subtree without modifying its source URDF."""
     source = Path(extract_dir) / "Panda/PandaWithHand.urdf"
     content = source.read_bytes()
-    expected = "a4a2d3265dadd69c4c7d8ed9238ae44494c217db6f66f586fcc40e8754ce2315"
-    if hashlib.sha256(content).hexdigest() != expected:
+    if hashlib.sha256(content).hexdigest() != _FR3_WITH_HAND_SHA256:
         raise ValueError("pinned FR3/hand source changed in the asset cache")
     original = ElementTree.fromstring(content)
     links = ("fr3_hand", "fr3_hand_tcp", "fr3_leftfinger", "fr3_rightfinger")
@@ -59,7 +68,7 @@ def _materialize_hand_component(extract_dir: str, data_root: str) -> None:
     report = json.dumps(
         dict(
             schema="fr3-hand-component/v1",
-            source_sha256=expected,
+            source_sha256=_FR3_WITH_HAND_SHA256,
             derived_sha256=hashlib.sha256(output).hexdigest(),
             links=links,
             joints=joints,
@@ -67,15 +76,22 @@ def _materialize_hand_component(extract_dir: str, data_root: str) -> None:
         sort_keys=True,
         indent=2,
     ).encode()
+    _write_derivatives(
+        source,
+        data_root,
+        {"Fr3HandV1.urdf": output, "Fr3HandV1.derivation.json": report},
+    )
+
+
+def _write_derivatives(source: Path, data_root: str, files: dict[str, bytes]) -> None:
     with _dataset_download_lock(data_root, "Franka"):
-        for name, value in (
-            ("Fr3HandV1.urdf", output),
-            ("Fr3HandV1.derivation.json", report),
-        ):
+        for name, value in files.items():
             target = source.parent / name
             if target.exists():
                 if target.read_bytes() != value:
-                    raise ValueError("derived FR3 hand differs from its pinned source")
+                    raise ValueError(
+                        f"derived FR3 asset {name} differs from its pinned source"
+                    )
                 continue
             temporary = None
             try:
@@ -114,15 +130,48 @@ class Franka(EmbodiChainDataset):
     """
 
     def __init__(self, data_root: str = None):
-        data_descriptor = o3d.data.DataDescriptor(
-            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "FrankaV4.zip"),
-            "0c613d884798e8b084604381641cc8e1",
-        )
+        data_descriptor = _franka_v4_archive()
         prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
         _materialize_hand_component(self.extract_dir, path)
+
+
+class FrankaRopePads(EmbodiChainDataset):
+    """FR3 with flat rope-grasping pads, derived on demand in the shared V4 cache."""
+
+    def __init__(self, data_root: str | None = None) -> None:
+        from .rope_pads import apply_rope_pads
+
+        root = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+        super().__init__("Franka", _franka_v4_archive(), root)
+        source = Path(self.extract_dir) / "Panda/PandaWithHand.urdf"
+        content = source.read_bytes()
+        if hashlib.sha256(content).hexdigest() != _FR3_WITH_HAND_SHA256:
+            raise ValueError("pinned FR3/hand source changed in the asset cache")
+        padded = ElementTree.fromstring(content)
+        apply_rope_pads(padded)
+        model = ElementTree.tostring(padded, encoding="utf-8", xml_declaration=True)
+        report = json.dumps(
+            {
+                "schema": "fr3-rope-pads/v1",
+                "source": source.name,
+                "source_sha256": _FR3_WITH_HAND_SHA256,
+                "derived_sha256": hashlib.sha256(model).hexdigest(),
+                "modified_links": ["fr3_leftfinger", "fr3_rightfinger"],
+            },
+            sort_keys=True,
+            indent=2,
+        ).encode()
+        _write_derivatives(
+            source,
+            root,
+            {
+                "Fr3RopePadsV1.urdf": model,
+                "Fr3RopePadsV1.derivation.json": report,
+            },
+        )
 
 
 class FrankaPandaArm(EmbodiChainDataset):

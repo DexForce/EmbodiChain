@@ -34,6 +34,7 @@ from embodichain.data_pipeline.recording.media import (
 from ._task_program_config import load_task_program_expansion, load_expansion_viewer
 
 if TYPE_CHECKING:
+    from embodichain.lab.gym.envs import EmbodiedEnvCfg
     from embodichain.lab.sim.scene.feasibility import JointSceneCandidate
     from .program import ProgramBatchResult
 
@@ -45,7 +46,7 @@ __all__ = [
 ]
 
 
-def _load_deployment(path: Path) -> None:
+def _load_deployment(path: Path) -> EmbodiedEnvCfg:
     from embodichain.lab.gym.utils.registration import (
         discover_task_packages,
         execute_init_hooks,
@@ -54,7 +55,7 @@ def _load_deployment(path: Path) -> None:
 
     discover_task_packages()
     execute_init_hooks()
-    config_to_cfg(load_mapping(path), source_path=path)
+    return config_to_cfg(load_mapping(path), source_path=path)
 
 
 from ._pose_sampling import _BoundedPoseSource, _AdaptivePoseSource
@@ -543,15 +544,37 @@ def run_task_program_expansion(
         Owned operator quotas, confirmed readback, native dataset paths and preview
         status. Incomplete groups remain explicit and never earn success credit.
     """
+    path = Path(configuration)
+    return _collect_task_program_expansion(
+        Path(deployment),
+        load_task_program_expansion(path),
+        Path(output_dir),
+        configuration_sha256=file_digest(path),
+        seed=seed,
+        operators=operators,
+        source_artifacts=source_artifacts,
+        runtime_versions=runtime_versions,
+        viewer=viewer,
+        preview_output=preview_output,
+    )
+
+
+def _collect_task_program_expansion(
+    deployment: Path,
+    options: dict[str, Any],
+    output: Path,
+    *,
+    configuration_sha256: str,
+    seed: int,
+    operators: Sequence[str] | None = None,
+    source_artifacts: Mapping[str, object] | None = None,
+    runtime_versions: Mapping[str, object] | None = None,
+    viewer: Mapping[str, object] | None = None,
+    preview_output: str | Path | None = None,
+) -> Mapping[str, object]:
     from importlib import import_module, metadata
     import torch
 
-    deployment, configuration, output = (
-        Path(deployment),
-        Path(configuration),
-        Path(output_dir),
-    )
-    options = load_task_program_expansion(configuration)
     view = load_expansion_viewer(None if viewer is None else dict(viewer))
     selected = list(
         options["trajectory"]["operators"] if operators is None else operators
@@ -606,7 +629,7 @@ def run_task_program_expansion(
     result = {
         "complete": all(value.get("complete", False) for value in groups.values()),
         "operators": groups,
-        "configuration_sha256": file_digest(configuration),
+        "configuration_sha256": configuration_sha256,
         "viewer": view,
     }
     atomic_json(output / "expansion.json", result)

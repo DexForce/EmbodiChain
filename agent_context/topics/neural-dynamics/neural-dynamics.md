@@ -166,14 +166,14 @@ Frozen source revisions, budgets and gates live in the
 Historical evidence remains bound to its recorded source, data and runtime;
 relocating code does not rerun it. NeRD validation uses the runnable showcase
 and its reference/acceptance workflows; `tests/learning/sl/` covers the common
-training contracts. The [feature overview](../../../docs/source/features/neural_dynamics.md)
+training contracts. The [model family overview](../../../docs/source/resources/models/neural_dynamics/index.md)
 owns model selection and the shared training entry point; the
-[NeRD guide](../../../docs/source/features/neural_dynamics/nerd.md) and
-[RigidFormer guide](../../../docs/source/features/neural_dynamics/rigidformer.md)
+[NeRD guide](../../../docs/source/resources/models/neural_dynamics/nerd.md) and
+[RigidFormer guide](../../../docs/source/resources/models/neural_dynamics/rigidformer.md)
 own their model principles and user workflows; the
-[RWM guide](../../../docs/source/features/neural_dynamics/rwm.md) covers prediction
+[RWM guide](../../../docs/source/resources/models/neural_dynamics/rwm.md) covers prediction
 and replay under the linked robot-world-model contract. The
-[WorldParticle guide](../../../docs/source/features/neural_dynamics/worldparticle.md)
+[WorldParticle guide](../../../docs/source/resources/models/neural_dynamics/worldparticle.md)
 owns frozen inference, operator provisioning and native demo navigation. The
 [model API](../../../docs/source/api_reference/model_catalogs.rst) owns exported
 definitions. Transition error, accumulated rollout error and paper-scale

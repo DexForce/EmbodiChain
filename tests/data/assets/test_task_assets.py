@@ -100,3 +100,43 @@ def test_task_assets_are_shared_by_config_and_cli_registry(
     )
     download.cmd_download(Namespace(all=False, category=None, name=name.lower()))
     assert calls == [(name.lower(), cls)]
+
+
+@pytest.mark.parametrize(
+    "source", [_HUB, _HUB.replace("huggingface.co", "hf-mirror.com")]
+)
+def test_rj45_fixture_uses_pinned_archive_and_versioned_cache(
+    source: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from embodichain.extensions.robots.franka import rj45_assets
+
+    class DownloadIntercepted(Exception):
+        """Stop before the Open3D base performs network I/O."""
+
+    def initialize(
+        self: EmbodiChainDataset,
+        prefix: str,
+        descriptor: o3d.data.DataDescriptor,
+        root: str,
+    ) -> None:
+        assert prefix == "Rj45FixtureV1"
+        assert root == str(tmp_path)
+        archive = (
+            "/datasets/DexForceAI/embodichain_data/resolve/"
+            "dcb448da52ea3df5df5a249e9ff977acafead0e4/task_assets/Rj45FixtureV1.zip"
+        )
+        assert descriptor.urls == (
+            ["https://huggingface.co" + archive]
+            if source == _HUB
+            else ["https://hf-mirror.com" + archive, "https://huggingface.co" + archive]
+        )
+        assert descriptor.md5 == "1d22a1fbad7a0ae10fd2c8da0cf0f8fd"
+        raise DownloadIntercepted
+
+    monkeypatch.setattr(task_assets, "EMBODICHAIN_DOWNLOAD_PREFIX", source)
+    monkeypatch.setattr(EmbodiChainDataset, "__init__", initialize)
+    cls = get_data_class("Rj45Fixture")
+    assert cls is task_assets.Rj45Fixture is rj45_assets.Rj45Fixture
+    assert dict(download.get_registry()["task"])["Rj45Fixture"] is cls
+    with pytest.raises(DownloadIntercepted):
+        cls(data_root=str(tmp_path))

@@ -123,3 +123,43 @@ def test_duplicate_start_recovers_the_terminal_receipt(
     assert session.invoke.call_args.kwargs["files"]["policy"] == str(
         tmp_path / "checkpoint"
     )
+
+
+def test_concurrent_starts_share_one_committed_receipt(
+    catalog: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    pytest.importorskip("mcp.server.mcpserver")
+    from embodichain.mcp import _policy_runs
+
+    (tmp_path / "checkpoint").touch()
+    session = MagicMock()
+    session.__enter__.return_value = session
+    session.info = {"config": {"backend": "newton", "dt": 0.005}}
+    session.invoke.return_value = {"passed": True}
+    connect = MagicMock(return_value=session)
+    monkeypatch.setattr(_policy_runs.Session, "connect", connect)
+
+    # Both services must reach initial receipt publication before either writes.
+    # With an early directory claim the second service fails to read the receipt.
+    barrier = Barrier(2)
+    write = _policy_runs._write_receipt
+
+    def write_receipt(path: Path, receipt: dict) -> None:
+        if receipt["status"] == "queued":
+            barrier.wait(timeout=5)
+        write(path, receipt)
+
+    monkeypatch.setattr(_policy_runs, "_write_receipt", write_receipt)
+    output = tmp_path / "runs"
+    first = _policy_runs._PolicyRuns(catalog, output, None, _SESSION)
+    second = _policy_runs._PolicyRuns(catalog, output, None, _SESSION)
+    plan = first.prepare(_RP1)["plan_id"]
+    with first.worker, second.worker, ThreadPoolExecutor(max_workers=2) as clients:
+        a = clients.submit(first.start, plan, _SESSION)
+        b = clients.submit(second.start, plan, _SESSION)
+        assert a.result(timeout=10)["run_id"] == b.result(timeout=10)["run_id"]
+    assert asyncio.run(second.get(a.result()["run_id"], 0))["status"] == "succeeded"
+    connect.assert_called_once()

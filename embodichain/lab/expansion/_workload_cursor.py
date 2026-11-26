@@ -68,73 +68,79 @@ class _WorkloadCursor(_Cursor):
     def next(self) -> ControllerAction | None:
         before_numpy, before_python = np.random.get_state(), random.getstate()
         with torch.random.fork_rng(devices=self.devices):
-            torch.set_rng_state(self.cpu_rng)
-            if self.devices:
-                torch.cuda.set_rng_state(self.gpu_rng, self.devices[0])
-            np.random.set_state(self.numpy_rng)
-            random.setstate(self.python_rng)
             try:
-                if (
-                    self.budget is None
-                    or self.rejection is not None
-                    or self.emergency is not None
-                ):
-                    action = super().next()
-                else:
-                    from embodichain.lab.sim.motion._budget import (
-                        _planning_budget_scope,
-                    )
-                    from embodichain.lab.sim.scene.feasibility import (
-                        FeasibilityBudgetExhausted,
-                    )
-
-                    try:
-                        with _planning_budget_scope(self.budget):
-                            action = super().next()
-                    except FeasibilityBudgetExhausted as error:
-                        if self.segment is None:
-                            # No command or segment exists yet: rejection has no
-                            # safe-stop action to acknowledge and earns no step.
-                            self.finished = True
-                            self.accepted = False
-                            self.reason = str(error)
-                            action = None
-                        else:
-                            self.abort(str(error))
-                            action = super().next()
-                if action is not None:
-                    if (
-                        self.rejection is not None or self.emergency is not None
-                    ) and self.last_command is not None:
-                        # The safe-stop value is new; its active invocation and
-                        # phase still belong to the command being interrupted.
-                        # Phase-aware physical validators must see that context.
-                        action = ControllerAction(
-                            action.value,
-                            metadata={
-                                **self.last_command.metadata,
-                                **{
-                                    key: value
-                                    for key, value in action.metadata.items()
-                                    if value is not None
-                                    or key not in self.last_command.metadata
-                                },
-                            },
-                        )
-                    self.last_command = action
-                if self.finished and self.rejection is not None:
-                    self.accepted, self.reason = False, self.rejection
-                return action
+                return self._next_in_planning_batch()
             finally:
-                self.cpu_rng = torch.get_rng_state()
-                if self.devices:
-                    self.gpu_rng = torch.cuda.get_rng_state(self.devices[0])
-                self.numpy_rng, self.python_rng = (
-                    np.random.get_state(),
-                    random.getstate(),
-                )
                 np.random.set_state(before_numpy)
                 random.setstate(before_python)
+
+    def _next_in_planning_batch(self) -> ControllerAction | None:
+        """Advance this row while the caller owns restoration of the caller RNG."""
+        torch.set_rng_state(self.cpu_rng)
+        if self.devices:
+            torch.cuda.set_rng_state(self.gpu_rng, self.devices[0])
+        np.random.set_state(self.numpy_rng)
+        random.setstate(self.python_rng)
+        try:
+            if (
+                self.budget is None
+                or self.rejection is not None
+                or self.emergency is not None
+            ):
+                action = super().next()
+            else:
+                from embodichain.lab.sim.motion._budget import (
+                    _planning_budget_scope,
+                )
+                from embodichain.lab.sim.scene.feasibility import (
+                    FeasibilityBudgetExhausted,
+                )
+
+                try:
+                    with _planning_budget_scope(self.budget):
+                        action = super().next()
+                except FeasibilityBudgetExhausted as error:
+                    if self.segment is None:
+                        # No command or segment exists yet: rejection has no
+                        # safe-stop action to acknowledge and earns no step.
+                        self.finished = True
+                        self.accepted = False
+                        self.reason = str(error)
+                        action = None
+                    else:
+                        self.abort(str(error))
+                        action = super().next()
+            if action is not None:
+                if (
+                    self.rejection is not None or self.emergency is not None
+                ) and self.last_command is not None:
+                    # The safe-stop value is new; its active invocation and
+                    # phase still belong to the command being interrupted.
+                    # Phase-aware physical validators must see that context.
+                    action = ControllerAction(
+                        action.value,
+                        metadata={
+                            **self.last_command.metadata,
+                            **{
+                                key: value
+                                for key, value in action.metadata.items()
+                                if value is not None
+                                or key not in self.last_command.metadata
+                            },
+                        },
+                    )
+                self.last_command = action
+            if self.finished and self.rejection is not None:
+                self.accepted, self.reason = False, self.rejection
+            return action
+        finally:
+            self.cpu_rng = torch.get_rng_state()
+            if self.devices:
+                self.gpu_rng = torch.cuda.get_rng_state(self.devices[0])
+            self.numpy_rng, self.python_rng = (
+                np.random.get_state(),
+                random.getstate(),
+            )
 
     def abort(self, reason: str) -> None:
         if self.finished or self.rejection is not None or self.emergency is not None:

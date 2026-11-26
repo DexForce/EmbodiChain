@@ -694,6 +694,94 @@ def test_newton_translated_halfspace_preserves_small_shape_support():
     checker.close()
 
 
+@pytest.mark.parametrize("blocked", [False, True])
+def test_batched_connection_matches_scalar_held_object_checks(blocked):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    import torch
+    from embodichain.lab.sim.objects.robot import Robot
+    from embodichain.lab.sim.scene.feasibility import (
+        FeasibilityCheck,
+        HeldObject,
+        RobotFeasibilityBackend,
+    )
+
+    def translate(qpos):
+        matrices = torch.eye(4).repeat(len(qpos), 1, 1)
+        matrices[:, 0, 3] = qpos[:, 0]
+        return matrices
+
+    offset = np.eye(4)
+    offset[0, 3] = 0.25
+    phase = TaskPhase("carry", held_objects=(HeldObject("payload", "arm", offset),))
+    cfg = SceneRobotFeasibilityCfg(
+        joint_resolution_rad=1 / 32, max_motion_samples=33, max_rrt_nodes=1
+    )
+    start, goal = np.array([0.0]), np.array([1.0])
+    # The penultimate interpolation sample fails, leaving too little budget for
+    # a two-sample detour. Both endpoints are clear.
+    first_collision = 0.25 + 31 / 32
+    expected = 0.25 + np.linspace(0.0, 1.0, 33)
+    if blocked:
+        expected = expected[:-1]
+    expected = np.concatenate(([0.25, 0.25, 1.25], expected))
+
+    def connect(robot):
+        check_x, fk_sizes = [], []
+
+        def forward_kinematics(qpos):
+            fk_sizes.append(len(qpos))
+            return {
+                "root": SimpleNamespace(
+                    get_matrix=lambda: translate(torch.zeros_like(qpos))
+                )
+            }
+
+        def check(frames, *, allowed_contacts, moving_objects):
+            assert tuple(moving_objects) == ("payload",)
+            x = frames["payload"][0, 3]
+            check_x.append(x)
+            if blocked and x == first_collision:
+                return (
+                    FeasibilityCheck("collision", "failed", "payload hits obstacle"),
+                    0.0,
+                )
+            return FeasibilityCheck("collision", "passed"), 1.0
+
+        robot.uid, robot.device, robot.joint_names = "r", "cpu", ["slide"]
+        robot.pk_chain = SimpleNamespace(
+            forward_kinematics=forward_kinematics,
+            get_joint_parameter_names=lambda: ["slide"],
+        )
+        robot.mimic_ids = robot.mimic_parents = robot.mimic_multipliers = (
+            robot.mimic_offsets
+        ) = ()
+        robot.get_qpos = lambda: torch.zeros(1, 1)
+        robot.get_qpos_limits = lambda: torch.tensor([[[-1.0, 2.0]]])
+        robot.get_local_pose = lambda *, to_matrix: torch.eye(4)[None]
+        robot.get_joint_ids = lambda *, name: [0]
+        robot.get_solver = lambda *, name: SimpleNamespace(
+            dof=1, root_link_name="root", get_fk=translate
+        )
+        backend = RobotFeasibilityBackend(robot, SimpleNamespace(check=check), cfg, {})
+        path = backend.connect(
+            start, goal, phase, {}, FeasibilityBudget(cfg, clock=lambda: 0.0)
+        )
+        np.testing.assert_array_equal(check_x, expected)
+        return path, backend.last_collision, fk_sizes
+
+    scalar, scalar_check, scalar_sizes = connect(SimpleNamespace())
+    batched, batch_check, batch_sizes = connect(Mock(spec=Robot))
+    assert max(scalar_sizes) == 1 < max(batch_sizes)
+    assert batch_check == scalar_check
+    if blocked:
+        assert batched is scalar is None
+        assert batch_check.reason == "payload hits obstacle"
+    else:
+        np.testing.assert_array_equal(batched, scalar)
+        np.testing.assert_array_equal(batched[:, 0], np.linspace(0.0, 1.0, 33))
+
+
 def test_robot_rrt_routes_around_blockage_and_exhausts_a_complete_barrier():
     from types import SimpleNamespace
     import torch

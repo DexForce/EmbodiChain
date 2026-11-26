@@ -215,6 +215,7 @@ class _AdaptivePoseSource(_BoundedPoseSource):
         self._outcomes = {}
         self._stats = {}
         self._events = []
+        self._next_checkpoint_events = 1
         self._raw_ordinal = 0
         self._root_pose = env.robot.get_local_pose(to_matrix=True)[0].detach().clone()
         self._joint_seed = (
@@ -564,7 +565,7 @@ class _AdaptivePoseSource(_BoundedPoseSource):
                 "screened": valid,
             }
         )
-        self.checkpoint()
+        self._checkpoint_progress()
         return candidate
 
     def validate(self, ordinal):
@@ -622,7 +623,7 @@ class _AdaptivePoseSource(_BoundedPoseSource):
             result["measured_tcp_indices"] = [pick_end, len(states) - 1]
         self._outcomes[ordinal] = result
         self._events.append(result)
-        self.checkpoint()
+        self._checkpoint_progress()
 
     def state_dict(self):
         from dataclasses import asdict
@@ -722,6 +723,7 @@ class _AdaptivePoseSource(_BoundedPoseSource):
         }
         self._outcomes = {int(k): v for k, v in data["outcomes"].items()}
         self._events = data["events"]
+        self._next_checkpoint_events = max(1, 2 * len(self._events))
         self._stats = {
             tuple(tuple(c) for c in cells): tuple(counts)
             for cells, counts in data["statistics"]
@@ -733,6 +735,14 @@ class _AdaptivePoseSource(_BoundedPoseSource):
         self.budget._blocked = (
             None if data["blocked"] is None else tuple(data["blocked"])
         )
+
+    def _checkpoint_progress(self) -> None:
+        # Whole-history diagnostic checkpoints grow geometrically. Explicit
+        # checkpoints at workload completion still write the complete history.
+        count = len(self._events)
+        if count >= self._next_checkpoint_events:
+            self.checkpoint()
+            self._next_checkpoint_events = 2 * count
 
     def checkpoint(self):
         if self.output is None:

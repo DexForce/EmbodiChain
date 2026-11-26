@@ -1,5 +1,5 @@
-Supported Tasks
-===============
+Tasks
+=====
 
 Task environments combine a simulation scene, robot, and task logic behind a
 Gymnasium-compatible interface.
@@ -11,6 +11,9 @@ configuration paths, and ``list-task`` output use the same hierarchy.
 
 Find a Task
 -----------
+
+Browse :doc:`deployments` for the deployment names, environment IDs, and
+capabilities declared in this documentation version.
 
 Use the catalog commands to inspect the installed task set:
 
@@ -48,8 +51,8 @@ Task hierarchy
      - ``classic_control/``
      - Compact control and learning environments.
    * - :doc:`Locomotion <locomotion/index>`
-     - ``locomotion/velocity/``
-     - Velocity-tracking tasks for legged robots.
+     - ``locomotion/velocity/`` and ``locomotion/tracking/``
+     - Velocity tracking and reference motion tracking for legged robots.
    * - :doc:`Manipulation <manipulation/index>`
      - ``manipulation/`` and ``manipulation/tableware/``
      - RL, Task Program, and environment-only manipulation tasks.
@@ -80,6 +83,7 @@ describes package layout and registration.
    :maxdepth: 2
    :hidden:
 
+   deployments
    classic_control
    locomotion/index
    manipulation/index
