@@ -71,12 +71,14 @@ class SceneExportImporter:
 
     def import_scene(self) -> Scene:
         """Validate the scene export, write ``scene.json``, and return a ``Scene``."""
+        self._restore_packaged_export()
         scene = self._load_scene()
         self._write_scene_json(scene)
         return scene
 
     def import_scene_and_graph(self) -> tuple[Scene, SceneGraph]:
         """Import a scene and graph after validating the complete edit input."""
+        self._restore_packaged_export()
         scene, scene_graph = self.read_scene_and_graph()
         self._write_scene_json(scene)
         return scene, scene_graph
@@ -95,6 +97,12 @@ class SceneExportImporter:
         }:
             raise ValueError("Scene graph nodes must match imported scene object ids.")
         return scene, scene_graph
+
+    def _restore_packaged_export(self) -> None:
+        if self.scene_export_root == self.output_root / "scene_export":
+            from .scene_package import _restore_scene_export
+
+            _restore_scene_export(self.output_root)
 
     def _load_scene(self) -> Scene:
         """Validate the exported scene files and restore the ``Scene`` data."""
