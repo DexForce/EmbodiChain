@@ -28,17 +28,38 @@ __all__ = ["create_server", "serve"]
 
 
 def create_server(
-    session: Session, *, writer_key_file: Path | None = None
+    session: Session,
+    *,
+    writer_key_file: Path | None = None,
+    handoff_key_file: Path | None = None,
+    motion_output: Path | None = None,
 ) -> MCPServer:
     """Register the available domain tools using a caller-owned session."""
     server = MCPServer("EmbodiChain")
     register_robot_tools(server, session)
-    if writer_key_file is not None:
+    if handoff_key_file is not None:
+        from .tools.handoff import register_handoff_tools
+
+        register_handoff_tools(server, session, handoff_key_file)
+    if handoff_key_file is not None and motion_output is not None:
+        from ._motion import register_motion_tools
+
+        register_motion_tools(
+            server,
+            session.session_id,
+            session,
+            handoff_key_file.read_bytes(),
+            motion_output.resolve(),
+            include_robot=False,
+            include_policy=True,
+        )
+    elif writer_key_file is not None or handoff_key_file is not None:
         from embodichain.lab.sim.dexsim_session.writer import WriterClient
         from .tools.control import register_control_tools
 
-        writer = WriterClient(session, writer_key_file)
-        writer.call("status", {})
+        writer = WriterClient(session, writer_key_file or handoff_key_file)
+        if writer_key_file is not None:
+            writer.call("status", {})
         register_control_tools(server, writer)
     return server
 
@@ -48,6 +69,8 @@ def serve(
     *,
     directory: str | None = None,
     writer_key_file: Path | None = None,
+    handoff_key_file: Path | None = None,
+    motion_output: Path | None = None,
     run_id: str | None = None,
     turn: int | None = None,
 ) -> None:
@@ -58,4 +81,9 @@ def serve(
             raise ValueError("Supply both the Run ID and a positive turn number")
         labels.update(run_id=run_id, turn=turn)
     with Session.connect(session_id, directory=directory, client=labels) as session:
-        create_server(session, writer_key_file=writer_key_file).run(transport="stdio")
+        create_server(
+            session,
+            writer_key_file=writer_key_file,
+            handoff_key_file=handoff_key_file,
+            motion_output=motion_output,
+        ).run(transport="stdio")

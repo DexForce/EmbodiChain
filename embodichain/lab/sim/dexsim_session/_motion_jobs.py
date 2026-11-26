@@ -75,6 +75,7 @@ class MotionJobs:
         self.output.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.progress = progress
         self.active: _ActiveJob | None = None
+        self.binding_id: str | None = None
 
     def _folder(self, run_id: str) -> Path:
         if not RUN_ID.fullmatch(run_id):
@@ -107,6 +108,8 @@ class MotionJobs:
         run_id = f"ecmotion_{digest}"
         folder = self._folder(run_id)
         intent = {"kind": kind, "request": request}
+        if self.binding_id is not None:
+            intent["binding_id"] = self.binding_id
         if folder.exists():
             recorded = json.loads((folder / "intent.json").read_text(encoding="utf-8"))
             if recorded != intent:

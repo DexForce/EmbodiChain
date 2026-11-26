@@ -26,7 +26,7 @@ from typing import Any, TYPE_CHECKING
 import torch
 
 from .attachment import AttachedSimulationManager
-from .robot_state import read_robot_state
+from .robot_state import _require_joint_solver, read_robot_state
 
 if TYPE_CHECKING:
     from dexsim.runtime import SessionContext
@@ -66,12 +66,9 @@ class WorldControl:
             )
         if context.scene.backend == "newton":
             diagnostics = context.scene.get_solver_diagnostics() or {}
-            if diagnostics.get("solver_type") != "mujoco_warp" or not math.isclose(
-                physics_dt, diagnostics.get("dt", 0), rel_tol=1e-6
-            ):
-                raise ValueError(
-                    "Control requires a matching Newton MuJoCo-Warp timestep"
-                )
+            _require_joint_solver(diagnostics)
+            if not math.isclose(physics_dt, diagnostics.get("dt", 0), rel_tol=1e-6):
+                raise ValueError("Control requires a matching Newton physics timestep")
         self.manager = manager
         self.context = context
         self.physics_dt = physics_dt

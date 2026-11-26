@@ -35,6 +35,21 @@ if TYPE_CHECKING:
 __all__ = ["read_robot_state", "run"]
 
 
+def _require_joint_solver(diagnostics: dict) -> None:
+    """Use the live solver capability shared by DexSim joint state and control."""
+    solver = diagnostics.get("solver_type")
+    if solver == "mujoco_warp":
+        return
+    if (
+        solver == "dexuni"
+        and (diagnostics.get("features") or {}).get("mujoco_solve_enabled") is True
+    ):
+        return
+    raise ValueError(
+        "Joint state requires MuJoCo-Warp or DexUni with MuJoCo joint solving enabled"
+    )
+
+
 def _select_dofs(
     layout: Sequence[JointDofLayout], selectors: Sequence[str]
 ) -> tuple[list[str], list[int], list[str]]:
@@ -83,11 +98,8 @@ def read_robot_state(
     if scene is None:
         raise ValueError("The attached World has no finalized scene")
     handle = scene.get_articulation(object_ref)
-    if (
-        scene.backend == "newton"
-        and (scene.get_solver_diagnostics() or {}).get("solver_type") != "mujoco_warp"
-    ):
-        raise ValueError("Reading Newton joint state requires the mujoco_warp solver")
+    if scene.backend == "newton":
+        _require_joint_solver(scene.get_solver_diagnostics() or {})
     parts = robot_cfg.control_parts or {}
     if control_part not in parts:
         raise ValueError(

@@ -77,8 +77,21 @@ def _server(
     session_id: str, session: Session | None, key: bytes, output: Path
 ) -> MCPServer:
     server = MCPServer("EmbodiChain motion")
+    return register_motion_tools(server, session_id, session, key, output)
+
+
+def register_motion_tools(
+    server: MCPServer,
+    session_id: str,
+    session: Session | None,
+    key: bytes,
+    output: Path,
+    *,
+    include_robot: bool = True,
+    include_policy: bool = False,
+) -> MCPServer:
     readonly = ToolAnnotations(readOnlyHint=True, destructiveHint=False)
-    if session is not None:
+    if session is not None and include_robot:
         register_robot_tools(server, session)
 
     def invoke(operation: str, **arguments: Any) -> dict[str, Any]:
@@ -163,6 +176,13 @@ def _server(
     def embodichain_prepare_program(program_id: str) -> dict[str, Any]:
         """Resolve an operator-registered Task Program in the current World."""
         return invoke("prepare_program", program_id=program_id)
+
+    if include_policy:
+
+        @server.tool()
+        def embodichain_start_policy(command_id: str) -> dict[str, Any]:
+            """Start the trained policy selected by the current scene binding."""
+            return invoke("start_policy", command_id=command_id)
 
     @server.tool()
     def embodichain_start_run(plan_id: str, command_id: str) -> dict[str, Any]:

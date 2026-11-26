@@ -36,7 +36,7 @@ from embodichain.lab.sim.cfg.source import _asset_file_path
 from embodichain.lab.sim.objects.rigid_object import RigidObject
 from embodichain.lab.sim.objects.robot import Robot
 from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
-from .robot_state import _select_dofs
+from .robot_state import _require_joint_solver, _select_dofs
 
 if TYPE_CHECKING:
     from dexsim.runtime import SessionContext
@@ -228,12 +228,8 @@ class AttachedSimulationManager:
             or not context.world.is_physics_manually_update()
         ):
             raise ValueError("Attachment requires a supported manually stepped World")
-        if (
-            scene.backend == "newton"
-            and (scene.get_solver_diagnostics() or {}).get("solver_type")
-            != "mujoco_warp"
-        ):
-            raise ValueError("Attachment requires the Newton MuJoCo-Warp backend")
+        if scene.backend == "newton":
+            _require_joint_solver(scene.get_solver_diagnostics() or {})
         self.topology_revision = scene.topology_revision
         self.validate()
         configs = [*robots, *rigid_objects]

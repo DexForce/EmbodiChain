@@ -1,0 +1,16 @@
+{
+  "rp1": {
+    "lead_clearance_m": 0.06,
+    "files": {
+      "policy": "assets/rp1/model/rp1_sparse5.onnx",
+      "robot_xml": "assets/rp1/cache/upstream/data/rp1_28dof_mjlab/rp1_28dof.xml",
+      "reference_mjcf": "scene-assets/reference/step_up.xml"
+    }
+  },
+  "anymal-c": {
+    "files": {
+      "resource_root": "assets/anymal/upstream",
+      "policy": "assets/anymal/upstream/anybotics_anymal_c/rl_policies/mjw_anymal.pt"
+    }
+  }
+}
