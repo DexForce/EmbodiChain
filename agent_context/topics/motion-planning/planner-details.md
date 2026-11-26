@@ -86,7 +86,8 @@ Both it and `max_acceleration` accept a scalar or a vector in `active_joint_ids`
 order. The default acceleration budget remains 15.0; CPU timing planners retain
 their 0.5 default. Its YAML and backend caches include resolved speed and
 acceleration vectors; changing either a request or robot limits closes and
-rebuilds the affected backend. Neural policy rollout retains its configured timing. The
+rebuilds the affected backend. Neural planning applies generic scalar limits to
+explicitly retimed requests. The
 `ik_interp` path resolves robot speed caps and generic motion limits in the
 facade independently of the selected planner backend.
 
@@ -217,10 +218,27 @@ heterogeneous limits. Validate reports, geometry and padding together in
 
 ### Neural policy adapter
 
-`neural_planner.py` consumes a standalone NMG ONNX export with normalization in
-the graph. Validate complete observation-layout metadata/fingerprint before
-rollout; model dimensions and waypoint capacity belong to the export contract.
-Inspect the `policy-deploy` package extra for runtime dependencies.
+`embodichain.extensions.models.policy.nmg.NeuralMotionGenerator` returns raw
+actions from NMG model artifacts. The ORT backend loads `.onnx`, verifies an
+explicit SHA256 before loading, and uses the `policy-deploy` extra. The
+PyTorch backend loads a trusted `.pt2`
+archive with `from_checkpoint()`, verifies its digest and preserves input
+autograd through the upstream graph with frozen actor weights. The two backends
+share the model observation layout. `NeuralPlanner` uses ORT, reads the
+joint count and constraint capacity from the ONNX metadata, and verifies
+the observation layout and fingerprint before rollout. Explicit dimension
+fields only assert compatibility with the export. The planner loads model
+extensions when it initializes a policy.
+The NMG benchmark adapter caches the exported dimensions before case selection
+using the same execution providers and CUDA options as rollout. It uses the
+capacity to classify oversized cases and checks retiming against the exported
+joint count. The timed construction loads the execution backend through
+`MotionGenerator`. Retimed Atomic Skill benchmark requests receive the
+suite's native limits through the adapter's planning-options hook.
+The CUDA ORT path binds Torch observation and action buffers on the same
+device. The host ORT interface checks that each input row has one action row.
+Canonicalized XYZW observations use the first significant X/Y/Z component
+around a half-turn to keep float32 FK roundoff from flipping their sign.
 
 With `batch_control_parts=True`, `MotionGenerator.generate_multi_part()` can
 route independent named-arm requests to `NeuralPlanner.plan_multi_part()`.
@@ -252,13 +270,28 @@ Grouping a request does not imply a packed backend. Atomic benchmark
 record groups actually planned, so an enabled flag alone does not prove batching
 ran when a prior stage failed.
 
-`NeuralPlannerCfg.dt` is bookkeeping, not solved timing: the rollout integrates
-a joint delta per step, so a saturated step implies `action_scale / dt` rad/s
-and overshoots a typical arm's velocity limit several times over. Setting
-`constraints` swaps that nominal timing for a TOPPRA parameterization through
-the shared entry point below; it resamples the path, so positions and poses
-change with the timing, and it cannot reduce the path's own jerk. Default
-remains `None`, which preserves the nominal-timing behavior.
+Direct `NeuralPlanner.plan_multi_part(..., synchronize_waypoints=True)` pairs
+equally many targets for two disjoint arms with the same rollout budget.
+Each environment advances after both TCP or joint constraints are met. A
+reached arm holds while its partner moves, with one `2 * B` actor call per
+rollout step. The position limits apply per environment. TOPPRA times the
+concatenated joint path under each arm's effective limits. Both results carry
+the same `dt`, `waypoint_indices` and success mask.
+The planner validates the two targets at each common output sample. Failed
+rows hold their start, and the per-arm `policy_waypoint_indices` and rollout
+prefixes retain the original arrival and waiting history. This mode supplies
+paired timing for fixed-base, independent joint chains. Collision validation
+and constraints on a shared payload belong to the caller's task plan.
+
+Raw rollouts integrate one joint delta per policy step on the nominal
+`NeuralPlannerCfg.dt`. A `constraints` mapping on `NeuralPlanOptions` or
+`NeuralPlannerCfg` selects TOPPRA timing. Each control part intersects its
+request with configured limits, generic motion budgets, and the effective
+robot speed caps in joint order. A stationary joint can have a zero
+acceleration bound. Tensor constraints are detached and copied when options
+or configuration are constructed. The solve resamples the path and recomputes
+poses. With both mappings omitted, the planner returns the nominal rollout
+even when an Atomic Skill supplies a default acceleration budget.
 
 `PlanResult.policy_rollout_positions` and `policy_rollout_lengths` retain the
 original policy states and per-row valid prefixes before retiming. Sample zero
@@ -271,8 +304,7 @@ Runtime/training frame differences must be expressed through explicit policy
 frame and TCP transforms. A shared single-arm policy can serve both arms of a
 fixed-base assembly through `policy_frame_from_world_by_control_part`; every
 requested arm must have an entry. The selected transform applies to targets,
-rollout FK, and retimed arrival checks. Atomic task orchestration coordinates
-the arms; reusing the policy does not create a jointly trained dual-arm policy.
+rollout FK, and retimed arrival checks. Each ONNX observation describes one arm.
 Acceptance uses the caller's runtime TCP origin even when the actor observes
 an offset policy TCP. Undo the right-hand tool transform when measuring
 position error; orientation error can move the two origins differently.

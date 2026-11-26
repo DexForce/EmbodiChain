@@ -45,6 +45,11 @@ Offline projection, external trajectory transforms, replay recovery and
 invocation revisions are rejected for this path. Its phases share one timeout
 and failure scope; `SkillPlan.segments` remain descriptive command ranges.
 
+`ObservedJointTrajectory` opts into bounded joint-command chunks within one
+`MoveJoints` invocation. The engine's planning services own the
+registered trajectory source. It resolves each chunk after the preceding command is
+acknowledged and supplies the original host cadence and velocity targets.
+
 Row-local planning within a larger World must carry the same explicit
 `context.env_ids` through FK/IK, root poses and diagnostics. HandOver applies this
 to both source/destination arms, including its continuation and failed-waypoint

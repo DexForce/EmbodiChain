@@ -1,7 +1,7 @@
 embodichain.compute
 
 Shared array and tensor computations
-------------------------------------
+====================================
 
 ``compute`` owns numerical algorithms that operate on arrays, tensors, and
 kinematic parameters without importing the simulation runtime. It does not
@@ -121,6 +121,11 @@ This monitor imports no Robot, simulator, environment or TaskSpec.
 
 Kinematics API
 --------------
+
+.. toctree::
+   :maxdepth: 1
+
+   ../kinematics_matrix
 
 ``yoshikawa_manipulability`` returns ``sqrt(det(J @ J^T))`` per batched
 Jacobian; ``condition_number`` returns the ratio of largest to smallest

@@ -6,6 +6,17 @@ scenes with Scene Engine, or use Task Engine to interpret an instruction and
 photograph into a semantic task graph. Their guides explain the separate asset,
 scene, declaration, and execution responsibilities and the handoff to simulation.
 
+Choose a workflow
+-----------------
+
+* :doc:`asset_engine` prepares an existing mesh for simulation.
+* :doc:`scene_engine` generates or edits a scene from an image.
+* :doc:`task_engine` turns an instruction and image into a semantic task graph.
+
+For execution, continue with :doc:`Task Program </overview/task_program/index>`
+and :doc:`scene preparation </overview/sim/scene/workflows>` to bind and validate
+the selected assets, scene, robot, and task declarations.
+
 Architecture
 ------------
 
@@ -131,19 +142,10 @@ Shared numerical algorithms and physical scene operations are owned by
 and support graph to these services. Motion planning, explicit physics stepping,
 observations, and recording belong to the simulation and Gym layers.
 
-Choose a workflow
------------------
-
-Start with Asset Engine for an existing mesh, Scene Engine for image-based scene
-generation or editing, and Task Engine for instruction/image semantic planning.
-For execution, continue with :doc:`Task Program </overview/task_program/index>`
-and :doc:`scene preparation </overview/sim/scene/workflows>` to bind and validate
-the selected assets, scene, robot, and task declarations.
-
 .. toctree::
    :maxdepth: 2
 
-   Model services <model_services.md>
    Asset Engine <asset_engine.md>
    Scene Engine <scene_engine.md>
    Task Engine <task_engine.md>
+   Model services <model_services.md>

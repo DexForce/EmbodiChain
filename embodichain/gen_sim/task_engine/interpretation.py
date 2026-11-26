@@ -24,6 +24,7 @@ from embodichain.gen_sim.services.runtime import GenSimServices, service_entry
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
+from graphlib import CycleError, TopologicalSorter
 import json
 import math
 import os
@@ -52,6 +53,8 @@ InstructionCaller = Callable[..., Mapping[str, Any]]
 InstructionIntent: TypeAlias = dict[str, Any]
 TASK_TYPES = frozenset(TASK_CONTRACTS)
 
+_TERMINAL_PARK_CALL = "simulation.park"
+_TERMINAL_PARK_KINDS = {f"terminal_park_{arm}": arm for arm in ("left", "right")}
 _RELATIONS = RELATIONS
 _ARMS = frozenset({"none", "auto", "left_arm", "right_arm"})
 _ORIENTATIONS = frozenset({"none", "preserve", "upright", "vertical"})
@@ -152,10 +155,6 @@ class _InstructionResourceError(ValueError):
     """Identify explicit held-resource conflicts before scene grounding."""
 
 
-class _InstructionPlacementError(ValueError):
-    """Reject a placement contradicted by literal source evidence."""
-
-
 @dataclass(frozen=True)
 class InstructionDraftResult:
     """One validated, scene-independent interpretation and its audit metadata."""
@@ -165,6 +164,15 @@ class InstructionDraftResult:
     attempts: int
     latency_seconds: float
     normalizations: tuple[dict[str, Any], ...]
+    terminal_park: tuple[dict[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class _SourceIntent:
+    intent: InstructionIntent
+    normalizations: list[dict[str, Any]]
+    scene_ref_quotes: dict[str, str]
+    terminal_park: dict[str, str]
 
 
 # Object semantics remain open natural-language references until the dedicated
@@ -252,6 +260,38 @@ _INTENT_OUTPUT_SCHEMA = {
 # graph; ``validate_instruction_intent`` remains the authoritative verifier.
 INSTRUCTION_INTENT_SCHEMA = deepcopy(_INTENT_OUTPUT_SCHEMA)
 
+_SOURCE_INTENT_AUDIT_TITLE = "ActionEngineInstructionSourceAudit"
+
+
+def _quoted_rows_schema(key: str, *values: str) -> dict[str, Any]:
+    return {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [key, "quote"],
+            "properties": {
+                key: {"type": "string", **({"enum": list(values)} if values else {})},
+                "quote": {"type": "string"},
+            },
+        },
+    }
+
+
+_MODEL_INTENT_SCHEMA = {
+    **_INTENT_OUTPUT_SCHEMA,
+    "properties": {
+        **_INTENT_OUTPUT_SCHEMA["properties"],
+        "scene_ref_quotes": _quoted_rows_schema("ref"),
+    },
+}
+_UNSUPPORTED_INTENT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["issues"],
+    "properties": {"issues": {**_quoted_rows_schema("reason"), "minItems": 1}},
+}
+
 
 @service_entry
 def interpret_instruction_draft(
@@ -260,12 +300,34 @@ def interpret_instruction_draft(
     model: str | None = None,
     caller: InstructionCaller | None = None,
     services: GenSimServices | None = None,
+    _allow_terminal_park: bool = False,
 ) -> InstructionDraftResult:
-    """Interpret one instruction without reading or grounding a scene."""
+    """Interpret and audit one instruction without reading or grounding a scene."""
     instruction_text = str(instruction).strip()
     if not instruction_text:
         raise ValueError("instruction must be non-empty.")
     prompt = _instruction_prompt(instruction_text)
+    evidence_prompt = (
+        "\n\nSOURCE EVIDENCE: alongside steps, quote the verbatim identifying "
+        "mention for scene_ref selectors in scene_ref_quotes: [{ref, quote}]. "
+        "ref is the one-based step position followed by .object or .target, "
+        "for example 1.object. Quote only the identifying phrase, including "
+        "any distinguishing qualifiers, not a whole sentence with multiple "
+        "referents. Omit evidence when a unique mention cannot be identified."
+    )
+    schema = deepcopy(_MODEL_INTENT_SCHEMA)
+    if _allow_terminal_park:
+        schema["properties"]["terminal_park"] = _quoted_rows_schema(
+            "arm", *_TERMINAL_PARK_KINDS.values(), "both"
+        )
+        evidence_prompt += (
+            f" {_TERMINAL_PARK_CALL} is available in the graph. Preserve an "
+            "explicit return of named arms to their starting posture after all "
+            "task actions in terminal_park, not as an E step. Emit "
+            "{arm:left|right|both, quote:verbatim source phrase}; use both for "
+            "a single request to return both arms. Do not defer any other "
+            "requirement or assume an unspecified arm."
+        )
     from functools import partial
 
     invoke = caller or partial(_default_instruction_caller, services=services)
@@ -279,7 +341,7 @@ def interpret_instruction_draft(
         current_prompt = prompt
         if first_error is not None:
             current_prompt += (
-                "\n\nREPAIR OVERRIDE: the previous JSON was invalid. Return a corrected "
+                "\n\nREPAIR OVERRIDE: the previous result failed validation. Return a corrected "
                 "JSON object only; do not repeat the sparse response. Every step "
                 "must contain all 16 step keys and every selector all 5 selector "
                 "keys. Keep semantic fields explicit: E4 requires transfer_arm "
@@ -296,30 +358,29 @@ def interpret_instruction_draft(
             )
         try:
             response = invoke(
-                prompt=current_prompt,
-                schema=deepcopy(INSTRUCTION_INTENT_SCHEMA),
+                prompt=current_prompt + evidence_prompt,
+                schema=deepcopy(schema),
                 model=selected_model,
             )
-            normalized, normalizations = _normalize_instruction_intent_fields(
-                _coerce_instruction_response(response)
+            draft = _validate_model_intent(
+                response, instruction_text, allow_terminal_park=_allow_terminal_park
             )
-            _apply_explicit_lift_height(instruction_text, normalized, normalizations)
-            intent = validate_instruction_intent(normalized)
-            if any(
-                step["task_type"] == "E3" and "pour_goal_mode" not in step
-                for step in intent["steps"]
-            ):
-                raise ValueError(
-                    "New E3 instructions require explicit pour_goal_mode: "
-                    "motion for an action-only request, fluid for liquid transfer."
-                )
-            _validate_instruction_placements(instruction_text, intent)
+            terminal_park = _review_source_intent(
+                instruction_text,
+                prompt + evidence_prompt,
+                draft,
+                invoke,
+                selected_model,
+                schema=schema,
+                allow_terminal_park=_allow_terminal_park,
+            )
             return InstructionDraftResult(
-                intent=intent,
+                intent=draft.intent,
                 model=selected_model or "injected_caller",
                 attempts=attempt + 1,
                 latency_seconds=perf_counter() - started,
-                normalizations=tuple(normalizations),
+                normalizations=tuple(draft.normalizations),
+                terminal_park=terminal_park,
             )
         except (TypeError, ValueError) as error:
             if attempt:
@@ -330,77 +391,262 @@ def interpret_instruction_draft(
     raise AssertionError("unreachable")
 
 
-def _validate_instruction_placements(
-    instruction: str, intent: InstructionIntent
-) -> None:
-    """Check literal destination evidence without rewriting or guessing references."""
-    clauses = re.split(r"[，,；;。\n.!?！？]", instruction.casefold())
-    positive = [
-        clause
-        for clause in clauses
-        if not re.search(r"不要|不得|不能|别(?=把|将|放|装)|\b(?:not|never)\b", clause)
-    ]
-    previous: dict[str, dict[str, Any]] = {}
-    for step in intent["steps"]:
-        target = step["target"]
-        prior = previous.get(target.get("step_id", ""), {})
-        previous[step["id"]] = step
-        obj = step["object"]
-        if step["task_type"] not in {"E1", "E4"} or obj["kind"] != "scene_ref":
-            continue
-        object_reference = obj["reference"].casefold()
-        matched = [clause for clause in positive if object_reference in clause]
-        # A literal object mentioned in multiple commands needs semantic resolution.
-        if len(matched) != 1 or matched[0].count(object_reference) != 1:
-            continue
-        clause = matched[0]
-        active = (
-            r"^\s*(?:(?:then|next|now|finally|please|and)\s+)*(?:"
-            r"(?:(?:再|然后|最后|先|请)\s*)*(?:把|将|取出)?\s*"
-            + re.escape(object_reference)
-            + r"\s*(?:放入|放进|收进|装入)|\b(?:put|place|insert|move|drop)\s+"
-            + r"(?:the\s+)?"
-            + re.escape(object_reference)
-            + r"\s+(?:into|inside)\s+)\s*(?:the\s+)?"
+def _validate_model_intent(
+    response: Any, instruction: str, *, allow_terminal_park: bool
+) -> _SourceIntent:
+    body = dict(_coerce_instruction_response(response))
+    references = _audit_quoted_rows(
+        instruction, body.pop("scene_ref_quotes", []), "ref"
+    )
+    parking = _audit_quoted_rows(instruction, body.pop("terminal_park", []), "arm")
+    normalized, normalizations = _normalize_instruction_intent_fields(body)
+    intent = validate_instruction_intent(normalized)
+    _validate_explicit_lift_height(instruction, intent)
+    if any(
+        step["task_type"] == "E3" and "pour_goal_mode" not in step
+        for step in intent["steps"]
+    ):
+        raise ValueError(
+            "New E3 instructions require explicit pour_goal_mode: "
+            "motion for an action-only request, fluid for liquid transfer."
         )
-        if target["kind"] == "scene_ref":
-            reference = str(target["reference"]).casefold()
-            ending = r"(?!\w)" if reference.isascii() else ""
-            evidence = re.compile(active + re.escape(reference) + ending)
-            surface = re.compile(
-                r"(?:放在|放到|\bon\s+)\s*(?:the\s+)?" + re.escape(reference) + ending
-            )
-            if (
-                step["relation"] != "inside"
-                and evidence.search(clause)
-                and not surface.search(clause)
-            ):
-                raise _InstructionPlacementError(
-                    f"Explicit containment for {target['reference']!r} requires "
-                    f"relation=inside, not {step['relation']!r}."
+    slots = {
+        f"{index}.{key}"
+        for index, step in enumerate(intent["steps"], start=1)
+        for key in ("object", "target")
+        if step[key]["kind"] == "scene_ref"
+    }
+    scene_ref_quotes = dict(references)
+    if len(scene_ref_quotes) != len(references) or scene_ref_quotes.keys() - slots:
+        raise ValueError("scene_ref_quotes must identify unique scene_ref slots.")
+
+    if parking and not allow_terminal_park:
+        raise ValueError("terminal_park requires graph planning.")
+    terminal_park: dict[str, str] = {}
+    for requested_arm, quote in parking:
+        requested = ("left", "right") if requested_arm == "both" else (requested_arm,)
+        for arm in requested:
+            if arm not in {"left", "right"} or arm in terminal_park:
+                raise ValueError(
+                    "terminal_park requires a unique declaration per named left/right arm."
                 )
-        if target["kind"] == "step_result":
-            destination = prior.get("target", {})
-            source = prior.get("object", {})
-            if destination.get("kind") == source.get("kind") == "scene_ref":
-                phrase = destination["reference"].casefold()
-                old_object = source["reference"].casefold()
-                for start in range(len(phrase)):
-                    suffix = phrase[start:]
-                    if len(suffix) < 2 or old_object.endswith(suffix):
-                        continue
-                    if suffix.isascii():
-                        if start and not phrase[start - 1].isspace():
-                            continue
-                        same = r"\bsame\s+" + re.escape(suffix) + r"(?!\w)"
-                    else:
-                        same = r"同一(?:个|只|块)?" + re.escape(suffix)
-                    if re.search(active + same, clause):
-                        raise _InstructionPlacementError(
-                            "Explicit repeated destination refers to the earlier "
-                            "target, not its manipulated object. Keep the named "
-                            "destination as scene_ref instead of step_result."
-                        )
+            terminal_park[arm] = quote
+    return _SourceIntent(intent, normalizations, scene_ref_quotes, terminal_park)
+
+
+# Conjunctions inside descriptions are fine; a coordinated action is not.
+_LIFT_ACTION_VERBS = r"lift|raise|lower|move|advance|push|pull|slide|shift|turn|rotate"
+_LIFT_ACTION_OBJECT = r"the|a|an|it|them|this|that|these|those|its|their"
+_LIFT_ACTION_BOUNDARY = (
+    r"\bthen\b|\b(?:and|or)\s+(?:(?:also|[a-z]+ly)\s+)*"
+    rf"(?:{_LIFT_ACTION_VERBS}|[a-z]+\s+(?:{_LIFT_ACTION_OBJECT}))\b"
+)
+# Inside an object modifier, two coordinated verb stems can modify one noun.
+_LIFT_PAIRED_MODIFIER = (
+    r"\b(?:with|having|featuring)\s+(?:(?!then\b|and\b|or\b)[\w-]+\s+)*?"
+    rf"(?:{_LIFT_ACTION_VERBS})\s+(?:and|or)\s+(?:{_LIFT_ACTION_VERBS})\b"
+    rf"(?=\s+(?!(?:{_LIFT_ACTION_OBJECT}|by|to|toward|over|forward|back|up|down|left|right)\b)[a-z])"
+)
+# A coordinated relative predicate describes the object, not another motion.
+_LIFT_RELATIVE_MODIFIER = (
+    r"\b[\w-]+\s+(?:that|which)\s+(?:(?!then\b|and\b|or\b)[\w-]+\s+)+?"
+    rf"(?:and|or)\s+(?!(?:{_LIFT_ACTION_VERBS})\b)[a-z]+\s+(?:{_LIFT_ACTION_OBJECT})\b"
+)
+_LIFT_MEASUREMENT = re.compile(
+    rf"\b(?:lift|raise)\b(?:{_LIFT_PAIRED_MODIFIER}|{_LIFT_RELATIVE_MODIFIER}"
+    rf"|(?!{_LIFT_ACTION_BOUNDARY})[^.!?;,\n])*?"
+    r"\s+(?:\bby\s+(?:(?:more than|at least|over|exactly)\s+)?|"
+    r"\b(?:more than|at least|over|exactly)\s+)"
+    r"([0-9]+(?:\.[0-9]+)?)\s*(mm|cm|m|millimet(?:er|re)s?|"
+    r"centimet(?:er|re)s?|met(?:er|re)s?)\b",
+    re.IGNORECASE,
+)
+
+
+def _validate_explicit_lift_height(instruction: str, intent: InstructionIntent) -> None:
+    """Independently check a uniquely attributable metric lift in the source."""
+    lifts = [
+        step
+        for step in intent["steps"]
+        if step["task_type"] == "E1"
+        and step["direction"] == "up"
+        and step["terminal_behavior"] == "hold"
+        and step["target"]["kind"] == "none"
+    ]
+    if len(lifts) != 1:
+        return
+    measurements = []
+    for match in _LIFT_MEASUREMENT.finditer(instruction):
+        prefix = re.split(r"[.!?;,\n]", instruction[: match.start()])[-1]
+        if re.search(
+            r"\b(?:not|never|without)\b|n['’]t\b", prefix + match[0], re.IGNORECASE
+        ):
+            continue
+        measurements.append(match.groups())
+    if len(measurements) != 1:
+        return
+    amount, units = measurements[0]
+    unit = units.lower()
+    scale = 1.0
+    if unit == "mm" or unit.startswith("milli"):
+        scale = 0.001
+    elif unit == "cm" or unit.startswith("centi"):
+        scale = 0.01
+    height = float(amount) * scale
+    if "lift_height_m" not in lifts[0] or not math.isclose(
+        lifts[0]["lift_height_m"], height
+    ):
+        raise ValueError(
+            f"lift_height_m must match the explicit source height of {height:g} m."
+        )
+
+
+def _review_source_intent(
+    instruction: str,
+    prompt: str,
+    draft: _SourceIntent,
+    invoke: InstructionCaller,
+    model: str | None,
+    *,
+    schema: dict[str, Any],
+    allow_terminal_park: bool,
+) -> tuple[dict[str, str], ...]:
+    """Compare an independent source reconstruction with the proposed typed intent."""
+    raw = invoke(
+        prompt=(
+            f"{prompt}\n\nSOURCE AUDIT: Independently reconstruct the complete "
+            "source intent, in source order, as a steps object. Preserve explicit "
+            "ordering, actor, destinations, result identity, relations, measurements "
+            "and final hold or release. Do not turn a negated action into a step, "
+            "or drop an unclear or unsupported requirement. For anything that "
+            "cannot be represented faithfully, return only issues with a "
+            "verbatim quote and reason."
+        ),
+        schema={
+            "title": _SOURCE_INTENT_AUDIT_TITLE,
+            "type": "object",
+            "oneOf": [deepcopy(schema), deepcopy(_UNSUPPORTED_INTENT_SCHEMA)],
+        },
+        model=model,
+    )
+    response = _coerce_instruction_response(raw)
+    if set(response) == {"issues"}:
+        issues = _audit_quoted_rows(instruction, response["issues"], "reason")
+        if not issues:
+            raise ValueError("Source audit issues must be a non-empty list.")
+        reasons = [f"{quote!r}: {reason}" for reason, quote in issues]
+        raise ValueError(f"Source audit found unsupported intent: {'; '.join(reasons)}")
+
+    reviewed = _validate_model_intent(
+        response, instruction, allow_terminal_park=allow_terminal_park
+    )
+    if draft.terminal_park.keys() != reviewed.terminal_park.keys():
+        raise ValueError(
+            "Source audit disagrees on terminal_park arms: "
+            f"draft={sorted(draft.terminal_park)}, source={sorted(reviewed.terminal_park)}."
+        )
+
+    proposed_steps = _canonicalize_intent(draft.intent)["steps"]
+    reviewed_steps = _canonicalize_intent(reviewed.intent)["steps"]
+    if len(proposed_steps) != len(reviewed_steps):
+        source_types = [step["task_type"] for step in reviewed_steps]
+        raise ValueError(
+            f"Source audit expects {len(reviewed_steps)} steps in order: {source_types}."
+        )
+    proposed_order = _dependency_ancestors(proposed_steps)
+    reviewed_order = _dependency_ancestors(reviewed_steps)
+    for index, (proposed, source) in enumerate(
+        zip(proposed_steps, reviewed_steps, strict=True), start=1
+    ):
+        for key in ("object", "target"):
+            slot = f"{index}.{key}"
+            draft_quote = draft.scene_ref_quotes.get(slot)
+            reviewed_quote = reviewed.scene_ref_quotes.get(slot)
+            if draft_quote is None or reviewed_quote is None:
+                continue
+
+            reference = draft_quote
+            if draft_quote != reviewed_quote:
+                # Overlap is not identity: both passes must declare the
+                # same unique reference inside their respective excerpts.
+                reference = proposed[key]["reference"]
+                if (
+                    reference != source[key]["reference"]
+                    or reference not in draft_quote
+                    or reference not in reviewed_quote
+                    or not _is_unique_source_mention(instruction, reference)
+                ):
+                    raise ValueError(
+                        f"Source audit disagrees at {source['id']} on {key} source mention: "
+                        f"draft={draft_quote!r}, source={reviewed_quote!r}."
+                    )
+            elif not _is_unique_source_mention(instruction, reference):
+                continue
+            proposed[key]["reference"] = source[key]["reference"] = reference
+            # Grounding uses the draft from this attempt, not the audit copies.
+            selector = draft.intent["steps"][index - 1][key]
+            if (previous := selector["reference"]) != reference:
+                selector["reference"] = reference
+                draft.normalizations.append(
+                    {
+                        "path": f"steps[{index - 1}].{key}.reference",
+                        "from": previous,
+                        "to": reference,
+                        "reason": "verified_source_reference",
+                    }
+                )
+        proposed["depends_on"] = sorted(proposed_order[proposed["id"]])
+        source["depends_on"] = sorted(reviewed_order[source["id"]])
+        if (
+            "lift_height_m" in proposed
+            and "lift_height_m" in source
+            and math.isclose(proposed["lift_height_m"], source["lift_height_m"])
+        ):
+            proposed["lift_height_m"] = source["lift_height_m"]
+        differences = {
+            key: source.get(key)
+            for key in sorted(proposed.keys() | source.keys())
+            if proposed.get(key) != source.get(key)
+        }
+        if differences:
+            raise ValueError(
+                f"Source audit disagrees at {source['id']} (reviewed fields: {differences!r})."
+            )
+    return tuple(
+        dict(arm=arm, quote=quote)
+        for arm, quote in sorted(reviewed.terminal_park.items())
+    )
+
+
+def _is_unique_source_mention(instruction: str, mention: str) -> bool:
+    start = instruction.find(mention)
+    return start != -1 and instruction.find(mention, start + 1) == -1
+
+
+def _dependency_ancestors(steps: Sequence[Mapping[str, Any]]) -> dict[str, set[str]]:
+    """Compute reachability on a validated, canonical step DAG."""
+    dependencies = {step["id"]: set(step["depends_on"]) for step in steps}
+    ancestors: dict[str, set[str]] = {}
+    for step_id in TopologicalSorter(dependencies).static_order():
+        parents = dependencies[step_id]
+        ancestors[step_id] = parents.union(*(ancestors[parent] for parent in parents))
+    return ancestors
+
+
+def _audit_quoted_rows(instruction: str, value: Any, key: str) -> list[tuple[str, str]]:
+    if not isinstance(value, list):
+        raise ValueError(f"Source audit {key} evidence must be a list.")
+    rows = []
+    for row in value:
+        if not isinstance(row, Mapping) or set(row) != {key, "quote"}:
+            raise ValueError(f"Source audit rows require exactly {key} and quote.")
+        quote = row["quote"]
+        if not isinstance(quote, str) or not quote.strip() or quote not in instruction:
+            raise ValueError(
+                "Source audit quote must occur verbatim in the instruction."
+            )
+        rows.append((_nonempty(row[key], f"Source audit {key}"), quote.strip()))
+    return rows
 
 
 def _normalize_instruction_intent_fields(
@@ -522,63 +768,6 @@ def _empty_selector() -> dict[str, Any]:
     }
 
 
-def _apply_explicit_lift_height(
-    instruction: str,
-    intent: dict[str, Any],
-    normalizations: list[dict[str, Any]],
-) -> None:
-    """Recover a unique metric minimum from the source of an explicit upward hold."""
-    raw_steps = intent.get("steps")
-    if not isinstance(raw_steps, list):
-        return
-    lifts = [
-        (index, step)
-        for index, step in enumerate(raw_steps)
-        if isinstance(step, dict)
-        and step.get("task_type") == "E1"
-        and step.get("direction") == "up"
-        and step.get("terminal_behavior") == "hold"
-        and isinstance(step.get("target"), Mapping)
-        and step["target"].get("kind") == "none"
-    ]
-    if len(lifts) != 1:
-        return
-    matches = re.findall(
-        r"\b(?:lift|raise)\b[^.!?;\n]*?\bby\s+(?:more than|at least|over)\s+"
-        r"(\d+(?:\.\d+)?)\s*(millimet(?:er|re)s?|centimet(?:er|re)s?|"
-        r"met(?:er|re)s?|mm|cm|m)\b",
-        instruction,
-        flags=re.IGNORECASE,
-    )
-    if len(matches) != 1:
-        return
-    amount, unit = matches[0]
-    unit = unit.lower()
-    scale = 1.0
-    if unit == "mm" or unit.startswith("milli"):
-        scale = 0.001
-    elif unit == "cm" or unit.startswith("centi"):
-        scale = 0.01
-    index, step = lifts[0]
-    height = float(amount) * scale
-    if "lift_height_m" in step:
-        proposed = step["lift_height_m"]
-        if type(proposed) not in {int, float} or not math.isclose(proposed, height):
-            raise ValueError(
-                "lift_height_m must match the explicit source height in metres."
-            )
-    else:
-        normalizations.append(
-            {
-                "path": f"steps[{index}].lift_height_m",
-                "from": None,
-                "to": height,
-                "reason": "explicit_source_lift_height",
-            }
-        )
-    step["lift_height_m"] = height
-
-
 def validate_instruction_intent(value: Mapping[str, Any]) -> dict[str, Any]:
     """Validate the private, non-graph instruction interpretation contract."""
     if not isinstance(value, Mapping):
@@ -686,9 +875,27 @@ def validate_instruction_intent(value: Mapping[str, Any]) -> dict[str, Any]:
                 f"Instruction step {step_id!r} has unknown dependencies "
                 f"{sorted(unknown)}."
             )
-    _validate_dag(dependencies)
+    try:
+        TopologicalSorter(dependencies).prepare()
+    except CycleError as exc:
+        raise ValueError("Instruction intent dependencies contain a cycle.") from exc
     _validate_instruction_resources(steps)
     return {"steps": steps}
+
+
+def _canonicalize_intent(intent: Mapping[str, Any]) -> dict[str, Any]:
+    """Remove arbitrary model step IDs while preserving the explicit DAG order."""
+    normalized = validate_instruction_intent(intent)
+    steps = normalized["steps"]
+    id_map = {step["id"]: f"step_{index + 1:02d}" for index, step in enumerate(steps)}
+    for step in steps:
+        step["id"] = id_map[step["id"]]
+        step["depends_on"] = [id_map[value] for value in step["depends_on"]]
+        for selector_name in ("object", "target"):
+            selector = step[selector_name]
+            if selector["kind"] == "step_result":
+                selector["step_id"] = id_map[selector["step_id"]]
+    return normalized
 
 
 def _validate_instruction_resources(steps: Sequence[Mapping[str, Any]]) -> None:
@@ -916,19 +1123,6 @@ def _validate_task_fields(step: Mapping[str, Any], context: str) -> None:
     elif task_type == "E5":
         direction = str(step["direction"])
         terminal = str(step["terminal_behavior"])
-        if target_kind == "scene_ref" and step["target"][
-            "reference"
-        ].strip().casefold() in {
-            "原处",
-            "原位",
-            "原来的位置",
-            "original position",
-            "original location",
-        }:
-            raise ValueError(
-                f"{context} E5 return position is not a scene object; use "
-                "target.kind=none, relation=none, direction=none, terminal_behavior=place."
-            )
         if terminal not in _TERMINAL_BEHAVIORS - {"none"}:
             raise ValueError(f"{context} E5 requires terminal_behavior hold/place.")
         if target_kind == "none":
@@ -1110,7 +1304,7 @@ def _instruction_prompt(instruction: str) -> str:
         "For E5, use target+relation for moving an object relative to another "
         "object. Returning the carried object to its original location uses "
         "target.kind=none, relation=none, direction=none, terminal_behavior=place; "
-        "never emit 'original position' or '原处' as a scene_ref. Use direction "
+        "the object's own starting pose is not a separate scene reference. Use direction "
         "for a small robot-relative move. When a request "
         "combines lifting with a horizontal direction, preserve that horizontal "
         "direction: 'carry forward and keep raised' uses direction=front and "
@@ -1205,16 +1399,6 @@ def _instruction_selector_rules() -> str:
 
 def _instruction_repair_guidance(error: Exception) -> str:
     """Add narrow semantic guidance for errors weak JSON-mode models repeat."""
-    if isinstance(error, _InstructionPlacementError):
-        return (
-            "\nPlacement fidelity repair: re-read the original instruction. "
-            "Explicit containment, including 放入/放进/收进/装入, is relation=inside, "
-            "not on. A container's descriptive position is not the placement "
-            "relation. For 'put A into B, then put C into the same B', both "
-            "targets select B as scene_ref; step_result of the first placement "
-            "means A, not B. Do not change objects, destinations, ordering or "
-            "containment to obtain a bindable or easier task.\n"
-        )
     if isinstance(error, _InstructionResourceError):
         return (
             "\nHeld-resource repair rule: re-read the original instruction. "
@@ -1397,25 +1581,6 @@ def _coerce_instruction_response(response: Any) -> Mapping[str, Any]:
     if not isinstance(parsed, Mapping):
         raise ValueError("Instruction model output must decode to a JSON object.")
     return dict(parsed)
-
-
-def _validate_dag(dependencies: Mapping[str, Sequence[str]]) -> None:
-    visiting: set[str] = set()
-    visited: set[str] = set()
-
-    def visit(node: str) -> None:
-        if node in visiting:
-            raise ValueError("Instruction intent dependencies contain a cycle.")
-        if node in visited:
-            return
-        visiting.add(node)
-        for dependency in dependencies[node]:
-            visit(str(dependency))
-        visiting.remove(node)
-        visited.add(node)
-
-    for node in dependencies:
-        visit(node)
 
 
 def _reject_forbidden_fields(value: Any) -> None:

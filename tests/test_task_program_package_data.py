@@ -62,6 +62,11 @@ _PROGRAMS = (
     ),
 )
 _DEPLOYMENTS = {
+    Path("tasks/manipulation/cable/franka_rj45_cycle/task.franka.yaml"): (
+        "franka_rj45_cycle",
+        "rj45_cycle",
+        "franka_rj45",
+    ),
     Path("tasks/manipulation/drawer_storage/task.ur5.long_horizon.yaml"): (
         "drawer_storage_long_horizon",
         "task_program_drawer_storage_long_horizon",
@@ -262,6 +267,35 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/gaussian_pick_place/catalog.yaml"),
         Path("tasks/manipulation/gaussian_pick_place/README.md"),
         Path("tasks/manipulation/cable/route_the_cable/cable.usda"),
+        Path("components/embodiments/franka_flat_pads.yaml"),
+        *(
+            Path("tasks/manipulation/cable/franka_rope_wrap") / filename
+            for filename in (
+                "README.md",
+                "cable.usda",
+                "catalog.yaml",
+                "config.json",
+                "env.yaml",
+                "task.franka.yaml",
+                "task_program/evaluation.yaml",
+                "task_program/integration.yaml",
+                "task_program/program.yaml",
+            )
+        ),
+        Path("components/embodiments/franka_rj45.yaml"),
+        *(
+            Path("tasks/manipulation/cable/franka_rj45_cycle") / filename
+            for filename in (
+                "catalog.yaml",
+                "config.json",
+                "env.yaml",
+                "task.franka.yaml",
+                "task_program/evaluation.yaml",
+                "task_program/execution_policy.yaml",
+                "task_program/integration.yaml",
+                "task_program/program.yaml",
+            )
+        ),
         Path("tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"),
         Path("tasks/manipulation/tableware/pour_cup/env.fluid.yaml"),
         Path("tasks/manipulation/tableware/pour_cup/task_program/program.fluid.yaml"),
@@ -445,9 +479,11 @@ def staged_config_package(
     assert type(include_package_data) is bool
 
     build_lib = tmp_path_factory.mktemp("task-config-build")
+    packages = get_packages()
+    assert "embodichain.extensions.tasks.manipulation.cable" in packages
     distribution = Distribution(
         {
-            "packages": get_packages(),
+            "packages": packages,
             "package_data": package_data,
             "include_package_data": include_package_data,
         }

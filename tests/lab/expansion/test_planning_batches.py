@@ -93,6 +93,48 @@ def test_planning_scope_leaves_external_rng_generators_unchanged(robot_device):
             assert torch.equal(before, after)
 
 
+def test_native_cursor_keeps_row_rng_across_cooperative_solver(monkeypatch):
+    import random
+    import numpy as np
+    from embodichain.lab.expansion._workload_cursor import _WorkloadCursor
+    from embodichain.lab.expansion.program import _Cursor
+
+    class Solver:
+        def get_fk(self, qpos):
+            return qpos.clone()
+
+    solver = Solver()
+    robot = SimpleNamespace(device=torch.device("cpu"), _solvers={"arm": solver})
+
+    def next_action(self):
+        before = torch.rand(1, 1) + np.random.random() + random.random()
+        return (
+            solver.get_fk(before)
+            + torch.rand(1, 1)
+            + np.random.random()
+            + random.random()
+        )
+
+    monkeypatch.setattr(_Cursor, "next", next_action)
+    direct = {row: _WorkloadCursor((), robot, row + 1) for row in (0, 1)}
+    batched = {row: _WorkloadCursor((), robot, row + 1) for row in (0, 1)}
+    expected = [
+        {row: cursor.next() for row, cursor in direct.items()} for _ in range(2)
+    ]
+    cpu = torch.get_rng_state()
+    numpy = np.random.get_state()
+    python = random.getstate()
+    with batched_planning(robot, 7) as planner:
+        for frame in expected:
+            commands = planner.gather(batched)
+            for row, command in commands.items():
+                torch.testing.assert_close(command, frame[row], rtol=0, atol=0)
+        assert planner.stats["merged_calls"] == 2
+    assert torch.equal(torch.get_rng_state(), cpu)
+    assert random.getstate() == python
+    np.testing.assert_equal(np.random.get_state(), numpy)
+
+
 def test_full_motion_grouping_preserves_autocast(monkeypatch):
     from embodichain.lab.sim.motion.motion_generator import (
         MotionGenerator,

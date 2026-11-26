@@ -26,9 +26,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
+from urllib.parse import urljoin, urlsplit
 
 __all__ = ["convert_readme_to_rst", "postprocess_rst"]
 
@@ -39,6 +41,8 @@ RST_PATH = REPO_ROOT / "docs" / "source" / "introduction.rst"
 
 # Prefix to make repo-root-relative paths work from docs/source/
 _DOCS_PATH_PREFIX = "../../"
+_DOCS_MAIN_URL = "https://dexforce.github.io/EmbodiChain/main/"
+_REPO_SOURCE_URL = "https://github.com/DexForce/EmbodiChain/blob/main/"
 
 
 def _fix_image_path(path: str) -> str:
@@ -55,8 +59,31 @@ def _fix_image_path(path: str) -> str:
     return _DOCS_PATH_PREFIX + path
 
 
+def _rewrite_readme_links(node: object) -> None:
+    """Update link destinations before Pandoc lays out the RST tables."""
+    if isinstance(node, list):
+        for child in node:
+            _rewrite_readme_links(child)
+    elif isinstance(node, dict):
+        if node.get("t") == "Link":
+            target = node["c"][-1]
+            url = target[0]
+            parts = urlsplit(url)
+            if url.startswith(_DOCS_MAIN_URL):
+                target[0] = url.removeprefix(_DOCS_MAIN_URL) or "index.html"
+            elif (
+                parts.path
+                and not parts.scheme
+                and not parts.netloc
+                and not parts.path.startswith("/")
+            ):
+                target[0] = urljoin(_REPO_SOURCE_URL, url)
+        for child in node.values():
+            _rewrite_readme_links(child)
+
+
 def convert_readme_to_rst(readme_content: str) -> str:
-    """Convert Markdown content to RST via pypandoc.
+    """Convert Markdown content to RST with links for the documentation site.
 
     Args:
         readme_content: Raw Markdown text from README.md.
@@ -66,7 +93,9 @@ def convert_readme_to_rst(readme_content: str) -> str:
     """
     import pypandoc
 
-    return pypandoc.convert_text(readme_content, "rst", format="md")
+    document = json.loads(pypandoc.convert_text(readme_content, "json", format="md"))
+    _rewrite_readme_links(document)
+    return pypandoc.convert_text(json.dumps(document), "rst", format="json")
 
 
 def postprocess_rst(rst: str, readme_content: str) -> str:
@@ -96,8 +125,8 @@ def postprocess_rst(rst: str, readme_content: str) -> str:
     while i < len(lines):
         line = lines[i]
 
-        # --- 1. Strip badge substitution reference lines ---
-        if re.match(r"^\|.*\|", line):
+        # --- 1. Strip badge substitutions while keeping grid-table rows (`| `) ---
+        if re.match(r"^\|[^|\s][^|]*\|", line):
             i += 1
             continue
 

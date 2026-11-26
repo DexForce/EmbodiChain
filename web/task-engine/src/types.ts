@@ -129,6 +129,7 @@ export interface ViewerData {
     [key: string]: unknown;
   };
   task_spec: { goal: Predicate[]; [key: string]: unknown } | null;
+  review?: { pairing?: { goal_groups?: Record<string, string[]> } };
   validation: {
     source?: {
       bindings?: {

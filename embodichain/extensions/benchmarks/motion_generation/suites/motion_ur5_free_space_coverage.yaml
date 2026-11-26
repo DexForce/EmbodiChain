@@ -45,11 +45,9 @@ planners:
     config: &nmg_policy
       # Supply the external UR5 policy with --nmg-onnx-path; otherwise NMG is skipped.
       onnx_model_path: null
-      num_waypoints: 5
       steps_per_waypoint: 30
       max_steps: 150
       action_scale: 0.2
-      num_arm_joints: 6
       joint_periodic_features: true
       use_relative_obs: true
       intermediate_orientation: true

@@ -55,7 +55,7 @@ Checklist
    advertise a catalog through an ``embodichain.robots`` entry point.
 9. **Add documentation** — create
    ``docs/source/resources/robot/<vendor>/<model>.md`` and include it in the
-   owning vendor's ``index.rst`` and the Supported Robots overview. Reuse the
+   owning vendor's ``index.rst`` and the Robots overview. Reuse the
    source namespace; community projects with an unknown manufacturer use their
    project namespace. Add an index for a new vendor or project and link it from
    ``resources/robot/index.rst``. Generic composition remains separate.

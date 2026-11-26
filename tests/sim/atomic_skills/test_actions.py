@@ -71,6 +71,7 @@ from embodichain.lab.sim.atomic_skills import (
     MoveJointsOptions,
     ObjectSemantics,
     ObservedArticulationJointState,
+    ObservedJointTrajectory,
     OpenDoor,
     OpenDoorAffordance,
     OpenDoorGoal,
@@ -1053,7 +1054,7 @@ def test_pose_options_own_late_bound_relative_transforms() -> None:
 
 
 def test_joint_position_goal_rejects_unsupported_target_type() -> None:
-    with pytest.raises(TypeError, match="torch.Tensor, str or TimedTrajectory"):
+    with pytest.raises(TypeError, match=r"target must be .* got float"):
         JointPositionGoal(target=1.0)  # type: ignore[arg-type]
 
 
@@ -10546,3 +10547,127 @@ def test_presampled_joint_commands_cannot_bypass_motion_gen_backend():
     )
     with pytest.raises(ValueError, match="requires strategy"):
         _plan_action(action, invocation, _context())
+
+
+@pytest.mark.parametrize("preserve", [False, True])
+def test_timed_joint_trajectory_can_preserve_explicit_phase_boundary_velocities(
+    preserve: bool,
+):
+    from embodichain.lab.sim.atomic_skills.policies import DynamicCollisionMode
+
+    generator = _motion_generator()
+    generator.robot.control_parts["whole_robot"] = object()
+    action = _bind_action(generator, MoveJoints())
+    context = _context()
+    position = (
+        torch.tensor([0.003, 0.006, 0.009])
+        .view(1, 3, 1)
+        .expand(NUM_ENVS, -1, ROBOT_DOF)
+    )
+    velocity = torch.full_like(position, 0.18)
+    goal = JointPositionGoal(
+        TimedTrajectory(
+            positions=position,
+            velocities=velocity,
+            accelerations=None,
+            dt=torch.full((NUM_ENVS, 3), CONTROL_DT),
+            env_ids=context.env_ids,
+        )
+    )
+    plan = _plan_action(
+        action,
+        SkillInvocation(
+            skill_id="move_joints",
+            binding=_binding(action, motion="whole_robot"),
+            goal=goal,
+            motion_policy=MotionPolicy(dynamic_collision_mode=DynamicCollisionMode.OFF),
+            skill_options=MoveJointsOptions(preserve_velocity_samples=preserve),
+        ),
+        context,
+    )
+    expected = velocity.clone()
+    if not preserve:
+        expected[:, 0] = expected[:, -1] = 0
+    torch.testing.assert_close(_joint_trajectory(plan).velocities, expected)
+
+
+def test_observed_move_joints_continues_with_live_state_and_explicit_velocity():
+    """Check that one invocation consumes fresh observations without losing commands."""
+    from embodichain.lab.sim.atomic_skills import RecoveryPolicy
+
+    class Source:
+        def __init__(self):
+            self.observed_at = []
+
+        def resolve(self, phase, start, stop, context, active_mask):
+            assert phase == "adaptive"
+            assert active_mask.all()
+            if not context.is_preview:
+                self.observed_at.append((start, stop, context.robot.timestamp))
+            offsets = torch.arange(1, stop - start + 1, dtype=torch.float32) * 0.003
+            positions = context.robot.qpos[:, None] + offsets[None, :, None]
+            return TimedTrajectory(
+                positions=positions,
+                velocities=torch.full_like(positions, 0.18),
+                accelerations=None,
+                dt=torch.full(positions.shape[:2], CONTROL_DT),
+                env_ids=context.env_ids,
+            )
+
+    generator = _motion_generator()
+    generator.robot.control_parts["whole_robot"] = object()
+    action = _bind_action(generator, MoveJoints())
+    engine = _ACTION_ENGINES[id(action)]
+    source = Source()
+    engine.planning_services.register_joint_trajectory_source("fixture", source)
+    invocation = SkillInvocation(
+        skill_id="move_joints",
+        invocation_id="adaptive_move",
+        binding=_binding(action, motion="whole_robot"),
+        goal=JointPositionGoal(ObservedJointTrajectory("fixture", "adaptive", (2, 1))),
+        motion_policy=MotionPolicy(dynamic_collision_mode="off"),
+        recovery_policy=RecoveryPolicy(max_replans=0, max_skill_retries=0),
+        skill_options=MoveJointsOptions(preserve_velocity_samples=True),
+    )
+    context = _context()
+    preview = engine.plan(invocation, replace(context, is_preview=True))
+    assert preview.continuation is None
+    assert _joint_trajectory(preview).waypoint_count == 3
+    assert source.observed_at == []
+
+    session = engine.start((invocation,), context)
+    frames = []
+    completed = 0
+    for _ in range(10):
+        tick = session.tick(context)
+        completed += sum(event.kind.value == "skill_completed" for event in tick.events)
+        if tick.command is not None:
+            (command,) = tick.command.commands
+            frames.append(command.payload)
+            observed = command.payload.positions
+            if len(frames) == 2:
+                observed = observed + 0.01
+            context = replace(
+                context,
+                robot=RobotObservation(
+                    len(frames) * CONTROL_DT, observed, torch.zeros_like(observed)
+                ),
+            )
+        if tick.status.value != "running":
+            break
+
+    assert session.status.value == "completed"
+    assert completed == 1
+    assert source.observed_at == [(0, 2, 0.0), (2, 3, 2 * CONTROL_DT)]
+    assert [attempt.plan.invocation_id for attempt in session.plan_attempts] == [
+        "adaptive_move",
+        "adaptive_move",
+    ]
+    assert len(frames) == 3
+    for payload, target in zip(frames, (0.003, 0.006, 0.019), strict=True):
+        torch.testing.assert_close(
+            payload.positions, torch.full_like(context.robot.qpos, target)
+        )
+        torch.testing.assert_close(
+            payload.velocities, torch.full_like(context.robot.qvel, 0.18)
+        )
