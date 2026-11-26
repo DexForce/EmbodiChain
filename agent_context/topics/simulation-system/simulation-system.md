@@ -205,3 +205,13 @@ teardown failures point to ownership/unwind order. Motion namespaces stay lazy.
 Select focused tests from the owning detail page. Lifecycle coverage starts in
 `tests/sim/test_sim_manager.py` and `tests/sim/spawn/test_scene.py`; source,
 configuration and adapter changes use their matching contract tests.
+
+For manual write access the host creates a WorldControl after binding and
+installs `writer_executors` as the sole command queue executor table. Disable
+GUI edits, other queues and background writers before admitting this dedicated
+session. Direct Python callers use WriterClient with the private host grant.
+A target command writes the selected control group, reads its target back,
+and advances exactly one configured interval. An accepted target and measured
+attainment are separate fields. The command ID, expected binding and receipt
+revision support reconciliation; a partial native failure fences the host.
+Ordinary DexSim sessions remain read-only through EmbodiChain.

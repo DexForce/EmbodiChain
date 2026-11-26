@@ -7342,3 +7342,17 @@ local resources while the native World remains available to its owner.
 
 .. autoclass:: embodichain.lab.sim.dexsim_session.attachment.AttachedSimulationManager
    :members:
+
+embodichain.lab.sim.dexsim_session.control
+------------------------------------------
+
+.. autoclass:: embodichain.lab.sim.dexsim_session.control.WorldControl
+   :members:
+
+embodichain.lab.sim.dexsim_session.writer
+-----------------------------------------
+
+.. autofunction:: embodichain.lab.sim.dexsim_session.writer.writer_executors
+
+.. autoclass:: embodichain.lab.sim.dexsim_session.writer.WriterClient
+   :members:
