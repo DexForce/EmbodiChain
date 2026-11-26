@@ -109,9 +109,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     except ModuleNotFoundError as exc:
         if exc.name != "mcp" and not (exc.name or "").startswith("mcp."):
             raise
-        parser.exit(
-            2, f"Install the MCP extra with pip install 'embodichain[mcp]': {exc}\n"
-        )
+        parser.exit(2, f"Install EmbodiChain with its default dependencies: {exc}\n")
     serve(
         args.session,
         directory=args.session_directory,

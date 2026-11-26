@@ -65,7 +65,7 @@ own DexPilot Run.
 
 ## Run the two-turn DexPilot demo
 
-Use a Python 3.11 environment with the EmbodiChain `[mcp]` extra,
+Use a Python 3.11 environment with the EmbodiChain extra,
 `dexsim-engine==0.6.1rc1`, and `imageio[ffmpeg]`, plus a host with GPU
 rendering and Xvfb. Use a configured DexPilot DSH route with per-Run stdio
 mounting. The recorded run used Node.js 26 and DexVerse `50001247a`
