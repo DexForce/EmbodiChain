@@ -1,9 +1,7 @@
-# RigidFormer: Rigid Geometry Dynamics
+# RigidFormer: Learning Rigid Dynamics using Transformers
 
-## Use cases
-
-[RigidFormer](https://arxiv.org/abs/2605.09196) predicts the motion of interacting
-rigid objects from observed geometry and physical properties. Use it when your
+RigidFormer predicts the motion of interacting rigid objects from observed
+geometry and physical properties. Use it when your
 observations are aligned material points on rigid bodies and you want a free
 rollout after several warmup frames. The current adapter has no action input.
 
@@ -12,21 +10,27 @@ architecture, official weights and a shared-SL training recipe for MOVi-Sphere,
 MOVi-A and MOVi-B. The example provides resource preparation, an engine
 comparison, fixed-checkpoint evaluation and independent reference checks.
 
-## How it works
+## Architecture
 
-The geometry encoder processes material-point positions and relative geometry
-between objects. Attention combines object/history features with physical
-properties and step-size conditioning. The prediction path queries selected
-anchors on each object to estimate their accelerations.
+RigidFormer encodes each object's point cloud as a token. The Transformer
+models interactions between objects, using anchor-based rotary positional
+embeddings (RoPE) to locate them relative to each other. Anchor-Vertex Pooling
+gives each anchor features from nearby surface points. An anchor query combines
+that local geometry with the object-level features to predict acceleration.
+[RigidFormer project](https://frank-zy-dou.github.io/projects/RigidFormer/) · [Authors' architecture diagram](https://arxiv.org/html/2605.09196v2#S2.F1)
 
 ```mermaid
 flowchart TB
-    G[Geometry history and reference points] --> E[Geometry encoder and attention]
-    P[Physical properties and step size] --> E
-    E --> V[Anchor acceleration and Verlet step]
-    V --> K[Kabsch rigid projection]
-    K --> O[Next full object geometry]
-    O --> E
+    accTitle: RigidFormer object interaction and rigid projection
+    G["Point-cloud history per object"] --> E["Object tokens"]
+    E --> T["Object-level Transformer with anchor-based RoPE"]
+    P["Physical properties and step size"] --> T
+    G --> L["Anchor-Vertex Pooling"]
+    T --> A["Anchor acceleration head"]
+    L --> A
+    A --> V["Verlet step for anchors"]
+    V --> K["Kabsch fit to reference anchors"]
+    K --> O["Rigid transform applied to all object points"]
 ```
 
 Predicted anchor accelerations advance positions through Verlet integration:
@@ -96,7 +100,10 @@ at frames 2..T-1. For free prediction, `model.rollout()` accepts **exactly**
 `[B, num_frames, O, P, 3]`, including the warmup. The default evaluation uses
 four observed frames; subsequent frames are predicted autoregressively.
 
-## Quick start
+## Examples
+
+Compare predicted and simulated sphere trajectories or train on MOVi-A/B
+using the [MOVi examples](https://github.com/DexForce/EmbodiChain/tree/main/examples/learning/rigidformer).
 
 ### Install the optional dependencies
 
@@ -204,9 +211,9 @@ print(trajectory["obj_positions"].shape)  # [1, 51, O, P, 3]
 This is a single inference read. For training, the factory registers the source
 with the trainer so traversal progress is committed after successful updates.
 
-## Training and evaluation
+### Training and evaluation
 
-### Prepare the full corpus and train
+#### Prepare the full corpus and train
 
 Use a complete corpus for the released training recipes. For example, MOVi-A
 uses a separate prepared directory from the Sphere debug workflow:
@@ -248,10 +255,10 @@ embodichain train-sl --config examples/learning/rigidformer/configs/sl.movi_a.ya
 For a distributed run, pass the same `--resume` argument through its original
 `torchrun` launch. Checkpoints retain model/optimizer, source traversal,
 scheduler, EMA and per-rank state. Recovery rejects changed data, split, scale,
-recipe or world size. The [example README](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/rigidformer/README.md)
+recipe or world size. The [example README](https://github.com/DexForce/EmbodiChain/tree/main/examples/learning/rigidformer)
 describes recovery into a fresh destination and the sampling contract.
 
-### Export and evaluate fixed weights
+#### Export and evaluate fixed weights
 
 ```bash
 embodichain run-example learning/rigidformer export \
@@ -280,17 +287,16 @@ do not establish complete MOVi benchmark accuracy.
 
 ## References
 
-### Original paper
-
 Zhiyang Dou, Minghao Guo, Haixu Wu, Doug Roble, Tuur Stuyck, and Wojciech
-Matusik. **RigidFormer: Learning Rigid Dynamics using Transformers.** 2026.
-[arXiv:2605.09196](https://arxiv.org/abs/2605.09196).
+Matusik (2026). *RigidFormer: Learning Rigid Dynamics using Transformers*.
+NeurIPS. [arXiv:2605.09196](https://arxiv.org/abs/2605.09196)
 
 ```bibtex
-@misc{dou2026rigidformer,
+@inproceedings{dou2026rigidformer,
   title = {{RigidFormer}: Learning Rigid Dynamics using Transformers},
   author = {Dou, Zhiyang and Guo, Minghao and Wu, Haixu and Roble, Doug and
             Stuyck, Tuur and Matusik, Wojciech},
+  booktitle = {Advances in Neural Information Processing Systems},
   year = {2026},
   eprint = {2605.09196},
   archivePrefix = {arXiv},
@@ -303,8 +309,6 @@ Matusik. **RigidFormer: Learning Rigid Dynamics using Transformers.** 2026.
 
 - [RigidFormer API](../../../api_reference/model_rigidformer.rst): model/config,
   checkpoint, data source, objective and trainer interfaces.
-- [Example README](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/rigidformer/README.md):
-  independent author comparison and exact recovery commands.
 - [Acceptance protocol](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/rigidformer/research/acceptance.md):
   frozen sources, numerical checks, evaluation and retraining requirements.
 - [Public model package](https://github.com/DexForce/EmbodiChain/tree/main/embodichain/extensions/models/dynamics/rigidformer):

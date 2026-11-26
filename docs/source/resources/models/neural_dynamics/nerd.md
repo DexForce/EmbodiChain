@@ -1,9 +1,7 @@
 # NeRD: Neural Robot Dynamics
 
-## Use cases
-
-[NeRD](https://arxiv.org/abs/2508.15755) predicts articulated robot state changes
-from a history of states, joint efforts and contact observations. The supported
+NeRD predicts articulated robot state changes from a history of states,
+joint efforts and contact observations. The supported
 reference systems are contact-free Cartpole and free-base Ant on a static plane.
 Choose it when the transition depends on recent motion and applied efforts,
 using a dataset and codec that match the physical system.
@@ -13,7 +11,13 @@ in `embodichain.extensions.models.dynamics.nerd`. The `learning/nerd` example pr
 resources and provides collection, training, export and evaluation commands.
 Native simulation deployment is a separate consumer of the model and codec.
 
-## How it works
+## Architecture
+
+NeRD replaces the forward-dynamics and contact solvers in a simulation step
+with a learned transition. The simulator still computes kinematics and
+detects contacts. Supplying those quantities in the robot's frame lets the
+same robot-specific network operate at different world positions and headings.
+[NeRD project](https://neural-robot-dynamics.github.io/) · [Authors' framework diagram](https://neural-robot-dynamics.github.io/static/images/overview.png)
 
 The physical codec converts each observed state and effort into named feature
 tensors. It expresses Ant state/contact features in the current body frame and
@@ -23,9 +27,16 @@ velocities directly.
 
 ```mermaid
 flowchart TB
-    S[State, effort and contact history] --> C[Encode and normalize features]
-    C --> T[Causal Transformer and prediction head]
-    T --> Q[Denormalize and decode next state]
+    accTitle: NeRD articulated robot state transition
+    S["Robot state (q, qd)"] --> C["Robot-specific feature encoding"]
+    G["Contact geometry when present"] --> C
+    C --> H["Normalized feature history"]
+    U["Joint efforts"] --> H
+    H --> T["Causal Transformer and prediction head"]
+    T --> D["Denormalized state change"]
+    D --> Q["Apply change to current state"]
+    S --> Q
+    Q --> NEXT["Next robot state (q, qd)"]
 ```
 
 Named features are normalized and concatenated at each history position, then
@@ -85,10 +96,12 @@ model's feature order and `block_size`; the shipped recipes use ten-position
 windows. Trajectories contain T+1 states and T effort/contact records, and
 windows cannot cross trajectory or train/validation/test boundaries.
 
-## Quick start
+## Examples
 
-Use the installed EmbodiChain package with PyTorch on CPU or CUDA. For a source
-checkout, install it with `python -m pip install -e .` before running examples.
+Prepare the published weights and trajectories, evaluate transitions, or
+train a new model with the [Cartpole and Ant examples](https://github.com/DexForce/EmbodiChain/tree/main/examples/learning/nerd).
+Use the installed EmbodiChain package with PyTorch on CPU or CUDA. For a
+source checkout, install it with `python -m pip install -e .`.
 
 ### Prepare and evaluate
 
@@ -240,9 +253,9 @@ or [Ant video](https://huggingface.co/DexForceAI/embodichain_model/resolve/main/
 The recordings visualize the released reference models; they are not a claim of
 paper-level accuracy or equivalent behavior in arbitrary robot scenes.
 
-## Training and evaluation
+### Training and evaluation
 
-### Train, recover and export
+#### Train, recover and export
 
 After preparation, train through the default common SL recipe:
 
@@ -288,7 +301,7 @@ Export accepts both SL checkpoints and historical NeRD checkpoints and preserves
 floating dtype, normalization, ordered features and attention policy. Export
 destinations must be new directories.
 
-### Teacher collection and historical experiments
+#### Teacher collection and historical experiments
 
 Prepare reference assets before invoking the independent collector:
 
@@ -304,8 +317,8 @@ with shards. Rejection-only progress preserves data identity; legacy sidecars
 remain readable, but resuming requires matching collector source and physical
 identity. Add `generate --resume` with the same configuration and output to
 continue collection. For the larger collection and historical training presets,
-see the [Cartpole configurations](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/nerd/configs/cartpole/README.md)
-and [Ant configurations](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/nerd/configs/ant/README.md).
+see the [Cartpole configurations](https://github.com/DexForce/EmbodiChain/tree/main/examples/learning/nerd/configs/cartpole)
+and [Ant configurations](https://github.com/DexForce/EmbodiChain/tree/main/examples/learning/nerd/configs/ant).
 The smoke collector and the default 1,000-update SL run exercise the workflow;
 full collection and paper-reproduction budgets are specified separately there.
 
@@ -320,17 +333,16 @@ Moving code or rerunning a smoke does not rerun those frozen experiments.
 
 ## References
 
-### Original paper
-
 Jie Xu, Eric Heiden, Iretiayo Akinola, Dieter Fox, Miles Macklin, and Yashraj
-Narang. **Neural Robot Dynamics.** 2025.
-[arXiv:2508.15755](https://arxiv.org/abs/2508.15755).
+Narang (2025). *Neural Robot Dynamics*. Conference on Robot Learning.
+[arXiv:2508.15755](https://arxiv.org/abs/2508.15755)
 
 ```bibtex
-@misc{xu2025neuralrobotdynamics,
+@inproceedings{xu2025neuralrobotdynamics,
   title = {Neural Robot Dynamics},
   author = {Xu, Jie and Heiden, Eric and Akinola, Iretiayo and Fox, Dieter and
             Macklin, Miles and Narang, Yashraj},
+  booktitle = {Conference on Robot Learning},
   year = {2025},
   eprint = {2508.15755},
   archivePrefix = {arXiv},
@@ -341,12 +353,10 @@ Narang. **Neural Robot Dynamics.** 2025.
 
 ### Implementation and further reading
 
-- [Neural Robot Dynamics project](https://neural-robot-dynamics.github.io/).
 - [Public API](../../../api_reference/model_catalogs.rst): network, codec,
   trajectory windows, objectives and trainer factory.
-- [Example README](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/nerd/README.md)
-  and [research protocol](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/nerd/research/acceptance.md):
-  historical experiments, frozen sources and acceptance evidence.
+- Historical experiments, frozen sources and acceptance criteria are described
+  in the [research protocol](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/nerd/research/acceptance.md).
 - [All neural dynamics models](index.md).
 
 ### Pinned resources
