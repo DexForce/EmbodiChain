@@ -303,7 +303,7 @@ class RobotFeasibilityBackend:
             self.robot.mimic_offsets,
             strict=True,
         ):
-            result[child] = result[parent] * multiplier + offset
+            result[..., child] = result[..., parent] * multiplier + offset
         return result
 
     def _indices(self, part: str) -> list[int]:
@@ -592,39 +592,61 @@ class RobotFeasibilityBackend:
         measured: bool = False,
     ) -> dict[str, np.ndarray]:
         """Compute full-link and payload transforms without writing simulator state."""
+        frames = self._frame_poses_batch(qpos[None], phase, entities, measured=measured)
+        return {uid: value[0] for uid, value in frames.items()}
+
+    def _frame_poses_batch(
+        self,
+        qpos: np.ndarray,
+        phase: TaskPhase,
+        entities: Mapping[str, np.ndarray],
+        *,
+        measured: bool = False,
+    ) -> dict[str, np.ndarray]:
         if not measured:
             qpos = self._project_mimic(qpos)
-        tensor = torch.tensor(
-            qpos[self._chain_indices][None],
-            dtype=torch.float32,
-            device=self.robot.device,
-        )
-        chain = self.robot.pk_chain.forward_kinematics(tensor)
-        output = dict(entities)
+        tensor = torch.as_tensor(qpos, dtype=torch.float32, device=self.robot.device)
+        chain = self.robot.pk_chain.forward_kinematics(tensor[:, self._chain_indices])
+        output = {
+            uid: np.broadcast_to(pose, (len(qpos), 4, 4))
+            for uid, pose in entities.items()
+        }
+        root = np.asarray(entities.get(self.robot.uid, self._root))
         for name, value in chain.items():
             output[f"{self.robot.uid}/{name}"] = (
-                np.asarray(entities.get(self.robot.uid, self._root))
-                @ value.get_matrix()[0].detach().cpu().double().numpy()
+                root @ value.get_matrix().detach().cpu().double().numpy()
             )
         for held in phase.held_objects:
             indices = self._indices(held.control_part)
             solver = self.robot.get_solver(name=held.control_part)
             local = (
-                solver.get_fk(
-                    qpos=torch.tensor(
-                        qpos[indices][None],
-                        dtype=torch.float32,
-                        device=self.robot.device,
-                    )
-                )[0]
-                .detach()
-                .cpu()
-                .double()
-                .numpy()
+                solver.get_fk(qpos=tensor[:, indices]).detach().cpu().double().numpy()
             )
             tcp = output[f"{self.robot.uid}/{solver.root_link_name}"] @ local
             output[held.entity_uid] = tcp @ held.tcp_from_object
         return output
+
+    def _edge_frames(
+        self,
+        qpos: np.ndarray,
+        phase: TaskPhase,
+        entities: Mapping[str, np.ndarray],
+    ) -> tuple[dict[str, np.ndarray], int]:
+        projected = self._project_mimic(qpos)
+        valid = (
+            np.isfinite(qpos)
+            & (qpos >= self.joint_limits[:, 0])
+            & (qpos <= self.joint_limits[:, 1])
+            & (np.abs(qpos - projected) <= 1e-6)
+        ).all(axis=1)
+        invalid = np.flatnonzero(~valid)
+        count = int(invalid[0]) if invalid.size else len(qpos)
+        frames = (
+            self._frame_poses_batch(projected[:count], phase, entities, measured=True)
+            if count
+            else {}
+        )
+        return frames, count
 
     def check_state(
         self,
@@ -683,6 +705,18 @@ class RobotFeasibilityBackend:
         ):
             return None
 
+        from embodichain.lab.sim.objects.robot import Robot
+
+        # Native FK accepts a leading sample dimension. Keep the collision
+        # automaton in scalar order and reuse its resident geometry model.
+        batch_edges = (
+            type(self) is RobotFeasibilityBackend
+            and isinstance(self.robot, Robot)
+            and "check_state" not in vars(self)
+            and "frame_poses" not in vars(self)
+        )
+        moving = [held.entity_uid for held in phase.held_objects]
+
         def edge(a: np.ndarray, b: np.ndarray) -> np.ndarray | None:
             nonlocal checked_samples
             budget.check()
@@ -695,13 +729,36 @@ class RobotFeasibilityBackend:
             if checked_samples + count > self.cfg.max_motion_samples:
                 return None
             path = np.linspace(a, b, count)
-            for q in path:
-                budget.check()
-                if budget.clock() >= deadline:
-                    return None
-                checked_samples += 1
-                if not self.check_state(q, phase, entities):
-                    return None
+            if batch_edges:
+                for offset in range(0, count, 16):
+                    budget.check()
+                    if budget.clock() >= deadline:
+                        return None
+                    block = path[offset : offset + 16]
+                    frames, valid_count = self._edge_frames(block, phase, entities)
+                    for row in range(len(block)):
+                        budget.check()
+                        if budget.clock() >= deadline:
+                            return None
+                        checked_samples += 1
+                        if row == valid_count:
+                            return None
+                        check, _ = self.collision.check(
+                            {uid: values[row] for uid, values in frames.items()},
+                            allowed_contacts=phase.allowed_contacts,
+                            moving_objects=moving,
+                        )
+                        self.last_collision = check
+                        if check.status != "passed":
+                            return None
+            else:
+                for q in path:
+                    budget.check()
+                    if budget.clock() >= deadline:
+                        return None
+                    checked_samples += 1
+                    if not self.check_state(q, phase, entities):
+                        return None
             return path
 
         direct = edge(start, goal)

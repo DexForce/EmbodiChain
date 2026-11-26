@@ -1,5 +1,5 @@
-Tools
-=====
+Robotics Toolkits
+=================
 
 The :mod:`embodichain.toolkits` package provides standalone tools that you can
 use in scripts, from the command line, or as part of an EmbodiChain workflow.

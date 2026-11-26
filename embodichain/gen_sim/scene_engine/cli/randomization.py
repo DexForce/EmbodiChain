@@ -52,7 +52,7 @@ def main(
         *workspace_flags,
         dest="output_root",
         required=True,
-        help="Scene workspace containing scene_export/; the baseline is written there.",
+        help="Scene workspace containing scene_export/ or an editable scene_package.zip.",
     )
     parser.add_argument(
         "--config",

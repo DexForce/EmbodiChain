@@ -95,7 +95,7 @@ CPU or CUDA without starting a simulator. Start from the
 {download}`Cartpole recipe <../../../../examples/learning/nerd/configs/cartpole/sl.train.yaml>`
 or {download}`Ant recipe <../../../../examples/learning/nerd/configs/ant/sl.train.yaml>`
 after preparing data and updating paths as described in the
-{doc}`NeRD guide </features/neural_dynamics/nerd>`.
+{doc}`NeRD guide </resources/models/neural_dynamics/nerd>`.
 
 ### RWM: action-conditioned robot state prediction
 
@@ -110,7 +110,7 @@ targets and validity masks. Action semantics, control period and ordered joints
 are explicit metadata. The CPU/CUDA example generates controlled fitting data
 and an SL `recipe.json`; these checks qualify fitting and interfaces rather
 than robot policy performance. See the
-{doc}`RWM guide </features/neural_dynamics/rwm>` and
+{doc}`RWM guide </resources/models/neural_dynamics/rwm>` and
 {download}`RWM example <../../../../examples/learning/rwm/README.md>` for corpus
 preparation and training.
 
@@ -130,7 +130,7 @@ public `rollout()` runs without autograd; differentiable action-based control
 is not part of this adapter. Start from the
 {download}`MOVi-A recipe <../../../../examples/learning/rigidformer/configs/sl.movi_a.yaml>`
 after following the
-{doc}`RigidFormer guide </features/neural_dynamics/rigidformer>` for preparation,
+{doc}`RigidFormer guide </resources/models/neural_dynamics/rigidformer>` for preparation,
 runtime requirements and evaluation.
 
 ## Run a first recipe
@@ -286,7 +286,7 @@ versions in the checkpoint signature. Additional persistent cursors or model
 averages can implement `SupervisedTrainingState`; their mathematics stays with
 the model family.
 
-- {doc}`Neural dynamics workflows </features/neural_dynamics>` describe model-specific training and qualification.
+- {doc}`Neural dynamics workflows </resources/models/neural_dynamics/index>` describe model-specific training and qualification.
 - {doc}`Official model library </api_reference/model_catalogs>` documents concrete models and recipes.
 - {doc}`Differentiable Kinematics <differentiable_kinematics>` supplies reusable FK/IK layers for networks and losses.
 - {doc}`Expert Data Expansion </tutorial/data_expansion>` and {doc}`ODS </features/online_data>` cover collecting and supplying demonstrations.

@@ -76,7 +76,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--disable-cuda-graph",
         action="store_true",
-        help="Use direct Newton stepping and enable particle-friction scheduling.",
+        help="Use direct Newton stepping with the same selected friction policy.",
+    )
+    parser.add_argument(
+        "--particle-friction",
+        choices=("constant", "scripted"),
+        default="constant",
+        help=(
+            "Cloth friction policy: constant retains the first-release CUDA Graph "
+            "demo's coefficient of 0.5; scripted follows the grasp-phase track."
+        ),
+    )
+    parser.add_argument(
+        "--solver-preset",
+        choices=("surface-fast", "reference"),
+        default="surface-fast",
+        help=(
+            "Surface solver policy; reference uses ordinary VBD updates. "
+            "Both policies retain 20 iterations."
+        ),
     )
     parser.add_argument(
         "--real-time",
@@ -174,6 +192,7 @@ GROUND_POSITION = (0.0, 0.0, -0.01)
 GROUND_SIZE = (8.0, 8.0, 0.02)
 SHIRT_POSITION = (0.55, 0.0, 1.189)
 SHIRT_SCALE = 0.0080 * 0.8
+SHIRT_CONTACT_FRICTION = 0.5
 CONTACT_SCRIPT_TRANSITIONS = np.asarray(
     [4.21, 16.8, 19.0, 22.18, 27.4, 31.4],
     dtype=np.float32,
@@ -354,10 +373,17 @@ def initialize_simulation(
             use_cuda_graph=use_cuda_graph,
             solver_cfg={
                 "solver_type": "dexuni",
+                "vbd_preset": (
+                    "surface-fast" if args.solver_preset == "surface-fast" else None
+                ),
+                # Keep bending conflicts while reducing sequential color groups.
+                "particle_coloring": "deterministic_smallest_last_interchange",
                 "joint_mode": "kinematic",
                 "contact_mode": "soft",
                 "vbd_options": {
                     "iterations": SOLVER_ITERATIONS,
+                    # Keep the reference displacement tolerance for both policies.
+                    "particle_displacement_threshold": 0.0,
                     "particle_enable_self_contact": True,
                     "particle_self_contact_radius": 0.002,
                     "particle_self_contact_margin": 0.002,
@@ -520,7 +546,7 @@ def create_shirt(
                 contact_material={
                     "stiffness": 3.0e5,
                     "damping": 5.0e-2,
-                    "dynamic_friction": 0.5,
+                    "dynamic_friction": SHIRT_CONTACT_FRICTION,
                 },
                 density=200.0,
                 surface_props=SurfaceElementPropertiesCfg(
@@ -542,7 +568,7 @@ def register_runtime_controls(
     trajectory_time_scale: float,
     *,
     static_w1: bool,
-    use_cuda_graph: bool,
+    scripted_particle_friction: bool,
 ) -> None:
     """Register the folding trajectory and phase-dependent contact materials."""
     transition_times = (
@@ -556,7 +582,13 @@ def register_runtime_controls(
             for sample_time, value in zip(contact_times, values, strict=True)
         )
 
-    particle_friction = friction_track((0.5, 1.2, 0.0, 0.5, 1.2, 0.0, 0.5))
+    # The first-release Graph demo kept cloth friction at 0.5. Changing this
+    # track changes the grasps; select it independently of Graph execution.
+    particle_friction = (
+        friction_track((0.5, 1.2, 0.0, 0.5, 1.2, 0.0, 0.5))
+        if scripted_particle_friction
+        else ((0.0, SHIRT_CONTACT_FRICTION),)
+    )
     w1_friction = friction_track((0.25, 1.2, 0.0, 0.25, 1.2, 0.0, 0.25))
     table_friction = friction_track((0.5, 0.12, 0.5, 0.5, 0.12, 0.5, 0.5))
 
@@ -640,7 +672,7 @@ def main(args: argparse.Namespace | None = None) -> None:
             trajectory_fps,
             args.trajectory_time_scale,
             static_w1=args.static_w1,
-            use_cuda_graph=use_cuda_graph,
+            scripted_particle_friction=args.particle_friction == "scripted",
         )
         sim.prepare()
 
@@ -660,7 +692,8 @@ def main(args: argparse.Namespace | None = None) -> None:
             f"cuda_graph={use_cuda_graph} | "
             f"frames={len(trajectory)} | trajectory_fps={trajectory_fps:.3f} | "
             f"dof={robot.dof} | cloth_particles={particle_count} | "
-            f"material={args.cloth_material}"
+            f"material={args.cloth_material} | solver_preset={args.solver_preset} | "
+            f"particle_friction={args.particle_friction}"
         )
 
         fps_window_start: float | None = None

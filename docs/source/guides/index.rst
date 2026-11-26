@@ -1,28 +1,12 @@
+:orphan:
+
 How-to Guides
 =============
 
-Practical guides for common tasks in EmbodiChain.
+* :doc:`tasks_and_environments` for finding, running, and configuring tasks.
+* :doc:`robots_and_assets` for choosing and previewing assets or adding a robot.
+* :doc:`data_and_training` for preparing demonstrations, training, and evaluation.
+* :doc:`integrations` for LeRobot, RLinf, and EmbodiChain MCP.
 
-.. toctree::
-   :maxdepth: 1
-
-   custom_functors
-   configuration
-   agent_skills
-   add_robot
-   preview_asset
-   preview_robot
-   preview_material
-   run_task
-   expert_task_language
-   offline_expert_datasets
-   lerobot_export
-   task_catalog
-   robot_catalog
-   configured_manipulation_rl
-   policy_evaluation
-   training_frameworks
-   lerobot
-   rlinf
-   mcp
-   cli
+For command arguments and public Python objects, see :doc:`cli` and
+:doc:`/api_reference/index`.

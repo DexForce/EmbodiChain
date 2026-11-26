@@ -105,7 +105,14 @@ def main() -> None:
                 journal=record.with_suffix(".jsonl"),
             ) as queue:
                 _publish_json(
-                    record, _session_info(session_id, queue.address, options, record)
+                    record,
+                    _session_info(
+                        session_id,
+                        queue.address,
+                        options,
+                        record,
+                        **({"token": queue.token} if hasattr(queue, "token") else {}),
+                    ),
                 )
                 while running:
                     queue.poll(timeout=0.02)

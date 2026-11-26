@@ -20,7 +20,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 import time
-from embodichain.data_pipeline.recording.media import _atomic_json
 from embodichain.lab.expansion.program import TaskProgramBatchExecutor
 from .contracts import CandidateIdentity, ExpertEpisode
 from .contracts import SceneCase
@@ -178,7 +177,7 @@ class GymCohortExecutor:
             on_started(assignments[row][0])
             record = assignments[row][4]
             record["status"] = "running"
-            _atomic_json(assignments[row][3] / "attempt.json", record)
+            ctx.journal._write_attempt(assignments[row][3], record)
 
         timings["source_binding"] = (
             timings.get("source_binding", 0.0) + time.monotonic() - phase_started

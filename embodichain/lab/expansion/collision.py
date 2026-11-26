@@ -21,6 +21,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import numpy as np
 import torch
+from embodichain.lab.sim.scene.state import _CapturedState
 from embodichain.utils.math import matrix_from_quat
 from embodichain.lab.task_program.integrations.feasibility import (
     build_feasibility_host,
@@ -32,17 +33,19 @@ __all__: list[str] = []
 
 
 class _MeasuredFrameBody:
-    def __init__(self, states, shapes):
-        self.body_state = torch.tensor(
-            [(*state.pose, *state.velocity) for state in states], dtype=torch.float32
-        )
-        self._poses = torch.eye(4).repeat(len(states), 1, 1)
-        self._poses[:, :3, :3] = matrix_from_quat(self.body_state[:, 3:7])
-        self._poses[:, :3, 3] = self.body_state[:, :3]
+    def __init__(self, state, shapes):
+        self.body_state = state.to(dtype=torch.float32)
+        self._poses = None
         self.shapes = shapes
 
     def get_local_pose(self, *, to_matrix=False):
-        return self._poses if to_matrix else self.body_state[:, :7]
+        if not to_matrix:
+            return self.body_state[:, :7]
+        if self._poses is None:
+            self._poses = torch.eye(4).repeat(len(self.body_state), 1, 1)
+            self._poses[:, :3, :3] = matrix_from_quat(self.body_state[:, 3:7])
+            self._poses[:, :3, 3] = self.body_state[:, :3]
+        return self._poses
 
     def get_collision_shapes(self, env_id=0):
         return self.shapes[env_id]
@@ -51,18 +54,28 @@ class _MeasuredFrameBody:
 def _measured_frame(env, snapshot, shapes):
     if snapshot.env_ids != tuple(range(env.num_envs)):
         raise ValueError("measured validation requires a complete World snapshot")
-    entities = {state.uid: [] for state in snapshot.batches[0]}
-    for batch in snapshot.batches:
-        for state in batch:
-            entities[state.uid].append(state)
+    if isinstance(snapshot, _CapturedState):
+        rigid = snapshot.rigid
+        qpos = snapshot.fields[env.robot.uid, "qpos"].to(dtype=torch.float32)
+    else:
+        entities = {state.uid: [] for state in snapshot.batches[0]}
+        for batch in snapshot.batches:
+            for state in batch:
+                entities[state.uid].append(state)
+        rigid = {
+            uid: torch.tensor(
+                [(*state.pose, *state.velocity) for state in states],
+                dtype=torch.float32,
+            )
+            for uid, states in entities.items()
+            if states[0].kind == "rigid_object"
+        }
+        qpos = torch.tensor(
+            [state.qpos for state in entities[env.robot.uid]], dtype=torch.float32
+        )
     bodies = {
-        uid: _MeasuredFrameBody(states, shapes[uid])
-        for uid, states in entities.items()
-        if states[0].kind == "rigid_object"
+        uid: _MeasuredFrameBody(state, shapes[uid]) for uid, state in rigid.items()
     }
-    qpos = torch.tensor(
-        [state.qpos for state in entities[env.robot.uid]], dtype=torch.float32
-    )
     return SimpleNamespace(
         num_envs=env.num_envs,
         robot=SimpleNamespace(joint_names=env.robot.joint_names, get_qpos=lambda: qpos),
@@ -201,6 +214,8 @@ class _MeasuredCollision:
             for row, report in zip(rows, reports):
                 if row not in self.results or report.status != "passed":
                     self.results[row] = report
+
+    _sample_captured = sample
 
     def close(self):
         self.checker.close()

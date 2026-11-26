@@ -19,6 +19,7 @@
 from __future__ import annotations
 from dataclasses import asdict, replace
 from collections import OrderedDict
+from collections.abc import Mapping
 import hashlib
 import json
 import os
@@ -240,21 +241,34 @@ class ArtifactEpisodeSink:
                     Path(reference["path"]).relative_to(directory.resolve()).as_posix()
                 )
 
-    def _archive_media(self, episode: ExpertEpisode, directory: Path) -> str | None:
+    @staticmethod
+    def _verify_media(episode: ExpertEpisode, path: Path) -> Mapping[str, object]:
+        expected = episode.metadata.get("media_manifest_sha256")
+        if expected is None or _digest(path) != expected:
+            raise ValueError("episode media manifest changed or is not attested")
+        return verify_media_manifest(
+            path,
+            expected_frames=len(episode.timestamps),
+            parent_episode_id=episode.episode_id,
+            expected_timestamps=episode.timestamps.detach().cpu().numpy(),
+        )
+
+    def _archive_media(
+        self, episode: ExpertEpisode, directory: Path, *, frozen: bool
+    ) -> str | None:
         original = episode.metadata.get("media_manifest")
         if original is None:
             return None
-        original = Path(original)
-        expected = episode.metadata.get("media_manifest_sha256")
-        if expected is None or _digest(original) != expected:
-            raise ValueError("episode media manifest changed or is not attested")
-        media = verify_media_manifest(
-            original,
-            expected_frames=len(episode.timestamps),
-            parent_episode_id=episode.episode_id,
-            expected_timestamps=episode.timestamps.cpu().numpy(),
-        )
         destination = directory / "media"
+        manifest = destination / "manifest.json"
+        if frozen:
+            # The numeric archive is linked after the owned media is durable.
+            # Audit the archived bytes even when the capture spool still exists.
+            self._verify_media(episode, manifest)
+            return "media/manifest.json"
+
+        original = Path(original)
+        media = self._verify_media(episode, original)
         for chunk in media["chunks"]:
             self._archive_reference(
                 {
@@ -264,7 +278,11 @@ class ArtifactEpisodeSink:
                 destination / chunk["path"],
             )
         self._archive_reference(
-            {"path": str(original), "sha256": expected}, destination / "manifest.json"
+            {
+                "path": str(original),
+                "sha256": episode.metadata["media_manifest_sha256"],
+            },
+            manifest,
         )
         return "media/manifest.json"
 
@@ -282,6 +300,35 @@ class ArtifactEpisodeSink:
     def submit(self, episode: ExpertEpisode, *, submission_id: int) -> CommitReceipt:
         """Publish an identity-matching receipt for durably verified episode content."""
         return self._write(episode, submission_id=submission_id, confirm=True)
+
+    @staticmethod
+    def _freeze_numeric(destination: Path, arrays: Mapping[str, np.ndarray]) -> None:
+        if not destination.exists():
+            descriptor, name = tempfile.mkstemp(
+                dir=destination.parent, prefix=".pending-"
+            )
+            temporary = Path(name)
+            try:
+                with os.fdopen(descriptor, "wb") as stream:
+                    np.savez(stream, **arrays)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                if temporary.stat().st_size > 128 * 1024 * 1024:
+                    raise BufferError(
+                        "numeric episode exceeds the 128 MiB archive reader limit"
+                    )
+                try:
+                    os.link(temporary, destination)
+                    return
+                except FileExistsError:
+                    pass
+            finally:
+                temporary.unlink(missing_ok=True)
+        with np.load(destination, allow_pickle=False) as saved:
+            if set(saved.files) != set(arrays) or any(
+                not np.array_equal(saved[key], value) for key, value in arrays.items()
+            ):
+                raise ValueError("commit identity already owns different episode bytes")
 
     def _write(
         self, episode: ExpertEpisode, *, submission_id: int, confirm: bool
@@ -301,9 +348,11 @@ class ArtifactEpisodeSink:
         key = hashlib.sha256(episode.commit_id.encode()).hexdigest()
         directory = self.directory / "episodes" / key
         _mkdir(directory)
+        destination = directory / "episode.npz"
+        frozen = destination.exists()
         portable = True
-        if (directory / "episode.npz").exists():
-            with np.load(directory / "episode.npz", allow_pickle=False) as saved:
+        if frozen:
+            with np.load(destination, allow_pickle=False) as saved:
                 portable = (
                     json.loads(saved["manifest"].tobytes())["metadata"].get(
                         "artifact_schema_version"
@@ -332,7 +381,7 @@ class ArtifactEpisodeSink:
         self._archive_sources(metadata["metadata"], directory, portable=portable)
         if portable:
             metadata["metadata"]["artifact_schema_version"] = 2
-            archived_media = self._archive_media(episode, directory)
+            archived_media = self._archive_media(episode, directory, frozen=frozen)
             if archived_media is not None:
                 metadata["metadata"]["media_manifest"] = archived_media
         encoded = json.dumps(
@@ -348,99 +397,70 @@ class ArtifactEpisodeSink:
             manifest=np.frombuffer(encoded, dtype=np.uint8),
         )
         media = episode.metadata.get("media_manifest")
-        if media is not None:
-            expected_media = episode.metadata.get("media_manifest_sha256")
-            if expected_media is None or _digest(Path(media)) != expected_media:
-                raise ValueError("episode media manifest changed or is not attested")
-            verify_media_manifest(
-                media,
-                expected_frames=len(episode.timestamps),
-                parent_episode_id=episode.episode_id,
-                expected_timestamps=episode.timestamps.detach().cpu().numpy(),
+        if media is not None and not portable:
+            self._verify_media(episode, Path(media))
+        self._freeze_numeric(destination, arrays)
+        checksum = _digest(destination)
+        receipt = CommitReceipt(
+            episode_id=episode.episode_id,
+            commit_id=episode.commit_id,
+            candidate_id=episode.identity.candidate_id,
+            attempt_id=episode.identity.attempt_id,
+            scene_case_id=episode.identity.scene_case_id,
+            submission_id=submission_id,
+            storage_id=str(destination.resolve()),
+            confirmed=True,
+        )
+        _atomic_json(
+            directory / "content.json",
+            {
+                "sha256": checksum,
+                "frames": len(episode.timestamps),
+                "media_manifest": metadata["metadata"].get("media_manifest"),
+                "media_sha256": (
+                    metadata["metadata"].get("media_manifest_sha256") if media else None
+                ),
+            },
+        )
+        if portable:
+            references = tuple(
+                ArtifactReference(ref["path"], ref["sha256"], "source")
+                for ref in _source_references(metadata["metadata"])
             )
-        destination = directory / "episode.npz"
-        descriptor, name = tempfile.mkstemp(dir=directory, prefix=".pending-")
-        temporary = Path(name)
-        try:
-            with os.fdopen(descriptor, "wb") as stream:
-                np.savez(stream, **arrays)
-                stream.flush()
-                os.fsync(stream.fileno())
-            if temporary.stat().st_size > 128 * 1024 * 1024:
-                raise BufferError(
-                    "numeric episode exceeds the 128 MiB archive reader limit"
-                )
-            try:
-                os.link(temporary, destination)
-            except FileExistsError:
-                with np.load(destination, allow_pickle=False) as existing:
-                    if set(existing.files) != set(arrays) or any(
-                        not np.array_equal(existing[key], value)
-                        for key, value in arrays.items()
-                    ):
-                        raise ValueError(
-                            "commit identity already owns different episode bytes"
-                        )
-            receipt = CommitReceipt(
-                episode_id=episode.episode_id,
-                commit_id=episode.commit_id,
-                candidate_id=episode.identity.candidate_id,
-                attempt_id=episode.identity.attempt_id,
-                scene_case_id=episode.identity.scene_case_id,
-                submission_id=submission_id,
-                storage_id=str(destination.resolve()),
-                confirmed=True,
+            artifact = EpisodeArtifactManifest(
+                episode.episode_id,
+                episode.commit_id,
+                episode.metadata.get("recipe_id"),
+                episode.identity.attempt_id,
+                ArtifactReference("episode.npz", checksum, "numerical"),
+                (
+                    ArtifactReference(
+                        metadata["metadata"]["media_manifest"],
+                        metadata["metadata"]["media_manifest_sha256"],
+                        "media",
+                    )
+                    if media
+                    else None
+                ),
+                references,
+                episode.metadata.get("physical_parent_episode_id"),
+                source_ancestors=tuple(
+                    episode.metadata.get("source_episode_uuids")
+                    or (
+                        [episode.metadata["source_episode_uuid"]]
+                        if episode.metadata.get("source_episode_uuid")
+                        else []
+                    )
+                ),
             )
-            _atomic_json(
-                directory / "content.json",
-                {
-                    "sha256": _digest(destination),
-                    "frames": len(episode.timestamps),
-                    "media_manifest": metadata["metadata"].get("media_manifest"),
-                    "media_sha256": None if media is None else _digest(Path(media)),
-                },
-            )
-            if portable:
-                references = tuple(
-                    ArtifactReference(ref["path"], ref["sha256"], "source")
-                    for ref in _source_references(metadata["metadata"])
-                )
-                artifact = EpisodeArtifactManifest(
-                    episode.episode_id,
-                    episode.commit_id,
-                    episode.metadata.get("recipe_id"),
-                    episode.identity.attempt_id,
-                    ArtifactReference("episode.npz", _digest(destination), "numerical"),
-                    (
-                        ArtifactReference(
-                            metadata["metadata"]["media_manifest"],
-                            metadata["metadata"]["media_manifest_sha256"],
-                            "media",
-                        )
-                        if media
-                        else None
-                    ),
-                    references,
-                    episode.metadata.get("physical_parent_episode_id"),
-                    source_ancestors=tuple(
-                        episode.metadata.get("source_episode_uuids")
-                        or (
-                            [episode.metadata["source_episode_uuid"]]
-                            if episode.metadata.get("source_episode_uuid")
-                            else []
-                        )
-                    ),
-                )
-                _atomic_json(directory / "artifacts.json", artifact.to_dict())
-            if not confirm:
-                return destination
-            stored = replace(
-                receipt, storage_id=destination.relative_to(self.directory).as_posix()
-            )
-            _atomic_json(directory / f"receipt-{submission_id}.json", asdict(stored))
-            return receipt
-        finally:
-            temporary.unlink(missing_ok=True)
+            _atomic_json(directory / "artifacts.json", artifact.to_dict())
+        if not confirm:
+            return destination
+        stored = replace(
+            receipt, storage_id=destination.relative_to(self.directory).as_posix()
+        )
+        _atomic_json(directory / f"receipt-{submission_id}.json", asdict(stored))
+        return receipt
 
     def recover(self, commit_id: str) -> CommitReceipt | None:
         """Confirm a complete staged episode without executing its source again."""

@@ -94,6 +94,29 @@ def test_part_limits_follow_waypoint_order_and_strictest_environment() -> None:
     assert constraints == {"velocity": None, "acceleration": [0.9, 1.4]}
 
 
+def test_request_intersects_signed_config_and_robot_limits() -> None:
+    # The arm's columns are elbow then shoulder. Their shared robot caps
+    # across the two environments are respectively 1.2 and 0.6 rad/s.
+    resolved = _resolve_joint_constraints(
+        _Robot(),
+        {"velocity": [[-2.0, 0.7], [-0.4, 0.9]], "acceleration": [1.0, 1.5]},
+        request_constraints={
+            "velocity": [1.8, 0.8],
+            "acceleration": [[-3.0, 0.5], [-1.0, 3.0]],
+        },
+        control_part="arm",
+        dof=2,
+    )
+    torch.testing.assert_close(
+        resolved["velocity"],
+        torch.tensor([[-1.2, 0.7], [-0.4, 0.6]], dtype=torch.float64),
+    )
+    torch.testing.assert_close(
+        resolved["acceleration"],
+        torch.tensor([[-1.0, 0.5], [-1.0, 1.5]], dtype=torch.float64),
+    )
+
+
 def test_single_row_planning_does_not_read_other_environment_caps() -> None:
     resolved = _resolve_joint_constraints(
         _Robot(), {}, control_part="arm", dof=2, batch_size=1
@@ -103,16 +126,18 @@ def test_single_row_planning_does_not_read_other_environment_caps() -> None:
     )
 
 
-@pytest.mark.parametrize("velocity_request", [None, 1.0])
+@pytest.mark.parametrize(
+    "velocity_request", [None, 1.0, [[-1.0, 0.8], [-1.0, 1.0], [0.0, 0.0]]]
+)
 def test_zero_speed_caps_survive_limit_resolution(
-    velocity_request: float | None,
+    velocity_request: float | list[list[float]] | None,
 ) -> None:
     robot = _Robot()
     robot.velocities[:, 2] = 0.0
     constraints = _resolve_joint_constraints(
         robot, {"velocity": velocity_request}, dof=3
     )
-    assert constraints["velocity"][2].item() == 0.0
+    assert torch.count_nonzero(constraints["velocity"][2]) == 0
 
 
 def _zero_speed_planner(planner_type: str) -> ToppraPlanner | TrapezoidalPlanner:

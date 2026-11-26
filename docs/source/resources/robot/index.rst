@@ -1,5 +1,5 @@
-Supported Robots
-================
+Robots
+======
 
 EmbodiChain provides configuration classes for the robot families and composed
 layouts below. Concrete robots follow their manufacturer or community project

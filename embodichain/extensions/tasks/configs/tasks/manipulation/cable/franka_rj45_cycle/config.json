@@ -1,0 +1,160 @@
+{
+  "schema_version": 1,
+  "home_qpos": [
+    0.0,
+    -0.569,
+    0.0,
+    -2.81,
+    0.0,
+    3.037,
+    0.741
+  ],
+  "pickup_tip_m": [
+    0.48,
+    -0.14,
+    0.0055
+  ],
+  "socket_mouth_m": [
+    0.57,
+    0.14,
+    0.202
+  ],
+  "anchor_m": [
+    0.2,
+    -0.33,
+    0.019999999999999997
+  ],
+  "cable_waypoints_m": [
+    [
+      0.2,
+      -0.33,
+      0.019999999999999997
+    ],
+    [
+      0.1,
+      -0.28,
+      0.012
+    ],
+    [
+      0.1,
+      -0.1,
+      0.012
+    ],
+    [
+      0.28,
+      -0.01,
+      0.012
+    ],
+    [
+      0.39,
+      -0.06,
+      0.006
+    ],
+    [
+      0.437,
+      -0.14,
+      0.0055
+    ],
+    [
+      0.449,
+      -0.14,
+      0.0055
+    ]
+  ],
+  "cable_segments": 96,
+  "cable_radius_m": 0.0028,
+  "cable_density_kg_m3": 1100.0,
+  "bend_stiffness_Nm_rad": 0.0001,
+  "bend_damping_Nms_rad": 0.0001,
+  "linear_stiffness_N_m": 100000.0,
+  "control_hz": 60,
+  "substeps": 32,
+  "iterations": 48,
+  "pre_roll_s": 2.0,
+  "duration_s": 40.0,
+  "grasp_offset_m": [
+    0.0,
+    0.0,
+    -0.0265
+  ],
+  "grip_half_gap_m": 0.005,
+  "seat_depth_m": 0.0105,
+  "carry_height_m": 0.12,
+  "contact_ke_N_m": 1000.0,
+  "contact_kd_Ns_m": 0.2,
+  "contact_gap_m": 5e-05,
+  "contact_match_distance_m": 5e-05,
+  "camera": {
+    "eye_m": [
+      1.1,
+      -1.2,
+      0.852
+    ],
+    "target_m": [
+      0.32,
+      -0.015,
+      0.262
+    ]
+  },
+  "detail_camera": {
+    "eye_m": [
+      0.36,
+      -0.1,
+      0.362
+    ],
+    "target_m": [
+      0.57,
+      0.14,
+      0.202
+    ]
+  },
+  "render": {
+    "width": 3840,
+    "height": 2160,
+    "fps": 30,
+    "spp": 16,
+    "renderer": "rt",
+    "tone_mapping_enabled": true,
+    "exposure": 0.8,
+    "min_bounces": 4,
+    "max_bounces": 8,
+    "crf": 15,
+    "preset": "slow"
+  },
+  "validation": {
+    "seat_min_m": 0.009,
+    "seat_max_m": 0.012,
+    "lateral_max_m": 0.0006,
+    "orientation_max_deg": 5.0,
+    "return_position_max_m": 0.003,
+    "return_orientation_max_deg": 10.0,
+    "attachment_max_m": 0.0002,
+    "contact_penetration_max_m": 0.0008,
+    "latch_limit_violation_max_deg": 1.0,
+    "latch_pressed_min_deg": 8.0,
+    "latch_return_max_deg": 1.0
+  },
+  "rigid_contact_hard": false,
+  "friction_epsilon": 1e-05,
+  "rigid_contact_history": false,
+  "socket_friction": 0.35,
+  "socket_contact_ke_N_m": 1000.0,
+  "latch_stiffness_Nm_rad": 0.001,
+  "latch_damping_Nms_rad": 1e-05,
+  "latch_limit_ke": 3.0,
+  "latch_limit_kd": 0.0002,
+  "latch_contact_ke_N_m": 50000.0,
+  "return_tip_m": [
+    0.48,
+    -0.14,
+    0.008
+  ],
+  "withdraw_grasp_offset_m": [
+    -0.0035,
+    0.00055,
+    -0.018
+  ],
+  "withdraw_half_gap_m": 0.0036,
+  "floor_height_m": 0.002,
+  "open_half_gap_m": 0.04
+}

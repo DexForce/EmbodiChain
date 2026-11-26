@@ -164,10 +164,15 @@ def randomize_scene_export(
     Returns:
         Completed run under scene_layouts, retaining the original export.
     """
+    from embodichain.gen_sim.scene_engine.pipeline.utils.scene_package import (
+        _restore_scene_export,
+    )
+
     cfg = _job_config(config)
     root = Path(output_root).expanduser().resolve()
     if root.name == "scene_export":
         root = root.parent
+    _restore_scene_export(root)
     original_digest = _export_digest(root)
     source = scene_layout_input_from_export(root)
     prepared = prepare_scene_randomization(

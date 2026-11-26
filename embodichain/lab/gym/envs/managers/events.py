@@ -35,6 +35,7 @@ from embodichain.lab.sim.objects import (
 from embodichain.lab.sim.cfg import RigidObjectCfg, ArticulationCfg, RigidConstraintCfg
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.gym.envs.managers._event_functors import (
+    pre_roll_with_robot_home,
     wait_for_dynamic_objects_to_settle,
 )
 from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
@@ -71,6 +72,7 @@ __all__ = [
     "resolve_dict",
     "get_pose",
     "drop_rigid_object_group_sequentially",
+    "pre_roll_with_robot_home",
     "wait_for_dynamic_objects_to_settle",
     "set_detached_uids_for_env_reset",
     "create_rigid_constraint",
