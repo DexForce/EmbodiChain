@@ -409,6 +409,9 @@ class OnlineDataEngineCfg:
     fills. Only successful exits from ``group_batch`` earn recycling credits.
     """
 
+    camera_color_channels: Literal[3, 4] = 4
+    """Stored camera channels. Select 3 for RGB-only rollout consumers."""
+
 
 def _validate_recording_config(cfg: OnlineDataEngineCfg) -> None:
     """Require an explicit ordered contract when recording policy requests."""
@@ -1781,6 +1784,7 @@ class OnlineDataEngine:
             gym_config,
             device=self.cfg.buffer_device,
             batch_size=self.cfg.buffer_size,
+            camera_color_channels=self.cfg.camera_color_channels,
             max_episode_steps=max_episode_steps,
             state_dim=self.cfg.state_dim,
             **(

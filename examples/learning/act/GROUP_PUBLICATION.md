@@ -78,6 +78,11 @@ the step boundary of each refill authorization. The auditor reconstructs
 live credits at each release and reports history draws and mean distinct
 trajectory counts over consecutive 10- and 100-update windows. An optimizer
 failure discards the pending live credits and the journal entry.
+Set `"camera_color_channels": 3` independently to retain RGB in live
+slots and copied anchors. The default stores four uint8 channels per pixel.
+Camera masks and depths keep their original layouts. ACT consumes the same
+three color channels with either storage setting.
+
 The calibration, development selection, 300-second publication budget and
 independent reserved evaluation use the same protocol for both arms.
 

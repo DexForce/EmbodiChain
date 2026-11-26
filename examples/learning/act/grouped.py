@@ -136,6 +136,7 @@ def make_engine(
     device: str = "cuda:0",
     logical_width: int | None = None,
     lane_offset: int = 0,
+    camera_color_channels: int = 4,
 ) -> Any:
     """Start an explicit single-renderer producer with raw PushCube policy requests."""
     from embodichain.data_pipeline.engine.data import (
@@ -160,6 +161,7 @@ def make_engine(
             buffer_size=capacity,
             max_episode_steps=300,
             buffer_device="cpu",
+            camera_color_channels=camera_color_channels,
             refill_policy="manual",
             group_min_draws=floor,
             action_semantics="policy_request",
@@ -613,6 +615,7 @@ def _train(
                     device=str(ranks.device),
                     logical_width=spec["producer_envs"],
                     lane_offset=ranks.rank * lanes,
+                    camera_color_channels=spec.get("camera_color_channels", 4),
                 )
                 cleanup.callback(engine.stop)
                 producer = _Producer(engine, path, ranks.rank, lanes, slots, cap)

@@ -47,7 +47,7 @@ from typing import (
     Literal,
     Optional,
 )
-from tensordict import TensorDict
+from tensordict import TensorDict, TensorDictBase
 
 from embodichain.lab.sim.cfg import (
     RobotCfg,
@@ -1078,7 +1078,12 @@ class EmbodiedEnv(BaseEnv):
         buffer_step_ids = step_ids.to(buffer_device)
         obs_device = getattr(obs, "device", None) or self.device
         obs_env_ids = env_ids.to(obs_device)
-        target[buffer_env_ids, buffer_step_ids] = obs[obs_env_ids].to(buffer_device)
+        recorded = obs[obs_env_ids]
+        for key in getattr(self, "_rgb_rollout_keys", ()):
+            color = recorded.get(key, None)
+            if color is not None and color.shape[-1] == 4:
+                recorded[key] = color[..., :3]
+        target[buffer_env_ids, buffer_step_ids] = recorded.to(buffer_device)
 
     def _record_initial_observation(
         self, frame: ObservationFrame, env_ids: torch.Tensor
@@ -1154,6 +1159,20 @@ class EmbodiedEnv(BaseEnv):
 
         self.rollout_buffer = rollout_buffer
         self._rollout_buffer_mode = self._infer_rollout_buffer_mode(rollout_buffer)
+        self._rgb_rollout_keys = ()
+        obs = rollout_buffer.get("obs", None)
+        if self._rollout_buffer_mode == "expert" and isinstance(obs, TensorDictBase):
+            self._rgb_rollout_keys = tuple(
+                key
+                for key, value in obs.items(include_nested=True, leaves_only=True)
+                if isinstance(key, tuple)
+                and len(key) == 3
+                and key[0] == "sensor"
+                and key[-1] in {"color", "color_right"}
+                and value.ndim == 5
+                and value.dtype == torch.uint8
+                and value.shape[-1] == 3
+            )
         self._rollout_action_semantics = (
             "policy_request"
             if self._rollout_buffer_mode == "rl"

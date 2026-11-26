@@ -2132,6 +2132,45 @@ def test_close_incomplete_execution_cleans_runtime_before_sim_without_stepping()
     assert env._active_task_program_bridge.is_complete is False
 
 
+def test_rgb_rollout_storage_keeps_native_stereo_observations() -> None:
+    from embodichain.lab.gym.utils.gym_utils import init_rollout_buffer_from_config
+
+    cfg = {
+        "physics": "default",
+        "env": {},
+        "sensor": [
+            {
+                "uid": "eyes",
+                "sensor_type": "StereoCamera",
+                "width": 3,
+                "height": 2,
+                "enable_mask": True,
+            }
+        ],
+    }
+    buffer = init_rollout_buffer_from_config(cfg, 5, 2, 7, camera_color_channels=3)
+    obs = buffer["obs"][:, 0].clone()
+    for n, key in enumerate(("color", "color_right")):
+        image = torch.arange(48, dtype=torch.uint8).reshape(2, 2, 3, 4) + n
+        obs["sensor", "eyes", key] = image
+    env = _RolloutWriterStub()
+    env.get_obs = lambda: obs
+    env._clear_expert_rollout_rows = MethodType(
+        EmbodiedEnv._clear_expert_rollout_rows, env
+    )
+    env._infer_rollout_buffer_mode = MethodType(
+        EmbodiedEnv._infer_rollout_buffer_mode, env
+    )
+    EmbodiedEnv.set_rollout_buffer(env, buffer)
+    for key in ("color", "color_right"):
+        rgba = obs["sensor", "eyes", key]
+        assert rgba.shape[-1] == 4
+        torch.testing.assert_close(
+            buffer["obs", "sensor", "eyes", key][:, 0], rgba[..., :3]
+        )
+    assert buffer["obs", "sensor", "eyes", "mask_right"].shape == (2, 5, 2, 3)
+
+
 def test_expert_rollout_keeps_terminal_observation_in_shared_backing_storage():
     env = _RolloutWriterStub()
     full = _make_rollout_buffer(2, 6)

@@ -2319,6 +2319,7 @@ def init_rollout_buffer_from_config(
     action_dim: int | None = None,
     *,
     source_path: str | os.PathLike[str] | None = None,
+    camera_color_channels: int = 4,
 ) -> TensorDict:
     """Initialize a rollout buffer based on the environment configuration.
 
@@ -2335,6 +2336,7 @@ def init_rollout_buffer_from_config(
         batch_size (int): The batch size for the rollout buffer.
         state_dim (int): The dimension of the flattened state vector.
         action_dim: Stored action width, defaulting to state_dim.
+        camera_color_channels: Store RGB (3) or RGBA (4) for each camera eye.
         source_path: Owning Gym configuration file for relative component paths.
             None preserves resolution from the current working directory.
 
@@ -2345,6 +2347,8 @@ def init_rollout_buffer_from_config(
     from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
     from embodichain.lab.sim.sensors import SensorCfg
 
+    if type(camera_color_channels) is not int or camera_color_channels not in (3, 4):
+        raise ValueError("camera_color_channels must be 3 or 4")
     if action_dim is not None and (type(action_dim) is not int or action_dim < 1):
         raise ValueError("action_dim must be a positive integer or None")
 
@@ -2405,7 +2409,7 @@ def init_rollout_buffer_from_config(
                     max_episode_steps,
                     height,
                     width,
-                    4,
+                    camera_color_channels,
                 ),
                 dtype=torch.uint8,
                 device=device,
@@ -2440,7 +2444,7 @@ def init_rollout_buffer_from_config(
                         max_episode_steps,
                         height,
                         width,
-                        4,
+                        camera_color_channels,
                     ),
                     dtype=torch.uint8,
                     device=device,

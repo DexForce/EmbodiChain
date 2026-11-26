@@ -76,7 +76,11 @@ fewer draws than the recycling floor. The ACT example owns the deadline and
 physical scoring. Use `try_refill_group_with_anchors` for bounded RAM replay
 at eviction. It returns owned valid anchors and masked targets before the
 writer can reuse the group. Only newly displaced episodes return copies.
-Applications account for history separately from live slot credits. The dual-GPU example has two layouts. Each rank can own a
+Applications account for history separately from live slot credits.
+`OnlineDataEngineCfg.camera_color_channels` sets the expert rollout store to
+RGB or RGBA for both camera eyes. The expert writer stores the first three channels in an RGB
+store. Sensors retain their native observation layout.
+The dual-GPU example has two layouts. Each rank can own a
 local engine, or rank zero can draw and distribute one global batch. The
 application waits for all optimizer updates before committing its contexts.
 See the [grouped ACT study](../../../examples/learning/act/GROUP_PUBLICATION.md#compare-dual-gpu-supply-layouts).
