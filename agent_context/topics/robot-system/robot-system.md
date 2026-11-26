@@ -54,6 +54,13 @@ empty World's owner thread, and the host retains World ownership.
 The [policy-run example](../../../examples/learning/policy_runs/README.md)
 owns the RP1 and ANYmal-C catalogs, resources and DexPilot setup.
 
+A dedicated writer also exposes the optional `--motion-output` MCP mode.
+Kinematics and plan previews bind to the live Robot and Scene. Motion,
+skill and program jobs advance on the World owner through
+`lab/sim/dexsim_session/_motion_jobs.py`; stdio polling reads durable receipts.
+The qualified UR5 example in `examples/learning/policy_runs/MOTION.md` shows
+grasp evidence and handoff between independent Pick and Place submissions.
+
 ## Configuration resolution
 
 The lightweight catalog is the selection boundary for Gym, preview, workspace
