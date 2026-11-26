@@ -41,6 +41,12 @@ in `embodichain/lab/observations/joints.py`. The host adapter in
 on each read and reports measured positions and velocities with aligned joint names and units, scene topology
 revision and available simulation clock. Disconnecting leaves the World running.
 
+A dedicated single-writer host may also expose control status, target-and-step,
+receipt and stop through `--writer-key-file`. The regular session route stays
+read-only. Use the [external World ownership contract](../simulation-system/simulation-system.md)
+and the runnable `examples/sim/attached_world/` fixture for grant, clock,
+retry and DexPilot Run/turn semantics.
+
 ## Configuration resolution
 
 The lightweight catalog is the selection boundary for Gym, preview, workspace

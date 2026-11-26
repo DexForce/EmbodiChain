@@ -7356,3 +7356,17 @@ embodichain.lab.sim.dexsim_session.writer
 
 .. autoclass:: embodichain.lab.sim.dexsim_session.writer.WriterClient
    :members:
+
+Dedicated MCP writer session
+----------------------------
+
+Use ``embodichain mcp --session ID --session-directory DIR --writer-key-file FILE``
+only after the World owner provisions a dedicated controller. The opt-in tools
+are ``embodichain_control_status``, ``embodichain_control_target_and_step``,
+``embodichain_control_receipt`` and ``embodichain_control_stop``. The client
+provides the host binding, receipt revision, stable command ID, control group,
+ordered positions and units, and control interval. A successful receipt records
+native target acceptance separately from measured attainment. Query the original
+command after a connection loss. Supply both ``--run-id`` and ``--turn`` to
+attribute native journal entries. DexSim MCP owns scene setup and low-level
+inspection.
