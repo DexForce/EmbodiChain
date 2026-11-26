@@ -27,6 +27,13 @@ Shared runtime fields remain documented on ``RobotCfg``; the class declarations
 below identify canonical imports without re-expanding inherited configuration
 fields or generated constructors.
 
+.. toctree::
+   :maxdepth: 1
+
+   agibot_g1
+   data/eef_assets
+   locomotion_robots
+
 
 embodichain.robot_registry
 --------------------------

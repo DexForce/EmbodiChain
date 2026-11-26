@@ -337,6 +337,7 @@ Other dynamics families
    :maxdepth: 2
 
    rwm
+   model_rigidformer
 
 
 WorldParticle independent transition

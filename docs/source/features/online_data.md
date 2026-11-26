@@ -6,6 +6,9 @@ learner can run independently; explicit provenance and optional per-trajectory
 delivery budgets make data use auditable. Shared APIs live in
 `embodichain.data_pipeline` and do not depend on a particular learner or task.
 
+Start with the [runnable examples](#runnable-examples) to see a simulator feed
+live batches to a learner.
+
 | Component | Responsibility |
 | --- | --- |
 | `OnlineDataEngine` | Own the simulation producer, shared storage, publication, locked selection/copy and optional live sampling ledger. |

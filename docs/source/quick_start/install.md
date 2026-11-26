@@ -2,7 +2,8 @@
 
 EmbodiChain is a Python framework built on the [DexSim](https://github.com/DexForce) simulation engine (`dexsim_engine` on PyPI). This guide covers system requirements, package indexes, Docker and local install paths, optional policy deployment, NMG input gradients, generative-simulation dependencies, and verification.
 
-After installation, continue with the [Quick Start Tutorial](../tutorial/index.rst).
+After installation, follow {doc}`first_run` to create a scene or preview an
+official task.
 
 ## Choose your setup
 
@@ -249,6 +250,23 @@ Commands can continue to use repository-style paths such as
 EmbodiChain resolves these paths from the checkout when present and otherwise
 from the installed wheel.
 
+(verify-install)=
+## Verify installation
+
+### Quick check (all install methods)
+
+```bash
+python -c "import embodichain, dexsim; print('embodichain', embodichain.__version__); print('dexsim', dexsim.__version__)"
+```
+
+You should see version strings for both packages with no import errors. To
+check simulation startup, {ref}`run a scene <first-run-scene>` or
+{ref}`preview an official task <first-run-task>`.
+
+### Simulation tutorial (source tree or Docker with repo)
+
+See {ref}`first-run-scene` for the tutorial command and local or remote display setup.
+
 ## Optional: policy deployment (`policy-deploy`)
 
 Install the `policy-deploy` extra to run ONNX policies with NeuralPlanner/NMG
@@ -396,58 +414,6 @@ correction described in the
 
 For Asset Engine usage and LLM configuration, see [Asset Engine](../features/generative_sim/asset_engine.md).
 
-## Verify installation
-
-### Quick check (all install methods)
-
-```bash
-python -c "import embodichain, dexsim; print('embodichain', embodichain.__version__); print('dexsim', dexsim.__version__)"
-```
-
-You should see version strings for both packages with no import errors.
-
-### Simulation tutorial (source tree or Docker with repo)
-
-The tutorial script `scripts/tutorials/sim/create_scene.py` ships with the repository. Run it from the **repository root**:
-
-```bash
-cd /path/to/EmbodiChain
-python scripts/tutorials/sim/create_scene.py
-```
-
-- **With a display:** omit `--headless` to open the DexSim viewer after the scene is built.
-- **Headless / SSH:** use `--headless` to run without a window (FPS logs in the terminal):
-
-```bash
-python scripts/tutorials/sim/create_scene.py --headless
-```
-
-Optional GPU smoke test:
-
-```bash
-python scripts/tutorials/sim/create_scene.py --headless --device cuda
-```
-
-For a headless browser view, enable Viser:
-
-```bash
-python scripts/tutorials/sim/create_scene.py --viser
-```
-
-Open the endpoint printed in the terminal, normally
-`http://127.0.0.1:8080`. On a remote machine, keep the default loopback binding
-and forward the port:
-
-```bash
-ssh -N -L 8080:127.0.0.1:8080 user@worker-host
-```
-
-See [Browser visualization with Viser](../overview/sim/visualization/viser.md)
-for supported objects, camera preview, update-rate options, and remote-access
-guidance.
-
-Press `Ctrl+C` to stop; the script cleans up the simulation on exit.
-
 ## Troubleshooting
 
 | Symptom | What to try |
@@ -465,4 +431,5 @@ Press `Ctrl+C` to stop; the script cleans up the simulation on exit.
 - [Quick Start Tutorial](../tutorial/index.rst)
 - [Simulation Manager](../overview/sim/sim_manager.md)
 - [Browser visualization with Viser](../overview/sim/visualization/viser.md)
-- [Build documentation](docs.md)
+
+If you are editing the documentation, see {doc}`docs`.
