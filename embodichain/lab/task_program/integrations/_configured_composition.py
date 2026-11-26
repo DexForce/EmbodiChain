@@ -68,8 +68,8 @@ _GRASP_GENERATOR_OVERRIDE_FIELDS = frozenset(
     {
         "angle_weight",
         "center_weight",
-        "opening_weight",
         "sample_count",
+        "max_candidates",
         "approach_direction_samples",
         "point_spacing",
         "filter_ground_collision",

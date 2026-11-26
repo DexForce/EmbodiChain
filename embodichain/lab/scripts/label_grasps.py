@@ -14,7 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Sample and physically verify object-local parallel-jaw grasp labels."""
+"""Generate object-local TCP poses for a mesh and a parallel-jaw gripper URDF.
+
+Drop the object into stable table placements, sample antipodal candidates from
+upper-hemisphere approach directions and test them in parallel with GraspValidator.
+Pose NMS retains distinct successful grasps. The output PyTorch file pairs each
+4×4 grasp_pose with its open_length in metres and records the source placement
+and world-frame approach direction.
+"""
 
 from __future__ import annotations
 
@@ -144,16 +151,22 @@ def _resolve_hand(settings: dict, urdf: Path):
         )
         if not data.get("pad_links"):
             raise ValueError("Custom grippers require two pad_links")
+        drives = data.pop("joint_drive_props", None)
         model = ParallelJawGripperCfg(
             uid=data["model_id"],
             **data,
             solver_cfg={},
         )
+        if drives is not None:
+            from embodichain.lab.sim.cfg import JointDrivePropertiesCfg
+
+            model.joint_drive_props = JointDrivePropertiesCfg(**drives)
         model.root_props.fixed_base = True
     return model, options
 
 
-def _generator(v, urdf, sampling, clearance):
+def _generator(v, urdf, sampling, clearance, *, generator_settings=None):
+    settings = generator_settings or {}
     hand = v.cfg
     description = {
         name: getattr(hand, name)
@@ -170,17 +183,24 @@ def _generator(v, urdf, sampling, clearance):
             "max_opening_width",
         )
     }
-    geometry = build_gripper_collision_geometry(description | {"fpath": str(urdf)})
+    geometry = build_gripper_collision_geometry(
+        description | {"fpath": str(urdf)},
+        point_spacing=settings.get("point_spacing", 0.012),
+    )
+    algorithm = dict(
+        sample_count=sampling.sample_count,
+        max_candidates=sampling.candidates_per_direction,
+        approach_direction_samples=1,
+        approach_alignment_angle=math.radians(sampling.approach_tolerance_deg),
+    )
+    algorithm.update(settings.get("algorithm", {}))
     return AntipodalGraspPoseGenerator(
         **grasp_generator_parameters(description),
         collision_geometry=geometry,
-        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
-            sample_count=sampling.sample_count,
-            max_candidates=sampling.candidates_per_direction,
-            approach_direction_samples=1,
-            approach_alignment_angle=math.radians(sampling.approach_tolerance_deg),
+        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(**algorithm),
+        collision_cfg=ParallelJawGraspCollisionCfg(
+            **(settings.get("collision", {}) | {"collision_threshold": clearance})
         ),
-        collision_cfg=ParallelJawGraspCollisionCfg(collision_threshold=clearance),
         annotation_cfg=GraspAnnotationCfg(disk_cache=False),
     )
 
@@ -334,7 +354,19 @@ def _labels(groups, placements, directions, sampling):
     )
 
 
-def _run(config, sampling, mesh_path, urdf, output, checkpoints, num_envs, resume):
+def _run(
+    config,
+    sampling,
+    mesh_path,
+    urdf,
+    output,
+    checkpoints,
+    num_envs,
+    resume,
+    *,
+    generator_settings=None,
+    candidate_transform=None,
+):
     hand, options = _resolve_hand(config["gripper"], urdf)
     rigid = dict(config.get("rigid", {}))
     if (
@@ -397,7 +429,13 @@ def _run(config, sampling, mesh_path, urdf, output, checkpoints, num_envs, resum
         seed = int(geometry_seed.generate_state(1)[0])
         np.random.seed(seed)
         torch.manual_seed(seed)
-        gen = _generator(v, urdf, sampling, config.get("collision_threshold", 0.005))
+        gen = _generator(
+            v,
+            urdf,
+            sampling,
+            config.get("collision_threshold", 0.005),
+            generator_settings=generator_settings,
+        )
         vertices, triangles = v.obj.get_semantic_mesh([0])
         mesh = vertices[0], triangles[0]
         groups = []
@@ -410,6 +448,8 @@ def _run(config, sampling, mesh_path, urdf, output, checkpoints, num_envs, resum
                     group = torch.load(path, map_location="cpu", weights_only=True)
                 else:
                     group = _candidates(gen, mesh, placement, direction)
+                    if candidate_transform is not None:
+                        group["poses"] = candidate_transform(group["poses"])
                     _save(path, group)
                 placement_groups.append((group, path))
                 groups.append((p, d, group))

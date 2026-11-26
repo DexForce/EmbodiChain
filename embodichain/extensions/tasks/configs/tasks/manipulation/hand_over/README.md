@@ -10,6 +10,24 @@ embodiment, Task Program integration and verified motion policy.
 | tianji_marvin | `task.tianji_marvin.yaml` | 750 mm tabletop in front of Marvin |
 | dual_franka_robotiq_arg2f_140 | `task.dual_franka_robotiq_arg2f_140.yaml` | Upright can and 500 mm support |
 
+## Dual UR5 with DH PGI grippers
+
+Run this command from the repository root to watch the source arm pick up the
+can and pass it to the receiving arm for placement.
+
+```bash
+python -m embodichain.lab.scripts.run_task \
+  --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/hand_over/task.dual_ur5_dh_pgi_140_80.yaml \
+  --no-headless --renderer fast-rt --seed 7 --max_episodes 1 --filter-dataset-saving
+```
+
+The default can transfer samples up to 200 candidate grasps per approach
+direction for physical validation. Both hands reuse the same labels when their
+gripper, object and sampling settings match. During planning, the source TCP
+must approach within 15° of the pickup direction and the receiver within 30°
+of its transfer direction. Adjust `max_candidates`, `pickup_approach_tolerance_deg`
+and `receive_approach_tolerance_deg` in [the handover integration](task_program/integration.yaml).
+
 ## Tianji Marvin
 
 The elongated can lies across a narrow pickup stand in the arms' shared

@@ -105,7 +105,7 @@ class _AntipodalMeshBackend:
         closing_geometry: SampledHandGeometry | None = None,
         closing_ground_height_m: float | None = None,
         closing_ground_clearance_m: float = 0.0,
-        ranking_weights: tuple[float, float, float] = _DEFAULT_RANKING_WEIGHTS,
+        ranking_weights: tuple[float, float] = _DEFAULT_RANKING_WEIGHTS,
     ) -> None:
         """Initialize the private backend for one target-local mesh.
 
@@ -118,7 +118,7 @@ class _AntipodalMeshBackend:
             max_deviation_angle: Maximum approach-axis deviation in radians.
             approach_direction_samples: Number of approach variants per pair.
             max_candidates: Maximum number of ranked candidates to retain.
-            ranking_weights: Relative angle, center and larger-opening weights.
+            ranking_weights: Relative angle and center weights.
             check_collision: Construct and use the fixed-hand checker; false
                 serves explicit unqualified proposal queries only.
             prepared: Same-generator backend whose immutable mesh/annotation
@@ -952,7 +952,6 @@ class _AntipodalMeshBackend:
         )
         total_cost = _grasp_costs(
             valid_grasp_poses,
-            valid_open_lengths,
             valid_centers,
             approach_direction,
             mesh_center,

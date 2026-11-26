@@ -1565,6 +1565,8 @@ def test_configured_handover_decodes_source_retreat_clearance() -> None:
             "kind": "hand_over",
             "retreat_distance": 0.12,
             "retreat_steps": 28,
+            "pickup_approach_tolerance_deg": 15,
+            "receive_approach_tolerance_deg": 30,
         },
         path="policy.skill_options.hand_over",
     )
@@ -1572,6 +1574,8 @@ def test_configured_handover_decodes_source_retreat_clearance() -> None:
     assert type(options) is HandOverOptions
     assert options.retreat_distance == pytest.approx(0.12)
     assert options.retreat_steps == 28
+    assert options.pickup_approach_tolerance_deg == 15
+    assert options.receive_approach_tolerance_deg == 30
 
 
 @pytest.mark.parametrize(
@@ -1776,7 +1780,6 @@ def test_grasp_generator_resolves_named_model_and_library_defaults() -> None:
     assert factory.approach_direction_samples is None
     assert factory.angle_weight is None
     assert factory.center_weight is None
-    assert factory.opening_weight is None
     assert factory.point_spacing == pytest.approx(0.012)
     assert factory.root_from_tcp is None
     assert factory.filter_ground_collision is None
@@ -1798,7 +1801,6 @@ def test_grasp_generator_factory_defers_to_toolkit_policy_defaults() -> None:
     assert generator.algorithm_cfg.approach_direction_samples == 4
     assert generator.algorithm_cfg.angle_weight == 0.5
     assert generator.algorithm_cfg.center_weight == 0.5
-    assert generator.algorithm_cfg.opening_weight == 0.0
     assert generator.collision_geometry.provenance["point_spacing_m"] == pytest.approx(
         0.012
     )
@@ -1840,7 +1842,6 @@ def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch)
             "center_mode": "centroid",
             "angle_weight": 2.0,
             "center_weight": 3.0,
-            "opening_weight": 5.0,
             "root_from_contact_frame": contact,
         },
         path="generator",
@@ -1851,7 +1852,6 @@ def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch)
     assert generator.algorithm_cfg.center_mode == "centroid"
     assert generator.algorithm_cfg.angle_weight == 2.0
     assert generator.algorithm_cfg.center_weight == 3.0
-    assert generator.algorithm_cfg.opening_weight == 5.0
 
     assert geometry_values["root_from_contact_frame"] == contact
 
@@ -1866,8 +1866,7 @@ def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch)
         {"center_mode": "guessed"},
         {"angle_weight": -0.1},
         {"center_weight": float("inf")},
-        {"opening_weight": float("nan")},
-        {"opening_weight": True},
+        {"opening_weight": 1.0},
         {"angle_weight": 0, "center_weight": 0},
         {"root_from_contact_frame": [[0.0] * 4 for _ in range(4)]},
     ],
@@ -1897,7 +1896,7 @@ def test_task_grasp_ranking_overrides_change_service_identity() -> None:
         config["task_program"], base_dir=path.parent
     )
     declaration.setdefault("runtime_services", {})["grasp_pose_generator_overrides"] = {
-        "left_eef": {"angle_weight": 0.25, "center_weight": 0.5, "opening_weight": 0.25}
+        "left_eef": {"angle_weight": 0.25, "center_weight": 0.5, "max_candidates": 200}
     }
     tuned = load_configured_task_program_deployment(
         task_program={**config["task_program"], "integration": {"inline": declaration}},
@@ -2107,11 +2106,8 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
         "embodichain.extensions.robots.tianji.marvin.cfg.get_data_path",
         lambda value: value,
     )
-    path = _config_path("hand_over")
-    config = _gym_config("hand_over")
-    config["embodiment"] = {
-        "component": "../../../components/embodiments/tianji_marvin.yaml"
-    }
+    path = _CONFIG_DIRECTORY / "hand_over" / "task.tianji_marvin.yaml"
+    config = load_config(path)
     physical = _physical_components(path, config)
     robot_values = dict(physical.config["robot"])
     assert robot_values.pop("class_type") == "TianjiMarvin"
@@ -4751,6 +4747,9 @@ def test_unrelated_task_program_identities_keep_pre_cable_program_values():
     options["hand_interp_steps"] = 10
     options["hold_steps"] = 4
     options["grasp_retract_distance"] = 0.0
+    options.pop("pickup_approach_tolerance_deg", None)
+    options.pop("receive_approach_tolerance_deg", None)
+    declaration["runtime_services"].pop("grasp_pose_generator_overrides", None)
     config["task_program"]["integration"] = {"inline": declaration}
     deployment = _load_configured_task_program_deployment(
         task_program=config["task_program"],

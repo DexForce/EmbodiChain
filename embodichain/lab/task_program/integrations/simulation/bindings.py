@@ -770,6 +770,9 @@ def _antipodal_affordance(
         "mesh_vertices": vertices,
         "mesh_triangles": triangles,
     }
+    attrs = getattr(getattr(entity, "cfg", None), "attrs", None)
+    if attrs is not None:
+        kwargs["validation_attrs"] = attrs.to_dict()
     if binding.internal_axis is None:
         return AntipodalAffordance(**kwargs)
     return AxisAlignAffordance(

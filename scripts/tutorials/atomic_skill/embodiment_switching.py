@@ -164,6 +164,7 @@ def main() -> None:
                 n_sample=args.n_sample,
                 force_refresh=args.force_reannotate,
                 gripper_data=model,
+                hand_commands=(cfg.commands[part]["open"], cfg.commands[part]["grasp"]),
                 collision_geometry=cfg.collision_geometries[part],
                 approach_direction_samples=1,
             )

@@ -362,7 +362,6 @@ class _AntipodalGraspPoseGeneratorFactory:
     center_mode: str | None = None
     angle_weight: float | None = None
     center_weight: float | None = None
-    opening_weight: float | None = None
     filter_ground_collision: bool | None = None
     force_refresh: bool | None = None
 
@@ -443,7 +442,7 @@ class _AntipodalGraspPoseGeneratorFactory:
         from embodichain.lab.sim.utility.gripper_geometry import (
             build_gripper_collision_geometry,
         )
-        import numpy as np
+        from embodichain.lab.sim.utility._validated_grasps import ValidatedGraspCache
 
         algorithm_kwargs: dict[str, object] = {}
         if self.sample_count is not None:
@@ -458,7 +457,6 @@ class _AntipodalGraspPoseGeneratorFactory:
             "center_mode",
             "angle_weight",
             "center_weight",
-            "opening_weight",
         ):
             value = getattr(self, name)
             if value is not None:
@@ -475,16 +473,20 @@ class _AntipodalGraspPoseGeneratorFactory:
         import json
 
         defaults = json.loads(self.gripper_json)
+        geometry = build_gripper_collision_geometry(
+            defaults, point_spacing=self.point_spacing
+        )
+        collision = ParallelJawGraspCollisionCfg(**collision_kwargs)
         return AntipodalGraspPoseGenerator(
+            validated_labels=ValidatedGraspCache(
+                defaults, algorithm_kwargs, collision, geometry
+            ),
             model_id=defaults["model_id"],
             min_opening_width=defaults["min_opening_width"],
             max_opening_width=defaults["max_opening_width"],
-            collision_geometry=build_gripper_collision_geometry(
-                defaults,
-                point_spacing=self.point_spacing,
-            ),
+            collision_geometry=geometry,
             algorithm_cfg=AntipodalGraspPoseGeneratorCfg(**algorithm_kwargs),
-            collision_cfg=ParallelJawGraspCollisionCfg(**collision_kwargs),
+            collision_cfg=collision,
             annotation_cfg=GraspAnnotationCfg(**annotation_kwargs),
         )
 

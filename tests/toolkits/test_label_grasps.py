@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+import math
+
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -119,3 +121,156 @@ def test_stable_orientations_ignore_translation_and_nearby_rotations() -> None:
     directions = labels._directions(np.random.default_rng(8), 24)
     assert (directions[:, 2] <= 0).all()
     torch.testing.assert_close(directions.norm(dim=1), torch.ones(24))
+
+
+def test_validated_pickup_cache_identity(tmp_path: Path) -> None:
+    from embodichain.lab.sim.utility._validated_grasps import _cache_key
+    import hashlib
+
+    hand = tmp_path / "hand.urdf"
+    hand.write_bytes(b"hand")
+    vertices = torch.eye(3)
+    triangles = torch.tensor([[0, 1, 2]], dtype=torch.int32)
+    policy = {"seed": 0, "directions": 64}
+    expected = hashlib.md5(
+        vertices.numpy().tobytes()
+        + triangles.numpy().tobytes()
+        + b'{"directions":64,"seed":0}'
+    ).hexdigest()
+    key = _cache_key(hand, vertices, triangles, policy)
+    assert key == f"{hashlib.md5(b'hand').hexdigest()}-{expected}"
+    assert key != _cache_key(hand, vertices + 1, triangles, policy)
+    assert key != _cache_key(hand, vertices, triangles.flip(1), policy)
+    assert key != _cache_key(hand, vertices, triangles, policy | {"seed": 1})
+    hand.write_bytes(b"different hand")
+    assert key != _cache_key(hand, vertices, triangles, policy)
+
+
+def test_live_cost_precedes_tcp_alignment_and_uses_the_current_support() -> None:
+    from embodichain.lab.sim.utility._validated_grasps import _rank_labels
+    from embodichain.toolkits.graspkit.pg_grasp import (
+        AntipodalGraspPoseGeneratorCfg,
+        ParallelJawGraspCollisionCfg,
+    )
+
+    # Candidate 0 points exactly along the first approach, but is off center.
+    # 1 and 2 have equal cost and opposite TCP axes. Rotating the object swaps them.
+    tcp = torch.eye(4).repeat(3, 1, 1)
+    tcp[0, 0, 3] = 0.02
+    tcp[1, 1, 1] = tcp[1, 2, 2] = -1
+    obj = torch.eye(4).repeat(2, 1, 1)
+    obj[1, 1, 1] = obj[1, 2, 2] = -1
+    geom = SimpleNamespace(
+        provenance={"grasp_from_tcp": torch.eye(4).tolist()},
+        points=torch.tensor([[0.0, 0.0, 0.1]]),
+    )
+    args = (
+        tcp,
+        torch.tensor([[-0.03, -0.03, -0.03], [0.03, 0.03, 0.03]]),
+        obj,
+        torch.tensor([0.0, 0.0, 1.0]),
+        geom,
+        AntipodalGraspPoseGeneratorCfg(),
+    )
+    order = _rank_labels(
+        *args, ParallelJawGraspCollisionCfg(filter_ground_collision=False), "center"
+    )
+    assert order.tolist() == [[2, 1, 0], [1, 2, 0]]
+    within_cone = _rank_labels(
+        *args,
+        ParallelJawGraspCollisionCfg(filter_ground_collision=False),
+        tcp_tolerance_deg=15,
+    )
+    assert within_cone.tolist() == [[2, 0], [1, -1]]
+    on_table = _rank_labels(*args, ParallelJawGraspCollisionCfg(), "center")
+    assert on_table.tolist() == [[2, 0], [1, -1]]
+
+
+def test_validated_pickup_scores_the_contact_axis_in_a_calibrated_hand() -> None:
+    from embodichain.lab.sim.utility._validated_grasps import _rank_labels
+    from embodichain.toolkits.graspkit.pg_grasp import (
+        AntipodalGraspPoseGeneratorCfg,
+        ParallelJawGraspCollisionCfg,
+    )
+
+    tcp = torch.eye(4).repeat(2, 1, 1)
+    # Rx(90) leaves TCP X horizontal. Ry(90) leaves TCP Y horizontal.
+    tcp[0, :3, :3] = torch.tensor([[1, 0, 0], [0, 0, -1], [0, 1, 0]])
+    tcp[1, :3, :3] = torch.tensor([[0, 0, 1], [0, 1, 0], [-1, 0, 0]])
+    grasp_from_tcp = [[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+    geom = SimpleNamespace(
+        provenance={"grasp_from_tcp": grasp_from_tcp}, points=torch.zeros(1, 3)
+    )
+    order = _rank_labels(
+        tcp,
+        torch.zeros(1, 3),
+        torch.eye(4)[None],
+        torch.tensor([0.0, 0.0, 1.0]),
+        geom,
+        AntipodalGraspPoseGeneratorCfg(angle_weight=1, center_weight=0),
+        ParallelJawGraspCollisionCfg(filter_ground_collision=False),
+        "center",
+    )
+    assert order.tolist() == [[1, 0]]
+
+
+def test_validated_grasps_partition_contact_centers_per_arm_in_the_live_frame() -> None:
+    from embodichain.lab.sim.utility._validated_grasps import _rank_labels
+    from embodichain.toolkits.graspkit.pg_grasp import (
+        AntipodalGraspPoseGeneratorCfg,
+        ParallelJawGraspCollisionCfg,
+    )
+
+    tcp = torch.eye(4).repeat(5, 1, 1)
+    tcp[:, 0, 3] = torch.tensor([-0.9, -0.1, 0.0, 0.2, 0.8])
+    objects = torch.eye(4).repeat(2, 1, 1)
+    objects[1, :2, :2] *= -1
+    args = (
+        tcp,
+        torch.tensor([[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]),
+        objects,
+        torch.tensor([0.0, 0.0, -1.0]),
+        SimpleNamespace(
+            provenance={"grasp_from_tcp": torch.eye(4).tolist()},
+            points=torch.zeros(1, 3),
+        ),
+        AntipodalGraspPoseGeneratorCfg(),
+        ParallelJawGraspCollisionCfg(),
+    )
+    params = dict(axis=torch.tensor([1.0, 0.0, 0.0]), on_support=False)
+    assert _rank_labels(*args, **params, positive=True, middle_gap=0.5).tolist() == [
+        [4],
+        [0],
+    ]
+    assert _rank_labels(
+        *args, **params, positive=torch.tensor([False, True]), middle_gap=0.5
+    ).tolist() == [[0], [0]]
+    assert _rank_labels(*args, **params, middle_only=True).tolist() == [
+        [2, 1, 3],
+        [2, 1, 3],
+    ]
+
+
+def test_physical_label_adjustments_apply_in_local_tcp_axes_before_validation() -> None:
+    from embodichain.lab.sim.utility._validated_grasps import _adjust_candidates
+
+    pose = torch.eye(4)[None]
+    adjusted = _adjust_candidates(
+        pose,
+        dict(
+            mirrored=True,
+            rotate_upright=math.pi / 2,
+            upright_axis=[0, 1, 0],
+            retract=0.01,
+        ),
+    )
+    torch.testing.assert_close(
+        adjusted[0, :3, 0], torch.tensor([-1.0, 0.0, 0.0]), atol=1e-6, rtol=0.0
+    )
+    torch.testing.assert_close(
+        adjusted[0, :3, 2], torch.tensor([0.0, -1.0, 0.0]), atol=1e-6, rtol=0.0
+    )
+    torch.testing.assert_close(
+        adjusted[0, :3, 3], torch.tensor([0.0, 0.01, 0.0]), atol=1e-6, rtol=0.0
+    )
+    assert torch.equal(pose[0], torch.eye(4))

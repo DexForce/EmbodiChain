@@ -169,7 +169,7 @@ def _generator(
     *,
     force_refresh: bool = False,
     alignment_angle: float | None = None,
-    weights: tuple[float, float, float] = (0.5, 0.5, 0.0),
+    weights: tuple[float, float] = (0.5, 0.5),
 ) -> AntipodalGraspPoseGenerator:
     return AntipodalGraspPoseGenerator(
         model_id="concrete_test_eef",
@@ -181,7 +181,6 @@ def _generator(
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
             angle_weight=weights[0],
             center_weight=weights[1],
-            opening_weight=weights[2],
             sample_count=321,
             max_candidates=7,
             approach_alignment_angle=alignment_angle,
@@ -231,10 +230,10 @@ def test_generator_rejects_invalid_opening_bounds(
     [
         {"angle_weight": -1},
         {"center_weight": float("nan")},
-        {"opening_weight": float("inf")},
+        {"center_weight": float("inf")},
         {"angle_weight": True},
-        {"opening_weight": "1"},
-        {"angle_weight": 0, "center_weight": 0, "opening_weight": 0},
+        {"angle_weight": "1"},
+        {"angle_weight": 0, "center_weight": 0},
     ],
 )
 def test_ranking_configuration_rejects_invalid_weights(
@@ -245,14 +244,11 @@ def test_ranking_configuration_rejects_invalid_weights(
 
 
 def test_ranking_configuration_round_trip_retains_relative_weights() -> None:
-    cfg = AntipodalGraspPoseGeneratorCfg(
-        angle_weight=2.0, center_weight=3.0, opening_weight=5.0
-    )
+    cfg = AntipodalGraspPoseGeneratorCfg(angle_weight=2.0, center_weight=3.0)
     restored = AntipodalGraspPoseGeneratorCfg(**cfg.to_dict())
-    assert (restored.angle_weight, restored.center_weight, restored.opening_weight) == (
+    assert (restored.angle_weight, restored.center_weight) == (
         2.0,
         3.0,
-        5.0,
     )
 
 
@@ -361,7 +357,7 @@ def test_direct_best_grasp_configures_and_reuses_private_mesh_backend(
     alignment_angle,
 ) -> None:
     vertices, triangles = _geometry()
-    weights = (0.25, 0.5, 0.25)
+    weights = (0.25, 0.5)
     generator = _generator(alignment_angle=alignment_angle, weights=weights)
     object_poses = torch.eye(4).repeat(2, 1, 1)
 

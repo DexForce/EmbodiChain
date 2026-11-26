@@ -110,6 +110,7 @@ def mounted_gripper_geometry(
     if name == "dh_pgi_140_80":
         return (
             {
+                **resolve_gripper_defaults("DHPGI14080"),
                 "model_id": "dh_pgi_140_80",
                 "min_opening_width": 0.003,
                 "max_opening_width": 0.1,
@@ -128,6 +129,7 @@ def mounted_gripper_geometry(
     )
     if name == "robotiq_arg2f_140":
         model = {
+            **resolve_gripper_defaults("RobotiqArg2F140"),
             "model_id": "robotiq_2f_140",
             "min_opening_width": 0.005,
             "max_opening_width": 0.14,
@@ -138,6 +140,8 @@ def mounted_gripper_geometry(
             "model_id": name,
             "min_opening_width": 0.002,
             "max_opening_width": 0.05,
+            "pad_links": ["finger1_link", "finger2_link"],
+            "control_parts": {"eef": ["finger1_joint", "finger2_joint"]},
         }
         root_from_grasp[2, 3] = 0.12
     elif name == "dh_pgc_140_50_m":
@@ -148,6 +152,8 @@ def mounted_gripper_geometry(
             "model_id": name,
             "min_opening_width": 0.003,
             "max_opening_width": 0.088,
+            "pad_links": ["finger1", "finger2"],
+            "control_parts": {"eef": ["FINGER1", "FINGER2"]},
         }
         root_from_grasp = root_from_tcp.copy()
     else:

@@ -321,6 +321,7 @@ def run_assemble_demo(
         },
         grasp_pose_generators={
             "left_eef": create_parallel_jaw_grasp_pose_generator(
+                hand_commands=(left_open, left_close),
                 robot=robot,
                 arm_control_part="left_arm",
                 n_sample=args.n_sample,

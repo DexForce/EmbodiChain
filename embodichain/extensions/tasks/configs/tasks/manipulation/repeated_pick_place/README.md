@@ -40,9 +40,30 @@ Inspect the available deployments:
 
 ```bash
 embodichain show-task embodichain.extensions.tasks:repeated_pick_place
-embodichain run-task \
-  --gym-config embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml
 ```
+
+## Validated Franka pickup
+
+Run this command from the repository root to watch one repeated pick-and-place
+episode in the native simulator window.
+
+```bash
+python -m embodichain.lab.scripts.run_task \
+  --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml \
+  --no-headless --renderer fast-rt --max_episodes 1 --filter-dataset-saving
+```
+
+The first ordinary antipodal pick runs `GraspValidator` in a separate PhysX
+process using the configured standalone hand and the scaled object mesh.
+Subsequent picks reuse the object-local TCPs and opening widths in
+`~/.cache/embodichain/grasp_annotator_cache/validated/<urdf-md5>-<object-md5>.pt`.
+The object digest includes vertex and face bytes and a canonical JSON signature
+of sampling, hand calibration and physics parameters.
+
+For each placement, PickUp checks support clearance, recomputes the antipodal
+cost over eligible labels, then breaks equal costs by alignment of the runtime
+TCP +Z with the requested approach. It checks the ordered candidates in groups
+of 50 and selects the first reachable pre-grasp, grasp and lift sequence.
 
 ## Configured trajectory expansion
 

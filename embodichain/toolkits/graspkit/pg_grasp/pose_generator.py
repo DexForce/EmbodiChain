@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 import math
 import hashlib
@@ -210,17 +211,8 @@ class AntipodalGraspPoseGeneratorCfg:
     center_weight: float = _DEFAULT_RANKING_WEIGHTS[1]
     """Relative cost weight for distance from the selected mesh center."""
 
-    opening_weight: float = _DEFAULT_RANKING_WEIGHTS[2]
-    """Relative reward for larger legal openings; zero disables this preference.
-
-    Ranking weights must be finite, nonnegative and not all zero. Scoring
-    normalizes their sum; configuration snapshots retain the supplied values.
-    """
-
     def __post_init__(self) -> None:
-        _normalized_ranking_weights(
-            self.angle_weight, self.center_weight, self.opening_weight
-        )
+        _normalized_ranking_weights(self.angle_weight, self.center_weight)
         self.sample_count = _positive_int(
             self.sample_count,
             field_name="sample_count",
@@ -329,6 +321,10 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
     canonical contact frame; every public pose result is transformed once to
     the geometry's runtime TCP. Widths, costs and failure masks are preserved.
 
+    A simulation host may supply ``validated_labels`` to resolve physically validated
+    object-local TCPs, row-local candidate order (padded with -1) and their cache
+    key for atomic skills. Geometric queries remain available independently of this provider.
+
     Optional ``closing_geometry`` uses that same canonical contact frame and
     requires an explicit ``closing_ground_height_m``. It qualifies discrete
     open-to-contact floor clearance before ranking, including both runtime TCP
@@ -347,6 +343,9 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         collision_cfg: ParallelJawGraspCollisionCfg | None = None,
         annotation_cfg: GraspAnnotationCfg | None = None,
         collision_geometry: FixedGripperCollisionGeometry,
+        validated_labels: (
+            Callable[..., tuple[torch.Tensor, torch.Tensor, str]] | None
+        ) = None,
         closing_geometry: SampledHandGeometry | None = None,
         closing_ground_height_m: float | None = None,
         closing_ground_clearance_m: float = 0.0,
@@ -356,6 +355,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             max_opening_width=max_opening_width,
             model_id=model_id,
         )
+        self.validated_labels = validated_labels
         self._algorithm_cfg = deepcopy(
             AntipodalGraspPoseGeneratorCfg() if algorithm_cfg is None else algorithm_cfg
         )
@@ -516,7 +516,6 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             ranking_weights=(
                 algorithm.angle_weight,
                 algorithm.center_weight,
-                algorithm.opening_weight,
             ),
             interactive_annotation=annotation.selection_mode == "interactive",
             viser_port=annotation.viser_port,

@@ -76,7 +76,7 @@ def _prepared_backend(
     backend._approach_alignment_angle = None
     backend._closing_geometry = None
     backend._collision_threshold = 0.0
-    backend._ranking_weights = (0.5, 0.5, 0.0)
+    backend._ranking_weights = (0.5, 0.5)
     return backend
 
 
@@ -222,14 +222,14 @@ def test_default_grasp_mode_ranks_by_transformed_bounding_box_center(
 @pytest.mark.parametrize(
     ("weights", "expected_costs", "best_center_x"),
     [
-        ((0.5, 0.5, 0.0), [1 / 12, 0.05, 0.5], 0.01),
-        ((1e308, 1e308, 0.0), [1 / 12, 0.05, 0.5], 0.01),
-        ((0.25, 0.5, 0.25), [1 / 24, 0.175, 0.5], 0.0),
-        ((0.0, 1.0, 0.0), [0.0, 0.1, 1.0], 0.0),
+        ((0.5, 0.5), [1 / 12, 0.05, 0.5], 0.01),
+        ((1e308, 1e308), [1 / 12, 0.05, 0.5], 0.01),
+        ((2.0, 1.0), [1 / 9, 1 / 30, 1 / 3], 0.01),
+        ((0.0, 1.0), [0.0, 0.1, 1.0], 0.0),
     ],
 )
 def test_ranking_weights_control_costs_and_top_candidate(
-    weights: tuple[float, float, float],
+    weights: tuple[float, float],
     expected_costs: list[float],
     best_center_x: float,
 ) -> None:

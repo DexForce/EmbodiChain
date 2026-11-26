@@ -53,7 +53,6 @@ def _row(
     if not valid.any():
         return torch.eye(4, device=pairs.device)[None], pairs.new_full((1,), torch.inf)
     centers = ((origin + hit) / 2)[valid]
-    widths = torch.norm(origin[valid] - hit[valid], dim=-1)
     closing = closing[valid]
     directions = [direction]
     for _ in range(algorithm.approach_direction_samples - 1):
@@ -76,20 +75,16 @@ def _row(
         poses.append(candidate)
     poses, keep = pose_nms(torch.vstack(poses), angle_th=math.pi / 36, dist_th=0.005)
     centers = centers.repeat(len(directions), 1)[keep]
-    widths = widths.repeat(len(directions))[keep]
     mesh = vertices @ pose[:3, :3].T + pose[:3, 3]
     center = (
         get_pc_center_box(mesh) if algorithm.center_mode == "bounds" else mesh.mean(0)
     )
     costs = _grasp_costs(
         poses,
-        widths,
         centers,
         direction,
         center,
-        _normalized_ranking_weights(
-            algorithm.angle_weight, algorithm.center_weight, algorithm.opening_weight
-        ),
+        _normalized_ranking_weights(algorithm.angle_weight, algorithm.center_weight),
     )
     # The caller applies its configured cap only after final-TCP qualification.
     return poses, costs

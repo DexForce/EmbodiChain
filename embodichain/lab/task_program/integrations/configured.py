@@ -1107,6 +1107,8 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 "retreat_distance",
                 "retreat_steps",
                 "receive_pick_object_part",
+                "pickup_approach_tolerance_deg",
+                "receive_approach_tolerance_deg",
                 "grasp_retract_distance",
                 "paired_object_to_eef",
                 "object_motion_keyframes",
@@ -1776,6 +1778,8 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                     "retreat_distance",
                     "retreat_steps",
                     "receive_pick_object_part",
+                    "pickup_approach_tolerance_deg",
+                    "receive_approach_tolerance_deg",
                     "release_at_target",
                     "arm_selection",
                 }
@@ -1806,6 +1810,11 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                     config[field_name],
                     path=f"{path}.{field_name}",
                     minimum=0 if field_name == "hold_steps" else 2,
+                )
+        for name in ("pickup_approach_tolerance_deg", "receive_approach_tolerance_deg"):
+            if name in config:
+                kwargs[name] = _real(
+                    config[name], path=f"{path}.{name}", minimum=0.0, maximum=180.0
                 )
         if "receive_pick_object_part" in config:
             kwargs["receive_pick_object_part"] = _identifier(
@@ -2461,7 +2470,6 @@ def _decode_grasp_generator(
                 "center_mode",
                 "angle_weight",
                 "center_weight",
-                "opening_weight",
                 "filter_ground_collision",
                 "force_refresh",
                 "point_spacing",
@@ -2533,7 +2541,7 @@ def _decode_grasp_generator(
         _normalized_ranking_weights,
     )
 
-    weight_names = ("angle_weight", "center_weight", "opening_weight")
+    weight_names = ("angle_weight", "center_weight")
     ranking_weights = {
         name: _real(config[name], path=f"{path}.{name}", minimum=0)
         for name in weight_names
@@ -3963,7 +3971,6 @@ def _decode_configured_task_program_integration(
                         "center_mode",
                         "angle_weight",
                         "center_weight",
-                        "opening_weight",
                     }
                     and value is None
                 )

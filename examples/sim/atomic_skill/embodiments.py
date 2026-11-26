@@ -160,6 +160,7 @@ def _mounted_gripper(
             {"open": (0.05, 0.05), "grasp": (0.0, 0.0)},
             tcp,
             {
+                **resolve_gripper_defaults("PikaGripper"),
                 "model_id": "tutorial_pika",
                 "max_opening_width": 0.1,
                 "min_opening_width": 0.001,
@@ -184,6 +185,8 @@ def _mounted_gripper(
         tcp,
         {
             "model_id": "tutorial_dh_ag95",
+            "pad_links": ["left_finger_pad", "right_finger_pad"],
+            "control_parts": {"eef": list(joints)},
             "max_opening_width": 0.095,
             "min_opening_width": 0.001,
         },
@@ -308,6 +311,9 @@ def create_embodiment(args: argparse.Namespace) -> EmbodimentCfg:
         cfg.models = {
             "eef": {
                 "model_id": "tutorial_arx5",
+                "extract_subtree": True,
+                "pad_links": ["link7", "link8"],
+                "control_parts": {"eef": ["joint7", "joint8"]},
                 "max_opening_width": 0.088,
                 "min_opening_width": 0.001,
             }

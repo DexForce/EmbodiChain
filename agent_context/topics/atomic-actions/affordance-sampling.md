@@ -29,6 +29,19 @@ the sampling record under `diagnostics.metadata["affordance_sample"]`.
 Slide distance, Twist angle, and OpenDoor opening fraction remain exact
 Action/Goal inputs rather than Affordance variation.
 
+Configured parallel-jaw grasp services label the scaled target mesh in an
+isolated PhysX process and cache object-local TCPs and opening widths by hand
+URDF, mesh and validation settings. PickUp, AxisAlign, HandOver, Slide,
+OpenDoor and CoordinatedPickment rank eligible labels by live closing-axis
+and contact-center cost, then TCP +Z alignment, and check each skill's IK
+waypoints in groups of 50. HandOver and coordinated grasps retain their
+per-arm regions. HandOver can additionally limit the source and receiving TCP
+approach angles independently in degrees. The live angle limits reuse the same
+physical labels. Handle validation tests the isolated link mesh; Slide and
+OpenDoor check motion against the live joint. Suspended handles and receiving
+hands skip the inferred tabletop. Explicit mirror, upright and retraction
+adjustments used in sampling are applied before physical validation.
+
 ## Current host boundary
 
 The only host integration is direct simulation. The PickUp, AxisAlign,

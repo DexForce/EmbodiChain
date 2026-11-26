@@ -141,6 +141,9 @@ class AntipodalAffordance(Affordance):
     mesh_scope: Literal["object", "link"] = "object"
     """Whether the mesh describes the whole object or one selected link."""
 
+    validation_attrs: dict | None = field(default=None, kw_only=True)
+    """Rigid-body properties used to validate grasps on the scaled local mesh."""
+
     MAX_SURFACE_POINT_COUNT: ClassVar[int] = 1000
     """Maximum point-cloud size used for geometry-distribution analysis."""
 

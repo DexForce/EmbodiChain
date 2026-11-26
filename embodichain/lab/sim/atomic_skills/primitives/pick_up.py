@@ -18,6 +18,10 @@
 
 from __future__ import annotations
 
+from embodichain.lab.sim.atomic_skills._grasp_selection import (
+    pickup_adjustment,
+    select_ranked_grasp,
+)
 from embodichain.lab.sim.atomic_skills.continuation import PlanContinuationResult
 from embodichain.lab.sim.atomic_skills.primitives.contact import (
     ContactPickUpGoal,
@@ -240,7 +244,8 @@ class PickUpOptions(SkillOptions):
     grasp_variant: str = "closest"
     """Symmetric TCP-roll variant to select after feasibility screening.
 
-    The default ``"closest"`` preserves selection of the feasible original or
+    Physical labels preserve the exact tested TCP. An explicit mirror is applied
+    before physical validation. For a geometry-only service, ``"closest"`` uses selection of the feasible original or
     mirrored grasp with the smallest rotation error from the current TCP.
     ``"original"`` and ``"mirrored"`` force one side and report an infeasible
     pickup when that side cannot pass the kinematic checks. Explicit goal
@@ -1222,6 +1227,30 @@ class PickUp(
         if not isinstance(affordance, AntipodalAffordance):
             raise ValueError("PickUp grasp sampling requires AntipodalAffordance.")
         generator = self.planning_services.grasp_pose_generator(grasp_target_id)
+        validated_labels = getattr(generator, "validated_labels", None)
+        if validated_labels is not None:
+            local, order, cache_key = validated_labels(
+                affordance.mesh_vertices,
+                affordance.mesh_triangles,
+                affordance.validation_attrs,
+                object_pose,
+                approach_direction,
+                options.pick_object_part,
+                on_support=affordance.mesh_scope == "object",
+                pose_adjustment=pickup_adjustment(options),
+            )
+            return self._select_validated_grasp(
+                local,
+                order,
+                cache_key,
+                object_pose,
+                start_qpos,
+                manipulator,
+                options,
+                approach_direction,
+                context,
+                sample_key,
+            )
         obj_longest_axis = None
         is_positive_part = True
         if options.pick_object_part != "center":
@@ -1283,6 +1312,103 @@ class PickUp(
         )
         grasp_variants = torch.matmul(grasp_variants, grasp_frame_to_eef)
 
+        pickup_success = self._grasp_path_feasibility(
+            grasp_variants,
+            object_poses,
+            start_qpos,
+            manipulator,
+            options,
+            approach_direction,
+        )
+
+        start_xpos = self.robot.compute_fk(
+            qpos=start_qpos,
+            name=manipulator.control_part,
+            to_matrix=True,
+            **(
+                {"env_ids": self.planning_services.env_ids}
+                if self.planning_services.env_ids is not None
+                else {}
+            ),
+        )
+        start_quat = quat_from_matrix(start_xpos[:, :3, :3])
+        # Preserve the established preference between symmetric roll variants;
+        # use the upright-adjusted pose only for feasibility and execution.
+        selection_eef_variants = torch.matmul(
+            selection_variants,
+            grasp_frame_to_eef,
+        )
+        variant_quat = quat_from_matrix(selection_eef_variants[..., :3, :3])
+        start_quat = start_quat[:, None, None, :].expand_as(variant_quat)
+        rotation_error = quat_error_magnitude(
+            variant_quat.reshape(-1, 4),
+            start_quat.reshape(-1, 4),
+        ).reshape(num_envs, n_pose, 2)
+        if options.grasp_variant == "closest":
+            feasible_rotation_error = torch.where(
+                pickup_success,
+                rotation_error,
+                torch.full_like(rotation_error, torch.inf),
+            )
+            best_variant_idx = feasible_rotation_error.argmin(dim=2)
+        else:
+            # A forced variant keeps its own feasibility result instead of
+            # falling back to the other side after screening.
+            variant_index = 0 if options.grasp_variant == "original" else 1
+            best_variant_idx = torch.full(
+                (num_envs, n_pose),
+                variant_index,
+                dtype=torch.long,
+                device=self.device,
+            )
+
+        env_idx = torch.arange(num_envs, device=self.device)[:, None]
+        pose_idx = torch.arange(n_pose, device=self.device)[None, :]
+        selected_grasp_xpos = grasp_variants[env_idx, pose_idx, best_variant_idx]
+        ik_success = pickup_success[env_idx, pose_idx, best_variant_idx]
+        return selected_grasp_xpos, ik_success
+
+    def _select_validated_grasp(
+        self,
+        local: torch.Tensor,
+        order: torch.Tensor,
+        cache_key: str,
+        object_pose: torch.Tensor,
+        start_qpos: torch.Tensor,
+        manipulator: JointPositionTarget,
+        options: PickUpOptions,
+        direction: torch.Tensor,
+        context: PlanningContext,
+        sample_key: str,
+    ) -> AffordanceSample:
+        """Screen physical labels in cost/alignment order without changing the TCP."""
+        return select_ranked_grasp(
+            (local, order, cache_key),
+            object_pose,
+            context.env_ids,
+            sample_key,
+            lambda poses: self._grasp_path_feasibility(
+                poses.unsqueeze(2),
+                object_pose,
+                start_qpos,
+                manipulator,
+                options,
+                direction,
+            ).squeeze(2),
+            calibration=options.grasp_frame_to_eef.to(object_pose),
+        )
+
+    def _grasp_path_feasibility(
+        self,
+        grasp_variants: torch.Tensor,
+        object_poses: torch.Tensor,
+        start_qpos: torch.Tensor,
+        manipulator: JointPositionTarget,
+        options: PickUpOptions,
+        approach_direction: torch.Tensor,
+    ) -> torch.Tensor:
+        """Check the approach, close, lift and any requested transport waypoints."""
+        num_envs = len(object_poses)
         pre_grasp_variants = grasp_variants.clone()
         candidate_approach = (
             approach_direction[:, None, None, :]
@@ -1353,52 +1479,7 @@ class PickUp(
                 f"downstream={downstream_success_counts}."
             )
 
-        start_xpos = self.robot.compute_fk(
-            qpos=start_qpos,
-            name=manipulator.control_part,
-            to_matrix=True,
-            **(
-                {"env_ids": self.planning_services.env_ids}
-                if self.planning_services.env_ids is not None
-                else {}
-            ),
-        )
-        start_quat = quat_from_matrix(start_xpos[:, :3, :3])
-        # Preserve the established preference between symmetric roll variants;
-        # use the upright-adjusted pose only for feasibility and execution.
-        selection_eef_variants = torch.matmul(
-            selection_variants,
-            grasp_frame_to_eef,
-        )
-        variant_quat = quat_from_matrix(selection_eef_variants[..., :3, :3])
-        start_quat = start_quat[:, None, None, :].expand_as(variant_quat)
-        rotation_error = quat_error_magnitude(
-            variant_quat.reshape(-1, 4),
-            start_quat.reshape(-1, 4),
-        ).reshape(num_envs, n_pose, 2)
-        if options.grasp_variant == "closest":
-            feasible_rotation_error = torch.where(
-                pickup_success,
-                rotation_error,
-                torch.full_like(rotation_error, torch.inf),
-            )
-            best_variant_idx = feasible_rotation_error.argmin(dim=2)
-        else:
-            # A forced variant keeps its own feasibility result instead of
-            # falling back to the other side after screening.
-            variant_index = 0 if options.grasp_variant == "original" else 1
-            best_variant_idx = torch.full(
-                (num_envs, n_pose),
-                variant_index,
-                dtype=torch.long,
-                device=self.device,
-            )
-
-        env_idx = torch.arange(num_envs, device=self.device)[:, None]
-        pose_idx = torch.arange(n_pose, device=self.device)[None, :]
-        selected_grasp_xpos = grasp_variants[env_idx, pose_idx, best_variant_idx]
-        ik_success = pickup_success[env_idx, pose_idx, best_variant_idx]
-        return selected_grasp_xpos, ik_success
+        return pickup_success
 
     def _approach_alignment_mask(
         self,
