@@ -155,6 +155,7 @@ def test_inline_suite_reports_gripper_category_and_instance(
     hand = "FrankaPandaHand"
     shift = [25, 0, -45]
     suite = {
+        "collision_threshold": 0.007,
         "grippers": [hand],
         "objects": [
             {
@@ -171,6 +172,8 @@ def test_inline_suite_reports_gripper_category_and_instance(
 
     def completed_case(spec, method, source, root, out, args):
         assert spec["rotation_shift_deg"] == shift
+        if source is None:
+            assert spec["collision_threshold"] == 0.007
         trials = [
             dict(_result(_trace(), d, False), rank=1, condition=d)
             for d in ("base", "x", "y")
@@ -329,6 +332,7 @@ def test_visual_preset_dispatches_one_case_per_gripper_category(
                 "external",
             )
             assert source == [candidate]
+            assert "collision_threshold" not in spec
             assert spec["visual_check"] == {"sample_count": visual["sample_count"]}
             assert (
                 spec["root_from_tcp"]
@@ -381,10 +385,14 @@ def test_visual_worker_executes_only_top_base_and_isolates_checkpoints(
     assert [(row["rank"], row["condition"]) for row in result["trials"]] == [
         (1, "base")
     ]
-    assert run(visual, candidates)["trial_id_prefix"] == result["trial_id_prefix"]
+    catalog = resolve_gripper_defaults(spec["gripper"])["joint_commands"]
+    explicit = visual | {"open_qpos": catalog["open"], "close_qpos": catalog["grasp"]}
+    assert run(explicit, candidates)["trial_id_prefix"] == result["trial_id_prefix"]
     empty = run(visual, [])
     assert empty["finished"] and not empty["trials"] and empty["count"] == 0
     validator.validate.assert_called_once()
+    narrowed = explicit | {"open_qpos": dict.fromkeys(catalog["open"], 0.028)}
+    assert run(narrowed, candidates)["trial_id_prefix"] != result["trial_id_prefix"]
     full = run(spec, candidates)
     assert full["trial_id_prefix"] != result["trial_id_prefix"]
     assert len(full["trials"]) == 6
@@ -585,7 +593,7 @@ def trial_validator() -> GraspValidator:
     validator.close_wait_steps = 20
     validator.initial = validator.root_tcp = validator.root_contact = torch.eye(4)
     validator.axes = [0, 1, 2]
-    validator.opened = torch.zeros(4)
+    validator.opened = torch.tensor([0.0, 0.0, 0.0, 0.2])
     validator.closed = torch.tensor([0.0, 0.0, 0.0, 1.0])
     validator.hand, validator.obj, validator.sensor = Mock(), Mock(), Mock()
     validator.cfg = SimpleNamespace(root_link="hand")
@@ -620,7 +628,7 @@ def test_close_wait_holds_closed_target_before_lift_and_shifts_disturbance(
 
     (trial,) = validator.validate(np.eye(4)[None], ["x"])
     # Each row is the three stage positions followed by the finger command.
-    assert commands[80 - 1].tolist() == pytest.approx([0, 0, 0.08, 0.5])
+    assert commands[80 - 1].tolist() == pytest.approx([0, 0, 0.08, 0.6])
     np.testing.assert_allclose(
         torch.stack(commands[100 - 1 : 120]), np.tile([0, 0, 0.08, 1], (21, 1))
     )
@@ -682,17 +690,19 @@ def test_suite_gripper_ids_and_invalid_calibration(tmp_path: Path) -> None:
         cli._suite_grippers({hand: {"root_from_tcp": reflection}})
     with pytest.raises(ValueError):
         cli._suite_grippers({hand: {"root_from_contact_frame": np.eye(4).tolist()}})
-    for invalid in (-1, float("inf"), True):
-        with pytest.raises(ValueError, match="stiffness"):
-            cli._suite_grippers({hand: {"stiffness": invalid}})
+    for prop in ("stiffness", "max_effort"):
+        for invalid in (-1, float("inf"), True):
+            with pytest.raises(ValueError, match=prop):
+                cli._suite_grippers({hand: {prop: invalid}})
     names = resolve_gripper_defaults(hand)["control_parts"]["eef"]
-    for invalid in (
-        {"unknown_joint": 0.0},
-        dict.fromkeys(names, True),
-        dict.fromkeys(names, float("nan")),
-    ):
-        with pytest.raises(ValueError, match="close_qpos"):
-            cli._suite_grippers({hand: {"close_qpos": invalid}})
+    for field in ("open_qpos", "close_qpos"):
+        for invalid in (
+            {"unknown_joint": 0.0},
+            dict.fromkeys(names, True),
+            dict.fromkeys(names, float("nan")),
+        ):
+            with pytest.raises(ValueError, match=field):
+                cli._suite_grippers({hand: {field: invalid}})
     suite = tmp_path / "suite.yaml"
     suite.write_text(f"grippers:\n  {hand}: {{}}\n  {hand}: {{}}\n")
     with pytest.raises(ValueError, match=f"Duplicate suite key '{hand}'"):
@@ -730,13 +740,14 @@ def test_case_uses_tcp_for_geometry_and_drive_settings_for_simulation(
     hand = "TianjiMarvinGripper"
     tcp = np.eye(4)
     tcp[0, 3] = 0.03
+    fingers = resolve_gripper_defaults(hand, variant="right")["control_parts"]["eef"]
     calibration = {
         "variant": "right",
         "root_from_tcp": tcp.tolist(),
         "stiffness": 0.0,
-        "close_qpos": resolve_gripper_defaults(hand, variant="right")["joint_commands"][
-            "grasp"
-        ],
+        "max_effort": 27.0,
+        "open_qpos": dict.fromkeys(fingers, -0.012),
+        "close_qpos": dict.fromkeys(fingers, -0.048),
     }
     urdf = tmp_path / "hand.urdf"
     urdf.write_text('<robot name="local"/>')
@@ -748,6 +759,7 @@ def test_case_uses_tcp_for_geometry_and_drive_settings_for_simulation(
         placement="default",
         rigid={"uid": "target"},
         gripper_urdf="hand.urdf",
+        collision_threshold=0.005,
         close_wait_steps=25,
         rotation_shift_deg=[0, 90, 0],
         **cli._suite_grippers({hand: calibration})[hand],
@@ -756,9 +768,17 @@ def test_case_uses_tcp_for_geometry_and_drive_settings_for_simulation(
         physics="default", num_envs=1, resume=False, headless=True, command="run"
     )
     validator = Mock()
-    geometry = Mock(side_effect=RuntimeError("stop before mesh sampling"))
+    validator.return_value.cfg.joint_commands = {
+        "open": calibration["open_qpos"],
+        "grasp": calibration["close_qpos"],
+    }
+    geometry = Mock()
+    generator = Mock(side_effect=RuntimeError("stop before mesh sampling"))
     monkeypatch.setattr(grasp_validation, "GraspValidator", validator)
     monkeypatch.setattr(gripper_geometry, "build_gripper_collision_geometry", geometry)
+    monkeypatch.setattr(
+        "embodichain.toolkits.graspkit.pg_grasp.AntipodalGraspPoseGenerator", generator
+    )
     monkeypatch.setattr(torch.cuda, "init", lambda: None)
     monkeypatch.setattr(torch.cuda, "reset_peak_memory_stats", lambda device: None)
     with pytest.raises(RuntimeError, match="stop before mesh sampling"):
@@ -766,28 +786,43 @@ def test_case_uses_tcp_for_geometry_and_drive_settings_for_simulation(
     assert validator.call_args.kwargs["close_wait_steps"] == 25
     assert validator.call_args.kwargs["rotation_shift_deg"] == [0, 90, 0]
     assert validator.call_args.kwargs["stiffness"] == 0.0
+    assert validator.call_args.kwargs["max_effort"] == 27.0
+    assert validator.call_args.kwargs["open_qpos"] == calibration["open_qpos"]
     assert validator.call_args.kwargs["close_qpos"] == calibration["close_qpos"]
     assert validator.call_args.kwargs["variant"] == "right"
+    assert generator.call_args.kwargs["collision_cfg"].collision_threshold == 0.005
     assert validator.call_args.kwargs["gripper_urdf"] == urdf
     np.testing.assert_allclose(validator.call_args.kwargs["root_from_tcp"], tcp)
     assert geometry.call_args.args[0]["root_link"] == "right_hand_base_link"
     assert geometry.call_args.args[0]["fpath"] == str(urdf)
+    assert (
+        geometry.call_args.args[0]["joint_commands"]["open"] == calibration["open_qpos"]
+    )
     assert geometry.call_args.args[0]["mesh_paths"] == {}
     assert geometry.call_args.kwargs.keys() == {"root_from_tcp"}
     np.testing.assert_allclose(geometry.call_args.kwargs["root_from_tcp"], tcp)
 
 
 @pytest.mark.parametrize(
-    ("hand", "physics", "master"),
+    ("hand", "physics", "master", "custom_settings"),
     [
-        ("FrankaPandaHand", "default", "fr3_finger_joint1"),
-        ("DHPGI14080", "default", "gripper_finger1_joint_1"),
-        ("RobotiqArg2F85", "default", "finger_joint"),
-        ("RobotiqArg2F140", "default", "finger_joint"),
-        ("CobotMagicV100Gripper", "default", "joint7"),
-        ("PikaGripper", "default", "FINGER1_JOINT"),
-        ("TianjiMarvinGripper", "default", "LEFT_HAND_FINGER_1"),
-        ("RobotiqArg2F85", "newton", None),
+        ("FrankaPandaHand", "default", "fr3_finger_joint1", None),
+        ("DHPGI14080", "default", "gripper_finger1_joint_1", None),
+        ("RobotiqArg2F85", "default", "finger_joint", None),
+        ("RobotiqArg2F140", "default", "finger_joint", None),
+        ("CobotMagicV100Gripper", "default", "joint7", None),
+        ("PikaGripper", "default", "FINGER1_JOINT", None),
+        ("TianjiMarvinGripper", "default", "LEFT_HAND_FINGER_1", None),
+        ("RobotiqArg2F85", "newton", None, {"max_effort": 12.5}),
+        (
+            "FrankaPandaHand",
+            "default",
+            "fr3_finger_joint1",
+            {
+                "stiffness": 300.0,
+                "open_qpos": {"fr3_finger_joint1": 0.028, "fr3_finger_joint2": 0.028},
+            },
+        ),
     ],
 )
 def test_suite_stages_hand_with_backend_coupling_and_separate_drive_gains(
@@ -795,10 +830,12 @@ def test_suite_stages_hand_with_backend_coupling_and_separate_drive_gains(
     hand: str,
     physics: str,
     master: str | None,
+    custom_settings: dict | None,
 ) -> None:
     fixtures = files("embodichain.extensions.benchmarks.grasp_pose_generator")
     suite = yaml.load((fixtures / "suite.yaml").read_text(), Loader=cli._SuiteLoader)
-    options = cli._suite_grippers(suite["grippers"])[hand]
+    settings = suite["grippers"][hand] if custom_settings is None else custom_settings
+    options = cli._suite_grippers({hand: settings})[hand]
     defaults = resolve_gripper_defaults(hand, variant=options.get("variant"))
     manager = Mock()
     add_robot = manager.return_value.add_robot
@@ -811,15 +848,22 @@ def test_suite_stages_hand_with_backend_coupling_and_separate_drive_gains(
         {master: MimicComplianceCfg(0.0, 0.0)} if master else {}
     )
     fingers = defaults["control_parts"]["eef"]
+    if custom_settings is None:
+        assert {"open_qpos", "close_qpos"} <= settings.keys()
+    for field, command in (("open_qpos", "open"), ("close_qpos", "grasp")):
+        assert cfg.joint_commands[command] == settings.get(
+            field, defaults["joint_commands"][command]
+        )
     if hand == "DHPGI14080":
         assert cfg.joint_commands["grasp"] == dict.fromkeys(fingers, 0.04)
         assert defaults["joint_commands"]["grasp"] == dict.fromkeys(fingers, 0.024)
     stage = ["stage_0", "stage_1", "stage_2"]
-    for prop, hand_value, stage_value in (
-        ("stiffness", suite["grippers"][hand]["stiffness"], 30000.0),
-        ("damping", defaults["joint_drive_props"]["damping"], 350.0),
-        ("max_effort", defaults["joint_drive_props"]["max_effort"], 2000.0),
+    for prop, stage_value in (
+        ("stiffness", 30000.0),
+        ("damping", 350.0),
+        ("max_effort", 2000.0),
     ):
+        hand_value = settings.get(prop, defaults["joint_drive_props"][prop])
         _, names, values = resolve_matching_names_values(
             getattr(cfg.joint_drive_props, prop), [*fingers, *stage]
         )
@@ -828,21 +872,25 @@ def test_suite_stages_hand_with_backend_coupling_and_separate_drive_gains(
 
 
 @pytest.mark.parametrize(
-    ("targets", "message"),
+    ("field", "targets", "message"),
     [
-        ((0.04, 0.03), "mimic"),
-        ((0.041, 0.041), "limits"),
+        ("open_qpos", (0.01, 0.02), "mimic"),
+        ("close_qpos", (0.04, 0.03), "mimic"),
+        ("close_qpos", (0.041, 0.041), "limits"),
     ],
 )
-def test_dh_close_qpos_respects_mimic_and_travel(
-    monkeypatch: pytest.MonkeyPatch, targets: tuple[float, float], message: str
+def test_dh_qpos_respects_mimic_and_travel(
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    targets: tuple[float, float],
+    message: str,
 ) -> None:
     hand = "DHPGI14080"
     names = resolve_gripper_defaults(hand)["control_parts"]["eef"]
     monkeypatch.setattr(grasp_validation, "SimulationManager", Mock())
     with pytest.raises(ValueError, match=message):
         GraspValidator(
-            RigidObjectCfg(uid="target"), hand, close_qpos=dict(zip(names, targets))
+            RigidObjectCfg(uid="target"), hand, **{field: dict(zip(names, targets))}
         )
 
 
@@ -939,20 +987,24 @@ def test_visual_report_distinguishes_observed_and_unexecuted_grasps(
     assert not report["complete"]
     assert report["counts"] == {
         "success": 1,
-        "failed": 1,
-        "no_candidate": 1,
+        "failed": 2,
         "missing": 1,
         "error": 1,
     }
+    assert (report["cases"][2]["status"], report["cases"][2]["reason"]) == (
+        "failed",
+        "no candidate",
+    )
     assert report["attempts"] == 3
     assert [row["attempts"] for row in report["cases"]] == [1, 1, 0, 1, 0]
     _reporting._write_visual_report(tmp_path, report)
     markdown = (tmp_path / "report.md").read_text()
+    assert "2 failed" in markdown
     for gripper, outcome in (
-        ("A", "success | —"),
-        ("B", "failed | lift"),
-        ("C", "no candidate | —"),
-        ("D", "missing | unavailable contact"),
-        ("E", "error | asset missing"),
+        ("A", "Success | —"),
+        ("B", "Failed | lift"),
+        ("C", "Failed | no candidate"),
+        ("D", "Missing | unavailable contact"),
+        ("E", "Error | asset missing"),
     ):
         assert f"| {gripper} | book | atlas | {outcome} |" in markdown

@@ -358,18 +358,18 @@ def _validate_gripper_command(value: object, names: Sequence[str]) -> dict[str, 
     return {name: float(value[name]) for name in names}
 
 
-def _validate_gripper_stiffness(value: object) -> float:
-    """Normalize a scalar position gain for the native gripper joints."""
+def _validate_gripper_drive_value(name: str, value: object) -> float:
+    """Normalize a nonnegative native joint drive parameter."""
     from numbers import Real
 
-    # Native drive descriptors store their gains as float32.
+    # Native drive descriptors store stiffness and effort limits as float32.
     max_float32 = 3.4028234663852886e38
     if (
         isinstance(value, bool)
         or not isinstance(value, Real)
         or not 0 <= value <= max_float32
     ):
-        raise ValueError("stiffness must be finite, nonnegative and fit in float32.")
+        raise ValueError(f"{name} must be finite, nonnegative and fit in float32.")
     return float(value)
 
 

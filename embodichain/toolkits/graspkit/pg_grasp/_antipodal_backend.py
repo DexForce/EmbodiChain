@@ -97,6 +97,7 @@ class _AntipodalMeshBackend:
         viser_port: int,
         use_largest_connected_component: bool,
         filter_ground_collision: bool,
+        collision_threshold: float,
         approach_alignment_angle: float | None = None,
         check_collision: bool = True,
         disk_cache: bool = True,
@@ -127,6 +128,8 @@ class _AntipodalMeshBackend:
             use_largest_connected_component: Whether to retain only the largest
                 component of an interactive selection.
             filter_ground_collision: Whether to reject ground collisions.
+            collision_threshold: Signed-distance threshold in metres for fixed
+                open-hand surface queries.
             approach_alignment_angle: Optional hard TCP-Z angle in radians,
                 applied before deduplication, collision checks and ranking.
         """
@@ -175,6 +178,7 @@ class _AntipodalMeshBackend:
         self._viser_port = viser_port
         self._use_largest_connected_component = use_largest_connected_component
         self._filter_ground_collision = filter_ground_collision
+        self._collision_threshold = collision_threshold
         self._antipodal_sampler = AntipodalSampler(cfg=sampler_cfg)
         self._hit_point_pairs: torch.Tensor | None = (
             prepared._hit_point_pairs if prepared is not None else None
@@ -894,7 +898,7 @@ class _AntipodalMeshBackend:
                 valid_grasp_poses,
                 is_filter_ground_collision=self._filter_ground_collision,
                 is_visual=visualize_collision,
-                collision_threshold=0.0,
+                collision_threshold=self._collision_threshold,
             )
             if is_colliding.logical_not().sum() == 0:
                 logger.log_warning(

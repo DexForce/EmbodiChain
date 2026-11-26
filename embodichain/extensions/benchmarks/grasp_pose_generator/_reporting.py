@@ -200,7 +200,7 @@ def _visual_outcome(case: dict) -> tuple[str, str | None]:
         return "error", case["error"]
     trials = case["trials"]
     if not trials and case["count"] == 0 and case.get("finished"):
-        return "no_candidate", None
+        return "failed", "no candidate"
     if len(trials) != 1 or (trials[0]["rank"], trials[0]["condition"]) != (1, "base"):
         return "missing", "Expected one rank-1 base trial"
     trial = trials[0]
@@ -213,7 +213,7 @@ def _visual_outcome(case: dict) -> tuple[str, str | None]:
 
 def _visual_report(cases: list[dict], protocol: dict) -> dict:
     """Summarize one visual check per gripper and object category."""
-    counts = dict.fromkeys(("success", "failed", "no_candidate", "missing", "error"), 0)
+    counts = dict.fromkeys(("success", "failed", "missing", "error"), 0)
     rows = []
     for case in cases:
         status, reason = _visual_outcome(case)
@@ -247,8 +247,7 @@ def _write_visual_report(out: Path, report: dict) -> None:
         f"attempts on {report['protocol']['physics']}.",
         "",
         f"{counts['success']} successful, {counts['failed']} failed, "
-        f"{counts['no_candidate']} without candidates, {counts['missing']} missing "
-        f"observations, {counts['error']} errors.",
+        f"{counts['missing']} missing observations, {counts['error']} errors.",
         "",
         "| Gripper | Object category | Object | Outcome | Stage or reason |",
         "|---|---|---|---|---|",
@@ -258,7 +257,7 @@ def _write_visual_report(out: Path, report: dict) -> None:
             row["gripper"],
             row["category"],
             row["object"],
-            row["status"].replace("_", " "),
+            row["status"].capitalize(),
             row["reason"] or "—",
         ]
         cells = [cell.replace("|", "\\|").replace("\n", " ") for cell in cells]

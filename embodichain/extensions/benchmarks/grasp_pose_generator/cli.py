@@ -27,6 +27,7 @@ import time
 from copy import copy
 import hashlib
 import json
+import math
 import os
 import tempfile
 import xml.etree.ElementTree as ET
@@ -39,7 +40,7 @@ import yaml
 
 from embodichain.robot_registry import (
     _validate_gripper_command,
-    _validate_gripper_stiffness,
+    _validate_gripper_drive_value,
     _validate_gripper_transform,
     resolve_gripper_defaults,
 )
@@ -184,13 +185,15 @@ class _GripperOptions(TypedDict, total=False):
     variant: str
     root_from_tcp: list[list[float]]
     stiffness: float
+    max_effort: float
+    open_qpos: dict[str, float]
     close_qpos: dict[str, float]
 
 
 def _suite_grippers(
     raw: object, *, gripper_root: Path | None = None
 ) -> dict[str, _GripperOptions]:
-    """Resolve each catalog variant and validate its TCP and drive settings."""
+    """Resolve each catalog variant and validate its TCP, drives and joint targets."""
     if not isinstance(raw, (dict, list)) or not raw:
         raise ValueError("grippers must be a nonempty list of IDs or a mapping by ID")
     entries = raw.items() if isinstance(raw, dict) else ((name, {}) for name in raw)
@@ -204,6 +207,8 @@ def _suite_grippers(
             "variant",
             "root_from_tcp",
             "stiffness",
+            "max_effort",
+            "open_qpos",
             "close_qpos",
         }
         if unknown:
@@ -217,9 +222,11 @@ def _suite_grippers(
                 if field == "variant":
                     options["variant"] = value
                 elif field == "stiffness":
-                    options["stiffness"] = _validate_gripper_stiffness(value)
-                elif field == "close_qpos":
-                    options["close_qpos"] = _validate_gripper_command(
+                    options["stiffness"] = _validate_gripper_drive_value(field, value)
+                elif field == "max_effort":
+                    options["max_effort"] = _validate_gripper_drive_value(field, value)
+                elif field in ("open_qpos", "close_qpos"):
+                    options[field] = _validate_gripper_command(
                         value, defaults["control_parts"]["eef"]
                     )
                 else:
@@ -236,7 +243,16 @@ def _suite_grippers(
     return grippers
 
 
-def _generate(v, defaults, root_from_tcp, seed, direction, sample_count=None):
+def _generate(
+    v,
+    defaults,
+    root_from_tcp,
+    seed,
+    direction,
+    sample_count=None,
+    *,
+    collision_threshold=0.0,
+):
     import torch
     from embodichain.lab.sim.utility.gripper_geometry import (
         build_gripper_collision_geometry,
@@ -246,6 +262,7 @@ def _generate(v, defaults, root_from_tcp, seed, direction, sample_count=None):
         AntipodalGraspPoseGenerator,
         AntipodalGraspPoseGeneratorCfg,
         GraspAnnotationCfg,
+        ParallelJawGraspCollisionCfg,
     )
 
     gen = AntipodalGraspPoseGenerator(
@@ -256,7 +273,11 @@ def _generate(v, defaults, root_from_tcp, seed, direction, sample_count=None):
             else None
         ),
         collision_geometry=build_gripper_collision_geometry(
-            defaults, root_from_tcp=root_from_tcp
+            defaults | {"joint_commands": v.cfg.joint_commands},
+            root_from_tcp=root_from_tcp,
+        ),
+        collision_cfg=ParallelJawGraspCollisionCfg(
+            collision_threshold=collision_threshold
         ),
         annotation_cfg=GraspAnnotationCfg(disk_cache=False),
     )
@@ -360,8 +381,17 @@ def _run_case(spec, method, source, root, out, args):
         protocol["gripper_files"] = gripper_files
     case["protocol"] = _trial_protocol(args.physics, close_wait_steps, visual)
     case["provenance"] = protocol
+    checkpoint_spec = spec
+    if args.command == "run" and "open_qpos" in spec:
+        # A suite spelling out its catalog targets can reuse its earlier trials.
+        checkpoint_spec = spec.copy()
+        for field, command in (("open_qpos", "open"), ("close_qpos", "grasp")):
+            if spec.get(field) == defaults["joint_commands"][command]:
+                del checkpoint_spec[field]
     encoded = json.dumps(
-        [protocol, spec, method, source, args.command], sort_keys=True, allow_nan=False
+        [protocol, checkpoint_spec, method, source, args.command],
+        sort_keys=True,
+        allow_nan=False,
     ).encode()
     name = hashlib.sha256(encoded).hexdigest()
     path = out / (name + ".json")
@@ -394,6 +424,8 @@ def _run_case(spec, method, source, root, out, args):
         rotation_shift_deg=spec.get("rotation_shift_deg"),
         root_from_tcp=root_from_tcp,
         stiffness=spec.get("stiffness"),
+        max_effort=spec.get("max_effort"),
+        open_qpos=spec.get("open_qpos"),
         close_qpos=spec.get("close_qpos"),
         close_wait_steps=close_wait_steps,
     )
@@ -414,6 +446,7 @@ def _run_case(spec, method, source, root, out, args):
                     spec["seed"],
                     spec.get("approach_direction", [0, 0, -1]),
                     sample_count=visual["sample_count"] if visual is not None else None,
+                    collision_threshold=spec.get("collision_threshold", 0.0),
                 )
             )
             if args.command == "run":
@@ -547,6 +580,11 @@ def main(argv: list[str] | None = None) -> None:
     if visual is not None and args.num_envs != 1:
         parser.error("A visual check runs in a single arena; use --num-envs 1")
     close_wait_steps = _close_wait_steps(suite)
+    collision_threshold = suite.get("collision_threshold", 0.0)
+    if type(collision_threshold) not in (int, float) or not math.isfinite(
+        collision_threshold
+    ):
+        raise ValueError("collision_threshold must be a finite number in metres")
     gripper_root = suite.get("gripper_root")
     grippers = _suite_grippers(
         suite["grippers"],
@@ -612,6 +650,8 @@ def main(argv: list[str] | None = None) -> None:
                     for line in (root / filename).read_text().splitlines()
                     if line.strip()
                 ]
+            elif collision_threshold != 0.0:
+                spec["collision_threshold"] = float(collision_threshold)
             jobs.append((spec, method, source))
     # Native solver failures can terminate the process. The parent owns the
     # intended population and retries from atomically committed arena batches.

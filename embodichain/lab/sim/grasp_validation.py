@@ -32,7 +32,7 @@ import torch
 
 from embodichain.robot_registry import (
     _validate_gripper_command,
-    _validate_gripper_stiffness,
+    _validate_gripper_drive_value,
     _validate_gripper_transform,
     resolve_robot_cfg,
 )
@@ -66,34 +66,35 @@ _SUPPORT = 15
 _ACCEL = 16
 
 
-def _stage(hand, directory, physics, close_qpos=None):
+def _stage(hand, directory, physics, close_qpos=None, *, open_qpos=None):
     """Mount the native hand on three axes and hard-couple its PhysX mimics."""
     source = Path(hand.fpath or hand.urdf_cfg.assemble_urdf())
     xml = ET.parse(source)
     root = xml.getroot()
-    if close_qpos is not None:
-        names = hand.control_parts["eef"]
-        command = _validate_gripper_command(close_qpos, names)
+    names = hand.control_parts["eef"]
+    joints = {joint.attrib["name"]: joint for joint in root.findall("joint")}
+    for field, action, values in (
+        ("open_qpos", "open", open_qpos),
+        ("close_qpos", "grasp", close_qpos),
+    ):
+        if values is None:
+            continue
+        command = _validate_gripper_command(values, names)
         limits = _native_joint_limits(hand.qpos_limits, names)
-        joints = {joint.attrib["name"]: joint for joint in root.findall("joint")}
         for name, value in command.items():
             joint = joints.get(name)
             if joint is None or joint.get("type") == "fixed":
                 raise ValueError(
-                    f"close_qpos joint {name!r} must be movable in the hand URDF"
+                    f"{field} joint {name!r} must be movable in the hand URDF"
                 )
             bounds = limits.get(name)
             if bounds is None and joint.get("type") != "continuous":
                 limit = joint.find("limit")
                 if limit is None:
-                    raise ValueError(
-                        f"Missing joint limits for close_qpos joint {name!r}"
-                    )
+                    raise ValueError(f"Missing joint limits for {field} joint {name!r}")
                 bounds = (float(limit.attrib["lower"]), float(limit.attrib["upper"]))
             if bounds is not None and not bounds[0] <= value <= bounds[1]:
-                raise ValueError(
-                    f"close_qpos for {name!r} exceeds joint limits {bounds}"
-                )
+                raise ValueError(f"{field} for {name!r} exceeds joint limits {bounds}")
             mimic = joint.find("mimic")
             if mimic is not None:
                 master = mimic.attrib["joint"]
@@ -105,9 +106,9 @@ def _stage(hand, directory, physics, close_qpos=None):
                     atol=1e-8,
                 ):
                     raise ValueError(
-                        f"close_qpos for {name!r} contradicts its mimic of {master!r}"
+                        f"{field} for {name!r} contradicts its mimic of {master!r}"
                     )
-        hand.joint_commands["grasp"] = command
+        hand.joint_commands[action] = command
     if physics == "default":
         masters = {mimic.attrib["joint"] for mimic in root.findall("joint/mimic")}
         hand.mimic_compliance = {
@@ -219,9 +220,12 @@ class GraspValidator:
         stiffness: Optional position gain for the native gripper drives. The
             translation stage has its own gains and mimic joints follow the
             backend's coupling rules.
-        close_qpos: Optional closed target by native joint name, including mimic
-            followers. Positions use metres for prismatic joints and radians for
-            revolute joints.
+        max_effort: Optional per-joint drive effort limit in newtons for
+            prismatic joints or newton-metres for revolute joints.
+        open_qpos: Optional open target used for trial reset and approach, by
+            native joint name including mimic followers. Positions use metres
+            for prismatic joints and radians for revolute joints.
+        close_qpos: Optional closing target in the same joint names and units.
         rotation_shift_deg: Optional object rotation about the fixed arena X, Y
             and Z axes, in that order, in degrees. A rotated target starts with
             its lowest collision point on the support, then settles.
@@ -241,6 +245,8 @@ class GraspValidator:
         headless: bool = True,
         root_from_tcp: ArrayLike | None = None,
         stiffness: float | None = None,
+        max_effort: float | None = None,
+        open_qpos: dict[str, float] | None = None,
         close_qpos: dict[str, float] | None = None,
         close_wait_steps: int = 0,
         rotation_shift_deg: ArrayLike | None = None,
@@ -274,8 +280,11 @@ class GraspValidator:
                     np.asarray(root_from_tcp).tolist()
                 )
             ]
-        if stiffness is not None:
-            stiffness = _validate_gripper_stiffness(stiffness)
+        drive_overrides = {
+            name: _validate_gripper_drive_value(name, value)
+            for name, value in (("stiffness", stiffness), ("max_effort", max_effort))
+            if value is not None
+        }
         self.temp = TemporaryDirectory()
         self.sim = SimulationManager(
             SimulationManagerCfg(
@@ -292,9 +301,9 @@ class GraspValidator:
         )
         try:
             cfg = resolve_robot_cfg(gripper, overrides, variant=variant)
-            if stiffness is not None:
-                cfg.joint_drive_props.stiffness = stiffness
-            _stage(cfg, self.temp.name, physics, close_qpos)
+            for name, value in drive_overrides.items():
+                setattr(cfg.joint_drive_props, name, value)
+            _stage(cfg, self.temp.name, physics, close_qpos, open_qpos=open_qpos)
             cfg.init_pos = [0, 0, 1.5]
             self.hand = self.sim.add_robot(cfg)
             self.sim.add_rigid_object(

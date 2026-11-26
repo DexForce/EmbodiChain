@@ -34,7 +34,8 @@ placement. Its `objects` mapping selects one model ID per category. Each of
 the 35 hand/category pairs uses the first configured seed, method and placement.
 The antipodal generator samples 2,000 rays per pair; `sample_count` controls
 this budget. The native window opens for the top-ranked candidate's ordinary
-lift and three-second hold. A pair with zero candidates skips playback.
+lift and three-second hold. A pair with zero candidates skips playback and
+counts as a failed check with the reason `no candidate`.
 The terminal shows progress, and `report.md` lists each pair's outcome and
 failure stage. Use `--headless` to run the same checks without a window.
 
@@ -84,8 +85,8 @@ rigid config fields.
 `grippers` accepts a list of catalog IDs or a mapping from each ID to its
 settings. The bundled suite evaluates the Franka FR3 hand, DH PGI-140-80,
 Robotiq 2F-85 and 2F-140, CobotMagic V100, Pika, and the left Tianji Marvin
-hand. Each entry specifies its TCP and drive stiffness. Omit either field to
-use the corresponding catalog default.
+hand. Each entry specifies its TCP, drive stiffness and maximum drive effort.
+Omitted settings use the corresponding catalog defaults.
 
 Set `gripper_root` to the directory containing
 `<catalog_id>/<catalog_id>.urdf` and each hand's relative mesh and material
@@ -109,11 +110,19 @@ directories relative to the suite YAML. For single-case validation, set
   in N/m for prismatic joints or N·m/rad for revolute joints. On PhysX the
   Robotiq 2F-85 drives `finger_joint` and its five followers track it through
   mimic constraints.
-  Changing stiffness creates a distinct trial checkpoint.
-- `close_qpos` sets the grasp target for each named moving joint, including
-  mimic followers. Prismatic positions use metres and revolute positions use
-  radians. The DH PGI-140-80 requests 0.040 m per finger so contact can stop
-  the fingers against a thin object. Omitting the field uses the catalog grasp.
+- `max_effort` sets the drive force limit (N for prismatic joints) or torque
+  limit (N·m for revolute joints) on each active hand joint. Fingertip
+  contact forces also depend on the linkage and contact location. The bundled
+  suite sets `max_effort` to 30 for each hand. The translation stage uses
+  its own drive limits. Changing either hand setting creates a distinct
+  trial checkpoint. Single-case validation accepts both fields.
+- `open_qpos` sets the joint positions used to sample the open-hand collision
+  geometry and to reset and approach in simulation. `close_qpos` sets the
+  targets for the closing motion. Each map names every moving hand joint,
+  including mimic followers, in metres for prismatic joints or radians for
+  revolute joints. Omitting either map uses its catalog command. The bundled
+  suite lists both maps for every hand, including the DH PGI-140-80's
+  0.040 m inward travel per finger.
 
 On PhysX (`--physics default`), both `run` and `validate` use hard coupling
 for every gripper's URDF mimic joints. They set natural frequency and damping
@@ -124,6 +133,14 @@ its own mimic constraints.
 `{object}`, `{category}`, `{gripper}`, `{placement}` and `{seed}`. A null value runs the
 built-in antipodal generator on the object's semantic mesh. Use an empty file
 to record an algorithm's abstention. Missing files are input errors.
+
+The suite-wide `collision_threshold` sets the open-gripper clearance in metres
+for built-in antipodal candidates. The bundled suite and its visual preset use
+0.005 m. A candidate is rejected if any hand surface sample has a signed
+distance of 5 mm or less to the object's convex hulls, or lies less than 5 mm
+above the inferred ground plane. Omitting the setting uses zero. Changing it
+selects a new checkpoint for generated candidates. External JSONL poses go
+directly to physical validation.
 
 After one simulated second, the validator checks the target pose every 0.1 s.
 It takes a snapshot once every arena stays within 1 mm and 0.005 rad of its

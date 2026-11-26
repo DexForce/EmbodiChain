@@ -154,13 +154,17 @@ class GraspRegionSelector(Protocol):
         ...
 
 
-def _real_number(value: float, *, field_name: str, minimum: float) -> float:
-    """Return one finite real number at or above ``minimum``."""
+def _real_number(
+    value: float, *, field_name: str, minimum: float | None = None
+) -> float:
+    """Return one finite real number, optionally checking its lower bound."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError(f"{field_name} must be a real number.")
     normalized = float(value)
-    if not math.isfinite(normalized) or normalized < minimum:
-        raise ValueError(f"{field_name} must be finite and at least {minimum}.")
+    if not math.isfinite(normalized):
+        raise ValueError(f"{field_name} must be finite.")
+    if minimum is not None and normalized < minimum:
+        raise ValueError(f"{field_name} must be at least {minimum}.")
     return normalized
 
 
@@ -261,12 +265,21 @@ class ParallelJawGraspCollisionCfg:
     filter_ground_collision: bool = True
     """Whether candidates intersecting the inferred support plane are removed."""
 
+    collision_threshold: float = 0.0
+    """Signed threshold in metres for open-hand object and enabled ground checks.
+
+    Positive values require clearance. Negative values tolerate penetration.
+    """
+
     def __post_init__(self) -> None:
         self.max_decomposition_hulls = _positive_int(
             self.max_decomposition_hulls, field_name="max_decomposition_hulls"
         )
         if type(self.filter_ground_collision) is not bool:
             raise TypeError("filter_ground_collision must be a bool.")
+        self.collision_threshold = _real_number(
+            self.collision_threshold, field_name="collision_threshold"
+        )
 
 
 @configclass
@@ -511,6 +524,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 annotation.use_largest_connected_component
             ),
             filter_ground_collision=collision.filter_ground_collision,
+            collision_threshold=collision.collision_threshold,
             check_collision=not proposals_only,
             prepared=prepared,
             **({} if annotation.disk_cache else {"disk_cache": False}),

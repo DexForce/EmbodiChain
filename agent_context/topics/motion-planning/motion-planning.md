@@ -152,8 +152,11 @@ For physical single-object grasp evaluation, the installed
 TCPs and delegates independent base/X/Y trials to
 `embodichain.lab.sim.grasp_validation.GraspValidator`. The
 [physical suite](../../../embodichain/extensions/benchmarks/grasp_pose_generator/README.md)
-owns per-hand TCP, drive stiffness and closed joint targets, the pre-lift
+owns per-hand TCP, drive stiffness, effort limits and open/closed joint targets, the pre-lift
 closure wait, dataset discovery, initial rotations by category and attempt budgets.
+Candidate collision geometry uses the same open command as the physical approach.
+The suite sets the open-hand clearance for generated candidates. External
+candidate files go directly to physical validation.
 Results are grouped by gripper, object category and their combination.
 The visual-check preset reuses the full suite's hand and object settings
 for one nominal grasp per gripper and category. The validator applies hard
