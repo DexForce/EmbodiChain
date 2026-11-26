@@ -152,13 +152,13 @@ def install_fault(name: str, root: Path) -> None:
                 return receipt
 
         workflow.ArtifactEpisodeSink = LostReceiptSink
-    elif name == "render":
-        import embodichain.lab.expansion.visual as visual
+    elif name == "export":
+        import embodichain.lab.expansion.export as exporter
 
         def fail(*args, **kwargs):
-            raise RuntimeError("showcase injected renderer failure")
+            raise RuntimeError("showcase injected export failure")
 
-        visual.render_observation_variants = fail
+        exporter.export_expansion_lerobot = fail
     else:
         raise ValueError(name)
 
@@ -178,8 +178,8 @@ def fault_checks(root: Path) -> dict:
     previous = root / "results/faults.json"
     if previous.exists():
         saved = json.loads(previous.read_text())
-        if saved.get("ok"):
-            for name in ("interrupted", "lost-receipt", "render-failure"):
+        if saved.get("ok") and (destination / "export-failure/job.json").exists():
+            for name in ("interrupted", "lost-receipt", "export-failure"):
                 if not inspect_expansion_job(destination / name)["complete"]:
                     raise ValueError("completed diagnostic evidence no longer verifies")
             return {**saved, "reused": True}
@@ -338,37 +338,26 @@ def fault_checks(root: Path) -> dict:
         }
     )
     p = config(
-        "render-failure",
+        "export-failure",
         target_episodes=1,
         export_lerobot=True,
         visual_profile_file=str(root / "configs/visual.ur5.yaml"),
-        render_profiles=["camera"],
-        observation_independent=True,
+        visual_profile="camera",
     )
-    if not (destination / "render-failure/job.json").exists():
-        assert run("render-first", p, fault="render") != 0
-    isolation = destination / "render-isolation.json"
-    if not isolation.exists():
-        summary = inspect_expansion_job(destination / "render-failure")
-        assert (
-            summary["stages"]["export"]["complete"]
-            and not summary["stages"]["render"]["complete"]
-        )
-        exported = resume_expansion_export(destination / "render-failure")
-        assert exported["stage_complete"] and not exported["complete"]
-        dump(
-            isolation,
-            {
-                "parent_exported_before_render_retry": True,
-                "export_only_complete": exported["stage_complete"],
-            },
-        )
-    assert run("render-resume", p, resume=True) == 0
+    failed_export = destination / "export-failure"
+    if not (failed_export / "job.json").exists():
+        assert run("export-first", p, fault="export") != 0
+        assert not inspect_expansion_job(failed_export)["stages"]["export"]["complete"]
+    summary = inspect_expansion_job(failed_export)
+    assert summary["collection_complete"] and summary["committed"] == 1
+    exported = resume_expansion_export(failed_export)
+    assert exported["stage_complete"] and exported["complete"]
+    assert exported["attempts"] == summary["attempts"]
     checks.append(
         {
-            "id": "render_failure_isolated_and_export_only_recovery",
+            "id": "export_failure_isolated_and_export_only_recovery",
             "ok": True,
-            "parent_exported_before_render_retry": True,
+            "new_physical_attempts": 0,
         }
     )
     return {

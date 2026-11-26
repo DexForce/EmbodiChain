@@ -18,11 +18,15 @@
 
 from __future__ import annotations
 
-import importlib.util
+from functools import cached_property
 from pathlib import Path
 
 import torch
 
+from embodichain.extensions.models.policy._nmg_observation import (
+    _OnnxObservationDimensions,
+)
+from embodichain.extensions.models.policy.nmg import _create_ort_session
 from embodichain.lab.sim.motion.motion_generator import (
     MotionGenCfg,
     MotionGenOptions,
@@ -90,12 +94,15 @@ class NmgOnnxAdapter(PlannerAdapter):
     def _retiming_constraints(self) -> dict[str, object]:
         """Use the shared suite budgets and strictest effective Robot caps."""
         limits = self.resolve_motion_limits(require_timing=True)
-        num_joints = int(self.spec.config.get("num_arm_joints", 7))
-        if len(limits["velocity"]) != num_joints:
+        velocity = limits["velocity"]
+        dimensions, _ = self._onnx_preflight
+        if dimensions is not None and len(velocity) != dimensions.num_controlled_joints:
             raise ValueError(
-                "NMG num_arm_joints must match the control-part joint count."
+                "NMG ONNX policy uses "
+                f"{dimensions.num_controlled_joints} joints but control part "
+                f"{self.context.control_part!r} has {len(velocity)}."
             )
-        return {"velocity": limits["velocity"], "acceleration": limits["acceleration"]}
+        return {"velocity": velocity, "acceleration": limits["acceleration"]}
 
     def _resolved_model_revision(self) -> str:
         """Use an explicit revision or derive one from the runtime ONNX path."""
@@ -107,18 +114,44 @@ class NmgOnnxAdapter(PlannerAdapter):
             return Path(str(model_path)).expanduser().stem
         return super()._resolved_model_revision()
 
-    def availability(self) -> tuple[bool, str | None]:
-        """Require ONNX Runtime and a resolved standalone policy path."""
-        if importlib.util.find_spec("onnxruntime") is None:
-            return False, "onnxruntime is not installed."
+    @cached_property
+    def _onnx_preflight(self) -> tuple[_OnnxObservationDimensions | None, str | None]:
+        """Read model dimensions once before case selection and timed construction."""
         model_path = self.spec.config.get("onnx_model_path")
         if not model_path:
-            return False, "NMG requires config.onnx_model_path or --nmg-onnx-path."
+            return None, "NMG requires config.onnx_model_path or --nmg-onnx-path."
         path = Path(str(model_path)).expanduser()
         if not path.is_file():
-            return False, f"NMG ONNX policy does not exist: {path}."
+            return None, f"NMG ONNX policy does not exist: {path}."
         if path.suffix.lower() != ".onnx":
-            return False, f"NMG requires a standalone .onnx policy, got {path}."
+            return None, f"NMG requires a standalone .onnx policy, got {path}."
+        try:
+            session = _create_ort_session(
+                str(path),
+                device=self.context.device,
+                providers=self.spec.config.get("onnx_providers"),
+                cuda_use_tf32=self.spec.config.get("onnx_cuda_use_tf32"),
+                intra_op_threads=1,
+            )
+            metadata = session.get_modelmeta().custom_metadata_map
+            return _OnnxObservationDimensions.from_metadata(metadata), None
+        except Exception as exc:
+            return None, f"Could not read NMG ONNX policy metadata from {path}: {exc}"
+
+    def availability(self) -> tuple[bool, str | None]:
+        """Require a readable policy and validate any legacy dimension assertions."""
+        dimensions, reason = self._onnx_preflight
+        if dimensions is None:
+            return False, reason
+        joints = self.spec.config.get("num_arm_joints")
+        waypoints = self.spec.config.get("num_waypoints")
+        try:
+            dimensions.check_expectations(
+                num_arm_joints=int(joints) if joints is not None else None,
+                num_waypoints=int(waypoints) if waypoints is not None else None,
+            )
+        except (TypeError, ValueError, OverflowError) as exc:
+            return False, str(exc)
         return True, None
 
     def supports_case(self, case: BenchmarkCase) -> tuple[bool, str | None]:
@@ -126,8 +159,13 @@ class NmgOnnxAdapter(PlannerAdapter):
         supported, reason = super().supports_case(case)
         if not supported:
             return supported, reason
-        capacity = int(self.spec.config.get("num_waypoints", 5))
-        if case.num_waypoints > capacity:
+        dimensions, _ = self._onnx_preflight
+        capacity = (
+            dimensions.num_waypoints
+            if dimensions is not None
+            else self.spec.config.get("num_waypoints")
+        )
+        if capacity is not None and case.num_waypoints > int(capacity):
             return (
                 False,
                 f"NMG policy supports at most {capacity} waypoints; case has "
@@ -158,6 +196,9 @@ class NmgOnnxAdapter(PlannerAdapter):
 
     def build(self) -> None:
         """Construct the ONNX-backed MotionGenerator."""
+        available, reason = self.availability()
+        if not available:
+            raise RuntimeError(reason)
         self.resolve_motion_limits(require_timing=self.retime)
         values = self.spec.config
         model_path = str(Path(str(values["onnx_model_path"])).expanduser())
@@ -169,9 +210,7 @@ class NmgOnnxAdapter(PlannerAdapter):
             batch_control_parts=bool(values.get("batch_control_parts", False)),
             max_steps=int(values.get("max_steps", 150)),
             action_scale=float(values.get("action_scale", 0.2)),
-            num_arm_joints=int(values.get("num_arm_joints", 7)),
             joint_periodic_features=bool(values.get("joint_periodic_features", False)),
-            num_waypoints=int(values.get("num_waypoints", 5)),
             use_relative_obs=bool(values.get("use_relative_obs", True)),
             canonicalize_quat_obs=bool(values.get("canonicalize_quat_obs", True)),
             intermediate_orientation=bool(values.get("intermediate_orientation", True)),
@@ -191,6 +230,23 @@ class NmgOnnxAdapter(PlannerAdapter):
         )
         self.motion_generator = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg))
         self.fixed_batch_size = self.motion_generator.planner._policy.fixed_batch_size
+
+    def atomic_plan_options(
+        self, *, control_dt: float | None = None
+    ) -> NeuralPlanOptions | None:
+        """Provide the suite's timing limits for retimed Atomic Skill trials.
+
+        Args:
+            control_dt: Host control period, if known. NMG uses its configured
+                maximum output sample interval.
+
+        Returns:
+            Native options with the resolved suite budgets, or ``None`` for a
+            nominal NMG rollout.
+        """
+        if self.retime:
+            return NeuralPlanOptions(constraints=self._retiming_constraints())
+        return None
 
     def plan(self, case: BenchmarkCase) -> PlanResult:
         """Plan all ordered constraints in one closed-loop rollout."""

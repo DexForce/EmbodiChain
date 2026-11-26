@@ -233,6 +233,311 @@ def test_all_task_families_plan_using_real_catalog_without_simulation(
     assert source_image.read_bytes() == before
 
 
+@pytest.mark.parametrize(
+    "defect,error",
+    [
+        (None, None),
+        ("resource_only", None),
+        ("no_audited_park", "Terminal park nodes must match"),
+        ("missing_arm", "Terminal park"),
+        ("audit_missing_arm", "Source audit disagrees.*terminal_park"),
+        ("before_placement", "Terminal park"),
+        ("wrong_placement_arm", "Missing required arm"),
+    ],
+)
+def test_template_park_uses_audited_arms_after_the_placement(
+    source_image,
+    tmp_path,
+    monkeypatch,
+    defect,
+    error,
+):
+    from embodichain.gen_sim.task_engine import interpretation
+
+    place, park = (
+        "Put the blue block inside the tray.",
+        "Return both arms to their initial poses.",
+    )
+    instruction = f"{place} {park}"
+    step, grounding, plan = _fixture()
+    plan["requirements"][0]["quote"] = place
+    if defect == "wrong_placement_arm":
+        step["required_arm"] = "left_arm"
+        for node in plan["nodes"]:
+            node["call"]["resources"] = {"primary": "right"}
+    arms = ["left"] if defect == "missing_arm" else ["left", "right"]
+    for arm in arms:
+        plan["nodes"].append(
+            dict(
+                id=f"park_{arm}",
+                step_id=step["id"],
+                call=dict(
+                    kind="registered",
+                    call_id="simulation.park",
+                    arguments={},
+                    resources={"primary": arm},
+                ),
+                depends_on=["n0" if defect == "before_placement" else "n1"],
+                semantic=dict(
+                    object=(
+                        None if defect == "resource_only" else f"terminal_park_{arm}"
+                    ),
+                    reference=None,
+                    relation=None,
+                    intent={},
+                ),
+            )
+        )
+    plan["requirements"].append(
+        dict(id="r2", quote=park, node_ids=[f"park_{arm}" for arm in arms])
+    )
+
+    def caller(*, schema, **_):
+        reviewed = schema["title"] == "ActionEngineInstructionSourceAudit"
+        names = (
+            (["left"] if defect == "audit_missing_arm" else ["left", "right"])
+            if reviewed
+            else ["both"]
+        )
+        ref = "blue block" if reviewed else "red block"
+        return dict(
+            steps=[dict(step, object=_selector(ref))],
+            scene_ref_quotes=[dict(ref="1.object", quote="the blue block")],
+            terminal_park=(
+                []
+                if defect == "no_audited_park"
+                else [dict(arm=arm, quote=park) for arm in names]
+            ),
+        )
+
+    def ground(*, user_prompt, **_):
+        assert json.loads(user_prompt)["references"][0]["reference"] == "the blue block"
+        return json.dumps(grounding)
+
+    monkeypatch.setattr(interpretation, "_default_instruction_caller", caller)
+
+    def generate():
+        return generate_semantic_task_graph_from_image(
+            source_image,
+            instruction,
+            image_caller=ground,
+            planning_caller=lambda **_: json.dumps(plan),
+            max_repairs=0,
+        )
+
+    if error:
+        with pytest.raises(SemanticPlanningError, match=error):
+            generate()
+        return
+
+    from embodichain.gen_sim.task_engine import _image_run
+    from embodichain.gen_sim._run_binding import _ground_ids
+    from embodichain.gen_sim.workflow import load_task_plan
+
+    result = generate()
+    assert any(a.get("purpose") == "source_review" for a in result["model_attempts"])
+    validation = result["semantic_graph_validation"]
+    coverage = validation["coverage"]
+    assert coverage["visual_status"] == "complete"
+    assert (
+        coverage["visual_observed_entities"] == coverage["visual_total_entities"] == 2
+    )
+    expected_objects = {entity["id"]: entity["id"] for entity in grounding["objects"]}
+    assert {entity["id"] for entity in result["image_grounding"]["objects"]} == set(
+        expected_objects
+    )
+    assert {
+        b["node_id"]: b["subject"]
+        for b in result["binding_requirements"]
+        if b["kind"] == "park_posture"
+    } == {"park_left": "left", "park_right": "right"}
+    binding = _ground_ids(
+        result["image_grounding"],
+        validation["source"]["annotations"],
+        result["semantic_task_graph"],
+        {uid: {} for uid in expected_objects},
+        {
+            "resources": [
+                {"resource_id": arm} for arm in ("left", "right", "default_primary")
+            ]
+        },
+        services=None,
+    )
+    assert binding["objects"] == expected_objects
+    assert binding["resources"] == {
+        arm: arm for arm in ("left", "right", "default_primary")
+    }
+    monkeypatch.setattr(
+        _image_run, "generate_semantic_task_graph_from_image", lambda *a, **kw: result
+    )
+    directory = tmp_path / "park-plan"
+    _image_run.plan_image_task(source_image, instruction, directory)
+    loaded = load_task_plan(directory)
+    assert (
+        loaded["qualifier_coverage"]
+        == result["semantic_graph_validation"]["qualifier_coverage"]
+    )
+    assert (directory / "semantic_task_graph.html").is_file()
+
+    if defect is None:
+        # Archived plans counted the legacy placeholders; their saved report must still match.
+        from embodichain.gen_sim.task_engine.semantic_plan_validation import (
+            validate_semantic_plan,
+        )
+
+        source = validation["source"]
+        legacy_grounding = {
+            **source["grounding"],
+            "objects": list(source["grounding"]["objects"]),
+        }
+        legacy_annotations = dict(source["annotations"])
+        for arm in ("left", "right"):
+            uid = f"terminal_park_{arm}"
+            legacy_grounding["objects"].append(
+                dict(id=uid, description=arm, provenance="runtime_required", bbox=None)
+            )
+            legacy_annotations[f"park_{arm}"] = dict(
+                legacy_annotations[f"park_{arm}"], object=uid
+            )
+        legacy_bindings = [
+            dict(
+                b,
+                subject=legacy_annotations[b["node_id"]]["object"],
+                value=legacy_annotations[b["node_id"]],
+            )
+            for b in source["bindings"]
+        ]
+        legacy_coverage = validate_semantic_plan(
+            result["semantic_task_graph"],
+            source["candidate"],
+            legacy_grounding,
+            legacy_annotations,
+            source["requirements"],
+            legacy_bindings,
+        )
+        assert legacy_coverage["visual_status"] == "pending"
+        assert (
+            legacy_coverage["visual_observed_entities"],
+            legacy_coverage["visual_total_entities"],
+        ) == (2, 4)
+
+
+def test_pre_audit_park_archive_can_be_viewed_and_revised(
+    source_image, tmp_path, monkeypatch
+):
+    from embodichain.gen_sim.task_engine import _image_run
+    from embodichain.gen_sim.task_engine._review import write_review
+    from embodichain.gen_sim.task_spec import canonical_hash
+    from embodichain.gen_sim.workflow import load_task_plan, revise_task_plan
+
+    result = _plan(source_image)
+    graph = result["semantic_task_graph"]
+    report = result["semantic_graph_validation"]
+    source = report["source"]
+    # Legacy park calls were annotated as a scene object rather than a pure resource.
+    annotation = dict(object="source", reference=None, relation=None, intent={})
+    call = dict(
+        kind="registered",
+        call_id="simulation.park",
+        arguments={},
+        resources={"primary": "left"},
+    )
+    group = graph["task_groups"][0]
+    graph["nodes"].append(
+        dict(
+            id="park",
+            call=call,
+            depends_on=[graph["nodes"][-1]["id"]],
+            task_instance_id=group["id"],
+            task_type=group["task_type"],
+            role="primary",
+        )
+    )
+    group["node_ids"].append("park")
+    source["annotations"]["park"] = annotation
+    source["requirements"][0]["node_ids"].append("park")
+    for kind in validate_semantic_call_payload(call)["runtime_bindings"]:
+        source["bindings"].append(
+            dict(
+                id="park." + kind,
+                node_id="park",
+                kind=kind,
+                parameter="runtime." + kind,
+                subject="source",
+                value=annotation,
+                source=group["id"],
+            )
+        )
+    report.update(
+        graph_digest=canonical_hash(graph),
+        coverage=validate_semantic_plan(graph, **source),
+    )
+    result["binding_requirements"] = source["bindings"]
+    monkeypatch.setattr(
+        _image_run, "generate_semantic_task_graph_from_image", lambda *a, **kw: result
+    )
+    directory = _image_run.plan_image_task(
+        source_image, graph["instruction"], tmp_path / "legacy"
+    )
+    manifest = directory / "task_plan_manifest.json"
+    sealed = manifest.read_bytes()
+    loaded = load_task_plan(directory)
+    assert loaded["semantic_graph_sha256"] == report["graph_digest"]
+    preview = tmp_path / "review.html"
+    write_review(directory, preview)
+    assert preview.is_file() and manifest.read_bytes() == sealed
+
+    renamed = {graph["nodes"][-2]["id"]: "placed"}
+    proposal = dict(
+        nodes=[
+            dict(
+                id=renamed.get(node["id"], node["id"]),
+                step_id=node["task_instance_id"],
+                call=node["call"],
+                depends_on=[renamed.get(dep, dep) for dep in node["depends_on"]],
+                semantic=source["annotations"][node["id"]],
+            )
+            for node in graph["nodes"]
+        ],
+        requirements=[
+            dict(row, node_ids=[renamed.get(node, node) for node in row["node_ids"]])
+            for row in source["requirements"]
+        ],
+    )
+    identities = dict(
+        expected_spec_digest=loaded["spec_digest"],
+        expected_graph_digest=loaded["semantic_graph_sha256"],
+        expected_plan_digest=loaded["plan_digest"],
+    )
+    revised = revise_task_plan(directory, proposal, tmp_path / "revised", **identities)
+    assert load_task_plan(revised)["spec_digest"] == loaded["spec_digest"]
+    revision_source = json.loads(
+        (revised / "semantic_graph_validation.json").read_text()
+    )["source"]
+    assert revision_source["annotations"]["park"] == annotation
+    assert (
+        next(
+            row
+            for row in revision_source["bindings"]
+            if row["id"] == "park.park_posture"
+        )["subject"]
+        == "source"
+    )
+    revision_graph = json.loads((revised / "semantic_task_graph.json").read_text())
+    assert next(node for node in revision_graph["nodes"] if node["id"] == "park")[
+        "depends_on"
+    ] == ["placed"]
+    assert manifest.read_bytes() == sealed
+
+    extra_park = deepcopy(proposal)
+    extra_park["nodes"].append(
+        dict(proposal["nodes"][-1], id="new_park", depends_on=["park"])
+    )
+    extra_park["requirements"][0]["node_ids"].append("new_park")
+    with pytest.raises(ValueError, match="Terminal park"):
+        revise_task_plan(directory, extra_park, tmp_path / "invalid", **identities)
+
+
 def test_variation_permission_and_coverage_have_independent_identities(source_image):
     from embodichain.gen_sim.task_spec.publication import (
         project_expansion_requirements,
@@ -654,9 +959,9 @@ def test_metric_lift_keeps_the_source_height_on_the_held_transport(
 
     def mutate(step, grounding, plan):
         _terminal_hold("E1")(step, grounding, plan)
-        # The episode's original model output declared the motion but did not
-        # have a field for its height.
-        step.update(target=_selector(), relation="none", direction="up")
+        step.update(
+            target=_selector(), relation="none", direction="up", lift_height_m=0.10
+        )
         grounding["bindings"].pop("step_01.target")
         grounding["objects"] = [
             item for item in grounding["objects"] if item["id"] == "source"
@@ -1547,7 +1852,7 @@ def test_hybrid_cli_compiles_pick_place_and_rejects_hinge(
                 for r in ("block_2", "block_1_top")
             }
             if kw["role"] == "task_image_grounding"
-            else {"issues": []}
+            else {"issues": [], "source_operations": [op]}
         ),
     )
     out = tmp_path / "hybrid"

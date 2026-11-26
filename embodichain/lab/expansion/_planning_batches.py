@@ -272,7 +272,10 @@ class PlanningBatches:
     def gather(self, cursors):
         """Advance every native cursor once, merging compatible pending solves."""
         from greenlet import greenlet
+        from ._workload_cursor import _WorkloadCursor
 
+        if not cursors:
+            return {}
         if len(cursors) == 1:
             row, cursor = next(iter(cursors.items()))
             self.solo = True
@@ -286,7 +289,9 @@ class PlanningBatches:
 
         def advance(task, row, value=None, first=False):
             state = self.owner_rng if first else self.tasks[task]
-            self._restore_rng(state)
+            # The preceding switch already restored the owner on first entry.
+            if not first:
+                self._restore_rng(state)
             try:
                 with (
                     self.torch.inference_mode(state[5]),
@@ -303,7 +308,12 @@ class PlanningBatches:
 
         try:
             for row, cursor in cursors.items():
-                task = greenlet(cursor.next, parent=self.owner)
+                advance_row = (
+                    cursor._next_in_planning_batch
+                    if type(cursor) is _WorkloadCursor
+                    else cursor.next
+                )
+                task = greenlet(advance_row, parent=self.owner)
                 task.gr_context = copy_context()
                 self.tasks[task] = self.owner_rng
                 advance(task, row, first=True)

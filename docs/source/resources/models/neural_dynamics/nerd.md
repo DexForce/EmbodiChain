@@ -342,12 +342,12 @@ Narang. **Neural Robot Dynamics.** 2025.
 ### Implementation and further reading
 
 - [Neural Robot Dynamics project](https://neural-robot-dynamics.github.io/).
-- [Public API](../../api_reference/model_catalogs.rst): network, codec,
+- [Public API](../../../api_reference/model_catalogs.rst): network, codec,
   trajectory windows, objectives and trainer factory.
 - [Example README](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/nerd/README.md)
   and [research protocol](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/nerd/research/acceptance.md):
   historical experiments, frozen sources and acceptance evidence.
-- [All neural dynamics models](../neural_dynamics.md).
+- [All neural dynamics models](index.md).
 
 ### Pinned resources
 

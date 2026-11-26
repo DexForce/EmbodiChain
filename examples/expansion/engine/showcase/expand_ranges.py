@@ -80,7 +80,7 @@ def main() -> None:
         ("wide-scene", "ur5-scene"),
         ("wide-joint_residual", "ur5-joint_residual"),
         ("wide-via_points", "ur5-via_points"),
-        ("wide-visual", "default-rerender-controls"),
+        ("wide-visual", "default-visual-camera"),
     ]:
         c = copy.deepcopy(next(c for c in cases if c["id"] == base))
         job = yaml.safe_load((R / c["job"]).read_text())
@@ -105,9 +105,15 @@ def main() -> None:
             profile["profiles"]["light"]["lights"]["main_light"].update(
                 color=[1.0, 0.55, 0.25], intensity=4.0
             )
+            profile["profiles"]["combined"] = {
+                kind: values
+                for name in ("material", "light", "camera")
+                for kind, values in profile["profiles"][name].items()
+            }
             path = R / "configs/visual.wide.yaml"
             freeze(path, profile)
             job["visual_profile_file"] = str(path)
+            job["visual_profile"] = "combined"
         if not (R / c["job"]).exists():
             dump(R / c["job"], job)
         added.append(c)

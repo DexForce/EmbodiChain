@@ -7,6 +7,9 @@ simulation operations. EmbodiChain MCP adds robot configuration and
 control-part semantics. Both servers can connect independently to the same
 Runtime session. EmbodiChain MCP needs only that session for its queries.
 
+Follow :doc:`the MCP connection guide <../../guides/mcp>` to install the server
+and read joint state from a running World.
+
 The diagram follows a joint-state request through either server. Each server
 connects using the same session ID and selects a host-side handler
 through ``Session.invoke()``.
@@ -44,8 +47,8 @@ same articulation, both handlers read measured joint positions and velocities.
 EmbodiChain returns them in configured control-part order. Each result goes
 back through the requesting server; closing its stdio connection leaves the
 World running.
-See :doc:`../../guides/mcp` for installation and a working client, or the
-:doc:`architecture overview <../../overview/architecture/index>` for the project map.
+See the :doc:`architecture overview <../../overview/architecture/index>` for
+the project map.
 
 Robot state
 -----------

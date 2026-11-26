@@ -1,5 +1,7 @@
-Read a robot in an existing DexSim World
-========================================
+.. _read-a-robot-in-an-existing-dexsim-world:
+
+MCP
+===
 
 DexSim Runtime owns the World. EmbodiChain MCP connects a local stdio client
 to that World and reads measured joints using a robot's configured control

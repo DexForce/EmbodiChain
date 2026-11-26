@@ -14,7 +14,7 @@ updates, run artifacts and recovery stay in [SL](../supervised-learning/supervis
 `build_rwm_trainer` for `train-sl`; the same symbol is exported from the model
 family. `examples/learning/rwm/` owns controlled corpus generation and acceptance
 through `embodichain run-example learning/rwm`; private support is not a model API.
-The [RWM guide](../../../docs/source/features/neural_dynamics/rwm.md) owns the
+The [RWM guide](../../../docs/source/resources/models/neural_dynamics/rwm.md) owns the
 user-facing principles, tensor layout, prediction and replay examples.
 
 `examples/learning/motion_tracking/fit_world_model.py` collects official G1 physical

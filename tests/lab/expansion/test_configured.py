@@ -17,17 +17,93 @@
 """Native file jobs fail before execution for unsupported schemas and scopes."""
 
 from __future__ import annotations
+import json
 from pathlib import Path
+
 import pytest
+import yaml
+
 from embodichain.lab.expansion import ExpansionEngine, load_expansion_job
 
 
+def test_cohort_job_matches_flat_format_with_owner_relative_paths(tmp_path):
+    presets = tmp_path / "presets"
+    presets.mkdir()
+    (presets / "cohort.yaml").write_text(
+        """execution: {mode: cohort, batch_size: 2, seed: 7}
+trajectory: {motion_profile: motion.yaml}
+validation: {collision_profile: replace-me.yaml}
+physics:
+  mass_scale: {cube: [0.98, 1.02]}
+"""
+    )
+    nested = tmp_path / "nested.yaml"
+    nested.write_text("""deployment: task.yaml
+expansion:
+  config: presets/cohort.yaml
+  collection: {output_dir: output, target_episodes: 4}
+  validation: {collision_profile: collision.yaml}
+""")
+    flat = tmp_path / "flat.json"
+    flat.write_text(
+        json.dumps(
+            {
+                "deployment": "task.yaml",
+                "output_dir": "output",
+                "batch_size": 2,
+                "seed": 7,
+                "target_episodes": 4,
+                "motion_profile": "presets/motion.yaml",
+                "collision_profile": "collision.yaml",
+                "mass_scale": {"cube": [0.98, 1.02]},
+            }
+        )
+    )
+    assert load_expansion_job(nested).to_dict() == load_expansion_job(flat).to_dict()
+
+
+def test_rolling_preflight_resolves_legacy_preset_and_reports_capacity(
+    tmp_path, capsys
+):
+    from embodichain.cli.expansion import main
+
+    fixture = Path(__file__).parent / "fixtures/task_program_job.yaml"
+    deployment = (
+        Path(__file__).resolve().parents[3]
+        / "examples/expansion/engine/task.default.yaml"
+    )
+    path = tmp_path / "job.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "deployment": str(deployment),
+                "expansion": {
+                    "config": str(fixture),
+                    "execution": {"mode": "rolling", "batch_size": 3},
+                    "collection": {"output_dir": "new", "episodes_per_operator": 2},
+                },
+            }
+        )
+    )
+    assert main(["preflight", "--job", str(path)]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["num_envs"] == 6
+    assert report["target_episodes"] == 4
+    assert report["operators"] == ["object_pose", "joint_residual"]
+    assert report["supports_resume"] is False
+    assert not (tmp_path / "new").exists()
+
+    with pytest.raises(SystemExit, match="2"):
+        main(["resume", "--job", str(path)])
+    assert (
+        "Rolling expansion requires a fresh output directory" in capsys.readouterr().err
+    )
+
+
 def test_task_program_declarations_are_pure_and_protect_contact_phases(tmp_path):
-    import json
     import os
     import subprocess
     import sys
-    import yaml
     from embodichain.lab.expansion import load_task_program_expansion
 
     path = Path(__file__).parent / "fixtures/task_program_job.yaml"
@@ -109,15 +185,27 @@ def test_example_preflight_resolves_owned_backend_and_budget(name, tmp_path):
     assert not report["capabilities"]["single_body_damping"]
 
 
-def test_native_media_requires_complete_decision_contract():
+def test_visual_profile_requires_media_capture():
     path = (
         Path(__file__).resolve().parents[3]
         / "examples/expansion/engine/job.default.yaml"
     )
     cfg = load_expansion_job(path)
-    cfg.render_profiles = ("blue",)
-    with pytest.raises(ValueError, match="observation_independent"):
-        ExpansionEngine.from_job(cfg)
+    cfg.visual_profile_file = str(path.with_name("visual.yaml"))
+    cfg.visual_profile = "blue"
+    with pytest.raises(
+        ValueError, match="visual_profile requires native media capture"
+    ):
+        ExpansionEngine.from_job(cfg).preflight()
+
+
+def test_removed_render_profiles_are_rejected_at_job_load(tmp_path):
+    path = tmp_path / "job.yaml"
+    path.write_text(
+        "deployment: task.yaml\noutput_dir: output\nrender_profiles: [blue]\n"
+    )
+    with pytest.raises(ValueError, match="unknown fields"):
+        load_expansion_job(path)
 
 
 def test_resource_changes_preserve_semantics_but_record_new_execution(tmp_path):

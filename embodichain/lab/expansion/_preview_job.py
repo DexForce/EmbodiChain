@@ -90,7 +90,7 @@ def plan_preview(
         raise ValueError(
             "preview --job currently requires native Task Program planning"
         )
-    if cfg.visual_profile or cfg.render_profiles or cfg.source_profile:
+    if cfg.visual_profile or cfg.source_profile:
         raise ValueError(
             "Distribution preview does not sample visual or prototype profiles"
         )

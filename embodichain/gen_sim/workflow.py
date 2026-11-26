@@ -343,6 +343,7 @@ def revise_task_plan(
     import shutil
     from .task_spec import canonical_hash
     from .task_engine.image_planning import _assemble
+    from .task_engine.interpretation import _TERMINAL_PARK_CALL
     from .task_engine._image_run import _image_preview
     from .task_engine.semantic_plan_validation import (
         validate_semantic_plan,
@@ -373,7 +374,23 @@ def revise_task_plan(
         raise ValueError("Select a revision directory outside the parent plan")
     report = _load_json(root / "semantic_graph_validation.json", "plan validation")
     source = report["source"]
-    graph, annotations, bindings = _assemble(dict(proposal), source["candidate"])
+    parent_graph = _load_json(
+        root / "semantic_task_graph.json", "parent semantic graph"
+    )
+    # Keep only the frozen legacy park identity; revised dependencies are still validated.
+    legacy_parks = {
+        node["id"]: (
+            node["task_instance_id"],
+            node["call"],
+            source["annotations"][node["id"]],
+        )
+        for node in parent_graph["nodes"]
+        if node["call"].get("call_id") == _TERMINAL_PARK_CALL
+        and source["annotations"][node["id"]]["object"] is not None
+    }
+    graph, annotations, bindings = _assemble(
+        dict(proposal), source["candidate"], legacy_parks=legacy_parks
+    )
     source.update(
         annotations=annotations,
         bindings=bindings,
