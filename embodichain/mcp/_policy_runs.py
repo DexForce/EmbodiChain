@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import errno
 import hashlib
 import json
 import math
@@ -154,23 +155,33 @@ class _PolicyRuns:
         receipt_path = folder / "receipt.json"
         if not folder.exists():
             _check_files(profile)
-        try:
-            folder.mkdir(mode=0o700)
-        except FileExistsError:
-            receipt = _read_receipt(receipt_path)
-            if receipt["plan_id"] != plan_id:
-                raise ToolError("The World already has an assigned policy run")
-            return receipt
-        receipt = {
-            "run_id": run_id,
-            "plan_id": plan_id,
-            "session_id": session_id,
-            "resolved": {field: profile[field] for field in _FIELDS},
-            "status": "queued",
-            "done": False,
-        }
-        _write_receipt(receipt_path, receipt)
-        self.worker.submit(self._execute, profile, receipt, receipt_path)
+            receipt = {
+                "run_id": run_id,
+                "plan_id": plan_id,
+                "session_id": session_id,
+                "resolved": {field: profile[field] for field in _FIELDS},
+                "status": "queued",
+                "done": False,
+            }
+            # A competing server can observe the claim only once its receipt exists.
+            with tempfile.TemporaryDirectory(
+                prefix=".policy-", dir=self.output
+            ) as temp:
+                staging = Path(temp)
+                _write_receipt(staging / "receipt.json", receipt)
+                try:
+                    staging.rename(folder)
+                except OSError as exc:
+                    # On POSIX, renaming over a published nonempty directory
+                    # may report ENOTEMPTY instead of EEXIST.
+                    if exc.errno not in (errno.EEXIST, errno.ENOTEMPTY):
+                        raise
+                else:
+                    self.worker.submit(self._execute, profile, receipt, receipt_path)
+                    return receipt
+        receipt = _read_receipt(receipt_path)
+        if receipt["plan_id"] != plan_id:
+            raise ToolError("The World already has an assigned policy run")
         return receipt
 
     def _execute(
