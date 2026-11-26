@@ -33,20 +33,82 @@ def main(argv: Sequence[str] | None = None) -> int:
         Zero for successful preflight/inspection or a completed collection;
         two when a bounded collection stopped before its target.
     """
-    parser = argparse.ArgumentParser(prog="embodichain expansion")
+    parser = argparse.ArgumentParser(
+        prog="embodichain expansion",
+        description="Collect expert demonstrations in simulation and manage collection jobs.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Related commands\n"
+            "  embodichain run-task --gym-config TASK\n"
+            "    Collect using the expansion block in a task deployment.\n"
+            "  embodichain gensim scene expand --help\n"
+            "    Generate layout variants of an existing scene.\n"
+            "  embodichain search-scene-feasibility --help\n"
+            "    Search scene layouts and robot installations for a task.\n"
+            "  embodichain real2sim prepare --help\n"
+            "    Prepare a motion prototype from a real demonstration."
+        ),
+    )
     commands = parser.add_subparsers(dest="operation", required=True)
-    for name in ("preflight", "run"):
-        command = commands.add_parser(name)
-        command.add_argument("--job", required=True)
-    command = commands.add_parser("resume")
-    source = command.add_mutually_exclusive_group(required=True)
-    source.add_argument("--job")
-    source.add_argument("--output")
-    command.add_argument("--stage", choices=("all", "export"), default="all")
-    command = commands.add_parser("inspect")
-    command.add_argument("--output", required=True)
+    for name, summary in (
+        ("preflight", "Validate the job configuration and report resolved settings."),
+        ("run", "Run a new job to collect and validate expert demonstrations."),
+    ):
+        command = commands.add_parser(name, help=summary, description=summary)
+        command.add_argument(
+            "--job", required=True, help="Cohort or rolling job configuration."
+        )
     command = commands.add_parser(
-        "preview", help="Replay confirmed results with native ghost rendering"
+        "resume",
+        help="Continue a cohort job or retry export from saved episodes.",
+        description=(
+            "Use --job to continue an existing cohort expansion job.\n"
+            "Use --output with --stage export to retry export from saved episodes."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples\n"
+            "  embodichain expansion resume --job job.yaml\n"
+            "  embodichain expansion resume --output outputs/expansion --stage export"
+        ),
+    )
+    source = command.add_mutually_exclusive_group(required=True)
+    source.add_argument(
+        "--job", help="Cohort job configuration for resuming collection."
+    )
+    source.add_argument(
+        "--output", help="Existing job output directory for export recovery."
+    )
+    command.add_argument(
+        "--stage",
+        choices=("all", "export"),
+        default="all",
+        help="Use all with --job (default). Use export with --output.",
+    )
+    command = commands.add_parser(
+        "inspect",
+        help="Report saved job status and verify committed artifacts.",
+        description="Report saved job status and verify committed artifacts.",
+    )
+    command.add_argument(
+        "--output",
+        required=True,
+        help="Cohort output directory or a rolling operator's dataset directory.",
+    )
+    command = commands.add_parser(
+        "preview",
+        help="Replay saved results or collect preview trajectories from a job.",
+        description=(
+            "Use --input to replay saved results.\n"
+            "Use --job to sample and collect trajectories for a preview.\n"
+            "Add --plan-only to write the plan and exit."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples\n"
+            "  embodichain expansion preview --input outputs/expansion --open\n"
+            "  embodichain expansion preview --job job.yaml --output outputs/preview"
+        ),
     )
     source = command.add_mutually_exclusive_group(required=True)
     source.add_argument(
@@ -54,15 +116,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--inpu",
         dest="inputs",
         action="append",
-        help="Existing job output or preview-plan directory; repeat for groups",
+        help="Existing job output or preview-plan directory. Repeat to compare groups.",
     )
     source.add_argument(
         "--job",
-        help="Compute an endpoint/interior preview from a Task Program expansion job",
+        help="Cohort job using native Task Program planning.",
     )
     command.add_argument(
         "--output",
-        help="New collection directory for --job; never an existing-result input",
+        help="New output directory for --job preview results.",
     )
     command.add_argument(
         "--interior-samples",
@@ -73,7 +135,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     command.add_argument(
         "--plan-only",
         action="store_true",
-        help="Freeze and validate the preview plan without collection/rendering",
+        help="Write and validate the preview plan, then exit. Requires --job.",
     )
     command.add_argument(
         "--no-open",
