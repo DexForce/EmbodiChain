@@ -37,7 +37,7 @@ from embodichain.gen_sim.scene_engine.core.scene_graph import (
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.gen_sim.scene_engine.task_spec_input import TaskEntity, TaskSpecInput
 from embodichain.gen_sim.services.compat import VisionClient
-from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils import (
+from embodichain.gen_sim.scene_engine.pipeline.utils._image_segmentation_utils import (
     MaskCandidate,
     build_mask_candidates,
     decode_rle_mask,

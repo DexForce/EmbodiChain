@@ -22,7 +22,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from embodichain.gen_sim.scene_engine.pipeline.utils import asset_posture
+from embodichain.gen_sim.scene_engine.pipeline.utils import (
+    _asset_posture as asset_posture,
+)
 
 
 class _Vision:

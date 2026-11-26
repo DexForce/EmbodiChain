@@ -27,8 +27,10 @@ from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.gen_sim.scene_engine.task_spec_input import TaskEntity, TaskSpecInput
 from embodichain.gen_sim.scene_engine.pipeline.generation import scene_understanding
-from embodichain.gen_sim.scene_engine.pipeline.utils import image_segmentation_utils
-from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils import (
+from embodichain.gen_sim.scene_engine.pipeline.utils import (
+    _image_segmentation_utils as image_segmentation_utils,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils._image_segmentation_utils import (
     render_asset_mask_id_overlay,
     save_visible_rgba_crop,
 )

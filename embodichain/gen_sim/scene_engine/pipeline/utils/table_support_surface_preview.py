@@ -24,7 +24,7 @@ import numpy as np
 from PIL import Image, ImageColor, ImageDraw, ImageFont
 from scipy.ndimage import distance_transform_edt, minimum_filter
 
-from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils import (
+from embodichain.gen_sim.scene_engine.pipeline.utils._image_segmentation_utils import (
     _load_label_font_at_size,
 )
 

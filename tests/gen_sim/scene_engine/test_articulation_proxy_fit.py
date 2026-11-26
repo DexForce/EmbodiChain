@@ -22,16 +22,16 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 
-from embodichain.gen_sim.scene_engine.pipeline.utils.articulation_orientation_review import (
+from embodichain.gen_sim.scene_engine.pipeline.utils._articulation_orientation_review import (
     _write_preview_stage,
 )
-from embodichain.gen_sim.scene_engine.pipeline.utils.articulation_proxy_alignment import (
+from embodichain.gen_sim.scene_engine.pipeline.utils._articulation_proxy_alignment import (
     align_articulation_proxy,
 )
-from embodichain.gen_sim.scene_engine.pipeline.utils.articulation_proxy_fit import (
+from embodichain.gen_sim.scene_engine.pipeline.utils._articulation_proxy_fit import (
     fit_articulation_proxy,
 )
-from embodichain.gen_sim.scene_engine.pipeline.utils.articulation_scale import (
+from embodichain.gen_sim.scene_engine.pipeline.utils._articulation_scale import (
     bake_articulation_scale,
 )
 from embodichain.lab.sim.scene.articulation_geometry import read_articulation_geometry

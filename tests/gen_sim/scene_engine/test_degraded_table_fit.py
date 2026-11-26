@@ -22,7 +22,7 @@ import trimesh
 from scipy.spatial.transform import Rotation
 from shapely.geometry import Polygon, box
 
-from embodichain.gen_sim.scene_engine.pipeline.utils.degraded_table_fit import (
+from embodichain.gen_sim.scene_engine.pipeline.utils._degraded_table_fit import (
     fit_degraded_table,
     tabletop_level_rotation,
 )

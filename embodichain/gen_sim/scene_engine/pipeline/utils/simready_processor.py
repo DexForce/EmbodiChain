@@ -31,10 +31,10 @@ from embodichain.gen_sim.scene_engine.core.scene_object import (
     ObjectPhysics,
     SceneObject,
 )
-from embodichain.gen_sim.scene_engine.pipeline.utils.asset_posture import (
+from embodichain.gen_sim.scene_engine.pipeline.utils._asset_posture import (
     review_asset_posture,
 )
-from embodichain.gen_sim.scene_engine.pipeline.utils.degraded_table_fit import (
+from embodichain.gen_sim.scene_engine.pipeline.utils._degraded_table_fit import (
     tabletop_level_rotation,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils import (

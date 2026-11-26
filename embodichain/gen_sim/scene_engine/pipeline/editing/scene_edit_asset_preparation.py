@@ -36,7 +36,7 @@ from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_edit_plan import SceneEditPlan
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.gen_sim.services.compat import VisionClient
-from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils import (
+from embodichain.gen_sim.scene_engine.pipeline.utils._image_segmentation_utils import (
     MaskCandidate,
     build_mask_candidates,
     invert_mask_if_foreground_is_off_center,

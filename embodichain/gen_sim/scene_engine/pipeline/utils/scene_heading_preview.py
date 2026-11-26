@@ -23,7 +23,7 @@ import tempfile
 from PIL import Image, ImageDraw, ImageOps
 
 from embodichain.gen_sim._blender_runtime import _run_blender_job
-from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils import (
+from embodichain.gen_sim.scene_engine.pipeline.utils._image_segmentation_utils import (
     _load_label_font_at_size,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils import (

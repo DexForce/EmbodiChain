@@ -37,7 +37,7 @@ from embodichain.utils.logger import log_info, log_warning
 from embodichain.gen_sim.asset_engine.utils.articulated_usdc_utils import (
     _articulation_root_bottom_z,
 )
-from embodichain.gen_sim.scene_engine.pipeline.utils.articulation_proxy_alignment import (
+from embodichain.gen_sim.scene_engine.pipeline.utils._articulation_proxy_alignment import (
     align_articulation_proxy,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_utils import (
@@ -610,7 +610,7 @@ class SceneExporter:
             )
             audit = {"status": "legacy_y_up", "support_z_m": support_z}
         else:
-            from embodichain.gen_sim.scene_engine.pipeline.utils.articulation_scale import (
+            from embodichain.gen_sim.scene_engine.pipeline.utils._articulation_scale import (
                 bake_articulation_scale,
             )
 
@@ -623,7 +623,7 @@ class SceneExporter:
                 and scene_object.visible_rgba_path is not None
                 and Path(scene_object.visible_rgba_path).is_file()
             ):
-                from embodichain.gen_sim.scene_engine.pipeline.utils.articulation_orientation_review import (
+                from embodichain.gen_sim.scene_engine.pipeline.utils._articulation_orientation_review import (
                     review_articulation_orientation,
                 )
 

@@ -23,7 +23,7 @@ from typing import Protocol
 from PIL import Image
 
 from embodichain.gen_sim.scene_engine.core.scene_graph import TABLE_OBJECT_ID
-from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils import (
+from embodichain.gen_sim.scene_engine.pipeline.utils._image_segmentation_utils import (
     build_mask_candidates,
     decode_rle_mask,
     invert_mask_if_foreground_is_off_center,

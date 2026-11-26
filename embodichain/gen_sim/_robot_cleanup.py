@@ -27,7 +27,7 @@ import numpy as np
 from PIL import Image, ImageChops, ImageFilter
 from scipy.ndimage import label
 
-from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils import (
+from embodichain.gen_sim.scene_engine.pipeline.utils._image_segmentation_utils import (
     decode_rle_mask,
 )
 from embodichain.gen_sim.services.compat import SegmentationFacade

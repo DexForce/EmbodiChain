@@ -24,7 +24,7 @@ from PIL import Image, ImageDraw
 import pytest
 
 from embodichain.gen_sim.scene_engine.pipeline.utils import (
-    image_segmentation_utils as segmentation,
+    _image_segmentation_utils as segmentation,
 )
 
 

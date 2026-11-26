@@ -51,13 +51,13 @@ from embodichain.gen_sim.scene_engine.core.scene_graph import (
 )
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.gen_sim.services.compat import VisionClient
-from embodichain.gen_sim.scene_engine.pipeline.utils.asset_posture import (
+from embodichain.gen_sim.scene_engine.pipeline.utils._asset_posture import (
     review_asset_posture,
 )
-from embodichain.gen_sim.scene_engine.pipeline.utils.degraded_table_asset import (
+from embodichain.gen_sim.scene_engine.pipeline.utils._degraded_table_asset import (
     generate_degraded_table_asset,
 )
-from embodichain.gen_sim.scene_engine.pipeline.utils.degraded_table_fit import (
+from embodichain.gen_sim.scene_engine.pipeline.utils._degraded_table_fit import (
     fit_degraded_table,
     tabletop_level_rotation,
 )

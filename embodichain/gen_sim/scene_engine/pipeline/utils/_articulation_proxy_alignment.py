@@ -26,7 +26,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
 
-from embodichain.gen_sim.scene_engine.pipeline.utils.articulation_proxy_fit import (
+from embodichain.gen_sim.scene_engine.pipeline.utils._articulation_proxy_fit import (
     ArticulationProxyFit,
     fit_articulation_proxy,
 )

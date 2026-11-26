@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageDraw
 
-from embodichain.gen_sim.scene_engine.pipeline.utils.degraded_table_asset import (
+from embodichain.gen_sim.scene_engine.pipeline.utils._degraded_table_asset import (
     generate_degraded_table_asset,
 )
 from embodichain.gen_sim.services.contracts import (
