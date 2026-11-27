@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Serve EmbodiChain queries over stdio for an explicitly selected session."""
+"""Serve the EmbodiChain catalog or read an existing DexSim Session over stdio."""
 
 from __future__ import annotations
 
@@ -25,15 +25,20 @@ __all__ = ["main"]
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """Start the local MCP server for an existing DexSim Runtime session."""
+    """Start the local EmbodiChain MCP server."""
     parser = argparse.ArgumentParser(prog="embodichain mcp", description=__doc__)
+    parser.add_argument("--session", help="Existing DexSim Runtime session ID")
     parser.add_argument(
-        "--session", required=True, help="Existing DexSim Runtime session ID"
+        "--catalog", action="store_true", help="Expose discovery and catalog resources"
     )
     parser.add_argument(
         "--session-directory", help="Optional DexSim discovery directory"
     )
     args = parser.parse_args(argv)
+    if not (args.session or args.catalog):
+        parser.error("Supply --session or --catalog")
+    if args.session_directory is not None and not args.session:
+        parser.error("--session-directory requires --session")
     try:
         from embodichain.mcp.server import serve
     except ModuleNotFoundError as exc:
@@ -42,4 +47,4 @@ def main(argv: Sequence[str] | None = None) -> None:
         parser.exit(
             2, f"Install the MCP extra with pip install 'embodichain[mcp]': {exc}\n"
         )
-    serve(args.session, directory=args.session_directory)
+    serve(args.session, directory=args.session_directory, catalog=args.catalog)

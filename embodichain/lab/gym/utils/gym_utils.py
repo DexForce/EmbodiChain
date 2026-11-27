@@ -1915,77 +1915,6 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
     return merged_config
 
 
-def _resolve_expansion_config_path(value: object, *, base_dir: Path) -> Path:
-    """Resolve one task-owned expansion declaration path."""
-    from embodichain.utils.config_paths import resolve_config_path
-
-    if type(value) is not str or not value.strip() or value != value.strip():
-        raise ValueError("expansion.config must be a nonempty path")
-    path = Path(value).expanduser()
-    resolved = resolve_config_path(path, base_dir=base_dir).resolve()
-    if resolved.suffix.lower() not in {".yaml", ".yml", ".json"}:
-        raise ValueError(f"expansion.config must be a YAML or JSON file: {resolved}")
-    if not resolved.is_file():
-        raise FileNotFoundError(f"expansion.config is not a file: {resolved}")
-    return resolved
-
-
-def _merge_expansion_config(
-    base: Mapping[str, Any], patch: Mapping[str, Any]
-) -> dict[str, Any]:
-    """Deep-merge a referenced expansion config with task-local overrides."""
-    merged = deepcopy(dict(base))
-    for key, value in patch.items():
-        if isinstance(value, Mapping):
-            current = merged.get(key, {})
-            if not isinstance(current, Mapping):
-                raise ValueError(f"expansion.{key} cannot replace a scalar")
-            merged[key] = _merge_expansion_config(current, value)
-        else:
-            merged[key] = deepcopy(value)
-    return merged
-
-
-def _load_expansion_declaration(
-    binding: Mapping[str, Any], *, base_dir: Path
-) -> tuple[dict[str, Any], Path | None]:
-    """Load an optional task-referenced expansion declaration.
-
-    A task may keep the expansion declaration inline or point ``expansion``
-    at a sibling YAML/JSON file with ``config``. The referenced file contains
-    the fields below ``expansion`` directly; a single outer ``expansion``
-    mapping is accepted as a migration convenience. Only one level of
-    references is resolved so malformed chains fail early.
-    """
-    if not isinstance(binding, Mapping):
-        raise ValueError("expansion must be a mapping")
-    if "config" not in binding:
-        return deepcopy(dict(binding)), None
-    config_value = binding["config"]
-
-    from embodichain.utils.utility import load_config
-
-    config_path = _resolve_expansion_config_path(config_value, base_dir=base_dir)
-    referenced = load_config(config_path)
-    if not isinstance(referenced, Mapping):
-        raise TypeError("expansion config must contain a mapping")
-    referenced = dict(referenced)
-    if "expansion" in referenced:
-        if set(referenced) != {"expansion"}:
-            raise ValueError(
-                "expansion config may contain either expansion fields or one "
-                "outer expansion mapping"
-            )
-        nested = referenced["expansion"]
-        if not isinstance(nested, Mapping):
-            raise TypeError("expansion config.expansion must be a mapping")
-        referenced = dict(nested)
-    if "config" in referenced:
-        raise ValueError("expansion.config cannot reference another expansion config")
-    local_overrides = {key: value for key, value in binding.items() if key != "config"}
-    return _merge_expansion_config(referenced, local_overrides), config_path
-
-
 def _apply_expansion_runtime_overlay(
     config: dict[str, Any], *, base_dir: Path | None = None
 ) -> dict[str, Any]:
@@ -1999,6 +1928,8 @@ def _apply_expansion_runtime_overlay(
     expansion = config.get("expansion")
     if not isinstance(expansion, Mapping):
         return config
+    from embodichain.lab.expansion._job_config import _load_expansion_declaration
+
     expansion, _ = _load_expansion_declaration(
         expansion,
         base_dir=Path.cwd() if base_dir is None else base_dir,

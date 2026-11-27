@@ -139,6 +139,120 @@ class SceneState:
         object.__setattr__(self, "batches", batches)
 
 
+@dataclass(frozen=True)
+class _CapturedState:
+    """Owned CPU tensor fields from one physical boundary in view row order."""
+
+    view: SceneView
+    entities: tuple[tuple[str, str, str, tuple[str, ...]], ...]
+    fields: dict[tuple[str, str], torch.Tensor]
+    rigid: dict[str, torch.Tensor]
+
+    @property
+    def env_ids(self) -> tuple[int, ...]:
+        return self.view.env_ids
+
+    def to_scene_state(self) -> SceneState:
+        values = {}
+        for (uid, name), tensor in self.fields.items():
+            values.setdefault(uid, {})[name] = tensor.tolist()
+        batches = []
+        for row in range(len(self.env_ids)):
+            batches.append(
+                tuple(
+                    EntityState(
+                        kind,
+                        uid,
+                        body_type,
+                        names,
+                        **{name: rows[row] for name, rows in values[uid].items()},
+                    )
+                    for kind, uid, body_type, names in self.entities
+                )
+            )
+        return SceneState(
+            self.view.sim.physics_backend,
+            self.env_ids,
+            tuple(batches),
+            self.view.sim,
+            self.view.topology,
+        )
+
+
+def _capture_state_fields(view: SceneView) -> _CapturedState:
+    """Read each entity once before materializing portable Python values."""
+    view.check_topology()
+    fields, rigid, entities = {}, {}, []
+    rows = list(view.env_ids)
+
+    def select(values, widths, uid):
+        for value, width in zip(values, widths, strict=True):
+            if (
+                not isinstance(value, torch.Tensor)
+                or not value.is_floating_point()
+                or value.shape != (view._num_envs, width)
+            ):
+                raise ValueError(f"{uid} has invalid physical state field shape")
+        if len({(value.device, value.dtype) for value in values}) == 1:
+            source = values[0] if len(values) == 1 else torch.cat(values, dim=-1)
+            packed = source.detach()[rows].cpu()
+            if not bool(torch.isfinite(packed).all()):
+                raise ValueError(f"{uid} state must be finite in selected rows")
+            return packed.split(widths, dim=-1)
+        selected = tuple(value.detach()[rows].cpu() for value in values)
+        if not all(bool(torch.isfinite(value).all()) for value in selected):
+            raise ValueError(f"{uid} state must be finite in selected rows")
+        return selected
+
+    for kind, uid, entity in view.entities():
+        if kind == "rigid_object":
+            (state,) = select((entity.body_state,), (13,), uid)
+            pose, velocity = state[:, :7], state[:, 7:]
+            if entity.body_type != "dynamic" and bool(velocity.any()):
+                raise ValueError("Moving non-dynamic rigid bodies cannot be restored")
+            rigid[uid] = state
+            values = {"pose": pose, "velocity": velocity}
+            entities.append((kind, uid, entity.body_type, ()))
+        else:
+            names = tuple(entity.joint_names)
+            live = entity.body_data.fetch_state()
+            # Some backends own and reuse observation buffers behind their getters.
+            live = {key: value.clone() for key, value in live.items()}
+            values = dict(
+                zip(
+                    (
+                        "pose",
+                        "velocity",
+                        "qpos",
+                        "qvel",
+                        "target_qpos",
+                        "target_qvel",
+                        "qf",
+                    ),
+                    select(
+                        (
+                            live["root_pose"],
+                            torch.cat((live["root_lin_vel"], live["root_ang_vel"]), -1),
+                            live["qpos"],
+                            live["qvel"],
+                            entity.get_qpos(target=True),
+                            entity.get_qvel(target=True),
+                            entity.get_qf(),
+                        ),
+                        (7, 6, *(len(names),) * 5),
+                        uid,
+                    ),
+                    strict=True,
+                )
+            )
+            entities.append((kind, uid, "", names))
+        quat_norm2 = values["pose"][:, 3:].double().square().sum(dim=-1)
+        if bool(((quat_norm2 - 1.0).abs() > 1e-5).any()):
+            raise ValueError("Snapshot pose quaternion must be normalized")
+        fields.update({(uid, name): value for name, value in values.items()})
+    return _CapturedState(view, tuple(entities), fields, rigid)
+
+
 def capture_state(view: SceneView) -> SceneState:
     """Capture all physical fields without stepping or retaining live buffers.
 
@@ -149,68 +263,7 @@ def capture_state(view: SceneView) -> SceneState:
     Returns:
         Immutable arena-local poses, velocities, joints, targets and efforts.
     """
-    view.check_topology()
-    batches: list[list[EntityState]] = [[] for _ in view.env_ids]
-
-    def rows(value: torch.Tensor, width: int, name: str) -> list[tuple[float, ...]]:
-        if (
-            not isinstance(value, torch.Tensor)
-            or not value.is_floating_point()
-            or value.shape != (view._num_envs, width)
-        ):
-            raise ValueError(f"{name} must have floating shape (num_envs,{width})")
-        selected = value.detach()[list(view.env_ids)].cpu()
-        if not bool(torch.isfinite(selected).all()):
-            raise ValueError(f"{name} must be finite in selected rows")
-        return [tuple(row) for row in selected.tolist()]
-
-    for kind, uid, entity in view.entities():
-        if kind == "rigid_object":
-            values = rows(entity.body_state, 13, f"{uid}.body_state")
-            for batch, value in zip(batches, values):
-                batch.append(
-                    EntityState(kind, uid, entity.body_type, (), value[:7], value[7:])
-                )
-            continue
-        names = tuple(entity.joint_names)
-        dof = len(names)
-        live = {
-            key: value.clone() for key, value in entity.body_data.fetch_state().items()
-        }
-        values = {
-            "pose": rows(live["root_pose"], 7, f"{uid}.root_pose"),
-            "velocity": rows(
-                torch.cat((live["root_lin_vel"], live["root_ang_vel"]), -1),
-                6,
-                f"{uid}.velocity",
-            ),
-            "qpos": rows(live["qpos"], dof, f"{uid}.qpos"),
-            "qvel": rows(live["qvel"], dof, f"{uid}.qvel"),
-            "target_qpos": rows(
-                entity.get_qpos(target=True), dof, f"{uid}.target_qpos"
-            ),
-            "target_qvel": rows(
-                entity.get_qvel(target=True), dof, f"{uid}.target_qvel"
-            ),
-            "qf": rows(entity.get_qf(), dof, f"{uid}.qf"),
-        }
-        for index, batch in enumerate(batches):
-            batch.append(
-                EntityState(
-                    kind,
-                    uid,
-                    "",
-                    names,
-                    **{key: value[index] for key, value in values.items()},
-                )
-            )
-    return SceneState(
-        view.sim.physics_backend,
-        view.env_ids,
-        tuple(tuple(batch) for batch in batches),
-        view.sim,
-        view.topology,
-    )
+    return _capture_state_fields(view).to_scene_state()
 
 
 def _preflight_restore(

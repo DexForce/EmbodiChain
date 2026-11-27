@@ -19,10 +19,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 import shutil
 import tempfile
 from typing import Any
+from zipfile import ZIP_STORED, ZipFile
 
 __all__: list[str] = []
 
@@ -113,8 +115,10 @@ def _package_registry() -> dict[str, Any]:
     }
 
 
-def _export_scene_package(*, scene_usd_path: Path, destination: Path) -> Path:
-    """Publish a schema-validated ZIP from only the USD dependency closure.
+def _export_scene_package(
+    *, scene_usd_path: Path, destination: Path, scene_export_root: Path | None = None
+) -> Path:
+    """Publish the USD closure and, when available, its editable scene layout.
 
     DexSim owns the schema, namespace remapping, inventories and provenance.
     Its packaging adapter is isolated here because it is currently a private
@@ -170,6 +174,10 @@ def _export_scene_package(*, scene_usd_path: Path, destination: Path) -> Path:
             target = staging / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(resolved, target)
+        if scene_export_root is not None:
+            from ._scene_package_metadata import _stage_scene_export
+
+            _stage_scene_export(scene_export_root.resolve(), staging / "scene_export")
         packaged = export_processed_usd(
             staging / scene_usd_path.name,
             workspace / "scene.zip",
@@ -177,5 +185,78 @@ def _export_scene_package(*, scene_usd_path: Path, destination: Path) -> Path:
             catalog=catalog,
             registry=_package_registry(),
         )
+        if scene_export_root is not None:
+            packaged = _finish_editable_package(packaged, workspace)
         packaged.replace(destination)
     return destination
+
+
+def _finish_editable_package(packaged: Path, workspace: Path) -> Path:
+    """Add scene metadata to the staged SDK archive and validate before publication."""
+    from dexsim.kit.simready import open_asset_package, validate_asset_revision
+    from ._scene_package_metadata import _SCENE_EXTENSION, _scene_package_metadata
+
+    # The pinned SDK writes the file inventory but has no scene-metadata input.
+    # Its digests cover the staged editable files. Only asset.json changes here.
+    enriched = workspace / "editable.zip"
+    with open_asset_package(packaged, workspace=workspace) as root:
+        asset_path = root / "asset.json"
+        asset = json.loads(asset_path.read_text(encoding="utf-8"))
+        metadata = _scene_package_metadata(root, asset)
+        asset.setdefault("extensions", {})[_SCENE_EXTENSION] = metadata.pop(
+            _SCENE_EXTENSION
+        )
+        asset.update(metadata)
+        asset_path.write_text(
+            json.dumps(asset, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+            encoding="utf-8",
+        )
+        if validate_asset_revision(root) is None:
+            raise ValueError("Scene package has no AssetRevision")
+        with ZipFile(enriched, "x", compression=ZIP_STORED) as archive:
+            for path in sorted(root.rglob("*")):
+                if path.is_file():
+                    archive.write(path, path.relative_to(root).as_posix())
+    return enriched
+
+
+def _restore_scene_export(output_root: Path) -> None:
+    """Materialize the editable files from a package-only scene workspace."""
+    destination = output_root / "scene_export"
+    packaged = output_root / "scene_package.zip"
+    if destination.exists() or destination.is_symlink() or not packaged.is_file():
+        return
+
+    from dexsim.kit.simready import open_asset_package, validate_asset_revision
+    from ._scene_package_metadata import (
+        _SCENE_EXTENSION,
+        _same_scene_layout,
+        _scene_package_metadata,
+    )
+
+    with open_asset_package(packaged, workspace=output_root) as root:
+        if validate_asset_revision(root) is None:
+            raise ValueError("Scene package has no AssetRevision")
+        # Read the validated document because the SDK's typed view omits optional
+        # scene fields on some releases.
+        asset = json.loads((root / "asset.json").read_text(encoding="utf-8"))
+        extension = asset.get("extensions", {}).get(_SCENE_EXTENSION)
+        if not isinstance(extension, dict) or extension.get("version") != 1:
+            raise ValueError(
+                "Scene package has no supported editable Scene Engine export"
+            )
+        expected = _scene_package_metadata(root, asset)
+        if (
+            extension != expected[_SCENE_EXTENSION]
+            or not _same_scene_layout(
+                asset.get("scene_layout"), expected["scene_layout"]
+            )
+            or asset.get("semantics") != expected["semantics"]
+            or asset["representations"] != expected["representations"]
+        ):
+            raise ValueError(
+                "Scene package metadata disagrees with its editable export"
+            )
+        # The SDK checks bytes before this same-filesystem rename. A conflicting
+        # nonempty destination cannot be replaced by rename.
+        (root / "scene_export").rename(destination)

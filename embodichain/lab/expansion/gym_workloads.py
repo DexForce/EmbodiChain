@@ -705,7 +705,6 @@ def run_gym_expansion_workloads(
                     "motion_profile",
                     "scene_atlas",
                     "visual_profile",
-                    "render_profiles",
                     "mass_scale",
                     "friction",
                     "center_of_mass",

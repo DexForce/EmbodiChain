@@ -312,4 +312,4 @@ for client and generation entry points.
 
 For preview modes and asset loading, see [Previewing Assets](../../guides/preview_asset.md).
 For mesh preparation utilities outside this workflow, see
-[Tools](../toolkits/index.rst).
+{doc}`../toolkits/index`.

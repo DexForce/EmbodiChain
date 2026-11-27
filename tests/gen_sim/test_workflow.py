@@ -164,10 +164,11 @@ def _services(
         ]
         plan["requirements"][0]["quote"] = f"Put the {required_color} cube on the table"
 
+    typed_intent = {"steps": [step or _step()]}
     return GenSimServices(
         GenSimServicesCfg(),
         injected={
-            "task_interpretation": _ScriptedChat({"steps": [step or _step()]}),
+            "task_interpretation": _ScriptedChat(typed_intent, typed_intent),
             "task_image_grounding": _ScriptedChat(
                 grounding,
                 {
@@ -1957,7 +1958,9 @@ def test_grounded_hybrid_placement_uses_scene_qualification(run_cfg, seen):
                     for o in packet["grounding"]["objects"]
                 },
             ),
-            "task_interpretation": _ScriptedChat({"issues": []}),
+            "task_interpretation": _ScriptedChat(
+                {"issues": [], "source_operations": [op]}
+            ),
         },
     ) as services:
         publish_hybrid(
@@ -2178,7 +2181,9 @@ def test_repeated_coordinated_release_has_unique_routes(run_cfg, different_pose)
         GenSimServicesCfg(),
         injected={
             "task_image_grounding": _ScriptedChat(dict(operations=ops)),
-            "task_interpretation": _ScriptedChat(dict(issues=[])),
+            "task_interpretation": _ScriptedChat(
+                dict(issues=[], source_operations=ops)
+            ),
         },
     ) as services:
         publish_hybrid(

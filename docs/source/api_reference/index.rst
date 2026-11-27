@@ -50,6 +50,12 @@ The core ``embodichain`` framework includes these top-level packages:
     Shared utilities: the ``@configclass`` decorator, logging, math/tensor
     helpers, file/string/device helpers, and legacy computation import aliases.
 
+``mcp``
+    MCP server and robot state queries for a running DexSim Runtime session.
+
+``gen_sim``
+    Asset and scene generation, scene adapters, and semantic task planning.
+
 .. currentmodule:: embodichain
 
 .. autosummary::
@@ -62,6 +68,20 @@ The core ``embodichain`` framework includes these top-level packages:
    toolkits
    learning
    utils
+
+.. toctree::
+   :maxdepth: 2
+
+   embodichain.mcp <embodichain/embodichain.mcp>
+   embodichain/embodichain.gen_sim
+
+Official Extensions
+-------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   extensions/index
 
 Public API Coverage
 -------------------
@@ -84,32 +104,6 @@ documentation. CI runs this same checker after style checks and before tests.
 .. toctree::
    :maxdepth: 1
 
-   embodichain/embodichain.mcp
    public_api
    skill_fitting
    embodichain/embodichain.gen_sim.task_engine
-   benchmarks
-   locomotion_tasks
-
-
-.. toctree::
-   :maxdepth: 2
-
-   robot_catalogs
-   agibot_g1
-   data/eef_assets
-   model_catalogs
-   model_rigidformer
-
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Locomotion robots
-
-   locomotion_robots
-
-
-.. toctree::
-   :maxdepth: 1
-
-   kinematics_matrix

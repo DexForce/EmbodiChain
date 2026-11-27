@@ -1,13 +1,18 @@
-# Policy Models
+# Policy Models: Generating Robot Actions
 
-| Model | Use it when | Inputs and outputs |
-| --- | --- | --- |
-| [Neural Motion Generator](nmg.md) | An arm needs to visit a sequence of joint or Cartesian goals | Joint state, tool pose and encoded goals → one action per controlled joint |
-| [Action Chunking Transformer (ACT)](act.md) | A policy trained from visual demonstrations should drive the robot | Camera images and robot observations → action chunks processed into physical commands |
+| Model | Inputs | Prediction | Example |
+| --- | --- | --- | --- |
+| [NMG](nmg.md) | Arm joints, tool pose, ordered goals, previous action | One action per joint toward the active goal | [Franka and PiPER waypoints](https://github.com/DexForce/EmbodiChain/tree/main/examples/sim/motion/planners/nmg) |
+| [ACT](act.md) | Camera images and measured joint positions | A chunk of future actions learned from demonstrations | [Visual PushCube](https://github.com/DexForce/EmbodiChain/tree/main/examples/learning/act) |
 
 ```{toctree}
 :hidden:
 
 nmg
-ACT <act>
+act
 ```
+
+## Original paper
+
+Zhao et al. (2023) introduce ACT and the ALOHA system used to collect its
+bimanual demonstrations. [Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware](https://www.roboticsproceedings.org/rss19/p016.html)

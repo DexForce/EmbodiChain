@@ -27,6 +27,151 @@ pytestmark = pytest.mark.no_sim
 
 
 @pytest.fixture
+def robot_frame():
+    from embodichain.lab.sim.scene.state import _CapturedState
+
+    pose = torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]])
+    return _CapturedState(
+        SimpleNamespace(
+            env_ids=(0,), sim=SimpleNamespace(physics_backend="default"), topology=()
+        ),
+        (("robot", "robot", "", ("j",)),),
+        {
+            ("robot", "pose"): pose,
+            ("robot", "velocity"): torch.zeros(1, 6),
+            **{
+                ("robot", name): torch.zeros(1, 1)
+                for name in ("qpos", "qvel", "qf", "target_qpos", "target_qvel")
+            },
+        },
+        {},
+    )
+
+
+def test_geometry_checks_dynamic_obstacle_omitted_from_snapshot(tmp_path, robot_frame):
+    pytest.importorskip("newton")
+    from embodichain.lab.expansion.acceptance import (
+        MeasuredExpansionValidator,
+        _GeometryRow,
+    )
+    from embodichain.lab.gym.envs.types import ControllerAction
+    from embodichain.lab.sim.scene.feasibility import (
+        CollisionBody,
+        NewtonCollisionChecker,
+    )
+    from embodichain.lab.task_program.integrations.feasibility import (
+        MeasuredTaskMonitor,
+    )
+
+    checker = NewtonCollisionChecker(
+        (
+            CollisionBody("robot_link", "robot/root", "sphere", (0.1,), robot=True),
+            CollisionBody("cube_shape", "cube", "box", (0.2, 0.2, 0.2)),
+        )
+    )
+    cube = SimpleNamespace(
+        is_static=False, get_local_pose=lambda *, to_matrix: torch.eye(4)[None]
+    )
+    validator = object.__new__(MeasuredExpansionValidator)
+    validator.env = SimpleNamespace(
+        num_envs=1,
+        robot=SimpleNamespace(
+            uid="robot",
+            joint_names=["j"],
+            link_names=["root"],
+            body_data=SimpleNamespace(
+                body_link_pose=robot_frame.fields["robot", "pose"][:, None]
+            ),
+        ),
+        sim=SimpleNamespace(
+            get_rigid_object_uid_list=lambda: ("cube",),
+            get_rigid_object=lambda uid: cube,
+        ),
+    )
+    row = object.__new__(_GeometryRow)
+    row.monitor = MeasuredTaskMonitor(
+        [{"kind": "joint_range", "joint": "j", "lower": -1, "upper": 1}], ()
+    )
+    row.env_id, row.output, row.moving = 0, tmp_path, ("cube",)
+    row.checkers = [(checker, (), {"robot/root", "cube"})]
+    row.terminal, row.results = {}, {}
+    validator.rows, validator.sensor = {0: row}, None
+    validator.terminal, validator.results, validator._shapes = {}, {}, {"cube": ()}
+
+    try:
+        validator.sample(
+            (0,), ControllerAction(torch.zeros(1, 1)), robot_frame.to_scene_state()
+        )
+        assert validator.results[0].status == "failed"
+        assert "robot_link" in validator.results[0].reason
+        assert "cube_shape" in validator.results[0].reason
+    finally:
+        checker.close()
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_frame_collector_honors_validator_sample(
+    monkeypatch, tmp_path, robot_frame, wrapped
+):
+    from embodichain.lab.expansion import _gym_frames
+    from embodichain.lab.expansion.acceptance import MeasuredExpansionValidator
+    from embodichain.lab.gym.envs.types import ControllerAction
+    from embodichain.lab.sim.scene import SceneState
+
+    validator = object.__new__(MeasuredExpansionValidator)
+    snapshots = []
+
+    def check(ids, action, snapshot):
+        snapshots.append(snapshot)
+        validator.results = {0: "passed"}
+
+    monkeypatch.setattr(validator, "_sample_captured", check)
+    if wrapped:
+        original = validator.sample
+
+        def reject(ids, action, snapshot):
+            original(ids, action, snapshot)
+            validator.results[0] = "failed"
+
+        monkeypatch.setattr(validator, "sample", reject)
+    monkeypatch.setattr(_gym_frames, "_capture_state_fields", lambda _: robot_frame)
+    env = SimpleNamespace(
+        robot=SimpleNamespace(
+            uid="robot",
+            dof=1,
+            get_qpos=lambda: torch.zeros(1, 1),
+            get_qvel=lambda: torch.zeros(1, 1),
+            get_qf=lambda: torch.zeros(1, 1),
+        ),
+        active_joint_ids=(0,),
+        expert_action_spec=SimpleNamespace(joint_command_mode="position"),
+        sim=SimpleNamespace(get_rigid_object_uid_list=lambda: ()),
+    )
+    collector = _gym_frames.GymFrameCollector(
+        SimpleNamespace(
+            cfg=SimpleNamespace(capture_media=False, episode_byte_budget=1024),
+            env=env,
+            initial=robot_frame.to_scene_state(),
+            initial_obs={},
+            view=None,
+            collision=validator,
+            timings={},
+            journal=SimpleNamespace(checkpoint=lambda: None),
+        ),
+        {0: (None, None, None, tmp_path, None)},
+    )
+    collector.observe((0,), ControllerAction(torch.zeros(1, 1)), {})
+
+    assert len(snapshots) == 1
+    if wrapped:
+        assert isinstance(snapshots[0], SceneState)
+        assert validator.results[0] == "failed"
+    else:
+        assert snapshots[0] is robot_frame
+        assert validator.results[0] == "passed"
+
+
+@pytest.fixture
 def contact_row(tmp_path):
     def build(duration=0.25, ground=False, frequency=10):
         asset = tmp_path / "robot.urdf"

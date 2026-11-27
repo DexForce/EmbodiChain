@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import subprocess
 from pathlib import Path
@@ -109,7 +110,7 @@ def test_attach_two_ur5_and_reconnect(
     def native(method: str, **params: Any) -> dict[str, Any]:
         return session.invoke("dexsim.kit.mcp.dispatch", method=method, params=params)
 
-    async def read_b(expected: dict[str, Any]) -> None:
+    async def read_b(expected: dict[str, Any], *, catalog: bool = False) -> None:
         parameters = mcp.StdioServerParameters(
             command=sys.executable,
             args=[
@@ -120,12 +121,34 @@ def test_attach_two_ur5_and_reconnect(
                 session.session_id,
                 "--session-directory",
                 str(tmp_path),
+                *(["--catalog"] if catalog else []),
             ],
         )
         async with mcp.Client(parameters) as client:
-            catalog = (await client.list_tools()).tools
-            assert [tool.name for tool in catalog] == ["embodichain_get_robot_state"]
-            tool = catalog[0]
+            tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+            if catalog:
+                uri = f"embodichain://worlds/{session.session_id}/manifest"
+                manifest = await client.read_resource(uri)
+                assert json.loads(manifest.contents[0].text) == {
+                    "schema_version": 1,
+                    "session_id": session.session_id,
+                    "backend": backend,
+                    "solver": session.info["config"]["solver"],
+                    "device": "cuda:0",
+                    "timestep_s": session.info["config"]["dt"],
+                    "dexsim_version": session.info["runtime"]["dexsim_version"],
+                    "scene_attached": True,
+                    "builder_finalized": True,
+                    "shutdown_requested": False,
+                }
+                health = await client.call_tool("embodichain_health")
+                assert not health.is_error
+                assert health.structured_content["status"] == "ready"
+                assert health.structured_content["session_id"] == session.session_id
+                assert health.structured_content["host_state"] in ("idle", "busy")
+            else:
+                assert set(tools) == {"embodichain_get_robot_state"}
+            tool = tools["embodichain_get_robot_state"]
             assert tool.annotations.read_only_hint
             assert "qvel" in tool.output_schema["required"]
             args = dict(
@@ -202,7 +225,7 @@ def test_attach_two_ur5_and_reconnect(
         updated = native("articulation.get_state", object_ref="ur5_b", joint_names=arm)
         assert updated["joint_position"] == pytest.approx(pose_b)
         assert updated["joint_velocity"] == pytest.approx(vel_b)
-        asyncio.run(read_b(updated))
+        asyncio.run(read_b(updated, catalog=True))
         after = native("articulation.get_state", object_ref="ur5_b", joint_names=arm)
         for signal in ("joint_position", "joint_velocity"):
             assert after[signal] == pytest.approx(updated[signal])

@@ -40,7 +40,7 @@ COMMANDS = (
     Command(
         name="mcp",
         target="embodichain.cli.mcp:main",
-        help="Serve read-only robot state from an existing DexSim session over stdio.",
+        help="Serve the catalog or read-only DexSim Session state over stdio.",
     ),
     Command(
         name="fit-trajectory",
@@ -55,7 +55,7 @@ COMMANDS = (
     Command(
         name="expansion",
         target="embodichain.cli.expansion:main",
-        help="Preflight, collect, resume and inspect expert expansion jobs.",
+        help="Collect expert demonstrations in simulation and manage collection jobs.",
     ),
     Command(
         name="train-sl",
@@ -115,7 +115,7 @@ COMMANDS = (
     Command(
         name="run-task",
         target="embodichain.lab.scripts.run_task:cli",
-        help="Run a task for data generation or preview.",
+        help="Run, preview, or replay a task and collect configured expansions.",
     ),
     Command(
         name="run-example",

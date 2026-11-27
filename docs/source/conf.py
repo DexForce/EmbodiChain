@@ -55,6 +55,7 @@ with open(os.path.join(os.path.dirname(__file__), "..", "..", "VERSION")) as f:
 
 extensions = [
     "architecture_sphinx",
+    "task_catalog_sphinx",
     "autodocsumm",
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",

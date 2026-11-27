@@ -21,6 +21,355 @@ import { join } from "node:path";
 import type { ViewerData } from "../src/types";
 
 const root = fileURLToPath(new URL("../.browser-fixtures", import.meta.url));
+
+for (const viewport of [
+  { width: 1680, height: 1120 },
+  { width: 1229, height: 396 },
+  { width: 390, height: 780 },
+]) {
+  test(`typed specification and step details are reachable at ${viewport.width}×${viewport.height}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport);
+    await page.goto(pathToFileURL(join(root, "hybrid-authoring.html")).href);
+    await page
+      .getByRole("combobox", { name: /语言|Language/ })
+      .selectOption("zh");
+    await expect(page.locator("h1")).toHaveText("Plank");
+    await expect(page.getByRole("button", { name: "依赖图" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(
+      page.locator('.rv-lane-action[data-key="call:step_03"]'),
+    ).toHaveAttribute("data-lane", "shared");
+    await expect(
+      page.locator('.rv-lane-edges [data-from="step_01"][data-to="step_02"]'),
+    ).toHaveCount(1);
+    await expect(page.locator(".rv-review-scene")).toContainText(
+      "Return both arms to their starting poses.",
+    );
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(viewport.width);
+    const detail = page.getByRole("complementary", { name: "详情" });
+    const close = detail.getByRole("button", { name: "关闭" });
+    await page.getByRole("button", { name: "任务规范", exact: true }).click();
+    await expect(detail).toContainText(
+      "Return both arms to their starting poses.",
+    );
+    await detail
+      .getByRole("button", { name: /保持稳定/ })
+      .first()
+      .click();
+    await expect(detail).toContainText(/plank.*left pedestal.*right pedestal/);
+    await close.click();
+
+    const goal = page.locator('button[data-key="goal:condition_02"]');
+    await expect(goal).toContainText("第 3 步");
+    await goal.click();
+    await expect(detail.locator(".rv-inline-heading")).toContainText(
+      "第 3 步详情",
+    );
+    await expect(
+      page.locator('.rv-lane-action[data-key="call:step_03"]'),
+    ).toHaveAttribute("aria-pressed", "true");
+    await close.click();
+
+    await page.getByRole("button", { name: "步骤列表" }).click();
+    await page.locator('[data-id="group:step_02"] .rv-toggle').click();
+    await page.locator('button[data-key="call:step_02"]').click();
+    await detail.getByText("工程信息", { exact: true }).click();
+    const semantics = detail.getByRole("region", { name: "步骤语义" });
+    await expect(semantics.getByText("右臂", { exact: true })).toBeVisible();
+    await expect(semantics).toContainText(/left pedestal.*right pedestal/);
+    const quote = semantics.getByText("Release the plank.");
+    await quote.scrollIntoViewIfNeeded();
+    await expect(quote).toBeInViewport();
+    await close.click();
+    await page.locator('[data-id="group:step_03"] .rv-toggle').click();
+    await page.locator('button[data-key="call:step_03"]').click();
+    await detail.getByText("工程信息", { exact: true }).click();
+    await expect(semantics).toContainText("左臂、右臂");
+    if (viewport.width === 1680) {
+      const thumb = page.locator(".rv-scene-thumb");
+      await expect(thumb).toBeVisible();
+      await thumb.press("Enter");
+      const lightbox = page.getByRole("dialog", { name: "输入场景原图" });
+      await expect(lightbox).toBeVisible();
+      const dismiss = lightbox.getByRole("button", { name: "关闭预览" });
+      await expect(dismiss).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(dismiss).toBeFocused();
+      await page.keyboard.press("Shift+Tab");
+      await expect(dismiss).toBeFocused();
+      await expect
+        .poll(() =>
+          lightbox
+            .locator("img")
+            .evaluate(
+              (img: HTMLImageElement) => img.complete && img.naturalWidth > 0,
+            ),
+        )
+        .toBe(true);
+      await page.keyboard.press("Escape");
+      await expect(lightbox).toHaveCount(0);
+      await expect(thumb).toBeFocused();
+      await expect(detail).toBeVisible();
+      const enlarge = page.getByRole("button", { name: "放大", exact: true });
+      await enlarge.click();
+      await dismiss.click();
+      await expect(enlarge).toBeFocused();
+      await enlarge.click();
+      await lightbox.click({ position: { x: 5, y: 5 } });
+      await expect(lightbox).toHaveCount(0);
+      await expect(enlarge).toBeFocused();
+    }
+  });
+}
+
+test("review shows recorded coverage even without unverified qualifiers", async ({
+  page,
+}) => {
+  for (const [fixture, expected] of [
+    ["hybrid-uncovered", "Uncovered"],
+    ["hybrid-authoring", "Source reviewed"],
+  ]) {
+    await page.goto(pathToFileURL(join(root, `${fixture}.html`)).href);
+    const badge = page
+      .locator(".rv-state > div")
+      .filter({ hasText: "Plan coverage" })
+      .locator("dd");
+    await expect(badge).toHaveText(expected);
+  }
+});
+
+test("each completion criterion keeps its reference and highlights its own check", async ({
+  page,
+}) => {
+  await page.goto(pathToFileURL(join(root, "hybrid-authoring.html")).href);
+  for (const [goal, reference, other] of [
+    ["condition_03", "left pedestal", "right pedestal"],
+    ["condition_04", "right pedestal", "left pedestal"],
+  ]) {
+    const button = page.locator(`button[data-key="goal:${goal}"]`);
+    await expect(button).toContainText(reference);
+    await button.click();
+    const criteria = page
+      .locator(".rv-step-checks li")
+      .filter({ hasText: "Completion criterion" });
+    await expect(criteria).toHaveCount(2);
+    await expect(criteria.filter({ hasText: reference })).toHaveClass(/hit/);
+    await expect(criteria.filter({ hasText: other })).not.toHaveClass(/hit/);
+  }
+});
+
+test("dependency wires do not pass under cards outside their endpoints", async ({
+  page,
+}) => {
+  const html = readFileSync(
+    join(root, "hybrid-authoring.html"),
+    "utf8",
+  ).replace(
+    /(<script id="graph-data" type="application\/json">)(.*?)(<\/script>)/s,
+    (_match, opening, payload, closing) => {
+      const fixture: ViewerData = JSON.parse(payload);
+      const action = fixture.graph.nodes[0];
+      const deps: Record<number, string[]> = {
+        2: ["step_01"],
+        5: ["step_04"],
+        6: ["step_02"],
+      };
+      fixture.graph.nodes = Array.from({ length: 7 }, (_, index) => ({
+        ...action,
+        id: `step_0${index + 1}`,
+        depends_on: deps[index] ?? [],
+        call: {
+          ...action.call,
+          resources: {},
+          arguments: { ...action.call.arguments, arms: ["auto"] },
+        },
+      }));
+      return `${opening}${JSON.stringify(fixture)}${closing}`;
+    },
+  );
+  await page.setViewportSize({ width: 1680, height: 900 });
+  await page.setContent(html);
+  const cards = page.locator(".rv-lane-action");
+  const wires = page.locator(".rv-lane-edges path[data-from]");
+  await expect(wires).toHaveCount(3);
+  for (const width of [1680, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect
+      .poll(() =>
+        cards.evaluateAll(
+          (nodes) =>
+            nodes[0].getBoundingClientRect().top ===
+            nodes[2].getBoundingClientRect().top,
+        ),
+      )
+      .toBe(width === 1680);
+    const crossings = await wires.evaluateAll((edges: SVGPathElement[]) => {
+      const nodes = Array.from(document.querySelectorAll(".rv-lane-action"));
+      return edges.flatMap((edge) => {
+        const view = edge.getScreenCTM()!;
+        return nodes.flatMap((node) => {
+          if (
+            [`call:${edge.dataset.from}`, `call:${edge.dataset.to}`].includes(
+              node.getAttribute("data-key")!,
+            )
+          )
+            return [];
+          const rect = node.getBoundingClientRect();
+          for (
+            let distance = 0;
+            distance < edge.getTotalLength();
+            distance += 2
+          ) {
+            const { x, y } = edge
+              .getPointAtLength(distance)
+              .matrixTransform(view);
+            if (
+              x > rect.left + 1 &&
+              x < rect.right - 1 &&
+              y > rect.top + 1 &&
+              y < rect.bottom - 1
+            )
+              return [
+                `${edge.dataset.from}→${edge.dataset.to} crosses ${node.getAttribute("data-key")}`,
+              ];
+          }
+          return [];
+        });
+      });
+    });
+    expect(crossings).toEqual([]);
+  }
+});
+
+test("the shipped offline export opens within the physical mobile viewport", async ({
+  page,
+}) => {
+  for (const height of [396, 780]) {
+    await page.setViewportSize({ width: 390, height });
+    await page.goto(pathToFileURL(join(root, "offline-preview.html")).href);
+    const preview = page.frameLocator("iframe");
+    await preview.locator("#te-language").selectOption("en");
+    const trigger = preview.getByRole("button", {
+      name: "Export",
+      exact: true,
+    });
+    await expect
+      .poll(
+        async () => (await page.locator("iframe").boundingBox())?.height ?? 0,
+      )
+      .toBeGreaterThan(height * 2);
+    await trigger.click();
+    const dialog = preview.locator("#te-export-dialog");
+    const close = dialog.getByRole("button", { name: "Close", exact: true });
+    const copy = dialog.locator("#te-copy");
+    await expect
+      .poll(async () => {
+        const a = await close.boundingBox(),
+          b = await copy.boundingBox();
+        return (
+          !!a &&
+          !!b &&
+          [a, b].every(({ y, height: h }) => y >= 0 && y + h <= height)
+        );
+      })
+      .toBe(true);
+    await close.click();
+    await expect(dialog).not.toBeVisible();
+  }
+});
+
+for (const [role, step] of [
+  ["left pedestal", "step_02"],
+  ["handle", "step_01"],
+]) {
+  test(`typed role selection highlights the stage and expanded action for ${role}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1680, height: 1120 });
+    await page.goto(pathToFileURL(join(root, "hybrid-authoring.html")).href);
+    await page.locator(".rv-view-switch button").first().click();
+    const stage = page.locator(`[data-id="group:${step}"]`);
+    await page.locator(`.rv-role-chip[title="${role}"]`).click();
+    await expect(stage.locator(".rv-toggle")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    await expect(stage.locator(".rv-frame")).toHaveClass(/role-match/);
+    await expect(page.locator(".rv-frame.role-match")).toHaveCount(1);
+    await expect(
+      page.locator(`button[data-key="call:${step}"]`),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+}
+
+test("a parent object's box locates a part action and follows the enlarged image", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1229, height: 396 });
+  await page.goto(pathToFileURL(join(root, "hybrid-authoring.html")).href);
+  const boxes = page.locator("button.rv-scene-box");
+  await expect(boxes).toHaveCount(2);
+  const box = page.locator('button.rv-scene-box[aria-label$="pedestal stand"]');
+  await expect(page.locator(".rv-state")).toContainText(/仅计划|Plan only/);
+  await box.click();
+  await expect(box).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".rv-role-chip[aria-pressed=true]")).toHaveText(
+    "pedestal stand",
+  );
+  await expect(
+    page.locator('.rv-lane-action[data-key="call:step_01"]'),
+  ).toHaveClass(/faded/);
+  await expect(
+    page.locator('.rv-lane-action[data-key="call:step_02"]'),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page.locator('.rv-lane-action[data-key="call:step_02"]'),
+  ).toBeInViewport();
+
+  await page.locator(".rv-enlarge").click();
+  const dialog = page.locator("dialog.rv-lightbox");
+  const outline = dialog.locator(".rv-scene-box");
+  await expect(outline).toHaveText("pedestal stand");
+  const actual = await outline.evaluate((box) => {
+    const image = box.parentElement!.querySelector("img")!;
+    const rect = image.getBoundingClientRect();
+    const marked = box.getBoundingClientRect();
+    return [
+      (marked.left - rect.left) / rect.width,
+      (marked.top - rect.top) / rect.height,
+      (marked.right - rect.left) / rect.width,
+      (marked.bottom - rect.top) / rect.height,
+    ];
+  });
+  [0.1, 0.25, 0.4, 0.75].forEach((edge, index) =>
+    expect(actual[index]).toBeCloseTo(edge, 2),
+  );
+});
+
+test("advanced view highlights the published terminal goal producer", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1680, height: 1120 });
+  await page.goto(pathToFileURL(join(root, "hybrid-authoring.html")).href);
+  await page.getByRole("button", { name: "Graph & exports" }).click();
+  await page.locator(".goal-card").filter({ hasText: "condition_02" }).click();
+  await expect(
+    page.locator('.task-graph-node[data-key="group:step_03"]'),
+  ).not.toHaveClass(/faded/);
+  await expect(
+    page.locator('.task-graph-node[data-key="group:step_01"]'),
+  ).toHaveClass(/faded/);
+  await expect(page.locator("#detail")).toContainText(
+    /Source stages\s*step_03/,
+  );
+});
+
 test("unified canvas opens measured evidence by clicking the action itself", async ({
   page,
 }) => {
@@ -307,8 +656,12 @@ test("selection, goal highlighting, raw data and search/status/reset controls", 
   const card = page.locator(
     '.task-graph-node[data-key="call:step_01__call_01"]',
   );
-  await card.focus();
-  await page.keyboard.press("Space");
+  await expect(card).toBeVisible();
+  await expect(page.locator(".task-canvas")).toHaveAttribute(
+    "aria-busy",
+    "false",
+  );
+  await card.press("Space");
   await page.keyboard.press("Backspace");
   await expect(page.locator(".task-graph-node")).toHaveCount(6);
   await expect(page.locator("#detail .sub-id")).toHaveText("step_01__call_01");
