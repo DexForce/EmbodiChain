@@ -150,29 +150,50 @@ def _scene_engine_updates(
 
 
 def _prepare_scene_engine_input(
-    image_value: str | np.ndarray | Image.Image,
-) -> tuple[str, Path, Path]:
-    """Normalize an uploaded image and store it under a stable content hash."""
+    image_value: str | np.ndarray | Image.Image | None,
+    task_spec_value: str | None,
+) -> tuple[str, Path, Path, Path | None]:
+    """Save image-only or paired inputs in a content-addressed workspace."""
     if image_value is None:
         raise ValueError("Please upload an image first.")
-    if isinstance(image_value, str):
-        image = Image.open(image_value)
-    elif isinstance(image_value, np.ndarray):
-        image = Image.fromarray(image_value)
-    elif isinstance(image_value, Image.Image):
-        image = image_value
-    else:
-        raise TypeError(f"Unsupported image input type: {type(image_value)!r}")
 
-    normalized = ImageOps.exif_transpose(image).convert("RGB")
-    image_bytes = io.BytesIO()
-    normalized.save(image_bytes, format="PNG")
-    scene_hash = hashlib.sha256(image_bytes.getvalue()).hexdigest()[:16]
+    task_spec_bytes = None
+    if task_spec_value is not None:
+        if not isinstance(image_value, str):
+            raise ValueError("Upload the original image file with the TaskSpec.")
+        source_image = Path(image_value)
+        image_suffix = source_image.suffix.lower()
+        if image_suffix not in {".jpg", ".jpeg", ".png"}:
+            raise ValueError("Upload the original PNG or JPEG with the TaskSpec.")
+        image_bytes = source_image.read_bytes()
+        task_spec_bytes = Path(task_spec_value).read_bytes()
+    else:
+        if isinstance(image_value, np.ndarray):
+            image_value = Image.fromarray(image_value)
+        if isinstance(image_value, str):
+            with Image.open(image_value) as source:
+                image = ImageOps.exif_transpose(source).convert("RGB")
+        elif isinstance(image_value, Image.Image):
+            image = ImageOps.exif_transpose(image_value).convert("RGB")
+        else:
+            raise TypeError(f"Unsupported image input type: {type(image_value)!r}")
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        image_bytes = buffer.getvalue()
+        image_suffix = ".png"
+
+    scene_hash = hashlib.sha256(image_bytes).hexdigest()[:16]
+    if task_spec_bytes is not None:
+        scene_hash += "-" + hashlib.sha256(task_spec_bytes).hexdigest()[:16]
     output_root = GEN_SIM_SCENE_ROOT / scene_hash
     output_root.mkdir(parents=True, exist_ok=True)
-    image_path = output_root / "input.png"
-    image_path.write_bytes(image_bytes.getvalue())
-    return scene_hash, output_root, image_path
+    image_path = output_root / f"input{image_suffix}"
+    image_path.write_bytes(image_bytes)
+    task_spec_path = None
+    if task_spec_bytes is not None:
+        task_spec_path = output_root / "task_spec_v1.json"
+        task_spec_path.write_bytes(task_spec_bytes)
+    return scene_hash, output_root, image_path, task_spec_path
 
 
 def _wait_for_viser(port: int, process: subprocess.Popen[str]) -> bool:
@@ -439,7 +460,7 @@ def preview_saved_scene(
 
 def reset_scene_engine(
     request: gr.Request,
-) -> tuple[None, str, object, int, str, str, str, str]:
+) -> tuple[None, None, str, object, int, str, str, str, str]:
     """Reset only the requesting session's Scene Engine state and processes.
 
     Args:
@@ -472,6 +493,7 @@ def reset_scene_engine(
     )
     return (
         None,
+        None,
         "",
         gr.update(value=None),
         PHASES["idle"].progress,
@@ -483,14 +505,16 @@ def reset_scene_engine(
 
 
 def run_scene_engine(
-    image_value: str | np.ndarray | Image.Image,
+    image_value: str | np.ndarray | Image.Image | None,
     request: gr.Request,
+    task_spec_value: str | None = None,
 ) -> Iterator[tuple[int, str, str | None, str]]:
     """Generate one scene for the requesting Gradio session.
 
     Args:
         image_value: Uploaded image path, array, or PIL image.
         request: Gradio request carrying the owning session hash.
+        task_spec_value: Optional uploaded TaskSpec for the original image file.
 
     Yields:
         Progress, status, output directory, and Viser preview updates.
@@ -519,7 +543,9 @@ def run_scene_engine(
         return
 
     try:
-        scene_hash, output_root, image_path = _prepare_scene_engine_input(image_value)
+        scene_hash, output_root, image_path, task_spec_path = (
+            _prepare_scene_engine_input(image_value, task_spec_value)
+        )
     except Exception as exc:
         with runtime_lock:
             if not _scene_runs.is_active(session_id, token):
@@ -548,6 +574,8 @@ def run_scene_engine(
         "--output_root",
         str(output_root),
     ]
+    if task_spec_path is not None:
+        command.extend(("--task-spec", str(task_spec_path)))
     scene_engine_log = output_root / "scene_engine.log"
     scene_engine_log.write_text("$ " + " ".join(command) + "\n", encoding="utf-8")
     with runtime_lock:

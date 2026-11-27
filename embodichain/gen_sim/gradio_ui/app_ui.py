@@ -124,8 +124,18 @@ def build_app() -> gr.Blocks:
                         label=UI_TEXT[LANGUAGE_EN]["input_image"],
                         sources=["upload", "webcam"],
                         type="filepath",
+                        image_mode=None,
                         format="png",
                         height=300,
+                    )
+                    scene_task_spec = gr.File(
+                        label="TaskSpec JSON (optional)",
+                        file_types=[".json"],
+                        type="filepath",
+                    )
+                    gr.Markdown(
+                        "Upload the original PNG or JPEG with its TaskSpec. "
+                        "With an image alone, all objects default to rigid."
                     )
                     with gr.Row():
                         scene_run = gr.Button("Generate scene", variant="primary")
@@ -265,7 +275,7 @@ def build_app() -> gr.Blocks:
 
         scene_generate_event = scene_run.click(
             run_scene_engine,
-            inputs=[scene_image],
+            inputs=[scene_image, scene_task_spec],
             outputs=[scene_progress, scene_status, scene_output, scene_preview],
         )
         scene_generate_event.then(
@@ -300,6 +310,7 @@ def build_app() -> gr.Blocks:
             reset_scene_engine,
             outputs=[
                 scene_image,
+                scene_task_spec,
                 scene_edit_prompt,
                 scene_scene_list,
                 scene_progress,

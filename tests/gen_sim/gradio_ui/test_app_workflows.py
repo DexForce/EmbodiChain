@@ -16,21 +16,30 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import gradio as gr
 import pytest
+from gradio.components.image import ImageData
+from gradio.data_classes import FileData
+from PIL import Image
+
+from embodichain.gen_sim.scene_engine.task_spec_input import load_task_spec_input
 
 GRADIO_UI_ROOT = (
     Path(__file__).resolve().parents[3] / "embodichain" / "gen_sim" / "gradio_ui"
 )
 sys.path.insert(0, str(GRADIO_UI_ROOT))
 
-import app_workflows  # noqa: E402
 import app_processes  # noqa: E402
+import app_ui  # noqa: E402
+import app_workflows  # noqa: E402
 
 
 class _FakeProcess:
@@ -96,6 +105,89 @@ def test_saved_scene_choices_lists_complete_exports_newest_first(
     choices = app_workflows.saved_scene_choices()
 
     assert [value for _label, value in choices] == ["newer-scene", "older-scene"]
+
+
+def test_scene_generation_upload_preserves_task_spec_image_pair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    image_path = tmp_path / "input.jpg"
+    Image.new("L", (3, 2), color=128).save(image_path)
+    image_bytes = image_path.read_bytes()
+    image_data = ImageData(path=str(image_path), orig_name=image_path.name)
+    monkeypatch.setattr(app_workflows, "GEN_SIM_SCENE_ROOT", tmp_path / "scenes")
+    commands: list[list[str]] = []
+
+    def record_command(command: list[str]) -> _FakeProcess:
+        commands.append(command)
+        raise RuntimeError("Stop before model services and preview.")
+
+    monkeypatch.setattr(app_workflows, "start_pipeline", record_command)
+    app = app_ui.build_app()
+    event = next(
+        fn for fn in app.fns.values() if fn.fn is app_workflows.run_scene_engine
+    )
+    session_id = "scene-generation-task-spec"
+
+    async def submit_scene(task_spec: FileData | None) -> None:
+        inputs = [
+            image_data.model_dump(),
+            task_spec.model_dump() if task_spec else None,
+        ]
+        request = gr.Request(session_hash=session_id)
+        result = await app.process_api(event, inputs, request=request)
+        while result["iterator"] is not None:
+            result = await app.process_api(
+                event, inputs, request=request, iterator=result["iterator"]
+            )
+
+    try:
+        for is_articulated in (True, False):
+            spec_path = tmp_path / str(is_articulated) / "task_spec_v1.json"
+            spec_path.parent.mkdir()
+            spec_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "task_spec/v1",
+                        "inputs": {
+                            "image": {"sha256": hashlib.sha256(image_bytes).hexdigest()}
+                        },
+                        "interpretation": {
+                            "references": [
+                                {
+                                    "entities": [
+                                        {
+                                            "id": "drawer",
+                                            "description": "Wooden drawer",
+                                            "is_articulated": is_articulated,
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            asyncio.run(
+                submit_scene(FileData(path=str(spec_path), orig_name=spec_path.name))
+            )
+
+            command = commands[-1]
+            saved_image = Path(command[command.index("--image") + 1])
+            saved_spec = Path(command[command.index("--task-spec") + 1])
+            assert saved_image.read_bytes() == image_bytes
+            assert saved_spec.read_bytes() == spec_path.read_bytes()
+            spec = load_task_spec_input(saved_spec, image_path=saved_image)
+            assert spec.entities[0].is_articulated is is_articulated
+
+        asyncio.run(submit_scene(None))
+    finally:
+        app_workflows._scene_runs.reset(session_id, force=True)
+        app_workflows.runtime_registry.reset(session_id)
+
+    assert len(commands) == 3
+    assert "--task-spec" not in commands[-1]
+    assert len({cmd[cmd.index("--output_root") + 1] for cmd in commands}) == 3
 
 
 def test_scene_edit_command_targets_selected_export_and_prompt(tmp_path: Path) -> None:
