@@ -1193,10 +1193,14 @@ def test_scene_usd_binds_every_gltf_pbr_texture_channel(tmp_path: Path) -> None:
             assert original.getpixel((0, 1)) == BOTTOM_ROW_COLOR
 
 
-def test_preview_loads_exported_usdc_as_an_articulation(
+def test_preview_and_gym_keep_exported_articulation_pose(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from scipy.spatial.transform import Rotation
+
+    from embodichain.gen_sim._run_binding import _physical_scene
     from embodichain.gen_sim.scene_engine.pipeline.utils import scene_usd
+    from embodichain.lab.sim.cfg import ArticulationCfg
 
     monkeypatch.setattr(scene_usd, "_read_revolute_qpos_limits", lambda path: {})
 
@@ -1211,26 +1215,40 @@ def test_preview_loads_exported_usdc_as_an_articulation(
     usdc_path.parent.mkdir(parents=True)
     usdc_path.write_bytes(b"USDC-drawer")
     sim = FakeSimulationManager()
+    position = [1.0, 2.0, 3.0]
+    angles = [90.0, 0.0, 45.0]
+    pose = np.eye(4)
+    pose[:3, :3] = Rotation.from_euler("XYZ", angles, degrees=True).as_matrix()
+    pose[:3, 3] = position
+    entry = {
+        "uid": "drawer",
+        "fpath": "articulated_assets/drawer/drawer.usdc",
+        "init_pos": position,
+        "init_rot": angles,
+        "init_local_pose": pose.tolist(),
+        "body_scale": [1.25, 2.5, 3.75],
+        "fix_base": True,
+    }
 
     _add_articulations(
         sim=sim,  # type: ignore[arg-type]
-        entries=[
-            {
-                "uid": "drawer",
-                "fpath": "articulated_assets/drawer/drawer.usdc",
-                "init_pos": [1.0, 2.0, 3.0],
-                "init_rot": [10.0, 20.0, 30.0],
-                "body_scale": [1.25, 2.5, 3.75],
-                "fix_base": True,
-            }
-        ],
+        entries=[entry],
         config_dir=tmp_path,
     )
+    deployment = _physical_scene(
+        tmp_path,
+        {"format": "embodichain.scene-export/v1", "articulation": [entry]},
+        tmp_path / "assets",
+    )
+    gym_cfg = ArticulationCfg.from_dict(deployment["articulation"][0])
 
-    articulation_cfg = sim.articulation_cfgs[0]
-    assert articulation_cfg.uid == "drawer"  # type: ignore[attr-defined]
-    assert articulation_cfg.fpath == str(usdc_path)  # type: ignore[attr-defined]
-    assert articulation_cfg.body_scale == (1.25, 2.5, 3.75)  # type: ignore[attr-defined]
+    (preview_cfg,) = sim.articulation_cfgs
+    assert isinstance(preview_cfg, ArticulationCfg)
+    assert preview_cfg.uid == gym_cfg.uid == "drawer"
+    assert preview_cfg.fpath == gym_cfg.fpath == str(usdc_path)
+    assert preview_cfg.body_scale == tuple(gym_cfg.body_scale) == (1.25, 2.5, 3.75)
+    assert np.asarray(preview_cfg.init_local_pose) == pytest.approx(pose)
+    assert gym_cfg.init_local_pose == pytest.approx(pose)
 
 
 def test_scene_graph_importer_restores_node_pose_description() -> None:
