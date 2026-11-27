@@ -775,14 +775,38 @@ class SceneExporter:
         runtime_usdc_path: Path,
     ) -> tuple[list[float], list[float], list[float], Path | None, int | None]:
         """Compute the runtime frame against the settled GLB and source links."""
-        from pxr import UsdGeom
+        from pxr import Sdf, UsdGeom
 
-        source = read_usd_source(scene_object.articulated_usdc_path)
+        source_path = Path(scene_object.articulated_usdc_path).resolve()
+        existing_asset_dir = self.export_root / "articulated_assets" / scene_object.id
+        # Inspect only root metadata here so relative sublayers retain their anchor.
+        layer = (
+            Sdf.Layer.OpenAsAnonymous(str(source_path), metadataOnly=True)
+            if source_path.parent == existing_asset_dir
+            else None
+        )
+        legacy_layered = bool(
+            layer is not None
+            and layer.subLayerPaths
+            and layer.pseudoRoot.GetInfo("upAxis") == UsdGeom.Tokens.z
+            and layer.pseudoRoot.GetInfo("metersPerUnit") == 1.0
+        )
+        source = None if legacy_layered else read_usd_source(source_path)
         audit_path = runtime_usdc_path.with_name("alignment.json")
         original_path = None
         yaw_offset = scene_object.articulation_yaw_offset_degrees
-        if UsdGeom.GetStageUpAxis(source.stage) == UsdGeom.Tokens.y:
-            # Retain the placement contract for existing Y-up scene exports.
+        if source is None or UsdGeom.GetStageUpAxis(source.stage) == UsdGeom.Tokens.y:
+            if source is None:
+                from ._scene_package_metadata import _usd_dependencies
+
+                # Preserve the old height fit for a composed local export.
+                # The shared geometry reader still requires self-contained USD.
+                _usd_dependencies(source_path, self.export_root)
+                staged_source = runtime_usdc_path.with_name(
+                    f"{scene_object.id}.source.usdc"
+                )
+                if source_path.name == staged_source.name:
+                    original_path = staged_source
             scale = SceneExporter._articulated_usdc_scale(scene_object)
             rotation = (
                 Rotation.from_matrix(proxy_rotation)
@@ -793,11 +817,12 @@ class SceneExporter:
             position[2] = (
                 support_z
                 + 0.001
-                - _articulation_root_bottom_z(
-                    scene_object.articulated_usdc_path, scale, rotation
-                )
+                - _articulation_root_bottom_z(source_path, scale, rotation)
             )
-            audit = {"status": "legacy_y_up", "support_z_m": support_z}
+            audit = {
+                "status": "legacy_z_up_sublayers" if legacy_layered else "legacy_y_up",
+                "support_z_m": support_z,
+            }
         else:
             from embodichain.gen_sim.scene_engine.pipeline.utils._articulation_scale import (
                 bake_articulation_scale,

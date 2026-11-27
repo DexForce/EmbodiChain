@@ -115,6 +115,21 @@ def _glb_dependencies(glb: Path, export: Path) -> set[Path]:
     return dependencies
 
 
+def _usd_dependencies(path: Path, export: Path) -> set[Path]:
+    """Resolve USD dependencies within the editable export."""
+    from pxr import UsdUtils
+
+    layers, assets, unresolved = UsdUtils.ComputeAllDependencies(str(path))
+    if unresolved:
+        raise ValueError(
+            f"Editable articulation has unresolved dependencies: {unresolved} (in {path})"
+        )
+    return {
+        _local_file(export, Path(dependency))
+        for dependency in [*(layer.realPath for layer in layers), *assets]
+    }
+
+
 def _asset_files(
     obj: SceneObject, export: Path, entry: dict[str, Any]
 ) -> tuple[Path, Path, set[Path]]:
@@ -125,8 +140,6 @@ def _asset_files(
     if obj.articulated_usdc_path is None:
         return proxy, proxy, dependencies
 
-    from pxr import UsdUtils
-
     # The imported object can hold the original USD for editing. The config
     # identifies which USD the simulator actually loads.
     runtime = _local_file(export, export / entry["fpath"])
@@ -135,15 +148,7 @@ def _asset_files(
         usd_files.add(_local_file(export, export / entry["source_usdc_fpath"]))
     dependencies.update(usd_files)
     for path in sorted(usd_files):
-        layers, assets, unresolved = UsdUtils.ComputeAllDependencies(str(path))
-        if unresolved:
-            raise ValueError(
-                f"Editable articulation has unresolved dependencies: {unresolved} (in {path})"
-            )
-        dependencies.update(
-            _local_file(export, Path(dependency))
-            for dependency in [*(layer.realPath for layer in layers), *assets]
-        )
+        dependencies.update(_usd_dependencies(path, export))
     dependencies.discard(runtime)
     return runtime, proxy, dependencies
 

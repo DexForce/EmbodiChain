@@ -31,6 +31,12 @@ import pytest
 import trimesh
 
 from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraph, SceneGraphNode
+from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import (
+    SceneExporter,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (
+    SceneExportImporter,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_package import (
     _export_scene_package,
     _restore_scene_export,
@@ -138,16 +144,25 @@ def test_editable_scene_package_retains_both_articulation_models(
     original = articulation_dir / "laptop.source.usdc"
     runtime_dependency = articulation_dir / "runtime_geometry.usda"
     original_dependency = articulation_dir / "source_geometry.usda"
-    for model, dependency, axis in (
-        (runtime, runtime_dependency, "Z"),
-        (original, original_dependency, "Y"),
+    for model, dependency, bottom in (
+        (runtime, runtime_dependency, -0.25),
+        (original, original_dependency, -1.0),
     ):
         geometry = Usd.Stage.CreateNew(str(export / dependency))
-        UsdGeom.Cube.Define(geometry, "/Body")
+        body = UsdGeom.Xform.Define(geometry, "/Body").GetPrim()
+        UsdPhysics.ArticulationRootAPI.Apply(body)
+        UsdPhysics.RigidBodyAPI.Apply(body)
+        collider = UsdGeom.Mesh.Define(geometry, "/Body/collision")
+        collider.CreatePointsAttr([(0, 0, bottom), (1, 0, 0), (0, 1, 0), (0, 0, 1)])
+        collider.CreateFaceVertexCountsAttr([3, 3, 3, 3])
+        collider.CreateFaceVertexIndicesAttr([0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3])
+        UsdPhysics.CollisionAPI.Apply(collider.GetPrim())
         geometry.GetRootLayer().Save()
         model_stage = Usd.Stage.CreateNew(str(export / model))
-        UsdGeom.SetStageUpAxis(model_stage, axis)
         model_stage.GetRootLayer().subLayerPaths = [dependency.name]
+        model_stage.SetDefaultPrim(model_stage.GetPrimAtPath("/Body"))
+        UsdGeom.SetStageUpAxis(model_stage, "Z")
+        UsdGeom.SetStageMetersPerUnit(model_stage, 1.0)
         model_stage.GetRootLayer().Save()
 
     config = {
@@ -216,6 +231,28 @@ def test_editable_scene_package_retains_both_articulation_models(
             representations[laptop["runtime_representation_id"]]["relative_path"]
             == f"scene_export/{runtime.as_posix()}"
         )
+
+    reopened = tmp_path / "reopened"
+    reopened.mkdir()
+    shutil.copyfile(destination, reopened / destination.name)
+    scene, graph = SceneExportImporter(output_root=reopened).import_scene_and_graph(
+        write_scene_json=False
+    )
+    refreshed = SceneExporter(scene=scene, scene_graph=graph, output_root=reopened)
+    refreshed_config = json.loads(refreshed.export().read_text(encoding="utf-8"))
+    (laptop,) = refreshed_config["articulation"]
+    # The table top is 0.5 m, the original collision bottom is -1 m,
+    # and the legacy positioning leaves 1 mm of clearance.
+    assert laptop["init_pos"][2] == pytest.approx(1.501)
+    assert laptop["source_usdc_fpath"] == original.as_posix()
+    for saved, expected in (
+        (runtime, original),
+        (original, original),
+        (original_dependency, original_dependency),
+    ):
+        assert (reopened / "scene_export" / saved).read_bytes() == (
+            export / expected
+        ).read_bytes()
 
 
 def test_scene_package_projects_floor_support_and_restores_legacy_metadata(
