@@ -648,7 +648,7 @@ def test_selected_handover_rows_preserve_world_batch():
 @pytest.mark.gpu
 @pytest.mark.subprocess_sim
 def test_handover_generates_and_reuses_physical_grasps(tmp_path: Path) -> None:
-    """Exercise both mounted hands from an empty cache at production sampling density."""
+    """Generate real labels for both hands from an empty cache, then reuse them."""
     cache = tmp_path / "validated"
     _run_probe("handover", cache, timeout=20 * 60)
     generated = {p.name: p.stat().st_mtime_ns for p in cache.glob("*.pt")}
@@ -663,7 +663,18 @@ if __name__ == "__main__":
     from embodichain.lab.sim.utility import _validated_grasps
 
     if len(sys.argv) == 3 and sys.argv[1] == "handover":
-        with patch.object(_validated_grasps, "_LABEL_CACHE_DIR", Path(sys.argv[2])):
+        from functools import partial
+        from embodichain.lab.scripts import label_grasps
+
+        # Both processes must use the same reduced budget to exercise a cache hit.
+        sampling = partial(
+            label_grasps._SamplingCfg, stable_poses=2, directions=16, max_drops=16
+        )
+        with (
+            patch.object(_validated_grasps, "_LABEL_CACHE_DIR", Path(sys.argv[2])),
+            patch.object(label_grasps, "_SamplingCfg", sampling),
+            patch.object(label_grasps, "_DEFAULT_NUM_ENVS", 256),
+        ):
             _probe_handover_rows()
     else:
         with patch.object(
