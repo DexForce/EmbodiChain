@@ -43,6 +43,7 @@ EXPECTED_COMMANDS = {
     "eval-policy",
     "expansion",
     "gensim",
+    "label-grasps",
     "list-robot",
     "list-task",
     "show-task",

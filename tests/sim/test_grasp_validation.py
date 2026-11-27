@@ -326,6 +326,7 @@ def test_dh_qpos_respects_mimic_and_travel(
 def test_stage_preserves_relative_meshes_native_limits_and_rounded_pika_opening(
     tmp_path, monkeypatch
 ):
+    import os
     import xml.etree.ElementTree as ET
     from embodichain.data import get_data_path
     from embodichain.robot_registry import resolve_robot_cfg
@@ -334,9 +335,15 @@ def test_stage_preserves_relative_meshes_native_limits_and_rounded_pika_opening(
     source = Path(get_data_path(resolve_gripper_defaults("PikaGripper")["fpath"]))
     monkeypatch.chdir(tmp_path)
     Path("assets").symlink_to(source.parent, target_is_directory=True)
+    derived = Path("derived/hand.urdf")
+    derived.parent.mkdir()
+    xml = ET.parse(source)
+    for mesh in xml.iter("mesh"):
+        mesh.set("filename", str(Path("../assets") / mesh.attrib["filename"]))
+    xml.write(derived)
     stage = tmp_path / "stage"
     stage.mkdir()
-    hand.fpath = str(Path("assets") / source.name)
+    hand.fpath = str(derived)
     joints = [
         j.get("name")
         for j in ET.parse(source).findall("joint")
@@ -349,7 +356,11 @@ def test_stage_preserves_relative_meshes_native_limits_and_rounded_pika_opening(
     staged = ET.parse(hand.fpath)
     assert staged.find("joint[@name='stage_mount']/child").get("link") == hand.root_link
     meshes = staged.findall(".//mesh")
-    assert meshes and all((stage / mesh.get("filename")).is_file() for mesh in meshes)
+    # Native importers normalize parent components before opening a mesh.
+    assert meshes and all(
+        Path(os.path.normpath(stage / mesh.attrib["filename"])).is_file()
+        for mesh in meshes
+    )
     assert hand.qpos_limits == dict(zip(joints, [[0.0, 0.05], [-0.001, 0.05]]))
     assert hand.joint_commands["open"] == dict.fromkeys(joints, 0.05)
     assert all(hand.joint_drive_props.stiffness[name] == 1000.0 for name in joints)

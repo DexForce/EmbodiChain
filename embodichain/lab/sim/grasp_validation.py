@@ -143,11 +143,16 @@ def _stage(hand, directory, physics, close_qpos=None, *, open_qpos=None):
         if link.get("name") not in children
     ]
     root_from_mount = _fixed_transform(root, hand.root_link, mount)
-    (Path(directory) / "hand_assets").symlink_to(
-        source.parent, target_is_directory=True
-    )
+    # Importers can normalize '..' before following symlinks. Mount each mesh
+    # directory directly, including for extracted hands with external assets.
+    asset_dirs = {}
     for mesh in root.iter("mesh"):
-        mesh.set("filename", str(Path("hand_assets") / mesh.get("filename")))
+        asset = (source.parent / mesh.attrib["filename"]).resolve(strict=True)
+        if asset.parent not in asset_dirs:
+            link = Path(directory) / f"hand_assets_{len(asset_dirs)}"
+            link.symlink_to(asset.parent, target_is_directory=True)
+            asset_dirs[asset.parent] = link.name
+        mesh.set("filename", str(Path(asset_dirs[asset.parent]) / asset.name))
     parent = "stage_base"
     ET.SubElement(root, "link", name=parent)
     # A massless URDF frame can be fixed to a moving stage but cannot be the

@@ -1,0 +1,34 @@
+# Object-local TCPs and opening widths from GraspValidator on PhysX (dexsim-engine 0.6.0).
+# Both probes used seed 0, 2 stable placements, 16 directions, 100 candidates per
+# direction, 16 drop attempts, 256 arenas and the configured lift/XY disturbance.
+# Each entry records the selected row in the original physical label cache.
+
+left_hand_base_link:
+  # 86c55e364a62503bb596091649a96627-2992d996b3d278c022c64e804d05beef.pt, row 0
+  mesh_bounds: [[-0.03150627, -0.09236223, -0.03150627], [0.03150627, 0.08952264, 0.03150627]]
+  open_length: [0.0618018322]
+  grasp_pose:
+    - - [0.980784774, 0.191762194, -0.0359004065, 0.00118158758]
+      - [1.50058312e-08, -0.184015974, -0.982923448, 0.0609494857]
+      - [-0.195093751, 0.964036047, -0.180480018, 0.0059400592]
+      - [0, 0, 0, 1]
+
+right_hand_base_link:
+  # 86c55e364a62503bb596091649a96627-8fdc36031f9dd76b91e1584a925399f0.pt, row 3
+  mesh_bounds: [[-0.03150627, -0.09236223, -0.03150627], [0.03150627, 0.08952264, 0.03150627]]
+  open_length: [0.0625987947]
+  grasp_pose:
+    - - [-0.992679298, 0.0230451431, -0.118561409, 0.00209130347]
+      - [-0.0983994082, 0.414925009, 0.90451932, -0.0698751211]
+      - [0.0700388551, 0.909563839, -0.409619808, 0.00725127198]
+      - [0, 0, 0, 1]
+
+gripper_base_link_1:
+  # ef9b34638f1e5ca8654c13bd89690561-1c5f44b261ffed5d5c74ebabc29acc0c.pt, row 3
+  mesh_bounds: [[-0.025, -0.025, -0.025], [0.025, 0.025, 0.025]]
+  open_length: [0.0500001013]
+  grasp_pose:
+    - - [-7.94778732e-09, 0.824290216, 0.566167474, -0.0011940226]
+      - [-0.999999821, -3.43847688e-08, -3.87534271e-08, -4.56348062e-08]
+      - [-3.04807002e-09, -0.566167414, 0.824290276, 0.000625908375]
+      - [0, 0, 0, 1]

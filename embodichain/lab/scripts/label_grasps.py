@@ -72,6 +72,8 @@ from embodichain.utils.nms import pose_nms_indices
 __all__ = ["cli"]
 
 _DEFAULT_NUM_ENVS = 2400
+# Revision 2 validates extracted hands with their native collision meshes.
+_VALIDATION_REVISION = 2
 
 
 @configclass
@@ -291,7 +293,13 @@ def _fingerprint(config, mesh, urdf, num_envs):
         if "model" in hand
         else None
     )
-    identity = [1, config, defaults, num_envs, version("dexsim-engine")]
+    identity = [
+        _VALIDATION_REVISION,
+        config,
+        defaults,
+        num_envs,
+        version("dexsim-engine"),
+    ]
     digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode())
     # Native hand contact geometry may change independently of the URDF.
     files = {mesh, urdf}

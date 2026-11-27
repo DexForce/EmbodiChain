@@ -243,6 +243,46 @@ class ValidatedGraspCache:
         )
         return _world_pose_rows(local, order, obj_poses)
 
+    def _load_labels(
+        self,
+        key: str,
+        urdf: Path,
+        vertices: torch.Tensor,
+        triangles: torch.Tensor,
+        signature: dict,
+    ) -> dict[str, torch.Tensor]:
+        """Read the physical labels, running one isolated validator on a cache miss."""
+        directory = Path.home() / ".cache/embodichain/grasp_annotator_cache/validated"
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{key}.pt"
+        if not path.exists() or (self.force_refresh and key not in self._refreshed):
+            with (directory / f"{key}.lock").open("a") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                if not path.exists() or (
+                    self.force_refresh and key not in self._refreshed
+                ):
+                    print(f"Validating antipodal grasps for {path.name}", flush=True)
+                    with TemporaryDirectory(dir=directory) as temp:
+                        work = Path(temp)
+                        import trimesh
+
+                        # Text OBJ preserves float32 coordinates in the native mesh importer.
+                        trimesh.Trimesh(
+                            vertices=vertices.detach().cpu().numpy(),
+                            faces=triangles.detach().cpu().numpy(),
+                            process=False,
+                        ).export(work / "target.obj", digits=17)
+                        (work / "job.json").write_text(
+                            json.dumps(signature | {"urdf": str(urdf)})
+                        )
+                        subprocess.run(
+                            [sys.executable, "-m", __name__, str(work)], check=True
+                        )
+                        (work / "labels.pt").replace(path)
+                    if self.force_refresh:
+                        self._refreshed.add(key)
+        return torch.load(path, weights_only=True, map_location="cpu")
+
     def __call__(
         self,
         vertices: torch.Tensor,
@@ -267,7 +307,11 @@ class ValidatedGraspCache:
         for the current object placements and approach directions. A padding
         index of -1 marks the end of a scene's eligible candidates.
         """
-        from embodichain.lab.scripts.label_grasps import _DEFAULT_NUM_ENVS, _SamplingCfg
+        from embodichain.lab.scripts.label_grasps import (
+            _DEFAULT_NUM_ENVS,
+            _SamplingCfg,
+            _VALIDATION_REVISION,
+        )
 
         hand = self.hand
         urdf = Path(get_data_path(hand["fpath"]))
@@ -353,7 +397,7 @@ class ValidatedGraspCache:
             point_spacing=self.geometry.provenance["point_spacing_m"],
         )
         signature = dict(
-            schema=1,
+            schema=_VALIDATION_REVISION,
             target_mesh_format="obj",
             config=config,
             sampling=sampling.to_dict(),
@@ -367,36 +411,7 @@ class ValidatedGraspCache:
         if pose_adjustment:
             signature["pose_adjustment"] = pose_adjustment
         key = _cache_key(urdf, vertices, triangles, signature)
-        directory = Path.home() / ".cache/embodichain/grasp_annotator_cache/validated"
-        directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"{key}.pt"
-        if not path.exists() or (self.force_refresh and key not in self._refreshed):
-            with (directory / f"{key}.lock").open("a") as lock:
-                fcntl.flock(lock, fcntl.LOCK_EX)
-                if not path.exists() or (
-                    self.force_refresh and key not in self._refreshed
-                ):
-                    print(f"Validating antipodal grasps for {path.name}", flush=True)
-                    with TemporaryDirectory(dir=directory) as temp:
-                        work = Path(temp)
-                        import trimesh
-
-                        # Text OBJ preserves float32 coordinates in the native mesh importer.
-                        trimesh.Trimesh(
-                            vertices=vertices.detach().cpu().numpy(),
-                            faces=triangles.detach().cpu().numpy(),
-                            process=False,
-                        ).export(work / "target.obj", digits=17)
-                        (work / "job.json").write_text(
-                            json.dumps(signature | {"urdf": str(native_urdf)})
-                        )
-                        subprocess.run(
-                            [sys.executable, "-m", __name__, str(work)], check=True
-                        )
-                        (work / "labels.pt").replace(path)
-                    if self.force_refresh:
-                        self._refreshed.add(key)
-        labels = torch.load(path, weights_only=True, map_location="cpu")
+        labels = self._load_labels(key, native_urdf, vertices, triangles, signature)
         poses = labels["grasp_pose"].to(object_poses)
         check = None
         if self.qualify is not None:
@@ -423,7 +438,7 @@ class ValidatedGraspCache:
             alignment_angle=self.algorithm.get("approach_alignment_angle"),
             tcp_tolerance_deg=tcp_tolerance_deg,
         )
-        print(f"Ranked {len(poses)} validated grasps from {path.name}", flush=True)
+        print(f"Ranked {len(poses)} validated grasps from {key}.pt", flush=True)
         return poses, order, key
 
 

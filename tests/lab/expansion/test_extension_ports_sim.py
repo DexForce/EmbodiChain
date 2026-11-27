@@ -20,7 +20,27 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from unittest.mock import patch
 import pytest
+
+
+def _recorded_grasp_labels(cache, _key, _urdf, vertices, _triangles, _signature):
+    """Replay physical labels for these CPU expansion probes; keep live ranking and IK."""
+    import torch
+    import yaml
+
+    path = Path(__file__).parent / "fixtures/validated_grasps.yaml"
+    entry = yaml.safe_load(path.read_text())[cache.hand["root_link"]]
+    torch.testing.assert_close(
+        torch.stack((vertices.amin(0), vertices.amax(0))),
+        vertices.new_tensor(entry["mesh_bounds"]),
+        atol=1e-6,
+        rtol=0,
+    )
+    return {
+        field: torch.tensor(entry[field], dtype=torch.float32)
+        for field in ("grasp_pose", "open_length")
+    }
 
 
 def _check_place_keyframes(env, generator):
@@ -621,7 +641,10 @@ def test_selected_handover_rows_preserve_world_batch(tmp_path):
 
 
 if __name__ == "__main__":
-    if sys.argv[1] == "handover":
-        _probe_handover_rows()
-    else:
-        _probe(sys.argv[1])
+    from embodichain.lab.sim.utility._validated_grasps import ValidatedGraspCache
+
+    with patch.object(ValidatedGraspCache, "_load_labels", _recorded_grasp_labels):
+        if sys.argv[1] == "handover":
+            _probe_handover_rows()
+        else:
+            _probe(sys.argv[1])
