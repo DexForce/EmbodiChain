@@ -23,6 +23,7 @@ close_wait_steps: 60
 enable_disturbance: true
 sampling:
   stable_poses: 5
+  support_up_axis: [0, 0, 1]
   max_drops: 100
   drop_height_m: 0.05
   min_rotation_deg: 20.0

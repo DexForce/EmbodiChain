@@ -454,6 +454,19 @@ def _check_native_trials(physics: str) -> None:
     poses[:, 2, 3] = 0.035
     validator = GraspValidator(target, "FrankaPandaHand", num_envs=3, physics=physics)
     try:
+        placements = validator.initial.repeat(3, 1, 1)
+        settled, centers = validator.drop_objects(
+            np.eye(3)[None], 0.02, return_support_centers=True
+        )
+        assert settled.shape == (1, 4, 4)
+        contact = settled[0, :3, :3] @ centers[0] + settled[0, :3, 3]
+        assert abs(contact[2].item()) < 0.01
+        assert abs(centers[0, 2].item() + 0.06) < 0.01
+        placements[:, 1, 3] += torch.tensor(
+            [-0.06, 0.03, 0.06], device=placements.device
+        )
+        validator.restore_placement(placements)
+        torch.testing.assert_close(validator.initial, placements)
         first, second, centered = validator.validate(poses)
         assert first["failure_stage"] == second["failure_stage"] == "lift"
         assert not first["success"] and not second["success"]

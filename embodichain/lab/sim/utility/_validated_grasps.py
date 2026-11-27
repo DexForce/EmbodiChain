@@ -388,7 +388,7 @@ class ValidatedGraspCache:
         vertices: torch.Tensor,
         triangles: torch.Tensor,
         signature: dict,
-    ) -> dict[str, torch.Tensor]:
+    ) -> dict:
         """Read the physical labels, running one isolated validator on a cache miss."""
         directory = _LABEL_CACHE_DIR
         directory.mkdir(parents=True, exist_ok=True)
@@ -419,32 +419,45 @@ class ValidatedGraspCache:
                         (work / "labels.pt").replace(path)
                     if self.force_refresh:
                         self._refreshed.add(key)
-        return torch.load(path, weights_only=True, map_location="cpu")
+        # Map the file so ranking reads only the retained poses and widths.
+        return torch.load(path, weights_only=True, map_location="cpu", mmap=True)
 
-    def _rank(
+    def precompute(
+        self,
+        vertices: torch.Tensor,
+        triangles: torch.Tensor,
+        attrs: dict | None = None,
+        *,
+        hand_commands: tuple[torch.Tensor, torch.Tensor] | None = None,
+        pose_adjustment: dict | None = None,
+    ) -> Path:
+        """Populate the planning cache for one mesh and one execution command pair.
+
+        Args:
+            vertices: Scaled object-local vertices from the live antipodal affordance.
+            triangles: Face indices referencing those vertices in their original order.
+            attrs: Physics attributes from the same affordance.
+            hand_commands: Optional open and grasp vectors in control-part joint order.
+            pose_adjustment: Final TCP adjustments applied by the consuming invocation.
+
+        Returns:
+            Path to the physically tested label file used by the planner.
+        """
+        cache = (
+            self
+            if hand_commands is None
+            else self._with_commands(torch.stack(hand_commands).detach().cpu())
+        )
+        _, key, _ = cache._physical_labels(vertices, triangles, attrs, pose_adjustment)
+        return _LABEL_CACHE_DIR / f"{key}.pt"
+
+    def _physical_labels(
         self,
         vertices: torch.Tensor,
         triangles: torch.Tensor,
         attrs: dict | None,
-        object_poses: torch.Tensor,
-        directions: torch.Tensor,
-        part: str = "center",
-        *,
-        axis: torch.Tensor | None = None,
-        positive: bool | torch.Tensor = True,
-        middle_gap: float | None = None,
-        middle_only: bool = False,
-        on_support: bool = True,
-        pose_adjustment: dict | None = None,
-        tcp_tolerance_deg: float | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, str]:
-        """Return object-frame TCPs, ordered label indices per scene and the cache key.
-
-        Validation runs in a separate physics process on the first request for
-        a hand, mesh and sampling configuration. Each call ranks the stored TCPs
-        for the current object placements and approach directions. A padding
-        index of -1 marks the end of a scene's eligible candidates.
-        """
+        pose_adjustment: dict | None,
+    ) -> tuple[dict, str, AntipodalGraspPoseGeneratorCfg]:
         from embodichain.lab.scripts.label_grasps import (
             _DEFAULT_NUM_ENVS,
             _SamplingCfg,
@@ -551,6 +564,35 @@ class ValidatedGraspCache:
             signature["pose_adjustment"] = pose_adjustment
         key = _cache_key(urdf, vertices, triangles, signature)
         labels = self._load_labels(key, native_urdf, vertices, triangles, signature)
+        return labels, key, algorithm
+
+    def _rank(
+        self,
+        vertices: torch.Tensor,
+        triangles: torch.Tensor,
+        attrs: dict | None,
+        object_poses: torch.Tensor,
+        directions: torch.Tensor,
+        part: str = "center",
+        *,
+        axis: torch.Tensor | None = None,
+        positive: bool | torch.Tensor = True,
+        middle_gap: float | None = None,
+        middle_only: bool = False,
+        on_support: bool = True,
+        pose_adjustment: dict | None = None,
+        tcp_tolerance_deg: float | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, str]:
+        """Return object-frame TCPs, ordered label indices per scene and the cache key.
+
+        Validation runs in a separate physics process on the first request for
+        a hand, mesh and sampling configuration. Each call ranks the stored TCPs
+        for the current object placements and approach directions. A padding
+        index of -1 marks the end of a scene's eligible candidates.
+        """
+        labels, key, algorithm = self._physical_labels(
+            vertices, triangles, attrs, pose_adjustment
+        )
         poses = labels["grasp_pose"].to(object_poses)
         check = None
         if self.qualify is not None:

@@ -20,7 +20,8 @@ Drop the object into stable table placements, sample antipodal candidates from
 upper-hemisphere approach directions and test them in parallel with GraspValidator.
 Pose NMS retains distinct successful grasps. The output PyTorch file pairs each
 4×4 grasp_pose with its open_length in metres and records the source placement
-and world-frame approach direction.
+and world-frame approach direction. Each original trial keeps its measured
+hold and disturbance evidence and its assignment to an NMS representative.
 """
 
 from __future__ import annotations
@@ -32,6 +33,8 @@ import hashlib
 from itertools import islice
 import json
 import math
+import time
+import sys
 from importlib.metadata import version
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -72,8 +75,7 @@ from embodichain.utils.nms import pose_nms_indices
 __all__ = ["cli"]
 
 _DEFAULT_NUM_ENVS = 2400
-# Revision 2 validates extracted hands with their native collision meshes.
-_VALIDATION_REVISION = 3
+_VALIDATION_REVISION = 6
 
 
 @configclass
@@ -85,6 +87,7 @@ class _SamplingCfg:
     max_drops: int = 100
     drop_height_m: float = 0.05
     min_rotation_deg: float = 20.0
+    support_up_axis: list[float] | None = None
     approach_tolerance_deg: float = 5.0
     nms_distance_m: float = 0.003
     nms_angle_deg: float = 5.0
@@ -101,6 +104,16 @@ class _SamplingCfg:
             value = getattr(self, key)
             if type(value) is not int or value < 1:
                 raise ValueError(f"{key} must be a positive integer")
+        if self.support_up_axis is not None:
+            axis = np.asarray(self.support_up_axis, dtype=float)
+            if (
+                axis.shape != (3,)
+                or not np.isfinite(axis).all()
+                or np.linalg.norm(axis) < 1e-8
+            ):
+                raise ValueError(
+                    "support_up_axis must be a finite nonzero object-frame vector"
+                )
         if type(self.seed) is not int or not 0 <= self.seed < 2**32:
             raise ValueError("seed must be an unsigned 32-bit integer")
         for key in (
@@ -222,31 +235,129 @@ def _directions(rng, count):
     )
 
 
+def _drop_rotations(cfg, rng):
+    if cfg.support_up_axis is None:
+        return Rotation.random(cfg.max_drops, random_state=rng).as_matrix()
+    up = np.asarray(cfg.support_up_axis, dtype=float)
+    up = up / np.linalg.norm(up)
+    x, y, z = np.eye(3)
+    targets = (z, x, -z)
+    alignments = Rotation.concatenate(
+        [Rotation.align_vectors(target[None], up[None])[0] for target in targets]
+    )
+    align = alignments[np.arange(cfg.max_drops) % len(targets)]
+    yaw, spin = rng.uniform(-np.pi, np.pi, size=(2, cfg.max_drops, 1))
+    tilt = rng.uniform(-0.12, 0.12, size=(cfg.max_drops, 1))
+    return (
+        Rotation.from_rotvec(yaw * z)
+        * Rotation.from_rotvec(tilt * y)
+        * align
+        * Rotation.from_rotvec(spin * up)
+    ).as_matrix()
+
+
+def _support_modes(poses, centers, vertices, up_axis):
+    # The table normal is world +Z. Its object-frame coordinates are row 2 of R.
+    normals = poses[:, 2, :3].double()
+    vertices = vertices.cpu().double()
+    diameter = (vertices.amax(0) - vertices.amin(0)).norm().item()
+    modes, regions = [], []
+    representatives = []
+    if up_axis is not None:
+        up = torch.nn.functional.normalize(
+            torch.as_tensor(up_axis, dtype=normals.dtype), dim=0
+        )
+    for normal, center in zip(normals, centers, strict=True):
+        region = next(
+            (
+                i
+                for i, (n, c) in enumerate(representatives)
+                if n @ normal >= math.cos(math.radians(20))
+                and (center - c).norm() <= max(0.002, diameter * 0.12)
+            ),
+            len(representatives),
+        )
+        if region == len(representatives):
+            representatives.append((normal, center))
+        if up_axis is None:
+            mode = f"support_{region}"
+        else:
+            cosine = float(normal @ up)
+            mode = "side_lying"
+            if abs(cosine) >= math.cos(math.pi / 4):
+                mode = "upright" if cosine > 0 else "inverted"
+        modes.append(mode)
+        regions.append(region)
+    return modes, regions
+
+
 def _placements(v, cfg, rng):
-    poses = []
-    quaternions = []
-    attempts = 0
-    n = v.sim.num_envs
-    limit = math.cos(math.radians(cfg.min_rotation_deg) / 2)
-    while attempts < cfg.max_drops and len(poses) < cfg.stable_poses:
-        count = min(n, cfg.max_drops - attempts)
-        rotations = Rotation.random(count, random_state=rng).as_matrix()
-        for pose in v.drop_objects(rotations, cfg.drop_height_m):
-            q = Rotation.from_matrix(pose[:3, :3].numpy()).as_quat()
-            if any(abs(float(q @ prior)) > limit for prior in quaternions):
-                continue
-            poses.append(pose)
-            quaternions.append(q)
-            if len(poses) == cfg.stable_poses:
-                break
-        attempts += count
-    if not poses:
-        raise RuntimeError(f"No supported, stable placement after {attempts} drops")
+    rotations = _drop_rotations(cfg, rng)
+    batch_size = v.sim.num_envs
+    batches = [
+        v.drop_objects(
+            rotations[i : i + batch_size],
+            cfg.drop_height_m,
+            return_support_centers=True,
+        )
+        for i in range(0, len(rotations), batch_size)
+    ]
+    settled, centers = (torch.cat(field) for field in zip(*batches, strict=True))
+    if not len(settled):
+        raise RuntimeError(
+            f"No supported, stable placement after {len(rotations)} drops"
+        )
+    vertices, _ = v.obj.get_semantic_mesh([0])
+    modes, regions = _support_modes(settled, centers, vertices[0], cfg.support_up_axis)
+    settled_rotations = settled[:, :3, :3].numpy()
+    quats = Rotation.from_matrix(settled_rotations).as_quat()
+    # Measure yaw with the same object-fixed tangent for every pose in a region.
+    # Choosing its least vertical basis axis keeps the horizontal projection nonzero.
+    regions = np.asarray(regions)
+    _, first = np.unique(regions, return_index=True)
+    tangent = np.abs(settled_rotations[first, 2]).argmin(axis=1)[regions]
+    headings = settled_rotations[np.arange(len(settled)), :2, tangent]
+    headings /= np.linalg.norm(headings, axis=1, keepdims=True)
+    nearest_yaw = np.full(len(quats), -1.0)
+    nearest = np.zeros(len(quats))
+    threshold = math.cos(math.radians(cfg.min_rotation_deg) / 2)
+    selected, mode_counts, region_counts = [], {}, {}
+    candidates = list(range(len(settled)))
+    while candidates and len(selected) < cfg.stable_poses:
+        # Allocate one placement per mode before adding support regions and yaw variants.
+        index = min(
+            candidates,
+            key=lambda i: (
+                mode_counts.get(modes[i], 0),
+                region_counts.get(regions[i], 0),
+                nearest_yaw[i],
+                nearest[i],
+                i,
+            ),
+        )
+        selected.append(index)
+        mode_counts[modes[index]] = mode_counts.get(modes[index], 0) + 1
+        region_counts[regions[index]] = region_counts.get(regions[index], 0) + 1
+        same_region = regions == regions[index]
+        nearest_yaw[same_region] = np.maximum(
+            nearest_yaw[same_region], headings[same_region] @ headings[index]
+        )
+        similarity = np.abs(quats @ quats[index])
+        nearest = np.maximum(nearest, similarity)
+        candidates = [i for i in candidates if i != index and nearest[i] <= threshold]
     print(
-        f"Accepted {len(poses)}/{cfg.stable_poses} stable placements after {attempts} drops",
+        f"Retained {len(selected)} placements from {len(settled)}/{len(rotations)} stable drops: {mode_counts}",
         flush=True,
     )
-    return torch.stack(poses)
+    return dict(
+        placements=settled[selected],
+        support_mode=[modes[i] for i in selected],
+        support_region=torch.tensor([regions[i] for i in selected]),
+        support_normal_object=settled[selected, 2, :3],
+        support_center_object=centers[selected],
+        settled_drops=len(settled),
+        drop_attempts=len(rotations),
+    )
 
 
 def _candidates(gen, mesh, placement, direction):
@@ -271,7 +382,11 @@ def _candidates(gen, mesh, placement, direction):
         widths=widths[keep].cpu(),
         costs=costs[keep].cpu(),
         tested=torch.zeros(count, dtype=torch.bool),
+        arena_index=torch.full((count,), -1, dtype=torch.long),
         success=torch.zeros(count, dtype=torch.bool),
+        failure_stage=torch.full((count,), -1, dtype=torch.int8),
+        hold=torch.full((count, len(_QUALITY_FIELDS)), float("nan")),
+        disturbance=torch.full((count, len(_QUALITY_FIELDS)), float("nan")),
     )
 
 
@@ -311,60 +426,124 @@ def _fingerprint(config, mesh, urdf, num_envs):
     return digest.hexdigest()
 
 
-def _validate_placement(v, placement, groups):
-    # Directions share a frozen object transform, so their pending candidates
-    # can occupy adjacent arenas in the same physics rollout.
+_QUALITY_FIELDS = ("slip_mm", "rotation_deg", "bilateral_fraction")
+_FAILURE_STAGES = ("passed", "lift", "disturbance", "hold")
+
+
+def _validate_groups(v, placements, groups):
+    # Store only CPU row references between simulations. Indexing both transforms
+    # with the same reference keeps candidate and placement paired through retries.
     work = (
-        (d, row)
-        for d, (group, _) in enumerate(groups)
+        (g, row)
+        for g, (_, _, group, _) in enumerate(groups)
         for row in torch.where(~group["tested"])[0].tolist()
     )
-    missing = 0
+    missing = real = slots = 0
     while batch := list(islice(work, v.sim.num_envs)):
-        poses = torch.stack([groups[d][0]["poses"][row] for d, row in batch])
-        padding = poses[-1:].expand(v.sim.num_envs - len(batch), -1, -1)
-        v.restore_placement(placement)
-        results = v.validate(torch.cat((poses, padding)).numpy())
-        for (d, row), result in zip(batch, results[: len(batch)], strict=True):
-            group = groups[d][0]
-            if result["status"] == "ok":
-                group["tested"][row] = True
-                group["success"][row] = result["success"]
-            else:
+        padded = batch + [batch[-1]] * (v.sim.num_envs - len(batch))
+        poses = torch.stack([groups[g][2]["poses"][row] for g, row in padded])
+        v.restore_placement(placements[[groups[g][0] for g, _ in padded]])
+        results = v.validate(poses.numpy())
+        real += len(batch)
+        slots += len(padded)
+        for arena, ((g, row), result) in enumerate(
+            zip(batch, results[: len(batch)], strict=True)
+        ):
+            group = groups[g][2]
+            if result["status"] != "ok":
                 missing += 1
-        for d in sorted({d for d, _ in batch}):
-            group, path = groups[d]
+                continue
+            group["arena_index"][row] = arena
+            group["tested"][row] = True
+            group["success"][row] = result["success"]
+            group["failure_stage"][row] = _FAILURE_STAGES.index(
+                result["failure_stage"] or "passed"
+            )
+            for phase in ("hold", "disturbance"):
+                window = result[phase]
+                if window is not None:
+                    group[phase][row] = torch.tensor(
+                        [window[key] for key in _QUALITY_FIELDS]
+                    )
+        for g in sorted({g for g, _ in batch}):
+            _, _, group, path = groups[g]
             _save(path, group)
-    return missing
+    return dict(missing=missing, real_trials=real, arena_slots=slots)
 
 
-def _labels(groups, placements, directions, sampling):
-    poses, widths, costs, source, approach = [], [], [], [], []
-    for p, d, group in groups:
-        ok = group["success"] & group["tested"]
-        selected = group["poses"][ok]
-        poses.append(selected)
-        widths.append(group["widths"][ok])
-        costs.append(group["costs"][ok])
-        source.append(torch.full((len(selected),), p, dtype=torch.long))
-        approach.append(directions[d].expand(len(selected), 3))
-    grasps = torch.cat(poses)
-    order = torch.argsort(torch.cat(costs), stable=True)
-    keep = order[
-        pose_nms_indices(
-            grasps[order],
-            dist_th=sampling.nms_distance_m,
-            angle_th=math.radians(sampling.nms_angle_deg),
-            preserve_order=True,
+def _labels(groups, placements, directions, sampling, physics):
+    # Keep the trial table in stable (placement, direction, candidate) order,
+    # independent of the arena count and checkpoint boundaries.
+    trials = {
+        field: torch.cat([group[field] for _, _, group, _ in groups])
+        for field in (
+            "poses",
+            "widths",
+            "costs",
+            "arena_index",
+            "success",
+            "failure_stage",
+            "hold",
+            "disturbance",
         )
-    ]
-    return dict(
-        grasp_pose=grasps[keep],
-        open_length=torch.cat(widths)[keep],
-        object_pose=placements,
-        object_pose_index=torch.cat(source)[keep],
-        approach_direction_world=torch.cat(approach)[keep],
+    }
+    trials["object_pose_index"] = torch.cat(
+        [torch.full((len(g["poses"]),), p, dtype=torch.long) for p, _, g, _ in groups]
     )
+    trials["direction_index"] = torch.cat(
+        [torch.full((len(g["poses"]),), d, dtype=torch.long) for _, d, g, _ in groups]
+    )
+    trials["candidate_index"] = torch.cat(
+        [torch.arange(len(g["poses"])) for _, _, g, _ in groups]
+    )
+    successful = torch.where(trials["success"])[0]
+    ordered = successful[trials["costs"][successful].argsort(stable=True)]
+    keep, inverse = pose_nms_indices(
+        trials["poses"][ordered],
+        dist_th=sampling.nms_distance_m,
+        angle_th=math.radians(sampling.nms_angle_deg),
+        preserve_order=True,
+        return_inverse=True,
+    )
+    representatives = ordered[keep]
+    trials["label_index"] = torch.full((len(trials["poses"]),), -1, dtype=torch.long)
+    trials["label_index"][ordered] = inverse
+    return dict(
+        grasp_pose=trials["poses"][representatives],
+        open_length=trials["widths"][representatives],
+        object_pose=placements,
+        object_pose_index=trials["object_pose_index"][representatives],
+        approach_direction_world=directions[trials["direction_index"][representatives]],
+        representative_trial_index=representatives,
+        trials=trials,
+        directions_world=directions,
+        quality_fields=list(_QUALITY_FIELDS),
+        failure_stages=list(_FAILURE_STAGES),
+        physics=physics,
+    )
+
+
+def _support_coverage(labels, modes):
+    """Count NMS representatives by the placement of their actual trial."""
+    trials = labels["trials"]
+    tested = trials["object_pose_index"]
+    per_placement = torch.stack(
+        [
+            torch.bincount(rows, minlength=len(modes))
+            for rows in (tested, tested[trials["success"]], labels["object_pose_index"])
+        ],
+        dim=1,
+    )
+    coverage = {}
+    for mode, (total, passed, kept) in zip(modes, per_placement.tolist(), strict=True):
+        counts = coverage.setdefault(
+            mode, dict(placements=0, trials=0, passed=0, labels=0)
+        )
+        counts["placements"] += 1
+        counts["trials"] += total
+        counts["passed"] += passed
+        counts["labels"] += kept
+    return coverage
 
 
 def _run(
@@ -380,6 +559,7 @@ def _run(
     generator_settings=None,
     candidate_transform=None,
 ):
+    started = time.perf_counter()
     hand, options = _resolve_hand(config["gripper"], urdf)
     rigid = dict(config.get("rigid", {}))
     if (
@@ -410,6 +590,7 @@ def _run(
             raise ValueError(
                 "Inputs or sampling configuration changed; choose a fresh output"
             )
+    resumed = state is not None
     if output.exists():
         if state is not None:
             print(f"Already completed: {output}")
@@ -418,27 +599,39 @@ def _run(
     placement_seed, direction_seed, geometry_seed = np.random.SeedSequence(
         sampling.seed
     ).spawn(3)
-    v = GraspValidator(
-        obj,
-        hand,
-        num_envs=num_envs,
-        gripper_urdf=urdf,
-        physics=config.get("physics", "default"),
-        close_wait_steps=config.get("close_wait_steps", 60),
-        enable_disturbance=config.get("enable_disturbance", True),
-        settle_on_init=False,
-        **options,
-    )
+    physics = config.get("physics", "default")
+
+    def scene(size):
+        return GraspValidator(
+            obj,
+            hand,
+            num_envs=size,
+            gripper_urdf=urdf,
+            physics=physics,
+            close_wait_steps=config.get("close_wait_steps", 60),
+            enable_disturbance=config.get("enable_disturbance", True),
+            settle_on_init=False,
+            **options,
+        )
+
+    v = None
     try:
         if state is None:
-            placements = _placements(v, sampling, np.random.default_rng(placement_seed))
-            directions = _directions(
-                np.random.default_rng(direction_seed), sampling.directions
-            )
-            state = dict(
-                fingerprint=fingerprint, placements=placements, directions=directions
+            drop_size = min(num_envs, sampling.max_drops)
+            v = scene(drop_size)
+            state = _placements(v, sampling, np.random.default_rng(placement_seed))
+            state.update(
+                fingerprint=fingerprint,
+                directions=_directions(
+                    np.random.default_rng(direction_seed), sampling.directions
+                ),
             )
             _save(manifest, state)
+            if drop_size != num_envs:
+                v.close()
+                v = None
+        if v is None:
+            v = scene(num_envs)
         placements, directions = state["placements"], state["directions"]
         seed = int(geometry_seed.generate_state(1)[0])
         np.random.seed(seed)
@@ -453,36 +646,148 @@ def _run(
         vertices, triangles = v.obj.get_semantic_mesh([0])
         mesh = vertices[0], triangles[0]
         groups = []
-        missing = 0
         for p, placement in enumerate(placements):
-            placement_groups = []
             for d, direction in enumerate(directions):
                 path = checkpoints / f"placement-{p}-direction-{d}.pt"
                 if path.exists():
                     group = torch.load(path, map_location="cpu", weights_only=True)
                 else:
+                    # Per-group streams make partial candidate-generation resumes reproducible.
+                    group_seed = int(
+                        np.random.SeedSequence([seed, p, d]).generate_state(1)[0]
+                    )
+                    np.random.seed(group_seed)
+                    torch.manual_seed(group_seed)
                     group = _candidates(gen, mesh, placement, direction)
                     if candidate_transform is not None:
                         group["poses"] = candidate_transform(group["poses"])
                     _save(path, group)
-                placement_groups.append((group, path))
-                groups.append((p, d, group))
-            missing += _validate_placement(v, placement, placement_groups)
-            passed = sum(int(group["success"].sum()) for group, _ in placement_groups)
-            count = sum(len(group["poses"]) for group, _ in placement_groups)
-            print(
-                f"Placement {p+1}/{len(placements)}: {passed}/{count} grasps passed",
-                flush=True,
-            )
-        if missing:
+                groups.append((p, d, group, path))
+        stats = _validate_groups(v, placements, groups)
+        if stats["missing"]:
             raise RuntimeError(
-                f"{missing} trials lack complete observations; retry with --resume"
+                f"{stats['missing']} trials lack complete observations; retry with --resume"
             )
-        labels = _labels(groups, placements, directions, sampling)
+        labels = _labels(groups, placements, directions, sampling, physics)
+        labels.update(
+            {
+                key: state[key]
+                for key in (
+                    "support_mode",
+                    "support_region",
+                    "support_normal_object",
+                    "support_center_object",
+                    "settled_drops",
+                    "drop_attempts",
+                )
+            }
+        )
+        stats.update(
+            support_coverage=_support_coverage(labels, state["support_mode"]),
+            elapsed_s=time.perf_counter() - started,
+            resumed=resumed,
+            drop_arenas=min(sampling.max_drops, num_envs),
+            trial_arenas=num_envs,
+        )
+        labels.update(
+            run_stats=stats,
+            root_from_tcp=v.root_tcp.detach().cpu(),
+            engine_version=version("dexsim-engine"),
+            sampling=sampling.to_dict(),
+        )
         _save(output, labels)
-        print(f"Saved {len(labels['grasp_pose'])} grasp labels to {output}", flush=True)
+        elapsed = time.perf_counter() - started
+        count = len(labels["grasp_pose"])
+        print(f"Support coverage: {json.dumps(stats['support_coverage'])}")
+        print(
+            f"Saved {count} grasp labels to {output} in {elapsed:.3f} s "
+            f"({count / elapsed:.2f} labels/s); "
+            f"used {stats['real_trials']}/{stats['arena_slots']} arena slots",
+            flush=True,
+        )
     finally:
-        v.close()
+        if v is not None:
+            v.close()
+
+
+def _precompute(argv: Sequence[str]) -> None:
+    """Warm common deployment hand/affordance pairs before starting a planner."""
+    import gymnasium
+    from embodichain.lab.gym.utils.gym_utils import (
+        add_env_launcher_args_to_parser,
+        build_env_cfg_from_args,
+    )
+    from embodichain.lab.gym.utils.registration import (
+        discover_task_packages,
+        execute_init_hooks,
+    )
+    from embodichain.lab.sim import SimulationManager
+    from embodichain.lab.sim.atomic_skills.affordance import AntipodalAffordance
+    from embodichain.lab.sim.utility._validated_grasps import ValidatedGraspCache
+
+    parser = argparse.ArgumentParser(
+        prog="embodichain label-grasps precompute",
+        description="Populate the physical grasp cache for mounted hand/object pairs in a Task Program deployment.",
+    )
+    parser.add_argument(
+        "--gym-config", required=True, help="Task Program deployment YAML"
+    )
+    parser.add_argument(
+        "--physics", choices=("default", "newton"), help="Select the deployment backend"
+    )
+    parser.add_argument(
+        "--pair",
+        nargs=3,
+        action="append",
+        required=True,
+        metavar=("HAND", "OBJECT", "AFFORDANCE"),
+        help="Execution control part, object ID and antipodal affordance ID. Repeat for more pairs.",
+    )
+    args = parser.parse_args(argv)
+    launcher = argparse.ArgumentParser(add_help=False)
+    add_env_launcher_args_to_parser(launcher, require_gym_config=True)
+    launcher.set_defaults(
+        headless=True,
+        num_envs=1,
+        renderer="no-render",
+        filter_dataset_saving=True,
+        disable_sensor=True,
+        physics=args.physics,
+    )
+    launch_args = launcher.parse_args(["--gym-config", args.gym_config])
+    discover_task_packages()
+    execute_init_hooks()
+    cfg, gym_config, action_config = build_env_cfg_from_args(launch_args)
+    env = gymnasium.make(gym_config["id"], cfg=cfg, **action_config)
+    try:
+        assembly = env.unwrapped.task_program_adapter.assemble_runtime(
+            cfg.task_program.integration
+        )
+        for part, obj, affordance_id in args.pair:
+            affordance = assembly.scene_registry.object_semantics(
+                obj, affordance=affordance_id
+            ).affordance
+            generator = assembly.engine.grasp_pose_generators[part]
+            cache = getattr(generator, "validated_labels", None)
+            if not isinstance(affordance, AntipodalAffordance) or not isinstance(
+                cache, ValidatedGraspCache
+            ):
+                raise ValueError(
+                    f"{part}/{affordance_id} requires a validated antipodal hand and affordance"
+                )
+            commands = assembly.engine.control_profiles[part].commands
+            path = cache.precompute(
+                affordance.mesh_vertices,
+                affordance.mesh_triangles,
+                affordance.validation_attrs,
+                hand_commands=tuple(
+                    commands[name].positions.reshape(-1) for name in ("open", "grasp")
+                ),
+            )
+            print(f"{part} / {obj} / {affordance_id}: {path}", flush=True)
+    finally:
+        env.unwrapped.close(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
 
 
 def cli(argv: Sequence[str] | None = None) -> None:
@@ -493,8 +798,14 @@ def cli(argv: Sequence[str] | None = None) -> None:
             Use ``--config`` for the mesh, gripper and sampling settings and
             ``--output`` for the destination PyTorch file.
     """
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "precompute":
+        _precompute(argv[1:])
+        return
     parser = argparse.ArgumentParser(
-        prog="embodichain label-grasps", description=__doc__
+        prog="embodichain label-grasps",
+        description=__doc__,
+        epilog="Use 'label-grasps precompute --help' to populate an atomic skill planning cache.",
     )
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--mesh", help="Override the target mesh path in the YAML.")

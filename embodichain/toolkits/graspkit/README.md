@@ -46,6 +46,9 @@ mesh-path mappings when a registered archive requires them. The loader records
 URDF/mesh hashes, resolved joint transforms and the sampled geometry. It does
 not construct a robot or simulator.
 
+For simulated lift and disturbance checks, per-trial evidence and planning cache
+precomputation, see the [GraspValidator and labeling guide](../../../examples/toolkits/grasp_labeling/README.md).
+
 ## Ranking preferences
 
 `AntipodalGraspPoseGeneratorCfg` uses two relative weights. `angle_weight` favors closing

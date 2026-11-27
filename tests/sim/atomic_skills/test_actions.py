@@ -4274,7 +4274,18 @@ def test_pickup_override_cannot_borrow_closed_hand_labels(monkeypatch) -> None:
     )
     scene = _target_scene(torch.eye(4).repeat(NUM_ENVS, 1, 1), timestamp=0.0, version=0)
     plan = _plan_action(action, invocation, _context(scene=scene))
-    assert len(jobs) == 2
+    planned_keys = set(jobs)
+    affordance = semantics.affordance
+    warmed = {
+        cache.precompute(
+            affordance.mesh_vertices,
+            affordance.mesh_triangles,
+            affordance.validation_attrs,
+            hand_commands=(opened, command),
+        ).stem
+        for command in (closed, opened)
+    }
+    assert len(planned_keys) == 2 and warmed == planned_keys
     assert {tuple(g["close_qpos"].values()) for g in jobs.values()} == {
         tuple(v.values()) for v in hand["joint_commands"].values()
     }

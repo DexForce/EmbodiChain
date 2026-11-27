@@ -153,7 +153,7 @@ owns the gripper, dynamic object and support in replicated physics arenas. Suppl
 object-from-TCP pose per arena to `validate()`. The validator closes the hand, lifts,
 optionally translates 3 cm out and back along world X and Y, and measures retention
 during a three-second hold. `drop_objects()` and `restore_placement()` support replay
-from measured resting poses. Atomic skills key physical labels on the mounted hand's
+from measured resting poses, including a different pose in each arena. Atomic skills key physical labels on the mounted hand's
 drives, contact settings, physics backend and resolved open/grasp commands. Rows
 with different commands use their own labels. At planning time, cached labels are
 filtered by the live approach direction and the calibrated closing axis before
@@ -162,4 +162,7 @@ ranking and batch IK.
 For offline labels, `embodichain label-grasps` samples settled placements and
 world-space approaches, then uses the validator to qualify object-local TCPs.
 The [CobotMagic cup example](../../../examples/toolkits/grasp_labeling/README.md)
-describes catalog and custom hand inputs, checkpoints and the output tensors.
+describes support-mode sampling, mixed-placement batches, checkpoints and the
+mapping from every tested TCP and its hold/disturbance evidence to a pose NMS
+representative. `label-grasps precompute` loads the deployment's mounted hand and
+affordance and warms the same physical label cache used by atomic skills.

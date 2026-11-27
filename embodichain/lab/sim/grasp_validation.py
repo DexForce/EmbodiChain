@@ -271,6 +271,9 @@ def _validation_scene(num_envs, physics, headless):
 class GraspValidator:
     """Own a prepared hand, support and dynamic target for independent trials.
 
+    See the repository's ``examples/toolkits/grasp_labeling/README.md`` for replay
+    of a supplied TCP, offline labeling, evidence and planning-cache examples.
+
     Args:
         object_cfg: Dynamic target shared by the replicated arenas.
         gripper: Catalog ID or a configured standalone parallel-jaw hand.
@@ -533,6 +536,10 @@ class GraspValidator:
         return torch.stack(heights).amin(0)
 
     def _contacts(self):
+        fingers, support_rows, lost = self._contact_rows()
+        return fingers, support_rows.any(1), lost
+
+    def _contact_rows(self):
         self.sensor.update()
         data = self.sensor.get_data()
         a, b = data["user_ids"].unbind(-1)
@@ -553,7 +560,7 @@ class GraspValidator:
         fingers = (
             (paired[:, :, None] == self.pad_ids[:, None, :]) & valid[:, :, None]
         ).any(1)
-        supported = ((paired == self.support_id) & valid).any(1)
+        supported = (paired == self.support_id) & valid
         lost = self.sensor.get_latest_contact_loss_mask()
         lost = lost | (data["is_valid"] & ~evidence).any(1)
         return fingers, supported, lost
@@ -569,17 +576,26 @@ class GraspValidator:
         self.hand.set_qpos(opened)
         self.sensor.reset()
 
-    def drop_objects(self, rotations: np.ndarray, height_m: float) -> torch.Tensor:
+    def drop_objects(
+        self,
+        rotations: np.ndarray,
+        height_m: float,
+        *,
+        return_support_centers: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Release randomly oriented targets with zero velocities over the table.
 
         Args:
             rotations: Object-to-arena rotations of shape (B, 3, 3), with
                 one to `sim.num_envs` rows.
             height_m: Initial height of the lowest collision point above the table.
+            return_support_centers: Also return the centroid of observed table contacts,
+                expressed in each settled object's local frame.
 
         Returns:
             CPU tensor of arena-from-object poses (K, 4, 4) for the K targets
             that settled on the table with valid support and no hand contact.
+            With ``return_support_centers``, return the poses and K matching XYZ centroids.
         """
         n = self.sim.num_envs
         rotations = np.asarray(rotations)
@@ -606,19 +622,59 @@ class GraspValidator:
         pose[:, 2, 3] = height_m - self._clearance(pose)
         self._reset_target(pose)
         current, settled = self._measure_settling()
-        valid = (settled & self._on_support())[:count]
-        return current[:count][valid].detach().cpu()
+        fingers, support_rows, lost = self._contact_rows()
+        valid = (settled & support_rows.any(1) & ~lost & ~fingers.any(1))[:count]
+        if not return_support_centers:
+            return current[:count][valid].detach().cpu()
+        points = self.sensor.get_data()["position"][:count]
+        support = support_rows[:count]
+        valid &= ~(support & ~points.isfinite().all(-1)).any(1)
+        center = torch.where(support[..., None], points, 0).sum(1) / support.sum(
+            1, keepdim=True
+        ).clamp_min(1)
+        poses = current[:count][valid]
+        centers = (
+            poses[:, :3, :3].mT @ (center[valid] - poses[:, :3, 3]).unsqueeze(-1)
+        ).squeeze(-1)
+        return poses.detach().cpu(), centers.detach().cpu()
 
     def restore_placement(self, object_pose: torch.Tensor) -> None:
-        """Start every arena from the same recorded resting placement.
+        """Restore recorded resting placements before a batch of trials.
 
         Args:
-            object_pose: A (4, 4) arena-from-object transform from a settled drop.
+            object_pose: One (4, 4) arena-from-object transform to broadcast, or
+                (num_envs, 4, 4) transforms in execution row order.
 
         Raises:
             ValueError: The transform is invalid or resting contact cannot be restored.
         """
-        frozen = self._tensor(_validate_gripper_transform(object_pose.tolist()))
+        frozen = self._tensor(object_pose)
+        n = self.sim.num_envs
+        if frozen.shape not in ((4, 4), (n, 4, 4)):
+            raise ValueError("Expected one resting transform or one per arena")
+        rotations = frozen[..., :3, :3]
+        if not (
+            torch.isfinite(frozen).all()
+            and torch.allclose(
+                frozen[..., 3, :],
+                frozen.new_tensor([0, 0, 0, 1]).expand_as(frozen[..., 3, :]),
+                atol=1e-7,
+                rtol=0,
+            )
+            and torch.allclose(
+                rotations.mT @ rotations,
+                torch.eye(3, device=frozen.device).expand_as(rotations),
+                atol=1e-6,
+                rtol=0,
+            )
+            and torch.allclose(
+                torch.linalg.det(rotations),
+                torch.ones_like(frozen[..., 0, 0]),
+                atol=1e-6,
+                rtol=0,
+            )
+        ):
+            raise ValueError("Resting placements must be proper rigid transforms")
         self.initial = None
         self._park_hand()
         pose = frozen.expand(self.sim.num_envs, -1, -1).contiguous()
@@ -633,7 +689,7 @@ class GraspValidator:
         if not self._on_support().all().item():
             raise ValueError("Restored placement lacks target/support contact")
         self._reset_target(pose)
-        self.initial = frozen
+        self.initial = frozen.clone()
 
     def close(self) -> None:
         """Release physics resources and the temporary mounting URDF."""
@@ -667,7 +723,8 @@ class GraspValidator:
             and np.allclose(np.linalg.det(rotations), 1, atol=1e-4)
         ):
             raise ValueError("Candidates must be proper rigid transforms")
-        goal = self.initial @ self._tensor(poses) @ torch.linalg.inv(self.root_tcp)
+        placements = self.initial.expand(n, -1, -1).contiguous()
+        goal = placements @ self._tensor(poses) @ torch.linalg.inv(self.root_tcp)
         axis = (goal @ self.root_contact)[:, :3, 2]
         base = goal.clone()
         base[:, :3, 3] -= 0.08 * axis
@@ -680,14 +737,14 @@ class GraspValidator:
         self.hand.set_qpos(opened, target=False)
         self.hand.set_qvel(torch.zeros_like(opened), target=False)
         self.hand.set_qpos(opened)
-        self.obj.set_local_pose(self.initial.expand(n, -1, -1).contiguous())
+        self.obj.set_local_pose(placements)
         zero = torch.zeros_like(axis)
         self.obj.set_velocity(zero, zero)
         self.sensor.reset()
         if self._show_trials and self.sim.viewer is None:
             if not self.sim.open_viewer():
                 raise RuntimeError("Could not open the native grasp validation window")
-            target = (self.initial[:3, 3] + self.sim.arena_offsets[0]).cpu().numpy()
+            target = (placements[0, :3, 3] + self.sim.arena_offsets[0]).cpu().numpy()
             target = target + [0, 0, 0.05]  # Frame both the pickup and the lift.
             eye = target + [0.36, -0.42, 0.25]
             self.sim.viewer.set_look_at(eye.tolist(), target.tolist(), [0, 0, 1])

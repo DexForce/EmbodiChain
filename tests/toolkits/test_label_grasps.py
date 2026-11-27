@@ -42,6 +42,10 @@ def test_object_frame_nms_keeps_width_and_verification_placement() -> None:
         costs=torch.tensor([2.0]),
         tested=torch.tensor([True]),
         success=torch.tensor([True]),
+        arena_index=torch.tensor([0]),
+        failure_stage=torch.tensor([0], dtype=torch.int8),
+        hold=torch.tensor([[6.0, 2.0, 1.0]]),
+        disturbance=torch.tensor([[3.0, 1.0, 0.94]]),
     )
     generator = SimpleNamespace(
         get_grasp_candidates=lambda **_: [
@@ -57,32 +61,62 @@ def test_object_frame_nms_keeps_width_and_verification_placement() -> None:
     )
     higher["tested"][:] = True
     higher["success"][0] = True
+    higher["failure_stage"][:] = torch.tensor([0, 1])
+    higher["hold"][0] = torch.tensor([2.0, 1.0, 1.0])
     result = labels._labels(
-        [(0, 0, lower), (1, 1, higher)], placements, directions, labels._SamplingCfg()
+        [(0, 0, lower, None), (1, 1, higher, None)],
+        placements,
+        directions,
+        labels._SamplingCfg(),
+        "default",
     )
     torch.testing.assert_close(result["grasp_pose"], local[:1])
     torch.testing.assert_close(result["open_length"], torch.tensor([0.03]))
     assert result["object_pose_index"].tolist() == [1]
     torch.testing.assert_close(result["approach_direction_world"], directions[1:])
+    assert result["physics"] == "default"
+    assert result["representative_trial_index"].tolist() == [1]
+    trials = result["trials"]
+    assert trials["label_index"].tolist() == [0, 0, -1]
+    assert trials["object_pose_index"].tolist() == [0, 1, 1]
+    assert trials["candidate_index"].tolist() == [0, 0, 1]
+    assert trials["hold"][:2, 0].tolist() == [6.0, 2.0]
+    assert trials["hold"][2].isnan().all()
     lower["success"][:] = False
     empty = labels._labels(
-        [(0, 0, lower)], placements, directions, labels._SamplingCfg()
+        [(0, 0, lower, None)], placements, directions, labels._SamplingCfg(), "newton"
     )
     assert empty["grasp_pose"].shape == (0, 4, 4) and empty["open_length"].shape == (0,)
 
 
 def test_partial_batch_retries_only_missing_observations(tmp_path: Path) -> None:
-    calls = []
+    calls, restores = [], []
+    passed = dict(
+        status="ok",
+        success=True,
+        failure_stage=None,
+        hold=dict(slip_mm=5.0, rotation_deg=2.0, bilateral_fraction=0.9),
+        disturbance=None,
+    )
 
     def validate(batch):
         calls.append(batch[:, 0, 3].tolist())
         if len(calls) == 1:
-            return [dict(status="ok", success=False), dict(status="missing")]
-        return [dict(status="ok", success=True)] * 2
+            return [
+                dict(
+                    status="ok",
+                    success=False,
+                    failure_stage="lift",
+                    hold=None,
+                    disturbance=None,
+                ),
+                dict(status="missing"),
+            ]
+        return [passed] * 2
 
     v = SimpleNamespace(
         sim=SimpleNamespace(num_envs=2),
-        restore_placement=lambda p: None,
+        restore_placement=lambda p: restores.append(p[:, 1, 3].tolist()),
         validate=validate,
     )
     poses = torch.eye(4).repeat(3, 1, 1)
@@ -91,21 +125,41 @@ def test_partial_batch_retries_only_missing_observations(tmp_path: Path) -> None
         poses=poses,
         tested=torch.zeros(3, dtype=torch.bool),
         success=torch.zeros(3, dtype=torch.bool),
+        arena_index=torch.full((3,), -1),
+        failure_stage=torch.full((3,), -1, dtype=torch.int8),
+        hold=torch.full((3, 3), torch.nan),
+        disturbance=torch.full((3, 3), torch.nan),
     )
+    placements = torch.eye(4).repeat(2, 1, 1)
+    placements[1, 1, 3] = 0.25
     groups = [
-        ({key: value[:1] for key, value in group.items()}, tmp_path / "first.pt"),
-        ({key: value[1:] for key, value in group.items()}, tmp_path / "second.pt"),
+        (0, 2, {key: value[:1] for key, value in group.items()}, tmp_path / "first.pt"),
+        (
+            1,
+            3,
+            {key: value[1:] for key, value in group.items()},
+            tmp_path / "second.pt",
+        ),
     ]
-    assert labels._validate_placement(v, torch.eye(4), groups) == 1
-    loaded = [(torch.load(path, weights_only=True), path) for _, path in groups]
-    assert labels._validate_placement(v, torch.eye(4), loaded) == 0
+    assert labels._validate_groups(v, placements, groups) == dict(
+        missing=1, real_trials=3, arena_slots=4
+    )
+    loaded = [
+        (p, d, torch.load(path, weights_only=True), path) for p, d, _, path in groups
+    ]
+    assert labels._validate_groups(v, placements, loaded) == dict(
+        missing=0, real_trials=1, arena_slots=2
+    )
     assert calls == [[0, 1], [2, 2], [1, 1]]
-    assert loaded[0][0]["success"].tolist() == [False]
-    assert loaded[1][0]["success"].tolist() == [True, True]
+    assert restores == [[0, 0.25], [0.25, 0.25], [0.25, 0.25]]
+    assert loaded[0][2]["failure_stage"].tolist() == [1]
+    assert loaded[1][2]["success"].tolist() == [True, True]
+    assert loaded[1][2]["arena_index"].tolist() == [0, 0]
+    assert loaded[1][2]["hold"][:, 0].tolist() == [5.0, 5.0]
 
 
 def test_stable_orientations_ignore_translation_and_nearby_rotations() -> None:
-    cfg = labels._SamplingCfg(stable_poses=2, max_drops=4)
+    cfg = labels._SamplingCfg(stable_poses=2, max_drops=5)
     poses = torch.eye(4).repeat(4, 1, 1)
     poses[1, 0, 3] = 0.5
     angle = np.deg2rad(10)
@@ -114,13 +168,43 @@ def test_stable_orientations_ignore_translation_and_nearby_rotations() -> None:
     )
     poses[3, :2, :2] = torch.tensor([[0.0, -1.0], [1.0, 0.0]])
     v = SimpleNamespace(
-        sim=SimpleNamespace(num_envs=4), drop_objects=lambda rots, height: poses
+        obj=SimpleNamespace(get_semantic_mesh=lambda _: ([torch.eye(3)], None)),
+        sim=SimpleNamespace(num_envs=5),
+        drop_objects=lambda *args, **kwargs: (poses, torch.zeros(len(poses), 3)),
     )
     actual = labels._placements(v, cfg, np.random.default_rng(3))
-    torch.testing.assert_close(actual, poses[[0, 3]])
+    torch.testing.assert_close(actual["placements"], poses[[0, 3]])
+    assert actual["drop_attempts"] == 5 and actual["settled_drops"] == 4
+    assert actual["support_region"].tolist() == [0, 0]
     directions = labels._directions(np.random.default_rng(8), 24)
     assert (directions[:, 2] <= 0).all()
     torch.testing.assert_close(directions.norm(dim=1), torch.ones(24))
+
+
+def test_placement_budget_covers_support_modes_before_extra_yaws() -> None:
+    poses = torch.eye(4).repeat(5, 1, 1)
+    poses[1, :2, :2] *= -1  # Same upright support under a different yaw.
+    poses[2, :3, :3] = torch.tensor(
+        [[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]
+    )
+    poses[3, :3, :3] = poses[1, :3, :3] @ poses[2, :3, :3]
+    poses[4, 1, 1] = poses[4, 2, 2] = -1
+    corners = torch.cartesian_prod(*[torch.tensor([-0.03, 0.03])] * 3)
+    validator = SimpleNamespace(
+        sim=SimpleNamespace(num_envs=5),
+        obj=SimpleNamespace(get_semantic_mesh=lambda _: ([corners], None)),
+        drop_objects=lambda *args, **kwargs: (poses, -0.03 * poses[:, 2, :3]),
+    )
+    cfg = labels._SamplingCfg(stable_poses=3, max_drops=5, support_up_axis=[0, 0, 1])
+    chosen = labels._placements(validator, cfg, np.random.default_rng(0))
+    assert set(chosen["support_mode"]) == {"upright", "inverted", "side_lying"}
+    # Two equal normals can rest on different regions of a nonconvex underside.
+    centers = torch.tensor([[0.02, 0.0, -0.03], [-0.02, 0.0, -0.03]])
+    modes, regions = labels._support_modes(poses[:2], centers, corners, up_axis=None)
+    assert len(set(modes)) == len(set(regions)) == 2
+    torch.testing.assert_close(
+        chosen["support_center_object"], -0.03 * chosen["support_normal_object"]
+    )
 
 
 def test_validated_pickup_cache_identity(tmp_path: Path) -> None:
