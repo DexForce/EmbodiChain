@@ -72,6 +72,12 @@ def main() -> None:
             )
             row["template_archive"] = str(archive)
             attempts = json.loads((archive / "model_attempts.json").read_text())
+            if not any(a.get("purpose") == "source_review" for a in attempts):
+                raise ValueError(
+                    "Template archive predates the instruction source audit. "
+                    "Its published graph is still available, but the recorded "
+                    "model responses cannot replay current template authoring."
+                )
 
             def replay(stage):
                 queue = deque(a["response"] for a in attempts if a["stage"] == stage)

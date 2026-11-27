@@ -138,7 +138,11 @@ def main(
         dest="output_root",
         type=str,
         required=True,
-        help="Path to the output directory",
+        help=(
+            "Workspace containing scene_export/ or an editable scene_package.zip"
+            if operation == "edit"
+            else "Path to the output directory"
+        ),
     )
     if operation != "generate":
         parser.add_argument(

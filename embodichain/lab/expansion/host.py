@@ -150,7 +150,6 @@ class GymExpansionHost:
             "prepare": 0.0,
             "execute": 0.0,
             "commit": 0.0,
-            "render_variants": 0.0,
             "export": 0.0,
         }
         env = REGISTERED_ENVS[raw["id"]].make(cfg=environment_cfg)

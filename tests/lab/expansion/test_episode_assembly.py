@@ -25,6 +25,7 @@ import pytest
 import torch
 
 from embodichain.lab.expansion._gym_episode import GymEpisodeAssembler
+from embodichain.lab.expansion.journal import ExpansionJournal
 from embodichain.lab.expansion.contracts import (
     CandidateIdentity,
     ValidationCheck,
@@ -83,6 +84,8 @@ def _assembly_case(root, failed_row):
         sim=SimpleNamespace(physics_backend="default"),
     )
     recipe = SimpleNamespace(recipe_id="recipe", to_dict=lambda: {})
+    journal = ExpansionJournal(root)
+    journal.job_instance_id = "job"
     ctx = SimpleNamespace(
         cfg=SimpleNamespace(visual_profile=None),
         report={"runtime_versions": {}, "input_files": {}},
@@ -95,7 +98,7 @@ def _assembly_case(root, failed_row):
         program=SimpleNamespace(program_id="program", instruction="task"),
         collision=None,
         physics_before={},
-        journal=SimpleNamespace(job_instance_id="job"),
+        journal=journal,
         requests={
             i: SimpleNamespace(sequence=i, recipe=recipe, attempt_id=0) for i in (0, 1)
         },

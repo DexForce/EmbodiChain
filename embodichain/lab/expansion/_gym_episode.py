@@ -23,7 +23,6 @@ from pathlib import Path
 import time
 import numpy as np
 import torch
-from embodichain.data_pipeline.recording.media import _atomic_json
 from .contracts import (
     ExpertEpisode,
     ValidationCheck,
@@ -99,7 +98,7 @@ class GymEpisodeAssembler:
                 record["partial_rollout"] = _save_partial(
                     records[row], directory / "rejected.npz", env.step_dt
                 )
-                _atomic_json(directory / "attempt.json", record)
+                ctx.journal._write_attempt(directory, record)
                 episodes[row] = None
                 continue
             numeric = records[row]
@@ -253,7 +252,7 @@ class GymEpisodeAssembler:
                             for c in rejected.checks
                         ],
                     )
-                    _atomic_json(directory / "attempt.json", record)
+                    ctx.journal._write_attempt(directory, record)
                     episodes[row] = None
                     continue
                 # Source qualification keeps its legacy labels, while the host
@@ -337,7 +336,7 @@ class GymEpisodeAssembler:
                 )
                 for check in episode.validation.checks
             ]
-            _atomic_json(directory / "attempt.json", record)
+            ctx.journal._write_attempt(directory, record)
         timings["acceptance"] = (
             timings.get("acceptance", 0.0) + time.monotonic() - phase_started
         )

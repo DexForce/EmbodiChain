@@ -252,6 +252,11 @@ def build_scene_usd(
     _export_scene_package(
         scene_usd_path=scene_usd_path,
         destination=resolved_output_root / "scene_package.zip",
+        scene_export_root=(
+            config_path.parent
+            if (config_path.parent / "scene_graph.json").is_file()
+            else None
+        ),
     )
     return scene_usd_path
 

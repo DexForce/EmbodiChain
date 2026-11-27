@@ -2,13 +2,9 @@
 
 ## 1. Install the documentation dependencies
 
-Build the docs from a source checkout in a Python 3.11 virtual environment.
-API generation imports optional GenSim modules, so this setup installs the
-`gensim` extra and its ABI-specific `bpy` dependency. A Python 3.12 environment
-can run the core package, but it cannot run this full documentation setup.
-
-Install the project runtime and documentation toolchain from the repository
-root:
+Activate a Python 3.11 virtual environment to match the documentation build in
+CI. Sphinx imports GenSim modules to generate the API reference, so install the
+`gensim` extra and the pinned documentation toolchain from the repository root.
 
 ```bash
 pip install -e ".[gensim]" \
@@ -18,46 +14,37 @@ pip install -e ".[gensim]" \
 pip install -r docs/requirements.txt
 ```
 
-HTML builds also require Node.js 22.12+ and the locked Architecture Explorer
-frontend dependencies. Install these once from the repository root:
+HTML builds also require Node.js 22.12+ and the Architecture Explorer frontend
+dependencies.
 
 ```bash
 npm --prefix docs/architecture/web ci
 ```
 
-Every Sphinx build generates architecture evidence from the checkout's HEAD.
-HTML builds compile the static frontend; text/PDF builders include the searchable
-module overview without running Node. Relevant source changes must be committed
-before generating their pinned evidence. Generated bundles live under
-`docs/source/_static/architecture/` and are ignored by Git. A failed generation
-stops the build before replacing the last complete bundle.
-
-The documentation requirements are pinned so local and CI builds use the same
-Sphinx toolchain.
-
-> If the build raises `locale.Error: unsupported locale setting`, run
-> `export LC_ALL=C.UTF-8; export LANG=C.UTF-8` before rebuilding.
-
 ## 2. Build the HTML site
 
 ### Local development (current version only)
 
-```bash
-cd docs
-make current-docs
-```
-
-This target treats warnings as errors. Preview the result at
-`docs/build/html/index.html`. To view the interactive Architecture Explorer,
-serve the output over HTTP (rather than opening it as a local file):
+From the repository root, build into a dedicated preview directory and serve it
+over HTTP so the Architecture Explorer can load its data.
 
 ```bash
-python -m http.server 4184 --bind 127.0.0.1 --directory build/html
+make -C docs current-docs BUILDDIR=build/preview
+python -m http.server 4184 --bind 127.0.0.1 --directory docs/build/preview/html
 ```
 
-Visit `http://127.0.0.1:4184/overview/architecture/index.html`. The page includes
-an embedded viewer, a full-screen link, and a searchable text reference. API
-links stay in the current documentation version; source links use its snapshot SHA.
+`current-docs` synchronizes the Introduction from the repository README and
+treats Sphinx warnings as errors. Open `http://127.0.0.1:4184/` to preview the
+homepage and browse to the Architecture Explorer.
+
+Sphinx pins architecture evidence to the checkout's `HEAD`. If it reports
+`Relevant source has uncommitted changes`, build a committed revision containing
+the listed changes to preview that architecture snapshot. The generated bundle
+lives under `docs/source/_static/architecture/`. Text and PDF builders use the
+searchable module overview without building the frontend.
+
+If Python reports `locale.Error: unsupported locale setting`, set both `LC_ALL`
+and `LANG` to `C.UTF-8` before rebuilding.
 
 ### Multi-version docs (CI/production)
 
@@ -72,26 +59,19 @@ docs/build/html/
 └── v0.1.2/              # Release docs
 ```
 
-To build a specific version into this layout:
+Build from a checkout of the branch or tag you want to document. From the
+repository root, synchronize the Introduction, build into the matching version
+directory, and regenerate the version selector. For the `main` checkout, run
 
 ```bash
-cd docs
-sphinx-build source build/html/<version>
+make -C docs sync-readme
+sphinx-build docs/source docs/build/html/main
+python docs/scripts/generate_versions_json.py --build-dir docs/build/html
 ```
 
-For example, to build the `main` branch docs:
-
-```bash
-sphinx-build source build/html/main
-```
-
-Then generate the version manifest and root redirect:
-
-```bash
-python3 scripts/generate_versions_json.py --build-dir build/html
-```
-
-This generates both `versions.json` (for the sidebar version selector) and `index.html` (redirects to the latest stable version, falling back to `main`).
+For a release checkout, use its tag in place of `main` in the Sphinx output path.
+The version script writes `versions.json` and a root `index.html` that sends
+readers to the latest stable build or falls back to `main`.
 
 > Old release versions beyond `DOCS_MAX_VERSIONS` (default: 5 in CI) are automatically pruned during CI builds.
 >

@@ -39,7 +39,7 @@ Explore EmbodiChain's module relationships with the [interactive architecture vi
 ## Getting Started
 
 1. **Set up your environment** with the [Installation Guide](https://dexforce.github.io/EmbodiChain/main/quick_start/install.html), including Docker, local installation, Python compatibility, and optional dependencies.
-2. **Build your first simulation** with the [Quick Start Tutorial](https://dexforce.github.io/EmbodiChain/main/tutorial/index.html).
+2. **Create your first scene or preview an official task** with the [First Run guide](https://dexforce.github.io/EmbodiChain/main/quick_start/first_run.html).
 3. **Explore runnable workflows** in the [examples](examples/README.md), or consult the [API Reference](https://dexforce.github.io/EmbodiChain/main/api_reference/index.html) to build your own.
 
 After installation, discover the available tasks, robots, and examples:
@@ -53,7 +53,7 @@ embodichain run-example --list
 ### Task Environments
 
 Use `embodichain list-task` to discover tasks and `embodichain run-task` to launch
-one with its configuration. See [Supported Tasks](https://dexforce.github.io/EmbodiChain/main/resources/task/index.html)
+one with its configuration. See [Tasks](https://dexforce.github.io/EmbodiChain/main/resources/task/index.html)
 for available tasks, runnable configurations, and task authoring guides.
 
 ### Third-party Training Frameworks
