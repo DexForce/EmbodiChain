@@ -125,7 +125,10 @@ def suite_objects(
         }
         packages = [(package.name, package) for package in sorted(flat)]
         packages.extend(
-            (p.parent.name, p) for p in sorted(directory.glob("*/*/simready_usd"))
+            (p.parent.name, p)
+            for p in sorted(directory.glob("*/*/simready_usd"))
+            # A flat package owns its source/ dependencies, including nested USDs.
+            if p.parents[1] not in flat
         )
         if not packages and wanted is None:
             raise ValueError(f"No unpacked SimReady packages in {directory}")

@@ -99,8 +99,9 @@ bundled suite discovers the unpacked SimReady models for `book`, `bottle`,
 USD layer (`.usd`, `.usda` or `.usdc`) in `<category>/<object_id>/` with
 its supporting files beside it. The loader also accepts the extracted
 DexTrove layout at `<category>/<source_id>/<model>/simready_usd/`.
-To prepare a separate dataset root from a DexTrove instance or replay a saved
-object shortlist, see the [DexTrove subset tool](../../../../scripts/tools/README.md).
+For the pinned DexTrove catalog, point a custom suite's `dataset_root` to the
+downloaded `categories/` directory and use the catalog's analysis category names.
+Each UUID appears under one category. See the [DexTrove subset tool](../../../../scripts/tools/README.md).
 Models with backend variants use the physics engine selected on the CLI.
 The shared `rigid.attrs.mass_props.mass` setting in `suite.yaml` defaults to
 0.035 kg. Adjust it for all categories or give one category its own rigid

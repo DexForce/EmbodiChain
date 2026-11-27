@@ -644,6 +644,8 @@ topics:
   - scripts/tools/prepare_yam_i2rt_assets.py
   - scripts/tools/prepare_cloth_fold_assets.py
   - scripts/tools/prepare_dextrove_subset.py
+  - scripts/tools/_dextrove_categories.py
+  - scripts/tools/configs/dextrove/catalog.json
   - embodichain/data/default_materials.py
   - embodichain/data/default_materials.json
   - embodichain/_material_catalog.py

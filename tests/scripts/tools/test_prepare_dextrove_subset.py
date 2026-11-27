@@ -23,6 +23,7 @@ import json
 from pathlib import Path
 import sys
 from threading import Thread
+from uuid import UUID
 import zipfile
 
 from pxr import Sdf, Usd, UsdGeom
@@ -31,6 +32,7 @@ import pytest
 from embodichain.extensions.benchmarks.grasp_pose_generator._objects import (
     suite_objects,
 )
+from scripts.tools import _dextrove_categories as categories
 from scripts.tools import prepare_dextrove_subset as tool
 
 pytestmark = pytest.mark.no_sim
@@ -59,8 +61,10 @@ def archive_api():
     model.customLayerData = {"SimReady_Metadata": {"Variants": {"Physics": profiles}}}
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
-        archive.writestr("model.usda", model.ExportToString())
-        archive.writestr("geometry/base.usda", geometry.GetRootLayer().ExportToString())
+        archive.writestr("simready_usd/model.usda", model.ExportToString())
+        archive.writestr(
+            "simready_usd/geometry/base.usda", geometry.GetRootLayer().ExportToString()
+        )
     payload = buffer.getvalue()
     entry = {
         "relative_path": "payload/model.zip",
@@ -70,7 +74,7 @@ def archive_api():
     metadata = {
         "asset_id": asset_id,
         "resource_kind": "archive",
-        "metadata": {"entrypoint": "model.usda"},
+        "metadata": {"entrypoint": "simready_usd/model.usda"},
         "entries": [entry],
         "entry_count": 1,
     }
@@ -101,63 +105,126 @@ def archive_api():
             thread.join()
 
 
-def test_shortlist_installs_one_composable_usd_across_categories(
+def test_catalog_download_and_legacy_replay_share_one_categorized_usd(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, archive_api
 ) -> None:
     api, asset_id, _, reads = archive_api
-    shortlist = tmp_path / "selected.jsonl"
-    tags = [{"domain": "feature.category", "key": key} for key in ("mug", "cup")]
-    shortlist.write_text(
-        json.dumps({"asset_id": asset_id, "name": "Tea mug", "tags": tags})
+    tags = [
+        dict(tag_id=key, domain="feature.category", key=key, display_name=key)
+        for key in ("mug", "cup")
+    ]
+    catalog = tmp_path / "catalog.json"
+    # A catalog from the earlier taxonomy keeps its original "drinkware" label.
+    catalog.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "classification_model": "gpt-6.2-astra",
+                "categories": {"drinkware": "Cups and glasses"},
+                "tag_dictionary": {
+                    "domains": [{"domain": "feature.category"}],
+                    "items": tags,
+                },
+                "assets": [
+                    dict(
+                        asset_id=asset_id,
+                        name="Tea mug",
+                        tag_ids=["mug", "cup"],
+                        category="drinkware",
+                    )
+                ],
+            }
+        )
     )
-    output = tmp_path / "subset"
+    monkeypatch.setattr(tool, "DEFAULT_CATALOG", catalog)
+    monkeypatch.setenv(
+        "CODEX_APP_RUNTIME_CLI_PATH", str(tmp_path / "nonexistent-codex")
+    )
     monkeypatch.setattr(
-        sys,
-        "argv",
-        [
+        tool, "_ask", lambda *args: pytest.fail("Unexpected model call")
+    )
+
+    def download(output: Path, *flags: str) -> None:
+        argv = [
             "prepare_dextrove_subset",
             "--api-root",
             api,
-            "--shortlist",
-            str(shortlist),
             "--output-dir",
             str(output),
-        ],
-    )
+        ]
+        monkeypatch.setattr(sys, "argv", [*argv, *flags])
+        assert tool.main() == 0
 
-    assert tool.main() == 0
-    assets = output / "assets"
-    canonical = assets / "cup" / asset_id / f"{asset_id}.usda"
-    alias = assets / "mug" / asset_id / canonical.name
-    assert alias.samefile(canonical)
-    stage = Usd.Stage.Open(str(alias))
-    assert stage.GetDefaultPrim().IsA(UsdGeom.Mesh)
-    del stage
-    assert not list(assets.rglob("*.zip"))
-    assert sum(path.endswith("/files/model.zip") for path in reads) == 1
-    first_reads = reads.copy()
-
-    def check_backends() -> None:
-        suite = {"dataset_root": "assets", "objects": [{"category": "mug"}]}
+    def check_category(directory: Path, category: str) -> Path:
+        category_dir = directory / "categories" / category / asset_id
+        assert list((directory / "categories").glob(f"*/{asset_id}")) == [category_dir]
+        wrapper = category_dir / f"{asset_id}.usda"
+        stage = Usd.Stage.Open(str(wrapper))
+        assert stage.GetDefaultPrim().IsA(UsdGeom.Mesh)
+        suite = {"dataset_root": "categories", "objects": [{"category": category}]}
         for backend, enabled, disabled in (
             ("default", "PhysX", "Newton"),
             ("newton", "Newton", "PhysX"),
         ):
-            (obj,) = suite_objects(suite, output, physics=backend)
+            # Its nested source/simready_usd package belongs to this same UUID.
+            (obj,) = suite_objects(suite, directory, physics=backend)
+            assert obj["id"] == asset_id
             assert obj["rigid"]["source"]["variants"] == {
                 "/Mug": {enabled: "Enabled", disabled: "Disabled"}
             }
+        return wrapper
 
-    check_backends()
-    # Older installs kept only the source path and authored no wrapper customLayerData.
-    canonical.write_text(
-        '#usda 1.0\n(defaultPrim = "Mug"\nsubLayers = [@source/model.usda@])\n'
+    output = tmp_path / "download"
+    download(output)
+    wrapper = check_category(output, "drinkware")
+    assert not list(output.rglob("*.zip"))
+    assert reads == [f"/v1/assets/{asset_id}", f"/v1/assets/{asset_id}/files/model.zip"]
+    first_reads = reads.copy()
+
+    # Older installs stored packages by first tag and created aliases for the rest.
+    legacy_output = tmp_path / "legacy"
+    canonical = legacy_output / "assets" / "cup" / asset_id
+    canonical.parent.mkdir(parents=True)
+    wrapper.resolve().parent.rename(canonical)
+    alias = legacy_output / "assets" / "mug" / asset_id
+    alias.parent.mkdir()
+    alias.symlink_to(Path("..") / "cup" / asset_id, target_is_directory=True)
+    legacy_wrapper = canonical / wrapper.name
+    old_source = "source/simready_usd/model.usda"
+    legacy_wrapper.write_text(
+        f'#usda 1.0\n(defaultPrim = "Mug"\nsubLayers = [@{old_source}@])\n'
     )
-    (canonical.parent / ".dextrove.json").write_text(
-        json.dumps({"asset_id": asset_id, "source_entrypoint": "source/model.usda"})
+    (canonical / ".dextrove.json").write_text(
+        json.dumps({"asset_id": asset_id, "source_entrypoint": old_source})
     )
-    assert tool.main() == 0
-    check_backends()
+
+    # A tag-only shortlist gets its category from the catalog without model access.
+    shortlist = tmp_path / "selected.jsonl"
+    row = {"asset_id": asset_id, "name": "Tea mug", "tags": tags}
+    shortlist.write_text(json.dumps(row))
+    download(legacy_output, "--shortlist", str(shortlist))
+    assert check_category(legacy_output, "drinkware").samefile(legacy_wrapper)
+    assert (alias / wrapper.name).samefile(legacy_wrapper)
+
+    # A prior catalog also supplied a UUID which is absent from this shortlist.
+    retired = str(UUID(int=9))
+    retired_cache = legacy_output / "objects" / retired
+    retired_cache.mkdir(parents=True)
+    retired_link = legacy_output / "categories" / "retired" / retired
+    retired_link.parent.mkdir()
+    retired_link.symlink_to(Path("../../objects") / retired, target_is_directory=True)
+
+    # Replaying an explicit correction moves the label and reuses the same package.
+    shortlist.write_text(json.dumps(dict(row, category="tableware")))
+    download(legacy_output, "--shortlist", str(shortlist))
+    assert check_category(legacy_output, "tableware").samefile(legacy_wrapper)
+    assert retired_link.is_dir()
+
+    download(legacy_output, "--download-limit", "1")
+    assert retired_link.is_dir()
+    download(legacy_output)
+    assert not retired_link.is_symlink()
+    assert retired_cache.is_dir()
     assert reads == first_reads
 
 
@@ -167,32 +234,38 @@ def test_mismatched_digest_leaves_no_installed_asset(
     api, asset_id, entry, _ = archive_api
     entry["digest"] = "sha256:" + "0" * 64
     monkeypatch.setattr(tool.time, "sleep", lambda seconds: None)
-    row = {"asset_id": asset_id, "tags": [{"domain": "feature.category", "key": "mug"}]}
     with tool.requests.Session() as session, pytest.raises(ValueError, match="SHA-256"):
-        tool._install(session, api, row, tmp_path)
-    assert not (tmp_path / "mug" / asset_id).exists()
+        tool._install_source(session, api, asset_id, tmp_path / "objects" / asset_id)
+    assert not (tmp_path / "objects" / asset_id).exists()
 
 
-def test_inventory_screens_tagged_tabletop_assets_and_resumes_snapshot(
+def test_refresh_screens_and_categorizes_then_replays_saved_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     cup = dict(tag_id="cup", key="cup", domain="feature.category", display_name="cup")
     fixture = dict(
         cup, tag_id="wall_fixture", key="wall_fixture", display_name="wall fixture"
     )
+    unused = dict(cup, tag_id="retired", key="retired", enabled=False)
+    numbered_id, switch_id, untagged_id = [str(UUID(int=i)) for i in (1, 2, 3)]
     assets = [
-        dict(asset_id="1", name="Cup", domain_id="objects", tags=[cup]),
+        dict(asset_id=numbered_id, name="D00162", domain_id="objects", tags=[cup]),
         dict(
-            asset_id="2", name="Fixed wall switch", domain_id="objects", tags=[fixture]
+            asset_id=switch_id,
+            name="Fixed wall switch",
+            domain_id="objects",
+            tags=[fixture],
         ),
-        dict(asset_id="3", name="Untagged", domain_id="objects", tags=[]),
+        dict(asset_id=untagged_id, name="Untagged", domain_id="objects", tags=[]),
     ]
     metadata = {
         "assets": dict(total=3, offset=0, items=assets),
         "assets/facets": dict(
             total=3, items=[dict(cup, count=1), dict(fixture, count=1)]
         ),
-        "tags": dict(items=[cup, fixture]),
+        "tags": dict(
+            domains=[{"domain": "feature.category"}], items=[cup, fixture, unused]
+        ),
     }
     for asset in assets:
         uid = asset["asset_id"]
@@ -212,20 +285,123 @@ def test_inventory_screens_tagged_tabletop_assets_and_resumes_snapshot(
         tool, "_get_json", lambda root, route, **params: metadata[route]
     )
     monkeypatch.setenv("CODEX_APP_RUNTIME_CLI_PATH", "mock-codex")
-    # Both tagged assets fit the jaws; only the cup passes tabletop screening.
-    answers = iter(["G000 B B", "G000 F X"])
+    # A model must be able to select the last of fifty classes by its object name.
+    taxonomy = {f"category_{i}": f"Test object {i}" for i in range(48)}
+    taxonomy["cup"] = "A drinking cup"
+    taxonomy["spoon"] = "A spoon"
+    monkeypatch.setattr(categories, "_CATEGORIES", taxonomy)
 
+    # Both tagged assets fit the jaws, but only D00162 passes placement screening.
     def model_response(cli, model, lines, prompt):
+        assert cli == "mock-codex"
+        assert model == "gpt-6.2-astra"
         assert all("Untagged" not in line for line in lines)
-        return next(answers)
+        if prompt == tool.PROMPT:
+            return "G000 B B"
+        if prompt == tool.PLACEMENT_PROMPT:
+            return "G000 F X"
+        (item,) = [json.loads(line) for line in lines]
+        assert item[1:3] == ["D00162", ["cup"]]
+        if item[4:] == [None, None]:
+            return f"{item[0]} cup"
+        assert item[4:] == ["Measuring Spoons", "spoon"]
+        return f"{item[0]} spoon"
 
     monkeypatch.setattr(tool, "_ask", model_response)
-    api = "https://catalog.example/v1"
-    shortlist = tool._prepare_shortlist(tmp_path, api, "test-model")
-    (selected,) = map(json.loads, shortlist.read_text().splitlines())
-    assert (selected["asset_id"], selected["reference_width_cm"]) == ("1", 5.0)
+    catalog = tmp_path / "pinned.json"
+    args = [
+        "prepare_dextrove_subset",
+        "--refresh",
+        "--catalog",
+        str(catalog),
+        "--output-dir",
+        str(tmp_path),
+        "--api-root",
+        "https://catalog.example/v1",
+    ]
+    monkeypatch.setattr(sys, "argv", args)
+    assert tool.main() == 0
+    snapshot = json.loads(catalog.read_text())
+    assert snapshot["tag_dictionary"] == metadata["tags"]
+    assert {r["asset_id"]: r["tag_ids"] for r in snapshot["assets"]} == {
+        numbered_id: ["cup"],
+        switch_id: ["wall_fixture"],
+        untagged_id: [],
+    }
+    (selected,) = tool.load_catalog(catalog)
+    assert (
+        selected["asset_id"],
+        selected["category"],
+        selected["reference_width_cm"],
+    ) == (
+        numbered_id,
+        "cup",
+        5.0,
+    )
     assert selected["tabletop_category"] == "food_and_kitchenware"
-    inventory = (tmp_path / "asset_tags.jsonl").read_text().splitlines()
-    assert [r["asset_id"] for r in map(json.loads, inventory)] == ["1", "2", "3"]
+    assert "usd_name" not in selected and "usd_category" not in selected
+
+    # A later offline refresh can use USD evidence that was unavailable at collection.
+    cached = tmp_path / "objects" / numbered_id / f"{numbered_id}.usda"
+    cached.parent.mkdir(parents=True)
+    layer = Sdf.Layer.CreateNew(str(cached))
+    layer.customLayerData = {
+        "SimReady_Metadata": {"asset_name": "Measuring Spoons", "category": "spoon"}
+    }
+    layer.Save()
     metadata.clear()
-    assert tool._prepare_shortlist(tmp_path, api, "test-model") == shortlist
+    args[args.index("--output-dir") + 1] = str(tmp_path / "reclassified")
+    args.extend(["--snapshot-dir", str(tmp_path)])
+    assert tool.main() == 0
+    (enriched,) = tool.load_catalog(catalog)
+    assert enriched == {
+        **selected,
+        "name": "D00162",
+        "tags": [cup],
+        "category": "spoon",
+        "usd_name": "Measuring Spoons",
+        "usd_category": "spoon",
+    }
+
+    # Invalid decisions must leave the published catalog usable by download clients.
+    previous = catalog.read_bytes()
+    monkeypatch.setattr(tool, "_ask", lambda *args: "0 cup\n0 category_1")
+    with pytest.raises(ValueError, match="ambiguous|invalid"):
+        tool.main()
+    assert catalog.read_bytes() == previous
+
+    # The ceiling also applies to declared classes that have no assignments.
+    snapshot["categories"]["extra"] = "One class too many"
+    catalog.write_text(json.dumps(snapshot))
+    with pytest.raises(ValueError, match="categor"):
+        tool.load_catalog(catalog)
+
+
+def test_bundled_catalog_has_exclusive_categories_and_resolvable_tags() -> None:
+    catalog = json.loads(tool.DEFAULT_CATALOG.read_text())
+    selected = tool.load_catalog(tool.DEFAULT_CATALOG)
+    expected_ids = {
+        item["asset_id"] for item in catalog["assets"] if "category" in item
+    }
+    assert expected_ids
+    assert len(selected) == len(expected_ids)
+    assert {item["asset_id"] for item in selected} == expected_ids
+    assert 1 < len({item["category"] for item in selected}) <= 50
+    assert all(item["name"] and item["tags"] for item in selected)
+
+
+def test_explicit_shortlist_accepts_fifty_categories_and_rejects_the_next(
+    tmp_path: Path,
+) -> None:
+    shortlist = tmp_path / "selected.jsonl"
+    catalog = tmp_path / "unused.json"
+    with shortlist.open("w") as stream:
+        for i in range(50):
+            row = {"asset_id": str(UUID(int=i)), "category": f"object_{i}"}
+            stream.write(json.dumps(row) + "\n")
+    assert len(tool._shortlist_rows(shortlist, catalog)) == 50
+    with shortlist.open("a") as stream:
+        row = {"asset_id": str(UUID(int=50)), "category": "extra"}
+        stream.write(json.dumps(row) + "\n")
+    with pytest.raises(ValueError, match="categor"):
+        tool._shortlist_rows(shortlist, catalog)

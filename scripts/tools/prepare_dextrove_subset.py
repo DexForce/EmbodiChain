@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Collect DexTrove metadata, screen tabletop assets with Codex, and download the subset."""
+"""Download the pinned DexTrove subset or refresh its analysis categories with Codex."""
 
 from __future__ import annotations
 
@@ -42,6 +42,21 @@ from uuid import UUID
 import requests
 import urllib3
 from pxr import Sdf
+
+if __package__:
+    from ._dextrove_categories import (
+        DEFAULT_CATALOG,
+        MAX_CATEGORIES,
+        load_catalog,
+        write_catalog,
+    )
+else:  # Also support python scripts/tools/prepare_dextrove_subset.py.
+    from _dextrove_categories import (
+        DEFAULT_CATALOG,
+        MAX_CATEGORIES,
+        load_catalog,
+        write_catalog,
+    )
 
 DEFAULT_MODEL = "gpt-6.2-astra"
 USD_SUFFIXES = {".usd", ".usda", ".usdc"}
@@ -425,11 +440,16 @@ def _write_tabletop_candidates(
         staging.replace(output)
 
 
-def screen(inventory: Path, output: Path, model: str) -> None:
-    """Classify each row, review borderline choices, then atomically write the shortlist."""
+def _codex_cli() -> str:
     cli = os.getenv("CODEX_APP_RUNTIME_CLI_PATH") or shutil.which("codex")
     if not cli:
-        raise RuntimeError("Codex CLI is required")
+        raise RuntimeError("Refreshing the DexTrove catalog requires the Codex CLI")
+    return cli
+
+
+def screen(inventory: Path, output: Path, model: str) -> None:
+    """Classify each row, review borderline choices, then atomically write the shortlist."""
+    cli = _codex_cli()
     rows = [
         json.loads(line) for line in inventory.read_text(encoding="utf-8").splitlines()
     ]
@@ -584,20 +604,6 @@ def _make_entry(entry: Path, wrapper: Path, api_root: str) -> None:
         marker.replace(wrapper.parent / MARKER)
 
 
-def _category_keys(tags: list[dict]) -> list[str]:
-    """Return the asset's English category keys that can be used as directory names."""
-    keys = set()
-    for tag in tags:
-        key = tag.get("key")
-        if tag.get("domain") != "feature.category" or not isinstance(key, str):
-            continue
-        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", key) and re.search(
-            r"[A-Za-z]", key
-        ):
-            keys.add(key)
-    return sorted(keys) or ["_uncategorized"]
-
-
 def _install_source(
     session: requests.Session, api_root: str, asset_id: str, dest: Path
 ) -> str:
@@ -653,21 +659,53 @@ def _install_source(
     return "installed"
 
 
-def _install(session: requests.Session, api_root: str, row: dict, root: Path) -> str:
-    asset_id = str(UUID(row["asset_id"]))
-    if not row["tags"]:
-        raise ValueError(f"Shortlisted asset has no tags: {asset_id}")
-    primary, *others = _category_keys(row["tags"])
-    dest = root / primary / asset_id
-    status = _install_source(session, api_root, asset_id, dest)
-    for category in others:
-        link = root / category / asset_id
-        target = Path("..") / primary / asset_id
-        if link.is_symlink() and link.readlink() == target:
+def _category_links(root: Path) -> dict[str, Path]:
+    """Index only the relative links published by the classified downloader."""
+    if root.is_symlink():
+        raise ValueError(f"Expected a local category directory: {root}")
+    links = {}
+    for link in root.glob("*/*"):
+        if link.parent.is_symlink() or not link.is_symlink():
             continue
-        link.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            if str(UUID(link.name)) != link.name:
+                continue
+        except ValueError:
+            continue
+        target = link.readlink()
+        if target.name != link.name or not (
+            target.parent == Path("../../objects")
+            or (
+                target.parent.parent == Path("../../assets")
+                and target.parent.name != ".."
+            )
+        ):
+            continue
+        if link.name in links:
+            raise ValueError(f"Multiple category links already exist for {link.name}")
+        links[link.name] = link
+    return links
+
+
+def _link_category(link: Path, source: Path, previous: Path | None) -> None:
+    """Publish a relative link, moving the old assignment atomically if it changed."""
+    if link.parent.is_symlink():
+        raise ValueError(f"Expected a local category directory: {link.parent}")
+    link.parent.mkdir(parents=True, exist_ok=True)
+    target = Path(os.path.relpath(source, link.parent))
+    if previous is None:
         link.symlink_to(target, target_is_directory=True)
-    return status
+        return
+    if previous != link:
+        if link.exists() or link.is_symlink():
+            raise FileExistsError(f"Category destination already exists: {link}")
+        previous.rename(link)
+    if link.readlink() != target:
+        # A cache can have moved from assets/<tag>/ to objects/ since the last run.
+        with TemporaryDirectory(dir=link.parent) as temp:
+            replacement = Path(temp) / link.name
+            replacement.symlink_to(target, target_is_directory=True)
+            replacement.replace(link)
 
 
 RESULT_FILES = (
@@ -684,29 +722,35 @@ def _sha256(path: Path) -> str:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def _prepare_shortlist(output: Path, api_root: str, model: str) -> Path:
-    """Commit all four result files before downloading. Reuse a complete snapshot on retry."""
-    shortlist = output / "tabletop_grasp_candidates.txt"
-    marker = output / SNAPSHOT
-    if marker.is_file():
-        state = json.loads(marker.read_text(encoding="utf-8"))
-        if state["api_root"] != api_root or state["model"] != model:
-            raise ValueError(
-                "This output contains a different API/model snapshot; choose a new output directory."
-            )
-        for name in RESULT_FILES:
-            path = output / name
-            if not path.is_file() or _sha256(path) != state["sha256"].get(name):
-                raise ValueError(
-                    f"Saved snapshot differs at {path}; use a new output directory to rebuild."
-                )
-        print(f"Resuming the saved shortlist at {shortlist}", flush=True)
-        return shortlist
-
+def _refresh_catalog(
+    output: Path, catalog: Path, snapshot: Path | None, api_root: str | None, model: str
+) -> None:
+    cli = _codex_cli()
+    shortlist_name = "tabletop_grasp_candidates.txt"
+    if snapshot is not None:
+        marker = snapshot / SNAPSHOT
+        if marker.is_file():
+            state = json.loads(marker.read_text(encoding="utf-8"))
+            for name in RESULT_FILES:
+                if _sha256(snapshot / name) != state["sha256"].get(name):
+                    raise ValueError(f"Saved snapshot differs at {snapshot / name}")
+        write_catalog(
+            snapshot,
+            snapshot / shortlist_name,
+            catalog,
+            cli,
+            model,
+            _ask,
+            asset_cache=output,
+        )
+        return
+    if not api_root:
+        raise ValueError("A live refresh requires a DexTrove API root")
     with TemporaryDirectory(dir=output) as temp:
         staging = Path(temp)
         inventory = export_inventory(api_root, staging)
-        screen(inventory, staging / shortlist.name, model)
+        shortlist = staging / shortlist_name
+        screen(inventory, shortlist, model)
         state = {
             "api_root": api_root,
             "model": model,
@@ -715,19 +759,65 @@ def _prepare_shortlist(output: Path, api_root: str, model: str) -> Path:
         (staging / SNAPSHOT).write_text(
             json.dumps(state, indent=2) + "\n", encoding="utf-8"
         )
+        write_catalog(staging, shortlist, catalog, cli, model, _ask, asset_cache=output)
         for name in (*RESULT_FILES, SNAPSHOT):
             (staging / name).replace(output / name)
-    return shortlist
 
 
-def _download_shortlist(
-    shortlist: Path, api_root: str, assets_dir: Path, limit: int | None
+def _shortlist_rows(path: Path, catalog: Path) -> list[dict]:
+    """Resolve pre-category JSONL entries against the pinned asset assignments."""
+    rows = [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    known = {}
+    if any("category" not in row for row in rows):
+        known = {row["asset_id"]: row["category"] for row in load_catalog(catalog)}
+    seen: set[str] = set()
+    categories: set[str] = set()
+    for row in rows:
+        uid = str(UUID(row["asset_id"]))
+        if uid in seen:
+            raise ValueError(f"Duplicate asset ID in shortlist: {uid}")
+        seen.add(uid)
+        row["asset_id"] = uid
+        category = row.get("category", known.get(uid))
+        if not isinstance(category, str) or not re.fullmatch(
+            "[a-z][a-z0-9_-]*", category
+        ):
+            raise ValueError(
+                f"Missing or invalid category for {uid}; supply a category or refresh the catalog"
+            )
+        row["category"] = category
+        categories.add(category)
+    if not rows or len(categories) > MAX_CATEGORIES:
+        raise ValueError(
+            f"A shortlist must contain assets in 1 to {MAX_CATEGORIES} analysis categories"
+        )
+    return rows
+
+
+def _download_rows(
+    rows: list[dict],
+    api_root: str,
+    assets_dir: Path,
+    limit: int | None,
+    *,
+    sync_catalog: bool = True,
 ) -> int:
-    with shortlist.open(encoding="utf-8") as stream:
-        rows = [json.loads(line) for line in stream if line.strip()]
+    """Install assets by UUID and expose one category link per selected object."""
+    objects = assets_dir.parent / "objects"
+    categories = assets_dir.parent / "categories"
+    links = _category_links(categories)
+    legacy_sources = {
+        marker.parent.name: marker.parent
+        for marker in sorted(assets_dir.glob(f"*/*/{MARKER}"))
+        if not marker.parent.is_symlink()
+    }
     selected = rows[:limit]
     print(
-        f"Downloading {len(selected)}/{len(rows)} candidates to {assets_dir}",
+        f"Preparing {len(selected)}/{len(rows)} candidates in {categories}",
         flush=True,
     )
     counts: Counter[str] = Counter()
@@ -735,7 +825,15 @@ def _download_shortlist(
         for index, row in enumerate(selected, 1):
             label = f"[{index}/{len(selected)}] {row.get('asset_id', '?')} {row.get('name', '')}"
             try:
-                status = _install(session, api_root, row, assets_dir)
+                uid = str(UUID(row["asset_id"]))
+                category = row["category"]
+                if not re.fullmatch(r"[a-z][a-z0-9_-]*", category):
+                    raise ValueError(f"Invalid category for {uid}: {category!r}")
+                source = objects / uid
+                if not source.exists() and uid in legacy_sources:
+                    source = legacy_sources[uid]
+                status = _install_source(session, api_root, uid, source)
+                _link_category(categories / category / uid, source, links.get(uid))
                 print(f"{label}: {status}", flush=True)
             except (
                 OSError,
@@ -749,6 +847,14 @@ def _download_shortlist(
                 status = "failed"
                 print(f"{label}: {error}", file=sys.stderr, flush=True)
             counts[status] += 1
+    if sync_catalog and limit is None and not counts["failed"]:
+        # A new complete catalog may remove candidates. Keep their cached payloads.
+        current = {row["asset_id"] for row in rows}
+        for uid in links.keys() - current:
+            links[uid].unlink()
+    for directory in {link.parent for link in links.values()}:
+        if not any(directory.iterdir()):
+            directory.rmdir()
     print(
         f"Installed {counts['installed']}, skipped {counts['skipped']}, failed {counts['failed']}.",
         flush=True,
@@ -768,17 +874,33 @@ def main() -> int:
     parser.add_argument(
         "--model",
         default=DEFAULT_MODEL,
-        help="Codex CLI screening model (default: %(default)s)",
+        help="Codex CLI model for --refresh (default: %(default)s)",
     )
     parser.add_argument(
         "--api-root",
         default=os.getenv("DEXTROVE_API_ROOT"),
         help="DexTrove API URL including /v1 (default: DEXTROVE_API_ROOT or the saved snapshot)",
     )
-    parser.add_argument(
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument(
         "--shortlist",
         type=Path,
-        help="Download an existing candidate JSONL, skipping collection and model screening",
+        help="Download an existing candidate JSONL, resolving missing categories from the catalog",
+    )
+    action.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Generate an updated catalog using Codex, for subsequent downloads",
+    )
+    parser.add_argument(
+        "--catalog",
+        type=Path,
+        help="Catalog to read (default: checked-in snapshot) or write with --refresh (default: OUTPUT_DIR/catalog.json)",
+    )
+    parser.add_argument(
+        "--snapshot-dir",
+        type=Path,
+        help="With --refresh, reclassify the inventory and shortlist from a previous collection",
     )
     parser.add_argument(
         "--download-limit",
@@ -789,26 +911,51 @@ def main() -> int:
     args = parser.parse_args()
     if args.download_limit is not None and args.download_limit < 1:
         parser.error("--download-limit must be positive")
+    if args.snapshot_dir and not args.refresh:
+        parser.error("--snapshot-dir requires --refresh")
+    if args.refresh and args.download_limit is not None:
+        parser.error("--download-limit applies only to downloads")
     output = args.output_dir.expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True)
     handle = os.open(output, os.O_RDONLY)
     try:
         # Keep two invocations from publishing different shortlists into one directory.
         fcntl.flock(handle, fcntl.LOCK_EX)
-        api_root = args.api_root
-        marker = output / SNAPSHOT
-        if not api_root and marker.is_file():
-            api_root = json.loads(marker.read_text(encoding="utf-8"))["api_root"]
-        if not api_root:
-            parser.error("provide --api-root or set DEXTROVE_API_ROOT")
-        api_root = api_root.rstrip("/")
-        shortlist = (
-            args.shortlist.expanduser()
-            if args.shortlist is not None
-            else _prepare_shortlist(output, api_root, args.model)
+        if args.refresh and args.snapshot_dir:
+            api_root = None
+        else:
+            api_root = args.api_root
+            marker = output / SNAPSHOT
+            if not api_root and marker.is_file():
+                api_root = json.loads(marker.read_text(encoding="utf-8"))["api_root"]
+            if not api_root:
+                parser.error("provide --api-root or set DEXTROVE_API_ROOT")
+            api_root = api_root.rstrip("/")
+        if args.refresh:
+            catalog = (args.catalog or output / "catalog.json").expanduser().resolve()
+            snapshot = (
+                args.snapshot_dir.expanduser().resolve() if args.snapshot_dir else None
+            )
+            if catalog.parent in (output, snapshot) and catalog.name in (
+                *RESULT_FILES,
+                SNAPSHOT,
+            ):
+                parser.error("--catalog must be separate from the raw snapshot files")
+            _refresh_catalog(output, catalog, snapshot, api_root, args.model)
+            print(f"Wrote DexTrove catalog to {catalog}", flush=True)
+            return 0
+        catalog = (args.catalog or DEFAULT_CATALOG).expanduser()
+        rows = (
+            _shortlist_rows(args.shortlist.expanduser(), catalog)
+            if args.shortlist
+            else load_catalog(catalog)
         )
-        return _download_shortlist(
-            shortlist, api_root, output / "assets", args.download_limit
+        return _download_rows(
+            rows,
+            api_root,
+            output / "assets",
+            args.download_limit,
+            sync_catalog=args.shortlist is None,
         )
     finally:
         os.close(handle)
