@@ -339,6 +339,11 @@ def _configure_rigid_usd(
     _set_resolved_usd_pose(cfg, desc.pose)
     desc.per_env = per_env
     materials = _namespace_materials(desc.renders, scene.materials, uid)
+    if cfg.usd_geometry_scale is not None:
+        scale = _vector3(cfg.usd_geometry_scale, field_name="usd_geometry_scale")
+        if not np.isfinite(scale).all() or (scale <= 0).any():
+            raise ValueError("USD geometry scale must be finite and positive.")
+        desc.body_scale = scale
 
     if cfg.resolve_asset_physics_mode() == "preserve":
         if desc.physics is None:
@@ -372,7 +377,7 @@ def _configure_rigid_usd(
         configured_body,
         recompute_inertia=bool(physics.recompute_inertia),
     )
-    if cfg.body_scale is not None:
+    if cfg.body_scale is not None and cfg.usd_geometry_scale is None:
         desc.body_scale = _vector3(cfg.body_scale, field_name="body_scale")
     cfg.body_type = actor_type
     cfg.body_scale = tuple(float(value) for value in desc.body_scale)

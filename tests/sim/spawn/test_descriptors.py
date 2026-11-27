@@ -1179,8 +1179,10 @@ def test_rigid_usd_can_recompute_source_inertia(
     assert descriptor.physics.inertia is None
 
 
+@pytest.mark.parametrize("geometry_scale", [None, (1.12, 1.12, 1.12)])
 def test_rigid_usd_preserves_asset_physics_by_default(
     monkeypatch: pytest.MonkeyPatch,
+    geometry_scale,
 ) -> None:
     source_mass = 7.0
     source_scale = np.array([2.0, 2.0, 2.0], dtype=np.float32)
@@ -1200,6 +1202,7 @@ def test_rigid_usd_preserves_asset_physics_by_default(
     cfg = RigidObjectCfg(
         uid="cube",
         shape=MeshCfg(fpath="cube.usd"),
+        usd_geometry_scale=geometry_scale,
         attrs=RigidBodyPhysicsCfg(mass_props=MassPropertiesCfg(mass=1.0)),
     )
 
@@ -1207,10 +1210,11 @@ def test_rigid_usd_preserves_asset_physics_by_default(
 
     assert descriptor.physics.mass == source_mass
     assert descriptor.physics.actor_type == dexsim.types.ActorType.DYNAMIC
-    np.testing.assert_array_equal(descriptor.body_scale, source_scale)
+    expected = source_scale if geometry_scale is None else geometry_scale
+    np.testing.assert_allclose(descriptor.body_scale, expected)
     assert descriptor.collisions[0].enable_collision is False
     assert cfg.body_type == "dynamic"
-    assert cfg.body_scale == tuple(source_scale)
+    assert cfg.body_scale == pytest.approx(tuple(expected))
 
 
 def test_rigid_descriptor_forwards_newton_sdf_options() -> None:
