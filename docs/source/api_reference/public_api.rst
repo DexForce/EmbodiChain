@@ -2270,6 +2270,7 @@ the facade owns configuration binding, preparation, export and optional preview.
    load_task_program_expansion
    load_expansion_viewer
    run_task_program_expansion
+   resolve_task_program_expansion_bindings
    derive_grasp_expansion_deployment
 
 .. autofunction:: load_task_program_expansion
@@ -2277,6 +2278,8 @@ the facade owns configuration binding, preparation, export and optional preview.
 .. autofunction:: load_expansion_viewer
 
 .. autofunction:: run_task_program_expansion
+
+.. autofunction:: resolve_task_program_expansion_bindings
 
 .. autofunction:: derive_grasp_expansion_deployment
 

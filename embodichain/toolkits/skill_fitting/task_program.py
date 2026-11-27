@@ -123,7 +123,7 @@ def _execution_timeline(timeline: list[dict], size: int) -> list[dict]:
 
 def _bound_demos(
     root: Path,
-    authored: dict,
+    segments: Mapping[str, tuple[int, dict]],
     integration: dict,
     spans: list[dict],
     pickup: dict,
@@ -153,23 +153,27 @@ def _bound_demos(
         raise ValueError(
             "Retained DemoSkill bindings must cover every retained interval in source order."
         )
-    locations = {
-        row["segment"]: (i, row["steps"]) for i, row in enumerate(authored["program"])
-    }
-    pickup_order = locations[bindings["segment"]][0]
+    registry = integration["runtime_services"]["demo_skills"]
+    demos_by_call = {entry["call_id"]: entry for entry in registry.values()}
+    pickup_order = segments[bindings["segment"]][0]
     previous = -1
     result = []
     for item in declarations:
-        order, steps = locations[item["program_segment"]]
+        segment = item["program_segment"]
+        if segment not in segments:
+            raise ValueError(f"Unknown retained DemoSkill segment: {segment}.")
+        order, call = segments[segment]
         start, stop = item["start"], item["stop"]
         if order <= previous or (stop <= pickup["start"]) != (order < pickup_order):
             raise ValueError(
                 "Retained DemoSkill calls do not follow the source execution order."
             )
         previous = order
-        declaration = integration["runtime_services"]["demo_skills"][
-            steps["demo_skill"]["skill"]
-        ]
+        declaration = demos_by_call.get(call.get("call_id"))
+        if call.get("kind") != "registered" or declaration is None:
+            raise ValueError(
+                f"Retained segment {segment!r} must bind a registered DemoSkill."
+            )
         if "source_slice" in item:
             path, asset = _build_source_slice(
                 root, start, stop, item["source_slice"], dt
@@ -349,6 +353,7 @@ def export_task_program(
     from embodichain.lab.task_program.integrations._program_identity import (
         task_program_fingerprint,
     )
+    from embodichain.lab.task_program.language.authoring import normalize_task_program
 
     base = execution_context.resolve(strict=True)
     output = output_dir.resolve()
@@ -435,19 +440,35 @@ def export_task_program(
         integration_path = root / deploy["task_program"]["integration"]
         integration = _read_yaml(integration_path)
         program_path = root / deploy["task_program"]["program"]
-        authored = _read_yaml(program_path)
-        selected = [
-            segment
-            for segment in authored["program"]
-            if segment["segment"] == segment_bindings["segment"]
-        ]
-        if len(selected) != 1 or "pick" not in selected[0]["steps"]:
+        registry = integration.get("runtime_services", {}).get("demo_skills", {})
+        declaration = normalize_task_program(
+            _read_yaml(program_path),
+            demo_skills={alias: entry["call_id"] for alias, entry in registry.items()},
+        ).declaration
+        body = declaration["program"]
+        if body.get("kind") != "sequence":
+            raise ValueError(
+                "A fitted program must contain a sequence of named segments."
+            )
+        segments = {}
+        for index, segment in enumerate(body["items"]):
+            if segment.get("kind") != "segment":
+                raise ValueError("Fitted programs require top-level named segments.")
+            name = segment["name"]
+            if name in segments:
+                raise ValueError(f"Duplicate fitted program segment: {name}.")
+            steps = segment["steps"]
+            segments[name] = (
+                index,
+                steps.get("call", {}) if steps.get("kind") == "invoke" else {},
+            )
+        selected = segments.get(segment_bindings["segment"])
+        if selected is None or selected[1].get("kind") != "pick":
             raise ValueError("Expected one authored standard Pick for the fit.")
-        call = selected[0]["steps"]["pick"]
-        if call["object"] != goal["object_id"]:
+        if selected[1]["object"] != goal["object_id"]:
             raise ValueError("The authored Pick binds a different entity.")
         demos = _bound_demos(
-            root, authored, integration, retained, pickup, segment_bindings, arrays, dt
+            root, segments, integration, retained, pickup, segment_bindings, arrays, dt
         )
         alias = pickup["annotation"]["id"]
         if not alias or "/" in alias or ":" in alias:
@@ -462,15 +483,16 @@ def export_task_program(
             raise ValueError("Fit preset identifier already has a different policy.")
         presets[preset_id] = preset
         integration_path.write_text(yaml.safe_dump(integration, sort_keys=False))
-        program_path.write_text(yaml.safe_dump(authored, sort_keys=False))
         program, manifest, integration_hash = _compile(root)
-        positions = {row["segment"]: i for i, row in enumerate(authored["program"])}
         compiled_segments = {
             row.source_path: row for row in program.iter_segments() if not row.implicit
         }
 
         def compiled_call(name):
-            owner = compiled_segments[("program", "items", positions[name])]
+            if name not in segments:
+                raise ValueError(f"Unknown fitted invocation segment: {name}.")
+            index, _ = segments[name]
+            owner = compiled_segments[("program", "items", index)]
             (entry,) = owner.calls
             identity = (
                 f"{program.program_id}/{owner.segment_id}:{entry.segment_call_index}"

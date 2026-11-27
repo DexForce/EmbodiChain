@@ -1181,6 +1181,21 @@ class SemanticCallExecutor:
                 call=call,
                 invocation=invocation,
             )
+            prepare_options = getattr(
+                self._plan_transform_factory, "prepare_skill_options", None
+            )
+            if prepare_options is not None:
+                if not callable(prepare_options):
+                    raise TypeError(
+                        "prepare_skill_options must be callable when provided."
+                    )
+                options = prepare_options(plan_request, engine=self._engine)
+                if type(options) is not type(invocation.skill_options):
+                    raise TypeError(
+                        "prepare_skill_options must preserve the skill options type."
+                    )
+                invocation = replace(invocation, skill_options=options)
+                plan_request = replace(plan_request, invocation=invocation)
             prepare_context = getattr(
                 self._plan_transform_factory,
                 "prepare_planning_context",

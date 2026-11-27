@@ -60,7 +60,8 @@ A v2 bundle additionally pins a host-owned execution context and declares the
 qualified design reference as its fitting trajectory. CLI fitting accepts saved
 annotation edits for the same frame source via `--annotations`.
 `export_task_program` uses that context to bind a scene-bound Pickup to one
-named invocation. It separates the fitted core from the surrounding annotation
+named invocation. Standard Task Program declarations and authored shorthand
+share the language normalizer before segment binding. It separates the fitted core from the surrounding annotation
 samples. Each retained interval needs an explicit named DemoSkill and measured
 boundary contract. A retained slice on the same post-step clock can be built
 from the pinned source asset with its original commands, shifted phases, events

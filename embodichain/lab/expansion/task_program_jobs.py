@@ -49,6 +49,7 @@ __all__ = [
     "load_task_program_expansion",
     "load_expansion_viewer",
     "run_task_program_expansion",
+    "resolve_task_program_expansion_bindings",
     "derive_grasp_expansion_deployment",
 ]
 
@@ -550,6 +551,48 @@ def _run_operators(
     return result["workloads"]
 
 
+def resolve_task_program_expansion_bindings(
+    deployment: str | Path,
+    *,
+    source_artifacts: Mapping[str, object] | None = None,
+    invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
+) -> tuple[tuple[InvocationPolicyBinding, ...], dict[str, object]]:
+    """Resolve checked per-invocation policies and their provenance for a workload.
+
+    Args:
+        deployment: Original deployment before deriving any expansion resources.
+        source_artifacts: Existing workload evidence, copied before adding the
+            four fitted artifacts.
+        invocation_policy_bindings: Optional explicit bindings that must agree
+            with a sealed deployment.
+
+    Returns:
+        Per-invocation policies and the source artifacts for the collector.
+    """
+    deployment = Path(deployment).resolve(strict=True)
+    sources = dict(source_artifacts or {})
+    if (deployment.parent / "invocation_bindings.json").is_file():
+        from embodichain.toolkits.skill_fitting.task_program import (
+            load_invocation_bindings,
+        )
+
+        sealed = load_invocation_bindings(deployment)
+        if invocation_policy_bindings and invocation_policy_bindings != sealed:
+            raise ValueError(
+                "Explicit invocation policies differ from the sealed deployment."
+            )
+        invocation_policy_bindings = sealed
+        for name in (
+            "manifest.json",
+            "compile_report.json",
+            "source_map.json",
+            "invocation_bindings.json",
+        ):
+            path = deployment.parent / name
+            sources[f"fitted_{name}"] = {"path": str(path), "sha256": file_digest(path)}
+    return invocation_policy_bindings, sources
+
+
 def run_task_program_expansion(
     deployment: str | Path,
     configuration: str | Path,
@@ -630,26 +673,11 @@ def run_task_program_expansion(
     output.mkdir(parents=True, exist_ok=True)
     inputs = output / "inputs"
     inputs.mkdir(exist_ok=True)
-    sources = dict(source_artifacts or {})
-    if (deployment.parent / "invocation_bindings.json").is_file():
-        from embodichain.toolkits.skill_fitting.task_program import (
-            load_invocation_bindings,
-        )
-
-        sealed = load_invocation_bindings(deployment)
-        if invocation_policy_bindings and invocation_policy_bindings != sealed:
-            raise ValueError(
-                "Explicit invocation policies differ from the sealed deployment."
-            )
-        invocation_policy_bindings = sealed
-        for name in (
-            "manifest.json",
-            "compile_report.json",
-            "source_map.json",
-            "invocation_bindings.json",
-        ):
-            path = deployment.parent / name
-            sources[f"fitted_{name}"] = {"path": str(path), "sha256": file_digest(path)}
+    invocation_policy_bindings, sources = resolve_task_program_expansion_bindings(
+        deployment,
+        source_artifacts=source_artifacts,
+        invocation_policy_bindings=invocation_policy_bindings,
+    )
     derived = _prepare_deployment(deployment, inputs)
     atomic_json(inputs / "expansion.json", options)
     for path in (derived, inputs / "environment.yaml", inputs / "expansion.json"):
