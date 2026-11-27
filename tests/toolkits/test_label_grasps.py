@@ -273,4 +273,17 @@ def test_physical_label_adjustments_apply_in_local_tcp_axes_before_validation() 
     torch.testing.assert_close(
         adjusted[0, :3, 3], torch.tensor([0.0, 0.01, 0.0]), atol=1e-6, rtol=0.0
     )
+    calibration = torch.eye(4)
+    calibration[0, 3] = 0.05
+    calibrated = _adjust_candidates(
+        pose,
+        dict(
+            mirrored=True,
+            rotate_upright=math.pi / 2,
+            upright_axis=[0, 1, 0],
+            retract=0.01,
+            grasp_frame_to_eef=calibration.tolist(),
+        ),
+    )
+    torch.testing.assert_close(calibrated, adjusted @ calibration)
     assert torch.equal(pose[0], torch.eye(4))

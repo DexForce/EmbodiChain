@@ -39,6 +39,8 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from embodichain.lab.sim.atomic_skills._grasp_selection import validated_label_provider
+
 from embodichain.compute.kinematics import pose_error
 from embodichain.lab.sim.atomic_skills import (
     SkillInvocation,
@@ -542,6 +544,21 @@ class _RecordingGraspPoseGenerator(GraspPoseGenerator):
         self._inner = inner
         self._part = part
         self._log = log
+
+    @property
+    def validated_labels(self) -> Callable | None:
+        """Record the live object poses used to rank physical grasp labels."""
+        provider = validated_label_provider(self._inner)
+        if provider is None:
+            return None
+
+        def record(vertices, triangles, attrs, poses, direction, *args, **kwargs):
+            self._log.append((self._part, poses.detach().clone()))
+            return provider(
+                vertices, triangles, attrs, poses, direction, *args, **kwargs
+            )
+
+        return record
 
     def get_valid_grasp_poses(self, **kwargs: object) -> list:
         """Log the requested object poses and forward the request."""

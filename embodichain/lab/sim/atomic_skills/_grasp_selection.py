@@ -23,7 +23,12 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from .affordance_sampling import AffordanceSample, _pose_sampling_metadata
+from .affordance_sampling import (
+    AffordancePoseCandidates,
+    AffordanceSample,
+    AffordanceSamplingContext,
+    _sample_pose_candidates,
+)
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -33,6 +38,18 @@ if TYPE_CHECKING:
     from .primitives.pick_up import PickUpOptions
 
 __all__ = []
+
+
+def validated_label_provider(generator: GraspPoseGenerator | None) -> Callable | None:
+    """Require a physical label source whenever an atomic skill uses Antipodal."""
+    from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGenerator
+
+    provider = getattr(generator, "validated_labels", None)
+    if isinstance(generator, AntipodalGraspPoseGenerator) and not callable(provider):
+        raise ValueError(
+            "Antipodal atomic skills require a GraspValidator label cache."
+        )
+    return provider
 
 
 def pickup_adjustment(options: PickUpOptions) -> dict:
@@ -49,6 +66,9 @@ def pickup_adjustment(options: PickUpOptions) -> dict:
                 else [0, 0, 1]
             ),
         )
+    calibration = options.grasp_frame_to_eef
+    if not torch.equal(calibration, torch.eye(4).to(calibration)):
+        adjustment["grasp_frame_to_eef"] = calibration.tolist()
     return adjustment
 
 
@@ -59,44 +79,52 @@ def select_ranked_grasp(
     key: str,
     feasible: Callable[[torch.Tensor], torch.Tensor],
     *,
-    calibration: torch.Tensor | None = None,
+    sampling: AffordanceSamplingContext | None = None,
 ) -> AffordanceSample:
-    """Select the first feasible TCP per row, preserving its original label ID."""
+    """Apply Affordance branches to the best reachable, physically tested TCPs."""
     local, order, cache_key = labels
-    rows = torch.arange(len(object_pose), device=object_pose.device)
-    chosen = torch.full_like(rows, -1)
-    selected = torch.eye(4, device=object_pose.device, dtype=object_pose.dtype).repeat(
-        len(rows), 1, 1
-    )
-    rank = torch.full_like(rows, -1)
+    # Affordance diversifies the first max(32, 4*count) feasible candidates.
+    # A nominal request only needs the first reachable label.
+    limit = max(32, 4 * sampling.count) if sampling and sampling.enabled else 1
+    capacity = max(1, min(limit, order.shape[1]))
+    counts = torch.zeros(len(object_pose), dtype=torch.long, device=order.device)
+    ranks = order.new_full((len(counts), capacity), -1)
+    ids = torch.full_like(ranks, -1)
+    poses = torch.eye(4).to(object_pose).repeat(len(counts), capacity, 1, 1)
     for offset in range(0, order.shape[1], 50):
-        ids = order[:, offset : offset + 50]
-        poses = object_pose[:, None] @ local[ids.clamp_min(0)]
-        if calibration is not None:
-            poses = poses @ calibration
-        ok = feasible(poses) & (ids >= 0)
-        first = ok.long().argmax(dim=1)
-        accept = (chosen < 0) & ok.any(dim=1)
-        chosen = torch.where(accept, ids[rows, first], chosen)
-        rank = torch.where(accept, offset + first, rank)
-        selected = torch.where(accept[:, None, None], poses[rows, first], selected)
+        block = order[:, offset : offset + 50]
+        world = object_pose[:, None] @ local[block.clamp_min(0)]
+        ok = (block >= 0) & feasible(world)
+        slots = counts[:, None] + ok.long().cumsum(1) - 1
+        rows, cols = torch.where(ok & (slots < capacity))
+        dest = slots[rows, cols]
+        ranks[rows, dest] = offset + cols
+        ids[rows, dest] = block[rows, cols]
+        poses[rows, dest] = world[rows, cols]
+        counts += ok.sum(1)
         if (
             offset + 50 >= order.shape[1]
-            or ((chosen >= 0) | (order[:, offset + 50] < 0)).all()
+            or ((counts >= capacity) | (order[:, offset + 50] < 0)).all()
         ):
             break
-    success = chosen >= 0
-    return AffordanceSample(
-        success,
-        selected,
-        {
-            **_pose_sampling_metadata(selected, success, env_ids, object_pose),
-            "key": key,
-            "validated_cache": cache_key,
-            "candidate_ranks": rank.tolist(),
-            "candidate_ids": chosen.tolist(),
-        },
+
+    sample = _sample_pose_candidates(
+        AffordancePoseCandidates(poses, ranks.to(poses.dtype), ids >= 0),
+        sampling,
+        env_ids=env_ids,
+        key=key,
+        reference_poses=object_pose,
     )
+    rows = torch.arange(len(counts), device=order.device)
+    selected = torch.tensor(
+        sample.metadata["candidate_ids"], device=order.device
+    ).clamp_min(0)
+    sample.metadata.update(
+        validated_cache=cache_key,
+        candidate_ids=ids[rows, selected].masked_fill(~sample.success, -1).tolist(),
+        candidate_ranks=ranks[rows, selected].masked_fill(~sample.success, -1).tolist(),
+    )
+    return sample
 
 
 def reachable_path(
@@ -139,7 +167,7 @@ def sample_link_grasp(
     feasible: Callable[[torch.Tensor], torch.Tensor],
 ) -> AffordanceSample:
     """Check physical handle labels on the live link; custom query services own their sampling."""
-    labels = getattr(generator, "validated_labels", None)
+    labels = validated_label_provider(generator)
     if labels is not None:
         pool = labels(
             affordance.mesh_vertices,
@@ -149,7 +177,14 @@ def sample_link_grasp(
             direction,
             on_support=False,
         )
-        return select_ranked_grasp(pool, link_pose, context.env_ids, key, feasible)
+        return select_ranked_grasp(
+            pool,
+            link_pose,
+            context.env_ids,
+            key,
+            feasible,
+            sampling=context.affordance_sampling,
+        )
     return affordance.sample_candidates(
         affordance.get_grasp_candidates(generator, link_pose, direction),
         sampling=context.affordance_sampling,

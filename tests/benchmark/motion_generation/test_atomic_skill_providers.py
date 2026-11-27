@@ -155,7 +155,7 @@ def test_empty_grasp_geometry_pool_is_a_typed_input_rejection(monkeypatch):
     scenario.grasp_model = lambda: None
     scenario.grasp_root_from_tcp = lambda: None
     generator = Mock()
-    generator.get_valid_grasp_poses.return_value = [
+    generator.validated_labels.ranked_world_poses.return_value = [
         (torch.eye(4)[None], torch.tensor([torch.inf]))
     ]
     monkeypatch.setattr(
@@ -168,7 +168,9 @@ def test_empty_grasp_geometry_pool_is_a_typed_input_rejection(monkeypatch):
         "create_antipodal_semantics",
         lambda *args, **kwargs: SimpleNamespace(
             affordance=SimpleNamespace(
-                mesh_vertices=torch.zeros(3, 3), mesh_triangles=torch.zeros(1, 3)
+                validation_attrs=None,
+                mesh_vertices=torch.zeros(3, 3),
+                mesh_triangles=torch.zeros(1, 3),
             )
         ),
     )
@@ -871,7 +873,7 @@ def test_axis_inward_rule_retains_unknowns_and_propagates_backend_errors(
             build_poses=lambda obj, grasp, **kwargs: grasp[:, None],
             seed=43001,
         )
-    assert len(calls) == (1 if backend_error else 4)
+    assert len(calls) == (1 if backend_error else 2)
 
 
 @pytest.mark.parametrize("values", [[0.1], [0.0, 0.1, 0.1], [0.0, float("nan")]])
@@ -1579,7 +1581,7 @@ def test_object_rotation_providers_screen_every_pose_row(
         pools.append(
             (torch.stack([row_candidate, row_alternative]), torch.tensor([0.1, 0.2]))
         )
-    generator.get_valid_grasp_poses.return_value = pools
+    generator.validated_labels.ranked_world_poses.return_value = pools
     generator_factory = Mock(return_value=generator)
     monkeypatch.setattr(
         _atomic_fixtures, "create_parallel_jaw_grasp_pose_generator", generator_factory
@@ -1589,7 +1591,9 @@ def test_object_rotation_providers_screen_every_pose_row(
         "create_antipodal_semantics",
         lambda *args, **kwargs: SimpleNamespace(
             affordance=SimpleNamespace(
-                mesh_vertices=torch.zeros(3, 3), mesh_triangles=torch.zeros(1, 3)
+                validation_attrs=None,
+                mesh_vertices=torch.zeros(3, 3),
+                mesh_triangles=torch.zeros(1, 3),
             )
         ),
     )
@@ -1721,9 +1725,9 @@ def test_object_rotation_providers_screen_every_pose_row(
         batch_size=batch_size,
     )
     screening = [call for call in calls if call[0]]
-    assert len(screening) == 2 * waypoint_count + 1
+    assert len(screening) == 2 * waypoint_count
     # The first candidate finishes for seven rows even though row four fails.
-    # Those seven frozen choices survive row four's mirror and next candidate.
+    # Those seven frozen choices survive evaluation of the next validated candidate.
     accepted = screening[:waypoint_count]
     last_accepted = screening[-waypoint_count:]
     accepted_poses = torch.stack([call[1] for call in accepted], dim=1)

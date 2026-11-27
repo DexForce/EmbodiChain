@@ -2517,6 +2517,10 @@ def _decode_grasp_generator(
         raise ValueError(
             f"{path}: selected gripper does not declare generator {kind!r}."
         )
+    if not defaults.get("pad_links"):
+        raise ValueError(
+            f"{path}.gripper.pad_links must name two contact pads for GraspValidator."
+        )
     root_from_tcp = None
     if "root_from_tcp" in config:
         root_from_tcp = _geometry_pose(

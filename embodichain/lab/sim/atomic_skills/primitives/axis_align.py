@@ -34,6 +34,7 @@ from embodichain.lab.sim.atomic_skills._grasp_selection import (
     offset_pose,
     reachable_path,
     select_ranked_grasp,
+    validated_label_provider,
 )
 from embodichain.lab.sim.atomic_skills.affordance import AxisAlignAffordance
 from embodichain.lab.sim.atomic_skills.affordance_sampling import (
@@ -511,7 +512,7 @@ class AxisAlign(AtomicSkill[AxisAlignGoal, AxisAlignOptions]):
             )
             is_positive_part = object_part == "top"
         generator = self.planning_services.grasp_pose_generator(grasp_target_id)
-        labels = getattr(generator, "validated_labels", None)
+        labels = validated_label_provider(generator)
         if labels is not None:
             pool = labels(
                 affordance.mesh_vertices,
@@ -552,7 +553,12 @@ class AxisAlign(AtomicSkill[AxisAlignGoal, AxisAlignOptions]):
                 )
 
             return select_ranked_grasp(
-                pool, object_pose, context.env_ids, sample_key, feasible
+                pool,
+                object_pose,
+                context.env_ids,
+                sample_key,
+                feasible,
+                sampling=context.affordance_sampling,
             )
         candidates = affordance.get_grasp_candidates(
             generator,

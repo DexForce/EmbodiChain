@@ -215,14 +215,32 @@ class AntipodalAffordance(Affordance):
         Returns:
             Padded candidates with explicit validity.
         """
-        rows = generator.get_valid_grasp_poses(
-            mesh_vertices=self.mesh_vertices,
-            mesh_triangles=self.mesh_triangles,
-            obj_poses=object_poses,
-            approach_direction=approach_direction,
-            obj_longest_axis=obj_longest_axis,
-            is_positive_part=is_positive_part,
-        )
+        from ._grasp_selection import validated_label_provider
+
+        labels = validated_label_provider(generator)
+        if labels is not None:
+            from embodichain.lab.sim.utility._validated_grasps import _world_pose_rows
+
+            local, order, _ = labels(
+                self.mesh_vertices,
+                self.mesh_triangles,
+                self.validation_attrs,
+                object_poses,
+                approach_direction,
+                axis=obj_longest_axis,
+                positive=is_positive_part,
+                on_support=self.mesh_scope == "object",
+            )
+            rows = _world_pose_rows(local, order, object_poses)
+        else:
+            rows = generator.get_valid_grasp_poses(
+                mesh_vertices=self.mesh_vertices,
+                mesh_triangles=self.mesh_triangles,
+                obj_poses=object_poses,
+                approach_direction=approach_direction,
+                obj_longest_axis=obj_longest_axis,
+                is_positive_part=is_positive_part,
+            )
         if len(rows) != object_poses.shape[0]:
             raise ValueError(
                 "grasp generator must return one candidate row per object pose."

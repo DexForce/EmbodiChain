@@ -21,7 +21,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib.metadata import version
 import json
 import math
@@ -159,6 +159,22 @@ def _rank_labels(
     return torch.nn.utils.rnn.pad_sequence(orders, batch_first=True, padding_value=-1)
 
 
+def _world_pose_rows(
+    local: torch.Tensor, order: torch.Tensor, object_poses: torch.Tensor
+) -> list[tuple[torch.Tensor, torch.Tensor]]:
+    """Express valid labels in each live object's world frame, preserving rank."""
+    rows = []
+    for pose, ids in zip(object_poses, order, strict=True):
+        candidates = pose @ local[ids[ids >= 0]]
+        rows.append(
+            (
+                candidates,
+                torch.arange(len(candidates), device=pose.device, dtype=pose.dtype),
+            )
+        )
+    return rows
+
+
 @dataclass
 class ValidatedGraspCache:
     """Resolve object-local labels for one configured parallel-jaw hand."""
@@ -169,6 +185,9 @@ class ValidatedGraspCache:
     geometry: FixedGripperCollisionGeometry
     qualify: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None
 
+    force_refresh: bool = False
+    _refreshed: set[str] = field(default_factory=set, init=False, repr=False)
+
     @classmethod
     def from_geometry(
         cls,
@@ -177,6 +196,7 @@ class ValidatedGraspCache:
         collision: ParallelJawGraspCollisionCfg,
         geometry: FixedGripperCollisionGeometry,
         *,
+        force_refresh: bool = False,
         qualify: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
     ) -> ValidatedGraspCache:
         """Use the mounted TCP and canonical contact frame for the validator's hand."""
@@ -193,7 +213,35 @@ class ValidatedGraspCache:
             collision_links=list(dict.fromkeys(p["link"] for p in source["parts"])),
             mesh_paths=source["mesh_paths"],
         )
-        return cls(description, algorithm, collision, geometry, qualify=qualify)
+        return cls(
+            description,
+            algorithm,
+            collision,
+            geometry,
+            qualify=qualify,
+            force_refresh=force_refresh,
+        )
+
+    def ranked_world_poses(
+        self,
+        *,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor,
+        attrs: dict | None = None,
+        on_support: bool = True,
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        """Return validated world-frame candidates and their row-local rank costs."""
+        local, order, _ = self(
+            mesh_vertices,
+            mesh_triangles,
+            attrs,
+            obj_poses,
+            approach_direction,
+            on_support=on_support,
+        )
+        return _world_pose_rows(local, order, obj_poses)
 
     def __call__(
         self,
@@ -306,6 +354,7 @@ class ValidatedGraspCache:
         )
         signature = dict(
             schema=1,
+            target_mesh_format="obj",
             config=config,
             sampling=sampling.to_dict(),
             generator=settings,
@@ -321,20 +370,23 @@ class ValidatedGraspCache:
         directory = Path.home() / ".cache/embodichain/grasp_annotator_cache/validated"
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"{key}.pt"
-        if not path.exists():
+        if not path.exists() or (self.force_refresh and key not in self._refreshed):
             with (directory / f"{key}.lock").open("a") as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX)
-                if not path.exists():
+                if not path.exists() or (
+                    self.force_refresh and key not in self._refreshed
+                ):
                     print(f"Validating antipodal grasps for {path.name}", flush=True)
                     with TemporaryDirectory(dir=directory) as temp:
                         work = Path(temp)
                         import trimesh
 
+                        # Text OBJ preserves float32 coordinates in the native mesh importer.
                         trimesh.Trimesh(
                             vertices=vertices.detach().cpu().numpy(),
                             faces=triangles.detach().cpu().numpy(),
                             process=False,
-                        ).export(work / "target.ply")
+                        ).export(work / "target.obj", digits=17)
                         (work / "job.json").write_text(
                             json.dumps(signature | {"urdf": str(native_urdf)})
                         )
@@ -342,6 +394,8 @@ class ValidatedGraspCache:
                             [sys.executable, "-m", __name__, str(work)], check=True
                         )
                         (work / "labels.pt").replace(path)
+                    if self.force_refresh:
+                        self._refreshed.add(key)
         labels = torch.load(path, weights_only=True, map_location="cpu")
         poses = labels["grasp_pose"].to(object_poses)
         check = None
@@ -390,6 +444,8 @@ def _adjust_candidates(poses: torch.Tensor, settings: dict) -> torch.Tensor:
         poses[:, :3, 2] = cos * z - sin * y
     if settings.get("retract"):
         poses[:, :3, 3] -= settings["retract"] * poses[:, :3, 2]
+    if "grasp_frame_to_eef" in settings:
+        poses = poses @ poses.new_tensor(settings["grasp_frame_to_eef"])
     return poses
 
 
@@ -400,7 +456,7 @@ def _generate(work: Path) -> None:
     _run(
         job["config"],
         _SamplingCfg(**job["sampling"]),
-        work / "target.ply",
+        work / "target.obj",
         Path(job["urdf"]),
         work / "labels.pt",
         work,

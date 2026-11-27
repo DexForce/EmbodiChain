@@ -321,6 +321,35 @@ def test_antipodal_affordance_builds_explicit_candidate_validity():
     assert candidates.valid.tolist() == [[True, True], [False, False]]
 
 
+def test_antipodal_affordance_only_uses_physically_validated_labels(monkeypatch):
+    from unittest.mock import Mock
+    from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGenerator
+
+    generator = object.__new__(AntipodalGraspPoseGenerator)
+    monkeypatch.setattr(
+        generator,
+        "get_valid_grasp_poses",
+        Mock(side_effect=AssertionError("geometric fallback")),
+    )
+    affordance = AntipodalAffordance(
+        mesh_vertices=torch.eye(3), mesh_triangles=torch.tensor([[0, 1, 2]])
+    )
+    objects = _poses(2)
+    objects[1, 2, 3] = 0.2
+    direction = torch.tensor([0.0, 0.0, -1.0])
+    with pytest.raises(ValueError, match="GraspValidator"):
+        affordance.get_grasp_candidates(generator, objects, direction)
+    local = _poses(1)
+    local[0, 0, 3] = 0.03
+    generator.validated_labels = Mock(
+        return_value=(local, torch.tensor([[-1], [0]]), "physical")
+    )
+    result = affordance.get_grasp_candidates(generator, objects, direction)
+    assert result.valid.tolist() == [[False], [True]]
+    torch.testing.assert_close(result.poses[1, 0], objects[1] @ local[0])
+    generator.get_valid_grasp_poses.assert_not_called()
+
+
 def test_press_sampling_rotates_only_contact_frame_roll():
     targets = _poses(4)
     targets[:, :3, :3] = axis_angle_to_rotation_matrix(torch.tensor([0.4, 0.2, -0.3]))

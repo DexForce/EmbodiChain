@@ -75,11 +75,18 @@ _ACCEL = 16
 
 def _stage(hand, directory, physics, close_qpos=None, *, open_qpos=None):
     """Mount the native hand on three axes and hard-couple its PhysX mimics."""
-    source = Path(hand.fpath or hand.urdf_cfg.assemble_urdf())
+    source = Path(hand.fpath or hand.urdf_cfg.assemble_urdf()).resolve(strict=True)
     xml = ET.parse(source)
     root = xml.getroot()
     names = hand.control_parts["eef"]
     joints = {joint.attrib["name"]: joint for joint in root.findall("joint")}
+    native_joints = {
+        name: name for name, joint in joints.items() if joint.get("type") != "fixed"
+    }
+    # Resolve native travel before the translation stage adds three more DOFs.
+    limits = _native_joint_limits(hand.qpos_limits, list(native_joints))
+    if hand.qpos_limits is not None:
+        hand.qpos_limits = {re.escape(name): bounds for name, bounds in limits.items()}
     for field, action, values in (
         ("open_qpos", "open", open_qpos),
         ("close_qpos", "grasp", close_qpos),
@@ -87,7 +94,6 @@ def _stage(hand, directory, physics, close_qpos=None, *, open_qpos=None):
         if values is None:
             continue
         command = _validate_gripper_command(values, names)
-        limits = _native_joint_limits(hand.qpos_limits, names)
         for name, value in command.items():
             joint = joints.get(name)
             if joint is None or joint.get("type") == "fixed":
@@ -101,7 +107,15 @@ def _stage(hand, directory, physics, close_qpos=None, *, open_qpos=None):
                     raise ValueError(f"Missing joint limits for {field} joint {name!r}")
                 bounds = (float(limit.attrib["lower"]), float(limit.attrib["upper"]))
             if bounds is not None and not bounds[0] <= value <= bounds[1]:
-                raise ValueError(f"{field} for {name!r} exceeds joint limits {bounds}")
+                bound = bounds[0] if value < bounds[0] else bounds[1]
+                # Runtime qpos buffers round exact URDF endpoints to float32.
+                if value != float(np.float32(bound)):
+                    raise ValueError(
+                        f"{field} for {name!r} exceeds joint limits {bounds}"
+                    )
+                command[name] = float(bound)
+        for name, value in command.items():
+            joint = joints[name]
             mimic = joint.find("mimic")
             if mimic is not None:
                 master = mimic.attrib["joint"]
@@ -136,8 +150,12 @@ def _stage(hand, directory, physics, close_qpos=None, *, open_qpos=None):
         mesh.set("filename", str(Path("hand_assets") / mesh.get("filename")))
     parent = "stage_base"
     ET.SubElement(root, "link", name=parent)
+    # A massless URDF frame can be fixed to a moving stage but cannot be the
+    # moving child of a prismatic joint (e.g. the Pika mounting adapter).
+    mount_mass = root.find(f"link[@name='{mount}']/inertial/mass")
+    fixed_mount = mount_mass is not None and float(mount_mass.attrib["value"]) == 0
     for i, axis in enumerate(("1 0 0", "0 1 0", "0 0 1")):
-        child = mount if i == 2 else f"stage_link{i}"
+        child = mount if i == 2 and not fixed_mount else f"stage_link{i}"
         if child != mount:
             link = ET.SubElement(root, "link", name=child)
         else:
@@ -164,14 +182,15 @@ def _stage(hand, directory, physics, close_qpos=None, *, open_qpos=None):
         ):
             ET.SubElement(joint, tag, attrs)
         parent = child
+    if fixed_mount:
+        joint = ET.SubElement(root, "joint", name="stage_mount", type="fixed")
+        ET.SubElement(joint, "parent", link=parent)
+        ET.SubElement(joint, "child", link=mount)
     path = Path(directory) / "stage.urdf"
     xml.write(path)
     hand.urdf_cfg = None
     hand.fpath = str(path)
     hand.init_qpos = None
-    native_joints = {
-        name: name for name, joint in joints.items() if joint.get("type") != "fixed"
-    }
     drives = _native_joint_drives(
         hand.joint_drive_props, list(native_joints), hand.control_parts, native_joints
     )
@@ -500,7 +519,9 @@ class GraspValidator:
             elif kind == "SPHERE":
                 depth = shape.radius
             elif kind == "CAPSULE":
-                depth = shape.radius + shape.half_height * z[:, 2].abs()
+                # Collision snapshots preserve each engine's native capsule frame.
+                axis = 2 if self.sim.physics_backend == "newton" else 0
+                depth = shape.radius + shape.half_height * z[:, axis].abs()
             elif shape.vertices is not None and len(shape.vertices):
                 depth = -(z @ shape.vertices.T).amin(-1)
             else:

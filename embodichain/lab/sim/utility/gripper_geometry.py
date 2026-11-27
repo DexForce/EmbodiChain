@@ -136,6 +136,8 @@ def _native_joint_limits(limits, joint_names):
         return {}
     import numpy as np
 
+    if hasattr(limits, "detach"):
+        limits = limits.detach().cpu().numpy()
     bounds = np.asarray(limits, dtype=float)
     if bounds.shape != (len(joint_names), 2):
         raise ValueError("qpos_limits must have native hand shape (num_dofs, 2).")

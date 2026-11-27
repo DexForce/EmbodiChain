@@ -1608,7 +1608,7 @@ def test_external_pick_enforces_requested_world_vertical_lift(
     generator.generate.assert_not_called()
 
 
-@pytest.mark.parametrize("origin", ["sampled", "explicit", "fixed"])
+@pytest.mark.parametrize("origin", ["sampled", "validated", "explicit", "fixed"])
 @pytest.mark.parametrize("physical_geometry", [False, True])
 def test_refined_grasp_calibration_preserves_eef_and_canonical_geometry(
     origin, physical_geometry
@@ -1697,19 +1697,45 @@ def test_refined_grasp_calibration_preserves_eef_and_canonical_geometry(
         env_ids=torch.tensor([0]),
         control_dt=CONTROL_DT,
     )
+    hand = NarrowGripper()
+    if origin == "validated":
+        hand.validated_labels = Mock(
+            return_value=(calibration[None], torch.tensor([[0]]), "physical")
+        )
+        hand.get_valid_grasp_poses = Mock(
+            side_effect=AssertionError("unexpected geometric grasp")
+        )
+        generator.robot.compute_batch_ik = Mock(
+            return_value=(
+                torch.ones((1, 1), dtype=torch.bool),
+                torch.zeros(1, 1, ARM_DOF),
+            )
+        )
     anchor, _, evidence = _pick_refinement_anchor(
         request,
         context,
         np.eye(4),
         calibration.numpy(),
         MotionRefinementCfg(max_translation_m=0.001, max_rotation_rad=0.01),
-        {"hand": NarrowGripper()},
+        {"hand": hand},
         generator,
     )
     np.testing.assert_allclose(anchor, calibration.numpy(), atol=1e-8)
-    torch.testing.assert_close(
-        generator.robot.compute_ik.call_args.args[0], calibration[None]
-    )
+    if origin == "validated":
+        assert (
+            hand.validated_labels.call_args.kwargs["pose_adjustment"][
+                "grasp_frame_to_eef"
+            ]
+            == calibration.tolist()
+        )
+        torch.testing.assert_close(
+            generator.robot.compute_batch_ik.call_args.kwargs["pose"],
+            calibration[None, None],
+        )
+    else:
+        torch.testing.assert_close(
+            generator.robot.compute_ik.call_args.args[0], calibration[None]
+        )
     assert evidence["object_opening_extent_m"] == pytest.approx(0.04)
     assert evidence["source_grasp_translation_error_m"] < 1e-8
 
@@ -4206,7 +4232,7 @@ def test_validated_pick_checks_the_next_50_without_replacing_a_feasible_row() ->
         JointPositionTarget("arm", tuple(range(ARM_DOF))),
         PickUpOptions(),
         torch.tensor([0.0, 0.0, 1.0]),
-        SimpleNamespace(env_ids=torch.arange(2)),
+        SimpleNamespace(env_ids=torch.arange(2), affordance_sampling=None),
         "pick",
     )
     order = torch.stack((torch.arange(101), torch.arange(100, -1, -1)))
@@ -4218,6 +4244,36 @@ def test_validated_pick_checks_the_next_50_without_replacing_a_feasible_row() ->
     empty = action._select_validated_grasp(local[:0], order[:, :0], *args)
     assert empty.success.tolist() == [False, False]
     assert empty.metadata["candidate_ids"] == [-1, -1]
+
+
+def test_validated_labels_preserve_affordance_branches_and_preferred_pose():
+    from embodichain.lab.sim.atomic_skills._grasp_selection import select_ranked_grasp
+    from embodichain.lab.sim.atomic_skills.affordance_sampling import (
+        AffordanceSamplingContext,
+    )
+
+    local = torch.eye(4).repeat(5, 1, 1)
+    local[:, 0, 3] = torch.tensor([-1.0, 0.0, 0.02, 0.02, 0.04])
+    objects = torch.eye(4).repeat(3, 1, 1)
+    objects[:, 1, 3] = torch.tensor([0.0, 1.0, 2.0])
+    order = torch.arange(5).expand(3, -1)
+    sample = select_ranked_grasp(
+        (local, order, "physical"),
+        objects,
+        torch.arange(3),
+        "pick",
+        lambda world: world[..., 0, 3] >= 0,
+        sampling=AffordanceSamplingContext(
+            count=4,
+            branch_overrides=(0, 1, 3),
+            preferred_local_poses=(("pick", tuple(local[2].flatten().tolist())),),
+        ),
+    )
+    assert sample.metadata["candidate_ids"] == [1, 2, 1]
+    assert sample.metadata["unique_candidate_counts"] == [3, 3, 3]
+    assert sample.metadata["reused"] == [False, False, True]
+    assert sample.metadata["matched_preferred_local_pose"] == [False, True, False]
+    torch.testing.assert_close(sample.poses, objects @ local[[1, 2, 1]])
 
 
 def test_pick_maps_canonical_grasp_frames_to_the_robot_eef() -> None:
@@ -7888,7 +7944,7 @@ def test_handover_selects_arm_per_environment(monkeypatch: pytest.MonkeyPatch) -
         assert sample["validated_cache"][geometric_row] is None
         assert sample["candidate_ranks"][physical_row] == 0
         assert sample["candidate_ranks"][geometric_row] is None
-        assert sample["valid_candidate_counts"][physical_row] is None
+        assert sample["valid_candidate_counts"][physical_row] == 1
         assert sample["valid_candidate_counts"][geometric_row] == 1
         assert sample["candidate_ids"] == [0, 0]
         assert sample["pose_frame"] == "world"
@@ -8438,14 +8494,26 @@ def test_coordinated_pick_rejects_unequal_physical_paired_queries(
             tcp[0, 3] = 0.1
         if right and difference == "surfaces":
             points[0, 0] = 0.1
-        return AntipodalGraspPoseGenerator(
-            model_id="identical_label",
+        native = AntipodalGraspPoseGenerator(
+            validated_labels=Mock(),
+            model_id="test_parallel_jaw",
             min_opening_width=0.001,
             max_opening_width=0.1,
             collision_geometry=FixedGripperCollisionGeometry(
                 points, {"grasp_from_tcp": tcp.tolist()}
             ),
         )
+
+        if not right:
+            return native
+
+        # A custom paired provider supplies its own query and geometry identity.
+        class PairedFixture(_StubGraspPoseGenerator):
+            @property
+            def paired_query_key(self):
+                return native.paired_query_key
+
+        return PairedFixture()
 
     left, right = (
         (_StubGraspPoseGenerator(), _StubGraspPoseGenerator())

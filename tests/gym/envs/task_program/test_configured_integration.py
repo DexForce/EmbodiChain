@@ -450,6 +450,11 @@ def test_handover_physical_labels_use_mounted_drives_and_pad_contacts(
 
     def run_label_worker(argv, *, check):
         work = Path(argv[-1])
+        import trimesh
+
+        mesh = trimesh.load_mesh(work / "target.obj", process=False)
+        torch.testing.assert_close(torch.tensor(mesh.vertices).float(), vertices)
+        assert mesh.faces.tolist() == [[0, 1, 2]]
         job = json.loads((work / "job.json").read_text())
         jobs.append(job)
         torch.save({"grasp_pose": torch.empty(0, 4, 4)}, work / "labels.pt")
@@ -459,21 +464,42 @@ def test_handover_physical_labels_use_mounted_drives_and_pad_contacts(
     )
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
 
-    def key(part):
+    vertices = torch.eye(3) * 0.02
+
+    def cache_for(part):
         generators = adapter_factory.create_adapter(SimpleNamespace(robot=robot))
-        cache = generators[part].validated_labels
+        return generators[part].validated_labels
+
+    def key(part, *, cache=None, adjustment=None):
+        cache = cache or cache_for(part)
         _, _, key = cache(
-            torch.eye(3),
+            vertices,
             torch.tensor([[0, 1, 2]]),
             None,
             torch.eye(4)[None],
             torch.tensor([[0.0, 0.0, -1.0]]),
+            pose_adjustment=adjustment,
         )
         return key
 
     baseline = key("left_eef")
     assert key("right_eef") == baseline
     assert len(jobs) == 1
+    from dataclasses import replace
+
+    refresh = replace(cache_for("left_eef"), force_refresh=True)
+    assert key("left_eef", cache=refresh) == key("left_eef", cache=refresh) == baseline
+    assert len(jobs) == 2
+    offset = torch.eye(4)
+    offset[0, 3] = 0.05
+    adjustment = {"grasp_frame_to_eef": offset.tolist()}
+    calibrated = key("left_eef", adjustment=adjustment)
+    assert calibrated != baseline
+    assert jobs[-1]["pose_adjustment"] == adjustment
+    assert key("left_eef", cache=refresh, adjustment=adjustment) == calibrated
+    assert key("left_eef", cache=refresh, adjustment=adjustment) == calibrated
+    assert len(jobs) == 4
+
     hand, _ = _resolve_hand(jobs[0]["config"]["gripper"], Path(jobs[0]["urdf"]))
     _stage(hand, tmp_path, "default")
     leader, follower = "gripper_finger1_joint_1", "gripper_finger2_joint_1"

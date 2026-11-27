@@ -491,7 +491,11 @@ class _AntipodalGraspPoseGeneratorFactory:
         collision = ParallelJawGraspCollisionCfg(**collision_kwargs)
         return AntipodalGraspPoseGenerator(
             validated_labels=ValidatedGraspCache(
-                defaults, algorithm_kwargs, collision, geometry
+                defaults,
+                algorithm_kwargs,
+                collision,
+                geometry,
+                force_refresh=bool(self.force_refresh),
             ),
             model_id=defaults["model_id"],
             min_opening_width=defaults["min_opening_width"],

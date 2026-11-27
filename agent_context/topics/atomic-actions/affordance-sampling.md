@@ -29,10 +29,13 @@ the sampling record under `diagnostics.metadata["affordance_sample"]`.
 Slide distance, Twist angle, and OpenDoor opening fraction remain exact
 Action/Goal inputs rather than Affordance variation.
 
-Configured parallel-jaw grasp services label the scaled target mesh in an
-isolated PhysX process and cache object-local TCPs and opening widths by hand
-URDF, mesh and validation settings. For a bound hand the validator applies the
-mounted joint drives and link contact properties under their native URDF names.
+An Atomic Skill using the Antipodal generator requires a GraspValidator cache
+and two configured contact pads. The worker validates proposals on the scaled
+target mesh in an isolated PhysX process and caches object-local TCPs and
+opening widths by hand URDF, mesh and validation settings. An explicit refresh
+regenerates each cache key once per service instance. For a bound hand the
+validator applies the mounted joint drives and link contact properties under
+their native URDF names.
 Changing a finger gain, effort limit or pad friction selects a new cache entry.
 PickUp, AxisAlign, HandOver, Slide,
 OpenDoor and CoordinatedPickment rank eligible labels by live closing-axis
@@ -43,7 +46,9 @@ approach angles independently in degrees. The live angle limits reuse the same
 physical labels. Handle validation tests the isolated link mesh; Slide and
 OpenDoor check motion against the live joint. Suspended handles and receiving
 hands skip the inferred tabletop. Explicit mirror, upright and retraction
-adjustments used in sampling are applied before physical validation.
+adjustments and PickUp's `grasp_frame_to_eef` are applied before physical
+validation and included in the cache key. Branch selection and preferred-pose
+matching operate on the ranked labels that pass waypoint IK.
 
 ## Current host boundary
 

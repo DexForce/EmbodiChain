@@ -323,6 +323,64 @@ def test_dh_qpos_respects_mimic_and_travel(
         )
 
 
+def test_stage_preserves_relative_meshes_native_limits_and_rounded_pika_opening(
+    tmp_path, monkeypatch
+):
+    import xml.etree.ElementTree as ET
+    from embodichain.data import get_data_path
+    from embodichain.robot_registry import resolve_robot_cfg
+
+    hand = resolve_robot_cfg("PikaGripper")
+    source = Path(get_data_path(resolve_gripper_defaults("PikaGripper")["fpath"]))
+    monkeypatch.chdir(tmp_path)
+    Path("assets").symlink_to(source.parent, target_is_directory=True)
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    hand.fpath = str(Path("assets") / source.name)
+    joints = [
+        j.get("name")
+        for j in ET.parse(source).findall("joint")
+        if j.get("type") != "fixed"
+    ]
+    hand.qpos_limits = np.array([[0.0, 0.05], [-0.001, 0.05]])
+    hand.joint_drive_props.stiffness = {"eef": 1000.0}
+    rounded = {name: float(np.float32(0.05)) for name in joints}
+    grasp_validation._stage(hand, stage, "default", open_qpos=rounded)
+    staged = ET.parse(hand.fpath)
+    assert staged.find("joint[@name='stage_mount']/child").get("link") == hand.root_link
+    meshes = staged.findall(".//mesh")
+    assert meshes and all((stage / mesh.get("filename")).is_file() for mesh in meshes)
+    assert hand.qpos_limits == dict(zip(joints, [[0.0, 0.05], [-0.001, 0.05]]))
+    assert hand.joint_commands["open"] == dict.fromkeys(joints, 0.05)
+    assert all(hand.joint_drive_props.stiffness[name] == 1000.0 for name in joints)
+
+
+@pytest.mark.parametrize("physics", ["default", "newton"])
+def test_capsule_clearance_uses_backend_collision_axis(physics):
+    validator = GraspValidator.__new__(GraspValidator)
+    shape = SimpleNamespace(
+        shape_type=SimpleNamespace(name="CAPSULE"),
+        local_pose=torch.eye(4),
+        radius=0.01,
+        half_height=0.05,
+    )
+    validator.sim = SimpleNamespace(physics_backend=physics)
+    if physics == "newton":
+        # Rotate Newton's Z-aligned capsule onto the default backend's X axis.
+        shape.local_pose[:3, :3] = torch.tensor(
+            [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]]
+        )
+    validator.shapes = [shape]
+    poses = torch.eye(4).repeat(2, 1, 1)
+    poses[1, :3, :3] = torch.tensor(
+        [[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]
+    )
+    poses[:, 2, 3] = torch.tensor([0.01, 0.06])
+    torch.testing.assert_close(validator._clearance(poses), torch.zeros(2))
+    poses[:, 2, 3] += 0.021
+    torch.testing.assert_close(validator._clearance(poses), torch.full((2,), 0.021))
+
+
 @pytest.mark.gpu
 @pytest.mark.subprocess_sim
 @pytest.mark.parametrize("physics", ["default", "newton"])

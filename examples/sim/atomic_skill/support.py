@@ -2005,9 +2005,19 @@ def create_parallel_jaw_grasp_pose_generator(
     if hand_commands is not None:
         names = hand["control_parts"]["eef"]
         hand["joint_commands"] = {
-            command: dict(zip(names, torch.as_tensor(values).tolist(), strict=True))
+            command: dict(
+                zip(
+                    names,
+                    torch.as_tensor(values, dtype=torch.float64).tolist(),
+                    strict=True,
+                )
+            )
             for command, values in zip(("open", "grasp"), hand_commands, strict=True)
         }
+    if not hand.get("pad_links") or not hand.get("joint_commands"):
+        raise ValueError(
+            "Antipodal atomic skills require pad_links and open/grasp joint commands for GraspValidator."
+        )
     algorithm = dict(
         sample_count=n_sample, approach_direction_samples=approach_direction_samples
     )
@@ -2015,12 +2025,8 @@ def create_parallel_jaw_grasp_pose_generator(
     return AntipodalGraspPoseGenerator(
         **grasp_generator_parameters(hand),
         collision_geometry=collision_geometry,
-        validated_labels=(
-            ValidatedGraspCache.from_geometry(
-                hand, algorithm, collision, collision_geometry
-            )
-            if "joint_commands" in hand
-            else None
+        validated_labels=ValidatedGraspCache.from_geometry(
+            hand, algorithm, collision, collision_geometry, force_refresh=force_refresh
         ),
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(**algorithm),
         collision_cfg=collision,

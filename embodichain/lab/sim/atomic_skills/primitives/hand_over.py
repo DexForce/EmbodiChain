@@ -32,6 +32,7 @@ from embodichain.lab.sim.atomic_skills._grasp_selection import (
     offset_pose,
     reachable_path,
     select_ranked_grasp,
+    validated_label_provider,
 )
 from embodichain.lab.sim.atomic_skills.affordance import AntipodalAffordance
 from embodichain.lab.sim.atomic_skills.affordance_sampling import (
@@ -2155,7 +2156,7 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
             )
 
         generator = self.planning_services.grasp_pose_generator(grasp_target_id)
-        labels = getattr(generator, "validated_labels", None)
+        labels = validated_label_provider(generator)
         if labels is not None:
             pool = labels(
                 affordance.mesh_vertices,
@@ -2184,7 +2185,12 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
                 )
 
             return select_ranked_grasp(
-                pool, object_pose, context.env_ids, sample_key, feasible
+                pool,
+                object_pose,
+                context.env_ids,
+                sample_key,
+                feasible,
+                sampling=context.affordance_sampling,
             )
         candidates = affordance.get_grasp_candidates(
             generator,

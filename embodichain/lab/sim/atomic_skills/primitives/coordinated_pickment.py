@@ -28,8 +28,12 @@ from embodichain.toolkits.graspkit import ParallelJawGraspPoseGenerator
 from embodichain.utils import logger
 from embodichain.utils.math import matrix_from_quat, pose_inv, quat_from_matrix
 
+from embodichain.lab.sim.atomic_skills.affordance_sampling import (
+    AffordanceSamplingContext,
+)
 from embodichain.lab.sim.atomic_skills._grasp_selection import (
     select_ranked_grasp,
+    validated_label_provider,
     reachable_path,
 )
 from embodichain.lab.sim.atomic_skills.affordance import AntipodalAffordance
@@ -591,6 +595,7 @@ class CoordinatedPickment(AtomicSkill[CoordinatedPickGoal, CoordinatedPickmentOp
                 resources.left_arm.control_part,
                 resources.right_arm.control_part,
                 context.env_ids,
+                sampling=context.affordance_sampling,
             )
         )
         left_object_to_eef = torch.bmm(pose_inv(object_initial_pose), left_grasp_xpos)
@@ -633,6 +638,8 @@ class CoordinatedPickment(AtomicSkill[CoordinatedPickGoal, CoordinatedPickmentOp
         left_control_part: str,
         right_control_part: str,
         env_ids: torch.Tensor,
+        *,
+        sampling: AffordanceSamplingContext | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Sample left/right grasp poses from the target antipodal affordance.
 
@@ -693,8 +700,8 @@ class CoordinatedPickment(AtomicSkill[CoordinatedPickGoal, CoordinatedPickmentOp
                 "services for both grasp endpoints."
             )
         providers = (
-            getattr(left_generator, "validated_labels", None),
-            getattr(right_generator, "validated_labels", None),
+            validated_label_provider(left_generator),
+            validated_label_provider(right_generator),
         )
         if (
             not all(providers)
@@ -754,13 +761,18 @@ class CoordinatedPickment(AtomicSkill[CoordinatedPickGoal, CoordinatedPickmentOp
                         torch.manual_seed(options.grasp_seed)
                         if cuda_devices:
                             torch.cuda.manual_seed_all(options.grasp_seed)
-                        dual_results = left_generator.get_dual_arm_valid_grasp_poses(
-                            mesh_vertices=semantics.affordance.mesh_vertices,
-                            mesh_triangles=semantics.affordance.mesh_triangles,
-                            obj_poses=object_poses,
-                            left_to_right_arm_direction=left_to_right_arm_direction,
-                            approach_direction=candidate_approach,
-                            middle_empty_ratio=partition_ratio,
+                        geometric_provider = (
+                            left_generator if providers[0] is None else right_generator
+                        )
+                        dual_results = (
+                            geometric_provider.get_dual_arm_valid_grasp_poses(
+                                mesh_vertices=semantics.affordance.mesh_vertices,
+                                mesh_triangles=semantics.affordance.mesh_triangles,
+                                obj_poses=object_poses,
+                                left_to_right_arm_direction=left_to_right_arm_direction,
+                                approach_direction=candidate_approach,
+                                middle_empty_ratio=partition_ratio,
+                            )
                         )
 
                 arm_results = []
@@ -810,7 +822,7 @@ class CoordinatedPickment(AtomicSkill[CoordinatedPickGoal, CoordinatedPickmentOp
                         )
 
                     sample = select_ranked_grasp(
-                        pool, object_poses, env_ids, role, feasible
+                        pool, object_poses, env_ids, role, feasible, sampling=sampling
                     )
                     arm_results.append((sample.poses, sample.success))
                 (candidate_left, left_success), (candidate_right, right_success) = (

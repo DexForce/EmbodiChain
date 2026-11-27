@@ -1745,9 +1745,10 @@ class AtomicSkillScenario(ScenarioProvider):
                     else {}
                 ),
             )
-            candidate_pools = generator.get_valid_grasp_poses(
+            candidate_pools = generator.validated_labels.ranked_world_poses(
                 mesh_vertices=affordance.mesh_vertices,
                 mesh_triangles=affordance.mesh_triangles,
+                attrs=affordance.validation_attrs,
                 obj_poses=object_pose,
                 approach_direction=approach_direction,
             )
@@ -1809,7 +1810,7 @@ class AtomicSkillScenario(ScenarioProvider):
         """Return independently accepted rows without discarding unresolved ones.
 
         Existing selections are owned copies and remain frozen. Unresolved rows
-        keep the declared candidate/half-turn order and complete IK-chain gate.
+        keep the validated candidate order and complete IK-chain gate.
         The strict public screen raises when any row remains unresolved.
         """
         assert self.robot is not None
@@ -1836,25 +1837,21 @@ class AtomicSkillScenario(ScenarioProvider):
                 if candidate_index < len(pool):
                     grasp[row] = pool[candidate_index]
             grasp = torch.where(found[:, None, None], selected, grasp)
-            mirrored = grasp.clone()
-            mirrored[:, :3, :2] = -mirrored[:, :3, :2]
-            for variant in (grasp, mirrored):
-                variant = torch.where(found[:, None, None], selected, variant)
-                alignment = torch.sum(variant[:, :3, 2] * approach_direction, dim=-1)
-                eligible = available & ~found & (alignment >= minimum_alignment)
-                if not bool(eligible.any().item()):
-                    continue
-                feasible = self._ik_chain_feasible_rows(
-                    start_qpos,
-                    waypoint_poses(variant),
-                    eligible=eligible,
-                    env_ids=env_ids,
-                    reference_protocol=reference_protocol,
-                )
-                selected[feasible] = variant[feasible]
-                found |= feasible
-                if bool(found.all().item()):
-                    return selected, found
+            alignment = torch.sum(grasp[:, :3, 2] * approach_direction, dim=-1)
+            eligible = available & ~found & (alignment >= minimum_alignment)
+            if not bool(eligible.any().item()):
+                continue
+            feasible = self._ik_chain_feasible_rows(
+                start_qpos,
+                waypoint_poses(grasp),
+                eligible=eligible,
+                env_ids=env_ids,
+                reference_protocol=reference_protocol,
+            )
+            selected[feasible] = grasp[feasible]
+            found |= feasible
+            if bool(found.all().item()):
+                return selected, found
         return selected, found
 
     def _ik_chain_feasible_rows(
@@ -2046,11 +2043,12 @@ class AtomicSkillScenario(ScenarioProvider):
                 gripper_data=self.grasp_model(),
                 root_from_tcp=self.grasp_root_from_tcp(),
             )
-            candidates, costs = generator.get_valid_grasp_poses(
+            candidates, costs = generator.validated_labels.ranked_world_poses(
                 mesh_vertices=mesh_vertices,
                 mesh_triangles=mesh_triangles,
                 obj_poses=target_pose[:1],
                 approach_direction=approach_direction[:1],
+                on_support=False,
             )[0]
         finite_indices = torch.nonzero(torch.isfinite(costs), as_tuple=False).flatten()
         if finite_indices.numel() == 0:
@@ -2071,15 +2069,11 @@ class AtomicSkillScenario(ScenarioProvider):
                 target_pose,
                 target_to_grasp.expand(target_pose.shape[0], -1, -1),
             )
-            mirrored = grasp.clone()
-            mirrored[:, :3, 0] = -mirrored[:, :3, 0]
-            mirrored[:, :3, 1] = -mirrored[:, :3, 1]
-            for variant in (grasp, mirrored):
-                alignment = torch.sum(variant[:, :3, 2] * approach_direction, dim=-1)
-                if not bool((alignment >= minimum_alignment).all().item()):
-                    continue
-                if self._ik_chain_feasible(start_qpos, waypoint_poses(variant)):
-                    return variant
+            alignment = torch.sum(grasp[:, :3, 2] * approach_direction, dim=-1)
+            if not bool((alignment >= minimum_alignment).all().item()):
+                continue
+            if self._ik_chain_feasible(start_qpos, waypoint_poses(grasp)):
+                return grasp
         raise RuntimeError(
             "No independently reachable antipodal articulation grasp remained after "
             f"screening {len(ranked)} candidates."

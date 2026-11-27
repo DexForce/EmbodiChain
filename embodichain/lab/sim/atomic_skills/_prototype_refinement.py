@@ -32,6 +32,11 @@ from embodichain.toolkits.graspkit.pg_grasp.fixed_geometry import (
 )
 from embodichain.toolkits.graspkit.pose_generator import GraspPoseGenerator
 
+from ._grasp_selection import (
+    pickup_adjustment,
+    reachable_path,
+    validated_label_provider,
+)
 from .affordance import AntipodalAffordance
 from .bindings import JointPositionTarget
 from .goals import resolve_pose_goal
@@ -116,10 +121,8 @@ def _pick_refinement_anchor(
             device=context.robot.qpos.device,
         )
         device = context.robot.qpos.device
-        labels = getattr(generator, "validated_labels", None)
+        labels = validated_label_provider(generator)
         if labels is not None:
-            from ._grasp_selection import pickup_adjustment
-
             world_object = torch.as_tensor(
                 object_pose, dtype=direction.dtype, device=device
             )[None]
@@ -166,9 +169,9 @@ def _pick_refinement_anchor(
     if geometry is not None:
         grasp_from_tcp = np.asarray(geometry.provenance["grasp_from_tcp"])
         canonical_candidates = candidates @ np.linalg.inv(grasp_from_tcp)
-        if origin == "affordance_mesh":
+        if origin == "affordance_mesh" and labels is None:
             candidates = candidates @ calibration
-    elif origin == "affordance_mesh":
+    elif origin == "affordance_mesh" and labels is None:
         canonical_candidates = candidates
         candidates = canonical_candidates @ calibration
     else:
@@ -198,8 +201,6 @@ def _pick_refinement_anchor(
             candidates[batch], dtype=seed.dtype, device=seed.device
         )
         if labels is not None:
-            from ._grasp_selection import reachable_path
-
             ok = reachable_path(
                 motion_generator.robot,
                 arm.control_part,

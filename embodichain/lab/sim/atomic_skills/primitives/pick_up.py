@@ -21,6 +21,7 @@ from __future__ import annotations
 from embodichain.lab.sim.atomic_skills._grasp_selection import (
     pickup_adjustment,
     select_ranked_grasp,
+    validated_label_provider,
 )
 from embodichain.lab.sim.atomic_skills.continuation import PlanContinuationResult
 from embodichain.lab.sim.atomic_skills.primitives.contact import (
@@ -1227,7 +1228,7 @@ class PickUp(
         if not isinstance(affordance, AntipodalAffordance):
             raise ValueError("PickUp grasp sampling requires AntipodalAffordance.")
         generator = self.planning_services.grasp_pose_generator(grasp_target_id)
-        validated_labels = getattr(generator, "validated_labels", None)
+        validated_labels = validated_label_provider(generator)
         if validated_labels is not None:
             local, order, cache_key = validated_labels(
                 affordance.mesh_vertices,
@@ -1395,7 +1396,7 @@ class PickUp(
                 options,
                 direction,
             ).squeeze(2),
-            calibration=options.grasp_frame_to_eef.to(object_pose),
+            sampling=context.affordance_sampling,
         )
 
     def _grasp_path_feasibility(
