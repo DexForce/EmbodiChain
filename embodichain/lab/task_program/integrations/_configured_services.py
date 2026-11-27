@@ -110,6 +110,7 @@ from embodichain.lab.task_program.compiler.lowering import (
 )
 
 if TYPE_CHECKING:
+    from embodichain.lab.sim.objects import Robot
     from embodichain.toolkits.graspkit import GraspPoseGenerator
 
 __all__: list[str] = []
@@ -432,7 +433,11 @@ class _AntipodalGraspPoseGeneratorFactory:
             )
 
     def __call__(self) -> GraspPoseGenerator:
-        """Create a fresh configured antipodal grasp-pose generator."""
+        """Create a standalone generator using the declared hand defaults."""
+        return self.create_for_robot(None)
+
+    def create_for_robot(self, robot: Robot | None) -> GraspPoseGenerator:
+        """Use the installed hand's actuation and contact settings for physical labels."""
         from embodichain.toolkits.graspkit.pg_grasp import (
             AntipodalGraspPoseGenerator,
             AntipodalGraspPoseGeneratorCfg,
@@ -473,6 +478,13 @@ class _AntipodalGraspPoseGeneratorFactory:
         import json
 
         defaults = json.loads(self.gripper_json)
+        if robot is not None and "binding" in defaults:
+            from embodichain.lab.sim.utility.gripper_binding import (
+                _mounted_hand_physics,
+            )
+
+            binding = robot.cfg.gripper_bindings[defaults["binding"]["instance"]]
+            defaults.update(_mounted_hand_physics(robot, binding))
         geometry = build_gripper_collision_geometry(
             defaults, point_spacing=self.point_spacing
         )

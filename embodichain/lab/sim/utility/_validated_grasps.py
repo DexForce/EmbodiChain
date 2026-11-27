@@ -246,6 +246,8 @@ class ValidatedGraspCache:
                 "max_opening_width",
                 "qpos_limits",
                 "joint_drive_props",
+                "attrs",
+                "link_attrs",
             )
             if k in hand
         }

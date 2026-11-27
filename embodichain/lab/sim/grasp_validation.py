@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import replace
 from numbers import Real
 from pathlib import Path
+import re
 from tempfile import TemporaryDirectory
 import time
 import xml.etree.ElementTree as ET
@@ -39,6 +40,7 @@ from embodichain.robot_registry import (
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     DefaultPhysicsCfg,
+    JointDrivePropertiesCfg,
     MimicComplianceCfg,
     NewtonPhysicsCfg,
     RenderCfg,
@@ -48,7 +50,10 @@ from embodichain.lab.sim.cfg.gripper import ParallelJawGripperCfg
 from embodichain.lab.sim.sensors import ContactSensorCfg, ArticulationContactFilterCfg
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.utility.gripper_geometry import _native_joint_limits
-from embodichain.lab.sim.utility.gripper_binding import _fixed_transform
+from embodichain.lab.sim.utility.gripper_binding import (
+    _fixed_transform,
+    _native_joint_drives,
+)
 
 __all__ = ["GraspValidator"]
 
@@ -164,17 +169,26 @@ def _stage(hand, directory, physics, close_qpos=None, *, open_qpos=None):
     hand.urdf_cfg = None
     hand.fpath = str(path)
     hand.init_qpos = None
-    for name, value in (
+    native_joints = {
+        name: name for name, joint in joints.items() if joint.get("type") != "fixed"
+    }
+    drives = _native_joint_drives(
+        hand.joint_drive_props, list(native_joints), hand.control_parts, native_joints
+    )
+    # Preserve passive fingers without disabling the independently driven stage.
+    if drives.get("drive_type") == "none":
+        del drives["drive_type"]
+        modes = drives.setdefault("target_mode", {})
+        for name in native_joints:
+            modes.setdefault(re.escape(name), "none")
+    for field, value in (
         ("stiffness", 30000.0),
         ("damping", 350.0),
         ("max_effort", 2000.0),
+        ("target_mode", "position_velocity"),
     ):
-        old = getattr(hand.joint_drive_props, name)
-        setattr(
-            hand.joint_drive_props,
-            name,
-            {**{j: old for j in hand.joint_commands["open"]}, "stage_.*": value},
-        )
+        drives.setdefault(field, {})["stage_.*"] = value
+    hand.joint_drive_props = JointDrivePropertiesCfg.from_dict(drives)
 
     return root_from_mount
 

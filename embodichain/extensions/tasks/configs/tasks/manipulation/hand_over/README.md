@@ -24,7 +24,7 @@ python -m embodichain.lab.scripts.run_task \
 The default can transfer samples up to 200 candidate grasps per approach
 direction for physical validation. Both hands reuse the same labels when their
 gripper, object and sampling settings match. During planning, the source TCP
-must approach within 15° of the pickup direction and the receiver within 30°
+must approach within 10° of the pickup direction and the receiver within 30°
 of its transfer direction. Adjust `max_candidates`, `pickup_approach_tolerance_deg`
 and `receive_approach_tolerance_deg` in [the handover integration](task_program/integration.yaml).
 

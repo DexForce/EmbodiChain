@@ -43,7 +43,12 @@ import torch
 import yaml
 
 from embodichain.data import get_data_path
-from embodichain.lab.sim.cfg import RigidObjectCfg
+from embodichain.lab.sim.cfg import (
+    JointDrivePropertiesCfg,
+    RigidBodyPhysicsCfg,
+    RigidObjectCfg,
+    link_attrs_from_dict,
+)
 from embodichain.lab.sim.cfg.gripper import ParallelJawGripperCfg
 from embodichain.lab.sim.grasp_validation import GraspValidator
 from embodichain.lab.sim.utility.gripper_geometry import (
@@ -152,15 +157,15 @@ def _resolve_hand(settings: dict, urdf: Path):
         if not data.get("pad_links"):
             raise ValueError("Custom grippers require two pad_links")
         drives = data.pop("joint_drive_props", None)
+        data["attrs"] = RigidBodyPhysicsCfg.from_dict(data.get("attrs", {}))
+        data["link_attrs"] = link_attrs_from_dict(data.get("link_attrs", {}))
         model = ParallelJawGripperCfg(
             uid=data["model_id"],
             **data,
             solver_cfg={},
         )
         if drives is not None:
-            from embodichain.lab.sim.cfg import JointDrivePropertiesCfg
-
-            model.joint_drive_props = JointDrivePropertiesCfg(**drives)
+            model.joint_drive_props = JointDrivePropertiesCfg.from_dict(drives)
         model.root_props.fixed_base = True
     return model, options
 

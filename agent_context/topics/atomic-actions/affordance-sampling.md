@@ -31,7 +31,10 @@ Action/Goal inputs rather than Affordance variation.
 
 Configured parallel-jaw grasp services label the scaled target mesh in an
 isolated PhysX process and cache object-local TCPs and opening widths by hand
-URDF, mesh and validation settings. PickUp, AxisAlign, HandOver, Slide,
+URDF, mesh and validation settings. For a bound hand the validator applies the
+mounted joint drives and link contact properties under their native URDF names.
+Changing a finger gain, effort limit or pad friction selects a new cache entry.
+PickUp, AxisAlign, HandOver, Slide,
 OpenDoor and CoordinatedPickment rank eligible labels by live closing-axis
 and contact-center cost, then TCP +Z alignment, and check each skill's IK
 waypoints in groups of 50. HandOver and coordinated grasps retain their
@@ -51,7 +54,9 @@ through the shared host helpers in
 `examples/sim/atomic_skill/support.py`. HandOver samples pickup
 and receiving grasps in separate named streams while preserving opposite object
 ends and per-row arm assignment; its diagnostics retain the selected assignment's
-candidate metadata and control parts. Press samples local contact-frame roll;
+candidate metadata and control parts. When the hands use different providers,
+a provider-specific diagnostic is null on rows where it does not apply.
+Press samples local contact-frame roll;
 the Twist example explicitly declares `grasp_roll_range=(-pi, pi)` for parallel
 branches. Press, Slide, and OpenDoor examples use `ik_interp` for their exact
 Cartesian contact/path samples.

@@ -609,21 +609,21 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
             assignment = first_is_handover.cpu().tolist()
             for name, first_metadata in first_to_second.affordance_samples.items():
                 second_metadata = second_to_first.affordance_samples[name]
-                metadata = dict(first_metadata)
-                for field, values in first_metadata.items():
-                    if isinstance(values, list):
-                        metadata[field] = [
-                            values[row] if use_first else second_metadata[field][row]
-                            for row, use_first in enumerate(assignment)
-                        ]
-                if first_metadata.get("validated_cache") != second_metadata.get(
-                    "validated_cache"
-                ):
-                    metadata["validated_cache"] = [
-                        (first_metadata if use_first else second_metadata).get(
-                            "validated_cache"
-                        )
-                        for use_first in assignment
+                selected_rows = [
+                    first_metadata if use_first else second_metadata
+                    for use_first in assignment
+                ]
+                metadata = {}
+                for field in first_metadata | second_metadata:
+                    first = first_metadata.get(field)
+                    second = second_metadata.get(field)
+                    if not isinstance(first, list) and first == second:
+                        metadata[field] = first
+                        continue
+                    values = [source.get(field) for source in selected_rows]
+                    metadata[field] = [
+                        value[row] if isinstance(value, list) else value
+                        for row, value in enumerate(values)
                     ]
                 affordance_samples[name] = metadata
 

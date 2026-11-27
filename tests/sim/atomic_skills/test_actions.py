@@ -7840,9 +7840,23 @@ def test_handover_horizontal_mode_receives_from_side_at_opposite_end() -> None:
     assert receive_call.kwargs["is_positive_part"].tolist() == [False, False]
 
 
-def test_handover_selects_arm_per_environment() -> None:
+def test_handover_selects_arm_per_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     generator = _dual_motion_generator()
     action = _bind_action(generator, HandOver())
+    physical = _StubGraspPoseGenerator()
+    physical.validated_labels = Mock(
+        return_value=(
+            torch.eye(4)[None],
+            torch.zeros(NUM_ENVS, 1, dtype=torch.long),
+            "pgi",
+        )
+    )
+    providers = {"left_hand": physical, "right_hand": _GRASP_GENERATORS[id(action)]}
+    monkeypatch.setattr(
+        type(action.planning_services),
+        "grasp_pose_generator",
+        lambda services, target_id: providers[target_id],
+    )
     semantics, _ = _handover_semantics()
     object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     object_pose[:, 0, 3] = torch.tensor([-0.8, 0.8])
@@ -7865,6 +7879,19 @@ def test_handover_selects_arm_per_environment() -> None:
     assert torch.all(positions[0, DUAL_ARM_DOF + 2 :] == 0)
     assert torch.all(positions[1, DUAL_ARM_DOF : DUAL_ARM_DOF + 2] == 0)
     assert torch.all(positions[1, DUAL_ARM_DOF + 2 :] == 1)
+
+    samples = plan.diagnostics.metadata["affordance_sample"]
+    for phase, physical_row in (("pickup_grasp", 0), ("receive_grasp", 1)):
+        sample = samples[phase]
+        geometric_row = 1 - physical_row
+        assert sample["validated_cache"][physical_row] == "pgi"
+        assert sample["validated_cache"][geometric_row] is None
+        assert sample["candidate_ranks"][physical_row] == 0
+        assert sample["candidate_ranks"][geometric_row] is None
+        assert sample["valid_candidate_counts"][physical_row] is None
+        assert sample["valid_candidate_counts"][geometric_row] == 1
+        assert sample["candidate_ids"] == [0, 0]
+        assert sample["pose_frame"] == "world"
 
 
 def test_handover_holds_rows_whose_candidate_arm_is_occupied() -> None:

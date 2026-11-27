@@ -417,6 +417,92 @@ def test_all_examples_decode_through_one_composable_integration_schema(
     assert integration.adapter_factory.registration is registration
 
 
+def test_handover_physical_labels_use_mounted_drives_and_pad_contacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+    import re
+    import xml.etree.ElementTree as ET
+
+    from embodichain.lab.scripts.label_grasps import _resolve_hand
+    from embodichain.lab.sim.grasp_validation import _stage
+    from embodichain.lab.sim.utility import _validated_grasps
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+    from embodichain.lab.gym.utils.gym_utils import _robot_cfg_from_dict
+
+    physical = _physical_components(_config_path("hand_over"), _gym_config("hand_over"))
+    cfg = _robot_cfg_from_dict(physical.config["robot"])
+    prepare_robot_grippers(cfg)
+    urdf = ET.parse(cfg.fpath)
+    robot = SimpleNamespace(
+        cfg=cfg,
+        all_joint_names=[j.get("name") for j in urdf.findall("joint")],
+        link_names=[link.get("name") for link in urdf.findall("link")],
+    )
+    adapter_factory = _deployment_from_path(
+        _config_path("hand_over")
+    ).integration.adapter_factory.delegate
+    monkeypatch.setattr(
+        "embodichain.lab.task_program.integrations.simulation.environment.create_simulation_task_program_adapter",
+        lambda environment, *, grasp_pose_generators, **kwargs: grasp_pose_generators,
+    )
+    jobs = []
+
+    def run_label_worker(argv, *, check):
+        work = Path(argv[-1])
+        job = json.loads((work / "job.json").read_text())
+        jobs.append(job)
+        torch.save({"grasp_pose": torch.empty(0, 4, 4)}, work / "labels.pt")
+
+    monkeypatch.setattr(
+        _validated_grasps, "subprocess", SimpleNamespace(run=run_label_worker)
+    )
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+
+    def key(part):
+        generators = adapter_factory.create_adapter(SimpleNamespace(robot=robot))
+        cache = generators[part].validated_labels
+        _, _, key = cache(
+            torch.eye(3),
+            torch.tensor([[0, 1, 2]]),
+            None,
+            torch.eye(4)[None],
+            torch.tensor([[0.0, 0.0, -1.0]]),
+        )
+        return key
+
+    baseline = key("left_eef")
+    assert key("right_eef") == baseline
+    assert len(jobs) == 1
+    hand, _ = _resolve_hand(jobs[0]["config"]["gripper"], Path(jobs[0]["urdf"]))
+    _stage(hand, tmp_path, "default")
+    leader, follower = "gripper_finger1_joint_1", "gripper_finger2_joint_1"
+    for field, expected in (
+        ("stiffness", (1000.0, 0.0, 30000.0)),
+        ("damping", (100.0, 0.0, 350.0)),
+        ("max_effort", (10000.0, 0.0, 2000.0)),
+    ):
+        rules = getattr(hand.joint_drive_props, field)
+        (stage_value,) = (
+            v for pattern, v in rules.items() if re.fullmatch(pattern, "stage_0")
+        )
+        assert (rules[leader], rules[follower], stage_value) == expected
+    for pad in hand.pad_links:
+        group = hand.link_attrs[pad]
+        assert group.link_names_expr == [pad]
+        assert group.attrs.material_props.static_friction == 2.0
+        assert group.attrs.material_props.dynamic_friction == 2.0
+        assert group.attrs.collision_props.condim == 4
+
+    cfg.joint_drive_props.max_effort["right_" + leader] = 30.0
+    assert key("left_eef") == baseline
+    lower_effort = key("right_eef")
+    assert lower_effort != baseline
+    cfg.link_attrs["gripper_fingers"].attrs.material_props.dynamic_friction = 0.5
+    assert key("right_eef") != lower_effort
+    assert key("left_eef") != baseline
+
+
 def test_execution_policy_planner_config_reaches_configured_adapter() -> None:
     """The policy-owned planner selection stays outside semantic payloads."""
     deployment = _deployment_from_path(
