@@ -44,18 +44,21 @@ embodichain show-task embodichain.extensions.tasks:repeated_pick_place
 
 ## Validated Franka pickup
 
-Run this command from the repository root to watch one repeated pick-and-place
-episode in the native simulator window.
+Prepare the Franka/cube cache once from the repository root, then run one
+repeated pick-and-place episode in the native simulator window.
 
 ```bash
-python -m embodichain.lab.scripts.run_task \
+python -m embodichain affordance precompute-grasp-cache \
+  --gym-config embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml \
+  --pair eef cube cube_grasp
+
+python -m embodichain run-task \
   --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml \
   --no-headless --renderer fast-rt --max_episodes 1 --filter-dataset-saving
 ```
 
-The first ordinary antipodal pick runs `GraspValidator` in a separate PhysX
-process using the configured standalone hand and the scaled object mesh.
-Subsequent picks reuse the object-local TCPs and opening widths in
+The preparation command runs `GraspValidator` for the mounted hand and scaled
+object mesh. Every pick reads the object-local TCPs and opening widths in
 `~/.cache/embodichain/grasp_annotator_cache/validated/<urdf-md5>-<object-md5>.pt`.
 The object digest includes vertex and face bytes and a canonical JSON signature
 of sampling, hand calibration and physics parameters.

@@ -21,7 +21,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-import embodichain.lab.sim.atomic_skills.articulation_geometry as articulation_geometry_module
+import embodichain.lab.sim.affordance.articulation_geometry as articulation_geometry_module
 from embodichain.lab.sim.atomic_skills.articulation_geometry import (
     ArticulationAffordanceGeometry,
     sample_initial_articulation_geometry,

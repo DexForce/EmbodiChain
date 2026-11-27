@@ -25,7 +25,7 @@ from unittest.mock import patch
 import pytest
 
 
-def _recorded_grasp_labels(cache, _key, _urdf, vertices, _triangles, _signature):
+def _recorded_grasp_labels(cache, vertices, triangles, attrs, adjustment):
     """Replay physical labels for these CPU expansion probes; keep live ranking and IK."""
     import torch
     import yaml
@@ -38,10 +38,15 @@ def _recorded_grasp_labels(cache, _key, _urdf, vertices, _triangles, _signature)
         atol=1e-6,
         rtol=0,
     )
-    return {
-        field: torch.tensor(entry[field], dtype=torch.float32)
-        for field in ("grasp_pose", "open_length")
-    }
+    key, _, _, algorithm = cache._label_job(vertices, triangles, attrs, adjustment)
+    return (
+        {
+            field: torch.tensor(entry[field], dtype=torch.float32)
+            for field in ("grasp_pose", "open_length")
+        },
+        key,
+        algorithm,
+    )
 
 
 def _check_place_keyframes(env, generator):
@@ -405,7 +410,7 @@ def _probe(output):
 
 
 def _run_probe(*args: str | Path, timeout: int = 300) -> None:
-    # A cache miss launches a second native process that also owns GPU arenas.
+    # Explicit cache preparation launches a second process that also owns GPU arenas.
     with subprocess.Popen(
         [sys.executable, __file__, *args],
         cwd=Path(__file__).resolve().parents[3],
@@ -650,7 +655,7 @@ def test_selected_handover_rows_preserve_world_batch():
 def test_handover_generates_and_reuses_physical_grasps(tmp_path: Path) -> None:
     """Generate real labels for both hands from an empty cache, then reuse them."""
     cache = tmp_path / "validated"
-    _run_probe("handover", cache, timeout=20 * 60)
+    _run_probe("prepare", cache, timeout=20 * 60)
     generated = {p.name: p.stat().st_mtime_ns for p in cache.glob("*.pt")}
     assert len(generated) == 2, generated
     # Reopen the real world with the same cache. Both hands must execute and
@@ -660,26 +665,49 @@ def test_handover_generates_and_reuses_physical_grasps(tmp_path: Path) -> None:
 
 
 if __name__ == "__main__":
-    from embodichain.lab.sim.utility import _validated_grasps
+    from embodichain.lab.sim.grasp import cache as _validated_grasps
 
-    if len(sys.argv) == 3 and sys.argv[1] == "handover":
+    if len(sys.argv) == 3 and sys.argv[1] in {"handover", "prepare"}:
         from functools import partial
-        from embodichain.lab.scripts import label_grasps
+        from embodichain.lab.sim.grasp import config as label_grasps
 
         # Both processes must use the same reduced budget to exercise a cache hit.
         sampling = partial(
-            label_grasps._SamplingCfg, stable_poses=2, directions=16, max_drops=16
+            label_grasps.GraspSamplingCfg, stable_poses=2, directions=16, max_drops=16
         )
         with (
             patch.object(_validated_grasps, "_LABEL_CACHE_DIR", Path(sys.argv[2])),
-            patch.object(label_grasps, "_SamplingCfg", sampling),
-            patch.object(label_grasps, "_DEFAULT_NUM_ENVS", 256),
+            patch.object(label_grasps, "GraspSamplingCfg", sampling),
+            patch.object(label_grasps, "DEFAULT_NUM_ENVS", 256),
         ):
-            _probe_handover_rows()
+            if sys.argv[1] == "prepare":
+                from embodichain.cli.affordance import main
+
+                root = Path(__file__).resolve().parents[3]
+                main(
+                    [
+                        "precompute-grasp-cache",
+                        "--gym-config",
+                        str(
+                            root
+                            / "embodichain/extensions/tasks/configs/tasks/manipulation/hand_over/task.tianji_marvin.yaml"
+                        ),
+                        "--pair",
+                        "left_eef",
+                        "can",
+                        "can_antipodal_grasp",
+                        "--pair",
+                        "right_eef",
+                        "can",
+                        "can_antipodal_grasp",
+                    ]
+                )
+            else:
+                _probe_handover_rows()
     else:
         with patch.object(
             _validated_grasps.ValidatedGraspCache,
-            "_load_labels",
+            "_lookup",
             _recorded_grasp_labels,
         ):
             if sys.argv[1] == "handover":

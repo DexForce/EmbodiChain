@@ -488,7 +488,7 @@ class SkillPlanningServices:
         values: Mapping[str, GraspPoseGenerator],
     ) -> dict[str, GraspPoseGenerator]:
         """Validate an endpoint-to-generator service mapping."""
-        from ._grasp_selection import validated_label_provider
+        from embodichain.lab.sim.grasp.cache import validated_label_provider
 
         if not isinstance(values, Mapping):
             raise TypeError("grasp_pose_generators must be a mapping or None.")

@@ -24,19 +24,20 @@ from typing import ClassVar
 
 import torch
 
+from embodichain.lab.sim.grasp.cache import validated_label_provider
+
 from embodichain.toolkits.graspkit import ParallelJawGraspPoseGenerator
 from embodichain.utils import logger
 from embodichain.utils.math import matrix_from_quat, pose_inv, quat_from_matrix
 
-from embodichain.lab.sim.atomic_skills.affordance_sampling import (
+from embodichain.lab.sim.affordance.sampling import (
     AffordanceSamplingContext,
 )
 from embodichain.lab.sim.atomic_skills._grasp_selection import (
     select_ranked_grasp,
-    validated_label_provider,
     reachable_path,
 )
-from embodichain.lab.sim.atomic_skills.affordance import AntipodalAffordance
+from embodichain.lab.sim.affordance.interactions import AntipodalAffordance
 from embodichain.lab.sim.atomic_skills.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_skills.control import (
     GRASP_COMMAND,

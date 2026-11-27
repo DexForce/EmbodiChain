@@ -14,12 +14,13 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""On-demand physical grasp labels for a configured parallel-jaw grasp service."""
+"""Preparation and read-only lookup of physical labels for a mounted parallel-jaw hand."""
 
 from __future__ import annotations
 
 import fcntl
 import hashlib
+from typing import TYPE_CHECKING
 from collections.abc import Callable
 from copy import copy
 from dataclasses import dataclass, field
@@ -49,9 +50,34 @@ from embodichain.toolkits.graspkit.pg_grasp.fixed_geometry import (
     FixedGripperCollisionGeometry,
 )
 
-__all__ = []
+if TYPE_CHECKING:
+    from embodichain.toolkits.graspkit.pg_grasp import GraspPoseGenerator
+
+__all__ = ["ValidatedGraspCache"]
 
 _LABEL_CACHE_DIR = Path.home() / ".cache/embodichain/grasp_annotator_cache/validated"
+
+
+def validated_label_provider(
+    generator: GraspPoseGenerator | None,
+    hand_commands: tuple[torch.Tensor, torch.Tensor] | None = None,
+) -> Callable | None:
+    """Require a physical label source whenever an atomic skill uses Antipodal."""
+    from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGenerator
+
+    provider = getattr(generator, "validated_labels", None)
+    if isinstance(generator, AntipodalGraspPoseGenerator) and not callable(provider):
+        raise ValueError(
+            "Antipodal atomic skills require a GraspValidator label cache."
+        )
+    if provider is not None and hand_commands is not None:
+        from functools import partial
+
+        if isinstance(generator, AntipodalGraspPoseGenerator) or isinstance(
+            provider, ValidatedGraspCache
+        ):
+            return partial(provider, hand_commands=hand_commands)
+    return provider
 
 
 def _cache_key(
@@ -228,7 +254,9 @@ class ValidatedGraspCache:
             np.float32(source["joint_positions"][name]) != np.float32(value)
             for name, value in description["joint_commands"]["open"].items()
         ):
-            from .gripper_geometry import build_gripper_collision_geometry
+            from embodichain.lab.sim.utility.gripper_geometry import (
+                build_gripper_collision_geometry,
+            )
 
             geometry = build_gripper_collision_geometry(
                 description, point_spacing=source["point_spacing_m"]
@@ -301,7 +329,9 @@ class ValidatedGraspCache:
         bound = copy(self)
         bound.hand = dict(self.hand, joint_commands=commands)
         if commands["open"] != defaults["open"]:
-            from .gripper_geometry import build_gripper_collision_geometry
+            from embodichain.lab.sim.utility.gripper_geometry import (
+                build_gripper_collision_geometry,
+            )
 
             bound.geometry = build_gripper_collision_geometry(
                 bound.hand, point_spacing=self.geometry.provenance["point_spacing_m"]
@@ -381,15 +411,15 @@ class ValidatedGraspCache:
         )
         return _world_pose_rows(local, order, obj_poses)
 
-    def _load_labels(
+    def _prepare_labels(
         self,
         key: str,
         urdf: Path,
         vertices: torch.Tensor,
         triangles: torch.Tensor,
         signature: dict,
-    ) -> dict:
-        """Read the physical labels, running one isolated validator on a cache miss."""
+    ) -> Path:
+        """Run one isolated validator under the per-key preparation lock."""
         directory = _LABEL_CACHE_DIR
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"{key}.pt"
@@ -410,8 +440,22 @@ class ValidatedGraspCache:
                             faces=triangles.detach().cpu().numpy(),
                             process=False,
                         ).export(work / "target.obj", digits=17)
+                        native_urdf = urdf
+                        if self.hand.get("extract_subtree") or self.hand.get(
+                            "mesh_paths"
+                        ):
+                            from embodichain.data.urdf import materialize_urdf_subtree
+
+                            native_urdf = materialize_urdf_subtree(
+                                urdf,
+                                self.hand["root_link"],
+                                mesh_paths={
+                                    k: get_data_path(v)
+                                    for k, v in self.hand.get("mesh_paths", {}).items()
+                                },
+                            )
                         (work / "job.json").write_text(
-                            json.dumps(signature | {"urdf": str(urdf)})
+                            json.dumps(signature | {"urdf": str(native_urdf)})
                         )
                         subprocess.run(
                             [sys.executable, "-m", __name__, str(work)], check=True
@@ -419,8 +463,7 @@ class ValidatedGraspCache:
                         (work / "labels.pt").replace(path)
                     if self.force_refresh:
                         self._refreshed.add(key)
-        # Map the file so ranking reads only the retained poses and widths.
-        return torch.load(path, weights_only=True, map_location="cpu", mmap=True)
+        return path
 
     def precompute(
         self,
@@ -448,35 +491,26 @@ class ValidatedGraspCache:
             if hand_commands is None
             else self._with_commands(torch.stack(hand_commands).detach().cpu())
         )
-        _, key, _ = cache._physical_labels(vertices, triangles, attrs, pose_adjustment)
-        return _LABEL_CACHE_DIR / f"{key}.pt"
+        key, urdf, signature, _ = cache._label_job(
+            vertices, triangles, attrs, pose_adjustment
+        )
+        return cache._prepare_labels(key, urdf, vertices, triangles, signature)
 
-    def _physical_labels(
+    def _label_job(
         self,
         vertices: torch.Tensor,
         triangles: torch.Tensor,
         attrs: dict | None,
         pose_adjustment: dict | None,
-    ) -> tuple[dict, str, AntipodalGraspPoseGeneratorCfg]:
-        from embodichain.lab.scripts.label_grasps import (
-            _DEFAULT_NUM_ENVS,
-            _SamplingCfg,
-            _VALIDATION_REVISION,
+    ) -> tuple[str, Path, dict, AntipodalGraspPoseGeneratorCfg]:
+        from .config import (
+            DEFAULT_NUM_ENVS,
+            GraspSamplingCfg,
+            VALIDATION_REVISION,
         )
 
         hand = self.hand
         urdf = Path(get_data_path(hand["fpath"]))
-        native_urdf = urdf
-        if hand.get("extract_subtree") or hand.get("mesh_paths"):
-            from embodichain.data.urdf import materialize_urdf_subtree
-
-            native_urdf = materialize_urdf_subtree(
-                urdf,
-                hand["root_link"],
-                mesh_paths={
-                    k: get_data_path(v) for k, v in hand.get("mesh_paths", {}).items()
-                },
-            )
         description = {
             k: hand[k]
             for k in (
@@ -494,8 +528,8 @@ class ValidatedGraspCache:
             )
             if k in hand
         }
-        defaults = _SamplingCfg()
-        sampling = _SamplingCfg(
+        defaults = GraspSamplingCfg()
+        sampling = GraspSamplingCfg(
             sample_count=self.algorithm.get("sample_count", defaults.sample_count),
             candidates_per_direction=self.algorithm.get(
                 "max_candidates", defaults.candidates_per_direction
@@ -549,12 +583,12 @@ class ValidatedGraspCache:
             point_spacing=self.geometry.provenance["point_spacing_m"],
         )
         signature = dict(
-            schema=_VALIDATION_REVISION,
+            schema=VALIDATION_REVISION,
             target_mesh_format="obj",
             config=config,
             sampling=sampling.to_dict(),
             generator=settings,
-            num_envs=_DEFAULT_NUM_ENVS,
+            num_envs=DEFAULT_NUM_ENVS,
             engine=version("dexsim-engine"),
             hand_geometry=self.geometry.provenance["points_sha256"],
             hand_files=sorted(self.geometry.provenance["files_sha256"].values()),
@@ -563,7 +597,28 @@ class ValidatedGraspCache:
         if pose_adjustment:
             signature["pose_adjustment"] = pose_adjustment
         key = _cache_key(urdf, vertices, triangles, signature)
-        labels = self._load_labels(key, native_urdf, vertices, triangles, signature)
+        return key, urdf, signature, algorithm
+
+    def _lookup(
+        self,
+        vertices: torch.Tensor,
+        triangles: torch.Tensor,
+        attrs: dict | None,
+        pose_adjustment: dict | None,
+    ) -> tuple[dict, str, AntipodalGraspPoseGeneratorCfg]:
+        """Map completed labels without acquiring a preparation lock or starting physics."""
+        key, _, _, algorithm = self._label_job(
+            vertices, triangles, attrs, pose_adjustment
+        )
+        path = _LABEL_CACHE_DIR / f"{key}.pt"
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"Missing prepared grasp cache {path}. Run 'embodichain affordance "
+                "precompute-grasp-cache --gym-config <deployment.yaml> --pair "
+                "<hand> <object> <affordance>' before planning. For invocation-specific "
+                "commands or TCP adjustments, prepare the matching pair with precompute()."
+            )
+        labels = torch.load(path, weights_only=True, map_location="cpu", mmap=True)
         return labels, key, algorithm
 
     def _rank(
@@ -585,12 +640,12 @@ class ValidatedGraspCache:
     ) -> tuple[torch.Tensor, torch.Tensor, str]:
         """Return object-frame TCPs, ordered label indices per scene and the cache key.
 
-        Validation runs in a separate physics process on the first request for
-        a hand, mesh and sampling configuration. Each call ranks the stored TCPs
+        The host must prepare labels for the effective hand, mesh and sampling
+        configuration before planning. Each call ranks the stored TCPs
         for the current object placements and approach directions. A padding
         index of -1 marks the end of a scene's eligible candidates.
         """
-        labels, key, algorithm = self._physical_labels(
+        labels, key, algorithm = self._lookup(
             vertices, triangles, attrs, pose_adjustment
         )
         poses = labels["grasp_pose"].to(object_poses)
@@ -646,12 +701,13 @@ def _adjust_candidates(poses: torch.Tensor, settings: dict) -> torch.Tensor:
 
 
 def _generate(work: Path) -> None:
-    from embodichain.lab.scripts.label_grasps import _SamplingCfg, _run
+    from .config import GraspSamplingCfg
+    from .labeling import label_grasps
 
     job = json.loads((work / "job.json").read_text())
-    _run(
+    label_grasps(
         job["config"],
-        _SamplingCfg(**job["sampling"]),
+        GraspSamplingCfg(**job["sampling"]),
         work / "target.obj",
         Path(job["urdf"]),
         work / "labels.pt",

@@ -37,7 +37,7 @@ from embodichain.lab.sim.atomic_skills import (
     PlanTransform,
     ResolvedSkillRequest,
 )
-from embodichain.lab.sim.atomic_skills.affordance_sampling import (
+from embodichain.lab.sim.affordance.sampling import (
     AffordanceSamplingContext,
 )
 from embodichain.lab.sim.motion.expansion import (

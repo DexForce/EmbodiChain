@@ -24,6 +24,8 @@ from typing import ClassVar
 
 import torch
 
+from embodichain.lab.sim.grasp.cache import validated_label_provider
+
 from embodichain.utils import logger
 from embodichain.utils.math import (
     axis_angle_to_rotation_matrix,
@@ -34,10 +36,9 @@ from embodichain.lab.sim.atomic_skills._grasp_selection import (
     offset_pose,
     reachable_path,
     select_ranked_grasp,
-    validated_label_provider,
 )
-from embodichain.lab.sim.atomic_skills.affordance import AxisAlignAffordance
-from embodichain.lab.sim.atomic_skills.affordance_sampling import (
+from embodichain.lab.sim.affordance.interactions import AxisAlignAffordance
+from embodichain.lab.sim.affordance.sampling import (
     AffordancePoseCandidates,
     AffordanceSample,
 )

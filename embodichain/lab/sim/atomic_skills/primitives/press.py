@@ -36,7 +36,7 @@ from embodichain.lab.sim.atomic_skills.primitives._helpers import (
     arm_qpos_from_state,
     find_symmetric_nearest_xpos,
 )
-from embodichain.lab.sim.atomic_skills.affordance import PressAffordance
+from embodichain.lab.sim.affordance.interactions import PressAffordance
 from embodichain.lab.sim.atomic_skills.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_skills.control import (
     GRASP_COMMAND,

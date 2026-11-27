@@ -33,8 +33,10 @@ import torch
 from embodichain.lab.evaluation import CompiledEvaluation
 from embodichain.lab.evaluation._recording import _is_segment_start_field
 from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
-from embodichain.lab.sim.atomic_skills import (
+from embodichain.lab.sim.affordance import (
     Affordance,
+)
+from embodichain.lab.sim.atomic_skills import (
     AtomicSkillEngine,
     EndpointTrackingFeedbackAddress,
     GRASP_CAPABILITY,
@@ -157,7 +159,14 @@ class IntegrationFingerprintMismatch(RuntimeError):
 def _qualified_name(value: type[object] | object) -> str:
     """Return a stable fully-qualified type name."""
     value_type = value if isinstance(value, type) else type(value)
-    return f"{value_type.__module__}.{value_type.__qualname__}"
+    module = value_type.__module__
+    if module == "embodichain.lab.sim.affordance.interactions":
+        # Published registration fingerprints use the original affordance type IDs.
+        from embodichain.lab.sim.atomic_skills import affordance as legacy
+
+        if getattr(legacy, value_type.__qualname__, None) is value_type:
+            module = legacy.__name__
+    return f"{module}.{value_type.__qualname__}"
 
 
 def _canonical_value(value: object) -> object:

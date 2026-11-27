@@ -30,7 +30,7 @@ from embodichain.lab.sim.atomic_skills._grasp_selection import (
     reachable_path,
     sample_link_grasp,
 )
-from embodichain.lab.sim.atomic_skills.affordance import SlideAffordance
+from embodichain.lab.sim.affordance.interactions import SlideAffordance
 from embodichain.lab.sim.atomic_skills.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_skills.control import (
     GRASP_COMMAND,

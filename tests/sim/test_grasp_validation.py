@@ -28,9 +28,9 @@ import numpy as np
 import pytest
 import torch
 
-from embodichain.lab.sim import grasp_validation
+from embodichain.lab.sim.grasp import validation as grasp_validation
 from embodichain.lab.sim.cfg import RigidObjectCfg
-from embodichain.lab.sim.grasp_validation import GraspValidator, _result
+from embodichain.lab.sim.grasp.validation import GraspValidator, _result
 from embodichain.robot_registry import resolve_gripper_defaults
 
 

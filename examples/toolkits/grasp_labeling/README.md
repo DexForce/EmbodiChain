@@ -6,7 +6,7 @@ mass, friction, scale and convex decomposition, the hand's TCP and drives, and
 the sampling budget. Run from the repository root with the PhysX/CUDA environment active.
 
 ```bash
-python -m embodichain label-grasps \
+python -m embodichain affordance label-grasps \
   --config examples/toolkits/grasp_labeling/cobotmagic_cup.yaml \
   --output outputs/grasp-labeling/cobotmagic_cup.pt
 ```
@@ -16,7 +16,7 @@ python -m embodichain label-grasps \
 For a quick end-to-end check, run a smaller budget in a separate output.
 
 ```bash
-python -m embodichain label-grasps \
+python -m embodichain affordance label-grasps \
   --config examples/toolkits/grasp_labeling/cobotmagic_cup.yaml \
   --stable-poses 3 --max-drops 12 --directions 4 --candidates-per-direction 4 --sample-count 2000 \
   --num-envs 4 --output outputs/grasp-labeling/cobotmagic_cup_quick.pt
@@ -94,7 +94,7 @@ This standalone example checks two top-down poses on a small block.
 ```python
 import numpy as np
 from embodichain.lab.sim.cfg import RigidObjectCfg
-from embodichain.lab.sim.grasp_validation import GraspValidator
+from embodichain.lab.sim.grasp.validation import GraspValidator
 
 block = RigidObjectCfg.from_dict({
     "uid": "block",
@@ -173,12 +173,13 @@ and material parameters. It prints the cache file in
 additional hand/object/affordance triples from the same deployment.
 
 ```bash
-python -m embodichain label-grasps precompute \
+python -m embodichain affordance precompute-grasp-cache \
   --gym-config embodichain/extensions/tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml \
   --pair eef cube cube_grasp
 ```
 
-The CLI warms the configured endpoint commands and unadjusted TCP. For
+The CLI prepares the configured endpoint commands and the final TCP adjustments
+from the deployment's skill presets. For
 invocations that change the TCP or override the commands, use the mounted
 generator's provider with the same effective parameters as the skill.
 
@@ -192,9 +193,10 @@ cache_path = generator.validated_labels.precompute(
 )
 ```
 
-Both paths use the same key, file lock and validator worker as planning. The
-ordinary `label-grasps --output` command writes a standalone dataset. Warming
-a deployment through `precompute` resolves its own physical identity.
+Both preparation paths use the same cache identity as planning. A cache miss
+during planning reports the missing key and the preparation command. The
+ordinary `affordance label-grasps --output` command writes a standalone dataset. Warming
+a deployment through `precompute-grasp-cache` resolves its own physical identity.
 
 ## CobotMagic cup reference run
 

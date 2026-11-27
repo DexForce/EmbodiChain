@@ -1999,7 +1999,7 @@ def create_parallel_jaw_grasp_pose_generator(
         gripper_data = mounted_model | (gripper_data or {})
     if gripper_data is None:
         raise ValueError("Explicit collision geometry also requires a gripper model.")
-    from embodichain.lab.sim.utility._validated_grasps import ValidatedGraspCache
+    from embodichain.lab.sim.grasp.cache import ValidatedGraspCache
 
     from embodichain.lab.sim.utility.gripper_binding import (
         _mounted_hand_physics,

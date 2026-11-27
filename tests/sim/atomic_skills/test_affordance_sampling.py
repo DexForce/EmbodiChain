@@ -24,7 +24,7 @@ import json
 import pytest
 import torch
 
-import embodichain.lab.sim.atomic_skills.affordance_sampling as sampling_module
+import embodichain.lab.sim.affordance.sampling as sampling_module
 from embodichain.lab.sim.atomic_skills.affordance_sampling import (
     AffordancePoseCandidates,
     AffordanceSample,

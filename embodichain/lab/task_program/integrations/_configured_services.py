@@ -36,12 +36,16 @@ from .extensions import (
     ControlPartEvidenceProviderFactory,
     RegisteredSemanticLowererFactory,
 )
+from embodichain.lab.sim.affordance import (
+    Affordance,
+    AxisAlignAffordance,
+    SlideAffordance,
+    sample_initial_articulation_geometry,
+)
 from embodichain.lab.sim.atomic_skills import (
     SkillOptions,
-    Affordance,
     AtomicSkillEngine,
     AxisAlign,
-    AxisAlignAffordance,
     AxisAlignGoal,
     AxisAlignOptions,
     CoordinatedPickGoal,
@@ -73,11 +77,9 @@ from embodichain.lab.sim.atomic_skills import (
     SceneProvider,
     SkillDescriptor,
     Slide,
-    SlideAffordance,
     SlideGoal,
     SlideJointTarget,
     SlideOptions,
-    sample_initial_articulation_geometry,
 )
 from embodichain.lab.task_program.semantics import (
     BinaryEffectEvidenceQuery,
@@ -447,7 +449,7 @@ class _AntipodalGraspPoseGeneratorFactory:
         from embodichain.lab.sim.utility.gripper_geometry import (
             build_gripper_collision_geometry,
         )
-        from embodichain.lab.sim.utility._validated_grasps import ValidatedGraspCache
+        from embodichain.lab.sim.grasp.cache import ValidatedGraspCache
         from embodichain.lab.sim.utility.gripper_binding import _validation_backend
 
         algorithm_kwargs: dict[str, object] = {}

@@ -259,7 +259,7 @@ def create_parallel_jaw_grasp_pose_generator(
                 closing_geometry.pads + offset,
                 closing_geometry.gaps,
             )
-    from embodichain.lab.sim.utility._validated_grasps import ValidatedGraspCache
+    from embodichain.lab.sim.grasp.cache import ValidatedGraspCache
 
     algorithm = dict(
         sample_count=n_sample,

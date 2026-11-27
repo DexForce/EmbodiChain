@@ -27,7 +27,7 @@ import torch
 
 from embodichain.compute.geometry import rotate_rigid_grasp
 
-from embodichain.lab.sim.atomic_skills.affordance import TwistAffordance
+from embodichain.lab.sim.affordance.interactions import TwistAffordance
 from embodichain.lab.sim.atomic_skills.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_skills.control import (
     GRASP_COMMAND,

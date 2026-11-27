@@ -26,6 +26,8 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 import torch
 
+from embodichain.lab.sim.grasp.cache import validated_label_provider
+
 from embodichain.lab.sim.motion.refinement import MotionRefinementCfg
 from embodichain.toolkits.graspkit.pg_grasp.fixed_geometry import (
     FixedGripperCollisionGeometry,
@@ -35,9 +37,8 @@ from embodichain.toolkits.graspkit.pose_generator import GraspPoseGenerator
 from ._grasp_selection import (
     pickup_adjustment,
     reachable_path,
-    validated_label_provider,
 )
-from .affordance import AntipodalAffordance
+from embodichain.lab.sim.affordance.interactions import AntipodalAffordance
 from .bindings import JointPositionTarget
 from .goals import resolve_pose_goal
 from .invocation import ResolvedSkillRequest

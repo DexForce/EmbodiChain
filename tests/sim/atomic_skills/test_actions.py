@@ -4212,12 +4212,14 @@ def test_pick_normalizes_integer_batch_ik_success_masks() -> None:
     assert qpos.shape == (NUM_ENVS, 3, 2, ARM_DOF)
 
 
-def test_pickup_override_cannot_borrow_closed_hand_labels(monkeypatch) -> None:
+def test_pickup_override_cannot_borrow_closed_hand_labels(
+    monkeypatch, tmp_path
+) -> None:
     from embodichain.lab.sim.atomic_skills.control import (
         JointPositionCommand,
         SkillControlOverrides,
     )
-    from embodichain.lab.sim.utility._validated_grasps import ValidatedGraspCache
+    from embodichain.lab.sim.grasp.cache import ValidatedGraspCache
     from embodichain.lab.sim.utility.gripper_geometry import (
         build_gripper_collision_geometry,
     )
@@ -4245,13 +4247,22 @@ def test_pickup_override_cannot_borrow_closed_hand_labels(monkeypatch) -> None:
     _GRASP_GENERATORS[id(action)].validated_labels = cache
     jobs = {}
 
-    def labels(cache, key, urdf, vertices, triangles, signature):
-        gripper = signature["config"]["gripper"]
-        jobs[key] = gripper
-        retained = gripper["close_qpos"] != gripper["open_qpos"]
-        return {"grasp_pose": torch.eye(4).repeat(int(retained), 1, 1)}
+    from pathlib import Path
+    from embodichain.lab.sim.grasp import cache as cache_module
 
-    monkeypatch.setattr(ValidatedGraspCache, "_load_labels", labels)
+    def run_worker(argv, *, check):
+        work = Path(argv[-1])
+        import json
+
+        gripper = json.loads((work / "job.json").read_text())["config"]["gripper"]
+        retained = gripper["close_qpos"] != gripper["open_qpos"]
+        jobs[retained] = gripper
+        torch.save(
+            {"grasp_pose": torch.eye(4).repeat(int(retained), 1, 1)}, work / "labels.pt"
+        )
+
+    monkeypatch.setattr(cache_module, "_LABEL_CACHE_DIR", tmp_path / "validated")
+    monkeypatch.setattr(cache_module, "subprocess", SimpleNamespace(run=run_worker))
     semantics = ObjectSemantics(
         entity_id="target",
         label="target",
@@ -4273,8 +4284,9 @@ def test_pickup_override_cannot_borrow_closed_hand_labels(monkeypatch) -> None:
         ),
     )
     scene = _target_scene(torch.eye(4).repeat(NUM_ENVS, 1, 1), timestamp=0.0, version=0)
-    plan = _plan_action(action, invocation, _context(scene=scene))
-    planned_keys = set(jobs)
+    with pytest.raises(FileNotFoundError, match="precompute-grasp-cache"):
+        _plan_action(action, invocation, _context(scene=scene))
+    assert not jobs and not (tmp_path / "validated").exists()
     affordance = semantics.affordance
     warmed = {
         cache.precompute(
@@ -4285,7 +4297,8 @@ def test_pickup_override_cannot_borrow_closed_hand_labels(monkeypatch) -> None:
         ).stem
         for command in (closed, opened)
     }
-    assert len(planned_keys) == 2 and warmed == planned_keys
+    assert len(warmed) == 2
+    plan = _plan_action(action, invocation, _context(scene=scene))
     assert {tuple(g["close_qpos"].values()) for g in jobs.values()} == {
         tuple(v.values()) for v in hand["joint_commands"].values()
     }

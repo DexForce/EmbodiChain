@@ -148,7 +148,7 @@ For stale obstacles inspect identity/capabilities; for duration or acceleration
 changes inspect normalization and the destination clock before tuning limits.
 Tests target production owners rather than importing tutorial implementations.
 
-For parallel-jaw grasp validation, `embodichain.lab.sim.grasp_validation.GraspValidator`
+For parallel-jaw grasp validation, `embodichain.lab.sim.grasp.validation.GraspValidator`
 owns the gripper, dynamic object and support in replicated physics arenas. Supply one
 object-from-TCP pose per arena to `validate()`. The validator closes the hand, lifts,
 optionally translates 3 cm out and back along world X and Y, and measures retention
@@ -159,10 +159,11 @@ with different commands use their own labels. At planning time, cached labels ar
 filtered by the live approach direction and the calibrated closing axis before
 ranking and batch IK.
 
-For offline labels, `embodichain label-grasps` samples settled placements and
+For offline labels, `embodichain affordance label-grasps` samples settled placements and
 world-space approaches, then uses the validator to qualify object-local TCPs.
 The [CobotMagic cup example](../../../examples/toolkits/grasp_labeling/README.md)
 describes support-mode sampling, mixed-placement batches, checkpoints and the
 mapping from every tested TCP and its hold/disturbance evidence to a pose NMS
-representative. `label-grasps precompute` loads the deployment's mounted hand and
-affordance and warms the same physical label cache used by atomic skills.
+representative. `affordance precompute-grasp-cache` loads the deployment's mounted hand and
+affordance and prepares labels before `run-task`. Skill planning reads prepared
+labels and reports a missing cache without starting a validation scene.

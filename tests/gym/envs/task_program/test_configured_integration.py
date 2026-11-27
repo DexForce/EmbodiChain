@@ -422,7 +422,7 @@ def handover_label_jobs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     import json
     import xml.etree.ElementTree as ET
 
-    from embodichain.lab.sim.utility import _validated_grasps
+    from embodichain.lab.sim.grasp import cache as _validated_grasps
     from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
     from embodichain.lab.gym.utils.gym_utils import _robot_cfg_from_dict
 
@@ -468,14 +468,17 @@ def handover_label_jobs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     def key(part, *, cache=None, adjustment=None):
         cache = cache or cache_for(part)
+        faces = torch.tensor([[0, 1, 2]])
+        prepared = cache.precompute(vertices, faces, pose_adjustment=adjustment)
         _, _, key = cache(
             vertices,
-            torch.tensor([[0, 1, 2]]),
+            faces,
             None,
             torch.eye(4)[None],
             torch.tensor([[0.0, 0.0, -1.0]]),
             pose_adjustment=adjustment,
         )
+        assert prepared.stem == key
         return key
 
     return SimpleNamespace(robot=robot, jobs=jobs, key=key, cache_for=cache_for)
@@ -486,8 +489,8 @@ def test_handover_physical_labels_use_mounted_drives_and_pad_contacts(
     handover_label_jobs,
 ) -> None:
     import re
-    from embodichain.lab.scripts.label_grasps import _resolve_hand
-    from embodichain.lab.sim.grasp_validation import _stage
+    from embodichain.lab.sim.grasp.labeling import _resolve_hand
+    from embodichain.lab.sim.grasp.validation import _stage
 
     cfg = handover_label_jobs.robot.cfg
     cache_for, key, jobs = (
@@ -573,8 +576,8 @@ def test_validation_worker_compiles_newton_passive_damping(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import xml.etree.ElementTree as ET
-    from embodichain.lab.sim.grasp_validation import _stage
-    from embodichain.lab.scripts import label_grasps
+    from embodichain.lab.sim.grasp.validation import _stage
+    from embodichain.lab.sim.grasp import labeling as label_grasps
     from embodichain.lab.sim.cfg import JointDrivePropertiesCfg
     from embodichain.lab.sim.spawn.descriptors import _compile_joint_properties
 
@@ -620,9 +623,9 @@ def test_validation_worker_compiles_newton_passive_damping(
     mesh_path = tmp_path / "mesh.obj"
     mesh_path.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
     with pytest.raises(Compiled):
-        label_grasps._run(
+        label_grasps.label_grasps(
             job["config"],
-            label_grasps._SamplingCfg(),
+            label_grasps.GraspSamplingCfg(),
             mesh_path,
             Path(job["urdf"]),
             tmp_path / "result.pt",

@@ -28,7 +28,7 @@ from typing import Callable, Iterable, Mapping, TYPE_CHECKING
 
 import torch
 
-from .affordance_sampling import AffordanceSamplingContext
+from embodichain.lab.sim.affordance.sampling import AffordanceSamplingContext
 from .bindings import SkillBinding
 from .core import AtomicSkill, SkillDescriptor
 from .control import SkillControlOverrides, ControlPartCommandProfile

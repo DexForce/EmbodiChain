@@ -31,11 +31,13 @@ import torch
 
 from embodichain.utils.math import pose_inv
 
+from embodichain.lab.sim.affordance import (
+    Affordance,
+)
 from embodichain.lab.sim.atomic_skills import (
     SkillControlOverrides,
     SkillInvocation,
     SkillOptions,
-    Affordance,
     GraspGoal,
     HandOverGoal,
     HandOverOptions,

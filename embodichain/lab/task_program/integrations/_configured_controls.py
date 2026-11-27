@@ -36,7 +36,7 @@ from embodichain.lab.sim.atomic_skills import (
     OpenDoorGoal,
     OpenDoorOptions,
 )
-from embodichain.lab.sim.atomic_skills.affordance import (
+from embodichain.lab.sim.affordance.interactions import (
     PressAffordance,
     TwistAffordance,
     OpenDoorAffordance,

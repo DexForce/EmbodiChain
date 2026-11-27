@@ -21,9 +21,12 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING
 
+
 import torch
 
-from .affordance_sampling import (
+from embodichain.lab.sim.grasp.cache import validated_label_provider
+
+from embodichain.lab.sim.affordance.sampling import (
     AffordancePoseCandidates,
     AffordanceSample,
     AffordanceSamplingContext,
@@ -33,34 +36,11 @@ from .affordance_sampling import (
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.toolkits.graspkit.pg_grasp import GraspPoseGenerator
-    from .affordance import AntipodalAffordance
+    from embodichain.lab.sim.affordance.interactions import AntipodalAffordance
     from .state import PlanningContext
     from .primitives.pick_up import PickUpOptions
 
 __all__ = []
-
-
-def validated_label_provider(
-    generator: GraspPoseGenerator | None,
-    hand_commands: tuple[torch.Tensor, torch.Tensor] | None = None,
-) -> Callable | None:
-    """Require a physical label source whenever an atomic skill uses Antipodal."""
-    from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGenerator
-
-    provider = getattr(generator, "validated_labels", None)
-    if isinstance(generator, AntipodalGraspPoseGenerator) and not callable(provider):
-        raise ValueError(
-            "Antipodal atomic skills require a GraspValidator label cache."
-        )
-    if provider is not None and hand_commands is not None:
-        from functools import partial
-        from embodichain.lab.sim.utility._validated_grasps import ValidatedGraspCache
-
-        if isinstance(generator, AntipodalGraspPoseGenerator) or isinstance(
-            provider, ValidatedGraspCache
-        ):
-            return partial(provider, hand_commands=hand_commands)
-    return provider
 
 
 def pickup_adjustment(options: PickUpOptions) -> dict:

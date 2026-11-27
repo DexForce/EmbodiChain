@@ -12,11 +12,15 @@ embodiment, Task Program integration and verified motion policy.
 
 ## Dual UR5 with DH PGI grippers
 
-Run this command from the repository root to watch the source arm pick up the
-can and pass it to the receiving arm for placement.
+Prepare both endpoints from the repository root, then run the transfer in the
+native simulator window.
 
 ```bash
-python -m embodichain.lab.scripts.run_task \
+python -m embodichain affordance precompute-grasp-cache \
+  --gym-config embodichain/extensions/tasks/configs/tasks/manipulation/hand_over/task.dual_ur5_dh_pgi_140_80.yaml \
+  --pair left_eef can can_antipodal_grasp --pair right_eef can can_antipodal_grasp
+
+python -m embodichain run-task \
   --gym_config embodichain/extensions/tasks/configs/tasks/manipulation/hand_over/task.dual_ur5_dh_pgi_140_80.yaml \
   --no-headless --renderer fast-rt --seed 7 --max_episodes 1 --filter-dataset-saving
 ```
@@ -29,6 +33,9 @@ of its transfer direction. Adjust `max_candidates`, `pickup_approach_tolerance_d
 and `receive_approach_tolerance_deg` in [the handover integration](task_program/integration.yaml).
 
 ## Tianji Marvin
+
+Prepare the same two endpoint pairs using `task.tianji_marvin.yaml` before the
+first run of this deployment.
 
 The elongated can lies across a narrow pickup stand in the arms' shared
 workspace. The stand leaves room below the finger pads, and both arms start

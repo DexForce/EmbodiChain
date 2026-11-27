@@ -80,8 +80,8 @@ define an explicit expansion policy.
 
 ## Change and validation sites
 
-- Sampling contracts and selection: `atomic_skills/affordance_sampling.py`.
-- Geometric samplers: `atomic_skills/affordance.py`.
+- Sampling contracts and selection: `affordance/sampling.py`.
+- Geometric samplers: `affordance/interactions.py`.
 - Feasibility and diagnostics: matching file under `atomic_skills/primitives/`.
 - Direct host examples: `examples/sim/atomic_skill/` and its shared
   `support.py` sampling helpers.

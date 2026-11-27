@@ -103,7 +103,7 @@ API composition; they reuse the canonical example setup.
 
 The [CobotMagic grasp labeling example](toolkits/grasp_labeling/README.md)
 samples stable cup placements and saves physically verified grasp poses and
-opening widths with `embodichain label-grasps`.
+opening widths with `embodichain affordance label-grasps`.
 
 The RoboCasa365 example tracks recorded PandaOmron joint trajectories across
 six fixed episodes and checks their outcomes in live simulation.
