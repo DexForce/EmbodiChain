@@ -4212,6 +4212,75 @@ def test_pick_normalizes_integer_batch_ik_success_masks() -> None:
     assert qpos.shape == (NUM_ENVS, 3, 2, ARM_DOF)
 
 
+def test_pickup_override_cannot_borrow_closed_hand_labels(monkeypatch) -> None:
+    from embodichain.lab.sim.atomic_skills.control import (
+        JointPositionCommand,
+        SkillControlOverrides,
+    )
+    from embodichain.lab.sim.utility._validated_grasps import ValidatedGraspCache
+    from embodichain.lab.sim.utility.gripper_geometry import (
+        build_gripper_collision_geometry,
+    )
+    from embodichain.robot_registry import resolve_gripper_defaults
+    from embodichain.toolkits.graspkit.pg_grasp import ParallelJawGraspCollisionCfg
+
+    hand = resolve_gripper_defaults("FrankaPandaHand")
+    cache = ValidatedGraspCache(
+        hand,
+        {},
+        ParallelJawGraspCollisionCfg(filter_ground_collision=False),
+        build_gripper_collision_geometry(hand),
+    )
+    opened, closed = (
+        torch.tensor(
+            [hand["joint_commands"][k][n] for n in hand["control_parts"]["eef"]]
+        )
+        for k in ("open", "grasp")
+    )
+    action = _bind_action(
+        _motion_generator(),
+        PickUp(),
+        {"hand": ControlPartCommandProfile.joint_positions(open=opened, grasp=closed)},
+    )
+    _GRASP_GENERATORS[id(action)].validated_labels = cache
+    jobs = {}
+
+    def labels(cache, key, urdf, vertices, triangles, signature):
+        gripper = signature["config"]["gripper"]
+        jobs[key] = gripper
+        retained = gripper["close_qpos"] != gripper["open_qpos"]
+        return {"grasp_pose": torch.eye(4).repeat(int(retained), 1, 1)}
+
+    monkeypatch.setattr(ValidatedGraspCache, "_load_labels", labels)
+    semantics = ObjectSemantics(
+        entity_id="target",
+        label="target",
+        geometry={},
+        affordance=AntipodalAffordance(
+            mesh_vertices=torch.eye(3) * 0.01, mesh_triangles=torch.tensor([[0, 1, 2]])
+        ),
+    )
+    invocation = replace(
+        _invocation(action, GraspGoal(semantics=semantics)),
+        control_overrides=SkillControlOverrides(
+            endpoints={
+                "primary": {
+                    "grasp": {
+                        "grasp": JointPositionCommand(torch.stack((closed, opened)))
+                    }
+                }
+            }
+        ),
+    )
+    scene = _target_scene(torch.eye(4).repeat(NUM_ENVS, 1, 1), timestamp=0.0, version=0)
+    plan = _plan_action(action, invocation, _context(scene=scene))
+    assert len(jobs) == 2
+    assert {tuple(g["close_qpos"].values()) for g in jobs.values()} == {
+        tuple(v.values()) for v in hand["joint_commands"].values()
+    }
+    assert plan.plan_success.tolist() == [True, False]
+
+
 def test_validated_pick_checks_the_next_50_without_replacing_a_feasible_row() -> None:
     action = _bind_action(_motion_generator(), PickUp())
     local = torch.eye(4).repeat(101, 1, 1)
@@ -7828,6 +7897,7 @@ def test_handover_center_grasp_rejects_lower_cost_outer_candidates(
         center_axis=torch.tensor([[0.0, 0.0, 1.0]]).expand(NUM_ENVS, -1),
         context=context,
         sample_key="handover:center_grasp",
+        hand_commands=(torch.zeros(NUM_ENVS, 1), torch.ones(NUM_ENVS, 1)),
         arm=JointPositionTarget("right_arm", (0,)),
         pre_grasp_distance=0.05,
     )

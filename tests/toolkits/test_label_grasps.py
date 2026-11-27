@@ -207,11 +207,13 @@ def test_validated_pickup_scores_the_contact_axis_in_a_calibrated_hand() -> None
         torch.eye(4)[None],
         torch.tensor([0.0, 0.0, 1.0]),
         geom,
-        AntipodalGraspPoseGeneratorCfg(angle_weight=1, center_weight=0),
+        AntipodalGraspPoseGeneratorCfg(
+            angle_weight=1, center_weight=0, approach_deviation_angle=math.radians(20)
+        ),
         ParallelJawGraspCollisionCfg(filter_ground_collision=False),
         "center",
     )
-    assert order.tolist() == [[1, 0]]
+    assert order.tolist() == [[1]]  # Candidate 0 closes parallel to the live approach.
 
 
 def test_validated_grasps_partition_contact_centers_per_arm_in_the_live_frame() -> None:

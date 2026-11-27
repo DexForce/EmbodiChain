@@ -73,7 +73,7 @@ __all__ = ["cli"]
 
 _DEFAULT_NUM_ENVS = 2400
 # Revision 2 validates extracted hands with their native collision meshes.
-_VALIDATION_REVISION = 2
+_VALIDATION_REVISION = 3
 
 
 @configclass
@@ -423,6 +423,7 @@ def _run(
         hand,
         num_envs=num_envs,
         gripper_urdf=urdf,
+        physics=config.get("physics", "default"),
         close_wait_steps=config.get("close_wait_steps", 60),
         enable_disturbance=config.get("enable_disturbance", True),
         settle_on_init=False,
@@ -533,6 +534,7 @@ def cli(argv: Sequence[str] | None = None) -> None:
     if type(num_envs) is not int or num_envs < 1:
         parser.error("num_envs must be a positive integer")
     unknown = config.keys() - {
+        "physics",
         "mesh",
         "gripper_urdf",
         "gripper",

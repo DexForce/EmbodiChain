@@ -524,9 +524,7 @@ class GraspValidator:
             elif kind == "SPHERE":
                 depth = shape.radius
             elif kind == "CAPSULE":
-                # Collision snapshots preserve each engine's native capsule frame.
-                axis = 2 if self.sim.physics_backend == "newton" else 0
-                depth = shape.radius + shape.half_height * z[:, axis].abs()
+                depth = shape.radius + shape.half_height * z[:, 2].abs()
             elif shape.vertices is not None and len(shape.vertices):
                 depth = -(z @ shape.vertices.T).amin(-1)
             else:

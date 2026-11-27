@@ -866,6 +866,7 @@ class PickUp(
                         options,
                         approach_direction,
                         context,
+                        hand_commands=(hand_open_qpos, hand_grasp_qpos),
                         sample_key=(request.invocation_id or self.skill_id) + ":grasp",
                     )
                     is_success = affordance_sample.success
@@ -1222,13 +1223,14 @@ class PickUp(
         approach_direction: torch.Tensor,
         context: PlanningContext,
         *,
+        hand_commands: tuple[torch.Tensor, torch.Tensor],
         sample_key: str,
     ) -> AffordanceSample:
         affordance = semantics.affordance
         if not isinstance(affordance, AntipodalAffordance):
             raise ValueError("PickUp grasp sampling requires AntipodalAffordance.")
         generator = self.planning_services.grasp_pose_generator(grasp_target_id)
-        validated_labels = validated_label_provider(generator)
+        validated_labels = validated_label_provider(generator, hand_commands)
         if validated_labels is not None:
             local, order, cache_key = validated_labels(
                 affordance.mesh_vertices,

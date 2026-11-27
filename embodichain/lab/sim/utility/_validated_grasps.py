@@ -21,7 +21,9 @@ from __future__ import annotations
 import fcntl
 import hashlib
 from collections.abc import Callable
+from copy import copy
 from dataclasses import dataclass, field
+import xml.etree.ElementTree as ET
 from importlib.metadata import version
 import json
 import math
@@ -39,6 +41,7 @@ from embodichain.toolkits.graspkit.pg_grasp import (
     ParallelJawGraspCollisionCfg,
 )
 from embodichain.toolkits.graspkit.pg_grasp._ranking import (
+    _closing_axis_deviation,
     _grasp_costs,
     _normalized_ranking_weights,
 )
@@ -112,7 +115,11 @@ def _rank_labels(
         lo, hi = mesh.amin(0), mesh.amax(0)
         center = (lo + hi) / 2 if algorithm.center_mode == "bounds" else mesh.mean(0)
         centers = world[:, :3, 3]
-        valid = torch.ones(len(world), device=world.device, dtype=torch.bool)
+        closing = torch.nn.functional.normalize(world[:, :3, 0], dim=-1)
+        valid = (
+            _closing_axis_deviation(closing, approach)
+            <= algorithm.approach_deviation_angle
+        )
         if axis is not None:
             projected = mesh @ axis[row]
             low, high = projected.amin(), projected.amax()
@@ -188,6 +195,7 @@ class ValidatedGraspCache:
     qualify: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None
 
     force_refresh: bool = False
+    physics: str = "default"
     _refreshed: set[str] = field(default_factory=set, init=False, repr=False)
 
     @classmethod
@@ -199,6 +207,7 @@ class ValidatedGraspCache:
         geometry: FixedGripperCollisionGeometry,
         *,
         force_refresh: bool = False,
+        physics: str = "default",
         qualify: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
     ) -> ValidatedGraspCache:
         """Use the mounted TCP and canonical contact frame for the validator's hand."""
@@ -215,14 +224,141 @@ class ValidatedGraspCache:
             collision_links=list(dict.fromkeys(p["link"] for p in source["parts"])),
             mesh_paths=source["mesh_paths"],
         )
+        if any(
+            np.float32(source["joint_positions"][name]) != np.float32(value)
+            for name, value in description["joint_commands"]["open"].items()
+        ):
+            from .gripper_geometry import build_gripper_collision_geometry
+
+            geometry = build_gripper_collision_geometry(
+                description, point_spacing=source["point_spacing_m"]
+            )
         return cls(
             description,
             algorithm,
             collision,
             geometry,
             qualify=qualify,
+            physics=physics,
             force_refresh=force_refresh,
         )
+
+    def _with_commands(self, values: torch.Tensor) -> ValidatedGraspCache:
+        """Map execution-order joint commands into the native validator hand."""
+        defaults = self.hand["joint_commands"]
+        names = (
+            self.hand.get("binding", {}).get("control_joint_names")
+            or self.hand["control_parts"]["eef"]
+        )
+        if values.shape != (2, len(names)):
+            raise ValueError(
+                "Invocation command width disagrees with the native hand binding."
+            )
+        commands = {}
+        for command, row in zip(("open", "grasp"), values, strict=True):
+            native = defaults[command]
+            if torch.equal(row, row.new_tensor([native[name] for name in names])):
+                commands[command] = native
+                continue
+            # Runtime buffers round URDF endpoints to float32. Retain the native
+            # value when an override reuses either calibrated endpoint.
+            effective = {}
+            for name, value in zip(names, row.tolist(), strict=True):
+                effective[name] = next(
+                    (
+                        target[name]
+                        for target in defaults.values()
+                        if row.new_tensor(target[name]).item() == value
+                    ),
+                    value,
+                )
+            if native.keys() - effective.keys():
+                # Bindings can command only the leader of a coupled pair.
+                xml = ET.parse(get_data_path(self.hand["fpath"]))
+                mimics = {
+                    j.attrib["name"]: j.find("mimic") for j in xml.findall("joint")
+                }
+
+                def resolve(name: str) -> float:
+                    if name not in effective:
+                        mimic = mimics[name]
+                        effective[name] = (
+                            native[name]
+                            if mimic is None
+                            else (
+                                resolve(mimic.attrib["joint"])
+                                * float(mimic.get("multiplier", "1"))
+                                + float(mimic.get("offset", "0"))
+                            )
+                        )
+                    return effective[name]
+
+                effective = {name: resolve(name) for name in native}
+            commands[command] = effective
+        if commands == defaults:
+            return self
+        # Bound views share the per-key force-refresh bookkeeping.
+        bound = copy(self)
+        bound.hand = dict(self.hand, joint_commands=commands)
+        if commands["open"] != defaults["open"]:
+            from .gripper_geometry import build_gripper_collision_geometry
+
+            bound.geometry = build_gripper_collision_geometry(
+                bound.hand, point_spacing=self.geometry.provenance["point_spacing_m"]
+            )
+        return bound
+
+    def __call__(
+        self,
+        vertices: torch.Tensor,
+        triangles: torch.Tensor,
+        attrs: dict | None,
+        object_poses: torch.Tensor,
+        directions: torch.Tensor,
+        part: str = "center",
+        *,
+        hand_commands: tuple[torch.Tensor, torch.Tensor] | None = None,
+        **options,
+    ) -> tuple[torch.Tensor, torch.Tensor, str]:
+        """Share physical validation only across rows executing the same commands."""
+        if hand_commands is None:
+            return self._rank(
+                vertices, triangles, attrs, object_poses, directions, part, **options
+            )
+        pairs = torch.stack(hand_commands, dim=1).detach().cpu()
+        unique, groups = pairs.unique(dim=0, return_inverse=True)
+        if len(unique) == 1:
+            return self._with_commands(unique[0])._rank(
+                vertices, triangles, attrs, object_poses, directions, part, **options
+            )
+        pools, keys = [], []
+        orders = [None] * len(pairs)
+        offset = 0
+        for index, pair in enumerate(unique):
+            rows = (groups == index).nonzero().flatten().tolist()
+            row_options = options.copy()
+            for name, shape in (("axis", (len(pairs), 3)), ("positive", (len(pairs),))):
+                value = options.get(name)
+                if isinstance(value, torch.Tensor):
+                    row_options[name] = value.expand(shape)[rows]
+            local, order, key = self._with_commands(pair)._rank(
+                vertices,
+                triangles,
+                attrs,
+                object_poses[rows],
+                directions.expand(len(pairs), 3)[rows],
+                part,
+                **row_options,
+            )
+            pools.append(local)
+            keys.append(key)
+            for row, ids in zip(rows, order, strict=True):
+                orders[row] = ids[ids >= 0] + offset
+            offset += len(local)
+        order = torch.nn.utils.rnn.pad_sequence(
+            orders, batch_first=True, padding_value=-1
+        )
+        return torch.cat(pools), order, "+".join(keys)
 
     def ranked_world_poses(
         self,
@@ -285,7 +421,7 @@ class ValidatedGraspCache:
                         self._refreshed.add(key)
         return torch.load(path, weights_only=True, map_location="cpu")
 
-    def __call__(
+    def _rank(
         self,
         vertices: torch.Tensor,
         triangles: torch.Tensor,
@@ -366,6 +502,7 @@ class ValidatedGraspCache:
             )
         )
         config = {
+            "physics": self.physics,
             "gripper": dict(
                 description=description,
                 root_from_tcp=hand["default_root_from_tcp"],

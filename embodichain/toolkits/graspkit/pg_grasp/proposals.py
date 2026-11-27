@@ -27,7 +27,7 @@ import torch.nn.functional as F
 from embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler import AntipodalSampler
 from embodichain.utils.math import get_pc_center_box
 from embodichain.utils.nms import pose_nms
-from ._ranking import _grasp_costs, _normalized_ranking_weights
+from ._ranking import _closing_axis_deviation, _grasp_costs, _normalized_ranking_weights
 
 if TYPE_CHECKING:
     from .pose_generator import (
@@ -48,8 +48,10 @@ def _row(
     origin = pairs[:, 0] @ pose[:3, :3].T + pose[:3, 3]
     hit = pairs[:, 1] @ pose[:3, :3].T + pose[:3, 3]
     closing = F.normalize(hit - origin, dim=-1)
-    angle = torch.acos((closing * direction).sum(-1).clamp(-1, 1)).abs()
-    valid = (angle - torch.pi / 2).abs() <= algorithm.approach_deviation_angle
+    valid = (
+        _closing_axis_deviation(closing, direction)
+        <= algorithm.approach_deviation_angle
+    )
     if not valid.any():
         return torch.eye(4, device=pairs.device)[None], pairs.new_full((1,), torch.inf)
     centers = ((origin + hit) / 2)[valid]

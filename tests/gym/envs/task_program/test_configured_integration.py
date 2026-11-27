@@ -417,15 +417,11 @@ def test_all_examples_decode_through_one_composable_integration_schema(
     assert integration.adapter_factory.registration is registration
 
 
-def test_handover_physical_labels_use_mounted_drives_and_pad_contacts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@pytest.fixture
+def handover_label_jobs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     import json
-    import re
     import xml.etree.ElementTree as ET
 
-    from embodichain.lab.scripts.label_grasps import _resolve_hand
-    from embodichain.lab.sim.grasp_validation import _stage
     from embodichain.lab.sim.utility import _validated_grasps
     from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
     from embodichain.lab.gym.utils.gym_utils import _robot_cfg_from_dict
@@ -482,6 +478,23 @@ def test_handover_physical_labels_use_mounted_drives_and_pad_contacts(
         )
         return key
 
+    return SimpleNamespace(robot=robot, jobs=jobs, key=key, cache_for=cache_for)
+
+
+def test_handover_physical_labels_use_mounted_drives_and_pad_contacts(
+    tmp_path: Path,
+    handover_label_jobs,
+) -> None:
+    import re
+    from embodichain.lab.scripts.label_grasps import _resolve_hand
+    from embodichain.lab.sim.grasp_validation import _stage
+
+    cfg = handover_label_jobs.robot.cfg
+    cache_for, key, jobs = (
+        handover_label_jobs.cache_for,
+        handover_label_jobs.key,
+        handover_label_jobs.jobs,
+    )
     baseline = key("left_eef")
     assert key("right_eef") == baseline
     assert len(jobs) == 1
@@ -527,6 +540,96 @@ def test_handover_physical_labels_use_mounted_drives_and_pad_contacts(
     cfg.link_attrs["gripper_fingers"].attrs.material_props.dynamic_friction = 0.5
     assert key("right_eef") != lower_effort
     assert key("left_eef") != baseline
+
+
+def test_mounted_leader_override_moves_native_mimic_in_validation(
+    handover_label_jobs,
+) -> None:
+    cache = handover_label_jobs.cache_for("left_eef")
+    names = cache.hand["binding"]["control_joint_names"]
+    assert names == ["gripper_finger1_joint_1"]
+    opened = torch.tensor([cache.hand["joint_commands"]["open"][n] for n in names])
+    bound = cache._with_commands(torch.stack((opened, opened)))
+    assert bound.hand["joint_commands"]["grasp"] == cache.hand["joint_commands"]["open"]
+    assert handover_label_jobs.key("left_eef", cache=bound) != handover_label_jobs.key(
+        "left_eef", cache=cache
+    )
+    # Opening changes must update the surfaces used for live support filtering.
+    closed = torch.tensor([cache.hand["joint_commands"]["grasp"][n] for n in names])
+    narrower = cache._with_commands(torch.stack(((opened + closed) / 2, closed)))
+    assert (
+        narrower.geometry.provenance["points_sha256"]
+        != cache.geometry.provenance["points_sha256"]
+    )
+    assert (
+        narrower.geometry.provenance["joint_positions"]
+        == narrower.hand["joint_commands"]["open"]
+    )
+
+
+def test_validation_worker_compiles_newton_passive_damping(
+    handover_label_jobs,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import xml.etree.ElementTree as ET
+    from embodichain.lab.sim.grasp_validation import _stage
+    from embodichain.lab.scripts import label_grasps
+    from embodichain.lab.sim.cfg import JointDrivePropertiesCfg
+    from embodichain.lab.sim.spawn.descriptors import _compile_joint_properties
+
+    robot, key, jobs = (
+        handover_label_jobs.robot,
+        handover_label_jobs.key,
+        handover_label_jobs.jobs,
+    )
+    cfg = robot.cfg
+    leader = "gripper_finger1_joint_1"
+    physx_key = key("left_eef")
+    robot.body_data = SimpleNamespace(is_newton_backend=True)
+    assert key("left_eef") != physx_key
+    cfg.joint_drive_props = JointDrivePropertiesCfg.from_dict(
+        cfg.joint_drive_props.to_dict()
+        | {"backend": "newton", "passive_damping": {"left_" + leader: 7.0}}
+    )
+    key("left_eef")
+    job = jobs[-1]
+    assert job["config"]["physics"] == "newton"
+
+    class Compiled(Exception):
+        pass
+
+    def compile_worker(
+        obj, hand, *, physics, gripper_urdf, close_qpos, open_qpos, **kwargs
+    ):
+        assert physics == "newton"
+        stage_dir = tmp_path / "newton"
+        stage_dir.mkdir()
+        _stage(hand, stage_dir, physics, close_qpos, open_qpos=open_qpos)
+        joints = [
+            SimpleNamespace(name=n.attrib["name"])
+            for n in ET.parse(hand.fpath).findall("joint")
+        ]
+        drives, *_ = _compile_joint_properties(
+            SimpleNamespace(joints=joints), hand, newton_solver_type="dexuni"
+        )
+        assert drives[leader][1].damping == 7.0
+        raise Compiled
+
+    monkeypatch.setattr(label_grasps, "GraspValidator", compile_worker)
+    mesh_path = tmp_path / "mesh.obj"
+    mesh_path.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+    with pytest.raises(Compiled):
+        label_grasps._run(
+            job["config"],
+            label_grasps._SamplingCfg(),
+            mesh_path,
+            Path(job["urdf"]),
+            tmp_path / "result.pt",
+            tmp_path,
+            1,
+            False,
+        )
 
 
 def test_execution_policy_planner_config_reaches_configured_adapter() -> None:

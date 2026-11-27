@@ -366,30 +366,64 @@ def test_stage_preserves_relative_meshes_native_limits_and_rounded_pika_opening(
     assert all(hand.joint_drive_props.stiffness[name] == 1000.0 for name in joints)
 
 
-@pytest.mark.parametrize("physics", ["default", "newton"])
-def test_capsule_clearance_uses_backend_collision_axis(physics):
+def test_native_physx_capsule_preserves_long_axis_and_offset() -> None:
+    from dexsim.engine import CapsuleGeometry
+    from embodichain.lab.sim.objects.backends.collision import (
+        collision_shapes_from_entity,
+    )
+
+    capsule = CapsuleGeometry()
+    local = np.eye(4, dtype=np.float32)
+    local[:3, 3] = [0.05, 0.04, 0.01]
+    capsule.local_pose = local
+    capsule.radius, capsule.half_height = 0.01, 0.05
+    body = Mock()
+    body.get_shape_count.return_value = 1
+    body.get_shape_geometry.return_value = capsule
     validator = GraspValidator.__new__(GraspValidator)
-    shape = SimpleNamespace(
-        shape_type=SimpleNamespace(name="CAPSULE"),
-        local_pose=torch.eye(4),
-        radius=0.01,
-        half_height=0.05,
+    validator.shapes = collision_shapes_from_entity(
+        SimpleNamespace(get_physical_body=lambda: body), object_uid="target"
     )
-    validator.sim = SimpleNamespace(physics_backend=physics)
-    if physics == "newton":
-        # Rotate Newton's Z-aligned capsule onto the default backend's X axis.
-        shape.local_pose[:3, :3] = torch.tensor(
-            [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]]
-        )
-    validator.shapes = [shape]
+    axes = validator.shapes[0].local_pose
+    torch.testing.assert_close(axes[:3, 2], torch.tensor([1.0, 0.0, 0.0]))
+    torch.testing.assert_close(axes[:3, 3], torch.from_numpy(local[:3, 3]))
+    torch.testing.assert_close(validator._clearance(torch.eye(4)[None]), torch.zeros(1))
+
+
+@pytest.mark.parametrize("axis", ["X", "Y", "Z"])
+def test_capsule_clearance_uses_authored_usd_axis(tmp_path: Path, axis: str) -> None:
+    from dexsim.spawn import objects_from_usd
+    from pxr import Usd, UsdGeom, UsdPhysics
+    from embodichain.lab.sim.objects.backends.collision import (
+        collision_shapes_from_entity,
+    )
+
+    path = tmp_path / "compound.usda"
+    stage = Usd.Stage.CreateNew(str(path))
+    UsdGeom.SetStageMetersPerUnit(stage, 1)
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    body = UsdGeom.Xform.Define(stage, "/Body")
+    UsdPhysics.RigidBodyAPI.Apply(body.GetPrim())
+    capsule = UsdGeom.Capsule.Define(stage, "/Body/Capsule")
+    capsule.CreateAxisAttr(axis)
+    capsule.CreateRadiusAttr(0.01)
+    capsule.CreateHeightAttr(0.1)
+    UsdPhysics.CollisionAPI.Apply(capsule.GetPrim())
+    cylinder = UsdGeom.Cylinder.Define(stage, "/Body/Cylinder")
+    cylinder.CreateRadiusAttr(0.001)
+    cylinder.CreateHeightAttr(0.002)
+    UsdPhysics.CollisionAPI.Apply(cylinder.GetPrim())
+    stage.GetRootLayer().Save()
+    (descriptor,) = objects_from_usd("test", str(path))
+    validator = GraspValidator.__new__(GraspValidator)
+    validator.shapes = collision_shapes_from_entity(
+        SimpleNamespace(object_desc=descriptor), object_uid="target"
+    )
+    assert len(validator.shapes) == 2
     poses = torch.eye(4).repeat(2, 1, 1)
-    poses[1, :3, :3] = torch.tensor(
-        [[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]
-    )
-    poses[:, 2, 3] = torch.tensor([0.01, 0.06])
-    torch.testing.assert_close(validator._clearance(poses), torch.zeros(2))
-    poses[:, 2, 3] += 0.021
-    torch.testing.assert_close(validator._clearance(poses), torch.full((2,), 0.021))
+    poses[:, 2, 3] = 0.06 if axis == "Z" else 0.01
+    poses[1, 2, 3] += 0.021
+    torch.testing.assert_close(validator._clearance(poses), torch.tensor([0.0, 0.021]))
 
 
 @pytest.mark.gpu

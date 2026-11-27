@@ -46,6 +46,14 @@ def _normalized_ranking_weights(
     return angle / total, center / total
 
 
+def _closing_axis_deviation(
+    closing: torch.Tensor, approach: torch.Tensor
+) -> torch.Tensor:
+    """Measure departure from perpendicular for unit closing and approach axes."""
+    angle = torch.acos((closing * approach).sum(-1).clamp(-1, 1))
+    return (angle - torch.pi / 2).abs()
+
+
 def _grasp_costs(
     poses: torch.Tensor,
     centers: torch.Tensor,
@@ -57,8 +65,7 @@ def _grasp_costs(
     if not len(poses):
         return poses.new_empty(0)
     axis = F.normalize(poses[:, :3, 0], dim=-1)
-    angle = torch.acos((axis * approach_direction).sum(-1).clamp(-1, 1)).abs()
-    angle_cost = (angle - 0.5 * torch.pi).abs() / (0.5 * torch.pi)
+    angle_cost = _closing_axis_deviation(axis, approach_direction) / (0.5 * torch.pi)
     distance = torch.norm(centers - mesh_center, dim=-1)
     eps = torch.finfo(distance.dtype).eps
     center_cost = distance / distance.max().clamp_min(eps)

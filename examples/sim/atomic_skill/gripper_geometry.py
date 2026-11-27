@@ -37,6 +37,20 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.cfg import RobotCfg
 
 
+def _descendant_links(joints: list[ET.Element], root_link: str) -> set[str]:
+    descendants = {root_link}
+    while True:
+        extended = descendants | {
+            joint.find("child").attrib["link"]
+            for joint in joints
+            if joint.find("parent").attrib["link"] in descendants
+        }
+        if extended == descendants:
+            break
+        descendants = extended
+    return descendants
+
+
 def geometry_from_asset(
     asset: str,
     *,
@@ -61,16 +75,7 @@ def geometry_from_asset(
         if len(roots) != 1:
             raise ValueError(f"Expected one source gripper root in {path}.")
         root_link = next(iter(roots))
-    descendants = {root_link}
-    while True:
-        extended = descendants | {
-            joint.find("child").attrib["link"]
-            for joint in joints
-            if joint.find("parent").attrib["link"] in descendants
-        }
-        if extended == descendants:
-            break
-        descendants = extended
+    descendants = _descendant_links(joints, root_link)
     collision_links = tuple(
         name
         for name, link in links.items()
@@ -86,6 +91,50 @@ def geometry_from_asset(
         grasp_from_tcp=np.linalg.inv(root_from_grasp) @ root_from_tcp,
         point_spacing=0.012,
     )
+
+
+def _example_hand_binding(
+    robot_cfg: RobotCfg, arm_control_part: str, geometry: FixedGripperCollisionGeometry
+) -> dict:
+    """Map native geometry names through the same naming rules as robot assembly."""
+    from embodichain.toolkits.urdf_assembly.name_normalizer import NameNormalizer
+
+    for binding in (robot_cfg.gripper_bindings or {}).values():
+        if binding["declaration"]["motion_part"] == arm_control_part:
+            return binding
+
+    assembly = robot_cfg.urdf_cfg
+    naming = NameNormalizer(
+        assembly.name_case if assembly else {"joint": "original", "link": "original"}
+    )
+    component = (
+        "hand"
+        if arm_control_part == "arm"
+        else arm_control_part.removesuffix("_arm") + "_hand"
+    )
+    prefix = (
+        NameNormalizer.resolve_component_prefixes(assembly.component_prefix)[component]
+        if assembly
+        else None
+    )
+    source = geometry.provenance
+    joints = ET.parse(source["urdf_path"]).findall("joint")
+    links = _descendant_links(joints, source["root_link"])
+    joint_names = [
+        j.attrib["name"]
+        for j in joints
+        if j.get("type") != "fixed"
+        and j.find("child").get("link") in links
+        and j.find("parent").get("link") in links
+    ]
+    return {
+        "joint_names": {
+            j: naming.component_name("joint", j, prefix) for j in joint_names
+        },
+        "link_names": {
+            link: naming.component_name("link", link, prefix) for link in links
+        },
+    }
 
 
 def mounted_gripper_geometry(

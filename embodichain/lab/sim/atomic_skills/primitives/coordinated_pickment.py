@@ -595,6 +595,14 @@ class CoordinatedPickment(AtomicSkill[CoordinatedPickGoal, CoordinatedPickmentOp
                 resources.left_arm.control_part,
                 resources.right_arm.control_part,
                 context.env_ids,
+                left_commands=(
+                    resources.left_hand_open_qpos,
+                    resources.left_hand_close_qpos,
+                ),
+                right_commands=(
+                    resources.right_hand_open_qpos,
+                    resources.right_hand_close_qpos,
+                ),
                 sampling=context.affordance_sampling,
             )
         )
@@ -639,6 +647,8 @@ class CoordinatedPickment(AtomicSkill[CoordinatedPickGoal, CoordinatedPickmentOp
         right_control_part: str,
         env_ids: torch.Tensor,
         *,
+        left_commands: tuple[torch.Tensor, torch.Tensor] | None = None,
+        right_commands: tuple[torch.Tensor, torch.Tensor] | None = None,
         sampling: AffordanceSamplingContext | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Sample left/right grasp poses from the target antipodal affordance.
@@ -700,8 +710,8 @@ class CoordinatedPickment(AtomicSkill[CoordinatedPickGoal, CoordinatedPickmentOp
                 "services for both grasp endpoints."
             )
         providers = (
-            validated_label_provider(left_generator),
-            validated_label_provider(right_generator),
+            validated_label_provider(left_generator, left_commands),
+            validated_label_provider(right_generator, right_commands),
         )
         if (
             not all(providers)

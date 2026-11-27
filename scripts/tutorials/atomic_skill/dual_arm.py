@@ -82,6 +82,7 @@ def main() -> None:
         else scene.HANDOVER_GRIPPER_MODEL
     )
     profiles = {}
+    generators = {}
     for part in ("left_eef", "right_eef"):
         opened, closed = get_hand_open_close_qpos(
             robot, hand_control_part=part, close_qpos=close
@@ -89,19 +90,20 @@ def main() -> None:
         profiles[part] = ControlPartCommandProfile.joint_positions(
             open=opened, grasp=closed
         )
-    generator = create_parallel_jaw_grasp_pose_generator(
-        robot=robot,
-        arm_control_part="left_arm",
-        n_sample=args.n_sample,
-        force_refresh=args.force_reannotate,
-        approach_direction_samples=getattr(args, "grasp_approach_samples", 4),
-        gripper_data=model,
-    )
+        generators[part] = create_parallel_jaw_grasp_pose_generator(
+            robot=robot,
+            arm_control_part=part.replace("_eef", "_arm"),
+            hand_commands=(opened, closed),
+            n_sample=args.n_sample,
+            force_refresh=args.force_reannotate,
+            approach_direction_samples=getattr(args, "grasp_approach_samples", 4),
+            gripper_data=model,
+        )
     engine = create_simulation_atomic_skill_engine(
         motion_generator=create_tutorial_motion_generator(robot, args.planner),
         scene_entities=(obj,),
         control_profiles=profiles,
-        grasp_pose_generators={"left_eef": generator, "right_eef": generator},
+        grasp_pose_generators=generators,
     )
 
     # -- Goal and binding --

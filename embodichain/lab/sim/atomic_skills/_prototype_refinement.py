@@ -78,9 +78,8 @@ def _pick_refinement_anchor(
     affordance.require_whole_object_mesh()
     if affordance.mesh_vertices is None or affordance.mesh_triangles is None:
         raise ValueError("Pick refinement requires explicit object mesh geometry")
-    hand = request.binding.endpoint("primary", "grasp").require_target(
-        JointPositionTarget
-    )
+    endpoint = request.binding.endpoint("primary", "grasp")
+    hand = endpoint.require_target(JointPositionTarget)
     generator = generators.get(hand.control_part)
     model = getattr(generator, "gripper_data", None)
     if not isinstance(model, dict):
@@ -123,6 +122,13 @@ def _pick_refinement_anchor(
         device = context.robot.qpos.device
         labels = validated_label_provider(generator)
         if labels is not None:
+            commands = tuple(
+                endpoint.joint_positions(
+                    name, num_envs=1, device=device, dtype=direction.dtype
+                )
+                for name in ("open", "grasp")
+            )
+            labels = validated_label_provider(generator, commands)
             world_object = torch.as_tensor(
                 object_pose, dtype=direction.dtype, device=device
             )[None]

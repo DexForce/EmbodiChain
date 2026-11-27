@@ -100,6 +100,12 @@ def _native_joint_drives(
     return resolved
 
 
+def _validation_backend(robot: Robot | None) -> str:
+    """Choose the physics engine of the materialized articulation."""
+    data = getattr(robot, "body_data", None)
+    return "newton" if data is not None and data.is_newton_backend else "default"
+
+
 def _mounted_hand_physics(robot: Robot, binding: dict) -> dict:
     """Project the installed hand's drive rules and contact overlays onto its URDF."""
     from embodichain.lab.sim.utility.sim_utils import _resolve_link_physics_groups

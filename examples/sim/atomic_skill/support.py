@@ -2001,9 +2001,27 @@ def create_parallel_jaw_grasp_pose_generator(
         raise ValueError("Explicit collision geometry also requires a gripper model.")
     from embodichain.lab.sim.utility._validated_grasps import ValidatedGraspCache
 
-    hand = dict(gripper_data)
+    from embodichain.lab.sim.utility.gripper_binding import (
+        _mounted_hand_physics,
+        _validation_backend,
+    )
+    from .gripper_geometry import _example_hand_binding
+
+    binding = _example_hand_binding(robot.cfg, arm_control_part, collision_geometry)
+    hand = dict(gripper_data) | _mounted_hand_physics(robot, binding)
+    native_by_mounted = {
+        mounted: native for native, mounted in binding["joint_names"].items()
+    }
+    endpoint = (
+        binding.get("declaration", {}).get("control_part")
+        or arm_control_part.removesuffix("arm") + "eef"
+    )
+    names = [
+        native_by_mounted[robot.joint_names[i]]
+        for i in robot.get_joint_ids(name=endpoint)
+    ]
+    hand["control_parts"] = {"eef": names}
     if hand_commands is not None:
-        names = hand["control_parts"]["eef"]
         hand["joint_commands"] = {
             command: dict(
                 zip(
@@ -2014,6 +2032,11 @@ def create_parallel_jaw_grasp_pose_generator(
             )
             for command, values in zip(("open", "grasp"), hand_commands, strict=True)
         }
+    elif "joint_commands" in hand:
+        hand["joint_commands"] = {
+            command: {name: values[name] for name in names}
+            for command, values in hand["joint_commands"].items()
+        }
     if not hand.get("pad_links") or not hand.get("joint_commands"):
         raise ValueError(
             "Antipodal atomic skills require pad_links and open/grasp joint commands for GraspValidator."
@@ -2022,12 +2045,18 @@ def create_parallel_jaw_grasp_pose_generator(
         sample_count=n_sample, approach_direction_samples=approach_direction_samples
     )
     collision = ParallelJawGraspCollisionCfg(filter_ground_collision=False)
+    cache = ValidatedGraspCache.from_geometry(
+        hand,
+        algorithm,
+        collision,
+        collision_geometry,
+        force_refresh=force_refresh,
+        physics=_validation_backend(robot),
+    )
     return AntipodalGraspPoseGenerator(
         **grasp_generator_parameters(hand),
-        collision_geometry=collision_geometry,
-        validated_labels=ValidatedGraspCache.from_geometry(
-            hand, algorithm, collision, collision_geometry, force_refresh=force_refresh
-        ),
+        collision_geometry=cache.geometry,
+        validated_labels=cache,
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(**algorithm),
         collision_cfg=collision,
         annotation_cfg=GraspAnnotationCfg(

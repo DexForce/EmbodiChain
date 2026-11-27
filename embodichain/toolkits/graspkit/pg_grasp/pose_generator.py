@@ -323,7 +323,9 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
 
     A simulation host may supply ``validated_labels`` to resolve physically validated
     object-local TCPs, row-local candidate order (padded with -1) and their cache
-    key for atomic skills. Geometric queries remain available independently of this provider.
+    key for atomic skills. For invocation-bound requests the provider receives
+    ``hand_commands=(open_qpos, grasp_qpos)`` in execution order, with one row per
+    environment. Geometric queries remain available independently of this provider.
 
     Optional ``closing_geometry`` uses that same canonical contact frame and
     requires an explicit ``closing_ground_height_m``. It qualifies discrete

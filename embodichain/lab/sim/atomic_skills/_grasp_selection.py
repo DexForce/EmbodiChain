@@ -40,7 +40,10 @@ if TYPE_CHECKING:
 __all__ = []
 
 
-def validated_label_provider(generator: GraspPoseGenerator | None) -> Callable | None:
+def validated_label_provider(
+    generator: GraspPoseGenerator | None,
+    hand_commands: tuple[torch.Tensor, torch.Tensor] | None = None,
+) -> Callable | None:
     """Require a physical label source whenever an atomic skill uses Antipodal."""
     from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGenerator
 
@@ -49,6 +52,14 @@ def validated_label_provider(generator: GraspPoseGenerator | None) -> Callable |
         raise ValueError(
             "Antipodal atomic skills require a GraspValidator label cache."
         )
+    if provider is not None and hand_commands is not None:
+        from functools import partial
+        from embodichain.lab.sim.utility._validated_grasps import ValidatedGraspCache
+
+        if isinstance(generator, AntipodalGraspPoseGenerator) or isinstance(
+            provider, ValidatedGraspCache
+        ):
+            return partial(provider, hand_commands=hand_commands)
     return provider
 
 
@@ -165,9 +176,10 @@ def sample_link_grasp(
     context: PlanningContext,
     key: str,
     feasible: Callable[[torch.Tensor], torch.Tensor],
+    hand_commands: tuple[torch.Tensor, torch.Tensor],
 ) -> AffordanceSample:
     """Check physical handle labels on the live link; custom query services own their sampling."""
-    labels = validated_label_provider(generator)
+    labels = validated_label_provider(generator, hand_commands)
     if labels is not None:
         pool = labels(
             affordance.mesh_vertices,

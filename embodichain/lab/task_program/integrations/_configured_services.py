@@ -448,6 +448,7 @@ class _AntipodalGraspPoseGeneratorFactory:
             build_gripper_collision_geometry,
         )
         from embodichain.lab.sim.utility._validated_grasps import ValidatedGraspCache
+        from embodichain.lab.sim.utility.gripper_binding import _validation_backend
 
         algorithm_kwargs: dict[str, object] = {}
         if self.sample_count is not None:
@@ -496,6 +497,7 @@ class _AntipodalGraspPoseGeneratorFactory:
                 collision,
                 geometry,
                 force_refresh=bool(self.force_refresh),
+                physics=_validation_backend(robot),
             ),
             model_id=defaults["model_id"],
             min_opening_width=defaults["min_opening_width"],

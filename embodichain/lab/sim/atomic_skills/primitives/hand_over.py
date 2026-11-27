@@ -859,6 +859,10 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
             exchange_pose,
             approach_direction,
             resources.second.hand.target_id,
+            hand_commands=(
+                resources.second.hand_open_qpos,
+                resources.second.hand_grasp_qpos,
+            ),
             obj_longest_axis=receive_axis,
             is_positive_part=receive_positive,
             center_axis=receive_center_axis,
@@ -1361,6 +1365,7 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
             object_pose,
             handover_direction,
             handover.hand.target_id,
+            hand_commands=(handover.hand_open_qpos, handover.hand_grasp_qpos),
             obj_longest_axis=obj_longest_axis,
             is_positive_part=handover_is_positive_part,
             arm=handover.arm,
@@ -1427,6 +1432,7 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
             middle_object_pose,
             receive_direction,
             receive.hand.target_id,
+            hand_commands=(receive.hand_open_qpos, receive.hand_grasp_qpos),
             obj_longest_axis=obj_longest_axis,
             is_positive_part=~handover_is_positive_part,
             arm=receive.arm,
@@ -2113,6 +2119,7 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
         approach_direction: torch.Tensor,
         grasp_target_id: str,
         *,
+        hand_commands: tuple[torch.Tensor, torch.Tensor],
         obj_longest_axis: torch.Tensor | None,
         is_positive_part: torch.Tensor,
         center_axis: torch.Tensor | None = None,
@@ -2156,7 +2163,7 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
             )
 
         generator = self.planning_services.grasp_pose_generator(grasp_target_id)
-        labels = validated_label_provider(generator)
+        labels = validated_label_provider(generator, hand_commands)
         if labels is not None:
             pool = labels(
                 affordance.mesh_vertices,

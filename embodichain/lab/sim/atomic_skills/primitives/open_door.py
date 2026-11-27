@@ -315,6 +315,7 @@ class OpenDoor(AtomicSkill[OpenDoorGoal, OpenDoorOptions]):
             context,
             (request.invocation_id or self.skill_id) + ":grasp",
             feasible,
+            (hand_open_qpos, hand_grasp_qpos),
         )
         grasp_success = grasp_sample.success
         grasp_xpos = grasp_sample.poses.to(device=self.device, dtype=torch.float32)

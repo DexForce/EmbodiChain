@@ -273,6 +273,7 @@ class AxisAlign(AtomicSkill[AxisAlignGoal, AxisAlignOptions]):
             options=options,
             start_qpos=start_arm_qpos,
             object_part=options.pick_object_part,
+            hand_commands=(hand_open_qpos, hand_grasp_qpos),
             sample_key=(request.invocation_id or self.skill_id) + ":grasp",
         )
         grasp_success = grasp_sample.success
@@ -483,6 +484,7 @@ class AxisAlign(AtomicSkill[AxisAlignGoal, AxisAlignOptions]):
         rotation_angle: torch.Tensor,
         grasp_target_id: str,
         *,
+        hand_commands: tuple[torch.Tensor, torch.Tensor],
         manipulator: JointPositionTarget,
         options: AxisAlignOptions,
         start_qpos: torch.Tensor,
@@ -512,7 +514,7 @@ class AxisAlign(AtomicSkill[AxisAlignGoal, AxisAlignOptions]):
             )
             is_positive_part = object_part == "top"
         generator = self.planning_services.grasp_pose_generator(grasp_target_id)
-        labels = validated_label_provider(generator)
+        labels = validated_label_provider(generator, hand_commands)
         if labels is not None:
             pool = labels(
                 affordance.mesh_vertices,
