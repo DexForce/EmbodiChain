@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 from unittest.mock import patch
@@ -403,17 +404,29 @@ def _probe(output):
         SimulationManager.flush_cleanup_queue()
 
 
-@pytest.mark.subprocess_sim
-def test_explicit_phase_paths_and_selected_row_acceptance(tmp_path):
-    result = subprocess.run(
-        [sys.executable, __file__, str(tmp_path)],
+def _run_probe(*args: str | Path, timeout: int = 300) -> None:
+    # A cache miss launches a second native process that also owns GPU arenas.
+    with subprocess.Popen(
+        [sys.executable, __file__, *args],
         cwd=Path(__file__).resolve().parents[3],
         env={**os.environ, "SDL_VIDEODRIVER": "offscreen", "OMP_NUM_THREADS": "1"},
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
-        timeout=300,
-    )
-    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-5000:]
+        start_new_session=True,
+    ) as process:
+        try:
+            output, _ = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            output, _ = process.communicate()
+            pytest.fail(f"Simulation probe exceeded {timeout}s.\n{output[-8000:]}")
+        assert process.returncode == 0, output[-8000:]
+
+
+@pytest.mark.subprocess_sim
+def test_explicit_phase_paths_and_selected_row_acceptance(tmp_path):
+    _run_probe(tmp_path)
 
 
 def _check_coordinated_grasp_targets(env):
@@ -628,23 +641,37 @@ def _probe_handover_rows():
 
 
 @pytest.mark.subprocess_sim
-def test_selected_handover_rows_preserve_world_batch(tmp_path):
-    result = subprocess.run(
-        [sys.executable, __file__, "handover"],
-        cwd=Path(__file__).resolve().parents[3],
-        env={**os.environ, "SDL_VIDEODRIVER": "offscreen", "OMP_NUM_THREADS": "1"},
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
-    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-5000:]
+def test_selected_handover_rows_preserve_world_batch():
+    _run_probe("handover")
+
+
+@pytest.mark.gpu
+@pytest.mark.subprocess_sim
+def test_handover_generates_and_reuses_physical_grasps(tmp_path: Path) -> None:
+    """Exercise both mounted hands from an empty cache at production sampling density."""
+    cache = tmp_path / "validated"
+    _run_probe("handover", cache, timeout=20 * 60)
+    generated = {p.name: p.stat().st_mtime_ns for p in cache.glob("*.pt")}
+    assert len(generated) == 2, generated
+    # Reopen the real world with the same cache. Both hands must execute and
+    # the second process must reuse both label files without replacing them.
+    _run_probe("handover", cache)
+    assert {p.name: p.stat().st_mtime_ns for p in cache.glob("*.pt")} == generated
 
 
 if __name__ == "__main__":
-    from embodichain.lab.sim.utility._validated_grasps import ValidatedGraspCache
+    from embodichain.lab.sim.utility import _validated_grasps
 
-    with patch.object(ValidatedGraspCache, "_load_labels", _recorded_grasp_labels):
-        if sys.argv[1] == "handover":
+    if len(sys.argv) == 3 and sys.argv[1] == "handover":
+        with patch.object(_validated_grasps, "_LABEL_CACHE_DIR", Path(sys.argv[2])):
             _probe_handover_rows()
-        else:
-            _probe(sys.argv[1])
+    else:
+        with patch.object(
+            _validated_grasps.ValidatedGraspCache,
+            "_load_labels",
+            _recorded_grasp_labels,
+        ):
+            if sys.argv[1] == "handover":
+                _probe_handover_rows()
+            else:
+                _probe(sys.argv[1])

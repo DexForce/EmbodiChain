@@ -462,7 +462,7 @@ def test_handover_physical_labels_use_mounted_drives_and_pad_contacts(
     monkeypatch.setattr(
         _validated_grasps, "subprocess", SimpleNamespace(run=run_label_worker)
     )
-    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    monkeypatch.setattr(_validated_grasps, "_LABEL_CACHE_DIR", tmp_path / "labels")
 
     vertices = torch.eye(3) * 0.02
 

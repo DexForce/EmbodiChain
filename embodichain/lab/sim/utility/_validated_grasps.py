@@ -48,6 +48,8 @@ from embodichain.toolkits.graspkit.pg_grasp.fixed_geometry import (
 
 __all__ = []
 
+_LABEL_CACHE_DIR = Path.home() / ".cache/embodichain/grasp_annotator_cache/validated"
+
 
 def _cache_key(
     urdf: Path, vertices: torch.Tensor, triangles: torch.Tensor, signature: dict
@@ -252,7 +254,7 @@ class ValidatedGraspCache:
         signature: dict,
     ) -> dict[str, torch.Tensor]:
         """Read the physical labels, running one isolated validator on a cache miss."""
-        directory = Path.home() / ".cache/embodichain/grasp_annotator_cache/validated"
+        directory = _LABEL_CACHE_DIR
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"{key}.pt"
         if not path.exists() or (self.force_refresh and key not in self._refreshed):
