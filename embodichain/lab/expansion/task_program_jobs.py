@@ -572,12 +572,10 @@ def resolve_task_program_expansion_bindings(
     """
     deployment = Path(deployment).resolve(strict=True)
     sources = dict(source_artifacts or {})
-    if (deployment.parent / "invocation_bindings.json").is_file():
-        from embodichain.toolkits.skill_fitting.task_program import (
-            load_invocation_bindings,
-        )
+    from embodichain.toolkits.skill_fitting.task_program import load_invocation_bindings
 
-        sealed = load_invocation_bindings(deployment)
+    sealed = load_invocation_bindings(deployment)
+    if sealed:
         if invocation_policy_bindings and invocation_policy_bindings != sealed:
             raise ValueError(
                 "Explicit invocation policies differ from the sealed deployment."
@@ -644,6 +642,9 @@ def run_task_program_expansion(
         runtime_versions=runtime_versions,
         viewer=viewer,
         preview_output=preview_output,
+        validator_factory=validator_factory,
+        nominal_source_factory=nominal_source_factory,
+        invocation_policy_bindings=invocation_policy_bindings,
     )
 
 
@@ -659,6 +660,11 @@ def _collect_task_program_expansion(
     runtime_versions: Mapping[str, object] | None = None,
     viewer: Mapping[str, object] | None = None,
     preview_output: str | Path | None = None,
+    validator_factory: Callable[[Any, Path], ExpansionValidator] | None = None,
+    nominal_source_factory: (
+        Callable[[Any, ExpansionRowContext], TaskProgramNominalSourceFactory] | None
+    ) = None,
+    invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = (),
 ) -> Mapping[str, object]:
     from importlib import import_module, metadata
     import torch

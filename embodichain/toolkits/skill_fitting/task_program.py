@@ -595,20 +595,27 @@ def load_invocation_bindings(deployment: Path) -> tuple[InvocationPolicyBinding,
         Validated bindings in declaration order, or an empty tuple when the
         deployment has no fitted invocation bindings.
     """
+    root = deployment.resolve(strict=True).parent
+    path = root / "invocation_bindings.json"
+    seal_path = root / "manifest.json"
+    if not path.is_file():
+        seal = json.loads(seal_path.read_text()) if seal_path.is_file() else None
+        if isinstance(seal, dict) and seal.get("schema") == _BINDING_SCHEMA:
+            raise ValueError(
+                "Missing sealed fitted Task Program artifact: invocation_bindings.json."
+            )
+        return ()
+
     from embodichain.lab.task_program.integrations.invocation_policy import (
         BoundInvocationPolicies,
         InvocationPolicyBinding,
     )
 
-    root = deployment.resolve(strict=True).parent
-    path = root / "invocation_bindings.json"
-    if not path.is_file():
-        return ()
     if deployment.resolve(strict=True) != root / "deployment.yaml":
         raise ValueError(
             "Fitted invocation bindings require their sealed deployment.yaml."
         )
-    seal = json.loads((root / "manifest.json").read_text())
+    seal = json.loads(seal_path.read_text())
     declaration = json.loads(path.read_text())
     if seal["schema"] != _BINDING_SCHEMA or declaration["schema"] != _BINDING_SCHEMA:
         raise ValueError("Unsupported fitted Task Program binding.")
@@ -632,5 +639,7 @@ def load_invocation_bindings(deployment: Path) -> tuple[InvocationPolicyBinding,
     bindings = tuple(
         InvocationPolicyBinding(**item) for item in declaration["bindings"]
     )
+    if not bindings:
+        raise ValueError("A sealed fitted Task Program requires an invocation policy.")
     BoundInvocationPolicies(program, bindings).validate_manifest(program, manifest)
     return bindings

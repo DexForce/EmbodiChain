@@ -100,6 +100,31 @@ def test_rolling_preflight_resolves_legacy_preset_and_reports_capacity(
     )
 
 
+@pytest.mark.parametrize("keep_binding_file", [False, True])
+def test_public_expansion_rejects_incomplete_fitted_deployment_before_collecting(
+    tmp_path,
+    keep_binding_file,
+):
+    from embodichain.lab.expansion import run_task_program_expansion
+
+    deployment = tmp_path / "deployment.yaml"
+    deployment.write_text("{}")
+    (tmp_path / "manifest.json").write_text(
+        json.dumps({"schema": "fitted-task-program/v1", "files": {}})
+    )
+    if keep_binding_file:
+        (tmp_path / "invocation_bindings.json").write_text(
+            json.dumps({"schema": "fitted-task-program/v1", "bindings": []})
+        )
+    fixture = Path(__file__).parent / "fixtures/task_program_job.yaml"
+    output = tmp_path / "expansion"
+
+    with pytest.raises(ValueError, match="Missing sealed fitted Task Program artifact"):
+        run_task_program_expansion(deployment, fixture, output, seed=0)
+
+    assert not (output / "dataset").exists()
+
+
 def test_task_program_declarations_are_pure_and_protect_contact_phases(tmp_path):
     import os
     import subprocess
