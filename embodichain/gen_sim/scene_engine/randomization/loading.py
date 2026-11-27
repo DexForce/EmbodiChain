@@ -122,7 +122,10 @@ def load_layouts(layout_dir: str | Path) -> LoadedLayouts:
                 "Scene Engine source configuration or asset contents changed."
             )
         source = scene_layout_input_from_export(
-            output_root, scene_id=loaded.prepared.source.scene_id
+            output_root,
+            scene_id=loaded.prepared.source.scene_id,
+            include_authored_support=loaded.prepared.source.main_support_bounds
+            is not None,
         )
         if source.fingerprint != loaded.prepared.source.fingerprint:
             raise ValueError("Scene Engine source changed after layouts were saved.")

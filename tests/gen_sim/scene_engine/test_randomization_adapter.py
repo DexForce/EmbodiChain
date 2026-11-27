@@ -21,6 +21,7 @@ import json
 
 import numpy as np
 import pytest
+import trimesh
 
 from embodichain.gen_sim.scene_engine.randomization.adapter import (
     convert_layouts,
@@ -81,6 +82,50 @@ def test_randomization_rejects_a_scene_with_only_floor_groups(tmp_path) -> None:
         scene_layout_input_from_export(export)
     with pytest.raises(ValueError, match="requires at least one table group"):
         randomize_scene(cfg)
+
+
+def test_v4_uses_exported_tabletop_level_and_safe_rectangle(tmp_path) -> None:
+    export, _ = _export(tmp_path, floor_subtree=True)
+    config_path = export / "scene_config.json"
+    config = json.loads(config_path.read_text())
+    table = config["background"][0]
+    mesh_path = export / table["shape"]["fpath"]
+    upper = trimesh.load_scene(mesh_path).to_geometry()
+    lower = trimesh.creation.box(extents=[0.8, 0.04, 0.6])
+    lower.apply_translation([-0.35, -0.32, 0.0])
+    trimesh.util.concatenate([upper, lower]).export(mesh_path)
+    shelf_z = -0.3
+    table["support_surface_z"] = shelf_z
+    table["support_optimization_rect_xy"] = [
+        [-0.74, -0.29],
+        [0.04, -0.29],
+        [0.04, 0.29],
+        [-0.74, 0.29],
+    ]
+    config["rigid_object"][-1]["init_pos"][2] = shelf_z + 0.05
+    config_path.write_text(json.dumps(config))
+
+    job = {"candidate_count": 8, "max_attempts": 100}
+    run = randomize_scene_export(tmp_path, job)
+    loaded = load_layouts(run / "layouts")
+    assert len(loaded.variants) == job["candidate_count"]
+    for variant in loaded.variants:
+        (change,) = variant.pose_changes
+        x, y, z = np.asarray(change.arena_pose)[:3, 3]
+        # The fixture's bottle is 12 cm wide and offset +3 cm from its pivot.
+        assert -0.74 <= x - 0.03 and x + 0.09 <= 0.04
+        assert -0.29 <= y - 0.04 and y + 0.04 <= 0.29
+        assert z == pytest.approx(shelf_z + 0.05)
+
+    # Both shelves can contain this rectangle. The height alone must change
+    # the source and cache identity even though the XY sampling bounds agree.
+    table["support_surface_z"] = 0.0
+    config_path.write_text(json.dumps(config))
+    upper_run = randomize_scene_export(tmp_path, job)
+    manifest = json.loads((run / "run_result.json").read_text())
+    upper_manifest = json.loads((upper_run / "run_result.json").read_text())
+    assert manifest["source_sha256"] != upper_manifest["source_sha256"]
+    assert len(list((run.parent / "geometry_cache").glob("*.json"))) == 2
 
 
 @pytest.mark.parametrize("backend,storage", [("slsqp", "json"), ("batched", "packed")])

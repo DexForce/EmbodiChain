@@ -78,17 +78,8 @@ def measure_scene_geometry(
         transform = pose.copy()
         transform[:3, :3] = pose[:3, :3] @ _Y_UP_TO_Z_UP @ np.diag(scale)
         if uid == "table":
-            # GLB positions are float32, while saved support corners can come
-            # from the mesh before export. Bound that round-trip error in the
-            # asset's local axes, then map it through scale and rotation. World
-            # translation must not enlarge the accepted boundary error.
-            local_error = (
-                np.max(np.abs(mesh.vertices), axis=0, initial=0.0)
-                * np.finfo(np.float32).eps
-            )
-            boundary_tolerance_xy = np.minimum(
-                np.abs(transform[:2, :3]) @ local_error,
-                _MAX_TABLE_BOUNDARY_TOLERANCE_M,
+            boundary_tolerance_xy = _table_boundary_tolerance_xy(
+                mesh.vertices, transform
             )
         mesh.apply_transform(transform)
         if (
@@ -104,6 +95,19 @@ def measure_scene_geometry(
     if table is None:
         raise ValueError("The scene must contain a table entity.")
     return SceneGeometry(poses_by_uid, aabbs_by_uid, table)
+
+
+def _table_boundary_tolerance_xy(
+    local_vertices: np.ndarray, transform: np.ndarray
+) -> np.ndarray:
+    """Bound the GLB float32 rounding error in the XY support rectangle."""
+    # World translation must not enlarge the accepted boundary error.
+    local_error = (
+        np.max(np.abs(local_vertices), axis=0, initial=0.0) * np.finfo(np.float32).eps
+    )
+    return np.minimum(
+        np.abs(transform[:2, :3]) @ local_error, _MAX_TABLE_BOUNDARY_TOLERANCE_M
+    )
 
 
 def _measure_table(

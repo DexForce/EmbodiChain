@@ -38,7 +38,7 @@ from embodichain.lab.sim.scene.expansion import (
     prepare_scene_randomization,
     save_scene_variants,
 )
-from ._geometry import _Y_UP_TO_Z_UP
+from ._geometry import _Y_UP_TO_Z_UP, _measure_table, _table_boundary_tolerance_xy
 from .baseline import _entry_pose, _rigid_entries, _support_groups, _source_digest
 from .cfg import _UniqueKeyLoader
 
@@ -70,6 +70,7 @@ def scene_layout_input_from_export(
     output_root: str | Path,
     *,
     scene_id: str | None = None,
+    include_authored_support: bool = True,
 ) -> SceneLayoutInput:
     """Read tabletop geometry in local Z-up without modifying its source export.
 
@@ -79,6 +80,8 @@ def scene_layout_input_from_export(
     Args:
         output_root: Workspace or scene_export directory.
         scene_id: Optional preserved legacy proposal parent identity.
+        include_authored_support: Use stored tabletop geometry if present.
+            Disable when reconstructing older snapshots that did not carry it.
 
     Returns:
         Owned source-independent geometry and support tree.
@@ -106,16 +109,39 @@ def scene_layout_input_from_export(
         parents.update(dict(members))
     active_uids = {"table", *parents}
     vertices, faces, poses = {}, {}, {}
+    main_support_bounds = None
     for entry in entries:
         uid = entry["uid"]
         if uid not in active_uids:
             continue
         mesh = load_glb_mesh(export / entry["shape"]["fpath"])
-        vertices[uid] = (
-            np.asarray(mesh.vertices) * entry.get("body_scale", [1, 1, 1])
-        ) @ _Y_UP_TO_Z_UP.T
-        faces[uid] = np.asarray(mesh.faces)
+        scale = entry.get("body_scale", [1, 1, 1])
+        vertices[uid] = (np.asarray(mesh.vertices) * scale) @ _Y_UP_TO_Z_UP.T
         poses[uid] = _entry_pose(entry)
+        if (
+            uid == "table"
+            and include_authored_support
+            and (
+                entry.get("support_surface_z") is not None
+                or entry.get("support_optimization_rect_xy") is not None
+            )
+        ):
+            transform = poses[uid].copy()
+            transform[:3, :3] = transform[:3, :3] @ _Y_UP_TO_Z_UP @ np.diag(scale)
+            tolerance = _table_boundary_tolerance_xy(mesh.vertices, transform)
+            # Retain the local mesh for the layout input and measure the saved
+            # tabletop declaration against the final, arena-space geometry.
+            faces[uid] = np.asarray(mesh.faces).copy()
+            mesh.apply_transform(transform)
+            table = _measure_table(entry, mesh, tolerance)
+            center = np.asarray(table["center_xy"])
+            half = np.asarray(table["size_xy"]) / 2
+            main_support_bounds = (
+                (*tuple(center - half), table["surface_z"]),
+                (*tuple(center + half), table["surface_z"]),
+            )
+        else:
+            faces[uid] = np.asarray(mesh.faces)
     return SceneLayoutInput(
         config["scene_id"] if scene_id is None else scene_id,
         "table",
@@ -123,6 +149,7 @@ def scene_layout_input_from_export(
         vertices,
         faces,
         parents,
+        main_support_bounds=main_support_bounds,
     )
 
 
@@ -237,7 +264,9 @@ def convert_layouts(
         (run / manifest["policy_file"]).read_text(), Loader=_UniqueKeyLoader
     )
     source = scene_layout_input_from_export(
-        loaded.output_root, scene_id=loaded.variants[0].parent_scene_id
+        loaded.output_root,
+        scene_id=loaded.variants[0].parent_scene_id,
+        include_authored_support=False,
     )
     cfg = SceneRandomizationPolicyCfg(
         randomize_groups=policy.get("randomize_groups", True),

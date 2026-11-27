@@ -108,6 +108,8 @@ class SceneLayoutInput:
         faces: Triangle indices for each entity's complete mesh.
         parent_by_uid: Parent UID for every entity except the main support.
         movable_entity_ids: Allowed changed entities; None permits all children.
+        main_support_bounds: Optional validated lower and upper XYZ corners of
+            one horizontal safe rectangle in the local arena frame.
 
     Inputs are copied and read-only. Unselected descendants follow their parent;
     entities excluded from the permission set must remain fixed in arena space.
@@ -120,6 +122,7 @@ class SceneLayoutInput:
     faces: Mapping[str, object]
     parent_by_uid: Mapping[str, str]
     movable_entity_ids: tuple[str, ...] | None = None
+    main_support_bounds: Sequence[Sequence[float]] | None = None
 
     def __post_init__(self) -> None:
         _identifier(self.scene_id, "scene_id")
@@ -174,6 +177,20 @@ class SceneLayoutInput:
         object.__setattr__(self, "faces", MappingProxyType(faces))
         object.__setattr__(self, "parent_by_uid", MappingProxyType(parents))
         object.__setattr__(self, "movable_entity_ids", permissions)
+        if self.main_support_bounds is not None:
+            bounds = np.asarray(self.main_support_bounds, dtype=np.float64)
+            if (
+                bounds.shape != (2, 3)
+                or not np.isfinite(bounds).all()
+                or np.any(bounds[0, :2] >= bounds[1, :2])
+                or bounds[0, 2] != bounds[1, 2]
+            ):
+                raise ValueError(
+                    "Main support bounds must form a horizontal rectangle."
+                )
+            object.__setattr__(
+                self, "main_support_bounds", tuple(map(tuple, bounds.tolist()))
+            )
         object.__setattr__(self, "_fingerprint", _digest(self.to_dict()))
 
     def to_dict(self) -> dict:
@@ -188,6 +205,11 @@ class SceneLayoutInput:
             "faces": {uid: value.tolist() for uid, value in self.faces.items()},
             "parent_by_uid": dict(self.parent_by_uid),
             "movable_entity_ids": list(self.movable_entity_ids),
+            **(
+                {"main_support_bounds": [list(row) for row in self.main_support_bounds]}
+                if self.main_support_bounds is not None
+                else {}
+            ),
         }
 
     @property
@@ -368,6 +390,11 @@ def prepare_scene_randomization(
     )
     geometry = None
     table = None
+    authored_table = (
+        tuple(tuple(point[:2]) for point in source.main_support_bounds)
+        if source.main_support_bounds is not None
+        else None
+    )
     path = None if cache_dir is None else Path(cache_dir) / (key + ".json")
     if path is not None and path.exists():
         from .persistence import _read_json
@@ -386,6 +413,8 @@ def prepare_scene_randomization(
         ):
             raise ValueError("Prepared main support bounds are invalid.")
         table = tuple(tuple(float(value) for value in row) for row in bounds)
+        if authored_table is not None and table != authored_table:
+            raise ValueError("Prepared bounds differ from the authored main support.")
     if geometry is None:
         supports = {}
         for parent in sorted(active):
@@ -419,23 +448,26 @@ def prepare_scene_randomization(
             supports[parent] = support
         geometry = {"nodes": nodes, "supports": supports}
     if table is None:
-        transform = np.asarray(source.poses[source.support_uid])
-        points = (
-            source.vertices[source.support_uid] @ transform[:3, :3].T + transform[:3, 3]
-        )
-        region = detect_support_region(
-            source.support_uid,
-            points,
-            source.faces[source.support_uid],
-            config=SupportSurfaceConfig(preserve_holes=True),
-        )
-        rectangle = region.optimization_rectangle
-        if rectangle is None:
-            raise ValueError(
-                "Main support has no conservative rectangular sampling region."
+        table = authored_table
+        if table is None:
+            transform = np.asarray(source.poses[source.support_uid])
+            points = (
+                source.vertices[source.support_uid] @ transform[:3, :3].T
+                + transform[:3, 3]
             )
-        lo_x, lo_y, hi_x, hi_y = rectangle.bounds
-        table = ((lo_x, lo_y), (hi_x, hi_y))
+            region = detect_support_region(
+                source.support_uid,
+                points,
+                source.faces[source.support_uid],
+                config=SupportSurfaceConfig(preserve_holes=True),
+            )
+            rectangle = region.optimization_rectangle
+            if rectangle is None:
+                raise ValueError(
+                    "Main support has no conservative rectangular sampling region."
+                )
+            lo_x, lo_y, hi_x, hi_y = rectangle.bounds
+            table = ((lo_x, lo_y), (hi_x, hi_y))
         offsets = _root_support_offsets(
             source, nodes, table, policy["group_xy_offset_bounds_m"], selected_roots
         )
