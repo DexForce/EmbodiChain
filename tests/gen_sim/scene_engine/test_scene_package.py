@@ -21,6 +21,7 @@ from importlib.resources import files
 import json
 from pathlib import Path
 import shutil
+from zipfile import ZipFile
 
 import dexsim
 from dexsim.kit.simready import open_asset_package, validate_asset_revision
@@ -32,11 +33,13 @@ import trimesh
 from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraph, SceneGraphNode
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_package import (
     _export_scene_package,
+    _restore_scene_export,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.usd_scene import (
     USD_SCENE_SCHEMA,
     UsdSceneIndex,
 )
+from .test_randomization_baseline import _export
 
 
 def test_scene_package_schema_bytes_and_relocated_joint_targets(tmp_path: Path) -> None:
@@ -213,6 +216,86 @@ def test_editable_scene_package_retains_both_articulation_models(
             representations[laptop["runtime_representation_id"]]["relative_path"]
             == f"scene_export/{runtime.as_posix()}"
         )
+
+
+def test_scene_package_projects_floor_support_and_restores_legacy_metadata(
+    tmp_path: Path,
+) -> None:
+    export, _ = _export(tmp_path, floor_subtree=True)
+    scene_usd = tmp_path / "scene.usda"
+    stage = Usd.Stage.CreateNew(str(scene_usd))
+    world = UsdGeom.Xform.Define(stage, "/World").GetPrim()
+    world.SetCustomDataByKey("embodichain:scene_schema", USD_SCENE_SCHEMA)
+    stage.SetDefaultPrim(world)
+    UsdGeom.SetStageUpAxis(stage, "Z")
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdPhysics.SetStageKilogramsPerUnit(stage, 1.0)
+    for uid in ("table", "tray", "cup", "block", "bottle"):
+        prim = UsdGeom.Cube.Define(stage, f"/World/{uid}").GetPrim()
+        prim.SetCustomDataByKey("embodichain:uid", uid)
+        prim.SetCustomDataByKey("embodichain:kind", "rigid")
+    stage.GetRootLayer().Save()
+
+    current = tmp_path / "current"
+    current.mkdir()
+    package = current / "scene_package.zip"
+    _export_scene_package(
+        scene_usd_path=scene_usd, destination=package, scene_export_root=export
+    )
+    with ZipFile(package) as archive:
+        members = {name: archive.read(name) for name in archive.namelist()}
+    asset = json.loads(members["asset.json"])
+    relations = asset["semantics"]["relations"]
+    assert {
+        (row["subject"]["instance_id"], row["relation"], row["object"]["instance_id"])
+        for row in relations
+    } == {("cup", "on", "tray"), ("block", "on", "cup"), ("bottle", "on", "table")}
+    attributes = asset["semantics"]["attributes"]
+    assert [
+        (row["subject"]["instance_id"], row["value"])
+        for row in attributes
+        if row["name"] == "placement_support"
+    ] == [("tray", "floor")]
+
+    # Earlier packages published the structural table-parent edge and no floor
+    # attribute. Reconstruct that on-disk metadata without calling its projector.
+    asset["semantics"]["attributes"] = [
+        row for row in attributes if row["name"] != "placement_support"
+    ]
+    legacy_edge = {
+        "relation_id": "relation-"
+        + hashlib.sha256(b'["tray","on","table"]').hexdigest(),
+        "subject": {"kind": "instance", "instance_id": "tray"},
+        "object": {"kind": "instance", "instance_id": "table"},
+        "relation": "on",
+        "conditions": [],
+        "namespace": "embodichain",
+        "taxonomy": "scene-graph",
+        "taxonomy_version": "1",
+        "origin": "unknown",
+        "evidence_refs": [],
+    }
+    relations.insert(0, legacy_edge)
+    legacy = tmp_path / "legacy"
+    tampered = tmp_path / "tampered"
+    for workspace in (legacy, tampered):
+        workspace.mkdir()
+        if workspace == tampered:
+            asset["semantics"]["labels"][0]["value"] = "unrelated category"
+        members["asset.json"] = json.dumps(asset).encode("utf-8")
+        with ZipFile(workspace / "scene_package.zip", "w") as archive:
+            for name, content in members.items():
+                archive.writestr(name, content)
+
+    for workspace in (current, legacy):
+        _restore_scene_export(workspace)
+        for filename in ("scene_config.json", "scene_graph.json"):
+            assert (workspace / "scene_export" / filename).read_bytes() == (
+                export / filename
+            ).read_bytes()
+    with pytest.raises(ValueError, match="metadata disagrees with its editable export"):
+        _restore_scene_export(tampered)
+    assert not (tampered / "scene_export").exists()
 
 
 def test_scene_package_removes_stale_delivery_on_dependency_failure(

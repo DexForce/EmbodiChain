@@ -246,13 +246,21 @@ def _restore_scene_export(output_root: Path) -> None:
                 "Scene package has no supported editable Scene Engine export"
             )
         expected = _scene_package_metadata(root, asset)
+        semantics = asset.get("semantics")
         if (
             extension != expected[_SCENE_EXTENSION]
             or not _same_scene_layout(
                 asset.get("scene_layout"), expected["scene_layout"]
             )
-            or asset.get("semantics") != expected["semantics"]
             or asset["representations"] != expected["representations"]
+            or (
+                semantics != expected["semantics"]
+                # Older v1 packages copied floor roots' table edges.
+                and semantics
+                != _scene_package_metadata(root, asset, legacy_floor_semantics=True)[
+                    "semantics"
+                ]
+            )
         ):
             raise ValueError(
                 "Scene package metadata disagrees with its editable export"

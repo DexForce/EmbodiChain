@@ -269,7 +269,9 @@ def _same_scene_layout(layout: dict[str, Any] | None, expected: dict[str, Any]) 
     return True
 
 
-def _scene_package_metadata(root: Path, asset: dict[str, Any]) -> dict[str, Any]:
+def _scene_package_metadata(
+    root: Path, asset: dict[str, Any], *, legacy_floor_semantics: bool = False
+) -> dict[str, Any]:
     """Build the standard layout and semantics from the inventoried scene files."""
     export = root / "scene_export"
     importer = SceneExportImporter(output_root=root, scene_export_root=export)
@@ -387,11 +389,20 @@ def _scene_package_metadata(root: Path, asset: dict[str, Any]) -> dict[str, Any]
         )
     edges = [(r.source_id, r.relation, r.target_id) for r in graph.relations]
     for node in graph.nodes:
-        if node.parent_id is not None and node.parent_relation is not None:
+        on_floor = (
+            not legacy_floor_semantics
+            and entries[node.object_id].get("placement_support") == "floor"
+        )
+        if (
+            not on_floor
+            and node.parent_id is not None
+            and node.parent_relation is not None
+        ):
             edges.append((node.object_id, node.parent_relation, node.parent_id))
         for name, value in (
-            ("table_region", node.table_region),
+            ("table_region", None if on_floor else node.table_region),
             ("pose_description", node.pose_description),
+            ("placement_support", "floor" if on_floor else None),
         ):
             if value is not None:
                 attributes.append(
