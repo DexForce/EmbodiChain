@@ -135,6 +135,11 @@ _DEPLOYMENTS = {
         "task_program_open_drawer",
         "franka_panda",
     ),
+    Path("tasks/manipulation/hand_over/task.dual_ur5_robotiq_arg2f_140.yaml"): (
+        "dual_ur5_hand_over",
+        "dual_ur5_handover_v1",
+        "dual_ur5_robotiq_arg2f_140",
+    ),
     Path("tasks/manipulation/hand_over/task.dual_ur5_dh_pgi_140_80.yaml"): (
         "dual_ur5_hand_over",
         "dual_ur5_handover_v1",
@@ -386,6 +391,7 @@ _RESOURCE_PATHS = frozenset(
         Path("components/randomization_profiles/rgb_visual.yaml"),
         Path("components/embodiments/cobotmagic.yaml"),
         Path("components/embodiments/dual_ur5_dh_pgi_140_80.yaml"),
+        Path("components/embodiments/dual_ur5_robotiq_arg2f_140.yaml"),
         Path("components/embodiments/franka_panda.yaml"),
         Path("components/embodiments/tianji_marvin.yaml"),
         Path("components/embodiments/ur5_dh_pgi_140_80.yaml"),

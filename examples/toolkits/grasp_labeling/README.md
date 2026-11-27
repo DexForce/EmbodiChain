@@ -2,8 +2,10 @@
 
 The example pairs the registered CobotMagic V100 gripper
 with the registered `CoffeeCup/cup_translated.ply` mesh. The YAML sets the cup's
-mass, friction, scale and convex decomposition, the hand's TCP and drives, and
-the sampling budget. Run from the repository root with the PhysX/CUDA environment active.
+mass, friction, scale, collision mesh and support axis. The registered hand
+supplies its TCP and open/close commands. The example overrides hand stiffness
+(200) and maximum effort (30). Sampling, validation and pose NMS use their
+defaults. Run from the repository root with the PhysX/CUDA environment active.
 
 ```bash
 python -m embodichain affordance label-grasps \
@@ -41,7 +43,9 @@ rays. The grasp contact-frame approach must be within 5° of its requested direc
 Drops use up to 100 arenas here. Validation packs candidates across directions
 and placements into 2,400 arenas. Each row restores its own frozen object pose
 and starts with open fingers. Only the final partial batch needs padding.
-Use `--num-envs` to scale the physics batch to your GPU.
+On a smaller GPU, add just `--num-envs 128` to the full command to run
+at most 128 validations at once. The five-placement, 64-direction,
+100-candidate-per-direction budget stays the same.
 
 ## Configure another mesh or hand
 

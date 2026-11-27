@@ -8,29 +8,7 @@ rigid:
     material_props: {static_friction: 0.99, dynamic_friction: 0.97}
 gripper:
   model: CobotMagicV100Gripper
-  root_from_tcp:
-    - [-1, 0, 0, 0]
-    - [0, -1, 0, 0]
-    - [0, 0, 1, 0.143]
-    - [0, 0, 0, 1]
   stiffness: 200.0
   max_effort: 30.0
-  open_qpos: {joint7: 0.05, joint8: 0.05}
-  close_qpos: {joint7: 0.0, joint8: 0.0}
-collision_threshold: 0.005
-num_envs: 2400
-close_wait_steps: 60
-enable_disturbance: true
 sampling:
-  stable_poses: 5
   support_up_axis: [0, 0, 1]
-  max_drops: 100
-  drop_height_m: 0.05
-  min_rotation_deg: 20.0
-  directions: 64
-  approach_tolerance_deg: 5.0
-  candidates_per_direction: 100
-  sample_count: 20000
-  nms_distance_m: 0.003
-  nms_angle_deg: 5.0
-  seed: 0

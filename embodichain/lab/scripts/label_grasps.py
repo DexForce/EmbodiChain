@@ -75,6 +75,7 @@ def cli(argv: Sequence[str] | None = None) -> None:
     )
     budgets = (
         "stable_poses",
+        "max_drops",
         "directions",
         "candidates_per_direction",
         "sample_count",

@@ -194,6 +194,30 @@ def test_hand_over_gym_config_uses_declared_default_backend() -> None:
     assert cfg.sim_cfg.physics_config.enable_ccd is True
 
 
+def test_robotiq_handover_calibrates_both_ur5_endpoints() -> None:
+    """The two UR solvers and grasp generators must agree on the mounted TCP."""
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+
+    path = _gym_config_path().with_name("task.dual_ur5_robotiq_arg2f_140.yaml")
+    robot = config_to_cfg(load_config(path), source_path=path).robot
+    prepare_robot_grippers(robot)
+    expected_tcp = torch.tensor(
+        [[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0.21], [0, 0, 0, 1]]
+    )
+    for side in ("left", "right"):
+        solver = robot.solver_cfg[f"{side}_arm"]
+        assert solver.ur_type == "ur5"
+        torch.testing.assert_close(torch.tensor(solver.tcp), expected_tcp)
+        hand = robot.gripper_bindings[f"{side}_eef"]["defaults"]
+        assert hand["model_id"] == "robotiq_arg2f_140"
+        torch.testing.assert_close(
+            torch.tensor(hand["root_from_contact_frame"]), expected_tcp
+        )
+        assert set(hand["joint_commands"]["open"].values()) == {0.0}
+        for joint, target in hand["joint_commands"]["grasp"].items():
+            assert target == (-0.5 if "knuckle" in joint else 0.5)
+
+
 def test_hand_over_gym_config_builds_dual_ur5_pgi_scene() -> None:
     """Config parsing preserves the tutorial robot, can, and support geometry."""
     cfg = _configured_env_cfg()
