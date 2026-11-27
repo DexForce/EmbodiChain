@@ -217,9 +217,22 @@ def calibrate_scene(
         The calibrated export and a ``reference_layout`` report.
 
     Raises:
-        ValueError: An object lacks a mask, the scene has no table or an
-            articulation, or the rotated table is not world-axis aligned.
+        ValueError: An object lacks a mask, the scene contains floor-supported
+            objects or articulations, or the table is missing or misaligned.
     """
+    # Supporting floor objects requires a floor plane calibrated in the same
+    # world frame as the camera, then fitting each object to its own support.
+    floor_uids = sorted(
+        entry["uid"]
+        for entry in data.get("rigid_object", [])
+        if entry.get("placement_support") == "floor"
+    )
+    if floor_uids:
+        raise ValueError(
+            "Source calibration only supports tabletop objects. "
+            f"Floor-supported objects: {', '.join(floor_uids)}."
+        )
+
     import numpy as np
     from scipy.spatial.transform import Rotation
     from ._run_binding import _EULER
