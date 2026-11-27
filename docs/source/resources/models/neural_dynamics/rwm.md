@@ -1,36 +1,34 @@
-# Robot World Model (RWM)
-
-## Use cases
+# RWM: Robot World Model
 
 RWM predicts a robot's next state from its current state, an action and optional
 physical context. Use it to fit measured transitions at a fixed control period
 or to differentiate a sequence of predictions with respect to states/actions.
 The model, predictor, transition replay and SL recipe are available in
 `embodichain.extensions.models.dynamics.rwm` and work on CPU or CUDA without a simulator.
-Its state-increment formulation is inspired by
-[SuperMimic](https://arxiv.org/abs/2610.28480); the implementation lineage is
-documented in [References](#references).
 
-The included example qualifies supervised fitting on controlled accelerations.
-It also checks a 29-joint state layout and action gradients. These are fitting
-and interface checks; robot physics and policy performance require their own
-data and downstream evaluation.
+## Architecture
 
-## How it works
+SuperMimic fits a differentiable world model to simulator transitions and
+trains a tracking policy by backpropagating through short predicted rollouts.
+EmbodiChain's `RobotWorldModel` follows the state-increment approach. The
+diagram shows one step of the local predictor. [SuperMimic training loop](https://supermimic.github.io/#loop)
 
 The input encoder extracts height, body-frame gravity and linear/angular
-velocities, and joint positions/velocities. Global XY position and yaw do not
-enter these features. The encoded state, action and physical context are
-normalized and passed through an MLP to predict frame-local state increments.
+velocities, and joint positions/velocities. The encoded state, action and
+optional physical context are normalized together. An MLP predicts changes
+in the robot's frame, so the same local movement can be applied at any global
+XY position or heading.
 
 ```mermaid
 flowchart TB
-    S[Current robot state] --> F[Body-frame features]
-    A[Action and physical context] --> N[Normalize and predict with MLP]
+    accTitle: RWM frame-local state prediction and integration
+    S["Current robot state"] --> F["Height, body-frame features and joints"]
+    A["Action and optional physical context"] --> N["Normalize inputs"]
     F --> N
-    N --> I[Denormalize increments and integrate]
-    I --> P[Next robot state]
-    P --> F
+    N --> M["MLP predicts body-frame increments"]
+    M --> I["Denormalize and integrate"]
+    S --> I
+    I --> P["Next world-frame robot state"]
 ```
 
 Translation and velocity increments are rotated from the current body frame
@@ -110,7 +108,13 @@ identity. A rotation matrix in this layout is distinct from the xyzw quaternion
 used in NeRD's Ant codec. First-order rotation derivatives are supported away
 from the rotation-logarithm branch cut at pi.
 
-## Quick start
+## Examples
+
+Fit a model to controlled accelerations and check multi-step predictions and
+action gradients with the [RWM fitting example](https://github.com/DexForce/EmbodiChain/tree/main/examples/learning/rwm).
+The G1 workflow fits the family's `KinematicWorldModel` variant to simulator
+transitions and trains a policy to follow motion references.
+[G1 motion-tracking example](https://github.com/DexForce/EmbodiChain/tree/main/examples/learning/motion_tracking)
 
 ### Run the controlled fitting example
 
@@ -201,7 +205,7 @@ and mask the following episode. The caller owns acquisition, reset and replay
 refill. Validation data here illustrates the adapter; use training transitions
 for fitting and normalization in an actual workflow.
 
-## Training and evaluation
+### Training and evaluation
 
 The emitted `recipe.json` works with the common `train-sl` entry point. To
 start a separate run over the same corpora, change only the output destination
@@ -240,25 +244,22 @@ contract.
 
 ## References
 
-### Original paper and implementation lineage
-
 Qiayuan Liao, Yiyang Shao, Junfeng Long, Kevin Zakka, Roberto Horowitz,
-Pieter Abbeel, and Koushil Sreenath. **SuperMimic: Scaling Humanoid Whole-Body
-Control with One Differentiable World Model.** 2026.
-[arXiv:2610.28480](https://arxiv.org/abs/2610.28480).
+Pieter Abbeel, and Koushil Sreenath (2026). *SuperMimic: Scaling Humanoid
+Whole-Body Control with One Differentiable World Model*. Conference on Robot
+Learning. [arXiv:2610.28480](https://arxiv.org/abs/2610.28480)
 
-SuperMimic is the methodological inspiration for this state-increment model.
-The code-level reference is the independent
+The paper supplies the method. The code-level reference for EmbodiChain's
+supervised transition model is the independent
 [Uni-SuperMimic reproduction](https://github.com/Motphys/Uni-SuperMimic/tree/ceafbc863c52b3d613d0e19976794c5a31b9b402).
-EmbodiChain's RWM integration covers the supervised transition model described
-in this guide; the paper also studies policy learning and humanoid control.
 
 ```bibtex
-@misc{liao2026supermimic,
+@inproceedings{liao2026supermimic,
   title = {{SuperMimic}: Scaling Humanoid Whole-Body Control with One
            Differentiable World Model},
   author = {Liao, Qiayuan and Shao, Yiyang and Long, Junfeng and Zakka, Kevin and
             Horowitz, Roberto and Abbeel, Pieter and Sreenath, Koushil},
+  booktitle = {Conference on Robot Learning},
   year = {2026},
   eprint = {2610.28480},
   archivePrefix = {arXiv},
@@ -271,7 +272,6 @@ in this guide; the paper also studies policy learning and humanoid control.
 
 - [RWM API](../../../api_reference/rwm.rst): state transforms, model, predictor,
   replay, objective and trainer factory.
-- [Example and fitting protocol](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/rwm/README.md).
 - [Model implementation](https://github.com/DexForce/EmbodiChain/blob/main/embodichain/extensions/models/dynamics/rwm/model.py):
   frame-local transition model and its upstream reference.
 - [All neural dynamics models](index.md).
