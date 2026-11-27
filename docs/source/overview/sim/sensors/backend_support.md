@@ -1,7 +1,7 @@
 # Sensor Backend Support
 
 EmbodiChain selects physics with `physics: default` or `physics: newton` in Gym
-configuration. The Default backend uses PhysX through DexSim. DexUni is a solver
+configuration. The `default` backend runs through DexSim. DexUni is a solver
 path within Newton. Select it with `solver_type="dexuni"` or use the default
 Newton solver configuration. See {doc}`../sim_manager/physics/index` for
 backend selection and the separate renderer configuration.
@@ -11,7 +11,7 @@ configuration. **Conditional** means availability or the requested output depend
 on the solver, device, scene, or SDK. **Unsupported** means the acquisition mode
 is unavailable on that backend or solver path.
 
-| Sensor or acquisition mode | Default (PhysX) | Newton (other solvers) | Newton (DexUni) | Requirements and output limits |
+| Sensor or acquisition mode | `default` | Newton (other solvers) | Newton (DexUni) | Requirements and output limits |
 | :--- | :--- | :--- | :--- | :--- |
 | {doc}`camera` and {doc}`stereo_camera` | Supported | Supported | Supported | Enable a DexSim renderer. Headless simulation can use offscreen rendering. |
 | `JointEncoder` | Supported | Supported | Supported | Requires a robot or articulation that exposes joint position and velocity. |
@@ -33,12 +33,12 @@ is unavailable on that backend or solver path.
 
 ## Contact report validity
 
-Default CPU PhysX reports the magnitude of the total impulse. A normal force
-requires a valid normal impulse. CPU MuJoCo does not supply device contact
-buffers. DexUni can report both force-bearing and geometry-only rows in the
-same scene. Check `contact_capabilities`, component validity flags, and report
-completeness before consuming forces. See {doc}`contact_sensor` for field
-semantics and {doc}`../sim_manager/physics/newton/runtime_qualification`
+On CPU, the `default` backend reports the magnitude of the total impulse.
+A normal force requires a valid normal impulse. CPU MuJoCo does not supply
+device contact buffers. DexUni can report both force-bearing and geometry-only
+rows in the same scene. Check `contact_capabilities`, component validity flags,
+and report completeness before consuming forces. See {doc}`contact_sensor`
+for field semantics and {doc}`../sim_manager/physics/newton/runtime_qualification`
 for Newton solver and device combinations.
 
 Native hydroelastic output reports face counts and separation for the latest
