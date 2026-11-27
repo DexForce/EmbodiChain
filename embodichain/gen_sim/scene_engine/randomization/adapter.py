@@ -133,7 +133,21 @@ def scene_layout_input_from_export(
             # tabletop declaration against the final, arena-space geometry.
             faces[uid] = np.asarray(mesh.faces).copy()
             mesh.apply_transform(transform)
-            table = _measure_table(entry, mesh, tolerance)
+            table_entry = entry
+            if (local_height := entry.get("support_surface_z")) is not None:
+                if not np.allclose(poses[uid][2, :3], [0, 0, 1], rtol=0, atol=1e-5):
+                    raise ValueError(
+                        "An authored tabletop height requires a horizontal table."
+                    )
+                # Local Z-up height is the mesh's Y coordinate. The stored
+                # rectangle already uses arena XY and must not be transformed again.
+                table_entry = {
+                    **entry,
+                    "support_surface_z": float(
+                        transform[2, 1] * float(local_height) + transform[2, 3]
+                    ),
+                }
+            table = _measure_table(table_entry, mesh, tolerance)
             center = np.asarray(table["center_xy"])
             half = np.asarray(table["size_xy"]) / 2
             main_support_bounds = (

@@ -26,7 +26,8 @@ from zipfile import ZipFile
 import dexsim
 from dexsim.kit.simready import open_asset_package, validate_asset_revision
 from jsonschema import Draft202012Validator, FormatChecker
-from pxr import Sdf, Usd, UsdGeom, UsdPhysics
+from PIL import Image
+from pxr import Sdf, Usd, UsdGeom, UsdPhysics, UsdShade
 import pytest
 import trimesh
 
@@ -40,6 +41,9 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_package import (
     _export_scene_package,
     _restore_scene_export,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
+    _prepare_runtime_assets,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.usd_scene import (
     USD_SCENE_SCHEMA,
@@ -144,6 +148,8 @@ def test_editable_scene_package_retains_both_articulation_models(
     original = articulation_dir / "laptop.source.usdc"
     runtime_dependency = articulation_dir / "runtime_geometry.usda"
     original_dependency = articulation_dir / "source_geometry.usda"
+    texture = articulation_dir / "albedo.png"
+    Image.new("RGB", (2, 2), "red").save(export / texture)
     for model, dependency, bottom in (
         (runtime, runtime_dependency, -0.25),
         (original, original_dependency, -1.0),
@@ -157,6 +163,11 @@ def test_editable_scene_package_retains_both_articulation_models(
         collider.CreateFaceVertexCountsAttr([3, 3, 3, 3])
         collider.CreateFaceVertexIndicesAttr([0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3])
         UsdPhysics.CollisionAPI.Apply(collider.GetPrim())
+        shader = UsdShade.Shader.Define(geometry, "/Body/Albedo")
+        shader.CreateIdAttr("UsdUVTexture")
+        shader.CreateInput("file", Sdf.ValueTypeNames.Asset).Set(
+            Sdf.AssetPath(texture.name)
+        )
         geometry.GetRootLayer().Save()
         model_stage = Usd.Stage.CreateNew(str(export / model))
         model_stage.GetRootLayer().subLayerPaths = [dependency.name]
@@ -245,10 +256,24 @@ def test_editable_scene_package_retains_both_articulation_models(
     # and the legacy positioning leaves 1 mm of clearance.
     assert laptop["init_pos"][2] == pytest.approx(1.501)
     assert laptop["source_usdc_fpath"] == original.as_posix()
+    runtime_assets = _prepare_runtime_assets(
+        scene_config=refreshed_config,
+        config_dir=reopened / "scene_export",
+        runtime_assets_root=reopened / "runtime",
+    )
+    staged = Usd.Stage.Open(str(runtime_assets["laptop"]))
+    assert staged.GetDefaultPrim().GetPath() == Sdf.Path("/Body")
+    collision = UsdGeom.Mesh.Get(staged, "/Body/collision")
+    assert collision.GetPrim().HasAPI(UsdPhysics.CollisionAPI)
+    assert min(point[2] for point in collision.GetPointsAttr().Get()) == -1.0
+    albedo = UsdShade.Shader.Get(staged, "/Body/Albedo").GetInput("file").Get()
+    assert Path(albedo.resolvedPath).is_relative_to(runtime_assets["laptop"].parent)
+    assert Path(albedo.resolvedPath).read_bytes() == (export / texture).read_bytes()
     for saved, expected in (
         (runtime, original),
         (original, original),
         (original_dependency, original_dependency),
+        (texture, texture),
     ):
         assert (reopened / "scene_export" / saved).read_bytes() == (
             export / expected

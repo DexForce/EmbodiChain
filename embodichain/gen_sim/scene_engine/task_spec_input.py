@@ -96,9 +96,13 @@ def load_task_spec_input(
 
 
 def _parse_task_spec_input(
-    data: bytes, *, path: Path, image_path: str | Path | None
+    data: bytes,
+    *,
+    path: Path,
+    image_path: str | Path | None,
+    image_sha256: str | None = None,
 ) -> TaskSpecInput:
-    """Parse an already-read TaskSpec using its path for error messages."""
+    """Parse an already-read TaskSpec, optionally using a captured image digest."""
     try:
         document = json.loads(data.decode("utf-8"))
     except json.JSONDecodeError as exc:
@@ -108,7 +112,7 @@ def _parse_task_spec_input(
     if document.get("schema_version") != "task_spec/v1":
         raise ValueError("TaskSpec.schema_version must be 'task_spec/v1'.")
     inputs = _require_object(document.get("inputs"), "TaskSpec.inputs")
-    _verify_source_image(inputs, image_path)
+    _verify_source_image(inputs, image_path, image_sha256=image_sha256)
     instruction = inputs.get("instruction")
     if instruction is not None and not isinstance(instruction, str):
         raise ValueError("TaskSpec.inputs.instruction must be text or null.")
@@ -189,7 +193,12 @@ def _parse_task_spec_input(
     )
 
 
-def _verify_source_image(inputs: dict[str, Any], image_path: str | Path | None) -> None:
+def _verify_source_image(
+    inputs: dict[str, Any],
+    image_path: str | Path | None,
+    *,
+    image_sha256: str | None,
+) -> None:
     if "image" not in inputs:
         return
     image = _require_object(inputs["image"], "TaskSpec.inputs.image")
@@ -200,8 +209,10 @@ def _verify_source_image(inputs: dict[str, Any], image_path: str | Path | None) 
         raise ValueError("TaskSpec.inputs.image.sha256 must be a SHA-256 digest.")
     if image_path is not None:
         path = Path(image_path).expanduser()
-        with path.open("rb") as stream:
-            actual = hashlib.file_digest(stream, "sha256").hexdigest()
+        actual = image_sha256
+        if actual is None:
+            with path.open("rb") as stream:
+                actual = hashlib.file_digest(stream, "sha256").hexdigest()
         if actual != expected:
             raise ValueError(
                 f"TaskSpec source image SHA-256 does not match the supplied image: {path}"

@@ -84,7 +84,14 @@ def test_randomization_rejects_a_scene_with_only_floor_groups(tmp_path) -> None:
         randomize_scene(cfg)
 
 
-def test_v4_uses_exported_tabletop_level_and_safe_rectangle(tmp_path) -> None:
+@pytest.mark.parametrize(
+    "height_scale, translation",
+    [(1.0, [0.0, 0.0, 0.0]), (2.0, [0.2, -0.1, 0.8])],
+    ids=["canonical", "translated-and-scaled"],
+)
+def test_v4_uses_exported_tabletop_level_and_safe_rectangle(
+    tmp_path, height_scale, translation
+) -> None:
     export, _ = _export(tmp_path, floor_subtree=True)
     config_path = export / "scene_config.json"
     config = json.loads(config_path.read_text())
@@ -95,14 +102,19 @@ def test_v4_uses_exported_tabletop_level_and_safe_rectangle(tmp_path) -> None:
     lower.apply_translation([-0.35, -0.32, 0.0])
     trimesh.util.concatenate([upper, lower]).export(mesh_path)
     shelf_z = -0.3
+    dx, dy, dz = translation
+    arena_shelf_z = shelf_z * height_scale + dz
+    table["body_scale"][1] = height_scale
+    table["init_pos"] = translation
     table["support_surface_z"] = shelf_z
     table["support_optimization_rect_xy"] = [
-        [-0.74, -0.29],
-        [0.04, -0.29],
-        [0.04, 0.29],
-        [-0.74, 0.29],
+        [-0.74 + dx, -0.29 + dy],
+        [0.04 + dx, -0.29 + dy],
+        [0.04 + dx, 0.29 + dy],
+        [-0.74 + dx, 0.29 + dy],
     ]
-    config["rigid_object"][-1]["init_pos"][2] = shelf_z + 0.05
+    bottle_pos = config["rigid_object"][-1]["init_pos"]
+    bottle_pos[:] = [bottle_pos[0] + dx, bottle_pos[1] + dy, arena_shelf_z + 0.05]
     config_path.write_text(json.dumps(config))
 
     job = {"candidate_count": 8, "max_attempts": 100}
@@ -113,9 +125,13 @@ def test_v4_uses_exported_tabletop_level_and_safe_rectangle(tmp_path) -> None:
         (change,) = variant.pose_changes
         x, y, z = np.asarray(change.arena_pose)[:3, 3]
         # The fixture's bottle is 12 cm wide and offset +3 cm from its pivot.
-        assert -0.74 <= x - 0.03 and x + 0.09 <= 0.04
-        assert -0.29 <= y - 0.04 and y + 0.04 <= 0.29
-        assert z == pytest.approx(shelf_z + 0.05)
+        assert -0.74 + dx <= x - 0.03 and x + 0.09 <= 0.04 + dx
+        assert -0.29 + dy <= y - 0.04 and y + 0.04 <= 0.29 + dy
+        assert z == pytest.approx(arena_shelf_z + 0.05)
+    source = json.loads((run / "scene_input.json").read_text())
+    assert [corner[2] for corner in source["main_support_bounds"]] == pytest.approx(
+        [arena_shelf_z, arena_shelf_z]
+    )
 
     # Both shelves can contain this rectangle. The height alone must change
     # the source and cache identity even though the XY sampling bounds agree.

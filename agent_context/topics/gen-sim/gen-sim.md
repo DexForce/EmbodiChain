@@ -91,11 +91,13 @@ checks. The [service guide](../../../embodichain/gen_sim/services/README.md) own
 configuration, adapter and wire contracts. Dotenv syntax is shared; caller
 selection and process-environment precedence stay separate.
 
-Staged analysis persists versioned blueprints before generation. Materialization
-checks source/mask hashes, copies supplied scene/graph state and closes only
-owned clients. Move/delete-only edits need no generation client. Blueprint audit
-documents are not runnable deployments. Whole-scene rotation also rotates graph
-relations/table regions; directional vocabularies require quarter turns.
+Staged analysis uses one source-image snapshot for TaskSpec verification and
+scene understanding. It rechecks the original inputs before publishing a
+versioned blueprint. Materialization checks source/mask hashes, copies supplied
+scene/graph state and closes only owned clients. Move/delete-only edits need no
+generation client. Blueprint audit documents are not runnable deployments.
+Whole-scene rotation also rotates graph relations/table regions; directional
+vocabularies require quarter turns.
 [Task Engine](../task-engine/task-engine.md) owns unbound instruction planning.
 
 ## Durable scene boundary
@@ -116,6 +118,8 @@ relations/table regions; directional vocabularies require quarter turns.
   isolated material sidecars; GLB node transforms alone are insufficient.
 - Every generated scene contains a rigid table. Articulations retain runtime
   USDC plus edit-proxy GLB, with distinct native-root and proxy placement.
+  Delivery flattens composed USD into a private runtime copy after checking
+  local dependencies, without changing the editable layers.
 - Generation, editing and staged materialization produce `scene_usd/` with
   provenance-bearing `scene.usda`, relocatable `scene.usdz` and `scene_package.zip`.
   DexSim owns canonical `/Asset` packaging, AssetRevision `2.0-draft` validation,

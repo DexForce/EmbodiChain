@@ -95,6 +95,8 @@ graph. Default SLSQP repair and opt-in CPU/CUDA rejection sampling have distinct
 proposal distributions. UID-addressed streams, logical ordinals and whole-attempt
 accounting preserve prefixes across batch sizes. GenSim owns group/member
 transforms, source/config snapshots and persisted canonical CPU-float64 poses.
+For authored Scene Engine tabletops, v4 converts the selected table-local
+height to arena Z but reuses the safe rectangle already stored in arena XY.
 
 Versioned intra-group policies add explicit non-root XY/yaw targets and fixed
 roots; empty targets preserve the group path. Numeric postorder subtree proposals

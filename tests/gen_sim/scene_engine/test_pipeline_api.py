@@ -24,6 +24,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from PIL import Image
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_edit_plan import (
@@ -168,6 +169,12 @@ def test_analyze_image_persists_blueprint_and_artifact_hashes(
     assert document["scene"]["objects"][0]["table_state"] == "degraded"
     assert document["artifacts"][0]["path"].endswith("table-mask.png")
     assert len(document["artifacts"][0]["sha256"]) == 64
+    image_record = next(
+        artifact
+        for artifact in document["artifacts"]
+        if artifact["path"] == image_path.as_posix()
+    )
+    assert image_record["sha256"] == hashlib.sha256(image_path.read_bytes()).hexdigest()
     if task_spec is not None:
         data = task_spec.read_bytes()
         assert document["artifacts"][-1] == {
@@ -204,6 +211,45 @@ def test_analyze_image_rejects_task_spec_replaced_during_scene_understanding(
             task_spec=task_spec,
         )
 
+    assert not (output_root / "scene_blueprint.json").exists()
+
+
+def test_analyze_image_rejects_replaced_source_image_without_mixing_inputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    image_path = tmp_path / "input.png"
+    replacement = tmp_path / "replacement.png"
+    Image.new("RGB", (4, 4), "red").save(image_path)
+    Image.new("RGB", (4, 4), "blue").save(replacement)
+    original_bytes = image_path.read_bytes()
+    replacement_bytes = replacement.read_bytes()
+    task_spec = _write_task_spec(tmp_path)
+    document = json.loads(task_spec.read_text(encoding="utf-8"))
+    document["inputs"]["image"] = {
+        "sha256": hashlib.sha256(original_bytes).hexdigest(),
+    }
+    task_spec.write_text(json.dumps(document), encoding="utf-8")
+    output_root = tmp_path / "output"
+    analysis_reads = []
+
+    def replace_source_image(*, image_path: Path, **_) -> tuple[Scene, SceneGraph]:
+        analysis_reads.append(image_path.read_bytes())
+        replacement.replace(tmp_path / "input.png")
+        analysis_reads.append(image_path.read_bytes())
+        return _table_scene()
+
+    monkeypatch.setattr(api, "understand_scene", replace_source_image)
+    with pytest.raises(ValueError, match="Source image changed during scene analysis"):
+        api.analyze_image(
+            image_path,
+            output_root,
+            task_spec=task_spec,
+            vlm_client=object(),
+            image_segmentation_client=_HealthyClient(),
+        )
+
+    assert analysis_reads == [original_bytes, original_bytes]
+    assert image_path.read_bytes() == replacement_bytes
     assert not (output_root / "scene_blueprint.json").exists()
 
 

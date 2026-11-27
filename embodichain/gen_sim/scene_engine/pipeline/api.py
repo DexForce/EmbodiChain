@@ -33,6 +33,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Final
 
 from embodichain.gen_sim.services.compat import ArticulationClient
@@ -160,6 +161,8 @@ def analyze_image(
     if task_spec is not None and image_path is None:
         raise ValueError("TaskSpec input requires an image.")
     resolved_image = Path(image_path).expanduser().resolve()
+    image_data = resolved_image.read_bytes()
+    image_record = _artifact_record(resolved_image, data=image_data)
     resolved_task_spec = (
         Path(task_spec).expanduser().resolve() if task_spec is not None else None
     )
@@ -168,7 +171,10 @@ def analyze_image(
     if resolved_task_spec is not None:
         data = resolved_task_spec.read_bytes()
         task_input = _parse_task_spec_input(
-            data, path=resolved_task_spec, image_path=resolved_image
+            data,
+            path=resolved_task_spec,
+            image_path=resolved_image,
+            image_sha256=image_record["sha256"],
         )
         task_spec_record = _artifact_record(resolved_task_spec, data=data)
     resolved_output = Path(output_root).expanduser().resolve()
@@ -178,15 +184,21 @@ def analyze_image(
     owns_segmentation = image_segmentation_client is None
     log_info("Starting Scene Understanding")
     try:
-        segmentation.check_health()
-        scene, scene_graph = understand_scene(
-            scene=Scene(),
-            image_path=resolved_image,
-            output_root=resolved_output,
-            vlm_client=effective_vlm,
-            image_segmentation_client=segmentation,
-            task_input=task_input,
-        )
+        # Multiple model calls must all read the same bytes that TaskSpec verified.
+        with TemporaryDirectory(
+            prefix=".scene-image-", dir=resolved_output
+        ) as directory:
+            analysis_image = Path(directory) / resolved_image.name
+            analysis_image.write_bytes(image_data)
+            segmentation.check_health()
+            scene, scene_graph = understand_scene(
+                scene=Scene(),
+                image_path=analysis_image,
+                output_root=resolved_output,
+                vlm_client=effective_vlm,
+                image_segmentation_client=segmentation,
+                task_input=task_input,
+            )
     finally:
         if owns_segmentation:
             segmentation.close()
@@ -199,21 +211,26 @@ def analyze_image(
         "scene_graph": scene_graph.to_dict(),
         "artifacts": [
             *_artifact_records(resolved_output / "scene_understanding"),
-            _artifact_record(resolved_image),
+            image_record,
             *([task_spec_record] if task_spec_record is not None else []),
         ],
     }
     blueprint_id = _canonical_hash(payload)
     document = {**payload, "blueprint_id": blueprint_id}
     manifest_path = resolved_output / "scene_blueprint.json"
-    if resolved_task_spec is not None:
+    for path, snapshot, label in (
+        (resolved_image, image_record, "Source image"),
+        (resolved_task_spec, task_spec_record, "TaskSpec"),
+    ):
+        if path is None:
+            continue
         try:
-            current_record = _artifact_record(resolved_task_spec)
+            current_record = _artifact_record(path)
         except FileNotFoundError:
             current_record = None
-        if current_record != task_spec_record:
+        if current_record != snapshot:
             raise ValueError(
-                f"TaskSpec changed during scene analysis ({resolved_task_spec}). "
+                f"{label} changed during scene analysis ({path}). "
                 "Run scene analysis again."
             )
     _write_json(manifest_path, document)
