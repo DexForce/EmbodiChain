@@ -624,7 +624,7 @@ topics:
   title: Data Assets
   aliases: [data assets, data path, asset download, 数据资产, 资产下载, 数据路径]
   keywords: [snapshot_urdf_resources, URDF resource snapshot, 机器人资源打包, get_data_path, get_data_class, _resolve_data_reference, EmbodiChainDataset, TabletopFourBases, Real2SimCarton, Real2SimCartonV1, demo assets, EMBODICHAIN_DATA_ROOT, EMBODICHAIN_DATASET_ROOT,
-    RoboSplatterOfficeGS, DiscoverseLab3GS, RoboSimGSTabletopGS,
+    RoboSplatterOfficeGS, DiscoverseLab3GS, RoboSimGSTabletopGS, DexTrove,
     CATEGORY_MODULES, embodichain.assets, ROBOT_ASSETS, 资产注册, download lock, get_registry, DefaultMaterials, list_default_materials, get_default_material_info, task_assets, PourCupAssets, PourCupDemoData]
   paths: [topics/data-assets/data-assets.md]
   source_of_truth:
@@ -643,6 +643,7 @@ topics:
   - scripts/tools/prepare_gaussian_scene_assets.py
   - scripts/tools/prepare_yam_i2rt_assets.py
   - scripts/tools/prepare_cloth_fold_assets.py
+  - scripts/tools/prepare_dextrove_subset.py
   - embodichain/data/default_materials.py
   - embodichain/data/default_materials.json
   - embodichain/_material_catalog.py
