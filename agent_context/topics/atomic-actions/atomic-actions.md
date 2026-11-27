@@ -148,6 +148,25 @@ Gym owns binding and execution through the
 [RewardManager composition contract](../manager-functor/manager-functor.md#composed-skill-rewards).
 Reward configuration does not implement a learned-policy execution backend.
 
+## Trajectory annotation and fitting
+
+`embodichain annotate-trajectory --bundle` opens the portable input package's
+video, joints, calibrated robot and reconstructed scene. `fit-trajectory` and
+the website's whole-trajectory fitting panel share `toolkits/skill_fitting/`;
+`atomic_skills/fitting.py` adapts the ordinary native planners. Explicit bindings
+and observed closing motion select participating control parts; names infer none.
+Accepted native spans replace only their selected cores. Remaining source frames
+become DemoSkill spans with original DOF-by-frame tensors.
+
+`run-task --skill-sequence skills.yaml` is a direct engine host that plans native
+object-bound goals from live state. It preserves closing preload on unbound
+joints. A matching Expansion Profile transforms only native free phases;
+DemoSkill commands remain unchanged. Execution completion is separate from
+physical success. See [fitting contracts and resource ownership](trajectory-fitting.md)
+and the [runnable guide](../../../examples/toolkits/skill_fitting/README.md)
+for pose frames, grasp symmetry, boundary qualification, collision caches,
+Viser comparison and portable input/output packages.
+
 ## Recommended change sites
 
 Modify the package-map owner for the changed contract. Add skill goals,

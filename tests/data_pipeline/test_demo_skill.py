@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 import json
 import shutil
 
@@ -111,6 +111,60 @@ def _build(source=None, spec=None, **kwargs):
         control_dt=0.01,
         **kwargs,
     )
+
+
+def test_fitted_source_slice_keeps_controls_and_measured_events(tmp_path):
+    from embodichain.toolkits.skill_fitting.task_program import _build_source_slice
+
+    raw = _source()
+    raw = replace(
+        raw,
+        commands=raw.qpos + 0.125,
+        command_alignment="post_step",
+        initial_observed_qpos=np.array([-1.0, 10.0]),
+    )
+    spec = _spec()
+    reference = build_demo_skill(
+        raw,
+        spec,
+        joints=(JointSpec("arm", "revolute"), JointSpec("finger", "prismatic")),
+        control_dt=0.02,
+    )
+    manifest = save_demo_skill(reference, tmp_path / "reference")
+    entry = np.eye(4)
+    entry[0, 3] = 0.012
+    spec.roles = (replace(spec.roles[0], source_pose=tuple(entry.flat)),)
+    spec.constraints = (spec.constraints[-1],)
+    (tmp_path / "contract.json").write_text(json.dumps(asdict(spec)))
+    _, clip = _build_source_slice(
+        tmp_path,
+        2,
+        8,
+        {
+            "reference_asset": manifest.relative_to(tmp_path).as_posix(),
+            "reference_asset_sha256": reference.content_sha256,
+            "contract": "contract.json",
+        },
+        0.02,
+    )
+    assert clip.demonstration.source_sample_offset == 2
+    np.testing.assert_array_equal(clip.demonstration.qpos, raw.qpos[2:8])
+    np.testing.assert_array_equal(clip.demonstration.commands, raw.commands[2:8])
+    np.testing.assert_array_equal(clip.demonstration.initial_observed_qpos, raw.qpos[1])
+    assert [(phase.name, phase.start, phase.stop) for phase in clip.spec.phases] == [
+        ("enter", 0, 2),
+        ("trace", 2, 6),
+    ]
+    assert [(event.event_id, event.sample_index) for event in clip.spec.events] == [
+        ("touch", 2),
+        ("mid_trace", 4),
+    ]
+    assert {constraint.check_id for constraint in clip.spec.constraints} == {
+        "touch",
+        "maintain",
+        "end",
+    }
+    assert clip.spec.roles[0].source_pose == tuple(entry.flat)
 
 
 def test_unlabeled_demo_preserves_observed_commands_and_internal_hard_events():

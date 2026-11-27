@@ -1181,6 +1181,21 @@ class SemanticCallExecutor:
                 call=call,
                 invocation=invocation,
             )
+            prepare_options = getattr(
+                self._plan_transform_factory, "prepare_skill_options", None
+            )
+            if prepare_options is not None:
+                if not callable(prepare_options):
+                    raise TypeError(
+                        "prepare_skill_options must be callable when provided."
+                    )
+                options = prepare_options(plan_request, engine=self._engine)
+                if type(options) is not type(invocation.skill_options):
+                    raise TypeError(
+                        "prepare_skill_options must preserve the skill options type."
+                    )
+                invocation = replace(invocation, skill_options=options)
+                plan_request = replace(plan_request, invocation=invocation)
             prepare_context = getattr(
                 self._plan_transform_factory,
                 "prepare_planning_context",
@@ -1213,6 +1228,16 @@ class SemanticCallExecutor:
             if self._nominal_source_factory is not None:
                 nominal_source = self._nominal_source_factory.create_nominal_source(
                     plan_request, engine=self._engine
+                )
+            if (
+                nominal_source is not None
+                and plan_transform is not None
+                and getattr(
+                    self._plan_transform_factory, "reject_nominal_source_overlap", False
+                )
+            ):
+                raise ValueError(
+                    "A native expansion and a declared nominal source select the same call."
                 )
         failures = getattr(grounded, "failed_preconditions", {})
         if failures or effect_guards:

@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import math
 from typing import ClassVar
 
@@ -109,6 +109,19 @@ class HeldObjectPoseGoal:
 @dataclass(frozen=True, slots=True, eq=False)
 class MoveHeldObjectOptions(SkillOptions):
     """Per-invocation held-object transport behavior."""
+
+    verified_terminal_object_to_eef: torch.Tensor | None = None
+    """Optional measured terminal relation for a demonstrated in-hand pivot."""
+
+    def __post_init__(self) -> None:
+        pose = self.verified_terminal_object_to_eef
+        if pose is not None:
+            validate_pose_goal(
+                pose, "verified_terminal_object_to_eef", allow_waypoints=False
+            )
+            if not isinstance(pose, torch.Tensor) or pose.shape != (4, 4):
+                raise ValueError("verified terminal relation must be one SE(3) tensor")
+            object.__setattr__(self, "verified_terminal_object_to_eef", pose.clone())
 
 
 class MoveHeldObject(AtomicSkill[HeldObjectPoseGoal, MoveHeldObjectOptions]):
@@ -335,13 +348,23 @@ class MoveHeldObject(AtomicSkill[HeldObjectPoseGoal, MoveHeldObjectOptions]):
             control_dt=context.require_control_dt(),
         )
 
+        terminal_held = held_object
+        terminal_relation = options.verified_terminal_object_to_eef
+        if terminal_relation is not None:
+            terminal_held = replace(
+                held_object,
+                object_to_eef=terminal_relation.to(start_arm_qpos)
+                .unsqueeze(0)
+                .expand(context.batch_size, -1, -1)
+                .clone(),
+            )
         return self.build_plan(
             request,
             context,
             success=success,
             trajectory=timed,
             expected_effects=(
-                StateDelta(held_object_updates={task_state_key: held_object})
+                StateDelta(held_object_updates={task_state_key: terminal_held})
                 if target.object_id is not None
                 else None
             ),

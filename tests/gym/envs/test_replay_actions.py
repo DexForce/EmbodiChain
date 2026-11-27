@@ -236,6 +236,57 @@ def test_kinematic_replay_ignores_controller_schema():
     ReplayWrapper(_ReplayEnv(), trajectory, mode="kinematic")
 
 
+@pytest.mark.parametrize("mode", ["position", "position_velocity"])
+def test_named_external_trajectory_aligns_state_and_commands_without_mutating_source(
+    mode,
+):
+    trajectory = _trajectory(mode=mode)
+    trajectory["meta"].update(
+        state_joint_names=["wrist", "unused", "elbow"],
+        active_joint_ids=[0, 2],
+        joint_names=["wrist", "elbow"],
+    )
+    source_qpos = torch.tensor([[[30.0, 10.0, 20.0], [31.0, 11.0, 21.0]]])
+    trajectory["states"] = TensorDict(
+        {"robot": {"qpos": source_qpos, "qvel": source_qpos + 100}}, batch_size=[1, 2]
+    )
+    env = _ReplayEnv()
+    replay = ReplayWrapper(env, trajectory)
+    torch.testing.assert_close(
+        replay._trajectory["states"]["robot"]["qpos"][0, 0],
+        torch.tensor([10.0, 20.0, 30.0]),
+    )
+    torch.testing.assert_close(
+        replay._trajectory["states"]["robot"]["qvel"][0, 0],
+        torch.tensor([110.0, 120.0, 130.0]),
+    )
+    replay.step(None)
+    torch.testing.assert_close(env.last_command["qpos"], torch.tensor([[1.0, 0.0]]))
+    if mode == "position_velocity":
+        torch.testing.assert_close(env.last_command["qvel"], torch.tensor([[3.0, 2.0]]))
+    assert trajectory["meta"]["state_joint_names"] == ["wrist", "unused", "elbow"]
+    torch.testing.assert_close(trajectory["states"]["robot"]["qpos"], source_qpos)
+
+
+@pytest.mark.parametrize(
+    "names,ids",
+    [
+        (["wrist", "elbow", "missing"], [0, 1]),
+        (["wrist", "wrist", "elbow"], [0, 2]),
+        (["wrist", "unused", "elbow"], [0, 1]),
+    ],
+)
+def test_named_external_trajectory_cannot_hide_mismatched_robot_or_actuators(
+    names, ids
+):
+    trajectory = _trajectory()
+    trajectory["meta"].update(state_joint_names=names, active_joint_ids=ids)
+    env = _ReplayEnv()
+    with pytest.raises(ValueError, match="joint"):
+        ReplayWrapper(env, trajectory)
+    assert env.step_count == 0
+
+
 def _objective_env():
     from embodichain.lab.gym.envs.objectives import (
         MeasuredRigidObjectState,

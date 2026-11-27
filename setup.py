@@ -121,6 +121,12 @@ def get_package_data() -> dict[str, list[str]]:
             "web_assets/*.css",
         ],
         "embodichain.data": ["default_materials.json"],
+        "embodichain.toolkits.trajectory_annotator": [
+            "README.md",
+            "web/*.html",
+            "web/*.js",
+            "web/*.css",
+        ],
         "embodichain.compute.kinematics._warp": [
             "ssik_LICENSE.txt",
             "data/*.npz",

@@ -30,6 +30,11 @@
 Human-facing behavior and usage are documented in
 `docs/source/overview/sim/visualization/index.rst`.
 
+Offline annotation's dual-robot Viser playback lives in
+`toolkits/trajectory_annotator/_viewer.py`, outside `SimulationManager`.
+See [video-selected skill fitting](../atomic-actions/atomic-actions.md) for its
+calibration, full-recording clock, and session-owned lifecycle.
+
 ## Ownership and Data Flow
 
 ```

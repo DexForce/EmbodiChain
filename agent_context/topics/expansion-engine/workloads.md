@@ -29,6 +29,10 @@ acceptance and aggregate results. Configuration/viewer loaders do not import the
 simulator. Integrators retain task values and provenance inputs rather than
 copying these binding components. `derive_grasp_expansion_deployment` exposes the
 same immutable-source preparation for configuration preflight.
+`resolve_task_program_expansion_bindings` validates sealed fitted policies
+and attaches the same four artifact hashes for callers that assemble their own
+workloads. Row-local transform factories can adjust one call's typed skill options
+before planning, leaving the deployment and other rows unchanged.
 
 `launch_expansion_preview`, `preview_expansion_results` and
 `stop_expansion_preview` manage a bounded Linux native service with recorded PID

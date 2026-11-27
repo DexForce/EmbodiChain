@@ -100,6 +100,31 @@ def test_rolling_preflight_resolves_legacy_preset_and_reports_capacity(
     )
 
 
+@pytest.mark.parametrize("keep_binding_file", [False, True])
+def test_public_expansion_rejects_incomplete_fitted_deployment_before_collecting(
+    tmp_path,
+    keep_binding_file,
+):
+    from embodichain.lab.expansion import run_task_program_expansion
+
+    deployment = tmp_path / "deployment.yaml"
+    deployment.write_text("{}")
+    (tmp_path / "manifest.json").write_text(
+        json.dumps({"schema": "fitted-task-program/v1", "files": {}})
+    )
+    if keep_binding_file:
+        (tmp_path / "invocation_bindings.json").write_text(
+            json.dumps({"schema": "fitted-task-program/v1", "bindings": []})
+        )
+    fixture = Path(__file__).parent / "fixtures/task_program_job.yaml"
+    output = tmp_path / "expansion"
+
+    with pytest.raises(ValueError, match="Missing sealed fitted Task Program artifact"):
+        run_task_program_expansion(deployment, fixture, output, seed=0)
+
+    assert not (output / "dataset").exists()
+
+
 def test_task_program_declarations_are_pure_and_protect_contact_phases(tmp_path):
     import os
     import subprocess
@@ -132,6 +157,23 @@ def test_task_program_declarations_are_pure_and_protect_contact_phases(tmp_path)
     invalid.write_text(yaml.safe_dump(value))
     with pytest.raises(ValueError, match="protected free phase"):
         load_task_program_expansion(invalid)
+
+
+@pytest.mark.parametrize("steps", [0, -1, False])
+def test_task_program_settling_steps_can_skip_preliminary_physics(steps, tmp_path):
+    import yaml
+    from embodichain.lab.expansion import load_task_program_expansion
+
+    fixture = Path(__file__).parent / "fixtures/task_program_job.yaml"
+    job = yaml.safe_load(fixture.read_text())
+    job["engine"]["settling_steps"] = steps
+    path = tmp_path / "settling.yaml"
+    path.write_text(yaml.safe_dump(job))
+    if type(steps) is int and steps == 0:
+        assert load_task_program_expansion(path)["engine"]["settling_steps"] == 0
+    else:
+        with pytest.raises(ValueError, match="engine.settling_steps"):
+            load_task_program_expansion(path)
 
 
 def test_official_layout_jobs_load_without_simulation_imports():

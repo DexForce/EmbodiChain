@@ -140,11 +140,12 @@ def _validate_task_program_expansion(value: dict[str, Any]) -> dict[str, Any]:
         )
     if engine["collision_backend"] not in ("newton", "native_contacts"):
         raise ValueError("engine.collision_backend must be newton or native_contacts")
+    if type(engine["settling_steps"]) is not int or engine["settling_steps"] < 0:
+        raise ValueError("engine.settling_steps must be a nonnegative integer")
     for name in (
         "episodes_per_operator",
         "max_attempts",
         "max_steps",
-        "settling_steps",
         "cpu_threads",
         "workload_count",
         "batch_size",

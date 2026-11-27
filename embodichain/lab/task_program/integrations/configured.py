@@ -1140,6 +1140,9 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 "translation_distance",
                 "preshape_fraction",
                 "approach_along_grasp_axis",
+                "grasp_relative_approach",
+                "verified_object_to_eef",
+                "verified_terminal_object_to_eef",
                 "cartesian_lift",
                 "release_retreat_distance",
                 "push_approach_offset",
@@ -1186,6 +1189,8 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                     *(
                         (
                             "approach_along_grasp_axis",
+                            "grasp_relative_approach",
+                            "verified_object_to_eef",
                             "initial_lift_height",
                             "cartesian_lift",
                         )
@@ -1197,6 +1202,28 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
             ),
         )
         kwargs: dict[str, object] = {}
+        if "verified_object_to_eef" in config:
+            import torch
+
+            kwargs["verified_object_to_eef"] = torch.tensor(
+                _pose_matrix(
+                    config["verified_object_to_eef"],
+                    path=f"{path}.verified_object_to_eef",
+                ),
+                dtype=torch.float32,
+            ).reshape(4, 4)
+        if "grasp_relative_approach" in config:
+            import torch
+
+            key = f"{path}.grasp_relative_approach"
+            kwargs["grasp_relative_approach"] = tuple(
+                torch.tensor(
+                    _pose_matrix(item, path=f"{key}[{index}]"), dtype=torch.float32
+                ).reshape(4, 4)
+                for index, item in enumerate(
+                    _sequence(config["grasp_relative_approach"], path=key)
+                )
+            )
         if "cartesian_lift" in config:
             kwargs["cartesian_lift"] = _boolean(
                 config["cartesian_lift"], path=f"{path}.cartesian_lift"
@@ -1377,8 +1404,23 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
             )
         return PlaceOptions(**kwargs)
     if kind == "move_held_object":
-        _mapping(value, path=path, required=frozenset({"kind"}))
-        return MoveHeldObjectOptions()
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind"}),
+            optional=frozenset({"verified_terminal_object_to_eef"}),
+        )
+        key = "verified_terminal_object_to_eef"
+        if key not in config:
+            return MoveHeldObjectOptions()
+        import torch
+
+        return MoveHeldObjectOptions(
+            verified_terminal_object_to_eef=torch.tensor(
+                _pose_matrix(config[key], path=f"{path}.{key}"),
+                dtype=torch.float32,
+            ).reshape(4, 4)
+        )
     if kind == "move_joints":
         config = _mapping(
             value,

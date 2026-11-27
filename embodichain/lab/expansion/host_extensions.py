@@ -26,6 +26,10 @@ from .contracts import CandidateIdentity, SceneCase, ValidationResult
 from .recipes import ExpansionRecipe
 
 if TYPE_CHECKING:
+    from embodichain.lab.task_program.integrations.invocation_policy import (
+        InvocationPolicyBinding,
+    )
+
     from .program import ProgramBatchResult
 
 __all__ = ["ExpansionValidator", "ExpansionRowContext", "GymExpansionHostExtensions"]
@@ -86,6 +90,9 @@ class GymExpansionHostExtensions:
         plan_transform_factory: Receives environment and immutable row identity;
             returns an ordinary Task Program transform factory. Its record metadata
             and hashed plan attachments are archived by the native episode owner.
+        nominal_source_factory: Receives environment and immutable row identity;
+            returns an attempt-local Task Program nominal source factory.
+        invocation_policy_bindings: Presets pinned to exact compiled invocations.
         feedback_factory: Optional rolling-collection feedback owner receiving env,
             scene source and artifact directory; exposes coverage, budget, validate,
             finish and checkpoint without advancing physics or writing episodes.
@@ -99,6 +106,12 @@ class GymExpansionHostExtensions:
     validator_factory: Callable[[Any, Path], ExpansionValidator] | None = None
     recipe_transform: Callable[[ExpansionRecipe], ExpansionRecipe] | None = None
     plan_transform_factory: Callable[[Any, ExpansionRowContext], Any] | None = None
+    nominal_source_factory: Callable[[Any, ExpansionRowContext], Any] | None = field(
+        default=None, kw_only=True
+    )
+    invocation_policy_bindings: tuple[InvocationPolicyBinding, ...] = field(
+        default=(), kw_only=True
+    )
     feedback_factory: Callable[[Any, Any, Path], Any] | None = field(
         default=None, kw_only=True
     )
@@ -108,6 +121,8 @@ class GymExpansionHostExtensions:
     )
 
     def __post_init__(self) -> None:
+        if type(self.invocation_policy_bindings) is not tuple:
+            raise TypeError("invocation_policy_bindings must be a tuple")
         if self.collection_renderer is not None and (
             type(self.collection_renderer) is not str
             or not self.collection_renderer.strip()
@@ -120,6 +135,7 @@ class GymExpansionHostExtensions:
             "recipe_transform",
             "plan_transform_factory",
             "plan_outcome",
+            "nominal_source_factory",
         ):
             value = getattr(self, name)
             if value is not None and not callable(value):

@@ -71,6 +71,9 @@ class TaskProgramPlanTransformFactory(Protocol):
     method with the same request and engine keyword arguments. The executor
     calls that optional hook immediately before Atomic planning, which is the
     ownership boundary for recipe-selected Affordance sampling.
+    A factory may also provide ``prepare_skill_options(request, *, engine)``
+    to replace the typed options of that invocation before planning without
+    changing its binding, recovery identity, or other calls.
     """
 
     def create_plan_transform(

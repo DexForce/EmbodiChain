@@ -155,6 +155,15 @@ imported articulation geometry retains its source approximation. Parser
 compatibility and current algorithm defaults stay in `shapes.py`,
 `cfg/rigid_object.py` and `spawn/descriptors.py`, not duplicated here.
 
+For `convex_decomposition`, optional `decomposition_fpath` supplies an OBJ with
+one object/group per precomputed convex piece, in the unscaled source-mesh local
+frame. `spawn/_convex_parts.py` validates the parts; the rigid compiler emits
+separate convex-hull colliders with the declared physics and body scale while
+retaining the original visual mesh. Missing/invalid files fail without recooking.
+The deployment resource resolver treats this file as an owner-relative asset.
+The fitting toolkit prepares and bundles these files before run-task starts;
+its cache does not replace ordinary native convex-shape initialization.
+
 Portable `contact_offset/rest_offset` becomes Newton margin/gap:
 `rest_offset → margin`, `contact_offset - effective_margin → gap`. Native
 margin/gap take precedence; an ambiguous standalone contact offset is rejected

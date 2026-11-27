@@ -145,6 +145,8 @@ class _NativePlanExpansion:
         calls = self.options.get("call_indices")
         if calls is not None and request.analysis_call_index not in calls:
             return None
+        if not self.options["free_phases"].get(request.invocation.skill_id):
+            return None
 
         def transform(resolved, context, plan):
             return self._transform(request, engine, resolved, context, plan)

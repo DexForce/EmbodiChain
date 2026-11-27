@@ -4760,15 +4760,15 @@ def test_unrelated_task_program_identities_keep_pre_cable_program_values():
     integration = deployment.integration
     registration = integration.registration
     assert "evaluation" not in registration.fingerprint_payload()
-    # Extending the accepted PickUp/Place goal descriptors intentionally changes
-    # registration identity. The handover program and inactive options stay fixed.
+    # The contact and explicit motion goals change the registered call descriptors.
+    # The authored handover program keeps its pre-extension identity.
     assert (
         registration.fingerprint
-        == "d9cd591643cf8c29cbad04e532c6743208b78315a484796e90595d03ad98e6a8"
+        == "6468b7078b087011647bae57998dda2948767aac484a836ca6015be753422755"
     )
     assert (
         integration.integration_fingerprint
-        == "785a9307300d193082e945cee747d37a688b0a7ba3a09d6569b418553b44379e"
+        == "bdc7f9603d7e93d8425cb0ccc07a3298b7d01211d21a888c3ac64d06e0d48f85"
     )
     compiled = registration.catalog.preflight(deployment.load_program())
     assert (

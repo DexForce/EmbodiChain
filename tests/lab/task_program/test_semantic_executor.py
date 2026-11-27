@@ -1075,7 +1075,12 @@ def test_executor_without_transform_factory_is_unchanged() -> None:
     assert system.action.plan_count == 1
 
 
-def test_executor_selects_nominal_source_before_native_planning() -> None:
+@pytest.mark.parametrize(
+    "transformed_call", [None, 0, 1], ids=["source-only", "overlap", "other-call"]
+)
+def test_executor_selects_nominal_source_before_native_planning(
+    transformed_call: int | None,
+) -> None:
     class Source:
         def instantiate(self, request, context):
             raise AssertionError("unsupported skill should reject before source use")
@@ -1088,15 +1093,29 @@ def test_executor_selects_nominal_source_before_native_planning() -> None:
             self.requests.append(request)
             return Source()
 
+    class ScopedTransform:
+        reject_nominal_source_overlap = True
+
+        def create_plan_transform(self, request, *, engine):
+            if request.analysis_call_index == transformed_call:
+                return lambda resolved, context, plan: plan
+            return None
+
     factory = Factory()
     system = _system(
         (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
         install_effect_monitor=False,
         nominal_source_factory=factory,
+        plan_transform_factory=(
+            ScopedTransform() if transformed_call is not None else None
+        ),
     )
     result = system.runtime.start(_call("generation"), workflow_id="nominal-workflow")
     assert result.status is SemanticExecutionStatus.FAILED
-    assert "does not support external nominal" in result.message
+    if transformed_call == 0:
+        assert "a declared nominal source select the same call" in result.message
+    else:
+        assert "does not support external nominal" in result.message
     assert factory.requests[0].workflow_id == "nominal-workflow"
     assert factory.requests[0].analysis_call_index == 0
     assert system.action.plan_count == 0

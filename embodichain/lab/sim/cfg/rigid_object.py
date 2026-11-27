@@ -97,6 +97,13 @@ class RigidObjectCfg(ObjectBaseCfg):
 
     USD ``preserve`` mode retains its source scale."""
 
+    usd_geometry_scale: tuple | list | None = None
+    """Replace the parsed USD geometry scale while retaining authored physics.
+
+    Use for registered metric assets that explicitly supply their final XYZ
+    mesh and collider scale. Without a value, USD source scale is preserved.
+    """
+
     asset_physics_mode: AssetPhysicsMode = "preserve"
     """How a file-backed asset's physical properties are handled.
 

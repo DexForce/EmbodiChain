@@ -14,6 +14,7 @@ Local and CI Sphinx builds regenerate their own version-specific assets.
 - [GenSim / TaskSpec design](gen-sim-taskspec-design.md): current implementation status, ownership boundaries, and staged target architecture.
 - [Task Program scene expansion design](task-program-scene-expansion-design.md): workspace integration, shared expert generation workflow, and three-developer implementation plan.
 - [Task Program and Atomic Skill reward composition](task-program-reward-composition.md): implemented architecture, reward formulas, physical evidence lifecycle, configuration and native acceptance.
+- [Teleoperation trajectory annotation design](teleop-trajectory-annotation-design.md): proposed local video annotation tool, frame interval semantics, keyboard controls, and persistence.
 
 `agent_context/MAP.yaml` remains the sole topic inventory. Groups are presentation
 choices. Neither import declarations nor adjacency establish runtime order. Every

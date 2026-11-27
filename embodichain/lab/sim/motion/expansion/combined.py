@@ -138,8 +138,10 @@ class _CombinedSourceCfg:
     trajectory_call_indices: tuple[int, ...] = (1, 3, 5)
 
     def __post_init__(self) -> None:
-        if self.kind != "task_program":
-            raise ValueError("combined source.kind must be task_program")
+        if self.kind not in {"task_program", "skill_sequence"}:
+            raise ValueError(
+                "combined source.kind must be task_program or skill_sequence"
+            )
         for name in ("source_id", "source_revision", "template_id"):
             _text(getattr(self, name), f"source.{name}")
         if self.unit_scope != "episode":
