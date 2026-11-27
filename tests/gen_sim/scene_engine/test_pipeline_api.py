@@ -169,7 +169,42 @@ def test_analyze_image_persists_blueprint_and_artifact_hashes(
     assert document["artifacts"][0]["path"].endswith("table-mask.png")
     assert len(document["artifacts"][0]["sha256"]) == 64
     if task_spec is not None:
-        assert document["artifacts"][-1]["path"] == task_spec.as_posix()
+        data = task_spec.read_bytes()
+        assert document["artifacts"][-1] == {
+            "path": task_spec.as_posix(),
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "size": len(data),
+        }
+
+
+def test_analyze_image_rejects_task_spec_replaced_during_scene_understanding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    image_path = tmp_path / "input.png"
+    image_path.write_bytes(b"image")
+    task_spec = _write_task_spec(tmp_path)
+    replacement = json.loads(task_spec.read_text(encoding="utf-8"))
+    replacement["inputs"]["instruction"] = "Close the microwave door."
+    replacement_path = tmp_path / "replacement.json"
+    replacement_path.write_text(json.dumps(replacement), encoding="utf-8")
+    output_root = tmp_path / "output"
+
+    def replace_task_spec(**kwargs) -> tuple[Scene, SceneGraph]:
+        assert kwargs["task_input"].instruction == "Open the microwave door."
+        replacement_path.replace(task_spec)
+        return _table_scene()
+
+    monkeypatch.setattr(api, "understand_scene", replace_task_spec)
+    with pytest.raises(ValueError, match="TaskSpec changed during scene analysis"):
+        api.analyze_image(
+            image_path,
+            output_root,
+            vlm_client=object(),
+            image_segmentation_client=_HealthyClient(),
+            task_spec=task_spec,
+        )
+
+    assert not (output_root / "scene_blueprint.json").exists()
 
 
 def test_analyze_image_requires_image_for_task_spec(tmp_path, monkeypatch) -> None:

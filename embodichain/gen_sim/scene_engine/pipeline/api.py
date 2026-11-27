@@ -41,7 +41,7 @@ from embodichain.gen_sim.services.compat import ImageClient
 from embodichain.gen_sim.services.compat import SegmentationClient
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.task_spec_input import (
-    load_task_spec_input,
+    _parse_task_spec_input,
 )
 from embodichain.gen_sim.scene_engine.core.scene_edit_plan import SceneEditPlan
 from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraph
@@ -163,11 +163,14 @@ def analyze_image(
     resolved_task_spec = (
         Path(task_spec).expanduser().resolve() if task_spec is not None else None
     )
-    task_input = (
-        load_task_spec_input(resolved_task_spec, image_path=resolved_image)
-        if resolved_task_spec is not None
-        else None
-    )
+    task_input = None
+    task_spec_record = None
+    if resolved_task_spec is not None:
+        data = resolved_task_spec.read_bytes()
+        task_input = _parse_task_spec_input(
+            data, path=resolved_task_spec, image_path=resolved_image
+        )
+        task_spec_record = _artifact_record(resolved_task_spec, data=data)
     resolved_output = Path(output_root).expanduser().resolve()
     resolved_output.mkdir(parents=True, exist_ok=True)
     effective_vlm = vlm_client or VisionFacade(services, "scene_understanding")
@@ -197,16 +200,22 @@ def analyze_image(
         "artifacts": [
             *_artifact_records(resolved_output / "scene_understanding"),
             _artifact_record(resolved_image),
-            *(
-                [_artifact_record(resolved_task_spec)]
-                if resolved_task_spec is not None
-                else []
-            ),
+            *([task_spec_record] if task_spec_record is not None else []),
         ],
     }
     blueprint_id = _canonical_hash(payload)
     document = {**payload, "blueprint_id": blueprint_id}
     manifest_path = resolved_output / "scene_blueprint.json"
+    if resolved_task_spec is not None:
+        try:
+            current_record = _artifact_record(resolved_task_spec)
+        except FileNotFoundError:
+            current_record = None
+        if current_record != task_spec_record:
+            raise ValueError(
+                f"TaskSpec changed during scene analysis ({resolved_task_spec}). "
+                "Run scene analysis again."
+            )
     _write_json(manifest_path, document)
     return SceneBlueprintPackage(
         schema_version=SCENE_BLUEPRINT_SCHEMA,
@@ -444,8 +453,9 @@ def _export_materialization(
     )
 
 
-def _artifact_record(path: Path) -> dict[str, Any]:
-    data = path.read_bytes()
+def _artifact_record(path: Path, *, data: bytes | None = None) -> dict[str, Any]:
+    if data is None:
+        data = path.read_bytes()
     return {
         "path": path.resolve().as_posix(),
         "sha256": hashlib.sha256(data).hexdigest(),

@@ -92,8 +92,15 @@ def load_task_spec_input(
         OSError: The input file cannot be read.
     """
     path = Path(task_spec)
+    return _parse_task_spec_input(path.read_bytes(), path=path, image_path=image_path)
+
+
+def _parse_task_spec_input(
+    data: bytes, *, path: Path, image_path: str | Path | None
+) -> TaskSpecInput:
+    """Parse an already-read TaskSpec using its path for error messages."""
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
+        document = json.loads(data.decode("utf-8"))
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid TaskSpec JSON in {path}: {exc.msg}") from exc
 
